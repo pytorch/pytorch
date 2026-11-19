@@ -94,6 +94,7 @@ from .bytecode_transformation import (
     Instruction,
     is_generator,
     is_jump_absolute,
+    UNCOVERED_IN_BLOCK_OPNAMES,
     unique_id_unbound_in,
 )
 from .code_context import code_context
@@ -106,6 +107,7 @@ from .exc import (
     format_frame_info,
     format_user_stack,
     get_stack_above_dynamo,
+    raise_name_error,
     raise_observed_exception,
     raise_value_error,
     ResumePrologueTracingError,
@@ -144,6 +146,7 @@ from .source import (
     LocalSource,
     SkipGuardSource,
     Source,
+    TypeSource,
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
@@ -156,6 +159,7 @@ from .utils import (
     get_fake_value,
     get_instruction_source_311,
     get_metrics_context,
+    get_type_mro_no_user_code,
     graph_break_dup_warning_checker,
     istype,
     LazyString,
@@ -189,6 +193,7 @@ from .variables.functions import (
     BaseUserFunctionVariable,
     CO_VARARGS,
     CO_VARKEYWORDS,
+    FunctoolsPartialVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -212,13 +217,18 @@ from .variables.lists import (
 from .variables.misc import CellVariable, NullVariable, UnknownVariable
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
+    _is_skipped_constant_property,
     generic_delitem,
     generic_getattr,
+    generic_getitem,
     generic_getiter,
     generic_is_true,
     generic_setitem,
+    mro_attr_source,
+    mro_lookup,
     pyiter_send,
     pysequence_contains,
+    type_is_immutable,
 )
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
@@ -244,7 +254,7 @@ from .variables.user_defined import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
 
     from .package import CompilePackage
 
@@ -385,18 +395,18 @@ class SpeculationLog:
                 SpeculationEntry(filename, lineno, instruction_pointer, inst)
             )
         entry = self.entries[self.index]
-        prev_entry_msg = ""
-        if self.index != 0:
-            prev_entry = self.entries[self.index - 1]
-            prev_entry_msg = (
-                f"Previous instruction: {prev_entry.filename}:{prev_entry.lineno}"
-                f"({prev_entry.inst.opname} @ {prev_entry.instruction_pointer})\n"
-            )
         if not (
             entry.instruction_pointer == instruction_pointer
             and entry.filename == filename
             and entry.lineno == lineno
         ):
+            prev_entry_msg = ""
+            if self.index != 0:
+                prev_entry = self.entries[self.index - 1]
+                prev_entry_msg = (
+                    f"Previous instruction: {prev_entry.filename}:{prev_entry.lineno}"
+                    f"({prev_entry.inst.opname} @ {prev_entry.instruction_pointer})\n"
+                )
             raise SpeculationLogDivergence(
                 f"""
 SpeculationLog diverged at index {self.index} (log had {len(self.entries)} entries):
@@ -1882,7 +1892,7 @@ class InstructionTranslatorBase(
         self.current_instruction = inst = self.instructions[ip]
         self.instruction_pointer = ip + 1
 
-        if inst.starts_line:
+        if inst.starts_line and inst.starts_line != self.lineno:
             self.starts_line(inst.starts_line)
 
         tc = TracingContext.try_get()
@@ -1906,7 +1916,7 @@ class InstructionTranslatorBase(
 
         # Store the latest 20 bytecode execution for the process,
         # Used repr for byte processing and limiting the length to 2048
-        if config.verbose:
+        if self._is_verbose:
             try:
                 stack_repr = repr(self.stack)
             except ValueError:
@@ -1916,7 +1926,8 @@ class InstructionTranslatorBase(
                 f"TRACE {inst.opname} {repr(inst.argval)} {stack_repr}"
             )
 
-        self.update_block_stack(inst)
+        if inst.exn_tab_entry is not None or self.block_stack:
+            self.update_block_stack(inst)
 
         try:
             self.dispatch_table[inst.opcode](self, inst)
@@ -1973,6 +1984,9 @@ class InstructionTranslatorBase(
                     )
                 e.skip_frame = True
                 raise
+            # Nested fallback would retain a caller resume on each loop iteration.
+            if self.parent is not None and self.parent.maybe_has_backedge():
+                self.raise_loop_graph_break(self.f_code, e)
             reason = (
                 "Encountered graph break that we cannot resume from. "
                 "Compiling up to the previous resumable state, "
@@ -2021,11 +2035,7 @@ class InstructionTranslatorBase(
             # are still in the same block. It is probably safe to do
             # this in 3.11, even though we haven't encountered this case before.
             # In 3.14+, NOT_TAKEN might also not be covered by an exn table entry.
-            if self.block_stack and inst.opname not in (
-                "NOP",
-                "JUMP_BACKWARD",
-                "NOT_TAKEN",
-            ):
+            if self.block_stack and inst.opname not in UNCOVERED_IN_BLOCK_OPNAMES:
                 # If we really escape from a block and the current
                 # instruction is not in another block, then there
                 # should be no other nested blocks that we are in.
@@ -2335,25 +2345,33 @@ class InstructionTranslatorBase(
         if not isinstance(val, VariableTracker):
             raise AssertionError(f"push expects VariableTracker, got {typestr(val)}")
         if val.source_location is None:
-            inst = self.current_instruction
-            if inst.positions is not None and inst.positions.lineno is not None:
-                val = val.with_source_location(
-                    SourceLocation(
-                        filename=self.f_code.co_filename,
-                        lineno=inst.positions.lineno,
-                        end_lineno=inst.positions.end_lineno,
-                        col_offset=inst.positions.col_offset,
-                        end_col_offset=inst.positions.end_col_offset,
-                    )
-                )
-            elif inst.starts_line is not None:
-                val = val.with_source_location(
-                    SourceLocation(
-                        filename=self.f_code.co_filename,
-                        lineno=inst.starts_line,
-                    )
-                )
+            loc = self._source_location_of(self.current_instruction)
+            if loc is not None:
+                val = val.with_source_location(loc)
         self.stack.append(val)
+
+    def _source_location_of(self, inst: Instruction) -> SourceLocation | None:
+        # Keyed by id because Instruction.__hash__ is a Python-level call; the
+        # entry keeps the instruction alive so the id cannot be reused.
+        cache = self._source_location_cache
+        entry = cache.get(id(inst))
+        if entry is not None and entry[0] is inst:
+            return entry[1]
+        loc = None
+        if inst.positions is not None and inst.positions.lineno is not None:
+            loc = SourceLocation(
+                filename=self.f_code.co_filename,
+                lineno=inst.positions.lineno,
+                end_lineno=inst.positions.end_lineno,
+                col_offset=inst.positions.col_offset,
+                end_col_offset=inst.positions.end_col_offset,
+            )
+        elif inst.starts_line is not None:
+            loc = SourceLocation(
+                filename=self.f_code.co_filename, lineno=inst.starts_line
+            )
+        cache[id(inst)] = (inst, loc)
+        return loc
 
     def push_many(self, vals: list[VariableTracker]) -> None:
         for val in vals:
@@ -2363,7 +2381,14 @@ class InstructionTranslatorBase(
         return self.stack.pop()
 
     def popn(self, n: int) -> list[VariableTracker]:
-        return [*reversed([self.pop() for _ in range(n)])]
+        if n == 0:
+            return []
+        stack = self.stack
+        if len(stack) < n:
+            raise IndexError("pop from empty list")
+        ret = stack[-n:]
+        del stack[-n:]
+        return ret
 
     def LOAD_FAST(self, inst: Instruction) -> None:
         name = inst.argval
@@ -2537,6 +2562,15 @@ class InstructionTranslatorBase(
     def LOAD_CONST(self, inst: Instruction) -> None:
         self.push(self._load_const(inst))
 
+    def _global_deleted_in_trace(self, item: VariableTracker, name: str) -> bool:
+        side_effects = self.output.side_effects
+        if not side_effects.has_pending_mutation_of_attr(item, name):
+            return False
+        return isinstance(
+            side_effects.load_attr(item, name, deleted_ok=True),
+            variables.DeletedVariable,
+        )
+
     def _load_global(self, inst: Instruction) -> None:
         name = inst.argval
 
@@ -2548,11 +2582,19 @@ class InstructionTranslatorBase(
                     raise AssertionError("expected name in self.f_builtins to be true")
                 self.exec_recorder.builtins[name] = self.f_builtins[name]
 
-        if name not in self.f_globals:
+        if name not in self.f_globals and name not in self.symbolic_globals:
             return self.load_builtin(inst)
 
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
+            if not self.output.side_effects.has_pending_mutation_of_attr(
+                variable, name
+            ):
+                # A delete of an absent name raised without storing; eager
+                # raises on the read too.
+                return self.load_builtin(inst)
+            if self._global_deleted_in_trace(variable, name):
+                return self.load_builtin(inst)
             self.push(self.output.side_effects.load_global(variable, name))
             return
 
@@ -2575,15 +2617,17 @@ class InstructionTranslatorBase(
         if sys.version_info >= (3, 13) and inst.arg % 2:
             self.PUSH_NULL(inst)
 
+    def _global_variable(self, name: str) -> VariableTracker:
+        if name not in self.symbolic_globals:
+            self.symbolic_globals[name] = object()  # type: ignore[assignment]  # sentinel object
+        return self.output.side_effects.track_global_existing(
+            GlobalSource(name), self.symbolic_globals[name]
+        )
+
     def STORE_GLOBAL(self, inst: Instruction) -> None:
         value = self.pop()
         name = inst.argval
-        source = GlobalSource(name)
-        if name not in self.symbolic_globals:
-            self.symbolic_globals[name] = object()  # type: ignore[assignment]  # sentinel object
-        variable = self.output.side_effects.track_global_existing(
-            source, self.symbolic_globals[name]
-        )
+        variable = self._global_variable(name)
         if isinstance(value, RemovableHandleVariable):
             unimplemented(
                 gb_type="Storing Tensor hook handle in globals",
@@ -2592,6 +2636,81 @@ class InstructionTranslatorBase(
                 hints=[],
             )
         self.output.side_effects.store_global(variable, name, value)
+
+    def DELETE_GLOBAL(self, inst: Instruction) -> None:
+        name = inst.argval
+        target = self._global_variable(name)
+        self._delete_global(name, target)
+        self.output.side_effects.store_global(target, name, variables.DeletedVariable())
+
+    def _delete_global(self, name: str, target: VariableTracker) -> None:
+        """Guard the name, raise what eager raises, and sync a dropped tensor."""
+        side_effects = self.output.side_effects
+        present = name in self.f_globals
+        guard_builder = (
+            GuardBuilder.DICT_CONTAINS if present else GuardBuilder.DICT_NOT_CONTAINS
+        )
+        install_guard(
+            self._globals_dict_source.make_guard(
+                functools.partial(guard_builder, key=name)
+            )
+        )
+        # A pending write to the module through the module object, or an
+        # already-materialized globals-dict VT, races the replayed delete: the
+        # dict replay rebuilds from a snapshot after it.
+        module_vt = None
+        registered_module = _registered_module_for_globals(
+            self.f_globals.get("__name__"), self.f_globals
+        )
+        if registered_module is not None and registered_module[1] in side_effects:
+            module_vt = side_effects[registered_module[1]]
+        if self.f_globals in side_effects or (
+            module_vt is not None
+            and module_vt is not target
+            and side_effects.has_pending_mutation_of_attr(module_vt, name)
+        ):
+            self.output.deleted_global_access_unsupported(f"name: {name}")
+        pending_on_target = side_effects.has_pending_mutation_of_attr(target, name)
+        if pending_on_target:
+            if self._global_deleted_in_trace(target, name):
+                raise_name_error(self, name)
+        elif not present:
+            raise_name_error(self, name)
+        # A pre-existing global's tensor is not covered: syncing its dealloc
+        # would need a guard on the tensor identity, which is not tracked.
+        self._maybe_sync_dealloc_attr(target, name)
+        # The delete is committed. Remember it so later module-object or
+        # module-__dict__ accesses to the name graph-break instead of
+        # racing the replayed delete. The entry keeps the dict alive so its
+        # id() key cannot be reused.
+        entry = self.output.deleted_globals_by_dict.get(id(self.f_globals))
+        if entry is None:
+            self.output.deleted_globals_by_dict[id(self.f_globals)] = (
+                self.f_globals,
+                {name},
+            )
+        else:
+            entry[1].add(name)
+
+    @functools.cached_property
+    def _globals_dict_source(self) -> Source:
+        # Guard membership on the dict itself, since GlobalSource(name) raises
+        # for an absent name.
+        registered_module = _registered_module_for_globals(
+            self.f_globals.get("__name__"), self.f_globals
+        )
+        if registered_module is None:
+            unimplemented(
+                gb_type="DELETE_GLOBAL in non-module globals",
+                context=f"module_name: {self.f_globals.get('__name__')!r}",
+                explanation=(
+                    "Dynamo cannot safely replay global deletes for a frame "
+                    "whose globals dict is not the registered module __dict__."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        module_name, _ = registered_module
+        return AttrSource(self.import_source(module_name), "__dict__")
 
     # Keyed by module_name alone, not the whole argument tuple as @cache_method
     # would key it, so a later argument cannot silently split the memo. Per
@@ -2752,14 +2871,8 @@ class InstructionTranslatorBase(
     @cache_method
     def load_builtin_from_argval(self, argval: Any) -> VariableTracker:
         if argval not in self.f_builtins:
-            # Name is neither a global nor a builtin: matches CPython raising
-            # NameError with `name` set to the missing identifier.
-            raise_observed_exception(
-                NameError,
-                self,
-                args=[f"name '{argval}' is not defined"],
-                kwargs={"name": ConstantVariable.create(argval)},
-            )
+            # Name is neither a global nor a builtin.
+            raise_name_error(self, argval)
         val = self.f_builtins[argval]
 
         if callable(val):
@@ -3380,22 +3493,38 @@ class InstructionTranslatorBase(
         self._load_attr(argval)
 
     def LOAD_METHOD(self, inst: Instruction) -> None:
-        self._load_attr(inst.argval)
-        obj = self.pop()
         if sys.version_info >= (3, 13):
-            self.push(obj)
+            self._load_attr(inst.argval)
             self.PUSH_NULL(inst)
         else:
-            # always follow the NULL + fn convention, since if obj
-            # is actually a method, self is already bound to it, so it
-            # doesn't need to be passed in as an arg.
+            obj = self.pop()
+            # Push NULL before lookup so nested graph breaks preserve the call stack.
             self.PUSH_NULL(inst)
             self.push(obj)
+            self._load_attr(inst.argval)
 
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop().realize()
+        if (
+            self.output.deleted_globals_by_dict
+            and isinstance(obj, variables.PythonModuleVariable)
+            and attr == "__dict__"
+        ):
+            # Above tp_getattro: its Unsupported is constant-folded to a stale
+            # read of the real module here for python-constant objects. Any
+            # view derived from the dict model is stale after a delete.
+            self.output.check_deleted_global_access(obj.value.__dict__, None)
+        elif (
+            self.output.deleted_globals_by_dict
+            and isinstance(obj, variables.PythonModuleVariable)
+            and not self.output.side_effects.has_pending_mutation_of_attr(obj, attr)
+        ):
+            self.output.check_deleted_global_access(obj.value.__dict__, attr)
         try:
-            result = generic_getattr(self, obj, attr)
+            if not _is_skipped_constant_property(self, obj, attr):
+                result = generic_getattr(self, obj, attr)
+                self.push(result)
+                return
         except Unsupported:
             if not obj.is_python_constant():
                 raise
@@ -3403,10 +3532,10 @@ class InstructionTranslatorBase(
                 obj, variables.UserDefinedClassVariable
             ) and obj.getattr_needs_tracing(self, attr):
                 raise
-            source = AttrSource(obj.source, attr) if obj.source else None
-            result = VariableTracker.build(
-                self, getattr(obj.as_python_constant(), attr), source=source
-            )
+        source = AttrSource(obj.source, attr) if obj.source else None
+        result = VariableTracker.build(
+            self, getattr(obj.as_python_constant(), attr), source=source
+        )
         self.push(result)
 
     def LOAD_ATTR(self, inst: Instruction) -> None:
@@ -4237,14 +4366,7 @@ class InstructionTranslatorBase(
                 if flags & 0x01:
                     defaults = self.pop()
 
-        fn = NestedUserFunctionVariable(  # noqa: RVT001
-            fn_name,
-            code,
-            self.f_globals,
-            defaults,
-            kwdefaults,
-            closure,
-        )
+        ann = None
         if annotations:
             if not isinstance(annotations, TupleVariable):
                 raise AssertionError(
@@ -4260,8 +4382,18 @@ class InstructionTranslatorBase(
                 ann_items,
                 mutation_type=ValueMutationNew(),
             )
-            fn.annotations = ann
-        self.push(fn)
+
+        self.push(
+            NestedUserFunctionVariable(  # noqa: RVT001
+                fn_name,
+                code,
+                self.f_globals,
+                defaults,
+                kwdefaults,
+                closure,
+                ann,
+            )
+        )
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = self.pop()
@@ -4517,6 +4649,94 @@ class InstructionTranslatorBase(
             )
         if not obj.is_mutable():
             raise AssertionError("expected obj.is_mutable() to be true")
+        if inst.opname == "DICT_MERGE":
+            v = v.realize()
+            if isinstance(v, ConstDictVariable):
+                # Match CALL_FUNCTION_EX's callable/NULL stack layout.
+                offset = 3 if sys.version_info >= (3, 13) else 2
+                fn = self.stack[-inst.arg - offset].realize()
+                positional = self.stack[-inst.arg - 1].realize()
+                nargs = 0
+                while isinstance(fn, FunctoolsPartialVariable):
+                    nargs += len(fn.args)
+                    fn = fn.func.realize()
+                observes_order = True
+                if isinstance(fn, BaseUserFunctionVariable) and istype(
+                    positional, (ListVariable, TupleVariable)
+                ):
+                    try:
+                        code = fn.get_code()
+                        observes_order = bool(code.co_flags & CO_VARKEYWORDS)
+                        if not observes_order:
+                            nargs += len(positional.items)
+                            nargs += isinstance(fn, UserMethodVariable)
+                            nargs = min(nargs, code.co_argcount)
+                            names = code.co_varnames[
+                                max(code.co_posonlyargcount, nargs) : code.co_argcount
+                                + code.co_kwonlyargcount
+                            ]
+                            # Binding errors expose the order of unexpected keywords.
+                            for key in v.items:
+                                if not key.vt.is_python_constant():
+                                    observes_order = True
+                                    break
+                                name = key.vt.as_python_constant()
+                                if type(name) is not str or name not in names:
+                                    observes_order = True
+                                    break
+                    except NotImplementedError:
+                        pass
+                if observes_order:
+                    v.install_dict_order_guard(self)
+                else:
+                    v.install_dict_keys_match_guard()
+                side_effects = self.output.side_effects
+                if any(
+                    cls in side_effects
+                    and side_effects.has_pending_mutation_of_attr(
+                        side_effects[cls], "__iter__"
+                    )
+                    for cls in get_type_mro_no_user_code(v.python_type())
+                ):
+                    unimplemented(
+                        gb_type="kwargs expansion after iteration slot mutation",
+                        context="DICT_MERGE",
+                        explanation="Dynamo cannot expand a mapping after changing its type's __iter__.",
+                        hints=["Expand the mapping outside the compiled function."],
+                        skip_frame=True,
+                    )
+                if v.source and not type_is_immutable(v.python_type()):
+                    iter_source = mro_attr_source(
+                        self, v.python_type(), TypeSource(v.source), "__iter__"
+                    )
+                    if iter_source:
+                        install_guard(iter_source.make_guard(GuardBuilder.ID_MATCH))
+                if type_is_immutable(v.python_type()) or (
+                    mro_lookup(v.python_type(), "__iter__") is dict.__iter__
+                ):
+                    v = ConstDictVariable(v.items, mutation_type=ValueMutationNew())
+                else:
+                    # PyDict_Merge uses the mapping protocol for a different iteration slot.
+                    snapshot = ConstDictVariable(
+                        obj.items, mutation_type=ValueMutationNew()
+                    )
+                    keys = generic_getattr(self, v, "keys").call_function(self, [], {})
+                    for key in unpack_iterable(self, keys):
+                        if pysequence_contains(
+                            self, snapshot, key
+                        ).as_python_constant():
+                            unimplemented(
+                                gb_type="Duplicate keyword mapping key",
+                                context="DICT_MERGE",
+                                explanation="Dynamo cannot trace duplicate keys while expanding a custom mapping.",
+                                hints=[
+                                    "Use unique keyword names or expand the mapping outside the compiled function."
+                                ],
+                                skip_frame=True,
+                            )
+                        value = generic_getitem(self, v, key)
+                        generic_setitem(self, snapshot, key, value)
+                    v = snapshot
         obj.call_method(self, "update", [v], {})  # type: ignore[arg-type]
 
     DICT_UPDATE = DICT_MERGE
@@ -4998,8 +5218,10 @@ class InstructionTranslatorBase(
 
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
-            attr = attr.call_function(self, [VariableTracker.build(self, 1)], {})
-            fn.annotations = attr
+            fn.annotate = attr
+            fn.annotations = attr.call_function(
+                self, [VariableTracker.build(self, 1)], {}
+            )
         elif flags & 0x08:
             fn.closure = attr
         elif flags & 0x04:
@@ -5170,7 +5392,7 @@ class InstructionTranslatorBase(
         return global_name
 
     @property
-    def fake_mode(self) -> FakeTensorMode | None:
+    def fake_mode(self) -> FakeTensorMode | CppFakeTensorMode | None:
         return self.output.tracing_context.fake_mode
 
     @contextlib.contextmanager
@@ -5361,7 +5583,7 @@ class InstructionTranslatorBase(
 
     @staticmethod
     def raise_loop_graph_break(
-        code: types.CodeType, exc: Unsupported | UserError
+        code: types.CodeType, exc: Unsupported | UserError | StepUnsupported
     ) -> NoReturn:
         unimplemented(
             gb_type="graph break in loop",
@@ -5426,6 +5648,9 @@ class InstructionTranslatorBase(
         self.prefix_insts = []
         self.exn_vt_stack = exn_vt_stack
         self.latest_bytecode_queue = deque(maxlen=20)
+        self._source_location_cache: dict[
+            int, tuple[Instruction, SourceLocation | None]
+        ] = {}
         self._comprehension_depth = 0
         self._comprehension_end_for_ips: set[int] = set()
         # Per-prefix counters for generating fresh pycode-local variable names.
@@ -5518,6 +5743,8 @@ class InstructionTranslatorBase(
         self.is_trace_source_log_enabled: bool | None = trace_source_log.isEnabledFor(
             logging.DEBUG
         )
+        # Read once: config attribute access is slow and step() is hot.
+        self._is_verbose: bool = config.verbose
         linecache.lazycache(f_code.co_filename, f_globals)
 
 
@@ -5958,16 +6185,16 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         kwargs: dict[str, VariableTracker],
         allow_nested_graph_breaks: bool = False,
     ) -> VariableTracker:
-        tracer = None
+        if not config.dynamo_profiler:
+            tracer = cls.build_inline_tracer(
+                parent, func, args, kwargs, allow_nested_graph_breaks
+            )
+            return tracer.inline_call_()
         with profile_inline_call(
             parent.output, func.get_code(), lambda: parent.inline_depth + 1
         ):
             tracer = cls.build_inline_tracer(
-                parent,
-                func,
-                args,
-                kwargs,
-                allow_nested_graph_breaks=allow_nested_graph_breaks,
+                parent, func, args, kwargs, allow_nested_graph_breaks
             )
             return tracer.inline_call_()
 
@@ -6022,12 +6249,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 f"Avoid calling the function `{fn_qualname}`.",
             ]
             if "_dynamo" not in func.get_filename():
-                hints += [
-                    f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{fn_qualname}` "
-                    "to force tracing into the function. "
-                    "More graph breaks may occur as a result of attempting to trace into the function.",
-                    "Please file an issue to PyTorch.",
-                ]
+                if not trace_rules.is_weakref_finalize_registry_code(func.get_code()):
+                    hints.append(
+                        f"Apply `@torch._dynamo.dont_skip_tracing` to the function `{fn_qualname}` "
+                        "to force tracing into the function. "
+                        "More graph breaks may occur as a result of attempting to trace into the function."
+                    )
+                hints.append("Please file an issue to PyTorch.")
             unimplemented(
                 gb_type="Attempted to inline function marked as skipped",
                 context=f"qualname: {fn_qualname}, name: {func.get_name()}, "
@@ -6198,12 +6426,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         parent.is_child_tracer_active = True
         code = self.f_code
 
-        strict_ctx: Any = contextlib.nullcontext()
-        if parent.strict_checks_fn:
-            strict_ctx = self.strict_translation_mode(parent.strict_checks_fn)
-
         try:
-            with strict_ctx:
+            if parent.strict_checks_fn:
+                with self.strict_translation_mode(parent.strict_checks_fn):
+                    self.run()
+            else:
                 self.run()
         except exc.ObservedException as e:
             msg = f"Observed exception DURING INLING {code} : {e}"
@@ -6241,7 +6468,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         parent.inconsistent_side_effects |= self.inconsistent_side_effects
 
         log.debug("DONE INLINING %s", code)
-        self.output.tracing_context.traced_code.append(code)
+        traced_code = self.output.tracing_context.traced_code
+        if not traced_code or traced_code[-1] is not code:
+            traced_code.append(code)
 
         if (
             is_generator(code)
@@ -6323,18 +6552,29 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.nn_module_stack = parent.nn_module_stack.copy()
         self.one_graph = parent.one_graph
         self._allow_nested_graph_breaks = allow_nested_graph_breaks
+        self._parent_frame_summary_inst: Instruction | None = None
+        self._parent_frame_summary: traceback.FrameSummary | None = None
 
     @property
-    def fake_mode(self) -> FakeTensorMode | None:
+    def fake_mode(self) -> FakeTensorMode | CppFakeTensorMode | None:
         return self.parent.fake_mode
 
     def run_ctx_mgr(self) -> Any:
-        return TracingContext.current_frame(self.parent.frame_summary())
+        # A generator is resumed many times from the same parent instruction;
+        # reuse that instruction's FrameSummary instead of rebuilding it.
+        parent = self.parent
+        inst = parent.current_instruction
+        if self._parent_frame_summary_inst is not inst:
+            self._parent_frame_summary_inst = inst
+            self._parent_frame_summary = parent.frame_summary()
+        return TracingContext.current_frame(self._parent_frame_summary)
 
     def _can_speculate_comprehension_nested(self) -> bool:
         """Check if comprehension speculation is allowed in this inlined context.
 
-        Unlike should_compile_partial_graph(), this skips the exception table entry check.
+        Unlike should_compile_partial_graph(), this skips the exception table entry
+        check for this frame; maybe_setup_comprehension_speculation does that check at
+        the comprehension's first prefix instruction instead.
         """
         if not config.nested_graph_breaks:
             return False
@@ -6437,6 +6677,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             super()._load_global(inst)
         else:
             _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
+            if self._global_deleted_in_trace(fglobals_vt, name):
+                return self.load_builtin(inst)
             if self.output.side_effects.has_pending_mutation_of_attr(fglobals_vt, name):
                 self.push(self.output.side_effects.load_attr(fglobals_vt, name))
             else:
@@ -6474,6 +6716,37 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 )
             self.output.side_effects.store_attr(fglobals_vt, name, value)
 
+    def DELETE_GLOBAL(self, inst: Instruction) -> None:
+        if self.output.global_scope is self.f_globals:
+            super().DELETE_GLOBAL(inst)
+            return
+        name = inst.argval
+        _, fglobals_vt, _ = self.get_globals_source_and_value(name)
+        if getattr(
+            getattr(fglobals_vt, "value", None), "__getattr__", None
+        ) is not None or self.output.side_effects.has_pending_mutation_of_attr(
+            fglobals_vt, "__getattr__"
+        ):
+            # The replay of this delete is gated on hasattr(module, name), and
+            # a module with __getattr__ answers it for names the module does
+            # not hold, so the emitted DELETE_ATTR may fail where eager does
+            # not. The same gap opens when __getattr__ is stored in the
+            # trace: the later read consults the real module and misses the
+            # hook.
+            unimplemented(
+                gb_type="DELETE_GLOBAL in module with __getattr__",
+                context=name,
+                explanation=(
+                    "Dynamo cannot safely replay global deletes for a module "
+                    "that defines __getattr__."
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        self._delete_global(name, fglobals_vt)
+        self.output.side_effects.store_attr(
+            fglobals_vt, name, variables.DeletedVariable()
+        )
+
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: list[VariableTracker]
@@ -6485,14 +6758,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.gi_exc_state = Segment()
 
     @contextlib.contextmanager
-    def link_gi_exc_state(self):
-        try:
-            self.exn_vt_stack.push_segment(self.gi_exc_state)
-            yield
-        finally:
-            self.exn_vt_stack.pop_segment()
-
-    @contextlib.contextmanager
     def temporarily_set_frame_state(self, state: FrameState):
         saved_frame_state = self.frame_state
         try:
@@ -6502,6 +6767,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.frame_state = saved_frame_state
 
     def inline_call_(self) -> VariableTracker:
+        if not config.dynamo_profiler:
+            return super().inline_call_()
         with profile_inline_call(self.output, self.f_code, lambda: self.inline_depth):
             return super().inline_call_()
 

@@ -338,7 +338,13 @@ void upsample_avx_bilinear_bicubic_uint8(
   unsigned int horiz_weights_precision, vert_weights_precision;
 
   bool skip_unpacking = (num_channels == 3 || num_channels == 4) && input.is_contiguous(at::MemoryFormat::ChannelsLast);
-  bool skip_packing = (num_channels == 3 || num_channels == 4) && output.is_contiguous(at::MemoryFormat::ChannelsLast);
+  // The unpacked data has 4 channels (RGBA) unless unpacking was skipped, so
+  // writing it straight into the output is only valid when the output has 4
+  // channels or holds the input's own layout. The two memory format checks can
+  // disagree because a tensor whose spatial dims are all 1 is contiguous in
+  // both formats, e.g. a (3, H, 1) -> (3, 1, 1) resize of a channels first
+  // input: it has to be unpacked, and the 3-channel output has to be packed.
+  bool skip_packing = (num_channels == 4 || skip_unpacking) && output.is_contiguous(at::MemoryFormat::ChannelsLast);
 
   if (need_horizontal) {
     int interp_dim = 3;
@@ -711,7 +717,7 @@ void ImagingResampleHorizontalConvolution8u4x(
       _write_endline_rgb_as_uint32(lineOut1 + out_x_strided, o1);
       _write_endline_rgb_as_uint32(lineOut2 + out_x_strided, o2);
 
-      if (C10_UNLIKELY(is_last_line)) {
+      if (is_last_line) [[unlikely]] {
         // When we handle the last line, we can not access the next 4 bytes
         // as they are out of memory bounds.
         std::memcpy(lineOut3 + out_x_strided, (uint8_t *) &o3, num_channels);
@@ -1032,7 +1038,7 @@ void ImagingResampleHorizontalConvolution8u(
     auto o = _mm_cvtsi128_si32(sss);
     const auto out_x_strided = stride * out_x;
     if (num_channels == 3 && C10_UNLIKELY(out_x_strided + 4 >= max_out_x_strided)) {
-      if (C10_UNLIKELY(is_last_line)) {
+      if (is_last_line) [[unlikely]] {
         // When we handle the last line, we can not access the next 4 bytes
         // as they are out of memory bounds.
         std::memcpy(lineOut + out_x_strided, (uint8_t *) &o, 3);
