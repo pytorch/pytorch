@@ -1458,7 +1458,6 @@ Adding/updating symbolic gradient functions must be tested carefully as it's eas
 
 If your PR adds/updates a gradient formula for `torch`/`nn` functions, you **MUST** enable/update the corresponding tests in
 - `torch` functions: `module_tests` in [common_nn.py](../../testing/_internal/common_nn.py)
-- `nn` functions: `nn_functional_tests` in [test_jit.py](../../testing/_internal/jit_metaprogramming_utils.py)
 
 To turn on autodiff check, you can add an optional `check_ad(should_autodiff_node[bool], nonfusible_nodes[str|list[str]], fusible_nodes[str|list[str]])` tuple after the optional test variant name field.
 If `should_autodiff_node=True`, the differentiated traced/script forward graph must have a `prim::DifferentiableGraph`.

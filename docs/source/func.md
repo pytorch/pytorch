@@ -51,6 +51,7 @@ This idea of composable function transforms comes from the [JAX framework](https
 
   func.whirlwind_tour
   func.api
+  func._random
   func.ux_limitations
   func.migrating
 ```

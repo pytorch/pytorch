@@ -182,6 +182,10 @@ class ConstantVariable(VariableTracker):
             if value is NotImplemented:
                 return CONSTANT_VARIABLE_NOT_IMPLEMENTED
 
+        # Fast path: a plain leaf literal needs none of the collection routing.
+        if type(value) in common_constant_types:
+            return ConstantVariable(value, **kwargs)
+
         source = kwargs.get("source")
 
         # Routing for supported collection literals.
@@ -239,6 +243,9 @@ class ConstantVariable(VariableTracker):
 
     def is_python_constant(self) -> Literal[True]:
         return True
+
+    def python_type(self) -> type:
+        return type(self.value)
 
     def tp_repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         return ConstantVariable.create(repr(self.value))
@@ -325,7 +332,7 @@ class ConstantVariable(VariableTracker):
         except TypeError as e:
             raise NotImplementedError from e
 
-    def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
         from torch.fx.experimental.proxy_tensor import _coor_enabled
 
@@ -333,7 +340,7 @@ class ConstantVariable(VariableTracker):
 
         if isinstance(self.value, torch.device) and _coor_enabled():
             # Drop the index so an explicit cuda:N lands in the same bucket as a
-            # rank-relative CurrentDeviceVariable; see its hash_impl.
+            # rank-relative CurrentDeviceVariable; see its tp_hash_impl.
             return hash(torch.device(self.value.type)), False
 
         value_type = cast(Any, type(self.value))
@@ -1083,7 +1090,7 @@ class FakeIdVariable(VariableTracker):
     def python_type(self) -> type:
         return int
 
-    def hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: InstructionTranslatorBase) -> tuple[int, bool]:
         return hash(self.value), True
 
     def tp_repr_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
