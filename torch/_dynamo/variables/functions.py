@@ -986,10 +986,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             from ..polyfills.copy import is_deepcopy_atomic
             from .builder import SourcelessBuilder
 
-            # IDs of live lists and dicts cannot match an atomic mapping key.
-            # A caller's other memo entries take precedence over atomic dispatch.
-            containers = tx.output.container_id_tokens
-            keys = [key.vt for key in memo.items if key.vt not in containers]
+            check = SourcelessBuilder.create_internal_user_function(is_deepcopy_atomic)
+            # IDs of live objects of a different type cannot match this key.
+            key_type = type(item.value)
+            origins = tx.output.deepcopy_id_types
+            keys = [k.vt for k in memo.items if origins.get(k.vt, key_type) is key_type]
             if keys and (
                 not tx.output.is_root_tracer()
                 or _method_identity_guards_filtered(tx)
@@ -1006,20 +1007,16 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             ):
                 memo.install_dict_keys_match_guard()
                 tokens = tuple(key.value for key in keys)
-                present = id(item.value) in tokens
+                hit = id(item.value) in tokens
                 if tokens:
                     guard = functools.partial(
                         GuardBuilder.DEEPCOPY_MEMO_CONTAINS_ID,
                         tokens=tokens,
-                        present=present,
+                        present=hit,
                     )
                     install_guard(source.make_guard(guard))
-                if not present:
-                    check = SourcelessBuilder.create_internal_user_function(
-                        is_deepcopy_atomic
-                    )
-                    if check.call_function(tx, [item], {}).as_python_constant():
-                        return item
+                if not hit and check.call_function(tx, [item], {}).as_python_constant():
+                    return item
 
         # Handle patch_dynamo_config call
         if self.fn is torch._dynamo.patch_dynamo_config:
