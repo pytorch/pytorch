@@ -1,16 +1,10 @@
 from __future__ import annotations
 
-import operator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal, Self, TYPE_CHECKING
 
+from .._api import _slice_range, _subrange
 from .._serialization import _WireDescriptor
-
-
-# Slicing is part of the transport API but not yet supported by this backend.
-# The methods exist so the runtime-checkable MemoryView/RemoteBuffer protocols
-# still recognize these classes; they raise rather than return a wrong range.
-_SLICE_UNSUPPORTED = "Mooncake transport does not support slicing yet"
 
 
 if TYPE_CHECKING:
@@ -26,7 +20,9 @@ class MooncakeRemoteBuffer(_WireDescriptor):
     """A serializable descriptor for memory registered by a Mooncake peer.
 
     Mooncake addresses peers by endpoint and reaches their registered segments
-    directly, so the descriptor carries no opaque per-buffer metadata blob.
+    directly, so the descriptor carries no opaque per-buffer metadata blob. A
+    slice narrows ``address``/``length``; Mooncake resolves the sub-range to the
+    covering registered buffer.
     """
 
     _backend = "mooncake"
@@ -45,10 +41,11 @@ class MooncakeRemoteBuffer(_WireDescriptor):
     memory_type: str
 
     def slice(self, offset: int | None = None, length: int | None = None) -> Self:
-        raise NotImplementedError(_SLICE_UNSUPPORTED)
+        offset, length = _subrange(self.length, offset, length, "remote buffer")
+        return replace(self, address=self.address + offset, length=length)
 
     def __getitem__(self, key: builtins.slice) -> Self:
-        raise NotImplementedError(_SLICE_UNSUPPORTED)
+        return self.slice(*_slice_range(self.length, key))
 
 
 @dataclass
@@ -60,7 +57,7 @@ class _Registration:
     device_id: int
     memory_type: str
     active: bool = True
-    # Set when a transfer fails: Mooncake may still be accessing the memory.
+    # Set when a transfer times out: Mooncake may still be accessing the memory.
     pinned: bool = False
 
     def ensure_active(self) -> None:
@@ -80,10 +77,12 @@ class MooncakeMemoryView:
         return self._length
 
     def slice(self, offset: int | None = None, length: int | None = None) -> Self:
-        raise NotImplementedError(_SLICE_UNSUPPORTED)
+        self._memory._registration.ensure_active()
+        offset, length = _subrange(self._length, offset, length, "view")
+        return type(self)(self._memory, self._offset + offset, length)
 
     def __getitem__(self, key: builtins.slice) -> Self:
-        raise NotImplementedError(_SLICE_UNSUPPORTED)
+        return self.slice(*_slice_range(self._length, key))
 
 
 class MooncakeMutableMemoryView(MooncakeMemoryView):
@@ -103,17 +102,7 @@ class MooncakeMemory:
 
     def _range(self, offset: int | None, length: int | None) -> tuple[int, int]:
         self._registration.ensure_active()
-        offset = 0 if offset is None else operator.index(offset)
-        if offset < 0 or offset > self._registration.length:
-            raise ValueError("offset is outside the registered memory")
-        length = (
-            self._registration.length - offset
-            if length is None
-            else operator.index(length)
-        )
-        if length < 0 or length > self._registration.length - offset:
-            raise ValueError("view exceeds the registered memory")
-        return offset, length
+        return _subrange(self._registration.length, offset, length)
 
     def to_view(
         self, offset: int | None = None, length: int | None = None
