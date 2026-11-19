@@ -713,10 +713,11 @@ class GraphPartitionPlan:
 
     @property
     def splits_off_unsafe_ops(self) -> bool:
-        """Whether an op that cannot be captured goes to its own uncaptured
-        partition rather than disabling capture for the whole graph. Not under
-        REGION_OPT_OUT: outside the region it carves out, that compile keeps the
-        whole-graph rules of graph_partition=False."""
+        """Whether the whole-graph cudagraph checks (CPU ops, dynamic shapes,
+        incompatible ops) are skipped because partitioning splits such ops off.
+        Not under REGION_OPT_OUT: that compile keeps those checks, although the
+        scheduler still leaves out of capture whatever else it would not
+        capture under partitioning."""
         return (
             self.cudagraphs_per_partition
             and self.mode is not GraphPartitionMode.REGION_OPT_OUT

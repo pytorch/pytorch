@@ -64,6 +64,7 @@ from torch._functorch.aot_autograd import (
 from torch._higher_order_ops.user_kernel_hop import user_kernel_hop_infos
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
+    _with_fx_subgraphs,
     BoxedDeviceIndex,
     check_aot_cudagraphs,
     cudagraph_trees_clone_live_user_visible_outputs,
@@ -686,20 +687,13 @@ def _any_region_opts_out_of_cudagraphs(gm: GraphModule) -> bool:
     """Whether a nested compile region anywhere in gm, inside another
     higher-order op's body included, sets triton.cudagraphs=False. gm can be a
     graph after AOTAutograd."""
-    visited: OrderedSet[int] = OrderedSet()
-
-    def visit(module: GraphModule) -> bool:
-        if id(module) in visited:
-            return False
-        visited.add(id(module))
-        return any(
-            _get_region_cudagraphs_setting(node) is False
-            for node in module.graph.find_nodes(
-                op="call_function", target=torch.ops.higher_order.invoke_subgraph
-            )
-        ) or any(visit(getattr(module, name)) for name in _get_subgraph_names(module))
-
-    return visit(gm)
+    return any(
+        _get_region_cudagraphs_setting(node) is False
+        for module in _with_fx_subgraphs(gm)
+        for node in module.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        )
+    )
 
 
 def _get_region_cudagraphs_setting(node: torch.fx.Node) -> bool | None:
@@ -721,7 +715,8 @@ def _validate_region_cudagraphs(
     Only opting out is: a first-level region set to False gets its own
     uncaptured partition (see _compile_fx_inner). A region nested in another one
     cannot have its own setting, since a region's body is never partitioned.
-    Opting in, and combining a region setting with
+    Opting in, opting out under cpp_wrapper or fx_wrapper (which cannot
+    partition), and combining a region setting with
     torch._dynamo.override_cudagraphs, are not supported either. AOT compilation
     does not use triton.cudagraphs, so only the structural checks apply there.
 
@@ -758,12 +753,29 @@ def _validate_region_cudagraphs(
             )
         if V.aot_compilation:
             return
-        if setting and not config.triton.cudagraphs:
+        # cpp_wrapper/fx_wrapper with graph_partition turned capture off for the
+        # whole compile, so a region set to True there changes nothing.
+        if (
+            setting
+            and not config.triton.cudagraphs
+            and get_wrapper_cudagraph_skip_reason() is None
+        ):
             reject(
                 node,
                 "opting in to CUDA Graphs while triton.cudagraphs is off is not "
                 "supported; turn on torch._inductor.config.triton.cudagraphs and "
                 "set triton.cudagraphs=False on the regions to leave out instead",
+            )
+        # With graph_partition on, these wrappers already turned capture off.
+        if (
+            not setting
+            and config.triton.cudagraphs
+            and (config.cpp_wrapper or config.fx_wrapper)
+        ):
+            reject(
+                node,
+                "cpp_wrapper and fx_wrapper cannot partition the graph to leave the "
+                "region out of CUDA Graphs; turn them off, or remove the setting",
             )
 
     def visit(module: GraphModule, in_region: bool) -> None:
@@ -1304,26 +1316,17 @@ def _compile_fx_inner(
     # with graph_partition off, partitioning is forced on for this compile only.
     # Decided here, under the compile's full config: a lazily compiled backward
     # runs outside torch.compile(options=...) until inner_compile re-applies them.
+    # cpp_wrapper and fx_wrapper cannot partition; _validate_region_cudagraphs
+    # rejects an opt-out under them.
     if (
         not aot_mode
         and graph_kwargs["cudagraphs"]
         and not config.graph_partition
+        and not graph_kwargs.get("cpp_wrapper", False)
+        and not graph_kwargs.get("fx_wrapper", False)
         and _any_region_opts_out_of_cudagraphs(gm)
     ):
-        if graph_kwargs.get("cpp_wrapper", False) or graph_kwargs.get(
-            "fx_wrapper", False
-        ):
-            # These wrappers cannot partition. Dropping every CUDA graph in the
-            # model would be further from the request than keeping the region in
-            # the enclosing capture.
-            torch._logging.warning_once(
-                cudagraphs_log,
-                "cannot exclude a nested compile region from cudagraphs under "
-                "cpp_wrapper/fx_wrapper: the region stays captured with the "
-                "enclosing graph",
-            )
-        else:
-            graph_kwargs["graph_partition_mode"] = GraphPartitionMode.REGION_OPT_OUT
+        graph_kwargs["graph_partition_mode"] = GraphPartitionMode.REGION_OPT_OUT
     if config.save_args:
         save_args_for_compile_fx_inner(
             gm,
@@ -3232,11 +3235,7 @@ def compile_fx_backward(
         #    meta["is_static_input"] to demote it to the runtime
         #    copy_if_misaligned treatment. Unstamped placeholders default to
         #    static, preserving the name-based classification.
-        # A region that opts out forces partitioning on for the backward too.
-        if (
-            compiler_config_extra.forward_is_cudagraph_partitioned.value
-            or _any_region_opts_out_of_cudagraphs(gm)
-        ):
+        if compiler_config_extra.forward_is_cudagraph_partitioned.value:
             candidate_idxs: Sequence[int] = get_static_bw_input_idxs(gm)
         else:
             candidate_idxs = range(fixed)

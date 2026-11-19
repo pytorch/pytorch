@@ -994,15 +994,18 @@ def nested_compile_region(
             ``inductor_config_patches``; its ``bw_inductor_config_patches``
             argument retains the same name. Both mappings accept only the
             Inductor config keys {supported_config_keys}.
-            ``triton.cudagraphs`` is accepted in
-            ``fw_inductor_config_patches`` only and covers the backward too:
-            with ``triton.cudagraphs`` on, a region set to ``False`` runs
-            outside CUDA Graph capture, in its own graph partition (turned on
-            for that compile if ``graph_partition`` is off). Opting in, setting
-            it on a region nested in another region, and combining it with
-            ``torch._dynamo.override_cudagraphs`` raise an error. AOTInductor
-            does not apply the setting but still rejects the last two, and a
-            region compiled on its own (e.g. by
+            ``fw_inductor_config_patches`` also accepts ``triton.cudagraphs``,
+            which covers the backward too: with ``triton.cudagraphs`` on, a
+            region set to ``False`` runs outside CUDA Graph capture, in its own
+            graph partition (turned on for that compile if ``graph_partition``
+            is off). With ``graph_partition`` off, anything that disables
+            capture of the whole graph under ``graph_partition=False``, such as
+            a CPU op or a CPU input or output of the region itself, still does.
+            Opting in, opting out under ``cpp_wrapper`` or ``fx_wrapper`` with
+            ``graph_partition`` off, setting it on a region nested in another
+            region, and combining it with ``torch._dynamo.override_cudagraphs``
+            raise an error. AOTInductor does not apply the setting but still
+            rejects the last two, and a region compiled on its own (e.g. by
             ``regional_inductor_invoke_subgraph``) rejects it.
             Warning: this is an experimental feature under development and
             not ready for use yet.
@@ -1044,6 +1047,7 @@ if nested_compile_region.__doc__:
         supported_config_keys=", ".join(
             f"``{key}``"
             for key in sorted(_SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS)
+            if key != "triton.cudagraphs"
         )
     )
 
