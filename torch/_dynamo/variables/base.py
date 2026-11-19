@@ -2674,11 +2674,16 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                         issubclass(derived_py, self_py)
                     )
         # __reduce_ex__ is a C builtin (object.__reduce_ex__) that Dynamo
-        # cannot trace into. Like CPython, defer to a __reduce__ the type
-        # defines; otherwise constant-fold it for VTs backed by a real Python
-        # object so that copy.deepcopy can trace through.
+        # cannot trace into. Like object.__reduce_ex__, defer to a __reduce__
+        # the VT models when the type inherits object.__reduce_ex__ (bytearray
+        # defines its own); otherwise constant-fold it for VTs backed by a real
+        # Python object so that copy.deepcopy can trace through.
         if name == "__reduce_ex__" and len(args) == 1 and not kwargs:
-            if self.lookup_tp_method("__reduce__") is not None:
+            from .object_protocol import mro_lookup
+
+            if self.lookup_tp_method("__reduce__") is not None and (
+                mro_lookup(self.python_type(), "__reduce_ex__") is object.__reduce_ex__
+            ):
                 return self.call_method(tx, "__reduce__", [], {})
             if self.is_python_constant():
                 protocol = args[0].as_python_constant()
