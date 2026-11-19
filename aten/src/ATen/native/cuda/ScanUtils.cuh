@@ -1063,6 +1063,10 @@ constexpr int64_t kMaxChunks = int64_t{kWarp} * kPartialsPerLane;
 // Data Mover, which hides the latency of short columns' few tile copies).
 constexpr int64_t kMinRows = 32;
 constexpr int64_t kMinRowsTdm = 16;
+// Those two hold for cumsum and cumprod. logcumsumexp is bound by its combines, which the tiled
+// scan applies about twice per element against once in the one-thread-per-column kernel, so it
+// takes the tiled scan only for columns of at least this many bytes.
+constexpr int64_t kMinColumnBytesExpensiveOp = 1024;
 // Split columns into chunks only if there are fewer (orow, strip) groups than SMs * this...
 constexpr int64_t kChunkBlocksPerSM = 4;
 // ...and each group has at least this many tiles; shorter columns don't repay the extra launches.
@@ -1570,9 +1574,11 @@ inline bool has_tdm() {
   return per_device[c10::cuda::current_device()];
 }
 
-template <typename T>
+template <typename T, bool kCheapOp>
 bool should_use(int64_t num_orows, int64_t row_size, int64_t num_irows) {
-  if (num_orows <= 0 || num_irows <= 0 || row_size < (has_tdm() ? kMinRowsTdm : kMinRows)) {
+  const int64_t min_rows = kCheapOp ? (has_tdm() ? kMinRowsTdm : kMinRows)
+                                    : kMinColumnBytesExpensiveOp / static_cast<int64_t>(sizeof(T));
+  if (num_orows <= 0 || num_irows <= 0 || row_size < min_rows) {
     return false;
   }
   if (has_tdm()) {
@@ -1681,7 +1687,8 @@ __host__ void scan_outer_dim(const TensorBase& self, const TensorBase& result,
       !std::is_same_v<BinaryFunction, std::plus<scalar_t>> &&
       !std::is_same_v<BinaryFunction, std::multiplies<scalar_t>>;
   if constexpr (sizeof(scalar_t) <= 8 && !kComplexLogAddExp) {
-    if (outer_scan::should_use<scalar_t>(num_orows, row_size, num_irows)) {
+    if (outer_scan::should_use<scalar_t, inner_scan::Traits<scalar_t, BinaryFunction>::kCheapOp>(
+            num_orows, row_size, num_irows)) {
       outer_scan::launch<scalar_t>(
           result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
           num_orows, row_size, num_irows, init, binary_op);
