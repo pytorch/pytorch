@@ -2490,6 +2490,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def as_python_constant(self) -> types.FunctionType:
         return self.get_function()
 
+    def can_load_const_for_codegen(self) -> bool:
+        return False
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         try:
             return super().tp_repr_impl(tx)
@@ -4031,6 +4034,9 @@ class FunctoolsPartialVariable(VariableTracker):
 
     def python_type(self) -> type:
         return functools.partial
+
+    def can_load_const_for_codegen(self) -> bool:
+        return False
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen.load_import_from("functools", "partial"))

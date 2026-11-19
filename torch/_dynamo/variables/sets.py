@@ -204,6 +204,9 @@ class BaseSetVariable(VariableTracker):
         finally:
             self._checking_python_constant = False
 
+    def can_load_const_for_codegen(self) -> bool:
+        return False
+
     def __contains__(self, vt: VariableTracker) -> bool:
         if not isinstance(vt, VariableTracker):
             raise AssertionError(f"Expected VariableTracker, got {type(vt)}")
@@ -1255,6 +1258,12 @@ class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
 
     def as_python_constant(self) -> Any:
         return frozenset({k.vt.as_python_constant() for k in self.set_items})
+
+    def can_load_const_for_codegen(self) -> bool:
+        return type(self) is FrozensetVariable
+
+    def _can_load_const_for_codegen_in_tuple(self) -> bool:
+        return False
 
     def tp_new_impl(
         self,

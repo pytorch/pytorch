@@ -5110,10 +5110,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for _ in range(10):
             opt_fn(x, counter)
         self.assertEqual(counter[0], 12)
-        if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """2""")
-        else:
-            self.assertExpectedInline(cnt.frame_count, """1""")
+        self.assertExpectedInline(cnt.frame_count, """1""")
 
     def test_many_overlapping_inputs_does_not_explode_guards(self):
         from torch._dynamo.backends.common import aot_autograd

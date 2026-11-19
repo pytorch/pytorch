@@ -205,6 +205,14 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     def is_realized(self) -> bool:
         return self._cache.vt is not None
 
+    def can_load_const_for_codegen(self) -> bool:
+        return self.is_realized() and self.unwrap().can_load_const_for_codegen()
+
+    def _can_load_const_for_codegen_in_tuple(self) -> bool:
+        return (
+            self.is_realized() and self.unwrap()._can_load_const_for_codegen_in_tuple()
+        )
+
     def clone(self, **kwargs: Any) -> VariableTracker:
         if kwargs.get("_cache", self._cache) is not self._cache:
             raise AssertionError(
