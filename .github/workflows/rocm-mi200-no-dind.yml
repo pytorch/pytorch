@@ -4,9 +4,8 @@ name: rocm-mi200-no-dind
 on:
   push:
     tags:
-      # Shares the registered rocm-mi200 label so the trial runs next to the DinD workflow.
+      # Reuses the registered rocm-mi200 label: a new ciflow label does nothing until it is on main.
       - ciflow/rocm-mi200/*
-  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
