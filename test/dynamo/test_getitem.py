@@ -24,7 +24,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.variables.base import VariableTracker
-from torch._dynamo.variables.constant import ConstantVariable
+from torch._dynamo.variables.constant import BytesConstantVariable, StrConstantVariable
 from torch._dynamo.variables.lists import BaseListVariable, DequeVariable, RangeVariable
 from torch._library.opaque_object import (
     CustomClassBase,
@@ -1301,7 +1301,13 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
     def test_sq_item_impl_overrides(self):
         """All sequence types override sq_item_impl from the base class."""
         base = VariableTracker.sq_item_impl
-        for cls in (BaseListVariable, RangeVariable, ConstantVariable, DequeVariable):
+        for cls in (
+            BaseListVariable,
+            RangeVariable,
+            StrConstantVariable,
+            BytesConstantVariable,
+            DequeVariable,
+        ):
             self.assertIsNot(
                 cls.sq_item_impl,
                 base,
