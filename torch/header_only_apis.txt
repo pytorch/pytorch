@@ -4,7 +4,7 @@
 # to ensure header-only-ness.
 
 # torch/headeronly/cpu/Utils.h
-headeronly_get_cpu_capabilities
+populate_cpu_cache_sizes_from_sysconf
 
 # torch/headeronly/util/shim_utils.h
 TORCH_ERROR_CODE_CHECK
