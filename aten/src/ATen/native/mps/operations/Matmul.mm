@@ -699,6 +699,7 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
               self.dtype(),
               " != ",
               other.dtype())
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool, "\"mm\" not implemented for 'Bool'");
   TensorArg args[]{{output, "out", 0}, {self, "mat1", 1}, {other, "mat2", 2}};
   checkAllSameGPU("mm", args);
 
@@ -776,6 +777,10 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
   TORCH_CHECK(batch2.is_mps());
   TORCH_CHECK(result.is_mps());
 
+  TORCH_CHECK_NOT_IMPLEMENTED(batch1.scalar_type() != kBool,
+                              "\"",
+                              opType == ADDBMM_OP_TYPE ? "addbmm" : "baddbmm",
+                              "\" not implemented for 'Bool'");
   TORCH_CHECK(supportedFloatingOrComplexType(batch1) || c10::isIntegralType(batch1.scalar_type(), true),
               "MPS device does not support addbmm or baddbmm for this input type");
 
@@ -921,6 +926,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
 
   TORCH_CHECK(output.is_mps());
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool, "\"addmm\" not implemented for 'Bool'");
 
   TensorArg args[]{{output, "out", 0}, {bias, "self", 1}, {self, "mat1", 2}, {other, "mat2", 3}};
   checkAllSameGPU(__func__, args);
@@ -1165,6 +1171,7 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
               batch1.scalar_type(),
               " and ",
               batch2.scalar_type());
+  TORCH_CHECK_NOT_IMPLEMENTED(batch1.scalar_type() != kBool, "\"bmm\" not implemented for 'Bool'");
   using namespace mps;
 
   // Matmul not supported if any output dimension size is larger than 2**32
