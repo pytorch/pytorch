@@ -1853,8 +1853,8 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(failures, [])
         self.assertEqual(compiled(x, Box(2)), x + 2)
         self.assertEqual(len(failures), 1)
-        self.assertIn("___check_obj_id(box", failures[0])
-        self.assertIn("Dynamo ran a function with this object", failures[0])
+        self.assertIn("___check_obj_id(", failures[0])
+        self.assertIn("Dynamo checks for the same object on later calls", failures[0])
         self.assertIn("Even an equal-valued replacement can recompile", failures[0])
 
     def test_assume_constant_result_on_computation_with_graph_input(self):
