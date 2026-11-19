@@ -513,14 +513,6 @@ def _problem(
         target = env.get(inst["uses"][0])
         if type(target) in _CONTAINERS and id(target) not in local:
             return f"changes a {type(target).__name__} from before the region"
-    elif op == "set_item":
-        # In a container the region made; or in a list or dict it was handed
-        # or that a module of its holds: done to a copy or a stand-in in a
-        # trace, and to the real one after the graph (``_Variant.effects``).
-        target = env.get(inst["uses"][0])
-        kept = type(target) in (list, dict) and id(target) in given
-        if not (kept or type(target) is _HeldItems or id(target) in local):
-            return f"changes a {type(target).__name__} from before the region"
     return None
 
 
@@ -652,31 +644,6 @@ def _watch_module_changes(on: bool) -> None:
             monitoring.set_local_events(_monitor, code, events)
 
 
-def _references(holder: dict[str, Any], name: str) -> int:
-    return sys.getrefcount(holder[name])
-
-
-# What ``_references`` says of something that only its holder refers to.
-_SOLE = _references({"only": {}}, "only")
-
-
-class _HeldItems(dict):  # type: ignore[type-arg]
-    """Stands in, for the time of a trace, for a dict that a module keeps as
-    an attribute (the activations it stores for whoever asks later). What
-    the trace stores in it, the region stores in the dict itself after its
-    graph has run. It cannot be read: what the dict holds is from before the
-    region, and what the trace would read is not what the call will."""
-
-    def _refuse(self, *args: Any, **kwargs: Any) -> Any:
-        raise Untraceable("reads a dict that a module holds")
-
-    __getitem__ = __contains__ = __iter__ = __len__ = __eq__ = __ne__ = _refuse  # type: ignore[assignment]
-    __delitem__ = __or__ = __ior__ = __ror__ = __reversed__ = _refuse  # type: ignore[assignment]
-    get = keys = values = items = copy = _refuse  # type: ignore[assignment]
-    pop = popitem = setdefault = update = clear = _refuse  # type: ignore[assignment]
-    __hash__ = None  # type: ignore[assignment]
-
-
 class _Watch:
     """What the modules of a trace hold, to see whether a step of the trace
     gave one of them something else, and to put everything back.
@@ -694,33 +661,16 @@ class _Watch:
         # trace, by the dict they are in and their name.
         self.stores: dict[tuple[int, str], tuple[nn.Module, str]] = {}
         self.saved: list[tuple[dict[Any, Any], dict[Any, Any]]] = []
-        # The dicts that modules keep as plain attributes and that nothing
-        # else refers to, each with what stands in for it during the trace.
-        self.items: list[tuple[nn.Module, str, dict[Any, Any], _HeldItems]] = []
-        try:
-            for module in self.modules:
-                for m in module.modules():
-                    self.hold(vars(m), m)
-        except BaseException:
-            self.restore()
-            raise
+        for module in self.modules:
+            for m in module.modules():
+                attributes = vars(m)
+                self.saved.append((attributes, dict(attributes)))
+                for name in _MODULE_DICTS:
+                    held = attributes.get(name)
+                    if isinstance(held, dict):
+                        self.saved.append((held, dict(held)))
         self.saved.extend((held, dict(held)) for held in _GLOBAL_HOOK_DICTS)
         self.before = self.stamp()
-
-    def hold(self, attributes: dict[str, Any], module: nn.Module) -> None:
-        for name in list(attributes):
-            if name in _MODULE_DICTS or type(attributes[name]) is not dict:
-                continue
-            if _references(attributes, name) == _SOLE:
-                stand = _HeldItems()
-                self.items.append((module, name, attributes[name], stand))
-                attributes[name] = stand
-        self.saved.append((attributes, dict(attributes)))
-        for held in attributes.values():
-            # A dict that something else refers to as well is one the trace
-            # must leave as it is, like those of the parameters and hooks.
-            if isinstance(held, dict) and type(held) is not _HeldItems:
-                self.saved.append((held, dict(held)))
 
     def stamp(self) -> tuple[int, ...]:
         hooks = [len(held) for held in _GLOBAL_HOOK_DICTS]
@@ -730,7 +680,7 @@ class _Watch:
         now = self.stamp()
         if now == self.before:
             return False
-        if (self.stores or self.items) and not self.changed_otherwise():
+        if self.stores and not self.changed_otherwise():
             self.before = now
             return False
         return True
@@ -747,19 +697,14 @@ class _Watch:
                     return True
         return False
 
-    def stored(self) -> list[tuple[Any, ...]]:
-        """What a trace left with the modules: ``(module, name, value)`` for
-        a tensor in an attribute, and ``(module, name, value, key, dict)``
-        for an item of a dict that an attribute holds."""
+    def stored(self) -> list[tuple[nn.Module, str, Any]]:
+        """The tensors a trace left in attributes of the modules."""
         before = {id(held): saved for held, saved in self.saved}
-        found: list[tuple[Any, ...]] = []
+        found = []
         for (held, name), (module, _) in self.stores.items():
             value = vars(module).get(name)
             if value is not before[held].get(name):
                 found.append((module, name, value))
-        for module, name, real, stand in self.items:
-            for key, value in dict.items(stand):
-                found.append((module, name, value, key, real))
         return found
 
     def restore(self) -> None:
@@ -770,10 +715,6 @@ class _Watch:
             if not same:
                 held.clear()
                 held.update(saved)
-        for module, name, real, stand in self.items:
-            attributes = vars(module)
-            if attributes.get(name) is stand:
-                attributes[name] = real
 
 
 class _Known:
@@ -1234,6 +1175,11 @@ def _usual(positions: Any, args: tuple[Any, ...], inputs: _Inputs, key: Any) -> 
             theirs.update(map(id, known.tensors))
             looked += 1
             return ("module", obj, state, known, inputs.known[looked - 1][0])
+        if cls is collections.OrderedDict:
+            # Described by its keys, as a dict is (``_describe``): not one
+            # of the nodes the runtime looks into, which have their context
+            # as text.
+            return None
         node = pytree.SUPPORTED_NODES.get(cls)
         if node is not None and len(part) == 3 and part[0] is cls:
             if id(obj) in held:
@@ -1527,19 +1473,14 @@ def _checked(
 
 
 def _effects_of(
-    copies: _Copies, recipes: "_Recipes", stored: list[tuple[Any, ...]]
+    copies: _Copies, recipes: "_Recipes", stored: list[tuple[nn.Module, str, Any]]
 ) -> tuple[list[Any], bool]:
     """What a region does after its graph has run: to what it was given,
     and to the modules whose tensors its trace replaced."""
     try:
         effects, grows = _effects(copies, recipes)
-        for module, name, value, *item in stored:
-            if not item:
-                effects.append(("module", module, name, recipes.of(value)))
-            elif type(item[0]) not in _VALUES:
-                raise Untraceable("gives a dict a key that is no plain value")
-            else:
-                effects.append(("item", module, name, item[0], recipes.of(value)))
+        for module, name, value in stored:
+            effects.append(("module", module, name, recipes.of(value)))
         return effects, grows
     except Untraceable as e:
         raise _Failed(None, str(e)) from None
@@ -1551,10 +1492,6 @@ def _apply(
     kind = effect[0]
     if kind == "module":
         setattr(effect[1], effect[2], _build(effect[3], results, built, flat, held))
-        return
-    if kind == "item":
-        value = _build(effect[4], results, built, flat, held)
-        getattr(effect[1], effect[2])[effect[3]] = value
         return
     target = held[effect[1]]
     if kind == "list":
@@ -2453,8 +2390,6 @@ class _Recipes:
         cls = type(obj)
         children: list[Any] | None = None
         recipe: list[Any]
-        if cls is _HeldItems:
-            raise Untraceable("gives a dict that a module holds")
         if id(obj) in self.given:
             recipe = ["given", True, self.given[id(obj)]]
         elif id(obj) in self.inputs:
@@ -3057,14 +2992,6 @@ class _Region:
                 plan.split(self, bad)
                 raise
             _note_local(inst, env, local)
-            if inst["op"] == "load_attr" and type(env.get(inst["dst"])) is dict:
-                # A dict that a module keeps: a trace has a stand-in for it
-                # (``_HeldItems``), so the region may store in it.
-                owner = env.get(inst["uses"][0])
-                name = inst["text"].split("'")[1]
-                if isinstance(owner, nn.Module) and name not in _MODULE_DICTS:
-                    if vars(owner).get(name) is env[inst["dst"]]:
-                        given.add(id(env[inst["dst"]]))
         outputs = self.give(env)
         if bad:
             plan.split(self, bad)
@@ -3641,8 +3568,6 @@ class _Walk:
             return False
         if any(value in self.refused or value not in env for value in uses):
             return True
-        if op == "set_item" and type(env[uses[0]]) is _HeldItems:
-            return False
         if op == "set_item" and type(env[uses[0]]) in (list, dict):
             # On what the path made itself, or on a copy of what it was
             # given: the store is then done to the real one after the graph.
@@ -4326,9 +4251,8 @@ def _written(
     were, so no graph has them built in."""
     written = {i for i, f in enumerate(fake) if f._version != versions[i]}
     where = {id(tensor): i for i, tensor in enumerate(flat)}
-    for module, name, _, *item in stored:
-        before = item[1].get(item[0]) if item else vars(module).get(name)
-        position = where.get(id(before))
+    for module, name, _ in stored:
+        position = where.get(id(vars(module).get(name)))
         if position is not None:
             written.add(position)
     return written
