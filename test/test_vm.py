@@ -4684,6 +4684,11 @@ class RegionNet(torch.nn.Module):
         return self.fc(torch.tanh(x.flatten(1)))
 
 
+def region_ordered(model, feats):
+    h = torch.relu(feats["a"]) + torch.tanh(feats["b"])
+    return model.fc(torch.sigmoid(h).flatten(1))
+
+
 class RegionBranch(torch.nn.Module):
     # Branches on data between two stretches that trace.
     def __init__(self):
@@ -5847,6 +5852,26 @@ class TestVmRegions(TestCase):
                 compiled(model, x)
         self.assertFalse(compiled.stats()["measuring"])
 
+    def test_region_that_is_handed_an_ordered_dict(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        compiled = torch.vm(
+            region_ordered, passes=with_graphs("aot_eager"), fallback=False
+        )
+        with torch.no_grad():
+            # Once the module has been looked at, a call is told from the
+            # one before it by what it was handed: an OrderedDict is
+            # described as a dict is, which the runtime took for a node of
+            # another kind and raised TypeError.
+            for _ in range(12):
+                feats = collections.OrderedDict(
+                    a=torch.randn(2, 4, 6, 6), b=torch.randn(2, 4, 6, 6)
+                )
+                expected = region_ordered(model, feats)
+                self.assertEqual(compiled(model, feats), expected, atol=0, rtol=0)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual(region["variants"], 1)
+
     def test_object_made_by_a_region_is_made_on_every_call(self):
         torch.manual_seed(0)
         model = RegionStateful().eval()
@@ -6200,10 +6225,11 @@ class TestVmRegions(TestCase):
         with torch.no_grad():
             for _ in range(10):
                 compiled(model, x)
-            # The key of a call is made of its input: what the module holds
-            # is what an earlier call found, and so is what the graph has
-            # built in.
-            self.assertEqual(self.looks(compiled, model, x), ([1, 1, 1], []))
+            # A call that is like the one before is told so in the runtime,
+            # which makes its key of the input: what the module holds is
+            # what an earlier call found, and so is what the graph has built
+            # in.
+            self.assertEqual(self.looks(compiled, model, x), ([], []))
             # A weight that is written to, replaced, or of another size is
             # found out all the same.
             model.fc.weight.mul_(2)
@@ -6241,8 +6267,8 @@ class TestVmRegions(TestCase):
                     self.assertEqual(compiled(*args), f(*args))
                 self.assertEqual(len(self.compiled_regions(compiled)), 1)
                 # One module inside the other, and a weight that both layers
-                # have: every tensor is still looked at once.
-                self.assertEqual(self.looks(compiled, *args), ([1, 1, 1], []))
+                # have: a call is still told to be like the one before.
+                self.assertEqual(self.looks(compiled, *args), ([], []))
                 first.weight.add_(1)
                 self.assertEqual(compiled(*args), f(*args))
                 second.bias = torch.nn.Parameter(torch.ones(4))
@@ -6590,6 +6616,70 @@ class TestVmRegions(TestCase):
             self.assertIsNone(usual.look((cell, RegionMade(a, 2.5))))
             self.assertIsNone(usual.look((types_module.CellType(3), made)))
             self.assertIsNone(usual.look((cell, cell)))
+
+    def test_a_call_like_the_one_before_is_told_so_in_the_runtime(self):
+        def mixed(model, x, options, more, scale, bias=None):
+            y = model(x) * scale
+            if options["double"]:
+                y = y * 2
+            for t in more:
+                y = y + t.sum()
+            if bias is not None:
+                y = y + bias.sum()
+            return y
+
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        x, a, b = torch.randn(2, 3, 6, 6), torch.randn(3), torch.randn(4)
+        compiled = torch.vm(mixed, passes=with_graphs("aot_eager"), fallback=False)
+        usual = (model, x, {"double": True}, [a, b], 3)
+        with torch.no_grad():
+            for _ in range(10):
+                self.assertEqual(compiled(*usual), mixed(*usual))
+            self.assertEqual(self.looks(compiled, *usual), ([], []))
+            # A call that is not like it is described the long way, whatever
+            # it is that differs: a value, a number, how a list or a dict is
+            # built, a tensor of another size or kind or one that comes
+            # twice, the modes of the thread, what the module holds.
+            unusual = [
+                (model, x, {"double": False}, [a, b], 3),
+                (model, x, {"double": True}, [a], 3),
+                (model, x, {"double": True}, [a, b, a], 3),
+                (model, x, {"double": True}, [a, b], 5),
+                (model, x, {"double": True}, [a, b], 2.5),
+                (model, x, {"double": True, "more": 1}, [a, b], 3),
+                (model, x, {"double": True}, [a, x], 3),
+                (model, x, {"double": True}, [a, b], 3, b),
+                (model, x.clone().requires_grad_(), {"double": True}, [a, b], 3),
+                (model, torch.randn(5, 3, 6, 6), {"double": True}, [a, b], 3),
+            ]
+            for args in unusual:
+                for _ in range(2):
+                    self.assertEqual(compiled(*args), mixed(*args))
+                self.assertEqual(compiled(*usual), mixed(*usual))
+        for _ in range(2):
+            self.assertEqual(compiled(*usual), mixed(*usual))
+        with torch.no_grad():
+            model.fc.weight.mul_(2)
+            self.assertEqual(compiled(*usual), mixed(*usual))
+            model.fc.weight.requires_grad_(False)
+            self.assertEqual(compiled(*usual), mixed(*usual))
+            model.fc.bias = torch.nn.Parameter(torch.ones(5))
+            self.assertEqual(compiled(*usual), mixed(*usual))
+            model.bn.train()
+            self.assertEqual(compiled(*usual), mixed(*usual))
+            model.bn.eval()
+            handle = torch.nn.modules.module.register_module_forward_hook(
+                lambda *args: None
+            )
+            try:
+                self.assertEqual(compiled(*usual), mixed(*usual))
+            finally:
+                handle.remove()
+            # And a call is like the one before again once it is.
+            for _ in range(6):
+                self.assertEqual(compiled(*usual), mixed(*usual))
+            self.assertEqual(self.looks(compiled, *usual), ([], []))
 
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):

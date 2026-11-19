@@ -246,6 +246,11 @@ _MOST_GROWTH = 2
 # How many lists, dicts and objects with state one call of a region may hand
 # it: each is copied for a trace and compared after it.
 _MOST_HELD = 4096
+# After this many calls of a region in a row that were not like the one
+# before, it is asked what a call is like (``_usual``) only once in as many.
+_MOST_UNUSUAL = 16
+# How many kinds of call a region keeps for that (one per layer of a model).
+_MOST_USUAL = 256
 
 
 _CONTAINERS = frozenset(
@@ -991,7 +996,6 @@ def _describe(obj: Any, inputs: _Inputs) -> Any:
             flat.extend(known.tensors)  # type: ignore[union-attr]
             seen.update(places)
         else:
-            inputs.unwritten = False
             first = len(flat)
             shared: list[torch.Tensor] = []
             try:
@@ -1011,6 +1015,8 @@ def _describe(obj: Any, inputs: _Inputs) -> Any:
                 state.epoch = None
                 return _describe(obj, inputs)
             if len(flat) > first:
+                # Looked at for the first time, or not what they were.
+                inputs.unwritten = False
                 tensors = flat[first:]
                 snapshot = _runtime.snapshot(state.accessors, tensors + shared)
                 if snapshot is None:
@@ -1065,6 +1071,128 @@ def _describe(obj: Any, inputs: _Inputs) -> Any:
         return ("instance", cls, tuple(state), values)
     # Anything else may have state that a trace would change unseen.
     raise _Opaque(0, f"a {cls.__name__} from before the region")
+
+
+def _usual(positions: Any, args: tuple[Any, ...], inputs: _Inputs, key: Any) -> Any:
+    """What tells, without the walk of ``_describe``, that a later call is
+    like this one, which was described the long way, and gives what the
+    walk would (``Usual`` of the runtime). None if this call is not of the
+    kind it knows: it came with a set, a method or an object with
+    attributes, a module was looked at for the first time or is not watched,
+    a tensor of a module came on its own as well."""
+    if _function_stack():
+        return None
+    epoch = _runtime.module_epoch()
+    inside: list[frozenset[int]] = []
+    held: set[int] = set()
+    # How many modules were found as a look had left them, and their tensors.
+    looked = 0
+    theirs: set[int] = set()
+
+    def spec(obj: Any, part: Any) -> Any:
+        # By what the walk made of the object: what is the same in the next
+        # call if the object is the same, equal, or built the same way.
+        nonlocal looked
+        cls = type(obj)
+        if cls in _TENSORS:
+            return ("tensor", part) if type(part) is int else None
+        if part is int:
+            return ("int",)
+        if type(part) is not tuple:
+            return None
+        if cls in _VALUES:
+            return ("value", obj) if len(part) == 2 and part[0] is cls else None
+        if part[0] == "object":
+            return ("object", obj)
+        if cls is types.CellType:
+            if part[0] != "cell" or id(obj) in held:
+                return None
+            held.add(id(obj))
+            inner = spec(obj.cell_contents, part[1])
+            return None if inner is None else ("cell", inner)
+        if cls is tuple or cls is list or cls is dict:
+            if cls is not tuple:
+                if part[0] == "again" or id(obj) in held:
+                    return None
+                held.add(id(obj))
+            values = obj.values() if cls is dict else obj
+            parts = part[2] if cls is dict else part[1]
+            items = [spec(item, sub) for item, sub in zip(values, parts)]
+            if len(items) != len(obj) or any(item is None for item in items):
+                return None
+            return ("dict", tuple(obj), items) if cls is dict else (cls.__name__, items)
+        if isinstance(obj, nn.Module):
+            if any(id(obj) in ids for ids in inside):
+                # Inside a module that is checked: so is this one.
+                return ("object", obj)
+            state = _module_states.get(id(obj))
+            if state is None or state.module() is not obj or state.epoch != epoch:
+                return None
+            inside.append(state.ids)
+            if not state.accessors:
+                return ("object", obj)
+            known = state.known
+            if known is None or known.epoch != epoch:
+                return None
+            if looked >= len(inputs.known) or inputs.known[looked][1] is not known:
+                return None
+            # A tensor it has in common with something before it is one of
+            # a module before it, which is checked.
+            if not known.shared <= theirs:
+                return None
+            theirs.update(map(id, known.tensors))
+            looked += 1
+            return ("module", obj, state, known, inputs.known[looked - 1][0])
+        if cls is collections.OrderedDict:
+            # Described by its keys, as a dict is (``_describe``): not one
+            # of the nodes the runtime looks into, which have their context
+            # as text.
+            return None
+        node = pytree.SUPPORTED_NODES.get(cls)
+        if node is not None and len(part) == 3 and part[0] is cls:
+            if id(obj) in held:
+                return None
+            held.add(id(obj))
+            children, context = node.flatten_fn(obj)
+            items = [spec(item, sub) for item, sub in zip(children, part[2])]
+            if len(items) != len(children) or any(item is None for item in items):
+                return None
+            return ("node", cls, node.flatten_fn, part[1], items)
+        return None
+
+    nodes = []
+    for position, part in zip(positions, key[0]):
+        node = spec(args[position], part)
+        if node is None:
+            return None
+        nodes.append(node)
+    if looked != len(inputs.known):
+        return None
+    usual = _runtime.Usual(
+        list(positions),
+        nodes,
+        key[0],
+        key[3],
+        inputs.known,
+        _TENSOR_TYPES,
+        _WIDE,
+        _GLOBAL_HOOK_DICTS,
+    )
+    # Only if, for this very call, it finds what the walk found.
+    found = usual.look(args)
+    if found is None:
+        return None
+    again, flat, objects, ints, offsets, known, unwritten = found
+    same = (
+        again == key
+        and _same_items(flat, inputs.flat)
+        and _same_items(objects, inputs.held)
+        and ints == inputs.ints
+        and offsets == inputs.offsets
+        and known is inputs.known
+        and unwritten == inputs.unwritten
+    )
+    return usual if same else None
 
 
 def _acceptable(obj: Any) -> str | None:
@@ -2508,15 +2636,50 @@ class _Region:
         # has modules that are being trained.
         self.melts = 0
         self.unstable: set[int] = set()
+        # What the calls that were described the long way were like, for
+        # the calls that are like one of them (``_usual``): by the first
+        # module among what the key is made of, since a region of a layer
+        # is called with every layer in turn; and how many calls in a row
+        # were like none.
+        self.usual: dict[int, Any] = {}
+        self.unusual = 0
 
     def __call__(self, *args: Any) -> Any:
         if not self.hot:
             return self.cold(args)
         inputs = _Inputs()
-        try:
-            key = self.key(args, inputs)
-        except _Opaque:
-            return self.decline(args)
+        found = None
+        if self.usual:
+            lead = self.lead(args)
+            usual = self.usual.get(lead)
+            if usual is not None:
+                found = usual.look(args)
+        if found is not None:
+            (
+                key,
+                inputs.flat,
+                inputs.held,
+                inputs.ints,
+                inputs.offsets,
+                inputs.known,
+                inputs.unwritten,
+            ) = found
+            self.unusual = 0
+        else:
+            try:
+                key = self.key(args, inputs)
+            except _Opaque:
+                return self.decline(args)
+            # A region whose calls are never alike is not asked every time.
+            self.unusual += 1
+            if self.unusual < _MOST_UNUSUAL or self.unusual % _MOST_UNUSUAL == 0:
+                usual = _usual(self.keyed(args), args, inputs, key)
+                if len(self.usual) >= _MOST_USUAL:
+                    self.usual.clear()
+                if usual is not None:
+                    self.usual[self.lead(args)] = usual
+                else:
+                    self.usual.pop(self.lead(args), None)
         variant = self.variants.get(key, self)
         if variant is not self and variant is not None:
             stale = variant.stale(inputs)  # type: ignore[union-attr]
@@ -2535,6 +2698,18 @@ class _Region:
         if variant.proven:  # type: ignore[union-attr]
             return variant.run(inputs)  # type: ignore[union-attr]
         return self.first_run(key, variant, args, inputs)  # type: ignore[arg-type]
+
+    def keyed(self, args: tuple[Any, ...]) -> Any:
+        """Which of the values of a call its key is made of."""
+        return range(len(args))
+
+    def lead(self, args: tuple[Any, ...]) -> int:
+        """Which module a call comes with first, among what its key is made
+        of: 0 if with none."""
+        for position in self.keyed(args):
+            if isinstance(args[position], nn.Module):
+                return id(args[position])
+        return 0
 
     def widened(self, key: Any, inputs: _Inputs) -> _Variant | None:
         """A variant that leaves open what this call has other numbers for."""
@@ -3321,6 +3496,9 @@ class _Path(_Region):
     def decline(self, args: tuple[Any, ...]) -> Any:
         return None
 
+    def keyed(self, args: tuple[Any, ...]) -> Any:
+        return self.positions or ()
+
     def key(self, args: tuple[Any, ...], inputs: _Inputs, positions: Any = None) -> Any:
         parts = []
         for position in positions if positions is not None else self.positions or ():
@@ -3433,6 +3611,7 @@ class _Path(_Region):
             self.positions = tuple(positions)
             self.variants.clear()
             self.sizes.clear()
+            self.usual.clear()
         final = _Inputs()
         key = self.key(args, final)
         self.sizes.setdefault(_kind(key), _Sizes(key[2]))
