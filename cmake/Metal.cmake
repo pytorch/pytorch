@@ -148,7 +148,7 @@ if(NOT USE_PYTORCH_METAL)
     return()
 endif()
 
-if(IOS OR INTERN_BUILD_MOBILE)
+if(IOS)
     return()
 endif()
 
