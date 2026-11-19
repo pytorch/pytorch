@@ -1,6 +1,6 @@
 """Stateless PRNG APIs.
 
-These are experimental and subject to change without notice.
+These are a prototype and subject to change without notice.
 Access via ``torch.func._random``.
 """
 
@@ -50,7 +50,8 @@ def key(
     Args:
         seed (int): The seed value for the PRNG.
         device (:class:`torch.device`, optional): The desired device for the
-            returned key. Default: ``cpu``.
+            returned key. Default: the current default device (see
+            :func:`torch.set_default_device`).
         impl (str): PRNG algorithm. Currently only ``"philox4x32-10"`` is
             supported.
 
@@ -350,6 +351,95 @@ def uniform(
     return uniform_(key, result, low=low, high=high)
 
 
+def sharded_normal_(
+    key: torch.Tensor,
+    result: torch.Tensor,
+    global_shape: Sequence[int],
+    global_offset: Sequence[int],
+    *,
+    mean: float = 0.0,
+    std: float = 1.0,
+) -> torch.Tensor:
+    r"""Fill ``result`` in-place with its region of a global normal tensor.
+
+    ``result`` is treated as the region at ``global_offset`` of a tensor of
+    shape ``global_shape`` (e.g. a shard of a parameter), and is filled with
+    exactly the values that ``normal(key, global_shape, mean=mean, std=std)``
+    would produce there, without generating the rest of the global tensor.
+
+    Args:
+        key (Tensor): An unbatched PRNG key returned by :func:`key`,
+            :func:`split`, or :func:`fold_in`.
+        result (Tensor): The output tensor to fill in-place.
+        global_shape (sequence of int): Shape of the global tensor.
+        global_offset (sequence of int): Index of ``result``'s first element
+            within the global tensor, one entry per dim.
+        mean (float): Mean of the normal distribution. Default: ``0.0``.
+        std (float): Standard deviation of the normal distribution.
+            Default: ``1.0``.
+
+    Returns:
+        ``result``, filled with normal random values.
+
+    Example::
+
+        >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
+        >>> # Rows 512:1024 of a (1024, 4096) parameter.
+        >>> shard = torch.empty(512, 4096, device="cuda")  # doctest: +SKIP
+        >>> torch.func._random.sharded_normal_(  # doctest: +SKIP
+        ...     key, shard, (1024, 4096), (512, 0)
+        ... )
+    """
+    return torch.ops.aten._philox_normal_shard_(
+        result, key, global_shape, global_offset, mean, std
+    )
+
+
+def sharded_uniform_(
+    key: torch.Tensor,
+    result: torch.Tensor,
+    global_shape: Sequence[int],
+    global_offset: Sequence[int],
+    *,
+    low: float = 0.0,
+    high: float = 1.0,
+) -> torch.Tensor:
+    r"""Fill ``result`` in-place with its region of a global uniform tensor.
+
+    ``result`` is treated as the region at ``global_offset`` of a tensor of
+    shape ``global_shape`` (e.g. a shard of a parameter), and is filled with
+    exactly the values that ``uniform(key, global_shape, low=low, high=high)``
+    would produce there, without generating the rest of the global tensor.
+
+    Args:
+        key (Tensor): An unbatched PRNG key returned by :func:`key`,
+            :func:`split`, or :func:`fold_in`.
+        result (Tensor): The output tensor to fill in-place.
+        global_shape (sequence of int): Shape of the global tensor.
+        global_offset (sequence of int): Index of ``result``'s first element
+            within the global tensor, one entry per dim.
+        low (float): Lower bound (inclusive) of the uniform distribution.
+            Default: ``0.0``.
+        high (float): Upper bound (exclusive) of the uniform distribution.
+            Default: ``1.0``.
+
+    Returns:
+        ``result``, filled with uniform random values.
+
+    Example::
+
+        >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
+        >>> # Columns 2048:4096 of a (1024, 4096) parameter.
+        >>> shard = torch.empty(1024, 2048, device="cuda")  # doctest: +SKIP
+        >>> torch.func._random.sharded_uniform_(  # doctest: +SKIP
+        ...     key, shard, (1024, 4096), (0, 2048)
+        ... )
+    """
+    return torch.ops.aten._philox_uniform_shard_(
+        result, key, global_shape, global_offset, low, high
+    )
+
+
 def randint_(
     key: torch.Tensor,
     result: torch.Tensor,
@@ -413,7 +503,8 @@ def randint_(
             the dtype's smallest value. Default: ``0``.
         high (int, optional): Upper bound (exclusive) of the range. ``None`` means
             the dtype's largest value plus one. For 32-bit dtypes,
-            ``high - low`` must be less than ``2 ** 28``; see the note below.
+            ``high - low`` must be a power of two or less than ``2 ** 28``;
+            see the note below.
             Default: ``None``.
 
     Returns:
@@ -422,9 +513,9 @@ def randint_(
     .. note::
 
         Values are reduced into ``[low, high)`` with a modulo, which is exactly
-        uniform only when ``high - low`` is a power of two. Ranges of ``2 ** 28``
-        or more are rejected for 32-bit dtypes; use a 64-bit dtype if you need a
-        range that large. See :func:`randint` for the bias in detail.
+        uniform only when ``high - low`` is a power of two. Other ranges of
+        ``2 ** 28`` or more are rejected for 32-bit dtypes; use a 64-bit dtype if
+        you need a range that large. See :func:`randint` for the bias in detail.
 
     Example::
 
@@ -504,7 +595,8 @@ def randint(
             the dtype's smallest value. Default: ``0``.
         high (int, optional): Upper bound (exclusive) of the range. ``None`` means
             the dtype's largest value plus one. For 32-bit dtypes,
-            ``high - low`` must be less than ``2 ** 28``; see the note below.
+            ``high - low`` must be a power of two or less than ``2 ** 28``;
+            see the note below.
             Default: ``None``.
         dtype (:class:`torch.dtype`, optional): The desired dtype: any integer
             dtype other than ``torch.bool``. Default: ``torch.int32``.

@@ -47,8 +47,8 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
-    expectedIfCppFakeTensor,
     HardwareClassification,
+    parametrize,
     run_tests,
     skipIfCppFakeTensor,
     skipIfTorchDynamo,
@@ -371,6 +371,20 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
+
+    def test_no_tensor_operands(self):
+        # Called twice, so Dynamo doesn't inline the region, and Inductor lowers
+        # a subgraph call with no operands to take the device from.
+        @nested_compile_region
+        def table():
+            return torch.arange(8, dtype=torch.float32).exp()
+
+        def fn(x):
+            return x * table() + table()
+
+        x = torch.randn(8)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(fn(x), res)
 
     def test_module_forward(self):
         class Mod(torch.nn.Module):
@@ -2791,7 +2805,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x.grad, x_clone.grad)
 
         if not TEST_WITH_CROSSREF:
-            cpp_expected = """\
+            fw_expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[s77, 16]", primals_2: "Sym(s77)"):
         partitioned_fw_subgraph_0_1 = self.partitioned_fw_subgraph_0_1
@@ -2830,12 +2844,10 @@ class GraphModule(torch.nn.Module):
             return (cos, primals_1, primals_0)"""
             self.assertExpectedInline(
                 normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
-                expectedIfCppFakeTensor(
-                    cpp_expected, cpp_expected.replace("add_15", "add")
-                ),
+                fw_expected,
                 ignore_empty_lines=True,
             )
-            bw_cpp_expected = """\
+            bw_expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_2: "Sym(s77)", getitem_17: "Sym(s77)", getitem_19: "Sym(s77)", getitem_21: "Sym(s77)", getitem_23: "Sym(s77)", getitem_16: "f32[s77, 16]", getitem_18: "f32[s77, 16]", getitem_20: "f32[s77, 16]", getitem_22: "f32[s77, 16]", cos: "f32[s77, 16]", tangents_1: "f32[]"):
         expand: "f32[s77, 16]" = torch.ops.aten.expand.default(tangents_1, [primals_2, 16]);  tangents_1 = primals_2 = None
@@ -2864,16 +2876,11 @@ class GraphModule(torch.nn.Module):
         def forward(self, primals_0: "Sym(s77)", primals_1: "f32[s77, 16]", tangents_0: "f32[s77, 16]"):
             sin: "f32[s77, 16]" = torch.ops.aten.sin.default(primals_1);  primals_1 = None
             neg: "f32[s77, 16]" = torch.ops.aten.neg.default(sin);  sin = None
-            mul_10: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
-            return (None, mul_10)"""
-            python_expected = (
-                bw_cpp_expected.replace("add_16", "add_1")
-                .replace("mul_10", "mul")
-                .replace("mul_9", "mul")
-            )
+            mul: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
+            return (None, mul)"""
             self.assertExpectedInline(
                 normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
-                expectedIfCppFakeTensor(bw_cpp_expected, python_expected),
+                bw_expected,
                 ignore_empty_lines=True,
             )
 
@@ -3273,6 +3280,27 @@ _reuse_test_global = None
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphCompileDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("tracing_mode", ["fake", "symbolic"])
+    @parametrize("noncontiguous_grad", [False, True])
+    def test_make_fx_backward(self, device, tracing_mode, noncontiguous_grad):
+        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        subgraph = torch.fx.symbolic_trace(lambda x: (x.sin(),))
+
+        def f(x, grad):
+            (y,) = invoke_subgraph(subgraph, "sin", x)
+            return torch.autograd.grad(y, x, grad)[0]
+
+        x = torch.randn(3, 4, device=device, requires_grad=True)
+        grad = (
+            torch.randn(4, 3, device=device).t()
+            if noncontiguous_grad
+            else torch.randn_like(x)
+        )
+        gm = make_fx(f, tracing_mode=tracing_mode)(x, grad)
+        self.assertEqual(gm(x, grad), x.cos() * grad)
 
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4819")
     @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
