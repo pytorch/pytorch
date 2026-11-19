@@ -4446,7 +4446,6 @@ def triton_config(
             pointwise_size_hints[p] for p in prefixes[num_budgets - 1 :]
         )
     }
-    maxGridSize = [2147483647, 65535, 65535]
 
     target = conditional_product(x, y, z)
     if conditional_product(*size_hints.values()) < target:
@@ -4462,27 +4461,12 @@ def triton_config(
     # if we are below original block size, scale up where we can;
     # or if the calculated grid size is larger than the limit, we bump up the corresponding dimension
     while x < min(size_hints["x"], TRITON_MAX_BLOCK["X"]) and (
-        x * maxGridSize[0] < size_hints["x"] or conditional_product(x, y, z) < target
+        x * 2147483647 < size_hints["x"] or conditional_product(x, y, z) < target
     ):
         x *= 2
-    while (
-        y
-        and y < min(size_hints["y"], TRITON_MAX_BLOCK["Y"])
-        and (
-            y * maxGridSize[1] < size_hints["y"]
-            or conditional_product(x, y, z) < target
-        )
-    ):
-        y *= 2
-    while (
-        z
-        and z < min(size_hints["z0_"], TRITON_MAX_BLOCK["Z0_"])
-        and (
-            z * maxGridSize[2] < size_hints["z0_"]
-            or conditional_product(x, y, z) < target
-        )
-    ):
-        z *= 2
+    numels = {p: n for p, n in (("x", x), ("y", y), ("z0_", z)) if n is not None}
+    _check_max_grid_yz(size_hints, numels, strict=False, target=target)
+    x, y, z = numels["x"], numels.get("y"), numels.get("z0_")
 
     # Calculate num_warps if they are not hard passed to config
     if num_warps is None:
@@ -4513,6 +4497,7 @@ def triton_config(
     pointwise_numels = _get_nd_pointwise_numels(
         pointwise_size_hints, [budget for budget in (x, y, z) if budget is not None]
     )
+    # Rounded hints can overestimate a launchable legacy 3D grid.
     if len(get_z_prefixes(pointwise_size_hints)) > 1:
         _check_max_grid_yz(pointwise_size_hints, pointwise_numels)
     cfg = _get_config(pointwise_numels)
@@ -4531,18 +4516,28 @@ def triton_config(
     return config
 
 
-def _check_max_grid_yz(size_hints: dict[str, int], numels: dict[str, int]) -> None:
-    groups = get_yz_grid_extents(size_hints, numels)
+def _check_max_grid_yz(
+    size_hints: dict[str, int],
+    numels: dict[str, int],
+    *,
+    strict: bool = True,
+    target: int | None = None,
+) -> None:
+    groups = (
+        get_yz_grid_extents(size_hints, numels)
+        if strict
+        else {(p,): 0 for p in ("y", "z0_") if p in numels}
+    )
     if not groups:
         return
-    target = math.prod(numels.values())
+    target = math.prod(numels.values()) if target is None else target
     limit = get_max_y_grid()
 
     def grid(group: Sequence[str]) -> int:
-        return get_yz_grid_extents(size_hints, numels)[tuple(group)]
+        return math.prod(ceildiv(size_hints[p], numels[p]) for p in group)
 
     for group in groups:
-        while grid(group) > limit:
+        while grid(group) > limit or math.prod(numels.values()) < target:
             prefix = next(
                 (
                     p
@@ -4553,8 +4548,10 @@ def _check_max_grid_yz(size_hints: dict[str, int], numels: dict[str, int]) -> No
                 None,
             )
             if prefix is None:
+                if not strict or grid(group) <= limit:
+                    break
                 axis = "Y" if group == ("y",) else "Z"
-                raise AssertionError(
+                raise RuntimeError(
                     f"Tiling configuration exceeds the {axis} launch-grid limit: "
                     f"extent={grid(group)}, limit={limit}, axes={group}, "
                     f"size_hints={size_hints}, block_sizes={numels}. "
@@ -4562,7 +4559,12 @@ def _check_max_grid_yz(size_hints: dict[str, int], numels: dict[str, int]) -> No
                 )
             numels[prefix] *= 2
 
-    for prefix in reversed(get_pointwise_prefixes(numels)):
+    if not strict:
+        return
+
+    for prefix in get_pointwise_prefixes(numels):
+        if prefix == "x":
+            continue
         while numels[prefix] > 1 and math.prod(numels.values()) > target:
             numels[prefix] //= 2
             if any(grid(group) > limit for group in groups):
@@ -4589,10 +4591,26 @@ def _get_nd_pointwise_numels(
         for prefix, budget in zip(prefixes, budgets[:-1])
     }
     expanded_prefixes = prefixes[len(budgets) - 1 :]
-    remaining = min(budgets[-1], math.prod(size_hints[p] for p in expanded_prefixes))
-    for prefix in expanded_prefixes:
+    numels.update(
+        _expand_nd_budget(
+            size_hints, expanded_prefixes, budgets[-1], cap_outermost=False
+        )
+    )
+    return numels
+
+
+def _expand_nd_budget(
+    size_hints: dict[str, int],
+    prefixes: Sequence[str],
+    budget: int,
+    *,
+    cap_outermost: bool = True,
+) -> dict[str, int]:
+    remaining = min(budget, math.prod(size_hints[p] for p in prefixes))
+    numels = {}
+    for prefix in prefixes:
         dim = min(size_hints[prefix], remaining)
-        if prefix != expanded_prefixes[-1]:
+        if cap_outermost or prefix != prefixes[-1]:
             dim = min(dim, get_max_block(prefix, TRITON_MAX_BLOCK))
         if remaining % dim:
             raise AssertionError(
@@ -4601,7 +4619,7 @@ def _get_nd_pointwise_numels(
         numels[prefix] = dim
         remaining //= dim
     if remaining != 1:
-        raise AssertionError(f"Pointwise budget exceeds size hints: {size_hints}")
+        raise AssertionError(f"Budget exceeds block limits: {size_hints}")
     return numels
 
 
@@ -4619,18 +4637,11 @@ def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, in
         [prefix for prefix in size_hints if prefix_is_reduction(prefix)]
     )
 
-    remaining = r
-    rnumels = {}
-    for idx in range(num_reduction_dims - 1, -1, -1):
-        prefix = f"r{idx}_"
-        max_size = min(size_hints[prefix], get_max_block(prefix, TRITON_MAX_BLOCK))
-        dim = min(max_size, remaining)
-        if remaining % dim != 0:
-            raise AssertionError(
-                f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
-            )
-        rnumels[prefix] = dim
-        remaining //= dim
+    rnumels = _expand_nd_budget(
+        size_hints,
+        tuple(f"r{idx}_" for idx in range(num_reduction_dims - 1, -1, -1)),
+        r,
+    )
 
     # Sanity check the results.
     final_numel = conditional_product(*rnumels.values())
@@ -5084,7 +5095,11 @@ def triton_config_tiled_reduction(
         while pointwise_numels[prefix] < size_hints[prefix] and total_numel() < target:
             pointwise_numels[prefix] *= 2
 
-    _check_max_grid_yz(size_hints, pointwise_numels)
+    if get_z_prefixes(size_hints):
+        # Rounded hints can overestimate a launchable legacy 3D grid.
+        _check_max_grid_yz(
+            size_hints, pointwise_numels, strict=len(get_z_prefixes(size_hints)) > 1
+        )
     cfg = _get_config({**pointwise_numels, **rnumels})
     num_warps = _num_warps(total_numel() // 256, min_num_warps=1, warp_size=warp_size)
     num_warps = _num_warps(

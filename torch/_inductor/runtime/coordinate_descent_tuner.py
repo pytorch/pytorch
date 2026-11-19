@@ -284,7 +284,7 @@ class CoordescTuner:
             not self.is_mm
             and not self.is_native_matmul
             and self.size_hints
-            and get_z_prefixes(self.size_hints)
+            and len(get_z_prefixes(self.size_hints)) > 1
         ):
             block_sizes = {block_to_prefix(k): v for k, v in config.kwargs.items()}
             if any(

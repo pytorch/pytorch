@@ -62,6 +62,7 @@ from torch._inductor.runtime.tiling import block_to_prefix, get_max_block
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _check_max_grid_x,
+    _check_max_grid_yz,
     _enforce_native_matmul_config_min_xblock,
     _enforce_reduction_config_block_minimums,
     _find_names,
@@ -285,6 +286,32 @@ class TestTritonHeuristics(TestCase):
         expected_grid = (1, 39063, 1) if axis == "y" else (1, 1, 39063)
         self.assertEqual(launch, expected_grid)
 
+    @parametrize("axis", ["y", "z0_"])
+    def test_3d_tiled_reduction_rounded_size_hint(self, axis):
+        hints = {"x": 8, "y": 8, "z0_": 8, "r0_": 32, axis: 1 << 26}
+        cfg = triton_config_tiled_reduction(hints, 8, 8, 32, z=8)
+        expected_blocks = {"XBLOCK": 8, "YBLOCK": 8, "Z0_BLOCK": 8, "R0_BLOCK": 32}
+        expected_blocks[f"{axis.upper()}BLOCK"] = 1024
+        self.assertEqual(cfg.kwargs, expected_blocks)
+        grid = Grid3D(inductor_meta={})
+        grid.generate(cfg.kwargs)
+        numels = {"x": 8, "y": 8, "z0_": 8, axis: 40_000_000}
+        launch = grid.eval_slow({f"{p}numel": n for p, n in numels.items()})
+        self.assertEqual(launch, (1, 39063, 1) if axis == "y" else (1, 1, 39063))
+
+    @parametrize("axis", ["y", "z0_"])
+    def test_nd_grid_adjustment_preserves_xblock(self, axis):
+        hints = {"x": 128, "y": 32, "z0_": 32, "z1_": 8, axis: 1 << 20}
+        blocks = {"x": 64, "y": 8, "z0_": 8, "z1_": 8}
+        _check_max_grid_yz(hints, blocks)
+        self.assertEqual(blocks["x"], 64)
+        self.assertGreater(blocks[axis], 8)
+        grid = GridND(inductor_meta={"rank": 4})
+        grid.generate({f"{p.upper()}BLOCK": n for p, n in blocks.items()})
+        launch = grid.eval_slow({f"{p}numel": n for p, n in hints.items()})
+        self.assertLessEqual(launch[1], 65535)
+        self.assertLessEqual(launch[2], 65535)
+
     @parametrize("rank", [4, 5])
     def test_nd_pointwise_autotune_hint(self, rank):
         hints = {"x": 64, "y": 8, **{f"z{i}_": 8 for i in range(rank - 2)}}
@@ -376,7 +403,7 @@ class TestTritonHeuristics(TestCase):
         hints = {"x": 1, "y": 1, "z0_": 1, "z1_": 1, axis: 1 << 27}
         label = "Y" if axis == "y" else "Z"
         with self.assertRaisesRegex(
-            AssertionError,
+            RuntimeError,
             rf"{label} launch-grid limit: extent=.*limit=65535.*triton.max_tiles",
         ):
             triton_config(hints, 1, 1, 1)

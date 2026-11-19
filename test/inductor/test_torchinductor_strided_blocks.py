@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
+    HAS_GPU_AND_TRITON,
     platform_supports_tensor_descriptor,
     requires_block_ptr,
     requires_gpu,
@@ -2943,7 +2944,7 @@ if GPU_TYPE == "cuda":
 
 @instantiate_parametrized_tests
 class TestNDPointwiseTiling(InductorTestCase):
-    @requires_gpu()
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     @config.patch(
         {
             "triton.max_tiles": 4,
@@ -2972,7 +2973,7 @@ class TestNDPointwiseTiling(InductorTestCase):
         if block_ptr:
             self.assertIn("tl.make_block_ptr", source)
 
-    @requires_gpu()
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     @config.patch({"triton.max_tiles": 5, "triton.prefer_nd_tiling": True})
     def test_nd_pointwise_permute_reshape(self):
         def fn(x):
@@ -3007,7 +3008,7 @@ class TestNDPointwiseTiling(InductorTestCase):
         self.assertIn("Z2_BLOCK", source)
         self.assertIn("tl.make_tensor_descriptor", source)
 
-    @requires_gpu()
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     @config.patch(
         {
             **tiled_reduction_config,
@@ -3035,7 +3036,7 @@ class TestNDPointwiseTiling(InductorTestCase):
         if block_ptr:
             self.assertIn("tl.make_block_ptr", source)
 
-    @requires_gpu()
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     @config.patch({"cpp_wrapper": True, "triton.prefer_nd_tiling": True})
     @parametrize("rank", [4, 5])
     def test_nd_pointwise_cpp_wrapper(self, rank):
@@ -3054,7 +3055,7 @@ class TestNDPointwiseTiling(InductorTestCase):
         self.assertEqual(actual, fn(a, b))
         self.assertIn(f"Z{rank - 3}_BLOCK", "\n".join(code))
 
-    @requires_gpu()
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
     @config.patch({"triton.max_tiles": 4, "triton.prefer_nd_tiling": True})
     def test_nd_pointwise_dynamic_shapes(self):
         def fn(a, b):
