@@ -1413,6 +1413,73 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
         register()
         python_pytree._deregister_pytree_node(MyDict)
 
+    def test_deregister_pytree_node_keeps_other_types(self):
+        # Removing a type must not remove the name of another type, whether the
+        # two were registered without a name or under the same name.
+        @dataclass(frozen=True)
+        class First:
+            pass
+
+        @dataclass(frozen=True)
+        class Second:
+            pass
+
+        def deregister(cls):
+            if cls in python_pytree.SUPPORTED_NODES:
+                python_pytree._deregister_pytree_node(cls)
+
+        for cls in (First, Second):
+            python_pytree.register_constant(cls)
+            self.addCleanup(deregister, cls)
+        # The name that stands for types without a name names none of them.
+        no_name = python_pytree.NO_SERIALIZED_TYPE_NAME_FOUND
+        self.assertNotIn(no_name, python_pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE)
+        python_pytree._deregister_pytree_node(First)
+        python_pytree._deregister_pytree_node(Second)
+        self.assertNotIn(Second, python_pytree.SUPPORTED_NODES)
+
+        name = "test_pytree.test_deregister_pytree_node_keeps_other_types"
+        for cls in (First, Second):
+            python_pytree.register_pytree_node(
+                cls,
+                lambda x: ([], None),
+                lambda children, context: None,
+                serialized_type_name=name,
+            )
+            self.addCleanup(deregister, cls)
+        python_pytree._deregister_pytree_node(First)
+        self.assertIs(python_pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE[name], Second)
+
+    def test_register_pytree_node_again_replaces_its_name(self):
+        # Registering a type again drops its old name, unless another type
+        # took that name in between.
+        class First:
+            pass
+
+        class Second:
+            pass
+
+        def register(cls, name):
+            python_pytree._private_register_pytree_node(
+                cls,
+                lambda x: ([], None),
+                lambda children, context: cls(),
+                serialized_type_name=f"test_pytree.register_again.{name}",
+            )
+
+        names = python_pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE
+        register(First, "a")
+        self.addCleanup(python_pytree._deregister_pytree_node, First)
+        with self.assertWarnsRegex(UserWarning, "Overwriting"):
+            register(First, "b")
+        self.assertNotIn("test_pytree.register_again.a", names)
+
+        register(Second, "b")
+        self.addCleanup(python_pytree._deregister_pytree_node, Second)
+        with self.assertWarnsRegex(UserWarning, "Overwriting"):
+            register(First, "c")
+        self.assertIs(names["test_pytree.register_again.b"], Second)
+
     @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182645")
     def test_constant(self):
         # Either use `frozen=True` or `unsafe_hash=True` so we have a
