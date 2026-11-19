@@ -416,15 +416,20 @@ class MetalOverrides(OpOverrides):
         return MetalOverrides._wrap_small_int(f"static_cast<decltype({x})>(-{x})", x)
 
     @staticmethod
-    def _wrap_small_int(expr: str, *args: OpVarT) -> str:
+    def _wrap_small_int(expr: str, *args: object) -> str:
         # Metal promotes char, uchar and short operands to int, so cast the
         # result back to wrap like eager does. The operand can already be an int
         # temporary, for example from where, maximum or minimum, so this is
         # needed for neg and abs as well. uint16 (ushort) is promoted the same
         # way and is not wrapped yet, because eager MPS has no uint16 add or
         # mul to test it against, see #205432.
-        dtypes = [a.dtype for a in args if isinstance(a, CSEVariable)]
-        if not dtypes or None in dtypes:
+        dtypes = []
+        for arg in args:
+            if isinstance(arg, CSEVariable):
+                if arg.dtype is None:
+                    return expr
+                dtypes.append(arg.dtype)
+        if not dtypes:
             return expr
         dtype = functools.reduce(torch.promote_types, dtypes)
         if dtype not in (torch.int8, torch.uint8, torch.int16):
