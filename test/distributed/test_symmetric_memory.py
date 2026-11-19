@@ -2457,6 +2457,18 @@ class AsyncTPTest(MultiProcContinuousTest):
 
     @skip_if_lt_x_gpu(2)
     @skip_if_no_flydsl
+    @mock.patch.dict(os.environ, {_FLY_ENV: "1", _fused_flydsl.TILE_ENV: "128x256"})
+    def test_fused_flydsl_forced_tile(self) -> None:
+        """The TP 2 CI shapes never pick the 128x256 all-gather tile on their own; forced, it compiles and matches."""
+        self._init_flydsl()
+        A_shard, B = self._fly_ag_inputs("k384_n768_col")
+        ag, mm = self._fly_ag(A_shard, [B], 0, True)
+        self._fly_check_ag(A_shard, [B], 0, ag, mm, True)
+        tiles = [k[-1] for k in _fused_flydsl._states if k[0] == "ag"]
+        self.assertIn("128x256", tiles)
+
+    @skip_if_lt_x_gpu(2)
+    @skip_if_no_flydsl
     @mock.patch.dict(os.environ, {_FLY_ENV: "1"})
     @torch._inductor.config.patch(_micro_pipeline_tp=True)
     @fresh_cache()
@@ -2598,6 +2610,32 @@ class FlyDSLAsyncTPPredicateTest(TestCase):
             for cols, admitted in ((65536 - 1024, True), (65536, False)):
                 got = ok(meta(8192, 32768), wt(32768, cols), "sum", 0, w) is not None
                 self.assertEqual(got, admitted, f"TP {w}: B 32768 x {cols}")
+
+    def test_ag_tile(self) -> None:
+        env = _fused_flydsl.TILE_ENV
+
+        def tile(want, lm, n, w):
+            with mock.patch.dict(os.environ):
+                os.environ.pop(env, None)
+                if want is not None:
+                    os.environ[env] = want
+                return _fused_flydsl._ag_tile(lm, 384, n, w)
+
+        # auto: 128x256 up to 2048 rows per rank and N per rank x TP of 14336, else 256x256
+        for lm, n, w, auto in (
+            (1024, 1024, 8, "128x256"),
+            (2048, 1792, 8, "128x256"),  # both bounds
+            (2048, 2048, 8, "256x256"),  # N 16384
+            (2304, 1792, 8, "256x256"),  # 2304 rows per rank
+            (4096, 768, 2, "256x256"),  # the TP 2 CI shape
+        ):
+            for want in (None, "auto"):
+                self.assertEqual(tile(want, lm, n, w), auto, f"{want}: {lm} {n} {w}")
+        self.assertEqual(tile("256x256", 1024, 1024, 8), "256x256")  # auto: 128x256
+        self.assertEqual(tile("128x256", 2048, 2048, 8), "128x256")  # auto: 256x256
+        # A forced tile the call does not fit (4 tile rows) runs the default
+        self.assertEqual(tile("128x256", 256, 768, 2), "256x256")
+        self.assertRaisesRegex(ValueError, env, tile, "128x128", 1024, 1024, 8)
 
     def test_helpers(self) -> None:
         """Operand alignment, the timeout setting, and the ranks' agreement check before a state's rendezvous."""

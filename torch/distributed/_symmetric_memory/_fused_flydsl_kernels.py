@@ -956,7 +956,8 @@ def rsmm_gfx950(
     _launch(stage, a, b, comm, param, stream, world, f"rsmm_w{world}_")
 
 
-# fused_hti_kernel's tile config.
+# fused_hti_kernel's tile config. The half-tile-interleaved kernel needs block_n = 64 * n_waves (so 256 threads at block_n
+# 128, 512 at 256) and a block_m that is a multiple of 64.
 CFG = dict(
     tile_m=256,
     tile_n=256,
@@ -973,7 +974,8 @@ def arg(t):
     return flyc.from_torch_tensor(t).mark_layout_dynamic()
 
 
-def gemm_param(m, n, k, b_t, group_m=CFG["group_m"]):
+def gemm_param(m, n, k, b_t, group_m=CFG["group_m"], tile=(256, 256)):
+    tile_m, tile_n = tile
     prm = make_gemm_param_and_validate(
         m,
         n,
@@ -981,6 +983,9 @@ def gemm_param(m, n, k, b_t, group_m=CFG["group_m"]):
         {
             "dtype_id": GEMM_DTYPE_BF16,
             **CFG,
+            "tile_m": tile_m,
+            "tile_n": tile_n,
+            "n_waves": tile_n // 64,
             "group_m": group_m,
             "a_is_transposed": False,
             "b_is_transposed": b_t,

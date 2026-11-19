@@ -37,6 +37,9 @@ source are in. One call, all on the current stream: bump the device epoch, the s
 done reading this rank's staging from the previous call), the kernel. The staging buffer is M x N bf16 per state. Its
 first call compiles and runs the kernel once with no reducers and every counter add into local scratch; the rest is as
 for the all-gather, a step counter still short after wait_ms() failing the launch.
+
+Tiles: both kernels run the 256x256 tile, except a narrow all-gather at small M (see TILE_ENV and _ag_tile), which runs
+128x256: a different state (the tile is in its key), the same kernel and tile order in units of tiles.
 """
 
 from __future__ import annotations
@@ -93,6 +96,20 @@ R = {
     (5120, 8192, 2): 16,
 }
 R_DEFAULT = {8: 28, 4: 12, 2: 8}
+
+# Tile (block_m x block_n) of the all-gather kernel's GEMM (512 threads at both). At small M a narrow-N all-gather is transfer
+# bound, and the 256 rows of the last arriving chunk are a whole 256x256 tile's time of exposed tail: the half-height tile
+# halves it (measured at TP 8, M 8192 / 16384, N <= 1792: 3-10% faster; a wider N is GEMM bound, where it is 2-47% slower).
+# The reduce-scatter gains nothing from it, so it always runs the default tile.
+# TORCH_SYMM_MEM_FLYDSL_TILE: "auto" (default), or one of TILES to force it for the all-gather (a tile that doesn't fit the
+# call falls back to the default). Read on every call; the tile is part of the state's key.
+TILE_ENV = "TORCH_SYMM_MEM_FLYDSL_TILE"
+TILES = ("256x256", "128x256")  # the first is the default
+# "auto" takes AUTO_TILE for an all-gather of at most AUTO_MAX_LM rows per rank and a global N (N per rank x TP) of at most
+# AUTO_MAX_N.
+AUTO_TILE = "128x256"
+AUTO_MAX_LM = 2048
+AUTO_MAX_N = 14336
 
 # Calls per op ("ag", "rs") that took the FlyDSL path; read by tests.
 _calls: collections.Counter = collections.Counter()
@@ -155,15 +172,43 @@ def _aligned(t):
     return t if t.data_ptr() % 16 == 0 else t.clone(memory_format=torch.preserve_format)
 
 
-def _ag_fits(lm, k, n, world):
-    """Whether the kernel takes a [lm, K] shard per rank times a [K, N] B."""
-    # Tile rows: the XCD-interleaved order needs whole groups of 32 and tiles in 8s.
-    tm = lm * world // 256
-    if lm % 256 or n % 256 or k % 128 or tm % 32 or tm * (n // 256) % 8:
+def _tile_dims(tile):
+    bm, bn = tile.split("x")
+    return int(bm), int(bn)
+
+
+def _ag_fits(lm, k, n, world, tile=TILES[0]):
+    """Whether the kernel takes a [lm, K] shard per rank times a [K, N] B at `tile`."""
+    # Tile rows: the XCD-interleaved order needs whole groups of 32 and tiles in 8s. The flagged chunks (CHUNK_ROWS
+    # rows) hold whole tile rows.
+    bm, bn = _tile_dims(tile)
+    tm = lm * world // bm
+    if (
+        lm % CHUNK_ROWS
+        or CHUNK_ROWS % bm
+        or n % bn
+        or k % 128
+        or tm % 32
+        or tm * (n // bn) % 8
+    ):
         return False
     # The gathered A and the output are addressed per tile; B's buffer offsets (one descriptor over K x N) and
     # _stage3's int32 offsets into the shard are still 32-bit.
     return _fits(k, n) and _fits(lm, k)
+
+
+def _ag_tile(lm, k, n, world):
+    """The tile of an all-gather the default tile admits. TILE_ENV forces one (the default if it doesn't fit); "auto"
+    takes AUTO_TILE for the calls described at AUTO_*, else the default."""
+    want = os.environ.get(TILE_ENV, "auto")
+    if want != "auto":
+        if want not in TILES:
+            raise ValueError(f"{TILE_ENV}={want!r}: expected auto or one of {TILES}")
+    elif lm <= AUTO_MAX_LM and n * world <= AUTO_MAX_N:
+        want = AUTO_TILE
+    else:
+        want = TILES[0]
+    return want if want == TILES[0] or _ag_fits(lm, k, n, world, want) else TILES[0]
 
 
 def _ag_meta(A_shard, Bs, gather_dim, world):
@@ -346,7 +391,7 @@ def _group_m(tpr):
 
 
 class _AGState:
-    def __init__(self, m, k, n, b_t, kc, group, b):
+    def __init__(self, m, k, n, b_t, kc, group, b, tile=TILES[0]):
         import flydsl.compiler as flyc
 
         import torch.distributed._symmetric_memory as symm_mem
@@ -354,6 +399,8 @@ class _AGState:
 
         rank, world = group.rank(), group.size()
         self.K, self.m, self.k, self.n, self.kc = K, m, k, n, kc
+        self.tile = tile
+        bm, bn = _tile_dims(tile)
         self.rank, self.world, self.group = rank, world, group
         self.ms = wait_ms()
         lm = m // world
@@ -364,15 +411,15 @@ class _AGState:
                 f"fused_all_gather_matmul (FlyDSL): {lm} rows per rank, K {k} and "
                 f"{kc} copy blocks don't fit the chunking"
             )
-        if (m // 256) % 32 or (m // 256) * (n // 256) % 8:
+        if not _ag_fits(lm, k, n, world, tile):
             raise RuntimeError(
                 f"fused_all_gather_matmul (FlyDSL): M {m}, N {n} don't fit the "
-                "XCD-interleaved tile order"
+                f"XCD-interleaved tile order of {tile} tiles"
             )
         check_group_agrees(
             "fused_all_gather_matmul",
             group,
-            f"fused_all_gather_matmul M {m} K {k} N {n} B transposed {b_t}",
+            f"fused_all_gather_matmul M {m} K {k} N {n} B transposed {b_t} tile {tile}",
         )
         self.buf = symm_mem.empty(
             2 * self.shard, dtype=torch.int32, device=torch.device("cuda")
@@ -385,7 +432,7 @@ class _AGState:
         self.bar_ms = 0
         self.sink = torch.zeros(1, dtype=torch.int32, device="cuda")
         self.mult = kc // (world - 1)
-        self.prm = K.gemm_param(m, n, k, b_t, _group_m(self.nch))
+        self.prm = K.gemm_param(m, n, k, b_t, _group_m(lm // bm), (bm, bn))
         self.calls, self.stream = 0, None
         # Compiling also runs the kernel once: with kc 0 (no copy blocks) on flags far past any target.
         never = torch.full_like(self.flags, 1 << 30)
@@ -460,7 +507,8 @@ class _AGState:
 def _ag_2d(a, b, k, n, b_t, group):
     """The gathered A [M, K] and A @ b [M, N] for a contiguous, aligned 2D shard a."""
     world, lm = group.size(), a.shape[0]
-    skey = ("ag", k, n, world, b_t, lm, group.group_name, a.device.index)
+    tile = _ag_tile(lm, k, n, world)
+    skey = ("ag", k, n, world, b_t, lm, group.group_name, a.device.index, tile)
     with torch.cuda.device(a.device):
         st = _states.get(skey)
         # A group destroyed and re-created under the same name: the state's handles belong to the old one.
@@ -471,7 +519,7 @@ def _ag_2d(a, b, k, n, b_t, group):
                     "under CUDA graph capture; it compiles and rendezvouses, so make one eager call first"
                 )
             kc = KC.get((k, n, world), KC_DEFAULT[world])
-            st = _states[skey] = _AGState(lm * world, k, n, b_t, kc, group, b)
+            st = _states[skey] = _AGState(lm * world, k, n, b_t, kc, group, b, tile)
         _order_streams(st)
         gat, c = st(a, b)
     st.calls += 1
