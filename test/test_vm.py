@@ -4743,6 +4743,53 @@ class RegionLayers(torch.nn.Module):
         return x
 
 
+class RegionMade:
+    """A pytree node whose ``__init__`` counts how often it ran."""
+
+    made = 0
+
+    def __init__(self, loc, scale):
+        type(self).made += 1
+        self.loc = loc
+        self.scale = scale
+        self.both = loc + scale
+
+
+torch.utils._pytree.register_pytree_node(
+    RegionMade,
+    lambda made: ([made.loc, made.scale], None),
+    lambda values, context: RegionMade(*values),
+    serialized_type_name="test_vm.RegionMade",
+)
+
+
+class RegionCached:
+    """An object that says of its copies that they come without its cache."""
+
+    def __init__(self, value):
+        self.value = value
+        self.cache = None
+
+    def __getstate__(self):
+        return {"value": self.value}
+
+
+class RegionItems(collections.OrderedDict):
+    """What a model returns: a dict that has its items as attributes too."""
+
+    made = 0
+
+    def __init__(self, **items):
+        type(self).made += 1
+        super().__init__()
+        for key, value in items.items():
+            self[key] = value
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        super().__setattr__(key, value)
+
+
 def region_infer(model, x):
     return model(x)
 
@@ -6276,6 +6323,56 @@ class TestVmRegions(TestCase):
             self.assertEqual(compiled(x, y), positive(x, y))
         self.assertEqual(self.left_to_vm(compiled, "positive"), [])
         self.assertEqual(len(self.compiled_regions(compiled)), 1)
+
+    def test_an_object_the_region_made_is_made_again_from_its_attributes(self):
+        def made(x):
+            one = RegionMade(x * 2, x + 1)
+            one.extra = one.both.sum()
+            return one
+
+        def cached(x):
+            return RegionCached(x * 2 + 1)
+
+        def output(x):
+            return RegionItems(logits=x * 2 + 1, loss=None)
+
+        x = torch.arange(4.0)
+        passes = with_graphs("aot_eager", min_ops=1)
+        compiled = torch.vm(made, passes=passes, fallback=False)
+        for _ in range(8):
+            compiled(x)
+        self.assertEqual(len(self.compiled_regions(compiled)), 1)
+        # A pytree node is not made from what it flattens to: that would run
+        # its __init__ on every call, and lose what was set afterwards.
+        before = RegionMade.made
+        for _ in range(3):
+            got = compiled(x)
+        self.assertEqual(RegionMade.made, before)
+        self.assertIs(type(got), RegionMade)
+        self.assertEqual(vars(got), vars(made(x)))
+
+        # What a class says of its copies is not about the object it made.
+        compiled = torch.vm(cached, passes=passes, fallback=False)
+        for _ in range(8):
+            got = compiled(x)
+        self.assertEqual(len(self.compiled_regions(compiled)), 1)
+        self.assertIs(type(got), RegionCached)
+        self.assertEqual(vars(got), vars(cached(x)))
+
+        # A dict of a class of its own: its items, in their order, and its
+        # attributes.
+        compiled = torch.vm(output, passes=passes, fallback=False)
+        for _ in range(8):
+            compiled(x)
+        self.assertEqual(len(self.compiled_regions(compiled)), 1)
+        before = RegionItems.made
+        for _ in range(3):
+            got = compiled(x)
+        self.assertEqual(RegionItems.made, before)
+        expected = output(x)
+        self.assertIs(type(got), RegionItems)
+        self.assertEqual(list(got.items()), list(expected.items()))
+        self.assertEqual(vars(got), vars(expected))
 
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):
