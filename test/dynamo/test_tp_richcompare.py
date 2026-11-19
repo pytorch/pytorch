@@ -1455,6 +1455,49 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
     # Opaque object comparison (CustomClassObjectVariable)
     # =====================================================================
 
+    @parametrize("operation", ["hash", "dict_key"])
+    def test_opaque_class_method_wrapper_hash(self, operation):
+        def fn(x):
+            if operation == "hash":
+                return x + 1, hash(_OpaqueVal.__call__)
+            return x + 1, {_OpaqueVal.__or__: 1}
+
+        x = torch.ones(1)
+        counter = torch._dynamo.testing.CompileCounter()
+        result = torch.compile(fn, backend=counter, fullgraph=True)(x)
+        self.assertEqual(result, fn(x))
+        self.assertGreater(counter.op_count, 0)
+        if operation == "dict_key":
+            wrapper = next(iter(result[1]))
+            self.assertIs(wrapper.__self__, _OpaqueVal)
+
+    @parametrize("receiver_kind", ["set", "prebound_dict"])
+    def test_opaque_class_container_method_wrapper_hash(self, receiver_kind):
+        if receiver_kind == "set":
+            receiver = {_OpaqueVal}
+
+            def fn(x, receiver):
+                return x + 1, hash(receiver.__iter__)
+        else:
+            receiver = {"key": _OpaqueVal}.__len__
+
+            def fn(x, wrapper):
+                return x + 1, hash(wrapper)
+
+        executions = []
+
+        def backend(gm, example_inputs):
+            def run(*args):
+                executions.append(True)
+                return gm(*args)
+
+            return run
+
+        x = torch.ones(1)
+        result = torch.compile(fn, backend=backend)(x, receiver)
+        self.assertTrue(executions)
+        self.assertEqual(result, fn(x, receiver))
+
     def test_opaque_object_cmp(self):
         """Opaque objects use value-based __eq__, not identity."""
         a1 = _OpaqueVal(1)
