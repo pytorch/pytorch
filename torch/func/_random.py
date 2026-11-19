@@ -354,8 +354,8 @@ def uniform(
 def sharded_normal_(
     key: torch.Tensor,
     result: torch.Tensor,
-    global_shape: Sequence[int],
-    global_offset: Sequence[int],
+    global_shape: Sequence[int | torch.SymInt],
+    global_offset: Sequence[int | torch.SymInt],
     *,
     mean: float = 0.0,
     std: float = 1.0,
@@ -398,8 +398,8 @@ def sharded_normal_(
 def sharded_uniform_(
     key: torch.Tensor,
     result: torch.Tensor,
-    global_shape: Sequence[int],
-    global_offset: Sequence[int],
+    global_shape: Sequence[int | torch.SymInt],
+    global_offset: Sequence[int | torch.SymInt],
     *,
     low: float = 0.0,
     high: float = 1.0,
