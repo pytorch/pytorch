@@ -518,6 +518,7 @@ class TestFlyDSLTopK(TestCase):
         # kernel. Tied input makes the deterministic gather order observable.
         from torch._native.ops.topk.flydsl_kernels import topk_cache_info
 
+        torch.manual_seed(15)
         n0 = _test_n(k, dtype)
         n1 = 2 * n0 + 1
         m = _test_m(k, dtype)
