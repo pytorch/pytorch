@@ -4132,6 +4132,31 @@ class RegionRandom(torch.nn.Module):
         return self.inner(x) * random.random()
 
 
+class RegionCounted(torch.nn.Module):
+    # Counts its calls in a buffer, whatever mode it is in.
+    def __init__(self):
+        super().__init__()
+        self.inner = RegionNet()
+        self.register_buffer("calls", torch.zeros((), dtype=torch.long))
+
+    def forward(self, x):
+        self.calls.add_(1)
+        return self.inner(x) * self.calls
+
+
+class RegionTwoHeads(torch.nn.Module):
+    # One head is used by forward, the other is not; and a tensor that is
+    # kept in a plain attribute.
+    def __init__(self):
+        super().__init__()
+        self.used = RegionNet()
+        self.unused = RegionNet()
+        self.cache = torch.zeros(5)
+
+    def forward(self, x):
+        return self.used(x) + self.cache
+
+
 def temporaries(x, steps):
     # Every step frees what the step before it made.
     for _ in range(steps):
@@ -5400,6 +5425,132 @@ class TestVmRegions(TestCase):
         small = make_fx(products)(row[:, :64], matrix[:64], bias)
         regions._rows_to_reductions(small)
         self.assertNotIn(aten.sum.dim_IntList, [n.target for n in small.graph.nodes])
+
+    def building_in(self):
+        """Has ``aot_eager`` regions build weights in, as Inductor ones do."""
+        regions = torch.vm._regions
+        return unittest.mock.patch.dict(
+            regions._BUILDS_IN, {regions._aot_eager: regions._aot_eager}
+        )
+
+    def test_weights_are_built_into_the_graph_of_an_inference_call(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        x = torch.randn(2, 3, 6, 6)
+        compiled = torch.vm(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
+        with self.building_in():
+            with torch.no_grad():
+                for _ in range(6):
+                    self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+            (region,) = self.compiled_regions(compiled)
+            self.assertEqual((region["variants"], region["frozen"]), (1, 1))
+            # A call that records gradients, and one of a model in training,
+            # take the weights.
+            self.assertTrue(compiled(model, x).requires_grad)
+            with torch.no_grad():
+                model.train()
+                compiled(model, x)
+            (region,) = self.compiled_regions(compiled)
+            self.assertEqual((region["variants"], region["frozen"]), (3, 1))
+            off = torch.vm(
+                region_infer,
+                passes=with_graphs("aot_eager", freeze=False),
+                fallback=False,
+            )
+            with torch.no_grad():
+                model.eval()
+                for _ in range(6):
+                    self.assertEqual(off(model, x), model(x), atol=0, rtol=0)
+            (region,) = self.compiled_regions(off)
+            self.assertEqual((region["variants"], region["frozen"]), (1, 0))
+
+    @parametrize("write", ("in_place", "data_swap", "optimizer", "load"))
+    def test_write_to_a_built_in_weight_is_seen(self, write):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        x = torch.randn(2, 3, 6, 6)
+
+        def change():
+            if write == "in_place":
+                with torch.no_grad():
+                    model.conv.weight.mul_(1.5)
+            elif write == "data_swap":
+                model.conv.bias.data = torch.randn(4)
+            elif write == "optimizer":
+                opt = torch.optim.SGD(model.parameters(), lr=0.5)
+                model(x).sum().backward()
+                opt.step()
+            else:
+                model.load_state_dict(RegionNet().state_dict())
+
+        compiled = torch.vm(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
+        with self.building_in():
+            # Compiled again for the weights it finds, then, when they have
+            # changed once more, with the weights as inputs.
+            for frozen in (1, 1, 0, 0):
+                with torch.no_grad():
+                    for _ in range(6):
+                        self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+                (region,) = self.compiled_regions(compiled)
+                self.assertEqual((region["variants"], region["frozen"]), (1, frozen))
+                change()
+            self.assertEqual(region["compiles"], 3)
+
+    def test_only_parameters_and_buffers_a_graph_uses_are_built_in(self):
+        torch.manual_seed(0)
+        model = RegionTwoHeads().eval()
+        x = torch.randn(2, 3, 6, 6)
+        compiled = torch.vm(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
+        with self.building_in(), torch.no_grad():
+            for i in range(12):
+                if i >= 6:
+                    # Neither is part of the graph as a constant.
+                    model.unused.conv.weight.mul_(2)
+                    model.cache.add_(1)
+                self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual((region["compiles"], region["frozen"]), (1, 1))
+
+    def test_buffer_a_region_writes_is_not_built_in(self):
+        torch.manual_seed(0)
+        model = RegionCounted().eval()
+        compiled = torch.vm(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
+        with self.building_in():
+            with torch.no_grad():
+                for _ in range(8):
+                    x = torch.randn(2, 3, 6, 6)
+                    reference = copy.deepcopy(model)
+                    self.assertEqual(compiled(model, x), reference(x), atol=0, rtol=0)
+                    self.assertEqual(model.calls, reference.calls)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual((region["compiles"], region["frozen"]), (1, 1))
+
+    @slowTest
+    def test_inductor_folds_built_in_weights(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        compiled = torch.vm(
+            region_infer, passes=with_graphs("inductor"), fallback=False
+        )
+        with torch.no_grad():
+            model.bn.running_mean.uniform_(-1, 1)
+            model.bn.running_var.uniform_(0.5, 2)
+            for i in range(12):
+                if i == 8:
+                    model.bn.weight.mul_(3)
+                x = torch.randn(2, 3, 6, 6)
+                self.assertEqual(compiled(model, x), model(x), atol=1e-5, rtol=1e-5)
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual((region["variants"], region["frozen"]), (1, 1))
+        self.assertEqual(region["compiles"], 2)
 
     @slowTest
     def test_inductor(self):

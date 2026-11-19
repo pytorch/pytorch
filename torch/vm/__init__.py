@@ -299,8 +299,11 @@ def vm(
     runtime = _load_runtime()
     regions = None
     if found is not None:
+        freeze = found.freeze
+        if freeze is None:
+            freeze = os.environ.get("TORCH_VM_FREEZE", "1") != "0"
         regions = _regions.make_pass(
-            runtime, found.backend, found.min_ops, found.max_variants, 0
+            runtime, found.backend, found.min_ops, found.max_variants, 0, freeze
         )
         block[0] = regions
     try:
@@ -342,10 +345,11 @@ def regions(fn: Any) -> list[dict[str, Any]]:
     ``state`` (``"compiled"``, or ``"waiting"`` for a region that has not been
     tried yet), ``variants``, ``compiles`` (how many of the variants went to
     the backend: the others had the graph of an earlier one), ``open`` (per
-    variant that leaves sizes open, the conditions it holds under), ``ops`` and
-    ``seconds`` spent tracing and compiling; and one per instruction or run of
-    instructions that was left to the VM, with ``state`` ``"vm"`` and the
-    ``reason``.
+    variant that leaves sizes open, the conditions it holds under), ``frozen``
+    (how many of the variants have the tensors of their modules built in, see
+    ``freeze``), ``ops`` and ``seconds`` spent tracing and compiling; and one
+    per instruction or run of instructions that was left to the VM, with
+    ``state`` ``"vm"`` and the ``reason``.
     """
     fn = getattr(fn, "__func__", fn)
     found = _region_passes.get(fn)
