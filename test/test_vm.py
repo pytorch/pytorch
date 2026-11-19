@@ -1184,6 +1184,23 @@ class TestVmPasses(TestCase):
 
     hw_classification = HardwareClassification.GENERIC
 
+    def test_function_attributes_are_read_through(self):
+        @unittest.expectedFailure
+        def f(x, k=2):
+            return x * k
+
+        f.note = "set by a decorator"
+        compiled = torch.vm(f, fallback=False)
+        self.assertIs(compiled.__code__, f.__code__)
+        self.assertEqual(compiled.__defaults__, (2,))
+        self.assertEqual(compiled.note, "set by a decorator")
+        self.assertTrue(compiled.__unittest_expecting_failure__)
+        self.assertEqual(compiled.__name__, "f")
+        with self.assertRaisesRegex(
+            AttributeError, "'function' object has no attribute 'nothing'"
+        ):
+            compiled.nothing
+
     def test_what_passes_takes(self):
         self.assertNotIn(P.NarrowDims(), DEFAULT)
         with self.assertRaisesRegex(TypeError, "passes has a str"):
