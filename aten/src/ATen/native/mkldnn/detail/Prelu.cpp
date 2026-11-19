@@ -1,5 +1,5 @@
 #include <ATen/native/mkldnn/detail/Prelu.h>
-#include <ATen/native/mkldnn/detail/Utils.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -92,6 +92,8 @@ void prelu_backward(
   auto expected_diff_dst = diff_dst.reorder_if_differ_in(pd.diff_dst_desc());
   auto expected_src = src.reorder_if_differ_in(pd.src_desc());
   auto expected_weights = weight_in.reorder_if_differ_in(pd.weights_desc());
+  // May replace the buffers and layouts of diff_src and diff_weight
+  // when they differ from the descs the primitive expects.
   diff_src.reinit_if_possible(pd.diff_src_desc());
   diff_weight.reinit_if_possible(pd.diff_weights_desc());
 
