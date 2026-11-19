@@ -1910,6 +1910,19 @@ def generate_fusion_from_config(config_options: dict[str, Any], pre_grad=True):
     return fusions
 
 
+def _option_matches_graph_devices(
+    options: dict[str, Any], graph_devices: OrderedSet[str]
+) -> bool:
+    devices = options.get("devices")
+    if devices is None:
+        return True
+    if isinstance(devices, str):
+        devices = (devices,)
+    if not isinstance(devices, (list, tuple, OrderedSet)):
+        return True
+    return not graph_devices.isdisjoint(devices)
+
+
 def group_batch_fusion_passes(
     graph: torch.fx.Graph, pre_grad=True, fusion_options=None
 ):
@@ -1937,6 +1950,17 @@ def group_batch_fusion_passes(
                     name,
                 )
                 post_grad_options[name] = config.pre_grad_fusion_options[name]
+        # Device-scoped defaults must not pay for the search on other devices.
+        graph_devices = OrderedSet()
+        for node in graph.nodes:
+            value = node.meta.get("val")
+            if isinstance(value, torch.Tensor):
+                graph_devices.add(value.device.type)
+        post_grad_options = {
+            name: options
+            for name, options in post_grad_options.items()
+            if _option_matches_graph_devices(options, graph_devices)
+        }
         fbgemm_fusion_keys = [
             x
             for x in post_grad_options
