@@ -512,6 +512,55 @@ class TestRegistryRuntime(TestCase):
             self.registry._graphs[(lib_symbol, op_symbol, dispatch_key)],
         )
 
+    @parametrize("sparse_first", (False, True))
+    def test_compile_routers_preserve_other_dispatch_keys(
+        self, sparse_first: bool
+    ) -> None:
+        op = torch.ops.aten.neg.default
+        dense = torch.tensor([-2.0, 3.0])
+        sparse = dense.to_sparse()
+        inputs = {"CPU": dense, "SparseCPU": sparse}
+        for key in ("SparseCPU", "CPU") if sparse_first else ("CPU", "SparseCPU"):
+            tensor = inputs[key]
+            kernel = torch.library.get_kernel("aten::neg", key)
+            keyset = torch._C._dispatch_keys(tensor)
+            factor = 2 if key == "CPU" else 3
+
+            def impl(
+                x: torch.Tensor,
+                *,
+                _kernel: Any = kernel,
+                _keyset: Any = keyset,
+                _factor: int = factor,
+            ) -> torch.Tensor:
+                return _kernel.call_boxed(_keyset, x) * _factor
+
+            self.registry.register_op_override(
+                "compile_dispatch_keys",
+                "aten",
+                "neg",
+                key,
+                None,
+                impl,
+                unconditional_override=True,
+            )
+            self._install("neg", key)
+
+        def routed(x: torch.Tensor) -> torch.Tensor:
+            result = self.registry.native_decomp_table(overrides_only=True)[op](x)
+            return op(x) if result is NotImplemented else result
+
+        self.assertEqual(routed(dense), torch.tensor([4.0, -6.0]))
+        self.assertEqual(routed(sparse).to_dense(), torch.tensor([6.0, -9.0]))
+        graph = self.registry._graphs[("aten", "neg", "SparseCPU")]
+        self.registry._graphs[("aten", "neg", "SparseCPU")] = []
+        self._install("neg", "SparseCPU")
+        self.assertEqual(routed(dense), torch.tensor([4.0, -6.0]))
+        self.assertEqual(routed(sparse).to_dense(), torch.tensor([2.0, -3.0]))
+        self.registry._graphs[("aten", "neg", "SparseCPU")] = graph
+        self._install("neg", "SparseCPU")
+        self.assertEqual(routed(sparse).to_dense(), torch.tensor([6.0, -9.0]))
+
     def test_boxed_scalar_inputs_do_not_allow_numerical_tensor_results(self) -> None:
         with torch.library._scoped_library("prims", "FRAGMENT") as library:
             library.define("_native_boxed_result_test(Tensor x) -> Tensor")
@@ -1487,7 +1536,9 @@ class TestRegistryNonAtenNamespace(TestCase):
         self.registry._native_decomp_overrides.update(self._saved_decomp_overrides)
 
         self.assertEqual(dict(self.registry._native_decomp_overrides), before)
-        self.assertNotIn(self.op, self.registry._native_decomp_overrides)
+        self.assertNotIn(
+            self.op, self.registry.native_decomp_table(overrides_only=True)
+        )
 
     def _register_both(self):
         self._register(lambda *a, **k: True, lambda x: torch.full_like(x, 99.0))
