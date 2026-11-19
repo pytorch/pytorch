@@ -559,9 +559,9 @@ class GuardManagerWrapper:
         of the following conditions:
 
         1. Immutable value - The value is intrinsically immutable according to
-        ``is_immutable_object``. Tensors are considered immutable. To ensure
-        that symbolic guards run, we also check that the GuardManager has no
-        accessors.
+        ``is_immutable_object``. Tensors are treated specially: they must have
+        no accessors, and their non-relational leaf guards are replayed on the
+        fast path because tensor metadata and Python attributes remain mutable.
 
         2. Nested tag safe dictionary - The value is a ``dict`` whose keys and
         values are all tag safe nodes  (checked recursively).  Such dictionaries
