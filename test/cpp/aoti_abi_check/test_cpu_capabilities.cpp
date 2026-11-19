@@ -2,29 +2,26 @@
 
 #include <torch/headeronly/cpu/Utils.h>
 
+#include <cstdint>
 #include <string>
-#include <variant>
+#include <unordered_map>
 
-TEST(TestCPUCapabilities, HeaderOnly) {
-  const auto capabilities =
-      torch::headeronly::cpu::headeronly_get_cpu_capabilities();
+TEST(TestCPUCacheSizes, HeaderOnly) {
+  std::unordered_map<std::string, std::int64_t> cache_sizes;
+  torch::headeronly::cpu::populate_cpu_cache_sizes_from_sysconf(cache_sizes);
 
-  const auto architecture = capabilities.find("architecture");
-  ASSERT_NE(architecture, capabilities.end());
-  ASSERT_TRUE(std::holds_alternative<std::string>(architecture->second));
-  EXPECT_FALSE(std::get<std::string>(architecture->second).empty());
-
-#if !defined(__s390x__) && !defined(__powerpc__)
-  if (cpuinfo_initialize()) {
-    const auto logical_cores = capabilities.find("num_logical_cores");
-    ASSERT_NE(logical_cores, capabilities.end());
-    ASSERT_TRUE(std::holds_alternative<int64_t>(logical_cores->second));
-    EXPECT_GT(std::get<int64_t>(logical_cores->second), 0);
-#if defined(__x86_64__) || defined(_M_X64)
-    const auto avx = capabilities.find("avx");
-    ASSERT_NE(avx, capabilities.end());
-    EXPECT_TRUE(std::holds_alternative<bool>(avx->second));
+#if defined(__s390x__)
+#if defined(_SC_LEVEL1_DCACHE_SIZE)
+  const auto l1d_cache_size = cache_sizes.find("l1d_cache_size");
+  ASSERT_NE(l1d_cache_size, cache_sizes.end());
+  EXPECT_GE(l1d_cache_size->second, 0);
 #endif
-  }
+#if defined(_SC_LEVEL2_CACHE_SIZE)
+  const auto l2_cache_size = cache_sizes.find("l2_cache_size");
+  ASSERT_NE(l2_cache_size, cache_sizes.end());
+  EXPECT_GE(l2_cache_size->second, 0);
+#endif
+#else
+  EXPECT_TRUE(cache_sizes.empty());
 #endif
 }
