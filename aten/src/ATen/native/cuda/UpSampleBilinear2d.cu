@@ -957,6 +957,7 @@ bool use_nhwc_gather(const Tensor& grad_output, const Tensor& grad_input) {
       (bounds.max_contributions == 0 ||
        contributions_x_input < bounds.max_contributions * grad_input.numel());
 }
+#endif
 
 // Writes every grad_input element, so the caller skips zero-fill.
 template <typename scalar_t>
@@ -996,12 +997,14 @@ void upsample_bilinear2d_backward_gather_nhwc_launch(
       ? num_input_elements / vector_size
       : num_input_elements;
   const auto* properties = at::cuda::getCurrentDeviceProperties();
+  size_t max_blocks = static_cast<size_t>(properties->maxGridSize[0]);
+#ifdef USE_ROCM
   // HIP rejects or silently drops a launch of 2^32 or more work-items. The
   // kernel is grid-stride, and a dropped launch would leave grad_input unset.
   constexpr size_t kHipMaxGlobalWorkSize = 4294967295ULL;  // UINT32_MAX
-  const size_t max_blocks = std::min(
-      static_cast<size_t>(properties->maxGridSize[0]),
-      kHipMaxGlobalWorkSize / static_cast<size_t>(num_threads));
+  max_blocks = std::min(
+      max_blocks, kHipMaxGlobalWorkSize / static_cast<size_t>(num_threads));
+#endif
   const size_t num_blocks = std::min(
       ceil_div(work_items, static_cast<size_t>(num_threads)), max_blocks);
   if (vectorized) {
@@ -1035,7 +1038,6 @@ void upsample_bilinear2d_backward_gather_nhwc_launch(
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
-#endif
 
 static void upsample_bilinear2d_backward_out_cuda_template(
     const Tensor& grad_input,
@@ -1238,54 +1240,18 @@ static void upsample_bilinear2d_backward_out_cuda_template_deterministic(
         input_width, output_width, align_corners, scales_w);
 
     if (grad_input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-      Tensor grad_output = grad_output_.contiguous(at::MemoryFormat::ChannelsLast);
-      constexpr int vector_size = 16 / sizeof(scalar_t);
-      const bool vectorized =
-          vector_size > 1 &&
-          channels % vector_size == 0 &&
-          memory::can_vectorize_up_to<scalar_t>(reinterpret_cast<const char*>(
-              grad_input.const_data_ptr<scalar_t>())) >= vector_size &&
-          memory::can_vectorize_up_to<scalar_t>(reinterpret_cast<const char*>(
-              grad_output.const_data_ptr<scalar_t>())) >= vector_size;
-      const size_t num_input_elements = static_cast<size_t>(nbatch) * channels *
-          input_height * input_width;
-      const size_t work_items = vectorized
-          ? num_input_elements / vector_size
-          : num_input_elements;
-      const auto* properties = at::cuda::getCurrentDeviceProperties();
-      const size_t num_blocks = std::min(
-          ceil_div(work_items, static_cast<size_t>(num_threads)),
-          static_cast<size_t>(properties->maxGridSize[0]));
-      if (vectorized) {
-        upsample_bilinear2d_backward_gather_nhwc_out_frame<
-            scalar_t, accscalar_t, vector_size><<<num_blocks, num_threads, 0, stream>>>(
-            work_items,
-            channels,
-            input_height,
-            input_width,
-            output_height,
-            output_width,
-            rheight,
-            rwidth,
-            align_corners,
-            grad_input.mutable_data_ptr<scalar_t>(),
-            grad_output.const_data_ptr<scalar_t>());
-      } else {
-        upsample_bilinear2d_backward_gather_nhwc_out_frame<
-            scalar_t, accscalar_t, 1><<<num_blocks, num_threads, 0, stream>>>(
-            work_items,
-            channels,
-            input_height,
-            input_width,
-            output_height,
-            output_width,
-            rheight,
-            rwidth,
-            align_corners,
-            grad_input.mutable_data_ptr<scalar_t>(),
-            grad_output.const_data_ptr<scalar_t>());
-      }
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      upsample_bilinear2d_backward_gather_nhwc_launch<scalar_t>(
+          grad_input,
+          grad_output_,
+          nbatch,
+          channels,
+          input_height,
+          input_width,
+          output_height,
+          output_width,
+          align_corners,
+          scales_h,
+          scales_w);
       return;
     }
 
