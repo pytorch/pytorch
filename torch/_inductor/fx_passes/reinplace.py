@@ -774,23 +774,23 @@ def reinplace_inplaceable_ops_core(
                 # We can probably do better (that is, reinplace one of them and clone the other)
                 # but that requires more work and mutable List[Tensor] are not that common.
                 return False
-            foreach_results = {}
             if node.target in inplaceable_foreach_ops:
                 foreach_results = {
                     user.args[1]: user
                     for user in node.users
                     if user.target is operator.getitem and isinstance(user.args[1], int)
                 }
-            return all(
-                can_inplace(
-                    node,
-                    arg,
-                    result_nodes=(
-                        [foreach_results[index]] if index in foreach_results else []
-                    ),
+                return all(
+                    can_inplace(
+                        node,
+                        arg,
+                        result_nodes=(
+                            [foreach_results[index]] if index in foreach_results else []
+                        ),
+                    )
+                    for index, arg in enumerate(mutated_arg)
                 )
-                for index, arg in enumerate(mutated_arg)
-            )
+            return all(can_inplace(node, arg, result_nodes=[]) for arg in mutated_arg)
 
         if get_node_storage(mutated_arg) is None:
             return False
