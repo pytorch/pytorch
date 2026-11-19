@@ -3194,25 +3194,26 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
         autotune_fallback_to_aten=False,
     )
-    @parametrize("num_decompose_k_splits", (0, 5, 20))
+    # None keeps the default number of splits, which enables decompose_k on CUDA and ROCm
+    @parametrize("num_decompose_k_splits", (None, 0, 5, 20))
     @parametrize("decompose_k_threshold", (8, 16))
     def test_max_autotune_decompose_k_envvars(
         self, num_decompose_k_splits, decompose_k_threshold
     ):
         shapes = [(32, 32, 32768), (32, 32, 256)]
+        patches = {
+            "triton.decompose_k_threshold": decompose_k_threshold,
+            "triton.decompose_k_min_output_tile_size": 0,
+        }
+        if num_decompose_k_splits is not None:
+            patches["triton.num_decompose_k_splits"] = num_decompose_k_splits
         for M, N, K in shapes:
             get_k_splits.cache_clear()
             use_decompose_k_choice.cache_clear()
             a = torch.randn(M, K, dtype=torch.float16, device=GPU_TYPE)
             b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE)
 
-            with config.patch(
-                {
-                    "triton.num_decompose_k_splits": num_decompose_k_splits,
-                    "triton.decompose_k_threshold": decompose_k_threshold,
-                    "triton.decompose_k_min_output_tile_size": 0,
-                }
-            ):
+            with config.patch(patches):
                 compiled_func = torch.compile(lambda a, b: a @ b)
                 _, code = run_and_get_code(compiled_func, a, b)
 
@@ -3228,6 +3229,7 @@ class TestMaxAutotune(TestCase):
                 ):
                     self.assertEqual(decompose_count, 0)
                 else:
+                    self.assertGreater(decompose_count, 0)
                     self.assertEqual(
                         decompose_count,
                         len(get_k_splits(M, N, K)),
