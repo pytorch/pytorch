@@ -865,7 +865,8 @@ class TestBenchmarker(TestCase):
         self.assertIsNone(_bench._hsa_cache_beyond_l2(b"f" * 16))
 
     @parametrize(
-        "hip_value,triton", ((None, True), ("mock-hip", True), ("mock-hip", False))
+        "hip_value,triton",
+        ((None, True), ("mock-hip", True), ("mock-hip", False), ("mock-hip", "broken")),
     )
     def test_inductor_benchmarker_flush_reads_on_rocm(self, hip_value, triton):
         # ROCm flushes by reading a float32 buffer twice with a Triton kernel (zero_()
@@ -907,6 +908,8 @@ class TestBenchmarker(TestCase):
 
         def fake_read_flush(buffer, passes):
             flush_passes.append(passes)
+            if triton == "broken":
+                raise RuntimeError("Triton compile failed")
             return lambda: calls.append("read")
 
         with (
@@ -921,7 +924,7 @@ class TestBenchmarker(TestCase):
                 _bench.inductor_config, "autotune_cudagraph_benchmarking", False
             ),
             patch.object(torch.version, "hip", hip_value),
-            patch.object(_bench, "has_triton", return_value=triton),
+            patch.object(_bench, "has_triton", return_value=bool(triton)),
         ):
             FakeInductorBenchmarker().benchmark_gpu(
                 lambda: calls.append("call"),
@@ -933,23 +936,29 @@ class TestBenchmarker(TestCase):
             )
 
         (size,), kwargs = empty_calls[0]
-        if hip_value and not triton:
+        if hip_value and triton == "broken":
+            # a Triton failure falls back to zero_() on the read-flush-sized buffer
+            self.assertEqual((size, kwargs["dtype"]), ((4 + 256) // 4, torch.float32))
+            flush, warmup_flushes, first = "zero_", 3, []
+        elif hip_value and not triton:
             # no Triton: the CUDA zero_() flush, which only covers the L2
             self.assertEqual((size, kwargs["dtype"]), (4 // 4, torch.int))
             self.assertEqual(flush_passes, [])
-            flush, warmup_flushes = "zero_", 3
+            flush, warmup_flushes, first = "zero_", 3, []
         elif hip_value:
             self.assertEqual((size, kwargs["dtype"]), ((4 + 256) // 4, torch.float32))
             # two read passes per flush; the warmup runs half as many flushes,
             # rounded up
             self.assertEqual(flush_passes, [2])
-            flush, warmup_flushes = "read", 2
+            # one extra flush right after creating it, to catch Triton failures
+            flush, warmup_flushes, first = "read", 2, ["read"]
         else:
             self.assertEqual((size, kwargs["dtype"]), (4 // 4, torch.int))
-            flush, warmup_flushes = "zero_", 3
+            flush, warmup_flushes, first = "zero_", 3, []
         self.assertEqual(
             calls,
             ["call", "zero_"]
+            + first
             + [flush, "call"] * 2
             + [flush] * warmup_flushes
             + [flush, "call"] * 4,
