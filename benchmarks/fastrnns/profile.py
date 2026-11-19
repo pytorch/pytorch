@@ -150,7 +150,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--nloops", default="5", type=int)
 
-    parser.add_argument("--rnns", nargs="*", help="What to run. cudnn, aten, jit, etc")
+    parser.add_argument("--rnns", nargs="*", help="What to run. cudnn, aten, py")
 
     # if internal_run, we actually run the rnns.
     # if not internal_run, we shell out to nvprof with internal_run=T
@@ -163,7 +163,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     if args.rnns is None:
-        args.rnns = ["cudnn", "aten", "jit"]
+        args.rnns = ["cudnn", "aten"]
     print(args)
 
     if args.internal_run:
