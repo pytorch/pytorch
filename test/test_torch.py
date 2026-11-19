@@ -3335,6 +3335,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(x, expected, **tol)
 
     @onlyCUDA
+    @skipIfTorchInductor("inductor lowers cumsum / cumprod itself; this tests the ATen kernels")
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double, torch.cfloat)
     def test_cumsum_cumprod_no_spurious_overflow(self, device, dtype):
         # Every run of these inputs has a finite sum and product that is exact in `dtype`, but
@@ -3355,6 +3356,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(op(x.to(device), dim), op(x, dim), atol=0, rtol=0)
 
     @onlyCUDA
+    @skipIfTorchInductor("inductor lowers cumsum / cumprod itself; this tests the ATen kernels")
     @skipCUDAIfNotRocm
     @largeTensorTest('12GB')
     def test_cumsum_more_than_2_32_elements(self, device):
@@ -3377,6 +3379,7 @@ class TestTorchDeviceType(TestCase):
             del x, res
 
     @onlyCUDA
+    @skipIfTorchInductor("inductor lowers cumsum / cumprod itself; this tests the ATen kernels")
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.half, torch.bfloat16)
     def test_cumsum_cumprod_last_dim_unaligned(self, device, dtype):
         # Rows with an odd length that start one element into their storage, so that rows start at
@@ -3407,6 +3410,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(b[[0, -1]].tolist(), [guard, guard])
 
     @onlyCUDA
+    @skipIfTorchInductor("inductor lowers cumsum / cumprod itself; this tests the ATen kernels")
     @skipCUDAIfNotRocm
     @dtypes(torch.int16, torch.half)
     def test_cumsum_cumprod_last_dim_odd_address(self, device, dtype):
@@ -3432,6 +3436,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(raw[[0, -1]].tolist(), [guard, guard])
 
     @onlyCUDA
+    @skipIfTorchInductor("inductor lowers cumsum / cumprod itself; this tests the ATen kernels")
     @skipCUDAIfNotRocm
     @dtypes(torch.half, torch.bfloat16)
     def test_cumsum_alignment_independent(self, device, dtype):

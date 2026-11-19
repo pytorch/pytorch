@@ -1117,9 +1117,14 @@ constexpr int64_t kMinChunks = 3;
 constexpr int64_t kStockRowBytesPerSM = 512;
 // Also without it, rows of 1- and 2-byte elements that are not a whole number of vectors are
 // copied an element at a time, which loses to the one-thread-per-column kernel on columns shorter
-// than this once there are kScalarCopyMinColumns columns.
+// than this once there are kScalarCopyMinColumns columns...
 constexpr int64_t kScalarCopyMaxRows = 512;
 constexpr int64_t kScalarCopyMinColumns = 64;
+// ...and on columns shorter than these (1- and 2-byte elements) when there are fewer. With the
+// Tensor Data Mover, 1-byte columns shorter than kFewColumnsMinRows1Tdm still lose.
+constexpr int64_t kFewColumnsMinRows1 = 96;
+constexpr int64_t kFewColumnsMinRows2 = 48;
+constexpr int64_t kFewColumnsMinRows1Tdm = 32;
 
 template <typename T>
 struct Traits {
@@ -1617,12 +1622,24 @@ bool should_use(int64_t num_orows, int64_t row_size, int64_t num_irows) {
   if (num_orows <= 0 || num_irows <= 0 || row_size < min_rows) {
     return false;
   }
+  const bool scalar_copy = num_irows % Traits<T>::kVec != 0;
+  const bool few_columns = num_orows * num_irows < kScalarCopyMinColumns;
   if (has_tdm()) {
-    return true;
+    return !(sizeof(T) == 1 && scalar_copy && few_columns && row_size < kFewColumnsMinRows1Tdm);
   }
-  if (sizeof(T) <= 2 && num_irows % Traits<T>::kVec != 0 && row_size < kScalarCopyMaxRows &&
-      num_orows * num_irows >= kScalarCopyMinColumns) {
+  // A row at least a block wide gives each thread a column of kRows-row tiles to scan alone, as
+  // the one-thread-per-column kernel does. Copied an element at a time, or as 8-byte elements, that
+  // is slower until the columns hold kMinTilesToChunk tiles and get split into chunks.
+  if (num_irows >= kBlock && (sizeof(T) == 8 || scalar_copy) &&
+      row_size < kMinTilesToChunk * Traits<T>::kRows) {
     return false;
+  }
+  if (sizeof(T) <= 2 && scalar_copy) {
+    const int64_t scalar_min_rows =
+        few_columns ? (sizeof(T) == 1 ? kFewColumnsMinRows1 : kFewColumnsMinRows2) : kScalarCopyMaxRows;
+    if (row_size < scalar_min_rows) {
+      return false;
+    }
   }
   const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   return num_orows * num_irows * static_cast<int64_t>(sizeof(T)) < num_sms * kStockRowBytesPerSM;
