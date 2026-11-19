@@ -19,6 +19,7 @@ import torch.distributed as dist
 import torch.utils._pytree as pytree
 from torch._custom_class_base import CustomClassBase
 from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+from torch._dynamo.guards import check_opaque_obj, extract_opaque_obj
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     CompileCounter,
@@ -50,6 +51,7 @@ from torch._library.opaque_object import (
     register_custom_class,
 )
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed.device_mesh import DeviceMesh
 from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -4359,6 +4361,36 @@ class GraphModule(torch.nn.Module):
         restored_real = restored_opaque.meta["example_value"].real_obj
         self.assertIsInstance(restored_real, HoistedString)
         self.assertEqual(restored_real.val, "double")
+
+    @unittest.skipIf(not dist.is_available(), "requires distributed")
+    def test_extract_opaque_obj_guard(self):
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        if dist.is_initialized():
+            dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=2)
+        try:
+            mesh = DeviceMesh("cpu", torch.arange(2))
+            other = DeviceMesh("cpu", torch.arange(2, 4))
+            fake = FakeScriptObject(
+                wrapped_obj=None, script_class_name="DeviceMesh", x=mesh
+            )
+            fake_other = FakeScriptObject(
+                wrapped_obj=None, script_class_name="DeviceMesh", x=other
+            )
+
+            m_real = extract_opaque_obj(None, mesh)
+            m_fake = extract_opaque_obj(None, fake)
+
+            self.assertIs(fake.real_obj, mesh)
+            self.assertIsNotNone(m_real)
+            self.assertIsNotNone(m_fake)
+            self.assertEqual(m_real, m_fake)
+            self.assertFalse(check_opaque_obj(other, m_real))
+            self.assertTrue(check_opaque_obj(fake, m_real))
+            self.assertFalse(check_opaque_obj(fake_other, m_real))
+        finally:
+            dist.destroy_process_group()
 
 
 instantiate_parametrized_tests(TestOpaqueObject)

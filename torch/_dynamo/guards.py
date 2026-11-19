@@ -1474,6 +1474,8 @@ def check_dtensor_spec(value: object, metadata: Any) -> bool:
 
 # Used by OPAQUE_OBJ_GUARD_FN_MATCH guard check spec
 def extract_opaque_obj(guard: Any, value: object) -> Any:
+    if isinstance(value, FakeScriptObject):
+        value = value.real_obj
     opaque_info = get_opaque_obj_info(type(value))
     if not opaque_info or not opaque_info.guard_fn:
         return None
@@ -1484,6 +1486,8 @@ def extract_opaque_obj(guard: Any, value: object) -> Any:
 def check_opaque_obj(value: object, metadata: Any) -> bool:
     if metadata is None:
         return True
+    if isinstance(value, FakeScriptObject):
+        value = value.real_obj
     opaque_info = get_opaque_obj_info(type(value))
     if not opaque_info or not opaque_info.guard_fn:
         return metadata is None
