@@ -259,6 +259,175 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1:], res[1:])
 
+    def test_int_to_bytes(self):
+        # int.to_bytes takes args/kwargs, so it missed the zero-arg
+        # constant-folding path used by bit_length()/bit_count().
+        def fn(t):
+            return (
+                t + 1,
+                (1024).to_bytes(2, "big"),
+                (-5).to_bytes(2, "big", signed=True),
+                int.from_bytes((255).to_bytes(4, "little"), "little"),
+            )
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
+
+    def test_int_to_bytes_raises(self):
+        # An out-of-range value must still raise OverflowError, not graph break.
+        def fn(t):
+            try:
+                (1024).to_bytes(1, "big")
+            except OverflowError:
+                return t + 1
+            return t - 1
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
+
+    def test_bytes_from_iterable(self):
+        # bytes(iterable_of_ints) had no handler, so a generator argument
+        # graph broke even though every element was a constant.
+        def fn(t):
+            return (
+                t + 1,
+                bytes(i & 0xFF for i in range(5)),
+                bytes([1, 2, 3]),
+                bytes(iter((7, 8))),
+            )
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
+
+    def test_bytes_from_iterable_raises(self):
+        # Out-of-range element must raise ValueError like eager does.
+        def fn(t):
+            try:
+                bytes(i for i in (1, 256))
+            except ValueError:
+                return t + 1
+            return t - 1
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
+
+    def test_bytes_from_iterator_matches_eager(self):
+        # bytes() must pull one item at a time and stop at the first bad one,
+        # leaving the rest of the iterator unconsumed, like CPython.
+        def gen_then_keyerror():
+            yield 300
+            raise KeyError("unreachable")
+
+        def stops_early(t):
+            g = (x for x in [1, 256, 3])
+            try:
+                bytes(g)
+            except ValueError:
+                pass
+            return t + 1, list(g)
+
+        def bad_type(t):
+            try:
+                bytes(x for x in ["a"])
+            except TypeError:
+                return t + 1
+            return t - 1
+
+        def wrong_exception(t):
+            try:
+                bytes(gen_then_keyerror())
+            except ValueError:
+                return t + 1
+            except KeyError:
+                return t - 1
+
+        def unbounded(t):
+            try:
+                bytes(itertools.count())
+            except ValueError:
+                return t + 1
+            return t - 1
+
+        def consumes_iterator(t):
+            it = iter((7, 8))
+            m = map(ord, "ab")
+            return t + 1, bytes(it), list(it), bytes(m), list(m)
+
+        def stops_early_sequences(t):
+            # list/tuple/reversed iterators have a bulk-unpack fast path that
+            # must not be used here.
+            rest = []
+            for it in (iter([1, 256, 3]), iter((1, 256, 3)), reversed([3, 256, 1])):
+                try:
+                    bytes(it)
+                except ValueError:
+                    pass
+                rest.append(list(it))
+            return t + 1, rest
+
+        class Index:
+            def __index__(self):
+                return 65
+
+        def index_items(t):
+            return t + 1, bytes(x for x in [Index(), True])
+
+        for fn in (
+            stops_early,
+            bad_type,
+            wrong_exception,
+            unbounded,
+            consumes_iterator,
+            stops_early_sequences,
+            index_items,
+        ):
+            opt = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
+
+    def test_bytes_non_iterator_matches_eager(self):
+        # __bytes__, __index__ and dynamic ints must not take the iterator path.
+        class HasBytes:
+            def __bytes__(self):
+                return b"hi"
+
+        fns = (
+            lambda t: (t + 1, bytes(HasBytes())),
+            lambda t: (t + 1, bytes(torch.tensor(3))),
+            lambda t: (t + 1, bytes(t.size(0))),
+        )
+        for fn in fns:
+            counters.clear()
+            opt = torch.compile(fn, backend="eager", dynamic=True)
+            self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
+            breaks = list(counters["graph_break"])
+            self.assertTrue(any("non-constant arguments" in k for k in breaks))
+            self.assertFalse(any("over an iterator" in k for k in breaks))
+
+    def test_bytes_iterator_non_constant_item_graph_breaks(self):
+        # An __index__ returning a SymInt stays non-constant, so bytes() graph
+        # breaks after the generator is partly traced; it must still match eager.
+        class Index:
+            def __init__(self, v):
+                self.v = v
+
+            def __index__(self):
+                return self.v
+
+        def fn(t):
+            return t + 1, bytes(x for x in [1, Index(t.size(0))])
+
+        counters.clear()
+        opt = torch.compile(fn, backend="eager", dynamic=True)
+        self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
+        self.assertTrue(any("over an iterator" in k for k in counters["graph_break"]))
+
+    def test_bool_to_bytes(self):
+        def fn(t):
+            return t + 1, True.to_bytes(1, "big"), False.to_bytes(2, "little")
+
+        opt = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(torch.ones(3)), opt(torch.ones(3)))
+
     def test_heapq_polyfill(self):
         # heapq is a C extension; Dynamo traces it via the pure-Python polyfill
         # (torch/_dynamo/polyfills/heapq.py). Counter.most_common(n) routes
