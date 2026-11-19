@@ -1,5 +1,5 @@
 #include <ATen/native/mkldnn/detail/Eltwise.h>
-#include <ATen/native/mkldnn/detail/Utils.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 #if AT_MKLDNN_ENABLED()
 
