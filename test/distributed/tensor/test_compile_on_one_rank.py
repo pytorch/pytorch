@@ -790,7 +790,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(not torch.accelerator.is_available(), "requires an accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
-    @parametrize("index_device", ("cpu", device_type))
+    @parametrize("index_device", sorted({"cpu", device_type}))
     def test_iota_device_fix_rank_agnostic_under_coor(self, index_device):
         # fix_iota_device moves an index arange onto the indexed tensor's device during
         # the joint graph passes, where the device must stay a current_device() node.

@@ -30,16 +30,22 @@ class AbstractCUDAGraphsTest(C10dBackendTest):
         )
 
     def _capture_and_replay(self, op, async_op):
-        stream = torch.Stream()
-        graph = torch.accelerator.Graph()
-        with stream, graph:
+        # torch.accelerator.Graph has no CUDA implementation registered yet
+        # (https://github.com/pytorch/pytorch/pull/171313), so use the device
+        # module's graph class and capture context.
+        device_module = torch.get_device_module(self.device_type)
+        graph = (
+            device_module.XPUGraph()
+            if self.device_type == "xpu"
+            else device_module.CUDAGraph()
+        )
+        with device_module.graph(graph):
             work = op()
             if async_op:
                 self.assertIsNotNone(work)
                 work.wait()
             else:
                 self.assertIsNone(work)
-        torch.accelerator.current_stream().wait_stream(stream)
         graph.replay()
         torch.accelerator.synchronize()
 
