@@ -290,6 +290,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             for k, v in self.items.items()
         }
 
+    def can_load_const_for_codegen(self) -> bool:
+        return False
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L3033-L3110
         ConstDictVariable.install_dict_order_guard(self, tx)

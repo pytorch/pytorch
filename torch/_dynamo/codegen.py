@@ -365,7 +365,10 @@ class PyCodegen:
         elif (
             # is_python_constant() would realize (and value-guard) lazy constants
             # that can be reloaded or recomputed instead
-            not _contains_unrealized_lazy_constant(value, self.tx.output.side_effects)
+            (not self.value_from_source or value.can_load_const_for_codegen())
+            and not _contains_unrealized_lazy_constant(
+                value, self.tx.output.side_effects
+            )
             and value.is_python_constant()
             and (const := value.try_as_python_constant())[0]
             and is_safe_constant(const[1])

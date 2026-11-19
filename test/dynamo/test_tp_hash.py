@@ -128,11 +128,11 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
 
         def fn(x):
             fs = frozenset({1, 2, t})
-            return hash(fs) == hash(fs)
+            return x + (hash(fs) == hash(fs))
 
-        self.assertTrue(
-            torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
-        )
+        x = torch.tensor(0)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(result, fn(x))
 
     # --- Range (RangeVariable) ---
 
