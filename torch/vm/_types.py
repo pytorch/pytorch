@@ -68,6 +68,12 @@ class TensorType(Type):
             count *= dim.lo if at == "lo" else dim.hi
         return count * self.dtype.itemsize
 
+    def as_checks(self) -> "list[Check]":
+        """The type as guards on the tensor it describes: its dtype, its
+        device, and the sizes of every dimension."""
+        checks: list[Check] = [Dtype(self.dtype), Device(self.device)]
+        return checks + [Dim(i, dim) for i, dim in enumerate(self.dims)]
+
     def __contains__(self, value: object) -> bool:
         if not isinstance(value, torch.Tensor) or value.dim() != len(self.dims):
             return False
