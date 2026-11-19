@@ -863,6 +863,13 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                     ],
                 )
             if isinstance(annotation, variables.ConstDictVariable):
+                if annotation.source and not is_constant_source(annotation.source):
+                    if not isinstance(
+                        annotation,
+                        (variables.OrderedDictVariable, variables.DunderDictVariable),
+                    ):
+                        tx.output.guard_on_key_order.add(annotation.source)
+                    annotation.install_dict_keys_match_guard()
                 annotation_dict = {
                     k.vt.as_python_constant(): annotation_constant(v)
                     for k, v in annotation.items.items()
@@ -3320,6 +3327,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     "to assert that all elements are true.",
                 )
 
+            predicate_is_constant = predicate_vt.is_python_constant()
+            if predicate_is_constant and predicate_vt.as_python_constant() is True:
+                return ConstantVariable.create(None)
+
             message_eager = None
             message_graph_arg = None
             # Realize a possible LazyVariableTracker so the exact-type checks
@@ -3378,7 +3389,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         ],
                     )
 
-            if predicate_vt.is_python_constant():
+            if predicate_is_constant:
                 if predicate_vt.as_python_constant():
                     return ConstantVariable.create(None)
                 msg = (

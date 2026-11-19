@@ -3582,6 +3582,8 @@ MOD_INLINELIST = [
     "torch.return_types",
     "torch.sparse",
     "torch.testing",
+    "torch.testing._creation",
+    "torch.testing._internal.common_utils",
     "torch.utils._content_store",
     "torch.utils._contextlib",
     "torch.utils._cxx_pytree",
@@ -3603,15 +3605,22 @@ if torch.distributed.is_available():
 # Modules in MOD_INLINELIST where nested graph breaks should be suppressed.
 # These are large internal modules that are inlined for correctness but whose
 # internal operations are not worth compiling as separate NGB subgraphs.
-NGB_SUPPRESS_INLINELIST: set[str] = set()
+NGB_SUPPRESS_MODULES: set[str] = set()
+
+# NGB-only module/qualname matching avoids importing test-only modules.
+NGB_SUPPRESS_FUNCTION_NAMES: dict[str, set[str]] = {
+    "torch._prims_common.wrappers": {"_maybe_resize_out"},
+    "torch.testing._creation": {"make_tensor"},
+    "torch.testing._internal.common_utils": {"TestCase.assertEqual", "TestCase.setUp"},
+}
 
 if torch.distributed.is_available():
-    NGB_SUPPRESS_INLINELIST.add("torch.distributed")
+    NGB_SUPPRESS_MODULES.add("torch.distributed")
 
-if not NGB_SUPPRESS_INLINELIST <= MOD_INLINELIST:
+if not NGB_SUPPRESS_MODULES <= MOD_INLINELIST:
     raise AssertionError(
-        "NGB_SUPPRESS_INLINELIST entries must also be in MOD_INLINELIST: "
-        f"{NGB_SUPPRESS_INLINELIST - MOD_INLINELIST}"
+        "NGB_SUPPRESS_MODULES entries must also be in MOD_INLINELIST: "
+        f"{NGB_SUPPRESS_MODULES - MOD_INLINELIST}"
     )
 
 
@@ -4125,18 +4134,24 @@ def is_torch_inline_allowed(filename: str) -> bool:
 
 
 @functools.cache
-def get_ngb_suppress_inlinelist() -> set[str]:
+def _is_builtin_inline_when_called(filename: str, prefixes: tuple[str, ...]) -> bool:
+    return filename.startswith(prefixes)
+
+
+@functools.cache
+def get_ngb_suppress_module_paths() -> set[str]:
     torch_dir = _module_dir(torch)
     if torch_dir is None:
         return set()
     return {
         _as_posix_path(torch_dir + m[len("torch.") :].replace(".", "/"))
-        for m in NGB_SUPPRESS_INLINELIST
+        for m in NGB_SUPPRESS_MODULES
     }
 
 
-def is_ngb_suppressed_inline(filename: str) -> bool:
-    return any(filename.startswith(d) for d in get_ngb_suppress_inlinelist())
+@functools.cache
+def is_ngb_suppressed_module(filename: str) -> bool:
+    return filename.startswith(tuple(get_ngb_suppress_module_paths()))
 
 
 @functools.cache
@@ -4331,5 +4346,7 @@ def clear_lru_cache() -> None:
     torch._dynamo.trace_rules.get_tensor_method.cache_clear()
     torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
     torch._dynamo.trace_rules.get_mod_inlinelist.cache_clear()
-    torch._dynamo.trace_rules.get_ngb_suppress_inlinelist.cache_clear()
+    torch._dynamo.trace_rules._is_builtin_inline_when_called.cache_clear()
+    torch._dynamo.trace_rules.get_ngb_suppress_module_paths.cache_clear()
+    torch._dynamo.trace_rules.is_ngb_suppressed_module.cache_clear()
     torch._dynamo.trace_rules.dynamo_dir.cache_clear()

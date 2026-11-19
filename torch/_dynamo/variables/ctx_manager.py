@@ -173,6 +173,11 @@ class ContextWrappingVariable(VariableTracker):
             raise AssertionError("Unexpected arg type")
 
     def supports_graph_breaks(self) -> bool:
+        r"""Whether this context can be reconstructed and re-entered in resume bytecode.
+
+        True requires reconstruct_type() and ReenterWith to restore the context;
+        False disallows checkpoints while the context is active.
+        """
         return True
 
     def exit_on_graph_break(self) -> bool:
@@ -1482,6 +1487,9 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
             _unsafe_set_version_counter
         ).call_function(tx, [self.tensors, self.prev_versions], {})
 
+    def supports_graph_breaks(self) -> bool:
+        return False
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         unimplemented(
             gb_type="torch.autograd._unsafe_preserve_version_counter escaped from compiled region",
@@ -1736,13 +1744,17 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
     def python_type(self) -> type:
         return contextlib._GeneratorContextManager
 
+    def supports_graph_breaks(self) -> bool:
+        return bool(self.target_values)
+
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
         if self.target_values:
             return super().reconstruct_type(codegen)
         unimplemented(
             gb_type="torch.fx.traceback.annotate escaped from compiled region",
             context=str(self),
-            explanation="Dynamo can only resume torch.fx.traceback.annotate after a graph break when every annotation value is a constant it can embed in bytecode.",
+            explanation="Dynamo can only reconstruct an escaped torch.fx.traceback.annotate "
+            "context when every annotation value is a constant it can embed in bytecode.",
             hints=[
                 *graph_break_hints.SUPPORTABLE,
             ],
