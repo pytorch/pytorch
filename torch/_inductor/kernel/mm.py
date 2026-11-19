@@ -668,18 +668,25 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         if aten_extra_kwargs:
             kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
 
+    # Triton templates accumulate in fp32, so they can also store an fp32 output
+    # for half-precision inputs (e.g. from the mm + fp32 upcast post-grad rewrite).
+    half_to_fp32 = out_dtype == torch.float32 and mat1.get_dtype() in (
+        torch.bfloat16,
+        torch.float16,
+    )
     if (
-        out_dtype is None
+        (out_dtype is None or half_to_fp32)
         and is_nonzero
         and use_triton_template(layout, check_max_autotune=True)
     ):
-        if use_decompose_k_choice(m, n, k):
+        if out_dtype is None and use_decompose_k_choice(m, n, k):
             templates_to_use.append(decompose_k_subgraph_template)
         # CUDA drops Triton mm from the default search once decompose_k applies
         # at twice the usual threshold. The exhaustive search still includes it.
         # HIP keeps Triton mm.
         keep_triton_mm = (
             torch.version.hip is not None
+            or out_dtype is not None
             or inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE"
             or not use_decompose_k_choice(m, n, k, threshold_multiple=2)
         )
@@ -706,7 +713,8 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
                     else:
                         templates_to_use.append(persistent_mm_template)
 
-        templates_to_use.append(mm_contiguous_subgraph_template)
+        if out_dtype is None:
+            templates_to_use.append(mm_contiguous_subgraph_template)
 
     choices.extend(
         V.choices.get_template_configs(

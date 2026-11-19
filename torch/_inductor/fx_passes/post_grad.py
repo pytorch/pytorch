@@ -1275,6 +1275,67 @@ def pointless_cumsum_check(match: Match) -> bool:
     return not isinstance(match.kwargs["fill_value"], torch.fx.Node)
 
 
+def mm_fp32_out_check(match: Match) -> bool:
+    # Later passes that match aten.mm.default (async TP, b2b GEMM, group/batch
+    # fusion) would no longer see the rewritten mm.
+    if (
+        config.emulate_precision_casts
+        or config.triton.native_matmul
+        or config._micro_pipeline_tp
+        or config.b2b_gemm_pass
+        or config.post_grad_fusion_options
+        or torch.version.hip is not None
+    ):
+        return False
+    if match.kwargs["dtype"] != torch.float32:
+        return False
+    a, b = (match.kwargs[k].meta.get("val") for k in ("mat1", "mat2"))
+    if not (isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor)):
+        return False
+    half = (torch.bfloat16, torch.float16)
+    if not (a.device.type == "cuda" and a.dtype in half and b.dtype == a.dtype):
+        return False
+    (m, k), n = a.shape, b.shape[1]
+    # A memory-bound GEMM pays for the fp32 output it now has to write, while
+    # the upcast alone could fuse into its consumers.
+    if not all(statically_known_true(d >= 1024) for d in (m, n, k)):
+        return False
+    # tuned_mm offers decompose-K only without out_dtype, so keep the plain mm
+    # wherever decompose-K could be a candidate.
+    thr = config.triton.decompose_k_threshold
+    return (
+        not (config.max_autotune or config.max_autotune_gemm)
+        or config.triton.num_decompose_k_splits <= 0
+        or statically_known_true(k < thr * m)
+        or statically_known_true(k < thr * n)
+    )
+
+
+@register_graph_pattern(
+    CallFunction(
+        prims.convert_element_type.default,
+        CallFunction(aten.mm.default, KeywordArg("mat1"), KeywordArg("mat2")),
+        KeywordArg("dtype"),
+    ),
+    extra_check=mm_fp32_out_check,
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+)
+def mm_fp32_out_replacement(match: Match, mat1, mat2, dtype):
+    """
+    mm(a, b).float() for half-precision a, b -> mm(a, b, out_dtype=fp32), so the
+    GEMM writes fp32 directly instead of rounding to half and launching a cast.
+    Skipping the intermediate rounding is gated on emulate_precision_casts.
+    """
+    counters["inductor"]["mm_fp32_out_dtype"] += 1
+
+    def repl(mat1, mat2):
+        return aten.mm.dtype(mat1, mat2, torch.float32)
+
+    # pyrefly: ignore [bad-argument-type]
+    match.replace_by_example(repl, [mat1, mat2])
+
+
 @register_graph_pattern(
     CallFunction(
         aten.cumsum.default,
