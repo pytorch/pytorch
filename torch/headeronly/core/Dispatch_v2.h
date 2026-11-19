@@ -38,7 +38,8 @@
 #define AT_WRAP(...) __VA_ARGS__
 
 // A new float8 type also needs adding to the hand-written lists of
-// aten/src/ATen/native/cuda/RoundedConversion.cu.
+// aten/src/ATen/native/cuda/RoundedConversion.cu and
+// RoundedConversionSm107f.cu.
 #define AT_FLOAT8_TYPES                               \
   torch::headeronly::ScalarType::Float8_e5m2,         \
       torch::headeronly::ScalarType::Float8_e5m2fnuz, \

@@ -396,12 +396,15 @@ class TestRoundedConversionInductorCUDAOnly(_RoundedConversionTestMixin, TestCas
 
     def test_float64_instructions(self):
         # The default conversions from float64, as in eager.
+        cc = _cuda_capability()
         to_odd = "round_float64_to_odd_float32"
         expectations = [
             (torch.float16, "cvt.rn.f16.f64"),
-            (torch.bfloat16, "cvt.rn.bf16.f64" if _cuda_capability() >= 90 else to_odd),
+            (torch.bfloat16, "cvt.rn.bf16.f64" if cc >= 90 else to_odd),
             (torch.float8_e5m2, to_odd),
         ]
+        if cc >= 89:
+            expectations.append((torch.float8_e4m3fn, to_odd))
 
         def fn(x, dst):
             return x.to(dst)
