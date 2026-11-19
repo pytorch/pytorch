@@ -52,41 +52,6 @@ struct vectypes<long> {
   using type2 = long2;
 };
 
-template <typename T>
-struct OpMathType {
-  using type = T;
-};
-
-template <>
-struct OpMathType<half> {
-  using type = float;
-};
-
-template <>
-struct OpMathType<short> {
-  using type = int;
-};
-
-template <>
-struct OpMathType<char> {
-  using type = int;
-};
-
-template <>
-struct OpMathType<uchar> {
-  using type = int;
-};
-
-template <>
-struct OpMathType<bfloat> {
-  using type = float;
-};
-
-template <>
-struct OpMathType<half2> {
-  using type = float2;
-};
-
 // Type promotion structure for higher precision accumulation
 template <typename T>
 struct AccumulationType {
@@ -107,9 +72,12 @@ struct AccumulationType<bfloat> {
 
 } // namespace detail
 
+// NaN-propagating max/min that, like std::max/std::min (and thus CPU), return
+// `a` on ties. ::metal::max/min return their second argument on ties, hence the
+// swapped order, which preserves the sign of e.g. max(-0.0, 0.0)
 template <typename T>
 ::metal::enable_if_t<::metal::is_floating_point_v<T>, T> max(T a, T b) {
-  return ::metal::isunordered(a, b) ? NAN : ::metal::max(a, b);
+  return ::metal::isunordered(a, b) ? NAN : ::metal::max(b, a);
 }
 
 template <typename T, typename U>
@@ -120,7 +88,7 @@ max(T a, U b) {
 
 template <typename T>
 ::metal::enable_if_t<::metal::is_floating_point_v<T>, T> min(T a, T b) {
-  return ::metal::isunordered(a, b) ? NAN : ::metal::min(a, b);
+  return ::metal::isunordered(a, b) ? NAN : ::metal::min(b, a);
 }
 
 template <typename T, typename U>
@@ -132,13 +100,13 @@ min(T a, U b) {
 template <>
 inline bfloat min(bfloat a, bfloat b) {
   return bfloat(
-      ::metal::isunordered(a, b) ? NAN : ::metal::min(float(a), float(b)));
+      ::metal::isunordered(a, b) ? NAN : ::metal::min(float(b), float(a)));
 }
 
 template <>
 inline bfloat max(bfloat a, bfloat b) {
   return bfloat(
-      ::metal::isunordered(a, b) ? NAN : ::metal::max(float(a), float(b)));
+      ::metal::isunordered(a, b) ? NAN : ::metal::max(float(b), float(a)));
 }
 
 // Less-than that sorts NaNs last. Uses a != a instead of metal::isnan,
@@ -166,9 +134,6 @@ using vec2type_t = typename detail::vectypes<T>::type2;
 
 template <typename T>
 using vec4type_t = typename detail::vectypes<T>::type4;
-
-template <typename T>
-using opmath_t = typename detail::OpMathType<T>::type;
 
 template <typename T>
 using accum_t = typename detail::AccumulationType<T>::type;
@@ -371,7 +336,12 @@ inline common_dtype<T, U> div(const T x, const U y) {
   if (y.y == 0) {
     return T(x.x / y.x, x.y / y.x);
   }
-  return T(::metal::dot(x, y), x.y * y.x - x.x * y.y) / ::metal::dot(y, y);
+  if (::metal::abs(y.x) >= ::metal::abs(y.y)) {
+    const auto rat = y.y / y.x;
+    return T(x.x + x.y * rat, x.y - x.x * rat) / (y.x + y.y * rat);
+  }
+  const auto rat = y.x / y.y;
+  return T(x.x * rat + x.y, x.y * rat - x.x) / (y.y + y.x * rat);
 }
 
 template <
@@ -461,9 +431,9 @@ inline float2 pow(T a, U b) {
   // Use explicit computation instead of length() due to numerical issues
   const auto r = ::metal::precise::sqrt(a.x * a.x + a.y * a.y);
 
-  // Special case: if r is 0, return 0
-  if (r == 0.0 && b.x > 0) {
-    return float2(0.0, 0.0);
+  // Special case: 0^b is 0 if Re(b) > 0, undefined otherwise
+  if (r == 0.0) {
+    return b.x > 0 ? float2(0.0, 0.0) : float2(NAN, NAN);
   }
 
   const auto theta = ::metal::precise::atan2(a.y, a.x);
@@ -529,24 +499,6 @@ inline float log1p(float x) {
   return rc;
 }
 
-// The function is ported from mlx
-inline float2 log1p(float2 in) {
-  float x = in.x;
-  float y = in.y;
-  float zabs = ::metal::precise::sqrt(x * x + y * y);
-  float theta = ::metal::atan2(y, x + 1);
-  if (zabs < 0.5f) {
-    float r = x * (2 + x) + y * y;
-    if (r == 0) { // handle underflow
-      return {x, theta};
-    }
-    return {0.5f * log1p(r), theta};
-  } else {
-    auto z0 = ::metal::sqrt((x + 1) * (x + 1) + y * y);
-    return {::metal::log(z0), theta};
-  }
-}
-
 template <typename T1, typename T2 = T1>
 struct pair {
   T1 first;
@@ -578,7 +530,8 @@ inline float2 conj(float2 a) {
 // the square terms. If `a` or `b` are very large or very small floating point
 // numbers, then their squares will resolve to inf or 0.
 //
-// Assume `a >= b >= 0`. We can first change the formula to:
+// Inputs are replaced by their absolute values, so assume `a >= b >= 0`.
+// We can first change the formula to:
 // `h = a sqrt(1 + (b / a)^2)`
 // `h = a sqrt(1 + r)`
 // where `r = (b / a)^2`. Since `a >= b >= 0`, then `1 >= r >= 0`.
@@ -600,6 +553,8 @@ inline float hypot(float a_, float b_) {
   if (::metal::isinf(a_) || ::metal::isinf(b_)) {
     return INFINITY;
   }
+  a_ = ::metal::abs(a_);
+  b_ = ::metal::abs(b_);
   auto a = max(a_, b_);
   auto b = min(a_, b_);
 
@@ -614,6 +569,53 @@ inline float hypot(float a_, float b_) {
   bool is_h2 = ((sqrt_1_plus_r == 1) && (r > 0));
 
   return ::metal::select(::metal::select(h3, h2, is_h2), h1, is_h1);
+}
+
+// Knuth's TwoSum: returns (s, e) with s = fl(a + b) and s + e == a + b exactly
+inline float2 sum_and_error(float a, float b) {
+  const float s = a + b;
+  const float bb = s - a;
+  return {s, (a - (s - bb)) + (b - bb)};
+}
+
+// log1p(z) = log|1 + z| + i arg(1 + z). When 1 + z is close to the unit circle,
+// log|1 + z| = log1p(r) / 2 with r = |1 + z|^2 - 1 = 2x + x^2 + y^2, which
+// cancels catastrophically. r is computed as the exact sum h + e + exx + eyy,
+// where exx, eyy are the rounding errors of the squares (via fma), e that of
+// their sum s, and h = 2x + s is exact whenever it cancels (Sterbenz lemma).
+// The four remaining terms can still cancel, so they are summed with
+// compensation (Ogita-Rump-Oishi Sum2). Overflow makes r NaN, which falls back
+// to log(hypot(1 + x, y))
+inline float2 log1p(float2 z) {
+  const float x = z.x, y = z.y;
+  const float xx = x * x, yy = y * y;
+  const auto s = sum_and_error(xx, yy);
+  const auto a = sum_and_error(2 * x + s.x, s.y);
+  const auto b = sum_and_error(a.x, ::metal::fma(x, x, -xx));
+  const auto c = sum_and_error(b.x, ::metal::fma(y, y, -yy));
+  const float r = c.x + (a.y + b.y + c.y);
+  const float theta = ::metal::precise::atan2(y, x + 1);
+  if (::metal::abs(r) < 0.5f) {
+    return {0.5f * log1p(r), theta};
+  }
+  return {::metal::precise::log(hypot(x + 1, y)), theta};
+}
+
+// Computes the larger component as sqrt((|re| + |z|) / 2) and derives the other
+// one by division, avoiding the cancellation in |z| - |re| when |im| << |re|
+template <typename T, ::metal::enable_if_t<is_complex_v<T>, bool> = true>
+inline T sqrt(const T x) {
+  const auto z = float2(x);
+  if (::metal::isinf(z.y)) {
+    return T(INFINITY, z.y);
+  }
+  const auto a = ::metal::abs(z);
+  const auto t = ::metal::precise::sqrt((a.x + hypot(a.x, a.y)) * .5);
+  if (t == 0) {
+    return T(0, z.y);
+  }
+  return z.x >= 0 ? T(t, z.y / (2 * t))
+                  : T(a.y / (2 * t), ::metal::copysign(t, z.y));
 }
 
 #define INSTANTIATE_FOR_ALL_TYPES(MACRO) \

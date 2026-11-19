@@ -2,7 +2,6 @@
 import contextlib
 import functools
 import unittest.mock
-from collections.abc import Callable
 from typing import Any
 from unittest.mock import patch
 
@@ -29,7 +28,6 @@ from torch._inductor.kernel_inputs import KernelInputs
 from torch._inductor.runtime.triton_compat import Config as TritonConfig
 from torch._inductor.select_algorithm import (
     autotune_select_algorithm,
-    ExternalTritonTemplateKernel,
     ExternKernelChoice,
     PartialRender,
     TritonTemplate,
@@ -51,6 +49,8 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
     IS_H100,
+    MockExternalTemplateBuffer,
+    patch_lowering,
     requires_gpu,
     requires_triton,
 )
@@ -1350,29 +1350,6 @@ class TestExternKernelCaller(TestCase):
             self.assertGreaterEqual(timing, 0.0)
 
 
-@contextlib.contextmanager
-def patch_lowering(lowering_overrides) -> Callable[[], None]:
-    import torch._inductor.lowering as inductor_lowering
-
-    with unittest.mock.patch.dict(inductor_lowering.lowerings):
-        for fn, (
-            decomp_fn,
-            broadcast,
-            type_promotion_kind,
-            convert_input_to_bool,
-        ) in lowering_overrides.items():
-            inductor_lowering._register_lowering(
-                fn,
-                decomp_fn,
-                broadcast=broadcast,
-                type_promotion_kind=type_promotion_kind,
-                convert_input_to_bool=convert_input_to_bool,
-                lowering_dict=inductor_lowering.lowerings,
-            )
-
-        yield
-
-
 class TestDtypeViewAutotuning(TestCase):
     @requires_gpu()
     @unittest.skipIf(
@@ -1799,7 +1776,7 @@ class TestTemplateRender(TestCase):
         XBLOCK = 128
         render_called = [False]
 
-        # Template source with placeholders filled in by _render()
+        # Template source with placeholders filled in by render()
         _MOCK_ADD_KERNEL_TEMPLATE = (
             "import triton\n"
             "import triton.language as tl\n"
@@ -1826,90 +1803,70 @@ class TestTemplateRender(TestCase):
             "    return {out_param}\n"
         )
 
-        class _MockExternalTemplateBuffer(ir.TemplateBuffer):
-            def __init__(self, layout, inputs):
-                tb_self = self
+        def render(tb, kernel):
+            render_called[0] = True
 
-                def _make_kernel_render(out_node, hint_override=None):
-                    kernel = ExternalTritonTemplateKernel(tb_self)
+            # Set up all fusion hooks in one call
+            kernel._setup_fusion_hooks()
 
-                    def render():
-                        return tb_self._render(kernel)
-
-                    return kernel, render
-
-                super().__init__(
-                    layout,
-                    inputs,
-                    _make_kernel_render,
-                    named_inputs={"A": inputs[0], "B": inputs[1]},
-                )
-                # Allow prologue fusion on input B (sigmoid(b) can be
-                # absorbed so the template reads b directly)
-                self.allowed_prologue_inps = OrderedSet([inputs[1].get_name()])
-                self.epilogue_fusable_outputs = {self.name: "result"}
-
-            def _render(self, kernel):
-                render_called[0] = True
-
-                # Set up all fusion hooks in one call
-                kernel._setup_fusion_hooks()
-
-                # --- Prologue handling for B ---
-                b_arg = self.inputs[1].get_name()
-                prologue_load_b = "    b = tl.load(B + xindex, mask=xmask)\n"
-                if kernel._prologue_source_buffers.get("B") is not None:
-                    b_arg = kernel._prologue_source_buffers["B"]
-                    prologue_load_b = (
-                        "    _prologue_B_xindex = xindex\n"
-                        "    _prologue_B_xmask = xmask\n"
-                        "    <LOAD_INPUT_B>\n"
-                        "    b = _prologue_B_result\n"
-                    )
-
-                call_args = [self.inputs[0].get_name(), b_arg]
-
-                # --- Epilogue handling ---
-                out_param = "result"
-                out_arg = self.name
-                for buf, param in kernel._extra_store_targets.items():
-                    out_param = param
-                    out_arg = buf
-                    break
-
-                call_args.append(out_arg)
-
-                # --- Extra inputs ---
-                extra_params = []
-                for buf_name, param_name in kernel._extra_inputs.items():
-                    extra_params.append(param_name)
-                    call_args.append(buf_name)
-
-                numel = self.get_size()[0]
-                call_args.append(str(numel))
-
-                extra_sig = ", " + ", ".join(extra_params) if extra_params else ""
-
-                source = _MOCK_ADD_KERNEL_TEMPLATE.format(
-                    out_param=out_param,
-                    extra_sig=extra_sig,
-                    prologue_load_b=prologue_load_b,
-                    kernel_name=str(Placeholder.KERNEL_NAME),
-                    xblock=XBLOCK,
+            # --- Prologue handling for B ---
+            b_arg = tb.inputs[1].get_name()
+            prologue_load_b = "    b = tl.load(B + xindex, mask=xmask)\n"
+            if kernel._prologue_source_buffers.get("B") is not None:
+                b_arg = kernel._prologue_source_buffers["B"]
+                prologue_load_b = (
+                    "    _prologue_B_xindex = xindex\n"
+                    "    _prologue_B_xmask = xmask\n"
+                    "    <LOAD_INPUT_B>\n"
+                    "    b = _prologue_B_result\n"
                 )
 
-                kernel._call_preamble = []
-                kernel._call_args = call_args
+            call_args = [tb.inputs[0].get_name(), b_arg]
 
-                return PartialRender(source, kernel.render_hooks)
+            # --- Epilogue handling ---
+            out_param = "result"
+            out_arg = tb.name
+            for buf, param in kernel._extra_store_targets.items():
+                out_param = param
+                out_arg = buf
+                break
+
+            call_args.append(out_arg)
+
+            # --- Extra inputs ---
+            extra_params = []
+            for buf_name, param_name in kernel._extra_inputs.items():
+                extra_params.append(param_name)
+                call_args.append(buf_name)
+
+            numel = tb.get_size()[0]
+            call_args.append(str(numel))
+
+            extra_sig = ", " + ", ".join(extra_params) if extra_params else ""
+
+            source = _MOCK_ADD_KERNEL_TEMPLATE.format(
+                out_param=out_param,
+                extra_sig=extra_sig,
+                prologue_load_b=prologue_load_b,
+                kernel_name=str(Placeholder.KERNEL_NAME),
+                xblock=XBLOCK,
+            )
+
+            kernel._call_args = call_args
+
+            return PartialRender(source, kernel.render_hooks)
 
         def add_override(a, b, alpha=None):
             layout = FixedLayout(a.get_device(), a.get_dtype(), a.get_size())
             a = ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(a))
             b = ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(b))
-            return ir.TensorBox.create(_MockExternalTemplateBuffer(layout, [a, b]))
+            tb = MockExternalTemplateBuffer(layout, [a, b], render)
+            # Allow prologue fusion on input B (sigmoid(b) can be absorbed so
+            # the template reads b directly)
+            tb.load_input_fusion_allowed_inputs = OrderedSet([b.get_name()])
+            tb.epilogue_fusable_outputs = {tb.name: "result"}
+            return ir.TensorBox.create(tb)
 
-        # (override_fn, decompose, type_promotion, convert_input_to_bool)
         with patch_lowering(
             {
                 torch.ops.aten.add.Tensor: (
@@ -1942,6 +1899,139 @@ class TestTemplateRender(TestCase):
             self.assertIn("maximum", code)
             # Verify prologue fusion: sigmoid fused via hook
             self.assertIn("tl.sigmoid", code)
+
+    def _patch_multi_output_external_add(self, boxes):
+        """Lower aten.add.Tensor to an external template with a
+        MultiOutputLayout whose outputs come from build_multi_outputs, as
+        Helion's kernels do under torch.compile. The kernel allocates and
+        returns its output, and the boxes build_multi_outputs returns are
+        appended to ``boxes``."""
+        import torch._inductor.ir as ir
+        from torch._inductor.utils import Placeholder
+
+        source = (
+            "import triton\n"
+            "import triton.language as tl\n"
+            "import torch\n"
+            "\n"
+            "@triton.jit\n"
+            "def _mock_multi_output_add(A, B, OUT, numel, XBLOCK: tl.constexpr):\n"
+            "    xindex = tl.program_id(0) * XBLOCK + tl.arange(0, XBLOCK)\n"
+            "    xmask = xindex < numel\n"
+            "    a = tl.load(A + xindex, mask=xmask)\n"
+            "    b = tl.load(B + xindex, mask=xmask)\n"
+            "    tl.store(OUT + xindex, a + b, mask=xmask)\n"
+            "\n"
+            "def {kernel_name}(A, B):\n"
+            "    out = torch.empty_like(A)\n"
+            "    numel = A.numel()\n"
+            "    grid = (triton.cdiv(numel, 128),)\n"
+            "    _mock_multi_output_add[grid](A, B, out, numel, XBLOCK=128)\n"
+            "    return (out,)\n"
+        )
+
+        def render(tb, kernel):
+            kernel._setup_fusion_hooks()
+            kernel._call_args = [inp.get_name() for inp in tb.inputs]
+            return PartialRender(
+                source.format(kernel_name=str(Placeholder.KERNEL_NAME)),
+                kernel.render_hooks,
+            )
+
+        class MultiOutputTemplateBuffer(MockExternalTemplateBuffer):
+            # The kernel allocates and returns its outputs; the template
+            # buffer itself holds no data.
+            def should_allocate(self):
+                return False
+
+            def get_size(self):
+                return next(iter(self._multi_output_children.values())).get_size()
+
+        def add_override(a, b, alpha=None):
+            a = ir.ExternKernel.require_contiguous(ir.ExternKernel.realize_input(a))
+            b = ir.ExternKernel.require_contiguous(ir.ExternKernel.realize_input(b))
+            tb = MultiOutputTemplateBuffer(
+                ir.MultiOutputLayout(device=a.get_device()), [a, b], render
+            )
+            out = V.graph.current_node.meta["val"]
+            # The same tensor listed twice is one output with one box.
+            first, second = ir.TemplateBuffer.build_multi_outputs(tb, (out, out))
+            boxes.extend((first, second))
+            return first
+
+        return patch_lowering(
+            {
+                torch.ops.aten.add.Tensor: (
+                    add_override,
+                    True,
+                    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+                    False,
+                )
+            }
+        )
+
+    def _check_multi_output_boxes(self, boxes):
+        import torch._inductor.ir as ir
+
+        self.assertEqual(len(boxes), 2)
+        self.assertIs(boxes[0], boxes[1])
+        self.assertIsInstance(boxes[0], ir.TensorBox)
+        self.assertIsInstance(boxes[0].data, ir.StorageBox)
+        self.assertIsInstance(boxes[0].data.data, ir.MultiOutput)
+
+    @requires_gpu()
+    @requires_triton()
+    @config.patch(cuda_backend="triton")
+    @unittest.skipIf(TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959")
+    def test_external_multi_output_template_output_returned_and_reused(self):
+        """A multi-output template's output that the graph returns and also
+        uses again lowers. GraphLowering.run_node reads result.data.data for
+        such a node, which failed on a bare TensorBox(MultiOutput) with
+        "'MultiOutput' object has no attribute 'data'"."""
+        boxes = []
+        with self._patch_multi_output_external_add(boxes):
+
+            @torch.compile
+            def f(a, b):
+                out = a + b
+                return out, out * 2
+
+            a = torch.randn(32, device=GPU_TYPE)
+            b = torch.randn(32, device=GPU_TYPE)
+            (out, doubled), (code,) = run_and_get_code(f, a, b)
+
+        torch.testing.assert_close(out, a + b)
+        torch.testing.assert_close(doubled, (a + b) * 2)
+        self.assertIn("_mock_multi_output_add", code)
+        # The template's kernel and Inductor's kernel for out * 2.
+        self.assertEqual(code.count("@triton.jit"), 2)
+        self._check_multi_output_boxes(boxes)
+
+    @requires_gpu()
+    @requires_triton()
+    @config.patch(cuda_backend="triton")
+    @unittest.skipIf(TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959")
+    def test_external_multi_output_template_output_returned_directly(self):
+        """A multi-output template's output that the graph returns is the
+        template's own buffer. A bare TensorBox(MultiOutput) was not seen as
+        realized, so ExternKernel.realize_input copied it with an extra
+        pointwise kernel."""
+        boxes = []
+        with self._patch_multi_output_external_add(boxes):
+
+            @torch.compile
+            def f(a, b):
+                return a + b
+
+            a = torch.randn(32, device=GPU_TYPE)
+            b = torch.randn(32, device=GPU_TYPE)
+            out, (code,) = run_and_get_code(f, a, b)
+
+        torch.testing.assert_close(out, a + b)
+        self.assertIn("_mock_multi_output_add", code)
+        # The template's kernel and no copy kernel.
+        self.assertEqual(code.count("@triton.jit"), 1)
+        self._check_multi_output_boxes(boxes)
 
     @inductor_config.patch(
         {

@@ -420,7 +420,7 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
     return THPVariable_Wrap(outputs[0]);
   } else {
     PyObject* output_tuple = PyTuple_New(num_outputs);
-    for (int i = 0; i < num_outputs; ++i) {
+    for (const auto i : c10::irange(num_outputs)) {
       PyTuple_SetItem(output_tuple, i, THPVariable_Wrap(outputs[i]));
     }
     return output_tuple;
@@ -1012,7 +1012,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       segmentDict[total_size_s] = seg.size;
       segmentDict[allocated_size_s] = seg.allocated ? seg.size : 0;
       segmentDict[active_size_s] = seg.active ? seg.size : 0;
-      segmentDict[requested_size_s] = seg.size;
+      segmentDict[requested_size_s] = seg.active ? seg.requested_size : 0;
       segmentDict[stream_s] = int64_t(0);
       segmentDict[segment_type_s] = small_s;
       segmentDict[segment_pool_id] = seg.owner_private_pool_id;
@@ -1026,7 +1026,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       py::dict blockDict;
       blockDict[address_s] = seg.address;
       blockDict[size_s] = seg.size;
-      blockDict[requested_size_s] = seg.size;
+      blockDict[requested_size_s] = seg.requested_size;
       blockDict[state_s] =
           (seg.allocated ? active_allocated_s
                          : (seg.active ? active_pending_free_s : inactive_s));
@@ -1594,31 +1594,12 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     c10::cuda::CUDACachingAllocator::raw_delete(data_ptr);
   });
 
-  m.def(
-      "_set_storage_access_error_msg", [](const at::Tensor& t, std::string s) {
-        t.unsafeGetTensorImpl()
-            ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
-      });
-
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
   });
-
-  m.def(
-      "_tensors_data_ptrs_at_indices_equal",
-      [](py::list& tensors, py::list& data_ptrs, py::list& indices) {
-        for (auto index : indices) {
-          auto t = tensors[index].cast<at::Tensor>();
-          auto data_ptr = data_ptrs[index].cast<int64_t>();
-          if (reinterpret_cast<int64_t>(t.data_ptr()) != data_ptr) {
-            return false;
-          }
-        }
-        return true;
-      });
 
   m.def(
       "_construct_CUDA_Tensor_From_Storage_And_Metadata",

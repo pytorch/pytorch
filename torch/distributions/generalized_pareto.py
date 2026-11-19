@@ -76,12 +76,8 @@ class GeneralizedPareto(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         z = self._z(value)
-        eq_zero = torch.isclose(
-            self.concentration, torch.zeros_like(self.concentration)
-        )
-        safe_conc = torch.where(
-            eq_zero, torch.ones_like(self.concentration), self.concentration
-        )
+        eq_zero = torch.isclose(self.concentration, self.concentration.new_zeros(()))
+        safe_conc = torch.where(eq_zero, 1, self.concentration)
         y = 1 / safe_conc + torch.ones_like(z)
         where_nonzero = torch.where(y == 0, y, y * torch.log1p(safe_conc * z))
         log_scale = (
@@ -93,12 +89,8 @@ class GeneralizedPareto(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         z = self._z(value)
-        eq_zero = torch.isclose(
-            self.concentration, torch.zeros_like(self.concentration)
-        )
-        safe_conc = torch.where(
-            eq_zero, torch.ones_like(self.concentration), self.concentration
-        )
+        eq_zero = torch.isclose(self.concentration, self.concentration.new_zeros(()))
+        safe_conc = torch.where(eq_zero, 1, self.concentration)
         where_nonzero = -torch.log1p(safe_conc * z) / safe_conc
         return torch.where(eq_zero, -z, where_nonzero)
 
@@ -113,7 +105,7 @@ class GeneralizedPareto(Distribution):
         scale = self.scale
         concentration = self.concentration
         eq_zero = torch.isclose(concentration, torch.zeros_like(concentration))
-        safe_conc = torch.where(eq_zero, torch.ones_like(concentration), concentration)
+        safe_conc = torch.where(eq_zero, 1, concentration)
         logu = torch.log1p(-value)
         where_nonzero = loc + scale / safe_conc * torch.expm1(-safe_conc * logu)
         where_zero = loc - scale * logu

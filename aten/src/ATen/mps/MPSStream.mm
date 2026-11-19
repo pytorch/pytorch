@@ -14,6 +14,16 @@
 @property(readwrite, atomic) BOOL enableCommitAndContinue;
 @end
 
+@interface MPSStreamCommandBuffer : MPSCommandBuffer
+@property(nonatomic) std::function<void()> willCommitAndContinue;
+@end
+@implementation MPSStreamCommandBuffer
+- (void)commitAndContinue {
+  _willCommitAndContinue();
+  [super commitAndContinue];
+}
+@end
+
 namespace at::mps {
 namespace {
 // Returns true if the command buffer failed to execute (e.g. was aborted by the driver)
@@ -34,6 +44,7 @@ bool commandBufferFailed(id<MTLCommandBuffer> cb, bool& is_oom, int32_t& code, s
 //-----------------------------------------------------------------
 
 MPSStream::MPSStream(Stream stream) : _stream(stream) {
+  _queryEvent = [MPSDevice::getInstance()->device() newSharedEvent];
   _commandQueue = [MPSDevice::getInstance()->device() newCommandQueue];
   TORCH_CHECK(_stream.device_type() == DeviceType::MPS);
   _serialQueue = dispatch_queue_create("metal gpu stream", nullptr);
@@ -56,6 +67,8 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
 }
 
 MPSStream::~MPSStream() {
+  [_queryEvent release];
+  _queryEvent = nil;
   [_commandQueue release];
   _commandQueue = nil;
   [_executionDescriptor release];
@@ -70,9 +83,10 @@ MPSStream::~MPSStream() {
 
 MPSCommandBuffer* MPSStream::commandBuffer() {
   if (!_commandBuffer) {
-    _commandBuffer = [MPSCommandBuffer commandBufferFromCommandQueue:_commandQueue].retain;
+    auto cb = [[MPSStreamCommandBuffer alloc] initWithCommandBuffer:[_commandQueue commandBuffer]];
+    cb.willCommitAndContinue = [this] { addErrorHandler(); };
+    _commandBuffer = cb;
   }
-
   return _commandBuffer;
 }
 
@@ -85,6 +99,7 @@ id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
     _commandEncoder = [commandBuffer() computeCommandEncoder].retain;
   }
   ++_kernelsSinceCommit;
+  markWorkEncoded();
 
   return _commandEncoder;
 }
@@ -131,7 +146,6 @@ void MPSStream::synchronize(SyncType syncType) {
 void MPSStream::commit() {
   _kernelsSinceCommit = 0;
   if (_enableCommitAndContinue) {
-    addErrorHandler();
     [commandBuffer() commitAndContinue];
   } else {
     flush();
@@ -165,12 +179,12 @@ void MPSStream::commitAndWait() {
     _commandBuffer = nil;
     checkLastError();
   }
+  _hasWorkSinceQuerySignal = false;
 }
 
 void MPSStream::commitAndContinue() {
   assert(_commandBuffer);
   _kernelsSinceCommit = 0;
-  addErrorHandler();
   [_commandBuffer commitAndContinue];
 }
 
@@ -229,6 +243,42 @@ void MPSStream::addCompletedHandler(MTLCommandBufferHandler block) {
   });
 }
 
+bool MPSStream::query() {
+  // Metal has no built-in way to check if there is any unfinished enqueued
+  // work. The strategy here is to enqueue an event, called a "query event". If
+  // the query event ever finishes before any other work has been enqueued, then
+  // we know that all enqueued work has finished.
+
+  __block bool done;
+  dispatch_sync_with_rethrow(_serialQueue, ^() {
+    @autoreleasepool {
+      if (encodeQuerySignalIfNeeded()) {
+        // Commit now because `query` must be able to be called in a loop that
+        // eventually finishes.
+        synchronize(SyncType::COMMIT);
+      }
+      // If all the enqueued query events have signaled then all the work
+      // enqueued before the event has finished.
+      done = _queryEvent.signaledValue >= _querySignalCounter;
+    }
+  });
+  return done;
+}
+
+bool MPSStream::encodeQuerySignalIfNeeded() {
+  // `_hasWorkSinceQuerySignal` is set wherever work is encoded (see
+  // `markWorkEncoded`). So if it is false, no new work has been enqueued.
+  if (!_hasWorkSinceQuerySignal) {
+    return false;
+  }
+  endKernelCoalescing();
+  [commandBuffer() encodeSignalEvent:_queryEvent value:++_querySignalCounter];
+  // Reset this flag since the newly encoded event marks the end of all
+  // previously encoded work.
+  _hasWorkSinceQuerySignal = false;
+  return true;
+}
+
 void MPSStream::copy(id<MTLBuffer> srcBuffer,
                      id<MTLBuffer> dstBuffer,
                      size_t length,
@@ -240,6 +290,7 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
     @autoreleasepool {
       endKernelCoalescing();
       id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
+      markWorkEncoded();
 
       // For some reason copyFromBuffer for 4Gb fails without returning an error
       // See https://github.com/pytorch/pytorch/issues/124335
@@ -302,6 +353,7 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
                    targetOperations:nil
                   resultsDictionary:results
                 executionDescriptor:_executionDescriptor];
+    markWorkEncoded();
 
     SyncType _syncType = syncType;
     // if commitAndContinue is disabled, we need to always commit manually after encoding
