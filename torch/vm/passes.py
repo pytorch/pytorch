@@ -109,14 +109,16 @@ class Graphs(BuiltinPass):
             graph.
         max_variants: how many combinations of inputs (shapes, dtypes, modules,
             modes) a region is compiled for before further ones run its
-            instructions as they are.
+            instructions as they are. Combinations that trace to the same
+            graph, as the layers of a model do when a region is called with one
+            after the other, share what the backend made of it.
     """
 
     engine: ClassVar[str] = "graphs"
 
     backend: str | Callable[..., Any] = "inductor"
     min_ops: int = 4
-    max_variants: int = 8
+    max_variants: int = 32
 
 
 @dataclasses.dataclass(frozen=True, repr=False)
