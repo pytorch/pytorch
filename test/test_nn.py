@@ -49,7 +49,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfMiopen, skipCUDAIfNoCudnn, skipCUDAIfNotRocm, largeMPSBufferTest, skipMPS, \
-    onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
+    onlyNativeDeviceTypes, deviceCountAtLeast, skipXPUIf, largeTensorTest, expectedFailureMeta, \
     expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric, toleranceOverride, tol
 from torch.testing import make_tensor
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
@@ -7844,7 +7844,10 @@ class TestNNDeviceType(NNTestCase):
     # (100, 256), and tall 32x32 weight and bias grad tiles with a column tail (300, 33). Every dtype accumulates in
     # float32, so float16 against a float32 CPU reference covers the kernels.
     @onlyAccelerator
-    @parametrize_test("shape", [(2, 20001), (2, 4097), (100, 256), (300, 33)])
+    @parametrize_test("shape", [
+        subtest((2, 20001), decorators=[skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6310")]),
+        (2, 4097), (100, 256), (300, 33),
+    ])
     def test_layer_norm_backward_shapes(self, device, shape):
         normalized_shape = shape[-1:]
         args = [torch.randn(s, dtype=torch.half) for s in (shape, normalized_shape, normalized_shape)]
@@ -9579,7 +9582,7 @@ class TestNNDeviceType(NNTestCase):
         out_cpu.backward(grad_cpu)
         self.assertEqual(x.grad.cpu(), x_cpu.grad)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.double, torch.float, torch.half, torch.bfloat16)
     # Below double, the device computes source coordinates in float and the
     # reference in double. The fp32 error is the coordinate rounding (up to ~3e-5 at large_plane)
@@ -9878,6 +9881,10 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # double device type
     @onlyNativeDeviceTypes
     @decorateIf(
+        skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6206"),
+        lambda p: torch.device(p['device']).type == 'xpu' and p['mode'] != 'lanczos',
+    )
+    @decorateIf(
         unittest.skip('Lanczos mode is only supported on CPU'),
         lambda p: p['mode'] == 'lanczos' and torch.device(p['device']).type == 'cuda',
     )
@@ -9894,7 +9901,8 @@ class TestNNDeviceType(NNTestCase):
             device, antialias, align_corners, mode, memory_format
         )
 
-    @onlyCUDA
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6318")
     @skipIfRocm
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
@@ -15973,7 +15981,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(res_cpu, res_device, exact_dtype=False)
         self.assertEqual(grad_cpu, grad_device)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float, torch.double)
     def test_CTCLoss_max_threads_launch_bounds(self, device, dtype):
         # Exercises maximum thread block sizes (768 for double, 1024 for float)
@@ -16021,7 +16029,7 @@ class TestNNDeviceType(NNTestCase):
         res_cpu = torch.nn.functional.ctc_loss(inp.cpu(), target, input_lengths, target_lengths, reduction='none')
         self.assertEqual(res_cpu, res_gpu, atol=1e-3, rtol=0)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float, torch.double)
     @parametrize_test("case", [
         subtest(((40, 5, 4), [5, 8, 16, 12, 12], [40] * 5, False, False, False), name="small_path"),
@@ -18019,7 +18027,7 @@ if __name__ == '__main__':
             self.assertEqual(grad.shape, torch.Size(normalized_shape), f"{name}.grad")
             self.assertEqual(grad.cpu(), ref, f"{name}.grad", atol=1e-3, rtol=1e-3)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize_test("op", ["layer_norm", "rms_norm"])
     def test_layer_norm_gamma_beta_backward_huge_M_cancellation(self, device, dtype, op):
@@ -18689,7 +18697,7 @@ instantiate_parametrized_tests(TestFusedRMSNormOverrideNumerics)
 
 instantiate_device_type_tests(TestNNCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(TestNNCUDA, globals(), only_for="cuda")
-instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)
+instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True, allow_xpu=True)
 instantiate_parametrized_tests(TestNN)
 
 # pytest-xdist workers import this file instead of running it as __main__.
