@@ -1691,7 +1691,15 @@ int32_t tensorInfo(PyObject* obj, TcfgTensorInfo* out) {
     out->strides = nullptr;
     out->storage_offset = 0;
   }
-  out->data = impl->has_storage() ? impl->unsafe_storage().data() : nullptr;
+  // Where the data is, not the data. Asked for its data, the storage of a
+  // tensor that shares its memory with a lazy clone (every tensor a graph
+  // has built in) first looks at the stream it would be read on, if it is
+  // on a GPU: that is paid per tensor, on every call.
+  out->data = nullptr;
+  if (impl->has_storage()) {
+    auto* storage = impl->unsafe_storage().unsafeGetStorageImpl();
+    out->data = storage->_mutable_data_ptr_no_checks().get();
+  }
   const auto& version = impl->version_counter();
   out->version =
       version.enabled() ? version.current_version() : TCFG_NO_VERSION;
