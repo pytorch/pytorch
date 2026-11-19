@@ -190,6 +190,16 @@ class TestDatasetRandomSplit(TestCase):
         with self.assertRaises(ValueError):
             random_split([1, 2, 3, 4], [1, 2])
 
+    def test_negative_lengths(self):
+        for lengths in ([2, -1, 3], [-1, 5]):
+            with self.subTest(lengths=lengths):
+                with self.assertRaises(ValueError):
+                    random_split(range(4), lengths)
+
+    def test_zero_length_splits(self):
+        splits = random_split(range(4), [0, 4])
+        self.assertEqual([len(split) for split in splits], [0, 4])
+
     def test_splits_have_correct_size(self):
         splits = random_split([1, 2, 3, 4, 5, 6], [2, 4])
         self.assertEqual(len(splits), 2)

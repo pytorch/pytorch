@@ -476,6 +476,9 @@ def random_split(
         lengths (sequence): lengths or fractions of splits to be produced
         generator (Generator): Generator used for the random permutation.
     """
+    if any(length < 0 for length in lengths):
+        raise ValueError("Split lengths must be non-negative")
+
     if math.isclose(sum(lengths), 1) and sum(lengths) <= 1:
         subset_lengths: list[int] = []
         for i, frac in enumerate(lengths):
