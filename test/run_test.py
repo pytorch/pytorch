@@ -49,6 +49,10 @@ from torch.testing._internal.common_utils import (
 
 # using tools/ to optimize test run.
 REPO_ROOT = Path(__file__).resolve().parent.parent
+CPP_FAKETENSOR_TESTS = REPO_ROOT / ".ci/pytorch/cpp_faketensor_tests.json"
+STAGED_CPP_FAKETENSOR = (
+    os.getenv("CPP_FAKETENSOR") == "1" and CPP_FAKETENSOR_TESTS.exists()
+)
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.import_test_stats import (
@@ -66,10 +70,15 @@ from tools.testing.discover_tests import (
 )
 from tools.testing.do_target_determination_for_s3 import import_results
 from tools.testing.target_determination.gen_artifact import gen_ci_artifact
+from tools.testing.target_determination.heuristics.interface import TestPrioritizations
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
 )
-from tools.testing.target_determination.heuristics.utils import get_pr_number
+from tools.testing.target_determination.heuristics.utils import (
+    get_pr_number,
+    td_enabled_default,
+)
+from tools.testing.target_determination.scorer import scorer_cut, TD_RESULTS_PATH
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
     calculate_shards,
@@ -126,10 +135,12 @@ NUM_PYTEST_RERUNS = int(os.getenv("PYTORCH_NUM_PYTEST_RERUNS", "2"))
 NUM_PROCESS_RETRIES = int(os.getenv("PYTORCH_NUM_PROCESS_RETRIES", "2"))
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
-# The periodic config hosts slow-gated tests (test.sh sets
-# PYTORCH_TEST_WITH_SLOW for it), so it gets slow's per-file timeout budget.
+# The periodic configs host slow-gated tests (test.sh sets
+# PYTORCH_TEST_WITH_SLOW for them), so they get slow's per-file timeout budget.
 IS_SLOW = (
-    "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT or TEST_CONFIG == "periodic"
+    "slow" in TEST_CONFIG
+    or "slow" in BUILD_ENVIRONMENT
+    or TEST_CONFIG in ("periodic", "periodic_daily")
 )
 IS_S390X = platform.machine() == "s390x"
 
@@ -262,10 +273,6 @@ S390X_BLOCKLIST = [
     # these tests fail when mkldnn is not available
     "inductor/test_custom_post_grad_passes",
     "inductor/test_mkldnn_pattern_matcher",
-    "test_metal",
-    # lacks quantization support
-    "onnx/test_models_quantized_onnxruntime",
-    "onnx/test_pytorch_onnx_onnxruntime",
     # sysctl -n hw.memsize is not available
     "test_mps",
     # https://github.com/pytorch/pytorch/issues/102078
@@ -288,7 +295,6 @@ S390X_BLOCKLIST = [
     "fx/test_z3_gradual_types",
     "test_proxy_tensor",
     # depends on torchvision
-    "onnx/test_utility_funs",
     # crash on s390x that needs investigation
     "test_schema_check",
     "test_meta",
@@ -297,8 +303,64 @@ S390X_BLOCKLIST = [
 ]
 
 XPU_BLOCKLIST = [
-    "test_autograd",
-    "profiler/test_memory_profiler",
+    # Not applicable to XPU, tracked by
+    # https://github.com/intel/torch-xpu-ops/issues/5205
+    "distributed/rpc/cuda/test_tensorpipe_agent",
+    "distributed/rpc/test_faulty_agent",
+    "distributed/rpc/test_share_memory",
+    "distributed/rpc/test_tensorpipe_agent",
+    "distributed/test_c10d_fault_tolerance",
+    "distributed/test_c10d_gloo",
+    "distributed/test_c10d_nccl2",
+    "distributed/test_c10d_spawn_gloo",
+    "distributed/test_c10d_spawn_ucc",
+    "distributed/test_c10d_window",
+    "distributed/test_ce_colls",
+    "distributed/test_cupy_as_tensor",
+    "distributed/test_nccl",
+    "distributed/test_nvshmem",
+    "distributed/test_p2p_ipc",
+    "distributed/test_shmem_triton",
+    "distributed/test_token_switch",
+    "dynamo/test_cudagraphs",
+    "dynamo/test_cudagraphs_expandable_segments",
+    "functorch/test_control_flow_cuda_initialization",
+    "inductor/test_ck_backend",
+    "inductor/test_cudagraph_trees",
+    "inductor/test_cudagraph_trees_expandable_segments",
+    "inductor/test_custom_op_autotune",
+    "inductor/test_cutedsl_grouped_mm",
+    "inductor/test_cutedsl_template",
+    "inductor/test_cutlass_backend",
+    "inductor/test_cutlass_evt",
+    "inductor/test_cutlass_fallback",
+    "inductor/test_flex_gemm",
+    "inductor/test_halide",
+    "inductor/test_inductor_annotations",
+    "inductor/test_nv_universal_gemm",
+    "inductor/test_origami",
+    "inductor/test_pallas",
+    "nn/attention/test_fa4",
+    "python_native/test_quack_vendor",
+    "python_native/test_topk_cutedsl",
+    "quantization/core/test_quantized_tensor",
+    "quantization/core/test_workflow_module",
+    "quantization/core/test_workflow_ops",
+    "quantization/fx/test_numeric_suite_fx",
+    "test_cpp_extensions_mtia_backend",
+    "test_cpp_extensions_stream_and_event",
+    "test_cuda",
+    "test_cuda_compatibility",
+    "test_cuda_expandable_segments",
+    "test_cuda_graph_debug",
+    "test_cuda_graph_utils",
+    "test_cuda_nvml_based_avail",
+    "test_cuda_primary_ctx",
+    "test_cuda_sanitizer",
+    "test_functionalization_of_rng_ops",
+    "test_jiterator",
+    "test_sparse_semi_structured",
+    "test_stateless_rng",
 ]
 
 XPU_TEST = [
@@ -313,12 +375,10 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_stream_and_event",
     "test_cpp_extensions_mtia_backend",
     "test_jit_disabled",
-    "test_mobile_optimizer",
     "test_multiprocessing",
     "test_multiprocessing_spawn",
     "test_namedtuple_return_api",
     "test_overrides",
-    "test_show_pickle",
     "test_tensorexpr",
     "test_cuda_primary_ctx",
     "test_gpu_trace",
@@ -336,7 +396,6 @@ RUN_PARALLEL_BLOCKLIST = [
 CI_SERIAL_LIST = [
     "test_nn",
     "test_fake_tensor",
-    "test_cpp_api_parity",
     "test_reductions",
     "test_fx_backends",
     "test_cpp_extensions_jit",
@@ -377,15 +436,6 @@ XDIST_SERIAL_CPU_LIST = [
     "test_torch",
 ]
 XDIST_SERIAL_FILES = XDIST_SERIAL_LIST + XDIST_SERIAL_CPU_LIST
-# A subset of onnx tests that cannot run in parallel due to high memory usage.
-ONNX_SERIAL_LIST = [
-    "onnx/test_models",
-    "onnx/test_models_quantized_onnxruntime",
-    "onnx/test_models_onnxruntime",
-    "onnx/test_custom_ops",
-    "onnx/test_utility_funs",
-]
-
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
 CORE_TEST_LIST = [
     "test_autograd",
@@ -395,7 +445,6 @@ CORE_TEST_LIST = [
     "test_ops",
     "test_ops_gradients",
     "test_ops_fwd_gradients",
-    "test_ops_jit",
     "test_torch",
 ]
 
@@ -451,12 +500,6 @@ or `conda install ninja`. Alternatively, disable said tests with
 """
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
-
-JIT_EXECUTOR_TESTS = [
-    "test_jit_profiling",
-    "test_jit_legacy",
-    "test_jit_fuser_legacy",
-]
 
 INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
@@ -560,10 +603,9 @@ def _torchci_report_args(
 
 def _torchci_reports_default() -> str | None:
     # Every pytorch/pytorch CI job writes reports by default; upload-test-artifacts
-    # uploads this folder. Not XPU builds until their CI image has pyzes, which lets
-    # the writer count XPU devices with Level Zero Sysman instead of the runtime.
+    # uploads this folder.
     in_pytorch_ci = IS_CI and os.environ.get("GITHUB_REPOSITORY") == "pytorch/pytorch"
-    if not in_pytorch_ci or torch.version.xpu:
+    if not in_pytorch_ci:
         return None
     return str(REPO_ROOT / "test/torchci-reports")
 
@@ -596,6 +638,10 @@ def run_test(
 
     is_distributed_test = test_file.startswith(DISTRIBUTED_TEST_PREFIX)
     is_cpp_test = _is_cpp_test(test_file)
+    if STAGED_CPP_FAKETENSOR:
+        if not options.pytest:
+            raise RuntimeError("Staged C++ FakeTensor tests require pytest")
+        unittest_args.extend(["--cpp-faketensor-tests", str(CPP_FAKETENSOR_TESTS)])
     # NB: Rerun disabled tests depends on pytest-flakefinder and it doesn't work with
     # pytest-cpp atm. We also don't have support to disable C++ test yet, so it's ok
     # to just return successfully here
@@ -1125,7 +1171,6 @@ def run_gloo_test(test_module, test_directory, options):
         (
             "ProcessGroupGlooTest",
             "ProcessGroupGlooLazyInitTest",
-            "ProcessGroupGlooFRTest",
             "DistributedDataParallelTest",
         ),
     )
@@ -1656,6 +1701,7 @@ CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": run_test_with_subprocess,
     "test_cuda_nvml_based_avail": run_test_with_subprocess,
     "test_gpu_trace": run_test_with_subprocess,
+    "profiler/test_kineto_registration": run_test_with_subprocess,
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
@@ -1834,7 +1880,7 @@ def parse_args():
         type=os.path.abspath,
         default=_torchci_reports_default(),
         metavar="DIR",
-        help="write test run reports to DIR (default in pytorch/pytorch CI, except on XPU builds: test/torchci-reports)",
+        help="write test run reports to DIR (default in pytorch/pytorch CI: test/torchci-reports)",
     )
     parser.add_argument(
         "-i",
@@ -1893,20 +1939,17 @@ def parse_args():
         help="Set a timeout based on the test times json file.  Only works if there are test times available",
         default=IS_CI and not strtobool(os.environ.get("NO_TEST_TIMEOUT", "False")),
     )
-    GITHUB_WORKFLOW = os.environ.get("GITHUB_WORKFLOW", "slow")
     parser.add_argument(
         "--enable-td",
         action="store_true",
         help="Enables removing tests based on TD",
-        default=IS_CI
-        and get_pr_number() is not None
-        and not strtobool(os.environ.get("NO_TD", "False"))
-        and not IS_MACOS
-        and "xpu" not in BUILD_ENVIRONMENT
-        and "onnx" not in BUILD_ENVIRONMENT
-        and (
-            GITHUB_WORKFLOW in ("trunk", "pull")
-            or GITHUB_WORKFLOW.startswith(("rocm-", "periodic-rocm-"))
+        default=td_enabled_default(
+            build_environment=BUILD_ENVIRONMENT,
+            workflow=os.environ.get("GITHUB_WORKFLOW", "slow"),
+            is_ci=IS_CI,
+            pr_number=get_pr_number() if IS_CI else None,
+            macos=IS_MACOS,
+            no_td=strtobool(os.environ.get("NO_TD", "False")),
         ),
     )
     parser.add_argument(
@@ -1923,11 +1966,6 @@ def parse_args():
         choices=range(1, 65),
         metavar="N",
         help="run non-serial tests with N pytest-xdist workers",
-    )
-    parser.add_argument(
-        "--exclude-jit-executor",
-        action="store_true",
-        help="exclude tests that are run for a specific jit config",
     )
     parser.add_argument(
         "--exclude-torch-export-tests",
@@ -2019,14 +2057,13 @@ def must_serial(file: str | ShardedTest) -> bool:
         file = file.name
     return (
         os.getenv("PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL", "0") == "1"
+        or STAGED_CPP_FAKETENSOR
         or DISTRIBUTED_TEST_PREFIX in os.getenv("TEST_CONFIG", "")
         or DISTRIBUTED_TEST_PREFIX in file
         or file in CUSTOM_HANDLERS
         or file in RUN_PARALLEL_BLOCKLIST
         or file in CI_SERIAL_LIST
         or file in XDIST_SERIAL_FILES
-        or file in JIT_EXECUTOR_TESTS
-        or file in ONNX_SERIAL_LIST
         or NUM_PROCS == 1
     )
 
@@ -2140,10 +2177,10 @@ def get_selected_tests(options) -> list[str]:
         selected_tests = [
             "test_ops",
             "test_mps",
-            "test_metal",
             "test_modules",
             "test_linalg",
             "test_scaled_matmul_cuda",
+            "test_stream",
             "nn/test_convolution",
             "nn/test_dropout",
             "nn/test_pooling",
@@ -2175,9 +2212,6 @@ def get_selected_tests(options) -> list[str]:
         options.exclude.extend(onnx_tests)
 
     # process exclusion
-    if options.exclude_jit_executor:
-        options.exclude.extend(JIT_EXECUTOR_TESTS)
-
     if options.exclude_distributed_tests:
         options.exclude.extend(DISTRIBUTED_TESTS)
 
@@ -2317,6 +2351,13 @@ def get_selected_tests(options) -> list[str]:
     return selected_tests
 
 
+def get_test_times_job_key() -> str | None:
+    job_name = os.environ.get("JOB_NAME")
+    if job_name is None or job_name == "":
+        return os.environ.get("BUILD_ENVIRONMENT")
+    return get_job_base_name(job_name)
+
+
 def load_test_times_from_file(file: str) -> dict[str, Any]:
     # Load previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
@@ -2330,12 +2371,7 @@ def load_test_times_from_file(file: str) -> dict[str, Any]:
         test_times_file = cast(dict[str, Any], json.load(f))
     raw_job_name = os.environ.get("JOB_NAME")
     build_env = os.environ.get("BUILD_ENVIRONMENT")
-    job_name = raw_job_name
-    if job_name is None or job_name == "":
-        # If job name isn't available, use build environment as a backup
-        job_name = build_env
-    else:
-        job_name = get_job_base_name(job_name)
+    job_name = get_test_times_job_key()
     test_config = os.environ.get("TEST_CONFIG")
     print_to_stderr(f"JOB_NAME={raw_job_name}")
     print_to_stderr(f"BUILD_ENVIRONMENT={build_env}")
@@ -2404,7 +2440,7 @@ def do_sharding(
         test_class_times=test_class_times,
         must_serial=(lambda _: True) if uses_xdist else must_serial,
         sort_by_time=sort_by_time,
-        allow_pytest_sharding=not uses_xdist,
+        allow_pytest_sharding=not (uses_xdist or STAGED_CPP_FAKETENSOR),
         xdist_workers=lambda file: serial_file_xdist_workers(
             file, options, NUM_PROCS_FOR_SHARDING_CALC
         ),
@@ -2477,7 +2513,10 @@ def run_tests(
         "multigpu": "multigpu",
         "not-multigpu": "not multigpu",
     }.get(getattr(options, "multigpu_filter", None))
-    periodic_marker = "periodic" if TEST_CONFIG == "periodic" else None
+    periodic_marker = {
+        "periodic": "periodic and not periodic_daily",
+        "periodic_daily": "periodic_daily",
+    }.get(TEST_CONFIG)
 
     # Orthogonal min-GPU threshold on the `multigpu` tests, applied by a pytest
     # plugin (see test/conftest.py). 0 disables it, so it is a no-op unless a
@@ -2546,6 +2585,7 @@ def run_tests(
             raise RuntimeError(failure.message + keep_going_message)
 
     pool = None
+    serial_report_dir = None
     try:
         for test in selected_tests_serial:
             workers = serial_file_xdist_workers(test, options)
@@ -2561,10 +2601,6 @@ def run_tests(
             finally:
                 del os.environ["NUM_PARALLEL_PROCS"]
             finish(failure)
-
-        # Run tests marked as serial first
-        for test in selected_tests_parallel:
-            finish(run_module(test, "serial"))
 
         # This is used later to constrain memory per proc on the GPU. On ROCm
         # the number of procs is the number of GPUs, so we don't need to do this.
@@ -2588,10 +2624,22 @@ def run_tests(
             ):
                 pool.terminate()
 
-        for test in selected_tests_parallel:
+        # Each parallel pass reports how many @serialTest tests it left out (see
+        # SerialReportPlugin in conftest.py), so the serial passes below run only
+        # where needed instead of starting a process per test file.
+        serial_report_dir = tempfile.mkdtemp(prefix="serial-report-")
+        serial_reports = [
+            os.path.join(serial_report_dir, str(i))
+            for i in range(len(selected_tests_parallel))
+        ]
+        failures_before_pool = len(failures)
+        for test, serial_report in zip(selected_tests_parallel, serial_reports):
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
+                options_clone.additional_args.append(
+                    f"--serial-report-file={serial_report}"
+                )
             options_clone.additional_args.extend(marker_args("not serial"))
             pool.apply_async(
                 run_test_module,
@@ -2602,12 +2650,33 @@ def run_tests(
         pool.join()
         del os.environ["NUM_PARALLEL_PROCS"]
 
+        if (
+            len(failures) == failures_before_pool
+            or options.continue_through_error
+            or RERUN_DISABLED_TESTS
+        ):
+            for test, serial_report in zip(selected_tests_parallel, serial_reports):
+                if has_serial_tests(serial_report):
+                    finish(run_module(test, "serial"))
+
     finally:
         if pool:
             pool.terminate()
             pool.join()
+        if serial_report_dir:
+            shutil.rmtree(serial_report_dir, ignore_errors=True)
 
     return
+
+
+def has_serial_tests(serial_report: str) -> bool:
+    """Whether a parallel pass reported @serialTest tests in its shard. A missing
+    report (not run under pytest, or it failed before collection finished) counts
+    as yes, so a serial pass is never skipped without evidence."""
+    if not os.path.exists(serial_report):
+        return True
+    with open(serial_report) as f:
+        return any(int(line) > 0 for line in f if line.strip())
 
 
 def check_pip_packages() -> None:
@@ -2652,8 +2721,23 @@ def main():
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
+    if STAGED_CPP_FAKETENSOR:
+        options.enable_td = False
+        if num_shards != 1:
+            raise RuntimeError("Staged C++ FakeTensor tests require a single shard")
+        selectors = json.loads(CPP_FAKETENSOR_TESTS.read_text())["tests"]
+        files = {selector.split("::")[0].removesuffix(".py") for selector in selectors}
+        if unknown := files - set(TESTS):
+            raise RuntimeError(f"Unknown C++ FakeTensor test files: {sorted(unknown)}")
+        selected_tests = [test for test in selected_tests if test in files]
+        if not selected_tests:
+            raise RuntimeError("C++ FakeTensor selection contains no test files")
 
-    test_prioritizations = import_results()
+    test_prioritizations = (
+        TestPrioritizations(selected_tests, {})
+        if STAGED_CPP_FAKETENSOR
+        else import_results()
+    )
     if len(test_prioritizations.get_all_tests()) == 0:
         options.enable_td = False
     test_prioritizations.amend_tests(selected_tests)
@@ -2707,11 +2791,26 @@ def main():
         else "Running all tests"
     )
     include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
+    scorer_info = None
+    if options.enable_td:
+        include, exclude, scorer_info = scorer_cut(
+            TD_RESULTS_PATH,
+            include,
+            exclude,
+            test_file_times_dict,
+            get_test_times_job_key() or "",
+            TEST_CONFIG,
+        )
+        print_to_stderr(f"TD scorer cut: {json.dumps(scorer_info)}")
 
     test_batch = TestBatch("tests to run", include, False)
     test_batch_exclude = TestBatch("excluded", exclude, True)
     if IS_CI:
-        gen_ci_artifact([x.to_json() for x in include], [x.to_json() for x in exclude])
+        gen_ci_artifact(
+            [x.to_json() for x in include],
+            [x.to_json() for x in exclude],
+            scorer_info,
+        )
 
     print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)

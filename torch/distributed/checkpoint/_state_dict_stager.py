@@ -205,15 +205,17 @@ class StateDictStager:
         Returns:
             A CPU copy of the tensor with optimized storage
         """
-        # if data_ptr is not 0, we allocate a new storage below. so we can skip
-        # memory allocation by using [] for size.
-        y = x.new_empty([] if x.data_ptr() != 0 else x.size(), device="cpu")
+        # If x's storage holds data, we stage that storage below, so we can skip
+        # memory allocation by using [] for size. Wrapper subclasses have no
+        # storage data and get a full-size tensor instead.
+        copy_storage = type(x) is torch.Tensor or torch._C._has_storage_data(x)
+        y = x.new_empty([] if copy_storage else x.size(), device="cpu")
 
         # Store in memo dict early to handle recursive references
         d = id(x)
         memo[d] = y
 
-        if type(x) is torch.Tensor or x.data_ptr() != 0:
+        if copy_storage:
             # Get the untyped storage
             untyped_storage = x.untyped_storage()
             storage_id = id(untyped_storage)
