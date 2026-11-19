@@ -2143,8 +2143,8 @@ class TestPatternMatcher(TestCase):
         def fn(a, b):
             return torch.mm(a, b).float()
 
-        a = torch.randn(64, 32, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(32, 48, device=GPU_TYPE, dtype=torch.bfloat16)
+        a = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(1024, 2048, device=GPU_TYPE, dtype=torch.bfloat16)
         out = torch.compile(fn)(a, b)
         self.assertEqual(counters["inductor"]["mm_fp32_out_dtype"], 1)
         self.assertEqual(out, torch.mm(a, b, out_dtype=torch.float32))
@@ -2154,6 +2154,27 @@ class TestPatternMatcher(TestCase):
             out = torch.compile(fn)(a, b)
         self.assertEqual(counters["inductor"]["mm_fp32_out_dtype"], 0)
         self.assertEqual(out, fn(a, b))
+
+        # Memory-bound shapes keep the plain mm.
+        counters.clear()
+        torch._dynamo.reset()
+        torch.compile(fn)(a[:, :128], b[:128])
+        self.assertEqual(counters["inductor"]["mm_fp32_out_dtype"], 0)
+
+        # Huge K under max-autotune keeps the plain mm, since decompose-K is only
+        # offered without out_dtype.
+        a = torch.randn(1024, 32768, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(32768, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
+        for splits, expected in ((10, 0), (0, 1)):
+            counters.clear()
+            torch._dynamo.reset()
+            with inductor_config.patch(
+                max_autotune=True,
+                max_autotune_gemm_backends="ATEN",
+                **{"triton.num_decompose_k_splits": splits},
+            ):
+                torch.compile(fn)(a, b)
+            self.assertEqual(counters["inductor"]["mm_fp32_out_dtype"], expected)
 
     def test_unfuse_bias_addmm(self):
         args = [

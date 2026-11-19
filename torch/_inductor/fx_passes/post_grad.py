@@ -1293,7 +1293,22 @@ def mm_fp32_out_check(match: Match) -> bool:
     if not (isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor)):
         return False
     half = (torch.bfloat16, torch.float16)
-    return a.device.type == "cuda" and a.dtype in half and b.dtype == a.dtype
+    if not (a.device.type == "cuda" and a.dtype in half and b.dtype == a.dtype):
+        return False
+    (m, k), n = a.shape, b.shape[1]
+    # A memory-bound GEMM pays for the fp32 output it now has to write, while
+    # the upcast alone could fuse into its consumers.
+    if not all(statically_known_true(d >= 1024) for d in (m, n, k)):
+        return False
+    # tuned_mm offers decompose-K only without out_dtype, so keep the plain mm
+    # wherever decompose-K could be a candidate.
+    thr = config.triton.decompose_k_threshold
+    return (
+        not (config.max_autotune or config.max_autotune_gemm)
+        or config.triton.num_decompose_k_splits <= 0
+        or statically_known_true(k < thr * m)
+        or statically_known_true(k < thr * n)
+    )
 
 
 @register_graph_pattern(
