@@ -377,6 +377,37 @@ class TestGroupedPointwiseCat(TestCase):
         self.assertEqual(act_sin, fn_sin(*xs))
         self.assertEqual(code_sin.count(".run("), 10)
 
+    @requires_gpu()
+    def test_channels_last_conv_cat_preserves_layout(self):
+        def fn(x, w_out, *ws):
+            c = torch.cat([F.conv2d(x, w, padding=1) for w in ws], dim=1)
+            return F.conv2d(c, w_out, padding=1)
+
+        x = torch.randn(2, 8, 16, 16, device=GPU_TYPE, dtype=torch.float32)
+        ws = tuple(
+            torch.randn(8, 8, 3, 3, device=GPU_TYPE, dtype=torch.float32) * 0.1
+            for _ in range(10)
+        )
+        w_out = torch.randn(16, 80, 3, 3, device=GPU_TYPE, dtype=torch.float32) * 0.1
+        ref = fn(x, w_out, *ws)
+        with (
+            fresh_cache(),
+            inductor_config.patch(
+                layout_optimization=True,
+                force_layout_optimization=True,
+                grouped_pointwise_cat=True,
+            ),
+        ):
+            act, (code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True), x, w_out, *ws
+            )
+        self.assertEqual(act, ref, atol=1e-2, rtol=1e-2)
+        # ConcatKernel must preserve the channels-last output stride from the
+        # layout-optimized conv inputs rather than materializing a contiguous
+        # intermediate buffer and converting it afterwards.
+        self.assertIn("(2, 80, 16, 16), (20480, 1, 1280, 80)", code)
+        self.assertNotIn("(2, 80, 16, 16), (20480, 256, 16, 1)", code)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

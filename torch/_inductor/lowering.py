@@ -2719,6 +2719,14 @@ def cat(inputs, dim=0):
         unwrapped = data.unwrap_view() if isinstance(data, ir.BaseView) else data
         return isinstance(unwrapped, ir.StorageBox) and unwrapped.is_input_buffer()
 
+    def _is_channels_last_fixed_layout(x) -> bool:
+        if not ir.is_storage_and_layout(x):
+            return False
+        layout = x.get_layout()
+        return isinstance(
+            layout, ir.FixedLayout
+        ) and ir.Layout.is_channels_last_contiguous(layout.size, layout.stride)
+
     def any_input_has_multi_consumers() -> bool:
         current_node, input_nodes, cat_input_nodes = _get_cat_fx_args()
         if input_nodes is None:
@@ -2770,6 +2778,7 @@ def cat(inputs, dim=0):
                 should_lower_cat_input(inp)
                 and not can_fuse_reduction(inp, exclude)
                 and not has_ext
+                and not _is_channels_last_fixed_layout(inp)
             )
             if not eligible:
                 _flush_group()
