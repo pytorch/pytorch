@@ -93,6 +93,8 @@ pub struct BlockState {
     pub capture_attempts: Vec<u32>,
     pub respec_left: u32,
     pub profile_runs: u32,
+    /// How many profiling runs in a row ended in a raise.
+    pub raised: u32,
     pub next_version_id: u32,
     pub execs: u64,
     pub spec_execs: u64,
@@ -167,6 +169,8 @@ struct Trial {
     phase: u8,
     /// The value of PLAN_EPOCH the measurement started under.
     epoch: u32,
+    /// The value of ENTRY_CALLS when the callee was first measured.
+    born: u32,
     calls: u32,
     compiled_best: u64,
     compiled_samples: u8,
@@ -200,6 +204,7 @@ impl Trial {
         Trial {
             phase: TRIAL_WARMUP,
             epoch,
+            born: ENTRY_CALLS.load(Ordering::Relaxed) as u32,
             calls: 0,
             compiled_best: u64::MAX,
             compiled_samples: 0,
@@ -238,8 +243,16 @@ const TRIAL_CLEAR_SHIFT: u32 = 3;
 fn trial_calls(ns: u64, least: u32, most: u32) -> u32 {
     ((TRIAL_BUDGET_NS / ns.max(1)).min(most as u64) as u32).max(least)
 }
-/// A callee whose measurement never gets quiet enough stays compiled.
+/// A measurement that never gets quiet enough is over after this many calls.
 const TRIAL_MAX_CALLS: u32 = 400;
+/// How many calls there have been of the functions that were given to be
+/// compiled (not of what they call).
+static ENTRY_CALLS: AtomicU64 = AtomicU64::new(0);
+/// A measurement that is over within this many of them started while what
+/// is below it was still being compiled, and starts again: a callee of a
+/// loop is called `TRIAL_MAX_CALLS` times before the first call of the
+/// function it is in returns.
+const TRIAL_YOUNG_ENTRIES: u32 = 16;
 /// How much faster the interpreter has to be: 1/32, about 3%.
 const TRIAL_MARGIN_SHIFT: u32 = 5;
 
@@ -1129,6 +1142,10 @@ pub fn undefined() -> Obj {
         .as_ptr()
 }
 
+/// How many profiling runs of a block in a row may end in a raise before it
+/// is specialized from what they saw.
+const PROFILE_RAISES: u32 = 2;
+
 /// How many blocks on this thread are in their profiling run: code that
 /// decides when to compile something uses it to let the outermost block go
 /// first.
@@ -1531,6 +1548,7 @@ impl Compiled {
                 capture_attempts: vec![0; block.insts.len()],
                 respec_left: options.max_respecializations,
                 profile_runs: 0,
+                raised: 0,
                 next_version_id: 1,
                 execs: 0,
                 spec_execs: 0,
@@ -2448,6 +2466,7 @@ impl Compiled {
         if !self.options.demote {
             return call();
         }
+        ENTRY_CALLS.fetch_add(1, Ordering::Relaxed);
         let phase = self.settled.trial.get().phase;
         if phase == TRIAL_COMPILED {
             // The clock is read for a call only if something below the one
@@ -2539,6 +2558,17 @@ impl Compiled {
         result
     }
 
+    /// Calls of a callee that was handed to the interpreter stop finding
+    /// its compiled form.
+    unsafe fn forget_compiled(&self, func: Obj) {
+        if !func.is_null() {
+            let code = ffi::PyFunction_GetCode(func);
+            let globals = ffi::PyFunction_GetGlobals(func);
+            let recent = self.callees.recent.get_unchecked((code as usize >> 4) & (RECENT_CALLEES - 1));
+            recent.set((code as usize, globals as usize, DEMOTED));
+        }
+    }
+
     unsafe fn trial_sample(
         &self,
         compiled: *const Compiled,
@@ -2553,7 +2583,7 @@ impl Compiled {
         }
         let epoch = PLAN_EPOCH.load(Ordering::Relaxed);
         if trial.epoch != epoch {
-            trial = Trial::start(epoch);
+            trial = Trial { born: trial.born, ..Trial::start(epoch) };
         }
         trial.calls += 1;
         slot.set(trial);
@@ -2606,7 +2636,10 @@ impl Compiled {
         if trial.phase != TRIAL_SAMPLING {
             return result;
         }
-        if !result.is_null() {
+        // A call that raised is a sample like any other: a callee that
+        // always raises (a lookup that fails, and is caught) would otherwise
+        // never be decided, and nothing above it either.
+        if !result.is_null() || !ffi::PyErr_Occurred().is_null() {
             if as_compiled {
                 trial.compiled_best = trial.compiled_best.min(elapsed);
                 trial.compiled_samples += 1;
@@ -2635,16 +2668,23 @@ impl Compiled {
             trial.phase = TRIAL_COMPILED;
         } else if lost {
             trial.phase = TRIAL_DEMOTED;
-            if !func.is_null() {
-                // Calls stop finding the compiled form.
-                let code = ffi::PyFunction_GetCode(func);
-                let globals = ffi::PyFunction_GetGlobals(func);
-                let recent =
-                    self.callees.recent.get_unchecked((code as usize >> 4) & (RECENT_CALLEES - 1));
-                recent.set((code as usize, globals as usize, DEMOTED));
-            }
+            self.forget_compiled(func);
         } else if trial.calls >= TRIAL_MAX_CALLS {
-            trial.phase = TRIAL_COMPILED;
+            // Still open: something below was compiled or measured during
+            // every one of its calls.
+            let age = (ENTRY_CALLS.load(Ordering::Relaxed) as u32).wrapping_sub(trial.born);
+            let behind = seen(trial.compiled_samples, enough)
+                && trial.interpreted_best + margin < trial.compiled_best;
+            if age < TRIAL_YOUNG_ENTRIES {
+                trial = Trial { born: trial.born, ..Trial::start(epoch) };
+            } else if behind {
+                // What it was measured to be is what it is: nothing says
+                // that the calls below get any quieter.
+                trial.phase = TRIAL_DEMOTED;
+                self.forget_compiled(func);
+            } else {
+                trial.phase = TRIAL_COMPILED;
+            }
         }
         slot.set(trial);
         result
@@ -4021,6 +4061,7 @@ impl Compiled {
             }
             bs.respec_left -= 1;
             bs.profile_runs += 1;
+            bs.raised = 0;
             let id = bs.next_version_id;
             bs.next_version_id += 1;
             // The last attempt must hold for every input.
@@ -4060,6 +4101,26 @@ impl Compiled {
                 st.blocks[b].rejected = Some(msg.clone());
                 st.log.push(format!("b{}: {}", b, msg));
             }
+        }
+    }
+
+    /// Called when an instruction raised in a profiling run of a block. A
+    /// block that raises every time it runs (a lookup that fails, and is
+    /// caught) would profile forever, and so would hold back all that waits
+    /// for the profiling above it to be over: the second such run in a row
+    /// is specialized from as one that got to the end is.
+    unsafe fn raised_profiling(&self, b: usize) {
+        let enough = {
+            let mut st = self.state.borrow_mut();
+            let bs = &mut st.blocks[b];
+            bs.raised += 1;
+            bs.raised >= PROFILE_RAISES
+        };
+        if enough {
+            // The passes run with no error set.
+            let raised = ffi::PyErr_GetRaisedException();
+            self.specialize(b);
+            ffi::PyErr_SetRaisedException(raised);
         }
     }
 
@@ -4253,6 +4314,9 @@ impl Compiled {
                             }
                             Err(()) => {
                                 self.fail(frames, inst.bc);
+                                if mode == Mode::Profile {
+                                    self.raised_profiling(cur);
+                                }
                                 raised!('blocks, cur);
                             }
                         }
