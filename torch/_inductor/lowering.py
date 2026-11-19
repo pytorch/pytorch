@@ -2714,6 +2714,45 @@ def cat(inputs, dim=0):
         if not has_multi_consumers and (fuse_pointwise_use or horizontal_fuse_cat):
             return pointwise_cat(inputs, dim)
 
+    elif (
+        inputs[0].get_device().type == "cuda"
+        and torch.cuda.is_initialized()
+        and config.max_complex_pointwise_cat_inputs > 1
+        and not fusable_reduction
+        and isinstance(V.current_node, torch.fx.Node)
+        and V.current_node.target == aten.cat.default
+    ):
+        # Only inline independent pads of graph inputs, so grouping cannot
+        # duplicate a computation or re-read a shared producer.
+        pads = V.current_node.all_input_nodes
+        if len(pads) == len(inputs) and all(
+            pad.target == aten.constant_pad_nd.default
+            and len(pad.users) == 1
+            and len(pad.all_input_nodes) == 1
+            and pad.all_input_nodes[0].op == "placeholder"
+            and isinstance(inp.data, ir.StorageBox)
+            and isinstance(inp.data.data, ir.Pointwise)
+            for pad, inp in zip(pads, inputs)
+        ):
+            from torch._dynamo.device_interface import get_interface_for_device
+
+            device = inputs[0].get_device()
+            props = get_interface_for_device(device).get_device_properties(device)
+            width = config.max_complex_pointwise_cat_inputs
+            sources = OrderedSet(pad.all_input_nodes[0] for pad in pads)
+            # Keep bandwidth-bound groups on the existing direct-write path.
+            if len(sources) == len(pads) and all(
+                V.graph.sizevars.statically_known_leq(
+                    inp.get_numel() * dtype.itemsize * width, props.L2_cache_size
+                )
+                for inp in inputs
+            ):
+                groups = [inputs[i : i + width] for i in range(0, len(inputs), width)]
+                inputs = [
+                    pointwise_cat(group, dim) if len(group) > 1 else group[0]
+                    for group in groups
+                ]
+
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
 

@@ -374,6 +374,25 @@ class FusionTests(TestCase):
     Tests that things can be fused into a single kernel
     """
 
+    @requires_gpu_and_triton
+    @unittest.skipUnless(DEVICE == "cuda", "requires CUDA device type")
+    @config.patch(
+        {
+            "force_disable_caches": True,
+            "max_complex_pointwise_cat_inputs": 4,
+            "max_pointwise_cat_inputs": 4,
+        }
+    )
+    def test_group_padded_cat_inputs(self):
+        def f(*xs):
+            return torch.cat([torch.nn.functional.pad(x, (0, 32)) for x in xs])
+
+        inputs = [T(8, 64) for _ in range(9)]
+        metrics.reset()
+        result = torch.compile(f, fullgraph=True)(*inputs)
+        self.assertEqual(result, f(*inputs))
+        self.assertLessEqual(metrics.generated_kernel_count, 3)
+
     def test_horizontal_reduction_pointwise(self):
         def f(a):
             b = a.sum(dim=1)
