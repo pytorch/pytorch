@@ -16,12 +16,11 @@
 #include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/xpu/grouped_mm/grouped_mm_api.h>
+#include <ATen/xpu/XPUContext.h>
 #include <c10/util/MaybeOwned.h>
-#include <c10/util/StringUtil.h>
 
-#include <cctype>
-#include <cstdlib>
-#include <string>
+#include <algorithm>
+#include <array>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -332,123 +331,98 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_xpu_v2_out)
 
 namespace {
 
-// TORCH_XPU_GROUPED_MM_BACKEND = auto (default) | sycltla | onednn | fallback,
-// read on every call.
-//   auto      SYCL-TLA if it can serve the call, else oneDNN, else the
-//             per-group fallback (the order of the checks in _grouped_mm_xpu)
-//   sycltla   force SYCL-TLA, onednn force oneDNN: the per-group fallback
-//             (with a one-time warning) for calls the backend cannot serve
-//   fallback  always the per-group fallback
-// Like _grouped_mm_cuda, the checks use only dtype, layout and alignment,
-// never the routed row counts, so every rank of an expert-parallel job runs
-// the same kernel for the same op.
-enum class GroupedMMBackend { Auto, SyclTla, OneDnn, Fallback };
-
-GroupedMMBackend requested_grouped_mm_backend() {
-  const char* v = std::getenv("TORCH_XPU_GROUPED_MM_BACKEND");
-  const std::string s = (v == nullptr) ? "" : v;
-  if (s.empty() || s == "auto") {
-    return GroupedMMBackend::Auto;
-  }
-  if (s == "sycltla" || s == "sycl-tla") {
-    return GroupedMMBackend::SyclTla;
-  }
-  if (s == "onednn") {
-    return GroupedMMBackend::OneDnn;
-  }
-  if (s == "fallback") {
-    return GroupedMMBackend::Fallback;
-  }
-  TORCH_WARN_ONCE(
-      "Ignoring unknown TORCH_XPU_GROUPED_MM_BACKEND='",
-      s,
-      "'; expected auto, sycltla, onednn or fallback.");
-  return GroupedMMBackend::Auto;
+// The SYCL-TLA grouped GEMM from torch-xpu-ops is opt-in, like ROCm's CK
+// grouped GEMM: set XPU_ALLOW_GROUP_GEMM_SYCLTLA=1 to enable it. It serves
+// bf16/fp16 calls with offs, no bias and the input dtype as output dtype, on
+// the architectures its kernels are built for, when
+// sycltla::can_use_grouped_mm accepts the layouts and alignment. Like the
+// CUDA and ROCm selection, the checks never look at the routed row counts, so
+// every rank of an expert-parallel job selects the same kernel.
+bool sycltla_grouped_mm_arch_supported() {
+  constexpr auto supported_architectures =
+      std::to_array<sycl::ext::oneapi::experimental::architecture>({
+          sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc,
+          sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc_vg,
+          sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g21,
+          sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g31});
+  const auto device_architecture =
+      at::xpu::getCurrentDeviceProperties()->architecture;
+  return std::find(
+             supported_architectures.begin(),
+             supported_architectures.end(),
+             device_architecture) != supported_architectures.end();
 }
 
-// SYCL-TLA grouped GEMM (torch-xpu-ops): "" if it can serve the call, else
-// the reason.
-std::string sycltla_why_not(
+bool sycltla_grouped_mm_supported(
     const Tensor& mat_a,
     const Tensor& mat_b,
     const std::optional<at::Tensor>& offs,
     const std::optional<at::Tensor>& bias,
     c10::ScalarType out_dtype,
     const Tensor& out) {
-  if (!offs.has_value()) {
-    return "no offs (3D x 3D batched)";
+  if (!offs.has_value() || bias.has_value() ||
+      out_dtype != mat_a.scalar_type()) {
+    return false;
   }
-  if (bias.has_value()) {
-    return "bias";
-  }
-  if (out_dtype != mat_a.scalar_type()) {
-    return "out_dtype differs from input dtype";
-  }
-  std::string why;
-  sycltla::can_use_grouped_mm(mat_a, mat_b, *offs, out, &why);
-  return why;
+  return sycltla::is_grouped_mm_available() &&
+      sycltla_grouped_mm_arch_supported() &&
+      sycltla::can_use_grouped_mm(mat_a, mat_b, *offs, out);
 }
 
-// oneDNN grouped matmul (pytorch/pytorch#195427, #195428): 2D x 3D and
-// 2D x 2D, same dtype for inputs and output, no bias.
-std::string onednn_why_not(
+enum class GroupedMMKernel { Fallback, OneDnn, SyclTla };
+
+GroupedMMKernel select_grouped_mm_kernel(
     const Tensor& mat_a,
     const Tensor& mat_b,
+    const std::optional<at::Tensor>& offs,
     const std::optional<at::Tensor>& bias,
-    std::optional<c10::ScalarType> out_dtype) {
+    std::optional<c10::ScalarType> out_dtype,
+    const Tensor& out) {
+  if (at::globalContext().xpuAllowGroupGemmSyclTla() &&
+      sycltla_grouped_mm_supported(
+          mat_a, mat_b, offs, bias, out.scalar_type(), out)) {
+    return GroupedMMKernel::SyclTla;
+  }
   const bool a_b_and_out_are_same_type = (mat_a.dtype() == mat_b.dtype()) &&
       (!out_dtype.has_value() || mat_a.dtype() == *out_dtype);
-  if (!a_b_and_out_are_same_type) {
-    return "dtypes differ";
+  // OneDNN only supports 2dx3d and 2dx2d for grouped matmul.
+  if (a_b_and_out_are_same_type && mat_a.dim() == 2 && !bias.has_value()) {
+    return GroupedMMKernel::OneDnn;
   }
-  if (mat_a.dim() != 2) {
-    return "mat_a is not 2D";
-  }
-  if (bias.has_value()) {
-    return "bias";
-  }
-  return "";
+  return GroupedMMKernel::Fallback;
 }
 
-// Log de-duplication key for a dispatch decision: the reason without its
-// numbers, plus the dims that do not change with routing.
-std::string grouped_mm_log_key(
-    const char* path,
+void _grouped_mm_xpu_impl(
     const Tensor& mat_a,
     const Tensor& mat_b,
-    const std::string& reason) {
-  std::string key = c10::str(path, "|");
-  for (char ch : reason) {
-    if (!std::isdigit(static_cast<unsigned char>(ch))) {
-      key += ch;
-    }
+    const std::optional<at::Tensor>& offs,
+    const std::optional<at::Tensor>& bias,
+    std::optional<c10::ScalarType> out_dtype,
+    GroupedMMKernel kernel,
+    Tensor& out) {
+  switch (kernel) {
+    case GroupedMMKernel::SyclTla:
+      // fast path, no d2h sync needed
+      sycltla::grouped_mm(mat_a, mat_b, *offs, out);
+      return;
+    case GroupedMMKernel::OneDnn:
+      at::native::onednn::scaled_grouped_matmul(
+          mat_a,
+          mat_b,
+          std::nullopt,
+          std::nullopt,
+          std::nullopt,
+          std::nullopt,
+          offs.value(),
+          out);
+      return;
+    default:
+      _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   }
-  return c10::str(
-      key,
-      "|",
-      mat_a.dim(),
-      "x",
-      mat_b.dim(),
-      "|",
-      mat_a.scalar_type(),
-      "|",
-      (mat_a.dim() == 2 && mat_b.dim() == 2) ? mat_a.size(0) : mat_a.size(-1),
-      "|",
-      mat_b.size(-1));
 }
 
 } // namespace
 
-// torch._grouped_mm on XPU, structured like _grouped_mm_cuda: validate,
-// allocate the output, then a grouped GEMM kernel (SYCL-TLA from
-// torch-xpu-ops, else oneDNN) or the generic per-group fallback. The kernels
-// serve the shapes autograd produces for a MoE expert layer:
-//   forward      mat_a [M, K] x mat_b [E, K, N]              -> [M, N]
-//   grad_input   mat_a [M, N] x mat_b.transpose(-2, -1)      -> [M, K]
-//   grad_weight  mat_a.t() [K, M] x grad [M, N]              -> [E, K, N]
-//
-// TORCH_XPU_GROUPED_MM_LOG=1 (each distinct decision once) or =2 (every call)
-// prints which kernel each call takes, and why, to stderr.
 Tensor _grouped_mm_xpu(
     const Tensor& mat_a,
     const Tensor& mat_b,
@@ -460,75 +434,14 @@ Tensor _grouped_mm_xpu(
       _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out =
       create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
-
-  const GroupedMMBackend req = requested_grouped_mm_backend();
-  std::string reason;
-  if (req == GroupedMMBackend::Fallback) {
-    reason = "TORCH_XPU_GROUPED_MM_BACKEND=fallback";
-  } else {
-    // fast paths, no d2h sync needed
-    if (req == GroupedMMBackend::Auto || req == GroupedMMBackend::SyclTla) {
-      const std::string why =
-          sycltla_why_not(mat_a, mat_b, offs, bias, out_dtype_, out);
-      if (why.empty()) {
-        sycltla::grouped_mm(mat_a, mat_b, *offs, out); // logs its own plan
-        return out;
-      }
-      reason = "sycltla: " + why;
-    }
-    if (req == GroupedMMBackend::Auto || req == GroupedMMBackend::OneDnn) {
-      const std::string why = onednn_why_not(mat_a, mat_b, bias, out_dtype);
-      if (why.empty()) {
-        if (sycltla::grouped_mm_log_level() > 0) {
-          sycltla::log_grouped_mm(
-              grouped_mm_log_key("onednn", mat_a, mat_b, reason),
-              c10::str(
-                  "oneDNN grouped matmul",
-                  reason.empty() ? "" : " (",
-                  reason,
-                  reason.empty() ? "" : ")",
-                  "  a",
-                  mat_a.sizes(),
-                  " b",
-                  mat_b.sizes(),
-                  " -> out",
-                  out.sizes()));
-        }
-        at::native::onednn::scaled_grouped_matmul(
-            mat_a,
-            mat_b,
-            std::nullopt,
-            std::nullopt,
-            std::nullopt,
-            std::nullopt,
-            offs.value(),
-            out);
-        return out;
-      }
-      reason += (reason.empty() ? "" : "; ") + ("onednn: " + why);
-    }
-    if (req != GroupedMMBackend::Auto) {
-      TORCH_WARN_ONCE(
-          "TORCH_XPU_GROUPED_MM_BACKEND: the forced grouped GEMM cannot serve "
-          "some calls (",
-          reason,
-          "); using the per-group fallback for those.");
-    }
-  }
-  if (sycltla::grouped_mm_log_level() > 0) {
-    sycltla::log_grouped_mm(
-        grouped_mm_log_key("fallback", mat_a, mat_b, reason),
-        c10::str(
-            "fallback per-group mm: ",
-            reason,
-            "  a",
-            mat_a.sizes(),
-            " b",
-            mat_b.sizes(),
-            " -> out",
-            out.sizes()));
-  }
-  _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+  _grouped_mm_xpu_impl(
+      mat_a,
+      mat_b,
+      offs,
+      bias,
+      out_dtype,
+      select_grouped_mm_kernel(mat_a, mat_b, offs, bias, out_dtype, out),
+      out);
   return out;
 }
 

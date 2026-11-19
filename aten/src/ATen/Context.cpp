@@ -159,6 +159,7 @@ std::string cudnn_depthwise2str(CuDNNDepthwiseKernel k) {
 static constexpr const auto rocm_allow_group_gemm_ck = "ROCM_ALLOW_GROUP_GEMM_CK";
 static constexpr const auto rocm_allow_group_gemm_ck_tile = "ROCM_ALLOW_GROUP_GEMM_CK_TILE";
 #endif
+static constexpr const auto xpu_allow_group_gemm_sycltla = "XPU_ALLOW_GROUP_GEMM_SYCLTLA";
 
 Context::Context() = default;
 
@@ -321,6 +322,10 @@ bool Context::rocmAllowGroupGemmCkTile() const {
     return allow_group_gemm_ck_tile;
 }
 #endif
+bool Context::xpuAllowGroupGemmSyclTla() const {
+    const auto allow_group_gemm_sycltla = c10::utils::check_env(xpu_allow_group_gemm_sycltla) == true;
+    return allow_group_gemm_sycltla;
+}
 
 bool Context::userEnabledFlashSDP() const {
   return enabled_flashSDP;

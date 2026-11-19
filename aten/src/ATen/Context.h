@@ -417,6 +417,7 @@ class TORCH_API Context {
   void setAllowFP16AccumulationCuBLAS(bool /*b*/);
   bool rocmAllowGroupGemmCk() const;
   bool rocmAllowGroupGemmCkTile() const;
+  bool xpuAllowGroupGemmSyclTla() const;
   bool preferCublasltGroupedGemm() const;
   void setPreferCublasltGroupedGemm(bool /*b*/);
 
