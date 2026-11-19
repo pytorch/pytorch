@@ -1,4 +1,5 @@
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
+#include <ATen/native/mps/kernels/Matmul.h>
 #include <c10/metal/common.h>
 #include <c10/metal/reduction_utils.h>
 #include <c10/metal/utils.h>
@@ -10,6 +11,103 @@ using namespace metal;
 #include <ATen/native/mps/kernels/Gemv.h>
 
 constant uint TILE_DIM = 16;
+
+template <typename T, int BM, typename idx_t>
+inline MatmulTile<T> matmul_tile(
+    device const T* a,
+    device const T* b,
+    device T* out,
+    constant MatmulParams<idx_t>& p,
+    uint2 tgid) {
+  const idx_t row = idx_t(tgid.y) * BM, col = idx_t(tgid.x) * kMatmulTileN;
+  return {
+      a + row * p.a_stride_m,
+      b + col * p.b_stride_n,
+      out + row * p.out_stride_m + col * p.out_stride_n,
+      uint32_t(min(idx_t(BM), idx_t(p.m) - row)),
+      uint32_t(min(idx_t(kMatmulTileN), idx_t(p.n) - col)),
+      p.k};
+}
+
+template <typename T, int BM, typename idx_t>
+[[max_total_threads_per_threadgroup(
+    matmul_simdgroups(BM, kMatmulTileN) * simdgroup_size)]]
+kernel void matmul_simd(
+    device const T* a [[buffer(0)]],
+    device const T* b [[buffer(1)]],
+    device T* out [[buffer(2)]],
+    constant MatmulParams<idx_t>& params [[buffer(3)]],
+    uint2 tgid [[threadgroup_position_in_grid]],
+    uint simd_group [[simdgroup_index_in_threadgroup]],
+    uint simd_lane [[thread_index_in_simdgroup]]) {
+  threadgroup T a_tile[BM * (kMatmulTileK + kMatmulTilePad)];
+  threadgroup T b_tile[kMatmulTileK * (kMatmulTileN + kMatmulTilePad)];
+  auto tile = matmul_tile<T, BM>(a, b, out, params, tgid);
+  matmul_tile_gemm<T, BM>(tile, params, a_tile, b_tile, simd_group, simd_lane);
+}
+
+#define INSTANTIATE_MATMUL_SIMD(T, BM, IDX_T, SUFFIX)                         \
+  template [[host_name("matmul_simd_" #T "_bm" #BM "_" #SUFFIX)]] kernel void \
+  matmul_simd<T, BM, IDX_T>(                                                  \
+      device const T*,                                                        \
+      device const T*,                                                        \
+      device T*,                                                              \
+      constant MatmulParams<IDX_T>&,                                          \
+      uint2,                                                                  \
+      uint,                                                                   \
+      uint)
+
+#define INSTANTIATE_MATMUL_SIMD_BM(T, BM)        \
+  INSTANTIATE_MATMUL_SIMD(T, BM, uint32_t, u32); \
+  INSTANTIATE_MATMUL_SIMD(T, BM, uint64_t, u64)
+
+#define INSTANTIATE_MATMUL_SIMD_DTYPE(T) \
+  INSTANTIATE_MATMUL_SIMD_BM(T, 16);     \
+  INSTANTIATE_MATMUL_SIMD_BM(T, 32);     \
+  INSTANTIATE_MATMUL_SIMD_BM(T, 64)
+
+INSTANTIATE_MATMUL_SIMD_DTYPE(float);
+INSTANTIATE_MATMUL_SIMD_DTYPE(half);
+INSTANTIATE_MATMUL_SIMD_DTYPE(bfloat);
+
+#if C10_METAL_HAS_MPP
+template <typename T, int BM, bool TA, bool TB>
+[[max_total_threads_per_threadgroup(
+    matmul_simdgroups(BM, kMatmulTileN) * simdgroup_size)]]
+kernel void matmul_mpp(
+    device const T* a [[buffer(0)]],
+    device const T* b [[buffer(1)]],
+    device T* out [[buffer(2)]],
+    constant MatmulParams<uint64_t>& params [[buffer(3)]],
+    uint2 tgid [[threadgroup_position_in_grid]]) {
+  auto tile = matmul_tile<T, BM>(a, b, out, params, tgid);
+  matmul_mpp_gemm<T, BM, kMatmulTileN, TA, TB>(tile, params);
+}
+
+#define INSTANTIATE_MATMUL_MPP(T, BM, TA, TB, LAYOUT)                        \
+  template [[host_name("matmul_mpp_" #LAYOUT "_" #T "_bm" #BM)]] kernel void \
+  matmul_mpp<T, BM, TA, TB>(                                                 \
+      device const T*,                                                       \
+      device const T*,                                                       \
+      device T*,                                                             \
+      constant MatmulParams<uint64_t>&,                                      \
+      uint2)
+
+#define INSTANTIATE_MATMUL_MPP_BM(T, BM)           \
+  INSTANTIATE_MATMUL_MPP(T, BM, false, false, nn); \
+  INSTANTIATE_MATMUL_MPP(T, BM, false, true, nt);  \
+  INSTANTIATE_MATMUL_MPP(T, BM, true, false, tn);  \
+  INSTANTIATE_MATMUL_MPP(T, BM, true, true, tt)
+
+#define INSTANTIATE_MATMUL_MPP_DTYPE(T) \
+  INSTANTIATE_MATMUL_MPP_BM(T, 16);     \
+  INSTANTIATE_MATMUL_MPP_BM(T, 32);     \
+  INSTANTIATE_MATMUL_MPP_BM(T, 64)
+
+INSTANTIATE_MATMUL_MPP_DTYPE(float);
+INSTANTIATE_MATMUL_MPP_DTYPE(half);
+INSTANTIATE_MATMUL_MPP_DTYPE(bfloat);
+#endif
 
 template <typename T1, typename T2, typename TA>
 inline TA matmul_inner(
