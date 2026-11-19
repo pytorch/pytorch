@@ -227,6 +227,16 @@ def get_profiling_event(event_name, profiler, dedup_gpu_user_annotation=False):
     ]
 
 
+def _default_pg_is_nccl_legacy():
+    if not dist.distributed_c10d._NCCL_LEGACY_AVAILABLE:
+        return False
+    pg = dist.distributed_c10d._get_default_group()
+    return isinstance(
+        pg._get_backend(torch.device("cuda")),
+        dist.distributed_c10d.ProcessGroupNCCL,
+    )
+
+
 def get_profiler_nccl_meta(prof):
     """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
     We will need to test metadata obtained from profiler here"""
@@ -695,6 +705,7 @@ class DistributedTest:
             """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
             We test for basic fields in this profiler event that correspond to the nccl communication
             collectives"""
+            is_legacy = _default_pg_is_nccl_legacy()
             per_coll_meta = defaultdict(list)
             for e in nccl_meta_events:
                 args = e.get("args", {})
@@ -706,12 +717,14 @@ class DistributedTest:
                 if collname == "wait":
                     continue
 
-                self.assertEqual(args["Process Group Description"], "default_pg")
                 self.assertNotEqual(args["Process Group Ranks"], "")
-
                 self.assertGreaterEqual(args.get("In msg nelems", -1), 0)
                 self.assertGreaterEqual(args.get("Out msg nelems", -1), 0)
                 self.assertGreaterEqual(args.get("Group size", -1), 0)
+                # nccl2 does not report the PG description or global ranks.
+                if not is_legacy:
+                    continue
+                self.assertEqual(args["Process Group Description"], "default_pg")
                 self.assertGreaterEqual(args.get("Global rank start", -1), 0)
                 self.assertGreaterEqual(args.get("Global rank stride", -1), 0)
 
@@ -6772,6 +6785,13 @@ class DistributedTest:
             self.assertEqual(len(indices_list), local_num_samples)
             validate_global_samples(local_num_samples)
 
+        def _nccl_object_test_device(self):
+            # Legacy also covers rank != GPU device; nccl2 rejects tensors off
+            # the group's bound device.
+            if _default_pg_is_nccl_legacy():
+                return (self.rank + 1) % int(self.world_size)
+            return self.rank
+
         def _test_allgather_object(self, subgroup=None):
             # Only set device for NCCL backend since it must use GPUs.
 
@@ -6779,9 +6799,7 @@ class DistributedTest:
 
             backend = os.environ["BACKEND"]
             if backend == "nccl":
-                # Case where rank != GPU device.
-                next_rank = (self.rank + 1) % int(self.world_size)
-                torch.cuda.set_device(next_rank)
+                torch.cuda.set_device(self._nccl_object_test_device())
 
             # If GPU test, add object with GPU tensor
             if backend == "nccl":
@@ -6824,9 +6842,7 @@ class DistributedTest:
 
             backend = os.environ["BACKEND"]
             if backend == "nccl":
-                # Case where rank != GPU device.
-                next_rank = (self.rank + 1) % int(self.world_size)
-                torch.cuda.set_device(next_rank)
+                torch.cuda.set_device(self._nccl_object_test_device())
 
             # If GPU test, add object with GPU tensor
             if backend == "nccl":

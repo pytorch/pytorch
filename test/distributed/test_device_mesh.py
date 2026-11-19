@@ -34,7 +34,10 @@ from torch.distributed.tensor._collective_utils import (
     unpad_tensor,
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_nccl_legacy,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_XPU, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -232,6 +235,7 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertTrue(is_initialized())
         self.destroy_pg(self.rank)
 
+    @requires_nccl_legacy()
     @with_comms(backend="nccl-legacy")
     def test_2d_mesh_non_eager_init_subgroup(self):
         mesh_shape = (2, self.world_size // 2)
@@ -284,6 +288,7 @@ class DeviceMeshTest(DTensorTestBase):
             ordered_mesh.get_local_rank(1), ordered_mesh.get_coordinate()[1]
         )
 
+    @requires_nccl_legacy()
     @with_comms(eager_init=True, backend="nccl-legacy")
     def test_device_mesh_preserve_rank_order_eager_nccl_legacy(self):
         mesh_tensor = torch.arange(4).reshape(2, 2).flip(-1)
