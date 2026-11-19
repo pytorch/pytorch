@@ -2659,9 +2659,10 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
-    # decompose_k_threshold for fp32 matmuls that use TF32 on Blackwell (the
-    # smaller of the two applies). A TF32 GEMM with few output tiles and a long
-    # K benefits from splitting K at a smaller K/M and K/N ratio.
+    # decompose_k_threshold for fp32 matmuls that use TF32 on datacenter
+    # Blackwell and whose 128x128 output tiles fill less than one wave (the
+    # smaller of the two thresholds applies). Such a GEMM benefits from
+    # splitting K at a smaller K/M and K/N ratio.
     decompose_k_threshold_tf32 = int(
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD_TF32", "4")
     )

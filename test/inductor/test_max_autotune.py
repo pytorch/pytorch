@@ -46,6 +46,7 @@ from torch._inductor.autotune_process import (
     use_pipelined_autotuning,
 )
 from torch._inductor.codegen.common import WorkspaceArg
+from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.registry import (
     get_registered_heuristic_class,
@@ -86,11 +87,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplateCaller,
 )
 from torch._prims_common import compute_required_storage_length
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FP8,
-    SM100OrLater,
-    SM90OrLater,
-)
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     _static_skip_if,
@@ -3231,17 +3228,20 @@ class TestMaxAutotune(TestCase):
         autotune_fallback_to_aten=False,
     )
     @unittest.skipIf(
-        GPU_TYPE != "cuda" or torch.version.hip is not None or not SM100OrLater,
-        "TF32 decompose_k threshold applies to CUDA Blackwell",
+        GPU_TYPE != "cuda" or not is_datacenter_blackwell_arch(),
+        "TF32 decompose_k threshold applies to datacenter Blackwell",
     )
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
     @parametrize("allow_tf32", (False, True))
-    def test_max_autotune_decompose_k_tf32_threshold(self, allow_tf32):
-        # K/M = K/N = 8 is below decompose_k_threshold but not below
-        # decompose_k_threshold_tf32.
-        M, N, K = 512, 512, 4096
+    @parametrize("M,N,K,few_tiles", ((512, 512, 4096, True), (2048, 2048, 8192, False)))
+    def test_max_autotune_decompose_k_tf32_threshold(
+        self, allow_tf32, M, N, K, few_tiles
+    ):
+        # K/M and K/N are below decompose_k_threshold but not below
+        # decompose_k_threshold_tf32, which only applies when the 128x128
+        # output tiles fill less than one wave.
         get_k_splits.cache_clear()
         use_decompose_k_choice.cache_clear()
         a = torch.randn(M, K, dtype=torch.float32, device=GPU_TYPE)
@@ -3261,7 +3261,7 @@ class TestMaxAutotune(TestCase):
             finally:
                 torch.backends.cuda.matmul.allow_tf32 = old_tf32
         has_decompose_k = any("benchmark_decompose_k_mm" in c for c in code)
-        self.assertEqual(has_decompose_k, allow_tf32)
+        self.assertEqual(has_decompose_k, allow_tf32 and few_tiles)
 
     @unittest.skipIf(
         config.triton.native_matmul,
