@@ -133,13 +133,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.common(mod, (x, w_scales))
         self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
 
-    @inductor_config.patch(
-        {
-            "freezing": True,
-            "cpp.enable_concat_linear": True,
-            "post_grad_fusion_options": {},
-        }
-    )
+    @inductor_config.patch({"freezing": True, "cpp.enable_concat_linear": True})
     @patches
     @torch.no_grad
     @dtypes(torch.bfloat16)
