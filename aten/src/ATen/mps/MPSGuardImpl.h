@@ -29,13 +29,17 @@ typedef MPSEvent* mpsEvent_t;
 
 // TODO: Move the MPSGuardImpl to inherit from NoOpDeviceGuardImpl
 // https://github.com/pytorch/pytorch/issues/77170
-struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface {
+struct TORCH_API MPSGuardImpl final
+    : public c10::impl::DeviceGuardImplInterface {
   static constexpr c10::DeviceType static_type = c10::DeviceType::MPS;
 
   // constructor
   MPSGuardImpl() = default;
   explicit MPSGuardImpl(c10::DeviceType t) {
-    TORCH_CHECK(t == DeviceType::MPS, "MPSGuardImpl initialized with non-MPS DeviceType: ", t);
+    TORCH_CHECK(
+        t == DeviceType::MPS,
+        "MPSGuardImpl initialized with non-MPS DeviceType: ",
+        t);
   }
 
   // returns the type
@@ -67,7 +71,8 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
     return getCurrentMPSStream()->unwrap();
   }
 
-  Stream getNewStream(Device /* unused */, int /* priority */ = 0) const override {
+  Stream getNewStream(Device /* unused */, int /* priority */ = 0)
+      const override {
     return getStreamFromPool()->unwrap();
   }
 
@@ -93,11 +98,13 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
     return previous->unwrap();
   }
   DeviceCapability getDeviceCapability(Device /* unused */) const override {
-    constexpr uint64_t kSupportedTypeBits = (1ULL << kIndex_Byte) | (1ULL << kIndex_Char) | (1ULL << kIndex_Short) |
-        (1ULL << kIndex_Int) | (1ULL << kIndex_Long) | (1ULL << kIndex_Half) | (1ULL << kIndex_Float) |
-        (1ULL << kIndex_ComplexHalf) | (1ULL << kIndex_ComplexFloat) | (1ULL << kIndex_Bool) |
-        (1ULL << kIndex_BFloat16) | (1ULL << kIndex_Float8_e4m3fn) | (1ULL << kIndex_UInt32) | (1ULL << kIndex_UInt16) |
-        (1ULL << kIndex_UInt64);
+    constexpr uint64_t kSupportedTypeBits = (1ULL << kIndex_Byte) |
+        (1ULL << kIndex_Char) | (1ULL << kIndex_Short) | (1ULL << kIndex_Int) |
+        (1ULL << kIndex_Long) | (1ULL << kIndex_Half) | (1ULL << kIndex_Float) |
+        (1ULL << kIndex_ComplexHalf) | (1ULL << kIndex_ComplexFloat) |
+        (1ULL << kIndex_Bool) | (1ULL << kIndex_BFloat16) |
+        (1ULL << kIndex_Float8_e4m3fn) | (1ULL << kIndex_UInt32) |
+        (1ULL << kIndex_UInt16) | (1ULL << kIndex_UInt64);
     DeviceCapability cap;
     cap.capability_data.capability_bits = kSupportedTypeBits;
     return cap;
@@ -115,9 +122,14 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
   // Event-related functions
   void createEvent(mpsEvent_t* event, const EventFlag flag) const;
 
-  void destroyEvent(void* event, const DeviceIndex device_index) const noexcept override;
+  void destroyEvent(void* event, const DeviceIndex device_index)
+      const noexcept override;
 
-  void record(void** event, const Stream& stream, const DeviceIndex device_index, const EventFlag flag) const override;
+  void record(
+      void** event,
+      const Stream& stream,
+      const DeviceIndex device_index,
+      const EventFlag flag) const override;
 
   void block(void* event, const Stream& stream) const override;
 
@@ -125,22 +137,26 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
 
   void synchronizeEvent(void* event) const override;
 
-  double elapsedTime(void* event1, void* event2, const DeviceIndex device_index) const override;
+  double elapsedTime(void* event1, void* event2, const DeviceIndex device_index)
+      const override;
 
   void synchronizeDevice(const DeviceIndex device_index) const override;
 
-  void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream) const override;
+  void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
+      const override;
 };
 
 /// A variant of OptionalDeviceGuard that is specialized for MPS.
 struct OptionalMPSGuard {
   explicit OptionalMPSGuard() = default;
 
-  explicit OptionalMPSGuard(std::optional<Device> device_opt) : guard_(device_opt) {}
+  explicit OptionalMPSGuard(std::optional<Device> device_opt)
+      : guard_(device_opt) {}
 
   /// Set the current MPS device to the passed device index, if it is not
   /// nullopt
-  explicit OptionalMPSGuard(std::optional<DeviceIndex> device_index_opt) : guard_(device_index_opt) {}
+  explicit OptionalMPSGuard(std::optional<DeviceIndex> device_index_opt)
+      : guard_(device_index_opt) {}
 
   // Copy is not allowed
   OptionalMPSGuard(const OptionalMPSGuard&) = delete;
