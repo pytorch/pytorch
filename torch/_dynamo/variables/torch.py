@@ -28,6 +28,7 @@ traceable graph nodes while preserving correct semantics and handling edge cases
 import enum
 import functools
 import inspect
+import itertools
 import logging
 import math
 import re
@@ -372,6 +373,14 @@ def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
 
 
 bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
+
+sparse_compressed_ctors = (
+    torch.sparse_bsc_tensor,
+    torch.sparse_bsr_tensor,
+    torch.sparse_csc_tensor,
+    torch.sparse_csr_tensor,
+    torch.sparse_compressed_tensor,
+)
 
 dispatch_key_set_functions = {
     torch._C._dispatch_keys,
@@ -1501,6 +1510,30 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             elif input.is_tensor():
                 # Workaround dynamic shapes issue
                 return input.call_method(tx, "numel", [], {})
+            return None
+
+        @register(*sparse_compressed_ctors)
+        def handle_sparse_compressed_ctor(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            from .tensor import TensorVariable
+
+            if torch.is_grad_enabled() and any(
+                isinstance(a, TensorVariable) and a.requires_grad
+                for a in itertools.chain(args, kwargs.values())
+            ):
+                unimplemented(
+                    gb_type="Sparse tensor creation with autograd not supported",
+                    context=f"function: {self.value.__name__}",
+                    explanation=(
+                        "torch.compile does not support tracing sparse tensor "
+                        "creation when an input tensor requires grad."
+                    ),
+                    hints=[*graph_break_hints.SPARSE_TENSOR],
+                )
             return None
 
         @register(torch.compile)

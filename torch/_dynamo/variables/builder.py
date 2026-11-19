@@ -352,6 +352,7 @@ from .torch import (
     FuncTorchInterpreterVariable,
     TorchCtxManagerClassVariable,
     TorchInGraphFunctionVariable,
+    sparse_compressed_ctors,
 )
 from .torch_function import (
     TensorWithTFOverrideVariable,
@@ -4546,7 +4547,8 @@ def handle_traced_output(
         # Check if the result is a sparse tensor -
         # We generally don't support sparse tensor so better to graph break here
         if is_sparse_any(example_value) and (
-            not tx.export or not config.capture_sparse_compute
+            not config.capture_sparse_compute
+            or (not tx.export and proxy.node.target not in sparse_compressed_ctors)
         ):
             # Avoid calling str() on FakeTensors with unbacked symints as it triggers
             # _tensor_str machinery which can cause GuardOnDataDependentSymNode errors

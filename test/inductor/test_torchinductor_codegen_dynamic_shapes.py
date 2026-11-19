@@ -119,6 +119,8 @@ def check_codegen(
 test_failures = {
     # histogramdd remains an external ATen call, so it emits no dynamic loop.
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
+    # sparse mm has no meta kernel, so it cannot trace with symbolic shapes
+    "test_sparse_csr_creation_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     #
     # PDL tests are CUDA SM90+ only, skip on CPU (generates Triton, not C++ code)
     #
