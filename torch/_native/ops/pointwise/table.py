@@ -40,6 +40,7 @@ class PointwiseDef(NamedTuple):
     mode_int_only: tuple[Mode, ...] = ()
     # Allowed CPU scalar input indices; None permits any single input.
     cpu_scalar_inputs: tuple[int, ...] | None = None
+    output_dispatch: bool = False
 
 
 _DEFAULT = PromotionKind.DEFAULT
@@ -118,6 +119,7 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         Functor("_div"),
         promotion=_INT2FLOAT,
         int_via_float=True,
+        cpu_scalar_inputs=(),
     ),
     PointwiseDef("maximum", 2, Functor("_maximum"), int_dtypes=_INT_DTYPES),
     PointwiseDef("minimum", 2, Functor("_minimum"), int_dtypes=_INT_DTYPES),
@@ -145,7 +147,13 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         dtypes=(torch.bfloat16, torch.float32, torch.float64),
     ),
     PointwiseDef("hypot", 2, Functor("_hypot")),
-    PointwiseDef("logaddexp", 2, Functor("_logaddexp"), precondition=_all_same_dtype),
+    PointwiseDef(
+        "logaddexp",
+        2,
+        Functor("_logaddexp"),
+        cpu_scalar_inputs=(),
+        output_dispatch=True,
+    ),
     PointwiseDef(
         "xlogy.Tensor", 2, Functor("_xlogy"), promotion=_INT2FLOAT, int_via_float=True
     ),
@@ -333,7 +341,6 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
     ),
     PointwiseDef("isnan", 1, Functor("_isnan"), promotion=_BOOL),
     PointwiseDef("isinf", 1, Functor("_isinf"), promotion=_BOOL),
-    PointwiseDef("isfinite", 1, Functor("_isfinite"), promotion=_BOOL),
     # Bitwise operations.
     PointwiseDef("bitwise_and.Tensor", 2, Functor("_bitwise_and"), dtypes=_INT_DTYPES),
     PointwiseDef("bitwise_or.Tensor", 2, Functor("_bitwise_or"), dtypes=_INT_DTYPES),
@@ -349,14 +356,14 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         "bitwise_left_shift.Tensor",
         2,
         Functor("_bitwise_left_shift"),
-        precondition=_all_same_dtype,
+        output_dispatch=True,
         dtypes=_INT_DTYPES,
     ),
     PointwiseDef(
         "bitwise_right_shift.Tensor",
         2,
         Functor("_bitwise_right_shift"),
-        precondition=_all_same_dtype,
+        output_dispatch=True,
         dtypes=_INT_DTYPES,
     ),
     # Ternary and multiple-output operations.
@@ -368,6 +375,7 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         1,
         Functor("_frexp"),
         nout=2,
+        skip_out_variant=True,
         # FP64 currently uses ATen.
         dtypes=(torch.float16, torch.bfloat16, torch.float32),
     ),
@@ -388,7 +396,13 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         int_dtypes=_INT_DTYPES,
         precondition=_all_same_dtype,
     ),
-    PointwiseDef("logaddexp2", 2, Functor("_logaddexp2"), precondition=_all_same_dtype),
+    PointwiseDef(
+        "logaddexp2",
+        2,
+        Functor("_logaddexp2"),
+        cpu_scalar_inputs=(),
+        output_dispatch=True,
+    ),
     PointwiseDef("special_entr", 1, Functor("_entr"), promotion=_INT2FLOAT),
     PointwiseDef(
         "special_xlog1py",
@@ -437,6 +451,7 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         mode_promotion={None: _INT2FLOAT, "floor": _DEFAULT, "trunc": _DEFAULT},
         int_dtypes=_INT_DTYPES,
         mode_int_only=("floor", "trunc"),
+        cpu_scalar_inputs=(),
     ),
     # Omitted clamp bounds use the matching infinity or integer limit.
     PointwiseDef(
@@ -506,16 +521,19 @@ def variant_aten_name(base_aten: str, variant: PointwiseVariant) -> str | None:
                 return f"{op}.{name}"
         return None
     if variant == "inplace":
-        return _first_defined([f"{op}_.{ov}", f"{op}_.default"])
-    return None
-
-
-def _first_defined(candidates: list[str]) -> str | None:
-    for name in candidates:
-        o, _, ov = name.partition(".")
-        try:
-            getattr(getattr(torch.ops.aten, o), ov or "default")
-        except AttributeError:
-            continue
-        return o if ov in ("", "default") else name
+        packet = getattr(torch.ops.aten, op + "_", None)
+        if packet is None:
+            return None
+        arguments = getattr(getattr(torch.ops.aten, op), ov)._schema.arguments
+        for name in packet.overloads():
+            candidate = getattr(packet, name)._schema.arguments
+            if len(candidate) == len(arguments) and all(
+                a.name == b.name
+                and a.type == b.type
+                and a.kwarg_only == b.kwarg_only
+                and a.default_value == b.default_value
+                for a, b in zip(arguments, candidate)
+            ):
+                return op + "_" if name == "default" else f"{op}_.{name}"
+        return None
     return None

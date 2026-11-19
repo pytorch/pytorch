@@ -1,3 +1,5 @@
+from typing import Any
+
 import cutlass
 import cutlass.cute as cute
 
@@ -19,6 +21,32 @@ def source_offset(
     row: Index, q: Index, b: int, middle: int, a: int, inner: int
 ) -> Index:
     return source_row(row, a, middle, b) * inner + q
+
+
+@cute.jit
+def source_row_fast(
+    row: Index, divisors: tuple[Any, Any, Any], middle_one: cutlass.Constexpr = False
+) -> Index:
+    a, middle, b = divisors
+    row, a_idx = divmod(cutlass.Int32(row), a)
+    if cutlass.const_expr(middle_one):
+        middle_idx = cutlass.Int32(0)
+        middle_size = 1
+    else:
+        row, middle_idx = divmod(row, middle)
+        middle_size = middle.divisor
+    outer, b_idx = divmod(row, b)
+    return ((outer * a.divisor + a_idx) * middle_size + middle_idx) * b.divisor + b_idx
+
+
+@cute.jit
+def source_row_pow2(row: Index, a_shift: Index, b_shift: Index) -> Index:
+    row = cutlass.Int32(row)
+    a_idx = row & ((1 << a_shift) - 1)
+    row = row >> a_shift
+    b_idx = row & ((1 << b_shift) - 1)
+    outer = row >> b_shift
+    return (((outer << a_shift) + a_idx) << b_shift) + b_idx
 
 
 @cute.jit
