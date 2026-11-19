@@ -107,11 +107,13 @@ class Graphs(BuiltinPass):
         min_ops: a region with fewer tensor operations than this is left to the
             VM, whose direct kernel calls are cheaper than entering a compiled
             graph.
-        max_variants: how many combinations of inputs (shapes, dtypes, modules,
-            modes) a region is compiled for before further ones run its
-            instructions as they are. Combinations that trace to the same
-            graph, as the layers of a model do when a region is called with one
-            after the other, share what the backend made of it.
+        max_variants: how many graphs a region gives the backend before further
+            kinds of inputs (dtypes, ranks, modules, modes) run its
+            instructions as they are. Inputs that trace to the same graph, as
+            the layers of a model do when a region is called with one after the
+            other, share what the backend made of it, and sizes that differ
+            from call to call are left open in one graph rather than compiled
+            one by one.
     """
 
     engine: ClassVar[str] = "graphs"
