@@ -21,8 +21,11 @@ from torch._inductor.cpp_builder import normalize_path_separator
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.runtime.cache_dir_utils import temporary_cache_dir
 from torch._inductor.utils import BoxedBool, InputType
-from torch._subclasses import FakeTensorMode
-from torch._subclasses.fake_tensor import maybe_get_fake_mode
+from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
+    FakeTensorMode,
+    maybe_get_fake_mode,
+)
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph_module import _share_torchbind_and_process_group_on_deepcopy
 
@@ -447,8 +450,8 @@ def _resolve_ignore_shape_env(dynamic_shapes: DynamicShapesType):
 def _resolve_fake_mode(
     gm: GraphModule,
     dynamic_shapes: DynamicShapesType,
-    fake_mode: FakeTensorMode | None = None,
-) -> FakeTensorMode:
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None = None,
+) -> FakeTensorMode | CppFakeTensorMode:
     if dynamic_shapes == "from_example_inputs":
         if fake_mode is not None:
             if fake_mode.shape_env is None:
@@ -520,12 +523,24 @@ def _resolve_fake_mode(
         )
 
 
+# What compile_to_python pins over the caller's options (see there). It is the
+# only pin of autotune_at_compile_time there: compile_to_python does not run
+# under _standalone_context.
+STANDALONE_PYTHON_PINS: dict[str, Any] = {
+    "benchmark_harness": False,
+    "cpp_wrapper": False,
+    "freezing": False,
+    "fx_wrapper": False,
+    "triton.autotune_at_compile_time": True,
+}
+
+
 @contextlib.contextmanager
 def _standalone_context(
     gm: GraphModule,
     dynamic_shapes: DynamicShapesType,
     aot: bool,
-    fake_mode: FakeTensorMode | None = None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None = None,
 ):
     from torch.compiler._cache import CacheArtifactManager
 
@@ -557,7 +572,7 @@ def standalone_compile(
     options: Any,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
     donate_graph_module: bool = False,
-    fake_mode: FakeTensorMode | None = None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None = None,
 ) -> CompiledArtifact:
     """
     Implementation of torch.inductor.standalone_compile
@@ -743,10 +758,10 @@ def compile_to_python(
     overrides), the same shape as ``torch._inductor.compile``'s ``options``. The
     keys are inductor config names: they are merged into the ``config.patch``
     block this function already wraps the compile in, so they take effect as
-    config rather than being forwarded as ``compile_fx`` kwargs. The two
-    capture-critical pins below (``benchmark_harness``, ``cpp_wrapper``) always win
-    over a conflicting user option, since the source-capture contract depends on
-    them and a caller cannot be allowed to break the emitted module.
+    config rather than being forwarded as ``compile_fx`` kwargs. The
+    ``STANDALONE_PYTHON_PINS`` always win over a conflicting user option, since the
+    source-capture contract depends on them and a caller cannot be allowed to break
+    the emitted module.
 
     ``inner_python`` is self-contained: loading it (``load_from_python``, or importing it
     from a file) JIT-compiles the inlined kernels on first use, so it runs with no cache.
@@ -791,20 +806,18 @@ def compile_to_python(
     # on disk, which holds for a same-machine warm cache but NOT the cold/cross-container
     # load this cache targets -- keeping it lets ``load_from_python`` rehydrate the cubin
     # from the bundle so the static CUDA launcher survives a fresh-dir load instead of
-    # silently falling back to the slower dynamic launch. The two output pins are applied
-    # AFTER the user options so they override any conflicting key: benchmark_harness=False
-    # keeps the emitted module runnable (no get_args()/benchmark_compiled_module()/__main__),
-    # and cpp_wrapper=False keeps it a python wrapper (the C++ backend emits a C++ ``call``
-    # we cannot inline). A caller must not be able to break either.
+    # silently falling back to the slower dynamic launch. STANDALONE_PYTHON_PINS are
+    # applied AFTER the user options so they override any conflicting key:
+    # benchmark_harness=False keeps the emitted module runnable (no get_args()/
+    # benchmark_compiled_module()/__main__), and cpp_wrapper=False keeps it a python
+    # wrapper (the C++ backend emits a C++ ``call`` we cannot inline). freezing=False
+    # holds for aot_autograd.compile_to_python's AOTAutograd step, whose captured graph
+    # freezing's forward compiler would rewrite under the runtime wrappers. A caller
+    # must not be able to break any of them.
     config_patches: dict[str, Any] = {"keep_static_cubin_raw": True}
     if options is not None:
         config_patches.update(options)
-    config_patches.update(
-        {
-            "benchmark_harness": False,
-            "cpp_wrapper": False,
-        }
-    )
+    config_patches.update(STANDALONE_PYTHON_PINS)
     # ``gm`` is a POST-AOTAutograd inner graph: already functionalized and decomposed
     # against the inductor decomposition table. That precondition lets us drive the
     # inductor codegen entry point (``compile_fx_inner``) DIRECTLY on the dense graph
@@ -843,13 +856,13 @@ def compile_to_python(
             "compile_to_python could not detect a FakeTensorMode on the graph's "
             "placeholders; expected a post-AOTAutograd graph traced under one."
         )
-    # no_grad pins the inference path; autotune_at_compile_time keeps the emitted source
-    # self-contained (autotuning resolved at compile, not deferred to runtime). The fresh
-    # CacheArtifactManager isolates the cache bundle ``_acceleration_cache_bytes`` returns.
+    # no_grad pins the inference path; the autotune_at_compile_time pin keeps the
+    # emitted source self-contained (autotuning resolved at compile, not deferred to
+    # runtime). The fresh CacheArtifactManager isolates the cache bundle
+    # ``_acceleration_cache_bytes`` returns.
     with (
         torch.no_grad(),
         patch_compile_options(config_patches),
-        config.patch("triton.autotune_at_compile_time", True),
         tracing(TracingContext(fake_mode)),
         V.set_fake_mode(fake_mode),
         CacheArtifactManager.with_fresh_cache(),
@@ -873,7 +886,7 @@ def autograd_cache_key(
     example_inputs,
     dynamic_shapes: DynamicShapesType,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
-    fake_mode: FakeTensorMode | None = None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None = None,
 ):
     from . import compile_fx
 
