@@ -3437,11 +3437,20 @@ _IntLike: TypeAlias = int | sympy.Expr
 
 @functools.cache
 def use_decompose_k_choice(
-    m: _IntLike, n: _IntLike, k: _IntLike, threshold_multiple: int = 1
+    m: _IntLike,
+    n: _IntLike,
+    k: _IntLike,
+    threshold_multiple: int = 1,
+    tf32: bool = False,
 ) -> bool:
     from torch._inductor.virtualized import V
 
-    decompose_k_threshold = config.triton.decompose_k_threshold * threshold_multiple
+    # The TF32 threshold only adds the decompose_k choice; dropping Triton mm
+    # (threshold_multiple > 1) keeps the regular threshold.
+    threshold = config.triton.decompose_k_threshold
+    if tf32 and threshold_multiple == 1:
+        threshold = min(threshold, config.triton.decompose_k_threshold_tf32)
+    decompose_k_threshold = threshold * threshold_multiple
 
     return (
         V.graph.sizevars.statically_known_true(
