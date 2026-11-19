@@ -410,13 +410,14 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         self._check_identity_guards(tx)
         obj = self.obj.realize()
         receiver = _bound_method_receiver(tx, obj)
-        # CPython wrapper_hash combines receiver and descriptor identities.
+        # CPython wrapper_hash:
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1347
         method = self.descriptor.__get__(receiver, type(receiver))
         return hash(method), type(obj) is not ConstantVariable
 
     def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
+        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
+    ) -> "VariableTracker":
         if op not in ("__eq__", "__ne__") or not isinstance(
             other, MethodWrapperVariable
         ):
@@ -426,9 +427,8 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
             self._check_identity_guards(tx)
             left, right = self.obj.realize(), other.obj.realize()
             if left.source is not None and right.source is not None:
-                equal = _bound_method_receiver(tx, left) is _bound_method_receiver(
-                    tx, right
-                )
+                receiver = _bound_method_receiver(tx, left)
+                equal = receiver is _bound_method_receiver(tx, right)
             else:
                 from .object_protocol import vt_identity_compare
 
@@ -659,7 +659,6 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
         super().__init__(**kwargs)
         self.descriptor = descriptor
         self.obj = obj
-        # The guarded runtime method, when built from one.
         self.value = value
 
     def __repr__(self) -> str:
@@ -687,12 +686,9 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
         obj = self.obj
         if self.value is not None or obj.source is not None:
             return False
-        if (
-            isinstance(obj, variables.TupleVariable)
-            and obj.python_type() is tuple
-            and not obj.items
-        ):
-            return False  # the empty tuple is a singleton
+        if isinstance(obj, variables.TupleVariable) and not obj.items:
+            if obj.python_type() is tuple:
+                return False  # the empty tuple is a singleton
         return isinstance(obj, variables.RangeVariable) or (
             obj.mutation_type is not None and obj.mutation_type.scope > 0
         )
@@ -781,16 +777,12 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
                 if source is None or TracingContext.get().guards_context.skip_install:
                     same_self = None
                 else:
-                    aliases = _receiver_alias_pattern(values)
-                    install_guard(
-                        source.make_guard(
-                            functools.partial(
-                                GuardBuilder.BUILTIN_METHOD_RECEIVER_ALIAS,
-                                sources=sources,
-                                aliases=aliases,
-                            )
-                        )
+                    alias_guard = functools.partial(
+                        GuardBuilder.BUILTIN_METHOD_RECEIVER_ALIAS,
+                        sources=sources,
+                        aliases=_receiver_alias_pattern(values),
                     )
+                    install_guard(source.make_guard(alias_guard))
                     tracer = tx.output.current_tracer
                     while tracer is not None:
                         tracer.has_builtin_method_identity = True
@@ -800,15 +792,12 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
         ) and _method_identity_guards_filtered(tx):
             same_self = None
         else:
-            same_self = _bound_method_receiver(tx, left) is _bound_method_receiver(
-                tx, right
-            )
+            receiver = _bound_method_receiver(tx, left)
+            same_self = receiver is _bound_method_receiver(tx, right)
         eq = None
         if same_self is not None:
             eq = same_self and (
-                same_function
-                if same_function is not None
-                else _same_c_function(self.descriptor, other.descriptor)
+                same_function or _same_c_function(self.descriptor, other.descriptor)
             )
         if eq is None:
             unimplemented(
