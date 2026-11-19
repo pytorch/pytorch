@@ -10,6 +10,8 @@ struct XPUHooks : public at::XPUHooksInterface {
   void init() const override;
   bool hasXPU() const override;
   std::string showConfig() const override;
+  C10_DEPRECATED_MESSAGE(
+      "XPUHooks::getGlobalIdxFromDevice() is deprecated since 2.16 and will be removed in 2.18. The SYCL index within the platform equals the torch device index, so use the torch device index instead. See https://github.com/pytorch/pytorch/issues/204019")
   int32_t getGlobalIdxFromDevice(const at::Device& device) const override;
   const Generator& getDefaultGenerator(
       DeviceIndex device_index = -1) const override;
