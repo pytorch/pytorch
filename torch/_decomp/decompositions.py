@@ -1159,6 +1159,7 @@ def col2im(
 
 @register_decomposition(aten.native_dropout_backward)
 @out_wrapper()
+@pw_cast_for_opmath_non_tensor_args
 def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
     # According to the CUDA kernel implementation we should have this test;
     # but it seems to fail tests!
@@ -2897,12 +2898,12 @@ def adaptive_avg_pool2d(input: Tensor, output_size: tuple[int, int]):
     device = input.device
     shape = input.shape
     ndim = len(shape)
-    torch._check(
+    torch._check_value(
         ndim in (3, 4),
         lambda: f"adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got {ndim}",
     )
     for d in input.shape[-2:]:
-        torch._check(
+        torch._check_value(
             d != 0,
             lambda: "adaptive_avg_pool2d(): Expected input to have non-zero size for "
             f"non-batch dimensions, but input has shape {tuple(shape)}.",
@@ -4662,6 +4663,72 @@ def upsample_trilinear3d(
     )
 
 
+def _canonicalize_trilinear(dims: list[int], total_dim: int) -> tuple[int, ...]:
+    canonical = utils.canonicalize_dims(total_dim, dims)
+    utils.validate_no_repeating_dims(canonical)
+    return canonical
+
+
+@register_decomposition([aten._trilinear.default, aten._trilinear.out])
+@out_wrapper(exact_dtype=True)
+def _trilinear(
+    i1: Tensor,
+    i2: Tensor,
+    i3: Tensor,
+    expand1: list[int],
+    expand2: list[int],
+    expand3: list[int],
+    sumdim: list[int],
+    unroll_dim: int = 1,
+) -> Tensor:
+    result_dtype = i1.dtype
+    total_dim = i1.dim() + len(expand1)
+    torch._check(
+        unroll_dim >= 0 and unroll_dim < total_dim,
+        lambda: f"unroll_dim must be in [0,{total_dim - 1}]",
+    )
+
+    _expand1, _expand2, _expand3, _sumdim = (
+        _canonicalize_trilinear(dims, total_dim)
+        for dims in (expand1, expand2, expand3, sumdim)
+    )
+
+    dims1 = [d for d in range(total_dim) if d not in _expand1]
+    dims2 = [d for d in range(total_dim) if d not in _expand2]
+    dims3 = [d for d in range(total_dim) if d not in _expand3]
+    out_dims = [d for d in range(total_dim) if d not in _sumdim]
+
+    all_expanded = set(_expand1) & set(_expand2) & set(_expand3)
+    if unroll_dim in all_expanded or any(d in all_expanded for d in out_dims):
+        sizes = [0] * total_dim
+        for t, dims in ((i1, dims1), (i2, dims2), (i3, dims3)):
+            for axis, d in enumerate(dims):
+                sizes[d] = t.shape[axis]
+        return i1.new_zeros([sizes[d] for d in out_dims])
+
+    promoted = torch.promote_types(torch.promote_types(i1.dtype, i2.dtype), i3.dtype)
+    torch._check(
+        utils.can_safe_cast_to(cast_to=result_dtype, cast_from=promoted),
+        lambda: f"result type {promoted} can't be cast to the desired output type {result_dtype}",
+    )
+
+    opmath_dtype = utils.get_computation_dtype(promoted)
+    compute_dtype = torch.float32 if promoted == torch.bool else opmath_dtype
+    i1, i2, i3 = (t.to(compute_dtype) for t in (i1, i2, i3))
+
+    dims12 = [
+        d
+        for d in range(total_dim)
+        if (d in dims1 or d in dims2) and not (d in _sumdim and d in _expand3)
+    ]
+    result = torch.einsum(i1, dims1, i2, dims2, dims12)
+    result = torch.einsum(result, dims12, i3, dims3, out_dims)
+
+    if result_dtype == torch.bool:
+        return result != 0
+    return result.to(result_dtype)
+
+
 def _compute_scale(in_size, out_size, align_corners, scale=None):
     if align_corners:
         return (in_size - 1.0) / (out_size - 1.0) if out_size > 1 else 0
@@ -5302,40 +5369,32 @@ def binary_cross_entropy_with_logits(
 def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> bool:
     # For comments of the logic of this function see eager in /native/LinearAlgebra.cpp
 
-    tensor1_larger = tensor1.ndim >= tensor2.ndim
-    t2 = tensor2 if tensor1_larger else tensor1
-    # Mirror native's `tensor1_larger ? tensor1 : tensor2.mT()` on metadata.
-    # Avoid emitting dead `aten.transpose` node when tracing this decomposition.
-    if tensor1_larger:
-        t1_shape = tensor1.shape
-        t1_stride = tensor1.stride()
-    else:
-        shape, stride = tensor2.shape, tensor2.stride()
-        t1_shape = (*shape[:-2], shape[-1], shape[-2])
-        t1_stride = (*stride[:-2], stride[-1], stride[-2])
+    t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
 
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-    if not (len(t1_shape) >= 3 and t2.ndim <= 2):
+    if not (t1.ndim >= 3 and t2.ndim <= 2):
         return False
     if t2.requires_grad and not is_out:
         return True
     if tensor1.ndim == 2:
         return False
-    if guard_or_false(reduce(operator.mul, t1_shape, 1) == 0):
+    if guard_or_false(sym_numel(t1) == 0):
         return True
 
-    from torch._subclasses.fake_impls import _compute_stride
+    t1_shape = t1.shape
+    t1_stride = t1.stride()
 
-    folded_shape = (reduce(operator.mul, t1_shape[:-1], 1), t1_shape[-1])
-    return (
-        _compute_stride(
-            t1_shape,
-            t1_stride,
-            folded_shape,
-            size_oblivious=True,
+    # Check the contiguous, we can skip the dim with size of 1
+    # as aten: https://github.com/pytorch/pytorch/blob/e201460f8aa1510b4c4686627d57b69756c4b916/aten/src/ATen/TensorGeometry.cpp#L17
+    expected_stride = [1]
+    for size in reversed(t1_shape[1:]):
+        expected_stride.append(size * expected_stride[-1])
+    return all(
+        guard_or_false(size == 1) or guard_or_false(left == right)
+        for left, right, size in zip(
+            t1_stride, list(reversed(expected_stride)), t1_shape
         )
-        is not None
     )
 
 
@@ -5817,6 +5876,7 @@ def multi_margin_loss(
     weight: Tensor | None = None,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
+    orig_target_shape = target.shape
     input = torch.atleast_2d(input)
     target = torch.atleast_1d(target)
     nframe = input.shape[0]
@@ -5853,7 +5913,9 @@ def multi_margin_loss(
     elif reduction == Reduction.SUM.value:
         return z.sum() / z.shape[1]
     else:
-        return z.mean(dim=1)
+        # Like eager, an unreduced loss has the target's shape, so a 0-d
+        # target gives a 0-d loss.
+        return z.mean(dim=1).reshape(orig_target_shape)
 
 
 @register_decomposition(aten.multilabel_margin_loss_forward)
@@ -6217,16 +6279,63 @@ def max_pool2d_with_indices_backward(
     Returns:
         Gradient w.r.t. input [B, C, H_in, W_in]
     """
+
+    # MPS: Use native kernel. scatter_add has correctness issues on macOS 14
+    # (#163327) and numerical differences on macOS 15+.
+    if grad_output.device.type == "mps":
+        return NotImplemented
+
+    if not stride:
+        stride = kernel_size
+
+    def to_pair(value):
+        if isinstance(value, IntLike):
+            return [value, value]
+        if len(value) == 1:
+            return [value[0], value[0]]
+        return list(value)
+
+    kernel_size = to_pair(kernel_size)
+    stride = to_pair(stride)
+    padding = to_pair(padding)
+    dilation = to_pair(dilation)
+
+    nonoverlap = (
+        self.dim() in (3, 4)
+        and all(p == 0 for p in padding)
+        and all(d == 1 for d in dilation)
+        and all(s >= k for s, k in zip(stride, kernel_size))
+    )
+    if nonoverlap:
+        in_height, in_width = self.shape[-2:]
+        out_height, out_width = grad_output.shape[-2:]
+        h = torch.arange(in_height, device=self.device)
+        w = torch.arange(in_width, device=self.device)
+        ph = h // stride[0]
+        pw = w // stride[1]
+        valid_h = (ph < out_height) & (h < ph * stride[0] + kernel_size[0])
+        valid_w = (pw < out_width) & (w < pw * stride[1] + kernel_size[1])
+        ph = ph.clamp(0, out_height - 1)
+        pw = pw.clamp(0, out_width - 1)
+
+        # indices is produced by max_pool2d_with_indices with the same parameters.
+        # With non-overlapping windows, an input can belong to at most one output.
+        # Index the trailing H/W dims via Ellipsis so this handles both the
+        # unbatched (C, H, W) and batched (N, C, H, W) layouts.
+        selected_indices = indices[..., ph, :][..., pw]
+        selected_grads = grad_output[..., ph, :][..., pw]
+        input_indices = h[:, None] * in_width + w[None, :]
+        grad_input = torch.where(
+            valid_h[:, None] & valid_w[None, :] & (selected_indices == input_indices),
+            selected_grads,
+            0,
+        )
+        return grad_input.contiguous(memory_format=utils.suggest_memory_format(self))
     # Use native kernel in deterministic mode
     if torch.are_deterministic_algorithms_enabled():
         return NotImplemented
 
     if grad_output.is_xpu:
-        return NotImplemented
-
-    # MPS: Use native kernel. scatter_add has correctness issues on macOS 14
-    # (#163327) and numerical differences on macOS 15+.
-    if grad_output.device.type == "mps":
         return NotImplemented
 
     # Get spatial dimensions

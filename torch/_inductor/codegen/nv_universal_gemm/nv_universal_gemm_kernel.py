@@ -29,7 +29,6 @@ from torch._inductor.codegen.common import (
     WorkspaceArg,
     WorkspaceZeroMode,
 )
-from torch._inductor.codegen.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import CuteDSLOpOverrides
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
     to_cutlass_scale_mode,
@@ -52,6 +51,7 @@ from torch._inductor.kernel.gemm_epilogue_codegen import (
     CuTeDSLEpilogueSource,
 )
 from torch._inductor.virtualized import V
+from torch._native.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -1676,8 +1676,17 @@ class NVUniversalGemmKernel(Kernel):
                     logical_axis = (
                         1 - reduction.axis if self.swap_ab else reduction.axis
                     )
-                    squeeze_dim = -1 if logical_axis == 1 else -2
-                    reduce_ptr = f"{reduce_ptr}.squeeze({squeeze_dim})"
+                    a_name, b_name = input_tensor_names[:2]
+                    rows = f"{a_name}.shape[-2]"
+                    cols = f"{b_name}.shape[-1]"
+                    if logical_axis == 0:
+                        rows = f"{rows} // {reduction.group}"
+                    else:
+                        cols = f"{cols} // {reduction.group}"
+                    # Keep both matrix dimensions so singleton groups transpose.
+                    reduce_ptr = (
+                        f"{reduce_ptr}.view(*{a_name}.shape[:-2], {rows}, {cols})"
+                    )
 
                 def feed_output_ptr(output_name: str | None) -> str:
                     if output_name is None:

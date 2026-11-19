@@ -10,20 +10,24 @@ on:
       - ".github/workflows/hardened-pr-review.yml"
       - ".github/workflows/hardened-pr-review-run.yml"
       - ".github/workflows/pr-review-scripts-test.yml"
-      # The skill is under contract here (its files are hashed and its gh/git
-      # commands are pinned). Without this a skill-only change skips the one
+      # The installed skills are under contract here (their files are hashed
+      # and their gh/git commands are pinned), and the suite takes seconds,
+      # so it runs for any skill change rather than tracking which skills
+      # are installed. Without this a skill-only change skips the one
       # check that would catch it.
-      - ".agents/skills/pr-review/**"
+      - ".agents/skills/**"
   pull_request:
     paths:
       - "scripts/pr_review/**"
       - ".github/workflows/hardened-pr-review.yml"
       - ".github/workflows/hardened-pr-review-run.yml"
       - ".github/workflows/pr-review-scripts-test.yml"
-      # The skill is under contract here (its files are hashed and its gh/git
-      # commands are pinned). Without this a skill-only change skips the one
+      # The installed skills are under contract here (their files are hashed
+      # and their gh/git commands are pinned), and the suite takes seconds,
+      # so it runs for any skill change rather than tracking which skills
+      # are installed. Without this a skill-only change skips the one
       # check that would catch it.
-      - ".agents/skills/pr-review/**"
+      - ".agents/skills/**"
 
 permissions:
   contents: read
