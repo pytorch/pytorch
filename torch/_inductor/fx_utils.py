@@ -703,7 +703,9 @@ class FakeTensorUpdater:
         self, node: torch.fx.Node, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> Any:
         with V.fake_mode, enable_python_dispatcher(), contextlib.ExitStack() as stack:
-            if self._node_invokes_subgraph(node, *args, **kwargs):
+            if isinstance(V.fake_mode, FakeTensorMode) and self._node_invokes_subgraph(
+                node, *args, **kwargs
+            ):
                 # HOP cache reconstruction does not preserve view/output aliases.
                 stack.enter_context(disable_fake_tensor_cache(V.fake_mode))
             if node.target is torch.ops.higher_order.with_effects:
