@@ -6,6 +6,7 @@ from typing import Any, TYPE_CHECKING
 import torch
 from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND as PromotionKind,
+    is_cpu_scalar_tensor as _is_wrapped_scalar,
     is_non_overlapping_and_dense_or_false,
 )
 from torch._tensor_iterator import nullary_op
@@ -30,17 +31,13 @@ from .table import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from ._types import Number, OperatorResult, PromotionOperands
-    from .signature import Functor, Signature
-
-
-if TYPE_CHECKING:
-    from ...cutedsl import dtypes as dt, launch as _L
+    from ...cutedsl import dtypes as dt
     from . import kernel as K, ops
+    from ._types import Number, OperatorResult, PromotionOperands, Shape
+    from .signature import Functor, Signature
 else:
     # Keep cutlass and kernel imports lazy during `import torch`.
     dt = LazyModule("torch._native.cutedsl.dtypes")
-    _L = LazyModule("torch._native.cutedsl.launch")
     K = LazyModule("torch._native.ops.pointwise.kernel")
     ops = LazyModule("torch._native.ops.pointwise.ops")
 
@@ -49,6 +46,8 @@ _SUPPORTED = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 
 
 def _layouts_serveable(ins: Sequence[torch.Tensor]) -> bool:
+    if all(t.is_contiguous() for t in ins):
+        return True
     arrays = [t for t in ins if t.numel() != 1]
     if arrays and all(
         t.shape == arrays[0].shape
@@ -68,25 +67,35 @@ def _layouts_serveable(ins: Sequence[torch.Tensor]) -> bool:
     return all(row_gap_view(t) in gaps for t in ins)
 
 
-def _is_wrapped_scalar(t: torch.Tensor) -> bool:
-    # Registry CPU wrappers retain Python numbers' weak promotion.
-    return isinstance(t, torch.Tensor) and t.dim() == 0 and t.device.type == "cpu"
-
-
 def _device_ref(ins: Sequence[torch.Tensor]) -> torch.Tensor | None:
     return next((t for t in ins if not _is_wrapped_scalar(t)), None)
+
+
+def _layout_operands(
+    row: PointwiseDef, ins: Sequence[torch.Tensor]
+) -> tuple[tuple[torch.dtype, Shape, Shape], ...]:
+    operands = ins[::-1] if row.aten == "rsub.Tensor" else ins
+    return tuple((t.dtype, tuple(t.shape), t.stride()) for t in operands)
+
+
+def _needs_native_narrowing(source: torch.dtype, destination: torch.dtype) -> bool:
+    # c10 narrows these types through FP32; the executor's scalar cast is direct.
+    return destination in (torch.float16, torch.bfloat16) and (
+        source is torch.float64
+        or (not source.is_floating_point and source.itemsize >= 4)
+    )
 
 
 def _supported(t: object, dtypes: Sequence[torch.dtype]) -> bool:
     # Resolving lazy neg/conj views can redispatch through copy_.
     return (
         isinstance(t, torch.Tensor)
+        and not cap.is_traced(t)
         and t.dtype in dtypes
         and t.numel() > 0
         and can_use_32bit_indexing(t)
         and not t.is_neg()
         and not t.is_conj()
-        and not cap.is_traced(t)
     )
 
 
@@ -194,7 +203,7 @@ def _make_cond(row: PointwiseDef, variant: PointwiseVariant) -> Callable[..., bo
 
     def cond(*args: Any, **kwargs: Any) -> bool:
         ins = args[: row.nin]
-        if len(ins) < row.nin or not all(_supported(t, dtypes) for t in ins):
+        if len(ins) < row.nin or not all(isinstance(t, torch.Tensor) for t in ins):
             return False
         cpu_inputs = [i for i, t in enumerate(ins) if _is_wrapped_scalar(t)]
         if len(cpu_inputs) > 1 or (
@@ -203,18 +212,17 @@ def _make_cond(row: PointwiseDef, variant: PointwiseVariant) -> Callable[..., bo
         ):
             return False
         ref = _device_ref(ins)
-        if ref is None:
+        if ref is None or cap.is_traced(ref):
             return False
         if not (cap.device_ok(ref, _ARCH_MAJORS) and cap.on_current_device(ref)):
             return False
-        if (
-            any(_is_wrapped_scalar(t) for t in ins)
-            and torch.cuda.is_current_stream_capturing()
+        if not all(_supported(t, dtypes) for t in ins):
+            return False
+        if any(
+            t.device != ref.device and i not in cpu_inputs for i, t in enumerate(ins)
         ):
             return False
-        if row.aten in ("div.Tensor", "div.Tensor_mode") and any(
-            _is_wrapped_scalar(t) for t in ins
-        ):
+        if cpu_inputs and torch.cuda.is_current_stream_capturing():
             return False
         scalars = _scalars(row, args, kwargs)
         if any(isinstance(s, complex) for s in scalars):
@@ -239,14 +247,6 @@ def _make_cond(row: PointwiseDef, variant: PointwiseVariant) -> Callable[..., bo
                 isinstance(s, float) for s in scalars
             ):
                 return False
-        if row.aten in ("clamp", "hardtanh", "hardshrink", "softshrink", "threshold"):
-            if ins[0].dtype.is_floating_point:
-                try:
-                    for s in scalars:
-                        if s is not None:
-                            round_float(float(s), ins[0].dtype)
-                except (OverflowError, ValueError):
-                    return False
         promotion = None
         fn_name = None
         if row.mode_kwarg is not None:
@@ -257,30 +257,21 @@ def _make_cond(row: PointwiseDef, variant: PointwiseVariant) -> Callable[..., bo
             if row.mode_int_only and _mode_of(row, args, kwargs) in row.mode_int_only:
                 if any(t.dtype.is_floating_point for t in ins):
                     return False
-        if any(t.device != ref.device and not _is_wrapped_scalar(t) for t in ins):
-            return False
         signature = _signature(row, _promo_key(ins), promotion, fn_name)
-        compute, result = signature.compute, signature.results[0]
+        result = signature.results[0]
         try:
-            for scalar in scalars:
-                if scalar is not None and compute.is_floating_point:
-                    round_float(float(scalar), compute)
-                elif scalar is not None:
-                    limits = torch.iinfo(compute)
-                    if not limits.min <= scalar <= limits.max:
-                        return False
+            for scalar, dtype in zip(
+                scalars, signature.arguments[row.nin :], strict=True
+            ):
+                if scalar is not None:
+                    check_scalar(scalar, dtype)
             for index, value in enumerate(ins):
-                if _is_wrapped_scalar(value):
+                if index in cpu_inputs:
                     scalar = value.item()
                     scalar_dtype = signature.input_dtype(index, True)
                     if value.dtype.is_floating_point and not math.isfinite(scalar):
                         return False
-                    if scalar_dtype.is_floating_point:
-                        round_float(float(scalar), scalar_dtype)
-                    else:
-                        limits = torch.iinfo(scalar_dtype)
-                        if not limits.min <= scalar <= limits.max:
-                            return False
+                    check_scalar(scalar, scalar_dtype)
         except (OverflowError, ValueError):
             return False
         basic_layout = _layouts_serveable(ins)
@@ -296,10 +287,10 @@ def _make_cond(row: PointwiseDef, variant: PointwiseVariant) -> Callable[..., bo
         if variant != "functional":
             if not (
                 isinstance(tgt, torch.Tensor)
+                and not cap.is_traced(tgt)
                 and is_non_overlapping_and_dense_or_false(tgt)
                 and tgt.device == ref.device
                 and const_data_ptr(tgt) % 16 == 0
-                and not cap.is_traced(tgt)
             ):
                 return False
             if any(_has_partial_overlap(tgt, t) for t in ins):
@@ -310,6 +301,15 @@ def _make_cond(row: PointwiseDef, variant: PointwiseVariant) -> Callable[..., bo
                 return False
             if not torch.can_cast(result, tgt.dtype):
                 return False
+            if row.output_dispatch and tgt.dtype != result:
+                return False
+            if _needs_native_narrowing(result, tgt.dtype):
+                return False
+        if any(
+            i not in cpu_inputs and _needs_native_narrowing(t.dtype, signature.storage)
+            for i, t in enumerate(ins)
+        ):
+            return False
         if not basic_layout:
             dtype = tgt.dtype if isinstance(tgt, torch.Tensor) else result
             return (
@@ -319,13 +319,7 @@ def _make_cond(row: PointwiseDef, variant: PointwiseVariant) -> Callable[..., bo
                     tuple(bshape),
                     dtype,
                     tgt,
-                    out_strides=output_strides(
-                        tuple(
-                            (t.dtype, tuple(t.shape), t.stride())
-                            for t in (ins[::-1] if row.aten == "rsub.Tensor" else ins)
-                        ),
-                        dtype,
-                    )
+                    out_strides=output_strides(_layout_operands(row, ins), dtype)
                     if variant == "functional"
                     else None,
                 )
@@ -343,7 +337,6 @@ def _make_impl(
         targets: Sequence[torch.Tensor],
         ins: Sequence[torch.Tensor],
         scalars: Sequence[Any],
-        in_dtypes: PromotionOperands,
         signature: Signature,
         fn_override: Functor | None = None,
     ) -> None:
@@ -352,25 +345,15 @@ def _make_impl(
         casts = tuple(
             signature.input_dtype(k, _is_wrapped_scalar(t)) for k, t in enumerate(ins)
         )
-        if row.aten in ("clamp", "hardtanh", "hardshrink", "softshrink", "threshold"):
-            if ins[0].dtype.is_floating_point:
-                scalars = tuple(round_float(s, ins[0].dtype) for s in scalars)
-        consts = tuple(dt.scalar_arg(s, compute) for s in scalars)
-        out_dtypes = tuple(t.dtype for t in targets)
-        aligned = tuple(const_data_ptr(t) % 16 == 0 for t in (*ins, *targets))
-        key = (
-            row.aten,
-            in_dtypes,
-            tuple((t.shape, t.stride()) for t in ins),
-            out_dtypes,
-            tuple(type(c) for c in consts),
-            fn_override,
-            aligned,
+        consts = tuple(
+            dt.scalar_arg(s, dtype)
+            for s, dtype in zip(scalars, signature.arguments[row.nin :], strict=True)
         )
-        fn_name = fn_override or row.fn
+        out_dtypes = tuple(t.dtype for t in targets)
+        fn = fn_override or row.fn
         K.run(
-            ops.get_fn(fn_name),
-            key,
+            ops.get_fn(fn),
+            (row.aten,),
             row.nin,
             row.nout,
             consts,
@@ -388,15 +371,12 @@ def _make_impl(
         ins: Sequence[torch.Tensor],
         signature: Signature,
     ) -> list[torch.Tensor]:
-        bshape = torch.broadcast_shapes(*(t.shape for t in ins))
         ref = _device_ref(ins)
         if ref is None:
             raise AssertionError("pointwise impl reached with no device operand")
         if variant == "functional":
-            operands = tuple(
-                (t.dtype, tuple(t.shape), t.stride())
-                for t in (ins[::-1] if row.aten == "rsub.Tensor" else ins)
-            )
+            bshape = torch.broadcast_shapes(*(t.shape for t in ins))
+            operands = _layout_operands(row, ins)
             return [
                 torch.empty_strided(
                     bshape, output_strides(operands, d), device=ref.device, dtype=d
@@ -419,7 +399,7 @@ def _make_impl(
         signature = _signature(row, in_dtypes, promotion, fn_override)
         scalars = _scalars(row, args, kwargs, signature.results[0])
         targets = _targets(args, kwargs, ins, signature)
-        _run_into(targets, ins, scalars, in_dtypes, signature, fn_override)
+        _run_into(targets, ins, scalars, signature, fn_override)
         return targets[0] if row.nout == 1 else tuple(targets)
 
     return impl
