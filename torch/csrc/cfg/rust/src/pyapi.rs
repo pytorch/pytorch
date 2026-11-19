@@ -21,8 +21,8 @@ use std::sync::Arc;
 /// Hands the C function table of torch._C to the VM.
 #[pyfunction]
 pub fn init(capsule: &Bound<'_, PyCapsule>) -> PyResult<()> {
-    let api = capsule.pointer() as *mut TcfgApi;
-    if api.is_null() || unsafe { (*api).version } != TCFG_API_VERSION {
+    let api = capsule.pointer_checked(Some(c"torch._C._cfg_c_api"))?.as_ptr() as *mut TcfgApi;
+    if unsafe { (*api).version } != TCFG_API_VERSION {
         return Err(PyRuntimeError::new_err(
             "torch._C and the torch.vm runtime were built from different sources",
         ));
@@ -43,7 +43,7 @@ pub fn decode(
 ) -> PyResult<Vec<(u32, String, u32, Option<u32>)>> {
     let table = OpcodeTable::load(py)?;
     let co_code = code.getattr("co_code")?;
-    let co_code = co_code.downcast::<PyBytes>()?;
+    let co_code = co_code.cast::<PyBytes>()?;
     Ok(bytecode::decode(&table, co_code)
         .into_iter()
         .map(|ins| (ins.off, table.names[ins.code as usize].clone(), ins.arg, ins.target))
@@ -56,7 +56,7 @@ pub fn builtin_passes() -> Vec<&'static str> {
 }
 
 fn interned(py: Python<'_>, name: &str) -> PyObj {
-    unsafe { PyObj::from_borrowed(pyo3::types::PyString::intern_bound(py, name).as_ptr()) }
+    unsafe { PyObj::from_borrowed(pyo3::types::PyString::intern(py, name).as_ptr()) }
 }
 
 /// Registers that a call of an instance whose class has `function` as its
@@ -219,10 +219,10 @@ pub fn compile(
 #[pyclass(module = "torch._cfg_rs", name = "CfgFunction", frozen, weakref)]
 pub struct CfgFunction {
     inner: Arc<Compiled>,
-    wrapped: PyObject,
+    wrapped: Py<PyAny>,
     /// The capsule of the function's workspace and the address in it, or
     /// none and 0.
-    workspace: Option<PyObject>,
+    workspace: Option<Py<PyAny>>,
     memory: usize,
 }
 
@@ -241,7 +241,7 @@ impl CfgFunction {
         py: Python<'_>,
         args: &Bound<'_, PyTuple>,
         kwargs: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         // For the time of the call, tensors get their memory from what the
         // function kept of its earlier calls.
         let memory = self.memory as *mut std::ffi::c_void;
@@ -255,7 +255,7 @@ impl CfgFunction {
         if result.is_null() {
             Err(PyErr::fetch(py))
         } else {
-            Ok(unsafe { PyObject::from_owned_ptr(py, result) })
+            Ok(unsafe { Bound::from_owned_ptr(py, result) }.unbind())
         }
     }
 
@@ -263,7 +263,7 @@ impl CfgFunction {
         slf: &Bound<'_, Self>,
         obj: Option<&Bound<'_, PyAny>>,
         _owner: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let py = slf.py();
         match obj {
             Some(obj) if !obj.is_none() => unsafe {
@@ -271,7 +271,7 @@ impl CfgFunction {
                 if method.is_null() {
                     Err(PyErr::fetch(py))
                 } else {
-                    Ok(PyObject::from_owned_ptr(py, method))
+                    Ok(Bound::from_owned_ptr(py, method).unbind())
                 }
             },
             _ => Ok(slf.clone().into_any().unbind()),
@@ -279,20 +279,20 @@ impl CfgFunction {
     }
 
     #[getter]
-    fn __wrapped__(&self, py: Python<'_>) -> PyObject {
+    fn __wrapped__(&self, py: Python<'_>) -> Py<PyAny> {
         self.wrapped.clone_ref(py)
     }
 
     /// The workspace the function was compiled with, if any.
     #[getter]
-    fn workspace(&self, py: Python<'_>) -> Option<PyObject> {
+    fn workspace(&self, py: Python<'_>) -> Option<Py<PyAny>> {
         self.workspace.as_ref().map(|w| w.clone_ref(py))
     }
 
     /// Everything this object does not define itself is read from the
     /// function it was compiled from: `__code__`, `__defaults__`, `__dict__`
     /// and what decorators stored in it.
-    fn __getattr__(&self, py: Python<'_>, name: &Bound<'_, pyo3::types::PyString>) -> PyResult<PyObject> {
+    fn __getattr__(&self, py: Python<'_>, name: &Bound<'_, pyo3::types::PyString>) -> PyResult<Py<PyAny>> {
         self.wrapped.bind(py).getattr(name).map(|v| v.unbind())
     }
 
@@ -359,16 +359,16 @@ impl CfgFunction {
 
     /// Counters of the tiers, per block, and the instructions that made
     /// dispatcher calls but could not be turned into direct kernel calls.
-    fn stats(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn stats(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let cf = &self.inner;
         let state = cf.state.borrow();
-        let out = PyDict::new_bound(py);
+        let out = PyDict::new(py);
         out.set_item("calls", cf.calls())?;
-        let blocks = PyList::empty_bound(py);
-        let unlowered = PyList::empty_bound(py);
+        let blocks = PyList::empty(py);
+        let unlowered = PyList::empty(py);
         let (mut sites, mut hits, mut misses) = (0u64, 0u64, 0u64);
         for (b, bs) in state.blocks.iter().enumerate() {
-            let d = PyDict::new_bound(py);
+            let d = PyDict::new(py);
             d.set_item("block", b)?;
             let (entries, specialized) = cf.block_entries(b, bs);
             d.set_item("executions", entries)?;
@@ -412,7 +412,7 @@ impl CfgFunction {
 
     /// The dispatch sites: for every instruction that calls kernels directly,
     /// its block, index, text, and one description per captured variant.
-    fn sites(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn sites(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let cf = &self.inner;
         let slots: Vec<(usize, usize, Arc<capi::SiteSlot>)> = {
             let state = cf.state.borrow();
@@ -426,15 +426,15 @@ impl CfgFunction {
             }
             v
         };
-        let out = PyList::empty_bound(py);
+        let out = PyList::empty(py);
         for (b, i, slot) in slots {
-            let d = PyDict::new_bound(py);
+            let d = PyDict::new(py);
             d.set_item("block", b)?;
             d.set_item("index", i)?;
             d.set_item("instruction", cf.func.op_repr(&cf.func.blocks[b].insts[i].op))?;
             d.set_item("hits", slot.hits.load(Ordering::Relaxed))?;
             d.set_item("misses", slot.misses.load(Ordering::Relaxed))?;
-            let variants = unsafe { PyObject::from_owned_ptr(py, slot.info()) };
+            let variants = unsafe { Bound::from_owned_ptr(py, slot.info()) };
             d.set_item("variants", variants)?;
             out.append(d)?;
         }
@@ -486,12 +486,12 @@ impl Region {
     /// The instructions as dicts with keys index, op, dst, uses and text;
     /// replayable and steppable; and kernel, the operator an instruction was
     /// seen to be exactly one call of (`aten::mul.Tensor`), or None.
-    fn instructions(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn instructions(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let (unit, cx) = self.parts()?;
         let func = cx.func();
-        let out = PyList::empty_bound(py);
+        let out = PyList::empty(py);
         for (i, u) in unit.insts.iter().enumerate() {
-            let d = PyDict::new_bound(py);
+            let d = PyDict::new(py);
             let text = func.op_repr(&u.inst.op);
             d.set_item("index", i)?;
             d.set_item("op", text.split_whitespace().next().unwrap_or(""))?;
@@ -510,12 +510,12 @@ impl Region {
     }
 
     /// What the profiling tier saw the SSA value be, or None.
-    fn observed(&self, py: Python<'_>, value: V) -> PyResult<PyObject> {
+    fn observed(&self, py: Python<'_>, value: V) -> PyResult<Py<PyAny>> {
         let (_, cx) = self.parts()?;
         let Some(obs) = cx.obs.get(value as usize) else {
             return Err(PyIndexError::new_err("no such value"));
         };
-        let d = PyDict::new_bound(py);
+        let d = PyDict::new(py);
         match obs {
             ValueObs::Unseen => return Ok(py.None()),
             ValueObs::Tensor { min_rank, dims, last } => {
@@ -558,11 +558,11 @@ impl Region {
 
     /// What a pass left on this block with `Replay.settle`, or None.
     #[getter]
-    fn note(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn note(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let (unit, cx) = self.parts()?;
         let state = cx.cf.state.borrow();
         Ok(match &state.blocks[unit.block].note {
-            Some(note) => unsafe { PyObject::from_borrowed_ptr(py, note.as_ptr()) },
+            Some(note) => unsafe { Bound::from_borrowed_ptr(py, note.as_ptr()).unbind() },
             None => py.None(),
         })
     }
@@ -705,7 +705,7 @@ impl Region {
         let func = cx.func();
         let c = if value.is_none() {
             func.const_none
-        } else if let Ok(b) = value.downcast::<pyo3::types::PyBool>() {
+        } else if let Ok(b) = value.cast::<pyo3::types::PyBool>() {
             if b.is_true() {
                 func.const_true
             } else {
@@ -802,7 +802,7 @@ impl Replay {
             Ok(()) => Ok(()),
             Err(index) => {
                 let err = PyErr::fetch(py);
-                let _ = err.value_bound(py).setattr("cfg_index", index);
+                let _ = err.value(py).setattr("cfg_index", index);
                 Err(err)
             }
         }
@@ -813,15 +813,15 @@ impl Replay {
 
     /// The generic instructions of a block, as `Region.instructions` gives
     /// them for the block of a pass.
-    fn instructions_of(&self, py: Python<'_>, block: usize) -> PyResult<PyObject> {
+    fn instructions_of(&self, py: Python<'_>, block: usize) -> PyResult<Py<PyAny>> {
         let compiled = self.compiled()?;
         let func = &compiled.func;
         let Some(found) = func.blocks.get(block) else {
             return Err(PyIndexError::new_err("no such block"));
         };
-        let out = PyList::empty_bound(py);
+        let out = PyList::empty(py);
         for (i, inst) in found.insts.iter().enumerate() {
-            let d = PyDict::new_bound(py);
+            let d = PyDict::new(py);
             let text = func.op_repr(&inst.op);
             d.set_item("index", i)?;
             d.set_item("op", text.split_whitespace().next().unwrap_or(""))?;
@@ -904,9 +904,9 @@ impl Replay {
 
     /// The globals of the function.
     #[getter]
-    fn globals(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn globals(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let compiled = self.compiled()?;
-        Ok(unsafe { PyObject::from_borrowed_ptr(py, compiled.func.globals.as_ptr()) })
+        Ok(unsafe { Bound::from_borrowed_ptr(py, compiled.func.globals.as_ptr()).unbind() })
     }
 
     /// `run` for the instructions lo..hi of any block, which may also be
@@ -931,7 +931,7 @@ impl Replay {
             Ok(()) => Ok(()),
             Err(index) => {
                 let err = PyErr::fetch(py);
-                let _ = err.value_bound(py).setattr("cfg_index", index);
+                let _ = err.value(py).setattr("cfg_index", index);
                 Err(err)
             }
         }
@@ -1117,7 +1117,7 @@ pub fn module_identity(module: &Bound<'_, PyAny>, skip: &Bound<'_, PyTuple>) -> 
 }
 
 pub fn run_python_pass(callable: &PyObj, unit: &mut Unit, cx: &PassCx) -> PyResult<bool> {
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         let region = Py::new(
             py,
             Region {
@@ -1168,8 +1168,8 @@ struct NativeRaw {
 /// The region a native pass was called with: the Python object, which the
 /// functions below reach the block through.
 unsafe fn native_region<'py>(region: *mut c_void) -> Bound<'py, Region> {
-    let py = Python::assume_gil_acquired();
-    Bound::from_borrowed_ptr(py, region as Obj).downcast_into_unchecked()
+    let py = Python::assume_attached();
+    Bound::from_borrowed_ptr(py, region as Obj).cast_into_unchecked()
 }
 
 unsafe fn native_inst<T>(region: *mut c_void, index: usize, read: impl FnOnce(&spec::UInst, &PassCx) -> T) -> Option<T> {
@@ -1253,7 +1253,7 @@ unsafe extern "C" fn native_swap(
     let py = region.py();
     let kernel = Bound::from_borrowed_ptr(py, kernel as Obj);
     let result = py
-        .import_bound("torch.vm._passes")
+        .import("torch.vm._passes")
         .and_then(|module| module.getattr("fuse_checked"))
         .and_then(|fuse| fuse.call1((&region, start, end, kernel, checks)))
         .and_then(|done| done.extract::<bool>());
@@ -1285,7 +1285,7 @@ pub struct NativePass {
     library: String,
     run: NativeRun,
     state: usize,
-    bound: Option<PyObject>,
+    bound: Option<Py<PyAny>>,
 }
 
 #[pymethods]
@@ -1301,7 +1301,7 @@ impl NativePass {
 
     /// The pass with `object` handed to it each time it runs: the kernel it
     /// puts in, as a rule.
-    fn bind(&self, object: PyObject) -> NativePass {
+    fn bind(&self, object: Py<PyAny>) -> NativePass {
         NativePass {
             name: self.name.clone(),
             library: self.library.clone(),
@@ -1336,7 +1336,7 @@ extern "C" {
 /// torch/csrc/cfg/rust/sdk) and returns its passes by name. The library
 /// stays loaded.
 #[pyfunction]
-pub fn load_passes(py: Python<'_>, path: &str) -> PyResult<PyObject> {
+pub fn load_passes(py: Python<'_>, path: &str) -> PyResult<Py<PyAny>> {
     #[cfg(not(unix))]
     {
         let _ = (py, path);
@@ -1370,7 +1370,7 @@ pub fn load_passes(py: Python<'_>, path: &str) -> PyResult<PyObject> {
         let table: unsafe extern "C" fn(*mut *const NativeRaw) -> usize = std::mem::transmute(table);
         let mut first: *const NativeRaw = std::ptr::null();
         let count = table(&mut first);
-        let out = PyDict::new_bound(py);
+        let out = PyDict::new(py);
         for raw in std::slice::from_raw_parts(first, count) {
             let name = std::ffi::CStr::from_ptr(raw.name).to_string_lossy().into_owned();
             let pass = NativePass {
