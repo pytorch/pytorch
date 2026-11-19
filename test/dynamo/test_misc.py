@@ -8013,9 +8013,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
     @parametrize("fullgraph", [False, True])
     @parametrize("capture", [False, True])
-    def test_ctc_loss_output_capture(self, fullgraph, capture):
+    @parametrize(
+        "ctc_loss",
+        [
+            subtest(F.ctc_loss, name="F"),
+            subtest(torch.ctc_loss, name="torch"),
+            subtest(torch.ops.aten.ctc_loss, name="aten_packet"),
+            subtest(torch.ops.aten.ctc_loss.Tensor, name="aten_tensor"),
+        ],
+    )
+    def test_ctc_loss_output_capture(self, fullgraph, capture, ctc_loss):
         def fn(log_probs, targets, input_lengths, target_lengths):
-            loss = F.ctc_loss(log_probs * 1.0, targets, input_lengths, target_lengths)
+            loss = ctc_loss(log_probs * 1.0, targets, input_lengths, target_lengths)
             return loss + 1
 
         T, N, C, S = 50, 2, 20, 10
