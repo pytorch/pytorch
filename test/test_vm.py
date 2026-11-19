@@ -4294,6 +4294,29 @@ class TestVmRegions(TestCase):
             self.assertEqual(shared(), scale)
         self.assertEqual(graphs, [5, 5])
 
+    def test_view_is_handed_on_as_a_reshape(self):
+        # A trace records `reshape` as the view it was for the tensor at
+        # hand. A backend that lays the tensor out otherwise could not take
+        # the view; it can always take the reshape.
+        targets = []
+
+        def backend(graph, inputs):
+            targets.extend(
+                str(n.target) for n in graph.graph.nodes if n.op == "call_function"
+            )
+            return graph
+
+        def f(x):
+            return x.reshape(2, -1).sin().view(-1, 2).cos().exp().tanh()
+
+        compiled = torch.vm(f, passes=with_graphs(backend), fallback=False)
+        for _ in range(5):
+            x = torch.randn(4, 3)
+            self.assertEqual(compiled(x), f(x), atol=0, rtol=0)
+        self.assertEqual(len(self.compiled_regions(compiled)), 1)
+        self.assertEqual([t for t in targets if "view" in t], [])
+        self.assertEqual(len([t for t in targets if "reshape" in t]), 2)
+
     def test_named_tuples_and_sets_of_values_are_inputs(self):
         compiled = torch.vm(
             region_pair, passes=with_graphs("aot_eager"), fallback=False
