@@ -25,10 +25,10 @@ from torchgen.native_aot_decl import decl_id_for_op as _decl_id, discover_declar
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from torchgen.api.types import Binding
-    from torchgen.model import NativeFunction, NativeFunctionsGroup
+    from torchgen.model import BackendIndex, NativeFunction, NativeFunctionsGroup
 
 
 @dataclass(frozen=True)
@@ -224,6 +224,8 @@ def first_tensor_arg(f: NativeFunction) -> str | None:
 def validate_native_aot_manifests(
     manifests: dict[tuple[DispatchKey, str], NativeAotManifest],
     grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
+    *,
+    backend_indices: Mapping[DispatchKey, BackendIndex] | None = None,
 ) -> None:
     r"""Validate unique or EXACT structured names and exact unstructured names.
     Unstructured hooks require fresh Tensor returns or an inplace self alias.
@@ -271,6 +273,27 @@ def validate_native_aot_manifests(
                     f"native-aot declaration for {op}@{key}: unstructured hooks "
                     "require a non-optional Tensor argument for the device guard"
                 )
+            if f.manual_kernel_registration:
+                raise RuntimeError(
+                    f"native-aot declaration for {op}@{key}: "
+                    "manual kernel registration has no generated backend wrapper"
+                )
+            if backend_indices is not None:
+                keys = (
+                    (key, DispatchKey.CompositeExplicitAutograd)
+                    if key is DispatchKey.CUDA
+                    else (key,)
+                )
+                if not any(
+                    backend_indices[k].has_kernel(f)
+                    for k in keys
+                    if k in backend_indices
+                ):
+                    wrappers = " or ".join(str(k) for k in keys)
+                    raise RuntimeError(
+                        f"native-aot declaration for {op}@{key}: "
+                        f"requires a generated {wrappers} backend wrapper"
+                    )
             continue
         base = op.split(".")[0]
         names = structured_by_base.get(base, [])

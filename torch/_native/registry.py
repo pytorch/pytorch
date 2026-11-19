@@ -550,6 +550,13 @@ def _scalar_arg_coercer(
     ]
     if not tensor_slots:
         return None
+    weak_scalars = overload._schema.name.removesuffix("_") in _WEAK_SCALAR_OPS
+    is_division = overload._schema.name in ("aten::div", "aten::div_")
+    from torch._prims_common import (
+        elementwise_dtypes,
+        ELEMENTWISE_TYPE_PROMOTION_KIND,
+        get_computation_dtype,
+    )
 
     def coerce(args: tuple[Any, ...]) -> _CoercedScalars:
         scalar_slots = [
@@ -559,27 +566,21 @@ def _scalar_arg_coercer(
         ]
         if not scalar_slots:
             return args, None
-        if overload._schema.name.removesuffix("_") not in _WEAK_SCALAR_OPS:
+        if not weak_scalars or all(
+            not isinstance(arg, torch.Tensor) or arg.dim() == 0 for arg in args
+        ):
             return None
         operands = [
             a for a in args if isinstance(a, (torch.Tensor, bool, int, float, complex))
         ]
-        from torch._prims_common import (
-            elementwise_dtypes,
-            ELEMENTWISE_TYPE_PROMOTION_KIND,
-            get_computation_dtype,
-        )
-
         _, cast_dtype = elementwise_dtypes(
             *operands, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
         )
         tensor_dtypes = [a.dtype for a in operands if isinstance(a, torch.Tensor)]
-        compute_dtype = None
-        if overload._schema.name not in (
-            "aten::div",
-            "aten::div_",
-        ):
-            compute_dtype = get_computation_dtype(cast_dtype)
+        compute_dtype = None if is_division else get_computation_dtype(cast_dtype)
+        if compute_dtype is not None and compute_dtype != cast_dtype:
+            if cast_dtype not in tensor_dtypes:
+                return None
         out = list(args)
         for i in scalar_slots:
             out[i] = _weak_wrap(args[i], tensor_dtypes, cast_dtype, compute_dtype)
@@ -1254,12 +1255,6 @@ def _register_overrides_from_graph(
             if coerced is None:
                 return _fallback.call_boxed(keyset, *original_args, **kwargs)
             args, cast_dtype = coerced
-        if cast_dtype is not None and all(
-            not isinstance(arg, torch.Tensor) or arg.dim() == 0 for arg in original_args
-        ):
-            # Native scalar kernels retain the wrapped-number promotion tier.
-            return _fallback.call_boxed(keyset, *original_args, **kwargs)
-
         result = _dispatch(
             args,
             kwargs,
@@ -1273,6 +1268,12 @@ def _register_overrides_from_graph(
         return _cast_to_weak_dtype(result, cast_dtype)
 
     def compile_router(*args: Any, **kwargs: Any) -> Any:
+        cast_dtype = None
+        if _coerce_scalars is not None:
+            coerced = _coerce_scalars(args)
+            if coerced is None:
+                return NotImplemented
+            args, cast_dtype = coerced
         result = _dispatch(
             args,
             kwargs,
@@ -1281,7 +1282,9 @@ def _register_overrides_from_graph(
         )
         if result is _NO_MATCH:
             return NotImplemented
-        return result
+        if overload is not None and overload._schema.is_mutable:
+            return result
+        return _cast_to_weak_dtype(result, cast_dtype)
 
     # Eager path: install a fresh override for this (lib, op, key).
     _install_override(lib_symbol, op_symbol, dispatch_key, eager_router)
