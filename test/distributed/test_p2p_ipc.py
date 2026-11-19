@@ -3,6 +3,8 @@
 # To run:
 # python test/distributed/test_p2p_ipc.py
 
+import ctypes
+import errno
 import os
 import unittest
 from contextlib import contextmanager
@@ -43,6 +45,24 @@ def _expandable_handle_type(tensor: torch.Tensor) -> int:
                 raise AssertionError("tensor is not in an expandable segment")
             return segment["expandable_segment_handle_type"]
     raise AssertionError("tensor not found in the allocator snapshot")
+
+
+def _pidfd_getfd_errno(pid: int, fd: int) -> int:
+    """Return 0 if this process may duplicate `fd` from process `pid`, else errno."""
+    try:
+        pidfd = os.pidfd_open(pid)
+    except OSError as e:
+        return e.errno
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        # SYS_pidfd_getfd is 438 on every architecture (unified syscall table).
+        new_fd = libc.syscall(438, pidfd, fd, 0)
+        if new_fd == -1:
+            return ctypes.get_errno()
+        os.close(new_fd)
+        return 0
+    finally:
+        os.close(pidfd)
 
 
 @contextmanager
@@ -188,6 +208,30 @@ class P2PIpcTest(MultiProcContinuousTest):
 
         torch.distributed.barrier()
 
+    def _require_pidfd_getfd(self) -> None:
+        # The POSIX fd import duplicates the exporter's fds with pidfd_getfd,
+        # which some hosts deny between sibling processes even with
+        # CAP_SYS_PTRACE. Probe it on every rank before exporting, so all
+        # ranks skip together instead of the producer waiting at a barrier.
+        fds = None
+        info = [None]
+        if self.rank == 0:
+            fds = os.pipe()
+            info = [(os.getpid(), fds[0])]
+        torch.distributed.broadcast_object_list(info, src=0)
+        err = 0 if self.rank == 0 else _pidfd_getfd_errno(*info[0])
+        errs = [None] * torch.distributed.get_world_size()
+        torch.distributed.all_gather_object(errs, err)
+        if fds is not None:
+            for fd in fds:
+                os.close(fd)
+        failed = sorted({e for e in errs if e})
+        if any(e in (errno.EPERM, errno.EACCES, errno.ENOSYS) for e in failed):
+            self.skipTest(
+                f"pidfd_getfd is denied on this host: {os.strerror(failed[0])}"
+            )
+        self.assertEqual(failed, [], "pidfd_getfd probe failed unexpectedly")
+
     def _require_handle_type(self, handle_type: int, expected: int) -> None:
         other = _FABRIC_HANDLE if expected == _POSIX_FD_HANDLE else _POSIX_FD_HANDLE
         if TEST_WITH_ROCM and handle_type == other:
@@ -241,6 +285,7 @@ class P2PIpcTest(MultiProcContinuousTest):
         test_p2p_ipc_expandable_segments on ROCm devices without fabric handle
         support, which share expandable segments with POSIX fds.
         """
+        self._require_pidfd_getfd()
         with _scoped_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC", "1"):
             torch.cuda.memory._set_allocator_settings("expandable_segments:True")
             torch.cuda.empty_cache()
