@@ -67,7 +67,7 @@ class ModelPool {
     void mark_in_flight() {
       AOTI_RUNTIME_CHECK(
           entry_ != nullptr, "The lease no longer holds a model");
-      pool_->return_model_to_draining(*entry_);
+      pool_->return_model_to_in_flight(*entry_);
       entry_ = nullptr;
     }
 
@@ -196,7 +196,7 @@ class ModelPool {
     kHeld,
     // Held by no thread, but its last run reached the device and may still be
     // executing there, so it is reused only once that work finishes.
-    kDraining,
+    kInFlight,
   };
 
   struct ModelEntry {
@@ -208,7 +208,7 @@ class ModelPool {
     // model.
     Stream stream;
     // When the entry entered its current state: the newest available model is
-    // checked out first, and the oldest draining one is waited on first.
+    // checked out first, and the oldest in-flight one is waited on first.
     uint64_t seq;
   };
 
@@ -240,10 +240,10 @@ class ModelPool {
     model_state_changed_.notify_all();
   }
 
-  void return_model_to_draining(ModelEntry& entry) {
+  void return_model_to_in_flight(ModelEntry& entry) {
     {
       std::lock_guard lk(models_mutex_);
-      transition(entry, ModelState::kHeld, ModelState::kDraining);
+      transition(entry, ModelState::kHeld, ModelState::kInFlight);
     }
     model_state_changed_.notify_all();
   }
@@ -323,8 +323,8 @@ class ModelPool {
         return *entry;
       }
 
-      if (entry->state == ModelState::kDraining) {
-        transition(*entry, ModelState::kDraining, ModelState::kHeld);
+      if (entry->state == ModelState::kInFlight) {
+        transition(*entry, ModelState::kInFlight, ModelState::kHeld);
         lk.unlock();
         try {
           entry->model->wait_for_completion();
@@ -368,11 +368,11 @@ class ModelPool {
     // is_finished() throws, every entry is still in exactly one state.
     bool reclaimed = false;
     uint64_t min_seq = 0;
-    while (ModelEntry* entry = oldest(ModelState::kDraining, min_seq)) {
+    while (ModelEntry* entry = oldest(ModelState::kInFlight, min_seq)) {
       // Read before transition() gives the entry a new seq.
       min_seq = entry->seq + 1;
       if (entry->model->is_finished()) {
-        transition(*entry, ModelState::kDraining, ModelState::kAvailable);
+        transition(*entry, ModelState::kInFlight, ModelState::kAvailable);
         reclaimed = true;
       }
     }
@@ -383,15 +383,15 @@ class ModelPool {
 
     model_state_changed_.wait(lk, [this]() {
       return oldest(ModelState::kAvailable) != nullptr ||
-          oldest(ModelState::kDraining) != nullptr;
+          oldest(ModelState::kInFlight) != nullptr;
     });
     if (oldest(ModelState::kAvailable) != nullptr) {
       return;
     }
     // Let's make the schedule simple first. We always wait on the oldest
-    // draining model to be complete.
-    ModelEntry* entry = oldest(ModelState::kDraining);
-    transition(*entry, ModelState::kDraining, ModelState::kHeld);
+    // in-flight model to be complete.
+    ModelEntry* entry = oldest(ModelState::kInFlight);
+    transition(*entry, ModelState::kInFlight, ModelState::kHeld);
     lk.unlock();
     try {
       entry->model->wait_for_completion();
