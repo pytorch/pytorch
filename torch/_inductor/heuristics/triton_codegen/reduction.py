@@ -22,6 +22,7 @@ from torch._inductor.runtime.hints import (
     TRITON_MAX_MIX_ORDER_XBLOCK,
 )
 from torch._inductor.runtime.runtime_utils import last_power_of_2, next_power_of_2
+from torch._inductor.runtime.tiling import get_max_block
 from torch._inductor.utils import prefix_is_reduction
 from torch.utils._ordered_set import OrderedSet
 
@@ -82,7 +83,7 @@ def _match_target_block_product(
         dim, score = max(relative_scores.items(), key=lambda item: item[1])
 
         if (
-            block_sizes[dim] >= TRITON_MAX_BLOCK[dim.capitalize()]
+            block_sizes[dim] >= get_max_block(dim, TRITON_MAX_BLOCK)
             or block_sizes[dim] >= size_hints[dim]
         ):
             del relative_scores[dim]
@@ -153,9 +154,14 @@ def _outer_config_opt(
     elif num_dynamic > 1:
         outer_r_block = max(min((rnumel // 64), 64), 8)
     elif num_dynamic == 1:
-        outer_r_block = (
-            1 if load_factor >= 3 else min(next_power_of_2(max(rnumel, 128) // 128), 8)
-        )
+        if load_factor >= 3 and inductor_meta.get("sm100_outer_reduction_r0_block_8"):
+            outer_r_block, num_warps = 8, 2
+        else:
+            outer_r_block = (
+                1
+                if load_factor >= 3
+                else min(next_power_of_2(max(rnumel, 128) // 128), 8)
+            )
     else:
         x_block = max(min(max_x_block, next_power_of_2(x // 4096)), x_block)
         if load_factor < 4 or rnumel <= 128:
@@ -195,6 +201,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     ) -> list[Config]:
         """Generate non-persistent reduction autotuning configs."""
         from torch._inductor.runtime.triton_heuristics import (
+            _enforce_native_matmul_config_min_xblock,
             get_total_reduction_numel,
             make_matmul_triton_config,
             triton_config_reduction,
@@ -228,17 +235,20 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
         if triton_meta.get("native_matmul"):
             if len(size_hints) == 3:
-                return [
+                configs = [
                     make_matmul_triton_config(sizes, num_warps, num_stages)
                     for sizes, num_warps, num_stages in triton_native_mm_configs
                 ]
             elif len(size_hints) == 4:
-                return [
+                configs = [
                     make_matmul_triton_config(sizes, num_warps, num_stages)
                     for sizes, num_warps, num_stages in triton_native_bmm_configs
                 ]
             else:
                 raise NotImplementedError("native matmul only supports mm/bmm pattern")
+            return _enforce_native_matmul_config_min_xblock(
+                configs, inductor_meta.get("min_xblock")
+            )
 
         def make_config(
             x,
@@ -423,6 +433,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             from torch._inductor.runtime.hints import native_matmul_persistent_rblock
             from torch._inductor.runtime.triton_heuristics import (
                 _cap_native_matmul_configs,
+                _enforce_native_matmul_config_min_xblock,
             )
 
             native_matmul_rblock = inductor_meta.get("native_matmul_persistent_rblock")
@@ -434,15 +445,19 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                     make_matmul_triton_config(sizes, num_warps, num_stages)
                     for sizes, num_warps, num_stages in triton_native_persistent_mm_configs
                 ]
-                return _cap_native_matmul_configs(configs, native_matmul_rblock)
             elif len(size_hints) == 4:
                 configs = [
                     make_matmul_triton_config(sizes, num_warps, num_stages)
                     for sizes, num_warps, num_stages in triton_native_persistent_bmm_configs
                 ]
-                return _cap_native_matmul_configs(configs, native_matmul_rblock)
             else:
                 raise NotImplementedError("native matmul only supports mm/bmm pattern")
+            configs = _cap_native_matmul_configs(configs, native_matmul_rblock)
+            return _enforce_native_matmul_config_min_xblock(
+                configs,
+                inductor_meta.get("min_xblock"),
+                r0_block=native_matmul_rblock,
+            )
 
         max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
             "max_autotune_pointwise"
