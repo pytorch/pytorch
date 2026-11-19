@@ -36,9 +36,12 @@ from torch._guards import compile_context, CompileContext
 from torch._higher_order_ops.wrap import inductor_compiled_code
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
+    check_current_accelerator_for_cudagraphs,
+    check_rng_state_for_cudagraphs,
     cudagraph_trees_clone_live_user_visible_outputs,
     CudagraphCachedInfo,
     CudagraphMetadata,
+    format_default_skip_message,
     get_input_storage_mutation_info,
     get_input_storage_mutation_reason,
     get_partition_cudagraph_metadata,
@@ -52,6 +55,7 @@ from torch._inductor.utils import (
     BoxedBool,
     CUDAGraphWrapperMetadata,
     GraphPartitionMap,
+    GraphPartitionPlan,
     InputType,
     is_gpu,
     output_node,
@@ -83,7 +87,7 @@ if TYPE_CHECKING:
     _BoxedCallable: TypeAlias = Callable[[Sequence[InputType]], object]
 
     class CompiledFnRunner(Protocol):
-        """Runner emitted by the Python wrapper when graph_partition is on.
+        """Runner emitted by the Python wrapper for a graph that uses graph partition.
 
         codegen writes a Runner class (see codegen/wrapper.py) whose partitions
         hold the per-partition callables and whose recursively_apply_fns rewrites
@@ -224,6 +228,42 @@ def prepare_cudagraph_post_compile(
         boxed_forward_device_index.set(compiled_graph.device_index())
 
 
+def _get_runtime_cudagraph_fail_reason(
+    compiled_graph: CompiledFxGraph,
+) -> str | None:
+    if config.cudagraph_policy is not None:
+        return None
+
+    device_types = [
+        device_type
+        for device_type in compiled_graph.device_types
+        if device_type not in ("cpu", "meta")
+    ]
+    if len(device_types) != 1:
+        return format_default_skip_message(
+            f"expected one accelerator device, got {device_types}"
+        )
+    device_type = device_types[0]
+    if not config.triton.cudagraph_trees and device_type != "cuda":
+        return format_default_skip_message(
+            f"non-Tree cudagraph capture requires CUDA, got {device_type!r}"
+        )
+    if reason := check_current_accelerator_for_cudagraphs(device_type):
+        return reason
+    if reason := check_rng_state_for_cudagraphs(device_type):
+        return reason
+
+    if config.triton.cudagraph_trees:
+        from torch._inductor.graph_tree_backend import is_graph_tree_backend_available
+
+        if not is_graph_tree_backend_available():
+            return format_default_skip_message(
+                "no Graph Trees backend registered for the current accelerator"
+            )
+
+    return None
+
+
 def cudagraph_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
@@ -243,7 +283,7 @@ def cudagraph_post_compile(
     if compiled_graph.cudagraph_info is None:
         raise AssertionError("compiled_graph.cudagraph_info must not be None")
     cached_info = compiled_graph.cudagraph_info
-    cudagraph_fail_reasons = cached_info.cudagraph_fail_reasons
+    cudagraph_fail_reasons = list(cached_info.cudagraph_fail_reasons)
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
 
@@ -253,6 +293,9 @@ def cudagraph_post_compile(
         maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
         log_cudagraph_skip_and_bump_counter("skipping cudagraphs due to bisector")
         return
+
+    if runtime_reason := _get_runtime_cudagraph_fail_reason(compiled_graph):
+        cudagraph_fail_reasons.append(runtime_reason)
 
     if not cudagraph_fail_reasons:
         fx_kwargs = compiled_graph.fx_kwargs
@@ -349,7 +392,10 @@ def cudagraph_partition_post_compile(
 
     if compiled_graph.cudagraph_info is None:
         raise AssertionError("compiled_graph.cudagraph_info must not be None")
-    cudagraph_fail_reasons = compiled_graph.cudagraph_info.cudagraph_fail_reasons
+    cudagraph_fail_reasons = list(compiled_graph.cudagraph_info.cudagraph_fail_reasons)
+    runtime_reason = _get_runtime_cudagraph_fail_reason(compiled_graph)
+    if runtime_reason:
+        cudagraph_fail_reasons.append(runtime_reason)
 
     if (
         cudagraph_fail_reasons
@@ -359,6 +405,8 @@ def cudagraph_partition_post_compile(
         # cudagraphify is not called if there are no partitions
         BoxedBool.disable(cudagraphs)
         maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
+        if runtime_reason:
+            log_cudagraph_skip_and_bump_counter(runtime_reason)
         return
 
     if compiled_graph.current_callable is None:
@@ -553,6 +601,7 @@ class CompiledFxGraph(OutputCode):
 
     cudagraph_info: CudagraphCachedInfo | None
     partition_maps: list[GraphPartitionMap] | None
+    partition_plan: GraphPartitionPlan
     has_uncaptured_partition: bool
     compile_region_name: str | None
     fx_kwargs: _CompileFxKwargs
@@ -652,6 +701,7 @@ class CompiledFxGraph(OutputCode):
         self.extern_libs_key = None
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
+        self.partition_plan = graph.partition_plan
         self.has_uncaptured_partition = graph.has_uncaptured_partition
         self._defers_input_alignment = getattr(graph, "_defers_input_alignment", False)
         storage_mutation_info = get_input_storage_mutation_info(gm)
@@ -872,7 +922,8 @@ class CompiledFxGraph(OutputCode):
         This runs whether or not we have a cache hit, and always runs directly after we get a CompiledFxGraph.
         The results of this function are *not* saved in the cache itself.
         """
-        if config.graph_partition and _unstable_customized_partition_wrapper.wrapper:
+        customized_wrapper = _unstable_customized_partition_wrapper.wrapper
+        if self.partition_plan.uses_graph_partition and customized_wrapper:
             # Mechanically apply user-specified cudagraph wrappers without modification
             if self.recursively_apply_fns is None:
                 raise AssertionError("self.recursively_apply_fns must not be None")
@@ -883,7 +934,6 @@ class CompiledFxGraph(OutputCode):
                 CUDAGraphWrapperMetadata(num_partitions, i)
                 for i in range(num_partitions)
             ]
-            customized_wrapper = _unstable_customized_partition_wrapper.wrapper
             customized_wrappers_with_metadata = [
                 lambda f, m=metadata: customized_wrapper(f, m)
                 for metadata in wrapper_metadatas
@@ -937,9 +987,9 @@ class CompiledFxGraph(OutputCode):
                         "boxed_forward_device_index", None
                     )
 
-                if config.graph_partition and policy is None:
-                    # With graph_partition=True, we skip some cudagraph checks
-                    # if it's supported with partition, so we use
+                if self.partition_plan.cudagraphs_per_partition and policy is None:
+                    # When the partitions are for CUDA Graphs, we skip some
+                    # cudagraph checks if it's supported with partition, so we use
                     # cudagraph_partition_post_compile.  When a CUDAGraphPolicy
                     # is active, we use cudagraph_post_compile instead so the
                     # policy controls wrapping via policy.cudagraphify().
