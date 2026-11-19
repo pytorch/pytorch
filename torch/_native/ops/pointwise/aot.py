@@ -58,10 +58,17 @@ class Arithmetic(NativeCoverage):
         }
         grid: list[dict[str, Any]] = [
             dict(
-                common, dtype=dtype, layout="dense", ept=ept, vec_bits=bits, transpose=0
+                common,
+                dtype=dtype,
+                layout="dense",
+                work_per_thread=work_per_thread,
+                vec_bits=bits,
+                transpose=0,
             )
             for dtype in _DTYPES
-            for ept, bits in dict.fromkeys((e, b) for _, e, b in self._presets(dtype))
+            for work_per_thread, bits in dict.fromkeys(
+                (e, b) for _, e, b in self._presets(dtype)
+            )
         ]
         if self.ATEN_OP != "rsub.Tensor":
             for shape in range(len(_CFG.POINTWISE_TMA_SHAPES) + 1):
@@ -76,7 +83,7 @@ class Arithmetic(NativeCoverage):
                         common,
                         dtype=["float16", "bfloat16", "float32"],
                         layout="tma",
-                        ept=1,
+                        work_per_thread=1,
                         vec_bits=128,
                         transpose=list(range(first, 1 << self.nin)),
                         shape=shape,
@@ -93,8 +100,8 @@ class Arithmetic(NativeCoverage):
             for i, (r, c) in enumerate(_CFG.POINTWISE_TMA_SHAPES)
         )
         return f"""
-struct PointwiseAotMatch {{ int layout=0, ept=1, vec_bits=128, transpose=0, shape=0; }};
-struct PointwiseAotPreset {{ at::ScalarType dtype; int64_t min_n; int ept, vec_bits; }};
+struct PointwiseAotMatch {{ int layout=0, work_per_thread=1, vec_bits=128, transpose=0, shape=0; }};
+struct PointwiseAotPreset {{ at::ScalarType dtype; int64_t min_n; int work_per_thread, vec_bits; }};
 inline PointwiseAotMatch pointwise_aot_match(
     std::initializer_list<const at::Tensor*> ins, const at::Tensor* out,
     const cudaDeviceProp* props, std::initializer_list<PointwiseAotPreset> presets) {{
@@ -119,10 +126,10 @@ inline PointwiseAotMatch pointwise_aot_match(
   }}
   if (out && reinterpret_cast<uintptr_t>(out->const_data_ptr()) % 16) return m;
   if (dense) {{
-    const auto bits = ref.scalar_type() == at::kDouble ? 64 : 32;
+    const auto bits = ref.element_size() * 8;
     const double fill = props->multiProcessorCount * props->maxThreadsPerMultiProcessor / double({_CFG.POINTWISE_REFERENCE_LANES});
     for (const auto& p : presets) if (p.dtype == ref.scalar_type() && n >= p.min_n * fill) {{
-      m.ept = p.ept; m.vec_bits = p.vec_bits;
+      m.work_per_thread = p.work_per_thread; m.vec_bits = p.vec_bits;
     }}
     if (n % (m.vec_bits / bits) == 0) m.layout = 1;
     return m;
@@ -201,7 +208,7 @@ inline PointwiseAotMatch pointwise_aot_match(
     def cpp_dispatch(self, spec: dict[str, Any]) -> str:
         dtype = f"{self._argument_names('Tensor')[0]}.scalar_type() == {_DTYPES[spec['dtype']]}"
         layout = (
-            f"match.layout == 1 && match.ept == {spec['ept']} && match.vec_bits == {spec['vec_bits']}"
+            f"match.layout == 1 && match.work_per_thread == {spec['work_per_thread']} && match.vec_bits == {spec['vec_bits']}"
             if spec["layout"] == "dense"
             else f"match.layout == 2 && match.transpose == {spec['transpose']} && match.shape == {spec['shape']}"
         )
@@ -211,7 +218,13 @@ inline PointwiseAotMatch pointwise_aot_match(
         names = self._argument_names("Tensor")
         args = names + [names[0]] * (3 - len(names))
         if spec["layout"] == "dense":
-            vector = spec["vec_bits"] // (64 if spec["dtype"] == "float64" else 32)
+            vector = spec["vec_bits"] // (
+                64
+                if spec["dtype"] == "float64"
+                else 32
+                if spec["dtype"] == "float32"
+                else 16
+            )
             input_views = [f"input{k}" for k in range(len(names))]
             views = "".join(
                 f"auto input{k} = {name}.as_strided({{{names[0]}.numel() / {vector}, {vector}}}, {{{vector}, 1}});\n"

@@ -52,7 +52,7 @@ _KERNELS: dict[CacheKey, "Function"] = {}
 
 class _PointwiseConfig(NamedTuple):
     block: int = 256
-    ept: int = 1
+    work_per_thread: int = 1
     vec_bits: int = 128
 
 
@@ -84,12 +84,14 @@ def _choose_config(
         dtype=dtype,
         rowgap=rowgap,
     )
-    _, ept, bits = next(p for p in reversed(presets) if numel >= p[0] * fill)
-    return _PointwiseConfig(ept=ept, vec_bits=bits)
+    _, work_per_thread, bits = next(
+        p for p in reversed(presets) if numel >= p[0] * fill
+    )
+    return _PointwiseConfig(work_per_thread=work_per_thread, vec_bits=bits)
 
 
-def _vec_width(compute_bits: int, vec_bits: int = _VEC_BITS) -> int:
-    return max(vec_bits // compute_bits, 1)
+def _vec_width(storage_bits: int, vec_bits: int = _VEC_BITS) -> int:
+    return max(vec_bits // storage_bits, 1)
 
 
 @cute.jit
@@ -177,7 +179,7 @@ class _PointwiseOp:
 @dataclass
 class _ElementwiseVec(_PointwiseOp):
     block: int = 256
-    ept: int = 1
+    vectors_per_thread: int = 1
     vector: int = 1
     scalar_inputs: tuple[bool, ...] = ()
 
@@ -197,7 +199,7 @@ class _ElementwiseVec(_PointwiseOp):
                 for k, t in enumerate(mIns)
             ]
         nvec = cute.size(outs[0].shape[0])
-        tile = const_expr(self.block * self.ept)
+        tile = const_expr(self.block * self.vectors_per_thread)
         self.kernel(ins, outs, consts, nvec).launch(
             grid=[cute.ceil_div(nvec, tile), 1, 1],
             block=[self.block, 1, 1],
@@ -210,7 +212,7 @@ class _ElementwiseVec(_PointwiseOp):
     ) -> None:
         tid, _, _ = cute.arch.thread_idx()
         block, _, _ = cute.arch.block_idx()
-        base = _block_base(block, tid, const_expr(self.block * self.ept))
+        base = _block_base(block, tid, const_expr(self.block * self.vectors_per_thread))
         scalar_regs = []
         for k in cutlass.range_constexpr(self.nin):
             if const_expr(self.scalar_inputs[k]):
@@ -228,15 +230,15 @@ class _ElementwiseVec(_PointwiseOp):
                 else cute.make_rmem_tensor((self.vector,), mIns[k].element_type)
                 for k in range(const_expr(self.nin))
             ]
-            for _ in range(const_expr(self.ept))
+            for _ in range(const_expr(self.vectors_per_thread))
         ]
-        for p in cutlass.range_constexpr(self.ept):
+        for p in cutlass.range_constexpr(self.vectors_per_thread):
             i = base + p * const_expr(self.block)
             if i < nvec:
                 for k in cutlass.range_constexpr(self.nin):
                     if const_expr(not self.scalar_inputs[k]):
                         cute.autovec_copy(mIns[k][i, None], regs[p][k])
-        for p in cutlass.range_constexpr(self.ept):
+        for p in cutlass.range_constexpr(self.vectors_per_thread):
             i = base + p * const_expr(self.block)
             if i < nvec:
                 self._compute_store(regs[p], mOuts, (i, None), consts)
@@ -245,7 +247,7 @@ class _ElementwiseVec(_PointwiseOp):
 @dataclass
 class _ElementwiseStrided(_PointwiseOp):
     block: int = 256
-    ept: int = 1
+    elements_per_thread: int = 1
     with_index: bool = False
 
     def __post_init__(self, compute: NumericType) -> None:
@@ -261,7 +263,7 @@ class _ElementwiseStrided(_PointwiseOp):
         stream: cuda.CUstream,
     ) -> None:
         n = cute.size(mOuts[0])
-        tile = const_expr(self.block * self.ept)
+        tile = const_expr(self.block * self.elements_per_thread)
         self.kernel(mIns, mOuts, consts, n, rank).launch(
             grid=[cute.ceil_div(n, tile), 1, 1],
             block=[self.block, 1, 1],
@@ -280,8 +282,8 @@ class _ElementwiseStrided(_PointwiseOp):
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
         block = const_expr(self.block)
-        base = _block_base(bidx, tidx, const_expr(block * self.ept))
-        for p in cutlass.range_constexpr(self.ept):
+        base = _block_base(bidx, tidx, const_expr(block * self.elements_per_thread))
+        for p in cutlass.range_constexpr(self.elements_per_thread):
             i = base + p * block
             if i < n:
                 rest = i
@@ -552,7 +554,7 @@ def _build_plan(
     inputs: Sequence[torch.Tensor],
     out_dtypes: DTypes,
     block: int | None,
-    ept: int | None,
+    work_per_thread: int | None,
     vec_bits: int | None,
     load: Load | None,
     out_refs: Sequence[torch.Tensor] | None = None,
@@ -582,27 +584,36 @@ def _build_plan(
     try_tma = load != "direct"
     force_tma = load == "tma"
     strided_block = 256 if block is None else block
-    strided_ept = 1 if ept is None else ept
-    requested_ept, requested_vec_bits = ept, vec_bits
+    strided_elements_per_thread = 1 if work_per_thread is None else work_per_thread
+    requested_work_per_thread, requested_vec_bits = work_per_thread, vec_bits
     hw = _hw.caps(ref.device)
-    storage_bits = max((t.element_size() * 8 for t in inputs), default=compute.width)
+    streaming_inputs = [t for t in inputs if t.is_cuda and t.numel() != 1]
+    output_bits = max(d.itemsize * 8 for d in out_dtypes)
+    storage_bits = max(
+        (t.element_size() * 8 for t in streaming_inputs), default=output_bits
+    )
+    memory_inputs = len(streaming_inputs)
+    vector_storage_bits = max(storage_bits, output_bits)
+    preset_dtype = streaming_inputs[0].dtype if streaming_inputs else out_dtypes[0]
     preset_name = getattr(fn, "__name__", "")
     cfg = _choose_config(
         math.prod(shape),
         compute.width,
         hw,
-        nin,
+        memory_inputs,
         storage_bits,
         any(d is torch.bool for d in out_dtypes),
         op=preset_name,
-        dtype=str(ref.dtype).removeprefix("torch."),
+        dtype=str(preset_dtype).removeprefix("torch."),
     )
     block = cfg.block if block is None else block
-    ept = cfg.ept if ept is None else ept
+    work_per_thread = (
+        cfg.work_per_thread if work_per_thread is None else work_per_thread
+    )
     vec_bits = cfg.vec_bits if vec_bits is None else vec_bits
     out_types = [torch2cute[torch.int8 if d is torch.bool else d] for d in out_dtypes]
     result_types = tuple(torch2cute[d] for d in (result_dtypes or out_dtypes))
-    V = _vec_width(compute.width, vec_bits)
+    V = _vec_width(vector_storage_bits, vec_bits)
     dev = ref.device
     seed_outs = (
         list(out_refs)
@@ -640,9 +651,7 @@ def _build_plan(
         )
         if not common_dtype.is_floating_point and compute_dtype.is_floating_point:
             common_dtype = compute_dtype
-    casts = input_casts or tuple(
-        common_dtype if t.numel() == 1 and t.is_cuda else compute_dtype for t in inputs
-    )
+    casts = input_casts or (common_dtype,) * len(inputs)
     input_types = tuple(torch2cute[d] for d in casts)
     scalar_inputs = tuple(t.numel() == 1 for t in inputs)
     host_scalars = tuple(t.device.type == "cpu" and t.dim() == 0 for t in inputs)
@@ -663,21 +672,25 @@ def _build_plan(
             math.prod(shape),
             compute.width,
             hw,
-            nin,
+            memory_inputs,
             storage_bits,
             any(d is torch.bool for d in out_dtypes),
             op=preset_name,
-            dtype=str(ref.dtype).removeprefix("torch."),
+            dtype=str(preset_dtype).removeprefix("torch."),
             rowgap=True,
         )
         row_bits = (
             row_cfg.vec_bits if requested_vec_bits is None else requested_vec_bits
         )
-        row_v = _vec_width(compute.width, row_bits)
+        row_v = _vec_width(vector_storage_bits, row_bits)
         if rg[1] % row_v or rg[2] % row_v:
             row_cfg, row_v = _PointwiseConfig(), V
         V = row_v
-        ept = row_cfg.ept if requested_ept is None else requested_ept
+        work_per_thread = (
+            row_cfg.work_per_thread
+            if requested_work_per_thread is None
+            else requested_work_per_thread
+        )
     tma = (
         tma_eligible(inputs, shape, out_dtypes[0], seed_outs[0], force=force_tma)
         if try_tma
@@ -687,7 +700,7 @@ def _build_plan(
             force_tma
             or (
                 not vec1
-                and (rg is None or ept == 1)
+                and (rg is None or work_per_thread == 1)
                 and any(not t.is_contiguous() for t in (*inputs, *seed_outs))
             )
         )
@@ -744,18 +757,24 @@ def _build_plan(
             input_types,
             host_scalars=host_scalars,
             block=block,
-            ept=ept,
+            vectors_per_thread=work_per_thread,
             vector=V,
             scalar_inputs=scalar_inputs,
             result_types=result_types,
         )
         path = "vec"
-        kkey = common + (path, "rowgap" if rg is not None else "dense", V, block, ept)
+        kkey = common + (
+            path,
+            "rowgap" if rg is not None else "dense",
+            V,
+            block,
+            work_per_thread,
+        )
     else:
         iteration = geometry
         if len(iteration.shape) > _ITERATION_DIMS:
             raise ValueError("pointwise iterator exceeds 32 coalesced dimensions")
-        block, ept = strided_block, strided_ept
+        block, work_per_thread = strided_block, strided_elements_per_thread
         op = _ElementwiseStrided(
             fn,
             nin,
@@ -765,7 +784,7 @@ def _build_plan(
             out_types,
             input_types,
             block=block,
-            ept=ept,
+            elements_per_thread=work_per_thread,
             with_index=with_index,
             host_scalars=host_scalars,
             result_types=result_types,
@@ -778,7 +797,7 @@ def _build_plan(
         ]
         cout = [_fake_iteration(torch2cute[o.dtype]) for o in storage_outs]
         path = "strided"
-        kkey = generic_key + ("strided", block, ept)
+        kkey = generic_key + ("strided", block, work_per_thread)
     seed_consts = [c.__class__(1) for c in consts]
     compile_ins = cin if cin else None
     compile_consts = seed_consts if seed_consts else None
@@ -804,7 +823,7 @@ def run(
     inputs: Sequence[torch.Tensor],
     out_dtypes: DTypes,
     block: int | None = None,
-    ept: int | None = None,
+    work_per_thread: int | None = None,
     vec_bits: int | None = None,
     out: Sequence[torch.Tensor] | None = None,
     with_index: bool = False,
@@ -861,7 +880,7 @@ def run(
         tuple(out_dtypes),
         with_index,
         block,
-        ept,
+        work_per_thread,
         vec_bits,
         load,
         layouts,
@@ -881,7 +900,7 @@ def run(
             inputs,
             out_dtypes,
             block,
-            ept,
+            work_per_thread,
             vec_bits,
             load,
             out,

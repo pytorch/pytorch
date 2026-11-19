@@ -9,8 +9,9 @@ from ...cutedsl import launch
 from ...cutedsl.aot import export_args
 from ...cutedsl.config import POINTWISE_TMA_SHAPES
 from ...cutedsl.dtypes import torch2cute
+from ...cutedsl.types import NumericType
 from . import ops
-from ._packing import flat_copy, FLAT_EPT, FLAT_THREADS
+from ._packing import flat_copy, FLAT_ELEMENTS_PER_THREAD, FLAT_THREADS
 from .kernel import _ElementwiseVec, _fake_vec
 from .layout import TmaLayout
 from .table import POINTWISE_DEF_TABLE
@@ -19,8 +20,11 @@ from .transpose_copy import _CUTE_WORD, tiled_kernel
 
 
 class _Arithmetic:
-    def __init__(self, op: _ElementwiseVec | ElementwiseTma) -> None:
+    def __init__(
+        self, op: _ElementwiseVec | ElementwiseTma, scalar_type: NumericType
+    ) -> None:
         self.op: _ElementwiseVec | ElementwiseTma = op
+        self.scalar_type: NumericType = scalar_type
 
 
 class _Arithmetic32(_Arithmetic):
@@ -35,7 +39,7 @@ class _Arithmetic32(_Arithmetic):
         stream: cuda.CUstream,
     ) -> None:
         op = self.op
-        op([x0, x1, x2][: op.nin], [y], (c0,)[: op.nconsts], stream)
+        op([x0, x1, x2][: op.nin], [y], (self.scalar_type(c0),)[: op.nconsts], stream)
 
 
 class _Arithmetic64(_Arithmetic):
@@ -50,7 +54,7 @@ class _Arithmetic64(_Arithmetic):
         stream: cuda.CUstream,
     ) -> None:
         op = self.op
-        op([x0, x1, x2][: op.nin], [y], (c0,)[: op.nconsts], stream)
+        op([x0, x1, x2][: op.nin], [y], (self.scalar_type(c0),)[: op.nconsts], stream)
 
 
 def build(spec: dict[str, Any]) -> dict[str, Any]:
@@ -72,7 +76,7 @@ def build(spec: dict[str, Any]) -> dict[str, Any]:
     casts = (torch2cute[signature.storage],) * row.nin
     results = tuple(torch2cute[d] for d in signature.results)
     if spec["layout"] == "dense":
-        vector = spec["vec_bits"] // compute.width
+        vector = spec["vec_bits"] // storage.width
         op = _ElementwiseVec(
             ops.get_fn(row.fn),
             row.nin,
@@ -81,12 +85,12 @@ def build(spec: dict[str, Any]) -> dict[str, Any]:
             compute,
             [storage],
             casts,
-            ept=spec["ept"],
+            vectors_per_thread=spec["work_per_thread"],
             vector=vector,
             result_types=results,
         )
         tensors = [_fake_vec(storage, vector) for _ in range(4)]
-        tag = f"v{spec['vec_bits']}_e{spec['ept']}"
+        tag = f"v{spec['vec_bits']}_e{spec['work_per_thread']}"
     else:
         orientations = tuple(bool(spec["transpose"] & (1 << k)) for k in range(row.nin))
         shape = spec.get("shape", 0)
@@ -123,7 +127,10 @@ def build(spec: dict[str, Any]) -> dict[str, Any]:
         tensors = inputs + [inputs[0]] * (3 - row.nin) + outputs
         tag = f"t{spec['transpose']}" + (f"_s{shape}" if shape else "")
     prefix = spec["op"].replace(".", "_")
-    fn = (_Arithmetic64 if compute is cutlass.Float64 else _Arithmetic32)(op)
+    scalar_type = torch2cute[signature.arguments[row.nin]] if row.scalars else compute
+    fn = (_Arithmetic64 if compute is cutlass.Float64 else _Arithmetic32)(
+        op, scalar_type
+    )
     return export_args(
         fn,
         *tensors,
@@ -151,7 +158,11 @@ class _RuntimeCopy:
     ) -> None:
         geometry = (b, middle, a, inner, numel)
         flat_copy(src, dst, geometry, 8 // self.pack, self.pack, self.normalize).launch(
-            grid=[cute.ceil_div(cute.size(dst), FLAT_THREADS * FLAT_EPT), 1, 1],
+            grid=[
+                cute.ceil_div(cute.size(dst), FLAT_THREADS * FLAT_ELEMENTS_PER_THREAD),
+                1,
+                1,
+            ],
             block=[FLAT_THREADS, 1, 1],
             stream=stream,
         )
