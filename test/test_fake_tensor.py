@@ -3489,7 +3489,7 @@ assert not torch.cuda.is_initialized()
     def test_use_cudnn_ctc_loss(self, kwargs, expected):
         args = _ctc_args(**kwargs)
         self.assertEqual(torch._use_cudnn_ctc_loss(*args), expected)
-        with FakeTensorMode() as mode:
+        with FakeTensorMode(allow_fallback_kernels=False) as mode:
             fake_args = _fake_args(mode, args)
             self.assertEqual(torch._use_cudnn_ctc_loss(*fake_args), expected)
 
@@ -3497,7 +3497,7 @@ assert not torch.cuda.is_initialized()
     @unittest.skipIf(not TEST_CUDNN, "requires cuDNN")
     def test_use_cudnn_ctc_loss_reads_cudnn_flag(self):
         args = _ctc_args()
-        with FakeTensorMode() as mode:
+        with FakeTensorMode(allow_fallback_kernels=False) as mode:
             fake_args = _fake_args(mode, args)
             self.assertTrue(torch._use_cudnn_ctc_loss(*fake_args))
             # same args, so this would hit the cached True without the bypass
@@ -3506,27 +3506,43 @@ assert not torch.cuda.is_initialized()
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, "requires cuDNN")
-    def test_use_cudnn_ctc_loss_tensor_lengths(self):
-        args = _ctc_args(tensor_lengths=True)
-        self.assertTrue(torch._use_cudnn_ctc_loss(*args))
-        with FakeTensorMode() as mode:
+    @parametrize(
+        "kwargs,expected",
+        [
+            subtest(({}, True), name="eligible"),
+            subtest(({"T": 300, "tl": (10, 20, 256)}, False), name="tl_256"),
+            subtest(({"tl": (10, 20, 60)}, False), name="tl_gt_il"),
+        ],
+    )
+    def test_use_cudnn_ctc_loss_tensor_lengths(self, kwargs, expected):
+        args = _ctc_args(tensor_lengths=True, **kwargs)
+        self.assertEqual(torch._use_cudnn_ctc_loss(*args), expected)
+        # the fake impl only knows the lengths' values under propagate_real_tensors
+        if not torch._functorch.config.fake_tensor_propagate_real_tensors:
+            expected = False
+        with FakeTensorMode(allow_fallback_kernels=False) as mode:
             fake_args = _fake_args(mode, args)
-            if torch._functorch.config.fake_tensor_propagate_real_tensors:
-                # The fake impl deliberately picks the native kernel
-                with self.assertRaises(MetadataMismatchError):
-                    torch._use_cudnn_ctc_loss(*fake_args)
-            else:
-                self.assertFalse(torch._use_cudnn_ctc_loss(*fake_args))
+            self.assertEqual(torch._use_cudnn_ctc_loss(*fake_args), expected)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, "requires cuDNN")
-    @parametrize("tensor_lengths", [False, True])
+    @parametrize(
+        "kwargs",
+        [
+            subtest({}, name="list_lengths"),
+            subtest({"tensor_lengths": True}, name="tensor_lengths"),
+            subtest({"tensor_lengths": True, "tgt_device": "cpu"}, name="cpu_targets"),
+            subtest(
+                {"tensor_lengths": True, "tgt_device": "cpu", "contiguous": False},
+                name="strided_cpu_targets",
+            ),
+        ],
+    )
     @parametrize("lp_contiguous", [False, True])
-    def test_cudnn_ctc_loss(self, tensor_lengths, lp_contiguous):
-        kwargs = {"tensor_lengths": tensor_lengths, "lp_contiguous": lp_contiguous}
-        args = (*_ctc_args(**kwargs), True, False)
+    def test_cudnn_ctc_loss(self, kwargs, lp_contiguous):
+        args = (*_ctc_args(lp_contiguous=lp_contiguous, **kwargs), True, False)
         real_out = torch._cudnn_ctc_loss(*args)
-        with FakeTensorMode() as mode:
+        with FakeTensorMode(allow_fallback_kernels=False) as mode:
             fake_out = torch._cudnn_ctc_loss(*_fake_args(mode, args))
         for r, f in zip(real_out, fake_out, strict=True):
             prims.utils.compare_tensor_meta(f, r, check_strides=True)

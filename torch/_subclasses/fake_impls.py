@@ -1423,6 +1423,27 @@ def repeat_interleave_tensor(
     return repeats.new_empty(output_size)  # type: ignore[return-value]
 
 
+def _cudnn_ctc_eligible(log_probs: FakeTensor, targets: FakeTensor, blank: int) -> bool:
+    return (
+        torch._C._has_cudnn
+        and torch.version.hip is None
+        and torch._C._get_cudnn_enabled()
+        and blank == 0
+        and log_probs.dim() == 3
+        and log_probs.dtype == torch.float
+        and log_probs.device.type == "cuda"
+        and targets.dim() == 1
+        and targets.dtype == torch.int
+        and targets.is_contiguous()
+    )
+
+
+def _cudnn_ctc_lengths_ok(input_lengths: list[int], target_lengths: list[int]) -> bool:
+    return len(input_lengths) == len(target_lengths) and all(
+        tl < 256 and tl <= il for il, tl in zip(input_lengths, target_lengths)
+    )
+
+
 @register_op_impl(aten._use_cudnn_ctc_loss.default)
 def _use_cudnn_ctc_loss(
     fake_mode: FakeTensorMode,
@@ -1434,20 +1455,10 @@ def _use_cudnn_ctc_loss(
     blank: int,
 ) -> bool:
     return (
-        torch._C._has_cudnn
-        and torch.version.hip is None
-        and torch._C._get_cudnn_enabled()
-        and blank == 0
-        and log_probs.dim() == 3
-        and log_probs.dtype == torch.float
-        and log_probs.device.type == "cuda"
-        and targets.dim() == 1
-        and targets.dtype == torch.int
+        _cudnn_ctc_eligible(log_probs, targets, blank)
         and targets.device.type == "cpu"
-        and targets.is_contiguous()
-        and len(input_lengths) == len(target_lengths)
         and all(il == log_probs.size(0) for il in input_lengths)
-        and all(tl < 256 and tl <= il for il, tl in zip(input_lengths, target_lengths))
+        and _cudnn_ctc_lengths_ok(input_lengths, target_lengths)
     )
 
 
@@ -1461,9 +1472,18 @@ def _use_cudnn_ctc_loss_tensor(
     target_lengths: FakeTensor,
     blank: int,
 ) -> bool:
-    # eager also needs target lengths < 256 and <= input lengths, which are
-    # unknown here, so use the native kernel (differs under propagate_real_tensors)
-    return False
+    # eager also reads the lengths' values, which only exist under
+    # propagate_real_tensors; without them use the native kernel, which
+    # supports every input
+    il = maybe_get_real_tensor(input_lengths)
+    tl = maybe_get_real_tensor(target_lengths)
+    if il is None or tl is None:
+        return False
+    return (
+        _cudnn_ctc_eligible(log_probs, targets, blank)
+        and il.dtype == tl.dtype == torch.int
+        and _cudnn_ctc_lengths_ok(il.reshape(-1).tolist(), tl.reshape(-1).tolist())
+    )
 
 
 @register_op_impl(aten._cudnn_ctc_loss.default)
@@ -1484,16 +1504,25 @@ def _cudnn_ctc_loss(
     torch._check(log_probs.device.type == "cuda", lambda: "log_probs must be on cuda")
     torch._check(targets.dim() == 1, lambda: "targets must be 1-D")
     torch._check(targets.dtype == torch.int, lambda: "targets must be int32")
-    torch._check(targets.is_contiguous(), lambda: "targets must be contiguous")
-    dev = "cpu" if func is aten._cudnn_ctc_loss.default else "cuda"
-    torch._check(targets.device.type == dev, lambda: f"targets must be on {dev}")
     torch._check(blank == 0, lambda: "blank must be label 0 for cudnn_ctc_loss")
+    if func is aten._cudnn_ctc_loss.default:
+        torch._check(targets.device.type == "cpu", lambda: "targets must be on cpu")
+        torch._check(targets.is_contiguous(), lambda: "targets must be contiguous")
+    else:
+        # eager copies CPU targets to cuda, which also makes them contiguous
+        torch._check(
+            targets.device.type == "cpu" or targets.is_contiguous(),
+            lambda: "targets must be contiguous",
+        )
     batch_size = log_probs.size(1)
 
     for name, lengths in zip(("input", "target"), (input_lengths, target_lengths)):
         if isinstance(lengths, list):
             size = len(lengths)
         else:
+            torch._check(
+                lengths.dtype == torch.int, lambda: f"{name}_lengths must be int32"
+            )
             size = lengths.size(0) if lengths.dim() > 0 else 1
         torch._check(
             size == batch_size,
