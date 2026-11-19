@@ -35,6 +35,7 @@ import logging
 import math
 import pickle
 import sys
+import sysconfig
 import textwrap
 import traceback
 import types
@@ -275,6 +276,7 @@ recompiles_verbose_log = torch._logging.getArtifactLogger(
     __name__, "recompiles_verbose"
 )
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
+_is_free_threaded = sysconfig.get_config_var("Py_GIL_DISABLED") == 1
 
 
 def _sequence_length(value: object) -> int:
@@ -532,8 +534,10 @@ class GuardManagerWrapper:
         return self.diff_guard_sources
 
     def finalize(self) -> None:
-        if config.use_recursive_dict_tags_for_guards and justknobs_check(
-            "pytorch/compiler:use_recursive_dict_tags_for_guards"
+        if (
+            config.use_recursive_dict_tags_for_guards
+            and not _is_free_threaded
+            and justknobs_check("pytorch/compiler:use_recursive_dict_tags_for_guards")
         ):
             self.find_tag_safe_roots()
         self.prepare_diff_guard_manager()
@@ -743,10 +747,11 @@ class GuardManagerWrapper:
                 and config.assume_dunder_attributes_remain_unchanged
             ):
                 # Assumption: callers will not reassign the attributes
-                #   func.__code__, func.__closure__, func.__defaults__, or func.__kwdefaults__.
+                # func.__code__, func.__closure__, func.__defaults__, or
+                # func.__kwdefaults__.
                 # Mutating the objects those attributes point to is fine;
                 # rebinding the attribute itself is not.
-                # Example ─ allowed:   foo.__defaults__[0].bar = 99
+                # Example - allowed:   foo.__defaults__[0].bar = 99
                 #          forbidden: foo.__defaults__ = (3, 4)
                 is_subtree_tag_safe = check_tag_safety(
                     node,
@@ -767,16 +772,6 @@ class GuardManagerWrapper:
 
                 if is_subtree_tag_safe:
                     node.mark_tag_safe()
-            elif issubclass(node.get_type_of_guarded_value(), types.CellType):
-                is_subtree_tag_safe = check_tag_safety(node, (GetAttrGuardAccessor,))
-
-                is_subtree_tag_safe &= all(
-                    isinstance(accessor, GetAttrGuardAccessor)
-                    and accessor.get_attr_name() == "cell_contents"
-                    for accessor in node.get_accessors()
-                )
-                if is_subtree_tag_safe:
-                    node.mark_tag_safe()
             elif (
                 issubclass(node.get_type_of_guarded_value(), tuple)
                 and node.get_source().endswith(dunder_attrs_assumed_constants)
@@ -784,13 +779,13 @@ class GuardManagerWrapper:
             ):
                 # We trust tuples obtained from a function's __closure__ or
                 # __defaults__. Any *other* tuple-valued attribute can be
-                # silently replaced—for example:
+                # silently replaced, for example:
                 #
                 #     foo.bar = (1, 2)      # original
-                #     foo.bar = (3, 4)      # rebinding that our dict-tag optimisation won't see
+                #     foo.bar = (3, 4)  # rebind not seen by dict-tag optimization
                 #
-                # Therefore only tuples from __closure__ / __defaults__ participate in the
-                # recursive-dict-tag optimization; all others are ignored.
+                # Therefore only tuples from __closure__ / __defaults__
+                # participate in this optimization; all others are ignored.
                 is_subtree_tag_safe = check_tag_safety(
                     node, (TupleGetItemGuardAccessor,)
                 )
