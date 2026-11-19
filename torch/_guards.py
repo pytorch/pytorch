@@ -967,7 +967,6 @@ class InvokeSubgraphReuseCondition:
     # of these to detect mutations on captured variables.
     traced_sources: OrderedSet[Source] = dataclasses.field(default_factory=OrderedSet)
 
-    # Order annotations required by guard source chains and additional dependencies.
     guard_on_key_order: set[Source] = dataclasses.field(default_factory=set)
     # Lexical reads and their defining depth. Stamp-out propagates only reads visible
     # in the enclosing tracer; an explicit input must not replace a lexical alias.
@@ -1078,7 +1077,7 @@ class InvokeSubgraphCache(HopSubgraphCache):
         if len(entries) >= max_reuse_entries:
             raise RuntimeError(
                 f"invoke_subgraph: exceeded maximum reuse entries "
-                f"({max_reuse_entries}) for function code {fn_code}. "
+                f"({max_reuse_entries}) for {fn_code}. "
                 f"This most likely means a guard keeps failing on every "
                 f"invocation, preventing subgraph reuse. "
                 f"Set TORCH_LOGS='+hierarchical_compile' to identify which "
@@ -1095,7 +1094,6 @@ class InvokeSubgraphCache(HopSubgraphCache):
             [InvokeSubgraphReuseCondition, InvokeSubgraphReuseEntry], T | None
         ],
     ) -> T | None:
-        """Return the first accepted evaluator result and promote its cache entry."""
         entries = self.subgraph_reuse_cache.get(fn_code, [])
         for i, (condition, entry) in enumerate(entries):
             if (match := evaluator(condition, entry)) is not None:
