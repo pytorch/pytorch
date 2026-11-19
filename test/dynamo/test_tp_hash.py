@@ -868,8 +868,6 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(x, range(3))
 
-    # A bytes subclass instance is a plain UserDefinedObjectVariable, not a
-    # bytes VT, so bytes.__hash__ runs the constant impl on the wrong receiver.
     @decorateIf(
         unittest.expectedFailure, lambda params: params["receiver"] == "bytes_subclass"
     )
