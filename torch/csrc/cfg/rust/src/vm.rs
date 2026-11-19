@@ -139,30 +139,72 @@ struct SettledBlocks {
 /// without much tensor work can lose more than it gains. After some calls to
 /// warm up, calls alternate between the compiled form and the interpreter
 /// and are timed, and the faster of the two (by their best times) is what
-/// the callee is from then on. A sample only counts if no other callee was
-/// still being measured during it, so callees settle from the leaves up.
+/// the callee is from then on.
+///
+/// A function and what it calls are measured at the same time. Compiled code
+/// only gets faster when something it calls is handed to the interpreter, so
+/// a function can win on any of its samples; to lose, it needs samples
+/// during which nothing it calls was still being measured (`settled`): a
+/// caller is not given up for the time its callees took before they were
+/// where they belong.
 #[derive(Clone, Copy)]
 struct Trial {
     phase: u8,
+    /// The value of PLAN_EPOCH the measurement started under.
+    epoch: u32,
     calls: u32,
     compiled_best: u64,
     compiled_samples: u8,
+    settled_best: u64,
+    settled_samples: u8,
     interpreted_best: u64,
     interpreted_samples: u8,
+}
+
+impl Trial {
+    fn start(epoch: u32) -> Trial {
+        Trial {
+            phase: TRIAL_WARMUP,
+            epoch,
+            calls: 0,
+            compiled_best: u64::MAX,
+            compiled_samples: 0,
+            settled_best: u64::MAX,
+            settled_samples: 0,
+            interpreted_best: u64::MAX,
+            interpreted_samples: 0,
+        }
+    }
 }
 
 const TRIAL_WARMUP: u8 = 0;
 const TRIAL_SAMPLING: u8 = 1;
 const TRIAL_COMPILED: u8 = 2;
 const TRIAL_DEMOTED: u8 = 3;
-const TRIAL_WARMUP_CALLS: u32 = 12;
+const TRIAL_WARMUP_CALLS: u32 = 8;
 const TRIAL_SAMPLES: u8 = 10;
+/// With this many samples of each, one side that is a quarter faster than
+/// the other has won: the rest of the samples would be calls at the speed of
+/// the slower one for nothing.
+const TRIAL_EARLY_SAMPLES: u8 = 3;
 /// A callee whose measurement never gets quiet enough stays compiled.
 const TRIAL_MAX_CALLS: u32 = 400;
 /// How much faster the interpreter has to be: 1/32, about 3%.
 const TRIAL_MARGIN_SHIFT: u32 = 5;
 
+/// Bumped when what compiled code does changes for a reason the VM does not
+/// see, such as a pass replacing part of a block by a compiled graph. A
+/// measurement that is under way starts over: it would compare the
+/// interpreter with code that is no longer what runs.
+static PLAN_EPOCH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// Counts the calls that are part of a measurement: a sample during which
+/// it did not move had nothing below it that was still being measured.
 static TRIAL_EVENTS: AtomicU64 = AtomicU64::new(0);
+
+pub fn plan_changed() {
+    PLAN_EPOCH.fetch_add(1, Ordering::Relaxed);
+}
+
 static TRIAL_DRAW: AtomicU64 = AtomicU64::new(0x9E37_79B9_7F4A_7C15);
 
 unsafe impl Send for SettledBlocks {}
@@ -1003,14 +1045,7 @@ impl Compiled {
             settled: SettledBlocks {
                 blocks: (0..generic.len()).map(|_| std::cell::Cell::new(Settled { code: std::ptr::null(), specialized: false, entries: 0 })).collect(),
                 calls: std::cell::Cell::new(0),
-                trial: std::cell::Cell::new(Trial {
-                    phase: TRIAL_WARMUP,
-                    calls: 0,
-                    compiled_best: u64::MAX,
-                    compiled_samples: 0,
-                    interpreted_best: u64::MAX,
-                    interpreted_samples: 0,
-                }),
+                trial: std::cell::Cell::new(Trial::start(PLAN_EPOCH.load(Ordering::Relaxed))),
             },
             generic,
             state: Shared::new(state),
@@ -1501,6 +1536,12 @@ impl Compiled {
         )
     }
 
+    /// Whether it is still open which of the two this function is run as.
+    pub fn is_measuring(&self) -> bool {
+        let phase = self.settled.trial.get().phase;
+        self.options.demote && (phase == TRIAL_WARMUP || phase == TRIAL_SAMPLING)
+    }
+
     /// Whether this function was measured to run faster in the interpreter
     /// and is left to it.
     pub fn is_demoted(&self) -> bool {
@@ -1538,6 +1579,10 @@ impl Compiled {
         if trial.phase == TRIAL_DEMOTED {
             return run_interpreted();
         }
+        let epoch = PLAN_EPOCH.load(Ordering::Relaxed);
+        if trial.epoch != epoch {
+            trial = Trial::start(epoch);
+        }
         trial.calls += 1;
         slot.set(trial);
         let events = TRIAL_EVENTS.fetch_add(1, Ordering::Relaxed) + 1;
@@ -1550,10 +1595,10 @@ impl Compiled {
         // Which of the two a call measures is drawn, not alternated: calls
         // often come in a pattern (two layers of a model, one after the
         // other), and alternating would give each side one half of it.
-        let as_compiled = if trial.compiled_samples >= TRIAL_SAMPLES {
-            false
-        } else if trial.interpreted_samples >= TRIAL_SAMPLES {
+        let as_compiled = if trial.interpreted_samples >= TRIAL_SAMPLES {
             true
+        } else if trial.settled_samples >= TRIAL_SAMPLES {
+            false
         } else {
             let mut state = TRIAL_DRAW.load(Ordering::Relaxed);
             state ^= state << 13;
@@ -1570,31 +1615,41 @@ impl Compiled {
         if trial.phase != TRIAL_SAMPLING {
             return result;
         }
-        if !result.is_null() && TRIAL_EVENTS.load(Ordering::Relaxed) == events {
+        if !result.is_null() {
             if as_compiled {
                 trial.compiled_best = trial.compiled_best.min(elapsed);
                 trial.compiled_samples += 1;
+                if TRIAL_EVENTS.load(Ordering::Relaxed) == events {
+                    trial.settled_best = trial.settled_best.min(elapsed);
+                    trial.settled_samples += 1;
+                }
             } else {
                 trial.interpreted_best = trial.interpreted_best.min(elapsed);
                 trial.interpreted_samples += 1;
             }
         }
-        if trial.compiled_samples >= TRIAL_SAMPLES && trial.interpreted_samples >= TRIAL_SAMPLES {
-            let margin = trial.interpreted_best >> TRIAL_MARGIN_SHIFT;
-            if trial.interpreted_best + margin < trial.compiled_best {
-                trial.phase = TRIAL_DEMOTED;
-                if !func.is_null() {
-                    // Calls stop finding the compiled form.
-                    let code = ffi::PyFunction_GetCode(func);
-                    let globals = ffi::PyFunction_GetGlobals(func);
-                    let recent = self
-                        .callees
-                        .recent
-                        .get_unchecked((code as usize >> 4) & (RECENT_CALLEES - 1));
-                    recent.set((code as usize, globals as usize, INTERPRETED));
-                }
-            } else {
-                trial.phase = TRIAL_COMPILED;
+        let quarter = |t: u64| t + (t >> 2);
+        let margin = trial.interpreted_best >> TRIAL_MARGIN_SHIFT;
+        let seen = |samples: u8, enough: u8| samples >= enough && trial.interpreted_samples >= enough;
+        let won = (seen(trial.compiled_samples, TRIAL_EARLY_SAMPLES)
+            && quarter(trial.compiled_best) < trial.interpreted_best)
+            || (seen(trial.compiled_samples, TRIAL_SAMPLES)
+                && trial.interpreted_best + margin >= trial.compiled_best);
+        let lost = (seen(trial.settled_samples, TRIAL_EARLY_SAMPLES)
+            && quarter(trial.interpreted_best) < trial.settled_best)
+            || (seen(trial.settled_samples, TRIAL_SAMPLES)
+                && trial.interpreted_best + margin < trial.settled_best);
+        if won {
+            trial.phase = TRIAL_COMPILED;
+        } else if lost {
+            trial.phase = TRIAL_DEMOTED;
+            if !func.is_null() {
+                // Calls stop finding the compiled form.
+                let code = ffi::PyFunction_GetCode(func);
+                let globals = ffi::PyFunction_GetGlobals(func);
+                let recent =
+                    self.callees.recent.get_unchecked((code as usize >> 4) & (RECENT_CALLEES - 1));
+                recent.set((code as usize, globals as usize, INTERPRETED));
             }
         } else if trial.calls >= TRIAL_MAX_CALLS {
             trial.phase = TRIAL_COMPILED;
