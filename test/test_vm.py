@@ -1660,6 +1660,34 @@ class TestVmPasses(TestCase):
         self.assertEqual(depths, [3, 0, 0])
         self.assertEqual(cfg_rs.profiling_depth(), 0)
 
+    def test_block_that_raises_every_time_is_specialized(self):
+        depths = []
+
+        class Missing:
+            def __getitem__(self, key):
+                depths.append(cfg_rs.profiling_depth())
+                raise KeyError(key)
+
+        def lookup(table, x):
+            try:
+                return table["scale"] * x
+            except KeyError:
+                return x + 1
+
+        compiled = torch.vm(lookup, fallback=False)
+        x = torch.ones(2)
+        for _ in range(5):
+            self.assertEqual(compiled(Missing(), x), x + 1)
+        # The block of the lookup never gets to its end. It is specialized
+        # from its second run, and what it calls is then no longer called
+        # from a block that is profiling.
+        self.assertEqual(block_stats(compiled, "profile_runs")[1], 1)
+        self.assertEqual(depths[2:], [0, 0, 0])
+        self.assertGreater(depths[0], 0)
+        # A run that gets to the end goes on from where the others raised.
+        self.assertEqual(compiled({"scale": 3.0}, x), x * 3)
+        self.assertEqual(compiled(Missing(), x), x + 1)
+
     def test_region_is_only_valid_during_the_pass(self):
         kept = []
 
@@ -4438,6 +4466,39 @@ def demote_tensor_caller(n, x):
     return demote_python(n), x
 
 
+def demote_raises(n):
+    total = 0
+    for i in range(n):
+        total += i * i % 7
+    raise KeyError(total)
+
+
+def demote_raises_caller(n, x):
+    try:
+        demote_raises(n)
+    except KeyError as e:
+        return e.args[0], x + 1
+
+
+DEMOTE_LOUD = [False]
+
+
+def demote_loud(n):
+    total = 0
+    for i in range(n):
+        total += i * i % 7
+    if DEMOTE_LOUD[0]:
+        cfg_rs.unsettled()
+    return total
+
+
+def demote_loud_loop(n, x):
+    total = 0
+    for _ in range(500):
+        total = demote_loud(n)
+    return total, x + 1
+
+
 def demote_chain_1(n):
     return demote_python(n)
 
@@ -4488,6 +4549,56 @@ class TestVmDemotion(TestCase):
             total, _ = compiled(300, x)
             self.assertEqual(total, demote_python(300))
         self.assertEqual(compiled.stats()["demoted_callees"], [])
+
+    def test_a_callee_that_raises_is_measured(self):
+        compiled = torch.vm(
+            demote_raises_caller, fallback=False, demote=True, passes=without(P.Inline)
+        )
+        x = torch.ones(2)
+        for _ in range(200):
+            total, y = compiled(300, x)
+            self.assertEqual(total, demote_python(300))
+            self.assertEqual(y, x + 1)
+        stats = compiled.stats()
+        # A call that ends in a raise is timed like one that returns.
+        self.assertEqual(stats["demoted_callees"], ["demote_raises"])
+        self.assertFalse(stats["measuring"])
+
+    def test_a_measurement_that_ran_out_in_the_first_calls_starts_again(self):
+        # The callee is called more often in the first call of the function
+        # than a measurement lasts, and as it is then (something below it
+        # is not what it will be), it cannot be given up.
+        compiled = torch.vm(
+            demote_loud_loop, fallback=False, demote=True, passes=without(P.Inline)
+        )
+        x = torch.ones(2)
+        DEMOTE_LOUD[0] = True
+        self.addCleanup(DEMOTE_LOUD.__setitem__, 0, False)
+        for _ in range(2):
+            compiled(50, x)
+        self.assertEqual(compiled.stats()["demoted_callees"], [])
+        DEMOTE_LOUD[0] = False
+        for _ in range(4):
+            total, _ = compiled(50, x)
+            self.assertEqual(total, demote_python(50))
+        # Measured again once that was over: the loop is slower in the VM.
+        self.assertEqual(compiled.stats()["demoted_callees"], ["demote_loud"])
+
+    def test_a_measurement_that_runs_out_goes_by_what_was_measured(self):
+        # Every call of the callee says that it is not what it will be, so
+        # no call of it counts against it; when that has gone on for as long
+        # as a measurement lasts, the times there are decide.
+        compiled = torch.vm(
+            demote_unsettled_caller,
+            fallback=False,
+            demote=True,
+            passes=without(P.Inline),
+        )
+        x = torch.ones(2)
+        for _ in range(450):
+            total, _ = compiled(300, x)
+            self.assertEqual(total, demote_python(300))
+        self.assertEqual(compiled.stats()["demoted_callees"], ["demote_unsettled"])
 
     def test_a_region_that_is_deciding_keeps_measurements_open(self):
         calls = []
@@ -4889,6 +5000,14 @@ class RegionRunner:
 
 def region_infer(model, x):
     return model(x)
+
+
+def region_lookup(table, x):
+    try:
+        scale = table["scale"]
+    except KeyError:
+        scale = 2.0
+    return torch.relu(x * scale) + 1
 
 
 def region_step(model, opt, x, y):
@@ -5937,6 +6056,28 @@ class TestVmRegions(TestCase):
                 self.assertEqual(outcome[0], expected[0])
                 if outcome[0] == "raised":
                     self.assertEqual(outcome[1:], expected[1:])
+
+    def test_instruction_that_raises_when_it_is_surveyed_is_left_to_the_vm(self):
+        calls = []
+        compiled = torch.vm(
+            region_lookup, passes=with_graphs("aot_eager"), fallback=False
+        )
+        x = torch.randn(4)
+        said = unittest.mock.patch.object(cfg_rs, "unsettled", lambda: calls.append(1))
+        with said:
+            for _ in range(6):
+                self.assertEqual(compiled({}, x), region_lookup({}, x))
+            early = len(calls)
+            for _ in range(6):
+                self.assertEqual(compiled({}, x), region_lookup({}, x))
+        # The lookup fails on every call. Its region is not surveyed again
+        # on each of them, with every measurement above it kept open.
+        self.assertGreater(early, 0)
+        self.assertEqual(len(calls), early)
+        reasons = self.left_to_vm(compiled, "region_lookup (block 1)")
+        self.assertEqual(reasons, ["raised KeyError when it was first run"])
+        table = {"scale": 3.0}
+        self.assertEqual(compiled(table, x), region_lookup(table, x))
 
     def test_measurement_starts_over_when_a_region_is_compiled(self):
         torch.manual_seed(0)

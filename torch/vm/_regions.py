@@ -2964,7 +2964,15 @@ class _Region:
                 bad[i] = reason
             elif inst["op"] in _WORK:
                 tensors += any(_involves_tensor(env.get(v)) for v in inst["uses"])
-            plan.replay.run(i, i + 1, env)
+            try:
+                plan.replay.run(i, i + 1, env)
+            except Exception as e:
+                # A lookup that fails and is caught, say: a region that
+                # raises whenever it is looked at would be looked at again
+                # at every call.
+                bad.setdefault(i, f"raised {type(e).__name__} when it was first run")
+                plan.split(self, bad)
+                raise
             _note_local(inst, env, local)
         outputs = self.give(env)
         if bad:
