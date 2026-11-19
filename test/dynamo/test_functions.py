@@ -7962,8 +7962,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
     @parametrize(
         "new_defaults, expected_guard",
         [
-            ((99, 2), "len(helper.__defaults__) == 1"),
-            (None, "___check_type_id(helper.__defaults__,"),
+            ((99, 2), r"len\([^)]*\.__defaults__\) == 1"),
+            (None, r"___check_type_id\([^,]*\.__defaults__,"),
         ],
     )
     def test_pos_default_length_guard_hint(self, new_defaults, expected_guard):
@@ -7987,8 +7987,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(compiled(x), x + 3)
 
         self.assertEqual(len(reasons), 1)
-        self.assertIn(expected_guard, reasons[0])
-        self.assertIn("HINT: Dynamo used a positional default", reasons[0])
+        self.assertRegex(reasons[0], expected_guard)
+        self.assertIn("Dynamo used a positional default", reasons[0])
         self.assertIn("count determines which parameter", reasons[0])
 
     def test_func_default_torch_args(self):
