@@ -126,6 +126,14 @@ class TestTritonDotReduction(TestCase):
         self._check_equal(f, (x, y))
         self._check_code(f, (x, y), 1, 1)
 
+    # force_filter_reduction_configs compiles one config, XBLOCK=64, YBLOCK=128,
+    # R0_BLOCK=64. On MI350 this kernel's second K loop,
+    #     for r0_offset in tl.range(0, r0_numel, R0_BLOCK, num_stages = 2):
+    #         ... tl.dot(tmp10, tmp11, ...) ... tl.dot(tmp18, tmp19, ...)
+    # then fails with "out of resource: triton_red_fused_add_mm_0 Required: 196608
+    # Hardware limit: 163840". The num_stages=1 retry does not help, because the
+    # loop's num_stages = 2 wins. Autotuning skips the configs that do not fit.
+    @inductor_config.patch({"test_configs.force_filter_reduction_configs": False})
     def test_3mm_add(self):
         def f(x, y, z, w, r, t):
             return x @ y + z @ w + r @ t
