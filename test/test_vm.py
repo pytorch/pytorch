@@ -3899,6 +3899,28 @@ class RegionLinears(torch.nn.Module):
         return self.net(x)
 
 
+class RegionAverage:
+    # State that a call reads and replaces.
+    def __init__(self):
+        self.mean = torch.zeros(6)
+
+    def update(self, value):
+        self.mean = self.mean * 0.9 + value.mean(0) * 0.1
+        return self.mean
+
+
+def region_running(model, x, stats):
+    out = model(x)
+    return out - stats.update(out)
+
+
+def region_remember(model, x, memory):
+    out = model(x)
+    memory["last"] = out.detach()
+    memory["sum"] = memory.get("sum", 0) + out.sum()
+    return out * 2
+
+
 def region_note(log, x, out):
     log.append(out.shape[0])
     x.add_(1)
@@ -4455,7 +4477,7 @@ class TestVmRegions(TestCase):
         self.assertEqual(len({id(r) for r in results}), 6)
         self.assertEqual(len({id(r.hidden) for r in results}), 6)
 
-    def test_object_from_before_a_region_is_left_alone(self):
+    def test_object_that_grows_on_every_call_is_left_to_the_vm(self):
         torch.manual_seed(0)
         model = RegionStateful().eval()
         compiled = torch.vm(
@@ -4463,7 +4485,7 @@ class TestVmRegions(TestCase):
         )
         cache, expected_cache = RegionCache(), RegionCache()
         with torch.no_grad():
-            for _ in range(8):
+            for _ in range(14):
                 x = torch.randn(2, 3, 6, 6)
                 expected = region_cached(model, x, expected_cache)
                 result = compiled(model, x, cache)
@@ -4471,8 +4493,10 @@ class TestVmRegions(TestCase):
                 # A trace that ran the update would have left its own tensors
                 # in the cache, or left it one entry short on later calls.
                 self.assertEqual(cache.seen, expected_cache.seen, atol=0, rtol=0)
+        # A region may change an object it is given, but this one is never
+        # what a graph was made for: its list has one more item every time.
         reasons = " / ".join(self.left_to_vm(compiled, "region_cached"))
-        self.assertIn("takes a RegionCache from before the region", reasons)
+        self.assertIn("changes what it is given on every call", reasons)
         # The module below the call that takes the cache is a graph.
         self.assertGreaterEqual(len(self.compiled_regions(compiled)), 1)
 
@@ -4703,6 +4727,60 @@ class TestVmRegions(TestCase):
     def test_an_unknown_backend_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "unknown backend"):
             torch.vm(region_infer, passes=with_graphs("nope"))
+
+    def counting(self, graphs):
+        from torch._dynamo.backends.debugging import aot_eager
+
+        def backend(graph, inputs):
+            graphs.append(graph)
+            return aot_eager(graph, inputs)
+
+        return backend
+
+    # --- what a region is given and changes
+
+    def test_region_changes_an_object_it_is_given(self):
+        torch.manual_seed(0)
+        model = RegionLinears().eval()
+        graphs = []
+        compiled = torch.vm(
+            region_running, passes=with_graphs(self.counting(graphs)), fallback=False
+        )
+        stats, expected_stats = RegionAverage(), RegionAverage()
+        with torch.no_grad():
+            for _ in range(10):
+                x = torch.randn(4, 6)
+                expected = region_running(model, x, expected_stats)
+                self.assertEqual(compiled(model, x, stats), expected, atol=1e-6, rtol=0)
+                # What the graph computed for the attribute, stored in the
+                # object itself once the graph has run.
+                self.assertEqual(stats.mean, expected_stats.mean, atol=1e-6, rtol=0)
+                self.assertIs(type(stats.mean), torch.Tensor)
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("region_running"))
+        self.assertEqual(len(graphs), 1)
+
+    def test_region_stores_into_a_dict_it_is_given(self):
+        torch.manual_seed(0)
+        model = RegionLinears().eval()
+        compiled = torch.vm(
+            region_remember, passes=with_graphs("aot_eager"), fallback=False
+        )
+        memory, expected_memory = {}, {}
+        with torch.no_grad():
+            for _ in range(8):
+                x = torch.randn(4, 6)
+                expected = region_remember(model, x, expected_memory)
+                self.assertEqual(compiled(model, x, memory), expected, atol=0, rtol=0)
+                self.assertEqual(list(memory), list(expected_memory))
+                self.assertEqual(
+                    memory["last"], expected_memory["last"], atol=0, rtol=0
+                )
+                self.assertEqual(
+                    memory["sum"], expected_memory["sum"], atol=1e-5, rtol=0
+                )
+        (region,) = self.compiled_regions(compiled)
+        self.assertTrue(region["where"].startswith("region_remember"))
 
     def test_path_ends_before_a_call_that_fails_part_way(self):
         torch.manual_seed(0)
