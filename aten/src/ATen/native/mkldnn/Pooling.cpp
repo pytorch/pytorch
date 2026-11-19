@@ -7,9 +7,12 @@
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/adaptive_avg_pool2d_native.h>
+#include <ATen/ops/avg_pool2d.h>
+#include <ATen/ops/avg_pool2d_backward.h>
 #include <ATen/ops/avg_pool2d_backward_native.h>
 #include <ATen/ops/avg_pool2d_native.h>
 #include <ATen/ops/avg_pool3d_backward_native.h>
@@ -259,6 +262,18 @@ static Tensor _mkldnn_pooling(
         false /*ceil_mode */);
   }
 
+  if (dims == 2 && algo == ideep::algorithm::pooling_avg_include_padding &&
+      padding_vec_r != padding_vec) {
+    // Ceil-mode padding must not contribute to the averaging divisor.
+    if (std::all_of(padding_vec.begin(), padding_vec.end(), [](int64_t p) { return p == 0; })) {
+      algo = ideep::algorithm::pooling_avg_exclude_padding;
+    } else {
+      return at::avg_pool2d(
+          input.to_dense(), kernel_size_vec, stride_vec, padding_vec,
+          ceil_mode, true, std::nullopt).to_mkldnn();
+    }
+  }
+
   auto aprop_kind = ideep::prop_kind::forward;
   // for max_pool, prop_kind::forward will save indices as workspace for backward use,
   // for inference, don't need the indices, set aprop_kind to prop_kind::forward_inference
@@ -296,6 +311,7 @@ static Tensor _mkldnn_pooling_backward(
 
   const int64_t dims = input.dim() - 2;
   auto kernel_size_vec = expand_param_if_needed(kernel_size, "kernel_size", dims);
+  if (stride.empty()) stride = kernel_size;
   auto stride_vec = expand_param_if_needed(stride, "stride", dims);
   auto const padding_vec = expand_param_if_needed(padding, "padding", dims);
   auto padding_vec_r = padding_vec;
@@ -334,6 +350,17 @@ static Tensor _mkldnn_pooling_backward(
            all_equal = false;
         }
       }
+    }
+  }
+
+  if (dims == 2 && algo == ideep::algorithm::pooling_avg_include_padding &&
+      padding_vec_r != padding_vec) {
+    if (std::all_of(padding_vec.begin(), padding_vec.end(), [](int64_t p) { return p == 0; })) {
+      algo = ideep::algorithm::pooling_avg_exclude_padding;
+    } else {
+      return at::avg_pool2d_backward(
+          grad_output.to_dense(), input.to_dense(), kernel_size_vec,
+          stride_vec, padding_vec, ceil_mode, true, std::nullopt).to_mkldnn();
     }
   }
 
