@@ -507,7 +507,6 @@ if torch.backends.mps.is_available():
     def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         XFAILLIST_GRAD = {
             # Unimplemented ops
-            # TODO: remove these expected failures when MPS segment_reduce backward is implemented.
             "_segment_reducelengths": None,
             "_segment_reduceoffsets": None,
             # No 5-D bicubic sampler on MPS; the grad leg fails in its forward call.

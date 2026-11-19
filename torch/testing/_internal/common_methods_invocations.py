@@ -8185,6 +8185,10 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
         ((S, S, S), 1, [[0, 1, 2, 2] for _ in range(S)], False),
         ((S, S, S), 1, [[2, 0, 3, 0], [0, 1, 2, 2], [3, 0, 2, 0], [1, 1, 1, 2], [0, 1, 2, 2]], False),
     )
+    if not requires_grad:
+        # Long 1-D segment to reach the MPS threadgroup kernel. Forward only: its product
+        # overflows on every device, which gives the CPU/CUDA gradcheck a NaN Jacobian.
+        test_cases += (((4096,), 0, [0, 4096], False),)
 
     reductions = ["max", "mean", "min", "sum", "prod"]
     for args, reduce, initial in product(test_cases, reductions, [1, 2]):
@@ -22901,10 +22905,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         supports_gradgrad=False,
         sample_inputs_func=sample_inputs_segment_reduce,
         skips=(
-            # TODO: remove when MPS segment_reduce backward is implemented.
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="mps"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="mps"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"),
             # FIXME: CUDA driver API confirmed a leak in
             # __main__.TestJitCUDA.test_variant_consistency_jit_segment_reduce_cuda_float32
             DecorateInfo(
@@ -22913,6 +22913,13 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
+            # Error: The operator 'aten::_segment_reduce_backward' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="mps"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="mps"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"),
+            # MPS sums the 4096-element float32 segment in a different order than CPU
+            DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-3, rtol=1.3e-6)}),
+                         "TestConsistency", "test_output_match", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -22925,10 +22932,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         supports_gradgrad=False,
         sample_inputs_func=partial(sample_inputs_segment_reduce, mode='offsets'),
         skips=(
-            # TODO: remove when MPS segment_reduce backward is implemented.
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="mps"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="mps"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"),
             # FIXME: CUDA driver API confirmed a leak in
             # __main__.TestJitCUDA.test_variant_consistency_jit_segment_reduce_cuda_float32
             DecorateInfo(
@@ -22937,6 +22940,13 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
+            # Error: The operator 'aten::_segment_reduce_backward' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="mps"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="mps"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"),
+            # MPS sums the 4096-element float32 segment in a different order than CPU
+            DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-3, rtol=1.3e-6)}),
+                         "TestConsistency", "test_output_match", device_type="mps"),
         ),
     ),
 ]

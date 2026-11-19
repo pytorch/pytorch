@@ -40,7 +40,7 @@ static uint32_t get_input_offset(
 
 #include <c10/metal/reduction_utils.h>
 
-// Load modes for SumReductionOp: identity (sum), nan-to-zero (nansum),
+// Load modes for SumOp: identity (sum), nan-to-zero (nansum),
 // nonzero-as-one (count_nonzero), abs (L1 norm), or square (L2 norm).
 enum LoadMode : uint {
   LOAD_IDENTITY = 0,
@@ -146,29 +146,28 @@ template <
     typename TO,
     LoadMode MODE = LOAD_IDENTITY,
     FinalizeOp FINAL = FINAL_NONE>
-struct SumReductionOp {
+struct SumOp {
   using acc_t =
       ::metal::conditional_t<MODE == LOAD_NONZERO, uint, opmath_t<TO>>;
-  using Reduce = c10::metal::SumOp<acc_t>;
   static inline acc_t identity() {
-    return Reduce::identity();
+    return acc_t(0);
   }
   template <typename TI>
   static inline acc_t load(TI v) {
     return static_cast<acc_t>(load_val<MODE>(v));
   }
   static inline acc_t combine(acc_t a, acc_t b) {
-    return Reduce::combine(a, b);
+    return a + b;
   }
   static inline acc_t simd_reduce(acc_t v) {
-    return Reduce::simd_reduce(v);
+    return c10::metal::simd_sum(v);
   }
   static inline acc_t threadgroup_reduce(
       threadgroup acc_t* shared,
       acc_t v,
       uint tid,
       uint tptg) {
-    return Reduce::threadgroup_reduce(shared, v, tid, tptg);
+    return c10::metal::threadgroup_sum(shared, v, tid, tptg);
   }
   static inline TO finalize(acc_t v, float param, device TO*, uint) {
     return static_cast<TO>(finalize_val<FINAL>(v, param));
@@ -176,28 +175,27 @@ struct SumReductionOp {
 };
 
 template <typename TO>
-struct ProdReductionOp {
+struct ProdOp {
   using acc_t = opmath_t<TO>;
-  using Reduce = c10::metal::ProdOp<acc_t>;
   static inline acc_t identity() {
-    return Reduce::identity();
+    return cast_to<acc_t>(1);
   }
   template <typename TI>
   static inline acc_t load(TI v) {
     return static_cast<acc_t>(v);
   }
   static inline acc_t combine(acc_t a, acc_t b) {
-    return Reduce::combine(a, b);
+    return c10::metal::mul(a, b);
   }
   static inline acc_t simd_reduce(acc_t v) {
-    return Reduce::simd_reduce(v);
+    return c10::metal::simd_prod(v);
   }
   static inline acc_t threadgroup_reduce(
       threadgroup acc_t* shared,
       acc_t v,
       uint tid,
       uint tptg) {
-    return Reduce::threadgroup_reduce(shared, v, tid, tptg);
+    return c10::metal::threadgroup_prod(shared, v, tid, tptg);
   }
   static inline TO finalize(acc_t v, float, device TO*, uint) {
     return static_cast<TO>(v);
@@ -984,7 +982,7 @@ kernel void reduction_flat_strided(
       TO)
 
 #define REGISTER_SUM_IMPL(TI, TO, PREFIX, MODE) \
-  REGISTER_REDUCTION(PREFIX, TI, TO, SumReductionOp<TO, MODE>)
+  REGISTER_REDUCTION(PREFIX, TI, TO, SumOp<TO, MODE>)
 
 #define REGISTER_SUM(TI, TO) REGISTER_SUM_IMPL(TI, TO, "sum_", LOAD_IDENTITY)
 #define REGISTER_NANSUM(TI, TO) \
@@ -994,14 +992,10 @@ kernel void reduction_flat_strided(
 #define REGISTER_NORM(TI, TO)                          \
   REGISTER_SUM_IMPL(TI, TO, "norm_l0_", LOAD_NONZERO); \
   REGISTER_SUM_IMPL(TI, TO, "norm_l1_", LOAD_ABS);     \
-  REGISTER_REDUCTION(                                  \
-      "norm_l2_", TI, TO, SumReductionOp<TO, LOAD_SQUARE, FINAL_SQRT>)
+  REGISTER_REDUCTION("norm_l2_", TI, TO, SumOp<TO, LOAD_SQUARE, FINAL_SQRT>)
 #define REGISTER_NORM_L2_COMBINE(TO) \
   REGISTER_REDUCTION(                \
-      "norm_l2_combine_",            \
-      float,                         \
-      TO,                            \
-      SumReductionOp<TO, LOAD_IDENTITY, FINAL_SQRT>)
+      "norm_l2_combine_", float, TO, SumOp<TO, LOAD_IDENTITY, FINAL_SQRT>)
 
 REGISTER_SUM(float, float);
 REGISTER_SUM(float, half);
@@ -1056,8 +1050,7 @@ REGISTER_NORM_L2_COMBINE(float);
 REGISTER_NORM_L2_COMBINE(half);
 REGISTER_NORM_L2_COMBINE(bfloat);
 
-#define REGISTER_PROD(TI, TO) \
-  REGISTER_REDUCTION("prod_", TI, TO, ProdReductionOp<TO>)
+#define REGISTER_PROD(TI, TO) REGISTER_REDUCTION("prod_", TI, TO, ProdOp<TO>)
 
 REGISTER_PROD(float, float);
 REGISTER_PROD(float, half);
@@ -1643,3 +1636,54 @@ INSTANTIATE_DOT_REDUCE(int);
 INSTANTIATE_DOT_REDUCE(short);
 INSTANTIATE_DOT_REDUCE(char);
 INSTANTIATE_DOT_REDUCE(uchar);
+
+template <typename OP, typename T, typename I, bool MEAN, bool PARALLEL>
+[[max_total_threads_per_threadgroup(INNER_TG_SIZE)]]
+kernel void segment_reduce(
+    device const T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    device const long* offsets [[buffer(2)]],
+    constant SegmentReduceParams<I>& params [[buffer(3)]],
+    uint3 tid [[thread_position_in_grid]]) {
+  const uint lane = PARALLEL ? tid.x : 0;
+  const I column = PARALLEL ? 0 : tid.x;
+  const I stride = PARALLEL ? 1 : params.inner;
+  const I row = tid.z * params.segments + tid.y;
+  const I start = static_cast<I>(offsets[row + tid.z]);
+  const I end = min(static_cast<I>(offsets[row + tid.z + 1]), params.axis_size);
+  device const T* values = input + tid.z * params.axis_size * stride + column;
+  float val = lane == 0 && params.has_initial ? params.initial : OP::identity();
+  for (I j = start + lane; j < end; j += PARALLEL ? INNER_TG_SIZE : 1) {
+    val = OP::combine(val, static_cast<float>(values[j * stride]));
+  }
+  threadgroup float shared[INNER_TG_SIZE / simdgroup_size];
+  if IF_CONSTEXPR (PARALLEL) {
+    val = OP::threadgroup_reduce(shared, val, lane, INNER_TG_SIZE);
+  }
+  if (lane == 0) {
+    if IF_CONSTEXPR (MEAN) {
+      val = end != start ? val / float(end - start)
+                         : (params.has_initial ? val : NAN);
+    }
+    output[row * stride + column] = T(val);
+  }
+}
+
+#define INSTANTIATE_SEGMENT(NAME, ...)                                    \
+  INSTANTIATE_KERNEL(NAME "_serial", segment_reduce, __VA_ARGS__, false); \
+  INSTANTIATE_KERNEL(NAME "_parallel", segment_reduce, __VA_ARGS__, true)
+
+#define INSTANTIATE_SEGMENT_IDX(T, I, SUFFIX)                               \
+  INSTANTIATE_SEGMENT("segment_max_" #T SUFFIX, MaxOp<float>, T, I, false); \
+  INSTANTIATE_SEGMENT("segment_min_" #T SUFFIX, MinOp<float>, T, I, false); \
+  INSTANTIATE_SEGMENT("segment_sum_" #T SUFFIX, SumOp<float>, T, I, false); \
+  INSTANTIATE_SEGMENT("segment_mean_" #T SUFFIX, SumOp<float>, T, I, true); \
+  INSTANTIATE_SEGMENT("segment_prod_" #T SUFFIX, ProdOp<float>, T, I, false)
+
+#define INSTANTIATE_SEGMENT_REDUCE(T)       \
+  INSTANTIATE_SEGMENT_IDX(T, uint, "_u32"); \
+  INSTANTIATE_SEGMENT_IDX(T, ulong, "_u64")
+
+INSTANTIATE_SEGMENT_REDUCE(float);
+INSTANTIATE_SEGMENT_REDUCE(half);
+INSTANTIATE_SEGMENT_REDUCE(bfloat);
