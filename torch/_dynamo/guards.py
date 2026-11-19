@@ -390,11 +390,11 @@ def _native_method_matches(value: object, expected: NativeMethodMetadata) -> boo
 def _method_identity_guards_filtered(
     tx: InstructionTranslatorBase, *, binding_only: bool = False
 ) -> bool:
-    if tx.output.package is not None:
-        return True
     guards = tx.output.tracing_context.guards_context
     if guards.skip_install:
         return not (binding_only and guards.tracing_reuse_hash)
+    if tx.output.package is not None:
+        return True
     if tx.export or torch.compiler.is_exporting():
         # Export can call a bound method on the captured module. Its graph
         # still cannot preserve observations of process-local wrapper identities.
@@ -3871,7 +3871,8 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
-    # Alias checks compare both source values, including during nested region reuse.
+    # Multi-source guard (two inputs aliasing) — not expressible as a
+    # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, values: values[0] is values[1],
@@ -7635,7 +7636,7 @@ def record_lexical_alias(
     if scopes:
         endpoints = (source, canonical)
         reads.update((s, scope) for s in endpoints for scope in scopes)
-        # Pin both identities: DUPLICATE_INPUT cannot express a mixed local/global alias.
+        # make_dupe_guard skips mixed local/global sources, so pin both endpoints.
         if is_from_local_source(source) != is_from_local_source(canonical):
             install_guard(*(s.make_guard(GuardBuilder.ID_MATCH) for s in endpoints))
 
