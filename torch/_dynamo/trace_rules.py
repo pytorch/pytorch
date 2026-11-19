@@ -3612,6 +3612,7 @@ NGB_SUPPRESS_FUNCTION_NAMES: dict[str, set[str]] = {
     "torch._prims_common.wrappers": {"_maybe_resize_out"},
     "torch.testing._comparison": {"assert_close"},
     "torch.testing._creation": {"make_tensor"},
+    "torch.testing._internal.common_nn": {"get_new_module_tests"},
     "torch.testing._internal.common_utils": {"TestCase.assertEqual", "TestCase.setUp"},
 }
 
