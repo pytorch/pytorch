@@ -1076,12 +1076,18 @@ class TestBlackwellExhaustiveConfigs(TestCase):
             "B_ROW_MAJOR": b_row_major,
             "BLOCK_M": block_m,
         }
-        self.assertEqual(
-            CUDABlackwellPersistentTMATemplateConfigHeuristic._supports_mma_layout(
-                dtype, allow_tf32, kwargs
-            ),
-            expected,
-        )
+        for triton_support in (False, True):
+            with mock.patch(
+                "torch._inductor.heuristics.template.triton."
+                "triton_supports_mn_major_tf32_mma",
+                return_value=triton_support,
+            ):
+                self.assertEqual(
+                    CUDABlackwellPersistentTMATemplateConfigHeuristic._supports_mma_layout(
+                        dtype, allow_tf32, kwargs
+                    ),
+                    expected or triton_support,
+                )
 
     @parametrize(
         "heuristic_cls",
