@@ -2509,7 +2509,7 @@ def _cat_inputs_recombine_reduction(inputs: list[TensorBox], dim: int) -> str | 
 
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
-    """Lower aten.cat, choosing between pointwise_cat and ConcatKernel."""
+    """Lower aten.cat via pointwise_cat, grouped pointwise_cat chunks into ConcatKernel, or ConcatKernel."""
     cpu_device = inputs[0].get_device().type == "cpu"
     if cpu_device and all(
         input.get_dtype() in [torch.int8, torch.uint8] for input in inputs
@@ -2638,6 +2638,186 @@ def cat(inputs, dim=0):
     def additional_pointwise_ops(op: torch._ops.OpOverload):
         return op in (aten.cat.default, aten.constant_pad_nd.default)
 
+    _DATA_MOVEMENT_OPS = OrderedSet(
+        [
+            "load",
+            "constant",
+            "index_expr",
+            "where",
+            "masked",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "eq",
+            "ne",
+            "and_",
+            "or_",
+            "logical_and",
+            "logical_or",
+            "to_dtype",
+        ]
+    )
+
+    def _get_cat_fx_args():
+        current_node = V.current_node
+        if current_node is None or not current_node.args:
+            return None, None, OrderedSet()
+        fx_args = current_node.args[0]
+        if isinstance(fx_args, (list, tuple)):
+            input_nodes = list(fx_args)
+        elif isinstance(fx_args, torch.fx.Node):
+            input_nodes = [fx_args]
+        else:
+            return None, None, OrderedSet()
+
+        if any(skip_mask):
+            input_nodes = [n for n, skip in zip(input_nodes, skip_mask) if not skip]
+
+        # A cat input can be consumed by another input to the same cat, for
+        # example cat((rotated, -rotated)).  That use is internal to this
+        # cat and should not make rotated a multi-consumer input.
+        return current_node, input_nodes, OrderedSet(input_nodes)
+
+    def _is_unrealized_pointwise(x) -> bool:
+        if isinstance(x, (TensorBox, ir.StorageBox)):
+            return _is_unrealized_pointwise(unwrap_tensor(x))
+        return isinstance(x, ir.Pointwise)
+
+    def _is_data_movement_only(x) -> bool:
+        if isinstance(x, (TensorBox, ir.StorageBox)):
+            return _is_data_movement_only(unwrap_tensor(x))
+        if not isinstance(x, ir.Pointwise):
+            return True
+        opcount = x.inner_fn_opcount()
+        return (
+            opcount.used_ops.issubset(_DATA_MOVEMENT_OPS)
+            and len(opcount.read_buffers) <= 1
+        )
+
+    def _input_has_external_consumer(
+        arg, ir_input, current_node, cat_input_nodes: OrderedSet[torch.fx.Node]
+    ) -> bool:
+        if not hasattr(arg, "users") or len(arg.users) <= 1:
+            return False
+        external_users = [
+            u for u in arg.users if u is not current_node and u not in cat_input_nodes
+        ]
+        if not external_users:
+            return False
+        # input will be computed multiple times because other consumers
+        # (eg. pointwise) will also inline it. So we should realize-in-place via ConcatKernel
+        if any(is_pointwise_use(u) for u in external_users):
+            return True
+        # If input is an unrealized Pointwise with multiple consumers, pointwise_cat
+        # will inline input without realizing it to memory, causing separate
+        # realization cost for input. So we should realize-in-place via ConcatKernel
+        return _is_unrealized_pointwise(ir_input)
+
+    def _is_raw_input_buffer(x) -> bool:
+        data = x.data if isinstance(x, TensorBox) else x
+        unwrapped = data.unwrap_view() if isinstance(data, ir.BaseView) else data
+        return isinstance(unwrapped, ir.StorageBox) and unwrapped.is_input_buffer()
+
+    def any_input_has_multi_consumers() -> bool:
+        current_node, input_nodes, cat_input_nodes = _get_cat_fx_args()
+        if input_nodes is None:
+            return False
+        return any(
+            _input_has_external_consumer(arg, ir_input, current_node, cat_input_nodes)
+            for arg, ir_input in zip(input_nodes, inputs)
+        )
+
+    def _partition_pointwise_cat_inputs() -> list[Any]:
+        max_simple = config.max_pointwise_cat_inputs
+        max_complex = config.max_complex_pointwise_cat_inputs
+        if max(max_simple, max_complex) < 2:
+            return inputs
+
+        current_node, input_nodes, cat_input_nodes = _get_cat_fx_args()
+        if input_nodes is not None and len(input_nodes) != len(inputs):
+            input_nodes = None
+        has_foreach = V.graph.has_feature(
+            inputs[0].get_device(), BackendFeature.FOREACH
+        )
+        max_compute_group_bytes = config.small_memory_access_threshold // 4
+
+        grouped: list[Any] = []
+        group: list[Any] = []
+        group_is_simple = True
+        group_has_compute = False
+        group_bytes: Any = 0
+
+        def _flush_group() -> None:
+            nonlocal group_is_simple, group_has_compute, group_bytes
+            if len(group) >= 2 and not (
+                has_foreach and all(_is_raw_input_buffer(item) for item in group)
+            ):
+                grouped.append(pointwise_cat(list(group), dim))
+            else:
+                grouped.extend(group)
+            group.clear()
+            group_is_simple = True
+            group_has_compute = False
+            group_bytes = 0
+
+        for idx, inp in enumerate(inputs):
+            arg = input_nodes[idx] if input_nodes is not None else None
+            has_ext = arg is not None and _input_has_external_consumer(
+                arg, inp, current_node, cat_input_nodes
+            )
+            eligible = (
+                should_lower_cat_input(inp)
+                and not can_fuse_reduction(inp, exclude)
+                and not has_ext
+            )
+            if not eligible:
+                _flush_group()
+                grouped.append(inp)
+                continue
+
+            inp_simple = op_count(inp) <= MAX_SIMPLE_OP_COUNT
+            inp_limit = max_simple if inp_simple else max_complex
+            inp_is_compute = not _is_data_movement_only(inp)
+            inp_bytes = inp.get_numel() * dtype.itemsize
+
+            # Pointwise cat evaluates every grouped input's arithmetic for each
+            # output element in the group. Keep large or dynamic compute-bearing
+            # inputs on direct ConcatKernel writes.
+            if inp_limit < 2 or (
+                inp_is_compute
+                and not V.graph.sizevars.statically_known_leq(
+                    inp_bytes, max_compute_group_bytes
+                )
+            ):
+                _flush_group()
+                grouped.append(inp)
+                continue
+
+            next_simple = group_is_simple and inp_simple
+            next_has_compute = group_has_compute or inp_is_compute
+            next_bytes = group_bytes + inp_bytes
+            limit = max_simple if next_simple else max_complex
+            exceeds_compute_budget = (
+                next_has_compute
+                and not V.graph.sizevars.statically_known_leq(
+                    next_bytes, max_compute_group_bytes
+                )
+            )
+            if group and (len(group) >= limit or limit < 2 or exceeds_compute_budget):
+                _flush_group()
+                next_simple = inp_simple
+                next_has_compute = inp_is_compute
+                next_bytes = inp_bytes
+
+            group.append(inp)
+            group_is_simple = next_simple
+            group_has_compute = next_has_compute
+            group_bytes = next_bytes
+
+        _flush_group()
+        return grouped
+
     if len(inputs) <= config.max_complex_pointwise_cat_inputs or (
         (len(inputs) <= config.max_pointwise_cat_inputs)
         and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
@@ -2659,52 +2839,6 @@ def cat(inputs, dim=0):
         # multi-consumer — ConcatKernel + NonOwningLayout avoids redundant
         # reads. Also skip when input is an unrealized Pointwise with
         # multiple consumers to avoid recomputation (e.g. pad-as-cat).
-        def any_input_has_multi_consumers() -> bool:
-            current_node = V.current_node
-            if current_node is None:
-                return False
-            fx_args = current_node.args[0]
-            if isinstance(fx_args, (list, tuple)):
-                input_nodes = fx_args
-            elif isinstance(fx_args, torch.fx.Node):
-                input_nodes = [fx_args]
-            else:
-                return False
-
-            if any(skip_mask):
-                input_nodes = [n for n, skip in zip(input_nodes, skip_mask) if not skip]
-
-            # A cat input can be consumed by another input to the same cat, for
-            # example cat((rotated, -rotated)).  That use is internal to this
-            # cat and should not make rotated a multi-consumer input.
-            cat_input_nodes = OrderedSet(input_nodes)
-
-            def is_unrealized_pointwise(x):
-                if isinstance(x, (TensorBox, ir.StorageBox)):
-                    return is_unrealized_pointwise(unwrap_tensor(x))
-                return isinstance(x, ir.Pointwise)
-
-            for arg, ir_input in zip(input_nodes, inputs):
-                if not hasattr(arg, "users") or len(arg.users) <= 1:
-                    continue
-                external_users = [
-                    u
-                    for u in arg.users
-                    if u is not current_node and u not in cat_input_nodes
-                ]
-                if not external_users:
-                    continue
-                # input will be computed multiple times because other consumers
-                # (eg. pointwise) will also inline it. So we should realize-in-place via ConcatKernel
-                if any(is_pointwise_use(u) for u in external_users):
-                    return True
-                # If input is an unrealized Pointwise with multiple consumers, pointwise_cat
-                # will inline input without realizing it to memory, causing separate
-                # realization cost for input. So we should realize-in-place via ConcatKernel
-                if is_unrealized_pointwise(ir_input):
-                    return True
-            return False
-
         has_multi_consumers = any_input_has_multi_consumers()
 
         horizontal_fuse_cat = (
@@ -2713,6 +2847,11 @@ def cat(inputs, dim=0):
 
         if not has_multi_consumers and (fuse_pointwise_use or horizontal_fuse_cat):
             return pointwise_cat(inputs, dim)
+
+    if config.grouped_pointwise_cat and (
+        len(inputs) > config.max_complex_pointwise_cat_inputs
+    ):
+        inputs = _partition_pointwise_cat_inputs()
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 

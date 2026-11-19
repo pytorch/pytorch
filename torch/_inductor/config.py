@@ -1208,6 +1208,12 @@ force_pointwise_cat = False
 # rarely needed.
 cat_fuse_computed_input_copies = False
 
+# Partition eligible inputs into bounded horizontally fused pointwise_cat
+# groups (with compute-bearing groups capped at
+# small_memory_access_threshold // 4 bytes) when aten.cat exceeds
+# max_complex_pointwise_cat_inputs.
+grouped_pointwise_cat = True
+
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
