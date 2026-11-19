@@ -1202,7 +1202,8 @@ class TestIndexingDevice(TestCase):
 
         self.assertEqual(out_gpu.cpu(), out_cpu)
 
-    @onlyCUDA
+    @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6084")  # fmt: skip
     @parametrize("accumulate", [False, True])
     def test_index_put_sorted_contiguous_size_one_stride(self, device, accumulate):
         # A size-1 dim may carry any stride and the tensor is still contiguous.
