@@ -57,6 +57,9 @@ constexpr char kCuptiPerThreadBufferEnabledKey[] =
     "CUPTI_PER_THREAD_BUFFER_ENABLED";
 constexpr std::string_view kRocprofPerThreadBufferEnabledKey =
     "ROCPROF_PER_THREAD_BUFFER_ENABLED";
+constexpr std::string_view kRocprofDispatchRecordWaitMsecsKey =
+    "ROCPROF_DISPATCH_RECORD_WAIT_MSECS";
+constexpr std::string_view kDeviceTracingEnabledKey = "DEVICE_TRACING_ENABLED";
 constexpr char kPerformanceMetricsKey[] = "PERFORMANCE_METRICS";
 constexpr char kPerformanceMetricsDeviceIdKey[] =
     "PERFORMANCE_METRICS_DEVICE_ID";
@@ -376,6 +379,10 @@ bool Config::handleOption(const std::string& name, std::string& val) {
     perThreadBufferEnabled_ = toBool(val);
   } else if (name == kRocprofPerThreadBufferEnabledKey) {
     rocprofPerThreadBufferEnabled_ = toBool(val);
+  } else if (name == kRocprofDispatchRecordWaitMsecsKey) {
+    rocprofDispatchRecordWait_ = milliseconds(toInt32(val));
+  } else if (name == kDeviceTracingEnabledKey) {
+    deviceTracingEnabled_ = toBool(val);
   } else if (!name.compare(kPerformanceMetricsKey)) {
     performanceMetricNames_ = splitAndTrim(val, ',');
   } else if (!name.compare(kPerformanceMetricsDeviceIdKey)) {

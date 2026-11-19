@@ -1,7 +1,10 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+import os
+import sys
 import threading
+import types
 import unittest
 from unittest.mock import patch
 
@@ -13,6 +16,7 @@ from torch._inductor.config import (
 )
 from torch._inductor.runtime.benchmarking import (
     _get_default_gpu_device_type,
+    _triton_benchmarking_context,
     Benchmarker,
     InductorBenchmarker,
     TorchProfilerBenchmarker,
@@ -436,7 +440,7 @@ class TestBenchmarker(TestCase):
         self.assertEqual(calls, ["enter", (1, 2, True), "fn", "exit"])
 
     def _run_fake_cuda_graph_benchmark(
-        self, iters, return_mode="min", grads=None, cudagraph_unroll=None
+        self, iters, return_mode="min", grads=None, cudagraph_unroll=None, nested=False
     ):
         from torch._inductor.runtime import benchmarking as _bench
 
@@ -447,6 +451,9 @@ class TestBenchmarker(TestCase):
         class FakeBenchmarker(Benchmarker):
             @_bench.gpu_benchmark_lock
             def benchmark_gpu(self, _callable, **kwargs):
+                # Like InductorBenchmarker: graph path unless timing a replay.
+                if not self._in_cudagraph_benchmark:
+                    return self.benchmark_gpu_with_cuda_graph(_callable, **kwargs)
                 calls.append("benchmark_gpu")
                 _callable()
                 if kwargs.get("return_mode") == "all":
@@ -473,6 +480,12 @@ class TestBenchmarker(TestCase):
 
         current_stream = FakeStream()
 
+        def fn():
+            calls.append("call")
+            # Emulates a callable that autotunes on its first launch.
+            if nested and calls.count("call") == 1:
+                benchmarker.benchmark_gpu(lambda: calls.append("inner"))
+
         previous = _bench.set_gpu_benchmark_lock_context(custom_context)
         try:
             with (
@@ -492,7 +505,7 @@ class TestBenchmarker(TestCase):
                 if cudagraph_unroll is not None:
                     kwargs["cudagraph_unroll"] = cudagraph_unroll
                 result = benchmarker.benchmark_gpu_with_cuda_graph(
-                    lambda: calls.append("call"),
+                    fn,
                     grad_to_none=grads,
                     return_mode=return_mode,
                     **kwargs,
@@ -520,15 +533,26 @@ class TestBenchmarker(TestCase):
         )
 
     def test_cudagraph_recursion_guard_is_thread_local(self):
-        from torch._inductor.runtime.benchmarking import Benchmarker
-
+        # The guard is raised while timing the captured replay, per thread: one
+        # thread finishing must not clear another thread's guard.
         benchmarker = InductorBenchmarker()
         both_entered = threading.Barrier(2)
         first_finished = threading.Event()
         observed = []
         errors = []
 
-        def benchmark_with_cuda_graph(_self, _callable, **kwargs):
+        class FakeStream:
+            def wait_stream(self, stream):
+                pass
+
+            def synchronize(self):
+                pass
+
+        class FakeCUDAGraph:
+            def replay(self):
+                pass
+
+        def time_replay(_self, _callable, **kwargs):
             both_entered.wait(timeout=5)
             if threading.current_thread().name == "second":
                 self.assertTrue(first_finished.wait(timeout=5))
@@ -544,10 +568,14 @@ class TestBenchmarker(TestCase):
                 if name == "first":
                     first_finished.set()
 
-        with patch.object(
-            Benchmarker,
-            "benchmark_gpu_with_cuda_graph",
-            benchmark_with_cuda_graph,
+        with (
+            patch.object(InductorBenchmarker, "benchmark_gpu", time_replay),
+            patch("torch.cuda.synchronize"),
+            patch("torch.cuda.Stream", FakeStream),
+            patch("torch.cuda.current_stream", return_value=FakeStream()),
+            patch("torch.cuda.stream", return_value=contextlib.nullcontext()),
+            patch("torch.cuda.CUDAGraph", FakeCUDAGraph),
+            patch("torch.cuda.graph", return_value=contextlib.nullcontext()),
         ):
             first = threading.Thread(target=run, args=("first",), name="first")
             second = threading.Thread(target=run, args=("second",), name="second")
@@ -617,6 +645,18 @@ class TestBenchmarker(TestCase):
         tensor = FakeTensor()
         self._run_fake_cuda_graph_benchmark(iters=3, grads=[tensor])
         self.assertEqual(tensor.grad_clear_count, 1 + 3)
+
+    def test_benchmark_gpu_with_cuda_graph_nested_benchmark_uses_graph(self):
+        # Only the replay timing is guarded against graph capture; a benchmark
+        # nested in the warmup gets its own warmup, capture and replay.
+        _, calls = self._run_fake_cuda_graph_benchmark(iters=1, nested=True)
+        inner = ["enter", "inner", "inner", "inner"]
+        replay = ["enter", "benchmark_gpu", "replay", "exit"]
+        self.assertEqual(
+            calls,
+            ["enter", "call", "enter", *inner, *replay, "exit", "exit"]
+            + ["call", "call", *replay, "exit"],
+        )
 
     def test_autotune_cudagraph_benchmarking_requires_max_autotune(self):
         from torch._inductor.runtime import benchmarking as _bench
@@ -744,6 +784,133 @@ class TestGpuBenchmarkDeviceTypes(TestCase):
         sentinel = "privateuse1_test_device"
         with patch("torch._inductor.utils.get_gpu_type", return_value=sentinel):
             self.assertEqual(_get_default_gpu_device_type(), sentinel)
+
+
+_BENCHMARKING = "torch._inductor.runtime.benchmarking"
+
+
+class TestTritonBenchmarkingContext(TestCase):
+    def setUp(self):
+        super().setUp()
+        _triton_benchmarking_context.cache_clear()
+        self.addCleanup(_triton_benchmarking_context.cache_clear)
+
+    @staticmethod
+    def _fake_collector():
+        """A triton.magnon.collector stub whose benchmarking() counts entries and
+        records whether it is active."""
+        collector = types.ModuleType("triton.magnon.collector")
+        collector.entered = 0
+        collector.active = False
+
+        @contextlib.contextmanager
+        def benchmarking():
+            collector.entered += 1
+            collector.active = True
+            try:
+                yield
+            finally:
+                collector.active = False
+
+        collector.benchmarking = benchmarking
+        return collector
+
+    @staticmethod
+    def _patch_compile_iq(*, collect="1", collector=None, flags=None, fbtriton=True):
+        """Patch TRITON_COMPILE_IQ_COLLECT (None unsets it), fbtriton detection, and a
+        stub triton.magnon package.
+
+        `collector` becomes triton.magnon.collector; None makes importing it fail.
+        `flags` maps triton.magnon.flags function names to their return values; None
+        makes importing triton.magnon.flags fail.
+        """
+        magnon = types.ModuleType("triton.magnon")
+        magnon.__path__ = []
+        modules = {"triton.magnon": magnon, "triton.magnon.collector": collector}
+        if flags is None:
+            modules["triton.magnon.flags"] = None
+        else:
+            magnon.flags = types.ModuleType("triton.magnon.flags")
+            for name, value in flags.items():
+                setattr(magnon.flags, name, lambda value=value: value)
+            modules["triton.magnon.flags"] = magnon.flags
+        stack = contextlib.ExitStack()
+        stack.enter_context(patch.dict(os.environ))
+        os.environ.pop("TRITON_COMPILE_IQ_COLLECT", None)
+        if collect is not None:
+            os.environ["TRITON_COMPILE_IQ_COLLECT"] = collect
+        stack.enter_context(patch.dict(sys.modules, modules))
+        stack.enter_context(
+            patch("torch.utils._triton.has_triton_compile_iq", return_value=fbtriton)
+        )
+        return stack
+
+    def test_enters_collector_benchmarking_context(self):
+        collector = self._fake_collector()
+        seen_active = []
+        with self._patch_compile_iq(collector=collector):
+            Benchmarker().benchmark_cpu(
+                lambda: seen_active.append(collector.active), warmup=0, rep=0
+            )
+        self.assertEqual(collector.entered, 1)
+        self.assertTrue(seen_active)
+        self.assertTrue(all(seen_active))
+        self.assertFalse(collector.active)
+
+    def test_do_bench_using_profiling_enters_collector_benchmarking_context(self):
+        from torch._inductor import utils as inductor_utils
+
+        def fake_do_bench_using_profiling(fn, warmup, rep, is_vetted_benchmarking):
+            fn()
+            return 1.0
+
+        collector = self._fake_collector()
+        seen_active = []
+        with (
+            self._patch_compile_iq(collector=collector),
+            patch.object(
+                inductor_utils,
+                "_do_bench_using_profiling",
+                side_effect=fake_do_bench_using_profiling,
+            ),
+        ):
+            inductor_utils.do_bench_using_profiling(
+                lambda: seen_active.append(collector.active)
+            )
+        self.assertEqual(collector.entered, 1)
+        self.assertEqual(seen_active, [True])
+        self.assertFalse(collector.active)
+
+    def test_import_error_falls_back_to_nullcontext(self):
+        with (
+            self._patch_compile_iq(collector=None),
+            self.assertLogs(_BENCHMARKING, level="WARNING") as logs,
+        ):
+            self.assertIs(_triton_benchmarking_context(), contextlib.nullcontext)
+            Benchmarker().benchmark_cpu(lambda: None, warmup=0, rep=0)
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn("TRITON_COMPILE_IQ_COLLECT", logs.output[0])
+
+    def test_collect_follows_magnon_flag_parsing(self):
+        with self._patch_compile_iq(
+            collect="0",
+            collector=self._fake_collector(),
+            flags={"collect_enabled": False},
+        ):
+            self.assertIs(_triton_benchmarking_context(), contextlib.nullcontext)
+
+    def test_collect_without_magnon_flags_treats_any_value_as_on(self):
+        collector = self._fake_collector()
+        with self._patch_compile_iq(collect="0", collector=collector):
+            self.assertIs(_triton_benchmarking_context(), collector.benchmarking)
+
+    def test_without_fbtriton_skips_collector_import(self):
+        with self._patch_compile_iq(collector=self._fake_collector(), fbtriton=False):
+            self.assertIs(_triton_benchmarking_context(), contextlib.nullcontext)
+
+    def test_collect_unset_uses_nullcontext(self):
+        with self._patch_compile_iq(collect=None, collector=self._fake_collector()):
+            self.assertIs(_triton_benchmarking_context(), contextlib.nullcontext)
 
 
 if __name__ == "__main__":

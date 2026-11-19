@@ -483,6 +483,7 @@ inline bool hasDeviceGuardImpl(DeviceType type) {
 }
 
 void C10_API ensureCUDADeviceGuardSet();
+void C10_API ensureXPUDeviceGuardSet();
 
 } // namespace impl
 } // namespace c10
