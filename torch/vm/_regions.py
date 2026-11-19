@@ -2687,6 +2687,9 @@ class _Region:
         self.hot = False
         # Whether the instructions were checked on real values.
         self.surveyed = False
+        # What the calls before the first graph were handed, as keys (see
+        # ``unending``).
+        self.before: list[Any] = []
         self.calls = 0
         # Graphs given to the backend, and the time traces and backend took.
         self.compiles = 0
@@ -2957,11 +2960,47 @@ class _Region:
             plan.split(self, None, "no tensor or module involved")
         else:
             self.surveyed = True
+            self.before = [self.glance(args)]
             plan.options.wait(self)
         return outputs
 
+    def glance(self, args: tuple[Any, ...]) -> Any:
+        """What a call hands the region, as a key, with nothing in the
+        place of what cannot be described."""
+        inputs = _Inputs()
+        parts = []
+        for arg in args:
+            try:
+                parts.append(_describe(arg, inputs))
+            except _Opaque:
+                parts.append(None)
+        return _key(parts, inputs)
+
+    def unending(self, args: tuple[Any, ...]) -> bool:
+        """Whether the first graph is put off, or the region given up:
+        handed other numbers or strings on each of its first three calls (a
+        learning rate on a schedule), it would be handed others on the
+        next, and every one would be a graph of its own."""
+        key = self.glance(args)
+        if not self.before:
+            # A part of a region that was surveyed as a whole: what it is
+            # handed has not been looked at yet.
+            self.before.append(key)
+            return True
+        if key in self.before:
+            return False
+        others = [k for k in self.before if _same_but_values(key, k)]
+        if len(others) >= 2:
+            self.plan.split(self, None, "its inputs take ever new values")
+        elif others:
+            # The next call tells whether they come again.
+            self.before.append(key)
+        return bool(others)
+
     def decide(self, args: tuple[Any, ...]) -> None:
         """Compiles the region for the first time, or takes it out of the plan."""
+        if self.unending(args):
+            return
         inputs = _Inputs()
         try:
             key = self.key(args, inputs)
@@ -3591,6 +3630,8 @@ class _Path(_Region):
         return _key(parts, inputs)
 
     def decide(self, args: tuple[Any, ...]) -> None:
+        if self.unending(args):
+            return
         try:
             key, variant = self.follow(args)
         except _Failed as e:
@@ -3876,6 +3917,7 @@ class _Plan:
             return
         other = (_Path if open_end else _Region)(self, last.lo, last.hi)
         other.calls, other.surveyed = last.calls, last.surveyed
+        other.before = last.before
         self.regions[-1] = other
 
     def insts_of(self, block: int) -> list[dict[str, Any]]:
