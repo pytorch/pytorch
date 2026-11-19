@@ -42,7 +42,10 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     preserves_device_selection,
 )
-from torch.testing._internal.common_utils import compare_equal_outs_and_grads
+from torch.testing._internal.common_utils import (
+    compare_equal_outs_and_grads,
+    HardwareClassification,
+)
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -68,6 +71,8 @@ lib.impl("maybe_dupe_op", maybe_dupe_op, "Meta")
 
 
 class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_LSTM(self):
         # https://github.com/pytorch/torchdynamo/issues/1147
         class Repro(torch.nn.Module):
@@ -2202,6 +2207,8 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
 
 class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     setUp = preserves_device_selection(torch._inductor.test_case.TestCase.setUp)
     setUpClass = classmethod(
         preserves_device_selection(
