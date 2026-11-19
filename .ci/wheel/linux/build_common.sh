@@ -161,9 +161,10 @@ else
     USE_NCCL=1
     USE_KINETO=1
     # CPU-only builds (build_cpu.sh) have no CUDA or ROCm backend for
-    # NCCL/RCCL to build against, and the configure now fails on
-    # explicitly requested options it cannot provide. Kineto stays on: it
-    # does not need a GPU backend.
+    # NCCL to build against, and the configure now fails on an
+    # explicitly requested USE_NCCL it cannot provide. USE_RCCL has no
+    # guard of its own but is turned off here too so the env stays
+    # consistent. Kineto stays on: it does not need a GPU backend.
     if [[ "${USE_CUDA:-}" = "0" ]]; then
         USE_RCCL=0
         USE_NCCL=0

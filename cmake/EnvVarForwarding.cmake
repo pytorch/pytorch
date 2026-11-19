@@ -34,6 +34,9 @@
 #
 # Feature toggles (USE_*/BUILD_*, forwarded by prefix):
 #   USE_CUDA=0                disables CUDA build
+#                            (an explicit USE_CUDA=1 without a usable CUDA
+#                            toolkit stops the configure instead of building
+#                            without it; same for USE_ROCM and USE_XCCL)
 #   USE_CUDNN=0               disables the cuDNN build
 #   USE_CUSPARSELT=0          disables the cuSPARSELt build
 #   USE_CUDSS=0               disables the cuDSS build
@@ -45,6 +48,10 @@
 #   USE_ITT=0                 disables Intel(R) VTune ITT functionality
 #   USE_NNPACK=0              disables NNPACK build
 #   USE_DISTRIBUTED=0         disables distributed (c10d, gloo, mpi, etc.) build
+#   USE_NCCL=1                requires USE_DISTRIBUTED on a non-Apple UNIX platform
+#                            with a CUDA or ROCm build; an explicit request that
+#                            cannot be provided stops the configure instead of
+#                            building without it
 #   USE_TENSORPIPE=0          disables the Tensorpipe backend
 #   USE_GLOO=0                disables the gloo backend
 #   USE_MPI=0                 disables the MPI backend

@@ -26,7 +26,7 @@ set(XPU_HOST_CXX_DEFINITIONS)
 find_package(SYCLToolkit REQUIRED)
 if(NOT SYCL_FOUND)
   pytorch_guard_explicit_request(USE_XPU XPU "cannot be found"
-    "Please check your oneAPI/SYCL installation and ensure SYCL_ROOT or "
+    "Please check your oneAPI/SYCL installation and ensure SYCL_ROOT or"
     "CMPLR_ROOT is set correctly.")
   set(PYTORCH_FOUND_XPU FALSE)
   # Exit early to avoid populating XPU_HOST_CXX_DEFINITIONS.

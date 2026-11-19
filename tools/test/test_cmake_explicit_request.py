@@ -42,7 +42,7 @@ CUDA_GUARD_MESSAGE = (
 )
 
 # the option declarations from CMakeLists.txt, from the sanitizer options
-# (the USE_CUDA declaration looks at USE_TSAN) down to the USE_NCCL
+# (the USE_CUDA declaration looks at USE_TSAN) down to the USE_XCCL
 # declaration, then the fallback chain from Dependencies.cmake in the
 # order it runs there
 HARNESS = """
@@ -69,7 +69,8 @@ if(USE_ROCM)
 endif()
 {nccl_block}
 message(STATUS "RESULT USE_CUDA=${{USE_CUDA}} USE_ROCM=${{USE_ROCM}} "
-               "USE_NCCL=${{USE_NCCL}}")
+               "USE_NCCL=${{USE_NCCL}} "
+               "CUDA_REQUEST=${{_USE_CUDA_EXPLICITLY_SET}}")
 """
 
 
@@ -85,7 +86,7 @@ def build_harness() -> str:
     options = extract(
         cmake_lists,
         r"^option\(USE_ASAN .*?(?=^cmake_dependent_option\(USE_RCCL)",
-        "USE_ASAN..USE_NCCL option block",
+        "USE_ASAN..USE_XCCL option block",
     )
     dependencies = (REPO / "cmake" / "Dependencies.cmake").read_text()
     nccl_block = extract(
@@ -123,9 +124,19 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
              f"-DPython_EXECUTABLE={sys.executable}", *args],
             env=run_env, capture_output=True, text=True)
 
-    def assert_ok(self, option: str, enabled: bool, *args: str, **kwargs) -> None:
+    def assert_ok(
+        self, option: str, enabled: bool, *args: str,
+        stderr_without: str | None = None, **kwargs
+    ) -> None:
         result = self.configure(*args, **kwargs)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        if stderr_without is not None:
+            # the RESULT line prints the settled value, which a fallback
+            # can write even when the forced value was dropped on the
+            # floor; the fallback's warning on stderr cannot be faked
+            self.assertNotIn(
+                " ".join(stderr_without.split()),
+                " ".join(result.stderr.split()))
         match = re.search(rf'RESULT .*?\b{option}=(\S*)', result.stdout)
         if match is None:
             self.fail(f"no RESULT line in:\n{result.stdout}")
@@ -167,10 +178,17 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
         self.assert_ok("USE_CUDA", False, build="cuda-default")
         self.assert_ok("USE_CUDA", False, "-DUSE_CUDA=OFF", build="cuda-d-off")
         # a second default configure in the same dir must not read the
-        # fallback-cached OFF as an explicit request
+        # fallback-cached OFF as an explicit request, and the request
+        # marker must stay off: cuda.cmake is not even included with the
+        # cached OFF, so the marker is the only thing that can show a
+        # wrongly recorded request here
         self.assert_ok("USE_CUDA", False, build="cuda-default")
+        result = self.configure(build="cuda-default")
+        self.assertNotIn(
+            "CUDA_REQUEST=ON", " ".join(result.stdout.split()))
 
     def test_forced_value_wins_over_cached_on(self) -> None:
+        self.skip_if_cuda_installed()
         # cmake_dependent_option applies the force value with a plain
         # set() in the caller's scope, so a wrapper that is a function
         # would eat it and leave the cached ON visible after the call.
@@ -201,13 +219,15 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
             "\n"
             "_USE_NCCL_LAST_SEEN:INTERNAL=ON\n")
         self.assert_ok("USE_NCCL", False, "-DUSE_DISTRIBUTED=OFF",
-                       build="force-nccl-seed")
+                       build="force-nccl-seed",
+                       stderr_without="disabling USE_NCCL")
         # the forced OFF lives in a normal variable while the cache keeps
         # the ON entry, so the second run is where a stamp that recorded
         # the normal variable would read the gap as a user edit and fail
         # the configure through the early refusal. it has to stay quiet
         self.assert_ok("USE_NCCL", False, "-DUSE_DISTRIBUTED=OFF",
-                       build="force-nccl-seed")
+                       build="force-nccl-seed",
+                       stderr_without="disabling USE_NCCL")
 
     def test_cuda_explicit_request_persists_in_cache(self) -> None:
         self.skip_if_cuda_installed()
@@ -249,6 +269,7 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
             "-DUSE_ROCM=ON", build="rocm-platform")
 
     def test_rocm_explicit_request_not_found(self) -> None:
+        self.skip_if_cuda_installed()
         if not (IS_LINUX or sys.platform == "win32"):
             self.skipTest("the LoadHIP fallback is only reached on Linux and Windows")
         if HAVE_ROCM:
@@ -259,6 +280,7 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
         self.assert_ok("USE_ROCM", False, build="rocm-default")
 
     def test_rocm_explicit_request_persists_in_cache(self) -> None:
+        self.skip_if_cuda_installed()
         if IS_LINUX and HAVE_ROCM:
             self.skipTest("ROCm is installed, so it cannot be missing")
         if IS_LINUX or sys.platform == "win32":
@@ -317,17 +339,26 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
     def test_xccl_explicit_request_no_xpu(self) -> None:
         # the USE_XCCL declaration is wrapped now, so an explicit request
         # against a disabled XPU has to fail at declaration time instead
-        # of falling back silently at the Dependencies.cmake site
-        self.assert_fails(
-            "XCCL was explicitly requested (USE_XCCL=1) but requires an "
-            "XPU build.",
-            "-DUSE_XCCL=ON", "-DUSE_XPU=OFF", build="xccl-no-xpu")
+        # of falling back silently at the Dependencies.cmake site. the
+        # refusal mirrors the NCCL one, so the platform branch fires
+        # first off a non-Apple UNIX platform
+        if IS_LINUX:
+            self.assert_fails(
+                "XCCL was explicitly requested (USE_XCCL=1) but requires "
+                "an XPU build.",
+                "-DUSE_XCCL=ON", "-DUSE_XPU=OFF", build="xccl-no-xpu")
+        else:
+            self.assert_fails(
+                "XCCL was explicitly requested (USE_XCCL=1) but requires "
+                "a non-Apple UNIX platform.",
+                "-DUSE_XCCL=ON", "-DUSE_XPU=OFF", build="xccl-no-xpu")
 
     # --- a configure that dies before a fallback site runs must not leave
     # the declaration defaults looking like user requests on the next run
     # in the same dir
 
     def test_rocm_fatal_does_not_poison_cuda(self) -> None:
+        self.skip_if_cuda_installed()
         if IS_LINUX and HAVE_ROCM:
             self.skipTest("ROCm is installed, so it cannot be missing")
         if IS_LINUX or sys.platform == "win32":
@@ -359,7 +390,7 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
     # keep the entry's help string, so the help-string signal alone cannot
     # see them. the _LAST_SEEN stamp the wrappers write after every
     # declaration is what makes them visible: option() never rewrites the
-    # value of an entry it adopts and the fallbacks only ever write OFF
+    # value of an entry it adopts and the fallbacks write their value
     # after their guard had its chance, so a value that moved under the
     # declaration's help string is the user's hand (gh-114388's symptom)
 
@@ -391,8 +422,8 @@ class TestExplicitRequestFallbacks(unittest.TestCase):
     def test_pre_stamping_cache_dir_reconfigures_cleanly(self) -> None:
         # a build directory from before the _LAST_SEEN stamping carries
         # cached values with no stamp to compare against; the first
-        # reconfigure must not record phantom requests (the bot's repro:
-        # an old CUDA dir with USE_NCCL=ON cached, reconfigured with
+        # reconfigure must not record phantom requests (an old CUDA
+        # dir with USE_NCCL=ON cached, reconfigured with
         # USE_CUDA=0, used to stop at the NCCL refusal)
         build = self.tmp / "pre-stamping-dir"
         build.mkdir()

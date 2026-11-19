@@ -141,10 +141,11 @@ endmacro()
 #
 # call this right above the option's own option() / cmake_dependent_option()
 # line, passing the doc string that declaration uses. the cache entry found
-# there was set by the user (-D or an initial cache script), forwarded from
-# the env by cmake/EnvVarForwarding.cmake, or written by an earlier
-# configure's declaration or fallback, and only the first kind carries
-# something other than the declaration's doc string: option() and
+# there was set by the user (-D or an initial cache script with its own
+# wording), forwarded from the env by cmake/EnvVarForwarding.cmake, or
+# written by an earlier configure's declaration or fallback, and only the
+# first kind carries something other than the declaration's doc string:
+# option() and
 # cmake_dependent_option() stamp their doc string over an entry they adopt,
 # caffe2_update_option() keeps it. only checking whether the entry exists
 # gets this wrong: a configure that dies before its fallback runs leaves the
@@ -169,9 +170,9 @@ endmacro()
 #      record a request nobody made -- those entries are left to the
 #      declaration's own judgment, so a -C script that reuses the doc
 #      string is not recorded.
-#   3. otherwise the value is stable since the declaration last ran: a
-#      declaration default or an already-recorded request, and the marker
-#      is left alone.
+#   3. otherwise the value is stable since the declaration last ran, or
+#      there is no stamp yet to compare against: a declaration default or
+#      an already-recorded request, and the marker is left alone.
 #
 # the decision is kept in an INTERNAL marker that survives the re-stamp:
 # the declaration stamps its own doc string over an adopted entry during
@@ -182,12 +183,14 @@ endmacro()
 # remaining limits, on purpose: a cache entry whose help string and value
 # both impersonate the declaration's default is indistinguishable from
 # one and always was; env forwarding that rewrites a value the cache
-# already holds is a no-op and leaves no new signal (harmless, the
-# outcome is the same); a forced dependent-option value lives in a
-# normal variable that the cache never sees, so the request state reads
-# the cache; and caffe2_update_option() writes that re-affirm an ON the
-# declaration already settled (FBGEMM, NUMPY, ROCm, SYSTEM_NCCL) restamp
-# the same value and cannot invent or erase a request.
+# already holds is a no-op and leaves no new signal, so a build dir whose
+# earlier configure died before the CUDA fallback falls back silently
+# where a fresh dir would fail; a forced dependent-option value lives in
+# a normal variable that the cache never sees, so the request state reads
+# the cache; and caffe2_update_option() writes restamp the value they
+# write (an ON re-affirming the declaration, FBGEMM and NUMPY, or an OFF
+# flipped to ON to match an enabled backend, SYSTEM_NCCL), so they cannot
+# invent or erase a request.
 function(pytorch_record_explicit_request option docstring)
   if(DEFINED CACHE{${option}})
     get_property(_help CACHE ${option} PROPERTY HELPSTRING)

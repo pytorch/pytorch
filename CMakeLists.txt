@@ -365,9 +365,10 @@ option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
 option(USE_LSAN "Use Leak Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 
-# remember whether the user set USE_CUDA before the option() below
-# installs the default, cuda.cmake errors out if they asked for CUDA and
-# it is not there. CUDA is incompatible with TSAN
+# remember whether the user set USE_CUDA before the
+# pytorch_dependent_option() below installs the default, cuda.cmake
+# errors out if they asked for CUDA and it is not there. CUDA is
+# incompatible with TSAN
 pytorch_dependent_option(USE_CUDA "Use CUDA" ON "NOT USE_TSAN" OFF)
 
 pytorch_option(USE_XPU "Use XPU" ON)
@@ -433,11 +434,18 @@ if(_USE_NCCL_EXPLICITLY_SET)
 endif()
 pytorch_dependent_option(USE_XCCL "Use XCCL" ON
                           "USE_XPU;UNIX;NOT APPLE" OFF)
-if(_USE_XCCL_EXPLICITLY_SET AND NOT USE_XPU)
-  message(FATAL_ERROR
-    "PyTorch: XCCL was explicitly requested (USE_XCCL=1) but requires an "
-    "XPU build. "
-    "If you want to build without XCCL, please set USE_XCCL=0.")
+if(_USE_XCCL_EXPLICITLY_SET)
+  if(NOT (UNIX AND NOT APPLE))
+    message(FATAL_ERROR
+      "PyTorch: XCCL was explicitly requested (USE_XCCL=1) but requires a "
+      "non-Apple UNIX platform. "
+      "If you want to build without XCCL, please set USE_XCCL=0.")
+  elseif(NOT USE_XPU)
+    message(FATAL_ERROR
+      "PyTorch: XCCL was explicitly requested (USE_XCCL=1) but requires an "
+      "XPU build. "
+      "If you want to build without XCCL, please set USE_XCCL=0.")
+  endif()
 endif()
 cmake_dependent_option(USE_RCCL "Use RCCL" ON "USE_NCCL;NOT WIN32" OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)

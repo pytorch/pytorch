@@ -30,7 +30,7 @@ find_package(CUDA)
 if(NOT CUDA_FOUND)
   # If user explicitly set USE_CUDA=1, error out instead of falling back
   pytorch_guard_explicit_request(USE_CUDA CUDA "cannot be found"
-    "Please check your CUDA installation, ensure CUDA toolkit is installed, "
+    "Please check your CUDA installation, ensure CUDA toolkit is installed,"
     "and that CUDA_HOME or CMAKE_CUDA_COMPILER is set correctly.")
 
   message(WARNING

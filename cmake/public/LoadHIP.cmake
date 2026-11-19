@@ -42,7 +42,7 @@ else()
   if(NOT EXISTS ${ROCM_PATH})
     # error out if the user explicitly set USE_ROCM=1, do not fall back
     pytorch_guard_explicit_request(USE_ROCM ROCm "cannot be found"
-      "Please check your ROCm installation, ensure a ROCm toolkit is "
+      "Please check your ROCm installation, ensure a ROCm toolkit is"
       "installed, and that ROCM_PATH is set correctly.")
     message(STATUS
         "ROCM_PATH environment variable is not set and ${ROCM_PATH} does not exist.\n"
