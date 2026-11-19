@@ -14,6 +14,7 @@
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -1787,6 +1788,10 @@ void framePop(void* popped, PyObject* kept) {
 }
 #endif
 
+int32_t isTracing() {
+  return torch::jit::tracer::isTracing();
+}
+
 const TcfgApi api_table = {
     TCFG_API_VERSION,
     &captureBegin,
@@ -1810,6 +1815,7 @@ const TcfgApi api_table = {
     nullptr,
     nullptr,
 #endif
+    &isTracing,
 };
 
 } // namespace
