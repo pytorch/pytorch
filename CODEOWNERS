@@ -750,7 +750,6 @@
 # /torch/numa/
 # /torch/overrides.py
 # /torch/py.typed
-/torch/pytree.py @XuehaiPan
 # /torch/quasirandom.py
 # /torch/random.py
 # /torch/return_types.py
@@ -786,6 +785,7 @@
 /torch/utils/hipify/ @jeffdaily @jithunnair-amd
 # label: module: pytree
 # owner: @XuehaiPan
+/torch/pytree.py @XuehaiPan
 /torch/utils/pytree/ @XuehaiPan
 /torch/utils/_pytree.py @XuehaiPan
 /torch/utils/_cxx_pytree.py @XuehaiPan
