@@ -66,7 +66,7 @@ class TestPythonAgnostic(TestCase):
 instantiate_device_type_tests(
     TestPythonAgnostic,
     globals(),
-    except_for=("cpu", "privateuse1", "hpu"),
+    except_for="cpu",
     allow_xpu=True,
 )
 
