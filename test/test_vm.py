@@ -41,6 +41,10 @@ try:
     cfg_rs = importlib.import_module("torch._cfg_rs")
 except ImportError:
     cfg_rs = None
+# The tests are about the VM: nothing is left to the interpreter for being
+# faster there, unless a test asks for it.
+os.environ["TORCH_VM_DEMOTE"] = "0"
+
 HAS_RUNTIME = UNDISTURBED and cfg_rs is not None and sys.version_info[:2] == (3, 12)
 P = torch.vm.passes
 DEFAULT = torch.vm.DEFAULT_PASSES
@@ -3108,6 +3112,69 @@ class TestVmShortcuts(TestCase):
         )
         self.assertEqual(compiled(net, x), net(x))
         self.assertIn("Module._call_impl", compiled.stats()["compiled_callees"])
+
+
+def demote_python(n):
+    total = 0
+    for i in range(n):
+        total += i * i % 7
+    return total
+
+
+def demote_caller(n, x):
+    return demote_python(n), x + 1
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmDemotion(TestCase):
+    """What the interpreter runs faster is left to it."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_python_callee_is_left_to_the_interpreter(self):
+        compiled = torch.vm(
+            demote_caller, fallback=False, demote=True, passes=without(P.Inline)
+        )
+        x = torch.ones(2)
+        for _ in range(200):
+            total, y = compiled(300, x)
+            self.assertEqual(total, demote_python(300))
+            self.assertEqual(y, x + 1)
+        stats = compiled.stats()
+        # A loop of integer arithmetic is several times slower in the VM.
+        self.assertEqual(stats["demoted_callees"], ["demote_python"])
+        self.assertEqual(stats["compiled_callees"], ["demote_python"])
+
+    def test_python_function_is_left_to_the_interpreter(self):
+        compiled = torch.vm(demote_python, fallback=False, demote=True)
+        self.assertFalse(compiled.stats()["demoted"])
+        for _ in range(200):
+            self.assertEqual(compiled(300), demote_python(300))
+        self.assertTrue(compiled.stats()["demoted"])
+
+    def test_nothing_is_demoted_when_turned_off(self):
+        compiled = torch.vm(
+            demote_caller, fallback=False, demote=False, passes=without(P.Inline)
+        )
+        for _ in range(200):
+            compiled(300, torch.ones(2))
+        stats = compiled.stats()
+        self.assertEqual((stats["demoted"], stats["demoted_callees"]), (False, []))
+
+    def test_error_in_a_callee_that_is_being_measured(self):
+        def fails(x):
+            if x > 150:
+                raise ValueError("late")
+            return x
+
+        def caller(x):
+            return fails(x)
+
+        compiled = torch.vm(
+            caller, fallback=False, demote=True, passes=without(P.Inline)
+        )
+        for x in range(200):
+            self.assertEqual(call_outcome(compiled, x), call_outcome(caller, x))
 
 
 def e2e_halve(x):
