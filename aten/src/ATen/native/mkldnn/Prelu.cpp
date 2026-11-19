@@ -31,24 +31,24 @@ Tensor mkldnn_prelu(const Tensor& input, const Tensor& weight) {
   }
 
   const ideep::tensor& x = itensor_from_mkldnn(input);
-  const ideep::tensor& w = itensor_from_tensor(weight);
+  const ideep::tensor& w = itensor_from_const_tensor(weight);
 
   ideep::tensor y;
   ideep::prelu_forward::compute(
-      x, w, y, ideep::prop_kind::forward_training);
+      x, w, y, dnnl::prop_kind::forward_training);
   return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
                                  input.options().device_opt());
 }
 
 std::tuple<Tensor, Tensor> mkldnn_prelu_backward(const Tensor& grad_output, const Tensor& input, const Tensor& weight) {
   const ideep::tensor& x = itensor_from_mkldnn(input);
-  const ideep::tensor& w = itensor_from_tensor(weight);
+  const ideep::tensor& w = itensor_from_const_tensor(weight);
   const ideep::tensor grady = itensor_from_mkldnn(grad_output);
   ideep::tensor gradx;
   ideep::tensor gradw;
 
   ideep::prelu_backward::compute(
-      x, w, grady, gradx, gradw, ideep::prop_kind::backward);
+      x, w, grady, gradx, gradw, dnnl::prop_kind::backward);
   if (weight.is_mkldnn()) {
     return std::make_tuple(
         new_with_itensor_mkldnn(std::move(gradx),

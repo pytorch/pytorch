@@ -34,6 +34,7 @@ from ..utils import (
     cmp_name_to_op_mapping,
     istype,
     lazily_unpack,
+    no_keywords,
     raise_args_mismatch,
     set_methods,
     tracked_repr,
@@ -100,6 +101,15 @@ class BaseSetVariable(VariableTracker):
 
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.SET_NOT_CONTAINS
+
+    _nonvar_fields = {
+        # Same reason as ConstDictVariable.original_items: a construction-time
+        # snapshot read only for still-live keys, so traversing it would make
+        # removed elements look reachable.  Here the mismatch is even wider --
+        # reconstruct emits set_items and never consults original_items at all.
+        "original_items",
+        *VariableTracker._nonvar_fields,
+    }
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # set_repr: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
@@ -206,11 +216,6 @@ class BaseSetVariable(VariableTracker):
             kwargs["source"] = None
         return super().clone(**kwargs)
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> ConstantVariable:
-        return VariableTracker.build(tx, hasattr(self.python_type(), name))
-
     def install_set_contains_guard(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> None:
@@ -262,6 +267,8 @@ class BaseSetVariable(VariableTracker):
         # matching CPython's hash-at-insert behavior.
         from .dicts import ConstDictVariable
 
+        if isinstance(other, ConstDictVariable):
+            other.install_dict_order_guard(tx)
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
             yield from other.items.keys()
             return
@@ -276,6 +283,8 @@ class BaseSetVariable(VariableTracker):
         # protocol.
         from .dicts import ConstDictVariable
 
+        if isinstance(other, ConstDictVariable):
+            other.install_dict_order_guard(tx)
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
             return list(other.items.keys())
         return [HashableTracker(x) for x in unpack_iterable(tx, other)]
@@ -446,7 +455,7 @@ class BaseSetVariable(VariableTracker):
 
         if self.source and not is_constant_source(self.source):
             tx.output.guard_on_key_order.add(self.source)
-        return SetIterator(self.items)
+        return SetIterator.create(self.items)
 
     def nb_or_impl(
         self,
@@ -573,7 +582,7 @@ class BaseSetVariable(VariableTracker):
     }
 
 
-class SetVariable(BaseSetVariable):
+class SetVariable(BaseSetVariable):  # noqa: RVT001
     """Represents a Python set during symbolic execution."""
 
     # PySet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2436
@@ -596,6 +605,25 @@ class SetVariable(BaseSetVariable):
     def as_python_constant(self) -> Any:
         return {k.vt.as_python_constant() for k in self.set_items}
 
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # set.__new__(cls, iterable=()); `self` is the BuiltinVariable(set)
+        # __new__ was found on, `args[0]` is the actual (possibly subclassed)
+        # cls. set.__new__ (tp_new) ignores extra args *and* kwargs --
+        # population happens later via __init__, called separately after
+        # __new__ returns.
+        if not args:
+            return VariableTracker.tp_new_impl(self, tx, args, kwargs)
+        if isinstance(args[0], variables.BuiltinVariable) and args[0].fn is set:
+            return SetVariable([], mutation_type=ValueMutationNew())
+        return tx.output.side_effects.track_new_user_defined_object(
+            self, args[0], [], tx=tx
+        )
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach([x.vt for x in self.set_items])
         codegen.append_output(create_instruction("BUILD_SET", arg=len(self.set_items)))
@@ -603,7 +631,7 @@ class SetVariable(BaseSetVariable):
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         from ..exc import raise_type_error
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
@@ -882,7 +910,7 @@ class OrderedSetClassVariable(VariableTracker):
         return var
 
 
-class OrderedSetVariable(BaseSetVariable):
+class OrderedSetVariable(BaseSetVariable):  # noqa: RVT001
     """``torch.utils._ordered_set.OrderedSet``, an insertion-ordered set.
 
     OrderedSet is a pure-Python ``collections.abc.MutableSet``, not a subclass
@@ -927,7 +955,7 @@ class OrderedSetVariable(BaseSetVariable):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import SetIterator
 
-        return SetIterator(self.items)
+        return SetIterator.create(self.items)
 
     def debug_repr(self) -> str:
         if not self.items:
@@ -961,7 +989,7 @@ class OrderedSetVariable(BaseSetVariable):
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def sq_contains_impl(
@@ -1146,7 +1174,7 @@ class OrderedSetVariable(BaseSetVariable):
     }
 
 
-class FrozensetVariable(BaseSetVariable):
+class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
     # PyFrozenSet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2526
     _cpython_type = frozenset
 
@@ -1165,6 +1193,35 @@ class FrozensetVariable(BaseSetVariable):
 
     def as_python_constant(self) -> Any:
         return frozenset({k.vt.as_python_constant() for k in self.set_items})
+
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # frozenset.__new__(cls, iterable=()); `self` is the
+        # BuiltinVariable(frozenset) __new__ was found on, `args[0]` is the
+        # actual (possibly subclassed) cls. frozenset is immutable:
+        # frozenset.__new__ (tp_new) populates contents directly from the
+        # iterable, since frozenset.__init__ is a no-op, and (unlike set)
+        # rejects kwargs.
+        if not args:
+            return VariableTracker.tp_new_impl(self, tx, args, kwargs)
+        # frozenset_new: https://github.com/python/cpython/blob/v3.13.3/Objects/setobject.c
+        cls = args[0].as_python_constant()
+        if cls is frozenset or cls.__init__ is frozenset.__init__:
+            no_keywords(tx, "frozenset", kwargs)
+        if len(args) > 2:
+            raise_type_error(
+                tx, f"{cls.__name__} expected at most 1 argument, got {len(args) - 1}"
+            )
+        if isinstance(args[0], variables.BuiltinVariable) and args[0].fn is frozenset:
+            init_args = unpack_iterable(tx, args[1]) if len(args) > 1 else []
+            return FrozensetVariable(init_args, mutation_type=ValueMutationNew())
+        return tx.output.side_effects.track_new_user_defined_object(
+            self, args[0], args[1:], tx=tx
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -1241,8 +1298,8 @@ class FrozensetVariable(BaseSetVariable):
     def is_hashable(self) -> bool:
         return True
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        # frozenset is hashable, unlike set (SetVariable.hash_impl raises TypeError).
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        # frozenset is hashable, unlike set (SetVariable.tp_hash_impl raises TypeError).
         # CPython frozenset_hash: https://github.com/python/cpython/blob/e76aa128fe/Objects/setobject.c#L769
         from .hashable import RawHash
         from .object_protocol import generic_hash_impl
@@ -1308,7 +1365,7 @@ class DictKeySetVariable(BaseSetVariable):
     def is_hashable(self) -> bool:
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def _dictview_binop(
@@ -1330,6 +1387,8 @@ class DictKeySetVariable(BaseSetVariable):
     ) -> "SetVariable":
         from .dicts import ConstDictVariable
 
+        if isinstance(vt, ConstDictVariable):
+            vt.install_dict_order_guard(tx)
         if isinstance(vt, (BaseSetVariable, ConstDictVariable)):
             items: list[Any] = list(vt.items.keys())
         else:
