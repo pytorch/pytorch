@@ -1212,6 +1212,20 @@ class TestVmPasses(TestCase):
         self.assertNotIn("dispatch", run(0))
         self.assertIn("dispatch", run(1))
 
+    def test_a_pass_over_the_control_flow_graph_is_asked_for(self):
+        def run(passes):
+            compiled = torch.vm(inl_shifted, passes=passes, fallback=False)
+            for _ in range(3):
+                self.assertEqual(
+                    compiled(torch.ones(2), torch.ones(2)),
+                    inl_shifted(torch.ones(2), torch.ones(2)),
+                )
+            return compiled.stats()["inlined"]
+
+        self.assertEqual(run([P.ResolveDispatch()]), [])
+        self.assertEqual(run([P.Inline(), P.ResolveDispatch()]), ["inl_scale"])
+        self.assertEqual(run([]), [])
+
     def test_generic_tier_only(self):
         def f(x, n):
             for _ in range(n):
@@ -1339,6 +1353,114 @@ class TestVmPasses(TestCase):
         stats = compiled.stats()
         self.assertEqual(block_stats(compiled, "versions"), [0])
         self.assertIn("pass failed", stats["blocks"][0]["rejected"])
+
+
+def inl_scale(x, k):
+    return x * k
+
+
+def inl_shifted(x, y):
+    t = inl_scale(x, 2)
+    if t.sum() > 0:
+        return t + y
+    return t - y
+
+
+def inl_outer(x, y):
+    a = inl_shifted(x, y)
+    return a + inl_shifted(a, y)
+
+
+def inl_fact(n):
+    return 1 if n <= 1 else n * inl_fact(n - 1)
+
+
+def inl_defaults(x, k=3):
+    return x * k
+
+
+def inl_uses_defaults(x):
+    return inl_defaults(x) + inl_defaults(x, k=2)
+
+
+def inl_raises(x):
+    return x + inl_missing_name  # noqa: F821
+
+
+def inl_calls_raises(x):
+    y = x * 2
+    return inl_raises(y)
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmGraphTransforms(TestCase):
+    """Inlining, which rewrites the graph before it runs."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_inlines_calls_of_module_functions(self):
+        compiled = torch.vm(inl_outer, fallback=False)
+        x, y = torch.randn(3), torch.randn(3)
+        for sign in (1, -1, 1):
+            self.assertEqual(compiled(sign * x, y), inl_outer(sign * x, y))
+        stats = compiled.stats()
+        # Both calls of inl_shifted, and the call of inl_scale inside each.
+        self.assertEqual(
+            sorted(stats["inlined"]),
+            ["inl_scale", "inl_scale", "inl_shifted", "inl_shifted"],
+        )
+        self.assertIn("is_function", compiled.dump())
+        # The inlined bodies are specialized like the caller's own code.
+        self.assertGreater(stats["sites"], 8)
+        self.assertEqual(stats["site_misses"], 0)
+
+    def test_inlined_call_is_guarded_on_the_callee(self):
+        compiled = torch.vm(inl_outer, fallback=False)
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(compiled(x, y), inl_outer(x, y))
+        original = inl_scale
+        try:
+            globals()["inl_scale"] = lambda x, k: x * k + 1
+            self.assertEqual(compiled(x, y), inl_outer(x, y))
+        finally:
+            globals()["inl_scale"] = original
+        code = inl_scale.__code__
+        try:
+            inl_scale.__code__ = (lambda x, k: x * k - 5).__code__
+            self.assertEqual(compiled(x, y), inl_outer(x, y))
+        finally:
+            inl_scale.__code__ = code
+        self.assertEqual(compiled(x, y), inl_outer(x, y))
+
+    def test_what_is_not_inlined(self):
+        recursive = torch.vm(inl_fact, fallback=False)
+        self.assertEqual(recursive(5), 120)
+        self.assertEqual(recursive.stats()["inlined"], [])
+        # Defaults and keywords stay calls.
+        defaults = torch.vm(inl_uses_defaults, fallback=False)
+        self.assertEqual(defaults(torch.ones(2)), torch.full((2,), 5.0))
+        self.assertEqual(defaults.stats()["inlined"], [])
+        off = torch.vm(inl_outer, fallback=False, passes=without(P.Inline))
+        x, y = torch.randn(3), torch.randn(3)
+        self.assertEqual(off(x, y), inl_outer(x, y))
+        self.assertEqual(off.stats()["inlined"], [])
+
+    def test_error_in_inlined_function_has_both_frames(self):
+        compiled = torch.vm(inl_calls_raises, fallback=False)
+        self.assertEqual(compiled.stats()["inlined"], ["inl_raises"])
+        try:
+            compiled(torch.ones(2))
+        except NameError:
+            frames = traceback.extract_tb(sys.exc_info()[2])
+        else:
+            self.fail("expected NameError")
+        self.assertEqual(
+            [(f.name, f.line) for f in frames[-2:]],
+            [
+                ("inl_calls_raises", "return inl_raises(y)"),
+                ("inl_raises", "return x + inl_missing_name  # noqa: F821"),
+            ],
+        )
 
 
 if __name__ == "__main__":

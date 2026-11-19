@@ -1019,10 +1019,13 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         }
     }
     let _ = py;
+    let name: String = code.getattr("co_name")?.extract()?;
+    let filename: String = code.getattr("co_filename")?.extract()?;
     Ok(Function {
-        name: code.getattr("co_name")?.extract()?,
+        origins: vec![Origin { name: name.clone(), filename: filename.clone(), call_bc: 0 }],
+        name,
         qualname: code.getattr("co_qualname")?.extract()?,
-        filename: code.getattr("co_filename")?.extract()?,
+        filename,
         firstlineno: code.getattr("co_firstlineno")?.extract()?,
         consts: all_consts,
         const_true,
@@ -1093,6 +1096,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::GetIter(a)
         | Op::IterNext(a)
         | Op::CheckBound(a, _)
+        | Op::IsFunction { v: a, .. }
         | Op::TensorSize { t: a, .. }
         | Op::TensorDim(a) => r!(a),
         Op::Binary(_, a, b)
@@ -1138,7 +1142,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
     Ok(())
 }
 
-fn rewrite_term_uses(term: &mut Term, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResult<()> {
+pub fn rewrite_term_uses(term: &mut Term, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResult<()> {
     match term {
         Term::Jump(_) => {}
         Term::Br { cond, .. } => *cond = f(*cond)?,

@@ -86,6 +86,9 @@ pub enum Op {
     IterNext(V),
     /// Raises UnboundLocalError if the value is undefined.
     CheckBound(V, u32),
+    /// Whether v is the function object consts[func] and still has the code
+    /// object consts[code]: the guard of an inlined call.
+    IsFunction { v: V, func: u32, code: u32 },
 
     // ---- specialized tier only ----
     Dispatch(Box<DispatchOp>),
@@ -185,6 +188,7 @@ impl Op {
             | Op::GetIter(a)
             | Op::IterNext(a)
             | Op::CheckBound(a, _)
+            | Op::IsFunction { v: a, .. }
             | Op::TensorSize { t: a, .. }
             | Op::TensorDim(a) => f(*a),
             Op::Binary(_, a, b)
@@ -265,16 +269,30 @@ impl Op {
                 | Op::TupleGet(..)
                 | Op::IsNone(..)
                 | Op::Is(..)
+                | Op::IsFunction { .. }
                 | Op::BuildTuple(_)
         )
     }
 }
 
+/// The code an instruction came from: the function itself (origin 0) or a
+/// function that was inlined into it.
+pub struct Origin {
+    pub name: String,
+    pub filename: String,
+    /// For an inlined function, the `Inst::bc` of the call it replaced.
+    pub call_bc: u32,
+}
+
+/// `Inst::bc` holds the index of the origin above this bit.
+pub const ORIGIN_SHIFT: u32 = 24;
+
 #[derive(Clone)]
 pub struct Inst {
     pub dst: V,
     pub op: Op,
-    /// Offset of the bytecode instruction this came from.
+    /// Offset of the bytecode instruction this came from, tagged with its
+    /// origin.
     pub bc: u32,
     /// Values whose last use is this instruction; their registers are
     /// released right after it.
@@ -324,8 +342,9 @@ pub struct Function {
     /// The value of each parameter, in co_varnames order.
     pub params: Vec<V>,
     pub value_names: Vec<Option<String>>,
-    /// (start offset, end offset, line)
+    /// (start offset, end offset, line), the offsets tagged like `Inst::bc`.
     pub lines: Vec<(u32, u32, i32)>,
+    pub origins: Vec<Origin>,
 
     pub globals: PyObj,
     pub builtins: PyObj,
@@ -481,6 +500,9 @@ impl Function {
             Op::GetIter(a) => format!("get_iter {}", n(a)),
             Op::IterNext(a) => format!("iter_next {}", n(a)),
             Op::CheckBound(a, _) => format!("check_bound {}", n(a)),
+            Op::IsFunction { v, func, .. } => {
+                format!("is_function {} {}", n(v), self.const_repr(*func))
+            }
             Op::Dispatch(d) => format!(
                 "dispatch {}({})    ; else {}",
                 d.slot.describe(),
