@@ -10554,6 +10554,30 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
                 torch.cuda.host_memory_stats()["num_host_free"], num_host_free + 1
             )
 
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_free_during_global_capture_on_other_thread(self, use_cuda_host_register):
+        # Another thread's empty_cache() frees a block while this thread
+        # captures in global mode, which forbids unsafe calls on every thread.
+        # The free runs in relaxed mode, so it neither fails nor invalidates
+        # the capture.
+        x = torch.zeros(1, device="cuda")
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            # So that data is a new block, allocated in this mode.
+            torch.cuda.synchronize()
+            torch._C._host_emptyCache()
+            data = torch.empty(1024, pin_memory=True)
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g, capture_error_mode="global"):
+                x.add_(1)
+                del data
+                with ThreadPoolExecutor(1) as executor:
+                    executor.submit(torch._C._host_emptyCache).result()
+            g.replay()
+            self.assertEqual(x.item(), 1)
+
     def test_unpinned_memory_use(self):
         # Copying between CPU and CUDA tensors during graph capture
         # with unpinned CPU memory should raise an error.
