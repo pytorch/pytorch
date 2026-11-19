@@ -2,9 +2,12 @@ import torch
 
 from .._core import ComplexTensor
 from .common import (
+    _get_func_name,
     complex_to_real_dtype,
     register_complex,
     register_force_test,
+    register_inductor,
+    register_simple,
     split_complex_tensor,
 )
 
@@ -38,3 +41,18 @@ def conj_impl(self: ComplexTensor) -> ComplexTensor:
 def item_impl(self: ComplexTensor) -> complex:
     re, im = split_complex_tensor(self)
     return complex(prims.item(re), prims.item(im))
+
+
+rev_impl = register_simple(prims.rev)
+
+
+INDUCTOR_OPS = [
+    prims.fft_r2c,
+    prims.fft_c2c,
+    prims.fft_c2r,
+]
+
+for inductor_op in INDUCTOR_OPS:
+    globals()[_get_func_name(inductor_op)] = register_inductor(inductor_op)
+
+del inductor_op

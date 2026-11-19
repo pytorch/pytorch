@@ -165,7 +165,7 @@ class TestCase(PytorchTestCase):
                 f"`check_consistency` called with the wrong `variant`: {variant}"
             )
         desc = Descriptor(
-            op=get_overload_packet_from_name(op.name),
+            op=get_overload_packet_from_name(op.aten_name),
             device_type=torch.device(device).type,
             dtype=dtype,
             variant=variant,
@@ -199,7 +199,7 @@ class TestCase(PytorchTestCase):
 
     def check_grad(self, device: str, dtype: torch.dtype, op: OpInfo) -> None:
         desc = Descriptor(
-            op=get_overload_packet_from_name(op.name),
+            op=get_overload_packet_from_name(op.aten_name),
             device_type=torch.device(device).type,
             dtype=dtype,
             variant=Variant.GradCheck,
@@ -219,18 +219,21 @@ class TestCase(PytorchTestCase):
                 is_leaf=lambda x: isinstance(x, torch.Tensor) and x.dtype.is_complex,
             )
 
+            out_fn = sample_input.output_process_fn_grad
             if isinstance(args[0], torch.Tensor):
                 input_list = list(args)
 
                 def func(*t: torch.Tensor):
-                    return op(*t, **kwargs)
+                    return out_fn(op.gradcheck_wrapper(op, *t, **kwargs))
             else:
                 # For ops like `stack` and `cat`, we need to specify
                 # the list of inputs a bit differently
                 input_list = list(args[0])
 
                 def func(*t: torch.Tensor):
-                    return op(list(t), *args[1:], **kwargs)
+                    return out_fn(
+                        op.gradcheck_wrapper(op, list(t), *args[1:], **kwargs)
+                    )
 
             # Do the actual gradcheck
             self.assertTrue(
@@ -270,15 +273,15 @@ decomposed_op_names = set(map(_get_op_name, DECOMPOSITIONS.keys())) - (
     implemented_op_names | force_test_names
 )
 implemented_op_db = tuple(
-    filter(lambda op: op.name in implemented_op_names, complex_op_db)
+    filter(lambda op: op.aten_name in implemented_op_names, complex_op_db)
 )
-force_test_op_db = tuple(filter(lambda op: op.name in force_test_names, op_db))
+force_test_op_db = tuple(filter(lambda op: op.aten_name in force_test_names, op_db))
 decomposed_op_db = tuple(
     filter(lambda op: op.aten_name in decomposed_op_names, complex_op_db)
 )
 
-tested_op_names = {op.name for op in implemented_op_db} | {
-    op.name for op in force_test_op_db
+tested_op_names = {op.aten_name for op in implemented_op_db} | {
+    op.aten_name for op in force_test_op_db
 }
 non_tested_ops = {
     op for op in COMPLEX_OPS_TABLE if _get_op_name(op) not in tested_op_names
