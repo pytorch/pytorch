@@ -4,7 +4,8 @@ name: rocm-mi200-no-dind
 on:
   push:
     tags:
-      - ciflow/rocm-mi200-no-dind/*
+      # Shares the registered rocm-mi200 label so the trial runs next to the DinD workflow.
+      - ciflow/rocm-mi200/*
   workflow_dispatch:
 
 concurrency:
