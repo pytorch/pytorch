@@ -75,7 +75,7 @@ from typing import Any
 
 import torch
 
-from . import passes
+from . import _shortcuts, passes
 from .passes import BuiltinPass, Inline, Unroll
 
 
@@ -89,6 +89,7 @@ class Unsupported(RuntimeError):
 DEFAULT_PASSES: tuple[BuiltinPass, ...] = (
     passes.Inline(),
     passes.Unroll(),
+    passes.ModuleShortcuts(),
     passes.ResolveDispatch(),
     passes.TensorAccessors(),
     passes.MethodCalls(),
@@ -153,7 +154,7 @@ def _plan(given: Iterable[Any]) -> tuple[list[Any], dict[str, bool]]:
             "passes has Unroll in front of Inline: the engine inlines first, so "
             "that the loops of an inlined function are unrolled too"
         )
-    whole = dict.fromkeys(("inline", "unroll"), False)
+    whole = dict.fromkeys(("inline", "unroll", "shortcuts"), False)
     for one in listed:
         if isinstance(one, BuiltinPass) and one.kind == "cfg":
             whole[one.engine] = True
@@ -248,6 +249,7 @@ def vm(
             inline=whole["inline"],
             unroll=whole["unroll"],
             callees=callees,
+            shortcuts=whole["shortcuts"] and _shortcuts.register(runtime),
             max_versions=max_versions,
             max_respecializations=max_respecializations,
         )
