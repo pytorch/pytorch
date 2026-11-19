@@ -4659,7 +4659,13 @@ class TestConvolutionNNCUDA(NNTestCase):
         with torch.backends.cudnn.flags(enabled=False):
             yref = m(x)
         y = m(x)
-        self.assertEqual(yref, y)
+        if TEST_WITH_ROCM and dtype == torch.bfloat16:
+            # On gfx90a hipBLASLt does not support this bf16 GEMM, so the
+            # cudnn-disabled reference uses a less accurate fallback: against fp32
+            # it is off by up to 0.016, MIOpen's implicit-GEMM solver by 0.004.
+            self.assertEqual(yref, y, atol=0.03, rtol=0.016)
+        else:
+            self.assertEqual(yref, y)
 
     @skipCUDAIfNoMiopen
     @dtypes(torch.float, torch.half, torch.bfloat16)
