@@ -994,8 +994,8 @@ def nested_compile_region(
             ``inductor_config_patches``; its ``bw_inductor_config_patches``
             argument retains the same name. Both mappings accept only the
             Inductor config keys {supported_config_keys}.
-            ``triton.cudagraphs`` is accepted in
-            ``fw_inductor_config_patches`` only and covers the backward too:
+            ``fw_inductor_config_patches`` also accepts ``triton.cudagraphs``,
+            which covers the backward too:
             with ``torch._inductor.config.graph_partition=True`` and
             ``triton.cudagraphs`` on, a region set to ``False`` runs outside
             CUDA Graph capture. Opting in, opting out with ``graph_partition``
@@ -1044,6 +1044,7 @@ if nested_compile_region.__doc__:
         supported_config_keys=", ".join(
             f"``{key}``"
             for key in sorted(_SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS)
+            if key != "triton.cudagraphs"
         )
     )
 

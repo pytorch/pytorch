@@ -738,7 +738,13 @@ def _validate_region_cudagraphs(
             )
         if V.aot_compilation:
             return
-        if setting and not config.triton.cudagraphs:
+        # cpp_wrapper/fx_wrapper with graph_partition turned capture off for the
+        # whole compile, so a region set to True there changes nothing.
+        if (
+            setting
+            and not config.triton.cudagraphs
+            and get_wrapper_cudagraph_skip_reason() is None
+        ):
             reject(
                 node,
                 "opting in to CUDA Graphs while triton.cudagraphs is off is not "
