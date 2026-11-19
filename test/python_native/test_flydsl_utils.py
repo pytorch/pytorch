@@ -136,6 +136,8 @@ class TestFlyDSLSharedPredicates(TestCase):
             (16383, 65536, 4, True),
             (16384, 65536, 4, False),
             (16385, 65536, 4, False),
+            (4095, 524288, 1, True),
+            (4096, 524288, 1, False),
             (1 << 31, 1, 1, False),
             (1, 1 << 31, 1, False),
         ),

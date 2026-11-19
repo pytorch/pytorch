@@ -54,10 +54,12 @@ from torch._inductor.runtime.hints import (
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
     ReductionHint,
+    TileHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_TENSOR_NUMEL,
 )
 from torch._inductor.runtime.runtime_utils import triton_config_to_hashable
+from torch._inductor.runtime.tiling import block_to_prefix, get_max_block
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _check_max_grid_x,
@@ -81,7 +83,7 @@ from torch._inductor.runtime.triton_heuristics import (
     triton_config,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache
+from torch._inductor.utils import fresh_cache, get_code
 
 
 class _FindNamesProbe:
@@ -257,11 +259,11 @@ class TestTritonHeuristics(TestCase):
         Make sure block size does not exceed the maximum defined in inductor config.
         """
         cfg = triton_config({"x": 2048, "y": 2}, 64, 64)
-        for label in "XYZ":
-            key = f"{label}BLOCK"
-            if key not in cfg.kwargs:
-                continue
-            self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+        for key, block in cfg.kwargs.items():
+            if key.endswith("BLOCK"):
+                self.assertLessEqual(
+                    block, get_max_block(block_to_prefix(key), TRITON_MAX_BLOCK)
+                )
 
     def test_native_matmul_config_block_numel_limit(self):
         device = DeviceProperties(
@@ -277,7 +279,7 @@ class TestTritonHeuristics(TestCase):
 
         for size_hints in (
             {"x": 1, "y": 1, "r0_": 1},
-            {"x": 1, "y": 1, "z": 1, "r0_": 1},
+            {"x": 1, "y": 1, "z0_": 1, "r0_": 1},
         ):
             cfgs = _reduction_configs(
                 size_hints=size_hints,
@@ -311,10 +313,10 @@ class TestTritonHeuristics(TestCase):
                 {"x": 4096, "y": 4096, "r0_": 64},
                 {"native_matmul_persistent_rblock": 1024},
             ),
-            ({"x": 4096, "y": 4096, "z": 128, "r0_": 1}, {}),
-            ({"x": 16384, "y": 2048, "z": 128, "r0_": 2048}, {}),
+            ({"x": 4096, "y": 4096, "z0_": 128, "r0_": 1}, {}),
+            ({"x": 16384, "y": 2048, "z0_": 128, "r0_": 2048}, {}),
             (
-                {"x": 4096, "y": 4096, "z": 128, "r0_": 64},
+                {"x": 4096, "y": 4096, "z0_": 128, "r0_": 64},
                 {"native_matmul_persistent_rblock": 1024},
             ),
         ):
@@ -387,7 +389,10 @@ class TestTritonHeuristics(TestCase):
             (2048, 2048, ReductionHint.INNER, None, [(1, 8)]),
         ],
     )
-    @parametrize("max_autotune_flag", ["max_autotune", "max_autotune_pointwise"])
+    @parametrize(
+        "max_autotune_flag",
+        ["max_autotune", "max_autotune_pointwise", "max_autotune_reduction"],
+    )
     def test_persistent_max_autotune_includes_default_config(
         self,
         xnumel,
@@ -423,6 +428,88 @@ class TestTritonHeuristics(TestCase):
             expected_max_configs,
         )
 
+    def test_max_autotune_reduction_false_keeps_default_reduction_configs(self):
+        from torch._inductor.runtime import triton_heuristics
+
+        triton_meta = {"device": self._fake_cuda_device_properties()}
+        pointwise_only = {
+            "max_autotune_pointwise": True,
+            "max_autotune_reduction": False,
+        }
+
+        def keys(configs):
+            return [triton_config_to_hashable(c) for c in configs]
+
+        def persistent(meta):
+            return keys(
+                _persistent_reduction_configs(
+                    size_hints={"x": 2048, "r0_": 256},
+                    reduction_hint=ReductionHint.INNER,
+                    inductor_meta=meta,
+                    triton_meta=triton_meta,
+                )
+            )
+
+        def looped(meta):
+            return keys(
+                _reduction_configs(
+                    size_hints={"x": 2048, "r0_": 4096},
+                    inductor_meta={"reduction_hint": ReductionHint.OUTER, **meta},
+                    triton_meta=triton_meta,
+                )
+            )
+
+        def pointwise_square(meta):
+            return keys(
+                triton_heuristics.pointwise(
+                    {"y": 1024, "x": 1024},
+                    triton_meta,
+                    tile_hint=TileHint.SQUARE,
+                    inductor_meta=meta,
+                    return_configs=True,
+                )
+            )
+
+        for configs in (persistent, looped, pointwise_square):
+            self.assertNotEqual(configs({}), configs({"max_autotune_pointwise": True}))
+        self.assertEqual(persistent(pointwise_only), persistent({}))
+        self.assertEqual(looped(pointwise_only), looped({}))
+        self.assertEqual(
+            pointwise_square(pointwise_only),
+            pointwise_square({"max_autotune_pointwise": True}),
+        )
+        reduction_only = {"max_autotune_reduction": True}
+        self.assertEqual(
+            persistent(reduction_only), persistent({"max_autotune_pointwise": True})
+        )
+        self.assertEqual(pointwise_square(reduction_only), pointwise_square({}))
+        self.assertEqual(
+            persistent({"max_autotune": True, "max_autotune_reduction": False}),
+            persistent({"max_autotune": True}),
+        )
+
+    @parametrize(
+        "max_autotune_pointwise,max_autotune_reduction,expected",
+        [
+            (False, None, False),
+            (True, None, True),
+            (True, False, False),
+            (False, True, True),
+        ],
+    )
+    def test_max_autotune_reduction_inductor_meta(
+        self, max_autotune_pointwise, max_autotune_reduction, expected
+    ):
+        from torch._inductor.codegen.triton import TritonKernel
+
+        with config.patch(
+            max_autotune_pointwise=max_autotune_pointwise,
+            max_autotune_reduction=max_autotune_reduction,
+        ):
+            meta = TritonKernel.inductor_meta_common()
+        self.assertIs(meta["max_autotune_reduction"], expected)
+        self.assertIs(meta["max_autotune_pointwise"], max_autotune_pointwise)
+
     @parametrize(
         "heuristic_cls,device_type,warp_size,expected_max_configs",
         [
@@ -435,7 +522,10 @@ class TestTritonHeuristics(TestCase):
             (XPUReductionHeuristic, "xpu", 32, [(8, 8), (1, 2), (8, 2)]),
         ],
     )
-    @parametrize("max_autotune_flag", ["max_autotune", "max_autotune_pointwise"])
+    @parametrize(
+        "max_autotune_flag",
+        ["max_autotune", "max_autotune_pointwise", "max_autotune_reduction"],
+    )
     def test_backend_persistent_max_autotune_retains_candidates(
         self,
         heuristic_cls,
@@ -543,6 +633,66 @@ class TestTritonHeuristics(TestCase):
                 {"x": 256, "y": 256, "r0_": 4096},
                 {"min_xblock": 16},
             )
+
+    @parametrize(
+        "knob,num_load,expected",
+        [
+            (True, 3, (64, 8, 2)),
+            (False, 3, (64, 1, 2)),
+            (True, 2, (64, 1, 2)),
+        ],
+    )
+    def test_sm100_outer_reduction_r0_block_8(self, knob, num_load, expected):
+        inductor_meta = {"reduction_hint": ReductionHint.OUTER, "num_load": num_load}
+        if knob:
+            inductor_meta["sm100_outer_reduction_r0_block_8"] = True
+
+        configs = _reduction_configs(
+            size_hints={"x": 65536, "r0_": 128},
+            inductor_meta=inductor_meta,
+            triton_meta={"device": self._fake_cuda_device_properties()},
+            num_dynamic=1,
+        )
+
+        outer = configs[-1]
+        self.assertEqual(
+            (outer.kwargs["XBLOCK"], outer.kwargs["R0_BLOCK"], outer.num_warps),
+            expected,
+        )
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @parametrize(
+        "knob,cc,persistent,expected",
+        [
+            (True, 100, False, True),
+            (False, 100, False, False),
+            (True, 90, False, False),
+            (True, 100, True, False),
+        ],
+    )
+    def test_sm100_outer_reduction_r0_block_8_in_inductor_meta(
+        self, knob, cc, persistent, expected
+    ):
+        from torch._inductor.codegen import triton as triton_codegen
+
+        real_props = triton_codegen.triton_meta_device_props
+        x = torch.randn(64 if persistent else 256, 64, device=GPU_TYPE)
+        with (
+            config.patch(
+                {"triton.sm100_outer_reduction_r0_block_8": knob, "compile_threads": 1}
+            ),
+            patch.object(
+                triton_codegen,
+                "triton_meta_device_props",
+                lambda device: real_props(device)._replace(cc=cc),
+            ),
+            fresh_cache(),
+        ):
+            code = "\n".join(get_code(torch.compile(lambda t: t.sum(0)), x))
+
+        heuristic = "persistent_reduction" if persistent else "reduction"
+        self.assertIn(f"@triton_heuristics.{heuristic}(", code)
+        self.assertEqual("'sm100_outer_reduction_r0_block_8': True" in code, expected)
 
     @parametrize(
         "major,cc,expected_baseline_configs,expected_scalar_configs",
@@ -1211,6 +1361,7 @@ class TestTritonHeuristics(TestCase):
                         self.assertEqual(configs, [tuned], msg=arch)
                         self.assertNotEqual(configs, fallback, msg=arch)
 
+    @unittest.skipIf(not torch.version.hip, "ROCm-specific MFMA config pruning")
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize(
         "arch,f16_count,int8_count,int8_kpack",

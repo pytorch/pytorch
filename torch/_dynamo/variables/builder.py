@@ -73,15 +73,16 @@ from torch._library.opaque_object import (
 )
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     FakeTensor,
     FakeTensorMode,
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
     maybe_get_item_memo,
+    unset_fake_temporarily,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
-from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental._dynamism import normalize_source_name
 from torch.fx.experimental.dynamic_spec import (
@@ -186,6 +187,8 @@ from ..utils import (
     get_locals_to_steal,
     get_static_address_type,
     get_type_dict_no_user_code,
+    has_custom_metaclass_accessor,
+    InvalidOrderedDict,
     is_frozen_dataclass,
     is_function,
     is_function_or_wrapper,
@@ -707,16 +710,7 @@ def normalize_descriptor_source(
     if isinstance(source.base, AttrSource) and source.base.member == "__dict__":
         cls = tx.output.resolve_source_value(source.base.base)
         if issubclass(type(cls), type):
-            metacls = type(cls)
-            custom_getattribute = (
-                next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
-                is not type.__dict__["__getattribute__"]
-            )
-            custom_dict = (
-                next(iter_mro_static_attrs(metacls, "__dict__"), None)
-                is not type.__dict__["__dict__"]
-            )
-            if custom_getattribute or custom_dict:
+            if has_custom_metaclass_accessor(cls, "__dict__"):
                 unimplemented(
                     gb_type="Unsupported descriptor source",
                     context="class __dict__ source",
@@ -942,6 +936,97 @@ def _is_dim_dynamic_from_source_dynamism(
     source_dynamism = dict(source.dynamism)
     dim_dynamism = source_dynamism.get(normalized_source_name)
     return dim_dynamism is not None and dim < len(dim_dynamism) and dim_dynamism[dim]
+
+
+def _dict_input_snapshot(value: dict[Any, Any]) -> list[tuple[int, Any, Any]]:
+    try:
+        return list(enumerate_items_with_dict_position(value))
+    except InvalidOrderedDict:
+        unimplemented(
+            gb_type="OrderedDict storage differs from linked keys",
+            context="OrderedDict input snapshot",
+            explanation="Raw dict writes can leave storage entries without matching OrderedDict links; Dynamo cannot track their iteration order.",
+            hints=[
+                "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
+                *graph_break_hints.FUNDAMENTAL,
+            ],
+            skip_frame=True,
+            apply_to_code=False,
+        )
+
+
+def _safe_ordered_dict_key(key: object) -> bool:
+    kind = type(key)
+    if type(key) is tuple or type(key) is frozenset or type(key) is torch.Size:
+        return all(_safe_ordered_dict_key(item) for item in key)
+    if any(
+        kind is t
+        for t in (
+            str,
+            int,
+            bool,
+            bytes,
+            float,
+            complex,
+            type(None),
+            type,
+            types.BuiltinMethodType,
+            torch.dtype,
+            torch.device,
+        )
+    ):
+        return True
+    return kind is torch.Tensor or (
+        type(kind) is type
+        and next(iter_mro_static_attrs(kind, "__hash__"), None) is object.__hash__
+        and next(iter_mro_static_attrs(kind, "__eq__"), None) is object.__eq__
+    )
+
+
+def _dict_items_and_order(
+    value: dict[Any, Any], source: Source
+) -> tuple[list[tuple[int, Any, Any]], bool]:
+    snapshot = _dict_input_snapshot(value)
+    value_type: type[Any] = type(value)
+    if not issubclass(value_type, collections.OrderedDict):
+        return snapshot, False
+    reordered = any(i != position for i, (position, _, _) in enumerate(snapshot))
+    if not all(_safe_ordered_dict_key(key) for _, key, _ in snapshot):
+        if reordered:
+            # Rebuilding storage can change the order and number of key callbacks.
+            # Leave the entire frame eager before any keys are wrapped or hashed.
+            unimplemented(
+                gb_type="Reordered OrderedDict input with callback-sensitive keys",
+                context="OrderedDict input snapshot",
+                explanation="Dynamo cannot restore an OrderedDict's storage order without potentially invoking user key hashing or equality.",
+                hints=["Construct the OrderedDict inside the compiled function."],
+                skip_frame=True,
+                apply_to_code=False,
+            )
+        if not is_constant_source(source):
+            install_guard(source.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
+    return snapshot, reordered
+
+
+def _build_dict_items(
+    snapshot: list[tuple[int, Any, Any]],
+    build_key_value: Callable[[int, object, object], tuple[T, VariableTracker]],
+    *,
+    reordered: bool,
+) -> dict[T, VariableTracker]:
+    if not reordered:
+        return dict(build_key_value(i, key, item) for i, key, item in snapshot)
+    entries = [
+        (position, *build_key_value(position, key, item))
+        for position, key, item in snapshot
+    ]
+    # Preserve both dict storage order and OrderedDict iteration order.
+    items = collections.OrderedDict(
+        (key, item) for _, key, item in sorted(entries, key=lambda entry: entry[0])
+    )
+    for _, key, _ in entries:
+        items.move_to_end(key)
+    return items
 
 
 class VariableBuilder:
@@ -1485,7 +1570,8 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            all_const = all(ConstantVariable.is_literal(k) for k in value)
+            snapshot, reordered = _dict_items_and_order(value, self.get_source())
+            all_const = all(ConstantVariable.is_literal(k) for _, k, _ in snapshot)
 
             # For all_const, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
@@ -1527,10 +1613,7 @@ class VariableBuilder:
 
                 return key, res_value
 
-            result = dict(
-                build_key_value(i, k, v)
-                for i, k, v in enumerate_items_with_dict_position(value)
-            )
+            result = _build_dict_items(snapshot, build_key_value, reordered=reordered)
 
             if istype(value, collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
@@ -1550,6 +1633,9 @@ class VariableBuilder:
                     source=self.source,
                 )
             else:
+                # A lazy VT for a globals dict realized after a delete in the
+                # trace hands out a stale model.
+                self.tx.output.check_deleted_global_access(value, None)
                 result = ConstDictVariable(
                     result,  # type: ignore[arg-type]
                     source=self.source,
@@ -2187,16 +2273,7 @@ class VariableBuilder:
             if isinstance(descriptor, types.ClassMethodDescriptorType) and issubclass(
                 type(method_self), type
             ):
-                metacls = type(method_self)
-                custom_getattribute = (
-                    next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
-                    is not type.__dict__["__getattribute__"]
-                )
-                custom_dict = (
-                    next(iter_mro_static_attrs(metacls, "__dict__"), None)
-                    is not type.__dict__["__dict__"]
-                )
-                if custom_getattribute or custom_dict:
+                if has_custom_metaclass_accessor(method_self, "__dict__"):
                     unimplemented(
                         gb_type="Bound builtin classmethod with custom metaclass",
                         context=f"{descriptor.__qualname__} bound to a class with a custom metaclass",
@@ -2538,11 +2615,7 @@ class VariableBuilder:
                 source=self.source,
                 tx=self.tx,
             )
-        elif (
-            isinstance(value, (dict, collections.OrderedDict))
-            and type(value).__new__ is dict.__new__
-        ):
-            # Construct a dict_vt that will reside inside the UserDefinedDictVariable
+        elif issubclass(type(value), dict) and type(value).__new__ is dict.__new__:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
@@ -2563,12 +2636,10 @@ class VariableBuilder:
 
                 return key, res_value
 
-            kv_items = dict(
-                build_key_value(i, k, v)
-                for i, k, v in enumerate_items_with_dict_position(value)
-            )
+            snapshot, reordered = _dict_items_and_order(value, self.get_source())
+            kv_items = _build_dict_items(snapshot, build_key_value, reordered=reordered)
 
-            if isinstance(value, collections.defaultdict):
+            if issubclass(type(value), collections.defaultdict):
                 factory_source = AttrSource(self.source, "default_factory")
                 result = UserDefinedDefaultDictVariable(
                     value,
@@ -2581,7 +2652,7 @@ class VariableBuilder:
             else:
                 udf_cls = (
                     UserDefinedOrderedDictVariable
-                    if isinstance(value, collections.OrderedDict)
+                    if issubclass(type(value), collections.OrderedDict)
                     else UserDefinedDictVariable
                 )
                 result = udf_cls(value, items=kv_items, source=self.source)
@@ -3978,7 +4049,6 @@ class VariableBuilder:
             # when specialize_float=False
             # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda
             or torch._inductor.config.triton.cudagraphs
-            or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
             or (
                 config.assume_static_by_default
                 and frame_state_entry.scalar is not auto_dynamic
@@ -4207,7 +4277,9 @@ def _dataclasses_fields_lambda(obj: VariableTracker) -> TupleVariable:
     return TupleVariable(items)
 
 
-def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
+def _clone_input(
+    value: Any, fake_mode: FakeTensorMode | CppFakeTensorMode | None
+) -> Any:
     if isinstance(value, torch.Tensor):
         # tensor subclasses will not be converted to FakeTensors and need to be cloned
         if not (
@@ -4220,7 +4292,8 @@ def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
             or value.is_nested
         ):
             # NB: ensure strides are preserved
-            value = clone_input(value)
+            with unset_fake_temporarily():
+                value = clone_input(value)
 
     return value
 
