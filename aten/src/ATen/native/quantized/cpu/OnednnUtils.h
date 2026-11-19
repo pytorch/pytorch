@@ -5,6 +5,9 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ideep.hpp>
+#include <ATen/native/mkldnn/detail/Conv.h>
+#include <ATen/native/mkldnn/detail/Deconv.h>
+#include <ATen/native/mkldnn/detail/Matmul.h>
 #if !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
@@ -40,13 +43,13 @@ struct PrimitiveCache {
   }
 };
 
-using LinearParams = ideep::matmul_forward_params;
+using LinearParams = at::native::mkldnn::matmul_forward_params;
 using Conv = dnnl::convolution_forward;
 using ConvDesc = dnnl::convolution_forward::primitive_desc;
-using ConvParams = ideep::convolution_forward_params;
+using ConvParams = at::native::mkldnn::convolution_forward_params;
 using Deconv = dnnl::deconvolution_forward;
 using DeconvDesc = dnnl::deconvolution_forward::primitive_desc;
-using DeconvParams = ideep::deconv_forward_params;
+using DeconvParams = at::native::mkldnn::deconv_forward_params;
 
 struct LinearPrimitiveCache : PrimitiveCache {
   LinearPrimitiveCache() = default;
@@ -312,7 +315,7 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
 
 namespace onednn_utils {
 
-inline ideep::attr_t create_attr_by_post_op(
+inline at::native::mkldnn::Attr create_attr_by_post_op(
     const std::string_view& binary_post_op,
     double binary_alpha,
     double input1_scale,
@@ -324,15 +327,15 @@ inline ideep::attr_t create_attr_by_post_op(
   using ideep::tensor;
   if (binary_post_op == "none") {
     if (unary_post_op == "relu") {
-      return ideep::attr_t::fuse_relu();
+      return at::native::mkldnn::Attr::fuse_relu();
     } else if (unary_post_op == "leaky_relu") {
       TORCH_CHECK(
           unary_post_op_args.size() == 1,
           "onednn qlinear: expect one argument for post op leaky_relu but got ", unary_post_op_args.size(), " args");
       auto alpha = unary_post_op_args[0].value().to<float>();
-      return ideep::attr_t::fuse_relu_v2(alpha);
+      return at::native::mkldnn::Attr::fuse_relu_v2(alpha);
     } else if (unary_post_op == "tanh") {
-      return ideep::attr_t::fuse_tanh();
+      return at::native::mkldnn::Attr::fuse_tanh();
     } else if (unary_post_op == "gelu") {
       TORCH_CHECK(
           unary_post_op_algorithm == "none" || unary_post_op_algorithm == "tanh",
@@ -340,7 +343,7 @@ inline ideep::attr_t create_attr_by_post_op(
       auto post_algorithm = unary_post_op_algorithm == "none" ?
         dnnl::algorithm::eltwise_gelu_erf :
         dnnl::algorithm::eltwise_gelu_tanh;
-      return ideep::attr_t::fuse_gelu_v2(0.f, 0.f, post_algorithm);
+      return at::native::mkldnn::Attr::fuse_gelu_v2(0.f, 0.f, post_algorithm);
     } else if (unary_post_op == "hardtanh") {
       TORCH_CHECK(
           unary_post_op_args.size() == 2 &&
@@ -351,11 +354,11 @@ inline ideep::attr_t create_attr_by_post_op(
           unary_post_op_args[0].value().to<float>();
       auto upper_bound_value =
           unary_post_op_args[1].value().to<float>();
-      return ideep::attr_t::fuse_clamp(lower_bound_value, upper_bound_value);
+      return at::native::mkldnn::Attr::fuse_clamp(lower_bound_value, upper_bound_value);
     } else if (unary_post_op == "hardswish") {
-      return ideep::attr_t::fuse_hardswish();
+      return at::native::mkldnn::Attr::fuse_hardswish();
     } else if (unary_post_op == "swish") {
-      return ideep::attr_t::fuse_swish();
+      return at::native::mkldnn::Attr::fuse_swish();
     } else {
       TORCH_CHECK(
           unary_post_op == "none",
@@ -363,9 +366,9 @@ inline ideep::attr_t create_attr_by_post_op(
     }
   } else if (binary_post_op == "sum") {
     if (unary_post_op == "none") {
-      return ideep::attr_t::fuse_sum(input1_scale, input1_zero_point);
+      return at::native::mkldnn::Attr::fuse_sum(input1_scale, input1_zero_point);
     } else if (unary_post_op == "relu") {
-      return ideep::attr_t::residual_with_sum_zero_point(input1_scale, input1_zero_point);
+      return at::native::mkldnn::Attr::residual_with_sum_zero_point(input1_scale, input1_zero_point);
     } else {
       TORCH_CHECK(
           false,
@@ -373,12 +376,12 @@ inline ideep::attr_t create_attr_by_post_op(
     }
   } else if (binary_post_op == "add") {
     if (unary_post_op == "none") {
-      return ideep::attr_t::fuse_binary(ideep::algorithm::binary_add, input1_desc);
+      return at::native::mkldnn::Attr::fuse_binary(dnnl::algorithm::binary_add, input1_desc);
     } else if (unary_post_op == "relu") {
       ideep::post_ops po;
-      po.append_binary(ideep::algorithm::binary_add, input1_desc);
-      po.append_eltwise(ideep::algorithm::eltwise_relu, 0, 0);
-      return ideep::attr_t::attr_post_ops(po);
+      po.append_binary(dnnl::algorithm::binary_add, input1_desc);
+      po.append_eltwise(dnnl::algorithm::eltwise_relu, 0, 0);
+      return at::native::mkldnn::Attr::attr_post_ops(po);
     } else {
       TORCH_CHECK(
           false,
@@ -389,7 +392,7 @@ inline ideep::attr_t create_attr_by_post_op(
         false,
         "onednn qlinear: unsupported binary post op ", binary_post_op);
   }
-  return ideep::attr_t();
+  return at::native::mkldnn::Attr();
 }
 
 // ONEDNN requires symmetric quantization of weight
@@ -496,7 +499,7 @@ struct QlinearForwardParams {
   c10::ScalarType out_dtype{c10::ScalarType::Undefined};
   std::vector<int64_t> output_size;
   dnnl::matmul primitive;
-  ideep::exec_args args;
+  std::unordered_map<int, dnnl::memory> args;
   ideep::tensor src;
   ideep::tensor dst;
   std::optional<ideep::tensor> src1;
