@@ -330,10 +330,11 @@ _IMPURE_BUILTINS = frozenset(
 # Where functions live that compute a value from their arguments and do
 # nothing else, whatever the arguments are.
 _PURE_MODULES = frozenset({"builtins", "math", "operator"})
-# The parts of torch itself that hold the tensor work of a model. The rest of
-# the library (the optimizers, the autograd front end, the plumbing around
-# operators) is Python that moves tensors about: regions there would be tried
-# one after the other for nothing.
+# The parts of torch itself that hold the tensor work of a model or of a
+# training step: the update of an optimizer is operations on lists of
+# tensors. The rest of the library (the autograd front end, the plumbing
+# around operators) is Python that moves tensors about: regions there would
+# be tried one after the other for nothing.
 _TORCH = torch.__file__.rsplit("/", 1)[0] + "/"
 _OWN = __file__.rsplit("/", 1)[0] + "/"
 _TORCH_MODEL_CODE = (
@@ -343,6 +344,7 @@ _TORCH_MODEL_CODE = (
     "distributions/",
     "_functorch/",
     "func/",
+    "optim/",
 )
 
 
