@@ -251,6 +251,9 @@ _MOST_HELD = 4096
 _MOST_UNUSUAL = 16
 # How many kinds of call a region keeps for that (one per layer of a model).
 _MOST_USUAL = 256
+# How many times a region has its modules looked at anew because one of
+# their tensors was written to or moved (``_Region.settle``).
+_MOST_SETTLES = 8
 
 
 _CONTAINERS = frozenset(
@@ -711,6 +714,7 @@ class _Known:
     instead of three over the tensors."""
 
     __slots__ = (
+        "again",
         "epoch",
         "kinds",
         "numbers",
@@ -734,6 +738,11 @@ class _Known:
         # these tensors, if the dicts they are in are watched: a call that is
         # given the same has no need to look at the places.
         self.epoch = epoch
+        # Set when the tensors were found written to or moved, and what a
+        # graph has built in of them was found good all the same: the next
+        # call looks at them anew, so that the ones after it find them
+        # untouched again (``_Variant.stale``).
+        self.again = False
         # The tensors of the module that the call had before it came to the
         # module: something else it was handed holds them too.
         self.shared = frozenset(id(tensor) for tensor in shared)
@@ -975,7 +984,7 @@ def _describe(obj: Any, inputs: _Inputs) -> Any:
         known = state.known
         same = 0
         places: dict[int, int] = {}
-        if known is not None:
+        if known is not None and not known.again:
             places = known.places(len(flat))
             # The call has the tensors it had before this module that the
             # look had, and no others of the module's.
@@ -1132,7 +1141,7 @@ def _usual(positions: Any, args: tuple[Any, ...], inputs: _Inputs, key: Any) -> 
             if not state.accessors:
                 return ("object", obj)
             known = state.known
-            if known is None or known.epoch != epoch:
+            if known is None or known.again or known.epoch != epoch:
                 return None
             if looked >= len(inputs.known) or inputs.known[looked][1] is not known:
                 return None
@@ -2643,6 +2652,7 @@ class _Region:
         # were like none.
         self.usual: dict[int, Any] = {}
         self.unusual = 0
+        self.settles = 0
 
     def __call__(self, *args: Any) -> Any:
         if not self.hot:
@@ -2686,6 +2696,8 @@ class _Region:
             if stale is not None:
                 self.melt(variant, stale)  # type: ignore[arg-type]
                 variant = self
+            elif not inputs.unwritten and variant.state is not None:  # type: ignore[union-attr]
+                self.settle(inputs)
         if variant is self or (variant is not None and not variant.holds()):  # type: ignore[union-attr]
             variant = self.widened(key, inputs)
             if variant is not None:
@@ -2698,6 +2710,20 @@ class _Region:
         if variant.proven:  # type: ignore[union-attr]
             return variant.run(inputs)  # type: ignore[union-attr]
         return self.first_run(key, variant, args, inputs)  # type: ignore[arg-type]
+
+    def settle(self, inputs: _Inputs) -> None:
+        """After a call that found a tensor of a module written to or in
+        other memory than when it was last looked at, and what the graph has
+        built in good all the same (a weight moves once when something asks
+        for a pointer it could write through): the next call looks at the
+        modules anew, so that the calls after it find them untouched, and
+        need no check of what is built in. Not for a region whose modules
+        never come to rest."""
+        if self.settles < _MOST_SETTLES and inputs.known:
+            self.settles += 1
+            for _, found in inputs.known:
+                found.again = True
+            self.usual.clear()
 
     def keyed(self, args: tuple[Any, ...]) -> Any:
         """Which of the values of a call its key is made of."""
