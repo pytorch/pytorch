@@ -18,11 +18,15 @@ allows Dynamo to accurately trace and optimize Python code while preserving its 
 
 from .base import VariableTracker
 from .builtin import (
+    BoolBuiltinVariable,
     BuiltinVariable,
     ByteArrayBuiltinVariable,
+    ComplexBuiltinVariable,
     DictBuiltinVariable,
+    FloatBuiltinVariable,
     GetAttrBuiltinVariable,
     HasAttrBuiltinVariable,
+    IntBuiltinVariable,
     IterBuiltinVariable,
     ListBuiltinVariable,
     SetAttrBuiltinVariable,
@@ -237,6 +241,10 @@ __all__ = [
     "BackwardHookVariable",
     "BaseListVariable",
     "TypeVariable",
+    "IntBuiltinVariable",
+    "FloatBuiltinVariable",
+    "ComplexBuiltinVariable",
+    "BoolBuiltinVariable",
     "BuiltinVariable",
     "ByteArrayBuiltinVariable",
     "ByteArrayIteratorVariable",
