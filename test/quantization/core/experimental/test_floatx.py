@@ -15,7 +15,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     instantiate_device_type_tests,
     onlyCPU,
-    skipMPS,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -44,7 +43,7 @@ CUDA_FLOAT8_DTYPES = [
     torch.float8_e8m0fnu,
     torch.float8_e5m3fnu,
 ]
-MPS_FLOAT8_DTYPES = [torch.float8_e4m3fn]
+MPS_FLOAT8_DTYPES = [torch.float8_e4m3fn, torch.float8_e8m0fnu]
 # torch-xpu-ops has no copy kernel for float8_e5m3fnu yet
 XPU_FLOAT8_DTYPES = [d for d in FLOAT8_DTYPES if d is not torch.float8_e5m3fnu]
 
@@ -305,7 +304,6 @@ class TestFloat8Dtype(TestCase):
         x8_simulated = simulate_fp8_precision(x, dtype)
         self.assertEqual(x8_simulated, x8.float())
 
-    @skipMPS
     def test_float8_e8m0fnu_rne_rounding(self, device):
         """
         For every possible e8m0 exponent (256 options) and for every possible
@@ -724,7 +722,9 @@ instantiate_device_type_tests(
     TestFloat8Dtype, globals(), allow_mps=True, allow_xpu=True
 )
 instantiate_device_type_tests(TestFloat8E5M3FNU, globals(), except_for="mps")
-instantiate_device_type_tests(TestFloat4Dtype, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestFloat4Dtype, globals(), allow_mps=True, allow_xpu=True
+)
 
 
 class TestFloat8DtypeCPUOnly(TestCase):
