@@ -7,55 +7,56 @@ import torch
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_GPU_AND_TRITON,
-    HAS_MULTIGPU,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
+from torch.testing._internal.inductor_utils import HAS_MULTIGPU
+from torch.utils._triton import has_triton
 
 
 requires_multigpu = functools.partial(
-    unittest.skipIf, not HAS_MULTIGPU, f"requires multiple {GPU_TYPE} devices"
+    unittest.skipIf, not HAS_MULTIGPU, f"requires multiple accelerators"
 )
 
 
 aten = torch.ops.aten
 
 
+def _check_fn(test_case, func, expect_cpu, *args):
+    out_eager = func(*args)
+
+    out_compiled, code = run_and_get_code(torch.compile(func), *args)
+    test_case.assertEqual(out_eager, out_compiled)
+
+    if len(code) != 1:
+        raise AssertionError
+    if expect_cpu:
+        FileCheck().check("cpp_fused").run(code[0])
+    else:
+        FileCheck().check_not("cpp_fused").run(code[0])
+
+
 class TestMoveConstructorsToGpu(TestCase):
-    def _check_fn(self, func, expect_cpu, *args):
-        out_eager = func(*args)
+    hw_classification = HardwareClassification.ACCELERATOR
 
-        out_compiled, code = run_and_get_code(torch.compile(func), *args)
-        self.assertEqual(out_eager, out_compiled)
-
-        if len(code) != 1:
-            raise AssertionError
-        if expect_cpu:
-            FileCheck().check("cpp_fused").run(code[0])
-        else:
-            FileCheck().check_not("cpp_fused").run(code[0])
-
-    def test_simple(self):
+    def test_simple(self, device):
         def foo(x):
             return x[torch.arange(x.shape[0])]
 
-        inp = torch.rand(32, 77, 512, device=GPU_TYPE)
+        inp = torch.rand(32, 77, 512, device=device)
 
-        self._check_fn(foo, False, inp)
+        _check_fn(self, foo, False, inp)
 
-    def test_output_failure(self):
+    def test_output_failure(self, device):
         def foo(x):
             tmp1 = torch.arange(x.shape[0])
             return tmp1, x[tmp1]
 
-        inp = torch.rand(32, 77, 512, device=GPU_TYPE)
+        inp = torch.rand(32, 77, 512, device=device)
 
-        self._check_fn(foo, True, inp)
+        _check_fn(self, foo, True, inp)
 
     @torch._inductor.config.patch({"triton.cudagraphs": True, "graph_partition": True})
-    def test_output_failure_cudagraphs(self):
+    def test_output_failure_cudagraphs(self, device):
         # cudagraphs lets the search walk through the output node so that cpu
         # scalar inputs stay movable, but a returned constructor keeps its device
         def returned_and_indexed(x):
@@ -73,7 +74,7 @@ class TestMoveConstructorsToGpu(TestCase):
             # constructor that cannot move; x * 2 keeps a gpu op in the graph
             return x * 2, scalar + torch.arange(x.shape[0], device="cpu")
 
-        inp = torch.rand(32, 77, device=GPU_TYPE)
+        inp = torch.rand(32, 77, device=device)
         cases = (
             (returned_and_indexed, (inp,)),
             (cpu_chain, (inp,)),
@@ -88,24 +89,87 @@ class TestMoveConstructorsToGpu(TestCase):
                 self.assertEqual(e, a, exact_device=True)
 
     @torch._inductor.config.patch({"triton.cudagraphs": True, "graph_partition": True})
-    def test_non_output_constructor_moves_cudagraphs(self):
+    def test_non_output_constructor_moves_cudagraphs(self, device):
         def index_with_arange(x):
             return x[torch.arange(x.shape[0])]
 
-        inp = torch.rand(32, 77, device=GPU_TYPE)
+        inp = torch.rand(32, 77, device=device)
         out, code = run_and_get_code(torch.compile(index_with_arange), inp)
         self.assertEqual(out, index_with_arange(inp))
         # the arange reaches no output, so it must still move to the device
         FileCheck().check_not("cpp_fused").run(code[0])
 
-    def test_non_convertable_op_failure(self):
+    def test_non_convertable_op_failure(self, device):
         def foo(x):
             y = torch.arange(x.shape[0])
-            return x + y, torch.ones([4], device=GPU_TYPE)
+            return x + y, torch.ones([4], device=device)
 
         inp = torch.rand([100])
 
-        self._check_fn(foo, True, inp)
+        _check_fn(self, foo, True, inp)
+
+    def test_sets_equiv(self, device):
+        @torch.compile()
+        def foo(x):
+            c1 = torch.ones([4], dtype=torch.long)
+            c2 = torch.arange(-1, 3)
+            return x[c1 + c2], c2 - 4 * 2
+
+        inp = torch.rand([4]).to(device)
+        _, code = run_and_get_code(foo, inp)
+        FileCheck().check_not("triton.jit").run(code[0])
+
+        @torch.compile()
+        def foo(x):
+            c2 = torch.arange(-1, 3)
+            c1 = torch.ones([4], dtype=torch.long)
+            return x[c1 + c2], c2 - 4 * 2
+
+        _, code = run_and_get_code(foo, inp)
+        FileCheck().check_not("triton.jit").run(code[0])
+
+    @requires_multigpu()
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/139520")
+    def test_multi_gpu(self, device):
+        device_type = torch.device(device).type
+
+        def foo(x):
+            return (
+                x[torch.arange(x.shape[0])],
+                torch.ones([4], device=f"{device_type}:0"),
+                torch.ones([4], device=f"{device_type}:1"),
+            )
+
+        # nyi, multi-gpu
+        inp = torch.rand([100], device=device)
+        _check_fn(self, foo, True, inp)
+
+
+    def test_random_constructor_not_moved(self, device):
+        from torch._inductor import config
+
+        for random_fn in [torch.randn, torch.rand]:
+            torch._dynamo.reset()
+
+            def foo(x, fn=random_fn):
+                values = fn(2, x.size(1)).to(x.device)
+                indices = torch.tensor([0, 2], dtype=torch.long).to(x.device)
+                return torch.index_add(x, 0, indices, values)
+
+            inp = torch.randn(4, 8, device=device)
+
+            with config.patch(fallback_random=True):
+                torch.manual_seed(0)
+                out_eager = foo(inp)
+
+                torch.manual_seed(0)
+                out_compiled = torch.compile(foo)(inp)
+
+            self.assertEqual(out_eager, out_compiled)
+
+
+class TestMoveConstructorsGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_multiple_constructors(self):
         def foo(x):
@@ -116,27 +180,14 @@ class TestMoveConstructorsToGpu(TestCase):
             return o1, o2, o1 + o2
 
         inp = torch.rand([200, 200])
-        self._check_fn(foo, True, inp)
+        _check_fn(self, foo, True, inp)
 
-    def test_sets_equiv(self):
-        @torch.compile()
+    def test_no_gpu(self):
         def foo(x):
-            c1 = torch.ones([4], dtype=torch.long)
-            c2 = torch.arange(-1, 3)
-            return x[c1 + c2], c2 - 4 * 2
+            return x[torch.arange(x.shape[0])]
 
-        inp = torch.rand([4]).to(GPU_TYPE)
-        _, code = run_and_get_code(foo, inp)
-        FileCheck().check_not("triton.jit").run(code[0])
-
-        @torch.compile()
-        def foo(x):
-            c2 = torch.arange(-1, 3)
-            c1 = torch.ones([4], dtype=torch.long)
-            return x[c1 + c2], c2 - 4 * 2
-
-        _, code = run_and_get_code(foo, inp)
-        FileCheck().check_not("triton.jit").run(code[0])
+        inp = torch.rand([100])
+        _check_fn(self, foo, True, inp)
 
     def test_index_put_mask_cpu_scalar_not_moved(self):
         # Eager index_put_ dispatches to masked_fill_ for a bool or uint8 mask
@@ -175,50 +226,13 @@ class TestMoveConstructorsToGpu(TestCase):
                 msg=str(dtype),
             )
 
-    @requires_multigpu()
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/139520")
-    def test_multi_gpu(self):
-        def foo(x):
-            return (
-                x[torch.arange(x.shape[0])],
-                torch.ones([4], device=f"{GPU_TYPE}:0"),
-                torch.ones([4], device=f"{GPU_TYPE}:1"),
-            )
 
-        # nyi, multi-gpu
-        inp = torch.rand([100], device=GPU_TYPE)
-        self._check_fn(foo, True, inp)
 
-    def test_no_gpu(self):
-        def foo(x):
-            return x[torch.arange(x.shape[0])]
-
-        inp = torch.rand([100])
-        self._check_fn(foo, True, inp)
-
-    def test_random_constructor_not_moved(self):
-        from torch._inductor import config
-
-        for random_fn in [torch.randn, torch.rand]:
-            torch._dynamo.reset()
-
-            def foo(x, fn=random_fn):
-                values = fn(2, x.size(1)).to(x.device)
-                indices = torch.tensor([0, 2], dtype=torch.long).to(x.device)
-                return torch.index_add(x, 0, indices, values)
-
-            inp = torch.randn(4, 8, device=GPU_TYPE)
-
-            with config.patch(fallback_random=True):
-                torch.manual_seed(0)
-                out_eager = foo(inp)
-
-                torch.manual_seed(0)
-                out_compiled = torch.compile(foo)(inp)
-
-            self.assertEqual(out_eager, out_compiled)
+instantiate_device_type_tests(
+    TestMoveConstructorsToGpu, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU_AND_TRITON:
+    if IS_LINUX and has_triton():
         run_tests()
