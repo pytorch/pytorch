@@ -30,6 +30,7 @@ from torch._C._dynamo import (
     PySequenceSlots,
     PyTypeSlots,
 )
+from torch.fx.experimental.symbolic_shapes import guard_or_false
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
@@ -39,6 +40,7 @@ from ..exc import (
     raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
+    raise_value_error,
     UnhandledDescriptorError,
     unimplemented,
 )
@@ -445,6 +447,54 @@ def generic_size(
     if obj.tp_as_sequence.sq_length:
         return obj.sq_length_impl(tx)
     return pymapping_size(tx, obj)
+
+
+def pyobject_length_hint(
+    tx: "InstructionTranslatorBase", obj: VariableTracker, default: int
+) -> VariableTracker:
+    """Mirrors PyObject_LengthHint: try __len__, then __length_hint__, falling
+    back to default for a missing slot, a TypeError raised by the slot, or a
+    NotImplemented result.
+
+    ref: https://github.com/python/cpython/blob/v3.13.3/Objects/abstract.c#L88-L150
+    """
+    from .tensor import SymNodeVariable
+
+    obj_type = maybe_get_python_type(obj)
+    if obj.tp_as_sequence.sq_length or obj.tp_as_mapping.mp_length:
+        try:
+            return generic_size(tx, obj)
+        except ObservedTypeError:
+            handle_observed_exception(tx)
+
+    if getattr(obj_type, "__length_hint__", None) is None:
+        return ConstantVariable.create(default)
+    try:
+        hint = obj.call_method(tx, "__length_hint__", [], {})
+    except ObservedTypeError:
+        handle_observed_exception(tx)
+        return ConstantVariable.create(default)
+
+    if hint.is_constant_match(NotImplemented):
+        return ConstantVariable.create(default)
+    hint_type = maybe_get_python_type(hint)
+    if not issubclass(hint_type, int):
+        raise_type_error(
+            tx, f"__length_hint__ must be an integer, not {hint_type.__name__}"
+        )
+    if isinstance(hint, SymNodeVariable) and isinstance(hint.sym_num, torch.SymInt):
+        # Stay symbolic so a size-derived hint does not recompile per size.
+        if guard_or_false(hint.sym_num < 0):
+            raise_value_error(tx, "__length_hint__() should return >= 0")
+        return hint
+    hint = specialize_symnode(hint)
+    if not hint.is_python_constant():
+        # e.g. a compile-time-only id(): cannot be range-checked, so unchecked.
+        return hint
+    val = pylong_as_ssize_t(tx, hint)
+    if val < 0:
+        raise_value_error(tx, "__length_hint__() should return >= 0")
+    return ConstantVariable.create(val)
 
 
 def generic_is_true(

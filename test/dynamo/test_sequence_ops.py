@@ -81,6 +81,40 @@ class IndexLike:
         return self.value
 
 
+class LengthHintRecorder:
+    """Iterable that logs __iter__/__length_hint__/__next__ calls; hint_exc is raised by __length_hint__."""
+
+    def __init__(self, items, hint_exc=None):
+        self.items = list(items)
+        self.hint_exc = hint_exc
+        self.events = []
+
+    def __iter__(self):
+        self.events.append("iter")
+        self.it = iter(self.items)
+        return self
+
+    def __next__(self):
+        self.events.append("next")
+        return next(self.it)
+
+    def __length_hint__(self):
+        self.events.append("hint")
+        if self.hint_exc is not None:
+            raise self.hint_exc
+        return len(self.items)
+
+
+class DictIterOverride(dict):
+    def __iter__(self):
+        return iter(["z"])
+
+
+class SetIterOverride(set):
+    def __iter__(self):
+        return iter([42])
+
+
 class TestSqConcat(torch._dynamo.test_case.TestCase):
     """Tests for sq_concat (+) and sq_inplace_concat (+=) operators for sequences."""
 
@@ -487,6 +521,41 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
             x.__init__(5)
         self.assertEqual(x, [])
 
+    # --- list.extend asks a generic iterable for a length hint (PyObject_LengthHint) ---
+
+    @make_dynamo_test
+    def test_list_extend_length_hint_order(self):
+        # list_extend_iter_lock_held: GetIter, then LengthHint, then iterate.
+        r = LengthHintRecorder([1, 2])
+        x = [0]
+        x.extend(r)
+        self.assertEqual(x, [0, 1, 2])
+        self.assertEqual(r.events, ["iter", "hint", "next", "next", "next"])
+
+    @make_dynamo_test
+    def test_list_extend_length_hint_error_propagates(self):
+        r = LengthHintRecorder([1, 2], hint_exc=RuntimeError("boom"))
+        x = [0]
+        with self.assertRaises(RuntimeError):
+            x.extend(r)
+        self.assertEqual(x, [0])
+        self.assertEqual(r.events, ["iter", "hint"])
+
+    @make_dynamo_test
+    def test_list_extend_length_hint_type_error_ignored(self):
+        # PyObject_LengthHint swallows a TypeError and uses the default.
+        r = LengthHintRecorder([1, 2], hint_exc=TypeError("ignored"))
+        self.assertEqual(list(r), [1, 2])
+
+    @make_dynamo_test
+    def test_deque_extend_skips_length_hint(self):
+        # deque_extend never calls PyObject_LengthHint.
+        r = LengthHintRecorder([1, 2], hint_exc=RuntimeError("boom"))
+        d = collections.deque([0])
+        d.extend(r)
+        self.assertEqual(list(d), [0, 1, 2])
+        self.assertEqual(r.events, ["iter", "next", "next", "next"])
+
     @make_dynamo_test
     def test_deque_extend_trims_per_item(self):
         # deque_append_lock_held trims to maxlen after every item, so the
@@ -510,6 +579,14 @@ class TestSqConcat(torch._dynamo.test_case.TestCase):
         self.assertEqual(list(d), [1, 2, 1, 2])
         d += d
         self.assertEqual(len(d), 8)
+
+    @make_dynamo_test
+    def test_list_extend_dict_set_subclass_uses_iter(self):
+        # Only exact dicts and sets skip __iter__ in list_extend.
+        x = [0]
+        x.extend(DictIterOverride(a=1))
+        self.assertEqual(x, [0, "z"])
+        self.assertEqual(list(SetIterOverride({1})), [42])
 
     # --- deque re-init (deque.__init__) ---
 
