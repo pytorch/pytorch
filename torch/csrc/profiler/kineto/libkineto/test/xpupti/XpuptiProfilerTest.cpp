@@ -236,6 +236,11 @@ TEST(XpuptiProfilerTest, OverheadActivity) {
         << "metadata = " << metadata;
     EXPECT_NE(metadata.find("overhead occupancy"), std::string::npos)
         << "metadata = " << metadata;
+    EXPECT_TRUE(
+        pActivity
+            ->getMetadataValue(libkineto::XpuMetadataFields::kOverheadApiId)
+            .has_value())
+        << "metadata = " << metadata;
   }
 }
 
@@ -323,6 +328,7 @@ TEST(XpuptiProfilerTest, PeerToPeerMemcpy) {
   KN::XPUActivityProfiler profiler;
   auto pSession =
       profiler.configure({KN::ActivityType::GPU_MEMCPY}, KN::Config{});
+  ASSERT_NE(pSession, nullptr);
 
   const auto now = [] {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -361,4 +367,16 @@ TEST(XpuptiProfilerTest, PeerToPeerMemcpy) {
   EXPECT_EQ(fromDevice, std::optional<int64_t>{activity.deviceId()});
   ASSERT_TRUE(toDevice.has_value());
   EXPECT_NE(*fromDevice, *toDevice);
+}
+
+TEST(XpuptiProfilerTest, DeviceTracingDisabledReturnsNoSession) {
+  KN::XPUActivityProfiler profiler;
+  KN::Config cfg;
+  ASSERT_TRUE(cfg.parse("DEVICE_TRACING_ENABLED=false"));
+  const std::set<KN::ActivityType> activities{
+      KN::ActivityType::CONCURRENT_KERNEL};
+  EXPECT_EQ(profiler.configure(activities, cfg), nullptr);
+  EXPECT_EQ(
+      profiler.configure(/*ts_ms=*/0, /*duration_ms=*/1000, activities, cfg),
+      nullptr);
 }

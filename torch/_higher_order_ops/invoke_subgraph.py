@@ -27,6 +27,7 @@ from torch._higher_order_ops.utils import (
     register_fake,
     save_values_for_backward,
     saved_values,
+    validate_subgraph_args_types,
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
@@ -47,11 +48,38 @@ from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispat
 invoke_subgraph_counter = 0
 
 
-# Keep this list limited to configs with established region-local semantics.
+# Keep this list limited to configs with established region-local semantics: a
+# key qualifies only if the decisions it drives (which kernels are generated
+# and how they are tuned) are made while the region is compiled under its patch
+# (graph passes, lowering, codegen), or are baked into the region's kernels'
+# inductor_meta at codegen. Each entry notes where its value is consumed and
+# any read outside the region's patch; check new keys the same way.
 _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS = frozenset(
     {
+        # Read by the region's own scheduler. It only switches combo kernels on
+        # or off: all other combo_kernel* and benchmark_combo_kernel settings,
+        # e.g. combo_kernels_autotune, combo_kernel_max_distance and
+        # combo_kernel_peak_memory_*, are not patchable per region and always
+        # come from the enclosing compile.
+        "combo_kernels",
+        # Read per node while the region is lowered (GraphLowering).
         "fallback_by_default",
+        # Read during lowering for GEMM autotuning choices, and baked into the
+        # region's kernels' inductor_meta at codegen. Exception: when a kernel
+        # is first autotuned, runtime/benchmarking.py reads the global value to
+        # choose CUDA-graph timing (only with autotune_cudagraph_benchmarking).
         "max_autotune",
+        # Read only during lowering, post-grad passes and scheduling for GEMM
+        # autotuning choices; never baked into inductor_meta or read at runtime.
+        # Unlike max_autotune, it does not affect pointwise/reduction tuning.
+        "max_autotune_gemm",
+        # Baked into the region's kernels' inductor_meta at codegen. The runtime
+        # heuristics read max_autotune or this key to widen the configs tried
+        # for pointwise, reduction, persistent and split reduction, and
+        # foreach/combo kernels, so True costs compile and runtime for all of
+        # them. False cannot turn off tuning that max_autotune enables, or
+        # pointwise multi-config tuning that triton.autotune_pointwise enables.
+        "max_autotune_pointwise",
     }
 )
 
@@ -342,27 +370,12 @@ class InvokeSubgraphHOP(HigherOrderOperator):
                 f"identifier must be None or a string, got {type(identifier)}"
             )
 
-        # Proxy: symbolic re-tracing replays calls with proxies, e.g. when a
-        # cached GraphModule is unpickled (_deserialize_graph_module).
-        if not all(
-            isinstance(
-                o,
-                (
-                    torch.Tensor,
-                    int,
-                    torch.SymInt,
-                    torch.Generator,
-                    FakeScriptObject,
-                    torch.fx.Proxy,
-                ),
-            )
-            or is_custom_class(type(o))
-            for o in operands
-            if o is not None
-        ):
-            raise AssertionError(
-                f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator, got {operands}"
-            )
+        validate_subgraph_args_types(
+            operands,
+            extra_allowed_types=(torch.Generator, FakeScriptObject, type(None)),
+            is_allowed=lambda o: is_custom_class(type(o)),
+            hop_name="invoke_subgraph",
+        )
 
         # pyrefly: ignore [missing-attribute]
         return super().__call__(subgraph, identifier, *operands)
