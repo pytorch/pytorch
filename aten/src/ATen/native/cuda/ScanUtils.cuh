@@ -424,7 +424,7 @@ struct Traits {
   // cumsum and cumprod (std::plus / std::multiplies) are memory-bound, so a thread takes 32 bytes.
   // Other ops (logcumsumexp) are compute-bound on 8- and 16-byte types, where a thread applies
   // binary_op about (2 * kItems + 6) / kItems times per element, so those take 16 items, as does
-  // every 16-byte type (on 32-lane waves; see launch).
+  // every 16-byte type (on 32-lane waves; see launch). launch uses fewer items for small launches.
   static constexpr bool kCheapOp =
       std::is_same_v<BinaryFunction, std::plus<T>> || std::is_same_v<BinaryFunction, std::multiplies<T>>;
   static constexpr int kItems =
@@ -958,6 +958,26 @@ inline Plan make_plan(int64_t num_rows, int64_t row_size, int64_t num_sms, int64
   return {Strategy::Block, 0, 1, row_size};
 }
 
+inline int64_t num_blocks(const Plan& plan, int64_t num_rows) {
+  switch (plan.strategy) {
+    case Strategy::Warp:
+      return ceil_div(num_rows, int64_t{kBlock / plan.group});
+    case Strategy::Block:
+      return num_rows;
+    case Strategy::Chunked:
+      return num_rows * plan.num_chunks;
+  }
+  return num_rows;
+}
+
+// A compute-bound op is latency-bound while its launch fits in one block per SM: the time is the
+// serial chain of binary_op in one thread, which grows with the items per thread. Launches of up to
+// `waves` blocks per SM use the fewest items that still cover a row with one tile.
+inline bool fits_waves(int64_t num_rows, int64_t row_size, int64_t num_sms, int items, int64_t waves) {
+  return row_size <= kBlock * items &&
+      num_blocks(make_plan(num_rows, row_size, num_sms, items), num_rows) <= waves * num_sms;
+}
+
 template <int kItems, int kVec, int kRun, typename T, class BinaryFunction>
 void launch_with(T* tgt, const T* src, int64_t num_rows, int64_t row_size, T init, BinaryFunction binary_op) {
   constexpr uintptr_t kAlign = kGlobalAlign<T>;
@@ -1011,6 +1031,22 @@ void launch_with(T* tgt, const T* src, int64_t num_rows, int64_t row_size, T ini
 template <typename T, class BinaryFunction>
 void launch(T* tgt, const T* src, int64_t num_rows, int64_t row_size, T init, BinaryFunction binary_op) {
   using Tr = Traits<T, BinaryFunction>;
+  if constexpr (!Tr::kCheapOp) {
+    const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+    if (fits_waves(num_rows, row_size, num_sms, 2, 1)) {
+      return launch_with<2, std::min(2, Tr::kVec), 2>(tgt, src, num_rows, row_size, init, binary_op);
+    }
+    if (fits_waves(num_rows, row_size, num_sms, 4, 1)) {
+      return launch_with<4, std::min(4, Tr::kVec), 4>(tgt, src, num_rows, row_size, init, binary_op);
+    }
+    if constexpr (Tr::kItems > 8) {
+      // c10::complex<float> stays faster with 8 items up to two blocks per SM; beyond that 16 items
+      // win on gfx942 / gfx950.
+      if (fits_waves(num_rows, row_size, num_sms, 8, std::is_same_v<T, c10::complex<float>> ? 2 : 1)) {
+        return launch_with<8, std::min(8, Tr::kVec), 8>(tgt, src, num_rows, row_size, init, binary_op);
+      }
+    }
+  }
   if constexpr (sizeof(T) >= 16) {
     // On 64-lane waves, 16 contiguous 16-byte items per lane spread every load instruction over
     // 64 cache lines; there cumsum / cumprod are fastest with 2 items and other ops with 8.
