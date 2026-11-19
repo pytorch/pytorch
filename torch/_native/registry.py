@@ -186,7 +186,7 @@ _filter_state: _FilterState = _FilterState()
 _libs: dict[tuple[str, str], torch.library.Library] = {}
 
 # Decomposition-style routers for the compile / export path, keyed by the
-# overridden op's OpOverload. Built in `_register_overrides_from_graph`
+# overridden op's OpOverload and dispatch key. Built in `_register_overrides_from_graph`
 # alongside the eager `Library.impl` routers.
 #
 # This dict is *not* written into any global compile/export decomp table (in
@@ -206,7 +206,52 @@ _libs: dict[tuple[str, str], torch.library.Library] = {}
 #
 # Keeping the table registry-local means `import torch._native` stays cheap
 # and consumers control exactly when and where overrides take effect.
-_native_decomp_overrides: dict[object, Callable] = {}
+_native_decomp_overrides: dict[tuple[object, str], Callable] = {}
+
+
+class _DispatchKeyRouter:
+    """Select a compile router without losing another backend's registration."""
+
+    def __init__(self, routers: dict[str, Callable]) -> None:
+        self.routers: dict[torch._C.DispatchKey, Callable] = {
+            getattr(torch._C.DispatchKey, key): router
+            for key, router in routers.items()
+        }
+        self.keys: torch._C.DispatchKeySet = torch._C._dispatch_keyset_full_after(
+            torch._C.DispatchKey.BackendSelect
+        )
+        for key in self.routers:
+            self.keys = self.keys.add(key)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        keys = torch._C.DispatchKeySet(torch._C.DispatchKey.Undefined)
+        has_tensors = False
+
+        def include(value: Any) -> None:
+            nonlocal keys, has_tensors
+            if isinstance(value, torch.Tensor):
+                keys = keys | torch._C._dispatch_keys(value)
+                has_tensors = True
+            elif isinstance(value, (tuple, list)):
+                for item in value:
+                    include(item)
+            elif isinstance(value, dict):
+                for item in value.values():
+                    include(item)
+
+        include(args)
+        include(kwargs)
+        if has_tensors:
+            keys = keys | torch._C._dispatch_tls_local_include_set()
+            keys = keys - torch._C._dispatch_tls_local_exclude_set()
+            key = (keys & self.keys).highestPriorityTypeId()
+            router = self.routers.get(key)
+            return NotImplemented if router is None else router(*args, **kwargs)
+        for key in sorted(self.routers, key=lambda key: key.value, reverse=True):
+            result = self.routers[key](*args, **kwargs)
+            if result is not NotImplemented:
+                return result
+        return NotImplemented
 
 
 # Re-entrancy guard for the Dynamo shortcut in `eager_router` (see the
@@ -1138,7 +1183,12 @@ def native_decomp_table(
 
         table = dict(default_decompositions())
     # Merge overrides last so they win on conflicts.
-    table.update(_native_decomp_overrides)
+    routers: dict[object, dict[str, Callable]] = {}
+    for (overload, key), router in _native_decomp_overrides.items():
+        routers.setdefault(overload, {})[key] = router
+    table.update(
+        {overload: _DispatchKeyRouter(routes) for overload, routes in routers.items()}
+    )
     return table
 
 
@@ -1179,7 +1229,7 @@ def _register_overrides_from_graph(
     # behavior intact and drop any decomp table entry.
     if not cond_impl:
         if overload is not None:
-            _native_decomp_overrides.pop(overload, None)
+            _native_decomp_overrides.pop((overload, dispatch_key), None)
         return
 
     # Capture the backend handle so fallback calls bypass this router.
@@ -1206,7 +1256,7 @@ def _register_overrides_from_graph(
         initialize_runtime: bool,
     ) -> Any:
         # covers() degrades exceptions to "uncovered", so this is safe on FakeTensors.
-        if coverage is not None and coverage.covers(args, kwargs):
+        if coverage is not None and coverage.covers(args, kwargs, op_symbol=op_symbol):
             return _NO_MATCH
         for cond, impl_name, try_initialize_runtime in cond_impl:
             try:
@@ -1291,7 +1341,7 @@ def _register_overrides_from_graph(
 
     # Only callers using native_decomp_table() opt into this compile router.
     if overload is not None:
-        _native_decomp_overrides[overload] = compile_router
+        _native_decomp_overrides[(overload, dispatch_key)] = compile_router
 
 
 def _register_all_overrides() -> None:
