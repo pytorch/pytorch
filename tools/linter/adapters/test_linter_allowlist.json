@@ -603,7 +603,6 @@
   "test/test_numpy_interop.py",
   "test/test_openmp.py",
   "test/test_ops.py",
-  "test/test_ops_gradients.py",
   "test/test_ops_unbacked.py",
   "test/test_out_dtype_op.py",
   "test/test_per_overload_api.py",
