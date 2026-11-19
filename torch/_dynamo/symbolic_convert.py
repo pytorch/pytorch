@@ -6668,13 +6668,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def _load_global(self, inst: Instruction) -> None:
         name = inst.argval
-        if name not in self.f_globals:
-            return self.load_builtin(inst)
-
         if self.output.global_scope is self.f_globals:
             # If the global scope matches that of the root frame, use handler in
             # root frame instruction translator, to enforce consistency.
             super()._load_global(inst)
+        elif name not in self.f_globals:
+            self.load_builtin(inst)
         else:
             _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
             if self._global_deleted_in_trace(fglobals_vt, name):
