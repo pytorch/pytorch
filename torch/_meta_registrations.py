@@ -791,16 +791,17 @@ def _check_philox_shard_args(op_name, self, key, global_shape, global_offset):
             f"{self.shape}"
         ),
     )
-    torch._check(
-        all(
-            0 <= o and o + s <= g
-            for s, g, o in zip(self.shape, global_shape, global_offset)
-        ),
-        lambda: (
+
+    def msg():
+        return (
             f"{op_name}: output of shape {self.shape} at global_offset "
             f"{global_offset} does not fit in global_shape {global_shape}"
-        ),
-    )
+        )
+
+    # Check each bound separately so symbolic sizes aren't forced to guard.
+    for s, g, o in zip(self.shape, global_shape, global_offset):
+        torch._check(o >= 0, msg)
+        torch._check(o + s <= g, msg)
 
 
 @register_meta(aten._philox_normal_shard_.default)
