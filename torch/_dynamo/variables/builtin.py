@@ -23,12 +23,14 @@ import abc
 import ast
 import builtins
 import contextlib
+import enum
 import functools
 import inspect
 import itertools
 import logging
 import math
 import operator
+import string
 import sys
 import types
 import typing
@@ -75,6 +77,7 @@ from ..utils import (
     dict_methods,
     extract_fake_example_value,
     get_fake_value,
+    get_type_mro_no_user_code,
     has_torch_function,
     is_safe_constant,
     is_tensor_getset_descriptor,
@@ -131,6 +134,8 @@ from .object_protocol import (
     generic_size,
     generic_str,
     maybe_get_python_type,
+    mro_attr_source,
+    mro_lookup,
     pycallable_check,
     pyiter_check,
     pylong_as_ssize_t,
@@ -1401,6 +1406,9 @@ class BuiltinVariable(BaseBuiltinVariable):
 
             return lazy_constant_handler
 
+        if fn is format or fn is str.format:
+            handlers.append(obj._format_user_defined)
+
         if inspect.isclass(fn) and (
             issubclass(fn, BaseException)
             # GeneratorExit doesn't inherit from Exception
@@ -1955,13 +1963,6 @@ class BuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if (self.fn is format or self.fn is str.format) and any(
-            isinstance(value, UserDefinedObjectVariable) and value.is_python_constant()
-            for value in itertools.chain(args, kwargs.values())
-        ):
-            # A constant-backed object's __format__ can still read or mutate its state.
-            return super().call_function(tx, args, kwargs)
-
         if self.fn is type and len(args) == 3:
             unimplemented(
                 gb_type="Dynamic class creation with type",
@@ -3299,6 +3300,79 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         return pynumber_invert(tx, a)
 
+    def _format_user_defined(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if not any(
+            isinstance(value, UserDefinedObjectVariable) and value.is_python_constant()
+            for value in itertools.chain(args, kwargs.values())
+        ):
+            return None
+
+        if self.fn is str.format and args and args[0].python_type() is str:
+            template = args[0].guard_as_python_constant()
+            from .builder import SourcelessBuilder
+
+            builtin = SourcelessBuilder.create_internal_builtin(format)
+
+            class Formatter(string.Formatter):
+                def format_field(self, value, spec):  # type: ignore[no-untyped-def]
+                    args = [value, ConstantVariable.create(spec)]
+                    result = builtin.call_function(tx, args, {})
+                    return result.guard_as_python_constant()
+
+            fields = Formatter()
+            try:
+                for _, field, spec, conversion in fields.parse(template):
+                    nested = field is not None and ("." in field or "[" in field)
+                    if nested or conversion or "{" in (spec or ""):
+                        return super().call_function(tx, args, kwargs)
+                result = fields.vformat(template, args[1:], kwargs)
+                return ConstantVariable.create(result)
+            except (ValueError, TypeError, IndexError, KeyError) as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+        if kwargs or len(args) not in (1, 2) or self.fn is not format:
+            return super().call_function(tx, args, kwargs)
+        value = args[0]
+        spec = args[1] if len(args) == 2 else ConstantVariable.create("")
+        if isinstance(value, UserDefinedObjectVariable) and spec.python_type() is str:
+            cls_type = value.python_type()
+            effects = tx.output.side_effects
+            if effects.store_attr_mutations and any(
+                cls in effects and effects[cls] in effects.store_attr_mutations
+                for cls in get_type_mro_no_user_code(cls_type)
+            ):
+                return super().call_function(tx, args, kwargs)
+            formatter = value.lookup_class_mro_attr("__format__")
+            if formatter is enum.Enum.__format__:
+                return value.SLOT1(tx, "__format__", spec)
+            for base in (int, float, str):
+                if formatter is not base.__format__ or value.cls_source is None:
+                    continue
+                # Scalar formatting can delegate to str, repr, or float.
+                names = ["__format__", "__str__", "__float__", "__int__"]
+                if value.lookup_class_mro_attr("__str__") is object.__str__:
+                    names.append("__repr__")
+                for name in names:
+                    expected = mro_lookup(base, name)
+                    if expected is NO_SUCH_SUBOBJ:
+                        continue
+                    actual = value.lookup_class_mro_attr(name)
+                    scalar_repr = name == "__str__" and actual is base.__repr__
+                    if actual is not expected and not scalar_repr:
+                        break
+                    source = mro_attr_source(tx, cls_type, value.cls_source, name)
+                    if source is None:
+                        break
+                    install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+                else:
+                    return None  # use the ordinary constant-fold handler
+
+        return super().call_function(tx, args, kwargs)
+
     def call_format(
         self,
         tx: "InstructionTranslatorBase",
@@ -3337,8 +3411,14 @@ class BuiltinVariable(BaseBuiltinVariable):
             from .builder import SourcelessBuilder
 
             result = SourcelessBuilder.create_internal_fake_id(id(arg))
-        if isinstance(arg, (variables.ConstDictVariable, variables.ListVariable)):
-            tx.output.container_id_tokens.add(result)
+        if (legacy := variables.functions._legacy_deepcopy) is not None and (
+            tx.f_globals is legacy.__globals__
+            or isinstance(arg, (ConstDictVariable, ListVariable))
+        ):
+            try:
+                tx.output.deepcopy_id_types[result] = arg.python_type()
+            except NotImplementedError:
+                pass
         return result
 
     def call_deepcopy(

@@ -3,7 +3,6 @@
 import keyword
 import operator
 import sys
-import types
 from unittest import mock
 
 import torch
@@ -237,7 +236,7 @@ class LazyConstantVariableTests(TestCase):
 
     def test_lazy_hashability_uses_actual_type(self):
         class Key:
-            __class__ = types.BuiltinFunctionType
+            __class__ = type(len)
 
         lazy = LazyVariableTracker.create(Key(), LocalSource("key"))
         self.assertFalse(lazy.is_hashable_lazy())
