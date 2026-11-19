@@ -4,6 +4,7 @@
 use crate::bytecode::{self, OpcodeTable};
 use crate::capi::{self, TcfgApi, TCFG_API_VERSION};
 use crate::frontend;
+use crate::inline;
 use crate::ir::*;
 use crate::pyffi::PyObj;
 use crate::spec::{self, CfgPass, PassCx, Pipeline, PyPass, Unit, ValueObs};
@@ -51,7 +52,7 @@ pub fn builtin_passes() -> Vec<&'static str> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6))]
+#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true))]
 pub fn compile(
     py: Python<'_>,
     func: &Bound<'_, PyAny>,
@@ -61,9 +62,13 @@ pub fn compile(
     unboxed: bool,
     max_versions: usize,
     max_respecializations: u32,
+    inline: bool,
 ) -> PyResult<CfgFunction> {
     let table = OpcodeTable::load(py)?;
-    let function = frontend::build(py, &table, func)?;
+    let mut function = frontend::build(py, &table, func)?;
+    if inline {
+        inline::inline_calls(py, &table, &mut function, &func.getattr("__code__")?);
+    }
     let mut pipeline: Vec<Box<dyn CfgPass>> = Vec::new();
     for pass in passes {
         if let Ok(name) = pass.extract::<String>() {
@@ -254,6 +259,8 @@ impl CfgFunction {
         out.set_item("unboxed_results", cf.unboxed_results.load(Ordering::Relaxed))?;
         out.set_item("boxed_later", cf.boxed_later.load(Ordering::Relaxed))?;
         out.set_item("unlowered", unlowered)?;
+        let inlined: Vec<String> = cf.func.origins[1..].iter().map(|o| o.name.clone()).collect();
+        out.set_item("inlined", inlined)?;
         out.set_item("log", state.log.clone())?;
         Ok(out.into_any().unbind())
     }
