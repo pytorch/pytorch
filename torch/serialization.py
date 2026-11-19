@@ -80,6 +80,41 @@ UNSAFE_MESSAGE = (
     "trusted source."
 )
 
+_WEIGHTS_ONLY_DOCS_MESSAGE = (
+    "\n\nCheck the documentation of torch.load to learn more about types accepted by default with "
+    "weights_only https://pytorch.org/docs/stable/generated/torch.load.html."
+)
+
+
+def _get_wo_message(message: str) -> str:
+    unsafe_global_pattern = r"GLOBAL (\S+) was not an allowed global by default."
+    has_unsafe_global = re.search(unsafe_global_pattern, message) is not None
+    blocklist_pattern = r"whose module (\S+) is blocked"
+    has_blocklist = re.search(blocklist_pattern, message) is not None
+    import_pattern = r"(\S+) must be (\S+) to load"
+    has_import = re.search(import_pattern, message) is not None
+    if has_unsafe_global:
+        updated_message = (
+            "Weights only load failed. This file can still be loaded, to do so you have two options, "
+            "\033[1mdo those steps only if you trust the source of the checkpoint\033[0m. "
+            f"\n\t(1) {UNSAFE_MESSAGE}\n\t(2) Alternatively, to load with `weights_only=True` please check "
+            "the recommended steps in the following error message.\n\tWeightsUnpickler error: "
+            + message
+        )
+    else:
+        if has_import:
+            return f"Weights only load failed. {message}\n {UNSAFE_MESSAGE}\n"
+        else:
+            updated_message = f"Weights only load failed. {UNSAFE_MESSAGE}\n"
+            if not has_blocklist:
+                updated_message += (
+                    "Please file an issue with the following so that we can make "
+                    "`weights_only=True` compatible with your use case: WeightsUnpickler error: "
+                )
+        updated_message += "\n\n" + message
+    return updated_message + _WEIGHTS_ONLY_DOCS_MESSAGE
+
+
 if not IS_WINDOWS:
     from mmap import MAP_PRIVATE, MAP_SHARED
 else:
@@ -808,6 +843,67 @@ class _open_zipfile_reader(_opener[torch._C.PyTorchFileReader]):
         super().__init__(torch._C.PyTorchFileReader(name_or_buffer))
 
 
+def _get_load_byteorder(zip_file) -> bytes | None:
+    """Resolve the effective load byte order for a ZIP archive.
+
+    Matches the historical :func:`_load` rules, including treating an unset
+    default as little-endian.
+    """
+    if zip_file.has_record("byteorder"):
+        byteorderdata = zip_file.get_record("byteorder")
+        if byteorderdata not in [b"little", b"big"]:
+            raise ValueError("Unknown endianness type: " + byteorderdata.decode())
+        return byteorderdata
+    endian = get_default_load_endianness()
+    if endian == LoadEndianness.LITTLE or endian is None:
+        return b"little"
+    if endian == LoadEndianness.BIG:
+        return b"big"
+    if endian == LoadEndianness.NATIVE:
+        return None
+    raise ValueError("Invalid load endianness type")
+
+
+def _load_zip_region(
+    zip_view: IO[bytes],
+    *,
+    overall_storage: torch.UntypedStorage,
+    storage_base_offset: int,
+) -> Any:
+    """Load one torch.save ZIP region, aliasing ``overall_storage`` when safe.
+
+    Uses the same ``weights_only`` unpickler setup as :func:`torch.load`
+    (``encoding="utf-8"`` and :func:`_get_wo_message` on ``UnpicklingError``).
+
+    Like ``FsspecReader``'s aliased loader: if the region would need an
+    in-place ``byteswap``, ``overall_storage`` is ignored and ``_load`` copies.
+    """
+    original_position = zip_view.tell()
+    try:
+        region_length = zip_view.seek(0, os.SEEK_END)
+        zip_view.seek(0)
+        try:
+            with _open_zipfile_reader(zip_view) as zip_file:
+                storage = overall_storage[
+                    storage_base_offset : storage_base_offset + region_length
+                ]
+                order = _get_load_byteorder(zip_file)
+                if order is not None and order != sys.byteorder.encode():
+                    storage = None
+                return _load(
+                    zip_file,
+                    map_location="cpu",
+                    pickle_module=_weights_only_unpickler,
+                    overall_storage=storage,
+                    weights_only=True,
+                    encoding="utf-8",
+                )
+        except pickle.UnpicklingError as e:
+            raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
+    finally:
+        zip_view.seek(original_position)
+
+
 class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
     def __init__(self, name: str) -> None:
         self.file_stream = None
@@ -1443,38 +1539,6 @@ def load(
         >>> torch.load("module.pt", encoding="ascii", weights_only=False)
     """
     torch._C._log_api_usage_once("torch.load")
-    DOCS_MESSAGE = (
-        "\n\nCheck the documentation of torch.load to learn more about types accepted by default with "
-        "weights_only https://pytorch.org/docs/stable/generated/torch.load.html."
-    )
-
-    def _get_wo_message(message: str) -> str:
-        unsafe_global_pattern = r"GLOBAL (\S+) was not an allowed global by default."
-        has_unsafe_global = re.search(unsafe_global_pattern, message) is not None
-        blocklist_pattern = r"whose module (\S+) is blocked"
-        has_blocklist = re.search(blocklist_pattern, message) is not None
-        import_pattern = r"(\S+) must be (\S+) to load"
-        has_import = re.search(import_pattern, message) is not None
-        if has_unsafe_global:
-            updated_message = (
-                "Weights only load failed. This file can still be loaded, to do so you have two options, "
-                "\033[1mdo those steps only if you trust the source of the checkpoint\033[0m. "
-                f"\n\t(1) {UNSAFE_MESSAGE}\n\t(2) Alternatively, to load with `weights_only=True` please check "
-                "the recommended steps in the following error message.\n\tWeightsUnpickler error: "
-                + message
-            )
-        else:
-            if has_import:
-                return f"Weights only load failed. {message}\n {UNSAFE_MESSAGE}\n"
-            else:
-                updated_message = f"Weights only load failed. {UNSAFE_MESSAGE}\n"
-                if not has_blocklist:
-                    updated_message += (
-                        "Please file an issue with the following so that we can make "
-                        "`weights_only=True` compatible with your use case: WeightsUnpickler error: "
-                    )
-            updated_message += "\n\n" + message
-        return updated_message + DOCS_MESSAGE
 
     weights_only_not_set = weights_only is None
 
@@ -2006,22 +2070,7 @@ def _load(
 
     # check if byteswapping is needed
     byteordername = "byteorder"
-    byteorderdata = None
-    if zip_file.has_record(byteordername):
-        byteorderdata = zip_file.get_record(byteordername)
-        if byteorderdata not in [b"little", b"big"]:
-            raise ValueError("Unknown endianness type: " + byteorderdata.decode())
-    elif (
-        get_default_load_endianness() == LoadEndianness.LITTLE
-        or get_default_load_endianness() is None
-    ):
-        byteorderdata = b"little"
-    elif get_default_load_endianness() == LoadEndianness.BIG:
-        byteorderdata = b"big"
-    elif get_default_load_endianness() == LoadEndianness.NATIVE:
-        pass
-    else:
-        raise ValueError("Invalid load endianness type")
+    byteorderdata = _get_load_byteorder(zip_file)
 
     storage_alignment = 64
     if zip_file.has_record(".storage_alignment"):
@@ -2125,7 +2174,21 @@ def _load(
                         )
             else:
                 storage_offset = zip_file.get_record_offset(name)
-            storage = overall_storage[storage_offset : storage_offset + nbytes]
+            record_size = zip_file.get_record_size(name)
+            if record_size != nbytes:
+                raise RuntimeError(
+                    f"record size ({record_size} bytes) does not match expected "
+                    f"size ({nbytes} bytes) for {name}"
+                )
+            storage_end = storage_offset + nbytes
+            mapped_nbytes = overall_storage.nbytes()
+            if not 0 <= storage_offset <= storage_end <= mapped_nbytes:
+                raise RuntimeError(
+                    f"mapped storage for {name} is out of bounds: "
+                    f"offset={storage_offset}, nbytes={nbytes}, "
+                    f"mapped_nbytes={mapped_nbytes}"
+                )
+            storage = overall_storage[storage_offset:storage_end]
         else:
             if can_calculate_storage_offsets and run_debug_asserts:
                 # This is debug code that we use to test the validity of

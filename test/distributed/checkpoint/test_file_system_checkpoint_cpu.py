@@ -1,8 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import sys
 import tempfile
 from typing import Any, IO
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -23,7 +25,9 @@ from torch.distributed.checkpoint import (
     save_state_dict,
 )
 from torch.distributed.checkpoint._extension import ZStandard
+from torch.distributed.checkpoint.planner import LoadItemType, LoadPlan, ReadItem
 from torch.distributed.checkpoint.stateful import Stateful
+from torch.distributed.checkpoint.utils import _create_file_view
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -152,6 +156,161 @@ class TestDistributedStateDictSaveLoad(TestCase):
 
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
+    @parametrize("thread_count", _THREAD_COUNTS)
+    def test_read_write_only_tensor_mmap(self, thread_count) -> None:
+        with tempfile.TemporaryDirectory() as path:
+            state_dict_to_save = MyTestModule().state_dict()
+
+            save_state_dict(
+                state_dict=state_dict_to_save,
+                storage_writer=FileSystemWriter(path=path, thread_count=thread_count),
+                no_dist=True,
+            )
+
+            state_dict_to_load_to = MyTestModule().state_dict()
+            with self.assertRaises(AssertionError):
+                assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+            load_zip_region = torch.serialization._load_zip_region
+
+            def _fail_torch_load(*args, **kwargs):
+                raise AssertionError("mmap path should not fall back to torch.load")
+
+            with (
+                mock.patch.object(
+                    torch.serialization,
+                    "_load_zip_region",
+                    wraps=load_zip_region,
+                ) as mocked_load_zip_region,
+                mock.patch(
+                    "torch.distributed.checkpoint.filesystem.torch.load",
+                    side_effect=_fail_torch_load,
+                ),
+            ):
+                load_state_dict(
+                    state_dict=state_dict_to_load_to,
+                    storage_reader=FileSystemReader(path=path, mmap=True),
+                    no_dist=True,
+                )
+
+            self.assertGreater(mocked_load_zip_region.call_count, 0)
+            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+    def test_load_zip_region_cross_endian_twice_on_shared_mapping(self) -> None:
+        # Force _load to byteswap by omitting the byteorder record and setting
+        # the opposite default endianness. Loading twice through one mapping
+        # must still return correct values (copy path, not in-place swap).
+        tensor = torch.arange(8, dtype=torch.float32)
+        opposite = (
+            torch.serialization.LoadEndianness.BIG
+            if sys.byteorder == "little"
+            else torch.serialization.LoadEndianness.LITTLE
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "region.pt")
+            torch.save(tensor, path, _disable_byteorder_record=True)
+            size = os.path.getsize(path)
+            mapped = torch.UntypedStorage.from_file(path, False, size)
+            prev = torch.serialization.get_default_load_endianness()
+            try:
+                torch.serialization.set_default_load_endianness(opposite)
+                with open(path, "rb") as fh:
+                    for _ in range(2):
+                        view = _create_file_view(fh, 0, size)
+                        loaded = torch.serialization._load_zip_region(
+                            view,
+                            overall_storage=mapped,
+                            storage_base_offset=0,
+                        )
+                        self.assertEqual(loaded, tensor)
+            finally:
+                torch.serialization.set_default_load_endianness(prev)
+
+    def test_mmap_storage_range_outside_file_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as path:
+            state_dict_to_save = {"w": torch.arange(4, dtype=torch.float32)}
+            save_state_dict(
+                state_dict=state_dict_to_save,
+                storage_writer=FileSystemWriter(path=path, thread_count=1),
+                no_dist=True,
+            )
+
+            reader = FileSystemReader(path=path, mmap=True)
+            metadata = reader.read_metadata()
+            reader.set_up_storage_reader(metadata, True)
+            idx = next(iter(reader.storage_data.keys()))
+            md = reader.storage_data[idx]
+            md.offset = 10**12
+            item = ReadItem(
+                type=LoadItemType.TENSOR,
+                dest_index=idx,
+                dest_offsets=torch.Size([0]),
+                storage_index=idx,
+                storage_offsets=torch.Size([0]),
+                lengths=torch.Size([4]),
+            )
+
+            class _Planner:
+                def resolve_tensor(self, req):
+                    return torch.empty(4)
+
+                def commit_tensor(self, req, tensor):
+                    pass
+
+            with self.assertRaisesRegex(
+                RuntimeError, "outside the backing file.*offset="
+            ):
+                reader.read_data(LoadPlan(items=[item]), _Planner()).wait()
+
+    def test_mmap_partial_narrow(self) -> None:
+        src = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+        expected = src[1:3, 1:3].contiguous()
+        with tempfile.TemporaryDirectory() as path:
+            save_state_dict(
+                state_dict={"w": src},
+                storage_writer=FileSystemWriter(path=path, thread_count=1),
+                no_dist=True,
+            )
+
+            def _run(mmap: bool) -> torch.Tensor:
+                reader = FileSystemReader(path=path, mmap=mmap)
+                metadata = reader.read_metadata()
+                reader.set_up_storage_reader(metadata, True)
+                idx = next(iter(reader.storage_data.keys()))
+                item = ReadItem(
+                    type=LoadItemType.TENSOR,
+                    dest_index=idx,
+                    dest_offsets=torch.Size([0, 0]),
+                    storage_index=idx,
+                    storage_offsets=torch.Size([1, 1]),
+                    lengths=torch.Size([2, 2]),
+                )
+                dest = torch.empty(2, 2)
+
+                class _Planner:
+                    def resolve_tensor(self, req):
+                        return dest
+
+                    def commit_tensor(self, req, tensor):
+                        pass
+
+                if mmap:
+                    with mock.patch(
+                        "torch.distributed.checkpoint.filesystem.torch.load",
+                        side_effect=AssertionError(
+                            "mmap partial narrow should not fall back to torch.load"
+                        ),
+                    ):
+                        reader.read_data(LoadPlan(items=[item]), _Planner()).wait()
+                else:
+                    reader.read_data(LoadPlan(items=[item]), _Planner()).wait()
+                return dest
+
+            mmap_out = _run(True)
+            native_out = _run(False)
+            self.assertEqual(mmap_out, expected)
+            self.assertEqual(native_out, expected)
+
 
 class TestDistributedStateDictSaveLoadRot13(TestCase):
     @parametrize("thread_count", _THREAD_COUNTS)
@@ -186,6 +345,39 @@ class TestDistributedStateDictSaveLoadRot13(TestCase):
                 storage_reader=fs_reader,
             )
 
+            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+    def test_read_write_tensor_and_blob_mmap(self) -> None:
+        # Transforms disable the mmap path; values must still round-trip.
+        with tempfile.TemporaryDirectory() as path:
+            state_dict_to_save = MyTestModule().state_dict()
+            state_dict_to_save["test_blob"] = BlobState(b"SomeBlobForTesting")
+
+            save(
+                state_dict=state_dict_to_save,
+                storage_writer=FileSystemWriter(
+                    path=path,
+                    thread_count=1,
+                    _extensions=[Rot13Example()],
+                ),
+            )
+
+            state_dict_to_load_to = MyTestModule().state_dict()
+            state_dict_to_load_to["test_blob"] = BlobState(b"")
+            with mock.patch.object(
+                torch.UntypedStorage,
+                "from_file",
+                wraps=torch.UntypedStorage.from_file,
+            ) as from_file:
+                load(
+                    state_dict=state_dict_to_load_to,
+                    storage_reader=FileSystemReader(
+                        path=path,
+                        mmap=True,
+                        _extension_registry=get_test_extension_registry(),
+                    ),
+                )
+            from_file.assert_not_called()
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
 

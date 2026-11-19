@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import io
+import os
 import sys
 import traceback
 
@@ -206,6 +207,26 @@ class TestReaderView(TestCase):
         self.assertEqual(self.front_view.read(-1), b"ABCDE")
         self.assertEqual(self.middle_view.read(-1), b"KLMNO")
         self.assertEqual(self.back_view.read(-1), b"VWXYZ")
+
+    def testNegativeReadSize(self):
+        self.assertEqual(self.front_view.read(-2), b"ABCDE")
+
+    def testSeek(self):
+        self.assertEqual(self.middle_view.seek(-2, os.SEEK_END), 3)
+        self.assertEqual(self.middle_view.read(), b"NO")
+
+        self.assertEqual(self.middle_view.seek(1, os.SEEK_SET), 1)
+        self.assertEqual(self.middle_view.read(2), b"LM")
+
+        self.middle_view.seek(0)
+        self.assertEqual(self.middle_view.seek(2, os.SEEK_CUR), 2)
+        self.assertEqual(self.middle_view.read(2), b"MN")
+
+        with self.assertRaisesRegex(ValueError, "negative seek value"):
+            self.middle_view.seek(-1, os.SEEK_SET)
+
+        with self.assertRaisesRegex(ValueError, "invalid whence"):
+            self.middle_view.seek(0, 99)
 
     def testShortReadinto(self):
         ba = bytearray(3)

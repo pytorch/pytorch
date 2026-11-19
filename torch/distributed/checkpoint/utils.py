@@ -396,12 +396,16 @@ class _ReaderView(io.IOBase):
         self.seek(0)
 
     def seek(self, offset: int, whence: int = os.SEEK_SET, /) -> int:
-        if whence == os.SEEK_SET:
-            offset = self.offset + offset
+        if whence == os.SEEK_CUR:
+            offset += self.tell()
         elif whence == os.SEEK_END:
-            whence = os.SEEK_SET
-            offset = (self.offset + self.len) - offset
-        return self.base_stream.seek(offset, whence)
+            offset += self.len
+        elif whence != os.SEEK_SET:
+            raise ValueError(f"invalid whence: {whence}")
+        if offset < 0:
+            raise ValueError(f"negative seek value {offset}")
+        self.base_stream.seek(self.offset + offset)
+        return offset
 
     def tell(self) -> int:
         return self.base_stream.tell() - self.offset
@@ -414,7 +418,7 @@ class _ReaderView(io.IOBase):
 
     def readinto(self, b):
         max_size = self.len - self.tell()
-        if max_size == 0:
+        if max_size <= 0:
             return 0
         if len(b) > max_size:
             b = memoryview(b)[:max_size]
@@ -422,7 +426,9 @@ class _ReaderView(io.IOBase):
 
     def read(self, size=-1):
         max_size = self.len - self.tell()
-        if size == -1 or size > max_size:
+        if max_size <= 0:
+            return b""
+        if size < 0 or size > max_size:
             size = max_size
         return self.base_stream.read(size)
 
