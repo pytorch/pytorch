@@ -469,10 +469,19 @@ static void apply_svd_cusolver_gesvdjBatched(const Tensor& A, const Tensor& U, c
 
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   auto jobz = compute_uv ? CUSOLVER_EIG_MODE_VECTOR : CUSOLVER_EIG_MODE_NOVECTOR;
-  at::cuda::solver::gesvdjBatched<scalar_t>(
-    handle, jobz, m, n, A_data, lda, S_data, U_data, ldu, V_data, ldv,
-    infos.data_ptr<int>(), gesvdj_params, batchsize
-  );
+  auto infos_data = infos.data_ptr<int>();
+  // rocSOLVER rejects kernel launches with more than 65535 blocks in grid.y or
+  // grid.z, which is where its batched kernels put the batch. The split is
+  // harmless for cuSOLVER.
+  constexpr int batch_limit = 65535;
+  for (int64_t mini_idx = 0; mini_idx < batchsize; mini_idx += batch_limit) {
+    int cur_batch_size = std::min<int>(batchsize - mini_idx, batch_limit);
+    at::cuda::solver::gesvdjBatched<scalar_t>(
+      handle, jobz, m, n, &A_data[mini_idx * lda * n], lda, &S_data[mini_idx * std::min(m, n)],
+      &U_data[mini_idx * ldu * m], ldu, &V_data[mini_idx * ldv * n], ldv,
+      &infos_data[mini_idx], gesvdj_params, cur_batch_size
+    );
+  }
 
   TORCH_CUSOLVER_CHECK(cusolverDnDestroyGesvdjInfo(gesvdj_params));
 }
@@ -700,14 +709,21 @@ static void apply_svd_rocsolver_ill_conditioned(const Tensor& A, const Tensor& U
     auto S_ptr = S_sub.data_ptr<value_t>();
     auto E_ptr = E.data_ptr<value_t>();
     auto infos_ptr = infos_sub.data_ptr<int>();
-    const auto gesvd = [&](auto fn) {
-      return fn(handle, svect, svect, mi, cuda_int_cast(n, "n"), A_ptr, std::max(1, mi), m * n, S_ptr, k,
-                U_ptr, std::max(1, mi), m * u_cols, Vh_ptr, ldvh, vh_rows * n, E_ptr, k, rocblas_outofplace, infos_ptr, batch_count);
+    const auto gesvd = [&](auto fn, int64_t i, int count) {
+      return fn(handle, svect, svect, mi, cuda_int_cast(n, "n"), A_ptr + i * m * n, std::max(1, mi), m * n, S_ptr + i * k, k,
+                compute_uv ? U_ptr + i * m * u_cols : nullptr, std::max(1, mi), m * u_cols,
+                compute_uv ? Vh_ptr + i * vh_rows * n : nullptr, ldvh, vh_rows * n,
+                E_ptr + i * k, k, rocblas_outofplace, infos_ptr + i, count);
     };
-    if constexpr (std::is_same_v<scalar_t, double>) {
-      TORCH_ROCBLAS_CHECK(gesvd(rocsolver_dgesvd_strided_batched));
-    } else {
-      TORCH_ROCBLAS_CHECK(gesvd(rocsolver_zgesvd_strided_batched));
+    // gesvd puts the batch in grid.y or grid.z too, see apply_svd_cusolver_gesvdjBatched
+    constexpr int batch_limit = 65535;
+    for (int i = 0; i < batch_count; i += batch_limit) {
+      const int count = std::min(batch_count - i, batch_limit);
+      if constexpr (std::is_same_v<scalar_t, double>) {
+        TORCH_ROCBLAS_CHECK(gesvd(rocsolver_dgesvd_strided_batched, i, count));
+      } else {
+        TORCH_ROCBLAS_CHECK(gesvd(rocsolver_zgesvd_strided_batched, i, count));
+      }
     }
     // gesvd can fail to converge where gesvdj did not; keep gesvdj's result for those matrices
     const Tensor converged = infos_sub.eq(0);
@@ -1399,25 +1415,30 @@ static void apply_syevd_batched_rocsolver(const Tensor& values, const Tensor& ve
 
   rocblas_handle handle = static_cast<rocblas_handle>(at::cuda::getCurrentCUDASolverDnHandle());
 
-  auto run_syevd = [&] {
+  // rocSOLVER rejects kernel launches with more than 65535 blocks in grid.y or
+  // grid.z, which is where its batched kernels put the batch
+  constexpr int64_t batch_limit = 65535;
+  auto work_ptr = static_cast<scalar_t*>(work_data.get());
+  auto run_syevd = [&](int64_t mini_idx, int64_t cur_batch_size) {
     return _rocsolver_syevd_strided_batched<scalar_t>(
         handle,
         evect,
         uplo,
         n,
-        vectors_data,
+        &vectors_data[mini_idx * vectors_stride],
         lda,
         vectors_stride,
-        values_data,
+        &values_data[mini_idx * values_stride],
         values_stride,
-        static_cast<scalar_t*>(work_data.get()),
+        &work_ptr[mini_idx * work_stride],
         work_stride,
-        infos_data,
-        batch_size);
+        &infos_data[mini_idx],
+        cur_batch_size);
   };
 
+  // The first chunk is the largest, so its workspace is large enough for all of them
   TORCH_ROCBLAS_CHECK(rocblas_start_device_memory_size_query(handle));
-  auto query_status = run_syevd();
+  auto query_status = run_syevd(0, std::min(batch_size, batch_limit));
   size_t workspace_size = 0;
   TORCH_ROCBLAS_CHECK(
       rocblas_stop_device_memory_size_query(handle, &workspace_size));
@@ -1437,7 +1458,10 @@ static void apply_syevd_batched_rocsolver(const Tensor& values, const Tensor& ve
     TORCH_ROCBLAS_CHECK(
         rocblas_set_workspace(handle, workspace.get(), workspace_size));
   }
-  auto status = run_syevd();
+  auto status = rocblas_status_success;
+  for (int64_t mini_idx = 0; mini_idx < batch_size && status == rocblas_status_success; mini_idx += batch_limit) {
+    status = run_syevd(mini_idx, std::min(batch_size - mini_idx, batch_limit));
+  }
   rocblas_status reset_status = rocblas_status_success;
   if (workspace_size > 0) {
     // Drop the user pointer before its DataPtr is freed.

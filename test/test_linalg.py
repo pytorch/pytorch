@@ -5388,6 +5388,36 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
         self.assertEqual(torch.linalg.inv(a), torch.linalg.inv(a.cpu()))
         self.assertEqual(torch.linalg.solve(a, b), torch.linalg.solve(a.cpu(), b.cpu()))
 
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float64)
+    @precisionOverride({torch.float32: 1e-4})
+    def test_linalg_svd_large_batch(self, device, dtype):
+        # rocSOLVER refuses batched launches above 65535 matrices
+        # (https://github.com/pytorch/pytorch/issues/200879), so the batch must
+        # exceed that to exercise the 65535-element chunking.
+        batch = 2 * 65535 + 1
+        a = torch.randn(batch, 3, 3, device=device, dtype=dtype)
+        # Rank-deficient matrices also take the ill-conditioned SVD path on ROCm
+        a_singular = a.clone()
+        a_singular[..., 2] = a_singular[..., 1]
+        for x in (a, a_singular):
+            self.assertEqual(torch.linalg.svdvals(x), torch.linalg.svdvals(x.cpu()))
+            U, S, Vh = torch.linalg.svd(x)
+            self.assertEqual(U @ torch.diag_embed(S) @ Vh, x)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm  # cuSOLVER batched eigh limits differ, see #166004; drop once #203815 lands
+    @dtypes(torch.float32, torch.float64)
+    @precisionOverride({torch.float32: 1e-4})
+    def test_linalg_eigh_large_batch(self, device, dtype):
+        # See test_linalg_svd_large_batch
+        batch = 2 * 65535 + 1
+        a = torch.randn(batch, 3, 3, device=device, dtype=dtype)
+        a = a @ a.mT
+        self.assertEqual(torch.linalg.eigvalsh(a), torch.linalg.eigvalsh(a.cpu()))
+        L, Q = torch.linalg.eigh(a)
+        self.assertEqual(Q @ torch.diag_embed(L) @ Q.mT, a)
+
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
