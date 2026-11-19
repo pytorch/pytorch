@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 import torch
+from torch._native.cutedsl.config import POINTWISE_ARCH_MAJORS
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -82,6 +83,8 @@ class TestPointwiseKernel(TestCase):
     def test_mixed_dtype_adapter(self, device: str, operation: str) -> None:
         from torch._native.ops.pointwise import overrides, table
 
+        if torch.cuda.get_device_capability(device)[0] not in POINTWISE_ARCH_MAJORS:
+            self.skipTest("pointwise overrides require a supported architecture")
         row = next(r for r in table.POINTWISE_DEF_TABLE if r.aten == operation)
         integer = operation.startswith("bitwise_")
         with torch.backends.python_native.cutedsl.disabled():
@@ -109,6 +112,8 @@ class TestPointwiseKernel(TestCase):
     def test_adapter_declines_double_rounding(self, device: str, case: str) -> None:
         from torch._native.ops.pointwise import overrides, table
 
+        if torch.cuda.get_device_capability(device)[0] not in POINTWISE_ARCH_MAJORS:
+            self.skipTest("pointwise overrides require a supported architecture")
         row = next(r for r in table.POINTWISE_DEF_TABLE if r.aten == "add.Tensor")
         with torch.backends.python_native.cutedsl.disabled():
             dtype = torch.int32 if case == "integer_output" else torch.float64
