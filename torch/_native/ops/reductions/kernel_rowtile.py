@@ -909,7 +909,7 @@ def reduce_row_tile(
     # Rows of whole vectors at a pitch of whole vectors have no edges; normal path
     # selection folds them with one kernel per vector class.
     if ragged_vector:
-        vec = tile.ragged_vector_width(N, x.element_size(), order, use_tma)
+        vec = tile.ragged_vector_width(N, x.element_size(), order, bool(use_tma))
         ragged_vector = N % vec != 0 or (M > 1 and x.stride(0) % vec != 0)
     itree = None
     if order == "inner_tree" and final and threads_per_row is None:
