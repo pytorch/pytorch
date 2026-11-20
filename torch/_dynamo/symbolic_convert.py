@@ -972,7 +972,22 @@ def generic_jump(
             return
 
         if value.is_python_constant():
-            if truth_fn(value.as_python_constant()):
+            constant = value.as_python_constant()
+            should_jump = truth_fn(constant)
+            source = value.source
+            if (
+                not should_jump
+                and type(constant) is bool
+                and not push
+                and inst.target is not None
+                and self.indexof[inst.target] > self.indexof[inst]
+                and source is not None
+                and type(source) in (LocalSource, GlobalSource)
+            ):
+                for guard in self.output.guards.get_guards_for_source(source):
+                    if guard.inner_create_fn() is GuardBuilder.CONSTANT_MATCH:
+                        self._retry_bool_branches[inst] = (guard, constant)
+            if should_jump:
                 if push:
                     self.push(value)
                 self.jump(inst)
@@ -1586,6 +1601,46 @@ class InstructionTranslatorBase(
     package: CompilePackage | None
     latest_bytecode_queue: deque[str]
     # Store the latest bytecode before graph_break() call by user
+    _retry_bool_branches: dict[Instruction, tuple[Guard, bool]]
+
+    def retain_conditional_break_guards(self) -> None:
+        if (
+            self.output.frame_state is None
+            or self.output.package is not None
+            or config.caching_precompile
+            or self.one_graph
+            or self.error_on_graph_break
+            or self.should_compile_partial_graph()
+            or self.maybe_has_backedge()
+        ):
+            return
+        tx: InstructionTranslatorBase | None = self
+        while tx is not None:
+            end = tx.indexof[tx.current_instruction]
+            for inst, (guard, expected) in tx._retry_bool_branches.items():
+                start = tx.indexof[inst]
+                if inst.target is None or not start < end < tx.indexof[inst.target]:
+                    continue
+                if any(
+                    op.opname in JUMP_OPNAMES or op.exn_tab_entry is not None
+                    for op in tx.instructions[start + 1 : end + 1]
+                ):
+                    continue
+                source = guard.originating_source
+                if type(source) is LocalSource:
+                    actual = self.output.local_scope.get(source.local_name)
+                elif type(source) is GlobalSource:
+                    if (
+                        type(self.output.global_scope) is not dict
+                        or source.global_name in self.output.installed_globals
+                    ):
+                        continue
+                    actual = dict.get(self.output.global_scope, source.global_name)
+                else:
+                    continue
+                if actual is expected and guard in self.output.guards:
+                    self.speculation_log.retry_guards.add(guard)
+            tx = tx.parent
 
     def mark_inconsistent_side_effects(self) -> None:
         """
@@ -5435,6 +5490,7 @@ class InstructionTranslatorBase(
         self.prefix_insts = []
         self.exn_vt_stack = exn_vt_stack
         self.latest_bytecode_queue = deque(maxlen=20)
+        self._retry_bool_branches = {}
         self._comprehension_depth = 0
         self._comprehension_end_for_ips: set[int] = set()
         # Per-prefix counters for generating fresh pycode-local variable names.
