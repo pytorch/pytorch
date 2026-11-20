@@ -417,7 +417,11 @@ _SM107_MIN_SIZE, _SM107_MID_SIZE = 16 << 20, 64 << 20
 _SM107_256MIB, _SM107_MAX_SIZE = 256 << 20, 2 << 30
 _SM107_SIZES = (_SM107_MIN_SIZE, _SM107_MID_SIZE, _SM107_256MIB, _SM107_MAX_SIZE)
 _SM107_FULL_SIZES = _SM107_SIZES[2:]
-_SM107_ONE_FIELD_NAMES = {SumOps: "sum", MeanOps: "mean", AMaxOps: "amax"}
+_SM107_ONE_FIELD_NAMES: dict[type, str] = {
+    SumOps: "sum",
+    MeanOps: "mean",
+    AMaxOps: "amax",
+}
 _SM107_ONE_FIELD = tuple(_SM107_ONE_FIELD_NAMES)
 
 
@@ -1277,7 +1281,8 @@ def replay_reduce(
     if _L.recording_active():
         return run()
     dims_key = None if dims is None else tuple(sorted({d % x.dim() for d in dims}))
-    # Unset, "" and "0" all leave the inner-tree order off; strict mode keys apart.
+    # Normalizes kernel_rowtile._inner_tree_env's values, which run() validates: unset,
+    # "" and "0" all leave the inner-tree order off; strict mode keys apart.
     order = os.environ.get(_INNER_TREE_ENV, "")
     key = (
         (trait_key, out_dtype, dims_key)

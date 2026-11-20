@@ -13,7 +13,8 @@ Of the launch policies, these one-field operations reach only the one-field rule
 index and Welford rules serve direct kernel calls.
 
 Opt out with torch.backends.python_native.cutedsl.enabled = False, which turns off
-every CuTeDSL override, not only these, or per overload with
+every conditional CuTeDSL override, not only these (unconditional ones such as
+quantize_tensor's stay), or per overload with
 disable_operations("sum.dim_IntList", "mean.dim", "prod.dim_int", "amax", "amin"). Names
 need the full overload: disable_operations("sum") matches nothing. Disabling
 sum.dim_IntList or prod.dim_int also drops PYTORCH_SUM_INNER_TREE's registration of that
@@ -30,8 +31,9 @@ cutedsl.enabled = False, disable_operations and TORCH_DISABLE_NATIVE_JIT=1 do no
 PYTORCH_NATIVE_INNER_TREE also orders served calls: a user who asks for the inner-tree
 order gets it, and serving an unordered request in that order is fine. The condition
 ignores the order, so with the variable set to "strict" a served call whose layout
-cannot take the inner tree raises (with any other value than "" or "0" it warns and runs
-unordered). Calls the condition declines go to ATen, which does not follow the order.
+cannot take the inner tree raises; with "1" it warns and runs unordered. "" and "0"
+leave the order off, and any other value makes served calls raise ValueError. Calls
+the condition declines go to ATen, which does not follow the order.
 """
 
 from __future__ import annotations

@@ -723,10 +723,13 @@ class TestColumnCombine(TestCase):
         key = f"order_{columns}"
         args = (trait, key, x, [torch.float32], 1, None, None, None)
         # No policy picks inner_tree at these shapes, so patch one in.
-        with patch.object(ct, "select_col_config", return_value=cfg):
+        with patch.object(ct, "select_col_config", return_value=cfg) as select:
             got = ct._reduce_col_tile(*args)[0]
         tags = {k[0] for k in ct._CACHE if k[1] == key} & {"ordered_col", "coltile"}
         self.assertEqual(tags, {"ordered_col" if columns >= 32 else "coltile"})
+        # A declined view re-selects without the inner-tree hand-off.
+        itree = [call.kwargs.get("itree", True) for call in select.call_args_list]
+        self.assertEqual(itree, [True] if columns >= 32 else [True, False])
         with (
             native._unconditional_masked(),
             torch.backends.python_native.cutedsl.disabled(),

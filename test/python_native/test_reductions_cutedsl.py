@@ -6,14 +6,13 @@
 import contextlib
 import functools
 import os
-import subprocess
-import sys
 import unittest
 from unittest import mock
 
 import torch
 from torch._native import cutedsl_utils as cu
 from torch._native.ops.reductions import cutedsl_impl, overrides as ov
+from torch._native.utils import capability as cap
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -211,41 +210,6 @@ class TestCuTeDSLReductionWiring(TestCase):
         # The Negative fallback clones the view, so the CUDA kernel serves the clone.
         self._check(lambda: torch.sum(xn, dim=-1), **_TOL[torch.float32])
 
-    @parametrize("kind", ["meta", "fake", "functional_fake"])
-    @skipIfTorchDynamo("host-side capability predicates need no dynamo compilation")
-    def test_traced_inputs_decline(self, device, kind):
-        """Decline tensors without launchable storage."""
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        if kind == "meta":
-            x = torch.empty(4, 128, device="meta")
-        else:
-            with FakeTensorMode():
-                x = torch.empty(4, 128, device=device)
-            if kind == "functional_fake":
-                x = torch._to_functional_tensor(x)
-        self.assertFalse(ov._cond(x, -1))
-        self.assertFalse(ov._dtype_cond(x, -1))
-
-    def test_fake_input_declines_without_initializing_cuda(self, device):
-        """Decline a fake CUDA tensor before querying, and so initializing, CUDA."""
-        # This process has initialized CUDA already, so check in a fresh one.
-        code = (
-            "import torch\n"
-            "from torch._native.ops.reductions import overrides as ov\n"
-            "from torch._subclasses.fake_tensor import FakeTensorMode\n"
-            "with FakeTensorMode():\n"
-            "    x = torch.empty(4, 128, device='cuda')\n"
-            "assert not torch.cuda.is_initialized()\n"
-            "assert not ov._cond(x, -1)\n"
-            "assert not torch.cuda.is_initialized()\n"
-            "print('FAKE_OK')\n"
-        )
-        cmd = [sys.executable, "-c", code]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("FAKE_OK", proc.stdout)
-
     def test_cow_input_served_and_preserved(self, device):
         """Read copy-on-write inputs without materializing or mutating their storage."""
         base = torch.randn(128, 512, device=device)
@@ -412,6 +376,42 @@ class TestCuTeDSLReductionWiring(TestCase):
         self.assertEqual(out, ref, **_TOL[torch.float32])
 
 
+class TestCuTeDSLTracedInputs(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @parametrize("kind", ["meta", "fake", "functional_fake"])
+    @skipIfTorchDynamo("host-side capability predicates need no dynamo compilation")
+    def test_traced_inputs_decline(self, device, kind):
+        """Decline tensors without launchable storage."""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        if kind == "meta":
+            x = torch.empty(4, 128, device="meta")
+        else:
+            with FakeTensorMode():
+                x = torch.empty(4, 128, device=device)
+            if kind == "functional_fake":
+                x = torch._to_functional_tensor(x)
+        self.assertFalse(ov._cond(x, -1))
+        self.assertFalse(ov._dtype_cond(x, -1))
+
+    def test_fake_input_declines_before_querying_the_device(self, device):
+        """Decline a fake CUDA tensor before querying, and so initializing, CUDA."""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            x = torch.empty(4, 128, device=device)
+        # The capability is memoized, so clear it for a query to reach the patch.
+        cap._arch_ok.cache_clear()
+        self.addCleanup(cap._arch_ok.cache_clear)
+        err = RuntimeError("queried the device")
+        patch = mock.patch.object(torch.cuda, "get_device_capability", side_effect=err)
+        with patch as query:
+            self.assertFalse(ov._cond(x, -1))
+            self.assertFalse(ov._dtype_cond(x, -1))
+        query.assert_not_called()
+
+
 class TestCuTeDSLReductionOpInfo(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -460,6 +460,7 @@ class TestCuTeDSLReductionOpInfo(TestCase):
 
 
 instantiate_device_type_tests(TestCuTeDSLReductionWiring, globals(), only_for="cuda")
+instantiate_device_type_tests(TestCuTeDSLTracedInputs, globals(), only_for="cuda")
 instantiate_device_type_tests(TestCuTeDSLReductionOpInfo, globals(), only_for="cuda")
 
 if __name__ == "__main__":
