@@ -380,7 +380,7 @@ class ApplyMainTest(unittest.TestCase):
             workflow,
         )
         self.assertIn("mode: ${{ steps.mode.outputs.mode }}", workflow)
-        self.assertIn("should-run: ${{ steps.history.outputs.should-run }}", workflow)
+        self.assertNotIn("should-run", workflow)
         for argument in (
             "--repository",
             "--run-attempt",
@@ -425,7 +425,6 @@ class ApplyMainTest(unittest.TestCase):
         self.assertNotIn("should-apply", action)
         self.assertNotIn("expected-head-sha", workflow)
         self.assertNotIn("expected-head-sha", action)
-        self.assertIn("types: [labeled, ready_for_review]", workflow)
         self.assertIn(
             "  analyze:\n    if: >-\n      github.repository_owner == 'pytorch' &&",
             workflow,
@@ -436,14 +435,6 @@ class ApplyMainTest(unittest.TestCase):
         self.assertNotIn("github.event.pull_request.base.ref", workflow)
         self.assertNotIn("expected-base-ref", action)
         self.assertIn("!github.event.pull_request.draft", workflow)
-        self.assertIn("github.event.action == 'ready_for_review'", workflow)
-        self.assertIn(
-            "contains(github.event.pull_request.labels.*.name, 'open source')",
-            workflow,
-        )
-        self.assertIn("READY_FOR_REVIEW_EVENT", workflow)
-        self.assertIn("pageInfo { hasPreviousPage }", workflow)
-        self.assertIn('"$READY_EVENT_COUNT" == "1"', workflow)
         for removed in (
             "action-basis",
             "analysis-complete",
@@ -470,7 +461,6 @@ class ApplyMainTest(unittest.TestCase):
         self.assertIn("  record-error:\n", workflow)
         self.assertIn("needs: [analyze, apply]", workflow)
         self.assertNotIn("  admit:\n", workflow)
-        self.assertIn("needs.analyze.outputs.should-run == 'true'", workflow)
         self.assertIn("needs.analyze.result == 'failure'", workflow)
         self.assertIn("needs.apply.result == 'failure'", workflow)
         self.assertIn("needs.apply.result == 'skipped'", workflow)
@@ -485,88 +475,19 @@ class ApplyMainTest(unittest.TestCase):
         self.assertEqual(action.count("continue-on-error: true"), 3)
         self.assertIn("always() &&", action)
 
-    def test_workflow_admits_label_events_and_first_ready_event(self) -> None:
+    def test_workflow_runs_on_every_push_one_run_per_pr_at_a_time(self) -> None:
         workflow = (
             REPOSITORY_ROOT / ".github/workflows/auto-pr-triage.yml"
         ).read_text()
-        lines = workflow.splitlines()
-        step_index = lines.index(
-            "      - name: Admit the label event or the first ready event after it"
+
+        self.assertIn("    types: [opened, ready_for_review, synchronize]\n", workflow)
+        self.assertIn(
+            "  group: auto-pr-triage-${{ github.event.pull_request.number }}\n"
+            "  cancel-in-progress: false\n",
+            workflow,
         )
-        run_index = lines.index("        run: |", step_index)
-        script_lines = []
-        for line in lines[run_index + 1 :]:
-            if line.startswith("          "):
-                script_lines.append(line[10:])
-            elif not line:
-                script_lines.append("")
-            else:
-                break
-        script = "\n".join(script_lines)
-        label = {"__typename": "LabeledEvent", "label": {"name": "open source"}}
-        ready = {"__typename": "ReadyForReviewEvent"}
-        cases = (
-            ("labeled", [label], False, "true"),
-            ("labeled", [label, label], False, "true"),
-            ("labeled", [label], True, "true"),
-            ("ready_for_review", [ready, label, ready], False, "true"),
-            ("ready_for_review", [label, ready, ready], False, "false"),
-            ("ready_for_review", [ready], False, "false"),
-            ("ready_for_review", [label, ready], True, "false"),
-        )
-
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            gh = root / "gh"
-            history_path = root / "history.json"
-            output_path = root / "github-output"
-            gh.write_text('#!/bin/sh\nexec /bin/cat "$FAKE_HISTORY"\n')
-            gh.chmod(0o755)
-            for action, nodes, truncated, expected in cases:
-                with self.subTest(action=action, nodes=nodes, truncated=truncated):
-                    history_path.write_text(
-                        json.dumps(
-                            {
-                                "data": {
-                                    "repository": {
-                                        "pullRequest": {
-                                            "timelineItems": {
-                                                "nodes": nodes,
-                                                "pageInfo": {
-                                                    "hasPreviousPage": truncated
-                                                },
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        )
-                    )
-                    output_path.write_text("")
-                    environment = {
-                        **os.environ,
-                        "EVENT_ACTION": action,
-                        "FAKE_HISTORY": str(history_path),
-                        "GH_TOKEN": "token",
-                        "GITHUB_OUTPUT": str(output_path),
-                        "PATH": f"{root}:{os.environ['PATH']}",
-                        "PR_NUMBER": "123",
-                        "REPOSITORY": "pytorch/ciforge",
-                    }
-                    result = subprocess.run(
-                        ["bash", "-eu", "-o", "pipefail", "-c", script],
-                        capture_output=True,
-                        text=True,
-                        env=environment,
-                        check=False,
-                    )
-
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(
-                        output_path.read_text().splitlines(),
-                        [f"should-run={expected}"],
-                    )
-
+        self.assertIn("      !github.event.pull_request.draft\n", workflow)
+        self.assertNotIn("open source", workflow)
 
 if __name__ == "__main__":
     unittest.main()

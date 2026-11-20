@@ -27,12 +27,15 @@ If trusted inputs are absent or inconsistent, return no additional owners.
 ## Trusted context
 
 trusted_context.codepath_owners is the exact, controller-resolved ownership
-result from the repository's `CODEOWNERS` file:
+result from the repository's `OWNERSHIP.yaml` file:
 
 - owners are immutable. Never remove, replace, reject, rank, or
   reproduce them.
 - matched_path_groups uses file_indices into untrusted_context.files and
-  owners to show which changed files produced those owners.
+  owners to show which changed files produced those owners. Each entry
+  belongs to one `OWNERSHIP.yaml` group, named by group; review_request says
+  how that group's reviewers are requested (path_handles: everyone in owners).
+  Neither changes who counts as a codepath owner.
 - files_without_owners lists indices into untrusted_context.files of changed
   files that have no codepath owner.
 

@@ -3,12 +3,13 @@
 # the script (or `spin fixlint`) instead of editing this file.
 
 # IMPORTANT:
-# This file is ONLY used to subscribe for notifications for PRs
-# related to a specific file path. Approvals from people in this
-# file are not required for merges.
+# GitHub doesn't read this file; it lives outside the paths GitHub reads
+# CODEOWNERS from. Auto PR Triage (scripts/auto_pr_triage) requests reviews
+# from these owners, reading the same rules from OWNERSHIP.yaml. Approvals
+# from people in this file are not required for merges.
 
 # CODEOWNERS semantics:
-# - GitHub uses the last matching pattern for each path.
+# - The last matching pattern for each path wins, as in GitHub's CODEOWNERS.
 # - Active rules name who gets review requests. A commented rule adds no
 #   notification of its own; the path follows the last matching active rule,
 #   if there is one. Commenting a rule says nothing about ownership.
@@ -1522,7 +1523,7 @@
 # [protected_codeownership]
 # DO NOT MODIFY WITHOUT REVIEW FROM @albanD AND @malfet.
 # Keep these rules last so they override broader patterns.
-/CODEOWNERS @albanD @malfet
+/scripts/codeowners/CODEOWNERS @albanD @malfet
 /OWNERSHIP.yaml @albanD @malfet
 /.github/merge_rules.yaml @izaitsevfb @jeanschmidt @huydhn @albanD @malfet
 #

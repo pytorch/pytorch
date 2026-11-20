@@ -13,6 +13,10 @@ from pathlib import Path
 
 
 LINTER_CODE = "CODEOWNERS_TAXONOMY"
+# Generated from OWNERSHIP.yaml. It lives outside the paths GitHub reads CODEOWNERS
+# from (root, .github/, docs/), so GitHub sends no review requests of its own;
+# Auto PR Triage requests codepath owners instead.
+CODEOWNERS_PATH = "scripts/codeowners/CODEOWNERS"
 HIERARCHY_MARKER = "# Review-surface hierarchy:"
 LABEL_PREFIX = "# label:"
 OWNER_PREFIX = "# owner:"
@@ -498,7 +502,7 @@ def emit_lint_error(description: str) -> None:
     print(
         json.dumps(
             {
-                "path": "CODEOWNERS",
+                "path": CODEOWNERS_PATH,
                 "line": None,
                 "char": None,
                 "code": LINTER_CODE,
@@ -527,7 +531,7 @@ def main() -> int:
         ).stdout.strip()
     )
     try:
-        codeowners = repo / "CODEOWNERS"
+        codeowners = repo / CODEOWNERS_PATH
         declared_groups = parse_declared_groups(codeowners)
         parsed = parse_codeowners(codeowners)
         patterns = parsed.patterns

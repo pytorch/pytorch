@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import argparse
 import functools
-import json
 import re
-from pathlib import Path
 from typing import Any
 
 from identifiers import CODEPATH_OWNER_RE
@@ -230,7 +227,9 @@ def resolve_paths(
 def build_llm_artifact(resolutions: list[dict[str, Any]]) -> dict[str, Any]:
     """Build the exact compact codepath-owner projection shown to the LLM."""
 
-    groups: dict[tuple[str, ...], list[str]] = {}
+    # Paths are grouped by OWNERSHIP.yaml group, then by the owners their rules
+    # list, which can differ within a path_handles group.
+    groups: dict[tuple[str, tuple[str, ...]], dict[str, Any]] = {}
     paths_without_owners = []
     owners = set()
     for resolution in resolutions:
@@ -238,17 +237,24 @@ def build_llm_artifact(resolutions: list[dict[str, Any]]) -> dict[str, Any]:
         resolved_owners = tuple(resolution["owners"])
         if resolved_owners:
             owners.update(resolved_owners)
-            groups.setdefault(resolved_owners, []).append(path)
+            rule = resolution["matched_rule"]
+            entry = groups.setdefault(
+                (rule["group"], resolved_owners),
+                {
+                    "group": rule["group"],
+                    "review_request": rule["review_request"],
+                    "owners": list(resolved_owners),
+                    "paths": [],
+                },
+            )
+            entry["paths"].append(path)
         else:
             # No matching rule and an ownerless override (a last matching rule
             # with no owners) are treated the same: the file has no codepath owner.
             paths_without_owners.append(path)
     return {
         "owners": sorted(owners, key=str.casefold),
-        "matched_path_groups": [
-            {"owners": list(group_owners), "paths": paths}
-            for group_owners, paths in groups.items()
-        ],
+        "matched_path_groups": list(groups.values()),
         "paths_without_owners": paths_without_owners,
     }
 
@@ -259,30 +265,3 @@ def resolve_for_llm(
     """Resolve paths against a loaded snapshot and return the LLM projection."""
 
     return build_llm_artifact(resolve_paths(paths=paths, rules=snapshot["rules"]))
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--codepath-owners", required=True, type=Path)
-    parser.add_argument(
-        "--owners-only",
-        action="store_true",
-        help="emit only the sorted JSON list of codepath owners",
-    )
-    parser.add_argument("--strict", action="store_true")
-    parser.add_argument("paths", nargs="+")
-    args = parser.parse_args()
-
-    diagnostics: list[dict[str, Any]] = []
-    rules = parse_rules(
-        contents=args.codepath_owners.read_text(),
-        diagnostics=diagnostics,
-        strict=args.strict,
-    )
-    artifact = build_llm_artifact(resolve_paths(paths=args.paths, rules=rules))
-    result = artifact["owners"] if args.owners_only else artifact
-    print(json.dumps(result, indent=2))
-
-
-if __name__ == "__main__":
-    main()

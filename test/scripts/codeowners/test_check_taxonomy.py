@@ -43,7 +43,8 @@ def run_lint(codeowners: str, *args: str) -> tuple[int, str]:
     without exceptions.
     """
     with tempfile.TemporaryDirectory() as repo:
-        Path(repo, "CODEOWNERS").write_text(codeowners)
+        Path(repo, check_taxonomy.CODEOWNERS_PATH).parent.mkdir(parents=True)
+        Path(repo, check_taxonomy.CODEOWNERS_PATH).write_text(codeowners)
         identity = ["-c", "user.name=test", "-c", "user.email=test@example.com"]
         for command in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "init"]):
             subprocess.check_output(["git", *identity, *command], cwd=repo)
@@ -186,7 +187,8 @@ class TestLintWiring(TestCase):
 
     def test_ownership_errors_fail_the_lint(self):
         codeowners = (
-            LINT_HEADER + "# label: module: ci\n# owner: @alice\n/CODEOWNERS @bob\n#\n"
+            LINT_HEADER
+            + "# label: module: ci\n# owner: @alice\n/scripts/ @bob\n#\n"
         )
         returncode, stdout = run_lint(codeowners)
         self.assertEqual(returncode, 1, stdout)
@@ -201,7 +203,7 @@ class TestLintWiring(TestCase):
     def test_clean_file_passes(self):
         codeowners = (
             LINT_HEADER
-            + "# label: module: ci\n# owner: @alice\n/CODEOWNERS @alice\n#\n"
+            + "# label: module: ci\n# owner: @alice\n/scripts/ @alice\n#\n"
         )
         returncode, stdout = run_lint(codeowners)
         self.assertEqual(returncode, 0, stdout)

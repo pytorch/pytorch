@@ -14,7 +14,7 @@ from assess_intake import (
     fetch_maintainer_activity,
     fetch_maintainer_requested_reviewers,
     fetch_user_has_triage_permission,
-    is_already_handled,
+    is_opted_out,
     main as intake_main,
     parse_description_claims,
     verify_description_claims,
@@ -38,18 +38,16 @@ class FakePermissionGitHub:
 
 
 class GateFactTest(unittest.TestCase):
-    def test_already_handled_uses_only_prior_outcome_and_opt_out_labels(self) -> None:
-        self.assertFalse(is_already_handled([{"name": "open source"}]))
-        self.assertFalse(is_already_handled([]))
+    def test_only_the_opt_out_label_makes_a_run_a_no_op(self) -> None:
+        self.assertFalse(is_opted_out([{"name": "open source"}]))
+        self.assertFalse(is_opted_out([]))
+        self.assertTrue(is_opted_out([{"name": "no automated triage"}]))
+        # Earlier outcomes don't stop a run: it runs again on every push.
         for label in (
             "triaged",
             "bot-triaged",
             "bot-triage-error",
-            "no automated triage",
-        ):
-            with self.subTest(label=label):
-                self.assertTrue(is_already_handled([{"name": label}]))
-        for label in (
+            "missing actionable issue",
             "bot-closed",
             "bot-shadow-close",
             "bot-shadow-triaged",
@@ -58,9 +56,9 @@ class GateFactTest(unittest.TestCase):
             "bot-codeowners-shadow-inconclusive",
         ):
             with self.subTest(label=label):
-                self.assertFalse(is_already_handled([{"name": label}]))
+                self.assertFalse(is_opted_out([{"name": label}]))
         with self.assertRaisesRegex(RuntimeError, "labels are invalid"):
-            is_already_handled([{"bad": "label"}])
+            is_opted_out([{"bad": "label"}])
 
     def test_linked_issue_state_ignores_foreign_closing_references(self) -> None:
         github = mock.Mock()
@@ -670,7 +668,7 @@ class IntakeMainTest(unittest.TestCase):
         facts = intake.facts
         self.assertEqual(intake.identity.workflow_sha, "a" * 40)
         self.assertEqual(intake.identity.head_sha, "b" * 40)
-        self.assertFalse(facts.is_already_handled)
+        self.assertFalse(facts.is_opted_out)
         self.assertTrue(facts.has_actionable_linked_issue)
         self.assertFalse(facts.author_has_triage_permission)
         self.assertFalse(facts.has_maintainer_activity)
@@ -771,7 +769,7 @@ class IntakeMainTest(unittest.TestCase):
         )
 
         facts = intake.facts
-        self.assertFalse(facts.is_already_handled)
+        self.assertFalse(facts.is_opted_out)
         self.assertTrue(facts.has_maintainer_activity)
         self.assertTrue(facts.is_open_non_draft_pr_against_main)
         self.assertTrue(facts.passes_intake)
