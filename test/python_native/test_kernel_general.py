@@ -565,12 +565,14 @@ class TestKernelGeneral(TestCase):
             block=block,
             uniform_tree=True,
         )
+        xc = x.contiguous()
         plain = kg.ReduceBlock(
             trait,
             count=count,
             num_o=rows,
             red_pairs=((count, 1),),
             kept_pairs=((rows, count),),
+            in_base=xc.storage_offset(),
             nouts=len(outs),
             block=block,
             uniform_tree=True,
@@ -580,7 +582,7 @@ class TestKernelGeneral(TestCase):
         # plain compiles the shared key for contiguous geometry, or reuses an earlier
         # case's kernel, so a strided or offset op runs a kernel built for other geometry.
         dense = [torch.empty_like(out) for out in outs]
-        kg._launch(plain, key, [kg._flat(x.contiguous())], dense)
+        kg._launch(plain, key, [kg._flat(xc)], dense)
         kg._launch(op, key, [kg._flat(x)], outs)
         with torch.backends.python_native.cutedsl.disabled():
             var, mean = torch.var_mean(x.double(), dim=1)

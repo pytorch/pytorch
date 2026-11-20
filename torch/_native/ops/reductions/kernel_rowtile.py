@@ -1078,8 +1078,8 @@ def reduce_row_tile(
     Other rows need stride(0) to be a multiple of vec_size(N). A ragged row's scalar
     prefix depends on its start, so identical rows can round differently. Callers must
     pre-check a 16-byte base for ragged rows: whole rows at a misaligned base take
-    narrow loads, but ragged rows raise. use_tma=True raises ValueError unless N is a
-    nonempty power of two.
+    narrow loads, but ragged rows raise. use_tma=True also requires threads_per_row=1, a
+    16-byte aligned base and stride, and a nonempty power-of-two N.
     """
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
