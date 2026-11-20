@@ -5889,13 +5889,19 @@ def pad(
         :math:`\text{padding\_front}, \text{padding\_back})`.
 
     Padding mode:
-        See :class:`torch.nn.CircularPad2d`, :class:`torch.nn.ConstantPad2d`,
-        :class:`torch.nn.ReflectionPad2d`, and :class:`torch.nn.ReplicationPad2d`
-        for concrete examples on how each of the padding modes works. Constant
-        padding is implemented for arbitrary dimensions. Circular, replicate and
-        reflection padding are implemented for padding the last 3 dimensions of a
-        4D or 5D input tensor, the last 2 dimensions of a 3D or 4D input tensor,
-        or the last dimension of a 2D or 3D input tensor.
+        * ``'constant'`` fills the padding with :attr:`value`
+          (see :class:`torch.nn.ConstantPad2d`).
+        * ``'reflect'`` mirrors values starting just inside each edge
+          (see :class:`torch.nn.ReflectionPad2d`).
+        * ``'replicate'`` repeats the nearest edge value
+          (see :class:`torch.nn.ReplicationPad2d`).
+        * ``'circular'`` wraps values from the opposite edge
+          (see :class:`torch.nn.CircularPad2d`).
+
+        Constant padding is implemented for arbitrary dimensions. Circular,
+        replicate and reflection padding are implemented for padding the last
+        3 dimensions of a 4D or 5D input tensor, the last 2 dimensions of a 3D
+        or 4D input tensor, or the last dimension of a 2D or 3D input tensor.
 
     Note:
         When using the CUDA backend, this operation may induce nondeterministic
@@ -5926,6 +5932,16 @@ def pad(
         >>> out = F.pad(t4d, p3d, "constant", 0)
         >>> print(out.size())
         torch.Size([3, 9, 7, 3])
+
+        >>> x = torch.tensor([[1, 2, 3]])
+        >>> F.pad(x, (1, 1), mode="constant", value=0).tolist()
+        [[0, 1, 2, 3, 0]]
+        >>> F.pad(x, (1, 1), mode="reflect").tolist()
+        [[2, 1, 2, 3, 2]]
+        >>> F.pad(x, (1, 1), mode="replicate").tolist()
+        [[1, 1, 2, 3, 3]]
+        >>> F.pad(x, (1, 1), mode="circular").tolist()
+        [[3, 1, 2, 3, 1]]
     """
     if has_torch_function_unary(input):
         return handle_torch_function(
