@@ -1207,7 +1207,7 @@ class TestUnbackedSymints(InductorTestCase):
 
 
 class TestUnbackedSymintsCompilerLogic(InductorTestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_remove_no_ops_unbacked_shape_dde(self, device):
         # Regression: fake_tensors_eq in remove_no_ops used `shape1 != shape2`,
