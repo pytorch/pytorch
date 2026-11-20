@@ -97,6 +97,13 @@ TEST(TestDtype, TestFloat8_e5m2) {
   EXPECT_EQ(a - b, sub);
   EXPECT_EQ(a * b, mul);
   EXPECT_EQ(a / b, div);
+
+  // Conversions saturate, but infinities stay infinite under unary minus.
+  using limits = std::numeric_limits<torch::headeronly::Float8_e5m2>;
+  const float finf = std::numeric_limits<float>::infinity();
+  EXPECT_EQ(torch::headeronly::Float8_e5m2(61440.0f).x, limits::max().x);
+  EXPECT_EQ(torch::headeronly::Float8_e5m2(-finf).x, limits::lowest().x);
+  EXPECT_EQ((-limits::infinity()).x, 0xFC);
 }
 
 TEST(TestDtype, TestFloat8_e5m2fnuz) {
