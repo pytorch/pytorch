@@ -766,7 +766,12 @@ def contain_metadata_mutation_ops(module: torch.fx.GraphModule) -> bool:
     return False
 
 
-_GRAPHSAFE_RNG_DEVICE_TYPES: set[str] = {"cuda"}
+_GRAPHSAFE_RNG_DEVICE_TYPES: set[str] = {"cuda", "xpu"}
+
+# XPU graph capture can't bind the generator states cloned for graphsafe
+# checkpointing yet, so the partitioner keeps XPU on run_with_rng_state:
+# https://github.com/intel/torch-xpu-ops/issues/5255
+_GRAPHSAFE_RNG_NO_FUNCTIONALIZATION_DEVICE_TYPES: set[str] = {"xpu"}
 
 
 def register_graphsafe_rng_device_type(device_type: str) -> None:
@@ -794,6 +799,13 @@ def register_graphsafe_rng_device_type(device_type: str) -> None:
 def supports_graphsafe_rng(device: torch.device) -> bool:
     """Check whether a device supports graphsafe RNG operations."""
     return device.type in _GRAPHSAFE_RNG_DEVICE_TYPES
+
+
+def supports_graphsafe_rng_functionalization(device: torch.device) -> bool:
+    """Check whether the partitioner may use graphsafe RNG for recomputed RNG ops."""
+    if device.type in _GRAPHSAFE_RNG_NO_FUNCTIONALIZATION_DEVICE_TYPES:
+        return False
+    return supports_graphsafe_rng(device)
 
 
 def get_default_generator(device: torch.device) -> Any:
