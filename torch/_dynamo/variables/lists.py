@@ -2855,6 +2855,27 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._bytearray_constant_method(tx, args, kwargs, "replace")
 
+    def bytearray_removeprefix(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_removeprefix_impl: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        # METH_O, so Method.__call__ has already checked there is exactly one
+        # argument. CPython always returns a new bytearray, even when the
+        # prefix is absent.
+        return self._bytearray_constant_method(tx, args, kwargs, "removeprefix")
+
+    def bytearray_removesuffix(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_removesuffix_impl: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        return self._bytearray_constant_method(tx, args, kwargs, "removesuffix")
+
     def bytearray_translate(
         self,
         tx: "InstructionTranslatorBase",
@@ -2934,6 +2955,8 @@ class ByteArrayVariable(VariableTracker):
         "lower": Method(bytearray_lower),
         "title": Method(bytearray_title),
         "replace": Method(bytearray_replace),
+        "removeprefix": Method(bytearray_removeprefix),
+        "removesuffix": Method(bytearray_removesuffix),
         "translate": Method(bytearray_translate),
         "center": Method(bytearray_center),
         "ljust": Method(bytearray_ljust),

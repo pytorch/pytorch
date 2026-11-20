@@ -1081,6 +1081,76 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         ):
             b.replace(b"a", b"b", b"0")
 
+    @make_dynamo_test
+    def test_removeprefix(self):
+        b = self.type2test(b"spamspamspam")
+        self.assertEqual(b.removeprefix(b"spam"), b"spamspam")
+        self.assertEqual(b.removeprefix(b"spamspamspam"), b"")
+        self.assertEqual(b.removeprefix(b"python"), b"spamspamspam")
+        self.assertEqual(b.removeprefix(b"spider"), b"spamspamspam")
+        self.assertEqual(b.removeprefix(b""), b"spamspamspam")
+        self.assertEqual(b.removeprefix(bytearray(b"spam")), b"spamspam")
+        self.assertEqual(self.type2test(b"").removeprefix(b"a"), b"")
+        # Non-ASCII bytes are matched byte for byte
+        self.assertEqual(self.type2test(b"\xffabc").removeprefix(b"\xff"), b"abc")
+        self.assertEqual(b, b"spamspamspam")
+
+    @make_dynamo_test
+    def test_removesuffix(self):
+        b = self.type2test(b"spamspamspam")
+        self.assertEqual(b.removesuffix(b"spam"), b"spamspam")
+        self.assertEqual(b.removesuffix(b"spamspamspam"), b"")
+        self.assertEqual(b.removesuffix(b"python"), b"spamspamspam")
+        self.assertEqual(b.removesuffix(b"blam"), b"spamspamspam")
+        self.assertEqual(b.removesuffix(b""), b"spamspamspam")
+        self.assertEqual(b.removesuffix(bytearray(b"spam")), b"spamspam")
+        self.assertEqual(self.type2test(b"").removesuffix(b"a"), b"")
+        self.assertEqual(self.type2test(b"abc\xff").removesuffix(b"\xff"), b"abc")
+        self.assertEqual(b, b"spamspamspam")
+
+    @make_dynamo_test
+    def test_removeprefix_removesuffix_new_object(self):
+        # Even when nothing is removed, the result is a new bytearray
+        b = self.type2test(b"abc")
+        for result in (b.removeprefix(b"x"), b.removesuffix(b"x")):
+            self.assertIsInstance(result, self.type2test)
+            self.assertIsNot(result, b)
+            self.assertEqual(result, b"abc")
+
+    @make_dynamo_test
+    def test_removeprefix_removesuffix_errors(self):
+        b = self.type2test(b"hello")
+        for name in ("removeprefix", "removesuffix"):
+            method = getattr(b, name)
+            self.assertRaises(TypeError, method)
+            self.assertRaises(TypeError, method, b"he", b"l")
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method("he")
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method(42)
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method((b"he", b"l"))
+
+    def test_input_bytearray_removeprefix_removesuffix(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.removeprefix(b"he"), ba.removesuffix(b"lo")
+
+        ba = bytearray(b"hello")
+        self.assertEqual(fn(ba), (bytearray(b"llo"), bytearray(b"hel")))
+        self.assertEqual(ba, bytearray(b"hello"))
+
+    def test_input_bytearray_removeprefix_mutate_result(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            out = ba.removeprefix(b"x")
+            out[0] = ord("j")
+            return out
+
+        ba = bytearray(b"hello")
+        self.assertEqual(fn(ba), bytearray(b"jello"))
+        self.assertEqual(ba, bytearray(b"hello"))
+
     @parametrize("buffer_type", [bytes, bytearray])
     def test_maketrans(self, buffer_type):
         def f(x, source, target):
