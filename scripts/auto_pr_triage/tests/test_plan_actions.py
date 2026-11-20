@@ -12,11 +12,13 @@ from unittest import mock
 from apply_actions import ApplyOutcome
 from plan_actions import (
     build_action_plan,
+    choose_owner_reviewers,
     EngagementReason,
     gather_planner_input,
     main as plan_main,
     new_reviewer_requests,
     OwnerChoice,
+    OwnerGroup,
     pick_roster_member,
     ReviewerState,
     TeamOwnerReviewers,
@@ -28,6 +30,7 @@ from schemas import (
     BOT_TRIAGE_ERROR_LABEL,
     MISSING_ACTIONABLE_ISSUE_ACTIONS,
     PlannerInput,
+    PullRequestIdentity,
     RequestReviewers,
 )
 from tests.plan_fixtures import (
@@ -67,11 +70,11 @@ class StageInputTest(unittest.TestCase):
         )
         self.assertEqual(github.calls, [])
 
-    def test_already_handled_result_is_a_read_free_noop(self) -> None:
+    def test_opted_out_result_is_a_read_free_noop(self) -> None:
         github = FakeGitHub()
         args = run_args(
             stage_results=stage_results(
-                is_already_handled=True,
+                is_opted_out=True,
                 has_actionable_linked_issue=False,
                 llm_run_status="skipped",
                 codepath_owners=(),
@@ -123,7 +126,7 @@ class StageInputTest(unittest.TestCase):
                 llm_run_status="skipped",
                 codepath_owners=(),
             ),
-            stage_results(is_already_handled=True),
+            stage_results(is_opted_out=True),
         )
         for results in cases:
             github = FakeGitHub()
@@ -152,33 +155,68 @@ class StageInputTest(unittest.TestCase):
 
 
 class CodeownersComparisonTest(unittest.TestCase):
-    def test_codepath_owners_are_not_requested(self) -> None:
+    def test_codepath_owners_are_requested(self) -> None:
         github = FakeGitHub()
 
         result = run_apply(github)
 
-        self.assertEqual(result, ApplyOutcome("triaged"))
+        self.assertEqual(result, ApplyOutcome("triaged", 1))
         self.assertEqual(
             mutations(github),
             [
                 (
                     "POST",
+                    "repos/pytorch/ciforge/pulls/123/requested_reviewers",
+                    {"reviewers": ["codepath-owner"]},
+                ),
+                (
+                    "POST",
                     "repos/pytorch/ciforge/issues/123/labels",
                     {"labels": ["triaged", "bot-triaged"]},
-                )
+                ),
             ],
         )
 
-    def test_codepath_users_and_teams_are_never_requested(self) -> None:
+    def test_codepath_owner_ever_requested_is_not_requested_again(self) -> None:
+        github = FakeGitHub(previously_requested=["Codepath-Owner"])
+
+        with mock.patch("builtins.print") as output:
+            result = run_apply(github)
+
+        self.assertEqual(result, ApplyOutcome("triaged"))
+        self.assertFalse(
+            any(call[1].endswith("/requested_reviewers") for call in mutations(github))
+        )
+        choice = printed_plan(output)["owner_choices"]["@codepath-owner"]
+        self.assertEqual(choice["state"], "previously_requested")
+
+    def test_codepath_owner_without_push_access_is_not_requested(self) -> None:
+        # The push-access read is keyed by casefolded login, so OWNERSHIP.yaml
+        # casing must not matter.
+        for owner in ("@codepath-owner", "@Codepath-Owner"):
+            github = FakeGitHub(without_push=["codepath-owner"])
+
+            with self.subTest(owner=owner), mock.patch("builtins.print") as output:
+                result = run_apply(github, codepath_owners=(owner,))
+
+                self.assertEqual(result, ApplyOutcome("triaged"))
+                self.assertFalse(
+                    any(call[1].endswith("/requested_reviewers") for call in mutations(github))
+                )
+                choice = printed_plan(output)["owner_choices"][owner]
+                self.assertEqual(choice["state"], "no_push_access")
+
+    def test_codepath_team_handles_are_never_requested(self) -> None:
         github = FakeGitHub()
 
         result = run_apply(
             github, codepath_owners=("@codepath-owner", "@pytorch/compiler")
         )
 
-        self.assertEqual(result, ApplyOutcome("triaged"))
-        self.assertFalse(
-            any(call[1].endswith("/requested_reviewers") for call in mutations(github))
+        self.assertEqual(result, ApplyOutcome("triaged", 1))
+        self.assertEqual(
+            [payload for _, endpoint, payload in mutations(github) if endpoint.endswith("/requested_reviewers")],
+            [{"reviewers": ["codepath-owner"]}],
         )
 
     def test_pending_team_request_does_not_suppress_semantic_addition(self) -> None:
@@ -216,7 +254,13 @@ class PlanOnlyTest(unittest.TestCase):
         plan = run_plan(github)
 
         self.assertEqual(plan.decision, "triage")
-        self.assertEqual(plan.actions, (AddLabels(("triaged", "bot-triaged")),))
+        self.assertEqual(
+            plan.actions,
+            (
+                RequestReviewers(("codepath-owner",), "codepath_owner"),
+                AddLabels(("triaged", "bot-triaged")),
+            ),
+        )
         self.assertEqual(mutations(github), [])
 
     def test_uncovered_concerns_route_found_owners_without_triaging(self) -> None:
@@ -258,7 +302,7 @@ class PlanOnlyTest(unittest.TestCase):
         self.assertEqual(result, ApplyOutcome("routed_untriaged", 1))
         self.assertEqual(printed_plan(output)["decision"], "routed_untriaged")
 
-    def test_uncovered_concern_ignores_unneeded_review_state_failure(self) -> None:
+    def test_unreadable_review_state_requests_no_codepath_owners(self) -> None:
         class UnavailableReviewsGitHub(FakeGitHub):
             def graphql(
                 self, *, query: str, variables: dict[str, Any]
@@ -270,13 +314,12 @@ class PlanOnlyTest(unittest.TestCase):
         github = UnavailableReviewsGitHub()
         result = run_apply(github, has_uncovered_concerns=True)
 
-        self.assertEqual(result, ApplyOutcome("routed_untriaged"))
-        self.assertFalse(
-            any(
-                BOT_TRIAGE_ERROR_LABEL in payload["labels"]
-                for _, endpoint, payload in mutations(github)
-                if endpoint.endswith("/labels")
-            )
+        # Without reviewer state a removed request can't be told apart, so no
+        # codepath owner is requested and the run is incomplete.
+        self.assertEqual(result, ApplyOutcome("incomplete"))
+        self.assertEqual(
+            [payload for _, _, payload in mutations(github)],
+            [{"labels": [BOT_TRIAGE_ERROR_LABEL]}],
         )
 
     def test_no_destination_stays_open_despite_review_activity(self) -> None:
@@ -313,15 +356,16 @@ class PlanOnlyTest(unittest.TestCase):
         self.assertNotIn("@soulitzer", summary_text)
         self.assertTrue(
             summary_text.startswith(
-                "## Auto PR Triage: requests review from `soulitzer`\n"
-            )
+                "## Auto PR Triage: requests review from `codepath-owner`, `soulitzer`\n"
+            ),
+            summary_text[:200],
         )
         self.assertIn(
             "| Admission | Admitted because it fixes an issue labeled `actionable`. |\n",
             summary_text,
         )
         self.assertIn(
-            "| `codepath-owner` | no new request | `codepath-owner` is a codepath owner in CODEOWNERS but has no pending request or review, so GitHub may not have requested them or someone may have removed the request.<br>Codepath owner `@codepath-owner` matched CODEOWNERS rules for: <code>torch/file.py</code>. |\n",  # noqa: B950
+            "| `codepath-owner` | new request | `codepath-owner` is a codepath owner and has no request or review yet, so this run requests them.<br>Codepath owner `@codepath-owner` matched CODEOWNERS rules for: <code>torch/file.py</code>. |\n",  # noqa: B950
             summary_text,
         )
         self.assertIn(
@@ -535,38 +579,39 @@ class ApplyTriageTest(unittest.TestCase):
         cases = (
             (
                 FakeGitHub(requested_users=["codepath-owner"]),
-                "codeowners_pending",
-                "already has a pending request; no new request is needed.",
+                "pending",
+                "@codepath-owner already has a pending request; no new request is needed.",
+                ApplyOutcome("triaged"),
             ),
             (
                 FakeGitHub(submitted_users=["codepath-owner"]),
-                "codeowners_submitted",
-                "already submitted a review; no new request is needed.",
+                "submitted",
+                "@codepath-owner already submitted a review; no new request is needed.",
+                ApplyOutcome("triaged"),
             ),
             (
                 FakeGitHub(),
-                "codeowners_missing",
-                "but has no pending request or review, so GitHub may not have "
-                "requested them or someone may have removed the request.",
+                "requested",
+                "@codepath-owner is a codepath owner and has no request or review "
+                "yet, so this run requests them.",
+                ApplyOutcome("triaged", 1),
             ),
             (
                 UnavailableReviewersGitHub(),
-                "codeowners_unconfirmed",
-                "GitHub requests codepath owners, but the reviewer state could not "
-                "be read to confirm.",
+                "unconfirmed",
+                "@codepath-owner is a codepath owner, but the reviewer state could "
+                "not be read, so they were not requested.",
+                ApplyOutcome("incomplete"),
             ),
         )
-        for github, state, text in cases:
+        for github, state, text, outcome in cases:
             with self.subTest(state=state), mock.patch("builtins.print") as output:
                 result = run_apply(github)
 
-                self.assertEqual(result, ApplyOutcome("triaged"))
+                self.assertEqual(result, outcome)
                 choice = printed_plan(output)["owner_choices"]["@codepath-owner"]
                 self.assertEqual(choice["state"], state)
                 routing = printed_reviewer_routing(output)
-                self.assertIn(
-                    "@codepath-owner is a codepath owner in CODEOWNERS", routing
-                )
                 self.assertIn(text, routing)
                 self.assertIn(
                     "Codepath owner `@codepath-owner` matched CODEOWNERS rules for: "
@@ -585,7 +630,7 @@ class ApplyTriageTest(unittest.TestCase):
         ):
             result = plan_and_apply(args=args, github=github)
 
-        self.assertEqual(result, ApplyOutcome("triaged"))
+        self.assertEqual(result, ApplyOutcome("triaged", 1))
 
     def test_failed_llm_run_preserves_codepath_owners(self) -> None:
         github = FakeGitHub()
@@ -597,7 +642,7 @@ class ApplyTriageTest(unittest.TestCase):
                 )
             summary_text = summary.read_text()
 
-        self.assertEqual(result, ApplyOutcome("incomplete"))
+        self.assertEqual(result, ApplyOutcome("incomplete", 1))
         reason = "The LLM run failed; only codepath owners remain."
         self.assertEqual(printed_plan(output)["incomplete_reasons"], [reason])
         self.assertIn(f"| Why this run is incomplete | {reason} |\n", summary_text)
@@ -605,12 +650,8 @@ class ApplyTriageTest(unittest.TestCase):
             f"Why this run is incomplete: {reason}", printed_reviewer_routing(output)
         )
         self.assertEqual(
-            mutations(github)[0][2],
-            {
-                "labels": [
-                    BOT_TRIAGE_ERROR_LABEL,
-                ]
-            },
+            [payload for _, _, payload in mutations(github)],
+            [{"reviewers": ["codepath-owner"]}, {"labels": [BOT_TRIAGE_ERROR_LABEL]}],
         )
 
     def test_fresh_roster_pick_is_requested_without_reading_history(self) -> None:
@@ -705,8 +746,8 @@ class ApplyTriageTest(unittest.TestCase):
             any(call[1].endswith("/requested_reviewers") for call in mutations(github))
         )
         choices = printed_plan(output)["owner_choices"]
-        self.assertEqual(choices["@codepath-owner"]["state"], "codeowners_submitted")
-        self.assertEqual(choices["@pytorch/compiler"]["state"], "codeowners_pending")
+        self.assertEqual(choices["@codepath-owner"]["state"], "submitted")
+        self.assertNotIn("@pytorch/compiler", choices)
 
     def test_large_codepath_owner_set_allows_no_new_requests(self) -> None:
         reviewers = tuple(f"owner{index}" for index in range(16))
@@ -735,9 +776,9 @@ class ApplyTriageTest(unittest.TestCase):
             any(call[1].endswith("/requested_reviewers") for call in mutations(github))
         )
 
-    def test_native_codepath_owners_do_not_consume_the_request_limit(self) -> None:
+    def test_codepath_owners_have_their_own_request_limit(self) -> None:
         github = FakeGitHub()
-        codepath_owners = tuple(f"@owner{index}" for index in range(15))
+        codepath_owners = tuple(f"@owner{index:02d}" for index in range(15))
 
         result = run_apply(
             github,
@@ -745,8 +786,11 @@ class ApplyTriageTest(unittest.TestCase):
             additional_owners=("compiler",),
         )
 
-        self.assertEqual(result, ApplyOutcome("triaged", 1))
-        self.assertEqual(mutations(github)[0][2], {"reviewers": ["extra"]})
+        self.assertEqual(result, ApplyOutcome("triaged", 16))
+        self.assertEqual(
+            mutations(github)[0][2], {"reviewers": [o[1:] for o in codepath_owners]}
+        )
+        self.assertEqual(mutations(github)[1][2], {"reviewers": ["extra"]})
 
     def test_pending_owner_and_new_owner_request_only_the_new_pick(self) -> None:
         github = FakeGitHub(requested_users=["soulitzer"])
@@ -865,10 +909,7 @@ class ApplyTriageTest(unittest.TestCase):
         self.assertEqual(mutations(github)[0][2], {"reviewers": ["soulitzer"]})
         choices = printed_plan(output)["owner_choices"]
         self.assertEqual(choices["autograd"]["provenance"]["source"], "semantic")
-        self.assertEqual(choices["@pytorch/autograd"]["state"], "codeowners_missing")
-        self.assertEqual(
-            choices["@pytorch/autograd"]["provenance"]["source"], "codepath"
-        )
+        self.assertNotIn("@pytorch/autograd", choices)
 
     def test_missing_live_reviewer_is_selected_at_plan_time(self) -> None:
         github = FakeGitHub()
@@ -915,21 +956,11 @@ class ApplyTriageTest(unittest.TestCase):
                 team_members=team_members,
             )
 
-        self.assertEqual(result, ApplyOutcome("incomplete"))
+        self.assertEqual(result, ApplyOutcome("incomplete", 1))
         self.assertEqual(printed_plan(output)["unresolved_owners"], ["autograd"])
         self.assertEqual(
-            mutations(github),
-            [
-                (
-                    "POST",
-                    "repos/pytorch/ciforge/issues/123/labels",
-                    {
-                        "labels": [
-                            BOT_TRIAGE_ERROR_LABEL,
-                        ]
-                    },
-                ),
-            ],
+            [payload for _, _, payload in mutations(github)],
+            [{"reviewers": ["codepath-owner"]}, {"labels": [BOT_TRIAGE_ERROR_LABEL]}],
         )
 
     def test_unavailable_reviewer_state_preserves_codepath_handles(self) -> None:
@@ -1108,7 +1139,7 @@ class ApplyTriageTest(unittest.TestCase):
 
         with configured():
             self.assertEqual(
-                plan_and_apply(args=args, github=github), ApplyOutcome("triaged")
+                plan_and_apply(args=args, github=github), ApplyOutcome("triaged", 1)
             )
         self.assertEqual(github.actionable_checks, 0)
         self.assertEqual(github.permission_checks, 0)
@@ -1121,7 +1152,8 @@ class ApplyTriageTest(unittest.TestCase):
                 codepath_owners=("@soulitzer",),
                 additional_owners=("autograd",),
             )
-        self.assertEqual(result, ApplyOutcome("triaged"))
+        self.assertEqual(result, ApplyOutcome("triaged", 1))
+        self.assertEqual(mutations(github)[0][2], {"reviewers": ["soulitzer"]})
         routing = printed_reviewer_routing(output)
         self.assertIn(
             "@soulitzer covers `autograd` through codepath ownership; "
@@ -1133,10 +1165,7 @@ class ApplyTriageTest(unittest.TestCase):
             routing.index("Codepath owner `@soulitzer`"),
             routing.index("Semantic owner `autograd`"),
         )
-        self.assertIn(
-            "Planned effect: no new Auto PR Triage reviewer request is needed.",
-            routing,
-        )
+        self.assertIn("Planned effect: one deduplicated request for @soulitzer.", routing)
 
     def test_ambiguous_reviewer_request_stops_before_labels(self) -> None:
         class TimeoutGitHub(FakeGitHub):
@@ -1199,11 +1228,12 @@ class EngagedReviewerApplyTest(unittest.TestCase):
                 maintainer_requested_reviewers=("requested",),
             )
 
-        self.assertEqual(result, ApplyOutcome("triaged"))
+        self.assertEqual(result, ApplyOutcome("triaged", 1))
         requested = "repos/pytorch/ciforge/pulls/123/requested_reviewers"
         self.assertEqual(
-            mutations(github)[:2],
+            mutations(github)[:3],
             [
+                ("POST", requested, {"reviewers": ["codepath-owner"]}),
                 ("POST", requested, {"reviewers": ["Maintainer"]}),
                 ("POST", requested, {"reviewers": ["labeler"]}),
             ],
@@ -1244,7 +1274,11 @@ class EngagedReviewerApplyTest(unittest.TestCase):
 
         self.assertEqual(plan.decision, "triage")
         self.assertEqual(
-            plan.actions[0], RequestReviewers(("Maintainer",), "supporter")
+            plan.actions[:2],
+            (
+                RequestReviewers(("codepath-owner",), "codepath_owner"),
+                RequestReviewers(("Maintainer",), "supporter"),
+            ),
         )
         self.assertEqual(mutations(github), [])
         self.assertIn(
@@ -1264,8 +1298,9 @@ class EngagedReviewerApplyTest(unittest.TestCase):
                 actionable_labelers=("labeler",),
             )
 
-        self.assertEqual(plan.actions[0], RequestReviewers(("helper",), "supporter"))
-        self.assertEqual(len(plan.actions), 2)  # the supporter request, then labels
+        self.assertEqual(plan.actions[1], RequestReviewers(("helper",), "supporter"))
+        # The codepath owner, the supporter, then labels.
+        self.assertEqual(len(plan.actions), 3)
         routing = printed_reviewer_routing(output)
         for login in ("labeler", "Maintainer"):
             self.assertIn(
@@ -1316,7 +1351,7 @@ class EngagedReviewerApplyTest(unittest.TestCase):
             github = FakeGitHub()
             with self.subTest(handoff=handoff), mock.patch("builtins.print") as output:
                 result = run_apply(github, has_uncovered_concerns=True, **handoff)
-                self.assertEqual(result, ApplyOutcome("triaged"))
+                self.assertEqual(result, ApplyOutcome("triaged", 1))
                 self.assertEqual(printed_plan(output)["decision"], "triage")
 
     def test_handoff_reviewer_triages_without_owners(self) -> None:
@@ -1340,6 +1375,68 @@ class EngagedReviewerApplyTest(unittest.TestCase):
         )
 
 
+class RepeatedRunTest(unittest.TestCase):
+    """Auto PR Triage runs on every push, so each run plans against earlier ones."""
+
+    def test_admitted_pr_loses_an_earlier_missing_actionable_issue_mark(self) -> None:
+        marked = ("triaged", "bot-triaged", "missing actionable issue")
+        github = FakeGitHub(labels=list(marked))
+        args = run_args(stage_results=stage_results(labels=marked))
+
+        with configured():
+            result = plan_and_apply(args=args, github=github)
+
+        self.assertEqual(result, ApplyOutcome("triaged", 1))
+        self.assertEqual(
+            mutations(github)[-1],
+            ("DELETE", "repos/pytorch/ciforge/issues/123/labels/missing%20actionable%20issue", None),
+        )
+        self.assertEqual(
+            {label["name"] for label in github.pr["labels"]}, {"triaged", "bot-triaged"}
+        )
+
+    def test_triaged_pr_is_never_marked_missing_an_actionable_issue(self) -> None:
+        github = FakeGitHub(labels=["triaged", "bot-triaged"])
+        args = run_args(
+            stage_results=stage_results(
+                has_actionable_linked_issue=False, labels=("bot-triaged", "triaged")
+            )
+        )
+
+        with configured():
+            plan = plan_pr(args=args, github=github)
+
+        codepath = RequestReviewers(("codepath-owner",), "codepath_owner")
+        self.assertEqual((plan.decision, plan.actions), ("kept_open", (codepath,)))
+
+    def test_failure_adds_the_error_label_even_to_a_triaged_pr(self) -> None:
+        github = FakeGitHub(labels=["triaged", "bot-triaged"])
+        args = run_args(
+            stage_results=stage_results(
+                llm_run_status="failed", labels=("bot-triaged", "triaged")
+            )
+        )
+
+        with configured():
+            plan = plan_pr(args=args, github=github)
+
+        self.assertEqual(plan.decision, "incomplete")
+        self.assertEqual(plan.actions[-1], AddLabels((BOT_TRIAGE_ERROR_LABEL,)))
+
+    def test_roster_member_requested_before_covers_the_team(self) -> None:
+        github = FakeGitHub(previously_requested=["soulitzer"])
+
+        with mock.patch("builtins.print") as output:
+            result = run_apply(
+                github, codepath_owners=(), additional_owners=("autograd",)
+            )
+
+        self.assertEqual(result, ApplyOutcome("triaged"))
+        self.assertEqual(mutations(github)[0][1], "repos/pytorch/ciforge/issues/123/labels")
+        choice = printed_plan(output)["owner_choices"]["autograd"]
+        self.assertEqual(choice["state"], "previously_requested")
+
+
 class BypassIntakeTest(unittest.TestCase):
     def test_pr_that_fails_intake_is_marked_without_a_bypass(self) -> None:
         for name, scenario in (
@@ -1350,11 +1447,13 @@ class BypassIntakeTest(unittest.TestCase):
             with self.subTest(name=name), mock.patch("builtins.print"):
                 result = run_apply(github, passes_intake=False, **scenario)
 
-            self.assertEqual(result, ApplyOutcome("missing_actionable_issue"))
+            # Codepath owners are requested even when a PR isn't admitted.
+            requested = 0 if name == "completed_without_owners" else 1
+            self.assertEqual(result, ApplyOutcome("missing_actionable_issue", requested))
             self.assertEqual(github.pr["state"], "open")
-            self.assertNotIn(
-                "repos/pytorch/ciforge/pulls/123/requested_reviewers",
-                [endpoint for _, endpoint, _ in mutations(github)],
+            self.assertEqual(
+                [p for _, e, p in mutations(github) if e.endswith("/requested_reviewers")],
+                [{"reviewers": ["codepath-owner"]}] if requested else [],
             )
 
     def test_bypass_admits_and_its_team_reviewer_is_a_handoff(self) -> None:
@@ -1409,18 +1508,12 @@ class BypassIntakeTest(unittest.TestCase):
         with mock.patch("builtins.print") as output:
             result = run_apply(github, passes_intake=False, llm_run_status="failed")
 
-        self.assertEqual(result, ApplyOutcome("incomplete"))
+        self.assertEqual(result, ApplyOutcome("incomplete", 1))
         self.assertEqual(printed_plan(output)["decision"], "incomplete")
         self.assertEqual(github.pr["state"], "open")
         self.assertEqual(
-            mutations(github),
-            [
-                (
-                    "POST",
-                    "repos/pytorch/ciforge/issues/123/labels",
-                    {"labels": [BOT_TRIAGE_ERROR_LABEL]},
-                )
-            ],
+            [payload for _, _, payload in mutations(github)],
+            [{"reviewers": ["codepath-owner"]}, {"labels": [BOT_TRIAGE_ERROR_LABEL]}],
         )
 
     def test_discarded_bypass_claim_keeps_the_pr_open_without_routing(self) -> None:
@@ -1429,7 +1522,8 @@ class BypassIntakeTest(unittest.TestCase):
             github, passes_intake=False, has_discarded_bypass_intake_match=True
         )
 
-        self.assertEqual((plan.decision, plan.actions), ("kept_open", ()))
+        codepath = RequestReviewers(("codepath-owner",), "codepath_owner")
+        self.assertEqual((plan.decision, plan.actions), ("kept_open", (codepath,)))
         self.assertEqual(mutations(github), [])
 
     def test_owner_without_bypass_is_not_a_handoff_reviewer(self) -> None:
@@ -1459,6 +1553,43 @@ class TeamOwnerReviewersTest(unittest.TestCase):
 
         self.assertEqual(routing.roster_users, ("Bob",))
         self.assertEqual(routing.unresolved_owners, ("quantization",))
+
+    def test_owner_groups_keep_the_first_covering_state_or_get_a_pick(self) -> None:
+        identity = PullRequestIdentity("pytorch/ciforge", 9, HEAD_SHA, "a" * 40)
+        groups = (
+            OwnerGroup("autograd", ("@Alice", "@bob")),
+            OwnerGroup("compiler", ("@Carol", "@dave")),
+            OwnerGroup("nn", ("@erin", "@frank")),
+            OwnerGroup("solo", ("@Author",)),
+        )
+
+        choices = choose_owner_reviewers(
+            identity=identity,
+            groups=groups,
+            coverage=(
+                ("codepath_covered", frozenset({"@alice"})),
+                ("pending", frozenset({"@bob", "@carol", "@author"})),
+            ),
+            author_handle="@author",
+        )
+
+        self.assertEqual(
+            choices,
+            {
+                "autograd": OwnerChoice("@Alice", "codepath_covered"),
+                "compiler": OwnerChoice("@Carol", "pending"),
+                "nn": OwnerChoice(
+                    pick_roster_member(
+                        repository="pytorch/ciforge",
+                        number=9,
+                        owner="nn",
+                        members=("@erin", "@frank"),
+                        author_handle="@author",
+                    ),
+                    "selected",
+                ),
+            },
+        )
 
     def test_roster_pick_is_reproducible_and_skips_the_author(self) -> None:
         args = {

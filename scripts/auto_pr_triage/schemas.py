@@ -222,7 +222,7 @@ def are_canonical_logins(logins: list[str] | tuple[str, ...]) -> bool:
 def passes_intake(
     *,
     is_open_non_draft_pr_against_main: bool,
-    is_already_handled: bool,
+    is_opted_out: bool,
     author_has_triage_permission: bool,
     has_actionable_linked_issue: bool,
     has_maintainer_activity: bool,
@@ -233,7 +233,7 @@ def passes_intake(
 
     return (
         is_open_non_draft_pr_against_main
-        and not is_already_handled
+        and not is_opted_out
         and (
             author_has_triage_permission
             or has_actionable_linked_issue
@@ -265,7 +265,7 @@ class IntakeFacts(_Record):
     """Hold intake's gate facts and handoff reviewers; the LLM never sees them."""
 
     is_open_non_draft_pr_against_main: bool
-    is_already_handled: bool
+    is_opted_out: bool
     author_has_triage_permission: bool
     has_actionable_linked_issue: bool
     has_maintainer_activity: bool
@@ -277,7 +277,7 @@ class IntakeFacts(_Record):
 
     def __post_init__(self) -> None:
         # Sanity: the gate facts agree with each other.
-        # - An inactive or handled PR carries no intake signals.
+        # - An inactive PR carries no intake signals.
         # - has_supporter is true exactly when supporters is non-empty.
         # - Actionable labelers imply an actionable issue.
         # - Handoff reviewers exist only on a PR that passes intake.
@@ -298,9 +298,9 @@ class IntakeFacts(_Record):
             self.has_maintainer_activity,
             self.has_supporter,
         )
-        active = self.is_open_non_draft_pr_against_main and not self.is_already_handled
+        active = self.is_open_non_draft_pr_against_main and not self.is_opted_out
         if not active and (any(signals) or self.has_related_actionable_issue):
-            raise RuntimeError("intake facts: signals on an inactive or handled PR")
+            raise RuntimeError("intake facts: signals on an inactive PR")
         if self.has_supporter != bool(self.supporters):
             raise RuntimeError("intake facts: has_supporter mismatches supporters")
         if self.actionable_labelers and not has_actionable_issue:
@@ -312,9 +312,9 @@ class IntakeFacts(_Record):
 
     @property
     def is_active(self) -> bool:
-        """Return whether the PR is an open, unhandled PR against main."""
+        """Return whether the PR is an open, non-draft PR against main, not opted out."""
 
-        return self.is_open_non_draft_pr_against_main and not self.is_already_handled
+        return self.is_open_non_draft_pr_against_main and not self.is_opted_out
 
     @property
     def passes_intake(self) -> bool:
@@ -322,7 +322,7 @@ class IntakeFacts(_Record):
 
         return passes_intake(
             is_open_non_draft_pr_against_main=self.is_open_non_draft_pr_against_main,
-            is_already_handled=self.is_already_handled,
+            is_opted_out=self.is_opted_out,
             author_has_triage_permission=self.author_has_triage_permission,
             has_actionable_linked_issue=self.has_actionable_linked_issue,
             has_maintainer_activity=self.has_maintainer_activity,
@@ -336,7 +336,8 @@ class IntakeResult(_Record):
     """Hold the intake decision and the one PR snapshot later stages reuse.
 
     Title and body are attacker-controlled; intake carries them so the ownership
-    stage never reads the PR a second time.
+    stage never reads the PR a second time. labels are the PR's labels when intake
+    read it, so planning can tell an earlier outcome from a first run.
     """
 
     identity: PullRequestIdentity
@@ -344,6 +345,7 @@ class IntakeResult(_Record):
     author_login: str
     title: str
     body: str
+    labels: tuple[str, ...] = ()
 
 
 # =============================================================================
@@ -353,17 +355,24 @@ class IntakeResult(_Record):
 # =============================================================================
 
 
+# How an OWNERSHIP.yaml group's reviewers are requested: everyone on the
+# matching path.
+ReviewRequest = Literal["path_handles"]
+
+
 @dataclass(frozen=True)
 class PathGroup(_Record):
-    """Hold changed files whose codepath-owner rules resolved to the same owners.
+    """Hold changed files of one OWNERSHIP.yaml group whose rules list the same owners.
 
-    If files 0 and 2 both resolve to @soulitzer and the autograd team, the group
-    is PathGroup(owners=("@soulitzer", "autograd"), file_indices=(0, 2)). Indices
-    point into untrusted_context.files.
+    If files 0 and 2 both match autograd rules listing @alband and @soulitzer, the
+    group is PathGroup(("@alband", "@soulitzer"), (0, 2), "autograd",
+    "path_handles"). Indices point into untrusted_context.files.
     """
 
     owners: tuple[str, ...]
     file_indices: tuple[int, ...]
+    group: str
+    review_request: ReviewRequest
 
     def __post_init__(self) -> None:
         # Sanity: a group has at least one owner and one file, no repeats.
@@ -543,7 +552,12 @@ class LLMInput(_Record):
         codepath_owners = CodepathOwners(
             tuple(codepath["owners"]),
             tuple(
-                PathGroup(tuple(g["owners"]), tuple(file_index(p) for p in g["paths"]))
+                PathGroup(
+                    tuple(g["owners"]),
+                    tuple(file_index(p) for p in g["paths"]),
+                    g["group"],
+                    g["review_request"],
+                )
                 for g in codepath["matched_path_groups"]
             ),
             tuple(file_index(path) for path in codepath["paths_without_owners"]),
@@ -695,6 +709,30 @@ RESULT_SCHEMA = json_schema(hint=LLMResult)
 
 
 @dataclass(frozen=True)
+class OwnershipGroup(_Record):
+    """Hold one OWNERSHIP.yaml group the PR touches.
+
+    owners are the handles on the touched files' rules, files are those touched
+    files, and review_request says how the group's reviewers are requested.
+    Which owner matched which file is in OwnershipResult.codepath_owners.
+    """
+
+    error = ValueError
+
+    owners: tuple[str, ...]
+    files: tuple[str, ...]
+    review_request: ReviewRequest
+
+    def __post_init__(self) -> None:
+        # Sanity: a group has owners and files, both without repeats.
+        super().__post_init__()
+        if not self.owners or len(set(self.owners)) != len(self.owners):
+            raise ValueError("ownership group owners are empty or repeated")
+        if not self.files or len(set(self.files)) != len(self.files):
+            raise ValueError("ownership group files are empty or repeated")
+
+
+@dataclass(frozen=True)
 class OwnershipResult(_Record):
     """Record everything the ownership stage concluded about the PR's owners.
 
@@ -704,7 +742,9 @@ class OwnershipResult(_Record):
       (an inactive PR: no owners) or failed (any validation error: codepath
       owners only). Only a succeeded run carries concerns.
     - codepath_owners is added from the trusted path rules, not the LLM, and
-      maps each owner to the changed files it matched.
+      maps each owner to the changed files it matched. ownership_groups holds
+      the same matches by OWNERSHIP.yaml group, with how each group's reviewers
+      are requested.
     - The LLM's additional_owner_concerns are split into accepted and
       discarded_additional_owner_concerns. A concern is discarded if its
       confidence is low or it cites a file whose patch was truncated or
@@ -721,6 +761,7 @@ class OwnershipResult(_Record):
     additional_owner_concerns: tuple[AdditionalOwnerConcern, ...] = ()
     discarded_additional_owner_concerns: tuple[AdditionalOwnerConcern, ...] = ()
     uncovered_concerns: tuple[UncoveredConcern, ...] = ()
+    ownership_groups: dict[str, OwnershipGroup] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Sanity: this result is built by validate_ownership from already
@@ -762,6 +803,15 @@ class OwnershipResult(_Record):
         )
         if self.llm_run_status != "succeeded" and any(concerns):
             raise ValueError("only a succeeded LLM run carries concerns")
+        # ownership_groups covers the same owners and files as codepath_owners.
+        # Which owner matched which file is only in codepath_owners, since one
+        # path_handles group's rules can list different handles per path.
+        groups = self.ownership_groups.values()
+        group_owners = {owner for group in groups for owner in group.owners}
+        group_files = {file for group in groups for file in group.files}
+        codepath_files = {file for files in self.codepath_owners.values() for file in files}
+        if group_owners != set(codepath) or group_files != codepath_files:
+            raise ValueError("ownership groups do not match codepath owners")
 
     @property
     def additional_owners(self) -> tuple[str, ...]:
@@ -804,10 +854,12 @@ class OwnershipResult(_Record):
         additional_owner_concerns: list[AdditionalOwnerConcern] | tuple = (),
         discarded_additional_owner_concerns: list[AdditionalOwnerConcern] | tuple = (),
         uncovered_concerns: list[UncoveredConcern] | tuple = (),
+        ownership_groups: dict[str, OwnershipGroup] | None = None,
     ) -> OwnershipResult:
         """Canonicalize one result built by validation."""
 
         codepath = codepath_owners or {}
+        groups = ownership_groups or {}
         return cls(
             llm_run_status,
             {
@@ -818,6 +870,7 @@ class OwnershipResult(_Record):
             tuple(sorted(additional_owner_concerns, key=lambda c: c.owner_id)),
             tuple(discarded_additional_owner_concerns),
             tuple(uncovered_concerns),
+            {name: groups[name] for name in sorted(groups)},
         )
 
 
@@ -834,7 +887,9 @@ class ReviewerSnapshot(_Record):
     """Hold every live GitHub read planning made for one PR.
 
     A None field was not needed or could not be read; errors says which reads
-    failed and why.
+    failed and why. previously_requested is everyone ever requested on the PR, from
+    its timeline; codepath_owners_without_push are codepath owners planning might
+    request who lack push access, so GitHub's CODEOWNERS would skip them too.
     """
 
     existing_labels: tuple[str, ...]
@@ -843,6 +898,8 @@ class ReviewerSnapshot(_Record):
     submitted_reviewers: tuple[str, ...] | None
     rosters: dict[str, tuple[str, ...]] | None
     errors: dict[str, str]
+    previously_requested: tuple[str, ...] | None = None
+    codepath_owners_without_push: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -886,13 +943,15 @@ BOT_TRIAGED_LABEL = "bot-triaged"
 BOT_TRIAGE_ERROR_LABEL = "bot-triage-error"
 MISSING_ACTIONABLE_ISSUE_LABEL = "missing actionable issue"
 # The only labels a plan may add, by decision; missing_actionable_issue plans
-# must instead be exactly MISSING_ACTIONABLE_ISSUE_ACTIONS.
+# instead add exactly MISSING_ACTIONABLE_ISSUE_LABELS.
 DECISION_LABELS = {
     "triage": frozenset({TRIAGED_LABEL, BOT_TRIAGED_LABEL}),
     "incomplete": frozenset({BOT_TRIAGE_ERROR_LABEL}),
 }
 # Why a reviewer is requested, in the order requests appear in a plan.
-REQUEST_REASONS = ("supporter", "actionable_labeler", "owner_roster")
+REQUEST_REASONS = ("codepath_owner", "supporter", "actionable_labeler", "owner_roster")
+# The only label a plan may remove, once the PR it marked meets policy.
+REMOVABLE_LABELS = frozenset({MISSING_ACTIONABLE_ISSUE_LABEL})
 TRIAGE_DECISIONS = frozenset(
     {
         "kept_open",
@@ -922,16 +981,15 @@ class _Action(_Record):
 class RequestReviewers(_Action):
     """Request users who share one reason.
 
+    - codepath_owner: owns a changed file through OWNERSHIP.yaml. Requested on
+      every run, admitted or not, as GitHub's native CODEOWNERS requests were.
     - supporter: named as a supporter in the PR description and verified.
     - actionable_labeler: labeled a linked or related issue `actionable`.
     - owner_roster: picked from a team owner's roster.
-
-    Codepath owners are never requested here: GitHub requests them through
-    CODEOWNERS.
     """
 
     users: tuple[str, ...]
-    reason: Literal["supporter", "actionable_labeler", "owner_roster"]
+    reason: Literal["codepath_owner", "supporter", "actionable_labeler", "owner_roster"]
     kind: str = "request_reviewers"
 
 
@@ -943,7 +1001,15 @@ class AddLabels(_Action):
     kind: str = "add_labels"
 
 
-Action = RequestReviewers | AddLabels
+@dataclass(frozen=True)
+class RemoveLabels(_Action):
+    """Remove labels from the pull request; only REMOVABLE_LABELS are allowed."""
+
+    labels: tuple[str, ...]
+    kind: str = "remove_labels"
+
+
+Action = RequestReviewers | AddLabels | RemoveLabels
 
 
 MISSING_ACTIONABLE_ISSUE_LABELS = (
@@ -1007,20 +1073,23 @@ class ActionPlan(_Record):
         # Security: this is the analyze job's output, and the apply job, which
         # has pull-requests: write, executes it as is. These checks cap what a
         # faulty or manipulated analysis can do:
-        # - An inactive or handled PR gets no actions.
+        # - An inactive PR gets no actions.
         # - Only an unadmitted PR on the first attempt can be marked as missing
         #   an actionable issue, and only with exactly
-        #   MISSING_ACTIONABLE_ISSUE_ACTIONS (triaged, bot-triaged, missing
+        #   MISSING_ACTIONABLE_ISSUE_LABELS (triaged, bot-triaged, missing
         #   actionable issue).
-        # - An unadmitted PR is never routed to reviewers.
+        # - An unadmitted PR is only ever requested its codepath owners.
         # - Only this bot's own labels can be added: those above, triaged and
         #   bot-triaged for triage, and bot-triage-error for incomplete. No other
         #   label (e.g. ciflow/*) can be added.
+        # - The only label that can be removed is `missing actionable issue`, and
+        #   only from an admitted PR.
         # - Nothing can close a PR or post a comment: there is no action for it.
-        # - Every requested user is justified by its request's reason: a verified
-        #   supporter or an actionable labeler. owner_roster users are checked
-        #   against rosters by apply. Nobody is requested twice, no team is ever
-        #   requested, and each request is capped at MAX_REVIEW_REQUESTS.
+        # - Every requested user is justified by its request's reason: a codepath
+        #   owner in the context, a verified supporter, or an actionable labeler.
+        #   owner_roster users are checked against rosters by apply. Nobody is
+        #   requested twice, no team is ever requested, and each request is
+        #   capped at MAX_REVIEW_REQUESTS.
         # The remaining checks (sorted logins, action order) keep the format canonical.
         super().__post_init__()
         context = self.context
@@ -1028,38 +1097,53 @@ class ActionPlan(_Record):
         if self.decision not in TRIAGE_DECISIONS:
             raise RuntimeError("action plan has an unknown decision")
         if not facts.is_active and (self.decision != "kept_open" or self.actions):
-            raise RuntimeError("action plan acts on an inactive or handled PR")
-        if self.decision == "missing_actionable_issue":
-            if context.admitted:
-                raise RuntimeError("action plan marks an admitted PR")
-            if context.run_attempt != 1:
-                raise RuntimeError("action plan marks a PR on a rerun")
-            if self.actions != MISSING_ACTIONABLE_ISSUE_ACTIONS:
-                raise RuntimeError("action plan labels are not the fixed set")
-            return
+            raise RuntimeError("action plan acts on an inactive PR")
 
         requests = [a for a in self.actions if isinstance(a, RequestReviewers)]
         label_actions = [a for a in self.actions if isinstance(a, AddLabels)]
-        if self.actions != (*requests, *label_actions) or len(label_actions) > 1:
-            raise RuntimeError("action plan must request reviewers, then add labels")
+        removals = [a for a in self.actions if isinstance(a, RemoveLabels)]
+        if (
+            self.actions != (*requests, *label_actions, *removals)
+            or len(label_actions) > 1
+            or len(removals) > 1
+        ):
+            raise RuntimeError(
+                "action plan must request reviewers, add labels, then remove labels"
+            )
         reasons = [request.reason for request in requests]
         if reasons != sorted(set(reasons), key=REQUEST_REASONS.index):
             raise RuntimeError(
                 "action plan reviewer requests are repeated or unordered"
             )
+        if self.decision == "missing_actionable_issue":
+            if context.admitted:
+                raise RuntimeError("action plan marks an admitted PR")
+            if context.run_attempt != 1:
+                raise RuntimeError("action plan marks a PR on a rerun")
+            if [a.labels for a in label_actions] != [MISSING_ACTIONABLE_ISSUE_LABELS]:
+                raise RuntimeError("action plan labels are not the fixed set")
+        else:
+            allowed_labels = DECISION_LABELS.get(self.decision, frozenset())
+            for action in label_actions:
+                if not action.labels or not set(action.labels) <= allowed_labels:
+                    raise RuntimeError("action plan has a label outside its decision")
         if not context.admitted and (
-            self.decision not in {"kept_open", "incomplete"} or requests
+            self.decision not in {"kept_open", "incomplete", "missing_actionable_issue"}
+            or set(reasons) - {"codepath_owner"}
         ):
             raise RuntimeError("action plan routes a PR that was not admitted")
-
-        allowed_labels = DECISION_LABELS.get(self.decision, frozenset())
-        for action in label_actions:
-            if not action.labels or not set(action.labels) <= allowed_labels:
-                raise RuntimeError("action plan has a label outside its decision")
+        for action in removals:
+            if not context.admitted or not action.labels:
+                raise RuntimeError("action plan removes a label from an unadmitted PR")
+            if not set(action.labels) <= REMOVABLE_LABELS:
+                raise RuntimeError("action plan removes a label it may not remove")
 
         # Each reason's users must come from that reason's own source. Roster
         # membership for owner_roster is checked by apply, which loads rosters.
         sources = {
+            "codepath_owner": {
+                owner.removeprefix("@").casefold() for owner in context.codepath_owners
+            },
             "supporter": {login.casefold() for login in facts.supporters},
             "actionable_labeler": {
                 login.casefold() for login in facts.actionable_labelers

@@ -195,7 +195,7 @@ class OwnershipInputMainTest(unittest.TestCase):
         codepath_policy = {
             "source": {
                 "repository": REPOSITORY,
-                "path": "CODEOWNERS",
+                "path": "OWNERSHIP.yaml",
                 "ref": "a" * 40,
                 "blob_sha": "c" * 40,
             },
@@ -203,9 +203,10 @@ class OwnershipInputMainTest(unittest.TestCase):
                 {
                     "pattern": "/test_dir/torch/csrc/autograd/",
                     "owners": ["@soulitzer"],
+                    "group": "autograd",
+                    "review_request": "path_handles",
                 }
             ],
-            "parse_diagnostics": [],
         }
         (directory / "intake.json").write_text(json.dumps(intake.to_dict()))
         github_output = directory / "github-output"
@@ -341,7 +342,7 @@ class OwnershipInputMainTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             status, _, load_codepath, _, outputs = self.run_main(
-                directory=root, intake=intake_result(is_already_handled=True)
+                directory=root, intake=intake_result(is_opted_out=True)
             )
             error = json.loads((root / "error.json").read_text())
             self.assertFalse((root / "llm_input.json").exists())

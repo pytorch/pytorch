@@ -31,8 +31,10 @@ from urllib.parse import quote
 from github_api import GitHubClient, GitHubReader, PullRequestRef
 from identifiers import USER_HANDLE_RE
 from reviewer_state import (
+    fetch_previously_requested_users,
     fetch_requested_reviewer_handles,
     fetch_submitted_review_state,
+    has_push_access,
 )
 from schemas import (
     Action,
@@ -43,13 +45,13 @@ from schemas import (
     check_stage_results,
     IntakeResult,
     MAX_REVIEW_REQUESTS,
-    MISSING_ACTIONABLE_ISSUE_ACTIONS,
     MISSING_ACTIONABLE_ISSUE_LABEL,
     MISSING_ACTIONABLE_ISSUE_LABELS,
     OwnershipResult,
     PlanContext,
     PlannerInput,
     PullRequestIdentity,
+    RemoveLabels,
     REQUEST_REASONS,
     RequestReviewers,
     ReviewerSnapshot,
@@ -59,10 +61,12 @@ from step_summary import summary_code, summary_diff, summary_prose
 from trusted_config import load_team_members
 
 
-# GitHub requests codepath owners through CODEOWNERS; the bot never does.
-# Planning reads them to tell whether the PR has owners, to skip a roster pick
-# for a team whose member is already a codepath owner, and to explain who
-# covers the PR.
+# GitHub doesn't read the generated CODEOWNERS, so planning requests codepath
+# owners itself, on every run and whether or not the PR is admitted, as GitHub's
+# native requests did. Auto PR Triage runs on every push, so each run plans
+# against what earlier runs and people already did: nobody ever requested on the
+# PR is asked again, and a triaged PR is never marked as missing an actionable
+# issue.
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MAX_LOGGED_OWNER_FILES = 16
 
@@ -73,12 +77,19 @@ class ReviewerState:
 
     requested_reviewers: frozenset[str]
     submitted_reviewers: frozenset[str]
+    previously_requested: frozenset[str] = frozenset()
 
     @property
     def current_reviewers(self) -> frozenset[str]:
         """Return handles with a pending request or submitted review."""
 
         return self.requested_reviewers | self.submitted_reviewers
+
+    @property
+    def involved(self) -> frozenset[str]:
+        """Return handles pending, reviewed, or ever requested; none is asked again."""
+
+        return self.current_reviewers | self.previously_requested
 
 
 def sanitize_log_text(value: str) -> str:
@@ -168,38 +179,39 @@ def reviewer_choice_reason(
     """Describe why one owner resolved to one reviewer."""
 
     reviewer = handle(choice.reviewer)
+    # A codepath owner is its own group, so only a team owner is "covered".
+    covering = "" if owner.casefold() == choice.reviewer.casefold() else f" covering `{owner}`"
     reasons = {
         "selected": (
             f"{reviewer} was picked at random from `{owner}`'s roster, seeded by "
             "this PR so that reruns pick the same member."
         ),
-        "codeowners_pending": (
-            f"{reviewer} is a codepath owner in CODEOWNERS and already has a pending "
-            "request; no new request is needed."
+        "requested": (
+            f"{reviewer} is a codepath owner and has no request or review yet, so "
+            "this run requests them."
         ),
-        "codeowners_submitted": (
-            f"{reviewer} is a codepath owner in CODEOWNERS and already submitted a "
-            "review; no new request is needed."
+        "no_push_access": (
+            f"{reviewer} is a codepath owner without push access, so, as with "
+            "GitHub's CODEOWNERS, they are not requested."
         ),
-        "codeowners_missing": (
-            f"{reviewer} is a codepath owner in CODEOWNERS but has no pending request "
-            "or review, so GitHub may not have requested them or someone may have "
-            "removed the request."
-        ),
-        "codeowners_unconfirmed": (
-            f"{reviewer} is a codepath owner in CODEOWNERS; GitHub requests codepath "
-            "owners, but the reviewer state could not be read to confirm."
+        "unconfirmed": (
+            f"{reviewer} is a codepath owner, but the reviewer state could not be "
+            "read, so they were not requested."
         ),
         "codepath_covered": (
             f"{reviewer} covers `{owner}` through codepath ownership; no `{owner}` "
             "roster pick was needed."
         ),
         "submitted": (
-            f"{reviewer} already submitted a review covering `{owner}`; no new request is needed."
+            f"{reviewer} already submitted a review{covering}; no new request is needed."
         ),
         "pending": (
-            f"{reviewer} already has a pending request covering `{owner}`; no new "
-            "request is needed."
+            f"{reviewer} already has a pending request{covering}; no new request is "
+            "needed."
+        ),
+        "previously_requested": (
+            f"{reviewer} was requested on this PR before{covering}; a removed request "
+            "is not repeated."
         ),
     }
     return reasons[choice.state]
@@ -371,20 +383,23 @@ def fetch_reviewer_state(pr: PullRequestRef, /) -> ReviewerState:
     return ReviewerState(
         requested_reviewers=requested,
         submitted_reviewers=submitted,
+        previously_requested=fetch_previously_requested_users(pr),
     )
 
 
-# A team owner's reviewer is selected, codepath_covered, submitted, or pending; a
-# codepath owner's state says what reviewer state showed about GitHub's request.
+# A team owner's reviewer is selected, codepath_covered, submitted, pending, or
+# previously_requested. A codepath owner's state is requested, submitted,
+# pending, previously_requested, no_push_access, or unconfirmed (no reviewer
+# state).
 ChoiceState = Literal[
     "selected",
+    "requested",
     "codepath_covered",
     "submitted",
     "pending",
-    "codeowners_pending",
-    "codeowners_submitted",
-    "codeowners_missing",
-    "codeowners_unconfirmed",
+    "previously_requested",
+    "no_push_access",
+    "unconfirmed",
 ]
 
 
@@ -393,10 +408,10 @@ class OwnerChoice:
     """Record how one owner resolved to one reviewer.
 
     For a team owner, state says whether the reviewer is newly picked from its
-    roster (selected) or already covers it: as a codepath owner, with a
-    submitted review, or with a pending request. For a codepath owner, whom
-    GitHub requests through CODEOWNERS, state says whether reviewer state showed
-    a pending request, a review, neither, or could not be read.
+    roster (selected) or already covers it: as a requested codepath owner, with
+    a submitted review, a pending request, or an earlier request. For a codepath
+    owner, it says whether this run requests them, they are already involved,
+    they lack push access, or the reviewer state could not be read.
     """
 
     reviewer: str
@@ -406,38 +421,6 @@ class OwnerChoice:
         """Return the logged form."""
 
         return asdict(self)
-
-
-def classify_team_owners(
-    *,
-    team_owner_ids: tuple[str, ...],
-    rosters: dict[str, tuple[str, ...]],
-    codepath_handles: frozenset[str],
-    reviewers: ReviewerState,
-    author_handle: str,
-) -> tuple[dict[str, OwnerChoice], tuple[str, ...]]:
-    """Return owners an existing reviewer covers, and owners needing a new pick.
-
-    A roster member who is a codepath owner covers the team, because GitHub
-    requests codepath owners through CODEOWNERS.
-    """
-
-    choices: dict[str, OwnerChoice] = {}
-    needs_pick: list[str] = []
-    for owner_id in team_owner_ids:
-        members = {member.casefold(): member for member in rosters[owner_id]}
-        covered = (codepath_handles & set(members)) - {author_handle}
-        submitted = (set(members) & reviewers.submitted_reviewers) - {author_handle}
-        pending = (set(members) & reviewers.requested_reviewers) - {author_handle}
-        if covered:
-            choices[owner_id] = OwnerChoice(min(covered), "codepath_covered")
-        elif submitted:
-            choices[owner_id] = OwnerChoice(members[min(submitted)], "submitted")
-        elif pending:
-            choices[owner_id] = OwnerChoice(members[min(pending)], "pending")
-        else:
-            needs_pick.append(owner_id)
-    return choices, tuple(needs_pick)
 
 
 def pick_roster_member(
@@ -461,6 +444,54 @@ def pick_roster_member(
     return eligible[int.from_bytes(seed[:8], "big") % len(eligible)]
 
 
+@dataclass(frozen=True)
+class OwnerGroup:
+    """Handles that can each cover one owner; any one of them is enough."""
+
+    owner: str
+    members: tuple[str, ...]
+
+
+def choose_owner_reviewers(
+    *,
+    identity: PullRequestIdentity,
+    groups: tuple[OwnerGroup, ...],
+    coverage: tuple[tuple[ChoiceState, frozenset[str]], ...],
+    author_handle: str,
+) -> dict[str, OwnerChoice]:
+    """Give each owner group a member who already covers it, or one new pick.
+
+    coverage lists casefolded handles already involved in the PR, one set per
+    state, highest precedence first; a group covered by several takes the first
+    state that covers it. A group nobody covers gets a member picked by
+    pick_roster_member. The author never covers or is picked, so a group whose
+    only member is the author is left out of the result.
+    """
+
+    choices: dict[str, OwnerChoice] = {}
+    for group in groups:
+        members = {
+            member.casefold(): member
+            for member in group.members
+            if member.casefold() != author_handle
+        }
+        for state, handles in coverage:
+            if covered := handles & members.keys():
+                choices[group.owner] = OwnerChoice(members[min(covered)], state)
+                break
+        else:
+            reviewer = pick_roster_member(
+                repository=identity.repository,
+                number=identity.number,
+                owner=group.owner,
+                members=group.members,
+                author_handle=author_handle,
+            )
+            if reviewer is not None:
+                choices[group.owner] = OwnerChoice(reviewer, "selected")
+    return choices
+
+
 def select_team_owner_reviewers(
     *,
     identity: PullRequestIdentity,
@@ -470,7 +501,10 @@ def select_team_owner_reviewers(
     author_handle: str,
     reviewers: ReviewerState,
 ) -> dict[str, OwnerChoice]:
-    """Select reviewers for team owner IDs from the snapshot alone."""
+    """Select reviewers for team owner IDs from the snapshot alone.
+
+    A roster member who is a codepath owner this plan requests covers the team.
+    """
 
     rosters = snapshot.rosters
     if rosters is None:
@@ -479,24 +513,17 @@ def select_team_owner_reviewers(
         )
     if not set(team_owner_ids) <= set(rosters):
         raise ValueError("owner is not configured")
-    choices, needs_pick = classify_team_owners(
-        team_owner_ids=team_owner_ids,
-        rosters=rosters,
-        codepath_handles=codepath_handles,
-        reviewers=reviewers,
+    return choose_owner_reviewers(
+        identity=identity,
+        groups=tuple(OwnerGroup(owner, rosters[owner]) for owner in team_owner_ids),
+        coverage=(
+            ("codepath_covered", codepath_handles),
+            ("submitted", reviewers.submitted_reviewers),
+            ("pending", reviewers.requested_reviewers),
+            ("previously_requested", reviewers.previously_requested),
+        ),
         author_handle=author_handle,
     )
-    for owner_id in needs_pick:
-        reviewer = pick_roster_member(
-            repository=identity.repository,
-            number=identity.number,
-            owner=owner_id,
-            members=rosters[owner_id],
-            author_handle=author_handle,
-        )
-        if reviewer is not None:
-            choices[owner_id] = OwnerChoice(reviewer, "selected")
-    return choices
 
 
 @dataclass(frozen=True)
@@ -735,35 +762,38 @@ def find_engaged_maintainers(
 
 
 def existing_reviewers(snapshot: ReviewerSnapshot) -> ReviewerState | None:
-    """Return who already has a pending request or a submitted review, if read."""
+    """Return who is pending, has reviewed, or was ever requested, if all were read."""
 
     requested = snapshot.requested_reviewers
-
     submitted = snapshot.submitted_reviewers
-    if requested is None or submitted is None:
+    previously = snapshot.previously_requested
+    if requested is None or submitted is None or previously is None:
         return None
-    return ReviewerState(frozenset(requested), frozenset(submitted))
+    return ReviewerState(frozenset(requested), frozenset(submitted), frozenset(previously))
 
 
 def new_reviewer_requests(
     *,
     engaged_maintainers: list[tuple[str, EngagementReason]],
+    codepath_users: tuple[str, ...] = (),
     roster_users: tuple[str, ...] = (),
     existing: ReviewerState,
     author_handle: str,
 ) -> tuple[RequestReviewers, ...]:
-    """Build one request per reason for candidates who are not reviewing yet.
+    """Build one request per reason for candidates nobody has involved yet.
 
-    Supporters and actionable labelers come from engaged_maintainers, and
-    owner_roster from roster_users. Anyone with a pending request or a submitted
-    review is dropped, as is the author, and each user is requested once, under
-    the first reason in REQUEST_REASONS that names them.
+    Codepath owners come from codepath_users, supporters and actionable labelers
+    from engaged_maintainers, and owner_roster from roster_users. Anyone pending,
+    who has reviewed, or who was ever requested is dropped, as is the author, and
+    each user is requested once, under the first reason in REQUEST_REASONS that
+    names them.
     """
 
     candidates = {
         kind: tuple(login for login, r in engaged_maintainers if r.kind == kind)
         for kind in ("supporter", "actionable_labeler")
     }
+    candidates["codepath_owner"] = codepath_users
     candidates["owner_roster"] = roster_users
     seen: set[str] = set()
     requests = []
@@ -772,7 +802,7 @@ def new_reviewer_requests(
             user.casefold(): user
             for user in candidates[reason]
             if user.casefold() not in seen
-            and f"@{user}".casefold() not in existing.current_reviewers
+            and f"@{user}".casefold() not in existing.involved
             and f"@{user}".casefold() != author_handle
         }
         seen |= set(fresh)
@@ -839,18 +869,34 @@ def gather_planner_input(
     existing = tuple(label for label in labels if exists[label])
     missing = tuple(label for label in labels if not exists[label])
 
-    requested = submitted = None
+    requested = submitted = previously = without_push = None
     rosters: dict[str, tuple[str, ...]] | None = None
     admitted = facts.passes_intake or bool(ownership.bypass_intake_matches)
     owners = ownership.codepath_owners or ownership.additional_owners
-    if admitted and (owners or engagement_candidates(intake)):
+    pr = PullRequestRef(github=github, repo=args.repository, number=args.pr)
+    # Codepath owners are requested whether or not the PR is admitted.
+    if ownership.codepath_owners or (
+        admitted and (owners or engagement_candidates(intake))
+    ):
         try:
-            state = fetch_reviewer_state(
-                PullRequestRef(github=github, repo=args.repository, number=args.pr)
-            )
+            state = fetch_reviewer_state(pr)
             requested = tuple(sorted(state.requested_reviewers))
             submitted = tuple(sorted(state.submitted_reviewers))
+            previously = tuple(sorted(state.previously_requested))
+            # Only codepath owners this run might request need a permission read.
+            author_handle = f"@{intake.author_login}".casefold()
+            candidates = sorted(
+                key
+                for key in (o.casefold() for o in ownership.codepath_owners)
+                if USER_HANDLE_RE.fullmatch(key)
+                and key != author_handle
+                and key not in state.involved
+            )
+            without_push = tuple(
+                key for key in candidates if not has_push_access(pr, login=key[1:])
+            )
         except (RuntimeError, subprocess.TimeoutExpired) as exc:
+            requested = submitted = previously = without_push = None
             errors["reviewers"] = read_failure(exc)
     if requested is not None and submitted is not None and ownership.additional_owners:
         try:
@@ -863,17 +909,24 @@ def gather_planner_input(
         except (RuntimeError, ValueError) as exc:
             errors["rosters"] = read_failure(exc)
     snapshot = ReviewerSnapshot(
-        existing, missing, requested, submitted, rosters, errors
+        existing, missing, requested, submitted, rosters, errors, previously, without_push
     )
     return PlannerInput(intake, ownership, snapshot, args.run_attempt)
 
 
 def routing_actions(
-    *, requests: tuple[RequestReviewers, ...], labels: tuple[str, ...]
+    *,
+    requests: tuple[RequestReviewers, ...],
+    labels: tuple[str, ...],
+    removed_labels: tuple[str, ...] = (),
 ) -> tuple[Action, ...]:
-    """Return the reviewer requests, then one label action if there are labels."""
+    """Return the reviewer requests, then one action each to add and remove labels."""
 
-    return (*requests, *((AddLabels(labels),) if labels else ()))
+    return (
+        *requests,
+        *((AddLabels(labels),) if labels else ()),
+        *((RemoveLabels(removed_labels),) if removed_labels else ()),
+    )
 
 
 def make_plan(
@@ -896,34 +949,46 @@ def make_plan(
 
 
 def plan_unadmitted(
-    *, planner_input: PlannerInput, why: PlanExplanation
+    *,
+    planner_input: PlannerInput,
+    why: PlanExplanation,
+    requests: tuple[RequestReviewers, ...],
 ) -> tuple[ActionPlan, PlanExplanation | None]:
     """Decide for an active PR that fails intake and has no bypass match.
 
-    This is the only path that can mark a PR as missing an actionable issue.
-    Doubt about a bypass, a failed analysis or a discarded claim, never marks it.
+    requests are its codepath owners, requested whatever the decision. This is
+    the only path that can mark a PR as missing an actionable issue. Doubt about
+    a bypass, a failed analysis or a discarded claim never marks it, and neither
+    does an earlier `triaged`: a later run doesn't overturn an outcome.
     """
 
+    intake = planner_input.intake
     ownership = planner_input.ownership
-
     snapshot = planner_input.reviewers
     if why.incomplete_reasons:
         require_label(snapshot=snapshot, label_name=BOT_TRIAGE_ERROR_LABEL)
-        actions = routing_actions(requests=(), labels=(BOT_TRIAGE_ERROR_LABEL,))
+        actions = routing_actions(requests=requests, labels=(BOT_TRIAGE_ERROR_LABEL,))
         return make_plan(
             planner_input=planner_input, decision="incomplete", actions=actions
         ), why
-    # Marking a PR answers its entry event only. A rerun is a later, manual
-    # action, often after a failure, so it may still route or triage an
-    # admitted PR but leaves an unadmitted one for a human.
-    if ownership.has_discarded_bypass_intake_match or planner_input.run_attempt != 1:
-        return make_plan(planner_input=planner_input, decision="kept_open"), None
+    # A rerun is a later, manual action, often after a failure, so it may still
+    # route or triage an admitted PR but leaves an unadmitted one for a human.
+    if (
+        ownership.has_discarded_bypass_intake_match
+        or planner_input.run_attempt != 1
+        or TRIAGED_LABEL in intake.labels
+    ):
+        actions = routing_actions(requests=requests, labels=())
+        return make_plan(
+            planner_input=planner_input, decision="kept_open", actions=actions
+        ), why if requests else None
     for label_name in MISSING_ACTIONABLE_ISSUE_LABELS:
         require_label(snapshot=snapshot, label_name=label_name)
+    actions = routing_actions(requests=requests, labels=MISSING_ACTIONABLE_ISSUE_LABELS)
     return make_plan(
         planner_input=planner_input,
         decision="missing_actionable_issue",
-        actions=MISSING_ACTIONABLE_ISSUE_ACTIONS,
+        actions=actions,
     ), why
 
 
@@ -951,15 +1016,94 @@ class TeamOwnerReviewers:
         return tuple(o for o in self.team_owner_ids if o not in self.choices)
 
 
-def resolve_team_owner_reviewers(planner_input: PlannerInput) -> TeamOwnerReviewers:
+@dataclass(frozen=True)
+class CodepathOwnerReviewers:
+    """Hold each codepath owner's state; its requests derive from it.
+
+    choices maps every codepath owner other than the author to its state.
+    """
+
+    choices: dict[str, OwnerChoice]
+    incomplete_reasons: tuple[str, ...]
+
+    @property
+    def users(self) -> tuple[str, ...]:
+        """Return the codepath owners this run requests, as logins."""
+
+        picks = {c.reviewer[1:] for c in self.choices.values() if c.state == "requested"}
+        return tuple(sorted(picks, key=str.casefold))
+
+
+def resolve_codepath_owner_reviewers(
+    planner_input: PlannerInput,
+) -> CodepathOwnerReviewers:
+    """Request each codepath owner nobody has involved yet, as GitHub's CODEOWNERS did.
+
+    Each touched OWNERSHIP.yaml group's review_request decides how its owners
+    are requested. In a path_handles group, the only kind so far, each owner is a
+    group of one, so everyone on the matching path is requested unless they are
+    the author, lack push access, are pending, have reviewed, or were ever
+    requested on the PR. Without the reviewer state nobody is requested, since a
+    removed request couldn't be told apart, and the plan is incomplete.
+    """
+
+    intake = planner_input.intake
+    ownership = planner_input.ownership
+    snapshot = planner_input.reviewers
+    author_handle = f"@{intake.author_login}".casefold()
+    groups = ownership.ownership_groups
+    path_handles = {
+        o for g in groups.values() if g.review_request == "path_handles" for o in g.owners
+    }
+    # OWNERSHIP.yaml only allows user logins, the only owners the token can request.
+    owners = [
+        o
+        for o in ownership.codepath_owners
+        if o in path_handles
+        and USER_HANDLE_RE.fullmatch(o)
+        and o.casefold() != author_handle
+    ]
+    if not owners:
+        return CodepathOwnerReviewers({}, ())
+    existing = existing_reviewers(snapshot)
+    without_push = snapshot.codepath_owners_without_push
+    if existing is None or without_push is None:
+        error = snapshot.errors.get("reviewers", "reviewer state was not read")
+        reason = f"Reviewer state was unavailable ({error}), so codepath owners were not requested."
+        unconfirmed = {o: OwnerChoice(o, "unconfirmed") for o in owners}
+        return CodepathOwnerReviewers(unconfirmed, (reason,))
+    choices = {
+        o: OwnerChoice(o, "no_push_access")
+        for o in owners
+        if o.casefold() in without_push
+    }
+    picks = choose_owner_reviewers(
+        identity=intake.identity,
+        groups=tuple(OwnerGroup(o, (o,)) for o in owners if o not in choices),
+        coverage=(
+            ("submitted", existing.submitted_reviewers),
+            ("pending", existing.requested_reviewers),
+            ("previously_requested", existing.previously_requested),
+        ),
+        author_handle=author_handle,
+    )
+    for owner, pick in picks.items():
+        state = "requested" if pick.state == "selected" else pick.state
+        choices[owner] = OwnerChoice(pick.reviewer, state)
+    return CodepathOwnerReviewers(choices, ())
+
+
+def resolve_team_owner_reviewers(
+    planner_input: PlannerInput, /, *, codepath: CodepathOwnerReviewers
+) -> TeamOwnerReviewers:
     """Pick each additional owner's reviewer from its roster, unless covered.
 
-    An owner whose roster member is a codepath owner, has submitted a review, or
-    has a pending request keeps that reviewer, and nobody new is asked;
-    otherwise a roster member is picked at random, seeded by the PR (see
-    pick_roster_member). GitHub requests codepath owners through CODEOWNERS, so
-    every reviewer picked here is optional: a failure skips it and records an
-    incomplete reason instead of raising.
+    An owner whose roster member is a codepath owner this run requests, has
+    submitted a review, has a pending request, or was ever requested keeps that
+    reviewer, and nobody new is asked; otherwise a roster member is picked at
+    random, seeded by the PR (see pick_roster_member). Every reviewer picked here
+    is optional: a failure skips it and records an incomplete reason instead of
+    raising.
     """
 
     intake = planner_input.intake
@@ -980,7 +1124,7 @@ def resolve_team_owner_reviewers(planner_input: PlannerInput) -> TeamOwnerReview
             identity=intake.identity,
             snapshot=snapshot,
             team_owner_ids=team_owner_ids,
-            codepath_handles=frozenset(o.casefold() for o in ownership.codepath_owners),
+            codepath_handles=frozenset(f"@{user}".casefold() for user in codepath.users),
             author_handle=f"@{intake.author_login}".casefold(),
             reviewers=existing,
         )
@@ -998,6 +1142,7 @@ def explain_plan(
     planner_input: PlannerInput,
     incomplete_reasons: list[str],
     engaged_maintainers: list[tuple[str, EngagementReason]] | None = None,
+    codepath: CodepathOwnerReviewers | None = None,
     team_owners: TeamOwnerReviewers | None = None,
     requests: tuple[RequestReviewers, ...] = (),
 ) -> PlanExplanation:
@@ -1005,15 +1150,13 @@ def explain_plan(
 
     A reviewer's reasons come from three sources: their own engagement
     (supporter, actionable labeler, maintainer request), a team owner they were
-    chosen for or already cover, and a codepath owner they are, whom GitHub
-    requests through CODEOWNERS. This is log-only: the plan's requests and labels
-    are already decided.
+    chosen for or already cover, and a codepath owner they are. This is log-only:
+    the plan's requests and labels are already decided.
     """
 
     intake = planner_input.intake
 
     ownership = planner_input.ownership
-    author_handle = f"@{intake.author_login}".casefold()
     concerns = {c.owner_id: c for c in ownership.additional_owner_concerns}
     requested = {handle.casefold() for handle in planned_handles(requests)}
 
@@ -1028,22 +1171,9 @@ def explain_plan(
         OwnerReason(owner, choice, provenance_for(owner))
         for owner, choice in team_choices.items()
     ]
-    # Codepath owners other than the author, whom GitHub requests through
-    # CODEOWNERS; reviewer state shows whether that request is visible.
-    existing = existing_reviewers(planner_input.reviewers)
-    for owner in ownership.codepath_owners:
-        key = owner.casefold()
-        if key == author_handle:
-            continue
-        if existing is None:
-            state = "codeowners_unconfirmed"
-        elif key in existing.submitted_reviewers:
-            state = "codeowners_submitted"
-        elif key in existing.requested_reviewers:
-            state = "codeowners_pending"
-        else:
-            state = "codeowners_missing"
-        choice = OwnerChoice(owner, state)
+    # Codepath owners other than the author, as resolve_codepath_owner_reviewers
+    # decided.
+    for owner, choice in (codepath.choices if codepath else {}).items():
         owner_reasons.append(OwnerReason(owner, choice, provenance_for(owner)))
 
     # Group every reason under its reviewer: engagement first, then codepath
@@ -1075,24 +1205,27 @@ def build_action_plan(
     """Decide one plan from the planner input alone.
 
     Read it top to bottom as a funnel with four exits, each closing one case:
-    1. An inactive or handled PR: kept_open, with nothing to explain.
-    2. A PR that is not admitted (fails intake, no bypass match):
-       plan_unadmitted decides; it is the only code that can mark a PR as
-       missing an actionable issue.
+    1. An inactive PR (draft, closed, not against main, or opted out): kept_open,
+       with nothing to explain.
+    2. A PR that is not admitted (fails intake, no bypass match): its codepath
+       owners are requested, and plan_unadmitted decides; it is the only code
+       that can mark a PR as missing an actionable issue.
     3. An admitted PR with no codepath owners and no additional owners: nobody
        is requested for ownership, so it is triaged only if a handoff reviewer
        is engaged, whatever its concerns.
-    4. An admitted PR with owners: request a reviewer for each additional owner
-       (from resolve_team_owner_reviewers) and the supporters and actionable
-       labelers; GitHub requests the codepath owners through CODEOWNERS.
-       The decision is then the first that applies:
+    4. An admitted PR with owners: request its codepath owners
+       (resolve_codepath_owner_reviewers), a reviewer for each additional owner
+       (resolve_team_owner_reviewers), and the supporters and actionable
+       labelers. The decision is then the first that applies:
        - incomplete, if any routing fell short;
        - routed_untriaged, if a concern has no owner and there is no handoff
          reviewer;
        - otherwise triage.
     Between exits 2 and 3, setup gathers what both admitted cases share: the
     supporter and actionable-labeler candidates and whether there is a handoff
-    reviewer. In both, every candidate is filtered for anyone already reviewing.
+    reviewer. Every candidate, on every exit, is filtered for anyone pending, who
+    has reviewed, or who was ever requested. An admitted PR still marked as
+    missing an actionable issue from an earlier run has that label removed.
 
     incomplete_reasons is built once, right after admission, and any entry
     makes the plan incomplete. The explanation is log-only (None when there is
@@ -1106,25 +1239,38 @@ def build_action_plan(
     snapshot = planner_input.reviewers
     facts = intake.facts
 
-    # Exit 1: inactive or handled.
+    # Exit 1: inactive.
     if not facts.is_active:
         return make_plan(planner_input=planner_input, decision="kept_open"), None
 
     llm_failed = ["The LLM run failed; only codepath owners remain."]
     llm_reasons = llm_failed if ownership.llm_run_status == "failed" else []
 
+    # Codepath owners are requested on every run, admitted or not, as GitHub's
+    # CODEOWNERS did. Their failures add incomplete reasons rather than raising.
+    codepath = resolve_codepath_owner_reviewers(planner_input)
+    existing = existing_reviewers(snapshot) or ReviewerState(frozenset(), frozenset())
+    author_handle = f"@{intake.author_login}".casefold()
+
     # Exit 2: not admitted. A PR is admitted if it passes intake or a team's
     # bypass intake matched. A PR that is not admitted is decided by
     # plan_unadmitted, the only code that can mark a PR as missing an
-    # actionable issue. Only a failed LLM run can make it incomplete: routing
-    # never runs for it.
+    # actionable issue. Only a failed LLM run or unreadable reviewer state can
+    # make it incomplete: semantic routing never runs for it.
     if not facts.passes_intake and not ownership.bypass_intake_matches:
-        return plan_unadmitted(
-            planner_input=planner_input,
-            why=explain_plan(
-                planner_input=planner_input, incomplete_reasons=llm_reasons
-            ),
+        requests = new_reviewer_requests(
+            engaged_maintainers=[],
+            codepath_users=codepath.users,
+            existing=existing,
+            author_handle=author_handle,
         )
+        why = explain_plan(
+            planner_input=planner_input,
+            incomplete_reasons=[*llm_reasons, *codepath.incomplete_reasons],
+            codepath=codepath,
+            requests=requests,
+        )
+        return plan_unadmitted(planner_input=planner_input, why=why, requests=requests)
 
     # The PR is admitted from here on. Additional owners get their reviewers
     # from resolve_team_owner_reviewers, whose failures add incomplete reasons
@@ -1133,16 +1279,17 @@ def build_action_plan(
     # instead of triaged. This is the complete list.
     team_owners = None
     if ownership.codepath_owners or ownership.additional_owners:
-        team_owners = resolve_team_owner_reviewers(planner_input)
+        team_owners = resolve_team_owner_reviewers(planner_input, codepath=codepath)
     routing_reasons = team_owners.incomplete_reasons if team_owners else ()
-    incomplete_reasons = [*llm_reasons, *routing_reasons]
+    incomplete_reasons = [*llm_reasons, *codepath.incomplete_reasons, *routing_reasons]
 
     # Setup shared by exits 3 and 4: supporters and actionable labelers are
     # candidates whether or not the PR has owners, and new_reviewer_requests
-    # later drops every candidate who already reviews, whatever their reason.
+    # later drops every candidate already involved, whatever their reason. An
+    # earlier run's `missing actionable issue` no longer applies.
     engaged_maintainers = find_engaged_maintainers(intake=intake, snapshot=snapshot)
-    existing = existing_reviewers(snapshot) or ReviewerState(frozenset(), frozenset())
-    author_handle = f"@{intake.author_login}".casefold()
+    marked = MISSING_ACTIONABLE_ISSUE_LABEL in intake.labels
+    removed_labels = (MISSING_ACTIONABLE_ISSUE_LABEL,) if marked else ()
     # A handoff reviewer is trusted to pull in reviewers for uncovered concerns.
     # A team that opted in through bypass intake is trusted like a supporter,
     # so its chosen reviewer also counts.
@@ -1174,7 +1321,9 @@ def build_action_plan(
         plan = make_plan(
             planner_input=planner_input,
             decision=decision,
-            actions=routing_actions(requests=requests, labels=labels),
+            actions=routing_actions(
+                requests=requests, labels=labels, removed_labels=removed_labels
+            ),
         )
         return plan, explain_plan(
             planner_input=planner_input,
@@ -1183,10 +1332,11 @@ def build_action_plan(
             requests=requests,
         )
 
-    # Exit 4: owners exist. Request each additional owner's chosen reviewer,
-    # through the same filter for anyone already reviewing.
+    # Exit 4: owners exist. Request the codepath owners and each additional
+    # owner's chosen reviewer, through the same filter for anyone involved.
     requests = new_reviewer_requests(
         engaged_maintainers=engaged_maintainers,
+        codepath_users=codepath.users,
         roster_users=team_owners.roster_users,
         existing=existing,
         author_handle=author_handle,
@@ -1208,14 +1358,14 @@ def build_action_plan(
         planner_input=planner_input,
         decision=decision,
         actions=routing_actions(
-            requests=requests,
-            labels=status_labels,
+            requests=requests, labels=status_labels, removed_labels=removed_labels
         ),
     )
     return plan, explain_plan(
         planner_input=planner_input,
         incomplete_reasons=incomplete_reasons,
         engaged_maintainers=engaged_maintainers,
+        codepath=codepath,
         team_owners=team_owners,
         requests=requests,
     )

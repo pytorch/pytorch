@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -16,11 +14,11 @@ from codepath_owners import (
     resolve_paths,
     resolve_rule,
 )
-from trusted_config import (
-    CODEPATH_OWNERS_PATH,
-    load_codepath_owners,
-    MAX_CODEPATH_OWNERS_BYTES,
-)
+from trusted_config import load_codepath_owners, MAX_OWNERSHIP_BYTES, OWNERSHIP_PATH
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "codeowners"))
+from generate_codeowners import load_ownership, render_codeowners  # noqa: E402
 
 
 COMMIT_SHA = "a" * 40
@@ -158,9 +156,12 @@ private/ # deliberately unowned
         )
 
     def test_compact_artifact_is_an_exact_ordered_partition(self) -> None:
-        rules = parse_rules(
-            contents="* @all\n/docs/ @docs @org/writers\n/docs/private/\n"
-        )
+        rules = [
+            {**rule, "group": "core", "review_request": "path_handles"}
+            for rule in parse_rules(
+                contents="* @all\n/docs/ @docs @org/writers\n/docs/private/\n"
+            )
+        ]
         resolutions = resolve_paths(
             paths=[
                 "src/a.py",
@@ -176,8 +177,15 @@ private/ # deliberately unowned
         self.assertEqual(
             artifact["matched_path_groups"],
             [
-                {"owners": ["@all"], "paths": ["src/a.py"]},
                 {
+                    "group": "core",
+                    "review_request": "path_handles",
+                    "owners": ["@all"],
+                    "paths": ["src/a.py"],
+                },
+                {
+                    "group": "core",
+                    "review_request": "path_handles",
                     "owners": ["@docs", "@org/writers"],
                     "paths": ["docs/a.rst", "docs/b.rst"],
                 },
@@ -193,88 +201,132 @@ private/ # deliberately unowned
         self.assertEqual(artifact["paths_without_owners"], ["private/a", "outside/a"])
 
 
+def ownership_yaml(*paths: str) -> bytes:
+    """Return a minimal OWNERSHIP.yaml with one label group owning these paths."""
+
+    entries = "".join(f"      - {path}\n" for path in paths)
+    return (
+        'planned_labels: []\nsections: [core]\nsection_notes: {}\nownership:\n'
+        '  - name: core\n    labels: ["module: core"]\n    owners: [chillee]\n'
+        f"    section: core\n    paths:\n{entries}"
+    ).encode()
+
+
+class GroupArtifactTest(unittest.TestCase):
+    def test_paths_are_grouped_by_ownership_group(self) -> None:
+        def rule(group: str, review_request: str) -> dict[str, object]:
+            return {"group": group, "review_request": review_request}
+
+        artifact = build_llm_artifact(
+            [
+                {"path": "a.py", "owners": ["@x", "@y"], "matched_rule": rule("autograd", "path_handles")},
+                {"path": "b.py", "owners": ["@x", "@y"], "matched_rule": rule("nn", "path_handles")},
+                {"path": "c.py", "owners": ["@x", "@y"], "matched_rule": rule("autograd", "path_handles")},
+                {"path": "d.py", "owners": ["@x"], "matched_rule": rule("nn", "path_handles")},
+            ]
+        )
+
+        self.assertEqual(
+            artifact["matched_path_groups"],
+            [
+                {"group": "autograd", "review_request": "path_handles", "owners": ["@x", "@y"], "paths": ["a.py", "c.py"]},
+                {"group": "nn", "review_request": "path_handles", "owners": ["@x", "@y"], "paths": ["b.py"]},
+                {"group": "nn", "review_request": "path_handles", "owners": ["@x"], "paths": ["d.py"]},
+            ],
+        )
+
+
 class PolicyLoadingTest(unittest.TestCase):
     def load(self, content: bytes) -> dict[str, object]:
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         root = Path(directory.name)
-        path = root / CODEPATH_OWNERS_PATH
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content)
+        (root / OWNERSHIP_PATH).write_bytes(content)
         return load_codepath_owners(
             repository_root=root, repo="pytorch/pytorch", ref=COMMIT_SHA
         )
 
     def test_loads_single_policy_file_with_content_provenance(self) -> None:
-        content = b"* @root-owner\n"
+        content = ownership_yaml("/torch/: [root-owner]")
         snapshot = self.load(content)
         header = f"blob {len(content)}\0".encode()
         self.assertEqual(
             snapshot["source"],
             {
                 "repository": "pytorch/pytorch",
-                "path": "CODEOWNERS",
+                "path": OWNERSHIP_PATH,
                 "ref": COMMIT_SHA,
                 "blob_sha": hashlib.sha1(header + content).hexdigest(),
             },
         )
-        self.assertEqual(snapshot["rules"][0]["owners"], ["@root-owner"])
+        self.assertEqual(
+            snapshot["rules"],
+            [
+                {
+                    "pattern": "/torch/",
+                    "owners": ["@root-owner"],
+                    "group": "core",
+                    "review_request": "path_handles",
+                }
+            ],
+        )
 
-    def test_checked_in_codeowners_loads(self) -> None:
+    def test_checked_in_ownership_matches_the_generated_codeowners(self) -> None:
         repository_root = Path(__file__).resolve().parents[3]
         snapshot = load_codepath_owners(
-            repository_root=repository_root, repo="pytorch/ciforge", ref=COMMIT_SHA
+            repository_root=repository_root, repo="pytorch/pytorch", ref=COMMIT_SHA
         )
+        generated = render_codeowners(load_ownership(repository_root / OWNERSHIP_PATH))
         self.assertTrue(snapshot["rules"])
+        self.assertEqual(
+            [(rule["pattern"], rule["owners"]) for rule in snapshot["rules"]],
+            [(rule["pattern"], rule["owners"]) for rule in parse_rules(contents=generated)],
+        )
 
-    def test_normalizes_and_deduplicates_github_handle_casing(self) -> None:
+    def test_skips_quiet_paths_and_normalizes_handle_casing(self) -> None:
         snapshot = self.load(
-            b"/one/ @Chillee @chillee @PyTorch/Core @pytorch/core\n/two/ @CHILLEE @PYTORCH/CORE\n"
+            ownership_yaml("/one/: [Chillee, chillee]", "/quiet/", "/two/: [CHILLEE]")
         )
 
         self.assertEqual(
-            [rule["owners"] for rule in snapshot["rules"]],
-            [
-                ["@chillee", "@pytorch/core"],
-                ["@chillee", "@pytorch/core"],
-            ],
+            [(rule["pattern"], rule["owners"]) for rule in snapshot["rules"]],
+            [("/one/", ["@chillee"]), ("/two/", ["@chillee"])],
         )
         artifact = resolve_for_llm(paths=["one/a.py", "two/b.py"], snapshot=snapshot)
-        self.assertEqual(artifact["owners"], ["@chillee", "@pytorch/core"])
+        self.assertEqual(artifact["owners"], ["@chillee"])
         self.assertEqual(
             artifact["matched_path_groups"],
             [
                 {
-                    "owners": ["@chillee", "@pytorch/core"],
+                    "group": "core",
+                    "review_request": "path_handles",
+                    "owners": ["@chillee"],
                     "paths": ["one/a.py", "two/b.py"],
                 }
             ],
         )
 
     def test_builds_exact_dynamic_codepath_owners_contract(self) -> None:
-        snapshot = self.load(b"/torch/ @pytorch/core\n")
+        snapshot = self.load(ownership_yaml("/torch/: [core-owner]"))
         artifact = resolve_for_llm(paths=["torch/a.py", "README.md"], snapshot=snapshot)
         self.assertEqual(
             set(artifact),
             {"owners", "matched_path_groups", "paths_without_owners"},
         )
-        self.assertEqual(artifact["owners"], ["@pytorch/core"])
+        self.assertEqual(artifact["owners"], ["@core-owner"])
         self.assertNotIn("rules", artifact)
-        self.assertNotIn("parse_diagnostics", artifact)
 
-    def test_skips_team_owner_ids(self) -> None:
-        snapshot = self.load(b"* @root-owner\n/torch/ compiler\n")
-        self.assertEqual(
-            [rule["owners"] for rule in snapshot["rules"]], [["@root-owner"]]
-        )
-        self.assertEqual(snapshot["parse_diagnostics"][0]["line"], 2)
+    def test_rejects_invalid_ownership(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "OWNERSHIP.yaml is invalid"):
+            self.load(ownership_yaml("/torch/: [pytorch/core]"))
+        with self.assertRaisesRegex(RuntimeError, "invalid owner handle"):
+            self.load(ownership_yaml("/torch/: [bad_user]"))
 
     def test_rejects_oversize_invalid_utf8_and_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            path = root / CODEPATH_OWNERS_PATH
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b"x" * (MAX_CODEPATH_OWNERS_BYTES + 1))
+            path = root / OWNERSHIP_PATH
+            path.write_bytes(b"x" * (MAX_OWNERSHIP_BYTES + 1))
             with self.assertRaisesRegex(RuntimeError, "size is invalid"):
                 load_codepath_owners(
                     repository_root=root, repo="pytorch/pytorch", ref=COMMIT_SHA
@@ -285,20 +337,13 @@ class PolicyLoadingTest(unittest.TestCase):
                     repository_root=root, repo="pytorch/pytorch", ref=COMMIT_SHA
                 )
             outside = root / "outside.txt"
-            outside.write_text("* @owner\n")
+            outside.write_bytes(ownership_yaml("/torch/: [owner]"))
             path.unlink()
             path.symlink_to(outside)
             with self.assertRaisesRegex(RuntimeError, "config file is unavailable"):
                 load_codepath_owners(
                     repository_root=root, repo="pytorch/pytorch", ref=COMMIT_SHA
                 )
-
-    def test_preserves_teams(self) -> None:
-        snapshot = self.load(b"* @person @pytorch/compiler\n")
-        self.assertEqual(
-            snapshot["rules"][0]["owners"],
-            ["@person", "@pytorch/compiler"],
-        )
 
     def test_email_is_not_a_valid_owner_handle(self) -> None:
         with self.assertRaisesRegex(ValueError, "codepath owner"):
@@ -311,38 +356,6 @@ class PolicyLoadingTest(unittest.TestCase):
                 self.assertRaisesRegex(ValueError, "codepath owner"),
             ):
                 parse_rules(contents=f"* {owner}\n", strict=True)
-
-    def test_loader_skips_invalid_lines_like_github(self) -> None:
-        snapshot = self.load(
-            b"* @root-owner\n/docs/ person@example.com\n/a/ @a-owner\n"
-        )
-        self.assertEqual(
-            [rule["owners"] for rule in snapshot["rules"]],
-            [["@root-owner"], ["@a-owner"]],
-        )
-        self.assertEqual([d["line"] for d in snapshot["parse_diagnostics"]], [2])
-
-
-class CommandLineTest(unittest.TestCase):
-    def test_cli_returns_json_handles(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "codepath_owners.txt"
-            path.write_text("* @all\n/docs/ @docs\n")
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(Path(__file__).resolve().parents[1] / "codepath_owners.py"),
-                    "--codepath-owners",
-                    str(path),
-                    "--owners-only",
-                    "src/a.py",
-                    "docs/a.rst",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        self.assertEqual(json.loads(result.stdout), ["@all", "@docs"])
 
 
 if __name__ == "__main__":

@@ -11,9 +11,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from github_api import PullRequestRef
-from schemas import Action, ActionPlan, RequestReviewers
+from schemas import Action, ActionPlan, AddLabels, RequestReviewers
 from trusted_config import load_team_members
 
 
@@ -103,11 +104,12 @@ def add_labels(
 def failure_message(action: Action) -> str:
     """Describe a failed action whose effect may still have landed."""
 
-    subject = (
-        f"{action.reason} reviewer request"
-        if isinstance(action, RequestReviewers)
-        else "label request"
-    )
+    if isinstance(action, RequestReviewers):
+        subject = f"{action.reason} reviewer request"
+    elif isinstance(action, AddLabels):
+        subject = "label request"
+    else:
+        subject = "label removal"
     return f"{subject} failed or returned ambiguously; it may already have landed"
 
 
@@ -120,8 +122,14 @@ def execute_action(pr: PullRequestRef, /, *, action: Action) -> None:
             method="POST",
             payload={"reviewers": list(action.users)},
         )
-    else:
+    elif isinstance(action, AddLabels):
         add_labels(pr, labels=action.labels)
+    else:
+        for label in action.labels:
+            pr.github.json(
+                f"repos/{pr.repo}/issues/{pr.number}/labels/{quote(label, safe='')}",
+                method="DELETE",
+            )
 
 
 def check_plan_reviewers(*, args: argparse.Namespace, plan: ActionPlan) -> None:
@@ -188,7 +196,8 @@ def apply_action_plan(
         requested_users=sum(
             len(action.users)
             for action in plan.actions
-            if isinstance(action, RequestReviewers) and action.reason == "owner_roster"
+            if isinstance(action, RequestReviewers)
+            and action.reason in {"codepath_owner", "owner_roster"}
         ),
     )
 

@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
-from codepath_owners import parse_rules
 from identifiers import TEAM_OWNER_ID_RE, USER_HANDLE_RE
 
 
-CODEPATH_OWNERS_PATH = "CODEOWNERS"
+OWNERSHIP_PATH = "OWNERSHIP.yaml"
 EXTRA_OWNERSHIP_METADATA_PATH = ".github/auto-pr-triage/extra_ownership_metadata.json"
 TEAM_MEMBERS_PATH = ".github/auto-pr-triage/team_members.json"
-MAX_CODEPATH_OWNERS_BYTES = 3_000_000
+MAX_OWNERSHIP_BYTES = 3_000_000
 MAX_CONFIG_BYTES = 1_000_000
 
 
@@ -78,25 +78,44 @@ def _decode_document(*, text: str, path: str) -> dict[str, Any]:
 def load_codepath_owners(
     *, repository_root: Path, repo: str, ref: str
 ) -> dict[str, Any]:
-    """Load the repository's CODEOWNERS rules, skipping lines the parser rejects.
+    """Load OWNERSHIP.yaml's active path rules in CODEOWNERS order.
 
-    GitHub skips invalid CODEOWNERS lines and applies the rest, so this does too
-    (for example an email owner, which GitHub accepts but cannot be mapped to a
-    login); the skipped lines are returned as parse_diagnostics.
+    The last matching rule decides a path's owners, as in the generated
+    CODEOWNERS; ordered_groups gives both the same order. Quiet paths (no
+    handles) are left out, like the commented lines CODEOWNERS renders for them.
     """
+
+    # Imported here because it needs PyYAML, which only jobs that load ownership
+    # install; the apply job imports this module for team rosters alone.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codeowners"))
+    from generate_codeowners import ordered_groups, parse_ownership
 
     text, source = _load_document(
         repository_root=repository_root,
         repo=repo,
         ref=ref,
-        path=CODEPATH_OWNERS_PATH,
-        max_bytes=MAX_CODEPATH_OWNERS_BYTES,
+        path=OWNERSHIP_PATH,
+        max_bytes=MAX_OWNERSHIP_BYTES,
     )
-    diagnostics: list[dict[str, Any]] = []
-    rules = parse_rules(
-        contents=text, blob_sha=source["blob_sha"], diagnostics=diagnostics
-    )
-    return {"source": source, "rules": rules, "parse_diagnostics": diagnostics}
+    try:
+        sections = ordered_groups(parse_ownership(text))
+    except ValueError as exc:
+        raise RuntimeError(f"{OWNERSHIP_PATH} is invalid: {exc}") from exc
+    rules = [
+        {
+            "pattern": rule.path,
+            "owners": list(dict.fromkeys(f"@{h}".casefold() for h in rule.notify)),
+            "group": group.name,
+            "review_request": group.review_request,
+        }
+        for _, groups in sections
+        for group in groups
+        for rule in group.paths
+        if rule.notify
+    ]
+    if not all(USER_HANDLE_RE.fullmatch(o) for r in rules for o in r["owners"]):
+        raise RuntimeError(f"{OWNERSHIP_PATH} has an invalid owner handle")
+    return {"source": source, "rules": rules}
 
 
 def load_extra_ownership_metadata(

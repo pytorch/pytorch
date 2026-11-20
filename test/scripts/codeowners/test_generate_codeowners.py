@@ -17,6 +17,7 @@ SCRIPT = (
     Path(__file__).resolve().parents[3] / "scripts/codeowners/generate_codeowners.py"
 )
 sys.path.insert(0, str(SCRIPT.parent))
+from check_taxonomy import CODEOWNERS_PATH
 from generate_codeowners import load_ownership, render_codeowners, SECTION_MARKER
 
 
@@ -38,11 +39,11 @@ ownership:
       - /torch/nn/modules/linear_cross_entropy.py: [pearu]
   - name: dynamo
     labels: ["module: dynamo"]
-    owners: [alice, pytorch/dev-infra]
+    owners: [alice, carol]
     section: compiler_dynamo
     paths:
       - /torch/_dynamo/
-      - /torch/_dynamo/eval_frame.py: [alice, someone@example.com]
+      - /torch/_dynamo/eval_frame.py: [alice, carol]
   - name: tvm_dynamo
     labels: ["module: dynamo", "module: tvm"]
     owners: []
@@ -102,9 +103,9 @@ class TestGenerateCodeowners(TestCase):
 # [compiler_dynamo]
 # /torch/_dynamo_unlabeled.py
 # label: module: dynamo
-# owner: @alice @pytorch/dev-infra
+# owner: @alice @carol
 # /torch/_dynamo/
-/torch/_dynamo/eval_frame.py @alice someone@example.com
+/torch/_dynamo/eval_frame.py @alice @carol
 # label: module: dynamo, module: tvm
 # owner: none
 # /torch/_dynamo/backends/tvm.py
@@ -153,6 +154,18 @@ class TestGenerateCodeowners(TestCase):
                 "owners: [pearu]\n    owner: pearu",
             ),
             "not valid YAML": ("planned_labels:", "planned_labels: [\n"),
+            "'nn' owners: list people instead of teams \\['pytorch/nn-team'\\]": (
+                "owners: [bob]",
+                "owners: [bob, pytorch/nn-team]",
+            ),
+            "/torch/nn/: list GitHub logins instead of emails \\['bob@example.com'\\]": (
+                "/torch/nn/: [bob]",
+                "/torch/nn/: [bob@example.com]",
+            ),
+            "/torch/nn/: list people instead of teams \\['pytorch/nn-team'\\]": (
+                "/torch/nn/: [bob]",
+                "/torch/nn/: [bob, pytorch/nn-team]",
+            ),
             "sits inside /torch/_dynamo/ in 'dynamo'": (
                 "/torch/_dynamo_unlabeled.py",
                 "/torch/_dynamo/unlabeled.py",
@@ -166,6 +179,11 @@ class TestGenerateCodeowners(TestCase):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(ValueError, message):
                     render(replace_once(OWNERSHIP, old, new))
+
+    def test_invalid_review_request(self):
+        line = "review_request: everyone"
+        with self.assertRaisesRegex(ValueError, "review_request must be one of"):
+            render(replace_once(OWNERSHIP, "owners: [bob]\n", f"owners: [bob]\n    {line}\n"))
 
     def test_groups_nesting_both_ways(self):
         ownership = replace_once(
@@ -186,7 +204,8 @@ def run_generator(*, ownership: str, codeowners: str, args: list[str]):
     """Run the generator in a throwaway repo; return the result and final CODEOWNERS."""
     with tempfile.TemporaryDirectory() as repo:
         Path(repo, "OWNERSHIP.yaml").write_text(ownership)
-        Path(repo, "CODEOWNERS").write_text(codeowners)
+        Path(repo, CODEOWNERS_PATH).parent.mkdir(parents=True)
+        Path(repo, CODEOWNERS_PATH).write_text(codeowners)
         subprocess.check_output(["git", "init", "-q"], cwd=repo)
         result = subprocess.run(
             [sys.executable, str(SCRIPT), *args],
@@ -194,7 +213,7 @@ def run_generator(*, ownership: str, codeowners: str, args: list[str]):
             capture_output=True,
             text=True,
         )
-        return result, Path(repo, "CODEOWNERS").read_text()
+        return result, Path(repo, CODEOWNERS_PATH).read_text()
 
 
 class TestGeneratorModes(TestCase):
@@ -229,7 +248,7 @@ class TestGeneratorModes(TestCase):
                 message["original"],
                 message["replacement"],
             ),
-            ("CODEOWNERS", "CODEOWNERS_GENERATED", "stale\n", generated),
+            (CODEOWNERS_PATH, "CODEOWNERS_GENERATED", "stale\n", generated),
         )
         result, codeowners = run_generator(
             ownership=OWNERSHIP, codeowners="stale\n", args=[]

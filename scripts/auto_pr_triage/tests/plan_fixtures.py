@@ -19,6 +19,7 @@ from schemas import (
     AdditionalOwnerConcern,
     IntakeFacts,
     IntakeResult,
+    OwnershipGroup,
     OwnershipResult,
     PullRequestIdentity,
 )
@@ -71,7 +72,7 @@ def stage_results(
     *,
     author_login: str = "external-author",
     is_open_non_draft_pr_against_main: bool = True,
-    is_already_handled: bool = False,
+    is_opted_out: bool = False,
     author_has_triage_permission: bool = False,
     has_actionable_linked_issue: bool | None = None,
     has_maintainer_activity: bool = False,
@@ -86,6 +87,7 @@ def stage_results(
     maintainer_requested_reviewers: tuple[str, ...] = (),
     bypass_intake_matches: tuple[str, ...] = (),
     has_discarded_bypass_intake_match: bool = False,
+    labels: tuple[str, ...] = (),
 ) -> tuple[IntakeResult, OwnershipResult]:
     if additional_owner_concerns is None:
         additional_owner_concerns = tuple(
@@ -119,14 +121,14 @@ def stage_results(
             for owner in additional_owners
         )
     if has_actionable_linked_issue is None:
-        # Facts are gathered only for an active, unhandled PR.
+        # Facts are gathered only for an active PR.
         has_actionable_linked_issue = (
-            is_open_non_draft_pr_against_main and not is_already_handled
+            is_open_non_draft_pr_against_main and not is_opted_out
         )
     identity = PullRequestIdentity(REPOSITORY, 123, HEAD_SHA, WORKFLOW_SHA)
     facts = IntakeFacts(
         is_open_non_draft_pr_against_main=is_open_non_draft_pr_against_main,
-        is_already_handled=is_already_handled,
+        is_opted_out=is_opted_out,
         author_has_triage_permission=author_has_triage_permission,
         has_actionable_linked_issue=has_actionable_linked_issue,
         has_maintainer_activity=has_maintainer_activity,
@@ -136,16 +138,29 @@ def stage_results(
         actionable_labelers=actionable_labelers,
         maintainer_requested_reviewers=maintainer_requested_reviewers,
     )
+    # Codepath owners own torch/file.py through one path_handles group.
+    groups = (
+        {"core": OwnershipGroup(tuple(codepath_owners), ("torch/file.py",), "path_handles")}
+        if codepath_owners
+        else {}
+    )
+    files_by_owner: dict[str, set[str]] = {}
+    for group in groups.values():
+        for owner in group.owners:
+            files_by_owner.setdefault(owner, set()).update(group.files)
     ownership = OwnershipResult.create(
         llm_run_status=llm_run_status,
-        codepath_owners={owner: ("torch/file.py",) for owner in codepath_owners},
+        codepath_owners=files_by_owner,
+        ownership_groups=groups,
         additional_owner_concerns=additional_owner_concerns,
         discarded_additional_owner_concerns=(
             [discarded_bypass_concern()] if has_discarded_bypass_intake_match else []
         ),
         uncovered_concerns=[uncovered_concern()] if has_uncovered_concerns else [],
     )
-    intake = IntakeResult(identity, facts, author_login, "fixture", "fixture body")
+    intake = IntakeResult(
+        identity, facts, author_login, "fixture", "fixture body", labels
+    )
     return intake, ownership
 
 
@@ -294,6 +309,8 @@ class FakeGitHub:
         author_has_triage_permission: bool = False,
         permission_error: Exception | None = None,
         unavailable_labels: list[str] | None = None,
+        previously_requested: list[str] | None = None,
+        without_push: list[str] | None = None,
     ) -> None:
         self.pr = {
             "number": 123,
@@ -320,6 +337,10 @@ class FakeGitHub:
         self.author_has_triage_permission = author_has_triage_permission
         self.permission_error = permission_error
         self.unavailable_labels = set(unavailable_labels or [])
+        # Logins with a review_requested event in the timeline.
+        self.previously_requested = list(previously_requested or [])
+        # Logins other than the author who lack push access.
+        self.without_push = {login.casefold() for login in without_push or []}
         self.review_checks = 0
         self.actionable_checks = 0
         self.permission_checks = 0
@@ -363,6 +384,18 @@ class FakeGitHub:
                 {"name": name} for name in payload["labels"] if name not in existing
             )
             return copy.deepcopy(self.pr["labels"])
+        if endpoint.startswith("repos/pytorch/ciforge/issues/123/labels/") and method == "DELETE":
+            label = unquote(endpoint.rsplit("/", 1)[-1])
+            self.pr["labels"] = [item for item in self.pr["labels"] if item["name"] != label]
+            return copy.deepcopy(self.pr["labels"])
+        if endpoint.startswith("repos/pytorch/ciforge/issues/123/timeline?"):
+            self.live_reads.append("timeline")
+            if not endpoint.endswith("&page=1"):
+                return []
+            return [
+                {"event": "review_requested", "requested_reviewer": {"login": login}}
+                for login in self.previously_requested
+            ]
         if endpoint.endswith("/collaborators/external-author/permission"):
             self.permission_checks += 1
             self.live_reads.append("permission")
@@ -379,6 +412,12 @@ class FakeGitHub:
                     },
                 }
             }
+        if endpoint.endswith("/permission") and "/collaborators/" in endpoint:
+            login = unquote(endpoint.split("/collaborators/", 1)[1].rsplit("/", 1)[0])
+            self.live_reads.append("push_permission")
+            push = login.casefold() not in self.without_push
+            permissions = {"triage": push, "push": push, "maintain": False, "admin": False}
+            return {"user": {"login": login, "permissions": permissions}}
         raise AssertionError(f"unexpected request: {method} {endpoint}")
 
     def graphql(self, *, query: str, variables: dict[str, Any]) -> dict[str, Any]:
@@ -449,7 +488,7 @@ class FakeGitHub:
 
 
 def mutations(github: FakeGitHub) -> list[tuple[str, str, dict[str, Any] | None]]:
-    return [call for call in github.calls if call[0] in {"POST", "PATCH"}]
+    return [call for call in github.calls if call[0] in {"POST", "PATCH", "DELETE"}]
 
 
 def printed_record(*, output: mock.Mock, label: str) -> dict[str, Any]:

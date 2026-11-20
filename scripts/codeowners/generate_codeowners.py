@@ -18,12 +18,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+from check_taxonomy import CODEOWNERS_PATH
 
 
 SECTION_MARKER = "# Grouped review-surface definitions:"
 LINTER_CODE = "CODEOWNERS_GENERATED"
 TOP_LEVEL_KEYS = {"planned_labels", "sections", "section_notes", "ownership"}
-GROUP_KEYS = {"name", "labels", "owners", "section", "paths"}
+GROUP_KEYS = {"name", "labels", "owners", "section", "paths", "review_request"}
+# How Auto PR Triage requests reviews for a group's paths: everyone on the matching
+# path's handles (the default, as GitHub's CODEOWNERS did).
+REVIEW_REQUESTS = ("path_handles",)
 
 
 @dataclass(frozen=True)
@@ -44,6 +48,8 @@ class LabelGroup:
     # CODEOWNERS section the group's rules are written under (kept for owners.py).
     section: str
     paths: tuple[PathRule, ...]
+    # One of REVIEW_REQUESTS.
+    review_request: str = "path_handles"
 
 
 @dataclass(frozen=True)
@@ -60,6 +66,17 @@ def string_list(value, *, where: str) -> tuple[str, ...]:
     return tuple(value)
 
 
+def check_handles(handles: tuple[str, ...], *, where: str) -> None:
+    # Auto PR Triage requests owners with the workflow token, which can't request
+    # a team or map an email to a login, so every handle must be a user login.
+    emails = [h for h in handles if "@" in h]
+    if emails:
+        raise ValueError(f"{where}: list GitHub logins instead of emails {emails}")
+    teams = [h for h in handles if "/" in h]
+    if teams:
+        raise ValueError(f"{where}: list people instead of teams {teams}")
+
+
 def mapping(value, *, where: str) -> dict:
     if not isinstance(value, dict):
         raise ValueError(f"{where} must be a mapping, got {value!r}")
@@ -74,6 +91,7 @@ def parse_path_rule(entry, *, where: str) -> PathRule:
         notify = string_list(handles, where=f"{where} {path}")
         if not notify:
             raise ValueError(f"{where} {path}: write a quiet path as a bare string")
+        check_handles(notify, where=f"{where} {path}")
     else:
         raise ValueError(
             f"{where}: expected '/path' or '/path: [handles]', got {entry!r}"
@@ -97,18 +115,24 @@ def parse_group(entry, *, sections: tuple[str, ...]) -> LabelGroup:
         raise ValueError(f"{where}: missing keys {sorted(missing)}")
     labels = string_list(entry.get("labels", []), where=f"{where} labels")
     owners = string_list(entry["owners"], where=f"{where} owners")
+    check_handles(owners, where=f"{where} owners")
     if owners and not labels:
         raise ValueError(f"{where}: a group without labels can't have owners")
     if entry["section"] not in sections:
         raise ValueError(f"{where}: section {entry['section']!r} is not in `sections`")
     if not isinstance(entry["paths"], list) or not entry["paths"]:
         raise ValueError(f"{where}: paths must be a non-empty list")
+    paths = tuple(parse_path_rule(rule, where=where) for rule in entry["paths"])
+    review_request = entry.get("review_request", "path_handles")
+    if review_request not in REVIEW_REQUESTS:
+        raise ValueError(f"{where}: review_request must be one of {REVIEW_REQUESTS}")
     return LabelGroup(
         name=name,
         labels=labels,
         owners=owners,
         section=entry["section"],
-        paths=tuple(parse_path_rule(rule, where=where) for rule in entry["paths"]),
+        paths=paths,
+        review_request=review_request,
     )
 
 
@@ -131,8 +155,13 @@ def check_consistency(ownership: OwnershipFile) -> None:
 
 def load_ownership(path: Path) -> OwnershipFile:
     """Load and validate OWNERSHIP.yaml; every problem is a ValueError."""
+    return parse_ownership(path.read_text())
+
+
+def parse_ownership(text: str) -> OwnershipFile:
+    """Parse and validate OWNERSHIP.yaml's text; every problem is a ValueError."""
     try:
-        document = yaml.safe_load(path.read_text())
+        document = yaml.safe_load(text)
     except yaml.YAMLError as error:
         raise ValueError(f"not valid YAML: {error}") from error
     document = mapping(document, where="OWNERSHIP.yaml")
@@ -167,8 +196,8 @@ def load_ownership(path: Path) -> OwnershipFile:
 
 
 def handle(name: str) -> str:
-    """Handles are stored without "@" (as in merge_rules.yaml); emails keep theirs."""
-    return name if "@" in name else f"@{name}"
+    """Handles are stored without "@" (as in merge_rules.yaml)."""
+    return f"@{name}"
 
 
 def render_rule(rule: PathRule) -> str:
@@ -192,12 +221,13 @@ def render_header(ownership: OwnershipFile) -> list[str]:
         "# the script (or `spin fixlint`) instead of editing this file.",
         "",
         "# IMPORTANT:",
-        "# This file is ONLY used to subscribe for notifications for PRs",
-        "# related to a specific file path. Approvals from people in this",
-        "# file are not required for merges.",
+        "# GitHub doesn't read this file; it lives outside the paths GitHub reads",
+        "# CODEOWNERS from. Auto PR Triage (scripts/auto_pr_triage) requests reviews",
+        "# from these owners, reading the same rules from OWNERSHIP.yaml. Approvals",
+        "# from people in this file are not required for merges.",
         "",
         "# CODEOWNERS semantics:",
-        "# - GitHub uses the last matching pattern for each path.",
+        "# - The last matching pattern for each path wins, as in GitHub's CODEOWNERS.",
         "# - Active rules name who gets review requests. A commented rule adds no",
         "#   notification of its own; the path follows the last matching active rule,",
         "#   if there is one. Commenting a rule says nothing about ownership.",
@@ -304,19 +334,33 @@ def check_unlabeled_order(groups: list[LabelGroup]) -> None:
                     )
 
 
-def render_codeowners(ownership: OwnershipFile) -> str:
-    lines = render_header(ownership)
+def ordered_groups(ownership: OwnershipFile) -> list[tuple[str, list[LabelGroup]]]:
+    """Return each section with its groups in CODEOWNERS order.
+
+    This is the order the last matching rule is taken from, so CODEOWNERS and Auto
+    PR Triage (scripts/auto_pr_triage/trusted_config.py) both read rules this way.
+    Within a section, groups without labels come first, then label blocks.
+    """
+    sections = []
     for section in ownership.sections:
-        lines.append(f"# [{section}]")
-        lines.extend(ownership.section_notes.get(section, ()))
         groups = [group for group in ownership.groups if group.section == section]
         check_unlabeled_order(groups)
+        unlabeled = [group for group in groups if not group.labels]
+        labeled = order_blocks([group for group in groups if group.labels])
+        sections.append((section, unlabeled + labeled))
+    return sections
+
+
+def render_codeowners(ownership: OwnershipFile) -> str:
+    lines = render_header(ownership)
+    for section, groups in ordered_groups(ownership):
+        lines.append(f"# [{section}]")
+        lines.extend(ownership.section_notes.get(section, ()))
         for group in groups:
-            if not group.labels:
-                lines.extend(map(render_rule, group.paths))
-        for group in order_blocks([group for group in groups if group.labels]):
-            lines.append(f"# label: {', '.join(group.labels)}")
-            lines.append(f"# owner: {' '.join(map(handle, group.owners)) or 'none'}")
+            if group.labels:
+                owners = " ".join(map(handle, group.owners)) or "none"
+                lines.append(f"# label: {', '.join(group.labels)}")
+                lines.append(f"# owner: {owners}")
             lines.extend(map(render_rule, group.paths))
         lines.append("#")
     return "\n".join(lines) + "\n"
@@ -369,12 +413,12 @@ def main() -> int:
             return 0
         print(f"error: OWNERSHIP.yaml is invalid: {error}", file=sys.stderr)
         return 1
-    codeowners = repo / "CODEOWNERS"
+    codeowners = repo / CODEOWNERS_PATH
     current = codeowners.read_text()
     if args.lintrunner:
         if current != generated:
             emit_lint_error(
-                path="CODEOWNERS",
+                path=CODEOWNERS_PATH,
                 description=(
                     "CODEOWNERS is generated from OWNERSHIP.yaml, so direct edits to "
                     "CODEOWNERS are discarded. Make the change in OWNERSHIP.yaml, then "

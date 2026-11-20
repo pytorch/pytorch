@@ -15,6 +15,7 @@ from schemas import (
     IntakeResult,
     LLMInput,
     MISSING_ACTIONABLE_ISSUE_ACTIONS,
+    OwnershipGroup,
     OwnershipResult,
     PlanContext,
     PullRequestIdentity,
@@ -49,13 +50,20 @@ def ownership_config(
     codepath = {
         "source": {
             "repository": repository,
-            "path": "CODEOWNERS",
+            "path": "OWNERSHIP.yaml",
             "ref": "a" * 40,
             "blob_sha": "c" * 40,
         },
         "owners": sorted(set(owners), key=str.casefold),
         "matched_path_groups": (
-            [{"owners": sorted(set(owners), key=str.casefold), "paths": paths}]
+            [
+                {
+                    "group": "core",
+                    "review_request": "path_handles",
+                    "owners": sorted(set(owners), key=str.casefold),
+                    "paths": paths,
+                }
+            ]
             if owners
             else []
         ),
@@ -92,7 +100,7 @@ def pr_identity(repository: str = REPOSITORY) -> PullRequestIdentity:
 def intake_facts(
     *,
     is_open_non_draft_pr_against_main: bool = True,
-    is_already_handled: bool = False,
+    is_opted_out: bool = False,
     author_has_triage_permission: bool = False,
     has_actionable_linked_issue: bool | None = None,
     has_maintainer_activity: bool = False,
@@ -102,13 +110,13 @@ def intake_facts(
     maintainer_requested_reviewers: list[str] | tuple[str, ...] = (),
 ) -> IntakeFacts:
     if has_actionable_linked_issue is None:
-        # Facts are gathered only for an active, unhandled PR.
+        # Facts are gathered only for an active PR.
         has_actionable_linked_issue = (
-            is_open_non_draft_pr_against_main and not is_already_handled
+            is_open_non_draft_pr_against_main and not is_opted_out
         )
     return IntakeFacts(
         is_open_non_draft_pr_against_main=is_open_non_draft_pr_against_main,
-        is_already_handled=is_already_handled,
+        is_opted_out=is_opted_out,
         author_has_triage_permission=author_has_triage_permission,
         has_actionable_linked_issue=has_actionable_linked_issue,
         has_maintainer_activity=has_maintainer_activity,
@@ -298,6 +306,11 @@ def make_ownership_result(
     return OwnershipResult.create(
         llm_run_status=llm_run_status,
         codepath_owners={owner: ("torch/file.py",) for owner in codepath_owners},
+        ownership_groups=(
+            {"core": OwnershipGroup(tuple(codepath_owners), ("torch/file.py",), "path_handles")}
+            if codepath_owners
+            else {}
+        ),
         additional_owner_concerns=[
             additional_owner_concern(owner, bypass=owner in bypass_intake_matches)
             for owner in additional_owners
