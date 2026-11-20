@@ -1209,6 +1209,19 @@ class TestKernelGeneral(TestCase):
         with torch.cuda.device(1), self.assertRaisesRegex(AssertionError, "is current"):
             call()
 
+    def test_replay_requires_the_current_device_one_gpu(self):
+        # One GPU has no other device, so pretend another one is current.
+        x = torch.randn(64, 256, device="cuda")
+        trait = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
+        args = (trait, "replay_one_gpu", x, 1, torch.float32)
+        kg.replay_reduce(*args)
+        (replay,) = [r for k, r in kg._REPLAYS.items() if k[0] == "replay_one_gpu"]
+        self.assertIsNotNone(replay)
+        other = x.get_device() + 1
+        with mock.patch.object(torch._C, "_cuda_getDevice", return_value=other):
+            with self.assertRaisesRegex(AssertionError, "is current"):
+                kg.replay_reduce(*args)
+
     def test_offset_views_share_a_general_plan(self):
         base = torch.randn(3, 8, 16, 16, device="cuda")
         trait = T.SumOps(acc=cutlass.Float32)
