@@ -929,23 +929,24 @@ def triton_reshape(
 # inconsistent with Python semantics (and consistent with C semantics).  We
 # must override all of these, or it is potential silent correctness problem
 class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
-    def _print_TruncToInt(self, expr: sympy.Expr) -> str:
+    def _print_rounding_to_int(self, expr: sympy.Expr, rounding: str) -> str:
         if len(expr.args) != 1:
             raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        return (
-            # pyrefly: ignore [missing-attribute]
-            f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
+        # pyrefly: ignore [missing-attribute]
+        value = self._print(expr.args[0])
+        return f"triton_helpers.rounding_to_int({value}, {V.kernel.index_dtype}, '{rounding}')"
+
+    def _print_TruncToInt(self, expr: sympy.Expr) -> str:
+        return self._print_rounding_to_int(expr, "trunc")
 
     def _print_TruncToFloat(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:
             raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
         # pyrefly: ignore [missing-attribute]
         value = self._print(expr.args[0])
-        # Adding +0.0 preserves large floating results while canonicalizing
-        # libdevice.trunc(-0.0) back to Python's +0.0 materialization behavior.
-        # pyrefly: ignore [missing-attribute]
-        return f"(libdevice.trunc({value}) + tl.zeros_like({value}))"
+        return (
+            f"triton_helpers.trunc_to_float({value}, {self._get_scalar_float_type()})"
+        )
 
     @staticmethod
     def _get_scalar_float_type() -> str:
@@ -1013,32 +1014,16 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
     # NB: sympy.floor/ceiling produce integers, so we have to do the
     # conversion to index dtype
     def _print_floor(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 1:
-            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        return (
-            # pyrefly: ignore [missing-attribute]
-            f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
+        return self._print_rounding_to_int(expr, "floor")
 
     def _print_FloorToInt(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 1:
-            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        return (
-            # pyrefly: ignore [missing-attribute]
-            f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
+        return self._print_rounding_to_int(expr, "floor")
 
     def _print_ceiling(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 1:
-            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        # pyrefly: ignore [missing-attribute]
-        return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        return self._print_rounding_to_int(expr, "ceil")
 
     def _print_CeilToInt(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 1:
-            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        # pyrefly: ignore [missing-attribute]
-        return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        return self._print_rounding_to_int(expr, "ceil")
 
     def _helper_sqrt(self, expr: sympy.Expr) -> str:
         # pyrefly: ignore [missing-attribute]
@@ -2612,12 +2597,16 @@ class TritonKernelOverrides(TritonOverrides):
         finally:
             V.kernel._index_dtype = real_index_dtype
         if real_index_dtype != dtype or var.dtype != dtype:
+            index_var = var
             var = V.kernel.cse.generate(
                 V.kernel.compute,
                 f"({var}).to({triton_type(dtype)})",
                 dtype=dtype,
                 shape=var.shape,
             )
+            # the cast is only valid where the index expression is, and a later
+            # indirect_indexing bounds assert needs that mask
+            var.mask_vars = index_var.mask_vars
         return var
 
     @staticmethod
@@ -3585,6 +3574,12 @@ ARG_REDUCTION_TYPES = (
     "argmin_with_value",
 )
 PLAIN_REDUCTION_TYPES = ("sum", "prod", "max", "min", "xor_sum")
+
+
+def _max_autotune_reduction() -> bool:
+    if config.max_autotune_reduction is not None:
+        return config.max_autotune_reduction
+    return config.max_autotune_pointwise
 
 
 class TritonKernel(SIMDKernel[TritonCSEVariable]):
@@ -5497,7 +5492,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         else:
             ep = ""
 
-        if (has_tmpmask or has_rindex) and indexing.has_mask():
+        if (
+            has_tmpmask or has_rindex or self._load_other is not None
+        ) and indexing.has_mask():
             if self._load_other:
                 other = f", other={constant_repr(self._load_other)}"
             elif uses_uint8_storage:
@@ -8022,6 +8019,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "incremental_autotune": config.incremental_autotune,
             "max_autotune": config.max_autotune,
             "max_autotune_pointwise": config.max_autotune_pointwise,
+            "max_autotune_reduction": _max_autotune_reduction(),
             "min_split_scan_rblock": config.triton.min_split_scan_rblock,
             "spill_threshold": config.triton.spill_threshold,
             "store_cubin": config.triton.store_cubin,
@@ -8385,10 +8383,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     V.graph.get_current_device_or_throw()
                 ),
                 "constants": {},
-                "native_matmul": (
-                    torch._inductor.config.triton.native_matmul
-                    and ("tl.dot" in str(self.body) or "tl.dot" in str(self.compute))
-                ),
+                "native_matmul": self.is_native_matmul,
                 **self.triton_meta_common(),
             },
         )
@@ -8695,15 +8690,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         for arg, arg_signature in zip(call_args, arg_signatures):
             if isinstance(arg_signature, TensorArg):
                 tensor_name = f"{self.kernel_name}: {arg}"
-                if V.graph.cpp_wrapper:
-                    wrapper.writeline(
-                        f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{tensor_name}", {arg}));'
-                    )
-                else:
-                    line = f"assert not {arg}.isnan().any().item(), {f'{tensor_name} contains NaN'!r}"
-                    wrapper.writeline(line)
-                    line = f"assert not {arg}.isinf().any().item(), {f'{tensor_name} contains Inf'!r}"
-                    wrapper.writeline(line)
+                wrapper.codegen_nan_assert(arg, tensor_name)
 
     def create_cse_var(self, *args, **kwargs) -> TritonCSEVariable:
         return TritonCSEVariable(*args, **kwargs)
