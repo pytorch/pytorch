@@ -2105,16 +2105,14 @@ class GuardedCache(Generic[T]):
             hints: List of symint hints paired with evaluate_guards
 
         Returns:
-            A tuple of (graph, pickled_content) if found, or (None, None) if not found
+            A tuple of (entry, pickled_content, cache_info). entry and
+            pickled_content are None if no candidate passed its guards.
         """
         graph = None
         pickled_content = None
         result_status = "full_miss"
         sample_guards_expr = None
         in_local = False
-
-        # Iterate over any entries in the subdir for this key and evaluate
-        # guards to determine whether there's a hit.
 
         for candidate, content, in_local in cls.iterate_over_candidates(
             local, remote_cache, key
@@ -2123,28 +2121,20 @@ class GuardedCache(Generic[T]):
                 raise AssertionError(
                     f"Cache candidate {type(candidate)} missing 'guards_expr' attribute"
                 )
-            if not candidate.guards_expr:  # type: ignore[attr-defined]
-                # No guards to evaluate, so this is a hit.
-                graph = candidate
-                pickled_content = content
-                result_status = "hit"
-                break
-
-            # Evaluate the guard expression in the current context.
-            # If there's not a cache hit, we don't want the evaluation to
-            # affect the current env, e.g., cause the creation of new guards,
-            # so we evaluate with the hints instead of the symbols.
-            hit = bool(evaluate_guards(candidate.guards_expr, hints))  # type: ignore[attr-defined]
-            if hit:
-                graph = candidate
-                pickled_content = content
-                result_status = "hit"
-                sample_guards_expr = candidate.guards_expr
-                break
-            else:
-                # At least one guard missed, log this
-                result_status = "guard_miss"
-                sample_guards_expr = candidate.guards_expr
+            guards_expr = candidate.guards_expr  # type: ignore[attr-defined]
+            if guards_expr:
+                # If there's not a cache hit, we don't want the evaluation to
+                # affect the current env, e.g., cause the creation of new guards,
+                # so we evaluate with the hints instead of the symbols.
+                sample_guards_expr = guards_expr
+                if not evaluate_guards(guards_expr, hints):
+                    result_status = "guard_miss"
+                    continue
+            # No guards to evaluate, or they all passed: a hit.
+            graph = candidate
+            pickled_content = content
+            result_status = "hit"
+            break
 
         info: CacheInfo = {"cache_status_detailed": result_status}
         if sample_guards_expr is not None:
