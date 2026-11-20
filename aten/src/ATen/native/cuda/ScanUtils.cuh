@@ -1028,23 +1028,59 @@ void launch_with(T* tgt, const T* src, int64_t num_rows, int64_t row_size, T ini
   }
 }
 
+// Items per thread for a launch of a compute-bound op.
+template <typename T, class BinaryFunction>
+int expensive_op_items(int64_t num_rows, int64_t row_size, int64_t num_sms) {
+  using Tr = Traits<T, BinaryFunction>;
+  if (fits_waves(num_rows, row_size, num_sms, 2, 1)) {
+    return 2;
+  }
+  if (fits_waves(num_rows, row_size, num_sms, 4, 1)) {
+    return 4;
+  }
+  int items = Tr::kItems;
+  if constexpr (sizeof(T) >= 16) {
+    if (at::cuda::warp_size() == 64) {
+      items = 8;
+    }
+  }
+  // Some compilers do not unroll 16 complex<float> logcumsumexp combines, which leaves the items in
+  // scratch memory; rows that one block covers with 8 items take 8.
+  if (std::is_same_v<T, c10::complex<float>> && row_size <= kBlock * 8) {
+    items = std::min(items, 8);
+  }
+  // 8 items stay faster up to two blocks per SM; beyond that 16 items win on gfx942 / gfx950.
+  if (items > 8 && fits_waves(num_rows, row_size, num_sms, 8, 2)) {
+    items = 8;
+  }
+  // A block per row needs only enough items to cover the row once.
+  if (make_plan(num_rows, row_size, num_sms, items).strategy == Strategy::Block) {
+    int fewer = 2;
+    while (fewer < items && row_size > kBlock * fewer) {
+      fewer *= 2;
+    }
+    return fewer;
+  }
+  return items;
+}
+
 template <typename T, class BinaryFunction>
 void launch(T* tgt, const T* src, int64_t num_rows, int64_t row_size, T init, BinaryFunction binary_op) {
   using Tr = Traits<T, BinaryFunction>;
   if constexpr (!Tr::kCheapOp) {
     const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-    if (fits_waves(num_rows, row_size, num_sms, 2, 1)) {
-      return launch_with<2, std::min(2, Tr::kVec), 2>(tgt, src, num_rows, row_size, init, binary_op);
-    }
-    if (fits_waves(num_rows, row_size, num_sms, 4, 1)) {
-      return launch_with<4, std::min(4, Tr::kVec), 4>(tgt, src, num_rows, row_size, init, binary_op);
-    }
-    if constexpr (Tr::kItems > 8) {
-      // c10::complex<float> stays faster with 8 items up to two blocks per SM; beyond that 16 items
-      // win on gfx942 / gfx950.
-      if (fits_waves(num_rows, row_size, num_sms, 8, std::is_same_v<T, c10::complex<float>> ? 2 : 1)) {
-        return launch_with<8, std::min(8, Tr::kVec), 8>(tgt, src, num_rows, row_size, init, binary_op);
-      }
+    switch (expensive_op_items<T, BinaryFunction>(num_rows, row_size, num_sms)) {
+      case 2:
+        return launch_with<2, std::min(2, Tr::kVec), 2>(tgt, src, num_rows, row_size, init, binary_op);
+      case 4:
+        return launch_with<4, std::min(4, Tr::kVec), 4>(tgt, src, num_rows, row_size, init, binary_op);
+      case 8:
+        if constexpr (Tr::kItems > 8) {
+          return launch_with<8, std::min(8, Tr::kVec), 8>(tgt, src, num_rows, row_size, init, binary_op);
+        }
+        break;
+      default:
+        break;
     }
   }
   if constexpr (sizeof(T) >= 16) {
@@ -1056,6 +1092,50 @@ void launch(T* tgt, const T* src, int64_t num_rows, int64_t row_size, T init, Bi
     }
   }
   launch_with<Tr::kItems, Tr::kVec, Tr::kRun>(tgt, src, num_rows, row_size, init, binary_op);
+}
+
+// Rows of 2 or fewer scan faster on the stock last-dim kernel, which gives such a row up to 512
+// threads, at these lengths.
+constexpr int64_t kStockFewRows = 2;
+constexpr int64_t kStockFewRowsMinLength = 65;
+constexpr int64_t kStockFewRowsMaxLength = 1024;
+// Longer complex rows, up to this length, scan faster there too while it gives each row 512 threads.
+constexpr int64_t kStockComplexMaxLength = 16384;
+// With this many rows per SM a launch is throughput-bound, and the stock kernel can win on work.
+constexpr int64_t kStockManyRowsPerSM = 32;
+
+// Whether the stock last-dim kernel scans these rows of a compute-bound op faster. It walks a row in
+// steps of 2 << get_log_num_threads_x_inner_scan elements and applies binary_op about twice per
+// element; the row kernels pad a row to whole tiles and apply it about 2 + 6 / items times per
+// element. With kStockManyRowsPerSM rows per SM the stock kernel wins once the row kernels do more
+// than 1.8 times its work. Half / bfloat16 stay on the row kernels: the stock kernel's rounding
+// error exceeds the logcumsumexp tolerance on such rows.
+template <typename T, class BinaryFunction>
+bool stock_faster(int64_t num_rows, int64_t row_size) {
+  using Tr = Traits<T, BinaryFunction>;
+  if constexpr (Tr::kCheapOp) {
+    return false;
+  } else {
+    if (num_rows <= kStockFewRows && row_size >= kStockFewRowsMinLength && row_size <= kStockFewRowsMaxLength) {
+      return true;
+    }
+    if (c10::is_complex<T>::value && row_size > kStockFewRowsMaxLength && row_size <= kStockComplexMaxLength &&
+        get_log_num_threads_x_inner_scan(num_rows, row_size) == 9) {
+      return true;
+    }
+    const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+    if (Tr::kHalf || num_rows < num_sms * kStockManyRowsPerSM) {
+      return false;
+    }
+    const int items = expensive_op_items<T, BinaryFunction>(num_rows, row_size, num_sms);
+    const Plan plan = make_plan(num_rows, row_size, num_sms, items);
+    const int64_t tile = plan.strategy == Strategy::Warp ? int64_t{plan.group} * items : int64_t{kBlock} * items;
+    const int64_t slots = plan.strategy == Strategy::Chunked ? plan.num_chunks * plan.chunk_size
+                                                             : ceil_div(row_size, tile) * tile;
+    const int64_t step = int64_t{2} << get_log_num_threads_x_inner_scan(num_rows, row_size);
+    const int64_t stock_ops = ceil_div(row_size, step) * step * 2;
+    return slots * (2 * items + 6) * 5 > stock_ops * items * 9;
+  }
 }
 
 } // namespace inner_scan
@@ -1770,12 +1850,15 @@ void scan_innermost_dim(const TensorBase& self, const TensorBase& result,
   int64_t num_rows = self.numel() / row_size;
 
 #if defined(USE_ROCM)
-  check_fits_in_unsigned(num_rows, "Number of rows (self.numel()/self.size(self.dim()-1))");
-  check_fits_in_unsigned(row_size, "row_size");
-  inner_scan::launch<scalar_t>(
-      result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
-      num_rows, row_size, init, binary_op);
-#else
+  if (!inner_scan::stock_faster<scalar_t, BinaryFunction>(num_rows, row_size)) {
+    check_fits_in_unsigned(num_rows, "Number of rows (self.numel()/self.size(self.dim()-1))");
+    check_fits_in_unsigned(row_size, "row_size");
+    inner_scan::launch<scalar_t>(
+        result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
+        num_rows, row_size, init, binary_op);
+    return;
+  }
+#endif
   // assuming max_num_threads per block is 512
   const uint32_t num_threads = 512;
   const uint32_t log_num_threads_x = get_log_num_threads_x_inner_scan(num_rows, row_size);
@@ -1793,7 +1876,6 @@ void scan_innermost_dim(const TensorBase& self, const TensorBase& result,
     result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
     num_rows, row_size, log_num_threads_x, init, binary_op);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-#endif
 }
 
 // binary_op must be associative. On CUDA it must also be commutative: the stock last-dim kernel
