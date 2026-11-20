@@ -698,6 +698,35 @@ class TestLibtorchAgnostic(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Not yet supported DeviceType"):
             libtorch_agnostic._interop.device_roundtrip(torch.device("xla"))
 
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    @parametrize(
+        "layout",
+        [
+            torch.strided,
+            torch.sparse_coo,
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+            torch._mkldnn,
+            torch.jagged,
+        ],
+    )
+    def test_pyobject_layout_roundtrip(self, device, layout):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        # torch.layout objects are singletons.
+        self.assertIs(libtorch_agnostic._interop.layout_roundtrip(layout), layout)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_non_layout_raises(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with self.assertRaisesRegex(RuntimeError, "expected torch.layout"):
+            libtorch_agnostic._interop.layout_roundtrip(torch.float32)
+
     @skipIfTorchVersionLessThan(2, 16)
     @skipIfTorchDynamo("Dynamo failed to run FX node with fake tensors")
     def test_my_add(self, device):
