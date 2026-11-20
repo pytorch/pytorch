@@ -817,6 +817,32 @@ AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError
+torch_layout_from_pyobject(void* py_obj, int32_t* ret_layout) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret_layout != nullptr, "ret_layout must not be null");
+    // The layout code crossing the ABI is the c10::Layout enum value, the same
+    // encoding as aoti_torch_layout_*().
+    *ret_layout = static_cast<int32_t>(
+        torch::detail::getPyObjectConversionImpl().layout_from_pyobject(
+            static_cast<PyObject*>(py_obj)));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_layout_to_pyobject(int32_t layout, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    TORCH_CHECK(
+        layout >= 0 && layout < static_cast<int32_t>(c10::Layout::NumOptions),
+        "torch_layout_to_pyobject: invalid layout code ",
+        layout);
+    *ret = torch::detail::getPyObjectConversionImpl().layout_to_pyobject(
+        static_cast<c10::Layout>(layout));
+  });
+}
+
 // Most other dtypes defined in torch/csrc/inductor/aoti_torch/shim_common.cpp
 #define TORCH_DTYPE_IMPL(dtype, stype)                    \
   AOTI_TORCH_EXPORT int32_t torch_dtype_##dtype() {       \
