@@ -29,11 +29,6 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable)
 /// version when no target is defined): v2 for >=2.16 receives build and target
 /// metadata, torch_call_dispatcher for 2.10-2.15 receives only the build
 /// version, and aoti_torch_call_dispatcher for 2.9 receives neither version.
-/// TORCH_FEATURE_VERSION resolves the effective target used by the wrapper.
-///
-/// Legacy C entrypoints without target metadata use 0 internally to mark an
-/// unknown target and retain their original conversion contract. An undefined
-/// TORCH_TARGET_VERSION defaults to the build version, not to 0.
 ///
 /// Minimum compatible version: PyTorch 2.9.
 /// Build time minimum version: PyTorch 2.16.
@@ -42,7 +37,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable)
 /// @param overload_name Overload name, e.g. "Tensor", or "" for the default.
 /// @param stack Boxed arguments on input; boxed returns on success.
 /// @return AOTITorchError; check it with STABLE_TORCH_ERROR_CODE_CHECK.
-inline AOTITorchError call_dispatcher(
+[[nodiscard]] inline AOTITorchError call_dispatcher(
     const char* op_name,
     const char* overload_name,
     StableIValue* stack) {
