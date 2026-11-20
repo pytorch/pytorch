@@ -19,64 +19,6 @@
 ```
 
 ```{eval-rst}
-.. autoclass:: torch.vm.Type
-```
-
-```{eval-rst}
-.. autoclass:: torch.vm.TensorType
-    :members:
-```
-
-```{eval-rst}
-.. autoclass:: torch.vm.IntType
-```
-
-```{eval-rst}
-.. autoclass:: torch.vm.Interval
-    :members:
-```
-
-```{eval-rst}
-.. autofunction:: torch.vm.type_of
-```
-
-```{eval-rst}
-.. autofunction:: torch.vm.materialize
-```
-
-```{eval-rst}
-.. autofunction:: torch.vm.guard
-```
-
-```{eval-rst}
-.. autoclass:: torch.vm.Check
-```
-
-```{eval-rst}
-.. autoclass:: torch.vm.Dtype
-```
-
-```{eval-rst}
-.. autoclass:: torch.vm.Device
-```
-
-```{eval-rst}
-.. autoclass:: torch.vm.Dim
-```
-
-```{eval-rst}
-.. autoclass:: torch.vm.Stride
-```
-
-```{eval-rst}
-.. autoclass:: torch.vm.Contiguous
-```
-
-```{eval-rst}
-.. autoclass:: torch.vm.Aligned
-```
-
-```{eval-rst}
 .. autofunction:: torch.vm.swap
 ```
 
@@ -90,10 +32,6 @@
 
 ```{eval-rst}
 .. autofunction:: torch.vm.load_passes
-```
-
-```{eval-rst}
-.. autofunction:: torch.vm.regions
 ```
 
 ```{eval-rst}
@@ -128,10 +66,6 @@
 
 ```{eval-rst}
 .. autoclass:: torch.vm.passes.ModuleShortcuts
-```
-
-```{eval-rst}
-.. autoclass:: torch.vm.passes.Graphs
 ```
 
 ```{eval-rst}
