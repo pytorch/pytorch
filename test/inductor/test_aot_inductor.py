@@ -473,6 +473,98 @@ def run_profiled(fn):
     return result, launched
 
 
+def _assert_subgraph_input_owners(test, output_code, min_owners=1, min_raw_owners=0):
+    paths = re.findall(r"AOT wrapper code written to: ([^\n]+)", output_code)
+    test.assertTrue(paths, "expected the generated AOT wrapper path")
+    code = pathlib.Path(paths[-1].strip()).read_text()
+    constructors = "RAIIAtenTensorHandle|wrap_with_raii_handle_if_needed"
+    pattern = rf"auto (?P<owner>var_\d+) = (?P<expr>(?:{constructors})\([^\n]*\));"
+    # Ignore C++ comments and quoted literals when locating generated blocks.
+    raw_literals = r'R"(?P<delimiter>\w*)\(.*?\)(?P=delimiter)"'
+    literals = (
+        raw_literals + r'|//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\''
+    )
+    braces = re.sub(literals, lambda match: " " * len(match[0]), code, flags=re.DOTALL)
+
+    def block_end(start):
+        depth = 0
+        for match in re.finditer(r"[{}]", braces[start:]):
+            depth += 1 if match[0] == "{" else -1
+            if depth == 0:
+                return start + match.start()
+        raise AssertionError("expected a complete generated C++ block")
+
+    entry_name = "run_impl"
+    if test.use_minimal_arrayref_interface:
+        entry_name += "_minimal_arrayref_interface"
+    entry = re.search(
+        rf"AOTInductorModel::{entry_name}(?:<[^>]*>)?\([^)]*\)\s*\{{", braces
+    )
+    test.assertIsNotNone(entry)
+    end = block_end(entry.end() - 1)
+    code = code[entry.start() : end + 1]
+    braces = braces[entry.start() : end + 1]
+    if config.fallback_by_default:
+        # ATen fallback materializes the view instead of passing its expression.
+        return code
+    owners = list(re.finditer(pattern, code))
+    test.assertGreaterEqual(len(owners), min_owners)
+    raw_owners = sum(
+        binding["expr"].startswith("RAIIAtenTensorHandle(") for binding in owners
+    )
+    test.assertGreaterEqual(raw_owners, min_raw_owners)
+
+    operations = list(
+        re.finditer(r"(?:if \([^)]*_scalar == 0\)|while \(1\)) \{", braces)
+    )
+    operations.extend(
+        match
+        for match in re.finditer(r"\{\s*// subgraph:", code)
+        if braces[match.start()] == "{"
+    )
+    operations.sort(key=lambda match: match.start())
+    previous_binding_end = 0
+    for binding in owners:
+        owner, expression = binding["owner"], binding["expr"]
+        raw = re.fullmatch(r"RAIIAtenTensorHandle\((tmp_\w+)\)", expression)
+        if raw is not None:
+            declaration = code.index(f"AtenTensorHandle {raw[1]};")
+            test.assertGreater(declaration, previous_binding_end)
+            test.assertLess(declaration, binding.start())
+        previous_binding_end = binding.end()
+        test.assertEqual(code.count(expression), 1)
+        reset = f"{owner}.reset();"
+        test.assertEqual(code.count(reset), 1)
+        operation = next(
+            (match for match in operations if match.start() > binding.end()), None
+        )
+        test.assertIsNotNone(
+            operation, "expected a control-flow operation after its owner"
+        )
+        end = block_end(braces.index("{", operation.start()))
+        while following := re.match(
+            r"\s*else(?:\s+if\s*\([^)]*\))?\s*\{", braces[end + 1 :]
+        ):
+            end = block_end(end + 1 + following.end() - 1)
+        uses = list(re.finditer(rf"\b{owner}[,)]", code))
+        test.assertTrue(uses)
+        test.assertLess(binding.end(), uses[0].start())
+        reset_pos = code.index(reset)
+        test.assertGreater(reset_pos, uses[-1].start())
+        if uses[0].start() < operation.start():
+            # Initial carried values have independent owners before the loop.
+            test.assertLess(reset_pos, operation.start())
+            continue
+        test.assertGreater(reset_pos, end)
+        gap = braces[end + 1 : reset_pos]
+        for other in owners:
+            gap = gap.replace(f"{other['owner']}.reset();", "")
+        test.assertFalse(
+            gap.strip(), "expected cleanup immediately after the operation"
+        )
+    return code
+
+
 class AOTInductorTestsTemplate:
     @common_utils.decorateIf(
         skip_if_device(
@@ -4052,6 +4144,192 @@ class AOTInductorTestsTemplate:
                 example_inputs=example_inputs,
             )
 
+    @common_utils.parametrize("view_kind", ["repeat", "dtype"])
+    def test_cond_view_handle_lifetime(self, view_kind):
+        class Model(torch.nn.Module):
+            def forward(self, pred, x, y):
+                if view_kind == "repeat":
+                    y = y.repeat_interleave(1, 0)
+                else:
+                    y = y.view(torch.int32)
+                result = torch.cond(
+                    pred, lambda x, y: x + y, lambda x, y: x - y, (x, y)
+                )
+                return result + 1
+
+        # Keep results heap-backed in the stack-allocation test variants.
+        size = 32768
+        if view_kind == "dtype":
+            x = torch.randint(0, 10, (size,), dtype=torch.int32, device=self.device)
+            y = torch.randint(0, 10, (size,), dtype=torch.int32, device=self.device)
+            y = y.view(torch.float32)
+        else:
+            x = torch.randn(size, device=self.device)
+            y = torch.randn(size, device=self.device)
+        inputs = [
+            (torch.tensor(selector, device=self.device), x, y)
+            for selector in (True, False, True)
+        ]
+        _, code = run_and_get_cpp_code(
+            self.check_model_with_multiple_inputs, Model(), inputs
+        )
+        _assert_subgraph_input_owners(self, code)
+
+    @common_utils.parametrize("view_kind", ["repeat", "dtype"])
+    def test_cond_multiple_view_handle_owners(self, view_kind):
+        class Model(torch.nn.Module):
+            def forward(self, pred, x, y, z):
+                if view_kind == "repeat":
+                    y = y.repeat_interleave(1, 0)
+                    z = z.repeat_interleave(1, 0)
+                else:
+                    y = y.view(torch.int32)
+                    z = z.view(torch.int32)
+                return torch.cond(
+                    pred,
+                    lambda x, y, z: x + y + z,
+                    lambda x, y, z: x - y - z,
+                    (x, y, z),
+                )
+
+        if view_kind == "dtype":
+            x, y, z = (
+                torch.randint(0, 10, (32768,), dtype=torch.int32, device=self.device)
+                for _ in range(3)
+            )
+            y, z = y.view(torch.float32), z.view(torch.float32)
+        else:
+            x, y, z = (torch.randn(32768, device=self.device) for _ in range(3))
+        inputs = [
+            (torch.tensor(selector, device=self.device), x, y, z)
+            for selector in (True, False, True)
+        ]
+        _, code = run_and_get_cpp_code(
+            self.check_model_with_multiple_inputs, Model(), inputs
+        )
+        _assert_subgraph_input_owners(self, code, min_owners=2, min_raw_owners=2)
+
+    @common_utils.parametrize("kind", ["invoke", "while"])
+    @common_utils.parametrize("view_kind", ["repeat", "dtype"])
+    def test_subgraph_view_input_acquisition(self, kind, view_kind):
+        with torch._dynamo.config.patch(
+            enable_invoke_subgraph_regional_compile=True,
+            inline_single_use_invoke_subgraph=False,
+        ):
+
+            @torch.compiler.nested_compile_region
+            def region(a, b):
+                return a + b
+
+            class Model(torch.nn.Module):
+                def forward(self, x, y):
+                    if view_kind == "repeat":
+                        x = x.repeat_interleave(1, 0)
+                        y = y.repeat_interleave(1, 0)
+                    else:
+                        x = x.view(torch.int32)
+                        y = y.view(torch.int32)
+                    if kind == "invoke":
+                        return region(x, y) + region(x * 2, y)
+                    return torch.while_loop(
+                        lambda i, a, b: i < 2,
+                        lambda i, a, b: (i + 1, a + b, b + 1),
+                        (torch.zeros((), dtype=torch.int64, device=x.device), x, y),
+                    )
+
+            if view_kind == "dtype":
+                x, y = (
+                    torch.randint(
+                        0, 10, (32768,), dtype=torch.int32, device=self.device
+                    ).view(torch.float32)
+                    for _ in range(2)
+                )
+            else:
+                x, y = (torch.randn(32768, device=self.device) for _ in range(2))
+            _, code = run_and_get_cpp_code(
+                self.check_model_with_multiple_inputs, Model(), [(x, y)] * 3
+            )
+            _assert_subgraph_input_owners(self, code, min_owners=2, min_raw_owners=2)
+
+    @common_utils.parametrize("view_kind", ["dtype", "prefix"])
+    def test_subgraph_stack_view_outputs(self, view_kind):
+        class Model(torch.nn.Module):
+            def forward(self, pred, x):
+                def true_fn(x):
+                    result = x + 1
+                    return (
+                        result.view(torch.float32)
+                        if view_kind == "dtype"
+                        else result[:2]
+                    )
+
+                def false_fn(x):
+                    result = x - 1
+                    return (
+                        result.view(torch.float32)
+                        if view_kind == "dtype"
+                        else result[:2]
+                    )
+
+                result = torch.cond(pred, true_fn, false_fn, (x,))
+                if view_kind == "dtype":
+                    result = result.view(torch.int32)
+                return result + 3
+
+        x = torch.randint(2, 10, (4,), dtype=torch.int32, device=self.device)
+        inputs = [
+            (torch.tensor(selector, device=self.device), x)
+            for selector in (True, False, True)
+        ]
+        model = Model()
+        package, output_code = run_and_get_cpp_code(
+            AOTIRunnerUtil.compile,
+            model,
+            inputs[0],
+            inductor_configs={
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            },
+        )
+        compiled = AOTIRunnerUtil.load_package(package)
+        for args in inputs:
+            # ArrayRef runners reuse output storage on their next invocation.
+            self.assertEqual(compiled(*args), model(*args))
+        if self.allow_stack_allocation and not config.fallback_by_default:
+            paths = re.findall(r"AOT wrapper code written to: ([^\n]+)", output_code)
+            self.assertTrue(paths)
+            code = pathlib.Path(paths[-1].strip()).read_text()
+            FileCheck().check("ArrayRefTensor<int32_t>").check(
+                "aoti_torch_clone(borrow_arrayref_tensor_as_tensor(value)"
+            ).run(code)
+
+    def test_cond_shared_selector_view_handles(self):
+        class Model(torch.nn.Module):
+            def forward(self, pred, x, y):
+                y = y.repeat_interleave(1, 0)
+                first = torch.cond(pred, lambda x, y: x + y, lambda x, y: x - y, (x, y))
+                second = torch.cond(
+                    pred,
+                    lambda x, y: x * 2 + y,
+                    lambda x, y: x * 2 - y,
+                    (first, y),
+                )
+                return second + 1
+
+        x, y = (torch.randn(32768, device=self.device) for _ in range(2))
+        inputs = [
+            (torch.tensor(selector, device=self.device), x, y)
+            for selector in (True, False, True)
+        ]
+        _, output_code = run_and_get_cpp_code(
+            self.check_model_with_multiple_inputs, Model(), inputs
+        )
+        code = _assert_subgraph_input_owners(self, output_code)
+        selectors = re.findall(r"if \((\w+_scalar) == 0\)", code)
+        self.assertEqual(len(selectors), 2)
+        self.assertEqual(selectors[0], selectors[1])
+        self.assertEqual(code.count(f"int64_t {selectors[0]};"), 1)
+
     def test_switch_simple(self):
         inputs = (torch.randn((10, 20), device=self.device),)
         dim0_x = Dim("s0", min=2, max=1024)
@@ -4121,9 +4399,11 @@ class AOTInductorTestsTemplate:
                 "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
             }
         ):
-            package_path = torch._inductor.aoti_compile_and_package(
-                torch.export.export(model, example_inputs)
+            package_path, code = run_and_get_cpp_code(
+                torch._inductor.aoti_compile_and_package,
+                torch.export.export(model, example_inputs),
             )
+        _assert_subgraph_input_owners(self, code)
         compiled = AOTIRunnerUtil.load_package(package_path)
         for _ in range(3):
             args = inputs()

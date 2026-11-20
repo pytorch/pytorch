@@ -253,9 +253,6 @@ CPU_TEST_FAILURES = {
     "test_deconv_freezing": fail_minimal_arrayref_interface(is_skip=True),
     "test_cond_share_predicate": fail_stack_allocation(is_skip=True),
     "test_cond_predicate_on_cpu": fail_stack_allocation(is_skip=True),
-    "test_while_loop_with_mixed_device_dynamic_True": fail_stack_allocation(),
-    "test_while_loop_with_mixed_device_dynamic_False": fail_stack_allocation(),
-    "test_while_loop_with_pytree_inputs": fail_stack_allocation(),
     # ArrayRefTensor outputs do not expose AtenTensorHandle, so this wrapper
     # variant intentionally skips fallback output metadata assertions.
     "test_aoti_custom_op_bad_fake_dtype_fails_fast": fail_stack_allocation(
@@ -343,14 +340,6 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_outer_code": fail_stack_allocation(is_skip=True),
     # TODO: error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
     "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
-    # Native lowering has existing while_loop ArrayRefTensor/handle conversion
-    # gaps. ATen fallback (lite) mode supports these cases and must not xfail.
-    **{
-        f"test_while_loop_captured_view_handle_lifetime_view_kind_{view_kind}_iterations_{iterations}": fail_stack_allocation()
-        for view_kind in ("repeat", "dtype", "slice")
-        for iterations in (0, 1, 3)
-        if not LITE_MODE
-    },
     # TODO: use of undeclared identifier 'float8_e4m3fn' and 'half'
     "test_fp8": fail_minimal_arrayref_interface(is_skip=True),
     "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
@@ -374,8 +363,6 @@ CPU_TEST_FAILURES = {
     "test_cond_unbacked_symint_closure_dynamic_False": fail_stack_allocation(
         is_skip=True
     ),
-    # TODO: no match for operator= between RAIIAtenTensorHandle and ArrayRefTensor
-    "test_cond_unbacked_symint_predicate": fail_stack_allocation(),
     "test_empty_cat_dtype_promotion": fail_stack_allocation(is_skip=True),
     "test_pad_fallback": fail_stack_allocation(is_skip=True),
     "test_simple_embed_kernel_binary_False_max_autotune_True": fail_stack_allocation(
@@ -434,14 +421,6 @@ LITE_MODE_TEST_FAILURES = {
 }
 
 if LITE_MODE:
-    # These pass in lite mode
-    for name in (
-        "test_cond_unbacked_symint_predicate",
-        "test_while_loop_with_mixed_device_dynamic_False",
-        "test_while_loop_with_mixed_device_dynamic_True",
-        "test_while_loop_with_pytree_inputs",
-    ):
-        del CPU_TEST_FAILURES[name]
     CPU_TEST_FAILURES.update(LITE_MODE_TEST_FAILURES)
 
 
