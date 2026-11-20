@@ -23,12 +23,14 @@
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/util/env.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <c10/xpu/XPUStream.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/static_launcher/common.h>
 #include <torch/csrc/inductor/static_launcher/xpu.h>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 #include <level_zero/ze_api.h>
@@ -62,13 +64,14 @@ typedef void* syclDevicePtr_t;
 
 /**
  * A loaded kernel and the launch properties that are fixed once it is loaded:
- * the threads per warp used with num_warps to size the work-group, and its
- * argument count.
+ * the threads per warp used with num_warps to size the work-group, its
+ * argument count, and whether it is submitted without a sycl::event.
  */
 struct LoadedKernel {
   sycl::kernel kernel;
   uint32_t threadsPerWarp = 0;
   uint32_t numArgs = 0;
+  bool eventlessSubmit = false;
 };
 
 syclDevicePtr_t callDataPtrMethod(PyObject* obj) {
@@ -378,6 +381,26 @@ inline LoadedKernel _createKernel(
   return LoadedKernel{std::move(fun), threadsPerWarp, props.numKernelArgs};
 }
 
+bool useEventlessSubmit(const sycl::device& device) {
+  const auto env = c10::utils::check_env("TORCHINDUCTOR_XPU_EVENTLESS_SUBMIT");
+  if (env) {
+    return *env;
+  }
+  // Below 1.6.35096+9 the device-side assert and printf buffers are harvested
+  // only when the host waits on the kernel's event. A version that does not
+  // parse counts as too old.
+  const auto ver = device.get_info<sycl::info::device::driver_version>();
+  std::array<unsigned, 4> v{}; // major, minor, patch, build
+  // NOLINTNEXTLINE(bugprone-unchecked-string-to-number-conversion)
+  int n = std::sscanf(ver.c_str(), "%u.%u.%u+%u", &v[0], &v[1], &v[2], &v[3]);
+  if (n < 3 || v < std::array<unsigned, 4>{1, 6, 35096, 9}) {
+    return false;
+  }
+  namespace syclex = sycl::ext::oneapi::experimental;
+  return device.get_info<syclex::info::device::architecture>() >=
+      syclex::architecture::intel_gpu_bmg_g21;
+}
+
 std::unique_ptr<LoadedKernel> loadKernel(
     const char* filePath,
     const char* funcName,
@@ -410,8 +433,13 @@ std::unique_ptr<LoadedKernel> loadKernel(
   auto mod = _createModule(
       reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), device_idx);
 
-  return std::make_unique<LoadedKernel>(
+  auto kernel = std::make_unique<LoadedKernel>(
       _createKernel(std::move(mod), funcName, nSpills));
+  // Decided once: all XPU devices share one Level Zero platform and driver.
+  static const bool eventlessSubmit = useEventlessSubmit(
+      c10::xpu::get_raw_device(static_cast<c10::DeviceIndex>(device_idx)));
+  kernel->eventlessSubmit = eventlessSubmit;
+  return kernel;
 }
 
 template <typename T>
@@ -494,6 +522,10 @@ void submitKernel(
       cgh.parallel_for(parallelWorkSize, loadedKernel->kernel);
     }
   };
+  if (loadedKernel->eventlessSubmit) {
+    sycl::ext::oneapi::experimental::submit(*queuePtr, cgf);
+    return;
+  }
   queuePtr->submit(cgf);
 }
 
