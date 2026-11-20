@@ -242,6 +242,9 @@ void ActivityProfilerController::syncToggleCollectionDynamic(
     const bool enable) {
   syncHandler_->toggleCollectionDynamic(enable);
 }
+void ActivityProfilerController::syncStopCollection() {
+  syncHandler_->stopCollection();
+}
 void ActivityProfilerController::syncStartTrace() {
   syncHandler_->startTrace();
 }

@@ -92,6 +92,10 @@ void ActivityProfilerProxy::toggleCollectionDynamic(const bool enable) {
   controller_->syncToggleCollectionDynamic(enable);
 }
 
+void ActivityProfilerProxy::stopCollection() {
+  controller_->syncStopCollection();
+}
+
 void ActivityProfilerProxy::startTrace() {
   controller_->syncStartTrace();
 }
