@@ -1,13 +1,14 @@
 #pragma once
 
+#include <c10/cuda/CUDAFunctions.h>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 namespace c10d {
 
 // Minimal C++ Backend for testing, modeled after ncclx
-// (fbcode/comms/ncclx/pg/).  Wraps a real ProcessGroupNCCL so that
+// (fbcode/comms/ncclx/pg/).  Wraps a real nccl2 ProcessGroupNCCL so that
 // collectives (including the allgather used by symmetric-memory PG
 // rendezvous) actually work.  Registers as a custom backend plugin via
 // Backend.register_backend() with extended_api=True, which means
@@ -20,11 +21,13 @@ class NCCLXStub : public Backend {
       const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
-      c10::intrusive_ptr<ProcessGroupNCCL::Options> options =
-          ProcessGroupNCCL::Options::create())
+      c10::intrusive_ptr<NCCLOptions> options = NCCLOptions::create())
       : Backend(rank, size) {
-    nccl_ = c10::make_intrusive<ProcessGroupNCCL>(
+    nccl_ = c10::make_intrusive<nccl2::ProcessGroupNCCL>(
         store, rank, size, std::move(options));
+    // nccl2 creates its communicator when bound to a device; c10d does not
+    // bind extended_api plugin backends, so bind the current device.
+    nccl_->setBoundDeviceId(at::Device(at::kCUDA, c10::cuda::current_device()));
   }
 
   const std::string getBackendName() const override {
@@ -67,7 +70,7 @@ class NCCLXStub : public Backend {
   }
 
  private:
-  c10::intrusive_ptr<ProcessGroupNCCL> nccl_;
+  c10::intrusive_ptr<nccl2::ProcessGroupNCCL> nccl_;
 };
 
 } // namespace c10d
