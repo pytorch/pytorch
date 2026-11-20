@@ -418,6 +418,9 @@ void WorkNCCL::synchronizeInternal() {
   // clear and both ranks spin forever). Skip while the stream is capturing a
   // CUDA graph: cudaStreamSynchronize is illegal during capture and the
   // captured work is replayed on-device where a host sync is meaningless.
+  // current_stream may be the null stream, which the CUDA runtime resolves
+  // against the current device; guard so we sync the comm's device.
+  c10::cuda::CUDAGuard device_guard(state_->comm->getDevice());
   if (state_->hostBlocking && !state_->blockingWait &&
       !c10::cuda::isStreamCapturingMayInitCtx(current_stream)) {
     C10_CUDA_CHECK(cudaStreamSynchronize(current_stream));
