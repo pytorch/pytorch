@@ -38,10 +38,21 @@ class PointwiseHeuristic(CodegenConfigHeuristics):
         hinted_configs: list[Any],
         tile_hint: TileHint | None = None,
         inductor_meta: dict[str, Any] | None = None,
+        triton_meta: dict[str, Any] | None = None,
     ) -> list[Any]:
         inductor_meta = inductor_meta or {}
         n = len(size_hints)
         if n == 1:
+            if inductor_meta.get("tma_variant"):
+                device = triton_meta["device"] if triton_meta else None
+                if device is not None and device.type == "cuda" and device.cc == 100:
+                    from triton import Config
+
+                    # Coordinate descent settles on 2048 elements and 2 warps on GB200 (#187175); other GPUs were not measured.
+                    # Built directly, since triton_config raises a block of 128+ elements to 4 warps (#97950).
+                    xblock = min(2 * bs, size_hints["x"])
+                    return [Config({"XBLOCK": xblock}, num_warps=2, num_stages=1)]
+                return [triton_config_fn(size_hints, bs)]
             return self._configs_1d(
                 size_hints, bs, hinted_configs, triton_config_fn, inductor_meta
             )
