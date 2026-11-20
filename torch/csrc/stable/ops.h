@@ -7,6 +7,7 @@
 #include <string>
 #include <tuple>
 #include <type_traits>
+#include <vector>
 
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
 #include <torch/csrc/stable/c/shim.h>
@@ -498,7 +499,11 @@ inline torch::stable::Tensor select(
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self),
       torch::stable::detail::from(dim),
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+      torch::stable::detail::from(torch::stable::SymInt(index))};
+#else
       torch::stable::detail::from(index)};
+#endif
   STABLE_TORCH_ERROR_CODE_CHECK(
       torch::stable::call_dispatcher("aten::select", "int", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
@@ -598,7 +603,12 @@ inline torch::stable::Tensor empty(
         std::nullopt) {
   const auto num_args = 6;
   std::array<StableIValue, num_args> stack{
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+      torch::stable::detail::from(
+          std::vector<torch::stable::SymInt>(size.begin(), size.end())),
+#else
       torch::stable::detail::from(size),
+#endif
       torch::stable::detail::from(dtype),
       torch::stable::detail::from(layout),
       torch::stable::detail::from(device),
@@ -625,7 +635,13 @@ inline torch::stable::Tensor reshape(
     torch::headeronly::IntHeaderOnlyArrayRef shape) {
   const auto num_args = 2;
   std::array<StableIValue, num_args> stack{
-      torch::stable::detail::from(self), torch::stable::detail::from(shape)};
+      torch::stable::detail::from(self),
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+      torch::stable::detail::from(
+          std::vector<torch::stable::SymInt>(shape.begin(), shape.end()))};
+#else
+      torch::stable::detail::from(shape)};
+#endif
   STABLE_TORCH_ERROR_CODE_CHECK(
       torch::stable::call_dispatcher("aten::reshape", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
@@ -647,7 +663,13 @@ inline torch::stable::Tensor view(
     torch::headeronly::IntHeaderOnlyArrayRef size) {
   const auto num_args = 2;
   std::array<StableIValue, num_args> stack{
-      torch::stable::detail::from(self), torch::stable::detail::from(size)};
+      torch::stable::detail::from(self),
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+      torch::stable::detail::from(
+          std::vector<torch::stable::SymInt>(size.begin(), size.end()))};
+#else
+      torch::stable::detail::from(size)};
+#endif
   STABLE_TORCH_ERROR_CODE_CHECK(
       torch::stable::call_dispatcher("aten::view", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);

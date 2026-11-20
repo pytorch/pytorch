@@ -21,7 +21,28 @@
 #include <torch/csrc/shim_exception_state.h>
 #include <torch/csrc/stable/c/shim.h>
 
+#include <cstring>
 #include <iomanip>
+#include <type_traits>
+
+// The stable conversion currently uses c10::SymInt's data_ word directly.
+// A representation change requires translation while preserving the stable ABI.
+static_assert(
+    sizeof(c10::SymInt) == sizeof(StableIValue) &&
+        alignof(c10::SymInt) == alignof(int64_t) &&
+        std::is_standard_layout_v<c10::SymInt>,
+    "Update the stable SymInt conversion when c10::SymInt's layout changes");
+static_assert(c10::SymInt::min_representable_int() == -(INT64_C(1) << 62));
+
+// Transfers value's owned reference into the encoded word.
+static int64_t symint_to_word(c10::SymInt value) {
+  int64_t word;
+  std::memcpy(&word, &value, sizeof(word));
+  if (value.is_heap_allocated()) {
+    std::move(value).release();
+  }
+  return word;
+}
 
 static void check_target_version(
     uint64_t extension_build_version,
@@ -200,12 +221,14 @@ static StableIValue from_ivalue(
           ivalue.toStringRef(), extension_build_version);
     }
     case c10::TypeKind::SymIntType: {
-      // Treat SymInt as Int for StableIValue <-> IValue conversion
-      return from_ivalue(
-          c10::IntType::get(),
-          ivalue,
-          extension_build_version,
-          extension_target_version);
+      if (extension_target_version < TORCH_VERSION_2_16_0) {
+        return torch::stable::detail::_from(
+            ivalue.toInt(), extension_build_version);
+      }
+      // List elements can alias a native caller's storage; acquire a reference
+      // rather than consuming the borrowed IValue.
+      return torch::stable::detail::_from(
+          symint_to_word(ivalue.toSymInt()), extension_build_version);
     }
     default: {
       TORCH_CHECK(
@@ -334,12 +357,14 @@ static c10::IValue to_ivalue(
           stable_ivalue, extension_build_version));
     }
     case c10::TypeKind::SymIntType: {
-      // Treat SymInt as Int for StableIValue <-> IValue conversion
-      return to_ivalue(
-          c10::IntType::get(),
-          stable_ivalue,
-          extension_build_version,
-          extension_target_version);
+      auto word = torch::stable::detail::_to<int64_t>(
+          stable_ivalue, extension_build_version);
+      if (extension_target_version < TORCH_VERSION_2_16_0) {
+        // Numeric input, not an owning word. IValue's toSymInt uses the
+        // checked constructor, including for integers below -2^62.
+        return c10::IValue(word);
+      }
+      return c10::IValue(c10::SymInt(c10::SymInt::UNCHECKED, word));
     }
     default: {
       TORCH_CHECK(
@@ -1034,6 +1059,28 @@ AOTITorchError torch_delete_stable_ivalue(StableIValue* value) {
     delete value;
     return AOTI_TORCH_SUCCESS;
   }
+}
+
+AOTITorchError torch_symint_from_int(int64_t value, int64_t* ret_word) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret_word = symint_to_word(c10::SymInt(value)); });
+}
+
+AOTITorchError torch_symint_incref(int64_t word) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto value = c10::SymInt(c10::SymInt::UNCHECKED, word);
+    if (value.is_heap_allocated()) {
+      c10::raw::intrusive_ptr::incref(std::move(value).release());
+    }
+  });
+}
+
+AOTITorchError torch_symint_decref(int64_t word) {
+  // The local SymInt adopts the word; its destructor releases the owned
+  // reference. Update this shim if the native adoption or destruction behavior
+  // changes.
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { auto value = c10::SymInt(c10::SymInt::UNCHECKED, word); });
 }
 
 AOTITorchError torch_stream_native_handle(

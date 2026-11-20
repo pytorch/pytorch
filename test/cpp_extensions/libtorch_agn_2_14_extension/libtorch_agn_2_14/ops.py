@@ -39,6 +39,22 @@ def my_mps_set_arg_bytes_lifetime(t) -> torch.Tensor:
     return torch.ops.libtorch_agn_2_14.my_mps_set_arg_bytes_lifetime.default(t)
 
 
+def integer_symint_echo(value: int) -> int:
+    return torch.ops.libtorch_agn_2_14.integer_symint_echo.default(value)
+
+
+def integer_symint_dispatch(value: int) -> int:
+    return torch.ops.libtorch_agn_2_14.integer_symint_dispatch.default(value)
+
+
+def integer_symint_select(self: torch.Tensor, index: int) -> torch.Tensor:
+    return torch.ops.libtorch_agn_2_14.integer_symint_select.default(self, index)
+
+
+def integer_symint_view(self: torch.Tensor, sizes: list[int]) -> torch.Tensor:
+    return torch.ops.libtorch_agn_2_14.integer_symint_view.default(self, sizes)
+
+
 def __getattr__(name):
     """Proxy for inherited ops from previous versions."""
     if name.startswith("_"):

@@ -20,8 +20,10 @@ extern "C" {
 
 // Legacy build-only variant of torch_call_dispatcher_v2. See v2 for the
 // boxed-stack and ownership contract. Pass TORCH_ABI_VERSION for the extension
-// build version (NOT its target version). This entrypoint retains the original
-// conversion contract; prefer v2 when it is available.
+// build version (NOT its target version); prefer v2 when it is available.
+// SymInt schema values, including list/optional elements and returns, use
+// full-range int64_t integers. Symbolic native values are concretized by
+// guard_int (or error if unresolved). No SymInt references cross this API.
 AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(
     const char* opName,
     const char* overloadName,
@@ -409,6 +411,9 @@ torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
 // defined (otherwise TORCH_ABI_VERSION). Target must be nonzero and <= build.
 // Older nonzero targets are valid when this entrypoint is available at runtime.
 // Build selects schema adapters; target is forwarded to value conversions.
+// For SymInt schema values (including list/optional elements and returns),
+// targets < 2.16 use full-range int64_t integers; targets >= 2.16 use owning
+// words boxed with from(stable::SymInt). Other schema encodings are unchanged.
 // Returns AOTITorchError; C++ callers should use
 // torch::stable::call_dispatcher.
 AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher_v2(
@@ -424,12 +429,28 @@ AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher_v2(
 // lifetime. The callback receives stack, input count, and output count (not
 // versions). It consumes owning input values and writes owning returns in the
 // same stack buffer; that buffer belongs to libtorch, not the callback.
+// SymInt schemas require stable::SymInt argument/return boxing for targets
+// >= 2.16, including list/optional elements. Lower targets use int64_t values;
+// raw torch_library_impl and aoti_torch_library_impl retain the integer
+// protocol.
 AOTI_TORCH_EXPORT AOTITorchError torch_library_impl_v2(
     TorchLibraryHandle self,
     const char* name,
     void (*fn)(StableIValue*, uint64_t, uint64_t),
     uint64_t extension_build_version,
     uint64_t extension_target_version);
+
+// A SymInt word is the integer itself in [-2^62, 2^63-1]. Other words are
+// opaque references; only libtorch may interpret them.
+// Constructs an owning word, including for integers outside the inline range.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_symint_from_int(int64_t value, int64_t* ret_word);
+
+// Acquires one reference for an opaque word; no-op for inline integers.
+AOTI_TORCH_EXPORT AOTITorchError torch_symint_incref(int64_t word);
+
+// Releases one owned reference; no-op for inline integers.
+AOTI_TORCH_EXPORT AOTITorchError torch_symint_decref(int64_t word);
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 

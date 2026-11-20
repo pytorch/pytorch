@@ -5,6 +5,7 @@
 #include <torch/csrc/stable/device_struct.h>
 #include <torch/csrc/stable/generator_struct.h>
 #include <torch/csrc/stable/macros.h>
+#include <torch/csrc/stable/symint.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/DeviceType.h>
 #include <torch/headeronly/core/Layout.h>
@@ -41,6 +42,19 @@ template <typename T>
 StableIValue from(T val);
 template <typename T>
 T to(StableIValue val);
+
+/*
+ * The const-reference Tensor overload below and the SymInt overload borrow
+ * their input rather than making a by-value copy. Declare SymInt's overload
+ * before the generic container definitions so qualified detail::from(elem)
+ * finds it by ordinary lookup, avoiding an extra incref/decref pair per
+ * element.
+ * [[maybe_unused]] suppresses warnings from clang12- and gcc11-; these
+ * overloads are used (see https://godbolt.org/z/859cshxrW for Tensor).
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+inline StableIValue from(const torch::stable::SymInt& val);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 // =============================================================================
 //  Below are the helpers for converting between StableIValue and T
@@ -293,6 +307,19 @@ struct FromImpl<torch::stable::Tensor> {
     return torch::stable::detail::from(new_ath);
   }
 };
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+// Boxing acquires a reference for the stack, like Tensor boxing.
+template <>
+struct FromImpl<torch::stable::SymInt> {
+  static StableIValue call(
+      const torch::stable::SymInt& val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    return detail::from(torch::stable::SymInt(val).release());
+  }
+};
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 // Specialization for torch::stable::Generator => StableIValue
@@ -668,6 +695,19 @@ struct ToImpl<torch::stable::Tensor> {
   }
 };
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+// Unboxing adopts the reference owned by the stack.
+template <>
+struct ToImpl<torch::stable::SymInt> {
+  static torch::stable::SymInt call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    return torch::stable::SymInt::reclaim(detail::to<int64_t>(val));
+  }
+};
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 // Specialization for StableIValue => torch::stable::Generator
 // The resulting stable::Generator steals ownership of the input's
@@ -965,12 +1005,17 @@ inline StableIValue from(const std::optional<T>& val) {
       val, aoti_torch_abi_version(), /*is_internal=*/false);
 }
 
-// The below overload is used! See https://godbolt.org/z/859cshxrW
-// We are suppressing the warning for versions clang12- and gcc11-
 [[maybe_unused]] inline StableIValue from(const torch::stable::Tensor& val) {
   return detail::FromImpl<torch::stable::Tensor>::call(
       val, aoti_torch_abi_version(), /*is_internal=*/false);
 }
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+[[maybe_unused]] inline StableIValue from(const torch::stable::SymInt& val) {
+  return detail::FromImpl<torch::stable::SymInt>::call(
+      val, aoti_torch_abi_version(), /*is_internal=*/false);
+}
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 template <typename T>
 inline T to(StableIValue val) {
