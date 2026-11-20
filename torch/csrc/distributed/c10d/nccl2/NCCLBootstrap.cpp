@@ -102,7 +102,7 @@ void populateNcclConfigFromHints(
   // Iterate over the hints and set the corresponding fields in the config.  For
   // string arguments, NCCL uses a "const char*" instead of a std::string.  The
   // strings only need to be valid for the duration of the
-  // ncclCommInitRankConfig call, so we use .c_str() directly.
+  // ncclCommInitRankConfig call, so we use .c_str() directly, except commName.
 
   for (const auto& [key, val] : hints) {
     if (kLayerHints.count(key)) {
@@ -138,7 +138,9 @@ void populateNcclConfigFromHints(
       TC_LOG(INFO) << "[comm=" << name
                    << "] Setting config.trafficClass=" << config.trafficClass;
     } else if (key == "commName") {
-      config.commName = val.c_str();
+      // NCCL keeps the pointer for the comm's lifetime and passes it to
+      // profiler plugins, so leak a copy as the NCCLConfig pybind setter does.
+      config.commName = strdup(val.c_str());
       TC_LOG(INFO) << "[comm=" << name
                    << "] Setting config.commName=" << config.commName;
     } else if (key == "collnetEnable" || key == "collnet_enable") {
@@ -196,9 +198,6 @@ ncclComm_t NCCLBootstrap::createNcclComm(
   // TODO: add logging on failures and successes
   // TODO: get the local rank
   ncclConfig_t config = base_config;
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
-  config.commName = name.c_str();
-#endif
 
   constexpr int kDefaultRanksPerRoot = 128;
   const int ranksPerRoot =
