@@ -9,8 +9,8 @@ name: job-filter
 #
 # 2. SHARED BUILD DEPENDENCY - when multiple jobs depend on the same build,
 #    the build job must include all dependent display names:
-#      # build job (used by both linux-jammy-py3.10-gcc11 test AND linux-docs)
-#      if: ${{ needs.job-filter.outputs.jobs == '' || contains(..., ' linux-jammy-py3.10-gcc11 ') || contains(..., ' linux-docs ') }}
+#      # build job (used by both linux-jammy-py3.11-gcc11 test AND linux-docs)
+#      if: ${{ needs.job-filter.outputs.jobs == '' || contains(..., ' linux-jammy-py3.11-gcc11 ') || contains(..., ' linux-docs ') }}
 #
 # 3. PRE-EXISTING CONDITION - when a job has a condition that existed before filtering
 #    (e.g., only run on certain events/tags), use OR logic to allow filter override:

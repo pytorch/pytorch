@@ -10,7 +10,7 @@ here would die with this process.
 Environment variables expected:
     GPU_ARCH_TYPE      - cpu, cuda, xpu (read from DESIRED_CUDA fallback)
     DESIRED_CUDA       - cpu, cu126, cu128, ..., xpu
-    CUDA_VERSION       - 126, 128, 129, 130, 132, 134 (CUDA builds only)
+    CUDA_VERSION       - 126, 128, 129, 130, 132, 134, 135 (CUDA builds only)
     VSDEVCMD_ARGS      - extra args for vcvarsall.bat (optional)
     VC_YEAR            - 2022 (or 2019)
 """
@@ -39,10 +39,8 @@ WIN_CI_DIR = Path(__file__).resolve().parents[2] / "pytorch" / "windows"
 # build_pytorch.bat + internal/check_deps.bat.
 COMMON_BUILD_ENV: dict[str, str] = {
     "PYTORCH_BINARY_BUILD": "1",
-    "TH_BINARY_BUILD": "1",
     "BUILD_TEST": "0",
     "INSTALL_TEST": "0",
-    "MSSdk": "1",
     "DISTUTILS_USE_SDK": "1",
     # Ninja is forced for Windows builds via cmake.define.CMAKE_GENERATOR in
     # pyproject.toml (single source of truth), so it is not set here.
@@ -73,6 +71,7 @@ TORCH_CUDA_ARCH_LIST_TABLE: dict[str, str] = {
     "130": "7.5;8.0;8.6;9.0;10.0;12.0",
     "132": "7.5;8.0;8.6;9.0;10.0;12.0",
     "134": "7.5;8.0;8.6;9.0;10.0;12.0",
+    "135": "7.5;8.0;8.6;9.0;10.0;12.0",
 }
 
 
@@ -194,7 +193,7 @@ def source_oneapi_vars(scripts: list[Path]) -> dict[str, str]:
 
 def install_cuda_toolkit() -> None:
     """Run the legacy internal/cuda_install.bat which downloads + installs
-    the CUDA toolkit, cuDNN, ZLIB, and the GPU driver DLLs.
+    the CUDA toolkit, cuDNN, and the GPU driver DLLs.
 
     Kept as a .bat invocation rather than ported to Python: the installer
     logic is heavy (multiple version branches, NvToolsExt staging,

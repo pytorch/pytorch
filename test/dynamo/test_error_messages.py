@@ -25,8 +25,13 @@ from torch._dynamo.exc import (
 )
 from torch._dynamo.testing import skipIfNotPy311, skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
+    HardwareClassification,
     IS_FBCODE,
     IS_S390X,
     munge_exc,
@@ -66,6 +71,8 @@ warning_once_logger = WarningOnceLogger("warning_once_logger")
 
 
 class ErrorMessagesTest(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_inplace_view_on_graph_input_hint(self):
         def fn(x):
             x.transpose_(1, 2)
@@ -295,19 +302,18 @@ Backend compiler exception
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0219.html""",
         )
 
-        if sys.version_info >= (3, 11):
-            msg_with_carets = munge_exc(
-                cm.exception,
-                suppress_suffix=True,
-                strip_carets=False,
-            )
-            self.assertIn(
-                """\
+        msg_with_carets = munge_exc(
+            cm.exception,
+            suppress_suffix=True,
+            strip_carets=False,
+        )
+        self.assertIn(
+            """\
       File "test_error_messages.py", line N, in fn
         return x + 1
         ^^^^^^^^^^^^""",
-                msg_with_carets,
-            )
+            msg_with_carets,
+        )
 
     @make_logging_test()
     def test_backend_fake_tensor_exc_no_warning(self, records):
@@ -1114,36 +1120,6 @@ from user code:
             ),
             expected,
         )
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_fx_node_error_cross_device(self):
-        linear = torch.nn.Linear(10, 20, device="cuda").eval()
-
-        def fn(x):
-            return linear(x)
-
-        with self.assertRaises(TorchRuntimeError) as cm:
-            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(1, 10))
-
-        msg = str(cm.exception)
-        self.assertIn(
-            expectedIfCppFakeTensor(
-                "RuntimeError when making fake tensor call", "Tensor device mismatch"
-            ),
-            msg,
-        )
-        self.assertIn("Expected all tensors to be on the same device", msg)
-        self.assertIn("cpu", msg)
-        self.assertIn("cuda", msg)
-        unexpected_messages = expectedIfCppFakeTensor(
-            ("Unhandled FakeTensor Device Propagation",),
-            (
-                "Dynamo failed to run FX node with fake tensors",
-                "Unhandled FakeTensor Device Propagation",
-            ),
-        )
-        for unexpected in unexpected_messages:
-            self.assertNotIn(unexpected, msg)
 
     def test_data_dependent_branching_fullgraph(self):
         def fn(x):
@@ -2374,7 +2350,7 @@ from user code:
 
         expected = """\
 RuntimeError when making fake tensor call
-  Explanation: Dynamo failed to run FX node with fake tensors: call_function <built-in function add>(*(FakeTensor(..., size=(4, 4)), FakeTensor(..., size=(10, s94))), **{}): got RuntimeError('The size of tensor a (4) must match the size of tensor b (s94: hint = 10) at non-singleton dimension 1)')
+  Explanation: Dynamo failed to run FX node with fake tensors: call_function <built-in function add>(*(FakeTensor(..., size=(4, 4)), FakeTensor(..., size=(10, s94))), **{}): got RuntimeError('The size of tensor a (4) must match the size of tensor b (s94: hint = 10) at non-singleton dimension 1')
   Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
 
   Developer debug context:
@@ -3183,6 +3159,35 @@ User code traceback:
 """,
         )
 
+
+class ErrorMessagesAcceleratorTest(LoggingTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_fx_node_error_cross_device(self, device):
+        linear = torch.nn.Linear(10, 20, device=device).eval()
+
+        def fn(x):
+            return linear(x)
+
+        with self.assertRaises(TorchRuntimeError) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(1, 10))
+
+        msg = str(cm.exception)
+        self.assertIn("Tensor device mismatch", msg)
+        self.assertIn("Expected all tensors to be on the same device", msg)
+        self.assertIn("cpu", msg)
+        self.assertIn(self.device_type, msg)
+        for unexpected in (
+            "Dynamo failed to run FX node with fake tensors",
+            "Unhandled FakeTensor Device Propagation",
+        ):
+            self.assertNotIn(unexpected, msg)
+
+
+instantiate_device_type_tests(
+    ErrorMessagesAcceleratorTest, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
