@@ -34,6 +34,12 @@ from ...select_algorithm import (
     TritonTemplate,
 )
 from ...utils import can_use_tma, use_flex_tdm_descriptor
+from .backend import (
+    FlexAttentionBackwardCall,
+    FlexAttentionCall,
+    FlexAttentionDeclined,
+    FlexBlockMask,
+)
 from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
@@ -69,6 +75,7 @@ from .flex_flydsl_backward import create_flydsl_flex_attention_backward_kernel
 
 if TYPE_CHECKING:
     from ...heuristics.template.triton import FlexBwDConfig, FlexConfig
+    from ...ir import Subgraph
 
 
 log = logging.getLogger(__name__)
@@ -171,6 +178,160 @@ flex_attention_template = TritonTemplate(
 )
 
 
+def _flex_block_mask(block_mask: tuple[Any, ...]) -> FlexBlockMask:
+    """The BlockMask a backend receives, from the lowering's tuple."""
+    (
+        q_length,
+        kv_length,
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        q_num_blocks,
+        q_indices,
+        full_q_num_blocks,
+        full_q_indices,
+        _,  # dq_write_order (Triton backward)
+        _,  # dq_write_order_full
+        _,  # dq_kv_order
+        _,  # dq_kv_order_spt
+        q_block_size,
+        kv_block_size,
+        mask_graph,
+    ) = block_mask
+    return FlexBlockMask(
+        q_length=q_length,
+        kv_length=kv_length,
+        kv_num_blocks=kv_num_blocks,
+        kv_indices=kv_indices,
+        full_kv_num_blocks=full_kv_num_blocks,
+        full_kv_indices=full_kv_indices,
+        q_num_blocks=q_num_blocks,
+        q_indices=q_indices,
+        full_q_num_blocks=full_q_num_blocks,
+        full_q_indices=full_q_indices,
+        q_block_size=q_block_size,
+        kv_block_size=kv_block_size,
+        mask_mod=mask_graph.graph_module,
+    )
+
+
+def _contributor_forward(
+    query: Any,
+    key: Any,
+    value: Any,
+    subgraph: Subgraph,
+    block_mask: tuple[Any, ...],
+    scale: float,
+    kernel_options: dict[str, Any],
+    score_mod_other_buffers: Sequence[Any],
+    mask_mod_other_buffers: Sequence[Any],
+) -> tuple[Any, Any, Any] | None:
+    """The forward's outputs from the first InductorChoices contributor that
+    lowers the call (``lower_flex_attention``), or None when none does."""
+    options, backend = _sanitize_kernel_options_for_triton(kernel_options)
+    if backend != "AUTO":
+        return None
+    call = FlexAttentionCall(
+        query=query,
+        key=key,
+        value=value,
+        score_mod=subgraph.graph_module,
+        block_mask=_flex_block_mask(block_mask),
+        scale=scale,
+        score_mod_buffers=tuple(score_mod_other_buffers),
+        mask_mod_buffers=tuple(mask_mod_other_buffers),
+        kernel_options=options,
+        backend=backend,
+        output_logsumexp=bool(options.get("OUTPUT_LOGSUMEXP", True)),
+        output_max=bool(options.get("OUTPUT_MAX", False)),
+    )
+    try:
+        outputs = V.choices.lower_flex_attention(call)
+    except FlexAttentionDeclined as e:
+        log.info("flex_attention forward lowered by Inductor: %s", e)
+        return None
+    if outputs is None:
+        return None
+
+    def statistic(value: Any) -> Any:
+        if value is not None:
+            return value
+        B, Hq, seq_len_q, _ = query.get_size()
+        return empty_strided(
+            [B, Hq, seq_len_q], None, dtype=torch.float32, device=query.get_device()
+        )
+
+    return (
+        outputs.out,
+        statistic(outputs.logsumexp),
+        statistic(outputs.max_scores),
+    )
+
+
+def _contributor_backward(
+    args: Sequence[Any],
+) -> tuple[Any, Any, Any, tuple[Any, ...]] | None:
+    """The backward's outputs from the first InductorChoices contributor that
+    lowers the call (``lower_flex_attention_backward``), or None when none
+    does. ``args`` are the lowering's arguments."""
+    (
+        query,
+        key,
+        value,
+        out,
+        logsumexp,
+        grad_out,
+        grad_logsumexp,
+        fw_graph,
+        joint_graph,
+        block_mask,
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
+    ) = args
+    options, backend = _sanitize_kernel_options_for_triton(kernel_options)
+    if backend != "AUTO":
+        return None
+    call = FlexAttentionBackwardCall(
+        query=query,
+        key=key,
+        value=value,
+        out=out,
+        logsumexp=logsumexp,
+        grad_out=grad_out,
+        grad_logsumexp=grad_logsumexp,
+        fw_graph=fw_graph.graph_module,
+        joint_graph=joint_graph.graph_module,
+        block_mask=_flex_block_mask(block_mask),
+        scale=scale,
+        score_mod_buffers=tuple(score_mod_other_buffers),
+        mask_mod_buffers=tuple(mask_mod_other_buffers),
+        kernel_options=options,
+        backend=backend,
+    )
+    try:
+        outputs = V.choices.lower_flex_attention_backward(call)
+    except FlexAttentionDeclined as e:
+        log.info("flex_attention backward lowered by Inductor: %s", e)
+        return None
+    if outputs is None:
+        return None
+    if len(outputs.captured_grads) != len(score_mod_other_buffers):
+        raise RuntimeError(
+            f"lower_flex_attention_backward returned {len(outputs.captured_grads)} "
+            f"captured-buffer gradients for {len(score_mod_other_buffers)} "
+            "captured buffers"
+        )
+    return (
+        outputs.grad_query,
+        outputs.grad_key,
+        outputs.grad_value,
+        tuple(outputs.captured_grads),
+    )
+
+
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
 def flex_attention(
     query,
@@ -189,7 +350,22 @@ def flex_attention(
     2. Flex Decode Triton Template
     3. Cpu specific CPP template
     4. MPS specific Metal template
+    An InductorChoices contributor may lower the whole call first
+    (``lower_flex_attention``).
     """
+    contributed = _contributor_forward(
+        query,
+        key,
+        value,
+        subgraph,
+        block_mask,
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
+    )
+    if contributed is not None:
+        return contributed
     if query.get_device().type == "cpu":
         return lower_cpu(
             query,
@@ -875,7 +1051,12 @@ def process_joint_outputs(
     torch.ops.higher_order.flex_attention_backward, type_promotion_kind=None
 )
 def flex_attention_backward(*args, **kwargs):
-    """Lowering for the flex_attention_backward op in triton"""
+    """Lowering for the flex_attention_backward op in triton. An InductorChoices
+    contributor may lower the whole call first
+    (``lower_flex_attention_backward``)."""
+    contributed = _contributor_backward(args)
+    if contributed is not None:
+        return contributed
     (
         query,
         key,
