@@ -645,6 +645,7 @@ class MetalKernel(SIMDKernel):
     newvar_prefix = "auto "
     max_threadgroup_size = 1024
     simd_group_size = 32
+    max_buffer_args = 31
     # thread_position_in_grid is 32-bit per axis; Metal silently truncates larger grids
     max_grid_size = torch.iinfo(torch.uint32).max
     # Power-of-two stride of the in-kernel loop over ranges that may not fit the grid
@@ -1142,6 +1143,7 @@ class MetalKernel(SIMDKernel):
                 )
                 code.writeline(header_contents)
 
+            head = []
             if self.inside_reduction and self.max_threadgroup_size > 1:
                 total_reduction_size = math.prod(
                     t.numel for t in self.range_trees if t.is_reduction
@@ -1153,16 +1155,17 @@ class MetalKernel(SIMDKernel):
                     if isinstance(total_reduction_size, sympy.Integer)
                     else self.max_threadgroup_size
                 )
-                code.writeline(
+                head.append(
                     f"[[max_total_threads_per_threadgroup({threadgroup_size})]]"
                 )
-            code.writeline(f"kernel void {fn_name}(")
+            head.append(f"kernel void {fn_name}(")
             with code.indent():
+                tensors = []
                 for outer, inner in self.args.output_buffers.items():
                     if outer in self.removed_buffers:
                         continue
                     dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
-                    code.writeline(f"device {dtype_str}* {inner},")
+                    tensors.append((f"device {dtype_str}*", inner, False))
                 for outer, inner in self.args.input_buffers.items():
                     dtype = V.graph.get_dtype(outer)
                     # MPS does not support float64, but scalar inputs are fine
@@ -1173,16 +1176,30 @@ class MetalKernel(SIMDKernel):
                         dtype_str = "float"
                     else:
                         dtype_str = self.dtype_to_str(dtype)
-                    code.writeline(f"constant {dtype_str}* {inner},")
-                for inner in self.args.sizevars.values():
-                    code.writeline(f"constant long& {inner},")
+                    on_cpu = V.graph.is_zero_dim_cpu_buffer(outer)
+                    tensors.append((f"constant {dtype_str}*", inner, on_cpu))
+                ints = list(self.args.sizevars.values())
 
                 # Write dynamic values as inputs
                 for idx_var in idx_vars:
                     if isinstance(idx_var.numel, sympy.Integer):
                         pass
                     else:
-                        code.writeline(f"constant long& {idx_var.prefix}numel,")
+                        ints.append(f"{idx_var.prefix}numel")
+                n_args = len(tensors) + len(ints) + ("error" in self.headers)
+                pack_ints = n_args > self.max_buffer_args
+                pack_tensors = pack_ints and not V.graph.cpp_wrapper
+                params = [f"{t} {n}," for t, n, _ in tensors]
+                if pack_tensors:
+                    fields = [f"{'ulong' if c else t} {n};" for t, n, c in tensors]
+                    head = [f"struct {fn_name}_buffers {{", *fields, "};", *head]
+                    params = [f"constant {fn_name}_buffers& buffers,"]
+                int_params = [f"constant long& {n}," for n in ints]
+                if pack_ints and ints:
+                    int_params = ["constant long* int_args,"]
+                with code.indent(-1):
+                    code.writelines(head)
+                code.writelines(params + int_params)
 
                 # Add error buffer parameter if error header is used
                 if "error" in self.headers:
@@ -1208,6 +1225,13 @@ class MetalKernel(SIMDKernel):
                     )
             code.writeline(") {")
             with code.indent():
+                if pack_tensors:
+                    for metal_type, inner, on_cpu in tensors:
+                        cast = f"({metal_type})&" if on_cpu else ""
+                        code.writeline(f"{metal_type} {inner} = {cast}buffers.{inner};")
+                if pack_ints:
+                    for idx, inner in enumerate(ints):
+                        code.writeline(f"const long {inner} = int_args[{idx}];")
                 if len(idx_vars) > 1 or strided:
                     for idx, var in enumerate(idx_vars):
                         pos = (
@@ -1269,6 +1293,7 @@ class MetalKernel(SIMDKernel):
 
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
+        num_tensors = len(args)
         args += [str(v) for v in self.args.sizevars]
         arg_types = [arg_name_to_type[arg] for arg in args]
 
@@ -1286,6 +1311,13 @@ class MetalKernel(SIMDKernel):
                 args.append(str(expr))
                 arg_types.append(int)
 
+        if len(args) + ("error" in self.headers) > self.max_buffer_args:
+            tensors, ints = args[:num_tensors], args[num_tensors:]
+            if not V.graph.cpp_wrapper:
+                args = [f"[{', '.join(a)}]" for a in (tensors, ints) if a]
+            elif ints:
+                args[num_tensors:] = [f"{{{', '.join(ints)}}}"]
+                arg_types[num_tensors:] = [list]
         expr_printer = self.cexpr if V.graph.cpp_wrapper else self.pexpr
 
         def format_threads(threads: list[str], kwarg: str) -> str:
@@ -1417,6 +1449,10 @@ class MetalScheduling(SIMDScheduling):
         if node1.is_template() or node2.is_template():
             WhyNoFuse(node1, node2)("MPS does not fuse into external templates")
             return False
+        cap = MetalKernel.max_buffer_args - 1
+        too_many = node1.scheduler.fusion_prevent_too_many_reads_and_writes
+        if V.graph.cpp_wrapper and too_many(node1, node2, cap):
+            return False
         return super().can_fuse(node1, node2)
 
     can_fuse_vertical = can_fuse
@@ -1504,9 +1540,7 @@ class MetalScheduling(SIMDScheduling):
         for line in metal_src.split("\n"):
             if line.strip().startswith("#include"):
                 continue
-            body_lines.append(
-                line.replace("kernel void generated_kernel(", f"kernel void {fn_name}(")
-            )
+            body_lines.append(line.replace("generated_kernel", fn_name))
 
         headers_repr = repr(sorted(kernel.headers))
         wrapper.header.writeline(f"{fn_name} = async_compile.metal({fn_name!r}, '''")

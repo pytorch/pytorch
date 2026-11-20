@@ -568,6 +568,42 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(b2.title(), self.type2test(b"They'Re Bill'S Friends"))
         self.assertRaises(TypeError, lambda: b.title(1))
 
+    @make_dynamo_test
+    def test_capitalize(self):
+        b = self.type2test(b"hELLO wORLD")
+        self.assertEqual(b.capitalize(), self.type2test(b"Hello world"))
+        # Non-ASCII bytes are unchanged (ASCII-only case mapping)
+        b2 = self.type2test(b"\xffABC")
+        self.assertEqual(b2.capitalize(), self.type2test(b"\xffabc"))
+        self.assertEqual(self.type2test().capitalize(), self.type2test())
+        # The result is a new object and the input is unchanged
+        self.assertIsNot(b.capitalize(), b)
+        self.assertEqual(b, self.type2test(b"hELLO wORLD"))
+        self.assertRaises(TypeError, lambda: b.capitalize(1))
+
+    @make_dynamo_test
+    def test_swapcase(self):
+        b = self.type2test(b"HeLLo cOmpUteRs")
+        self.assertEqual(b.swapcase(), self.type2test(b"hEllO CoMPuTErS"))
+        b2 = self.type2test(b"\xff\xfeAbC")
+        self.assertEqual(b2.swapcase(), self.type2test(b"\xff\xfeaBc"))
+        self.assertEqual(self.type2test().swapcase(), self.type2test())
+        self.assertIsNot(b.swapcase(), b)
+        self.assertEqual(b, self.type2test(b"HeLLo cOmpUteRs"))
+        self.assertRaises(TypeError, lambda: b.swapcase(1))
+
+    def test_input_bytearray_capitalize_swapcase(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.capitalize(), ba.swapcase()
+
+        ba = bytearray(b"hELLO wORLD")
+        self.assertEqual(
+            fn(ba),
+            (bytearray(b"Hello world"), bytearray(b"Hello World")),
+        )
+        self.assertEqual(ba, bytearray(b"hELLO wORLD"))
+
     def test_input_bytearray_upper_lower_title(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(ba):
@@ -1081,6 +1117,21 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         ):
             b.replace(b"a", b"b", b"0")
 
+    @parametrize("buffer_type", [bytes, bytearray])
+    def test_maketrans(self, buffer_type):
+        def f(x, source, target):
+            return x + bytearray.maketrans(source, target)[ord("a")]
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.tensor(1)
+        source, target = buffer_type(b"a"), buffer_type(b"z")
+        self.assertEqual(compiled(x, source, target), f(x, source, target))
+
+    @make_dynamo_test
+    def test_maketrans_invalid_length(self):
+        with self.assertRaises(ValueError):
+            bytearray.maketrans(b"a", b"xy")
+
     @make_dynamo_test
     def test_translate(self):
         b = self.type2test(b"hello")
@@ -1236,6 +1287,54 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             fn(bytearray(b"abc"), bytearray(b"*")),
             (bytearray(b"*abc*"), bytearray(b"abc**"), bytearray(b"**abc")),
         )
+
+    @make_dynamo_test
+    def test_zfill(self):
+        b = self.type2test(b"-12")
+        self.assertEqual(b.zfill(5), b"-0012")
+        self.assertEqual(self.type2test(b"+12").zfill(5), b"+0012")
+        self.assertEqual(self.type2test(b"12").zfill(4), b"0012")
+        self.assertEqual(self.type2test(b"").zfill(3), b"000")
+        self.assertEqual(b.zfill(2), b"-12")
+        self.assertEqual(b, b"-12")
+        self.assertIsInstance(b.zfill(5), self.type2test)
+
+    @make_dynamo_test
+    def test_expandtabs(self):
+        b = self.type2test(b"ab\tc\r\td\n\te")
+        self.assertEqual(b.expandtabs(), b"ab      c\r        d\n        e")
+        self.assertEqual(b.expandtabs(4), b"ab  c\r    d\n    e")
+        self.assertEqual(b.expandtabs(tabsize=1), b"ab c\r d\n e")
+        self.assertEqual(b.expandtabs(0), b"abc\rd\ne")
+        self.assertEqual(b, b"ab\tc\r\td\n\te")
+        self.assertIsInstance(b.expandtabs(), self.type2test)
+
+    @make_dynamo_test
+    def test_zfill_expandtabs_errors(self):
+        b = self.type2test(b"abc")
+        with self.assertRaisesRegex(TypeError, "takes exactly one argument"):
+            b.zfill()
+        with self.assertRaisesRegex(TypeError, "cannot be interpreted as an integer"):
+            b.zfill("7")
+        with self.assertRaisesRegex(TypeError, "takes at most 1 argument"):
+            b.expandtabs(4, 4)
+        with self.assertRaisesRegex(TypeError, "cannot be interpreted as an integer"):
+            b.expandtabs(4.0)
+        with self.assertRaises(OverflowError):
+            b.zfill(2**63)
+
+    def test_zfill_expandtabs_returns_new_bytearrays(self):
+        def f(ba, x):
+            return ba.zfill(1), ba.expandtabs(), x + 1
+
+        ba = bytearray(b"abc")
+        result = torch.compile(f, backend="eager", fullgraph=True)(ba, torch.ones(1))
+        self.assertEqual(result, f(bytearray(b"abc"), torch.ones(1)))
+        for i, p in enumerate(result[:2]):
+            self.assertIsNot(p, ba)
+            p[0] = ord("x") + i
+        self.assertEqual(result[:2], (b"xbc", b"ybc"))
+        self.assertEqual(ba, b"abc")
 
     def test_append_extend_arg_mutation(self):
         @torch.compile(backend="eager", fullgraph=True)

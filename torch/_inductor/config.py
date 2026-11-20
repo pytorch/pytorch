@@ -291,6 +291,10 @@ pick_loop_orders = True
 # reuse a kernel input as the output
 inplace_buffers = True
 
+# Ignore fusion profitability for view scatters in the post-grad FX reinplace pass.
+# All-reduce retains its layout and symmetric-memory guards.
+reinplace_whenever_possible = False
+
 # reuse a buffer for an unrelated purpose
 allow_buffer_reuse = lite_mode_default(False, True)
 
@@ -586,8 +590,20 @@ use_torch_profiler_benchmarker: bool = Config(
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
-# enable slow autotuning passes to select pointwise/reductions algorithms
+# enable slow autotuning passes to select pointwise algorithms. Until
+# max_autotune_reduction stops defaulting to None, this also covers reductions.
 max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") == "1"
+
+# Widen the configs tried for reduction, persistent reduction and split
+# reduction kernels. None follows max_autotune_pointwise. max_autotune=True
+# enables both regardless.
+# TODO: once no callers rely on max_autotune_pointwise also covering reductions
+# (they set max_autotune_reduction=True instead), default this to False and
+# remove the None fallback, so that max_autotune_pointwise covers only pointwise
+# kernels.
+max_autotune_reduction: bool | None = get_tristate_env(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_REDUCTION"
+)
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
@@ -991,6 +1007,28 @@ keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == 
 # Whether view outputs must match eager strides exactly instead of only matching
 # their stride order. Exact matching can introduce additional copy kernels.
 strict_output_strides = False
+
+# Keep load/store indices affine in the loop variables, as the scheduler's
+# memory dependencies see them: no ModularIndexing, FloorDiv, Min/Max/Abs/Where
+# of loop variables and no products of them (the Triton backend still splits
+# its flat block index with // and %). Views that merge dims are realized (a
+# copy, unless the producer's layout is still flexible) instead of being
+# inlined, split reductions split at a dim boundary, repeat, roll and strided
+# slice_scatter are lowered without modular arithmetic, a loop reindexing
+# during fusion is undone when it leaves a non-affine index, and non-affine
+# index arithmetic (%, //, abs, clamp) stays a value computation behind an
+# indirect variable. The indirect variable does not remove the %, //: it is
+# computed as a value and the load becomes a data-dependent gather, like
+# aten.index or an embedding lookup. That helps a backend that lowers direct
+# loads only from affine addresses but has a gather path (MTIA); it is not
+# faster elsewhere. Best effort: adaptive pooling and
+# upsample_nearest2d_backward with non-divisible sizes, split reductions over
+# symbolic ranges and a strided slice_scatter whose dim is not provably a
+# multiple of the step still produce modular addresses. Helps backends with
+# restricted memory addressing at the cost of extra buffers and copies. Each of
+# these choices is made by InductorChoices.use_modular_indexing, which follows
+# this option by default and can be overridden through V.set_choices_handler.
+avoid_modular_indexing = os.environ.get("TORCHINDUCTOR_AVOID_MODULAR_INDEXING") == "1"
 
 # Enabling this will let compiler print warning messages if a generated triton
 # kernel has inputs with mixed layouts.  This is helpful for perf debugging
@@ -3529,6 +3567,14 @@ class test_configs:
     runtime_triton_dtype_assert = False
     runtime_triton_shape_assert = False
     static_cpp_dtype_assert = False
+
+    # Raise when a scheduler node's load/store index is not affine in the loop
+    # variables (contains ModularIndexing, FloorDiv, Min/Max/Abs/Where or a
+    # product of loop variables). Used together with avoid_modular_indexing to
+    # find the places that still generate such indexing.
+    raise_on_modular_indexing = (
+        os.environ.get("TORCHINDUCTOR_RAISE_ON_MODULAR_INDEXING") == "1"
+    )
 
     # regex to control the set of considered autotuning
     # choices (aka configs) by name and / or description
