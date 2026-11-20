@@ -219,9 +219,9 @@ class GroupArtifactTest(unittest.TestCase):
 
         artifact = build_llm_artifact(
             [
-                {"path": "a.py", "owners": ["@x", "@y"], "matched_rule": rule("autograd", "path_handles")},
+                {"path": "a.py", "owners": ["@x", "@y"], "matched_rule": rule("autograd", "one_of_owners")},
                 {"path": "b.py", "owners": ["@x", "@y"], "matched_rule": rule("nn", "path_handles")},
-                {"path": "c.py", "owners": ["@x", "@y"], "matched_rule": rule("autograd", "path_handles")},
+                {"path": "c.py", "owners": ["@x", "@y"], "matched_rule": rule("autograd", "one_of_owners")},
                 {"path": "d.py", "owners": ["@x"], "matched_rule": rule("nn", "path_handles")},
             ]
         )
@@ -229,7 +229,7 @@ class GroupArtifactTest(unittest.TestCase):
         self.assertEqual(
             artifact["matched_path_groups"],
             [
-                {"group": "autograd", "review_request": "path_handles", "owners": ["@x", "@y"], "paths": ["a.py", "c.py"]},
+                {"group": "autograd", "review_request": "one_of_owners", "owners": ["@x", "@y"], "paths": ["a.py", "c.py"]},
                 {"group": "nn", "review_request": "path_handles", "owners": ["@x", "@y"], "paths": ["b.py"]},
                 {"group": "nn", "review_request": "path_handles", "owners": ["@x"], "paths": ["d.py"]},
             ],

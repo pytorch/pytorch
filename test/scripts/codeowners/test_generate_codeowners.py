@@ -180,10 +180,31 @@ class TestGenerateCodeowners(TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     render(replace_once(OWNERSHIP, old, new))
 
-    def test_invalid_review_request(self):
-        line = "review_request: everyone"
-        with self.assertRaisesRegex(ValueError, "review_request must be one of"):
-            render(replace_once(OWNERSHIP, "owners: [bob]\n", f"owners: [bob]\n    {line}\n"))
+    def test_one_of_owners_lists_the_owners_on_every_path(self):
+        ownership = replace_once(
+            OWNERSHIP,
+            "    owners: [bob]\n    section: python_nn_api\n    paths:\n      - /torch/nn/: [bob]\n",
+            "    owners: [bob, dave]\n    section: python_nn_api\n    review_request: one_of_owners\n"
+            "    paths:\n      - /torch/nn/\n",
+        )
+        self.assertIn("# owner: @bob @dave\n/torch/nn/ @bob @dave\n", render(ownership))
+
+    def test_invalid_one_of_owners(self):
+        cases = {
+            "review_request must be one of": "review_request: everyone",
+            "with one_of_owners, write paths as bare strings": "review_request: one_of_owners",
+        }
+        for message, line in cases.items():
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    render(replace_once(OWNERSHIP, "owners: [bob]\n", f"owners: [bob]\n    {line}\n"))
+        ownership = replace_once(
+            OWNERSHIP,
+            "  - name: tvm_dynamo\n",
+            "  - name: tvm_dynamo\n    review_request: one_of_owners\n",
+        )
+        with self.assertRaisesRegex(ValueError, "one_of_owners needs owners"):
+            render(ownership)
 
     def test_groups_nesting_both_ways(self):
         ownership = replace_once(

@@ -26,8 +26,9 @@ LINTER_CODE = "CODEOWNERS_GENERATED"
 TOP_LEVEL_KEYS = {"planned_labels", "sections", "section_notes", "ownership"}
 GROUP_KEYS = {"name", "labels", "owners", "section", "paths", "review_request"}
 # How Auto PR Triage requests reviews for a group's paths: everyone on the matching
-# path's handles (the default, as GitHub's CODEOWNERS did).
-REVIEW_REQUESTS = ("path_handles",)
+# path's handles (the default, as GitHub's CODEOWNERS did), or one of the group's
+# owners, picked per PR, unless one of them is already involved.
+REVIEW_REQUESTS = ("path_handles", "one_of_owners")
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,16 @@ def parse_group(entry, *, sections: tuple[str, ...]) -> LabelGroup:
     review_request = entry.get("review_request", "path_handles")
     if review_request not in REVIEW_REQUESTS:
         raise ValueError(f"{where}: review_request must be one of {REVIEW_REQUESTS}")
+    if review_request == "one_of_owners":
+        if not owners:
+            raise ValueError(f"{where}: one_of_owners needs owners")
+        if any(rule.notify for rule in paths):
+            raise ValueError(
+                f"{where}: with one_of_owners, write paths as bare strings; "
+                "reviews go to one of `owners`"
+            )
+        # Every path is owned by the whole group, so CODEOWNERS lists the owners.
+        paths = tuple(PathRule(rule.path, owners) for rule in paths)
     return LabelGroup(
         name=name,
         labels=labels,

@@ -83,6 +83,7 @@ def load_codepath_owners(
     The last matching rule decides a path's owners, as in the generated
     CODEOWNERS; ordered_groups gives both the same order. Quiet paths (no
     handles) are left out, like the commented lines CODEOWNERS renders for them.
+    A one_of_owners group's paths list all of its owners.
     """
 
     # Imported here because it needs PyYAML, which only jobs that load ownership
