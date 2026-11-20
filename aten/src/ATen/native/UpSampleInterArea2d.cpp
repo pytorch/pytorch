@@ -2,6 +2,9 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/native/UpSample.h>
+#include <c10/util/irange.h>
+
+#include <cmath>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -12,11 +15,31 @@
 #endif
 
 namespace at::meta {
+namespace {
+
+// The scales are the interpolation scales, as cv::resize's fx / fy, so they must be the ones the output
+// size was computed from: output_size == floor(input_size * scale). Other scales would give weights
+// outside of the input.
+void check_inter_area_scales(IntArrayRef input_size, IntArrayRef output_size,
+                             std::optional<double> scales_h, std::optional<double> scales_w) {
+  const std::optional<double> scales[] = {scales_h, scales_w};
+  for (const auto i : c10::irange(2)) {
+    const auto scale = scales[i];
+    TORCH_CHECK(
+        !scale.has_value() || scale.value() <= 0 ||
+            std::floor(static_cast<double>(input_size[i + 2]) * scale.value()) == static_cast<double>(output_size[i]),
+        "_upsample_inter_area2d: the output size must be floor(input size * scale), but got input size ",
+        input_size[i + 2], ", output size ", output_size[i], " and scale ", scale.value());
+  }
+}
+
+} // namespace
 
 TORCH_META_FUNC(_upsample_inter_area2d) (
   const Tensor& input, IntArrayRef output_size, std::optional<double> scales_h, std::optional<double> scales_w
 ) {
   auto full_output_size = native::upsample_2d_common_check(input.sizes(), output_size);
+  check_inter_area_scales(input.sizes(), output_size, scales_h, scales_w);
 
   TORCH_CHECK(
       input.numel() != 0 || c10::multiply_integers(input.sizes().begin() + 1, input.sizes().end()),

@@ -1827,6 +1827,7 @@ def linalg_cross_strategy(
         aten._upsample_bilinear2d_aa.default,
         aten._upsample_bicubic2d_aa.default,
         aten._upsample_lanczos2d_aa.default,
+        aten._upsample_inter_area2d.default,
         aten.upsample_bicubic2d.default,
         aten.upsample_bilinear2d.default,
         aten.upsample_linear1d.default,

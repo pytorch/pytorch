@@ -1543,8 +1543,9 @@ struct HelperInterpInterArea : public HelperInterpBase {
     return kLinear ? 2 : static_cast<int>(std::ceil(scale)) + 1;
   }
 
-  // As in cv::resize, with kLinear an axis is resampled whenever its scale isn't 1, even if its size
-  // doesn't change (e.g. a size of 10 with scale_factor=1.04).
+  // As in cv::resize, with kLinear an axis whose size doesn't change is still resampled if its scale isn't
+  // 1 (e.g. a size of 10 with scale_factor=1.04). If no size changes, the kernels copy the input, as
+  // cv::resize does.
   static inline bool needs_pass(int64_t input_size, int64_t output_size, const std::optional<double>& opt_scale) {
     return input_size != output_size || (kLinear && scales(input_size, output_size, opt_scale).second != 1.0);
   }

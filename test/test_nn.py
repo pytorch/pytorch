@@ -10303,9 +10303,11 @@ class TestNNDeviceType(NNTestCase):
     def _inter_area_reference(x, output_size, scale_factors=None):
         # cv::resize(..., interpolation=INTER_AREA) in float64, from per-axis weight matrices.
         input_size = x.shape[-2:]
+        if tuple(output_size) == tuple(input_size):
+            return x.cpu().double()  # cv::resize copies the input if no size changes
         inv_scales = scale_factors or [o / i for o, i in zip(output_size, input_size)]
         scales = [1 / s for s in inv_scales]
-        # Area weights if no axis grows, 2-tap linear coefficients on both axes otherwise.
+        # Area weights if no axis grows, at most 2 input pixels per output pixel on both axes otherwise.
         linear = min(scales) < 1
 
         def weights(n_in, n_out, scale, inv_scale):
@@ -10369,11 +10371,18 @@ class TestNNDeviceType(NNTestCase):
 
         # cv2.resize(x, None, fx=0.45, fy=0.45, interpolation=cv2.INTER_AREA) on 10x10: the scale is
         # 0.45, not the output/input size ratio of 0.4.
-        x = ((torch.arange(100, dtype=torch.float32) * 7) % 23).reshape(1, 1, 10, 10)
-        expected = torch.tensor([5.2, 14.964999, 13.0, 8.85, 7.4, 7.85, 13.82, 10.360001, 9.599999, 10.05, 10.5, 9.8,
-                                 11.799999, 12.25, 12.700001, 12.0])
+        if dtype == torch.uint8:
+            x = ((torch.arange(100) * 37) % 256).to(torch.uint8).reshape(1, 1, 10, 10)
+            expected = torch.tensor([84, 131, 120, 93, 128, 123, 118, 135, 145, 119, 139, 140, 121, 157, 143, 126],
+                                    dtype=dtype)
+            tol = dict(atol=1, rtol=0)
+        else:
+            x = ((torch.arange(100, dtype=dtype) * 7) % 23).reshape(1, 1, 10, 10)
+            expected = torch.tensor([5.2, 14.964999, 13.0, 8.85, 7.4, 7.85, 13.82, 10.360001, 9.599999, 10.05, 10.5,
+                                     9.8, 11.799999, 12.25, 12.700001, 12.0])
+            tol = dict(atol=1e-5, rtol=1e-5)
         out = F.interpolate(x.to(device), scale_factor=0.45, mode="inter-area")
-        self.assertEqual(out.flatten(), expected, atol=1e-5, rtol=1e-5)
+        self.assertEqual(out.flatten(), expected, **tol)
 
         # cv2.resize(x, None, fx=0.5, fy=1.04, interpolation=cv2.INTER_AREA) on 5x6: the height keeps its
         # size but is resampled, as its scale isn't 1.
@@ -10394,7 +10403,8 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("num_channels", [1, 3, 4, 5])
     @dtypes(torch.float32, torch.float64, torch.uint8)
     def test_upsamplingInterArea2d_vs_reference(self, device, dtype, memory_format, num_channels):
-        # uint8 with 3 or 4 channels uses the AVX2 (or NEON) kernels, the other cases the separable kernel.
+        # uint8 with 1 to 4 channels uses the AVX2 kernels (NEON: 3 channels, channels-last), the other cases
+        # the separable kernel.
         tol = {torch.uint8: dict(atol=1, rtol=0), torch.float32: dict(atol=1e-5, rtol=1e-5),
                torch.float64: dict(atol=1e-6, rtol=1e-6)}[dtype]
         torch.manual_seed(0)
@@ -10412,6 +10422,7 @@ class TestNNDeviceType(NNTestCase):
             ((5, 6), (3, 7), [0.6, 1.3]),  # explicit scale factors, linear coefficients
             ((10, 20), (10, 10), [1.04, 0.5]),  # the height keeps its size but is resampled
             ((20, 10), (10, 10), [0.5, 1.04]),  # the width keeps its size but is resampled
+            ((10, 10), (10, 10), [1.04, 1.04]),  # no size changes: a copy, as in cv::resize
         ]
         for input_size, output_size, scale_factors in cases:
             if dtype == torch.uint8:
@@ -10446,10 +10457,16 @@ class TestNNDeviceType(NNTestCase):
             F.interpolate(x, size=(4, 4), mode="inter-area", align_corners=False)
         with self.assertRaisesRegex(ValueError, "Anti-alias option is restricted"):
             F.interpolate(x, size=(4, 4), mode="inter-area", antialias=True)
-        with self.assertRaisesRegex(NotImplementedError, "inter-area"):
+        with self.assertRaisesRegex(NotImplementedError, "Got 3D input, but inter-area mode needs 4D input"):
             F.interpolate(x[0], size=4, mode="inter-area")
+        with self.assertRaisesRegex(NotImplementedError, "Got 5D input, but inter-area mode needs 4D input"):
+            F.interpolate(x[None], size=(2, 4, 4), mode="inter-area")
+        with self.assertRaisesRegex(RuntimeError, r"the output size must be floor\(input size \* scale\)"):
+            torch.ops.aten._upsample_inter_area2d(x, [6, 6], 0.5, 0.5)
         with self.assertRaisesRegex(RuntimeError, "derivative for '_upsample_inter_area2d' is not implemented"):
-            F.interpolate(x.requires_grad_(), size=(4, 4), mode="inter-area").sum().backward()
+            F.interpolate(x.clone().requires_grad_(), size=(4, 4), mode="inter-area").sum().backward()
+        with fwAD.dual_level(), self.assertRaisesRegex(RuntimeError, "forward AD"):
+            F.interpolate(fwAD.make_dual(x, torch.rand_like(x)), size=(4, 4), mode="inter-area")
 
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("mode", ["bilinear", "bicubic", "lanczos"])

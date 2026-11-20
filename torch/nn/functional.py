@@ -5154,10 +5154,12 @@ def interpolate(  # noqa: F811
         and ``align_corners=False``, the result matches PIL's ``Image.LANCZOS`` resampling filter.
 
     .. note::
-        Mode ``mode='inter-area'`` matches OpenCV's ``cv2.resize`` with ``interpolation=cv2.INTER_AREA``
-        for the same output size. With ``scale_factor``, the output size is computed as for the other modes,
-        which can differ from OpenCV's. It only supports 4-D input and CPU, and doesn't support
-        ``align_corners``, ``antialias`` or backward. For ``uint8`` inputs, outputs can differ from OpenCV's by 1.
+        Mode ``mode='inter-area'`` matches OpenCV's ``cv2.resize`` with ``interpolation=cv2.INTER_AREA``.
+        With ``size``, it matches ``cv2.resize(x, (w, h))``. With ``scale_factor``, it is used like OpenCV's
+        ``fx`` / ``fy`` (unless ``recompute_scale_factor=True``), but the output size is
+        ``floor(input_size * scale_factor)`` as for the other modes, where OpenCV rounds to the nearest.
+        It only supports 4-D input and CPU, and doesn't support ``align_corners``, ``antialias`` or backward.
+        For ``uint8`` inputs, outputs can differ from OpenCV's by 1.
 
     .. note::
         Mode ``mode='nearest-exact'`` matches Scikit-Image and PIL nearest neighbours interpolation
@@ -5461,6 +5463,10 @@ def interpolate(  # noqa: F811
         raise NotImplementedError("Got 5D input, but linear mode needs 3D input")
     if input.dim() == 5 and mode == "bilinear":
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
+    if input.dim() == 3 and mode == "inter-area":
+        raise NotImplementedError("Got 3D input, but inter-area mode needs 4D input")
+    if input.dim() == 5 and mode == "inter-area":
+        raise NotImplementedError("Got 5D input, but inter-area mode needs 4D input")
 
     raise NotImplementedError(
         "Input Error: Only 3D, 4D and 5D input Tensors supported"
