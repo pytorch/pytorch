@@ -519,11 +519,46 @@ class TestTransportBatch(TestCase):
         # Each dispatch gets what is left of the batch's deadline.
         self.assertEqual(transport.timeouts, [9.0, 8.0])
 
-        with self.assertRaises(TimeoutError):
+        transport = _ScriptedTransport()
+        with self.assertRaisesRegex(TimeoutError, "before dispatch"):
             transport.write_batch([_PAIR] * 2, timeout=0)
+        self.assertEqual(transport.transfers, [])
         batch = transport.write_batch_async([_PAIR], timeout=0)
-        with self.assertRaisesRegex(TimeoutError, "remain pending"):
+        with self.assertRaisesRegex(TimeoutError, "before dispatch"):
             asyncio.run(asyncio.wait_for(batch, 5))
+        self.assertEqual(transport.transfers, [])
+
+    def test_no_dispatch_after_deadline(self):
+        transport = _ScriptedTransport()
+        # Pairs are dispatched at 1 and 2; the deadline is 2.
+        ticks = itertools.count()
+        clock = SimpleNamespace(monotonic=lambda: float(next(ticks)))
+        with patch.object(_api, "time", clock):
+            work = transport.write_batch([_PAIR] * 2, async_op=True, timeout=2)
+        self.assertEqual(transport.timeouts, [1.0])
+        transport.transfers[0].set_result(None)
+        with self.assertRaisesRegex(TimeoutError, "before dispatch"):
+            work.wait()
+
+    def test_async_timeout_includes_executor_queueing(self):
+        transport = _ScriptedTransport()
+        # The deadline is set at 0; the executor thread starts the dispatch at 1.
+        ticks = itertools.count()
+        clock = SimpleNamespace(monotonic=lambda: float(next(ticks)))
+        with patch.object(_api, "time", clock):
+            batch = transport.write_batch_async([_PAIR], timeout=0.5)
+            with self.assertRaisesRegex(TimeoutError, "before dispatch"):
+                asyncio.run(asyncio.wait_for(batch, 5))
+        self.assertEqual(transport.transfers, [])
+
+        ticks = itertools.count()
+        with patch.object(_api, "time", clock):
+            batch = transport.write_batch_async([_PAIR], timeout=4)
+            with self.assertRaisesRegex(TimeoutError, "remain pending"):
+                asyncio.run(asyncio.wait_for(batch, 5))
+        # Dispatch at 1 passes on the 3 left, which write_batch re-anchors at 2,
+        # so the transfer gets 2; the final wait at 5 is past the deadline.
+        self.assertEqual(transport.timeouts, [2.0])
 
     def test_future_outlives_its_event_loop(self):
         transport = _ScriptedTransport(work=_PolledWork)
