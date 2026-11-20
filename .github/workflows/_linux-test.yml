@@ -11,9 +11,7 @@ on:
       test-matrix:
         required: true
         type: string
-        description: |
-          JSON description of what test configs to run.
-          Entries may set force_no_td to true to disable TD for that shard.
+        description: JSON description of what test configs to run.
       docker-image:
         required: true
         type: string
@@ -302,7 +300,7 @@ jobs:
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
           TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
           NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
-          NO_TD: ${{ (inputs.force-no-td || matrix.force_no_td) && '1' || steps.keep-going.outputs.ci-no-td }}
+          NO_TD: ${{ inputs.force-no-td && '1' || steps.keep-going.outputs.ci-no-td }}
           TD_DISTRIBUTED: ${{ steps.keep-going.outputs.ci-td-distributed }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_REGION: us-east-1

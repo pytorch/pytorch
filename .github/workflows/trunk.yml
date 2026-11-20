@@ -86,7 +86,7 @@ jobs:
       cuda-arch-list: '10.0'
       test-matrix: |
         { include: [
-          { config: "smoke_b200", shard: 1, num_shards: 1, runner: "nv-l-arm64grace-16-200-gb300", force_no_td: true },
+          { config: "smoke_b200", shard: 1, num_shards: 1, runner: "nv-l-arm64grace-16-200-gb300" },
           { config: "default", shard: 1, num_shards: 14, runner: "nv-l-arm64grace-16-200-gb300" },
           { config: "default", shard: 2, num_shards: 14, runner: "nv-l-arm64grace-16-200-gb300" },
           { config: "default", shard: 3, num_shards: 14, runner: "nv-l-arm64grace-16-200-gb300" },
@@ -107,12 +107,55 @@ jobs:
       cuda-version: "13.2"
     secrets: inherit
 
+  linux-jammy-aarch64-cuda13_2-py3_12-gcc13-test-matrices:
+    if: github.repository_owner == 'pytorch'
+    needs: linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      smoke: ${{ steps.split.outputs.smoke }}
+      default: ${{ steps.split.outputs.default }}
+    steps:
+      - name: Split the filtered GB300 test matrix
+        id: split
+        shell: bash
+        env:
+          TEST_MATRIX: ${{ needs.linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build.outputs.test-matrix }}
+        run: |
+          smoke=$(jq -c '{include: [.include[] | select(.config == "smoke_b200")]}' <<< "$TEST_MATRIX")
+          default=$(jq -c '{include: [.include[] | select(.config == "default")]}' <<< "$TEST_MATRIX")
+          echo "smoke=$smoke" >> "$GITHUB_OUTPUT"
+          echo "default=$default" >> "$GITHUB_OUTPUT"
+
   linux-jammy-aarch64-cuda13_2-py3_12-gcc13-sm100-test:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-aarch64-cuda13.2-py3.12-gcc13-sm100 ') }}
     name: linux-jammy-aarch64-cuda13.2-py3.12-gcc13-sm100
     uses: ./.github/workflows/_linux-test.yml
     needs:
       - linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build
+      - linux-jammy-aarch64-cuda13_2-py3_12-gcc13-test-matrices
+      - get-label-type
+      - job-filter
+    with:
+      build-environment: ${{ needs.linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build.outputs.build-environment }}
+      docker-image: ghcr.io/pytorch/ci-image:pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.12-gcc13-${{ needs.get-label-type.outputs.ci-docker-hash }}
+      force-no-td: true
+      python-version: "3.12"
+      test-matrix: ${{ needs.linux-jammy-aarch64-cuda13_2-py3_12-gcc13-test-matrices.outputs.smoke }}
+      timeout-minutes: 360
+      compiler: gcc13
+      cuda-version: "13.2"
+    secrets: inherit
+
+  linux-jammy-aarch64-cuda13_2-py3_12-gcc13-sm100-default-test:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-aarch64-cuda13.2-py3.12-gcc13-sm100 ') }}
+    name: linux-jammy-aarch64-cuda13.2-py3.12-gcc13-sm100
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build
+      - linux-jammy-aarch64-cuda13_2-py3_12-gcc13-test-matrices
       - target-determination
       - get-label-type
       - job-filter
@@ -120,7 +163,7 @@ jobs:
       build-environment: ${{ needs.linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build.outputs.build-environment }}
       docker-image: ghcr.io/pytorch/ci-image:pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.12-gcc13-${{ needs.get-label-type.outputs.ci-docker-hash }}
       python-version: "3.12"
-      test-matrix: ${{ needs.linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build.outputs.test-matrix }}
+      test-matrix: ${{ needs.linux-jammy-aarch64-cuda13_2-py3_12-gcc13-test-matrices.outputs.default }}
       timeout-minutes: 360
       compiler: gcc13
       cuda-version: "13.2"
