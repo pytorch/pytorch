@@ -250,7 +250,7 @@ def forward(self, x_1, w_1):
 instantiate_device_type_tests(
     TestOutDtypeOpDevice,
     globals(),
-    only_for=("cuda", "xpu"),
+    except_for="cpu",
     allow_xpu=True,
 )
 
