@@ -140,6 +140,21 @@ def default_stream() -> Stream:
     return Stream(stream_id=0)
 
 
+def _set_stream_by_id(stream_id, device_index, device_type):
+    r"""set stream specified by the stream id, device index and
+        device type
+
+    Args: stream_id (int): stream id in stream pool
+          device_index (int): device index in topo
+          device_type (int): enum device type
+    """
+    torch._C._mps_setStream(
+        stream_id=stream_id,
+        device_index=device_index,
+        device_type=device_type,
+    )
+
+
 def set_stream(stream: Stream | None) -> None:
     r"""Set the current stream. Usage of this function is discouraged in favor
     of the :meth:`stream` context manager.
@@ -150,7 +165,11 @@ def set_stream(stream: Stream | None) -> None:
     """
     if stream is None:
         return
-    torch._C._mps_setStream(stream)
+    _set_stream_by_id(
+        stream_id=stream.stream_id,
+        device_index=stream.device_index,
+        device_type=stream.device_type,
+    )
 
 
 for _obj in (Stream, stream, current_stream, default_stream, set_stream):
