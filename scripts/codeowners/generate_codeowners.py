@@ -144,8 +144,13 @@ def check_consistency(ownership: OwnershipFile) -> None:
 
 def load_ownership(path: Path) -> OwnershipFile:
     """Load and validate OWNERSHIP.yaml; every problem is a ValueError."""
+    return parse_ownership(path.read_text())
+
+
+def parse_ownership(text: str) -> OwnershipFile:
+    """Parse and validate OWNERSHIP.yaml's text; every problem is a ValueError."""
     try:
-        document = yaml.safe_load(path.read_text())
+        document = yaml.safe_load(text)
     except yaml.YAMLError as error:
         raise ValueError(f"not valid YAML: {error}") from error
     document = mapping(document, where="OWNERSHIP.yaml")
@@ -317,19 +322,33 @@ def check_unlabeled_order(groups: list[LabelGroup]) -> None:
                     )
 
 
-def render_codeowners(ownership: OwnershipFile) -> str:
-    lines = render_header(ownership)
+def ordered_groups(ownership: OwnershipFile) -> list[tuple[str, list[LabelGroup]]]:
+    """Return each section with its groups in CODEOWNERS order.
+
+    This is the order the last matching rule is taken from, so CODEOWNERS and Auto
+    PR Triage (scripts/auto_pr_triage/trusted_config.py) both read rules this way.
+    Within a section, groups without labels come first, then label blocks.
+    """
+    sections = []
     for section in ownership.sections:
-        lines.append(f"# [{section}]")
-        lines.extend(ownership.section_notes.get(section, ()))
         groups = [group for group in ownership.groups if group.section == section]
         check_unlabeled_order(groups)
+        unlabeled = [group for group in groups if not group.labels]
+        labeled = order_blocks([group for group in groups if group.labels])
+        sections.append((section, unlabeled + labeled))
+    return sections
+
+
+def render_codeowners(ownership: OwnershipFile) -> str:
+    lines = render_header(ownership)
+    for section, groups in ordered_groups(ownership):
+        lines.append(f"# [{section}]")
+        lines.extend(ownership.section_notes.get(section, ()))
         for group in groups:
-            if not group.labels:
-                lines.extend(map(render_rule, group.paths))
-        for group in order_blocks([group for group in groups if group.labels]):
-            lines.append(f"# label: {', '.join(group.labels)}")
-            lines.append(f"# owner: {' '.join(map(handle, group.owners)) or 'none'}")
+            if group.labels:
+                owners = " ".join(map(handle, group.owners)) or "none"
+                lines.append(f"# label: {', '.join(group.labels)}")
+                lines.append(f"# owner: {owners}")
             lines.extend(map(render_rule, group.paths))
         lines.append("#")
     return "\n".join(lines) + "\n"
