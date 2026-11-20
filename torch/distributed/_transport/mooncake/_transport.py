@@ -225,7 +225,8 @@ class MooncakeTransport(Transport):
         def submit() -> _FutureWork:
             if peer not in self._peers:
                 raise ValueError("peer is not connected")
-            future = self._send_notify(self._engine, peer, payload)
+            notify = self._notify_message(payload)
+            future = self._send_notify(self._engine, peer, notify)
             work = _FutureWork(future, wait_timeout)
 
             def untrack(_: _ThreadFuture[None]) -> None:
@@ -238,13 +239,12 @@ class MooncakeTransport(Transport):
 
         return self._call(submit, timeout)
 
-    def _send_notify(
-        self, engine: Any, peer: str, payload: bytes
-    ) -> _ThreadFuture[None]:
-        notify = self._backend.TransferNotify(
+    def _notify_message(self, payload: bytes) -> Any:
+        return self._backend.TransferNotify(
             self._endpoint, base64.b64encode(payload).decode()
         )
 
+    def _send_notify(self, engine: Any, peer: str, notify: Any) -> _ThreadFuture[None]:
         def send() -> None:
             if engine.transfer_sync(
                 peer, 0, 0, 0, self._backend.TransferOpcode.Write, notify
@@ -258,7 +258,7 @@ class MooncakeTransport(Transport):
         transfer: _ThreadFuture[None],
         engine: Any,
         peer: str,
-        payload: bytes,
+        notify: Any,
     ) -> _ThreadFuture[None]:
         result: _ThreadFuture[None] = _ThreadFuture()
 
@@ -268,16 +268,18 @@ class MooncakeTransport(Transport):
             else:
                 result.set_result(None)
 
-        def notify(done: _ThreadFuture[None]) -> None:
+        def send_after(done: _ThreadFuture[None]) -> None:
             if done.exception() is not None:
                 forward(done)
                 return
+            # Runs on the poller thread, where an escaped exception would leave
+            # the Work pending forever and wedge close().
             try:
-                self._send_notify(engine, peer, payload).add_done_callback(forward)
-            except RuntimeError as error:  # The notifier was shut down.
+                self._send_notify(engine, peer, notify).add_done_callback(forward)
+            except BaseException as error:
                 result.set_exception(error)
 
-        transfer.add_done_callback(notify)
+        transfer.add_done_callback(send_after)
         return result
 
     def wait_notifications(self, *, timeout: float | None = None) -> list[Notification]:
@@ -440,10 +442,12 @@ class MooncakeTransport(Transport):
     ) -> _MooncakeWork:
         engine = self._ensure_open()
         self._check_transfer(local_buffer, remote_buffer, mutable=mutable)
+        notify = None
         if notification is not None:
             self._check_notification(notification)
             if local_buffer.size() == 0:
                 raise ValueError("zero-byte transfers cannot carry notifications")
+            notify = self._notify_message(notification)
         local_buffer = cast(MooncakeMemoryView, local_buffer)
         remote_buffer = cast(MooncakeRemoteBuffer, remote_buffer)
         registration = local_buffer._memory._registration
@@ -468,9 +472,7 @@ class MooncakeTransport(Transport):
         future = (
             transfer
             if notification is None
-            else self._then_notify(
-                transfer, engine, remote_buffer.endpoint, notification
-            )
+            else self._then_notify(transfer, engine, remote_buffer.endpoint, notify)
         )
         work = _MooncakeWork(self, local_buffer, remote_buffer, future, timeout)
         self._pending[id(work)] = work
