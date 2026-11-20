@@ -11132,6 +11132,39 @@ print(start <= default.data_ptr() < start + size, start <= in_pool.data_ptr() < 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "memory snapshot not supported")
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_side_stream_alloc_during_global_capture(self, use_cuda_host_register):
+        # A capture begun inside the context takes only the capturing stream:
+        # pinned allocations on another stream of this thread still go to the
+        # pool. There, querying a block's event and allocating a new block are
+        # unsafe calls under a global-mode capture, so they run relaxed.
+        hp = torch.cuda.HostMemPool()
+        gpu = torch.zeros(1000, device="cuda")
+        x = torch.zeros(1, device="cuda")
+        side_stream = torch.cuda.Stream()
+        with (
+            caching_host_allocator_use_host_register(use_cuda_host_register),
+            self._record_host_segments(),
+        ):
+            with torch.cuda.use_mem_pool(hp):
+                used = torch.ones(1000, pin_memory=True)
+                gpu.copy_(used, non_blocking=True)  # the block gets an event
+                del used
+                g = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(g):
+                    x.add_(1)
+                    with torch.cuda.stream(side_stream):
+                        queried = torch.empty(1000, pin_memory=True)
+                        new = torch.empty(100000, pin_memory=True)
+            self.assertEqual(self._pool_of(queried), hp.id)
+            self.assertEqual(self._pool_of(new), hp.id)
+        g.replay()
+        self.assertEqual(x.item(), 1)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_del_during_capture_defers_free(self):
         hp = torch.cuda.HostMemPool()
         with torch.cuda.use_mem_pool(hp):
