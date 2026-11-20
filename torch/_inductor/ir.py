@@ -10563,7 +10563,7 @@ class FallbackKernel(ExternKernelAlloc):
         # does not fit a double at all; bool and int lose their type, which ATen rejects
         # (`alpha=1` -> `1.0`) or silently mis-promotes. Such ops go to the proxy executor,
         # which serializes each scalar with its real type. Used by both codegen() and
-        # _materialize_scalar_tensor_args.
+        # _prepare_aot_proxy_args.
         if not V.graph.cpp_wrapper or not isinstance(kernel, torch._ops.OpOverload):
             return False
 
@@ -10612,30 +10612,31 @@ class FallbackKernel(ExternKernelAlloc):
         return False
 
     @classmethod
-    def _materialize_scalar_tensor_args(
+    def _prepare_aot_proxy_args(
         cls, kernel: _OpOverloads, args: Any, kwargs: Any
-    ) -> tuple[Any, Any, bool]:
-        # A scalar bound to a Tensor-typed schema arg ("scalar in place of a tensor", a
-        # wrapped number) cannot be serialized by the AOT ProxyExecutor fill_args path.
-        # Materialize it into a real constant tensor buffer up front so it flows through
-        # the tensor path uniformly (arg classification, serialization, and the host proxy
-        # executor all agree that it is a TensorArgument). The constant dtype follows
-        # eager's weak-scalar promotion (torch.result_type) so numerics match normal
-        # lowering, which inlines the scalar via promote_constants.
-        #
-        # Returns the rewritten (args, kwargs) plus whether anything was materialized;
-        # the caller needs to know because process_kernel feeds graph constants back in
-        # as *real* tensors (see the V.graph.constants branch there).
+    ) -> tuple[_OpOverloads, Any, Any, bool]:
         if not isinstance(kernel, torch._ops.OpOverload):
-            return args, kwargs, False
-        # Materialize for anything codegen() will send to the proxy executor: no C-shim,
-        # or a scalar the C-shim's double ABI cannot represent.
+            return kernel, args, kwargs, False
         if not (
             cls._uses_aot_proxy_executor(kernel)
             or cls._cshim_scalar_abi_forces_proxy(kernel, args, kwargs)
         ):
-            return args, kwargs, False
+            return kernel, args, kwargs, False
 
+        if kernel == aten.mul.Tensor:
+            other = kwargs.get("other", args[1] if len(args) > 1 else None)
+            if (
+                type(other) is int
+                and -(1 << 63) <= other < (1 << 63)
+                and cls._cshim_scalar_abi_forces_proxy(aten.mul.Scalar, args, kwargs)
+            ):
+                # Keep wrapped-number promotion without overflowing a narrow tensor
+                # constant. Only rewrite integers the proxy can transport as int64.
+                return aten.mul.Scalar, args, kwargs, False
+
+        # A scalar bound to a Tensor-typed schema arg cannot be serialized by the
+        # proxy executor. Otherwise, materialize it into a constant tensor buffer
+        # with a dtype based on eager's weak-scalar promotion.
         tensor_dtypes: list[torch.dtype] = []
         device: torch.device | None = None
         for v in itertools.chain(args, kwargs.values()):
@@ -10720,7 +10721,7 @@ class FallbackKernel(ExternKernelAlloc):
                 )
             elif not arg_info.kwarg_only and i < len(new_args):
                 new_args[i] = maybe_wrap(new_args[i], arg_info)
-        return tuple(new_args), new_kwargs, bool(materialized)
+        return kernel, tuple(new_args), new_kwargs, bool(materialized)
 
     @staticmethod
     @contextlib.contextmanager
@@ -10728,7 +10729,7 @@ class FallbackKernel(ExternKernelAlloc):
         # process_kernel deliberately re-runs fake propagation with the *real* tensor
         # for anything registered in V.graph.constants, so that ops which inspect their
         # operand values do not hit a DataDependentError. A constant we just created in
-        # _materialize_scalar_tensor_args therefore reaches the op as a real tensor
+        # _prepare_aot_proxy_args therefore reaches the op as a real tensor
         # alongside fake ones, which FakeTensorMode rejects with "Please convert all
         # Tensors to FakeTensors first". Let the mode absorb it for this one
         # propagation; it is a compile-time constant we synthesised ourselves, and the
@@ -10748,7 +10749,7 @@ class FallbackKernel(ExternKernelAlloc):
     @classmethod
     def create(cls, kernel: _OpOverloads, *args: Any, **kwargs: Any) -> FallbackKernel:
         """Create an instance of FallbackKernel from an _OpOverloads"""
-        args, kwargs, materialized = cls._materialize_scalar_tensor_args(
+        kernel, args, kwargs, materialized = cls._prepare_aot_proxy_args(
             kernel, args, kwargs
         )
         fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
