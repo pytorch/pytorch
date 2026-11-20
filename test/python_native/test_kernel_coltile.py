@@ -517,40 +517,6 @@ class TestKernelColTile(TestCase):
         self.assertNotIn("coltile", _tags("gate_off"))
         self.assertEqual(got, x.double().sum(dim=1).float(), atol=1e-4, rtol=1e-4)
 
-    @parametrize(
-        "case,error",
-        [
-            (dict(col_group=2), "col_group must be 1, 4, 8 or 16"),
-            (dict(axis="row"), "column groups need the col axis, got axis='row'$"),
-            (dict(combine=True), "column groups need a fold of inputs, not partials$"),
-            (dict(vec=4), "column groups need vec=1, got vec=4$"),
-            (
-                dict(trait=T.SumOps(acc=cutlass.Float32)),
-                "column groups need a trait with has_combine_equal, got SumOps$",
-            ),
-        ],
-        name_fn=lambda case, error: "_".join(case),
-    )
-    def test_column_groups_need_scalar_welford_columns(self, case, error):
-        welford = T.WelfordOps(acc=cutlass.Float32)
-        kwargs = dict(trait=welford, axis="col", vec=1, col_group=4) | case
-        trait, axis = kwargs.pop("trait"), kwargs.pop("axis")
-        with self.assertRaisesRegex(ValueError, error):
-            tile.TileReduce(trait, cutlass.Float32, axis, 1024, **kwargs)
-
-    def test_column_groups_report_a_missing_vec_first(self):
-        welford = T.WelfordOps(acc=cutlass.Float32)
-        with self.assertRaisesRegex(ValueError, "the col axis needs an explicit vec$"):
-            tile.TileReduce(welford, cutlass.Float32, "col", 1024, col_group=4)
-
-    def test_column_groups_share_unroll_variants(self):
-        # TileReduce runs the grouped prefix at unroll 1, so configs differing only in
-        # unroll share a plan.
-        op = (T.WelfordOps(acc=cutlass.Float32), cutlass.Float32, "col", 1024)
-        kw = dict(vec=1, col_group=4)
-        sigs = {tile.TileReduce(*op, **kw, unroll=u).cache_sig for u in (2, 8)}
-        self.assertEqual(len(sigs), 1)
-
     def test_over_reported_split_stays_correct(self):
         # 64 chunks of ceil(65 / 64) = 2 rows leave the last 31 empty; they must load
         # nothing and combine identities.
@@ -589,6 +555,40 @@ class TestColTileHost(TestCase):
         self.assertIsNone(col.tm)
         with self.assertRaisesRegex(AssertionError, "no tile"):
             col.tilemap
+
+    @parametrize(
+        "case,error",
+        [
+            (dict(col_group=2), "col_group must be 1, 4, 8 or 16"),
+            (dict(axis="row"), "column groups need the col axis, got axis='row'$"),
+            (dict(combine=True), "column groups need a fold of inputs, not partials$"),
+            (dict(vec=4), "column groups need vec=1, got vec=4$"),
+            (
+                dict(trait=T.SumOps(acc=cutlass.Float32)),
+                "column groups need a trait with has_combine_equal, got SumOps$",
+            ),
+        ],
+        name_fn=lambda case, error: "_".join(case),
+    )
+    def test_column_groups_need_scalar_welford_columns(self, case, error):
+        welford = T.WelfordOps(acc=cutlass.Float32)
+        kwargs = dict(trait=welford, axis="col", vec=1, col_group=4) | case
+        trait, axis = kwargs.pop("trait"), kwargs.pop("axis")
+        with self.assertRaisesRegex(ValueError, error):
+            tile.TileReduce(trait, cutlass.Float32, axis, 1024, **kwargs)
+
+    def test_column_groups_report_a_missing_vec_first(self):
+        welford = T.WelfordOps(acc=cutlass.Float32)
+        with self.assertRaisesRegex(ValueError, "the col axis needs an explicit vec$"):
+            tile.TileReduce(welford, cutlass.Float32, "col", 1024, col_group=4)
+
+    def test_column_groups_share_unroll_variants(self):
+        # TileReduce runs the grouped prefix at unroll 1, so configs differing only in
+        # unroll share a plan.
+        op = (T.WelfordOps(acc=cutlass.Float32), cutlass.Float32, "col", 1024)
+        kw = dict(vec=1, col_group=4)
+        sigs = {tile.TileReduce(*op, **kw, unroll=u).cache_sig for u in (2, 8)}
+        self.assertEqual(len(sigs), 1)
 
     def test_explicit_vec_must_divide_the_column_count(self):
         # Explicit vec must divide C or trailing outputs remain uninitialized.
