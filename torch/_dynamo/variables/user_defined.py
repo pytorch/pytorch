@@ -393,6 +393,10 @@ KNOWN_DATA_DESCRIPTOR_TYPES: frozenset[type] = frozenset(
 # type_getattro, including one that only inherits the override.
 _type_getattribute = type.__getattribute__
 
+_MUTABLE_TYPE_METADATA = frozenset(
+    {"__doc__", "__module__", "__name__", "__qualname__"}
+)
+
 
 def is_data_descriptor(obj: object) -> bool:
     """Return True if *obj* is a data descriptor (has __get__ and (__set__ or __delete__))."""
@@ -755,16 +759,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # Step 1-2: Metaclass data descriptors.
         # For type(cls) is type, these are C-level getset/member descriptors
         # for __dict__, __mro__, __name__, __qualname__, __doc__, etc.
-        # type.__doc__ reads the class dictionary, including deferred writes.
+        # Deferred writes to writable type metadata must beat trace-time descriptors.
         if (
             metacls is type
-            and name
-            in {
-                "__doc__",
-                "__module__",
-                "__name__",
-                "__qualname__",
-            }
+            and name in _MUTABLE_TYPE_METADATA
             and tx.output.side_effects.has_pending_mutation_of_attr(self, name)
         ):
             return tx.output.side_effects.load_attr(self, name)
@@ -2305,14 +2303,31 @@ class NewClassVariable(UserDefinedClassVariable):
                 attr_name := name_var.as_python_constant(), str
             ):
                 raise_type_error(tx, "attribute name must be string")
+            if attr_name in {"__name__", "__qualname__"}:
+                if not value.is_python_constant():
+                    unimplemented(
+                        gb_type="Non-constant class name mutation",
+                        context=f"setattr({self}, {attr_name}, {value})",
+                        explanation="Dynamo cannot validate this class name mutation.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                metadata = value.as_python_constant()
+                if not isinstance(metadata, str):
+                    raise_type_error(
+                        tx,
+                        f"can only assign string to {self.value.__name__}.{attr_name}, not '{type(metadata).__name__}'",
+                    )
+                if attr_name == "__name__" and "\x00" in metadata:
+                    raise_observed_exception(
+                        ValueError,
+                        tx,
+                        args=["type name must not contain null characters"],
+                    )
             meta_attr = self.lookup_metaclass_attr(attr_name)
             if (
                 meta_attr is not NO_SUCH_SUBOBJ
                 and is_data_descriptor(meta_attr)
-                and (
-                    attr_name
-                    not in {"__doc__", "__module__", "__name__", "__qualname__"}
-                )
+                and (attr_name not in _MUTABLE_TYPE_METADATA)
             ):
                 unimplemented(
                     gb_type="Unsupported attribute write on a new class",
@@ -2335,6 +2350,22 @@ class NewClassVariable(UserDefinedClassVariable):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         return super().tp_getattro_impl(tx, name)
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        unimplemented(
+            gb_type="Introspection on a class created in the same frame",
+            context=f"repr({self.value})",
+            explanation="Dynamo cannot safely represent this class while it has deferred mutations.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def getattr_needs_tracing(self, tx: "InstructionTranslatorBase", name: str) -> bool:
+        return name in {
+            "__base__",
+            "__bases__",
+            "__dict__",
+            "__mro__",
+        } or super().getattr_needs_tracing(tx, name)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen.load_import_from("builtins", "type"))

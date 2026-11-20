@@ -271,28 +271,70 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
     def test_new_class_observed_errors(self):
         def invalid_name_type(x):
-            type(1, (), {})
-            return x
+            try:
+                type(1, (), {})
+            except TypeError:
+                return x + 1
 
         def invalid_name_encoding(x):
-            type("\ud800", (), {})
-            return x
+            try:
+                type("\ud800", (), {})
+            except UnicodeEncodeError:
+                return x + 1
 
         x = torch.ones(2)
-        for fn, error in (
-            (invalid_name_type, TypeError),
-            (invalid_name_encoding, UnicodeEncodeError),
-        ):
-            with self.assertRaises(error):
-                torch.compile(fn, backend="eager", fullgraph=True)(x)
+        for fn in (invalid_name_type, invalid_name_encoding):
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x), x + 1
+            )
 
         def invalid_attr(x):
             cls = type("A", (), {})
-            setattr(cls, 1, 2)
-            return x
+            try:
+                setattr(cls, 1, 2)
+            except TypeError:
+                return x + 1
 
-        with self.assertRaises(TypeError):
-            torch.compile(invalid_attr, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            torch.compile(invalid_attr, backend="eager", fullgraph=True)(x), x + 1
+        )
+
+        def invalid_class_name_type(x):
+            cls = type("A", (), {})
+            try:
+                cls.__name__ = 1
+            except TypeError:
+                return x + 1
+
+        def invalid_class_name_value(x):
+            cls = type("A", (), {})
+            try:
+                cls.__name__ = "a\x00b"
+            except ValueError:
+                return x + 1
+
+        def invalid_class_qualname(x):
+            cls = type("A", (), {})
+            try:
+                cls.__qualname__ = None
+            except TypeError:
+                return x + 1
+
+        def invalid_arity(x):
+            try:
+                type(x, x)
+            except TypeError:
+                return x + 1
+
+        for fn in (
+            invalid_class_name_type,
+            invalid_class_name_value,
+            invalid_class_qualname,
+            invalid_arity,
+        ):
+            self.assertEqual(
+                torch.compile(fn, backend="eager", fullgraph=True)(x), x + 1
+            )
 
     def test_new_class_rejected_inputs(self):
         class Base:
@@ -305,11 +347,16 @@ class MiscTests(torch._inductor.test_case.TestCase):
             return type("A", (), {"value": x})
 
         x = torch.ones(2)
-        for fn in (non_object_base, non_literal_namespace):
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported, "type\\(\\) with"
-            ):
-                torch.compile(fn, backend="eager", fullgraph=True)(x)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "type\\(\\) with unsupported class arguments",
+        ):
+            torch.compile(non_object_base, backend="eager", fullgraph=True)(x)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "type\\(\\) with non-constant class arguments",
+        ):
+            torch.compile(non_literal_namespace, backend="eager", fullgraph=True)(x)
 
     def test_new_class_unsafe_uses_graph_break(self):
         def read_dict(x):
@@ -322,8 +369,23 @@ class MiscTests(torch._inductor.test_case.TestCase):
             cls.answer = 42
             return x + cls().answer
 
+        def read_dir(x):
+            cls = type("A", (), {})
+            cls.answer = 42
+            return x + int("answer" in dir(cls))
+
+        def read_repr(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in repr(cls))
+
         x = torch.ones(2)
-        for fn in (read_dict, instantiate):
+        for fn in (read_dict, instantiate, read_dir, read_repr):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "class created in the same frame",
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
             self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
     def test_new_class_attribute_list_alias(self):
@@ -370,13 +432,15 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         def fn(x):
             Existing.__doc__ = "updated"
+            doc = Existing.__doc__
             x = x + 1
             torch._dynamo.graph_break()
-            return x, Existing.__doc__
+            return x, doc, Existing.__doc__
 
-        result, doc = torch.compile(fn, backend="eager")(torch.ones(2))
+        result, before, after = torch.compile(fn, backend="eager")(torch.ones(2))
         self.assertEqual(result, torch.full((2,), 2.0))
-        self.assertEqual(doc, "updated")
+        self.assertEqual(before, "updated")
+        self.assertEqual(after, "updated")
 
     def test_existing_class_descriptor_owner_mutation(self):
         class Descriptor:
