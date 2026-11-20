@@ -6050,6 +6050,19 @@ class TestMPS(TestCaseMPS):
             for cpu, mps in ((x.cpu(), x), (x.t().cpu(), x.t())):
                 self.assertEqual(mps.sum(**kw).cpu(), cpu.sum(**kw))
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16, torch.int32])
+    @parametrize("shape", [(256, 1000), (4096, 63), (8, 8192), (64, 4096)])
+    def test_reduction_innermost_strided_rows(self, dtype, shape):
+        # Rows are contiguous but not adjacent and the gaps hold NaN (127 for ints), so a kernel that walks
+        # rows n apart instead of stride(0) apart reads poison. The shapes cover the innermost, chunk (with and
+        # without vec4 loads), split-K and argmax split-K kernels; integer values keep every sum exact.
+        m, n = shape
+        x = torch.full((2 * m, n + 5), torch.nan if dtype.is_floating_point else 127, dtype=dtype, device="mps")
+        x[::2, 1:n + 4] = torch.randint(-3, 4, (m, n + 3), device="mps").to(dtype)
+        for view in (x[::2, 1:n + 1], x[::2, 4:n + 4]):
+            for fn in (lambda t: t.sum(-1), lambda t: t.amax(-1), lambda t: t.argmax(-1), lambda t: t.max(-1)):
+                self.assertEqual(fn(view), fn(view.cpu()))
+
     @parametrize("n", [33, 64, 100, 1000, 20000, 262185, 1 << 20])
     def test_int64_minmax_partial_simdgroups(self, n):
         # simd_max/min<long> is emulated on top of simd_shuffle_and_fill_down and
