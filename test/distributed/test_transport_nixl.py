@@ -122,20 +122,21 @@ class _Agent:
     def initialize_xfer(self, operation, local, remote, remote_agent, *, backends):
         if backends != list(self.backends):
             raise AssertionError("unexpected transfer backend")
-        address, length, device_id = remote.entries[0]
+        if [e[1] for e in local.entries] != [e[1] for e in remote.entries]:
+            raise RuntimeError("descriptor lists do not match")
         registered = self.remote_metadata.get(remote_agent, set())
-        if not any(
-            start <= address
-            and address + length <= start + registered_length
-            and device_id == registered_device
-            and remote.memory_type == memory_type
-            for start, registered_length, registered_device, memory_type in registered
-        ):
-            raise RuntimeError("remote memory is absent from NIXL metadata")
+        for address, length, device_id in remote.entries:
+            if not any(
+                start <= address
+                and address + length <= start + registered_length
+                and device_id == registered_device
+                and remote.memory_type == memory_type
+                for start, registered_length, registered_device, memory_type in registered
+            ):
+                raise RuntimeError("remote memory is absent from NIXL metadata")
         return _Transfer(operation, local, remote, remote_agent)
 
-    def _view(self, descs):
-        address, length, _ = descs.entries[0]
+    def _view(self, address, length):
         for registration in self.registrations:
             tensor = registration.tensor
             offset = address - tensor.data_ptr()
@@ -150,12 +151,15 @@ class _Agent:
         if self.transfer_state != "DONE":
             return self.transfer_state
         peer = self.agents[handle.remote_agent]
-        local = self._view(handle.local)
-        remote = peer._view(handle.remote)
-        if handle.operation == "WRITE":
-            remote.copy_(local.clone())
-        else:
-            local.copy_(remote.clone())
+        for (address, length, _), (remote_address, _, _) in zip(
+            handle.local.entries, handle.remote.entries
+        ):
+            local = self._view(address, length)
+            remote = peer._view(remote_address, length)
+            if handle.operation == "WRITE":
+                remote.copy_(local.clone())
+            else:
+                local.copy_(remote.clone())
         self._send_transfer_notification(handle)
         return "DONE"
 
@@ -952,6 +956,97 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         work.wait()
         first.write(source.to_view(), remotes[0])
         self.assertEqual(targets[0], torch.arange(8, dtype=torch.uint8))
+
+    def test_batch_issues_one_request_per_group(self):
+        first, second = self.make_transport_pair()
+        with patch.object(_nixl, "_load_backend", return_value=self.backend()):
+            third = new_transport("nixl", agent_name="third", plugin=self.plugin)
+        self.addCleanup(third.close)
+        first.connect(third.bind())
+        sources = [torch.arange(8, dtype=torch.uint8) + 8 * i for i in range(2)]
+        dram, vram = (first.register_memory(s).to_view() for s in sources)
+        # Another local memory type needs a descriptor list, so a request, of its own.
+        vram._memory._registration.memory_type = "VRAM"
+        targets = [torch.zeros(8, dtype=torch.uint8) for _ in range(3)]
+        peers = (second, second, third)
+        memories = [p.register_memory(t) for p, t in zip(peers, targets)]
+        remotes = [memory.to_remote_buffer() for memory in memories]
+        agent = first._agent
+        load = patch.object(agent, "add_remote_agent", wraps=agent.add_remote_agent)
+        start = patch.object(agent, "initialize_xfer", wraps=agent.initialize_xfer)
+        with load as loads, start as starts:
+            # One request spans two registrations on second, each with its metadata.
+            first.write_batch(
+                [
+                    (dram[:4], remotes[0][4:]),
+                    (dram[4:], remotes[1][:4]),
+                    (vram[:4], remotes[0][:4]),
+                    (dram, remotes[2]),
+                    (vram[:0], remotes[1]),
+                ]
+            )
+        self.assertEqual(first._pending, {})
+        self.assertEqual(loads.call_count, 3)
+        requests = [
+            (call.args[3], call.args[1].memory_type, len(call.args[1].entries))
+            for call in starts.call_args_list
+        ]
+        expected = [("second", "DRAM", 2), ("second", "VRAM", 1), ("third", "DRAM", 1)]
+        self.assertEqual(requests, expected)
+        self.assertEqual(targets[0], torch.cat([sources[1][:4], sources[0][:4]]))
+        self.assertEqual(targets[1][:4], sources[0][4:])
+        self.assertEqual(targets[1][4:].count_nonzero(), 0)
+        self.assertEqual(targets[2], sources[0])
+
+    def test_pending_batch_retains_every_view(self):
+        first, second = self.make_transport_pair()
+        memories = [first.register_memory(torch.ones(8)) for _ in range(2)]
+        remote = second.register_memory(torch.zeros(16)).to_remote_buffer()
+        pairs = [(m.to_view(), remote[32 * i :]) for i, m in enumerate(memories)]
+        with patch.object(_Agent, "transfer_state", "PROC"):
+            work = first.write_batch(pairs, async_op=True)
+            with self.assertRaisesRegex(RuntimeError, "pending transfers"):
+                first.unregister_memory(memories[1])
+        work.wait()
+        first.unregister_memory(memories[1])
+
+    @parametrize("rejected", ["second", "third"])
+    def test_batch_rejected_request(self, rejected):
+        first, source, targets, remotes = self.connect_peers()
+        pairs = [(source.to_view(), remotes[0]), (source.to_view(), remotes[1])]
+        initialize = first._agent.initialize_xfer
+
+        def reject(operation, local, remote, remote_agent, **kwargs):
+            if remote_agent == rejected:
+                raise RuntimeError("initialize failed")
+            return initialize(operation, local, remote, remote_agent, **kwargs)
+
+        start = patch.object(first._agent, "initialize_xfer", side_effect=reject)
+        with start as starts:
+            if rejected == "second":
+                # Nothing started, so the batch raises at submission.
+                with self.assertRaisesRegex(RuntimeError, "initialize failed"):
+                    first.write_batch(pairs, async_op=True)
+            else:
+                # The started request finishes before the batch reports the error.
+                work = first.write_batch(pairs, async_op=True)
+                with self.assertRaisesRegex(RuntimeError, "initialize failed"):
+                    work.wait()
+                self.assertTrue(work.is_completed())
+        # Dispatch stops at the rejected request.
+        self.assertEqual(starts.call_count, 1 if rejected == "second" else 2)
+        written = torch.arange(8, dtype=torch.uint8) * (rejected == "third")
+        self.assertEqual(targets[0], written)
+        self.assertEqual(targets[1].count_nonzero(), 0)
+        self.assertEqual((first._transfers, first._pending), ({}, {}))
+
+    def test_batch_checks_metadata_before_dispatch(self):
+        first, source, targets, remotes = self.connect_peers()
+        view = source.to_view()
+        wrong = replace(remotes[1], metadata=remotes[0].metadata)
+        with self.assertRaisesRegex(ValueError, "different agent"):
+            first.write_batch([(view, remotes[0]), (view, wrong)])
+        self.assertEqual(targets[0].count_nonzero(), 0)
 
     def test_peer_validation(self):
         first, second, source, remote = self.registered_pair()
