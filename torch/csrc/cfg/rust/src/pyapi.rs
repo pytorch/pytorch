@@ -3,7 +3,7 @@
 
 use crate::bytecode::{self, OpcodeTable};
 use crate::capi::{self, TcfgApi, TCFG_API_VERSION};
-use crate::graph::Graphs;
+use crate::graph::{GraphState, Graphs};
 use crate::ir::*;
 use crate::pyffi::{Obj, PyObj};
 use crate::spec::{self, CalleeFact, CalleeKind, CfgPass, InstFacts, Kernels, PassCx, Pipeline, PyPass, Unit, ValueObs};
@@ -131,7 +131,7 @@ pub fn clear_shortcuts() {
 }
 
 #[pyfunction]
-#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, max_trip_count=8, callees=true, shortcuts=true, demote=true, workspace=None, hook=true, graphs=None))]
+#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, max_trip_count=8, callees=true, shortcuts=true, demote=true, workspace=None, hook=true, graphs=None, export=None))]
 pub fn compile(
     py: Python<'_>,
     func: &Bound<'_, PyAny>,
@@ -149,10 +149,14 @@ pub fn compile(
     demote: bool,
     workspace: Option<Bound<'_, PyAny>>,
     hook: bool,
-    graphs: Option<usize>,
+    graphs: Option<(usize, usize)>,
+    export: Option<Bound<'_, PyAny>>,
 ) -> PyResult<CfgFunction> {
     // What the pass "graphs" is made with: the least number of operations
-    // of a graph.
+    // of a graph and the most exported forms of one; and what makes an
+    // exported form of the description of a graph (it returns the callable
+    // and the guards of the passes, or the reason there is none), if the
+    // graphs are to be exported at all.
     // What `torch._C._cfg_workspace` made: the memory the function keeps
     // between its calls.
     let mut memory = 0usize;
@@ -187,8 +191,10 @@ pub fn compile(
     for pass in passes {
         if let Ok(name) = pass.extract::<String>() {
             if name == "graphs" {
-                let min_ops = graphs.unwrap_or(Graphs::default().min_ops);
-                pipeline.push(Box::new(Graphs { min_ops }));
+                let made = Graphs::default();
+                let (min_ops, max_variants) = graphs.unwrap_or((made.min_ops, made.max_variants));
+                let export = export.as_ref().map(|e| unsafe { PyObj::from_borrowed(e.as_ptr()) });
+                pipeline.push(Box::new(Graphs { min_ops, max_variants, export }));
                 continue;
             }
             match spec::builtin_pass(&name) {
@@ -486,10 +492,17 @@ impl CfgFunction {
     /// The graphs of the function and of the functions it called, and what
     /// was left out of them. One dict per graph of a specialized block, with
     /// `where` (function, block, and the generic instructions from its first
-    /// operation to its last), `state` ("built": the VM runs it), `ops` and
-    /// `operators`, and `version` (of the block). And one per instruction or
-    /// run of instructions with tensor work that is in no graph, with `state`
-    /// "vm", the `reason`, and for one instruction its `text`.
+    /// operation to its last), `state` ("built": the VM runs it; "waiting":
+    /// it is exported at its next call; "compiled": what the passes over it
+    /// made runs in its place, with a `reason` if it is not exported for
+    /// further kinds of calls; "vm" with a `reason`: it is not exported, or
+    /// not for the calls it has seen), `ops` and `operators`, `inputs` and
+    /// `outputs` (how many values it takes and gives), `variants` (how many
+    /// exported forms it has), `hits` and `misses` (how many calls ran an
+    /// exported form, and how many came to the graph and ran its
+    /// instructions), and `version` (of the block). And one per instruction
+    /// or run of instructions with tensor work that is in no graph, with
+    /// `state` "vm", the `reason`, and for one instruction its `text`.
     fn graphs(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let out = PyList::empty(py);
         let mut known: Vec<(String, String)> = Vec::new();
@@ -507,11 +520,29 @@ impl CfgFunction {
                     let Some(path) = site.path() else {
                         continue;
                     };
+                    let compiled = path.compiled();
+                    let closed = path.exported.borrow().iter().find_map(|form| form.closed.clone());
+                    let (state, reason) = match &*site.state.borrow() {
+                        GraphState::GivenUp(reason) if compiled > 0 => ("compiled", Some(reason.clone())),
+                        GraphState::GivenUp(reason) => ("vm", Some(reason.clone())),
+                        GraphState::Built => ("built", None),
+                        GraphState::Waiting if compiled > 0 => ("compiled", None),
+                        GraphState::Waiting if closed.is_some() => ("vm", closed),
+                        GraphState::Waiting => ("waiting", None),
+                    };
                     let d = PyDict::new(py);
                     d.set_item("where", site.name.clone())?;
-                    d.set_item("state", "built")?;
+                    d.set_item("state", state)?;
+                    if let Some(reason) = reason {
+                        d.set_item("reason", reason)?;
+                    }
                     d.set_item("ops", path.operators.len())?;
                     d.set_item("operators", path.operators.clone())?;
+                    d.set_item("inputs", path.inputs.len())?;
+                    d.set_item("outputs", path.outputs.len())?;
+                    d.set_item("variants", compiled)?;
+                    d.set_item("hits", path.hits.load(Ordering::Relaxed))?;
+                    d.set_item("misses", path.misses.load(Ordering::Relaxed))?;
                     d.set_item("version", version.id)?;
                     out.append(d)?;
                 }
@@ -957,10 +988,10 @@ impl Replay {
 
 /// Tells the VM that compiled code changed behind its back: measurements of
 /// compiled code against the interpreter that are under way start over.
-/// Says that what is running is not yet what it will be: a region is
-/// still running its instructions one by one before it decides whether to
-/// compile them. A measurement that this falls into does not count against
-/// the compiled form of a function.
+/// Says that what is running is not yet what it will be: a graph is
+/// still running its instructions, and what a pass makes of them will run
+/// in their place. A measurement that this falls into does not count
+/// against the compiled form of a function.
 #[pyfunction]
 pub fn unsettled() {
     vm::unsettled();
