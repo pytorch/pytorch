@@ -4,7 +4,6 @@ import logging
 import math
 import os
 import pathlib
-from collections.abc import Callable
 from typing import Any
 
 import sympy
@@ -40,11 +39,7 @@ class MultiKernelState:
         self._root: MultiKernelState = self if parent is None else parent._root
         self._num_names = 0
 
-    def define_kernel(
-        self,
-        kernels: list[Any],
-        write_definition: Callable[[IndentedBuffer, str, tuple[str, ...]], None],
-    ) -> str:
+    def define_kernel(self, multi_kernel: "DispatchedMultiKernel") -> str:
         """
         Previously we name the multi kernel as "multi_kernel_{kernel_names[0]}".
         This has some minor issue.
@@ -59,15 +54,13 @@ class MultiKernelState:
 
         We should name the multi-kernel differently in these 2 cases.
 
-        kernels:
-            A list of kernels
-        write_definition:
-            Writes `name = async_compile.<dispatcher>(...)` for the multi-kernel kind,
-            given the buffer, the multi-kernel name and the sub-kernel names.
+        Writes the shared `arg_index` table, then the kind-specific definition
+        (multi_kernel.write_definition), and returns the multi-kernel's name.
         """
         # Prevent circular import
         from ..select_algorithm import TritonTemplateKernel
 
+        kernels = multi_kernel.kernels
         kernel_names = tuple(k.kernel_name for k in kernels)
         if kernel_names in self.subkernel_to_kernel_name:
             return self.subkernel_to_kernel_name[kernel_names]
@@ -110,7 +103,7 @@ class MultiKernelState:
             slice_reprs = ", ".join(repr(s) for s in slice_list)
             buf.writeline(f"    {key}: [{slice_reprs}],")
         buf.writeline("}")
-        write_definition(buf, multi_kernel_name, kernel_names)
+        multi_kernel.write_definition(buf, multi_kernel_name, kernel_names)
 
         if config.triton.autotune_at_compile_time:
             V.graph.wrapper_code.src_to_kernel["\n".join(kernel_names)] = (
@@ -234,9 +227,7 @@ class DispatchedMultiKernel(MultiKernelBase):
     @functools.cached_property
     def kernel_name(self) -> str:  # type: ignore[override]
         # Registered on first use: the sub-kernels only have names once defined.
-        return V.graph.wrapper_code.multi_kernel_state.define_kernel(
-            self.kernels, self.write_definition
-        )
+        return V.graph.wrapper_code.multi_kernel_state.define_kernel(self)
 
     def write_definition(
         self, buf: IndentedBuffer, name: str, kernel_names: tuple[str, ...]
