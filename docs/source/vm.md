@@ -180,9 +180,6 @@ What ends a path:
   on the data of a tensor;
 - an instruction that could run Python code on the values of this call: a
   read of an attribute that is a property, an iterator that is unpacked;
-- in a function with a `try`, a read or a write of a variable that one of
-  its handlers may read: such a function keeps them where the handlers find
-  them;
 - the end of the function, a block that this call is the first to run (the
   path is taken down again at the next call, up to three times), and 200,000
   instructions.
@@ -206,6 +203,28 @@ for found in torch.vm.regions(g):
 # on_data (block 0)[1] 5 aten::is_nonzero gives a number read from a tensor
 # on_data (block 0)[11] None aten::is_nonzero gives a number read from a tensor
 # on_data (block 1)[1] 5 the function returns
+```
+
+In a function with a `try`, the variables that a handler may read are kept
+where the handlers find them. A path goes on across the reads and writes of
+such a variable, and what it bound is there when the function goes on behind
+it:
+
+```python
+def looked_up(x, table):
+    y = x.sin() * 2
+    try:
+        y = y.cos() + table["k"]
+    except KeyError:
+        y = y - 1
+    return (y * 2).tanh().sum()
+
+
+g = torch.vm(looked_up, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs()))
+for table in ({"k": 2.0}, {"k": 2.0}, {"k": 2.0}, {}, {}):
+    same = torch.equal(g(x, table), looked_up(x, table))
+found = torch.vm.regions(g)[0]
+found["where"], found["ops"], found["why"]  # ('looked_up (block 0)[1]', 7, 'the function returns')
 ```
 
 A graph does not go on through a call of a Python function: the function
