@@ -31,6 +31,7 @@ from torch._environment import is_fbcode
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
+    DimsType,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     make_contiguous_strides_for,
@@ -899,7 +900,7 @@ def normal(
 @register_decomposition(aten.amax)
 def amax(
     self: torch.Tensor,
-    dim: int | None = None,
+    dim: DimsType | None = None,
     keepdim: bool = False,
 ) -> torch.Tensor:
     if self.dtype == torch.bool:
@@ -913,7 +914,7 @@ def amax(
 @register_decomposition(aten.amin)
 def amin(
     self: torch.Tensor,
-    dim: int | None = None,
+    dim: DimsType | None = None,
     keepdim: bool = False,
 ) -> torch.Tensor:
     if self.dtype == torch.bool:
