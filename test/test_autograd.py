@@ -16379,12 +16379,15 @@ class TestMultithreadAutograd(TestCase):
             return x
 
         _self = self
+        # DataParallel runs forward in one thread per replica, so read the replica
+        # count from the wrapper instead of querying the accelerator.
+        replica_counts = []
 
         class Model(torch.nn.Module):
             def forward(self, x):
                 with warnings.catch_warnings(record=True) as w:
                     y = x * x
-                    if torch.accelerator.device_count() >= 2:
+                    if replica_counts[0] >= 2:
                         # DataParallel is calling the forward in different threads
                         # without propagating TLS, so hooks should not be called here
                         _self.assertEqual(len(w), 0)
@@ -16395,6 +16398,7 @@ class TestMultithreadAutograd(TestCase):
 
         x = torch.ones(5, 5, requires_grad=True)
         model = torch.nn.DataParallel(Model())
+        replica_counts.append(len(model.device_ids))
 
         with torch.autograd.graph.saved_tensors_hooks(pack, lambda x: x):
             model(x)
@@ -19138,14 +19142,11 @@ Outer.apply(x).backward()
 
 
 class TestAutogradThreadShutdown(TestCase):
-    # No hw_classification: it checks the engine's device threads both with and
-    # without an accelerator present, so it isn't GENERIC. The test takes no
-    # device parameter and the class doesn't use instantiate_device_type_tests,
-    # so it isn't ACCELERATOR either. Unlabeled, it runs on every job.
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
-    def test_thread_shutdown(self):
-        code = """import torch
+    def test_thread_shutdown(self, device):
+        code = f"""import torch
 from torch.autograd import Function
 class MyFunction(Function):
     @staticmethod
@@ -19156,12 +19157,10 @@ class MyFunction(Function):
     def backward(ctx, grad):
         return grad
 
-# Run on the accelerator if available to ensure that the worker thread
+# Run the backward on the device under test to ensure that the worker thread
 # is properly initialized by the time we exit.
-device = torch.accelerator.current_accelerator() if torch.accelerator.is_available() else "cpu"
-
 for shape in [(1,), ()]:
-    v = torch.ones(shape, requires_grad=True, device=device)
+    v = torch.ones(shape, requires_grad=True, device={device!r})
     MyFunction.apply(v).backward()
 """
         s = TestCase.runWithPytorchAPIUsageStderr(code)
@@ -19288,6 +19287,8 @@ class TestAutogradCudaOnly(TestCase):
 
 @skipIfTorchDynamo("compiled autograd rejects disallow_implicit_grad_accumulation")
 class TestDisallowImplicitGradAccumulation(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_raises_instead_of_summing(self, device):
         a = torch.randn(3, device=device, requires_grad=True)
         x = a.sin()
@@ -19444,6 +19445,7 @@ instantiate_device_type_tests(
     TestSelectiveActivationCheckpointCudaOnly, globals(), only_for="cuda"
 )
 instantiate_device_type_tests(TestInputGradBuffers, globals())
+instantiate_device_type_tests(TestAutogradThreadShutdown, globals())
 instantiate_device_type_tests(TestDisallowImplicitGradAccumulation, globals())
 
 instantiate_parametrized_tests(TestAutograd)
