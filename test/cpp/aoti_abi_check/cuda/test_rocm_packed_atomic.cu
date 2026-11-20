@@ -3,6 +3,8 @@
 #ifdef USE_ROCM
 #undef ROCM_VERSION
 #define ROCM_VERSION 0
+// Run the scoped CAS even on GPUs that have the packed hardware atomic.
+#define TORCH_HEADERONLY_FORCE_PACKED_CAS 1
 #endif
 
 #include <gtest/gtest.h>
@@ -62,9 +64,21 @@ TEST(TestRocmPackedAtomic, LegacyPackedBranch) {
   packed_atomic_kernel<<<1, 1>>>(half, bfloat, fp32);
   HIP_ASSERT_OK(hipGetLastError());
   HIP_ASSERT_OK(hipDeviceSynchronize());
-  float host = -1.f;
-  HIP_ASSERT_OK(hipMemcpy(&host, fp32, sizeof(float), hipMemcpyDeviceToHost));
-  EXPECT_EQ(host, 1.f);
+  torch::headeronly::Half half_host[2];
+  torch::headeronly::BFloat16 bfloat_host[2];
+  float fp32_host = -1.f;
+  HIP_ASSERT_OK(
+      hipMemcpy(half_host, half, sizeof(half_host), hipMemcpyDeviceToHost));
+  HIP_ASSERT_OK(hipMemcpy(
+      bfloat_host, bfloat, sizeof(bfloat_host), hipMemcpyDeviceToHost));
+  HIP_ASSERT_OK(
+      hipMemcpy(&fp32_host, fp32, sizeof(fp32_host), hipMemcpyDeviceToHost));
+  // Index 0 is the packed lane. Index 1 is the -0 partner and stays zero.
+  EXPECT_EQ(static_cast<float>(half_host[0]), 1.f);
+  EXPECT_EQ(static_cast<float>(half_host[1]), 0.f);
+  EXPECT_EQ(static_cast<float>(bfloat_host[0]), 1.f);
+  EXPECT_EQ(static_cast<float>(bfloat_host[1]), 0.f);
+  EXPECT_EQ(fp32_host, 1.f);
   hipFree(half);
   hipFree(bfloat);
   hipFree(fp32);

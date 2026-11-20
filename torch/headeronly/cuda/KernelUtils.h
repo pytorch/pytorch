@@ -47,7 +47,12 @@
 __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(
     __hip_bfloat162* address,
     __hip_bfloat162 value) {
+  // Test TUs set this so a GPU with the hardware atomic still runs the CAS.
+#if defined(TORCH_HEADERONLY_FORCE_PACKED_CAS)
+  if (false) {
+#else
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2bf16)) {
+#endif
     typedef short __attribute__((ext_vector_type(2))) vec_short2;
     static_assert(sizeof(vec_short2) == sizeof(__hip_bfloat162_raw));
     union {
@@ -76,7 +81,11 @@ __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(
 __device__ inline __half2 preview_unsafeAtomicAdd(
     __half2* address,
     __half2 value) {
+#if defined(TORCH_HEADERONLY_FORCE_PACKED_CAS)
+  if (false) {
+#else
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2f16)) {
+#endif
     // The api expects an ext_vector_type of half
     typedef _Float16 __attribute__((ext_vector_type(2))) vec_fp162;
     static_assert(sizeof(vec_fp162) == sizeof(__half2_raw));
