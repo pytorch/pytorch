@@ -20,8 +20,9 @@ from torch._C._dynamo.guards import (
     compute_overlapping_tensor_groups,
     compute_overlapping_tensors,
 )
+from torch._dynamo.source import ConstantSource, GlobalSource
 from torch._functorch._aot_autograd.schemas import PlainTensorMeta
-from torch._guards import StorageOverlapPartition
+from torch._guards import Source, StorageOverlapPartition
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
@@ -413,6 +414,10 @@ def _storage_overlap_partition(
         )
 
 
+def _constant_to_global(s: Source) -> Source:
+    return GlobalSource(s.source_name) if isinstance(s, ConstantSource) else s
+
+
 def add_input_mutation_storage_overlap_partition_guard(
     aot_config: AOTConfig,
     fwd_inputs: list[Any],
@@ -428,7 +433,12 @@ def add_input_mutation_storage_overlap_partition_guard(
     if not aot_config.aot_autograd_arg_pos_to_source:
         return
 
-    sources = aot_config.aot_autograd_arg_pos_to_source
+    # Dynamo installs assume_constant_result values as frame globals under their
+    # ConstantSource name, so guard on them through G.
+    sources = [
+        None if s is None else s.clone(_constant_to_global)
+        for s in aot_config.aot_autograd_arg_pos_to_source
+    ]
     tensor_indices: list[int] = []
     seen_sources: set[Any] = set()
     for i, inpt in enumerate(fwd_inputs):
