@@ -56,8 +56,9 @@ bool is_smooth(int64_t n) {
 }
 
 // Cached MPS tables. W: W_n^k for k < n. W2, for long axes: W_n^b for b < 4096 then W_n^(4096 a). Chirp: Bluestein's
-// exp(-+ i pi k^2 / n), and ChirpFFT: the M-point FFT of its conjugate wrapped around zero
-enum class Table { W, W2, Chirp, ChirpFFT };
+// exp(-+ i pi k^2 / n), and ChirpFFT: the M-point FFT of its conjugate wrapped around zero. OnesidedChirp and
+// MirrorFFT serve c2r: Chirp with every bin but DC and Nyquist doubled, and ChirpFFT with its lags mirrored
+enum class Table { W, W2, Chirp, OnesidedChirp, ChirpFFT, MirrorFFT };
 
 Tensor table(Table kind, int64_t n, bool inverse = false, int64_t M = 0) {
   using Key = std::tuple<Table, int64_t, bool, int64_t>;
@@ -78,12 +79,13 @@ Tensor table(Table kind, int64_t n, bool inverse = false, int64_t M = 0) {
   const auto angle = kind == Table::W || kind == Table::W2
       ? k.mul(-2 * M_PI / n)
       : k.mul(k).remainder(2 * n).mul((inverse ? 1 : -1) * M_PI / n);
-  const auto c = at::polar(at::ones_like(angle), angle);
+  const auto mag = kind == Table::OnesidedChirp ? k.mul(2).remainder(n).clamp_max(1).add(1) : at::ones_like(angle);
+  const auto c = at::polar(mag, angle);
   const auto head = c.slice(0, 0, M - n + 1).conj();
-  const auto b = kind == Table::ChirpFFT
+  const auto b = kind == Table::ChirpFFT || kind == Table::MirrorFFT
       ? at::fft_fft(at::cat({head, c.new_zeros(M - head.size(0) - n + 1), c.narrow(0, 1, n - 1).conj().flip(0)}))
       : c;
-  const auto t = b.to(at::device(kMPS).dtype(kComplexFloat));
+  const auto t = (kind == Table::MirrorFFT ? b.flip(0).roll(1, 0) : b).to(at::device(kMPS).dtype(kComplexFloat));
   usage_list.emplace_front(key, t);
   cache[key] = usage_list.begin();
   bytes += t.nbytes();
@@ -443,17 +445,20 @@ void fft_pass(const Tensor& in, const Tensor& out, int64_t dim, int64_t n, bool 
     return fft_batch(b, n, inv, x);
   }
 
-  // Bluestein: X = c * IFFT_M(FFT_M(x * c) * B)[:n_out], M a power of two > n + n_out - 1 (never 16: no chirp kernels)
+  // Bluestein: X = c * IFFT_M(FFT_M(x * c) * B)[:n_out], M a power of two > n_in + n_out - 1 (never 16: no kernels)
   TORCH_CHECK_NOT_IMPLEMENTED(!wide, "MPS FFT: lengths with a prime factor of 11 or over 13 cannot span 2^31 elements");
+  const auto n_in = x.n_in ? x.n_in : n;
   const auto n_out = x.n_out ? x.n_out : n;
-  const auto M = static_cast<int64_t>(std::bit_ceil<uint64_t>(n + n_out));
+  const bool onesided = n_in < n;
+  const auto M = static_cast<int64_t>(std::bit_ceil<uint64_t>(n_in + n_out));
   if (!in.is_complex() && M / 2 >= n + n / 2 + 1) {
     fft_pass(in, out, dim, n, inv, {.n_out = n / 2 + 1, .scale = x.scale});
     out.narrow(dim, n / 2 + 1, (n - 1) / 2).copy_(out.narrow(dim, 1, (n - 1) / 2).flip(dim).conj());
     return;
   }
   TORCH_CHECK_NOT_IMPLEMENTED(M < kMax, "MPS FFT: lengths with a prime factor of 11 or over 13 are limited to 2^29");
-  const auto c = table(Table::Chirp, n, inv), B = table(Table::ChirpFFT, n, inv, M);
+  const auto c = table(Table::Chirp, n, inv), cl = onesided ? table(Table::OnesidedChirp, n, inv) : c;
+  const auto B = table(onesided ? Table::MirrorFFT : Table::ChirpFFT, n, inv, M);
   // The temp's axis goes last where its transforms would otherwise span 2^31 elements
   const bool last = (M - 1) * c10::multiply_integers(in.sizes().slice(dim + 1)) >= kMax;
   DimVector sizes(in.sizes());
@@ -463,7 +468,7 @@ void fft_pass(const Tensor& in, const Tensor& out, int64_t dim, int64_t n, bool 
   tmp = last ? tmp.movedim(-1, dim) : std::move(tmp);
   // Two tile passes fold every chirp into the kernels
   if (M <= kFFTMaxTwoPassPoints) {
-    fft_pass(in, tmp, dim, M, false, {.n_sig = n, .n_in = x.n_in ? x.n_in : n, .scale = x.scale / M, .cl = c, .cs = B});
+    fft_pass(in, tmp, dim, M, false, {.n_sig = n_in, .scale = x.scale / M, .cl = cl, .cs = B});
     return fft_pass(tmp, out, dim, M, true, {.n_out = n_out, .cs = c});
   }
   // Longer transforms nest and their stores fold none: B goes into the second transform's loads, c into a mul
