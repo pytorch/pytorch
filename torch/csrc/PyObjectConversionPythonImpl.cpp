@@ -258,6 +258,22 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
     TORCH_CHECK_PYTHON(py != nullptr);
     return py;
   }
+
+  bool is_none_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_is_none_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    return obj == Py_None;
+  }
+
+  PyObject* new_none_pyobject() const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_new_none_pyobject requires the GIL to be held");
+    Py_INCREF(Py_None);
+    return Py_None;
+  }
 };
 
 // Registered once when libtorch_python is loaded (static init), analogous to

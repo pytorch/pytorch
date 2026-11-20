@@ -13,8 +13,10 @@
 #include <torch/headeronly/util/shim_utils.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 // Header-only helpers converting between Python objects (passed as raw
 // PyObject* / void*) and their torch::stable equivalents. These are
@@ -212,6 +214,165 @@ inline void* string_to_pyobject(std::string_view str) {
   STABLE_TORCH_ERROR_CODE_CHECK(
       torch_string_to_pyobject(str.data(), str.size(), &raw));
   return raw;
+}
+
+// Generic conversions, composing the helpers above. See from_pyobject /
+// to_pyobject below.
+
+namespace detail {
+
+// PyObjectConverter<T>::from(void*) reads a T out of a borrowed PyObject* and
+// PyObjectConverter<T>::to(const T&) returns a new reference. Only the types
+// specialized here are supported; any other T fails to compile.
+template <typename T>
+struct PyObjectConverter;
+
+template <>
+struct PyObjectConverter<Tensor> {
+  static Tensor from(void* py_obj) {
+    return tensor_from_pyobject(py_obj);
+  }
+  static void* to(const Tensor& value) {
+    return tensor_to_pyobject(value);
+  }
+};
+
+template <>
+struct PyObjectConverter<torch::headeronly::ScalarType> {
+  static torch::headeronly::ScalarType from(void* py_obj) {
+    return dtype_from_pyobject(py_obj);
+  }
+  static void* to(torch::headeronly::ScalarType value) {
+    return dtype_to_pyobject(value);
+  }
+};
+
+template <>
+struct PyObjectConverter<Device> {
+  static Device from(void* py_obj) {
+    return device_from_pyobject(py_obj);
+  }
+  static void* to(const Device& value) {
+    return device_to_pyobject(value);
+  }
+};
+
+template <>
+struct PyObjectConverter<torch::headeronly::Layout> {
+  static torch::headeronly::Layout from(void* py_obj) {
+    return layout_from_pyobject(py_obj);
+  }
+  static void* to(torch::headeronly::Layout value) {
+    return layout_to_pyobject(value);
+  }
+};
+
+template <>
+struct PyObjectConverter<torch::headeronly::MemoryFormat> {
+  static torch::headeronly::MemoryFormat from(void* py_obj) {
+    return memory_format_from_pyobject(py_obj);
+  }
+  static void* to(torch::headeronly::MemoryFormat value) {
+    return memory_format_to_pyobject(value);
+  }
+};
+
+template <>
+struct PyObjectConverter<bool> {
+  static bool from(void* py_obj) {
+    return bool_from_pyobject(py_obj);
+  }
+  static void* to(bool value) {
+    return bool_to_pyobject(value);
+  }
+};
+
+template <>
+struct PyObjectConverter<int64_t> {
+  static int64_t from(void* py_obj) {
+    return int64_from_pyobject(py_obj);
+  }
+  static void* to(int64_t value) {
+    return int64_to_pyobject(value);
+  }
+};
+
+template <>
+struct PyObjectConverter<double> {
+  static double from(void* py_obj) {
+    return double_from_pyobject(py_obj);
+  }
+  static void* to(double value) {
+    return double_to_pyobject(value);
+  }
+};
+
+template <>
+struct PyObjectConverter<std::string> {
+  static std::string from(void* py_obj) {
+    return string_from_pyobject(py_obj);
+  }
+  static void* to(const std::string& value) {
+    return string_to_pyobject(value);
+  }
+};
+
+// C++ -> Python only: a view cannot own what it reads from Python.
+template <>
+struct PyObjectConverter<std::string_view> {
+  static void* to(std::string_view value) {
+    return string_to_pyobject(value);
+  }
+};
+
+template <typename T>
+struct is_std_optional : std::false_type {};
+template <typename T>
+struct is_std_optional<std::optional<T>> : std::true_type {};
+
+template <typename T>
+struct PyObjectConverter<std::optional<T>> {
+  static_assert(
+      !is_std_optional<T>::value,
+      "Nested std::optional is not supported: Python None cannot tell an "
+      "empty outer optional from an empty inner one");
+
+  static std::optional<T> from(void* py_obj) {
+    bool is_none = false;
+    STABLE_TORCH_ERROR_CODE_CHECK(torch_is_none_pyobject(py_obj, &is_none));
+    if (is_none) {
+      return std::nullopt;
+    }
+    return PyObjectConverter<T>::from(py_obj);
+  }
+
+  static void* to(const std::optional<T>& value) {
+    if (value.has_value()) {
+      return PyObjectConverter<T>::to(*value);
+    }
+    void* raw = nullptr;
+    STABLE_TORCH_ERROR_CODE_CHECK(torch_new_none_pyobject(&raw));
+    return raw;
+  }
+};
+
+} // namespace detail
+
+// Convert a Python object (borrowed PyObject* passed as void*) to T. T is any
+// type with a *_from_pyobject helper above, or std::optional<T>, which maps
+// None to std::nullopt and otherwise converts the object as T. A null py_obj
+// is an error, not None.
+template <typename T>
+T from_pyobject(void* py_obj) {
+  return detail::PyObjectConverter<T>::from(py_obj);
+}
+
+// Convert value to a new-reference Python object. T is any type with a
+// *_to_pyobject helper above (std::string_view included), or std::optional<T>,
+// which maps std::nullopt to None.
+template <typename T>
+void* to_pyobject(const T& value) {
+  return detail::PyObjectConverter<T>::to(value);
 }
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
