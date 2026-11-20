@@ -827,6 +827,7 @@ class TestKernelRowTile(TestCase):
             self.assertEqual(got, want, atol=0, rtol=0)
         mine = [k for k in rt._CACHE if "ragged_whole" in k]
         self.assertEqual(len(mine), 1, f"expected one plan per vec class, got {mine}")
+        self._assert_ragged_plan("ragged_whole", False)
 
     def test_ragged_vector_rejects_inner_tree_and_tma(self):
         trait = T.SumOps(acc=cutlass.Float32)
@@ -875,6 +876,11 @@ class TestKernelRowTile(TestCase):
         trait, f16 = T.SumOps(acc=cutlass.Float32), cutlass.Float16
         with self.assertRaisesRegex(ValueError, "nonempty rows"):
             rt.tile.TileReduce(trait, f16, "row", 0, ragged_vector=True)
+
+    def test_one_thread_rows_reject_empty_rows(self):
+        trait, x = T.SumOps(acc=cutlass.Float32), torch.empty(4, 0, device="cuda")
+        with self.assertRaisesRegex(ValueError, "one-thread rows must be nonempty"):
+            rt.reduce_row_tile(trait, "empty", x, [torch.float32], threads_per_row=1)
 
     def test_ragged_vector_pitched_rows(self):
         """Take each row's edges from its own start: pitched rows, and whole-vector rows

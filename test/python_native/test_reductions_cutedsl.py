@@ -392,8 +392,15 @@ class TestCuTeDSLTracedInputs(TestCase):
                 x = torch.empty(4, 128, device=device)
             if kind == "functional_fake":
                 x = torch._to_functional_tensor(x)
-        self.assertFalse(ov._cond(x, -1))
-        self.assertFalse(ov._dtype_cond(x, -1))
+        # Report a served GPU so that only is_traced declines CUDA inputs; device_ok
+        # also declines meta ones, so check is_traced directly.
+        self.addCleanup(cap._arch_ok.cache_clear)
+        cap._arch_ok.cache_clear()
+        cc = (10, 0)
+        with mock.patch.object(torch.cuda, "get_device_capability", return_value=cc):
+            self.assertFalse(ov._cond(x, -1))
+            self.assertFalse(ov._dtype_cond(x, -1))
+        self.assertTrue(cap.is_traced(x))
 
     def test_fake_input_declines_before_querying_the_device(self, device):
         """Decline a fake CUDA tensor before querying, and so initializing, CUDA."""
