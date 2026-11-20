@@ -1,8 +1,12 @@
-r"""Host layout classification for pointwise kernels."""
-
 from __future__ import annotations
 
-from functools import cache
+from ...cutedsl import config
+
+
+r"""Host layout classification for pointwise kernels."""
+
+
+from functools import lru_cache
 from typing import NamedTuple, TYPE_CHECKING
 
 import torch
@@ -13,7 +17,7 @@ if TYPE_CHECKING:
     from ._types import RowGap, Shape
 
 
-@cache
+@lru_cache(maxsize=config.POINTWISE_HOST_CACHE_LIMIT)
 def output_strides(
     operands: tuple[tuple[torch.dtype, Shape, Shape], ...], dtype: torch.dtype
 ) -> Shape:
