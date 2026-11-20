@@ -94,6 +94,77 @@ class TestKernelRowTile(TestCase):
             ref = x.sum(1)
         self.assertEqual(got, ref, atol=0, rtol=0)
 
+    def test_narrow_one_thread_row_chains(self):
+        f32 = cutlass.Float32
+        sum_trait = T.SumOps(acc=f32)
+
+        def chains(trait, n, **kw):
+            kw.setdefault("threads_per_row", 1)
+            return tile.TileReduce(trait, f32, "row", n, **kw).row_chains
+
+        widths = (0, 1, 8, 9, 16, 17, 31, 64)
+        got = [chains(sum_trait, n) for n in widths]
+        self.assertEqual(got, [8, 8, 8, 16, 16, 32, 32, 32])
+        self.assertEqual(chains(T.AMaxOps(acc=f32), 3), 8)
+        # Multi-field, norm and abs-extremum traits, TMA, ragged and multi-thread rows
+        # keep WARP.
+        self.assertEqual(chains(T.ArgMaxOps(acc=f32), 8), 32)
+        self.assertEqual(chains(T.NormOps(2, acc=f32), 8), 32)
+        self.assertEqual(chains(T.AbsMaxOps(acc=f32), 8), 32)
+        self.assertEqual(chains(sum_trait, 16, use_tma=True), 32)
+        self.assertEqual(chains(sum_trait, 15, ragged_vector=True), 32)
+        self.assertEqual(chains(sum_trait, 16, threads_per_row=32), 32)
+        # 12 and 16 share a plan; 20, in the same vec class, takes the WARP plan.
+        rt._CACHE.clear()
+        kw = {"threads_per_row": 1, "use_tma": False}
+        for n in (12, 16, 20):
+            x = torch.randn(64, n, device="cuda")
+            rt.reduce_row_tile(sum_trait, "narrow_chains", x, [torch.float32], **kw)
+        mine = [k for k in rt._CACHE if "narrow_chains" in k]
+        self.assertEqual(len(mine), 2, f"expected two plans, got {sorted(mine)}")
+
+    @parametrize(
+        "dtype, columns",
+        (
+            (torch.float32, 1),
+            (torch.float32, 3),
+            (torch.float32, 16),
+            (torch.float32, 17),
+            (torch.float32, 31),
+            (torch.bfloat16, 8),
+            (torch.bfloat16, 16),
+        ),
+    )
+    def test_narrow_one_thread_rows_match_warp_chains(self, dtype, columns):
+        """Narrow one-thread rows fold the bits of WARP accumulators, which the row
+        padded with identities to WARP elements takes, signed zeros, subnormal sums and
+        NaNs included."""
+        M, inf = 4096, float("inf")
+        gen = torch.Generator("cuda").manual_seed(0)
+        x = torch.randn(M, columns, device="cuda", generator=gen)
+        signs = torch.randint(0, 2, (M // 2, columns), device="cuda", generator=gen)
+        x[: M // 2] = torch.tensor([0.0, -0.0], device="cuda")[signs]
+        x[M // 2 : M // 2 + 64, columns // 2] = float("nan")
+        x[-64:, 0], x[-64:, -1] = inf, -inf
+        x[-128:-64, 0], x[-128:-64, -1] = -1.5e-38, 1e-38
+        x = x.to(dtype)
+        kw, f32 = {"threads_per_row": 1, "use_tma": False}, [torch.float32]
+        for name, trait, pad in (
+            ("sum", T.SumOps, 0.0),
+            ("prod", T.ProdOps, 1.0),
+            ("amax", T.AMaxOps, -inf),
+            ("amin", T.AMinOps, inf),
+            ("nansum", T.NanSumOps, 0.0),
+            ("absmax", T.AbsMaxOps, 0.0),
+        ):
+            padded = torch.full((M, tile.WARP), pad, device="cuda", dtype=dtype)
+            padded[:, :columns] = x
+            op = trait(acc=cutlass.Float32)
+            (got,) = rt.reduce_row_tile(op, f"narrow_{name}", x, f32, **kw)
+            (want,) = rt.reduce_row_tile(op, f"narrow_{name}", padded, f32, **kw)
+            with self.subTest(op=name):
+                self.assertEqual(got.view(torch.int32), want.view(torch.int32))
+
     def test_one_kernel_per_vec_class(self):
         trait = T.SumOps(acc=cutlass.Float32)
         rt._CACHE.clear()
