@@ -2,6 +2,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <c10/core/Device.h>
+#include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/python_stub.h>
 #include <torch/csrc/Export.h>
@@ -64,6 +65,14 @@ struct TORCH_API PyObjectConversionInterface {
   // Return a new-reference Python torch.device for the given at::Device. The
   // GIL must be held.
   virtual PyObject* device_to_pyobject(const at::Device& device) const = 0;
+
+  // Read the at::Layout out of a Python torch.layout (PyObject*). The GIL must
+  // be held.
+  virtual at::Layout layout_from_pyobject(PyObject* obj) const = 0;
+
+  // Return a new-reference Python torch.layout for the given at::Layout. The
+  // GIL must be held.
+  virtual PyObject* layout_to_pyobject(at::Layout layout) const = 0;
 };
 
 // Install the conversion implementation. Called once by libtorch_python when it
