@@ -59,6 +59,68 @@ def mock_compare_config_prefer_larger_XBLOCK(
 
 @instantiate_parametrized_tests
 class TestCoordinateDescentTuner(TestCase):
+    @parametrize(
+        "max_tiles,expected",
+        [
+            (1, ["XBLOCK", "R0_BLOCK"]),
+            (2, ["XBLOCK", "YBLOCK", "R0_BLOCK", "R1_BLOCK"]),
+            (3, ["XBLOCK", "YBLOCK", "Z0_BLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"]),
+            (
+                None,
+                ["XBLOCK", "YBLOCK", "Z0_BLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"],
+            ),
+            (
+                4,
+                [
+                    "XBLOCK",
+                    "YBLOCK",
+                    "Z0_BLOCK",
+                    "Z1_BLOCK",
+                    "R0_BLOCK",
+                    "R1_BLOCK",
+                    "R2_BLOCK",
+                    "R3_BLOCK",
+                ],
+            ),
+            (
+                5,
+                [
+                    "XBLOCK",
+                    "YBLOCK",
+                    "Z0_BLOCK",
+                    "Z1_BLOCK",
+                    "Z2_BLOCK",
+                    "R0_BLOCK",
+                    "R1_BLOCK",
+                    "R2_BLOCK",
+                    "R3_BLOCK",
+                    "R4_BLOCK",
+                ],
+            ),
+        ],
+    )
+    def test_tunable_fields_follow_max_tiles(self, max_tiles, expected):
+        with config.patch({"triton.max_tiles": max_tiles}):
+            self.assertEqual(
+                CoordescTuner().tunable_fields,
+                expected + ["BLOCK_M", "BLOCK_N", "BLOCK_K", "num_warps"],
+            )
+
+    @config.patch("triton.max_tiles", 1)
+    def test_tunable_fields_use_size_hints(self):
+        self.assertEqual(
+            CoordescTuner(size_hints={"z10_": 32, "x": 64, "r10_": 128}).tunable_fields,
+            [
+                "XBLOCK",
+                "Z10_BLOCK",
+                "R10_BLOCK",
+                "BLOCK_M",
+                "BLOCK_N",
+                "BLOCK_K",
+                "num_warps",
+            ],
+        )
+
     def test_abs_function(self):
         """
         The benchmark result is simply abs(XBLOCK - 15)

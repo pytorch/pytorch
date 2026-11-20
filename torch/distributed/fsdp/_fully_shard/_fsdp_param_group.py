@@ -179,7 +179,8 @@ class AllGatherState(NamedTuple):
 
 
 class ReduceScatterState(NamedTuple):
-    reduce_scatter_input: torch.Tensor
+    # For a single-rank group, the reduce-dtype copies of the gradients
+    reduce_scatter_input: torch.Tensor | list[torch.Tensor]
     event: torch.Event | None  # last use of the input (see foreach_reduce)
     allocation_stream: torch.Stream  # Owns the input allocation
     param_group: FSDPParamGroup  # Identifies the owning FSDP root
@@ -519,12 +520,24 @@ class FSDPParamGroup:
             # directly initialize unsharded parameters from sharded parameters
 
             for fsdp_param in self.fsdp_params:
-                all_gather_inputs = fsdp_param.all_gather_inputs
+                local_tensor = fsdp_param._sharded_local_tensor
+                # The copy below casts a plain shard, which saves a cast kernel
+                if (
+                    fsdp_param.sharded_state == ShardedState.SHARDED
+                    and fsdp_param.param_dtype is not None
+                    and not fsdp_param.offload_to_cpu
+                    and not hasattr(local_tensor, "fsdp_pre_all_gather")
+                ):
+                    all_gather_inputs = [fsdp_param._sharded_param_data]
+                    dtypes = [fsdp_param.param_dtype]
+                else:
+                    all_gather_inputs = fsdp_param.all_gather_inputs
+                    dtypes = [t.dtype for t in all_gather_inputs]
                 # Avoids building the lists once the outputs exist
                 if not fsdp_param.all_gather_outputs:
                     fsdp_param.init_all_gather_outputs(
                         [t.numel() for t in all_gather_inputs],
-                        [t.dtype for t in all_gather_inputs],
+                        dtypes,
                         world_size,
                         self.device,
                     )

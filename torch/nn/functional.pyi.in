@@ -831,6 +831,7 @@ class SwizzleType(Enum):
     SWIZZLE_32_4_4 = 1
     SWIZZLE_32_8 = 2
     SWIZZLE_MN_K4 = 3
+    SWIZZLE_128 = 4
 
 __all__ += ["SwizzleType"]
 

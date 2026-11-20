@@ -41,7 +41,17 @@ from types import (
     MethodType,
     ModuleType,
 )
-from typing import Any, cast, Generic, Literal, NoReturn, Self, TYPE_CHECKING, TypeVar
+from typing import (
+    Any,
+    cast,
+    Generic,
+    Literal,
+    NoReturn,
+    NotRequired,
+    Self,
+    TYPE_CHECKING,
+    TypeVar,
+)
 from typing_extensions import override, TypedDict
 
 import torch
@@ -107,6 +117,7 @@ from torch._inductor.utils import (
     clear_on_fresh_cache,
     determine_aoti_mmap_flags,
     fp32_matmul_precision_key,
+    get_cpp_wrapper_header_device,
     is_linux,
     is_windows,
     parallel_num_threads,
@@ -149,7 +160,7 @@ from .output_code import CompiledFxGraph
 from .remote_cache import cache_stats, create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
-from .triton_bundler import TritonBundler
+from .triton_bundler import TritonBundle, TritonBundler
 from .virtualized import V
 
 
@@ -158,6 +169,8 @@ T = TypeVar("T")
 
 class SystemDeviceInfo(TypedDict):
     name: str | None
+    # The XCC count depends on the compute partition mode, not on the arch.
+    xcc_count: NotRequired[int | None]
 
 
 class SystemVersionInfo(TypedDict, total=False):
@@ -356,6 +369,7 @@ class CacheBase:
                 version_info["cuda"] = torch.version.cuda
             else:
                 device_info["name"] = device_properties.gcnArchName
+                device_info["xcc_count"] = getattr(device_properties, "xcc_count", None)
                 version_info["hip"] = torch.version.hip
             hash_input["device"] = device_info
         except (AssertionError, RuntimeError):
@@ -1968,6 +1982,32 @@ class GuardedCache(Generic[T]):
         raise NotImplementedError("Implement _record_result on parent class")
 
     @classmethod
+    def _local_entry_path(cls: type[GuardedCache[T]], key: str, content: bytes) -> str:
+        """
+        Where to store a serialized entry on disk. The file name is a hash of the
+        content; it only needs to be unique, since a lookup iterates over every
+        entry in the key's subdir.
+        """
+        return os.path.join(cls._get_tmp_dir_for_key(key), sha256_hash(content))
+
+    @staticmethod
+    def _put_remote(
+        remote_cache: RemoteCache[JsonDataTy],
+        key: str,
+        content: bytes,
+        time_taken_ms: int,
+    ) -> None:
+        """
+        Store a serialized entry in the remote cache, in the format that
+        iterate_over_candidates decodes.
+        """
+        cache_data: JsonDataTy = {
+            "data": base64.b64encode(content).decode("ascii"),
+            "time_taken_ms": time_taken_ms,
+        }
+        remote_cache.put(key, cache_data)
+
+    @classmethod
     def iterate_over_candidates(
         cls: type[GuardedCache[T]],
         local: bool,
@@ -2247,20 +2287,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         CompiledFxGraph.post_compile)
         """
         if bundle := graph._triton_bundle:
-            triton_bundler_meta = TritonBundler.read_and_emit(bundle)
-            if (meta := triton_bundler_meta) is not None:
-                cache_info["triton_bundler_meta"] = str(meta)
-                CompileEventLogger.try_add_pt2_compile(
-                    "inductor_compile", cached_kernel_names=meta.cached_kernel_names
-                )
-                CompileEventLogger.try_add_pt2_compile(
-                    "AOTAutogradCache.inductor_load",
-                    cached_kernel_names=meta.cached_kernel_names,
-                )
-                if len(meta.cached_kernel_names) > 0:
-                    CompileEventLogger.try_(
-                        CompileEventLogger.increment_toplevel, "num_triton_bundles"
-                    )
+            FxGraphCache._emit_triton_bundle(bundle, cache_info)
 
         try:
             artifact_path = graph.after_deserialization(constants)
@@ -2287,6 +2314,37 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
         counters["inductor"] += graph.counter_deltas
 
+        FxGraphCache._log_cache_hit_artifacts(graph, artifact_path)
+        return graph, cache_info
+
+    @staticmethod
+    def _emit_triton_bundle(bundle: TritonBundle, cache_info: CacheInfo) -> None:
+        """
+        Write the kernels bundled with a cache hit back into the Triton cache dir
+        and record which kernels were served from the bundle.
+        """
+        if (meta := TritonBundler.read_and_emit(bundle)) is None:
+            return
+        cache_info["triton_bundler_meta"] = str(meta)
+        CompileEventLogger.try_add_pt2_compile(
+            "inductor_compile", cached_kernel_names=meta.cached_kernel_names
+        )
+        CompileEventLogger.try_add_pt2_compile(
+            "AOTAutogradCache.inductor_load",
+            cached_kernel_names=meta.cached_kernel_names,
+        )
+        if len(meta.cached_kernel_names) > 0:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel, "num_triton_bundles"
+            )
+
+    @staticmethod
+    def _log_cache_hit_artifacts(graph: CompiledFxGraph, artifact_path: str) -> None:
+        """
+        Log the output code and the structured-trace artifacts for a graph loaded
+        from the cache.
+        """
+        code = graph.source_code
         output_code_log.debug("Output code: \n%s", code)
         output_code_log.debug("Output code written to: %s", artifact_path)
         # On cache hit, use artifact path as filename
@@ -2333,7 +2391,6 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             get_metrics_context().add_to_set(
                 "inductor_provenance", graph.inductor_provenance_stack_traces_str
             )
-        return graph, cache_info
 
     @staticmethod
     def _lookup_graph(
@@ -2408,14 +2465,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
     @staticmethod
     def _write_to_local_cache(key: str, content: bytes) -> None:
-        subdir = FxGraphCache._get_tmp_dir_for_key(key)
-        if not os.path.exists(subdir):
-            os.makedirs(subdir, exist_ok=True)
-
-        # Use a hash of the serialized CompiledFxGraph to get a unique file
-        # name. The specific name doesn't matter since a lookup involves
-        # iterating over all entries in the parent subdir.
-        path = os.path.join(subdir, sha256_hash(content))
+        path = FxGraphCache._local_entry_path(key, content)
         write_atomic(path, content, make_dirs=True)
 
     @staticmethod
@@ -2474,11 +2524,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
             if remote_cache:
                 time_taken_ms = int((disk_compiled_graph._time_taken_ns or 0) // 1e6)
-                cache_data: JsonDataTy = {
-                    "data": base64.b64encode(content).decode("ascii"),
-                    "time_taken_ms": time_taken_ms,
-                }
-                remote_cache.put(key, cache_data)
+                FxGraphCache._put_remote(remote_cache, key, content, time_taken_ms)
         except Exception:
             log.warning("fx graph unable to write to cache", exc_info=True)
             counters["inductor"]["fxgraph_cache_write_error"] += 1
@@ -4009,7 +4055,7 @@ def _get_cpp_prefix_header(device: str) -> str | None:
 def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
     """Given a device type (and optionally whether we're in AOT Inductor mode), returns
     the path to the cpp_wrapper header file to be precompiled."""
-    base_device = device.split(":", maxsplit=1)[0]
+    base_device = get_cpp_wrapper_header_device(device.split(":", maxsplit=1)[0])
     is_array_ref = config.aot_inductor.allow_stack_allocation and base_device == "cpu"
     return (
         "torch/csrc/inductor/"

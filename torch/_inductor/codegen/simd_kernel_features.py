@@ -18,6 +18,7 @@ from .. import ir
 from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
 from ..runtime.hints import ReductionHint
 from ..runtime.runtime_utils import next_power_of_2
+from ..runtime.tiling import get_pointwise_prefixes
 from ..scheduler import SchedulerNode
 from ..utils import cache_on_self
 from ..virtualized import V
@@ -41,7 +42,7 @@ def tiling_scores_suggest_inner_reduction(
     sizevars = V.graph.sizevars
     non_reduction_score = sum(
         sizevars.optimization_hint(tiling_scores.get(dim, 0), fallback=0)
-        for dim in ("x", "y", "z0_")
+        for dim in get_pointwise_prefixes(tiling_scores)
     )
     non_reduction_score = max(non_reduction_score, 1)
     r_score = sizevars.optimization_hint(tiling_scores["r0_"], fallback=0)
