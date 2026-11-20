@@ -1323,6 +1323,93 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         with self.assertRaises(OverflowError):
             b.zfill(2**63)
 
+    @make_dynamo_test
+    def test_strip_whitespace(self):
+        b = self.type2test(b"   hello   ")
+        self.assertEqual(b.strip(), b"hello")
+        self.assertEqual(b.lstrip(), b"hello   ")
+        self.assertEqual(b.rstrip(), b"   hello")
+        self.assertEqual(b, b"   hello   ")
+        # All six ASCII whitespace bytes are stripped
+        ws = self.type2test(b" \t\n\r\x0b\x0cabc \t\n\r\x0b\x0c")
+        self.assertEqual(ws.strip(), b"abc")
+        self.assertEqual(ws.lstrip(), b"abc \t\n\r\x0b\x0c")
+        self.assertEqual(ws.rstrip(), b" \t\n\r\x0b\x0cabc")
+        # None means whitespace, same as no argument
+        self.assertEqual(b.strip(None), b"hello")
+        self.assertEqual(b.lstrip(None), b"hello   ")
+        self.assertEqual(b.rstrip(None), b"   hello")
+        # Non-ASCII bytes such as \xa0 are not whitespace
+        self.assertEqual(self.type2test(b"\xa0a\xa0").strip(), b"\xa0a\xa0")
+        self.assertEqual(self.type2test(b"").strip(), b"")
+
+    @make_dynamo_test
+    def test_strip_chars(self):
+        b = self.type2test(b"xyzzyhelloxyzzy")
+        self.assertEqual(b.strip(b"xyz"), b"hello")
+        self.assertEqual(b.lstrip(b"xyz"), b"helloxyzzy")
+        self.assertEqual(b.rstrip(b"xyz"), b"xyzzyhello")
+        self.assertEqual(b.strip(bytearray(b"xyz")), b"hello")
+        self.assertEqual(self.type2test(b"hello").strip(b"xyz"), b"hello")
+        self.assertEqual(self.type2test(b"mississippi").strip(b"mississippi"), b"")
+        # Only the ends are trimmed, not interior bytes
+        self.assertEqual(self.type2test(b"mississippi").strip(b"i"), b"mississipp")
+        # An empty argument strips nothing
+        self.assertEqual(self.type2test(b" a ").strip(b""), b" a ")
+        self.assertEqual(self.type2test(b"\xffa\xff").strip(b"\xff"), b"a")
+
+    @make_dynamo_test
+    def test_strip_returns_new_bytearray(self):
+        b = self.type2test(b"abc")
+        for result in (b.strip(), b.lstrip(b"x"), b.rstrip(b"x")):
+            self.assertIsInstance(result, self.type2test)
+            self.assertIsNot(result, b)
+            self.assertEqual(result, b"abc")
+
+    @make_dynamo_test
+    def test_strip_errors(self):
+        b = self.type2test(b" abc ")
+        for name in ("strip", "lstrip", "rstrip"):
+            method = getattr(b, name)
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method("ac")
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method(32)
+            with self.assertRaisesRegex(
+                TypeError, "expected at most 1 argument, got 2"
+            ):
+                method(b"a", b"b")
+            with self.assertRaisesRegex(TypeError, "takes no keyword arguments"):
+                method(bytes=b"a")
+
+    def test_input_bytearray_strip(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.strip(), ba.lstrip(b" a"), ba.rstrip(None)
+
+        ba = bytearray(b" abc ")
+        results = fn(ba)
+        for result in results:
+            self.assertIs(type(result), bytearray)
+        self.assertEqual(
+            results, (bytearray(b"abc"), bytearray(b"bc "), bytearray(b" abc"))
+        )
+        self.assertEqual(ba, bytearray(b" abc "))
+
+    @parametrize("name", ["strip", "lstrip", "rstrip"])
+    def test_input_bytearray_strip_mutate_result(self, name):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            out = getattr(ba, name)()
+            out[0] = ord("j")
+            return out
+
+        ba = bytearray(b"hello")
+        out = fn(ba)
+        self.assertIs(type(out), bytearray)
+        self.assertEqual(out, bytearray(b"jello"))
+        self.assertEqual(ba, bytearray(b"hello"))
+
     def test_zfill_expandtabs_returns_new_bytearrays(self):
         def f(ba, x):
             return ba.zfill(1), ba.expandtabs(), x + 1
