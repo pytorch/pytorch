@@ -65,8 +65,8 @@ C10_METAL_CONSTEXPR uint32_t DOT_BLOCK_ELEMS_PER_THREAD = 4 * SUM_NCHAINS;
 C10_METAL_CONSTEXPR uint32_t DOT_MAX_TGS = 2048;
 
 // segment_reduce reduces a segment with an INNER_TG_SIZE threadgroup once every
-// lane reads several elements; shorter segments get one thread each.
-C10_METAL_CONSTEXPR uint32_t SEGMENT_PARALLEL_MIN_LEN = 4 * INNER_TG_SIZE;
+// lane has an element to read; shorter segments get one thread each.
+C10_METAL_CONSTEXPR uint32_t SEGMENT_PARALLEL_MIN_LEN = INNER_TG_SIZE;
 
 template <typename index_t = int64_t>
 struct DotParams {

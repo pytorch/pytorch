@@ -8186,9 +8186,9 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
         ((S, S, S), 1, [[2, 0, 3, 0], [0, 1, 2, 2], [3, 0, 2, 0], [1, 1, 1, 2], [0, 1, 2, 2]], False),
     )
     if not requires_grad:
-        # Long 1-D segment to reach the MPS threadgroup kernel. Forward only: its product
-        # overflows on every device, which gives the CPU/CUDA gradcheck a NaN Jacobian.
-        test_cases += (((4096,), 0, [0, 4096], False),)
+        # Long segments, with an empty one in between, to reach the MPS threadgroup kernel. Forward only: their
+        # products overflow on every device, which gives the CPU/CUDA gradcheck a NaN Jacobian.
+        test_cases += (((2, 1024), 1, [[512, 0, 512], [1000, 0, 24]], False),)
 
     reductions = ["max", "mean", "min", "sum", "prod"]
     for args, reduce, initial in product(test_cases, reductions, [1, 2]):
@@ -22917,7 +22917,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"),
-            # MPS sums the 4096-element float32 segment in a different order than CPU
+            # MPS sums the long float32 segments in a different order than CPU
             DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-3, rtol=1.3e-6)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
         ),
@@ -22944,7 +22944,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_variant_consistency_eager", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"),
-            # MPS sums the 4096-element float32 segment in a different order than CPU
+            # MPS sums the long float32 segments in a different order than CPU
             DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-3, rtol=1.3e-6)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
         ),

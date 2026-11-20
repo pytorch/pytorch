@@ -67,7 +67,13 @@ static Tensor segment_reduce_mps(ReductionType reduction,
                                                 .has_initial = initial.has_value()};
         mtl_setArgs(encoder, data, output, offsets, params);
       });
-      mtl_dispatch3DJob(encoder, pso, parallel ? INNER_TG_SIZE : inner, segments, outer);
+      if (parallel) {
+        // The kernel strides by INNER_TG_SIZE, so each segment must get exactly one full threadgroup
+        [encoder dispatchThreadgroups:MTLSizeMake(1, segments, outer)
+                threadsPerThreadgroup:MTLSizeMake(INNER_TG_SIZE, 1, 1)];
+      } else {
+        mtl_dispatch3DJob(encoder, pso, inner, segments, outer);
+      }
     }
   });
   return output;
