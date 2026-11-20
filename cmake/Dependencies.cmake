@@ -1001,6 +1001,25 @@ if(USE_ROCM)
     message(INFO "Compiling with HIP for AMD.")
     caffe2_update_option(USE_ROCM ON)
 
+    # Link dirs from the pip ROCm SDK are absolute build-venv paths. Record the
+    # installed sibling SDK packages relative to torch/lib so native programs
+    # linking libtorch resolve ROCm without Python preloading it.
+    if(UNIX AND NOT APPLE AND ROCM_PATH MATCHES "[\\/]_rocm_sdk_[^\\/]*$")
+      get_filename_component(_rocm_site_packages "${ROCM_PATH}" DIRECTORY)
+      foreach(_rocm_rel IN ITEMS
+          _rocm_sdk_core/lib
+          _rocm_sdk_core/lib/host-math/lib
+          _rocm_sdk_core/lib/rocm_sysdeps/lib
+          _rocm_sdk_libraries/lib)
+        if(IS_DIRECTORY "${_rocm_site_packages}/${_rocm_rel}")
+          list(APPEND CMAKE_INSTALL_RPATH "${_rpath_portable_origin}/../../${_rocm_rel}")
+        endif()
+      endforeach()
+      message(STATUS "ROCm SDK wheel RUNPATH: ${CMAKE_INSTALL_RPATH}")
+      unset(_rocm_site_packages)
+      unset(_rocm_rel)
+    endif()
+
     if(USE_NCCL AND NOT USE_SYSTEM_NCCL)
       message(INFO "Forcing USE_SYSTEM_NCCL to ON since it's required by using RCCL")
       caffe2_update_option(USE_SYSTEM_NCCL ON)
