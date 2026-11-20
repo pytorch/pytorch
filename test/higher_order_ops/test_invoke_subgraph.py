@@ -417,6 +417,24 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
 
+    def test_autocast_dtype(self):
+        @nested_compile_region
+        def gn(x, w):
+            return (x @ w).float()
+
+        def fn(x, w):
+            with torch.autocast("cpu", dtype=torch.float16):
+                a = gn(gn(x, w), w)
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                b = gn(gn(x, w), w)
+            return a, b
+
+        x = torch.randn(8, 8, requires_grad=True)
+        w = torch.randn(8, 8, requires_grad=True)
+        ref = fn(x, w)
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, w)
+        self.assertEqual(ref, res)
+
     def test_stack_trace(self):
         # Last frame in the stack trace on invoke_subgraph should point to
         # model code, not files in torch._higher_order_ops directory.
