@@ -12,8 +12,10 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 
 namespace torch::detail {
@@ -273,6 +275,84 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
         "torch_new_none_pyobject requires the GIL to be held");
     Py_INCREF(Py_None);
     return Py_None;
+  }
+
+  void decref_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_decref_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    Py_DECREF(obj);
+  }
+
+  // Sequences are lists or tuples (subclasses included), as for the list and
+  // tuple arguments PythonArgParser accepts. Other iterables are rejected.
+  static Py_ssize_t sequence_size(PyObject* obj, const char* shim) {
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    if (PyList_Check(obj)) {
+      return PyList_GET_SIZE(obj);
+    }
+    TORCH_CHECK(
+        PyTuple_Check(obj),
+        shim,
+        ": expected list or tuple, got ",
+        Py_TYPE(obj)->tp_name);
+    return PyTuple_GET_SIZE(obj);
+  }
+
+  size_t sequence_size_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_sequence_size_pyobject requires the GIL to be held");
+    return static_cast<size_t>(
+        sequence_size(obj, "torch_sequence_size_pyobject"));
+  }
+
+  PyObject* sequence_get_item_pyobject(PyObject* obj, size_t index)
+      const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_sequence_get_item_pyobject requires the GIL to be held");
+    const auto size = static_cast<size_t>(
+        sequence_size(obj, "torch_sequence_get_item_pyobject"));
+    TORCH_CHECK(
+        index < size,
+        "torch_sequence_get_item_pyobject: index ",
+        index,
+        " is out of range for a sequence of size ",
+        size);
+    const auto i = static_cast<Py_ssize_t>(index);
+    if (PyList_Check(obj)) {
+      // PyList_GetItemRef rechecks the index and takes the reference
+      // atomically, which matters on free-threaded builds where another
+      // thread can shrink the list.
+      PyObject* item = PyList_GetItemRef(obj, i);
+      TORCH_CHECK_PYTHON(item != nullptr);
+      return item;
+    }
+    PyObject* item = PyTuple_GET_ITEM(obj, i);
+    Py_INCREF(item);
+    return item;
+  }
+
+  PyObject* new_list_pyobject(PyObject* const* items, size_t length)
+      const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_new_list_pyobject requires the GIL to be held");
+    TORCH_CHECK(
+        length <= static_cast<size_t>(PY_SSIZE_T_MAX),
+        "torch_new_list_pyobject: too many items");
+    for (size_t i = 0; i < length; ++i) {
+      TORCH_CHECK(items[i] != nullptr, "torch_new_list_pyobject: null item");
+    }
+    THPObjectPtr list(PyList_New(static_cast<Py_ssize_t>(length)));
+    TORCH_CHECK_PYTHON(list);
+    for (size_t i = 0; i < length; ++i) {
+      Py_INCREF(items[i]);
+      PyList_SET_ITEM(list.get(), static_cast<Py_ssize_t>(i), items[i]);
+    }
+    return list.release();
   }
 };
 
