@@ -132,7 +132,11 @@ class WorkNCCL : public c10d::Work {
   void setHostBlocking(bool host_blocking);
 
  protected:
-  void recordStart(std::string_view coll_name);
+  // Records the start event and opens a "nccl:<coll_name>" profiler event.
+  // `inputs` supply its shapes; empty falls back to the retained inputs.
+  void recordStart(
+      std::string_view coll_name,
+      at::ArrayRef<at::Tensor> inputs = {});
   void recordEnd();
 
   friend class ProcessGroupNCCL;
@@ -197,7 +201,9 @@ class WorkNCCL : public c10d::Work {
   // Poll the CUDA events, advance status and publish the result once terminal.
   WorkStatus checkStatus(
       std::optional<std::chrono::milliseconds> timeout = std::nullopt);
-  void recordFunctionStart(std::string_view coll_name);
+  void recordFunctionStart(
+      std::string_view coll_name,
+      at::ArrayRef<at::Tensor> inputs);
   // Make the current stream wait on the work's end event (the c10d "wait"
   // semantics for CUDA work: order subsequent current-stream ops after this).
   void synchronizeInternal();
