@@ -1107,17 +1107,36 @@ class TestSerialization(TestCase, SerializationMixin):
 
         test(io.BytesIO())
 
-    def test_serialization_zipfile_actually_jit(self):
-        with tempfile.NamedTemporaryFile() as f:
-            torch.jit.save(torch.jit.script(torch.nn.Linear(3, 4)), f)
-            f.seek(0)
-            with self.assertRaisesRegex(
-                RuntimeError,
-                re.escape("Cannot use ``weights_only=True`` with TorchScript archives passed to ``torch.load``")
-            ):
-                torch.load(f, weights_only=True)
-            f.seek(0)
-            torch.load(f, weights_only=False)
+    @parametrize('weights_only', (True, False))
+    def test_serialization_rejects_torchscript_archives(self, weights_only):
+        cu = torch.jit.CompilationUnit('def forward(x: Tensor) -> Tensor:\n    return x + 1\n')
+        archive = cu.forward.save_to_buffer()
+        with TemporaryFileName() as filename:
+            with open(filename, "wb") as f:
+                f.write(archive)
+            for source in (filename, io.BytesIO(archive)):
+                if IS_FBCODE:
+                    if weights_only:
+                        with self.assertRaisesRegex(
+                            RuntimeError,
+                            re.escape(
+                                "Cannot use ``weights_only=True`` with TorchScript archives "
+                                "passed to ``torch.load``"
+                            ),
+                        ):
+                            torch.load(source, weights_only=True)
+                    else:
+                        loaded = torch.load(source, weights_only=False)
+                        x = torch.arange(3)
+                        self.assertEqual(loaded(x), cu.forward(x))
+                else:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        re.escape("TorchScript archives are no longer supported by torch.load")
+                    ) as cm:
+                        torch.load(source, weights_only=weights_only)
+                    self.assertIn("older PyTorch version", str(cm.exception))
+                    self.assertIn("original model to torch.export", str(cm.exception))
 
     # Ensure large zip64 serialization works properly
     @serialTest()

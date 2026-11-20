@@ -5,6 +5,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/Pad.h>
 #include <c10/metal/common.h>
+#include <utility>
 
 #include <algorithm>
 #include <limits>
@@ -279,12 +280,12 @@ static bool constant_pad_dense_eligible(const Tensor& input, const Tensor& outpu
   if (padding_dim > 3 || !input.is_contiguous() || !output.is_contiguous()) {
     return false;
   }
-  constexpr auto uint_max = std::numeric_limits<uint32_t>::max();
   const auto out_w = output.size(-1);
   const auto out_h = padding_dim >= 2 ? output.size(-2) : 1;
   const auto out_d = padding_dim >= 3 ? output.size(-3) : 1;
-  const bool sizes_fit = out_w <= uint_max && out_h <= uint_max && out_d <= uint_max;
-  return sizes_fit && output.numel() / (out_w * out_h) <= uint_max;
+  const bool sizes_fit =
+      std::in_range<uint32_t>(out_w) && std::in_range<uint32_t>(out_h) && std::in_range<uint32_t>(out_d);
+  return sizes_fit && std::in_range<uint32_t>(output.numel() / (out_w * out_h));
 }
 
 static void constant_pad_dense_kernel_mps(const Tensor& input,
@@ -491,7 +492,7 @@ Tensor constant_pad_nd_mps(const Tensor& self, IntArrayRef pad, const Scalar& va
   const Scalar fill = all_pads_non_positive ? Scalar(0) : value;
   if (mps::constant_pad_dense_eligible(cropped, output, padding_dim)) {
     mps::constant_pad_dense_kernel_mps(cropped, output, pad, padding_dim, fill);
-  } else if (output.numel() > std::numeric_limits<uint32_t>::max() || ndim > c10::metal::max_ndim) {
+  } else if (!std::in_range<uint32_t>(output.numel()) || ndim > c10::metal::max_ndim) {
     return at::native::constant_pad_nd(self, pad, value);
   } else {
     mps::constant_pad_strided_kernel_mps(cropped, output, pad, padding_dim, fill);

@@ -43,8 +43,7 @@ bool is_windows_drive_root(const std::string& path) {
 
 std::string strip_trailing_separator(const std::string& path) {
   std::string stripped_path = path;
-  while (stripped_path.size() > 1 &&
-         c10::ends_with(stripped_path, k_separator) &&
+  while (stripped_path.size() > 1 && stripped_path.ends_with(k_separator) &&
          !is_windows_drive_root(stripped_path)) {
     stripped_path.pop_back();
   }
@@ -52,7 +51,7 @@ std::string strip_trailing_separator(const std::string& path) {
 }
 
 std::string append_separator_if_needed(const std::string& path) {
-  if (path.empty() || c10::ends_with(path, k_separator)) {
+  if (path.empty() || path.ends_with(k_separator)) {
     return path;
   }
   return path + k_separator;
@@ -108,7 +107,7 @@ bool path_starts_with_directory(
   const std::string normalized_directory_with_sep =
       append_separator_if_needed(normalized_directory);
   return normalized_path == normalized_directory ||
-      c10::starts_with(normalized_path, normalized_directory_with_sep);
+      normalized_path.starts_with(normalized_directory_with_sep);
 }
 
 void list_files_recursive(
@@ -167,7 +166,7 @@ const char* extension_file_ext() {
 }
 
 bool is_wrapper_library(const std::string& path) {
-  return c10::ends_with(path, std::string(".wrapper") + extension_file_ext());
+  return path.ends_with(std::string(".wrapper") + extension_file_ext());
 }
 
 void categorize_model_file(
@@ -609,7 +608,7 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
     std::string root_with_sep = append_separator_if_needed(root_dir);
     for (const auto& path : found_filenames) {
       size_t pos = path.find(rel_model_path_suffix);
-      if (pos != std::string::npos && c10::starts_with(path, root_with_sep) &&
+      if (pos != std::string::npos && path.starts_with(root_with_sep) &&
           pos >= root_with_sep.length()) {
         if (pos > root_with_sep.length()) {
           file_prefix =
@@ -627,7 +626,7 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
 
     for (const auto& cur_filename : found_filenames) {
       if (path_starts_with_directory(cur_filename, search_model_dir) &&
-          c10::ends_with(cur_filename, metadata_suffix)) {
+          cur_filename.ends_with(metadata_suffix)) {
         metadata_path = cur_filename;
         break;
       }
@@ -647,7 +646,7 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
     for (auto const& zip_filename_str : found_filenames) {
       auto cur_filename = normalize_path_separator(zip_filename_str);
       if (path_starts_with_directory(cur_filename, model_directory) &&
-          c10::ends_with(cur_filename, metadata_suffix)) {
+          cur_filename.ends_with(metadata_suffix)) {
         metadata_filename = zip_filename_str;
         break;
       }
@@ -781,8 +780,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     std::string temp_dir_with_sep = append_separator_if_needed(temp_dir_);
     for (const auto& path : found_filenames) {
       size_t pos = path.find(rel_model_path_suffix);
-      if (pos != std::string::npos &&
-          c10::starts_with(path, temp_dir_with_sep) &&
+      if (pos != std::string::npos && path.starts_with(temp_dir_with_sep) &&
           pos >= temp_dir_with_sep.length()) {
         if (pos > temp_dir_with_sep.length()) {
           file_prefix = path.substr(

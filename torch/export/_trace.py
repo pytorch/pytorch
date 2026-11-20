@@ -685,9 +685,10 @@ class _ExportSafeToReorder:
 
         self._is_safe_to_reorder = _is_safe_to_reorder
         self._prev_stack: tuple[str, ...] | None = None
+        self._subgraph_purity: dict[torch.fx.GraphModule, bool] = {}
 
     def __call__(self, node: torch.fx.Node) -> bool:
-        if not self._is_safe_to_reorder(node):
+        if not self._is_safe_to_reorder(node, subgraph_purity=self._subgraph_purity):
             self._prev_stack = tuple(node.meta.get("nn_module_stack", {}).keys())
             return False
         stack = tuple(node.meta.get("nn_module_stack", {}).keys())

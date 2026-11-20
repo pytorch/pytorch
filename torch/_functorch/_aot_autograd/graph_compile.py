@@ -2090,16 +2090,26 @@ def _is_joint_graph_name_canonicalization_enabled() -> bool:
 
 
 def _maybe_canonicalize_joint_graph_for_sync(graph: torch.fx.Graph) -> None:
-    if not _is_joint_graph_name_canonicalization_enabled():
+    if not (
+        _is_joint_graph_name_canonicalization_enabled()
+        or torch._functorch.config._sync_decision_cross_ranks
+    ):
+        return
+    if (
+        torch._dynamo.compiled_autograd.in_compiled_autograd_region
+        or torch.compiler.is_exporting()
+    ):
         return
     owning_module = graph.owning_module
-    if not isinstance(owning_module, torch.fx.GraphModule):
+    if owning_module is not None and not isinstance(
+        owning_module, torch.fx.GraphModule
+    ):
         raise AssertionError("expected the joint graph to have an owning GraphModule")
-    _canonicalize_joint_graph(owning_module)
+    _canonicalize_joint_graph(graph)
 
 
-def _canonicalize_joint_graph(fx_g: torch.fx.GraphModule) -> None:
-    """Canonicalize final joint-graph order and raw node identity.
+def _canonicalize_joint_graph(fx_g: torch.fx.GraphModule | torch.fx.Graph) -> None:
+    """Canonicalize final joint-graph raw node identity.
 
     A name-only pass uses the unconstrained dataflow order so independent
     compute on opposite sides of a barrier receives the same identity on every
@@ -2114,18 +2124,19 @@ def _canonicalize_joint_graph(fx_g: torch.fx.GraphModule) -> None:
         _stable_target_str,
     )
 
-    graph = fx_g.graph
+    graph = fx_g if isinstance(fx_g, torch.fx.Graph) else fx_g.graph
     downstream_hashes = _joint_graph_downstream_hashes(graph)
     placeholder_ordinals = {
         node: ordinal for ordinal, node in enumerate(graph.find_nodes(op="placeholder"))
     }
+    subgraph_purity: dict[torch.fx.GraphModule, bool] = {}
     barrier_ordinals = {
         node: ordinal
         for ordinal, node in enumerate(
             node
             for node in graph.nodes
             if node.op not in {"placeholder", "get_attr", "output"}
-            and not _is_safe_to_reorder(node)
+            and not _is_safe_to_reorder(node, subgraph_purity=subgraph_purity)
         )
     }
 
@@ -2160,14 +2171,15 @@ def _canonicalize_joint_graph(fx_g: torch.fx.GraphModule) -> None:
     _canonicalize_graph_node_names(
         graph, canonical_key, skip_rename_ops=skip_placeholders
     )
-    fx_g.recompile()
+    owning_module = graph.owning_module
+    if isinstance(owning_module, torch.fx.GraphModule):
+        owning_module.recompile()
 
 
 def _has_source_canonicalized_dynamo_inputs(aot_config: AOTConfig) -> bool:
     sources = aot_config.aot_autograd_arg_pos_to_source
     if (
-        not torch._dynamo.config.canonicalize_output_graph_node_order
-        or not torch._functorch.config._sync_decision_cross_ranks
+        not torch._functorch.config._sync_decision_cross_ranks
         or torch._dynamo.compiled_autograd.in_compiled_autograd_region
         or aot_config.is_export
         or sources is None

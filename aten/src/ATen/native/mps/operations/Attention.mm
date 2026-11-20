@@ -11,6 +11,7 @@
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/util/safe_conv.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -401,7 +402,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   const bool u32 = fits_u32(q_) && fits_u32(k_, 2) && fits_u32(v_, 2) && fits_u32(out) && (!mask || fits_u32(*mask, 3));
   const int64_t bd = q_len <= kDecodeMaxQueries && u32 ? decode_bucket(d, dv) : 0;
   if (out.numel() > 0 && bd > 0 && k_.size(2) >= kTwoPassMinKeys &&
-      out.numel() / dv * kDecodeBlocks * bd <= std::numeric_limits<int32_t>::max()) {
+      std::in_range<int32_t>(out.numel() / dv * kDecodeBlocks * bd)) {
     sdpa_vector_2pass_mps(q_, k_, v_, out, mask, is_causal, scale_factor, bd);
   } else if (out.numel() > 0 && bd > 0) {
     sdpa_vector_fast_mps(q_, k_, v_, out, mask, is_causal, scale_factor, bd);
