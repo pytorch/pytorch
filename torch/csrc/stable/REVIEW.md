@@ -61,6 +61,11 @@ Reuse `torch::stable::detail::from` and `torch::stable::detail::to` for boxing a
 unboxing where applicable. Avoid redundant conversion layers or round trips in
 high-level wrappers.
 
+Use enum-specific `from`/`to` conversions from `stableivalue_conversions.h` for
+runtime integer encodings across C shims, not raw casts of extension enums. If
+no such conversion exists, define and document the stable encoding; preserve
+the unstable API's unsupported-value behavior.
+
 For handles and callbacks, verify the ownership contract explicitly: borrowed
 versus owned handles, shared value semantics, who releases the resource, and
 whether a callback runs exactly once. Match the unstable type's RAII behavior
