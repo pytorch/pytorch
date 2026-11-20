@@ -3690,6 +3690,11 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
         try:
             return self._call_getattr(tx, args, kwargs)
         except Unsupported:
+            # Do not retry a dict read on a fresh constant partial.
+            if isinstance(args[0], variables.FunctoolsPartialVariable) and args[
+                1
+            ].is_constant_match("__dict__"):
+                raise
             # Replicate the constant-fold fallback from BuiltinVariable._make_handler:
             # if all args are python constants, evaluate getattr() directly rather
             # than propagating a graph break from tp_getattro_impl.

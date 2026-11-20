@@ -163,7 +163,7 @@ from .source import (
     FlattenScriptObjectSource,
     FloatTensorSource,
     FSDPNNModuleSource,
-    FunctoolsPartialDictStateSource,
+    FunctoolsPartialStateSource,
     GenericAttrSource,
     GetItemSource,
     GlobalSource,
@@ -342,8 +342,8 @@ def _native_method_matches(value: object, expected: NativeMethodMetadata) -> boo
     )
 
 
-def _functools_partial_dict_state(value: Any) -> object:
-    return functools.partial.__reduce__(value)[2][3]
+def _functools_partial_state(value: Any) -> object:
+    return functools.partial.__reduce__(value)[2]
 
 
 def _mapping_proxy_mapping(value: object) -> object:
@@ -2260,11 +2260,11 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif istype(source, FunctoolsPartialDictStateSource):
+        elif istype(source, FunctoolsPartialStateSource):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")
             out = base_guard_manager.lambda_manager(
-                python_lambda=_functools_partial_dict_state,
+                python_lambda=_functools_partial_state,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,

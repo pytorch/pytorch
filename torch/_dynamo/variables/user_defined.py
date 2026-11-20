@@ -1563,6 +1563,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             fn = args[0]
             rest_args = args[1:]
             if isinstance(fn, variables.functions.FunctoolsPartialVariable):
+                inner_func, inner_args, inner_keywords = fn.native_fields or (
+                    fn.func,
+                    fn.args,
+                    fn.keywords,
+                )
                 if fn.dict_state_source is not None:
                     # Guard the flatten decision both ways: the dict state is
                     # None while the instance dict is unset, a dict once set.
@@ -1581,15 +1586,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         and any(
                             isinstance(v := arg.realize(), UserDefinedObjectVariable)
                             and v.value is placeholder
-                            for arg in fn.args
+                            for arg in inner_args
                         )
                     )
                 ):
                     # Like CPython's partial_new, merge a nested partial into
                     # the new one instead of wrapping it.
-                    rest_args = fn.args + rest_args
-                    kwargs = {**fn.keywords, **kwargs}
-                    fn = fn.func
+                    rest_args = inner_args + rest_args
+                    kwargs = {**inner_keywords, **kwargs}
+                    fn = inner_func
             # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
             # args and keywords
             # A partial created while tracing never gets an instance dict:

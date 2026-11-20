@@ -624,38 +624,121 @@ partial_fn = functools.partial(fn, scale=2)
         self.assertFalse(opt_fn(inner, x)[0])
         self.assertEqual(cnt.frame_count, 2)
 
-    def test_functools_partial_nested_vars_not_flattened(self):
-        # vars() and hasattr() create the instance dict, so CPython stops
-        # flattening.
-        def traced(x):
-            inner = functools.partial(capture_args, "a")
-            vars(inner)
-            p = functools.partial(inner)
-            return p.func is inner, p.args, x.sin()
+    @parametrize(
+        "case",
+        [
+            "sourced_vars",
+            "sourced_dict",
+            "sourced_getattr",
+            "sourced_hasattr",
+            "created_vars",
+            "created_hasattr",
+        ],
+    )
+    def test_functools_partial_nested_vars_not_flattened(self, case):
+        created = case.startswith("created")
+        access = case.split("_")[1]
 
-        def sourced(inner, x):
-            vars(inner)
-            p = functools.partial(inner)
-            return p.func is inner, p.args, x.sin()
+        def fn(inner, x):
+            # Two ops establish a resumable checkpoint for LOAD_ATTR.
+            y = x.sin().cos()
+            if created:
+                inner = functools.partial(capture_args, "held", mode=1)
+            if access == "vars":
+                state = vars(inner)
+            elif access == "dict":
+                state = inner.__dict__
+            elif access == "getattr":
+                state = getattr(inner, "__dict__")  # noqa: B009
+            else:
+                state = hasattr(inner, "__dict__")
+            outer = functools.partial(inner, "outside", mode=2)
+            metadata = outer.func is inner, outer.args, outer.keywords
+            return inner, state, outer, metadata, y.cos()
 
+        calls = []
+
+        def backend(gm, inputs):
+            index = len(calls)
+            calls.append(0)
+
+            def run(*args):
+                calls[index] += 1
+                return gm.forward(*args)
+
+            return run
+
+        opt_fn = torch.compile(fn, backend=backend)
+        inner = None if created else functools.partial(capture_args, "held", mode=1)
         x = torch.randn(3)
-        opt_traced = torch.compile(traced, backend="eager", fullgraph=True)
-        self.assertEqual(opt_traced(x), traced(x))
-        self.assertTrue(opt_traced(x)[0])
-        opt_sourced = torch.compile(sourced, backend="eager", fullgraph=True)
-        self.assertEqual(
-            opt_sourced(functools.partial(capture_args, "a"), x),
-            sourced(functools.partial(capture_args, "a"), x),
-        )
-        self.assertTrue(opt_sourced(functools.partial(capture_args, "a"), x)[0])
+        results = []
+        expected_call = (("held", "outside", "later"), {"mode": 2, "extra": 3})
+        for _ in range(2):
+            result = opt_fn(inner, x)
+            results.append(result)
+            actual_inner, state, outer = result[:3]
+            if not created:
+                self.assertIs(actual_inner, inner)
+            self.assertEqual(result[3], (True, ("outside",), {"mode": 2}))
+            self.assertIs(outer.func, actual_inner)
+            self.assertEqual(outer.args, ("outside",))
+            self.assertEqual(outer("later", extra=3), expected_call)
+            native_dict = functools.partial.__reduce__(actual_inner)[2][3]
+            self.assertEqual(native_dict, {})
+            if access == "hasattr":
+                self.assertTrue(state)
+            else:
+                self.assertIs(state, native_dict)
+        # LOAD_ATTR uses step-level fallback, leaving the tail eager.
+        self.assertEqual(calls, [2] if access == "dict" else [2, 2])
+        first_dict = functools.partial.__reduce__(results[0][0])[2][3]
+        second_dict = functools.partial.__reduce__(results[1][0])[2][3]
+        first_dict["marker"] = 3
+        self.assertEqual(second_dict, {} if created else {"marker": 3})
+        if access != "hasattr":
+            self.assertEqual(results[0][1], {"marker": 3})
 
-        def sourced_hasattr(inner, x):
-            hasattr(inner, "__dict__")
-            p = functools.partial(inner)
-            return p.func is inner, p.args, x.sin()
+        strict_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        msg = "functools.partial instance dictionary"
+        with self.assertRaisesRegex(Unsupported, msg):
+            strict_fn(inner, x)
 
-        opt_hasattr = torch.compile(sourced_hasattr, backend="eager", fullgraph=True)
-        self.assertTrue(opt_hasattr(functools.partial(capture_args, "a"), x)[0])
+    def test_functools_partial_nested_vars_survives_resume(self):
+        def fn(inner, x):
+            vars(inner)
+            y = x.sin()
+            torch._dynamo.graph_break()
+            outer = functools.partial(inner, "outside", mode=2)
+            return outer, outer.func is inner, outer.args, outer.keywords, y.cos()
+
+        calls = []
+
+        def backend(gm, inputs):
+            index = len(calls)
+            calls.append(0)
+
+            def run(*args):
+                calls[index] += 1
+                return gm.forward(*args)
+
+            return run
+
+        inner = functools.partial(capture_args, "held", mode=1)
+        self.assertIsNone(functools.partial.__reduce__(inner)[2][3])
+        opt_fn = torch.compile(fn, backend=backend)
+        x = torch.randn(3)
+        results = []
+        expected_call = (("held", "outside", "later"), {"mode": 2, "extra": 3})
+        for _ in range(2):
+            result = opt_fn(inner, x)
+            results.append(result)
+            self.assertEqual(result[1:4], (True, ("outside",), {"mode": 2}))
+            self.assertIs(result[0].func, inner)
+            self.assertEqual(result[0].args, ("outside",))
+            self.assertEqual(result[0]("later", extra=3), expected_call)
+            self.assertEqual(functools.partial.__reduce__(inner)[2][3], {})
+        self.assertEqual(calls, [2, 2])
+        self.assertIs(results[0][0].func, results[1][0].func)
 
     def test_functools_partial_nested_subclass_func_property_not_flattened(self):
         # CPython merges the native fields, not a subclass's func property.
@@ -678,6 +761,89 @@ partial_fn = functools.partial(fn, scale=2)
         ref, _ = fn(inner, x)
         res, _ = opt_fn(inner, x)
         self.assertEqual(res(1), ref(1))
+
+    @parametrize("field", ("func", "args", "keywords"))
+    def test_functools_partial_nested_native_fields(self, field):
+        def stored(*args, **kwargs):
+            return "stored", args, kwargs
+
+        def changed(*args, **kwargs):
+            return "changed", args, kwargs
+
+        def visible(*args, **kwargs):
+            return "visible", args, kwargs
+
+        public = {
+            "func": visible,
+            "args": ("public",),
+            "keywords": {"native": "public", "shared": "public"},
+        }
+
+        class Partial(functools.partial):
+            def __getattribute__(self, name):
+                if name in public:
+                    return public[name]
+                return super().__getattribute__(name)
+
+            def __reduce__(self):
+                raise AssertionError("The subclass reducer must not run")
+
+        def fn(inner, x):
+            p = functools.partial(inner, "outside", shared="outside")
+            projections = inner.func is visible, inner.args, inner.keywords
+            assumptions = (
+                p.func is stored,
+                p.args[0] == "inside",
+                p.keywords["native"] == "before",
+                "added" in p.keywords,
+            )
+            return p, projections, assumptions, x.sin()
+
+        graphs, runs, escaped = [], [], []
+
+        def backend(gm, inputs):
+            graphs.append(gm)
+
+            def execute(*args):
+                runs.append(1)
+                return gm.forward(*args)
+
+            return execute
+
+        inner = Partial(stored, "inside", native="before", shared="inside")
+        x = torch.ones(3)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        stages = 3 if field == "keywords" else 2
+        for stage in range(stages):
+            if stage == 1:
+                func, args, keywords, _ = functools.partial.__reduce__(inner)[2]
+                if field == "func":
+                    new_state = changed, args, keywords, None
+                    functools.partial.__setstate__(inner, new_state)
+                elif field == "args":
+                    new_state = func, ("changed",), keywords, None
+                    functools.partial.__setstate__(inner, new_state)
+                else:
+                    keywords["native"] = "after"
+            elif stage == 2:
+                functools.partial.__reduce__(inner)[2][2]["added"] = "new"
+
+            for _ in range(2):
+                ref, ref_public, ref_assumptions, _ = fn(inner, x)
+                res, res_public, res_assumptions, _ = compiled(inner, x)
+                self.assertIs(res.func, ref.func)
+                self.assertEqual(res.args, ref.args)
+                self.assertEqual(res.keywords, ref.keywords)
+                self.assertEqual(res_public, ref_public)
+                self.assertEqual(res_assumptions, ref_assumptions)
+                if escaped:
+                    self.assertIsNot(res, escaped[-1][0])
+                escaped.append((res, ref()))
+                self.assertIsNone(functools.partial.__reduce__(inner)[2][3])
+            self.assertEqual((len(graphs), len(runs)), (stage + 1, 2 * (stage + 1)))
+
+        for partial, result in escaped:
+            self.assertEqual(partial(), result)
 
     def test_functools_partial_traced_setattr_graph_breaks(self):
         # Flattening partials created while tracing relies on setattr on them
@@ -4483,7 +4649,7 @@ partial_fn = functools.partial(fn, scale=2)
             "__ge__",
             "__le__",
             "__gt__",
-            "__dict__",
+            # __dict__ graph breaks: test_functools_partial_nested_vars_not_flattened
             "__getattribute__",
             "__setattr__",
             "__doc__",

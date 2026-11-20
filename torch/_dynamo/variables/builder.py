@@ -143,7 +143,7 @@ from ..source import (
     DictSubclassGetItemSource,
     DynamicScalarSource,
     FloatTensorSource,
-    FunctoolsPartialDictStateSource,
+    FunctoolsPartialStateSource,
     GetItemSource,
     GlobalSource,
     GradSource,
@@ -1685,6 +1685,7 @@ class VariableBuilder:
             # override func, args or keywords are not flattened.
             flattenable = False
             dict_state_source = None
+            native_fields = None
             value_type = type(value)
             if all(
                 getattr(value_type, name) is getattr(functools.partial, name)
@@ -1693,8 +1694,22 @@ class VariableBuilder:
                 sys.version_info >= (3, 13)
                 or value_type.__call__ is functools.partial.__call__
             ):
-                flattenable = functools.partial.__reduce__(value)[2][3] is None
-                dict_state_source = FunctoolsPartialDictStateSource(self.get_source())
+                state = functools.partial.__reduce__(value)[2]
+                state_source = FunctoolsPartialStateSource(self.get_source())
+                flattenable = state[3] is None
+                dict_state_source = GetItemSource(state_source, 3)
+                native_keywords = VariableBuilder(
+                    self.tx, GetItemSource(state_source, 2)
+                )(state[2])
+                if not isinstance(native_keywords, ConstDictVariable):
+                    raise AssertionError("Expected dict for partial's native keywords")
+                native_fields = (
+                    VariableBuilder(self.tx, GetItemSource(state_source, 0))(state[0]),
+                    VariableBuilder(self.tx, GetItemSource(state_source, 1))(
+                        state[1]
+                    ).unpack_var_sequence(self.tx),
+                    native_keywords.keys_as_python_constant(),
+                )
             return FunctoolsPartialVariable(
                 func_obj,
                 args,
@@ -1702,6 +1717,7 @@ class VariableBuilder:
                 original_cache_hash=original_cache_hash,
                 flattenable=flattenable,
                 dict_state_source=dict_state_source,
+                native_fields=native_fields,
             )
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.

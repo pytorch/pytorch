@@ -189,6 +189,7 @@ from .variables.functions import (
     BaseUserFunctionVariable,
     CO_VARARGS,
     CO_VARKEYWORDS,
+    FunctoolsPartialVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -3397,6 +3398,9 @@ class InstructionTranslatorBase(
         try:
             result = generic_getattr(self, obj, attr)
         except Unsupported:
+            # A constant partial is a fresh object, so its dict read loses the effect.
+            if isinstance(obj, FunctoolsPartialVariable) and attr == "__dict__":
+                raise
             if not obj.is_python_constant():
                 raise
             # An eager getattr would run a user-defined __get__ at trace time
