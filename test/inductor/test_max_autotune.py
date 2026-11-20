@@ -427,30 +427,22 @@ class TestMaxAutotune(TestCase):
         ):
             c_actual, code = run_and_get_code(torch.compile(torch.mm), a, b)
 
-        FileCheck().check("tl.debug_barrier").run(code[0])
+        # The default threshold also emits the barrier, so check the patched value.
+        FileCheck().check_regex(r"TILE_BARRIER_MIN_K_STEPS : tl.constexpr = 1\b").check(
+            "tl.debug_barrier"
+        ).run(code[0])
         torch.testing.assert_close(c_actual, torch.mm(a, b), atol=1e-2, rtol=1e-2)
 
-    @unittest.skipIf(GPU_TYPE != "xpu", "XPU mm templates")
-    @unittest.skipIf(not has_triton_stable_tma_api(), "Need tensor descriptors")
-    def test_max_autotune_xpu_mm_templates_reject_misaligned_k(self):
+    def _compile_mm_with_xpu_templates_toggled(self, a, b, record_choice):
+        """Compile mm on Xe2 with the XPU templates on and off; returns the outputs."""
         from torch.xpu._utils import XPUArch
 
-        M, N, K = 168, 248, 90
-        a = torch.randn((M, K), dtype=torch.bfloat16, device=GPU_TYPE)
-        b = torch.randn((K, N), dtype=torch.bfloat16, device=GPU_TYPE)
-        all_triton_mm_choices: dict[bool, list[str]] = {}
-        all_triton_mm_choice_names: dict[bool, list[str]] = {}
-        actual = None
-
+        results = {}
         for enable_xpu_templates in (True, False):
-            triton_mm_choices: list[str] = []
-            triton_mm_choice_names: list[str] = []
 
-            def record_choices(choices):
+            def record_choices(choices, enabled=enable_xpu_templates):
                 for choice in choices:
-                    if choice.name.startswith("triton_mm"):
-                        triton_mm_choice_names.append(choice.name)
-                        triton_mm_choices.append(choice.description)
+                    record_choice(enabled, choice)
                 return choices
 
             add_preprocessing_fn(record_choices)
@@ -470,82 +462,108 @@ class TestMaxAutotune(TestCase):
                         }
                     ),
                 ):
-                    result = torch.compile(lambda x, y: torch.mm(x, y))(a, b)
+                    results[enable_xpu_templates] = torch.compile(
+                        lambda x, y: torch.mm(x, y)
+                    )(a, b)
             finally:
                 clear_preprocessing_fns(clear_defaults=False)
+        return results
 
-            all_triton_mm_choices[enable_xpu_templates] = triton_mm_choices
-            all_triton_mm_choice_names[enable_xpu_templates] = triton_mm_choice_names
-            if enable_xpu_templates:
-                actual = result
+    @unittest.skipIf(GPU_TYPE != "xpu", "XPU mm templates")
+    @unittest.skipIf(not has_triton_stable_tma_api(), "Need tensor descriptors")
+    def test_max_autotune_xpu_mm_templates_reject_misaligned_k(self):
+        M, N, K = 168, 248, 90
+        a = torch.randn((M, K), dtype=torch.bfloat16, device=GPU_TYPE)
+        b = torch.randn((K, N), dtype=torch.bfloat16, device=GPU_TYPE)
+        triton_mm_choices: dict[bool, list[str]] = {True: [], False: []}
+        triton_mm_choice_names: dict[bool, list[str]] = {True: [], False: []}
 
-        self.assertTrue(
-            all_triton_mm_choices[True],
-        )
+        def record_choice(enabled, choice):
+            if choice.name.startswith("triton_mm"):
+                triton_mm_choice_names[enabled].append(choice.name)
+                triton_mm_choices[enabled].append(choice.description)
+
+        results = self._compile_mm_with_xpu_templates_toggled(a, b, record_choice)
+
+        self.assertTrue(triton_mm_choices[True])
         self.assertFalse(
-            any("mm_xpu_" in name for name in all_triton_mm_choice_names[True]),
-            all_triton_mm_choice_names[True],
+            any("mm_xpu_" in name for name in triton_mm_choice_names[True]),
+            triton_mm_choice_names[True],
         )
         self.assertEqual(
-            sorted(all_triton_mm_choices[True]),
-            sorted(all_triton_mm_choices[False]),
+            sorted(triton_mm_choices[True]),
+            sorted(triton_mm_choices[False]),
         )
-        self.assertIsNotNone(actual)
-        torch.testing.assert_close(actual, a @ b, atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(results[True], a @ b, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(GPU_TYPE != "xpu", "XPU mm templates")
+    @unittest.skipIf(not has_triton_stable_tma_api(), "Need tensor descriptors")
+    def test_max_autotune_xpu_mm_templates_aoti_dynamic_k(self):
+        from torch._inductor import aoti_compile_and_package, aoti_load_package
+        from torch.xpu._utils import XPUArch
+
+        class Mm(torch.nn.Module):
+            def forward(self, a, b):
+                return a @ b
+
+        a = torch.randn(168, 88, dtype=torch.bfloat16, device=GPU_TYPE)
+        b = torch.randn(88, 248, dtype=torch.bfloat16, device=GPU_TYPE)
+        k = torch.export.Dim("k", min=16, max=4096)
+        ep = torch.export.export(
+            Mm(), (a, b), dynamic_shapes={"a": {1: k}, "b": {0: k}}
+        )
+        names: list[str] = []
+
+        def record_choices(choices):
+            names.extend(choice.name for choice in choices)
+            return choices
+
+        add_preprocessing_fn(record_choices)
+        try:
+            with (
+                mock.patch(
+                    "torch.xpu._utils.get_xpu_arch",
+                    return_value=XPUArch.Xe2,
+                ),
+                config.patch({"max_autotune": True, "triton.native_matmul": False}),
+            ):
+                fn = aoti_load_package(aoti_compile_and_package(ep))
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        # AOTI can't check at runtime that K is aligned, so no descriptor template.
+        self.assertTrue(names)
+        self.assertFalse(any("mm_xpu_" in name for name in names), names)
+        a = torch.randn(168, 90, dtype=torch.bfloat16, device=GPU_TYPE)
+        b = torch.randn(90, 248, dtype=torch.bfloat16, device=GPU_TYPE)
+        torch.testing.assert_close(fn(a, b), a @ b, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(GPU_TYPE != "xpu", "XPU mm templates")
     @unittest.skipIf(not has_triton_stable_tma_api(), "Need tensor descriptors")
     @parametrize("dtype", (torch.bfloat16, torch.float16))
     def test_max_autotune_xpu_mm_templates_prune_triton_mm(self, dtype: torch.dtype):
-        from torch.xpu._utils import XPUArch
-
         # Every companion tile fits these sizes, so shape scaling leaves them as is.
         M, N, K = 168, 248, 88
         a = torch.randn((M, K), dtype=dtype, device=GPU_TYPE)
         b = torch.randn((K, N), dtype=dtype, device=GPU_TYPE)
-        triton_mm_configs: dict[bool, set[tuple[str, int, int]]] = {}
-        xpu_template_names: dict[bool, set[str]] = {}
+        triton_mm_configs: dict[bool, set[tuple[str, int, int]]] = {
+            True: set(),
+            False: set(),
+        }
+        xpu_template_names: dict[bool, set[str]] = {True: set(), False: set()}
 
-        for enable_xpu_templates in (True, False):
-            configs: set[tuple[str, int, int]] = set()
-            names: set[str] = set()
+        def record_choice(enabled, choice):
+            if not choice.name.startswith("triton_mm"):
+                return
+            if "mm_xpu_" in choice.name:
+                xpu_template_names[enabled].add(choice.name.rsplit("_", 1)[0])
+                return
+            info = choice.info_dict()
+            triton_mm_configs[enabled].add(
+                (info["tile_shape"], info["num_stages"], info["num_warps"])
+            )
 
-            def record_choices(choices):
-                for choice in choices:
-                    if not choice.name.startswith("triton_mm"):
-                        continue
-                    if "mm_xpu_" in choice.name:
-                        names.add(choice.name.rsplit("_", 1)[0])
-                        continue
-                    info = choice.info_dict()
-                    configs.add(
-                        (info["tile_shape"], info["num_stages"], info["num_warps"])
-                    )
-                return choices
-
-            add_preprocessing_fn(record_choices)
-            try:
-                torch._dynamo.reset()
-                with (
-                    fresh_cache(),
-                    mock.patch(
-                        "torch.xpu._utils.get_xpu_arch",
-                        return_value=XPUArch.Xe2,
-                    ),
-                    config.patch(
-                        {
-                            "max_autotune": True,
-                            "triton.native_matmul": False,
-                            "triton.enable_xpu_mm_templates": enable_xpu_templates,
-                        }
-                    ),
-                ):
-                    torch.compile(lambda x, y: torch.mm(x, y))(a, b)
-            finally:
-                clear_preprocessing_fns(clear_defaults=False)
-
-            triton_mm_configs[enable_xpu_templates] = configs
-            xpu_template_names[enable_xpu_templates] = names
+        self._compile_mm_with_xpu_templates_toggled(a, b, record_choice)
 
         # tile_shape is logged as str((BLOCK_M, BLOCK_K, BLOCK_N)).
         companion_configs = {
