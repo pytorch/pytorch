@@ -257,6 +257,15 @@ TEST(ParseTest, RocprofPerThreadBuffer) {
   EXPECT_TRUE(cfg.rocprofPerThreadBufferEnabled());
 }
 
+TEST(ParseTest, RocprofDispatchRecordWait) {
+  Config cfg;
+  EXPECT_EQ(cfg.rocprofDispatchRecordWait(), milliseconds(20));
+  EXPECT_TRUE(cfg.parse("ROCPROF_DISPATCH_RECORD_WAIT_MSECS=100"));
+  EXPECT_EQ(cfg.rocprofDispatchRecordWait(), milliseconds(100));
+  EXPECT_FALSE(cfg.parse("ROCPROF_DISPATCH_RECORD_WAIT_MSECS=-5"));
+  EXPECT_EQ(cfg.rocprofDispatchRecordWait(), milliseconds(100));
+}
+
 // The two keys stay independent. Configs in the wild already set the CUPTI one,
 // so letting it reach the rocprof path would enable it on every ROCm run.
 TEST(ParseTest, CuptiPerThreadBufferDoesNotEnableRocprof) {

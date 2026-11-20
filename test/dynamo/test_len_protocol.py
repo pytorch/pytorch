@@ -411,6 +411,38 @@ class TestTensorLen(torch._dynamo.test_case.TestCase):
         self.assertEqual(t.__len__(), 3)
         self.assertEqual(torch.Tensor.__len__(t), 3)
 
+    @make_dynamo_test
+    def test_len_0d_raises_type_error(self):
+        t = torch.tensor(3.0)
+        with self.assertRaisesRegex(TypeError, "len\\(\\) of a 0-d tensor"):
+            len(t)
+        with self.assertRaisesRegex(TypeError, "len\\(\\) of a 0-d tensor"):
+            t.__len__()
+        with self.assertRaisesRegex(TypeError, "len\\(\\) of a 0-d tensor"):
+            torch.Tensor.__len__(t)
+
+    def test_len_0d_caught_in_compiled_fn(self):
+        def f(x):
+            try:
+                return len(x)
+            except TypeError:
+                return -1
+
+        x = torch.tensor(3.0)
+        self.assertEqual(f(x), -1)
+        for fullgraph in (False, True):
+            torch._dynamo.reset()
+            compiled = torch.compile(f, backend="eager", fullgraph=fullgraph)
+            self.assertEqual(compiled(x), -1)
+
+    def test_len_0d_uncaught_matches_eager(self):
+        def f(x):
+            return len(x)
+
+        compiled = torch.compile(f, backend="eager")
+        with self.assertRaisesRegex(TypeError, "len\\(\\) of a 0-d tensor"):
+            compiled(torch.tensor(3.0))
+
 
 class TestNNModuleLen(torch._dynamo.test_case.TestCase):
     """Tests for len() on torch.nn module containers"""

@@ -121,20 +121,9 @@ bool SchemaInfo::is_nondeterministic() const {
     return false;
   }
 
-#if defined C10_MOBILE
-  static const std::vector<c10::FunctionSchema> nondeterministic_ops =
-      getNonDeterministicOps();
-  return std::any_of(
-      nondeterministic_ops.begin(),
-      nondeterministic_ops.end(),
-      [this](const c10 ::FunctionSchema& nondeterministic_op) {
-        return nondeterministic_op == this->schema_;
-      });
-#else
   const auto& op = c10::Dispatcher::singleton().findOp(
       c10::OperatorName(schema_.name(), schema_.overload_name()));
   return op && op->hasTag(at::Tag::nondeterministic_seeded);
-#endif
 }
 
 bool SchemaInfo::may_alias(

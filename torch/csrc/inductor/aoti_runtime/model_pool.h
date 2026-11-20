@@ -73,8 +73,8 @@ class ModelPool {
   void set_use_stream_affinity(bool use_stream_affinity) {
     std::lock_guard lk(models_mutex_);
     AOTI_RUNTIME_CHECK(
-        available_models_.size() == models_.size() && pending_models_.empty() &&
-            checked_out_models_.empty(),
+        available_models_.size() == models_.size() &&
+            in_flight_models_.empty() && checked_out_models_.empty(),
         "Stream affinity can only be reconfigured while the model pool is "
         "quiescent");
 #if defined(USE_CUDA) || defined(USE_XPU)
@@ -161,18 +161,13 @@ class ModelPool {
     model_state_changed_.notify_all();
   }
 
-  void return_model_to_pending(Model* model) {
+  void return_model_to_in_flight(Model* model) {
     {
       std::lock_guard lk(models_mutex_);
       checked_out_models_.erase(model);
-      pending_models_.push_back(model);
+      in_flight_models_.push_back(model);
     }
     model_state_changed_.notify_all();
-  }
-
-  // For run_single_threaded(), which bypasses the pool's locking entirely.
-  Model* first_available_model_unsynchronized() {
-    return available_models_[0];
   }
 
  private:
@@ -225,10 +220,10 @@ class ModelPool {
         return model;
       }
 
-      const auto pending_it =
-          std::find(pending_models_.begin(), pending_models_.end(), model);
-      if (pending_it != pending_models_.end()) {
-        pending_models_.erase(pending_it);
+      const auto in_flight_it =
+          std::find(in_flight_models_.begin(), in_flight_models_.end(), model);
+      if (in_flight_it != in_flight_models_.end()) {
+        in_flight_models_.erase(in_flight_it);
         checked_out_models_.insert(model);
         lk.unlock();
         try {
@@ -288,41 +283,34 @@ class ModelPool {
   }
 
   void reclaim_finished_models(std::unique_lock<std::mutex>& lk) {
-#ifdef __aarch64__
-    // push finished model instances to the end of pending_models_
-    auto it = std::partition(
-        pending_models_.begin(), pending_models_.end(), [](Model* m) {
-          return !m->is_finished();
-        });
-#else
-    // push finished model instances to the end of pending_models_
-    auto it = std::stable_partition(
-        pending_models_.begin(), pending_models_.end(), [](Model* m) {
-          return !m->is_finished();
-        });
-#endif
-
-    if (it != pending_models_.end()) {
-      // We have finished model instances that can be pushed into
-      // available_models_ so that we don't have to block waiting on
-      // model_state_changed_.
-      available_models_.insert(
-          available_models_.end(), it, pending_models_.end());
-      pending_models_.erase(it, pending_models_.end());
+    // Move every finished run to available_models_, oldest first, so the most
+    // recently launched one is reused first. std::stable_partition keeps that
+    // order too, but its temporary buffer caused OOMs on aarch64 hosts running
+    // multi-threaded predictors.
+    auto still_in_flight = in_flight_models_.begin();
+    for (auto* model : in_flight_models_) {
+      if (model->is_finished()) {
+        available_models_.push_back(model);
+      } else {
+        *still_in_flight++ = model;
+      }
+    }
+    if (still_in_flight != in_flight_models_.end()) {
+      in_flight_models_.erase(still_in_flight, in_flight_models_.end());
       model_state_changed_.notify_all();
       return;
     }
 
     model_state_changed_.wait(lk, [this]() {
-      return !available_models_.empty() || !pending_models_.empty();
+      return !available_models_.empty() || !in_flight_models_.empty();
     });
     if (!available_models_.empty()) {
       return;
     }
     // Let's make the schedule simple first. We always wait on the first
-    // pending_models_ to be complete.
-    auto* model = pending_models_.front();
-    pending_models_.pop_front();
+    // in_flight_models_ to be complete.
+    auto* model = in_flight_models_.front();
+    in_flight_models_.pop_front();
     if (use_stream_affinity_) {
       checked_out_models_.insert(model);
     }
@@ -348,7 +336,7 @@ class ModelPool {
 
   // Holds the model instances available for inference. When stream affinity
   // is enabled, each model is in exactly one execution state under
-  // models_mutex_: available here, pending device completion below, or checked
+  // models_mutex_: available here, in flight on the device below, or checked
   // out by a host thread. Stream bindings are persistent preferences
   // independent of those states; borrowing a bound model preserves its
   // binding, while a failed run clears it so the next call may choose another
@@ -357,7 +345,7 @@ class ModelPool {
 
   // Holds the model instances that have started running inference and can be
   // placed onto available_models_ upon their completion.
-  std::deque<Model*> pending_models_;
+  std::deque<Model*> in_flight_models_;
 
   bool use_stream_affinity_{false};
   // Callers enabling affinity must keep bound streams alive to avoid a reused

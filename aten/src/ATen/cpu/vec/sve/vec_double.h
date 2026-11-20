@@ -28,6 +28,11 @@ template <>
 struct is_vec_specialized_for<double> : std::bool_constant<true> {};
 
 template <>
+struct VecBoolType<double> {
+  using type = SveVecBool<double>;
+};
+
+template <>
 class Vectorized<double> {
  private:
   vls_float64_t values;
@@ -45,6 +50,9 @@ class Vectorized<double> {
   Vectorized(double val) {
     values = svdup_n_f64(val);
   }
+  // A comparison result as a mask: all bits set in a true lane.
+  Vectorized(VecBool<double> p)
+      : values(svsel_f64(p, ALL_F64_TRUE_MASK, ALL_F64_FALSE_MASK)) {}
   template <
       typename... Args,
       typename = std::enable_if_t<(sizeof...(Args) == size())>>
@@ -82,6 +90,12 @@ class Vectorized<double> {
       const Vectorized<double>& mask_) {
     svbool_t mask =
         svcmpeq_s64(ptrue, svreinterpret_s64_f64(mask_), ALL_S64_TRUE_MASK);
+    return svsel_f64(mask, b, a);
+  }
+  static Vectorized<double> blendv(
+      const Vectorized<double>& a,
+      const Vectorized<double>& b,
+      VecBool<double> mask) {
     return svsel_f64(mask, b, a);
   }
   template <typename step_t>
@@ -138,10 +152,8 @@ class Vectorized<double> {
     }
     return mask;
   }
-  Vectorized<double> isnan() const {
-    // NaN check
-    svbool_t mask = svcmpuo_f64(ptrue, values, ZERO_F64);
-    return svsel_f64(mask, ALL_F64_TRUE_MASK, ALL_F64_FALSE_MASK);
+  VecBool<double> isnan() const {
+    return svcmpuo_f64(ptrue, values, ZERO_F64);
   }
   bool has_inf_nan() const {
     return svptest_any(
@@ -161,6 +173,10 @@ class Vectorized<double> {
   }
   double reduce_max() const {
     return svmaxv_f64(ptrue, values);
+  }
+  // A NaN (all bits set) where mask is true, this otherwise.
+  Vectorized<double> or_nan_if(VecBool<double> mask) const {
+    return svsel_f64(mask, ALL_F64_TRUE_MASK, values);
   }
   Vectorized<double> abs() const {
     return svabs_f64_x(ptrue, values);
@@ -423,34 +439,28 @@ class Vectorized<double> {
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN
-  Vectorized<double> operator==(const Vectorized<double>& other) const {
-    svbool_t mask = svcmpeq_f64(ptrue, values, other);
-    return svsel_f64(mask, ALL_F64_TRUE_MASK, ALL_F64_FALSE_MASK);
+  VecBool<double> operator==(const Vectorized<double>& other) const {
+    return svcmpeq_f64(ptrue, values, other);
   }
 
-  Vectorized<double> operator!=(const Vectorized<double>& other) const {
-    svbool_t mask = svcmpne_f64(ptrue, values, other);
-    return svsel_f64(mask, ALL_F64_TRUE_MASK, ALL_F64_FALSE_MASK);
+  VecBool<double> operator!=(const Vectorized<double>& other) const {
+    return svcmpne_f64(ptrue, values, other);
   }
 
-  Vectorized<double> operator<(const Vectorized<double>& other) const {
-    svbool_t mask = svcmplt_f64(ptrue, values, other);
-    return svsel_f64(mask, ALL_F64_TRUE_MASK, ALL_F64_FALSE_MASK);
+  VecBool<double> operator<(const Vectorized<double>& other) const {
+    return svcmplt_f64(ptrue, values, other);
   }
 
-  Vectorized<double> operator<=(const Vectorized<double>& other) const {
-    svbool_t mask = svcmple_f64(ptrue, values, other);
-    return svsel_f64(mask, ALL_F64_TRUE_MASK, ALL_F64_FALSE_MASK);
+  VecBool<double> operator<=(const Vectorized<double>& other) const {
+    return svcmple_f64(ptrue, values, other);
   }
 
-  Vectorized<double> operator>(const Vectorized<double>& other) const {
-    svbool_t mask = svcmpgt_f64(ptrue, values, other);
-    return svsel_f64(mask, ALL_F64_TRUE_MASK, ALL_F64_FALSE_MASK);
+  VecBool<double> operator>(const Vectorized<double>& other) const {
+    return svcmpgt_f64(ptrue, values, other);
   }
 
-  Vectorized<double> operator>=(const Vectorized<double>& other) const {
-    svbool_t mask = svcmpge_f64(ptrue, values, other);
-    return svsel_f64(mask, ALL_F64_TRUE_MASK, ALL_F64_FALSE_MASK);
+  VecBool<double> operator>=(const Vectorized<double>& other) const {
+    return svcmpge_f64(ptrue, values, other);
   }
 
   Vectorized<double> eq(const Vectorized<double>& other) const;
@@ -560,32 +570,32 @@ Vectorized<double> inline operator^(
 
 Vectorized<double> inline Vectorized<double>::eq(
     const Vectorized<double>& other) const {
-  return (*this == other) & Vectorized<double>(1.0);
+  return svsel_f64(*this == other, ONE_F64, ZERO_F64);
 }
 
 Vectorized<double> inline Vectorized<double>::ne(
     const Vectorized<double>& other) const {
-  return (*this != other) & Vectorized<double>(1.0);
+  return svsel_f64(*this != other, ONE_F64, ZERO_F64);
 }
 
 Vectorized<double> inline Vectorized<double>::gt(
     const Vectorized<double>& other) const {
-  return (*this > other) & Vectorized<double>(1.0);
+  return svsel_f64(*this > other, ONE_F64, ZERO_F64);
 }
 
 Vectorized<double> inline Vectorized<double>::ge(
     const Vectorized<double>& other) const {
-  return (*this >= other) & Vectorized<double>(1.0);
+  return svsel_f64(*this >= other, ONE_F64, ZERO_F64);
 }
 
 Vectorized<double> inline Vectorized<double>::lt(
     const Vectorized<double>& other) const {
-  return (*this < other) & Vectorized<double>(1.0);
+  return svsel_f64(*this < other, ONE_F64, ZERO_F64);
 }
 
 Vectorized<double> inline Vectorized<double>::le(
     const Vectorized<double>& other) const {
-  return (*this <= other) & Vectorized<double>(1.0);
+  return svsel_f64(*this <= other, ONE_F64, ZERO_F64);
 }
 
 template <>

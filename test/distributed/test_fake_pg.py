@@ -9,7 +9,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
-from torch._C._distributed_c10d import FakeProcessGroup
+from torch._C._distributed_c10d import FakeWork, WorkResult
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.tensor import Shard
@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
-from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.testing._internal.distributed.fake_pg import FakeProcessGroup, FakeStore
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -59,8 +59,12 @@ class TestFakePG(TestCase):
         dist.init_process_group(backend="fake", rank=1, world_size=2)
 
         output = torch.ones(3, 3) * dist.get_rank()
-        dist.all_reduce(output)
+        work = dist.all_reduce(output, async_op=True)
         self.assertEqual(tuple(output.shape), (3, 3))
+        # A fake op is done when issued.
+        fut = work.get_future_result()
+        self.assertTrue(fut.done())
+        self.assertEqual(WorkResult(fut.value()), WorkResult.SUCCESS)
 
     def test_compile_sync_pg_stays_fake(self):
         # One real rank under a fake default group sized to a larger world must not
@@ -90,34 +94,40 @@ class TestFakePG(TestCase):
             pg = dynamo_distributed.get_compile_sync_pg()
             self.assertEqual(dist.get_backend(pg), dist.Backend.FAKE)
 
-    @parametrize(
-        "config,gloo_available,expected",
-        [
-            ("cuda:fake", True, "fake"),
-            ("cuda:fake", False, "fake"),
-            ("cpu:fake,cuda:fake", True, "fake"),
-            ("cpu:fake,cuda:fake", False, "fake"),
-            # One real device backend means real peers: sync over gloo.
-            ("cpu:gloo,cuda:fake", True, "gloo"),
-            ("cpu:gloo,cuda:fake", False, None),
-            ("cpu:fake,cuda:nccl", True, "gloo"),
-            ("cpu:fake,cuda:nccl", False, None),
-        ],
-    )
-    def test_compile_sync_backend_needs_every_device_backend_fake(
-        self, config, gloo_available, expected
-    ):
+    def test_compile_sync_backend_needs_every_device_backend_fake(self):
         from torch._dynamo import distributed as dynamo_distributed
 
-        with (
-            unittest.mock.patch.object(dist, "get_backend_config", return_value=config),
-            unittest.mock.patch.object(
-                dist, "is_gloo_available", return_value=gloo_available
-            ),
-        ):
-            backends = dynamo_distributed._default_device_backends()
-            backend = dynamo_distributed._compile_sync_backend(backends)
-        self.assertEqual(backend, expected)
+        fake, gloo = dist.Backend.FAKE, dist.Backend.GLOO
+        # The backend with gloo available, then without it.
+        cases = {
+            "cuda:fake": (fake, fake),
+            "cpu:fake,cuda:fake": (fake, fake),
+            # One real device backend means real peers: sync over gloo.
+            "cpu:gloo,cuda:fake": (gloo, None),
+            "cpu:fake,cuda:nccl": (gloo, None),
+            # An MPI default group has no store for a gloo group to use; one whose
+            # devices have different backends does.
+            "mpi": (None, None),
+            "cpu:mpi,cuda:nccl": (gloo, None),
+        }
+        for config, expected in cases.items():
+            for gloo_available, backend in zip((True, False), expected):
+                with (
+                    self.subTest(config=config, gloo=gloo_available),
+                    unittest.mock.patch.object(
+                        dist, "get_backend_config", return_value=config
+                    ),
+                    unittest.mock.patch.object(
+                        dist, "get_backend", return_value=config
+                    ),
+                    unittest.mock.patch.object(
+                        dist, "is_gloo_available", return_value=gloo_available
+                    ),
+                ):
+                    backends = dynamo_distributed._default_device_backends()
+                    self.assertEqual(
+                        dynamo_distributed._compile_sync_backend(backends), backend
+                    )
 
     @unittest.skipUnless(dist.is_gloo_available(), "requires gloo")
     @parametrize("fake_options", [False, True])
@@ -140,6 +150,55 @@ class TestFakePG(TestCase):
             self.assertEqual(dist.get_backend(pg), dist.Backend.GLOO)
             backend = pg._get_backend(torch.device("cpu"))
             self.assertEqual(backend.options._timeout, timeout)
+
+    @unittest.skipUnless(dist.is_gloo_available(), "requires gloo")
+    @parametrize("cuda_options", [True, False])
+    def test_compile_sync_pg_timeout_skips_a_backend_without_options(
+        self, cuda_options
+    ):
+        from torch._dynamo import distributed as dynamo_distributed
+
+        class NoOptions:
+            @property
+            def options(self):
+                raise RuntimeError("Backend ucc does not implement getBackendOptions.")
+
+        get_backend = dist.ProcessGroup._get_backend
+
+        def without_options(pg, device):
+            if pg is default_pg and (device.type == "cpu" or not cuda_options):
+                return NoOptions()
+            return get_backend(pg, device)
+
+        timeout = timedelta(minutes=5)
+        # The CPU backend, which object collectives use and so is read first, has
+        # no options to read; the cuda one keeps the configured timeout, unless it
+        # has none either.
+        dist.init_process_group(
+            backend="cuda:gloo,cpu:gloo",
+            rank=0,
+            world_size=1,
+            store=dist.HashStore(),
+            timeout=timeout,
+        )
+        default_pg = dist.distributed_c10d._get_default_group()
+        log = dynamo_distributed.log
+        with (
+            unittest.mock.patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None),
+            unittest.mock.patch.object(
+                dist.ProcessGroup, "_get_backend", without_options
+            ),
+        ):
+            if cuda_options:
+                with self.assertNoLogs(log, "WARNING"):
+                    pg = dynamo_distributed.get_compile_sync_pg()
+            else:
+                # Not dropped silently.
+                with self.assertLogs(log, "WARNING") as logs:
+                    pg = dynamo_distributed.get_compile_sync_pg()
+                self.assertIn("reports its timeout", logs.output[0])
+                timeout = dist.constants.default_pg_timeout
+        self.assertEqual(pg._get_backend(torch.device("cpu")).options._timeout, timeout)
 
     def test_cache_sync_primes_the_fake_group_without_gloo(self):
         from torch._dynamo import distributed as dynamo_distributed
@@ -196,6 +255,18 @@ class TestFakePG(TestCase):
                 _sync_decision_cross_ranks(graph, [x, reduced]), [x, reduced]
             )
 
+    @unittest.skipIf(not dist.is_gloo_available(), "requires gloo")
+    def test_debug_detail_keeps_backend_alive(self):
+        # DETAIL wraps the backend in _ProcessGroupWrapper, which must keep the
+        # Python backend object alive.
+        self.addCleanup(dist.set_debug_level, dist.get_debug_level())
+        dist.set_debug_level(dist.DebugLevel.DETAIL)
+        dist.init_process_group(backend="fake", rank=0, world_size=1, store=FakeStore())
+
+        wrapper = dist.get_backend_impl(device=torch.device("cpu"))
+        self.assertIsInstance(wrapper.wrapped_pg, FakeProcessGroup)
+        self.assertEqual(wrapper.wrapped_pg.name(), "fake")
+
     def test_set_timeout(self):
         # FakeProcessGroup used to inherit Backend's default set_timeout, which
         # raised "does not support setting timeout". Setting a timeout is a
@@ -218,6 +289,99 @@ class TestFakePG(TestCase):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
         dist.distributed_c10d._add_ephemeral_timeout_for_all_pgs(timedelta(seconds=42))
+
+    def test_c10d_alias(self):
+        alias = torch._C._distributed_c10d.FakeProcessGroup
+        self.assertIs(alias, FakeProcessGroup)
+        with self.assertRaisesRegex(AttributeError, "has no attribute"):
+            torch._C._distributed_c10d.NoSuchAttribute
+
+        # External users build a group from the alias without init_process_group.
+        backend = alias._create_internal(0, 2)
+        group = dist.ProcessGroup(FakeStore(), 0, 2)
+        cpu = torch.device("cpu")
+        group._register_backend(cpu, dist.ProcessGroup.BackendType.CUSTOM, backend)
+        group._set_default_backend(dist.ProcessGroup.BackendType.CUSTOM)
+        tensor = torch.ones(2)
+        group.allreduce(tensor).wait()
+        self.assertEqual(tensor, torch.ones(2))
+
+    def test_split_group_options(self):
+        dist.init_process_group(backend="fake", rank=0, world_size=4, store=FakeStore())
+        parent = dist.distributed_c10d._get_default_group()
+        cpu = torch.device("cpu")
+        self.assertIsNone(parent.split_group([1, 2], device_types=[cpu]))
+
+        # The parent has no options, so C++ passes base options to split().
+        pg = parent.split_group([0, 1], device_types=[cpu])
+        self.assertEqual(dist.get_backend_impl(pg, cpu).options.fake_option, 0)
+
+        opts = FakeProcessGroup.Options()
+        opts.fake_option = 42
+        pg = parent.split_group([0, 1], opts=opts, device_types=[cpu])
+        options = dist.get_backend_impl(pg, cpu).options
+        self.assertIsNot(options, opts)
+        self.assertEqual(options.fake_option, 42)
+
+    def test_convenience_overloads(self):
+        # Python overrides must keep BackendBase's pybind convenience overloads.
+        opts = FakeProcessGroup.Options()
+        opts.simulate_uniform_ranks = True
+        pg = FakeProcessGroup._create_internal(1, 2, opts)
+        t = torch.ones(3)
+        outputs = [torch.zeros(3), torch.zeros(3)]
+        pg.allgather(outputs, t).wait()
+        self.assertEqual(outputs, [t, t])
+        outputs = [torch.zeros(3), torch.zeros(3)]
+        pg.gather(outputs, t, 1).wait()
+        self.assertEqual(outputs, [t, t])
+        output = torch.zeros(3)
+        pg.scatter(output, [t, t], 1).wait()
+        self.assertEqual(output, t)
+
+        x = torch.ones(3)
+        pg.allreduce(x).wait()
+        self.assertIsInstance(pg.allreduce([x]), FakeWork)
+        pg.allreduce([x], dist.ReduceOp.MAX).wait()
+        pg.reduce(x, 1, dist.ReduceOp.SUM).wait()
+        pg.broadcast(x, 0).wait()
+        self.assertEqual(x, torch.full((3,), 8.0))
+        pg.reduce_scatter(output, [t, x], op=dist.ReduceOp.MAX).wait()
+        self.assertEqual(output, x)
+
+        for bad in (
+            lambda: pg.allreduce([1, 2]),
+            lambda: pg.allgather([[t, t]], [[t]]),
+            lambda: pg.scatter([t], [t]),
+        ):
+            with self.assertRaisesRegex(TypeError, "incompatible function arguments"):
+                bad()
+
+    def test_split_options(self):
+        parent_opts = FakeProcessGroup.Options()
+        parent_opts.fake_option = 7
+        pg = FakeProcessGroup._create_internal(0, 2, parent_opts)
+        # Base options, as C++ passes for an options-less parent, inherit the
+        # fake fields.
+        opts = dist.BackendBase.Options("fake")
+        opts.group_name = "child"
+        child = pg.split(FakeStore(), [1, 0], opts)
+        self.assertEqual((child.rank(), child.size()), (1, 2))
+        options = child.options
+        self.assertIsNot(options, parent_opts)
+        self.assertEqual((options.fake_option, options.group_name), (7, "child"))
+
+        class OtherOptions(dist.BackendBase.Options):
+            pass
+
+        other = OtherOptions("other")
+        with self.assertRaisesRegex(TypeError, "must be FakeProcessGroup.Options"):
+            FakeProcessGroup._create_internal(0, 2, other)
+        for opts in (other, dist.BackendBase.Options("gloo")):
+            with self.assertRaisesRegex(
+                RuntimeError, "not a FakeProcessGroup::Options"
+            ):
+                pg.split(FakeStore(), [0, 1], opts)
 
     def test_allgather(self):
         dist.init_process_group(backend="fake", rank=1, world_size=2)
@@ -818,8 +982,6 @@ class TestFakePG(TestCase):
         dist.destroy_process_group()
 
         # Test with error_on_collective=True
-        from torch._C._distributed_c10d import FakeProcessGroup
-
         options = FakeProcessGroup.Options()
         options.error_on_collective = True
 
@@ -846,6 +1008,29 @@ class TestFakePG(TestCase):
         ):
             dist.broadcast(tensor, src=0)
 
+        pg = dist.get_backend_impl(device=torch.device("cpu"))
+        t = torch.ones(2)
+        for op in (
+            lambda: pg.allreduce_sparse([t]),
+            lambda: pg.allreduce_coalesced([t]),
+            lambda: pg.reduce([t]),
+            lambda: pg.all_gather_single(torch.ones(4), t),
+            lambda: pg.allgather_coalesced([[t, t]], [t]),
+            lambda: pg.all_gather_single_coalesced([torch.ones(4)], [t]),
+            lambda: pg.gather([[t, t]], [t]),
+            lambda: pg.scatter([t], [[t, t]]),
+            lambda: pg.reduce_scatter([t], [[t, t]]),
+            lambda: pg.reduce_scatter_single(t, torch.ones(4)),
+            lambda: pg.reduce_scatter_single_coalesced([t], [torch.ones(4)]),
+            lambda: pg.all_to_all_single(t, t, [], []),
+            lambda: pg.alltoall([t, t], [t, t]),
+            lambda: (pg.start_coalescing(), pg.end_coalescing()),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "FakeProcessGroup collective operation error"
+            ):
+                op()
+
         with self.assertRaisesRegex(
             RuntimeError, "FakeProcessGroup collective operation error"
         ):
@@ -858,7 +1043,9 @@ class TestFakePG(TestCase):
                     kwargs = {}
                 return func(*args, **kwargs)
 
-        with self.assertRaisesRegex(TypeError, r"No constructor defined"):
+        with self.assertRaisesRegex(
+            TypeError, r"FakeProcessGroup cannot be constructed directly"
+        ):
             fake_pg = FakeProcessGroup(rank=0, world_size=3)
 
             with SimpleTensorMode():
@@ -972,6 +1159,11 @@ class TestFakePG(TestCase):
         inputs = [torch.ones(3, 3)]
         with self.assertRaisesRegex(RuntimeError, "invalid output size"):
             dist.all_gather_coalesced(output, inputs)
+
+        pg = dist.get_backend_impl(device=torch.device("cpu"))
+        outputs = [torch.empty(4), torch.empty(4)]
+        with self.assertRaisesRegex(RuntimeError, "lists to have the same length"):
+            pg.all_gather_single_coalesced(outputs, [torch.ones(2)])
 
     @skipIfHpu
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
@@ -1190,7 +1382,10 @@ class TestFakePGUniformRanks(TestCase):
 
     def test_option_defaults_to_off(self):
         """Existing behavior must be untouched unless the flag is set."""
-        self.assertFalse(FakeProcessGroup.Options().simulate_uniform_ranks)
+        opts = FakeProcessGroup.Options()
+        self.assertFalse(opts.simulate_uniform_ranks)
+        with self.assertRaises(AttributeError):
+            opts.simulate_uniform_rank = True
 
     def test_create_internal_uses_fresh_default_options(self):
         first = FakeProcessGroup._create_internal(0, world_size=2)

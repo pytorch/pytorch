@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = [
 #   "flake8==7.3.0",
 #   "flake8-bugbear==24.12.12",

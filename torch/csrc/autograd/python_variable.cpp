@@ -315,6 +315,17 @@ void pushPyOutToStack(
         stack, torch::jit::toIValue(out.ptr(), schema_returns[0].real_type()));
   } else {
     auto outs = py::cast<py::sequence>(out);
+    TORCH_CHECK(
+        outs.size() == num_returns,
+        "Expected ",
+        msg,
+        " for ",
+        op.operator_name(),
+        " to return ",
+        num_returns,
+        " values but it returned ",
+        outs.size(),
+        " instead.");
     for (const auto idx : c10::irange(outs.size())) {
       torch::jit::push(
           stack,
@@ -417,7 +428,7 @@ static PyObject* THPVariable_WrapWithType(
     PyTypeObject* type = reinterpret_cast<PyTypeObject*>(THPVariableClass);
     if (desired_type) {
       type = *desired_type;
-    } else if (C10_UNLIKELY(var.device().type() == c10::kXLA)) {
+    } else if (var.device().type() == c10::kXLA) [[unlikely]] {
       if (auto clazz = getPythonTensorClass(var.device())) {
         type = reinterpret_cast<PyTypeObject*>(clazz);
       }
@@ -3163,13 +3174,23 @@ static PyObject* THPVariable_is_sparse_csr(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+// Match FakeTensor's Python properties without changing native layout queries.
+static bool is_fake_mkldnn(const at::Tensor& tensor) {
+  if (!tensor.is_fake()) {
+    return false;
+  }
+  const auto keys = tensor.unsafeGetTensorImpl()->fake_dispatch_keys();
+  return keys.has_value() && keys->has_all(c10::mkldnn_ks);
+}
+
 static PyObject* THPVariable_is_mkldnn(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "is_mkldnn");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return torch::autograd::utils::wrap(self_.is_mkldnn());
+  return torch::autograd::utils::wrap(
+      self_.is_mkldnn() || is_fake_mkldnn(self_));
   END_HANDLE_TH_ERRORS
 }
 
@@ -3269,7 +3290,8 @@ static PyObject* THPVariable_layout(THPVariable* self, void* unused) {
     return handle_torch_function_getter(self, "layout");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return torch::autograd::utils::wrap(self_.layout());
+  return torch::autograd::utils::wrap(
+      is_fake_mkldnn(self_) ? at::kMkldnn : self_.layout());
   END_HANDLE_TH_ERRORS
 }
 

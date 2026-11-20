@@ -23,13 +23,14 @@ from typing import (
     Literal,
     NamedTuple,
     NewType,
+    NotRequired,
     overload,
     Protocol,
     TYPE_CHECKING,
     TypeAlias,
     TypeVar,
 )
-from typing_extensions import deprecated, NotRequired, TypedDict, TypeIs
+from typing_extensions import deprecated, TypedDict, TypeIs
 
 import torch
 from torch._C import _DistStoreError as DistStoreError
@@ -297,6 +298,8 @@ def _pg_options_to_hints(pg_options: object) -> dict[str, str] | None:
     """Convert ProcessGroupNCCL.Options to a torchcomms hints dict."""
     if pg_options is None:
         return None
+    if getattr(pg_options, "encryption_psk", None) is not None:
+        raise ValueError("encryption_psk is not supported with torchcomms")
 
     hints: dict[str, str] = {}
 
@@ -312,7 +315,7 @@ def _pg_options_to_hints(pg_options: object) -> dict[str, str] | None:
                     pass
 
     for attr in dir(pg_options):
-        if not attr.startswith("_") and attr != "config":
+        if not attr.startswith("_") and attr not in ("config", "encryption_psk"):
             try:
                 value = getattr(pg_options, attr)
                 if not callable(value):
@@ -446,11 +449,17 @@ try:
 except ImportError:
     _MPI_AVAILABLE = False
 
+# The legacy ProcessGroupNCCL ("nccl-legacy") is only built internally; in OSS
+# ProcessGroupNCCL is an alias of ProcessGroupNCCL2.
+_NCCL_LEGACY_AVAILABLE = False
 try:
     from torch._C._distributed_c10d import ProcessGroupNCCL
 
     ProcessGroupNCCL.__module__ = "torch.distributed.distributed_c10d"
     __all__ += ["ProcessGroupNCCL"]
+    _NCCL_LEGACY_AVAILABLE = ProcessGroupNCCL is not getattr(
+        torch._C._distributed_c10d, "ProcessGroupNCCL2", None
+    )
 except ImportError:
     _NCCL_AVAILABLE = False
 
@@ -651,6 +660,11 @@ class Backend(str):  # noqa: SLOT000
                 break
 
         if backend_entrypoint is None:
+            # Fake is built in; register it where entry points are unavailable (e.g. Buck).
+            if normalized_name == Backend.FAKE:
+                from torch.distributed._backends.fake import _register_fake_backend
+
+                _register_fake_backend()
             return
 
         try:
@@ -968,18 +982,22 @@ def _register_builtin_gloo_backend() -> None:
     )
 
 
-def _register_builtin_nccl_backend() -> None:
+def _use_nccl2_override() -> bool | None:
+    """TORCH_DIST_USE_NCCL2: "1" forces nccl2, "0" forces legacy, else None."""
+    return {"1": True, "0": False}.get(os.environ.get("TORCH_DIST_USE_NCCL2", ""))
+
+
+def _register_nccl_backend(use_legacy: bool) -> None:
     creator_fn = (
         _create_nccl_process_group
-        if os.environ.get("TORCH_DIST_USE_NCCL2") == "0"
+        if use_legacy and _NCCL_LEGACY_AVAILABLE
         else _create_nccl2_process_group
     )
     # Record what "nccl" actually resolved to for _maybe_attach_flight_recorder,
     # which must skip a group only if every one of its backends feeds a
     # FlightRecorder by itself: stock ProcessGroupNCCL does, nccl2 needs the
-    # hook. Derived from the creator picked above rather than re-read from the
-    # environment, which is only consulted here and could otherwise disagree
-    # with what was built.
+    # hook. Derived from the creator picked above so it can't disagree with
+    # what was built.
     if creator_fn is _create_nccl_process_group:
         _FR_SELF_RECORDING_BACKENDS.add(Backend.NCCL)
     else:
@@ -993,7 +1011,14 @@ def _register_builtin_nccl_backend() -> None:
     )
 
 
+def _register_builtin_nccl_backend() -> None:
+    # nccl2 unless TORCH_DIST_USE_NCCL2=0 and legacy is built.
+    _register_nccl_backend(use_legacy=_use_nccl2_override() is False)
+
+
 def _register_builtin_nccl_legacy_backend() -> None:
+    if not _NCCL_LEGACY_AVAILABLE:
+        return
     Backend.register_backend(
         "nccl-legacy",
         _create_nccl_process_group,
@@ -1004,14 +1029,9 @@ def _register_builtin_nccl_legacy_backend() -> None:
 
 
 def _register_builtin_nccl_as_legacy() -> None:
-    _FR_SELF_RECORDING_BACKENDS.add(Backend.NCCL)
-    Backend.register_backend(
-        Backend.NCCL,
-        _create_nccl_process_group,
-        extended_api=True,
-        devices=Backend.backend_capability[Backend.NCCL],
-        _backend_type=ProcessGroup.BackendType.NCCL,
-    )
+    # Internal entry point: legacy unless TORCH_DIST_USE_NCCL2=1 or legacy
+    # isn't built.
+    _register_nccl_backend(use_legacy=_use_nccl2_override() is not True)
 
 
 def _register_builtin_nccl2_backend() -> None:
@@ -2325,7 +2345,7 @@ def _get_process_group_uid(pg: ProcessGroup) -> int:
         )
     except RuntimeError:
         pass
-    if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
+    if _NCCL_LEGACY_AVAILABLE and isinstance(backend, ProcessGroupNCCL):
         return backend.uid
     return -1
 
@@ -2723,7 +2743,7 @@ def init_process_group(
         # backward compatible API
         if store is None:
             if backend == Backend.FAKE:
-                from torch.testing._internal.distributed.fake_pg import FakeStore
+                from torch.distributed._backends.fake import FakeStore
 
                 store = FakeStore()
             else:
@@ -2890,18 +2910,17 @@ def _get_backend_name_for_device(
     return result
 
 
-# Backends that feed a FlightRecorder without any help: ProcessGroupGloo
-# unconditionally, ProcessGroupNCCL and ProcessGroupXCCL through their own
-# integrations. "fake" and "undefined" never communicate, so recording them is
-# pure noise. Everything else -- nccl2, nccl-lazy, mpi, ucc, out-of-tree
-# plugins -- is invisible to the flight recorder unless a hook is attached.
+# Backends that feed a FlightRecorder without any help: ProcessGroupNCCL and
+# ProcessGroupXCCL through their own integrations. "fake" and "undefined" never
+# communicate, so recording them is pure noise. Everything else -- gloo, nccl2,
+# nccl-lazy, mpi, ucc, out-of-tree plugins -- is invisible to the flight
+# recorder unless a hook is attached.
 #
 # Backend.NCCL is not in here by construction: which implementation the name
 # builds is a runtime choice, so its registrar puts it in or takes it out when
 # it makes that choice, and this stays the single answer to "does this backend
 # record itself".
 _FR_SELF_RECORDING_BACKENDS = {
-    Backend.GLOO,
     "nccl-legacy",
     Backend.XCCL,
     Backend.FAKE,
@@ -2927,9 +2946,10 @@ def _maybe_attach_flight_recorder(
     # A hook is attached per ProcessGroup but backends are per device, and the
     # hook now resolves per op: it skips whatever a self-recording backend
     # serves and records the rest into that backend's own recorder instance. So
-    # a mixed group ("cpu:gloo,cuda:nccl2") gets its nccl2 half without
-    # duplicating gloo's native entries, and only a group that is self-recording
-    # on every device is still skipped -- a hook there would record nothing.
+    # a mixed group ("cpu:gloo,cuda:nccl-legacy") gets its gloo half without
+    # duplicating nccl-legacy's native entries, and only a group that is
+    # self-recording on every device is still skipped -- a hook there would
+    # record nothing.
     if all(
         backend_str in _FR_SELF_RECORDING_BACKENDS
         for backend_str in backend_config.get_device_backend_map().values()
@@ -2948,6 +2968,15 @@ def _maybe_attach_flight_recorder(
     # handle returned by attach() is dropped. Park it with the rest of the
     # group's state, which destroy_process_group tears down.
     _world.pg_flight_recorder_hooks[pg] = FlightRecorderHook.attach(pg, global_ranks)
+
+
+def _remove_flight_recorder_hook(pg: ProcessGroup) -> None:
+    # remove() rather than drop the handle: the hook may hold Works, and once
+    # dropped it can be destroyed by a running result callback, on the
+    # backend's watchdog.
+    hook = _world.pg_flight_recorder_hooks.pop(pg, None)
+    if hook is not None:
+        hook.remove()
 
 
 def _new_process_group_helper(
@@ -3360,7 +3389,8 @@ def destroy_process_group(
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
-        _world.pg_flight_recorder_hooks.clear()
+        for hooked_pg in list(_world.pg_flight_recorder_hooks):
+            _remove_flight_recorder_hook(hooked_pg)
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
@@ -3387,7 +3417,7 @@ def destroy_process_group(
                 stacklevel=2,
             )
             del _world.pg_coalesce_state[pg]
-        _world.pg_flight_recorder_hooks.pop(pg, None)
+        _remove_flight_recorder_hook(pg)
 
         tag = _world.pg_to_tag.get(pg)
         del _world.pg_to_tag[pg]
@@ -3474,7 +3504,8 @@ def _abort_process_group(
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
-        _world.pg_flight_recorder_hooks.clear()
+        for hooked_pg in list(_world.pg_flight_recorder_hooks):
+            _remove_flight_recorder_hook(hooked_pg)
         _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
@@ -3502,7 +3533,7 @@ def _abort_process_group(
                 stacklevel=2,
             )
             del _world.pg_coalesce_state[pg]
-        _world.pg_flight_recorder_hooks.pop(pg, None)
+        _remove_flight_recorder_hook(pg)
 
         tag = _world.pg_to_tag.get(pg)
         del _world.pg_to_tag[pg]
@@ -7099,6 +7130,13 @@ def split_group(
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
         )
+    psk = getattr(pg_options, "encryption_psk", None)
+    if (
+        psk is not None
+        and _use_torchcomms_enabled()
+        and isinstance(parent_backend, _BackendWrapper)
+    ):
+        raise ValueError("encryption_psk is not supported with torchcomms")
 
     device_id = parent_pg.bound_device_id
 
@@ -8311,7 +8349,7 @@ def _cleanup_process_group_global_state(pg: ProcessGroup) -> None:
 
         # Clean up coalesce state if present
         _world.pg_coalesce_state.pop(pg, None)
-        _world.pg_flight_recorder_hooks.pop(pg, None)
+        _remove_flight_recorder_hook(pg)
 
     except Exception:
         # Log cleanup failures but don't propagate - we want to continue with other cleanups

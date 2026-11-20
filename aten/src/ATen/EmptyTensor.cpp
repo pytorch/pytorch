@@ -37,7 +37,6 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
   return c10::GetCPUAllocator();
 }
 
-#ifndef C10_MOBILE
 constexpr uint64_t storage_max() {
   // int64_t and size_t are used somewhat inconsistently throughout ATen.
   // To be safe, storage size calculations must fit in both types.
@@ -47,7 +46,6 @@ constexpr uint64_t storage_max() {
       std::numeric_limits<size_t>::max());
   return std::min(int64_max, size_max);
 }
-#endif
 
 inline void raise_warning_for_complex_half(ScalarType dtype) {
   if (dtype == kComplexHalf) {
@@ -66,8 +64,6 @@ size_t computeStorageNbytesContiguous(
     size_t itemsize_bytes,
     size_t storage_offset
   ) {
-  // Ignore overflow checks on mobile
-#ifndef C10_MOBILE
   uint64_t size = 1;
   bool overflowed = c10::safe_multiplies_u64(sizes, &size);
   overflowed |= c10::add_overflows(size, storage_offset, &size);
@@ -76,10 +72,6 @@ size_t computeStorageNbytesContiguous(
   TORCH_CHECK(!overflowed,
               "Storage size calculation overflowed with sizes=", sizes);
   return static_cast<size_t>(size);
-#else
-  const auto numel = c10::multiply_integers(sizes);
-  return itemsize_bytes * (storage_offset + numel);
-#endif
 }
 
 size_t computeStorageNbytes(
@@ -96,8 +88,6 @@ size_t computeStorageNbytes(
     strides.size(),
     ")");
 
-  // Ignore overflow checks on mobile
-#ifndef C10_MOBILE
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
   uint64_t size = storage_offset + 1;
@@ -117,19 +107,6 @@ size_t computeStorageNbytes(
               "Storage size calculation overflowed with sizes=",
               sizes, " and strides=", strides);
   return static_cast<size_t>(size);
-#else
-  // size of the underlying storage is 1 bigger than the offset
-  // of the last element according to stride
-  uint64_t size = 1;
-  for (const auto i : c10::irange(sizes.size())) {
-    if (sizes[i] == 0) {
-      return 0;
-    }
-
-    size += strides[i] * (sizes[i] - 1);
-  }
-  return itemsize_bytes * (storage_offset + size);
-#endif
 }
 
 SymInt computeStorageNbytesContiguous(
@@ -141,8 +118,6 @@ SymInt computeStorageNbytesContiguous(
   return itemsize_bytes * (storage_offset + numel);
 }
 
-// not including mobile-only macros in this function,
-// since mobile shouldn't be using symints.
 SymInt computeStorageNbytes(
     SymIntArrayRef sizes,
     SymIntArrayRef strides,

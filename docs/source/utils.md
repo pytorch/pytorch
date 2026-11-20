@@ -203,7 +203,6 @@ for tracking purposes -->
 .. py:module:: torch.utils.data.datapipes.iter.filelister
 .. py:module:: torch.utils.data.datapipes.iter.fileopener
 .. py:module:: torch.utils.data.datapipes.iter.grouping
-.. py:module:: torch.utils.data.datapipes.iter.routeddecoder
 .. py:module:: torch.utils.data.datapipes.iter.selecting
 .. py:module:: torch.utils.data.datapipes.iter.sharding
 .. py:module:: torch.utils.data.datapipes.iter.utils
@@ -212,7 +211,6 @@ for tracking purposes -->
 .. py:module:: torch.utils.data.datapipes.map.combining
 .. py:module:: torch.utils.data.datapipes.map.grouping
 .. py:module:: torch.utils.data.datapipes.map.utils
-.. py:module:: torch.utils.data.datapipes.utils.decoder
 .. py:module:: torch.utils.data.datapipes.utils.snapshot
 .. py:module:: torch.utils.data.dataset
 .. py:module:: torch.utils.data.distributed

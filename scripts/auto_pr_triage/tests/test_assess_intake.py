@@ -565,6 +565,15 @@ class HandoffReviewerTest(unittest.TestCase):
         self.assertEqual(labelers, ["Latest"])
 
 
+NATIVE_STACK_ON_MAIN = {
+    "base": {"ref": "main", "sha": "e" * 40},
+    "id": 7,
+    "number": 8,
+    "position": 2,
+    "size": 3,
+}
+
+
 def external_pr(**updates: object) -> dict[str, object]:
     pr = {
         "number": 999,
@@ -691,13 +700,16 @@ class IntakeMainTest(unittest.TestCase):
         *,
         body: str = "fixture body",
         base_ref: str = "main",
+        stack: object = None,
         fetch_permission: mock.Mock | None = None,
         fetch_labels: mock.Mock | None = None,
         fetch_labelers: mock.Mock | None = None,
     ) -> tuple[IntakeResult, dict[str, str], mock.Mock, mock.Mock]:
         github = mock.Mock()
         github.json.return_value = external_pr(
-            body=body, base={"ref": base_ref, "repo": {"full_name": REPOSITORY}}
+            body=body,
+            base={"ref": base_ref, "repo": {"full_name": REPOSITORY}},
+            **({} if stack is None else {"stack": stack}),
         )
         with tempfile.TemporaryDirectory() as directory:
             output_dir = Path(directory) / "output"
@@ -778,6 +790,17 @@ class IntakeMainTest(unittest.TestCase):
         self.assertTrue(intake.facts.passes_intake)
         self.assertEqual(outputs["active"], "true")
 
+    def test_intake_treats_native_stack_on_main_as_main(self) -> None:
+        intake, outputs, _, _ = self.run_intake_for_external_pr(
+            ("@maintainer", ("comment",)),
+            base_ref="external-author/below",
+            stack=NATIVE_STACK_ON_MAIN,
+        )
+
+        self.assertTrue(intake.facts.is_open_non_draft_pr_against_main)
+        self.assertTrue(intake.facts.passes_intake)
+        self.assertEqual(outputs["active"], "true")
+
     def test_intake_records_inactive_target_without_further_reads(self) -> None:
         cases = (
             (
@@ -787,6 +810,29 @@ class IntakeMainTest(unittest.TestCase):
             (
                 "ghstack head branch",
                 {"base": {"ref": "gh/user/1/head", "repo": {"full_name": REPOSITORY}}},
+            ),
+            *(
+                (
+                    f"native stack: {name}",
+                    {
+                        "base": {
+                            "ref": "user/below",
+                            "repo": {"full_name": REPOSITORY},
+                        },
+                        "stack": stack,
+                    },
+                )
+                for name, stack in (
+                    (
+                        "another trunk",
+                        {**NATIVE_STACK_ON_MAIN, "base": {"ref": "viable/strict"}},
+                    ),
+                    ("null", None),
+                    ("not a dict", "main"),
+                    ("no base", {"position": 2, "size": 3}),
+                    ("base not a dict", {"base": "main"}),
+                    ("ref not a string", {"base": {"ref": ["main"]}}),
+                )
             ),
             ("closed", {"state": "closed"}),
             ("draft", {"draft": True}),

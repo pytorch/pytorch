@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import dataclasses
 import inspect
+import re
 import sys
 from collections.abc import Callable, Iterable, Iterator
 from typing import Any, Literal, overload
@@ -45,6 +46,40 @@ def get_source(stacklevel: int) -> str:
     frame = inspect.getframeinfo(sys._getframe(stacklevel))
     source = f"{frame.filename}:{frame.lineno}"
     return source
+
+
+def caller_module() -> str:
+    """The module whose body is running, the one whose import makes the current
+    registration, or "__main__" if none is."""
+    frame = sys._getframe(1)
+    while frame is not None and frame.f_code.co_name != "<module>":
+        frame = frame.f_back
+    return frame.f_globals.get("__name__", "__main__") if frame else "__main__"
+
+
+# By (op, dispatch key), with "" for the op's definition: the caller_module() of a
+# torch.library.define or impl call that made its own Library, and that Library's
+# site, which the dispatcher records instead of the caller's.
+REGISTRATION_CALLERS: dict[tuple[str, str], tuple[str, str]] = {}
+
+
+def kernel_callers(qualname: str) -> dict[str, str]:
+    """By dispatch key, the caller_module() of the register_kernel or
+    torch.library.impl call that made the active kernel of ``qualname``, for the
+    keys where that registration is still the active one."""
+    from torch._library.custom_ops import OPDEFS
+
+    opdef = OPDEFS.get(qualname)
+    pattern = r"^(\w+)(?:\[alias\])?: registered at (.+:\d+) ::"
+    callers = {}
+    for key, site in re.findall(pattern, _C._dispatch_dump(qualname), re.MULTILINE):
+        if opdef is not None and site == opdef._lib._site:
+            # The custom_op's own kernel runs the latest register_kernel function.
+            if key in opdef._backend_fn_callers:
+                callers[key] = opdef._backend_fn_callers[key]
+        elif (entry := REGISTRATION_CALLERS.get((qualname, key))) and entry[1] == site:
+            callers[key] = entry[0]
+    return callers
 
 
 def parse_namespace(qualname: str) -> tuple[str, str]:

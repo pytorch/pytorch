@@ -13,6 +13,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch import _dynamo as torchdynamo
+from torch._inductor.utils import fresh_cache
 from torch.autograd import (
     _record_function_with_args_enter,
     _record_function_with_args_exit,
@@ -32,6 +33,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
+    skipIfCppFakeTensor,
     skipIfHpu,
     skipIfTorchDynamo,
     TemporaryFileName,
@@ -389,6 +391,7 @@ class TestExecutionTrace(TestCase):
         "need triton and device(CUDA or XPU) availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
+    @fresh_cache()
     def test_execution_trace_with_pt2(self, device):
         @torchdynamo.optimize("inductor")
         def fn(a, b, c):
@@ -464,12 +467,8 @@ class TestExecutionTrace(TestCase):
             "ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS": "1",
         },
     )
+    @fresh_cache()
     def test_execution_trace_env_enabled_with_pt2(self, device):
-        # clean up the local cache for triton kernel
-        from torch._inductor.codecache import PyCodeCache
-
-        PyCodeCache.cache_clear(purge=True)
-
         @torchdynamo.optimize("inductor")
         def fn(a, b, c):
             x = torch.nn.functional.linear(a, b)
@@ -529,12 +528,8 @@ class TestExecutionTrace(TestCase):
         "need triton and device(CUDA or XPU) availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
+    @fresh_cache()
     def test_triton_fx_graph_with_et(self, device):
-        # clean up the local cache for triton kernel
-        from torch._inductor.codecache import PyCodeCache
-
-        PyCodeCache.cache_clear(purge=True)
-
         @torchdynamo.optimize("inductor")
         def fn(a, b, c):
             x = torch.nn.functional.linear(a, b)
@@ -721,6 +716,7 @@ class TestExecutionTrace(TestCase):
             if not found_root_node:
                 raise AssertionError("Expected to find root node")
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/124500")
     def test_execution_trace_nested_tensor(self):
         def fn(nt):

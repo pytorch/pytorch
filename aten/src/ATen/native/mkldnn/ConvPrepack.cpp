@@ -56,7 +56,7 @@ ContextConv create(
       expand_param_if_needed(input_size, "input_size", k);
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-  auto w = itensor_view_from_dense(weight);
+  auto w = itensor_view_from_const_dense(weight);
   // TODO: what if input is nhwc but w is nchw
   bool is_channels_last =
       weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
@@ -69,8 +69,8 @@ ContextConv create(
           {padding_expanded.begin(), padding_expanded.end()},
           {dilation_expanded.begin(), dilation_expanded.end()},
           groups,
-          ideep::algorithm::convolution_direct,
-          ideep::prop_kind::forward,
+          dnnl::algorithm::convolution_direct,
+          dnnl::prop_kind::forward,
           /*x_dtype*/ w.get_data_type(),
           {input_size_expanded.begin(), input_size_expanded.end()},
           attr,
@@ -113,11 +113,11 @@ static void _mkldnn_convolution_out(
         {padding.begin(), padding.end()},
         {padding.begin(), padding.end()},
         groups,
-        ideep::scale_t(),
-        ideep::scale_t(),
-        ideep::scale_t(),
-        ideep::zero_point_t(),
-        ideep::zero_point_t(),
+        std::vector<float>(),
+        std::vector<float>(),
+        std::vector<float>(),
+        std::vector<int32_t>(),
+        std::vector<int32_t>(),
         attr);
   } else {
     ideep::convolution_forward::compute_v2(
@@ -130,11 +130,11 @@ static void _mkldnn_convolution_out(
         {padding.begin(), padding.end()},
         {padding.begin(), padding.end()},
         groups,
-        ideep::scale_t(),
-        ideep::scale_t(),
-        ideep::scale_t(),
-        ideep::zero_point_t(),
-        ideep::zero_point_t(),
+        std::vector<float>(),
+        std::vector<float>(),
+        std::vector<float>(),
+        std::vector<int32_t>(),
+        std::vector<int32_t>(),
         attr);
   }
 }
@@ -155,10 +155,10 @@ static void mkldnn_convolution_out(
   const Tensor& bias = *bias_maybe_owned;
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-  const ideep::tensor mkldnn_input = itensor_from_tensor(input);
+  const ideep::tensor mkldnn_input = itensor_from_const_tensor(input);
   std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
-    mkldnn_bias = itensor_from_tensor(bias);
+    mkldnn_bias = itensor_from_const_tensor(bias);
   }
 
   _mkldnn_convolution_out(
@@ -237,7 +237,7 @@ void run(ContextConv& context, const Tensor& input, void* output) {
       input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
   ideep::tensor y;
 
-  ideep::tag o_tag = is_channels_last ? ideep::tag::nhwc : ideep::tag::nchw;
+  dnnl::memory::format_tag o_tag = is_channels_last ? dnnl::memory::format_tag::nhwc : dnnl::memory::format_tag::nchw;
   ideep::tensor::desc o_desc = {
       output_sizes, get_mkldnn_dtype(input.scalar_type()), o_tag};
   ideep::tensor mkldnn_output = {o_desc, output};

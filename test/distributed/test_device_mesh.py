@@ -4,6 +4,7 @@ import functools
 import os
 import unittest
 from datetime import timedelta
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -18,11 +19,13 @@ from torch.distributed.distributed_c10d import (
     _TORCHCOMM_AVAILABLE,
     _world,
     get_global_rank,
+    get_process_group_ranks,
     get_world_size,
     init_process_group,
     is_initialized,
     new_group,
     ProcessGroup,
+    split_group,
 )
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor._collective_utils import (
@@ -31,7 +34,10 @@ from torch.distributed.tensor._collective_utils import (
     unpad_tensor,
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_nccl_legacy,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_XPU, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -229,6 +235,7 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertTrue(is_initialized())
         self.destroy_pg(self.rank)
 
+    @requires_nccl_legacy()
     @with_comms(backend="nccl-legacy")
     def test_2d_mesh_non_eager_init_subgroup(self):
         mesh_shape = (2, self.world_size // 2)
@@ -281,6 +288,7 @@ class DeviceMeshTest(DTensorTestBase):
             ordered_mesh.get_local_rank(1), ordered_mesh.get_coordinate()[1]
         )
 
+    @requires_nccl_legacy()
     @with_comms(eager_init=True, backend="nccl-legacy")
     def test_device_mesh_preserve_rank_order_eager_nccl_legacy(self):
         mesh_tensor = torch.arange(4).reshape(2, 2).flip(-1)
@@ -289,6 +297,75 @@ class DeviceMeshTest(DTensorTestBase):
         for ranks in mesh_tensor:
             if self.rank in ranks:
                 self.assertEqual(global_ranks, sorted(ranks.tolist()))
+
+    @skip_if_lt_x_gpu(4)
+    @with_comms(eager_init=True)
+    def test_2d_mesh_eager_init_subgroup_backend_without_split_support(self):
+        """
+        ``eager_init=True`` binds a device id on the default process group, which
+        routes subgroup creation through ``split_group()``. That path is only
+        valid when the parent backend actually implements communicator
+        splitting: ``Backend::supportsSplitting()`` defaults to ``False`` and
+        backends such as XCCL never override it, so ``split_group()`` raised
+        "No backend for the parent process group or its backend does not support
+        splitting". ``DeviceMesh`` must fall back to the ``new_group()`` loop.
+        See https://github.com/intel/torch-xpu-ops/issues/3233.
+
+        Every backend built into this repo (gloo, nccl, fake) reports
+        ``supports_splitting == True``, so this only runs where a backend that
+        cannot split is present, e.g. XCCL from torch-xpu-ops.
+        """
+        default_backend = _get_default_group()._get_backend(
+            torch.device(self.device_type)
+        )
+        if default_backend.supports_splitting:
+            self.skipTest(f"{self.backend} supports communicator splitting")
+
+        mesh_shape = (2, self.world_size // 2)
+        with mock.patch(
+            "torch.distributed.device_mesh.split_group", wraps=split_group
+        ) as mock_split_group:
+            mesh_2d = init_device_mesh(
+                self.device_type, mesh_shape, mesh_dim_names=("dp", "tp")
+            )
+            # Without the fallback, ``split_group()`` is reached and raises.
+            mock_split_group.assert_not_called()
+
+        # The subgroups built by the fallback must span exactly the ranks that
+        # ``split_group()`` would have produced, and must be usable.
+        mesh_tensor = torch.arange(self.world_size).reshape(mesh_shape)
+        row, col = divmod(self.rank, mesh_shape[1])
+        for dim_name, expected_ranks in (
+            ("dp", mesh_tensor[:, col].tolist()),
+            ("tp", mesh_tensor[row, :].tolist()),
+        ):
+            dim_group = mesh_2d.get_group(dim_name)
+            self.assertEqual(get_process_group_ranks(dim_group), expected_ranks)
+            tensor = torch.ones(1, device=self.device_type)
+            dist.all_reduce(tensor, group=dim_group)
+            self.assertEqual(tensor.item(), len(expected_ranks))
+
+    @skip_if_lt_x_gpu(4)
+    @with_comms(eager_init=True)
+    def test_2d_mesh_eager_init_subgroup_uses_split_when_supported(self):
+        """
+        Guards the other side of the gate added for
+        https://github.com/intel/torch-xpu-ops/issues/3233: a backend that does
+        support splitting must keep making a single ``split_group()`` call per
+        mesh dimension instead of falling back to the ``new_group()`` loop.
+        """
+        default_backend = _get_default_group()._get_backend(
+            torch.device(self.device_type)
+        )
+        if not default_backend.supports_splitting:
+            self.skipTest(f"{self.backend} does not support communicator splitting")
+
+        mesh_shape = (2, self.world_size // 2)
+        with mock.patch(
+            "torch.distributed.device_mesh.split_group", wraps=split_group
+        ) as mock_split_group:
+            init_device_mesh(self.device_type, mesh_shape, mesh_dim_names=("dp", "tp"))
+        self.assertEqual(mock_split_group.call_count, len(mesh_shape))
 
     @with_comms()
     def test_get_group_and_get_all_groups(self):
@@ -465,8 +542,8 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(device_mesh.ndim, 1)
         self.assertEqual(device_mesh.size(), 1)
         self.assertEqual(device_mesh.mesh_dim_names, ("dp",))
-        backend = device_mesh.get_all_groups()[0]._get_backend(torch.device("cuda"))
-        self.assertIsInstance(backend, torch._C._distributed_c10d.FakeProcessGroup)
+        backend = dist.get_backend_impl(device_mesh.get_group(), torch.device("cuda"))
+        self.assertIsInstance(backend, FakeProcessGroup)
 
     @with_comms
     def test_from_group_with_global_pg(self):

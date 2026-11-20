@@ -355,7 +355,8 @@ def _preconnect_shared_p2p_edges(
 
     The schedule's parent all-reduce initializes the communicator used by
     batched P2P. A lazy native backend selects separate bidirectional pair
-    channels for raw P2P, so one canonical exchange initializes each physical
+    channels for raw P2P. NCCL still connects each send direction of a pair on
+    its first use, so one exchange per direction initializes each physical
     pair before pipeline execution or CUDA-graph capture.
 
     Args:
@@ -375,21 +376,13 @@ def _preconnect_shared_p2p_edges(
     for matching in _physical_edge_matchings(assignment):
         local_pair = next((pair for pair in matching if group_rank in pair), None)
         if local_pair is not None:
-            lower_rank, higher_rank = local_pair
-            if group_rank == lower_rank:
-                work = dist.isend(
-                    payload,
-                    group=parent,
-                    group_dst=higher_rank,
-                )
-            else:
-                work = dist.irecv(
-                    payload,
-                    group=parent,
-                    group_src=lower_rank,
-                )
-            if work is not None:
-                work.wait()
+            for source, destination in (local_pair, local_pair[::-1]):
+                if group_rank == source:
+                    work = dist.isend(payload, group=parent, group_dst=destination)
+                else:
+                    work = dist.irecv(payload, group=parent, group_src=source)
+                if work is not None:
+                    work.wait()
 
         # A rank not in this matching must not enter a later raw-P2P round
         # while peers are still selecting their current pair channel.

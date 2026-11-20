@@ -405,39 +405,6 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         ]
         self.assertEqual(result, expected)
 
-    def test_constant_variable_list_tp_iter(self):
-        """ConstantVariable wrapping a list value should iterate via tp_iter_impl.
-
-        ConstantVariable.create() normally redirects list to ListVariable. This
-        test bypasses __init__ to construct a ConstantVariable holding a list
-        directly, exercising the generic tp_iter_impl unpack path.
-        """
-        from torch._dynamo.variables.base import VariableTracker
-        from torch._dynamo.variables.constant import ConstantVariable
-        from torch._dynamo.variables.lists import ListIteratorVariable
-
-        cv = ConstantVariable.__new__(ConstantVariable)
-        VariableTracker.__init__(cv)
-        cv.value = [1, 2, 3]
-
-        result = cv.tp_iter_impl(None)
-        self.assertIsInstance(result, ListIteratorVariable)
-        self.assertEqual([v.as_python_constant() for v in result.items], [1, 2, 3])
-
-    def test_constant_variable_tuple_tp_iter(self):
-        """ConstantVariable wrapping a tuple value iterates via tp_iter_impl."""
-        from torch._dynamo.variables.base import VariableTracker
-        from torch._dynamo.variables.constant import ConstantVariable
-        from torch._dynamo.variables.lists import ListIteratorVariable
-
-        cv = ConstantVariable.__new__(ConstantVariable)
-        VariableTracker.__init__(cv)
-        cv.value = (10, 20, 30)
-
-        result = cv.tp_iter_impl(None)
-        self.assertIsInstance(result, ListIteratorVariable)
-        self.assertEqual([v.as_python_constant() for v in result.items], [10, 20, 30])
-
     def test_constant_variable_non_iterable_tp_iter(self):
         """Non-iterable ConstantVariable falls back to base unimplemented."""
         from torch._dynamo.exc import Unsupported
@@ -701,6 +668,21 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         it = reversed([10, 20, 30, 40])
         next(it)  # start is now 2, not 3 (consumed 40; remaining: 30, 20, 10)
         self.assertEqual(opt_fn(it, torch.tensor(0)), torch.tensor(60))
+
+    def test_list_reverseiterator_iter_keeps_position(self):
+        """Issue #196211: iter() on a partially consumed reversed iterator."""
+
+        def fn(x):
+            it = reversed([x, x + 2, x + 5])
+            last = next(it)
+            it2 = iter(it)
+            middle = next(it2)
+            first = next(it)
+            return last - middle, first, it2 is it
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.tensor([3.0, 7.0])
+        self.assertEqual(opt_fn(x), fn(x))
 
     def test_list_reverseiterator_mutation_side_effects(self):
         """Caller-side iterator advancement via _codegen_list_iterator_mutation."""

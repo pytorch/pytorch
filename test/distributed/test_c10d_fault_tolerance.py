@@ -16,7 +16,7 @@ if not dist.is_available():
     sys.exit(0)
 
 import torch.distributed.distributed_c10d as c10d
-from torch._C._distributed_c10d import WorkResult
+from torch._C._distributed_c10d import HookOpName, NanCheckHook, WorkResult
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
@@ -567,6 +567,58 @@ class AbstractFaultToleranceTest:
         finally:
             self.store.set("ft_dead_peer_done", "1")
         os._exit(0)
+
+    def test_hooks_fire_for_reconfigure(self):
+        self._init_reconfigurable_pg()
+        handles = self._collect_handles("ft_hooks")
+        pre = []
+        post = []
+        self.pg.register_pre_hook(
+            0,
+            lambda args: pre.append(
+                (
+                    args.name,
+                    args.op_id,
+                    len(args.input_tensors) + len(args.output_tensors),
+                    args.root,
+                    args.async_op,
+                )
+            ),
+        )
+        self.pg.register_post_hook(
+            0, lambda args: post.append((args.name, args.op_id, args.work is not None))
+        )
+        self._reconfigure(2100, handles)
+        self.pg.unregister_pre_hook(0)
+        self.pg.unregister_post_hook(0)
+
+        self.assertEqual(len(pre), 1)
+        name, op_id, num_tensors, root, async_op = pre[0]
+        self.assertEqual(name, HookOpName.RECONFIGURE)
+        self.assertEqual((num_tensors, root, async_op), (0, -1, True))
+        self.assertEqual(post, [(HookOpName.RECONFIGURE, op_id, True)])
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+
+    def test_nan_check_uses_reconfigured_rank(self):
+        self._init_reconfigurable_pg()
+        handles = self._collect_handles("ft_nan_check")
+        hook = NanCheckHook.attach(self.pg)
+        # Reversing the handles makes old rank 0 a non-root, so its NaN receive
+        # buffer must not be checked.
+        self._reconfigure(2200, handles[::-1])
+        self.assertEqual(dist.get_rank(), self.world_size - 1 - self.rank)
+        root = dist.get_rank() == 0
+        # The new root's send buffer is checked. Only the CPU check raises; the
+        # CUDA check is a device assert that poisons the context.
+        if root and self.device_type == "cpu":
+            with self.assertRaisesRegex(RuntimeError, "NaN"):
+                dist.broadcast(
+                    torch.full((4,), float("nan"), device=self.device), src=0
+                )
+        tensor = torch.full((4,), 1.0 if root else float("nan"), device=self.device)
+        dist.broadcast(tensor, src=0)
+        self.assertEqual(tensor.cpu(), torch.ones(4))
+        hook.remove()
 
     def test_reconfigure_after_failed_join_has_unique_handle(self):
         if self.backend_name != "nccl2":

@@ -146,13 +146,16 @@ static PyObject* THPStream_get_native_handle(THPStream* self, void* unused) {
 static PyObject* THPStream_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPStream*>(_self);
-
-  return PyBool_FromLong(c10::Stream::unpack3(
-                             self->stream_id,
-                             static_cast<c10::DeviceIndex>(self->device_index),
-                             static_cast<c10::DeviceType>(self->device_type))
-                             .query());
-
+  bool res = false;
+  {
+    pybind11::gil_scoped_release no_gil;
+    res = c10::Stream::unpack3(
+              self->stream_id,
+              static_cast<c10::DeviceIndex>(self->device_index),
+              static_cast<c10::DeviceType>(self->device_type))
+              .query();
+  }
+  return PyBool_FromLong(res);
   END_HANDLE_TH_ERRORS
 }
 
@@ -295,7 +298,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
       static_cast<c10::DeviceType>(self->device_type);
 
   // No operation is performed if the stream does not belong to an accelerator.
-  if (C10_UNLIKELY(!at::accelerator::isAccelerator(stream_device_type))) {
+  if (!at::accelerator::isAccelerator(stream_device_type)) [[unlikely]] {
     return Py_NewRef(_self);
   }
 
@@ -306,7 +309,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   // stream and device so that they can be restored in __exit__.
   //
   // The stack is stored as a Python list where each entry is either:
-  //   - Py_None: no-op enter (stream was already current);
+  //   - Py_None: no-op enter (stream and its device were already current);
   //   - dict:    {_ctx_stream, _ctx_device_index} saved before switching.
   //
   // self->context is initialized lazily as a PyList on first __enter__.
@@ -321,9 +324,10 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
       static_cast<c10::DeviceIndex>(self->device_index);
   c10::Stream cur_stream = at::accelerator::getCurrentStream(stream_device_idx);
 
-  // If the stream is already current, push None as a no-op sentinel.
+  // If the stream is already current on the current device, push None as a
+  // no-op sentinel.
   if (cur_stream.id() == self->stream_id &&
-      cur_stream.device_index() == stream_device_idx) {
+      stream_device_idx == cur_device_idx) {
     TORCH_CHECK_PYTHON(PyList_Append(self->context, Py_None) >= 0);
     return Py_NewRef(_self);
   }
@@ -357,8 +361,8 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   auto self = reinterpret_cast<THPStream*>(_self);
 
   // No operation is performed if the stream does not belong to an accelerator.
-  if (C10_UNLIKELY(!at::accelerator::isAccelerator(
-          static_cast<c10::DeviceType>(self->device_type)))) {
+  if (!at::accelerator::isAccelerator(
+          static_cast<c10::DeviceType>(self->device_type))) [[unlikely]] {
     Py_RETURN_NONE;
   }
 

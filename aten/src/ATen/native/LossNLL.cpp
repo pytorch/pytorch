@@ -273,7 +273,7 @@ void nll_loss_out_frame(
 
     for (int64_t j = 0; j + 1 < cascade_sum_num_levels; ++j) {
       const auto mask = (level_mask << (j * level_power));
-      if (C10_LIKELY((b & mask) != 0)) {
+      if ((b & mask) != 0) [[likely]] {
         break;
       }
 
