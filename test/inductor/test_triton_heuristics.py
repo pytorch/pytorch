@@ -2731,6 +2731,7 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
 class TestDynamicScaleRblockCacheLoading(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_load_cached_autotuning_reconstructs_unknown_config(self):
         """
         When the cached best config is not in the original configs list
@@ -2766,6 +2767,7 @@ class TestDynamicScaleRblockCacheLoading(TestCase):
         self.assertEqual(result.num_warps, 8)
         self.assertEqual(result.num_stages, 1)
 
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_load_cached_autotuning_still_matches_known_config(self):
         """
         When the cached best config IS in the original configs list,
@@ -2795,6 +2797,7 @@ class TestDynamicScaleRblockCacheLoading(TestCase):
         self.assertIsNotNone(result)
         self.assertIs(result, cfg_b)
 
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_autotune_cache_round_trips_maxnreg(self):
         """
         Two configs that differ only in maxnreg must survive save + load as
@@ -2825,6 +2828,7 @@ class TestDynamicScaleRblockCacheLoading(TestCase):
         self.assertIs(result, capped)
         self.assertNotIn("maxnreg", result.kwargs)
 
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_load_cached_autotuning_rejects_hash_mismatch(self):
         """
         When configs_hash doesn't match, _load_cached_autotuning must
