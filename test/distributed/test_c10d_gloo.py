@@ -13,6 +13,7 @@ import unittest
 from datetime import timedelta
 from functools import reduce
 from itertools import groupby
+from types import SimpleNamespace
 
 import torch
 import torch.distributed as c10d
@@ -3607,6 +3608,25 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         value = torch.tensor(float(self.rank + 1))
         c10d.all_reduce(value, group=child)
         self.assertEqual(value, torch.tensor(float(sum(rank + 1 for rank in ranks))))
+        c10d.destroy_process_group()
+
+    @requires_gloo()
+    def test_split_group_rejects_encryption_psk(self):
+        # Only NCCL backends consume encryption_psk; other parents must not
+        # silently drop it.
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        ranks = list(range(self.world_size))
+        with self.assertRaisesRegex(ValueError, "encryption_psk is not supported"):
+            c10d.split_group(
+                split_ranks=[ranks],
+                pg_options=SimpleNamespace(encryption_psk="secret"),
+            )
         c10d.destroy_process_group()
 
 
