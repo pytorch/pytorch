@@ -1064,7 +1064,7 @@ def reduce_ordered_col(
         if split
         else [out.reshape(-1) for out in outs]
     )
-    args = (Int64(x.storage_offset()), Int32(B * C), Int32(C), _stream(device))
+    args = (Int64(x.storage_offset()), Int32(B * C), Int32(C))
     key = (
         "ordered_col1" if split else "ordered_col",
         trait_key,
@@ -1078,11 +1078,10 @@ def reduce_ordered_col(
         fake_outs = [
             _L.fake_compact(torch2cute[out.dtype], (_L.sym(),)) for out in kernel_outs
         ]
-        return _compile(op, fake_in, fake_outs, *args)
+        return _compile(op, fake_in, fake_outs, *args, _stream(device))
 
-    cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(
-        _L.read_only(kernel_x), kernel_outs, *args
-    )
+    fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
+    _L.launch(fn, device, kernel_x, kernel_outs, *args)
     if split:
         flat_outs = [out.reshape(-1) for out in outs]
         _combine_itree_partials(
@@ -1305,8 +1304,10 @@ def _reduce_col_tile(
         device,
     ) + op.cache_sig
     build = lambda: _compile(op, *_fake())  # noqa: E731
-    cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(
-        [_L.read_only(rows)],
+    _L.launch(
+        cached_plan(_CACHE, key, build, op=f"aten::{trait_key}"),
+        device,
+        [rows],
         dsts,
         nchunks,
         batch_chunks,
@@ -1319,7 +1320,6 @@ def _reduce_col_tile(
         None,
         None,
         None,
-        _stream(device),
     )
     if single:
         return tuple(outs)
@@ -1345,9 +1345,9 @@ def _reduce_col_tile(
             Int32(npar),
             _stream(device),
         )
-        ins = [_L.read_only(pp) for pp in parts]
-        cached_plan(_CACHE, key2, build2, op=f"aten::{trait_key}")(
-            ins, kernel_outs, Int32(total), nrows, Int32(npar), _stream(device)
+        fn2 = cached_plan(_CACHE, key2, build2, op=f"aten::{trait_key}")
+        _L.launch(
+            fn2, device, list(parts), kernel_outs, Int32(total), nrows, Int32(npar)
         )
         return tuple(outs)
 
@@ -1417,8 +1417,10 @@ def _reduce_col_tile(
         device,
     ) + op2.cache_sig
     build2 = lambda: _compile(op2, *_fake2())  # noqa: E731
-    cached_plan(_CACHE, key2, build2, op=f"aten::{trait_key}")(
-        [_L.read_only(pp) for pp in parts],
+    _L.launch(
+        cached_plan(_CACHE, key2, build2, op=f"aten::{trait_key}"),
+        device,
+        list(parts),
         kernel_outs,
         Int32(total),
         None,
@@ -1431,6 +1433,5 @@ def _reduce_col_tile(
         None,
         None,
         None,
-        _stream(device),
     )
     return tuple(outs)
