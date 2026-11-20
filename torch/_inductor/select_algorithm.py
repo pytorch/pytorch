@@ -724,6 +724,7 @@ class TritonTemplateKernel(TritonKernel):
         self.store_output_input_producer_groups: dict[str, list[Any]] = {}
         # Load-input fused inputs whose producers preserve a zero mask.
         self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
+        self.prologue_descriptor_vars: dict[Any, str] = {}
 
         # The following attributes are all used for triton kernel codegen.
         # They are swapped onto the TritonTemplateKernel object by
@@ -1239,6 +1240,10 @@ class TritonTemplateKernel(TritonKernel):
         """
         if input_name is not None:
             node = self.named_input_nodes[input_name]
+            if node.get_name() in self.load_input_fused_inputs:
+                # A fused producer is loaded through its own sources in
+                # load_input; the input buffer is never materialized.
+                return ""
         else:
             node = self.output_node
 
@@ -1500,6 +1505,10 @@ class TritonTemplateKernel(TritonKernel):
         other: float | int | None = 0.0,
         indent_width: int = 4,
         index_shape: tuple[str] | None = None,
+        unfused_load: str | None = None,
+        prologue_descriptor_offsets: tuple[str, ...] | None = None,
+        prologue_descriptor_block_shape: tuple[str, ...] | None = None,
+        prologue_descriptor_cat2: bool = False,
     ):
         """Loads an input and applies any necessary preprocessing or masking.
 
@@ -1510,9 +1519,35 @@ class TritonTemplateKernel(TritonKernel):
             mask (Optional[str]): An optional mask to use for the load operation.
             other (Optional[Union[float, int]]): The value to use for masked elements. Default is 0.0.
             indent_width (int): The number of spaces to use for indentation.
+            prologue_descriptor_offsets: Descriptor offsets for source loads in
+                a fused prologue. Must be paired with prologue_descriptor_block_shape.
+            prologue_descriptor_block_shape: Descriptor block shape for source
+                loads in a fused prologue.
+            prologue_descriptor_cat2: Generate two half-width descriptor loads
+                for an exact contiguous cat/cast producer when possible.
         """
 
+        if (prologue_descriptor_offsets is None) != (
+            prologue_descriptor_block_shape is None
+        ):
+            raise AssertionError(
+                "descriptor offsets and block shape must be provided together"
+            )
+
         input_node = self.named_input_nodes[input_name]
+        cat2_code = None
+        if (
+            prologue_descriptor_cat2
+            and prologue_descriptor_offsets is not None
+            and prologue_descriptor_block_shape is not None
+            and input_node.get_name() in self.load_input_fused_inputs
+        ):
+            cat2_code = self.codegen_cat2_prologue_descriptors(
+                input_node,
+                output_name,
+                prologue_descriptor_offsets,
+                prologue_descriptor_block_shape,
+            )
         if not self.prologue_loads_all_named_inputs:
             self.load_input_fusion_allowed_inputs.add(input_node.get_name())
             named_input_index = self.prefix_args + list(self.named_input_nodes).index(
@@ -1575,6 +1610,26 @@ class TritonTemplateKernel(TritonKernel):
 
             class StoreOutputSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
                 name = "StoreOutputSubstitution"
+
+                def load(self, name: str, index: sympy.Expr):
+                    # Values another fused producer node stored stay in
+                    # registers (CSEProxy's store_cache); only graph sources
+                    # load through descriptors.
+                    if (
+                        prologue_descriptor_offsets is not None
+                        and name not in V.kernel.cse.store_cache
+                    ):
+                        if prologue_descriptor_block_shape is None:
+                            raise AssertionError("missing descriptor block shape")
+                        return V.kernel.load_prologue_descriptor(
+                            name,
+                            index,
+                            tuple(indices),
+                            tuple(lengths),
+                            prologue_descriptor_offsets,
+                            prologue_descriptor_block_shape,
+                        )
+                    return super().load(name, index)
 
                 def store(
                     self,
@@ -1662,17 +1717,212 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             with self.set_subgraph_body(hook_key):
                 self.cse.invalidate(OrderedSet())
-                self.codegen_body()
+                if (
+                    cat2_code is not None
+                    and input_node.get_name() in self.load_input_fused_inputs
+                ):
+                    self.body.writeline(cat2_code)
+                else:
+                    self.codegen_body()
                 self.cse.invalidate(OrderedSet())
                 if input_node.get_name() not in self.load_input_fused_inputs:
-                    if load_code is None:
+                    if unfused_load is not None:
+                        self.body.writeline(f"{output_name} = {unfused_load}")
+                    elif load_code is None:
                         raise AssertionError("load_code must not be None")
-                    self.body.writeline(load_code)
+                    else:
+                        self.body.writeline(load_code)
 
                 result = self.body.getvalue()
                 if indent_width:
                     result = textwrap.indent(result, " " * indent_width)
                 return result.strip()
+
+        return self._register_hook(hook_key, hook)
+
+    def codegen_cat2_prologue_descriptors(
+        self,
+        input_node: Any,
+        output_name: str,
+        offsets: tuple[str, ...],
+        block_shape: tuple[str, ...],
+    ) -> str | None:
+        """Codegen an exact ``cat([Kx64, Kx64], 1).to(BF16)`` via TMA."""
+        from .kernel.decompose_k import get_cat2_fp32_prologue_sources
+
+        source_names = get_cat2_fp32_prologue_sources(input_node)
+        if (
+            source_names is None
+            or len(offsets) != 2
+            or len(block_shape) != 2
+            or block_shape[1] != "BLOCK_N"
+        ):
+            return None
+
+        descriptor_names: list[str] = []
+        for source_name in source_names:
+            source = V.graph.get_buffer(source_name)
+            source_size = tuple(V.graph.sizevars.simplify(s) for s in source.get_size())
+
+            descriptor = self.prologue_descriptor_vars.get(source_name)
+            if descriptor is None:
+                descriptor = f"prologue_descriptor{len(self.prologue_descriptor_vars)}"
+                self.prologue_descriptor_vars[source_name] = descriptor
+                source_var = self.args.input(source_name)
+                source_k = texpr(self.rename_indexing(source_size[0]))
+                self.prologue.writeline(
+                    f"{descriptor} = tl.make_tensor_descriptor("
+                    f"{source_var}, shape=[{source_k}, 64], strides=[64, 1], "
+                    f"block_shape=[{block_shape[0]}, 64])"
+                )
+            descriptor_names.append(descriptor)
+
+        return (
+            f"{output_name}_left = {descriptor_names[0]}.load([{offsets[0]}, 0])\n"
+            f"{output_name}_right = {descriptor_names[1]}.load([{offsets[0]}, 0])\n"
+            f"{output_name} = tl.cat({output_name}_left, {output_name}_right, "
+            "dim=1).to(tl.bfloat16)"
+        )
+
+    def load_prologue_descriptor(
+        self,
+        name: str,
+        index: sympy.Expr,
+        index_names: tuple[str, ...],
+        expected_size: tuple[sympy.Expr, ...],
+        offsets: tuple[str, ...],
+        block_shape: tuple[str, ...],
+    ) -> CSEVariable:
+        """Load a prologue source through TMA when its index is affine in the
+        template's tile indices.
+
+        The source's index is ``offset + sum(c_i * index_i)`` over the operand
+        dims. Dims with ``c_i == 0`` are broadcast and dims with ``c_i == 1`` are
+        the descriptor's contiguous dim, so the descriptor's dims are the operand
+        dims with nonzero coefficients, its strides are the coefficients, and the
+        loaded tile is permuted and broadcast back to the operand's tile shape.
+        Anything else (non-affine indexing, misaligned strides or base, an
+        unsupported dtype, dynamic strides) falls back to a pointer load.
+        """
+        from .utils import _TMA_SUPPORTED_DTYPES, TMA_ALIGNMENT
+
+        sizevars = V.graph.sizevars
+        buffer = V.graph.get_buffer(name)
+        dtype = buffer.get_dtype()
+        itemsize = dtype.itemsize
+        expr = sympy.sympify(index)
+        # Match symbols by name: the index may carry different assumptions.
+        by_name = {str(sym): sym for sym in expr.free_symbols}
+        syms = [
+            by_name.get(index_name, sympy.Symbol(index_name, integer=True))
+            for index_name in index_names
+        ]
+        if "xindex" in by_name:
+            # CSEProxy canonicalizes the exact contiguous expression to xindex.
+            expr = expr.subs(
+                by_name["xindex"],
+                sympy_dot(ir.FlexibleLayout.contiguous_strides(expected_size), syms),
+            )
+
+        def aligned(e: sympy.Expr) -> bool:
+            return sizevars.statically_known_multiple_of(e * itemsize, TMA_ALIGNMENT)
+
+        coeffs: list[sympy.Expr] = []
+        try:
+            poly = sympy.Poly(sympy.expand(expr), *syms)
+        except sympy.PolynomialError:
+            poly = None
+        # Every other free symbol must be a graph size; kernel-local index
+        # variables (e.g. split range-tree vars) are not constants per tile.
+        if (
+            poly is not None
+            and poly.total_degree() <= 1
+            and all(
+                sym in syms
+                or symbol_is_type(sym, (SymT.SIZE, SymT.PRECOMPUTED_SIZE))
+                for sym in expr.free_symbols
+            )
+        ):
+            coeffs = [poly.coeff_monomial(sym) for sym in syms]
+            base_offset = sympy.expand(expr).subs({sym: 0 for sym in syms})
+        tile_dims = [
+            i for i, c in enumerate(coeffs) if not sizevars.statically_known_equals(c, 0)
+        ]
+        inner = [i for i in tile_dims if sizevars.statically_known_equals(coeffs[i], 1)]
+        block_vals = [self.meta.get(b, b) for b in block_shape]
+        if (
+            len(coeffs) != len(syms)
+            or len(offsets) != len(syms)
+            or len(block_shape) != len(syms)
+            # A masked load (e.g. a cat or pad producer) may index outside the
+            # source; a descriptor over the operand's extent would read there.
+            or self._load_mask is not None
+            # TMA strides are unsigned (no flips).
+            or not all(sizevars.statically_known_gt(coeffs[i], 0) for i in tile_dims)
+            or dtype not in _TMA_SUPPORTED_DTYPES
+            or name in V.graph.unaligned_buffers
+            or len(inner) != 1
+            or not 1 <= len(tile_dims) <= 5
+            or not aligned(base_offset)
+            or not all(aligned(coeffs[i]) for i in tile_dims if i != inner[0])
+            or not aligned(expected_size[inner[0]])
+            or not isinstance(block_vals[inner[0]], int)
+            or block_vals[inner[0]] * itemsize < TMA_ALIGNMENT
+        ):
+            return super().load(name, index)
+
+        # Descriptor dims: the operand's nonbroadcast dims, contiguous dim last.
+        desc_dims = [i for i in tile_dims if i != inner[0]] + inner
+        key = (
+            name,
+            base_offset,
+            tuple((coeffs[i], expected_size[i], block_shape[i]) for i in desc_dims),
+        )
+        descriptor = self.prologue_descriptor_vars.get(key)
+        if descriptor is None:
+            descriptor = f"prologue_descriptor{len(self.prologue_descriptor_vars)}"
+            self.prologue_descriptor_vars[key] = descriptor
+            var = self.args.input(name)
+            if not sizevars.statically_known_equals(base_offset, 0):
+                var = f"({var} + {texpr(self.rename_indexing(base_offset))})"
+            shape_str = ", ".join(
+                texpr(self.rename_indexing(expected_size[i])) for i in desc_dims
+            )
+            stride_str = ", ".join(
+                texpr(self.rename_indexing(coeffs[i])) for i in desc_dims
+            )
+            block_shape_str = ", ".join(block_shape[i] for i in desc_dims)
+            self.prologue.writeline(
+                f"{descriptor} = tl.make_tensor_descriptor("
+                f"{var}, shape=[{shape_str}], strides=[{stride_str}], "
+                f"block_shape=[{block_shape_str}])"
+            )
+
+        line = f"{descriptor}.load([{', '.join(offsets[i] for i in desc_dims)}])"
+        # Permute the tile from descriptor order back to operand order, then
+        # insert the broadcast dims.
+        if desc_dims != sorted(desc_dims):
+            perm = [desc_dims.index(i) for i in sorted(desc_dims)]
+            line = f"tl.permute({line}, {tuple(perm)})"
+        if len(tile_dims) != len(syms):
+            line = f"({line})[{', '.join(':' if i in tile_dims else 'None' for i in range(len(syms)))}]"
+        shape = tuple(block_shape[i] if i in tile_dims else "1" for i in range(len(syms)))
+        return self.cse.generate(self.loads, line, dtype=dtype, shape=shape)
+
+    def unfused_input(
+        self,
+        input_name: str,
+        code: str,
+        indent_width: int = 4,
+    ) -> str:
+        """Emit ``code`` only when ``input_name`` was not prologue-fused."""
+        input_node = self.named_input_nodes[input_name]
+        hook_key = f"<UNFUSED_INPUT_{input_name}_{self._gen_tmp_var()}>"
+
+        def hook() -> str:
+            if input_node.get_name() in self.load_input_fused_inputs:
+                return ""
+            return textwrap.indent(code, " " * indent_width).strip()
 
         return self._register_hook(hook_key, hook)
 
@@ -2100,6 +2350,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.stride,
                 self.store_output,
                 self.load_input,
+                self.unfused_input,
                 self.make_load,
                 self.modification,
                 self.gen_argdefs,
