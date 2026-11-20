@@ -1555,8 +1555,9 @@ class TestStaticTritonCompileResult(_StaticTritonCompileResultMixin, TestCase):
 class _FastLauncherMixin(StaticLauncherTestMixin):
     """Helpers for building and invoking the fast launcher C extensions."""
 
-    def _fast_launcher_cls(self):
-        if GPU_TYPE == "xpu":
+    def _fast_launcher_cls(self, device: str | None = None):
+        dev = torch.device(device if device is not None else GPU_TYPE).type
+        if dev == "xpu":
             from torch._C import _FastXpuLauncher
 
             return _FastXpuLauncher
@@ -1564,13 +1565,13 @@ class _FastLauncherMixin(StaticLauncherTestMixin):
 
         return _FastCudaLauncher
 
-    def _make_fast_launcher(self, kernel, arg_tys=None):
+    def _make_fast_launcher(self, kernel, arg_tys=None, device: str | None = None):
         n_scratch = 0
         if getattr(kernel, "has_global_scratch", False):
             n_scratch += 1
         if getattr(kernel, "has_profile_scratch", False):
             n_scratch += 1
-        return self._fast_launcher_cls()(
+        return self._fast_launcher_cls(device)(
             kernel.function,
             kernel.num_warps,
             kernel.shared,
@@ -1578,18 +1579,20 @@ class _FastLauncherMixin(StaticLauncherTestMixin):
             n_scratch,
         )
 
-    def _stream(self) -> int:
-        device_interface = get_interface_for_device(GPU_TYPE)
+    def _stream(self, device: str | None = None) -> int:
+        dev = torch.device(device if device is not None else GPU_TYPE).type
+        device_interface = get_interface_for_device(dev)
         return device_interface.get_raw_stream(device_interface.current_device())
 
-    def _store_sum_launcher(self):
+    def _store_sum_launcher(self, device: str | None = None):
         @triton.jit
         def simple_kernel(arg0, arg1):
             x = tl.load(arg0)
             tl.store(arg0, x + arg1)
 
-        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
-        return self._make_launcher(simple_kernel[(1,)](arg0, 5))
+        dev = device if device is not None else GPU_TYPE
+        arg0 = torch.zeros(1, dtype=torch.int32, device=dev)
+        return self._make_launcher(simple_kernel[(1,)](arg0, 5), dev)
 
 
 class TestCudaStaticTritonCompileResult(_StaticTritonCompileResultMixin, TestCase):
@@ -1663,7 +1666,7 @@ class TestCudaStaticTritonCompileResult(_StaticTritonCompileResultMixin, TestCas
 class TestFastLauncher(_FastLauncherMixin, TestCase):
     """Tests for the _FastCudaLauncher / _FastXpuLauncher C extensions."""
 
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_basic(self, device):
         @triton.jit
@@ -1675,7 +1678,7 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
         arg0 = torch.zeros(1, dtype=torch.int32, device=device)
         compiled_kernel = simple_kernel[(1,)](arg0, 5)
         launcher = self._make_launcher(compiled_kernel, device)
-        fast = self._make_fast_launcher(launcher)
+        fast = self._make_fast_launcher(launcher, device=device)
 
         new_arg0 = torch.zeros(1, dtype=torch.int32, device=device)
         device_interface = get_interface_for_device(torch.device(device).type)
@@ -1693,11 +1696,11 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
         scalar = float.fromhex("0x1.0020000000001p+0")
         arg0 = torch.zeros(1, dtype=torch.float64, device=device)
         compiled_kernel = floats[(1,)](arg0, scalar, 1.0, 1.0)
-        launcher = self._make_launcher(compiled_kernel)
+        launcher = self._make_launcher(compiled_kernel, device)
         expected = torch.tensor([3.0 + 2**-10], dtype=torch.float64, device=device)
         self.assertEqual(arg0, expected)
         self.assertEqual(launcher.arg_tys, "Oefd")
-        fast = self._make_fast_launcher(launcher)
+        fast = self._make_fast_launcher(launcher, device=device)
 
         new_arg0 = torch.zeros(1, dtype=torch.float64, device=device)
         device_interface = get_interface_for_device(torch.device(device).type)
@@ -1719,11 +1722,11 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
         scalar = float.fromhex("0x1.018p+0")
         arg0 = torch.zeros(1, dtype=torch.float64, device=device)
         compiled_kernel = bfloat16[(1,)](arg0, scalar, 1.0, 1.0)
-        launcher = self._make_launcher(compiled_kernel)
+        launcher = self._make_launcher(compiled_kernel, device)
         expected = torch.tensor([3.0], dtype=torch.float64, device=device)
         self.assertEqual(arg0, expected)
         self.assertEqual(launcher.arg_tys, "Oyfd")
-        fast = self._make_fast_launcher(launcher)
+        fast = self._make_fast_launcher(launcher, device=device)
 
         new_arg0 = torch.zeros(1, dtype=torch.float64, device=device)
         device_interface = get_interface_for_device(torch.device(device).type)
@@ -1745,7 +1748,7 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
         out = torch.zeros(1, dtype=torch.int32, device=device)
         compiled_kernel = add_kernel[(1,)](a, b, out)
         launcher = self._make_launcher(compiled_kernel, device)
-        fast = self._make_fast_launcher(launcher)
+        fast = self._make_fast_launcher(launcher, device=device)
 
         out2 = torch.zeros(1, dtype=torch.int32, device=device)
         device_interface = get_interface_for_device(torch.device(device).type)
@@ -1764,7 +1767,7 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
         arg0 = torch.zeros(1, dtype=torch.int32, device=device)
         compiled_kernel = simple_kernel[(1,)](arg0, 5)
         launcher = self._make_launcher(compiled_kernel, device)
-        fast = self._make_fast_launcher(launcher)
+        fast = self._make_fast_launcher(launcher, device=device)
 
         target = torch.zeros(1, dtype=torch.int32, device=device)
         device_interface = get_interface_for_device(torch.device(device).type)
@@ -1774,35 +1777,35 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
 
     def test_wrong_arg_count(self, device):
         """Verify the fast launcher raises RuntimeError on argument count mismatch."""
-        launcher = self._store_sum_launcher()
-        fast = self._make_fast_launcher(launcher)
+        launcher = self._store_sum_launcher(device)
+        fast = self._make_fast_launcher(launcher, device=device)
 
         arg0 = torch.zeros(1, dtype=torch.int32, device=device)
         with self.assertRaises(RuntimeError):
-            fast(1, 1, 1, self._stream(), arg0)  # missing arg1
+            fast(1, 1, 1, self._stream(device), arg0)  # missing arg1
 
     def test_too_many_args_raises_value_error(self, device):
         """Verify the fast launcher raises ValueError when nArgs > MAX_ARGS (121)."""
-        launcher = self._store_sum_launcher()
+        launcher = self._store_sum_launcher(device)
         # 'O' is the pointer type code; 130 of them exceeds MAX_ARGS=121.
         with self.assertRaisesRegex(ValueError, "too many arguments"):
-            self._make_fast_launcher(launcher, arg_tys="O" * 130)
+            self._make_fast_launcher(launcher, arg_tys="O" * 130, device=device)
 
     def test_keyword_arguments_rejected(self, device):
-        launcher = self._store_sum_launcher()
-        fast = self._make_fast_launcher(launcher)
+        launcher = self._store_sum_launcher(device)
+        fast = self._make_fast_launcher(launcher, device=device)
 
         arg0 = torch.zeros(1, dtype=torch.int32, device=device)
         with self.assertRaisesRegex(RuntimeError, "keyword arguments"):
-            fast(1, 1, 1, self._stream(), arg0, 5, unexpected=1)
+            fast(1, 1, 1, self._stream(device), arg0, 5, unexpected=1)
 
     def test_call_without_vectorcall(self, device):
         # tp_call, for callers that go through PyObject_Call.
-        launcher = self._store_sum_launcher()
-        fast = self._make_fast_launcher(launcher)
+        launcher = self._store_sum_launcher(device)
+        fast = self._make_fast_launcher(launcher, device=device)
 
         arg0 = torch.zeros(1, dtype=torch.int32, device=device)
-        type(fast).__call__(fast, 1, 1, 1, self._stream(), arg0, 5)
+        type(fast).__call__(fast, 1, 1, 1, self._stream(device), arg0, 5)
         self.assertEqual(arg0, torch.tensor([5], dtype=torch.int32, device=device))
 
     def test_pointer_arg_kinds(self, device):
@@ -1810,30 +1813,31 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
         # Parameter, which the exact type check accepts like a plain tensor;
         # and an object with a data_ptr() method, which only the fallback that
         # calls that method can handle.
-        launcher = self._store_sum_launcher()
-        fast = self._make_fast_launcher(launcher)
+        launcher = self._store_sum_launcher(device)
+        fast = self._make_fast_launcher(launcher, device=device)
         expected = torch.tensor([5], dtype=torch.int32, device=device)
+        stream = self._stream(device)
 
         arg0 = torch.zeros(1, dtype=torch.int32, device=device)
-        fast(1, 1, 1, self._stream(), arg0.data_ptr(), 5)
+        fast(1, 1, 1, stream, arg0.data_ptr(), 5)
         self.assertEqual(arg0, expected)
 
         param = torch.nn.Parameter(
             torch.zeros(1, dtype=torch.int32, device=device), requires_grad=False
         )
-        fast(1, 1, 1, self._stream(), param, 5)
+        fast(1, 1, 1, stream, param, 5)
         self.assertEqual(param.data, expected)
 
         target = torch.zeros(1, dtype=torch.int32, device=device)
-        fast(1, 1, 1, self._stream(), SimpleNamespace(data_ptr=target.data_ptr), 5)
+        fast(1, 1, 1, stream, SimpleNamespace(data_ptr=target.data_ptr), 5)
         self.assertEqual(target, expected)
 
     def test_launches_are_independent(self, device):
         # Each launch must bind its own arguments, including when the same
         # launcher is reused with different ones.
-        launcher = self._store_sum_launcher()
-        fast = self._make_fast_launcher(launcher)
-        stream = self._stream()
+        launcher = self._store_sum_launcher(device)
+        fast = self._make_fast_launcher(launcher, device=device)
+        stream = self._stream(device)
 
         first = torch.zeros(1, dtype=torch.int32, device=device)
         second = torch.zeros(1, dtype=torch.int32, device=device)
@@ -1853,11 +1857,11 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
 
         grid_x, grid_y = 4, 3
         out = torch.zeros(grid_x * grid_y, dtype=torch.int32, device=device)
-        launcher = self._make_launcher(pid_kernel[(1, 1, 1)](out, grid_y))
-        fast = self._make_fast_launcher(launcher)
+        launcher = self._make_launcher(pid_kernel[(1, 1, 1)](out, grid_y), device)
+        fast = self._make_fast_launcher(launcher, device=device)
 
         out.zero_()
-        fast(grid_x, grid_y, 1, self._stream(), out, grid_y)
+        fast(grid_x, grid_y, 1, self._stream(device), out, grid_y)
         expected = torch.tensor(
             [x * 10 + y for x in range(grid_x) for y in range(grid_y)],
             dtype=torch.int32,
@@ -1870,7 +1874,7 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
         # launch through the launcher it installs.
         import types
 
-        kernel = self._store_sum_launcher()
+        kernel = self._store_sum_launcher(device)
 
         def launcher_body(grid_0, grid_1, grid_2, stream, *args):
             runner(grid_0, grid_1, grid_2, stream, *args)  # noqa: F821
@@ -1881,16 +1885,16 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
         launcher._is_static = True
         autotuner = object.__new__(CachingAutotuner)
         autotuner.inductor_meta = {"use_fast_triton_launcher": True}
-        autotuner.device_props = SimpleNamespace(type=GPU_TYPE)
+        autotuner.device_props = SimpleNamespace(type=torch.device(device).type)
 
         fast_launcher = autotuner._build_fast_launcher(launcher)
         self.assertIsNotNone(fast_launcher)
         self.assertIsInstance(
-            fast_launcher.__globals__["runner"], self._fast_launcher_cls()
+            fast_launcher.__globals__["runner"], self._fast_launcher_cls(device)
         )
 
         out = torch.zeros(1, dtype=torch.int32, device=device)
-        fast_launcher(1, 1, 1, self._stream(), out, 5)
+        fast_launcher(1, 1, 1, self._stream(device), out, 5)
         self.assertEqual(out, torch.tensor([5], dtype=torch.int32, device=device))
 
 
@@ -2024,12 +2028,12 @@ class _FastLauncherCompileMixin:
 
 @requires_gpu_and_triton
 class TestFastLauncherFallbackCompileResult(_FastLauncherCompileMixin, TestCase):
-    """E2E fast-launcher behavior shared by every accelerator: with the config
-    on a fast launcher is built and results stay correct; with it off the
-    regular launcher is used.
+    """E2E fast-launcher behavior shared by the CUDA and XPU fast launchers:
+    with the config on a fast launcher is built and results stay correct; with
+    it off the regular launcher is used.
     """
 
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_basic_compile(self, device):
         """Verify torch.compile uses the fast launcher and produces correct output."""
