@@ -2100,6 +2100,42 @@ class GraphModule(torch.nn.Module):
         # default -> side stream -> default; the bug added extra switches.
         self.assertEqual(_count_generated_stream_contexts(code), 3)
 
+    def test_foreach_in_side_stream_stays_on_side_stream(self):
+        # Foreach kernels are grouped before stream assignment and must still
+        # run on the side stream (#205704).
+        from torch._inductor.utils import run_and_get_code
+
+        s = device_module.Stream()
+
+        def fn(a, b, c, d):
+            x = a @ b
+            ev = device_module.Event()
+            ev.record()
+            with device_module.stream(s):
+                s.wait_event(ev)
+                t1, t2 = (c @ d).clone(), (c + d).clone()
+                torch._foreach_mul_([t1, t2], 2.0)
+                torch._foreach_add_([t1, t2], 0.5)
+                ev2 = device_module.Event()
+                ev2.record()
+            device_module.current_stream().wait_event(ev2)
+            return x + t1 + t2
+
+        args = [torch.randn(16, 16, device=GPU_TYPE) for _ in range(4)]
+        compiled_fn = torch.compile(fn)
+        _, (code,) = run_and_get_code(compiled_fn, *args)
+        for i in range(3):
+            inputs = [t + i * 0.1 for t in args]
+            expected = fn(*inputs)
+            device_module.synchronize()
+            actual = compiled_fn(*inputs)
+            device_module.synchronize()
+            self.assertEqual(actual, expected)
+        self.assertIn("triton_for_fused", code)
+        # default -> side stream -> default; the bug moved the foreach kernel
+        # back to the default stream.
+        self.assertEqual(_count_generated_stream_contexts(code), 3)
+
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
 @xfailIfNoAcceleratorTriton

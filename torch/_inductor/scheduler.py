@@ -6568,7 +6568,9 @@ class Scheduler:
         """
         from .stream_constants import DEFAULT_STREAM_IDX
 
-        for node in self.nodes:
+        # Foreach nodes already exist here and have no IR node of their own, so
+        # assign their members; get_node_stream derives the group's stream.
+        for node in itertools.chain.from_iterable(n.get_nodes() for n in self.nodes):
             stream_idx = DEFAULT_STREAM_IDX
 
             if node.node is not None:
