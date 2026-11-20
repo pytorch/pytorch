@@ -315,10 +315,9 @@ inline __device__ void atomicAdd(bool* address, bool val) {
 
 /* Note [explicitly non-returning atomics]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * Through ROCm 6.4, MI100 (gfx908) exposes its fp32 no-return atomic via
- * atomicAddNoRet(), and callers must opt in. From ROCm 7 that function is a
- * deprecated alias of unsafeAtomicAdd, so gpuAtomicAddNoReturn calls
- * unsafeAtomicAdd directly. It cannot implement the returning atomicAdd.
+ * gfx908 opts into atomicAddNoRet through ROCm 6.4. That function has
+ * been HIP_DEPRECATED since ROCm 6.0; from ROCm 7 it only aliases
+ * unsafeAtomicAdd. The no-return op cannot implement returning atomicAdd.
  */
 template <typename T>
 inline __device__ void gpuAtomicAddNoReturn(
@@ -367,7 +366,7 @@ inline __device__ void gpuAtomicAddNoReturn(
 #if defined(USE_ROCM)
 inline __device__ void gpuAtomicAddNoReturn(float* address, float val) {
   // HIP_VERSION comes from hip/hip_version.h, so cpp extensions see it.
-  // ROCm 7+ (HIP 7) makes atomicAddNoRet a deprecated alias of unsafeAtomicAdd.
+  // From ROCm 7, atomicAddNoRet only aliases unsafeAtomicAdd.
 #if HIP_VERSION_MAJOR >= 7
   (void)unsafeAtomicAdd(address, val);
 #else
