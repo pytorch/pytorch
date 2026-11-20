@@ -241,8 +241,8 @@ def select_full_itree_arch(
     the device's _ITREE_ARCH row. The input must be one contiguous fp32 or bf16 row
     (M == 1) of exactly 256 MiB or 2 GiB, aligned to at least tile.TRANSFER_ALIGNMENT.
     Every field must be 32-bit, with _sm107_outputs.
-    fp32 sums and argmax (int32 indices, an int64 output) take the profile; Welford
-    traits with welford_outs != 0 (not return_mean) take a variant with
+    fp32 sums, and fp32 or bf16 argmax (int32 indices, an int64 output), take the
+    profile; Welford traits with welford_outs != 0 (not return_mean) take a variant with
     combine_unroll=64 and uniform_combine="weights"."""
     if (
         cc not in _SM107_CCS
@@ -493,7 +493,10 @@ def itree_plan(
     *,
     arch: _ItreeArch | None = None,
 ) -> _ItreePlan | None:
-    """Return the upstream-matching plan, or None to use default order without declining."""
+    """Return the upstream-matching plan, or None for default order without declining.
+
+    `arch` replaces the device's policy; give itree_combine_plan the same profile.
+    """
     from .inner_tree_plan import (
         _K_MULTIROW_MAX_LOADS,
         _K_TWO_KERNEL_THRESHOLD,
@@ -657,7 +660,10 @@ def trait_itree_plan(
     *,
     arch: _ItreeArch | None = None,
 ) -> _ItreePlan | None:
-    """Retune ragged looped plans whose arithmetic or storage favors less fusion."""
+    """Retune ragged looped plans whose arithmetic or storage favors less fusion.
+
+    `arch` replaces the device's policy; give itree_combine_plan the same profile.
+    """
     plan = itree_plan(N, M, itemsize, stage=stage, device=device, arch=arch)
     if plan is None or plan.shape != "looped" or all(tm.exact for tm in plan.tms):
         return plan
@@ -901,7 +907,8 @@ def _run_itree(
 ) -> tuple[torch.Tensor, ...]:
     """Launch each stage on x's device; split buffers are per field.
 
-    Callers check that the device is current.
+    Callers check that the device is current. `arch` replaces the device's policy and
+    must be the profile `itree` was planned with, since it also builds the combine.
     """
     M, N = x.shape
     device = x.get_device()
@@ -1092,6 +1099,9 @@ def reduce_row_tile(
     if ragged_vector:
         vec = tile.ragged_vector_width(N, x.element_size(), order, bool(use_tma))
         ragged_vector = N % vec != 0 or (M > 1 and x.stride(0) % vec != 0)
+    if threads_per_row == 1 and N < 1:
+        # fold_linear_rolled's tail loads vector 0 for masked lanes.
+        raise ValueError(f"one-thread rows must be nonempty, got {N=}")
     itree, arch = None, None
     if order == "inner_tree" and final and threads_per_row is None:
         arch = _full_itree_arch(trait, x, out_dtypes[:nouts])
