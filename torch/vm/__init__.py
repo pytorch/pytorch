@@ -70,11 +70,14 @@ default list::
     @torch.vm(passes=torch.vm.DEFAULT_PASSES)
     def forward(model, x): ...
 
-A list of one's own is the default one with more passes; the pass that hands
-tensor work to Inductor is the one to ask for when the last bits of a result
-may differ::
+A list of one's own is the default one with more passes. The engine makes
+graphs of the tensor work of a function when it is asked to, along the ways
+its calls take through it, and runs them itself, with the results of eager
+mode; the pass that hands such a graph to
+Inductor is the one to ask for when the last bits of a result may differ::
 
-    passes = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs("inductor"))
+    P = torch.vm.passes
+    passes = (*torch.vm.DEFAULT_PASSES, P.Graphs(), P.Inductor())
 
 
     @torch.vm(passes=passes)
@@ -86,8 +89,8 @@ A pass that has a setting is made with it::
     torch.vm.passes.Unroll(16)
 
 A pass of one's own goes in the list as well, and its signature says what it
-is over. A function of two arguments is a pass over the graph of a region: it
-gets the ``torch.fx.GraphModule`` that was traced from the tensor work of a
+is over. A function of two arguments is a pass over a graph: it gets the
+``torch.fx.GraphModule`` of a graph the engine made of the tensor work of a
 block and the types of its inputs (:class:`TensorType`: dtype, device, and
 per dimension the sizes the graph is for), and returns the graph, rewritten.
 What its rewrite is only right for, it says with :func:`guard`: a call that
@@ -121,13 +124,12 @@ import os
 import sys
 import types
 import warnings
-import weakref
 from collections.abc import Iterable
 from typing import Any
 
 import torch
 
-from . import _regions, _shortcuts, passes
+from . import _shortcuts, passes
 from ._passes import fuse_checked, Mismatch, swap
 from ._types import (
     Aligned,
@@ -266,10 +268,10 @@ def is_available() -> bool:
 
 
 def _over_graph(one: Any) -> bool:
-    """Whether a pass of one's own is over the graph of a region: its
-    signature says so, ``(gm, input_types) -> gm``."""
+    """Whether a pass is over a graph: one of the engine's says so, and the
+    signature of one's own does, ``(gm, input_types) -> gm``."""
     if isinstance(one, BuiltinPass):
-        return False
+        return one.kind == "graph"
     try:
         parameters = inspect.signature(one).parameters.values()
     except (TypeError, ValueError):
@@ -287,7 +289,7 @@ def _plan(
     Returns the passes over a block in their order (the engine's own by name),
     which of the passes over the control-flow graph are asked for, the graph
     pass if there is one, what the passes were made with, and the passes over
-    the graph of a region.
+    a graph in their order.
     """
     listed = tuple(given)
     for one in listed:
@@ -312,33 +314,47 @@ def _plan(
         if isinstance(one, BuiltinPass) and one.kind == "cfg":
             whole[one.engine] = True
             settings.update(dataclasses.asdict(one))
+
+    def said(one: Any) -> str:
+        if isinstance(one, BuiltinPass):
+            return repr(one)
+        return getattr(one, "__name__", type(one).__name__)
+
+    def place(one: Any) -> int:
+        return next(i for i, other in enumerate(listed) if other is one)
+
     found = next((one for one in listed if isinstance(one, Graphs)), None)
     over_graph = [one for one in listed if _over_graph(one)]
     if over_graph and found is None:
-        # Regions are made for them, and their graphs run on the eager kernels.
-        found = Graphs("aot_eager")
-        listed = (*listed, found)
+        # The graphs they are over are made for them.
+        found = Graphs()
+        at = place(over_graph[0])
+        listed = (*listed[:at], found, *listed[at:])
     for one in over_graph:
-        if listed.index(one) > listed.index(found):
-            name = getattr(one, "__name__", type(one).__name__)
+        if place(one) < place(found):
             raise ValueError(
-                f"passes has {name} behind {found!r}: the graph compiler is given what "
-                "the passes over the graph of a region made of it, so they go in front of it"
+                f"passes has {said(one)} in front of {found!r}: a pass over a graph "
+                "is given the graphs that Graphs makes, so it goes behind it"
             )
+    compiling = [one for one in over_graph if getattr(one, "compiles", False)]
+    if len(compiling) > 1:
+        raise ValueError(
+            f"passes has {said(compiling[0])} and {said(compiling[1])}: a graph is "
+            "compiled once, by the last pass over it"
+        )
+    if compiling and over_graph[-1] is not compiling[0]:
+        raise ValueError(
+            f"passes has {said(over_graph[-1])} behind {said(compiling[0])}: what a "
+            "pass that compiles a graph returns is run, not rewritten, so it is the "
+            "last pass over a graph"
+        )
     block = [
         one
         for one in listed
         if not (isinstance(one, BuiltinPass) and one.kind == "cfg")
+        and all(one is not other for other in over_graph)
     ]
-    block = [one for one in block if all(one is not other for other in over_graph)]
-    # The graph pass sees a block as the function wrote it: it is the first.
-    block = [one for one in block if one is found] + [
-        one for one in block if one is not found
-    ]
-    engine = [
-        one.engine if isinstance(one, BuiltinPass) and one is not found else one
-        for one in block
-    ]
+    engine = [one.engine if isinstance(one, BuiltinPass) else one for one in block]
     return engine, whole, found, settings, over_graph
 
 
@@ -371,12 +387,15 @@ def vm(
             the block, once the block has run and was watched. An entry is one
             of :mod:`torch.vm.passes` (``torch.vm.passes.Fold()``), or a pass
             of one's own, whose signature says what it is over. A function
-            ``pass_(gm, input_types) -> gm`` is a pass over the graph of a
-            region: the ``torch.fx.GraphModule`` of the tensor work of a block,
-            with a :class:`Type` per input, to be returned rewritten, under the
-            guards it adds with :func:`guard`; with such a pass in the list
-            regions are made as for ``torch.vm.passes.Graphs("aot_eager")``,
-            and it goes in front of ``Graphs`` when that is in the list too. A
+            ``pass_(gm, input_types) -> gm`` is a pass over a graph: the
+            ``torch.fx.GraphModule`` of a graph that
+            :class:`torch.vm.passes.Graphs` made of the tensor work of a
+            block, with a :class:`Type` per input, to be returned rewritten,
+            under the guards it adds with :func:`guard`. The passes over a
+            graph go behind ``Graphs`` (which is taken to be in the list when
+            one of them is) and are applied in their order; one that compiles
+            the graph (:class:`torch.vm.passes.AOTAutograd`,
+            :class:`torch.vm.passes.Inductor`) is the last of them. A
             callable ``pass_(region) -> bool`` looks at the instructions of one
             basic block and at what was observed of them, rewrites them, and
             returns whether it changed anything; it can be written in Rust
@@ -466,23 +485,13 @@ def vm(
         raise TypeError(f"torch.vm expects a function, not {type(fn).__name__}")
     block, whole, found, settings, over_graph = _plan(passes)
     runtime = _load_runtime()
-    regions = None
-    if found is not None:
-        freeze = found.freeze
-        if freeze is None:
-            freeze = os.environ.get("TORCH_VM_FREEZE", "1") != "0"
-        regions = _regions.make_pass(
-            runtime,
-            found.backend,
-            found.min_ops,
-            found.max_variants,
-            0,
-            freeze,
-            tuple(over_graph),
-        )
-        block[0] = regions
+    export = None
+    if over_graph:
+        # Only a pass over graphs has the engine hand a graph to Python.
+        _export = importlib.import_module("torch.vm._export")
+        export = _export.exporter(tuple(over_graph), runtime)
     try:
-        compiled = runtime.compile(
+        return runtime.compile(
             fn,
             block,
             specialize=bool(block),
@@ -498,10 +507,9 @@ def vm(
             max_respecializations=max_respecializations,
             workspace=torch._C._cfg_workspace() if keep_memory else None,
             hook=os.environ.get("TORCH_VM_EVAL_FRAME", "1") != "0",
+            graphs=None if found is None else (found.min_ops, found.max_variants),
+            export=export,
         )
-        if regions is not None:
-            _region_passes[compiled] = regions
-        return compiled
     except NotImplementedError as e:
         if not fallback:
             raise Unsupported(f"{fn.__qualname__}: {e}") from None
@@ -509,28 +517,46 @@ def vm(
         return fn
 
 
-# The region pass of each compiled function that has a backend.
-_region_passes: "weakref.WeakKeyDictionary[Any, _regions.Regions]" = (
-    weakref.WeakKeyDictionary()
-)
-
-
 def regions(fn: Any) -> list[dict[str, Any]]:
     """What :class:`passes.Graphs` made of a rewritten function and of what it calls.
 
-    One dict per region, with ``where`` (function, block and instructions),
-    ``state`` (``"compiled"``, or ``"waiting"`` for a region that has not been
-    tried yet), ``variants``, ``compiles`` (how many of the variants went to
-    the backend: the others had the graph of an earlier one), ``open`` (per
-    variant that leaves sizes open, the conditions it holds under), ``frozen``
-    (how many of the variants have the tensors of their modules built in, see
-    ``freeze``), ``ops`` and ``seconds`` spent tracing and compiling; and one
-    per instruction or run of instructions that was left to the VM, with
-    ``state`` ``"vm"`` and the ``reason``.
+    One dict per graph, with ``where`` (function, block and instruction of its
+    first operation, which is its name whether its path starts there or
+    with the function), ``state``, ``ops`` (how many operations the path
+    that ran last has) and ``operators`` (which, as the dispatcher names
+    them), ``inputs`` and ``outputs`` (how many values it takes and gives),
+    ``branches`` (how many branches and loop tests it goes through) and
+    ``calls`` (how many calls of Python functions it goes into), ``within``
+    (only for a graph of a called function whose operations a graph of a
+    caller holds: that graph, which is the one that runs them; such a graph
+    is listed, and its operations are not further ones), ``paths`` (how many ways
+    through the function were taken down), ``ends`` (per path, the block and
+    the instruction the function goes on at behind it) and ``why`` (it ends
+    there: what the instruction behind it is),
+    ``variants`` (how many exported forms it has), ``exports`` (how many
+    times it was handed to the passes over graphs), and ``hits`` and
+    ``misses`` (the calls that ran what was made of it, and those that came
+    to it and ran its operations). The ``state`` is ``"built"`` for a graph
+    the engine runs itself; with a pass over graphs in the list, ``"waiting"``
+    for one that is exported at its next call and ``"compiled"`` for one that
+    what the passes returned runs in place of (with a ``reason`` if further
+    kinds of calls are not exported); and ``"vm"`` for one that is not
+    exported, or not for the calls it has seen, with the ``reason``.
+    ``forms`` lists the kinds of calls the graph was recorded for, the one
+    that ran last first: per kind its ``checks`` (what a call has to be like
+    to be one of the kind, as text: the tensors with their types and sizes,
+    and the values the operations take), its ``hits``, and the ``reason`` if
+    calls of the kind are not exported. And one dict per instruction or run
+    of instructions with tensor work that is in no graph, with ``state``
+    ``"vm"``, the ``reason``, and for one instruction its ``text``.
+
+    ``fn.stats()["graphs"]`` has the totals: ``built`` (graphs), ``exported``
+    (times one was handed to the passes), ``hits``, ``misses`` and
+    ``given_up`` (graphs that are not exported anymore).
     """
     fn = getattr(fn, "__func__", fn)
-    found = _region_passes.get(fn)
-    return found.report() if found is not None else []
+    graphs = getattr(fn, "graphs", None)
+    return graphs() if graphs is not None else []
 
 
 def memory(fn: Any) -> dict[str, int] | None:
@@ -551,13 +577,14 @@ def memory(fn: Any) -> dict[str, int] | None:
 
 def is_exact(passes: Iterable[Any] | None = None) -> bool:
     """Whether a list of passes computes what the interpreter computes, bit for
-    bit: ``torch.vm.is_exact()`` is true, and with ``torch.vm.passes.Graphs()``
-    in the list it is not.
+    bit: ``torch.vm.is_exact()`` is true, and with
+    ``torch.vm.passes.Inductor()`` in the list it is not.
 
     True when every pass is one of the engine's own that leaves every result
     what it was: they change how the same kernels are reached, not which ones
-    run or in what order. The graph pass is not such a pass, and a pass of
-    one's own is not taken to be one.
+    run or in what order. ``torch.vm.passes.Graphs()`` is such a pass: the
+    engine runs its graphs with those kernels. A pass that compiles a graph
+    is not, and a pass of one's own is not taken to be one.
     """
     listed = DEFAULT_PASSES if passes is None else tuple(passes)
     return all(getattr(one, "exact", False) is True for one in listed)
