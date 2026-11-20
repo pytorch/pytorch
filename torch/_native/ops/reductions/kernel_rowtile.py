@@ -210,7 +210,8 @@ def _itree_arch(
 
 # SM107's profile for its measured M == 1 full reductions; other shapes keep the device's
 # row. Fully unrolled, the fp32 sum anchors compiled in 4.5 s against 1.0 s at
-# combine_unroll 128 and ran only 2-3% faster (B200 running this profile).
+# combine_unroll 128 and ran only 2-3% faster (B200 running this profile). A deliberate
+# pin, equal to B200's row when measured, so a B200 retune does not carry over to it.
 _SM107_FULL_ITREE_ARCH = _ItreeArch(
     split_stage_rows=4,
     combine_rpb=WARP,
@@ -268,8 +269,10 @@ def _full_itree_arch(
     trait: Any, x: torch.Tensor, out_dtypes: Sequence[torch.dtype]
 ) -> _ItreeArch | None:
     M, N = x.shape
+    if M != 1:
+        return None
     cc = _hw.caps(x.device).cc
-    if M != 1 or cc not in _SM107_CCS:
+    if cc not in _SM107_CCS:
         return None
     return select_full_itree_arch(
         cc,
@@ -700,6 +703,9 @@ def itree_combine_plan(
     if arch.combine_async and arch.combine_rpb > WARP:
         # The async copy maps one warp's lanes onto a row's partials.
         raise ValueError("combine_async requires combine_rpb <= WARP")
+    mode = arch.uniform_combine
+    if mode not in ("off", "counts", "weights"):
+        raise ValueError(f"uniform_combine must be off, counts or weights: {mode!r}")
     caps = _hw.caps(device)
     nbatch = itree.split[0]
     rpb = arch.combine_rpb
@@ -709,7 +715,6 @@ def itree_combine_plan(
         rpb = 1 << (live - 1).bit_length()
     grp = arch.combine_group_bytes // itemsize
     g = max(1, math.gcd(nbatch, grp)) if grp else 1
-    mode = arch.uniform_combine
     uniform = mode != "off" and tile.uniform_combine_ok(trait, itree.split)
     weights = uniform and mode == "weights"
     # Uniform counts stage no count field; weights stage one row shared by the block.
@@ -1060,10 +1065,10 @@ def reduce_row_tile(
     order="inner_tree" and use_tma=True for every N. Rows of whole 16-byte vectors at a
     pitch of whole vectors otherwise fall through to normal path selection; ragged rows
     need a 16-byte aligned base and raise ValueError on any other rather than fall back.
-    Other rows need a pitch of whole N-wide vectors. A ragged row's scalar prefix depends
-    on its start, so identical rows can round differently. Callers must pre-check a
-    16-byte base for ragged rows: whole rows at a misaligned base take narrow loads, but
-    ragged rows raise.
+    Other rows need stride(0) to be a multiple of vec_size(N). A ragged row's scalar
+    prefix depends on its start, so identical rows can round differently. Callers must
+    pre-check a 16-byte base for ragged rows: whole rows at a misaligned base take
+    narrow loads, but ragged rows raise.
     """
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
