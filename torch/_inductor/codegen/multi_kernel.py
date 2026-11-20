@@ -39,15 +39,17 @@ class MultiKernelState:
         self._root: MultiKernelState = self if parent is None else parent._root
         self._num_names = 0
 
-    def define_kernel(self, multi_kernel: "DispatchedMultiKernel") -> str:
-        """Register a dispatched multi-kernel and return its name.
+    def define_dispatcher(self, multi_kernel: "DispatchedMultiKernel") -> str:
+        """Register a multi-kernel whose sub-kernel is picked at run time by a
+        dispatcher object in the generated module (MultiKernel, SizeHintMultiKernel;
+        see DispatchedMultiKernel), and return its name.
 
         Multi-kernels with the same sub-kernels share one name; otherwise a new
         `multi_kernel_N` is assigned (numbered from the root state, since subgraph
-        definitions land in the parent module) and its definition is written to
-        kernel_defs: the shared `arg_index` table (which call args each sub-kernel
-        takes), then the kind-specific line from multi_kernel.write_definition.
-        Nothing is written in the second pass of cpp-wrapper codegen.
+        definitions land in the parent module) and kernel_defs gets the shared
+        `arg_index` table (which call args each sub-kernel takes), then the line
+        that creates the dispatcher, from multi_kernel.write_dispatcher. Nothing is
+        written in the second pass of cpp-wrapper codegen.
         """
         # Prevent circular import
         from ..select_algorithm import TritonTemplateKernel
@@ -95,7 +97,7 @@ class MultiKernelState:
             slice_reprs = ", ".join(repr(s) for s in slice_list)
             buf.writeline(f"    {key}: [{slice_reprs}],")
         buf.writeline("}")
-        multi_kernel.write_definition(buf, multi_kernel_name, kernel_names)
+        multi_kernel.write_dispatcher(buf, multi_kernel_name, kernel_names)
 
         if config.triton.autotune_at_compile_time:
             V.graph.wrapper_code.src_to_kernel["\n".join(kernel_names)] = (
@@ -122,14 +124,8 @@ class MultiKernelBase:
 
     kernels: list[Any]
 
-    # A placeholder: multi-kernels have no argument list of their own (their leaves
-    # do). It exists because the scheduler tells a real kernel handler from the
-    # NullHandler with hasattr(V.kernel, "args") (SchedulerBuffer.allocate and the
-    # in-place reuse check in scheduler.py), and a multi-kernel is V.kernel while
-    # its nodes' buffers are allocated (mark_run). Without it, in-place reuse would
-    # be silently skipped.
-    # TODO: replace those hasattr checks with an explicit test for a real kernel
-    # handler and drop this attribute.
+    # need this since some code in inductor check if the kernel object has an args
+    # attribute to decide if it's a non-null kernel.
     args: object = object()
 
     @property
@@ -219,13 +215,15 @@ class DispatchedMultiKernel(MultiKernelBase):
     @functools.cached_property
     def kernel_name(self) -> str:  # type: ignore[override]
         # Registered on first use: the sub-kernels only have names once defined.
-        return V.graph.wrapper_code.multi_kernel_state.define_kernel(self)
+        return V.graph.wrapper_code.multi_kernel_state.define_dispatcher(self)
 
-    def write_definition(
+    def write_dispatcher(
         self, buf: IndentedBuffer, name: str, kernel_names: tuple[str, ...]
     ) -> None:
-        """Write `name = async_compile.<dispatcher>(...)`: the run-time object that
-        picks the sub-kernel. An `arg_index` table is already defined above it."""
+        """Write the module-level line that creates the dispatcher, e.g.
+        `multi_kernel_0 = async_compile.multi_kernel(...)`: the run-time object that
+        picks the sub-kernel on each `.run()`. `arg_index` is already defined above
+        it."""
         raise NotImplementedError
 
     def launched_kernel_name(self) -> str:
@@ -242,8 +240,13 @@ class DispatchedMultiKernel(MultiKernelBase):
 
     def call_kernel(self, kernel_name):
         """
-        Collect the union of arguments from all subkernels as the arguments
-        for the multi-kernel.
+        Codegen the launch of this multi-kernel into the wrapper (nothing runs here):
+        `multi_kernel_0.run(<args>)`, which the dispatcher routes to one sub-kernel at
+        run time. The args are the sub-kernels' shared call args (they must match),
+        plus each sub-kernel's own grid args for templates, sliced apart again by
+        `arg_index`. The merged workspaces are allocated before the launch and freed
+        after it. In the second pass of cpp-wrapper codegen the pick is already
+        made, so the chosen sub-kernel is launched directly.
         """
         # Prevent circular import
         from ..select_algorithm import TritonTemplateKernel
@@ -337,7 +340,7 @@ class MultiKernel(DispatchedMultiKernel):
 
         self.kernels = kernels
 
-    def write_definition(
+    def write_dispatcher(
         self, buf: IndentedBuffer, name: str, kernel_names: tuple[str, ...]
     ) -> None:
         buf.writeline(f"{name} = async_compile.multi_kernel({name!r}, [")
@@ -617,7 +620,7 @@ class SizeHintMultiKernel(DispatchedMultiKernel):
             self.kernels.append(kernel)
             self.kernel_shape_keys.append(shape_key)
 
-    def write_definition(
+    def write_dispatcher(
         self, buf: IndentedBuffer, name: str, kernel_names: tuple[str, ...]
     ) -> None:
         # Prevent circular import
@@ -663,8 +666,8 @@ class ConditionalMultiKernel(MultiKernelBase):
         return self.kernels[0].kernel_name
 
     def call_kernel(self, kernel_name):
-        """Write one ConditionalKernelDispatchLine whose branches hold each
-        sub-kernel's own launch.
+        """Codegen the launch of this kernel into the wrapper (nothing runs here): one
+        ConditionalKernelDispatchLine whose branches hold each sub-kernel's own launch.
 
         Each sub-kernel's call_kernel runs under capture_lines(), which collects the
         lines it writes (numel arguments and the launch) for its branch instead of

@@ -151,10 +151,11 @@ class DebugPrinterManager:
         kernel,
         kernel_type=None,
     ):
-        # Note: MultiKernel debug printing is not supported for now
+        # Note: multi-kernel debug printing is not supported for now
         if isinstance(kernel, MultiKernelBase):
             log.info(
-                "MultiKernel type is not supported in AOTI debug printer tool yet."
+                "%s is not supported in AOTI debug printer tool yet.",
+                type(kernel).__name__,
             )
             self.debug_printer_level = IntermediateValueDebuggingLevel.OFF
 
