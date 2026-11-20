@@ -5567,6 +5567,24 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, "expected all tensors to have the same dtype"):
             torch.ops.aten.huber_loss_backward(torch.ones_like(x), x, t, 1, 1.0)
 
+    def test_loss_backward_half_mean_norm(self):
+        # 1/numel rounded to half is subnormal above 2^14 elements and keeps one or two bits above 2^22,
+        # so the mean's norm has to be applied in float
+        x = torch.randn(100_000, dtype=torch.float16)
+        t = torch.randn(100_000, dtype=torch.float16)
+        cases = ((F.mse_loss, {}), (F.smooth_l1_loss, {}), (F.huber_loss, {}), (F.huber_loss, {"delta": 0.5}))
+        for fn, kwargs in cases:
+            x_mps = x.to("mps").requires_grad_()
+            fn(x_mps, t.to("mps"), **kwargs).backward()
+            x_cpu = x.float().requires_grad_()
+            fn(x_cpu, t.float(), **kwargs).backward()
+            self.assertEqual(x_mps.grad.cpu(), x_cpu.grad.half(), atol=0, rtol=0, msg=f"{fn.__name__} {kwargs}")
+        # beta=0 divides by beta only where input != target
+        x_mps = x.to("mps")
+        grad = torch.ops.aten.smooth_l1_loss_backward(torch.ones((), dtype=x.dtype, device="mps"), x_mps, x_mps, 1, 0.0)
+        ref = torch.ops.aten.smooth_l1_loss_backward(torch.ones(()), x.float(), x.float(), 1, 0.0)
+        self.assertEqual(grad.cpu(), ref.half(), atol=0, rtol=0)
+
     @parametrize("in_dtype", [torch.float16, torch.bfloat16])
     def test_batch_norm_mixed_dtype_backward(self, in_dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/154887
@@ -15172,6 +15190,9 @@ class TestConsistency(TestCaseMPS):
                 atol, rtol = 5e-3, 5e-3
             if op.name == "nn.functional.soft_margin_loss" and dtype == torch.float16:
                 atol, rtol = 5e-4, 2e-3
+            # CPU rounds mse's 2/numel and each product to half, MPS rounds once from float
+            if op.name == "nn.functional.mse_loss" and dtype == torch.float16:
+                atol, rtol = 1e-5, 2e-3
             if op.name in ("polygamma", "special.polygamma") and dtype == torch.float32:
                 atol, rtol = 1e-2, 5e-6
             if op.name in ("polygamma", "special.polygamma") and dtype == torch.float16:

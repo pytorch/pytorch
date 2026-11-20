@@ -349,17 +349,14 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
               " and grad_input ",
               grad_input.scalar_type());
   TORCH_CHECK(mps::supportedFloatingType(input.scalar_type()), "huber_loss_backward_mps only supports floating types");
-  // grad_output is a scalar unless the reduction is None (where norm is 1), so
-  // folding the mean's 1/numel into it is a 0-dim op and leaves alpha for delta.
   const double norm = reduction == Reduction::Mean && input.numel() > 0 ? 1.0 / input.numel() : 1.0;
-  const Tensor grad = norm == 1.0 ? grad_output : grad_output.mul(norm);
   auto iter = TensorIteratorConfig()
                   .add_output(grad_input)
                   .add_const_input(input)
                   .add_const_input(target)
-                  .add_const_input(grad)
+                  .add_const_input(grad_output)
                   .build();
-  mps::lib.exec_ternary_kernel(iter, "huber_backward", delta, at::toOpMathType(iter.common_dtype()));
+  mps::lib.exec_ternary_kernel(iter, "huber_backward", delta, at::toOpMathType(iter.common_dtype()), norm);
   return grad_input;
 }
 
@@ -371,7 +368,7 @@ static void mse_mps_kernel(TensorIteratorBase& iter) {
 
 static void mse_backward_mps_kernel(TensorIterator& iter, const Scalar& value) {
   TORCH_CHECK(mps::supportedFloatingType(iter.common_dtype()), "mse_backward_mps only supports floating types");
-  mps::lib.exec_ternary_kernel(iter, "mse_backward", value);
+  mps::lib.exec_ternary_kernel(iter, "mse_backward", value, at::toOpMathType(iter.common_dtype()));
 }
 
 REGISTER_DISPATCH(mse_stub, &mse_mps_kernel)
@@ -446,22 +443,17 @@ Tensor& smooth_l1_loss_backward_out_mps(const Tensor& grad_output,
   TORCH_CHECK_NOT_IMPLEMENTED(input.scalar_type() != kBool && !isComplexType(input.scalar_type()),
                               "smooth_l1_loss_backward_mps not implemented for ",
                               input.scalar_type());
-  // grad_output is a scalar unless the reduction is None (where norm is 1), so
-  // folding the mean's 1/numel into it is a 0-dim op and leaves alpha for beta.
-  // Integer inputs truncate norm first, like the CPU kernel's norm.to<scalar_t>().
   const double norm = reduction == Reduction::Mean && input.numel() > 0 ? 1.0 / input.numel() : 1.0;
-  const Scalar norm_scalar = isFloatingType(input.scalar_type()) ? Scalar(norm) : Scalar(static_cast<int64_t>(norm));
-  const Tensor grad = norm == 1.0 ? grad_output : grad_output.mul(norm_scalar);
   auto iter = TensorIteratorConfig()
                   .add_output(grad_input)
                   .add_const_input(input)
                   .add_const_input(target)
-                  .add_const_input(grad)
+                  .add_const_input(grad_output)
                   .promote_inputs_to_common_dtype(true)
                   .cast_common_dtype_to_outputs(true)
                   .enforce_safe_casting_to_output(true)
                   .build();
-  mps::lib.exec_ternary_kernel(iter, "smooth_l1_backward", beta, at::toOpMathType(iter.common_dtype()));
+  mps::lib.exec_ternary_kernel(iter, "smooth_l1_backward", beta, at::toOpMathType(iter.common_dtype()), norm);
   return grad_input;
 }
 
