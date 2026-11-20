@@ -5628,6 +5628,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             torch.matmul(x, y)
         self.assertIn(torch.ops.aten.bmm.default, ops)
         self.assertNotIn(torch.ops.aten.expand.default, ops)
+        self.assertNotIn(torch.ops.aten.permute.default, ops)
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):

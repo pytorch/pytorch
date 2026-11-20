@@ -5478,7 +5478,9 @@ def _matmul_fold_broadcast_batch(
     if not all(guard_or_false(v <= int_max) for v in ints):
         return None
 
-    out = tensor1.permute(perm).view(t1_shape).bmm(tensor2.reshape(t1_shape[0], m2, p))
+    if perm != sorted(perm):
+        tensor1 = tensor1.permute(perm)
+    out = tensor1.view(t1_shape).bmm(tensor2.reshape(t1_shape[0], m2, p))
     if in_order:
         return torch.ops.aten._unsafe_view(out, [*sizes1[:-1], p])
     out = torch.ops.aten._unsafe_view(out, keep_sizes + fold_sizes + [n, p])

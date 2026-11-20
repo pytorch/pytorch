@@ -2125,8 +2125,11 @@ static std::optional<Tensor> matmul_fold_broadcast_batch(
     }
   }
 
-  const auto out = tensor1.permute(perm).view_symint(t1_shape).bmm(
-      tensor2.reshape_symint({keep_numel, m, p}));
+  // perm holds each dim once, so it is the identity if it is sorted
+  const auto t1 =
+      std::is_sorted(perm.begin(), perm.end()) ? tensor1 : tensor1.permute(perm);
+  const auto out =
+      t1.view_symint(t1_shape).bmm(tensor2.reshape_symint({keep_numel, m, p}));
   if (in_order) {
     c10::SymDimVector output_shape(sizes1.begin(), sizes1.end() - 1);
     output_shape.push_back(p);
