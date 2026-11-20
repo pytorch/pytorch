@@ -61,7 +61,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.utils._triton import (
-    has_triton,
     has_triton_cuda_tma_device,
     has_triton_for_device,
 )
@@ -792,7 +791,15 @@ class StaticLauncherTestMixin:
 class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @unittest.skipIf(not has_triton(), "requires triton")
+    def setUp(self):
+        # has_triton() is process-wide: another backend's Triton support must
+        # not let a device without Triton run these compile-on-device cases.
+        # Skip ahead of super() so the mixin's XPU JITFunction patch is not
+        # applied to a test that will not launch anything.
+        if not has_triton_for_device(self.device_type):
+            self.skipTest(f"requires Triton on {self.device_type}")
+        super().setUp()
+
     def test_basic(self, device):
         """Verify _FastCudaLauncher correctly launches a kernel with tensor + scalar args.
 
@@ -825,7 +832,6 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
     # 2. triton relies on inspect.get_source to get the type annotations
     # so I can't even use exec() to generate the test cases.
     # So we'll just make a few kernels by hand
-    @unittest.skipIf(not has_triton(), "requires triton")
     def test_unsigned_integers(self, device):
         @triton.jit
         def unsigned_integers(
@@ -849,7 +855,6 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
         launcher.run(1, 1, 1, stream, new_arg0, 50, 50, 50, 50)
         self.assertEqual(new_arg0, arg0)
 
-    @unittest.skipIf(not has_triton(), "requires triton")
     def test_signed_integers(self, device):
         @triton.jit
         def signed_integers(
@@ -938,7 +943,6 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
             torch.tensor([float("inf")], dtype=torch.float64, device=device),
         )
 
-    @unittest.skipIf(not has_triton(), "requires triton")
     def test_basic_1arg(self, device):
         @triton.jit
         def simple_kernel_1_arg(arg0):
@@ -963,7 +967,6 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
         )
         self.assertEqual(new_arg0, arg0)
 
-    @unittest.skipIf(not has_triton(), "requires triton")
     def test_constexpr(self, device):
         # Constexprs are compiled directly into the cubin file,
         # so we never need to pass it to StaticCudaLauncher.
@@ -992,7 +995,6 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
         )
         self.assertEqual(new_arg0, arg0)
 
-    @unittest.skipIf(not has_triton(), "requires triton")
     def test_implied_constant(self, device):
         """xnumel is unused in this kernel, but isn't explicitly marked as a constexpr"""
 
@@ -1045,7 +1047,6 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
         launcher.run(1, 1, 1, stream, arg0, arg2, 128)
         self.assertEqual(arg1, arg2)
 
-    @unittest.skipIf(not has_triton(), "requires triton")
     def test_kernel_no_args(self, device):
         # Just an easy way to test incompatible number of arguments
         @triton.jit
@@ -1058,7 +1059,6 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
         stream = device_interface.get_raw_stream(device_interface.current_device())
         launcher.run(1, 1, 1, stream)
 
-    @unittest.skipIf(not has_triton(), "requires triton")
     def test_high_shared_mem(self, device):
         @triton.jit
         def simple_kernel(arg0, arg1):
@@ -1084,7 +1084,6 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
         self.assertEqual(new_arg0, arg0)
 
 
-    @unittest.skipIf(not has_triton(), "requires triton")
     def test_too_high_shared_mem(self, device):
         @triton.jit
         def simple_kernel(arg0, arg1):
@@ -1104,7 +1103,6 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
             lambda: self._make_launcher(compiled_kernel),
         )
 
-    @unittest.skipIf(not has_triton(), "requires triton")
     @skipIfRocm
     @skipIfXpu(msg="Oversized shared memory is a CUDA feature")
     def test_oversized_shared_mem(self, device):
@@ -1134,7 +1132,6 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
         launcher.run(1, 1, 1, stream, new_arg0, arg1)
         self.assertEqual(new_arg0, arg0)
 
-    @unittest.skipIf(not has_triton(), "requires triton")
     @skipIfRocm
     @skipIfXpu(msg="Oversized shared memory is a CUDA feature")
     def test_too_high_oversized_shared_mem(self, device):
@@ -1163,7 +1160,6 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
             lambda: self._make_launcher(compiled_kernel, device),
         )
 
-    @unittest.skipIf(not has_triton(), "requires triton")
     def test_kernel_empty_tensor(self, device):
         # Triton kernel generated by torch.compile of the following:
         # @torch.compile()
@@ -1224,7 +1220,6 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
         launcher.run(1, 1, 1, stream, arg1, arg2, buf1, arg0, xnumel)
         self.assertEqual(buf0, buf1)
 
-    @unittest.skipIf(not has_triton(), "requires triton")
     def test_kernel_many_args(self, device):
         N = 200
         # Make 200 arguments
@@ -1456,7 +1451,9 @@ class TestStaticTritonLauncherXpuOnly(StaticLauncherTestMixin, TestCase):
             )
 
 
-instantiate_device_type_tests(TestStaticTritonLauncherXpuOnly, globals(), only_for="xpu")
+instantiate_device_type_tests(
+    TestStaticTritonLauncherXpuOnly, globals(), only_for="xpu", allow_xpu=True
+)
 
 
 class _StaticTritonCompileResultMixin:
