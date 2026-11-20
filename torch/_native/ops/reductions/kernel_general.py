@@ -1257,9 +1257,10 @@ def replay_reduce(
     """reduce_dim over `dims`, or reduce_all when None, replaying the launches of an
     earlier call with the same metadata. x's device must be current. The trait is not
     keyed: trait_key, with x.dtype and out_dtype, must determine every parameter of the
-    trait make_trait builds. Every route must also follow _L.LaunchRecord's replay
-    contract. Inside an active _L.recording it skips _REPLAYS and runs the full path, so
-    the outer recording captures the launches."""
+    trait make_trait builds. _hw.caps, _BATCHED_COL_CCS and _ORDERED_COL_CCS are not
+    keyed either, so they must not change while replays are live. Every route must also
+    follow _L.LaunchRecord's replay contract. Inside an active _L.recording it skips
+    _REPLAYS and runs the full path, so the outer recording captures the launches."""
     if not x.is_cuda:
         raise AssertionError(f"need a CUDA input, got {x.device}")
     # Warm replays skip _reduce's and _reduce_all's checks; without this one they would
