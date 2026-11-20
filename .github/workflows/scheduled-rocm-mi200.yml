@@ -5,6 +5,10 @@ on:
   schedule:
     - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
   workflow_dispatch:
+  # TEMPORARY, remove before merge: exercises the workflow_call path on the PR.
+  push:
+    tags:
+      - ciflow/trunk/*
 
 permissions:
   id-token: write
