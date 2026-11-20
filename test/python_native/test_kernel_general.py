@@ -639,7 +639,13 @@ class TestKernelGeneral(TestCase):
         ],
     )
     def test_welford_trees_agree_with_aten_on_infinities(self, path, n, where):
-        """Tree folds must give NaN where ATen does for one +-inf, not var = +inf."""
+        """Tree folds must give NaN where ATen does for an infinity, not var = +inf.
+
+        With an m2 = 0 leaf, only "last" (except ("uniform", 4095)) and
+        ("inner_tree", 127, "mid") give +inf, so those guard the leaf's NaN m2; the
+        others reach NaN through a later merge either way. "first_last" puts +inf and
+        -inf in each even row.
+        """
         rows = 257 if path == "ordered_col" else 17
         x = torch.randn(rows, n, device="cuda")
         # Odd rows stay finite, so the finite comparison is not empty.
@@ -675,9 +681,8 @@ class TestKernelGeneral(TestCase):
         self.assertEqual(got[finite], want[finite], atol=1e-5, rtol=1e-5)
 
     def test_uniform_welford_tree_changes_bits(self):
-        """uniform_tree=True must take the tree: its bits differ from the online chain's,
-        and both stay within tolerance of fp64."""
-        torch.manual_seed(0)
+        """uniform_tree=True must take the tree: it compiles the tree's load count, its
+        bits differ from the online chain's, and both stay within tolerance of fp64."""
         rows, count = 17, 4096
         x = torch.randn(rows, count, device="cuda")
         trait = T.WelfordOps(correction=1, acc=cutlass.Float32)
@@ -692,6 +697,8 @@ class TestKernelGeneral(TestCase):
                 block=64,
                 uniform_tree=uniform_tree,
             )
+            loads = count // 64 if uniform_tree else 0
+            self.assertEqual(op.tile.uniform_tree_loads, loads)
             outs.append(torch.empty(rows, device="cuda"))
             key = ("uniform_bits", "var") + op.cache_sig
             kg._launch(op, key, [kg._flat(x)], outs[-1:])

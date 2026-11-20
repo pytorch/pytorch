@@ -412,7 +412,11 @@ _SM107_MIN_SIZE, _SM107_MID_SIZE = 16 << 20, 64 << 20
 _SM107_256MIB, _SM107_MAX_SIZE = 256 << 20, 2 << 30
 _SM107_SIZES = (_SM107_MIN_SIZE, _SM107_MID_SIZE, _SM107_256MIB, _SM107_MAX_SIZE)
 _SM107_FULL_SIZES = _SM107_SIZES[2:]
-_SM107_ONE_FIELD_NAMES = {SumOps: "sum", MeanOps: "mean", AMaxOps: "amax"}
+_SM107_ONE_FIELD_NAMES: dict[type, str] = {
+    SumOps: "sum",
+    MeanOps: "mean",
+    AMaxOps: "amax",
+}
 _SM107_ONE_FIELD = tuple(_SM107_ONE_FIELD_NAMES)
 
 
