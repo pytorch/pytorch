@@ -632,6 +632,10 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
         for async_op, p2p, side in itertools.product((False, True), repeat=3):
             # Warm up so NCCL connections exist and rank 0 can issue alone.
             self._coalescing_window(async_op, p2p, side)
+            # XCCL's _end_coalescing() blocks until all peers issue the window, so rank 0
+            # cannot issue alone: https://github.com/intel/torch-xpu-ops/issues/6314
+            if not self.supports_nonblocking_coalescing:
+                continue
             key = f"coalescing_window_rank0_issued_{async_op}_{p2p}_{side}"
             if self.rank != 0:
                 store.wait([key])

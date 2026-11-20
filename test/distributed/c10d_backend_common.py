@@ -42,6 +42,7 @@ class BackendConfig:
     name: str
     device_type: str
     supports_coalescing: bool = False
+    supports_nonblocking_coalescing: bool = True
     supports_bitwise_reductions: bool = False
     supports_cuda_graph_barrier: bool = False
     supports_dropped_p2p_work: bool = False
@@ -189,6 +190,7 @@ C10D_BACKENDS: tuple[BackendConfig, ...] = (
         "xccl",
         "xpu",
         supports_coalescing=True,
+        supports_nonblocking_coalescing=False,
         supports_reduce_avg=False,
         supports_work_sequence_number=True,
         supports_uneven_all_gather=True,
@@ -311,6 +313,7 @@ def instantiate_backend_tests(
                 "backend_name": backend.name,
                 "device_type": backend.device_type,
                 "supports_coalescing": backend.supports_coalescing,
+                "supports_nonblocking_coalescing": backend.supports_nonblocking_coalescing,
                 "supports_bitwise_reductions": backend.supports_bitwise_reductions,
                 "supports_cuda_graph_barrier": backend.supports_cuda_graph_barrier,
                 "supports_dropped_p2p_work": backend.supports_dropped_p2p_work,
