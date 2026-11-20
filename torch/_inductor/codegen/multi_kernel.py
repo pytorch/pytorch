@@ -240,7 +240,7 @@ class DispatchedMultiKernel(MultiKernelBase):
 
     def call_kernel(self, kernel_name):
         """
-        Codegen the launch of this multi-kernel into the wrapper (nothing runs here):
+        Codegen the launch of this multi-kernel into the wrapper:
         `multi_kernel_0.run(<args>)`, which the dispatcher routes to one sub-kernel at
         run time. The args are the sub-kernels' shared call args (they must match),
         plus each sub-kernel's own grid args for templates, sliced apart again by
@@ -666,7 +666,7 @@ class ConditionalMultiKernel(MultiKernelBase):
         return self.kernels[0].kernel_name
 
     def call_kernel(self, kernel_name):
-        """Codegen the launch of this kernel into the wrapper (nothing runs here): one
+        """Codegen the launch of this kernel into the wrapper: one
         ConditionalKernelDispatchLine whose branches hold each sub-kernel's own launch.
 
         Each sub-kernel's call_kernel runs under capture_lines(), which collects the
