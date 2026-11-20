@@ -1706,6 +1706,118 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         x = torch.zeros(1)
         self.assertEqual(fn(Child, Base, x), (x + 1, False, "default"))
 
+    def test_class_setattr_then_instance_getattr(self):
+        class MyClass:
+            x = 0
+
+            def get(self):
+                return self.x
+
+        def fn(t):
+            before = MyClass()
+            MyClass.x = 5
+            obj = MyClass()
+            MyClass.x += 1
+            return t + obj.x + obj.get() + before.x
+
+        t = torch.zeros(1)
+        expected = fn(t)
+        MyClass.x = 0
+        result = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(result, expected)
+        self.assertEqual(MyClass.x, 6)
+
+    def test_class_setattr_then_instance_getattr_shadowed(self):
+        class MyClass:
+            x = 0
+
+        def fn(t):
+            a = MyClass()
+            a.x = 2
+            b = MyClass()
+            MyClass.x = 9
+            return t + a.x + b.x
+
+        t = torch.zeros(1)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(result, t + 11)
+
+    def test_class_setattr_on_base_then_instance_getattr(self):
+        class Base:
+            foo = 1
+
+        class Child(Base):
+            pass
+
+        class Defines(Base):
+            foo = 2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(obj, base, x):
+            base.foo = 3
+            return x + obj.foo
+
+        x = torch.zeros(1)
+        self.assertEqual(fn(Child(), Base, x), x + 3)
+        self.assertEqual(fn(Defines(), Base, x), x + 2)
+        # Child.foo now shadows the write to Base.foo.
+        Child.foo = 5
+        self.assertEqual(fn(Child(), Base, x), x + 5)
+        self.assertEqual(cnt.frame_count, 3)
+        # An instance attribute shadows the class write.
+        o = Child()
+        o.foo = 7
+        self.assertEqual(fn(o, Base, x), x + 7)
+        self.assertEqual(cnt.frame_count, 4)
+
+    def test_class_setattr_method_then_instance_getattr(self):
+        class MyClass:
+            def f(self):
+                return 1
+
+        def g(self):
+            return 6
+
+        def fn(t):
+            MyClass.f = g
+            obj = MyClass()
+            return t + obj.f()
+
+        t = torch.zeros(1)
+        result = torch.compile(fn, backend="eager")(t)
+        self.assertEqual(result, t + 6)
+
+    def test_class_setattr_descriptor_then_instance_getattr(self):
+        class MyClass:
+            pass
+
+        def fn(t):
+            MyClass.double = property(lambda self: 2)
+            MyClass.plain = 4
+            obj = MyClass()
+            return t + obj.double + obj.plain
+
+        t = torch.zeros(1)
+        result = torch.compile(fn, backend="eager")(t)
+        self.assertEqual(result, t + 6)
+
+    def test_class_setattr_replaces_property_then_instance_getattr(self):
+        class MyClass:
+            @property
+            def p(self):
+                return 1
+
+        def fn(t):
+            MyClass.p = 4
+            obj = MyClass()
+            return t + obj.p
+
+        t = torch.zeros(1)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(result, t + 4)
+
     @unittest.expectedFailure
     def test_class_setattr_abstractmethods_hasattr(self):
         class Base:

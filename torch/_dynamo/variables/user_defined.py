@@ -454,6 +454,44 @@ class UserDefinedVariable(VariableTracker):
         return None
 
 
+def pending_class_setattr_owner(
+    tx: "InstructionTranslatorBase",
+    cls: type,
+    cls_source: Source | None,
+    name: str,
+    cls_vt: VariableTracker | None = None,
+) -> VariableTracker | None:
+    """The class in *cls*'s MRO whose setattr of *name* is still pending in this
+    frame, or None.
+
+    A setattr on a class is replayed when the graph is done, so until then the
+    real ``__dict__`` still holds the old value that an instance lookup would
+    find. *cls_vt* is the VariableTracker for *cls* when the caller has it.
+    """
+    side_effects = tx.output.side_effects
+    if not side_effects.store_attr_mutations:
+        return None
+    for idx, (klass, namespace) in enumerate(iter_mro_static_dicts(cls)):
+        if klass is cls and cls_vt is not None:
+            klass_vt = cls_vt
+        elif klass in side_effects:
+            klass_vt = side_effects[klass]
+        else:
+            klass_vt = None
+        if klass_vt is not None and side_effects.has_pending_mutation_of_attr(
+            klass_vt, name
+        ):
+            if cls_source is not None:
+                guard_mro_absent(tx, cls, cls_source, name, idx)
+                if klass is not cls:
+                    mro_entry = GetItemSource(TypeMROSource(cls_source), idx)
+                    install_guard(mro_entry.make_guard(GuardBuilder.CLASS_MATCH))
+            return klass_vt
+        if name in namespace:
+            return None
+    return None
+
+
 class UserDefinedClassVariable(UserDefinedVariable):
     # pyrefly: ignore[bad-override]
     value: type[object]
@@ -737,26 +775,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         past and the owner's place in the MRO are guarded to keep it that way, as
         ``__bases__`` can be reassigned between calls.
         """
-        side_effects = tx.output.side_effects
-        for idx, (klass, namespace) in enumerate(iter_mro_static_dicts(self.value)):
-            if klass is self.value:
-                klass_vt = self
-            elif klass in side_effects:
-                klass_vt = side_effects[klass]
-            else:
-                klass_vt = None
-            if klass_vt is not None and side_effects.has_pending_mutation_of_attr(
-                klass_vt, name
-            ):
-                if self.source is not None:
-                    guard_mro_absent(tx, self.value, self.source, name, idx)
-                    if klass_vt is not self:
-                        mro_entry = GetItemSource(TypeMROSource(self.source), idx)
-                        install_guard(mro_entry.make_guard(GuardBuilder.CLASS_MATCH))
-                return klass_vt
-            if name in namespace:
-                return None
-        return None
+        return pending_class_setattr_owner(tx, self.value, self.source, name, self)
 
     def getattr_needs_tracing(self, tx: "InstructionTranslatorBase", name: str) -> bool:
         """Whether a real ``getattr`` cannot stand in for tracing the lookup.
@@ -3991,6 +4010,37 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # hooks.  Undo that here so the unpatched original is traced instead.
         if type_attr is torch.nn.Module.__init__:
             type_attr = unpatched_nn_module_init
+
+        # A setattr on the class (or a base) that is still pending in this frame
+        # replaces type_attr: in eager it is already in the class __dict__.
+        owner = pending_class_setattr_owner(tx, type(self.value), self.cls_source, name)
+        if owner is not None:
+            value = tx.output.side_effects.load_attr(owner, name)
+            try:
+                is_descriptor = mro_lookup(value.python_type(), "__get__") is not (
+                    NO_SUCH_SUBOBJ
+                )
+            except NotImplementedError:
+                is_descriptor = True
+            if is_descriptor:
+                unimplemented(
+                    gb_type="Instance lookup of a descriptor set on its class",
+                    context=f"{type(self.value).__name__}.{name} = {value}",
+                    explanation="Dynamo cannot bind a descriptor that was assigned to "
+                    "the class earlier in the same frame.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            result = self.lookup_instance_dict(tx, name)
+            if result is not None:
+                return result
+            if (
+                self.source is not None
+                and not is_constant_source(self.source)
+                and hasattr(self.value, "__dict__")
+                and name not in self.value.__dict__
+            ):
+                install_not_in_instance_dict_guard(self.source, name)
+            return value
 
         # Step 2: Data descriptors on the type take priority over instance dict.
         if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
