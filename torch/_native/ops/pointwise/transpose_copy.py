@@ -543,8 +543,18 @@ def _plan(src: torch.Tensor, dst: torch.Tensor | None, spec: TransposeSpec) -> _
     )
 
 
-def _indexing_supported(src: torch.Tensor, spec: TransposeSpec, plan: _Plan) -> bool:
+def _indexing_supported(
+    src: torch.Tensor, spec: TransposeSpec, plan: _Plan, dst: torch.Tensor | None = None
+) -> bool:
     outer, b, middle, a, inner, itemsize = spec
+    word_size = 4 if plan.vectorized else plan.word_size
+    divisor = word_size * plan.pack
+    if any(
+        t.storage_offset() * t.element_size() % divisor or const_data_ptr(t) % word_size
+        for t in (src, dst)
+        if t is not None
+    ):
+        return False
     count = outer * b * middle * a * inner
     if not 0 < count <= 2**31 - 1 or count != src.numel():
         return False
@@ -578,17 +588,28 @@ def _indexing_supported(src: torch.Tensor, spec: TransposeSpec, plan: _Plan) -> 
 
 
 def indexing_supported(
-    src: torch.Tensor, dst: torch.Tensor | None, spec: TransposeSpec
+    src: torch.Tensor,
+    dst: torch.Tensor | None,
+    spec: TransposeSpec,
+    *,
+    plan: _Plan | None = None,
 ) -> bool:
     """Check the selected copy path's logical count and CUDA launch bounds."""
-    return _indexing_supported(src, spec, _plan(src, dst, spec))
+    plan = _plan(src, dst, spec) if plan is None else plan
+    return _indexing_supported(src, spec, plan, dst)
 
 
-def run(src: torch.Tensor, dst: torch.Tensor, spec: TransposeSpec) -> torch.Tensor:
+def run(
+    src: torch.Tensor,
+    dst: torch.Tensor,
+    spec: TransposeSpec,
+    *,
+    plan: _Plan | None = None,
+) -> torch.Tensor:
     device = src.get_device()
     check_current(device)
-    plan = _plan(src, dst, spec)
-    if not _indexing_supported(src, spec, plan):
+    plan = _plan(src, dst, spec) if plan is None else plan
+    if not _indexing_supported(src, spec, plan, dst):
         raise ValueError(
             "transpose copy exceeds supported indexing or CUDA grid limits"
         )

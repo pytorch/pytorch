@@ -6,6 +6,7 @@ from typing import Annotated, get_args, get_origin, NamedTuple, TYPE_CHECKING
 
 import torch
 from torch._prims_common import (
+    elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND as PromotionKind,
     get_computation_dtype,
 )
@@ -63,6 +64,9 @@ def _native_dtypes(
         torch.empty(() if zero_dim else (0,), dtype=dtype, device="meta")
         for dtype, zero_dim in operands
     ]
+    if promotion is PromotionKind.BOOL_TO_LONG:
+        _, dtype = elementwise_dtypes(*probes, type_promotion_kind=promotion)
+        probes = [probe.to(dtype) for probe in probes]
     iterator = TensorIterator(
         outputs=[None],
         const_inputs=probes,
@@ -79,13 +83,22 @@ def _native_dtypes(
 
 @cache
 def specialize(
-    fn: MathFn, common: torch.dtype, result: torch.dtype, nout: int = 1
+    fn: MathFn,
+    common: torch.dtype,
+    result: torch.dtype,
+    nout: int = 1,
+    *,
+    with_index: bool = False,
 ) -> Signature:
-    r"""Bind callable types to TensorIterator common and result dtypes."""
+    r"""Bind arithmetic types, excluding a declared leading index."""
     args, returns = inspect_functor(fn)
     if len(returns) != nout:
         raise ValueError(f"functor returns {len(returns)} values, expected {nout}")
     opmath = get_computation_dtype(common)
+    if with_index:
+        if not args or resolve_type(args[0], common, opmath) is not torch.int64:
+            raise TypeError("indexed functors require a leading Int64 argument")
+        args = args[1:]
     arguments = tuple(resolve_type(a, common, opmath) for a in args)
     raw_results = tuple(resolve_type(r, common, opmath) for r in returns)
     results = tuple(
@@ -108,8 +121,12 @@ class Functor(NamedTuple):
         operands: PromotionOperands,
         promotion: PromotionKind = PromotionKind.DEFAULT,
         nout: int = 1,
+        *,
+        with_index: bool = False,
     ) -> Signature:
         from .ops import get_fn
 
         common, result = _native_dtypes(operands, promotion, torch.get_default_dtype())
-        return specialize(get_fn(self.name), common, result, nout)
+        return specialize(
+            get_fn(self.name), common, result, nout, with_index=with_index
+        )
