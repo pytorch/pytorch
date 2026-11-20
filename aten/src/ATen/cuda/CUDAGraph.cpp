@@ -446,6 +446,14 @@ cudaGraphExec_t CUDAGraph::raw_cuda_graph_exec() {
   return graph_exec_;
 }
 
+void CUDAGraph::set_raw_cuda_graph_exec(cudaGraphExec_t graph_exec) {
+  TORCH_CHECK(capture_ended_, "capture_end() must have been called before setting a graph executable");
+  TORCH_CHECK(keep_graph_, "set_raw_cuda_graph_exec() requires keep_graph=True");
+  TORCH_CHECK(has_graph_, "set_raw_cuda_graph_exec() requires a retained cudaGraph_t");
+  graph_exec_ = graph_exec;
+  has_graph_exec_ = graph_exec != nullptr;
+}
+
 void CUDAGraph::reset() {
   // These checks warn instead of throwing: reset() is called from the
   // destructor, and at least one CI build refuses to compile with a throwing

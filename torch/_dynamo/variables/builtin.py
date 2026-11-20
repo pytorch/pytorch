@@ -4232,6 +4232,25 @@ class ByteArrayBuiltinVariable(BaseBuiltinVariable):
     def __repr__(self) -> str:
         return "ByteArrayBuiltinVariable()"
 
+    def maketrans(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if not check_constant_args(args, kwargs):
+            return None
+        try:
+            table = bytearray.maketrans(
+                *(arg.as_python_constant() for arg in args),
+                **{key: val.as_python_constant() for key, val in kwargs.items()},
+            )
+        except (TypeError, ValueError) as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
+        return VariableTracker.build(tx, table)
+
+    tp_methods = {"maketrans": Method(maketrans)}
+
     def _constant_fold_constructor(
         self,
         tx: "InstructionTranslatorBase",
