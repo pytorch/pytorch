@@ -25,6 +25,12 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/ScaledMM_metallib.h>
 #endif
 
+// Whether mat's storage offset and leading stride are multiples of alignment elements, which are bytes for the
+// one-byte types the kernels load as vectors
+bool is_aligned(const Tensor& mat, int64_t leading_stride, int64_t alignment) {
+  return mat.storage_offset() % alignment == 0 && leading_stride % alignment == 0;
+}
+
 const std::array<scaled::ScaleKernelDispatchEntry, 5> scale_kernel_dispatch = {{
     {"tensorwise_tensorwise", scaled::check_tensorwise_recipe, scaled::ScaledGemmImplementation::TENSORWISE_TENSORWISE},
     {"rowwise_rowwise", scaled::check_rowwise_recipe, scaled::ScaledGemmImplementation::ROWWISE_ROWWISE},
@@ -73,14 +79,12 @@ void scaled_mm_blockwise_out(const Tensor& mat_a,
   };
   // Metal 4.1 MPP applies MX block scales natively. It needs whole blocks along K and dense operands, since it derives
   // the scale plane's row pitch from the data's, and indexes each tile in int32.
-  const bool native = !nvfp4 && has_metal_4_1() && k % 32 == 0 && mat_a.stride(0) == k && mat_b.stride(1) == k &&
-      std::in_range<int32_t>(scaled_mm_native_tile * k);
-  // The few rows kernel reads whole chunks of K with 16-byte vector loads
-  const auto aligned16 = [](const Tensor& mat, int64_t leading_stride) {
-    return mat.storage_offset() % 16 == 0 && leading_stride % 16 == 0;
-  };
+  const bool native = !nvfp4 && has_metal_4_1() && k % scaled_mm_mx_block == 0 && mat_a.stride(0) == k &&
+      mat_b.stride(1) == k && std::in_range<int32_t>(scaled_mm_native_tile * k);
+  // The few rows kernel reads whole chunks of K with vector loads
   const bool few_rows = params.m <= scaled_mm_few_rows_max && k % scaled_mm_blockwise_chunk == 0 &&
-      aligned16(mat_a, mat_a.stride(0)) && aligned16(mat_b, mat_b.stride(1));
+      is_aligned(mat_a, mat_a.stride(0), scaled_mm_few_rows_load_bytes) &&
+      is_aligned(mat_b, mat_b.stride(1), scaled_mm_few_rows_load_bytes);
   const auto type_str = scalarToMetalTypeString(out.scalar_type());
   const auto format = nvfp4 ? "nvfp4" : "mxfp8";
   const auto kernel_name = few_rows ? fmt::format("scaled_mm_few_rows_{}_{}_{}", format, params.m, type_str)
@@ -239,7 +243,7 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
       return;
     }
     const auto leading_stride = mat.stride(1) == 1 ? mat.stride(0) : mat.stride(1);
-    TORCH_CHECK_VALUE(mat.storage_offset() % scaled_mm_alignment == 0 && leading_stride % scaled_mm_alignment == 0,
+    TORCH_CHECK_VALUE(is_aligned(mat, leading_stride, scaled_mm_alignment),
                       "Expected ",
                       name,
                       " storage offset and leading stride to be divisible by ",
