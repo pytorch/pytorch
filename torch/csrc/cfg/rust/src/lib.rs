@@ -39,19 +39,10 @@ fn _cfg_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pyapi::NativePass>()?;
     m.add_function(wrap_pyfunction!(pyapi::plan_changed, m)?)?;
     m.add_function(wrap_pyfunction!(pyapi::unsettled, m)?)?;
-    m.add_function(wrap_pyfunction!(pyapi::module_stamp, m)?)?;
-    m.add_function(wrap_pyfunction!(pyapi::module_look, m)?)?;
-    m.add_function(wrap_pyfunction!(pyapi::module_epoch, m)?)?;
-    m.add_function(wrap_pyfunction!(pyapi::module_identity, m)?)?;
     m.add_function(wrap_pyfunction!(shapes::tensor_key, m)?)?;
-    m.add_function(wrap_pyfunction!(shapes::tensor_stamp, m)?)?;
-    m.add_function(wrap_pyfunction!(shapes::snapshot, m)?)?;
-    m.add_class::<shapes::Snapshot>()?;
     m.add_class::<pyapi::CfgFunction>()?;
     m.add_class::<pyapi::Region>()?;
     m.add_class::<pyapi::Replay>()?;
     m.add_class::<shapes::ShapeGuard>()?;
-    // What a leap is called with in place of a value that is not defined.
-    m.add("UNDEFINED", unsafe { Bound::from_borrowed_ptr(m.py(), vm::undefined()) })?;
     Ok(())
 }
