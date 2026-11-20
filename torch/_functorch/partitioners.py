@@ -3901,7 +3901,12 @@ def _sync_decision_cross_ranks(
 ) -> list[torch.fx.Node]:
     # use the same policy across different GPUs
     from torch._dynamo.distributed import get_compile_sync_pg
+    from torch._functorch._aot_autograd.graph_compile import (
+        _maybe_canonicalize_joint_graph_for_sync,
+    )
     from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+    _maybe_canonicalize_joint_graph_for_sync(joint_graph)
 
     def has_collectives(joint_graph: torch.fx.Graph) -> bool:
         for node in joint_graph.nodes:

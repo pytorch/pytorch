@@ -3166,14 +3166,75 @@ class DictTests(torch._dynamo.test_case.TestCase):
                         results.append(self.shallow(val))
                 return torch.cat(results, dim=-1).sum()
 
+        def graph_metadata(model, inp):
+            backend = torch._dynamo.testing.EagerAndRecordGraphs()
+            torch.compile(model, backend=backend)(inp)
+            graph = backend.graphs[0].graph
+            return (
+                [node.name for node in graph.nodes],
+                [
+                    (
+                        node.name,
+                        node._dynamo_source.name,
+                        tuple(sorted(user.name for user in node.users)),
+                    )
+                    for node in graph.nodes
+                    if node.op == "placeholder"
+                ],
+            )
+
         model = Model()
         d1 = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
         d2 = {"b": torch.randn(4, 8), "a": torch.randn(4, 8)}
 
-        names1 = self._get_graph_node_names(model, d1)
+        names1, placeholders1 = graph_metadata(model, d1)
         torch._dynamo.reset()
-        names2 = self._get_graph_node_names(model, d2)
+        names2, placeholders2 = graph_metadata(model, d2)
+
         self.assertEqual(names1, names2)
+        self.assertEqual(placeholders1, placeholders2)
+        sources = [source for _, source, _ in placeholders1]
+        self.assertEqual(sources, sorted(sources))
+
+    @parametrize(
+        "source_names,expected_order,preserves_names",
+        (
+            (("z", "a"), (1, 0), False),
+            (("z", None), (0, 1), True),
+            (("same", "same"), (0, 1), True),
+        ),
+    )
+    def test_canonical_graph_placeholder_source_fallback(
+        self, source_names, expected_order, preserves_names
+    ):
+        from torch._dynamo.output_graph import _canonicalize_graph
+
+        graph = fx.Graph()
+        graphargs = []
+        for i, source_name in enumerate(source_names):
+            node = graph.placeholder(f"arg_{i}")
+            node.name = f"original_{i}"
+            source = (
+                None if source_name is None else types.SimpleNamespace(name=source_name)
+            )
+            grapharg = types.SimpleNamespace(source=source)
+            node.meta["grapharg"] = grapharg
+            graphargs.append(grapharg)
+        graph.output(tuple(graph.find_nodes(op="placeholder")))
+
+        _canonicalize_graph(graph)
+
+        placeholders = graph.find_nodes(op="placeholder")
+        actual_order = tuple(
+            next(i for i, arg in enumerate(graphargs) if arg is node.meta["grapharg"])
+            for node in placeholders
+        )
+        self.assertEqual(actual_order, expected_order)
+        if preserves_names:
+            self.assertEqual(
+                [node.name for node in placeholders],
+                ["original_0", "original_1"],
+            )
 
     @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_dict_order_canonical_graph_correctness(self):
@@ -3341,19 +3402,25 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(len(mul_after) >= 1)
 
     def test_canonical_graph_config_gating(self):
+        # The branches must be asymmetric (deep vs shallow) so the node order
+        # actually differs without canonicalization.
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear_a = torch.nn.Linear(8, 16)
-                self.linear_b = torch.nn.Linear(8, 16)
+                self.deep = torch.nn.Sequential(
+                    torch.nn.Linear(8, 16),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(16, 16),
+                )
+                self.shallow = torch.nn.Linear(8, 16)
 
             def forward(self, d):
                 results = []
                 for key, val in d.items():
                     if key == "a":
-                        results.append(self.linear_a(val))
+                        results.append(self.deep(val))
                     else:
-                        results.append(self.linear_b(val))
+                        results.append(self.shallow(val))
                 return torch.cat(results, dim=-1)
 
         model = Model()
@@ -3446,11 +3513,398 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(_is_safe_to_reorder(token_consumer))
         self.assertTrue(_is_safe_to_reorder(pure(token_consumer)))
 
-        # HOPs are exempt from the value heuristic: graph passes (e.g. graph
-        # deduplication) create invoke_subgraph nodes without example_value/val.
-        hop = torch.ops.higher_order.invoke_subgraph
-        hop_node = graph.call_function(hop, (x, "subgraph_0", x))
-        self.assertTrue(_is_safe_to_reorder(hop_node))
+        def flat_apply_capture(value):
+            return value
+
+        flat_apply_capture.__module__ = "torch._dynamo.variables.torch"
+        opaque_call = pure(graph.call_function(flat_apply_capture, (x,)))
+        self.assertFalse(_is_safe_to_reorder(opaque_call))
+
+        # Nodes binding unbacked symbols are barriers: reordering them changes
+        # the order the ShapeEnv resolves replacements (compile-time blowup).
+        # Checked before the call_method branch, since Dynamo emits item() as a
+        # call_method that would otherwise be reported safe.
+        unbacked_method = graph.call_method("item", (x,))
+        self.assertTrue(_is_safe_to_reorder(unbacked_method))
+        unbacked_method.meta["unbacked_bindings"] = {"u0": ()}
+        self.assertFalse(_is_safe_to_reorder(unbacked_method))
+
+        # The generic state-only-function heuristic must keep both aliases of
+        # increment_version pinned even though their names differ.
+        self.assertFalse(
+            _is_safe_to_reorder(
+                graph.call_function(torch.autograd.graph.increment_version, (x,))
+            )
+        )
+        self.assertFalse(
+            _is_safe_to_reorder(graph.call_function(torch._C._increment_version, (x,)))
+        )
+
+        # A HOP whose subgraphs cannot be resolved is a barrier: its effects
+        # could live anywhere this pass cannot see.
+        cond_node = graph.call_function(torch.ops.higher_order.cond, (x, x, x, ()))
+        self.assertFalse(_is_safe_to_reorder(cond_node))
+
+    @parametrize("activation", ["relu", "dropout"])
+    @parametrize(
+        "positional,inplace",
+        [(False, None), (False, False), (False, True), (True, False), (True, True)],
+    )
+    def test_canonical_graph_functional_inplace(self, activation, positional, inplace):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        args, kwargs = (x,), {}
+        if inplace is not None:
+            if positional:
+                args += (inplace,) if activation == "relu" else (1.0, True, inplace)
+            else:
+                kwargs["inplace"] = inplace
+        target = getattr(torch.nn.functional, activation)
+        node = graph.call_function(target, args, kwargs)
+        node.meta["example_value"] = torch.empty(0)
+        self.assertEqual(_is_safe_to_reorder(node), inplace is not True)
+
+    @parametrize("nested", [False, True])
+    @parametrize("activation", ["relu", "dropout"])
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_canonical_graph_functional_mutation_order(self, nested, activation):
+        module = (
+            torch.nn.ReLU(inplace=True)
+            if activation == "relu"
+            else torch.nn.Dropout(p=1.0, inplace=True)
+        )
+
+        def fn(pred, x):
+            def branch(y):
+                module(y)
+                return y + 1
+
+            x = x.clone()
+            if nested:
+                out = torch.cond(pred, branch, branch, (x,))
+                return x.abs() + out
+            module(x)
+            return x.abs()
+
+        pred, x = torch.tensor(True), -torch.ones(3, dtype=torch.float64)
+        expected = torch.ones_like(x) if nested else torch.zeros_like(x)
+        with torch.no_grad():
+            self.assertEqual(fn(pred, x), expected)
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(pred, x)
+        self.assertEqual(actual, expected)
+
+    def test_canonical_graph_allow_in_graph_mutation_is_not_reordered(self):
+        @torch.compiler.allow_in_graph
+        def mutate(x):
+            x.add_(10)
+            return x
+
+        def fn(x):
+            y = x.clone()
+            before = y * 2
+            mutate(y)
+            return before + y
+
+        x = torch.ones(1)
+        ref = fn(x)
+        with torch._dynamo.config.patch(canonicalize_output_graph_node_order=True):
+            res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, ref)
+
+    def test_canonical_graph_hop_mutation_is_not_reordered(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(8))
+
+            def forward(self, p, x):
+                def true_fn(x):
+                    x.add_(1)
+                    self.buf.add_(1)
+                    return x + self.buf
+
+                x = x.clone()
+                out = torch.cond(p, true_fn, true_fn, (x,))
+                # Reads the values true_fn mutated; hoisting either read above
+                # the cond observes the pre-mutation buffer.
+                return x + self.buf + out
+
+        p, x = torch.tensor(True), torch.randn(1)
+        with torch.no_grad():
+            ref = M()(p, x.clone())
+            torch._dynamo.reset()
+            res = torch.compile(M(), backend="eager", fullgraph=True)(p, x.clone())
+        self.assertEqual(ref, res)
+
+    @torch._dynamo.config.patch(
+        canonicalize_output_graph_node_order=True,
+        do_not_emit_runtime_asserts=True,
+    )
+    def test_canonical_graph_hop_purity_without_runtime_asserts(self):
+        def fn(pred, x):
+            def branch(x):
+                return x.sin()
+
+            out = torch.cond(pred, branch, branch, (x,))
+            return out + torch.abs(x)
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(fn, backend=backend, fullgraph=True)(
+            torch.tensor(True), torch.randn(4)
+        )
+        nodes = list(backend.graphs[0].graph.nodes)
+        cond = next(
+            node for node in nodes if node.target is torch.ops.higher_order.cond
+        )
+        abs_ = next(node for node in nodes if node.target is torch.abs)
+        self.assertLess(nodes.index(abs_), nodes.index(cond))
+
+    def test_canonical_graph_explicit_owner_for_call_module(self):
+        from torch._dynamo.output_graph import _canonicalize_graph
+
+        root = torch.nn.Module()
+        root.relu = torch.nn.ReLU()
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        relu = graph.call_module("relu", (x,))
+        graph.output(relu)
+
+        self.assertIsNone(graph.owning_module)
+        _canonicalize_graph(graph, owning_module=root)
+
+    def test_canonical_graph_increment_version_stays_between_reads(self):
+        from torch._dynamo.output_graph import _canonicalize_graph
+        from torch._dynamo.tensor_version_op import _tensor_version
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        v0 = graph.call_function(_tensor_version, (x,))
+        graph.call_function(torch.autograd.graph.increment_version, (x,))
+        v1 = graph.call_function(_tensor_version, (x,))
+        graph.output((v0, v1))
+
+        # Both reads sort before the bump on the canonical key, so without the
+        # barrier they hoist above it and observe the same version.
+        _canonicalize_graph(graph)
+        read, bump = "_tensor_version_default", "increment_version"
+        expected = ["x", read, bump, f"{read}_1", "output"]
+        self.assertEqual([n.name for n in graph.nodes], expected)
+
+    def test_canonical_graph_hop_barrier_follows_subgraph_purity(self):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        def make(
+            body,
+            target=torch.ops.higher_order.cond,
+            *,
+            nested=False,
+            with_constant=False,
+        ):
+            root = torch.nn.Module()
+            sub = fx.Graph()
+            s = sub.placeholder("s")
+            sub.output((body(sub, s),))
+            root.branch = fx.GraphModule(torch.nn.Module(), sub)
+            if with_constant:
+                root.register_buffer("constant", torch.ones(1))
+            g = fx.Graph()
+            x = g.placeholder("x")
+            attr = g.get_attr("branch")
+            constant = g.get_attr("constant") if with_constant else None
+            gm = fx.GraphModule(root, g)
+            subgraphs = [attr] if nested else attr
+            operands = (x, constant) if with_constant else (x,)
+            return gm.graph.call_function(target, (x, subgraphs, operands))
+
+        # aten overloads, not bare python callables: main's value heuristic
+        # barriers any non-OpOverload node lacking example_value/val meta,
+        # which synthetic test nodes do not carry.
+        pure = make(lambda sub, s: sub.call_function(torch.ops.aten.sin.default, (s,)))
+        self.assertTrue(_is_safe_to_reorder(pure))
+
+        mutating = make(lambda sub, s: sub.call_method("add_", (s, s)))
+        self.assertFalse(_is_safe_to_reorder(mutating))
+
+        for target in (
+            torch.ops.higher_order.flex_attention_backward,
+            torch.ops.higher_order.flex_gemm,
+            torch.ops.higher_order.foreach_map,
+            torch.ops.higher_order.hints_wrapper,
+            torch.ops.higher_order.invoke_quant,
+            torch.ops.higher_order.invoke_quant_packed,
+            torch.ops.higher_order.local_map_hop,
+            torch.ops.higher_order.strict_mode,
+            torch.ops.higher_order.while_loop_stack_output,
+        ):
+            self.assertTrue(
+                _is_safe_to_reorder(
+                    make(
+                        lambda sub, s: sub.call_function(
+                            torch.ops.aten.sin.default, (s,)
+                        ),
+                        target,
+                    )
+                ),
+                target.__name__,
+            )
+
+        nested_pure = make(
+            lambda sub, s: sub.call_function(torch.ops.aten.sin.default, (s,)),
+            torch.ops.higher_order.switch,
+            nested=True,
+        )
+        self.assertTrue(_is_safe_to_reorder(nested_pure))
+        nested_pure_with_constant = make(
+            lambda sub, s: sub.call_function(torch.ops.aten.sin.default, (s,)),
+            torch.ops.higher_order.switch,
+            nested=True,
+            with_constant=True,
+        )
+        self.assertTrue(_is_safe_to_reorder(nested_pure_with_constant))
+        nested_mutating = make(
+            lambda sub, s: sub.call_method("add_", (s, s)),
+            torch.ops.higher_order.switch,
+            nested=True,
+        )
+        self.assertFalse(_is_safe_to_reorder(nested_mutating))
+
+        checkpoint = make(
+            lambda sub, s: sub.call_function(torch.ops.aten.sin.default, (s,)),
+            torch.ops.higher_order.tag_activation_checkpoint,
+        )
+        cache: dict[fx.GraphModule, bool] = {}
+        self.assertTrue(_is_safe_to_reorder(checkpoint, subgraph_purity=cache))
+        owning_module = checkpoint.graph.owning_module
+        if owning_module is None:
+            raise AssertionError("checkpoint graph must have an owning module")
+        checkpoint_body = owning_module.get_submodule("branch")
+        checkpoint_body.meta["_checkpoint_context_fn"] = lambda: None
+        self.assertFalse(_is_safe_to_reorder(checkpoint, subgraph_purity=cache))
+        cond = checkpoint.graph.call_function(
+            torch.ops.higher_order.cond, checkpoint.args
+        )
+        self.assertTrue(_is_safe_to_reorder(cond, subgraph_purity=cache))
+
+        wrap_checkpoint = make(
+            lambda sub, s: sub.call_function(torch.ops.aten.sin.default, (s,)),
+            torch.ops.higher_order.wrap_activation_checkpoint,
+        )
+        self.assertTrue(_is_safe_to_reorder(wrap_checkpoint, subgraph_purity=cache))
+        owning_module = wrap_checkpoint.graph.owning_module
+        if owning_module is None:
+            raise AssertionError("checkpoint graph must have an owning module")
+        checkpoint_body = owning_module.get_submodule("branch")
+        checkpoint_body.meta["_checkpoint_context_fn"] = lambda: None
+        self.assertFalse(_is_safe_to_reorder(wrap_checkpoint, subgraph_purity=cache))
+
+        # Effects that do not live in a subgraph keep the HOP pinned even when
+        # every subgraph it does carry is pure.
+        not_allowlisted = make(
+            lambda sub, s: sub.call_function(torch.ops.aten.sin.default, (s,))
+        )
+        not_allowlisted.target = torch.ops.higher_order.auto_functionalized_v2
+        self.assertFalse(_is_safe_to_reorder(not_allowlisted))
+
+    @parametrize("consumer", ["dynamo", "export"])
+    def test_canonical_graph_hop_purity_cache(self, consumer):
+        from torch._dynamo.output_graph import _canonicalize_graph
+        from torch.export._trace import _ExportSafeToReorder
+        from torch.fx.passes import canonicalize
+
+        def make_hops(body):
+            root = torch.nn.Module()
+            root.body = body
+            graph = fx.Graph()
+            x = graph.placeholder("x")
+            attr = graph.get_attr("body")
+            hops = [
+                graph.call_function(torch.ops.higher_order.cond, (x, attr, attr, (x,)))
+                for _ in range(2)
+            ]
+            graph.output(tuple(hops))
+            return fx.GraphModule(root, graph), hops
+
+        leaf_graph = fx.Graph()
+        x = leaf_graph.placeholder("x")
+        leaf_node = leaf_graph.call_function(torch.ops.aten.sin.default, (x,))
+        output = leaf_graph.output((leaf_node,))
+        leaf = fx.GraphModule(torch.nn.Module(), leaf_graph)
+        inner, inner_hops = make_hops(leaf)
+        gm, outer_hops = make_hops(inner)
+        visits = defaultdict(int)
+        verdicts = {}
+        safe_to_reorder = canonicalize._is_safe_to_reorder
+
+        def counted(node, **kwargs):
+            visits[node] += 1
+            verdicts[node] = safe_to_reorder(node, **kwargs)
+            return verdicts[node]
+
+        def run_pass():
+            with patch.object(canonicalize, "_is_safe_to_reorder", counted):
+                if consumer == "dynamo":
+                    _canonicalize_graph(gm.graph)
+                else:
+                    predicate = _ExportSafeToReorder()
+                    for node in gm.graph.nodes:
+                        predicate(node)
+
+        run_pass()
+        self.assertEqual([verdicts[node] for node in outer_hops], [True, True])
+        self.assertEqual([visits[node] for node in inner_hops], [1, 1])
+        self.assertEqual(visits[leaf_node], 1)
+
+        with leaf_graph.inserting_before(output):
+            mutation = leaf_graph.call_method("add_", (x, 1))
+        visits.clear()
+        verdicts.clear()
+        run_pass()
+        self.assertEqual([verdicts[node] for node in outer_hops], [False, False])
+        self.assertEqual(visits[leaf_node], 1)
+        self.assertEqual(visits[mutation], 1)
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_canonical_graph_collectives_are_barriers(self):
+        from torch.distributed import _functional_collectives
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        self.assertIsNotNone(_functional_collectives)
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+
+        # Functional collectives are barriers (comm/compute overlap + Inductor's
+        # in-place collective reuse). Cover current and legacy namespaces in
+        # both the Dynamo packet and aten overload forms.
+        for namespace in (
+            torch.ops._c10d_functional,
+            torch.ops.c10d_functional,
+        ):
+            self.assertFalse(
+                _is_safe_to_reorder(
+                    graph.call_function(namespace.all_reduce.default, (x,))
+                )
+            )
+            collective_packet = graph.call_function(namespace.all_reduce, (x,))
+            collective_packet.meta["example_value"] = torch.randn(4)
+            self.assertFalse(_is_safe_to_reorder(collective_packet))
+        self.assertTrue(
+            _is_safe_to_reorder(graph.call_function(torch.ops.aten.add.Tensor, (x, x)))
+        )
+
+        # Every order-sensitive namespace, not just _c10d_functional. symm_mem
+        # carries sync primitives, so reordering across a wait breaks the sync
+        # contract; _dtensor carries collectives with the same overlap concern.
+        for op in (
+            torch.ops._c10d_functional_autograd.all_to_all_single.default,
+            torch.ops.symm_mem.one_shot_all_reduce.default,
+            torch.ops.symm_mem.nvshmem_wait_for_signal.default,
+            torch.ops._dtensor.shard_dim_alltoall.default,
+        ):
+            self.assertFalse(
+                _is_safe_to_reorder(graph.call_function(op, (x,))), op.name()
+            )
 
     @parametrize(
         "operation",

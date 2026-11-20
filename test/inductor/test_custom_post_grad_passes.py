@@ -182,6 +182,64 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             x = torch.randn(8, dtype=torch.float32)
             torch.testing.assert_close(torch.compile(f)(x), g(x))
 
+    def test_custom_joint_post_pass_names_are_recanonicalized(self):
+        from functools import partial
+
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._dynamo.backends.debugging import boxed_nop
+        from torch._functorch.partitioners import min_cut_rematerialization_partition
+        from torch._inductor.compile_fx import partition_fn as inductor_partition_fn
+
+        events = []
+
+        class ScrambleNames(CustomGraphPass):
+            def __call__(self, graph):
+                events.append("joint_custom_post_pass")
+                for ordinal, node in enumerate(
+                    node for node in graph.nodes if node.op != "placeholder"
+                ):
+                    node.name = f"late_joint_pass_{ordinal}"
+
+            def uuid(self):
+                return "scramble-joint-graph-names"
+
+        def raw_partition(gm, joint_inputs, **kwargs):
+            events.append("partitioner_fn_override")
+            names = [node.name for node in gm.graph.nodes if node.op != "placeholder"]
+            self.assertTrue(names)
+            self.assertTrue(all(name.startswith("late_joint_pass_") for name in names))
+            result = min_cut_rematerialization_partition(gm, joint_inputs, **kwargs)
+            self.assertFalse(
+                any(
+                    node.name.startswith("late_joint_pass_")
+                    for node in gm.graph.nodes
+                    if node.op != "placeholder"
+                )
+            )
+            return result
+
+        backend = aot_autograd(
+            fw_compiler=boxed_nop,
+            bw_compiler=boxed_nop,
+            partition_fn=partial(
+                inductor_partition_fn,
+                partitioner_fn_override=raw_partition,
+            ),
+        )
+
+        def fn(x):
+            return x.sin().cos().sum()
+
+        x = torch.randn(8, requires_grad=True)
+        with (
+            torch._dynamo.config.patch(canonicalize_output_graph_node_order=True),
+            torch._functorch.config.patch(_sync_decision_cross_ranks=True),
+            config.patch(joint_custom_post_pass=ScrambleNames()),
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(x).backward()
+
+        self.assertEqual(events, ["joint_custom_post_pass", "partitioner_fn_override"])
+
     def test_custom_pass_list_runs_in_order(self):
         def f(x):
             return (x.sin() + 1).relu()
