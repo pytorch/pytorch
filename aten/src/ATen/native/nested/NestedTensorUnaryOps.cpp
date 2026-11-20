@@ -7,6 +7,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
+#include <c10/util/irange.h>
 
 namespace at::native {
 
@@ -68,7 +69,7 @@ Tensor NestedTensor_where(const Tensor& condition, const Tensor& self, const Ten
   std::vector<Tensor> output_unbind = output.unbind();
 
   // Apply at::where operation on each triplet of condition, self, and other tensors
-  for (int64_t i = 0; i < ntensors; i++) {
+  for (const auto i : c10::irange(ntensors)) {
     at::where_out(
       output_unbind[i],
       condition_unbind[i],
@@ -99,7 +100,7 @@ Tensor& NestedTensor_where_out(const Tensor& condition, const Tensor& self, cons
   std::vector<Tensor> output_unbind = out.unbind();
 
   // Apply at::where operation on each triplet of condition, self, and other tensors
-  for (int64_t i = 0; i < ntensors; i++) {
+  for (const auto i : c10::irange(ntensors)) {
     at::where_out(
       output_unbind[i],
       condition_unbind[i],

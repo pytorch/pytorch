@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing_extensions import assert_never
+from typing import assert_never
 
 from torchgen.api import cpp
 from torchgen.api.types import (

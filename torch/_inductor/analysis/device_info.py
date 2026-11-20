@@ -282,6 +282,23 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_gb=48.0,
     ),
     # Source:
+    # @lint-ignore https://www.amd.com/en/products/graphics/workstations/radeon-pro/w7900.html
+    "AMD RADEON PRO W7900": DeviceInfo(
+        tops={
+            # RDNA3 runs fp64 at 1/32 of the fp32 rate quoted here
+            torch.float64: 1.92,
+            torch.float32: 61.3,
+            # TF32 is not specified; fall back to the FP32 throughput.
+            "torch.tf32": 61.3,
+            torch.bfloat16: 123.0,
+            torch.float16: 123.0,
+            # RDNA3 WMMA runs int8 at the fp16 rate
+            torch.int8: 123.0,
+        },
+        dram_bw_gbs=864.0,
+        dram_gb=48.0,
+    ),
+    # Source:
     # @lint-ignore https://www.amd.com/en/products/graphics/desktops/radeon/7000-series/amd-radeon-rx-7900xt.html
     "AMD RADEON RX 7900 XT": DeviceInfo(
         tops={
@@ -339,6 +356,63 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_gb=32.0,
     ),
     # Source:
+    # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/245796/
+    # intel-arc-pro-b65-graphics/specifications.html
+    "INTEL B65": DeviceInfo(
+        tops={
+            torch.float64: 6.14,
+            torch.float32: 12.28,
+            "torch.tf32": 98.5,
+            torch.bfloat16: 98.5,
+            torch.float16: 98.5,
+            torch.float8_e8m0fnu: 98.5,
+            torch.float8_e4m3fnuz: 98.5,
+            torch.float8_e5m2: 98.5,
+            torch.float8_e5m2fnuz: 98.5,
+            torch.int8: 197,
+        },
+        dram_bw_gbs=608.0,
+        dram_gb=32.0,
+    ),
+    # Source:
+    # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/243916/
+    # intel-arc-pro-b60-graphics/specifications.html
+    "INTEL B60": DeviceInfo(
+        tops={
+            torch.float64: 6.14,
+            torch.float32: 12.28,
+            "torch.tf32": 98.5,
+            torch.bfloat16: 98.5,
+            torch.float16: 98.5,
+            torch.float8_e8m0fnu: 98.5,
+            torch.float8_e4m3fnuz: 98.5,
+            torch.float8_e5m2: 98.5,
+            torch.float8_e5m2fnuz: 98.5,
+            torch.int8: 197,
+        },
+        dram_bw_gbs=456.0,
+        dram_gb=24.0,
+    ),
+    # Source:
+    # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/242615/
+    # intel-arc-pro-b50-graphics/specifications.html
+    "INTEL B50": DeviceInfo(
+        tops={
+            torch.float64: 5.33,
+            torch.float32: 10.65,
+            "torch.tf32": 85.0,
+            torch.bfloat16: 85.0,
+            torch.float16: 85.0,
+            torch.float8_e8m0fnu: 85.0,
+            torch.float8_e4m3fnuz: 85.0,
+            torch.float8_e5m2: 85.0,
+            torch.float8_e5m2fnuz: 85.0,
+            torch.int8: 170,
+        },
+        dram_bw_gbs=224.0,
+        dram_gb=16.0,
+    ),
+    # Source:
     # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/232876/\
     # intel-data-center-gpu-max-1100/specifications.html
     "Intel(R) Data Center GPU Max 1100": DeviceInfo(
@@ -354,15 +428,37 @@ _device_mapping: dict[str, DeviceInfo] = {
             # Matrix engine
             torch.float16: 355.5,
             torch.bfloat16: 355.5,
-            # not supported, fall back to float32 numbers
-            torch.float8_e8m0fnu: 22.2,
-            torch.float8_e4m3fnuz: 22.2,
-            torch.float8_e5m2: 22.2,
-            torch.float8_e5m2fnuz: 22.2,
+            # no native fp8, fp8 matmuls run at the fp16 rate
+            torch.float8_e8m0fnu: 355.5,
+            torch.float8_e4m3fnuz: 355.5,
+            torch.float8_e5m2: 355.5,
+            torch.float8_e5m2fnuz: 355.5,
             torch.int8: 711.1,
         },
         dram_bw_gbs=1228.8,
         dram_gb=48,
+    ),
+    # Source:
+    # @lint-ignore https://www.intel.com/content/www/us/en/ark/products/series/232874/
+    # intel-data-center-gpu-max-series.html
+    # The card has two tiles but a process normally uses one, so bandwidth and
+    # memory are per-tile (half the datasheet values). No native fp8 rate is
+    # listed; fp8 matmuls run at the fp16 rate.
+    "Intel(R) Data Center GPU Max 1550": DeviceInfo(
+        tops={
+            torch.float32: 26.2,
+            "torch.tf32": 26.2,
+            torch.float16: 419.43,
+            torch.bfloat16: 419.43,
+            torch.float8_e4m3fn: 419.43,
+            torch.float8_e4m3fnuz: 419.43,
+            torch.float8_e5m2: 419.43,
+            torch.float8_e5m2fnuz: 419.43,
+            torch.float8_e8m0fnu: 419.43,
+            torch.int8: 838.86,
+        },
+        dram_bw_gbs=1638.4,
+        dram_gb=64,
     ),
 }
 _device_mapping["AMD INSTINCT MI355X"] = _device_mapping["AMD MI355X"]
@@ -376,6 +472,10 @@ _device_mapping["AMD INSTINCT MI250X / MI250"] = _device_mapping["AMD MI250X"]
 _device_mapping["RADEON RX 7900 XT"] = _device_mapping["AMD RADEON RX 7900 XT"]
 _device_mapping["Intel(R) Arc(TM) B580 Graphics"] = _device_mapping["INTEL B580"]
 _device_mapping["Intel(R) Arc(TM) Pro B70 Graphics"] = _device_mapping["INTEL B70"]
+_device_mapping["Intel(R) Arc(TM) Pro B65 Graphics"] = _device_mapping["INTEL B65"]
+_device_mapping["Intel(R) Arc(TM) Pro B60 Graphics"] = _device_mapping["INTEL B60"]
+_device_mapping["Intel(R) Arc(TM) Pro B50 Graphics"] = _device_mapping["INTEL B50"]
+_device_mapping["NVIDIA GB300 Max-Q"] = _device_mapping["NVIDIA GB300"]
 
 # Enforce the upper-case-key invariant so entries cannot silently miss
 # `lookup_device_info` (which upper-cases the query before lookup).

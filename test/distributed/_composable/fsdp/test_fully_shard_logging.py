@@ -1,6 +1,7 @@
 # Owner(s): ["module: fsdp"]
 import functools
 import os
+import sys
 import unittest
 
 import torch.distributed as dist
@@ -30,6 +31,9 @@ class LoggingTests(LoggingTestCase):
         env["WORLD_SIZE"] = "1"
         env["MASTER_PORT"] = "34715"
         env["MASTER_ADDR"] = "localhost"
+        # The child process does not inherit sys.path entries added at startup,
+        # for example by a packaged test binary.
+        env["PYTHONPATH"] = os.pathsep.join(sys.path)
         _, stderr = self.run_process_no_exception(
             f"""\
 import logging

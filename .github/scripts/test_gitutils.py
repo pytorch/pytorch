@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 from unittest import main, SkipTest, TestCase
+from unittest.mock import call, MagicMock, patch
 
 from gitutils import (
     _shasum,
@@ -96,6 +97,41 @@ class TestGitRepo(TestCase):
         head_ref = "gh/clee2000/1/head"
         self._skip_if_ref_does_not_exist(head_ref)
         self.assertFalse(are_ghstack_branches_in_sync(self.repo, head_ref))
+
+
+@patch.object(GitRepo, "_run_git")
+class TestGitRepoPush(TestCase):
+    def setUp(self) -> None:
+        self.repo = GitRepo("/nonexistent")
+
+    def test_push_once_on_success(self, mock_run_git: MagicMock) -> None:
+        self.repo.push("main", dry_run=False)
+        mock_run_git.assert_called_once_with("push", "origin", "main")
+
+    def test_push_dry_run(self, mock_run_git: MagicMock) -> None:
+        self.repo.push("main", dry_run=True)
+        mock_run_git.assert_called_once_with("push", "--dry-run", "origin", "main")
+
+    def test_push_rebases_before_retry(self, mock_run_git: MagicMock) -> None:
+        mock_run_git.side_effect = [RuntimeError("rejected"), "", "", ""]
+        self.repo.push("main", dry_run=False)
+        self.assertEqual(
+            mock_run_git.call_args_list,
+            [
+                call("push", "origin", "main"),
+                call("fetch", "origin"),
+                call("rebase", "origin/main"),
+                call("push", "origin", "main"),
+            ],
+        )
+
+    def test_push_raises_after_last_attempt(self, mock_run_git: MagicMock) -> None:
+        errors = [RuntimeError(f"attempt {i} rejected") for i in range(3)]
+        mock_run_git.side_effect = [errors[0], "", "", errors[1], "", "", errors[2]]
+        with self.assertRaises(RuntimeError) as ctx:
+            self.repo.push("main", dry_run=False, retry=3)
+        self.assertIs(ctx.exception, errors[2])
+        self.assertEqual(mock_run_git.call_count, 7)
 
 
 if __name__ == "__main__":

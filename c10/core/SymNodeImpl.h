@@ -219,6 +219,10 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual bool has_hint() {
     TORCH_CHECK(false, "NYI");
   }
+  // The hint used for guarding decisions, if the node has one.
+  virtual std::optional<int64_t> guarding_hint() {
+    return std::nullopt;
+  }
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   }

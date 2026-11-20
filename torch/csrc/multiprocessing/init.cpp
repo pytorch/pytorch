@@ -20,7 +20,7 @@ namespace torch::multiprocessing {
 
 namespace {
 
-PyObject* multiprocessing_init(PyObject* _unused, PyObject* noargs) {
+PyObject* multiprocessing_init(PyObject* /*_unused*/, PyObject* /*noargs*/) {
   auto multiprocessing_module =
       THPObjectPtr(PyImport_ImportModule("torch.multiprocessing"));
   TORCH_CHECK_PYTHON(multiprocessing_module);
@@ -37,7 +37,7 @@ PyObject* multiprocessing_init(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_TRUE;
 }
 
-PyObject* set_thread_name(PyObject* _unused, PyObject* arg) {
+PyObject* set_thread_name(PyObject* /*_unused*/, PyObject* arg) {
   TORCH_CHECK(THPUtils_checkString(arg), "invalid argument to setDevice");
 
   auto name = THPUtils_unpackString(arg);
@@ -46,7 +46,7 @@ PyObject* set_thread_name(PyObject* _unused, PyObject* arg) {
   Py_RETURN_TRUE;
 }
 
-PyObject* get_thread_name(PyObject* _unused, PyObject* noargs) {
+PyObject* get_thread_name(PyObject* /*_unused*/, PyObject* /*noargs*/) {
   return THPUtils_packString(c10::getThreadName());
 }
 

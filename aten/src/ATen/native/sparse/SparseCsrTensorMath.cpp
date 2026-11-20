@@ -8,7 +8,6 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/mkl/Sparse.h>
 #include <ATen/native/BinaryOps.h>
-#include <ATen/native/CPUBlas.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SparseTensorUtils.h>
@@ -560,24 +559,38 @@ static void addmm_out_sparse_csr_native_cpu(
         int64_t r_stride0 = r.stride(0);
         int64_t r_stride1 = r.stride(1);
 
+        const int64_t nnz = values.size(0);
+        int64_t avg_nnz_per_row = 1;
+        if (dim_i != 0 && nnz != 0) {
+          avg_nnz_per_row = (nnz - 1) / dim_i + 1;
+        }
+        const int64_t work_per_row = avg_nnz_per_row * dim_k;
+        const int64_t grain = std::max<int64_t>(
+            1, internal::GRAIN_SIZE / std::max<int64_t>(1, work_per_row));
+        const bool contiguous_inner_loop = dense_stride1 == 1 && r_stride1 == 1;
+
         at::parallel_for(
             0,
             dim_i,
-            internal::GRAIN_SIZE,
+            grain,
             [&](int64_t irow_start, int64_t irow_end) {
               for (index_t h = irow_start; h < irow_end; ++h) {
                 index_t i_start = csr_accessor[h];
                 index_t i_end = csr_accessor[h + 1];
-                for (index_t i = i_start; i < i_end; i++) {
-                  scalar_t val = values_accessor[i];
+                scalar_t* r_row = r_ptr + h * r_stride0;
+                for (const auto i : c10::irange(i_start, i_end)) {
+                  scalar_t val = cast_alpha * values_accessor[i];
                   index_t col = col_indices_accessor[i];
-                  at::native::cpublas::axpy<scalar_t>(
-                      dim_k,
-                      cast_alpha * val,
-                      dense_ptr + col * dense_stride0,
-                      dense_stride1,
-                      r_ptr + h * r_stride0,
-                      r_stride1);
+                  const scalar_t* dense_row = dense_ptr + col * dense_stride0;
+                  if (contiguous_inner_loop) {
+                    for (int64_t j = 0; j < dim_k; j++) {
+                      r_row[j] += val * dense_row[j];
+                    }
+                  } else {
+                    for (int64_t j = 0; j < dim_k; j++) {
+                      r_row[j * r_stride1] += val * dense_row[j * dense_stride1];
+                    }
+                  }
                 }
               }
             });
@@ -593,6 +606,9 @@ Tensor& addmm_out_sparse_compressed_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
+  if (at::sparse_csr::has_noncontiguous_values(result)) {
+    return at::sparse_csr::run_on_contiguous_clone(result, [&](Tensor& r) { addmm_out_sparse_compressed_cpu(self, mat1, mat2, beta, alpha, r); });
+  }
   check_mm_shapes(mat1, mat2, "addmm");
 
   c10::MaybeOwned<at::Tensor> self_;
@@ -980,6 +996,10 @@ Tensor& add_out_sparse_compressed_cpu(
       return out;
     }
 
+    if (at::sparse_csr::has_noncontiguous_values(out)) {
+      return at::sparse_csr::run_on_contiguous_clone(out, [&](Tensor& r) { add_out_sparse_compressed_cpu(self, other, alpha, r); });
+    }
+
     // out is resized in place, so operate on clones of any input aliasing it.
     const Tensor self_ = sparse_compressed_members_alias(self, out) ? self.clone() : self;
     const Tensor other_ = sparse_compressed_members_alias(other, out) ? other.clone() : other;
@@ -1186,7 +1206,7 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
     index_t* row_map_ptr = row_map.data_ptr<index_t>();
     int64_t nnz = 0;
     new_crow_indices_ptr[0] = 0;
-    for(int64_t i=0; i<nrows; i++) {
+    for(const auto i : c10::irange(nrows)) {
       if (crow_indices_ptr[i] != crow_indices_ptr[i + 1]) {
         row_map_ptr[i] = nnz;
         nnz++;
@@ -1212,7 +1232,7 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
               i_end = crow_indices_ptr[h+1];
               if (i_start != i_end) {
                 acc_t res = static_cast<acc_t>(values_ptr[i_start]);
-                for (index_t i = i_start + 1; i < i_end; i++) {
+                for (const auto i : c10::irange(i_start + 1, i_end)) {
                   res = rop(res, static_cast<acc_t>(values_ptr[i]));
                 }
                 new_values_acc_ptr[row_map_ptr[h]] = res;
@@ -1261,7 +1281,7 @@ In [4]: %timeit torch.sum(t.values())
                                        rop.identity(),
                                        [&](int64_t i_start, int64_t i_end, scalar_t identity) {
                                          acc_t res = acc_t(identity);
-                                         for (int64_t i=i_start; i<i_end; i++) {
+                                         for (const auto i : c10::irange(i_start, i_end)) {
                                            acc_t val = acc_t(values_ptr[i]);
                                            res = rop(res, val);
                                          }

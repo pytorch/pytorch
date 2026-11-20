@@ -109,7 +109,7 @@ struct SingleElementType : public SharedType {
   }
 
   bool equals(const Type& rhs) const override {
-    if (auto rhs_ = rhs.cast<T>()) {
+    if (auto* rhs_ = rhs.castRaw<T>()) {
       return *getElementType() == *rhs_->getElementType();
     }
     return false;

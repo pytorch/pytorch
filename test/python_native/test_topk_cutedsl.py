@@ -283,6 +283,8 @@ class TestCuTeDSLTopK(TestCase):
         base = torch.randn(256, _test_n(64), device="cuda")
         x = base._lazy_clone()
         data_ptr = x.const_data_ptr()
+        if not torch._C._is_cow_tensor(x):
+            self.skipTest("allocator does not support COW sharing")
         self.assertTrue(torch._C._is_cow_tensor(x))
 
         self.assertFalse(cutedsl_impl._eligible(x, 100, -1, True, True))

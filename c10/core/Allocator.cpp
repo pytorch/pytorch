@@ -1,5 +1,6 @@
 #include <c10/core/Allocator.h>
 #include <array>
+#include <atomic>
 
 #include <c10/util/ThreadLocalDebugInfo.h>
 
@@ -57,7 +58,24 @@ at::Allocator* GetAllocator(const at::DeviceType& t) {
   return alloc;
 }
 
+namespace {
+// Count of live reporters; lets memoryProfilingEnabled() skip the
+// thread-local lookup when none are installed.
+std::atomic<int64_t> num_reporters{0};
+} // namespace
+
+MemoryReportingInfoBase::MemoryReportingInfoBase() {
+  num_reporters.fetch_add(1, std::memory_order_relaxed);
+}
+
+MemoryReportingInfoBase::~MemoryReportingInfoBase() {
+  num_reporters.fetch_sub(1, std::memory_order_relaxed);
+}
+
 bool memoryProfilingEnabled() {
+  if (num_reporters.load(std::memory_order_relaxed) == 0) {
+    return false;
+  }
   auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
       ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
   return reporter_ptr && reporter_ptr->memoryProfilingEnabled();

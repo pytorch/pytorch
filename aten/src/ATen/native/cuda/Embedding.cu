@@ -60,6 +60,11 @@ __global__ void embedding_backward_feature_kernel
 
   for(int batch_start = 0; batch_start < n; batch_start += blockDim.x*blockDim.y)
   {
+    // Warps still finishing the previous batch's last chunk read indices_batch
+    // to elect their match-group leader, so nobody may overwrite it until every
+    // warp is done with it.
+    __syncthreads();
+
     // Entire block cooperates to load a batch of 1024 indices to process
     int tid = threadIdx.x + threadIdx.y*blockDim.x;
     if(batch_start + tid < n)
@@ -400,7 +405,9 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
     const int64_t *num_unique_indices_ptr = num_unique_indices.const_data_ptr<int64_t>();
     dim3 grid = unique_indices.numel();
     dim3 block = num_threads();
-    int dim = self.stride(0);
+    // The kernel addresses rows and columns through self's strides; the row
+    // length is size(1), which differs from stride(0) for non-contiguous weights.
+    int64_t dim = self.size(1);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_renorm_cuda_", [&] {
       using accscalar_t = acc_type<scalar_t, true>;

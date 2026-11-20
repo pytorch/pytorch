@@ -5,9 +5,9 @@
 #include <torch/csrc/distributed/c10d/nccl2/WorkNCCL.hpp>
 
 #include <ATen/core/ivalue.h>
-#include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include <iterator>
 #include <thread>
@@ -18,10 +18,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
 
 namespace c10d::nccl2 {
-
-namespace {
-std::atomic<uint64_t> nextCompletionKey{1};
-} // namespace
 
 NCCLEventPool::NCCLEventPool(
     bool cacheEnabled,
@@ -108,6 +104,11 @@ void WorkNCCL::InputTensorShelf::append(InputTensorShelf& other) {
   other.tensors.clear();
 }
 
+void WorkNCCL::InputTensorShelf::appendCopy(InputTensorShelf& other) {
+  std::scoped_lock lock(mutex, other.mutex);
+  tensors.insert(tensors.end(), other.tensors.begin(), other.tensors.end());
+}
+
 void WorkNCCL::InputTensorShelf::clear() {
   std::lock_guard<std::mutex> lock(mutex);
   tensors.clear();
@@ -124,7 +125,6 @@ WorkNCCL::State::State(
           at::cuda::getStreamFromExternal(stream, comm->getDevice().index())),
       workStartTime(std::chrono::steady_clock::now()),
       timeout(timeout),
-      completionKey(nextCompletionKey.fetch_add(1, std::memory_order_relaxed)),
       timingEnabled(comm->collectivesTimingEnabled()),
       events(std::make_shared<Events>(comm->getEventPool(), timingEnabled)),
       durationStartEvents(events),
@@ -190,54 +190,55 @@ bool WorkNCCL::State::setTerminalStatus(WorkStatus terminal_status) {
       terminal_status == WorkStatus::TIMEDOUT ||
       terminal_status == WorkStatus::ERROR);
 
-  WorkResult result = WorkResult::SUCCESS;
-  {
-    std::lock_guard<std::mutex> lock(terminalStatusMutex);
-    WorkStatus current = status();
-    if (current == WorkStatus::COMPLETED || current == WorkStatus::TIMEDOUT ||
-        current == WorkStatus::ERROR) {
-      return false;
-    }
-
-    if (terminal_status == WorkStatus::TIMEDOUT) {
-      result = WorkResult::TIMEOUT;
-      workException = std::make_exception_ptr(C10_BUILD_ERROR(
-          DistBackendError,
-          "Watchdog caught collective operation timeout: NCCL operation "
-          "timed out"));
-    } else if (terminal_status == WorkStatus::ERROR) {
-      result = WorkResult::COMM_ERROR;
-      workException = std::make_exception_ptr(
-          C10_BUILD_ERROR(DistBackendError, "NCCL operation failed"));
-    }
-    workStatus.store(terminal_status, std::memory_order_release);
+  std::lock_guard<std::mutex> lock(terminalStatusMutex);
+  WorkStatus current = status();
+  if (current == WorkStatus::COMPLETED || current == WorkStatus::TIMEDOUT ||
+      current == WorkStatus::ERROR) {
+    return false;
   }
-  futureWorkResult->markCompleted(c10::IValue(static_cast<uint8_t>(result)));
+
+  if (terminal_status == WorkStatus::TIMEDOUT) {
+    workException = std::make_exception_ptr(C10_BUILD_ERROR(
+        DistBackendError,
+        "Watchdog caught collective operation timeout: NCCL operation "
+        "timed out"));
+  } else if (terminal_status == WorkStatus::ERROR) {
+    workException = std::make_exception_ptr(
+        C10_BUILD_ERROR(DistBackendError, "NCCL operation failed"));
+  }
+  workStatus.store(terminal_status, std::memory_order_release);
   return true;
 }
 
-void WorkNCCL::State::notifyCompletion() {
-  // Called once per work, by the queue that popped it as COMPLETED, and only
-  // for success -- a timed-out or failed work reports nothing, because a
-  // consumer that read that as "finished" would lose the very fact a
-  // post-mortem needs.
-  if (!comm->hasCompletionHooks()) {
+void WorkNCCL::State::releaseEphemeralTimeout() {
+  if (ownedEphemeralTimeout.count() > 0 &&
+      !ephemeralTimeoutReleased.exchange(true)) {
+    comm->releaseEphemeralTimeout(ownedEphemeralTimeout);
+  }
+}
+
+void WorkNCCL::State::publishResult() {
+  // Exactly once, by whichever of the watchdog and a caller of the Work's own
+  // status methods gets here first. The future's callbacks run inline and may
+  // take locks of their own, including the GIL, so callers hold no lock --
+  // except reconfigure, which holds reconfigure_mutex_ and revoke_mutex_.
+  if (resultPublished.exchange(true, std::memory_order_acq_rel)) {
     return;
   }
-  std::optional<float> duration;
-  if (timingEnabled) {
-    try {
-      // cudaEventElapsedTime on two events that have already been observed to
-      // complete: no synchronization, and no NCCL call, so it is legal on the
-      // watchdog thread. Stock ProcessGroupNCCL's watchdog calls getDuration()
-      // from its own completion hook for the same reason.
-      duration = getDuration();
-    } catch (const std::exception& e) {
-      TC_LOG(WARNING, comm)
-          << "Cannot measure collective duration: " << e.what();
-    }
+  WorkResult result = WorkResult::SUCCESS;
+  switch (status()) {
+    case WorkStatus::COMPLETED:
+      break;
+    case WorkStatus::TIMEDOUT:
+      result = WorkResult::TIMEOUT;
+      break;
+    case WorkStatus::ERROR:
+      result = WorkResult::COMM_ERROR;
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "publishResult on a work still in flight");
   }
-  comm->runCompletionHooks(completionKey, duration);
+  futureWorkResult->markCompleted(c10::IValue(static_cast<uint8_t>(result)));
 }
 
 WorkNCCL::WorkStatus WorkNCCL::status() const {
@@ -261,13 +262,33 @@ std::chrono::milliseconds WorkNCCL::getTimeout() const {
   return state_->timeout;
 }
 
+void WorkNCCL::setDurationStart(const WorkNCCL& first) {
+  std::scoped_lock lock(state_->durationMutex, first.state_->durationMutex);
+  state_->durationStartEvents = first.state_->durationStartEvents;
+}
+
 void WorkNCCL::setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children) {
   if (!children.empty()) {
-    std::lock_guard<std::mutex> lock(state_->durationMutex);
-    state_->durationStartEvents = children.front()->state_->events;
+    setDurationStart(*children.front());
   }
   for (const auto& child : children) {
     inputTensors_->append(*child->inputTensors_);
+  }
+}
+
+void WorkNCCL::retainInputs(
+    const std::vector<c10::intrusive_ptr<WorkNCCL>>& works) {
+  for (const auto& work : works) {
+    inputTensors_->appendCopy(*work->inputTensors_);
+  }
+}
+
+void WorkNCCL::waitFor(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works) {
+  for (const auto& work : works) {
+    if (work->state_->stream == state_->stream) {
+      continue;
+    }
+    work->state_->events->end->block(state_->stream);
   }
 }
 
@@ -285,7 +306,12 @@ void WorkNCCL::setHostBlocking(bool host_blocking) {
 
 WorkNCCL::WorkStatus WorkNCCL::checkStatus(
     std::optional<std::chrono::milliseconds> timeout) {
-  return state_->checkStatus(timeout);
+  WorkStatus current = state_->checkStatus(timeout);
+  if (current == WorkStatus::COMPLETED || current == WorkStatus::ERROR ||
+      current == WorkStatus::TIMEDOUT) {
+    state_->publishResult();
+  }
+  return current;
 }
 
 WorkNCCL::WorkStatus WorkNCCL::State::checkStatus(
@@ -326,10 +352,8 @@ WorkNCCL::WorkStatus WorkNCCL::State::checkStatus(
   if (status() == WorkStatus::INPROGRESS) {
     try {
       if (events->end->query()) {
-        if (setTerminalStatus(WorkStatus::COMPLETED) &&
-            ownedEphemeralTimeout.count() > 0 &&
-            !ephemeralTimeoutReleased.exchange(true)) {
-          comm->releaseEphemeralTimeout(ownedEphemeralTimeout);
+        if (setTerminalStatus(WorkStatus::COMPLETED)) {
+          releaseEphemeralTimeout();
         }
         return status();
       }
@@ -394,6 +418,9 @@ void WorkNCCL::synchronizeInternal() {
   // clear and both ranks spin forever). Skip while the stream is capturing a
   // CUDA graph: cudaStreamSynchronize is illegal during capture and the
   // captured work is replayed on-device where a host sync is meaningless.
+  // current_stream may be the null stream, which the CUDA runtime resolves
+  // against the current device; guard so we sync the comm's device.
+  c10::cuda::CUDAGuard device_guard(state_->comm->getDevice());
   if (state_->hostBlocking && !state_->blockingWait &&
       !c10::cuda::isStreamCapturingMayInitCtx(current_stream)) {
     C10_CUDA_CHECK(cudaStreamSynchronize(current_stream));
@@ -482,10 +509,6 @@ uint64_t WorkNCCL::getSequencenumber() const {
   return state_->seq;
 }
 
-uint64_t WorkNCCL::getCompletionKey() const {
-  return state_->completionKey;
-}
-
 c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
   if (future_) {
     return future_;
@@ -501,16 +524,21 @@ c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
   future_ = c10::make_intrusive<c10::ivalue::Future>(
       c10::ListType::create(c10::TensorType::get()), devices);
 
-  // Order the current stream after the collective before completing the future
-  // so consumers observing the future see correct results.
-  synchronize();
-
-  if (!outputs_.empty() && !devices.empty()) {
-    c10::OptionalDeviceGuard guard(outputs_[0].device());
+  // Without a device the future records no CUDA event, so order the current
+  // stream here instead (this includes barriers, which have no outputs).
+  if (devices.empty()) {
+    synchronize();
     future_->markCompleted(c10::IValue(outputs_));
-  } else {
-    future_->markCompleted(c10::IValue(outputs_));
+    return future_;
   }
+
+  // Complete on the stream that last wrote the outputs (the collective's
+  // stream unless the backend copied them on another), so the future's events
+  // come after those writes: consumers are ordered after them when they wait
+  // on the future, and the caller's stream is not blocked here (DDP calls
+  // getFuture() right after launching each bucket's allreduce).
+  at::cuda::CUDAStreamGuard guard(outputsStream_.value_or(state_->stream));
+  future_->markCompleted(c10::IValue(outputs_));
   return future_;
 }
 

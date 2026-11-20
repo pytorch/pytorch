@@ -83,7 +83,7 @@ class M(torch.nn.Module):
 
         z = torch.cat([z, z])
 
-        torch._check_is_size(a)
+        torch._check(a >= 0)
         torch._check(a < z.shape[0])
 
         return z[:a]

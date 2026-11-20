@@ -1655,7 +1655,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     const int64_t* bs_ptr = batch_sizes.const_data_ptr<int64_t>();
     int64_t first_batch = bs_ptr[0];
     bool uniform = true;
-    for (int64_t i = 1; i < batch_sizes.size(0); i++) {
+    for (const auto i : c10::irange(1, batch_sizes.size(0))) {
       if (bs_ptr[i] != first_batch) {
         uniform = false;
         break;
