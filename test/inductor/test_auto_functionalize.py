@@ -14,7 +14,6 @@ from torch import Tensor
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import try_use_slice
-from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     HardwareClassification,
@@ -2038,6 +2037,8 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
         Dtype views of graph inputs should mutate without allocating a clone.
         Slice views and intermediate tensors must retain their expected values.
         """
+        from torch._inductor.utils import run_and_get_code
+
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
                 "mylib::mutate_inplace",
