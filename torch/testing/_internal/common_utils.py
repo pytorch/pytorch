@@ -6471,8 +6471,13 @@ def find_library_location(lib_name: str) -> Path:
     path = torch_root / 'lib' / lib_name
     if os.path.exists(path):
         return path
-    torch_root = Path(__file__).resolve().parents[2]
-    path = torch_root.parent / 'build' / 'lib' / lib_name
+    build_dir = Path(__file__).resolve().parents[3] / 'build'
+    if IS_WINDOWS:
+        # CMake treats Windows DLLs as runtime artifacts and writes them to build/bin.
+        path = build_dir / 'bin' / lib_name
+        if path.is_file():
+            return path
+    path = build_dir / 'lib' / lib_name
     if os.path.exists(path):
         return path
     raise FileNotFoundError(f"Could not find library '{lib_name}' in installed or build paths")
