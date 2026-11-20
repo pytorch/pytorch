@@ -507,13 +507,17 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     }
 
     // Shell dtypes (e.g. float4_e2m1fn_x2) have no value conversions. CPU rejects
-    // promoting to or from one when it creates the temporaries below through
-    // copy_; check it here so every device (and meta) rejects the same casts.
-    if (config.promote_inputs_to_common_dtype_ && !op.is_output && op.current_dtype != common_dtype_) {
-      at::native::check_shell_dtype_cast(op.current_dtype, common_dtype_);
-    }
-    if (config.cast_common_dtype_to_outputs_ && op.is_output && op.current_dtype != common_dtype_) {
-      at::native::check_shell_dtype_cast(common_dtype_, op.current_dtype);
+    // converting an input to the common dtype, or the common dtype to an output,
+    // when it creates the temporaries below through copy_; other devices convert
+    // inside their kernels, so check here to make every device (and meta) reject
+    // the same casts.
+    const bool converted = op.is_output ? config.cast_common_dtype_to_outputs_
+                                        : config.promote_inputs_to_common_dtype_;
+    if (converted && op.current_dtype != common_dtype_) {
+      // Direction only affects the error message
+      at::native::check_shell_dtype_cast(
+          op.is_output ? common_dtype_ : op.current_dtype,
+          op.is_output ? op.current_dtype : common_dtype_);
     }
 
     // Creates temporaries for CPU operations, if needed and requested
