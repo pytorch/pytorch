@@ -34,6 +34,8 @@ struct TLSConfig {
   std::string ca;
   std::string psk; // Secret key value, never a filename or diagnostic argument.
   bool fromEnv = false;
+  std::string peerCertOid;
+  std::string peerCertValue;
 
   bool enabled() const {
     return !cert.empty() || !key.empty() || !ca.empty() || !psk.empty();
@@ -41,7 +43,8 @@ struct TLSConfig {
 
   bool sameSettings(const TLSConfig& other) const {
     return cert == other.cert && key == other.key && ca == other.ca &&
-        psk == other.psk;
+        psk == other.psk && peerCertOid == other.peerCertOid &&
+        peerCertValue == other.peerCertValue;
   }
 };
 
@@ -76,10 +79,15 @@ class TLSContext {
     return psk_;
   }
 
+  // Called from OpenSSL after normal chain verification of the leaf.
+  bool verifyPeerCertificate(void* cert) const;
+
  private:
   void* ctx_;
   bool isServer_;
   std::string psk_;
+  void* peerCertOid_ = nullptr;
+  std::string peerCertValue_;
 };
 
 // A TLS connection over memory buffers. Ciphertext received from the peer is
