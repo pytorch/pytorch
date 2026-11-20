@@ -1604,6 +1604,20 @@ class LocalGeneratorObjectVariable(VariableTracker):
         # exits without yielding another value
         return self.gen_send_ex(tx, args[0], False)
 
+    def gen_close_iter(
+        self, tx: "InstructionTranslatorBase", yf: VariableTracker
+    ) -> None:
+        # https://github.com/python/cpython/blob/3.13/Objects/genobject.c (gen_close_iter)
+        # Only call yf.close() if it exists; e.g. tuple_iterator has no close().
+        if isinstance(yf, LocalGeneratorObjectVariable):
+            yf.call_method(tx, "close", [], {})
+            return
+        from .object_protocol import generic_getattr
+
+        meth = generic_getattr(tx, yf, "close", default=None)
+        if meth is not None:
+            meth.call_function(tx, [], {})
+
     def gen_close(
         self,
         tx: "InstructionTranslatorBase",
@@ -1636,7 +1650,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         if yf:
             with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
                 try:
-                    yf.call_method(tx, "close", [], {})
+                    self.gen_close_iter(tx, yf)
                 except ObservedException:
                     err = True
 
@@ -1705,9 +1719,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # CPython has an extra flag for handling async generators
             if pyerr_given_exception_match(arg, GeneratorExit):
                 try:
-                    # CPython uses gen_close_iter here
                     with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
-                        yf.call_method(tx, "close", [], {})
+                        self.gen_close_iter(tx, yf)
                 except ObservedException:
                     pass
                 return throw_here()

@@ -291,77 +291,90 @@ class TritonBundler:
 
         with dynamo_timed(key="TritonBundler.collect", log_pt2_compile_event=True):
             entries = cls._entries
-            if entries is not None:
-                # Only bundle winning autotuning configs. If _winners is
-                # non-empty, skip entries whose kernel_hash is not a winner.
-                # When _winners is empty (single-config kernels, or no
-                # autotuning ran), bundle everything.
-                winners = cls._winners
-                result: list[TritonKernelArtifacts] = []
-                kernel_names: list[str] = []
-                for entry in entries:
-                    if winners and entry.kernel_hash not in winners:
-                        log.debug("Skipping non-winning kernel %s", entry.kernel_hash)
-                        continue
-                    artifacts: list[TritonKernelArtifact] = []
-                    path = os.path.join(entry.directory, entry.kernel_hash)
-                    if not os.path.exists(path):
-                        continue
-                    for filename in os.listdir(path):
-                        filepath = os.path.join(path, filename)
-                        try:
-                            if not os.path.isfile(filepath):
-                                raise AssertionError(
-                                    f"expected a regular file, got {filepath}"
-                                )
-                            with open(filepath, "rb") as file:
-                                payload = file.read()
-                                if filepath.endswith(".json"):
-                                    # Make sure there's no sentinel value
-                                    if TritonBundler._REPLACE_BYTES in payload:
-                                        log.warning(
-                                            "Bundle contains illegal %s, payload: %s",
-                                            TritonBundler._REPLACE_BYTES,
-                                            payload,
-                                        )
-                                        raise AssertionError(
-                                            "Bundle contains illegal bytes"
-                                        )
-                                    # Remove the path from payload
-                                    payload = payload.replace(
-                                        str.encode(path), TritonBundler._REPLACE_BYTES
-                                    )
-                                artifacts.append(
-                                    TritonKernelArtifact(filename, payload)
-                                )
-                            counters["inductor"]["triton_bundler_save_kernel"] += 1
-                        except Exception:
-                            log.debug("failed to collect triton kernel", exc_info=True)
-                        extension = os.path.splitext(filename)[1]
-                        if extension in GPU_KERNEL_BIN_EXTS.values():
-                            # Each kernel has bunch of files like .cubin(for cuda), .zebin(for xpu), .json, .ttir
-                            # Just append one of them without the extension
-                            kernel_names.append(Path(filename).stem)
-                    if artifacts:
-                        result.append(
-                            TritonKernelArtifacts(
-                                entry.kernel_hash,
-                                entry.device,
-                                artifacts,
-                            )
+            if entries is None:
+                return TritonBundle([], []), None
+            # Only bundle winning autotuning configs. If _winners is
+            # non-empty, skip entries whose kernel_hash is not a winner.
+            # When _winners is empty (single-config kernels, or no
+            # autotuning ran), bundle everything.
+            winners = cls._winners
+            result: list[TritonKernelArtifacts] = []
+            kernel_names: list[str] = []
+            for entry in entries:
+                if winners and entry.kernel_hash not in winners:
+                    log.debug("Skipping non-winning kernel %s", entry.kernel_hash)
+                    continue
+                path = os.path.join(entry.directory, entry.kernel_hash)
+                if not os.path.exists(path):
+                    continue
+                if artifacts := cls._collect_kernel_artifacts(path, kernel_names):
+                    result.append(
+                        TritonKernelArtifacts(
+                            entry.kernel_hash, entry.device, artifacts
                         )
-                if config.use_static_triton_launcher:
-                    static_autotuners, static_kernel_names = (
-                        cls.collect_static_autotuners()
                     )
-                else:
-                    static_autotuners = []
-                    static_kernel_names = []
-                cls.end_compile()
-                return TritonBundle(result, static_autotuners), TritonBundlerMetadata(
-                    kernel_names, static_kernel_names
-                )
-            return TritonBundle([], []), None
+            if config.use_static_triton_launcher:
+                static_autotuners, static_kernel_names = cls.collect_static_autotuners()
+            else:
+                static_autotuners = []
+                static_kernel_names = []
+            cls.end_compile()
+            return TritonBundle(result, static_autotuners), TritonBundlerMetadata(
+                kernel_names, static_kernel_names
+            )
+
+    @staticmethod
+    def _collect_kernel_artifacts(
+        path: str, kernel_names: list[str]
+    ) -> list[TritonKernelArtifact]:
+        """
+        Read every file in one kernel's cache directory, replacing the directory
+        path inside .json metadata with _REPLACE_BYTES. Appends the name of each
+        kernel binary found to kernel_names.
+        """
+        artifacts: list[TritonKernelArtifact] = []
+        for filename in os.listdir(path):
+            filepath = os.path.join(path, filename)
+            try:
+                if not os.path.isfile(filepath):
+                    raise AssertionError(f"expected a regular file, got {filepath}")
+                with open(filepath, "rb") as file:
+                    payload = file.read()
+                    if filepath.endswith(".json"):
+                        # Make sure there's no sentinel value
+                        if TritonBundler._REPLACE_BYTES in payload:
+                            log.warning(
+                                "Bundle contains illegal %s, payload: %s",
+                                TritonBundler._REPLACE_BYTES,
+                                payload,
+                            )
+                            raise AssertionError("Bundle contains illegal bytes")
+                        # Remove the path from payload
+                        payload = payload.replace(
+                            str.encode(path), TritonBundler._REPLACE_BYTES
+                        )
+                    artifacts.append(TritonKernelArtifact(filename, payload))
+                counters["inductor"]["triton_bundler_save_kernel"] += 1
+            except Exception:
+                log.debug("failed to collect triton kernel", exc_info=True)
+            extension = os.path.splitext(filename)[1]
+            if extension in GPU_KERNEL_BIN_EXTS.values():
+                # Each kernel has bunch of files like .cubin(for cuda), .zebin(for xpu), .json, .ttir
+                # Just append one of them without the extension
+                kernel_names.append(Path(filename).stem)
+        return artifacts
+
+    @staticmethod
+    def _payload_for_directory(artifact: TritonKernelArtifact, directory: str) -> bytes:
+        """
+        The artifact's contents as they should appear on disk in directory,
+        undoing collect()'s path replacement in .json metadata.
+        """
+        if artifact.filename.endswith(".json"):
+            return artifact.payload.replace(
+                TritonBundler._REPLACE_BYTES, str.encode(directory)
+            )
+        return artifact.payload
 
     @staticmethod
     def _check_existing_kernel(
@@ -381,11 +394,7 @@ class TritonBundler:
 
         with FileLock(directory + ".lock") if _IS_WINDOWS else nullcontext():
             for artifact in artifacts.artifacts:
-                payload = artifact.payload
-                if artifact.filename.endswith(".json"):
-                    payload = payload.replace(
-                        TritonBundler._REPLACE_BYTES, str.encode(directory)
-                    )
+                payload = TritonBundler._payload_for_directory(artifact, directory)
                 path = Path(directory) / artifact.filename
                 if not path.is_file() or path.read_bytes() != payload:
                     raise PrecompileError(
@@ -416,80 +425,8 @@ class TritonBundler:
             key="TritonBundler.read_and_emit", log_pt2_compile_event=True
         ):
             kernel_names: list[str] = []
-
             for artifacts in bundle.kernel_artifacts:
-                device = artifacts.device
-                if device is None:
-                    extensions = OrderedSet(
-                        os.path.splitext(artifact.filename)[1]
-                        for artifact in artifacts.artifacts
-                    )
-                    device_type = next(
-                        (
-                            t
-                            for t, ext in GPU_KERNEL_BIN_EXTS.items()
-                            if ext in extensions
-                        ),
-                        None,
-                    )
-                    if device_type is not None:
-                        from .runtime.triton_heuristics import _resolve_load_device
-
-                        # Match the directory CachingAutotuner resolves for a
-                        # rank-agnostic (compile_on_one_rank) GPU kernel.
-                        resolved = _resolve_load_device(None, device_type)
-                        if resolved is None:
-                            raise AssertionError("a GPU device resolves to an index")
-                        device = resolved
-                basedir = triton_cache_dir(device)
-                directory = os.path.join(basedir, artifacts.kernel_hash)
-
-                if os.path.exists(directory) and len(os.listdir(directory)) != 0:
-                    TritonBundler._check_existing_kernel(directory, artifacts)
-                    # If directory already exists, we bail out and leave
-                    # local disk to take care of caching
-                    log.debug(
-                        "Bailing out TritonBundler.read_and_emit, %s is non empty",
-                        directory,
-                    )
-                    continue
-
-                Path(basedir).mkdir(parents=True, exist_ok=True)
-
-                # Random ID to avoid any collisions
-                rnd_id = str(uuid.uuid4())
-                tmp_dir = os.path.join(basedir, f"tmp.{rnd_id}")
-                os.makedirs(tmp_dir)
-
-                for artifact in artifacts.artifacts:
-                    filepath = os.path.join(tmp_dir, artifact.filename)
-                    with open(filepath, "wb") as file:
-                        payload = artifact.payload
-                        if artifact.filename.endswith(".json"):
-                            payload = payload.replace(
-                                TritonBundler._REPLACE_BYTES, str.encode(directory)
-                            )
-                        file.write(payload)
-                    counters["inductor"]["triton_bundler_read_and_emit_kernel"] += 1
-                    extension = os.path.splitext(artifact.filename)[1]
-                    if extension in GPU_KERNEL_BIN_EXTS.values():
-                        # Each kernel has bunch of files like .cubin(for cuda), zebin(for xpu), .json, .ttir
-                        # Just append one of them without the extension
-                        kernel_names.append(Path(artifact.filename).stem)
-
-                if _IS_WINDOWS:
-                    with FileLock(directory + ".lock"):
-                        if os.path.exists(directory):
-                            shutil.rmtree(directory)
-                        os.replace(tmp_dir, directory)
-                else:
-                    # Atomic on POSIX systems
-                    try:
-                        os.replace(tmp_dir, directory)
-                    except OSError:
-                        log.warning("Directory %s is not empty - skipping!", tmp_dir)
-                        shutil.rmtree(tmp_dir, ignore_errors=True)
-                        TritonBundler._check_existing_kernel(directory, artifacts)
+                TritonBundler._emit_kernel_artifacts(artifacts, kernel_names)
 
             if config.use_static_triton_launcher:
                 static_kernel_names = TritonBundler.load_autotuners(
@@ -498,3 +435,85 @@ class TritonBundler:
             else:
                 static_kernel_names = []
             return TritonBundlerMetadata(kernel_names, static_kernel_names)
+
+    @staticmethod
+    def _resolve_device(artifacts: TritonKernelArtifacts) -> int:
+        """
+        A kernel bundled without a device index is rank-agnostic
+        (compile_on_one_rank); infer its device type from the binary extension
+        and resolve the local index for it.
+        """
+        device = artifacts.device
+        if device is None:
+            extensions = OrderedSet(
+                os.path.splitext(artifact.filename)[1]
+                for artifact in artifacts.artifacts
+            )
+            device_type = next(
+                (t for t, ext in GPU_KERNEL_BIN_EXTS.items() if ext in extensions),
+                None,
+            )
+            if device_type is not None:
+                from .runtime.triton_heuristics import _resolve_load_device
+
+                # Match the directory CachingAutotuner resolves for a
+                # rank-agnostic (compile_on_one_rank) GPU kernel.
+                resolved = _resolve_load_device(None, device_type)
+                if resolved is None:
+                    raise AssertionError("a GPU device resolves to an index")
+                device = resolved
+        return device
+
+    @staticmethod
+    def _emit_kernel_artifacts(
+        artifacts: TritonKernelArtifacts, kernel_names: list[str]
+    ) -> None:
+        """
+        Write one kernel's artifacts into the Triton cache directory, unless that
+        directory is already populated. Appends the name of each kernel binary
+        written to kernel_names.
+        """
+        basedir = triton_cache_dir(TritonBundler._resolve_device(artifacts))
+        directory = os.path.join(basedir, artifacts.kernel_hash)
+
+        if os.path.exists(directory) and len(os.listdir(directory)) != 0:
+            TritonBundler._check_existing_kernel(directory, artifacts)
+            # If directory already exists, we bail out and leave
+            # local disk to take care of caching
+            log.debug(
+                "Bailing out TritonBundler.read_and_emit, %s is non empty",
+                directory,
+            )
+            return
+
+        Path(basedir).mkdir(parents=True, exist_ok=True)
+
+        # Random ID to avoid any collisions
+        rnd_id = str(uuid.uuid4())
+        tmp_dir = os.path.join(basedir, f"tmp.{rnd_id}")
+        os.makedirs(tmp_dir)
+
+        for artifact in artifacts.artifacts:
+            filepath = os.path.join(tmp_dir, artifact.filename)
+            with open(filepath, "wb") as file:
+                file.write(TritonBundler._payload_for_directory(artifact, directory))
+            counters["inductor"]["triton_bundler_read_and_emit_kernel"] += 1
+            extension = os.path.splitext(artifact.filename)[1]
+            if extension in GPU_KERNEL_BIN_EXTS.values():
+                # Each kernel has bunch of files like .cubin(for cuda), zebin(for xpu), .json, .ttir
+                # Just append one of them without the extension
+                kernel_names.append(Path(artifact.filename).stem)
+
+        if _IS_WINDOWS:
+            with FileLock(directory + ".lock"):
+                if os.path.exists(directory):
+                    shutil.rmtree(directory)
+                os.replace(tmp_dir, directory)
+        else:
+            # Atomic on POSIX systems
+            try:
+                os.replace(tmp_dir, directory)
+            except OSError:
+                log.warning("Directory %s is not empty - skipping!", tmp_dir)
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                TritonBundler._check_existing_kernel(directory, artifacts)
