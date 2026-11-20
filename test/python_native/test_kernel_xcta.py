@@ -7,6 +7,7 @@ from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -150,6 +151,7 @@ class TestKernelXcta(TestCase):
         want = torch.var_mean(x.double(), dim=1, correction=0)
         self.assertEqual(res, tuple(w.float() for w in want), atol=1e-4, rtol=1e-4)
 
+    @largeTensorTest("3GB", device="cuda")
     def test_b200_welford_subrow_target_follows_rows(self):
         """Take the sub-row target from select_xcta_config: at B200's 256 MiB fp16
         Welford anchor, one row splits into longer sub-rows than each of two rows."""
