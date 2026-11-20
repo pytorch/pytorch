@@ -10,6 +10,7 @@
 #include <torch/headeronly/core/Layout.h>
 #include <torch/headeronly/core/MemoryFormat.h>
 #include <torch/headeronly/core/ScalarType.h>
+#include <torch/headeronly/core/TransposeType.h>
 #include <torch/headeronly/core/enum_tag.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/Deprecated.h>
@@ -212,6 +213,31 @@ struct FromImpl<DeviceType> {
     }
   }
 };
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+// Translate the extension's TransposeType to the runtime's encoding.
+using torch::headeronly::TransposeType;
+template <>
+struct FromImpl<TransposeType> {
+  static StableIValue call(
+      TransposeType val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    switch (val) {
+      case TransposeType::NoTranspose:
+        return torch::stable::detail::from(
+            torch_transpose_type_no_transpose());
+      case TransposeType::Transpose:
+        return torch::stable::detail::from(torch_transpose_type_transpose());
+      case TransposeType::ConjTranspose:
+        return torch::stable::detail::from(
+            torch_transpose_type_conj_transpose());
+      default:
+        STD_TORCH_CHECK(false, "Unsupported TransposeType value");
+    }
+  }
+};
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 // Specialization for std::nullopt_t => StableIValue
 template <>
