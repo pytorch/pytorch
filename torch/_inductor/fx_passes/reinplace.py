@@ -579,11 +579,7 @@ def reinplace_inplaceable_ops_core(
         raise ValueError("reinplacement updater must own the supplied graph")
 
     copy_args_to_copy_nodes = {}
-    # maps argument to the first copy_ node that mutates it.
-    copy_nodes = {}
-    # maps (view_arg, inplaceable_op_node) to copy_ nodes that copy a view of
-    # the op result back into the graph input that view_arg aliases.
-    copy_args_to_copy_nodes_via_views = {}
+    copy_nodes: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = defaultdict(OrderedSet)
     mutated_inputs = OrderedSet[Any]()
     storage_to_nodes = defaultdict(OrderedSet)
     node_to_storage = {}
@@ -616,32 +612,19 @@ def reinplace_inplaceable_ops_core(
                 or node_order[node] < node_order[previous]
             ):
                 copy_args_to_copy_nodes[(dst, src)] = node
-            previous = copy_nodes.get(dst)
-            if (
-                previous is None
-                or previous._erased
-                or node_order[node] < node_order[previous]
-            ):
-                copy_nodes[dst] = node
+            copy_nodes[dst].add(node)
 
             mutated_inputs.add(node.args[0])
 
-            src_base = _get_view_base(src)
-            if src_base is not src and isinstance(src_base.target, Callable):
-                inplaceable_op = inplaceable_ops.get(src_base.target)
-                if inplaceable_op is not None:
-                    for mutated_arg_idx in inplaceable_op.mutated_args:
-                        mutated_arg = src_base.args[mutated_arg_idx]
-                        if (
-                            isinstance(mutated_arg, torch.fx.Node)
-                            and _get_view_base(mutated_arg) is dst
-                            and _is_layout_preserving_view_copy_back(
-                                dst, src, mutated_arg, src_base
-                            )
-                        ):
-                            copy_args_to_copy_nodes_via_views[
-                                (mutated_arg, src_base)
-                            ] = node
+    def copy_nodes_after(node, mutated_arg):
+        base = _get_view_base(mutated_arg)
+        return (
+            copy_node
+            for copy_node in copy_nodes.get(base, ())
+            if not copy_node._erased
+            and copy_node.args[0] is base
+            and node_order[copy_node] > node_order[node]
+        )
 
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
@@ -845,23 +828,11 @@ def reinplace_inplaceable_ops_core(
                     return False
 
         if mutated_arg.op in ("placeholder", "get_attr"):
-            # Get the first copy_ node that mutates the mutated_arg.
-            copy_node = copy_nodes.get(mutated_arg)
-            if copy_node is not None and (
-                copy_node._erased or node_order[copy_node] <= node_order[node]
-            ):
-                copy_node = min(
-                    (
-                        user
-                        for user in mutated_arg.users
-                        if user.target is aten.copy_.default
-                        and user.args[0] is mutated_arg
-                        and node_order[user] > node_order[node]
-                    ),
-                    key=node_order.__getitem__,
-                    default=None,
-                )
-                copy_nodes[mutated_arg] = copy_node
+            copy_node = min(
+                copy_nodes_after(node, mutated_arg),
+                key=node_order.__getitem__,
+                default=None,
+            )
             if copy_node is None:
                 # There is no copy_ back to the candidate mutated_arg (which is a graph input).
                 # Therefore the semantics of the program are that it does not mutate
@@ -876,7 +847,7 @@ def reinplace_inplaceable_ops_core(
         elif any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
             # If mutated_arg is a view of a graph input, we can only reinplace
             # when a later copy_ writes this op's result back to that input.
-            copy_node = copy_args_to_copy_nodes_via_views.get((mutated_arg, node))
+            copy_node = copy_node_for_reinplaced_arg(node, mutated_arg)
             if copy_node is None:
                 return False
 
@@ -908,20 +879,21 @@ def reinplace_inplaceable_ops_core(
         copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
         if copy_node is not None and copy_node._erased:
             copy_node = None
-        if copy_node is None:
-            copy_node = copy_args_to_copy_nodes_via_views.get((mutated_arg, node))
-            if copy_node is not None:
-                copy_dst = copy_node.args[0]
-                copy_src = copy_node.args[1]
-                if not (
-                    isinstance(copy_dst, torch.fx.Node)
-                    and isinstance(copy_src, torch.fx.Node)
+        if copy_node is None and isinstance(mutated_arg, torch.fx.Node):
+            copy_node = min(
+                (
+                    copy_node
+                    for copy_node in copy_nodes_after(node, mutated_arg)
+                    if isinstance(copy_node.args[1], torch.fx.Node)
+                    and _get_view_base(copy_node.args[1]) is node
                     and _is_layout_preserving_view_copy_back(
-                        copy_dst, copy_src, mutated_arg, node
+                        copy_node.args[0], copy_node.args[1], mutated_arg, node
                     )
-                ):
-                    return None
-        return copy_node if copy_node is None or not copy_node._erased else None
+                ),
+                key=node_order.__getitem__,
+                default=None,
+            )
+        return copy_node
 
     def all_can_inplace(node, mutated_args):
         return all(can_inplace(node, arg) for arg in mutated_args)
