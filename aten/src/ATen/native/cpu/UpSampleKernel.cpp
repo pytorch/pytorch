@@ -736,6 +736,12 @@ void upsample_linear_channels_last(
 // Helper structs to use with upsample_non_separable_Nd_kernel_impl
 struct HelperInterpBase {
 
+  // Whether the separable kernels run the 1d pass of an axis. By default, an axis whose size doesn't
+  // change is left as is.
+  static inline bool needs_pass(int64_t input_size, int64_t output_size, const std::optional<double>& /*opt_scale*/) {
+    return input_size != output_size;
+  }
+
   static inline void init_indices_weights(
     at::ScalarType output_type,
     std::vector<Tensor> & output, int64_t output_size, int64_t ndims,
@@ -1537,6 +1543,12 @@ struct HelperInterpInterArea : public HelperInterpBase {
     return kLinear ? 2 : static_cast<int>(std::ceil(scale)) + 1;
   }
 
+  // As in cv::resize, with kLinear an axis is resampled whenever its scale isn't 1, even if its size
+  // doesn't change (e.g. a size of 10 with scale_factor=1.04).
+  static inline bool needs_pass(int64_t input_size, int64_t output_size, const std::optional<double>& opt_scale) {
+    return input_size != output_size || (kLinear && scales(input_size, output_size, opt_scale).second != 1.0);
+  }
+
   // Weights of output index i, written to wt_ptr (max_interp_size values, zero-padded). Returns the
   // largest weight.
   template <typename scalar_t>
@@ -1851,14 +1863,14 @@ void upsample_separable_Nd_kernel_impl(
   int num_1d_ops = 0;
   for (const auto i : c10::irange(out_ndims)) {
     interp_dim = 2 + out_ndims - 1 - i;
-    if (output_shape[interp_dim] != input_shape[interp_dim]) {
+    if (F::needs_pass(input_shape[interp_dim], output_shape[interp_dim], scales[interp_dim - 2])) {
       num_1d_ops += 1;
     }
   }
 
   // Horizontal resampling (last spatial dim, i.e. W)
   interp_dim = 2 + out_ndims - 1;
-  if (output_shape[interp_dim] != input_shape[interp_dim]) {
+  if (F::needs_pass(input_shape[interp_dim], output_shape[interp_dim], scales[interp_dim - 2])) {
 
     num_1d_ops -= 1;
     if (num_1d_ops > 0) {
@@ -1880,7 +1892,7 @@ void upsample_separable_Nd_kernel_impl(
   // Vertical resampling (remaining spatial dims, e.g. H, D)
   for (const auto i : c10::irange(1, out_ndims)) {
     interp_dim = 2 + out_ndims - 1 - i;
-    if (output_shape[interp_dim] != input_shape[interp_dim]) {
+    if (F::needs_pass(input_shape[interp_dim], output_shape[interp_dim], scales[interp_dim - 2])) {
 
       num_1d_ops -= 1;
       if (num_1d_ops > 0) {

@@ -10349,6 +10349,20 @@ class TestNNDeviceType(NNTestCase):
         out = F.interpolate(x.to(device), scale_factor=0.45, mode="inter-area")
         self.assertEqual(out.flatten(), expected, atol=1e-5, rtol=1e-5)
 
+        # cv2.resize(x, None, fx=0.5, fy=1.04, interpolation=cv2.INTER_AREA) on 5x6: the height keeps its
+        # size but is resampled, as its scale isn't 1.
+        if dtype == torch.uint8:
+            x = ((torch.arange(30) * 37) % 256).to(torch.uint8).reshape(1, 1, 5, 6)
+            expected = torch.tensor([19, 93, 167, 108, 60, 134, 199, 27, 101, 177, 107, 69, 144, 197, 36], dtype=dtype)
+            tol = dict(atol=1, rtol=0)
+        else:
+            x = ((torch.arange(30, dtype=dtype) * 7) % 23).reshape(1, 1, 5, 6)
+            expected = torch.tensor([3.5, 17.5, 8.5, 10.7, 13.660001, 4.66, 17.9, 9.82, 11.4, 14.98, 5.98, 8.48, 11.14,
+                                     11.8, 14.299999])
+            tol = dict(atol=1e-5, rtol=1e-5)
+        out = F.interpolate(x.to(device), scale_factor=(1.04, 0.5), mode="inter-area")
+        self.assertEqual(out.flatten(), expected, **tol)
+
     @onlyCPU
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("num_channels", [1, 3, 4, 5])
@@ -10370,6 +10384,8 @@ class TestNNDeviceType(NNTestCase):
             ((1, 1), (3, 2), None),  # linear coefficients, single input pixel
             ((10, 10), (4, 4), [0.45, 0.45]),  # explicit scale factor, area weights
             ((5, 6), (3, 7), [0.6, 1.3]),  # explicit scale factors, linear coefficients
+            ((10, 20), (10, 10), [1.04, 0.5]),  # the height keeps its size but is resampled
+            ((20, 10), (10, 10), [0.5, 1.04]),  # the width keeps its size but is resampled
         ]
         for input_size, output_size, scale_factors in cases:
             if dtype == torch.uint8:
