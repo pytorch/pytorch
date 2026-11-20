@@ -40,12 +40,13 @@ from torch.utils._config_module import (
 class TestConfigModule(TestCase):
     def tearDown(self):
         # Config changes get persisted between test cases
-        for k in config._config:
-            config._config[k].user_override.set(_UNSET_SENTINEL)
-            config._config[k].hide = False
-        config._hash_cache_var.set(None)
-        config._get_dict_dirty_keys_var.set(None)
-        config._get_dict_cache_var.set(None)
+        for mod in (config, config2):
+            for k in mod._config:
+                mod._config[k].user_override.set(_UNSET_SENTINEL)
+                mod._config[k].hide = False
+            mod._hash_cache_var.set(None)
+            mod._get_dict_dirty_keys_var.set(None)
+            mod._get_dict_cache_var.set(None)
         # Reset deprecation warning flags
         for k in config._config:
             config._config[k]._deprecation_warned = False
@@ -549,6 +550,27 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             self.assertTrue(config.e_aliased_bool)
         with config.patch(e_aliased_bool=True):
             self.assertTrue(config2.e_aliasing_bool)
+
+    def test_patch_restores_unset_override(self):
+        # Exiting a patch must not leave behind a user override equal to the
+        # default; Dynamo guards on whether the override is set.
+        with config.patch(e_bool=True):
+            pass
+        self.assertIs(config._config["e_bool"].user_override.get(), _UNSET_SENTINEL)
+
+        target = config2._config["e_aliasing_bool"]
+        self.assertIs(target.user_override.get(), _UNSET_SENTINEL)
+        with config.patch(e_aliased_bool=False):
+            pass
+        self.assertIs(target.user_override.get(), _UNSET_SENTINEL)
+
+    def test_patch_deprecation_error_applies_nothing(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            with self.assertRaisesRegex(FutureWarning, "e_deprecated is deprecated"):
+                with config.patch(e_bool=False, e_deprecated=False):
+                    pass
+        self.assertTrue(config.e_bool)
 
     def test_reference_is_default(self):
         t = config.e_dict

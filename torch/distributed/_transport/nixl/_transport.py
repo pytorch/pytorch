@@ -42,8 +42,8 @@ class NIXLTransport(Transport):
     """One-sided tensor transport backed by a NIXL plugin.
 
     Backend options accepted by :func:`new_transport` include ``plugin="UCX"``,
-    ``agent_name=None``, ``num_threads=0``, ``enable_prog_thread=True``,
-    ``capture_telemetry=False``, ``backend_options=None``, and ``timeout=30.0``.
+    ``agent_name=None``, ``num_threads=0``, ``capture_telemetry=False``,
+    ``backend_options=None``, and ``timeout=30.0``.
     ``backend_options`` maps plugin parameter names to strings and is forwarded
     to NIXL's ``create_backend``. NIXL is an optional dependency, imported only
     when selected. Transfers require registered views; raw tensors are rejected
@@ -57,7 +57,6 @@ class NIXLTransport(Transport):
         plugin: str = "UCX",
         agent_name: str | None = None,
         num_threads: int = 0,
-        enable_prog_thread: bool = True,
         capture_telemetry: bool = False,
         backend_options: dict[str, str] | None = None,
         timeout: float = 30.0,
@@ -84,7 +83,9 @@ class NIXLTransport(Transport):
         config = backend.nixl_agent_config(
             backends=[] if backend_options else [self._plugin],
             num_threads=num_threads,
-            enable_prog_thread=enable_prog_thread,
+            # Passive endpoints have no Work to poll, so the backend needs
+            # background progress to complete peers' one-sided transfers.
+            enable_prog_thread=True,
             capture_telemetry=capture_telemetry,
         )
         self._agent = backend.nixl_agent(

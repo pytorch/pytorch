@@ -399,6 +399,15 @@ torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
 
+// Same as torch_call_dispatcher EXCEPT we also require passing the extension's
+// target version (on top of build version).
+AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher_v2(
+    const char* opName,
+    const char* overloadName,
+    StableIValue* stack,
+    uint64_t extension_build_version,
+    uint64_t extension_target_version);
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #ifdef __cplusplus
