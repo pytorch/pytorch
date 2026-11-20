@@ -1,5 +1,6 @@
 # pyre-strict
 # mypy: allow-untyped-defs
+import faulthandler
 import gc
 import logging
 import os
@@ -23,6 +24,8 @@ from torch.distributed.elastic.utils.distributed import get_free_port
 
 
 logger = logging.getLogger()
+
+_DEAD_PROCESS_JOIN_TIMEOUT_S = 5
 
 
 class _CheckpointSaveProcessControlOpts(Enum):
@@ -149,13 +152,17 @@ class _AsyncCheckpointProcess:
     def _send(self, data: Any) -> None:
         self._process_pipe.send(data)
 
+    def _dead_process_error(self) -> RuntimeError:
+        msg = "Checkpoint background process is dead."
+        if self._save_process.exitcode is not None:
+            msg += f" Exit code: {self._save_process.exitcode}"
+        return RuntimeError(msg)
+
     def _wait_for_response(self, timeout: float | None = None) -> Any:
         if not self._save_process.is_alive():
             logger.info("Checkpoint background process is dead calling join()...")
             self._save_process.join()
-            raise RuntimeError(
-                f"Checkpoint background process is dead. Exit code: {self._save_process.exitcode}"
-            )
+            raise self._dead_process_error()
 
         if timeout is not None and not self._process_pipe.poll(timeout=timeout):
             raise RuntimeError(
@@ -165,9 +172,10 @@ class _AsyncCheckpointProcess:
         try:
             response = self._process_pipe.recv()
         except EOFError:
-            raise RuntimeError(  # noqa: B904
-                f"Checkpoint background process is dead. Exit code: {self._save_process.exitcode}"
-            )
+            # The pipe closes before the child is reaped, so exitcode is not
+            # yet set; wait for the exit to report how the process died.
+            self._save_process.join(timeout=_DEAD_PROCESS_JOIN_TIMEOUT_S)
+            raise self._dead_process_error() from None
 
         if isinstance(response, BaseException):
             raise response
@@ -228,6 +236,13 @@ class _AsyncCheckpointProcess:
         pg_init_info: _ProcessGroupInitInfo,
         parent_conn,
     ) -> None:
+        # A spawned process does not inherit the parent's fault handler, so a
+        # native crash here would otherwise leave no stack trace.
+        try:
+            faulthandler.enable(all_threads=True)
+        except (AttributeError, OSError, RuntimeError, ValueError) as e:
+            logger.warning(f"Could not enable faulthandler: {e}")  # noqa: G004
+
         # Phase 1: Process Group Initialization
         # Only needs to execute once during the lifetime of the checkpoint background process.
         try:

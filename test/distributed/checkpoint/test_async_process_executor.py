@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: distributed checkpointing"]
 
+import faulthandler
 import os
+import signal
 import sys
 from unittest.mock import patch
 
@@ -49,7 +51,7 @@ class TestStorageWriter(StorageWriter):
         Create a test storage writer with specified behavior.
 
         Args:
-            behavior: "success", "fail_once"
+            behavior: "success", "fail_once", "segfault", "report_faulthandler"
         """
         self.behavior = behavior
         self.call_count = 0
@@ -83,6 +85,11 @@ class TestStorageWriter(StorageWriter):
     def write_data(self, plan, planner):
         """Write data with policy-based failure behavior."""
         from torch.futures import Future
+
+        if self.behavior == "segfault":
+            os.kill(os.getpid(), signal.SIGSEGV)
+        if self.behavior == "report_faulthandler":
+            raise RuntimeError(f"faulthandler enabled: {faulthandler.is_enabled()}")
 
         # Check if we should fail based on policy
         if self._should_fail():
@@ -221,6 +228,52 @@ class TestAsyncProcessExecutorPrefixStore(TestCase):
             async_process_executor._CHECKPOINT_PROCESS = None
             if dist.is_initialized():
                 dist.destroy_process_group()
+
+
+class TestAsyncProcessDiagnostics(TestCase):
+    """Single-rank tests of what the background process reports when it fails."""
+
+    def _save_exception(self, behavior: str) -> BaseException | None:
+        test_state_dict = {"model": {"weight": torch.randn(4, 4)}}
+        master_port = str(common.find_free_port())
+        env = {
+            "DCP_USE_PREFIX_STORE": "1",
+            "MASTER_ADDR": "localhost",
+            "MASTER_PORT": master_port,
+        }
+        try:
+            with patch.dict(os.environ, env):
+                dist.init_process_group(backend=dist.Backend.GLOO, rank=0, world_size=1)
+                fut = _ProcessBasedAsyncCheckpointExecutor().execute_save(
+                    staging_future_or_state_dict=test_state_dict,
+                    storage_writer=TestStorageWriter(behavior=behavior),
+                )
+                return fut.exception()
+        finally:
+            # The returned exception's traceback keeps the process object
+            # alive, so stop the child here instead of relying on __del__.
+            proc = async_process_executor._CHECKPOINT_PROCESS
+            async_process_executor._CHECKPOINT_PROCESS = None
+            if proc is not None:
+                proc._save_process.terminate()
+                proc._save_process.join(timeout=30)
+            if dist.is_initialized():
+                dist.destroy_process_group()
+
+    @skip_if_win32()
+    @retry_on_connect_failures
+    def test_crash_reports_signal_exit_code(self) -> None:
+        exc = self._save_exception("segfault")
+        self.assertIn(
+            f"Checkpoint background process is dead. Exit code: {-signal.SIGSEGV}",
+            str(exc),
+        )
+
+    @skip_if_win32()
+    @retry_on_connect_failures
+    def test_faulthandler_enabled_in_background_process(self) -> None:
+        exc = self._save_exception("report_faulthandler")
+        self.assertIn("faulthandler enabled: True", str(exc))
 
 
 class TestProcessGroupInitInfo(DTensorContinuousTestBase):
