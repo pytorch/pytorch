@@ -65,7 +65,8 @@ default list::
 
 A pass of one's own goes in the list as well: a Python callable taking a
 ``Region``, the instructions of one basic block (:func:`swap` makes one that
-puts a kernel in the place of a run of operations).
+puts a kernel in the place of a run of operations), or one written in Rust and
+loaded from a library (:func:`load_passes`).
 """
 
 import functools
@@ -90,6 +91,7 @@ __all__ = [
     "Unsupported",
     "fuse_checked",
     "is_available",
+    "load_passes",
     "memory",
     "passes",
     "swap",
@@ -152,6 +154,27 @@ def _compilers() -> list[str]:
     places += [f"_dynamo/eval_frame.py::{entry}"]
     root = os.path.dirname(torch.__file__)
     return [os.path.join(root, place) for place in places]
+
+
+def load_passes(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """Loads passes written in Rust from a library, by name.
+
+    The library is a ``cdylib`` crate that depends on the crate
+    ``torch-vm-pass`` (``torch/csrc/cfg/rust/sdk`` in the source tree),
+    implements its ``Pass`` trait and ends with ``export_passes!``. Such a
+    pass sees a basic block as a Python pass does (the instructions, the
+    kernel each was seen to call, the values they define and use) and can
+    replace a run of them by a call. A library links against neither Python
+    nor PyTorch, so one that was built once keeps working::
+
+        passes = torch.vm.load_passes("target/release/libmine.so")
+        fuse = passes["fuse_rmsnorm"].bind(kernel)  # what the pass puts in
+        torch.vm(fn, passes=[fuse, *torch.vm.DEFAULT_PASSES])
+
+    ``bind`` returns the pass with an object that is handed to it on every
+    run: the kernel, as a rule, which stays a Python callable.
+    """
+    return _load_runtime().load_passes(os.fspath(path))
 
 
 def is_available() -> bool:
@@ -229,10 +252,11 @@ def vm(
             of :mod:`torch.vm.passes` (``torch.vm.passes.Fold()``), or a pass
             of one's own: a callable ``pass_(region) -> bool`` that looks at
             the instructions of one basic block and at what was observed of
-            them, rewrites them, and returns whether it changed anything. With
-            an empty list nothing is rewritten: the function runs in the
-            generic tier of the VM, which does what the interpreter does,
-            without profiling and without direct kernel calls.
+            them, rewrites them, and returns whether it changed anything, or
+            one written in Rust (:func:`load_passes`). With an empty list
+            nothing is rewritten: the function runs in the generic tier of the
+            VM, which does what the interpreter does, without profiling and
+            without direct kernel calls.
         fallback: if the function uses something that is not supported, warn
             and return it unchanged instead of raising :class:`Unsupported`.
         skip_autograd: let a call site enter below the Autograd kernel when the
