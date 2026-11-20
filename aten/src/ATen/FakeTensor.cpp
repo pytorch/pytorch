@@ -41,4 +41,31 @@ void set_and_normalize_fake_device(
   impl->set_fake_device(fake_device);
 }
 
+void init_cpp_fake(
+    c10::TensorImpl* impl,
+    c10::Device device,
+    const std::shared_ptr<c10::FakeTensorMode>& mode) {
+  TORCH_INTERNAL_ASSERT(mode != nullptr);
+  // Both checked before impl is changed; once its fake device is set, impl no
+  // longer reads as meta
+  TORCH_CHECK(
+      impl->is_meta(),
+      "init_cpp_fake expects a meta tensor, got a tensor on ",
+      impl->device());
+  TORCH_CHECK(
+      device.type() != c10::kMeta || mode->allow_meta_,
+      "device.type must not be 'meta' when allow_meta is False");
+  set_and_normalize_fake_device(impl, device);
+  impl->set_fake_tensor_mode(mode);
+  if (!impl->has_storage()) {
+    return;
+  }
+  auto* storage_impl = impl->storage().unsafeGetStorageImpl();
+  if (mode->allow_unsafe_data_ptr_access_) {
+    storage_impl->set_warn_deprecated_on_mutable_data_ptr();
+  } else {
+    storage_impl->set_throw_on_mutable_data_ptr();
+  }
+}
+
 } // namespace at

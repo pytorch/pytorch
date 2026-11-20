@@ -863,6 +863,19 @@ class FxirTestCase(InductorTestCase):
         if use_dynamic_shapes:
             self.assertEqual(type(shape[0]), torch.fx.Node)
 
+    @config.patch("triton.autotune_at_compile_time", True)
+    def test_autotune_skips_kernels_with_device_asserts(self):
+        # Tuning runs kernels on zeros. There the gather reads row 64 of 64, and
+        # launching it would trip its device-side bounds assert.
+        w = torch.randn(64, 32, device=self.device)
+        idx = torch.full((128,), -64, device=self.device)
+        tuner = torch._inductor.runtime.triton_heuristics.CachingAutotuner
+        with unittest.mock.patch.object(
+            tuner, "run", autospec=True, side_effect=tuner.run
+        ) as tuned:
+            self._compile_and_check(lambda w, idx: w[idx + 64] * 2, [w, idx])
+        tuned.assert_not_called()
+
     def test_custom_triton(self):
         @triton.jit
         def add_kernel(

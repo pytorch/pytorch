@@ -4707,6 +4707,103 @@ class TestCompileSyncPgCrossRanks(MultiProcessTestCase):
             timeout=timeout,
         )
 
+    @requires_gloo()
+    @parametrize("canonicalize", (False, True))
+    def test_reversed_dict_sync_converges_saved_plan(self, canonicalize):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._dynamo.backends.debugging import boxed_nop
+        from torch._functorch.partitioners import (
+            _extract_fwd_bwd_modules,
+            _is_primal,
+            _sync_decision_cross_ranks,
+            is_not_collective,
+        )
+
+        self._init_process_group(timeout=datetime.timedelta(seconds=40))
+
+        def model(values):
+            results = {}
+            for key, value in values.items():
+                local = value.relu()
+                if key == "a":
+                    reduced = _functional_collectives.all_reduce(
+                        local.detach(), "sum", c10d.group.WORLD
+                    )
+                    results[key] = (local, reduced)
+                else:
+                    results[key] = local * 2
+            return results["a"][0].sum() + results["a"][1].sum() + results["b"].sum()
+
+        final_saved_names = []
+        backward_graphs = []
+        dynamo_sources = []
+        relu_target = torch.ops.aten.relu.default
+
+        def partition_fn(gm, joint_inputs, **kwargs):
+            relus = [node for node in gm.graph.nodes if node.target is relu_target]
+            primals = [node for node in gm.graph.nodes if _is_primal(node)]
+            self.assertEqual(len(relus), 2)
+            self.assertEqual(len(primals), 2)
+            selected = relus if self.rank == 0 else primals
+            extract = _extract_fwd_bwd_modules
+            num_fw = kwargs["num_fwd_outputs"]
+            extract(gm, list(selected), saved_sym_nodes=[], num_fwd_outputs=num_fw)
+            physical_order = list(gm.graph.nodes)
+            saved = _sync_decision_cross_ranks(gm.graph, selected)
+            self.assertEqual(list(gm.graph.nodes), physical_order)
+            final_saved_names.extend(node.name for node in saved)
+            fw, bw = extract(gm, saved, saved_sym_nodes=[], num_fwd_outputs=num_fw)
+            for module in (fw, bw):
+                module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
+                module.graph.lint()
+                module.recompile()
+            backward_graphs.append(bw)
+            return fw, bw
+
+        aot_backend = aot_autograd(
+            fw_compiler=boxed_nop,
+            bw_compiler=boxed_nop,
+            partition_fn=partition_fn,
+        )
+
+        def backend(gm, inputs):
+            dynamo_sources.extend(
+                node._dynamo_source.name
+                for node in gm.graph.find_nodes(op="placeholder")
+            )
+            return aot_backend(gm, inputs)
+
+        a = torch.tensor(
+            [[-2, -0.5, 1], [3, 4, 5]], dtype=torch.float64, requires_grad=True
+        )
+        b = torch.tensor(
+            [[1, 2, -3], [-4, 0.5, 6]], dtype=torch.float64, requires_grad=True
+        )
+        values = {"a": a, "b": b} if self.rank == 0 else {"b": b, "a": a}
+        reference = model(values)
+        expected_grads = torch.autograd.grad(reference, (a, b))
+        with (
+            torch._dynamo.config.patch(
+                canonicalize_output_graph_node_order=canonicalize
+            ),
+            torch._functorch.config.patch(_sync_decision_cross_ranks=True),
+        ):
+            loss = torch.compile(model, backend=backend, fullgraph=True)(values)
+            loss.backward()
+
+        saved_names = [None for _ in range(self.world_size)]
+        c10d.all_gather_object(saved_names, final_saved_names)
+        self.assertEqual(saved_names[0], saved_names[1])
+        self.assertEqual(dynamo_sources, ["L['values']['a']", "L['values']['b']"])
+        self.assertEqual(len(final_saved_names), 2)
+        self.assertEqual(len(backward_graphs), 1)
+        self.assertNotIn(
+            relu_target,
+            [node.target for node in backward_graphs[0].graph.nodes],
+        )
+        self.assertEqual(loss, reference)
+        self.assertEqual((a.grad, b.grad), expected_grads)
+
     def test_sync_cache_decision_cross_ranks(self):
         # A cache hit on one rank and a miss on another leaves only the missing rank
         # inside _sync_decision_cross_ranks, which desyncs the process group. The hit
@@ -5151,6 +5248,9 @@ class TestDedupReduceScatter(torch._dynamo.test_case.TestCase):
         dedup_fsdp_reduce_scatter(gm)
 
         self.assertEqual(self._count_ops(gm, rs_target), 2)
+
+
+instantiate_parametrized_tests(TestCompileSyncPgCrossRanks)
 
 
 if __name__ == "__main__":

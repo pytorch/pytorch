@@ -63,6 +63,9 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_meta();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_xpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_mps();
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_mtia();
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_privateuse1();
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2();

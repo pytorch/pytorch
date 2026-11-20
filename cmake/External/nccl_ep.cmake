@@ -57,10 +57,10 @@ if(NOT __NCCL_EP_INCLUDED)
   # Branch on how torch links NCCL (USE_NCCL_EP supports both):
   #  - USE_SYSTEM_NCCL=OFF (source/dev): torch statically embeds the submodule
   #    NCCL, so build libnccl_ep.a against it and have the extension statically
-  #    link it -- self-contained, no nccl4py, no runtime libnccl_ep.so.
+  #    link it -- self-contained, no nccl-extensions, no runtime libnccl_ep.so.
   #  - USE_SYSTEM_NCCL=ON (wheel/CI): torch dynamically links the system NCCL, so
   #    build libnccl_ep.so against that same NCCL; the extension NEEDED-links it
-  #    and resolves it (and its JIT headers) from the nccl4py wheel at runtime.
+  #    and resolves it (and its JIT headers) from the nccl-extensions wheel at runtime.
   if(USE_SYSTEM_NCCL)
     if(DEFINED ENV{NCCL_INCLUDE_DIR})
       get_filename_component(__NCCL_EP_NCCL_HOME "$ENV{NCCL_INCLUDE_DIR}" DIRECTORY)
@@ -107,7 +107,7 @@ if(NOT __NCCL_EP_INCLUDED)
     # Static path only: bake the in-tree JIT header dir so the extension
     # self-configures NCCL_EP_HOME / NCCL_HOME (both resolve under this one dir:
     # include/nccl_ep and include/nccl.h). The dynamic path instead gets these
-    # from nccl4py at runtime, so leave NCCL_EP_JIT_HOME unset there.
+    # from nccl-extensions at runtime, so leave NCCL_EP_JIT_HOME unset there.
     set(NCCL_EP_JIT_HOME "${__NCCL_BUILD_DIR}" CACHE INTERNAL "nccl-ep JIT header home")
   endif()
 

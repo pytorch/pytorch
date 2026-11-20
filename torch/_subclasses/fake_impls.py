@@ -307,6 +307,9 @@ def constructors(
     with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
     if r.device.type == "meta":
+        # An out overload returns its out argument, which may be a meta fake
+        if fake_mode.is_our_fake(r):
+            return r
         return fake_mode.fake_tensor_converter.from_meta_and_device(
             fake_mode, r, out_device
         )
