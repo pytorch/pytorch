@@ -3,12 +3,16 @@
 
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/autocast_mode.h>
 #include <ATen/core/dispatch/DispatchCapture.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <c10/core/DefaultDtype.h>
 #include <c10/core/GradMode.h>
+#include <c10/core/InferenceMode.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -18,6 +22,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/tensor_memoryformats.h>
 
 #ifdef _WIN32
 #include <c10/util/win32-headers.h>
@@ -1617,6 +1622,20 @@ PyObject* siteCall(
   END_HANDLE_TH_ERRORS
 }
 
+const char* retName(Ret ret) {
+  switch (ret) {
+    case Ret::Tensor:
+      return "tensor";
+    case Ret::Bool:
+      return "bool";
+    case Ret::Int:
+      return "int";
+    case Ret::Double:
+      return "float";
+  }
+  return "tensor";
+}
+
 PyObject* siteInfo(const TcfgSite* site) {
   HANDLE_TH_ERRORS
   const auto& schema = site->op.schema();
@@ -1671,8 +1690,141 @@ PyObject* siteInfo(const TcfgSite* site) {
     operand_args.append(found);
   }
   info["operand_args"] = operand_args;
+  info["returns"] = retName(site->ret);
+  info["writes"] = schema.is_mutable();
+  info["random"] = site->op.hasTag(at::Tag::nondeterministic_seeded);
   return info.release().ptr();
   END_HANDLE_TH_ERRORS
+}
+
+const char* convName(Conv conv) {
+  switch (conv) {
+    case Conv::Tensor:
+      return "tensor";
+    case Conv::Bool:
+      return "bool";
+    case Conv::Int:
+      return "int";
+    case Conv::IntAsDouble:
+      return "int_as_double";
+    case Conv::IntAsList:
+      return "int_as_list";
+    case Conv::Double:
+      return "double";
+    case Conv::WrappedNumber:
+      return "wrapped_number";
+    case Conv::IntSeq:
+      return "int_seq";
+  }
+  return "tensor";
+}
+
+const char* guardName(OperandGuard::Kind kind) {
+  switch (kind) {
+    case OperandGuard::None:
+      return "none";
+    case OperandGuard::Tensor:
+      return "tensor";
+    case OperandGuard::ExactType:
+      return "exact";
+    case OperandGuard::IsNone:
+      return "is_none";
+    case OperandGuard::Identity:
+      return "identity";
+  }
+  return "none";
+}
+
+// A constant of a site as the object an operator called from Python is given
+// for it: the number a wrapped-number tensor was made of, and the dtype,
+// layout or memory format that a kernel takes as an int.
+py::object constantObject(const c10::Argument& argument, const c10::IValue& v) {
+  if (v.isTensor()) {
+    const auto& t = v.toTensor();
+    if (t.defined() && t.dim() == 0 &&
+        t.unsafeGetTensorImpl()->is_wrapped_number()) {
+      return torch::jit::toPyObject(c10::IValue(t.item()));
+    }
+  }
+  if (v.isInt()) {
+    c10::TypePtr type = argument.real_type();
+    if (const auto optional = type->cast<c10::OptionalType>()) {
+      type = optional->getElementType();
+    }
+    const auto value = v.toInt();
+    switch (type->kind()) {
+      case c10::TypeKind::ScalarTypeType:
+        return py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(
+            torch::getTHPDtype(static_cast<at::ScalarType>(value))));
+      case c10::TypeKind::LayoutType:
+        return py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(
+            torch::getTHPLayout(static_cast<at::Layout>(value))));
+      case c10::TypeKind::MemoryFormatType:
+        return py::reinterpret_borrow<py::object>(
+            torch::utils::getTHPMemoryFormat(
+                static_cast<at::MemoryFormat>(value)));
+      default:
+        break;
+    }
+  }
+  return torch::jit::toPyObject(v);
+}
+
+PyObject* siteExport(const TcfgSite* site) {
+  HANDLE_TH_ERRORS
+  const auto& schema = site->op.schema();
+  py::dict info;
+  info["op"] = site->op.operator_name().name;
+  info["overload"] = site->op.operator_name().overload_name;
+  py::list args;
+  for (size_t a = 0; a < site->args.size(); a++) {
+    const ArgTemplate& arg = site->args[a];
+    const auto& argument = schema.arguments()[a];
+    py::object from;
+    py::object value;
+    switch (arg.kind) {
+      case ArgTemplate::Operand:
+        from = py::str("operand");
+        value = py::make_tuple(arg.operand, convName(arg.conv));
+        break;
+      case ArgTemplate::PackedInts: {
+        py::list packed;
+        for (int32_t k : arg.packed) {
+          packed.append(k);
+        }
+        from = py::str("packed");
+        value = std::move(packed);
+        break;
+      }
+      default:
+        from = py::str("const");
+        value = constantObject(argument, arg.constant);
+        break;
+    }
+    args.append(
+        py::make_tuple(argument.name(), argument.kwarg_only(), from, value));
+  }
+  info["args"] = args;
+  py::list guards;
+  for (const auto& g : site->guards) {
+    guards.append(guardName(g.kind));
+  }
+  info["guards"] = guards;
+  info["returns"] = retName(site->ret);
+  info["writes"] = schema.is_mutable();
+  info["random"] = site->op.hasTag(at::Tag::nondeterministic_seeded);
+  return info.release().ptr();
+  END_HANDLE_TH_ERRORS
+}
+
+int32_t traceCalls(const TcfgTrace* trace) {
+  return trace->top_level + trace->nested_top_level;
+}
+
+void dispatchKeys(uint64_t* included, uint64_t* excluded) {
+  const auto tls = c10::impl::tls_local_dispatch_key_set();
+  *included = tls.included_.raw_repr();
+  *excluded = tls.excluded_.raw_repr();
 }
 
 int32_t tensorInfo(PyObject* obj, TcfgTensorInfo* out) {
@@ -1719,6 +1871,24 @@ int32_t tensorInfo(PyObject* obj, TcfgTensorInfo* out) {
   return 1;
 }
 
+int32_t tensorForwardGrad(PyObject* obj) {
+  if (isUnboxed(obj)) {
+    auto* impl = unboxedImpl(obj);
+    return impl->autograd_meta() != nullptr &&
+            torch::autograd::isFwGradDefined(BorrowedTensor(impl).tensor)
+        ? 1
+        : 0;
+  }
+  if (!THPVariable_Check(obj)) {
+    return 0;
+  }
+  const auto& t = THPVariable_Unpack(obj);
+  return t.defined() && t.unsafeGetTensorImpl()->autograd_meta() != nullptr &&
+          torch::autograd::isFwGradDefined(t)
+      ? 1
+      : 0;
+}
+
 PyObject* tensorBox(PyObject* tagged) {
   HANDLE_TH_ERRORS
   return THPVariable_Wrap(at::Tensor(TensorPtr::reclaim(unboxedImpl(tagged))));
@@ -1733,18 +1903,70 @@ void tensorRelease(PyObject* tagged) {
   c10::raw::intrusive_ptr::decref(unboxedImpl(tagged));
 }
 
+// Frames are for 3.12, and for 3.14 in its default build on a 64-bit
+// platform: the variables of its frames are stack references, which the VM
+// writes itself (`frame_ref` in vm.rs) and whose header MSVC does not compile.
 #if IS_PYTHON_3_12_PLUS && !IS_PYTHON_3_13_PLUS
 #define TCFG_HAS_FRAMES 1
+#elif IS_PYTHON_3_14_PLUS && !IS_PYTHON_3_15_PLUS &&            \
+    !defined(Py_GIL_DISABLED) && !defined(Py_STACKREF_DEBUG) && \
+    !defined(_WIN32) && SIZEOF_VOID_P > 4
+#define TCFG_HAS_FRAMES 1
+#endif
+
+#ifdef TCFG_HAS_FRAMES
 
 extern "C" {
 // Copies of CPython internals that torch/csrc/dynamo/cpython_defs.c keeps.
 _PyInterpreterFrame* THP_PyThreadState_BumpFramePointerSlow(
     PyThreadState* tstate,
     size_t size);
+#if !IS_PYTHON_3_13_PLUS
 void THP_PyFrame_Clear(_PyInterpreterFrame* frame);
 void THP_PyThreadState_PopFrame(
     PyThreadState* tstate,
     _PyInterpreterFrame* frame);
+#endif
+}
+
+// Where the thread has its current frame.
+_PyInterpreterFrame*& currentFrame(PyThreadState* tstate) {
+#if IS_PYTHON_3_14_PLUS
+  return tstate->current_frame;
+#else
+  return tstate->cframe->current_frame;
+#endif
+}
+
+// The function and the code of a frame.
+PyFunctionObject* frameFunction(_PyInterpreterFrame* frame) {
+#if IS_PYTHON_3_14_PLUS
+  return reinterpret_cast<PyFunctionObject*>(
+      PyStackRef_AsPyObjectBorrow(frame->f_funcobj));
+#else
+  return reinterpret_cast<PyFunctionObject*>(frame->f_funcobj);
+#endif
+}
+
+PyCodeObject* frameCode(_PyInterpreterFrame* frame) {
+#if IS_PYTHON_3_14_PLUS
+  return reinterpret_cast<PyCodeObject*>(
+      PyStackRef_AsPyObjectBorrow(frame->f_executable));
+#else
+  return frame->f_code;
+#endif
+}
+
+// Disposes of a frame that is not, or no longer, the current one of the
+// thread, as the interpreter does when a call returns.
+void frameDispose(PyThreadState* tstate, _PyInterpreterFrame* frame) {
+#if IS_PYTHON_3_13_PLUS
+  // What the two copies below do, the interpreter exports from 3.13 on.
+  _PyEval_FrameClearAndPop(tstate, frame);
+#else
+  THP_PyFrame_Clear(frame);
+  THP_PyThreadState_PopFrame(tstate, frame);
+#endif
 }
 
 // A function that the VM runs is a Python call: it counts against the
@@ -1776,8 +1998,8 @@ void frameLink(
     uint16_t** code_start,
     PyObject*** locals,
     PyObject*** object) {
-  auto* function = reinterpret_cast<PyFunctionObject*>(frame->f_funcobj);
-  PyCodeObject* code = frame->f_code;
+  PyFunctionObject* function = frameFunction(frame);
+  PyCodeObject* code = frameCode(frame);
   // What COPY_FREE_VARS does. The other variables are what the caller bound
   // (the arguments, for a frame the interpreter made) or start out unbound:
   // the VM fills them in as the function binds them.
@@ -1785,17 +2007,22 @@ void frameLink(
     Py_ssize_t n = PyTuple_GET_SIZE(closure);
     Py_ssize_t first = code->co_nlocalsplus - n;
     for (Py_ssize_t i = 0; i < n; i++) {
-      frame->localsplus[first + i] = Py_NewRef(PyTuple_GET_ITEM(closure, i));
+      PyObject* cell = PyTuple_GET_ITEM(closure, i);
+#if IS_PYTHON_3_14_PLUS
+      frame->localsplus[first + i] = PyStackRef_FromPyObjectNew(cell);
+#else
+      frame->localsplus[first + i] = Py_NewRef(cell);
+#endif
     }
   }
   // A frame that has not reached its RESUME counts as not started, and is
   // skipped by whoever walks the stack.
-  frame->prev_instr = _PyCode_CODE(code) + code->_co_firsttraceable;
-  frame->previous = tstate->cframe->current_frame;
-  tstate->cframe->current_frame = frame;
-  *instr = reinterpret_cast<uint16_t**>(&frame->prev_instr);
+  PREV_INSTR(frame) = _PyCode_CODE(code) + code->_co_firsttraceable;
+  frame->previous = currentFrame(tstate);
+  currentFrame(tstate) = frame;
+  *instr = reinterpret_cast<uint16_t**>(&PREV_INSTR(frame));
   *code_start = reinterpret_cast<uint16_t*>(_PyCode_CODE(code));
-  *locals = frame->localsplus;
+  *locals = reinterpret_cast<PyObject**>(frame->localsplus);
   *object = reinterpret_cast<PyObject**>(&frame->frame_obj);
 }
 
@@ -1818,7 +2045,18 @@ void* framePush(
     return nullptr;
   }
   Py_INCREF(func);
+#if IS_PYTHON_3_14_PLUS
+  _PyFrame_Initialize(
+      tstate,
+      frame,
+      PyStackRef_FromPyObjectSteal(func),
+      nullptr,
+      code,
+      0,
+      nullptr);
+#else
   _PyFrame_Initialize(frame, function, nullptr, code, 0);
+#endif
   frameLink(tstate, frame, instr, code_start, locals, object);
   return frame;
 }
@@ -1833,8 +2071,7 @@ int32_t frameAdopt(
   PyThreadState* tstate = PyThreadState_Get();
   if (!enterPythonCall(tstate)) {
     // Whoever is handed a frame to run disposes of it.
-    THP_PyFrame_Clear(frame);
-    THP_PyThreadState_PopFrame(tstate, frame);
+    frameDispose(tstate, frame);
     return 0;
   }
   frameLink(tstate, frame, instr, code_start, locals, object);
@@ -1852,41 +2089,103 @@ void framePop(void* popped) {
   PyThreadState* tstate = PyThreadState_Get();
   // Unlinked before it is cleared, as in the interpreter: clearing can run
   // finalizers, which must not find a half-cleared frame on the stack.
-  tstate->cframe->current_frame = frame->previous;
-  THP_PyFrame_Clear(frame);
-  THP_PyThreadState_PopFrame(tstate, frame);
+  currentFrame(tstate) = frame->previous;
+  frameDispose(tstate, frame);
   ++tstate->py_recursion_remaining;
 }
 
 void* frameSwap(void* frame) {
   PyThreadState* tstate = PyThreadState_Get();
-  _PyInterpreterFrame* previous = tstate->cframe->current_frame;
-  tstate->cframe->current_frame = static_cast<_PyInterpreterFrame*>(frame);
+  _PyInterpreterFrame* previous = currentFrame(tstate);
+  currentFrame(tstate) = static_cast<_PyInterpreterFrame*>(frame);
   return previous;
 }
 
+#if IS_PYTHON_3_14_PLUS
+// The tools of sys.monitoring that stand for a trace function: pdb is the
+// first of them from 3.14 on, where it no longer calls sys.settrace.
+constexpr uint8_t kTracingTools =
+    1 << PY_MONITORING_DEBUGGER_ID | 1 << PY_MONITORING_COVERAGE_ID;
+#endif
+
+// Whether something is told about the frames the interpreter enters on this
+// thread, and the lines it runs in them.
+bool traced(PyThreadState* tstate) {
+  if (tstate->c_tracefunc != nullptr) {
+    return true;
+  }
+#if IS_PYTHON_3_14_PLUS
+  const auto& starts = tstate->interp->monitors.tools;
+  return (starts[PY_MONITORING_EVENT_PY_START] & kTracingTools) != 0;
+#else
+  return false;
+#endif
+}
+
 int32_t frameTraced() {
-  PyThreadState* tstate = PyThreadState_Get();
-  return tstate->c_tracefunc != nullptr;
+  return traced(PyThreadState_Get());
 }
 
 int32_t frameReturns(void* returning, PyObject* result) {
   auto* frame = static_cast<_PyInterpreterFrame*>(returning);
   PyThreadState* tstate = PyThreadState_Get();
   PyFrameObject* object = frame->frame_obj;
-  if (object == nullptr || object->f_trace == nullptr ||
-      tstate->c_tracefunc == nullptr || tstate->tracing != 0) {
+  if (object == nullptr || object->f_trace == nullptr || tstate->tracing != 0) {
     return 0;
   }
-  // What the interpreter does for a frame that has a trace function when it
-  // returns; the function is not itself traced.
-  Py_INCREF(object);
-  tstate->tracing++;
-  int failed =
-      tstate->c_tracefunc(tstate->c_traceobj, object, PyTrace_RETURN, result);
-  tstate->tracing--;
-  Py_DECREF(object);
-  return failed != 0 ? -1 : 0;
+  if (tstate->c_tracefunc != nullptr) {
+    // What the interpreter does for a frame that has a trace function when
+    // it returns; the function is not itself traced.
+    Py_INCREF(object);
+    tstate->tracing++;
+    int failed =
+        tstate->c_tracefunc(tstate->c_traceobj, object, PyTrace_RETURN, result);
+    tstate->tracing--;
+    Py_DECREF(object);
+    return failed != 0 ? -1 : 0;
+  }
+#if IS_PYTHON_3_14_PLUS
+  // The same for a debugger that listens through sys.monitoring: it asked
+  // for the returns of the code of the frames it put its trace function on,
+  // and is called as the interpreter calls a tool (call_one_instrument).
+  PyCodeObject* code = frameCode(frame);
+  uint8_t tools = code->_co_monitoring == nullptr
+      ? 0
+      : code->_co_monitoring->local_monitors
+            .tools[PY_MONITORING_EVENT_PY_RETURN];
+  tools &= kTracingTools;
+  if (tools == 0) {
+    return 0;
+  }
+  Py_ssize_t at =
+      (frame->instr_ptr - _PyCode_CODE(code)) * sizeof(_Py_CODEUNIT);
+  PyObject* offset = PyLong_FromSsize_t(at);
+  if (offset == nullptr) {
+    return -1;
+  }
+  PyObject* args[] = {reinterpret_cast<PyObject*>(code), offset, result};
+  int failed = 0;
+  for (int tool = 0; tool < PY_MONITORING_TOOL_IDS && failed == 0; tool++) {
+    PyObject* callback =
+        tstate->interp
+            ->monitoring_callables[tool][PY_MONITORING_EVENT_PY_RETURN];
+    if ((tools & (1 << tool)) == 0 || callback == nullptr) {
+      continue;
+    }
+    int outer = tstate->what_event;
+    tstate->what_event = PY_MONITORING_EVENT_PY_RETURN;
+    tstate->tracing++;
+    PyObject* told = PyObject_Vectorcall(callback, args, 3, nullptr);
+    tstate->tracing--;
+    tstate->what_event = outer;
+    failed = told == nullptr ? -1 : 0;
+    Py_XDECREF(told);
+  }
+  Py_DECREF(offset);
+  return failed;
+#else
+  return 0;
+#endif
 }
 
 // The frame evaluation function of the interpreter (PEP 523) while a
@@ -1901,6 +2200,8 @@ bool hook_linked = false;
 int32_t hook_wanted = 0;
 // The frame this thread is handing on to what is below.
 thread_local _PyInterpreterFrame* hook_handing = nullptr;
+// How many frames the interpreter brought here on this thread.
+thread_local uint64_t hook_frames = 0;
 // The interpreter the hook was registered in: the only one PyTorch runs in.
 PyInterpreterState* hook_interp = nullptr;
 
@@ -1924,23 +2225,25 @@ PyObject* evalFrame(
   if (frame == hook_handing) {
     return _PyEval_EvalFrameDefault(tstate, frame, throwflag);
   }
+  hook_frames++;
   // Offered: the frame of a call of a function, before its first
   // instruction. Not the body of a class or a module, which has its
   // variables in a dict; not a generator or a coroutine, whose frame outlives
-  // the call; nothing while a trace function is set, which the interpreter
-  // tells about the frames it runs; and nothing that is another evaluator's
+  // the call; nothing while the thread is traced, when it is the interpreter
+  // that tells of the frames it runs; and nothing that is another evaluator's
   // business: while one is in front of this one, or is running a frame that
   // this one handed on to it.
   constexpr int kinds =
       CO_OPTIMIZED | CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR;
   if (hook_wanted > 0 && throwflag == 0 &&
       frame->owner == FRAME_OWNED_BY_THREAD && frame->f_locals == nullptr &&
-      (frame->f_code->co_flags & kinds) == CO_OPTIMIZED &&
-      tstate->c_tracefunc == nullptr && PyFunction_Check(frame->f_funcobj) &&
+      (frameCode(frame)->co_flags & kinds) == CO_OPTIMIZED && !traced(tstate) &&
+      PyFunction_Check(frameFunction(frame)) &&
       (hook_handing == nullptr || hook_below == &_PyEval_EvalFrameDefault) &&
       _PyInterpreterState_GetEvalFrameFunc(tstate->interp) == &evalFrame) {
     PyObject* result = nullptr;
-    if (hook_take(frame->f_funcobj, frame, &result)) {
+    PyObject* function = reinterpret_cast<PyObject*>(frameFunction(frame));
+    if (hook_take(function, frame, &result)) {
       return result;
     }
   }
@@ -1981,10 +2284,25 @@ PyObject* frameInterpret(void* frame) {
   return handOn(
       PyThreadState_Get(), static_cast<_PyInterpreterFrame*>(frame), 0);
 }
+
+uint64_t frameCount() {
+  return hook_frames;
+}
 #endif
 
 int32_t isTracing() {
   return torch::jit::tracer::isTracing();
+}
+
+uint64_t callModes() {
+  uint64_t modes = c10::GradMode::is_enabled() ? 1 : 0;
+  modes |= c10::InferenceMode::is_enabled() ? 2 : 0;
+  modes |= at::autocast::is_autocast_enabled(at::kCUDA) ? 4 : 0;
+  modes |= at::autocast::is_autocast_enabled(at::kCPU) ? 8 : 0;
+  modes |= static_cast<uint64_t>(c10::get_default_dtype_as_scalartype()) << 8;
+  modes |= static_cast<uint64_t>(at::impl::PythonTorchFunctionTLS::stack_len())
+      << 16;
+  return modes;
 }
 
 void* workspaceEnterRaw(void* workspace) {
@@ -2006,14 +2324,14 @@ void workspaceCapsuleFree(PyObject* capsule) {
 }
 
 const TcfgApi api_table = {
-    TCFG_API_VERSION, &captureBegin,      &captureEnd,        &traceFree,
-    &traceRecords,    &siteFromTrace,     &siteFree,          &siteCall,
-    &siteInfo,        &tensorInfo,        &tensorBox,         &tensorRetain,
+    TCFG_API_VERSION,   &captureBegin,      &captureEnd,        &traceFree,
+    &traceRecords,      &siteFromTrace,     &siteFree,          &siteCall,
+    &siteInfo,          &tensorInfo,        &tensorBox,         &tensorRetain,
     &tensorRelease,
 #ifdef TCFG_HAS_FRAMES
-    &framePush,       &framePop,          &frameHeld,         &frameSwap,
-    &frameTraced,     &frameHook,         &frameWant,         &frameAdopt,
-    &frameInterpret,  &frameReturns,
+    &framePush,         &framePop,          &frameHeld,         &frameSwap,
+    &frameTraced,       &frameHook,         &frameWant,         &frameAdopt,
+    &frameInterpret,    &frameReturns,
 #else
     nullptr,
     nullptr,
@@ -2026,7 +2344,14 @@ const TcfgApi api_table = {
     nullptr,
     nullptr,
 #endif
-    &isTracing,       &workspaceEnterRaw, &workspaceLeaveRaw,
+    &isTracing,         &workspaceEnterRaw, &workspaceLeaveRaw, &callModes,
+    &siteExport,        &traceCalls,        &dispatchKeys,
+#ifdef TCFG_HAS_FRAMES
+    &frameCount,
+#else
+    nullptr,
+#endif
+    &tensorForwardGrad,
 };
 
 } // namespace
@@ -2107,6 +2432,13 @@ void initCfgBindings(PyObject* module) {
       throw py::error_already_set();
     }
     return info;
+  });
+  site_class.def("export", [](const TcfgSite& site) {
+    auto exported = py::reinterpret_steal<py::object>(siteExport(&site));
+    if (!exported) {
+      throw py::error_already_set();
+    }
+    return exported;
   });
   // Returns NotImplemented when a guard of the site does not hold.
   site_class.def("call", [](TcfgSite& site, const py::args& operands) {

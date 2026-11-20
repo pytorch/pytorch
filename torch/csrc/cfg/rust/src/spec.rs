@@ -13,6 +13,7 @@
 
 use crate::analysis::BitSet;
 use crate::capi::{self, SiteSlot, TCFG_METHOD};
+use crate::graph::{GraphSite, Graphs, Left};
 use crate::ir::*;
 use crate::pyffi::{self, PyObj};
 use crate::vm::Compiled;
@@ -29,6 +30,15 @@ pub enum ValueObs {
     Tensor { min_rank: u32, dims: Vec<(i64, i64)>, last: Vec<i64> },
     Bool { seen_true: u32, seen_false: u32, last: bool },
     Int { lo: i64, hi: i64 },
+    /// Always an exact float.
+    Float,
+    /// Always None.
+    None,
+    /// Always an exact str; `same` while it was the same text every time.
+    Str { hash: isize, same: bool },
+    /// Always an object of one exact type, given by its address; for a list,
+    /// a tuple or a dict, the lengths that were seen.
+    Object { ty: usize, len: Option<(i64, i64)> },
     Other,
 }
 
@@ -52,6 +62,12 @@ impl ValueObs {
             } else {
                 ValueObs::Int { lo: x, hi: x }
             }
+        } else if python && ffi::PyFloat_CheckExact(obj) != 0 {
+            ValueObs::Float
+        } else if python && obj == ffi::Py_None() {
+            ValueObs::None
+        } else if python && ffi::PyUnicode_CheckExact(obj) != 0 {
+            ValueObs::Str { hash: ffi::PyObject_Hash(obj), same: true }
         } else {
             let mut info = capi::TcfgTensorInfo::empty();
             match capi::api() {
@@ -63,6 +79,13 @@ impl ValueObs {
                         dims: sizes.iter().map(|s| (*s, *s)).collect(),
                         last: sizes,
                     }
+                }
+                _ if python => {
+                    let sized = ffi::PyList_CheckExact(obj) != 0
+                        || ffi::PyTuple_CheckExact(obj) != 0
+                        || ffi::PyDict_CheckExact(obj) != 0;
+                    let len = sized.then(|| ffi::PyObject_Size(obj) as i64);
+                    ValueObs::Object { ty: ffi::Py_TYPE(obj) as usize, len: len.map(|n| (n, n)) }
                 }
                 _ => ValueObs::Other,
             }
@@ -90,6 +113,18 @@ impl ValueObs {
             (ValueObs::Int { lo, hi }, ValueObs::Int { lo: x, .. }) => {
                 ValueObs::Int { lo: (*lo).min(x), hi: (*hi).max(x) }
             }
+            (ValueObs::Float, ValueObs::Float) => ValueObs::Float,
+            (ValueObs::None, ValueObs::None) => ValueObs::None,
+            (ValueObs::Str { hash, same }, ValueObs::Str { hash: h2, .. }) => {
+                ValueObs::Str { hash: h2, same: *same && *hash == h2 }
+            }
+            (ValueObs::Object { ty, len }, ValueObs::Object { ty: t2, len: l2 }) if *ty == t2 => {
+                let len = match (len, l2) {
+                    (Some((lo, hi)), Some((n, _))) => Some(((*lo).min(n), (*hi).max(n))),
+                    _ => None,
+                };
+                ValueObs::Object { ty: t2, len }
+            }
             _ => ValueObs::Other,
         };
         *self = merged;
@@ -100,6 +135,111 @@ impl ValueObs {
             ValueObs::Tensor { min_rank, .. } => Some(*min_rank),
             _ => None,
         }
+    }
+
+    /// Whether the value was an exact int, float or bool every time.
+    pub fn is_number(&self) -> bool {
+        matches!(self, ValueObs::Int { .. } | ValueObs::Float | ValueObs::Bool { .. })
+    }
+}
+
+/// How many dispatcher calls the profiling tier saw an instruction make.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Kernels {
+    /// Not counted: the instruction did not run in the profiling tier, or it
+    /// is a call of something that is not a C function, which is not put
+    /// under a capture.
+    #[default]
+    Unseen,
+    None,
+    One,
+    /// More than one, or not the same number every time.
+    Many,
+}
+
+/// How a call reached the Python function it entered.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CalleeKind {
+    Function,
+    /// Bound to the object it was looked up on.
+    Method,
+    /// An instance whose class has it as its `__call__`, or that a call
+    /// shortcut leads to.
+    Instance,
+}
+
+/// The Python function the profiling tier saw a call enter first.
+#[derive(Clone, Default)]
+pub enum CalleeFact {
+    #[default]
+    Unseen,
+    /// Its code object.
+    One(PyObj, CalleeKind),
+    Many,
+}
+
+/// What the profiling tier saw one instruction of a block do.
+#[derive(Clone, Default)]
+pub struct InstFacts {
+    /// How many times it ran in the profiling tier.
+    pub runs: u32,
+    pub kernels: Kernels,
+    /// A Python frame was entered while it ran: by the VM for a function it
+    /// runs itself, or by the interpreter (a function, a class body, a
+    /// generator that goes on). Also set where the interpreter does not tell
+    /// of its frames, for an instruction that can call something.
+    pub frames: bool,
+    pub raised: bool,
+    pub callee: CalleeFact,
+    /// The version counter of a tensor it was given moved: it wrote to it in
+    /// place.
+    pub wrote: bool,
+    /// For an instruction that made dispatcher calls and is no call site:
+    /// the operators it called itself, as the dispatcher names them, over
+    /// all its counted runs. With `UNKNOWN_OPERATOR` among them where they
+    /// could not all be taken down.
+    pub operators: Vec<String>,
+}
+
+/// Stands in `InstFacts::operators` for operators that are not known.
+pub const UNKNOWN_OPERATOR: &str = "?";
+const MAX_OPERATORS: usize = 12;
+
+impl InstFacts {
+    /// Whether every run made no dispatcher call, entered no frame, wrote to
+    /// no tensor and did not raise.
+    pub fn quiet(&self) -> bool {
+        self.runs > 0 && self.kernels == Kernels::None && !self.frames && !self.raised && !self.wrote
+    }
+
+    pub fn saw_kernels(&mut self, kernels: Kernels) {
+        self.kernels = match (self.kernels, kernels) {
+            (seen, Kernels::Unseen) => seen,
+            (Kernels::Unseen, new) => new,
+            (seen, new) if seen == new => seen,
+            _ => Kernels::Many,
+        };
+    }
+
+    pub fn saw_operators(&mut self, names: Vec<String>) {
+        for name in names {
+            if self.operators.contains(&name) {
+                continue;
+            }
+            if self.operators.len() >= MAX_OPERATORS {
+                self.operators.push(UNKNOWN_OPERATOR.to_string());
+                break;
+            }
+            self.operators.push(name);
+        }
+    }
+
+    pub fn saw_callee(&mut self, code: PyObj, kind: CalleeKind) {
+        self.callee = match &self.callee {
+            CalleeFact::Unseen => CalleeFact::One(code, kind),
+            CalleeFact::One(seen, how) if seen.as_ptr() == code.as_ptr() && *how == kind => return,
+            _ => CalleeFact::Many,
+        };
     }
 }
 
@@ -123,6 +263,11 @@ pub struct Unit {
     /// for a block that keeps failing its guards, so that it settles on code
     /// that holds for every input.
     pub speculate: bool,
+    /// The graphs that start in the unit, each with the position of its
+    /// first instruction in `insts`, and what the graph pass left out of
+    /// them.
+    pub graphs: Vec<(Arc<GraphSite>, usize)>,
+    pub left: Vec<Left>,
 }
 
 impl Unit {
@@ -143,6 +288,8 @@ impl Unit {
             term: b.term.clone(),
             entry_guards: Vec::new(),
             speculate,
+            graphs: Vec::new(),
+            left: Vec::new(),
         }
     }
 
@@ -242,6 +389,11 @@ pub struct PassCx<'a> {
     pub slots: &'a [Option<Arc<SiteSlot>>],
     /// Per SSA value of the function.
     pub obs: &'a [ValueObs],
+    /// Per generic instruction of the block.
+    pub facts: &'a [InstFacts],
+    /// Per generic instruction of the block: why one that made dispatcher
+    /// calls is no call site.
+    pub reasons: &'a [Option<String>],
 }
 
 impl PassCx<'_> {
@@ -275,6 +427,12 @@ impl PassCx<'_> {
 pub trait CfgPass: Send + Sync {
     fn name(&self) -> String;
     fn run(&self, unit: &mut Unit, cx: &PassCx) -> PyResult<bool>;
+
+    /// Whether the pass runs once, on what the others made of the unit when
+    /// none of them changes it anymore.
+    fn finishes(&self) -> bool {
+        false
+    }
 }
 
 impl Pipeline {
@@ -291,12 +449,13 @@ pub fn builtin_pass(name: &str) -> Option<Box<dyn CfgPass>> {
         "narrow_dims" => Some(Box::new(NarrowDims)),
         "fold" => Some(Box::new(Fold)),
         "dce" => Some(Box::new(Dce)),
+        "graphs" => Some(Box::new(Graphs::default())),
         _ => None,
     }
 }
 
-pub const BUILTIN_PASSES: [&str; 6] =
-    ["resolve_dispatch", "method_calls", "tensor_accessors", "narrow_dims", "fold", "dce"];
+pub const BUILTIN_PASSES: [&str; 7] =
+    ["resolve_dispatch", "method_calls", "tensor_accessors", "narrow_dims", "fold", "dce", "graphs"];
 
 /// Replaces operations the profile found to be a single dispatcher call with
 /// a direct call of the post-dispatch kernel.
@@ -713,18 +872,22 @@ const MAX_ROUNDS: usize = 8;
 
 impl Pipeline {
     /// Runs the passes in order, again and again, until the unit stops
-    /// changing. Returns whether anything changed at all.
+    /// changing, and then the ones that finish. Returns whether anything
+    /// changed at all.
     pub fn run(&self, unit: &mut Unit, cx: &PassCx) -> PyResult<bool> {
         let mut any = false;
         for _ in 0..MAX_ROUNDS {
             let mut changed = false;
-            for pass in &self.passes {
+            for pass in self.passes.iter().filter(|pass| !pass.finishes()) {
                 changed |= pass.run(unit, cx)?;
             }
             any |= changed;
             if !changed {
                 break;
             }
+        }
+        for pass in self.passes.iter().filter(|pass| pass.finishes()) {
+            any |= pass.run(unit, cx)?;
         }
         Ok(any)
     }
@@ -748,6 +911,7 @@ pub fn finalize(unit: Unit, cf: &Compiled, id: u32) -> Result<BlockCode, String>
         }
     }
     let mut insts: Vec<Inst> = Vec::with_capacity(unit.insts.len());
+    let mut origins: Vec<u32> = Vec::with_capacity(unit.insts.len());
     // Specialized code must run the generic instructions it keeps in their
     // original order, and a guard must resume exactly at the first generic
     // instruction that has not run yet.
@@ -788,6 +952,7 @@ pub fn finalize(unit: Unit, cf: &Compiled, id: u32) -> Result<BlockCode, String>
             available.insert(inst.dst);
         }
         insts.push(inst);
+        origins.push(u.origin);
     }
     let mut missing = None;
     unit.term.for_each_use(|v| {
@@ -804,11 +969,38 @@ pub fn finalize(unit: Unit, cf: &Compiled, id: u32) -> Result<BlockCode, String>
         return Err(format!("{} is needed after the block but not defined", func.value_name(v)));
     }
     let term_kills = crate::analysis::compute_kills(&mut insts, &unit.term, &analysis.live_out[b]);
+    let graphs: Vec<Arc<GraphSite>> = unit.graphs.iter().map(|(site, _)| site.clone()).collect();
+    // The graphs are entered from a copy of the code, which runs in its
+    // place while one of them has something to do.
+    let mut entering = None;
+    if !unit.graphs.is_empty() {
+        let (mut with, mut at) = (insts.clone(), origins.clone());
+        for (site, first) in unit.graphs.iter().rev() {
+            let bc = with.get(*first).map_or(func.blocks[b].term_bc, |inst| inst.bc);
+            with.insert(*first, Inst { dst: NONE, op: Op::Graph(site.clone()), bc, kills: Vec::new() });
+            at.insert(*first, NONE);
+        }
+        entering = Some(Arc::new(BlockCode {
+            insts: with,
+            term: unit.term.clone(),
+            term_kills: term_kills.clone(),
+            entry_guards: unit.entry_guards.clone(),
+            id,
+            origins: at,
+            graphs: graphs.clone(),
+            left: Vec::new(),
+            entering: None,
+        }));
+    }
     Ok(BlockCode {
         insts,
         term: unit.term,
         term_kills,
         entry_guards: unit.entry_guards,
         id,
+        origins,
+        graphs,
+        left: unit.left,
+        entering,
     })
 }
