@@ -24,6 +24,18 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
+# Pin the good-shape autotune to a single B2B candidate: select_algorithm
+# skips benchmarking when a single choice remains, so only the first shape
+# per associativity pays for autotuning. The regex is unanchored because the
+# choice description is built from the kernel kwargs and may gain a prefix
+# on other GPUs.
+_B2B_GOOD_SHAPE_PIN = {
+    "test_configs.autotune_choice_desc_regex": (
+        r"BLOCK_SIZE_M=128, BLOCK_SIZE_N=16, "
+        r"BLOCK_SIZE_O=16, BLOCK_SIZE_P=16"
+    )
+}
+
 
 class B2BGEMMTest(TestCase):
     device = GPU_TYPE
@@ -70,16 +82,11 @@ class B2BGEMMTest(TestCase):
             m3 = m3.to(torch.float32)
             return f(m1, m2, m3).to(torch.float16)
 
-        # The first shape exercises the full candidate set under real
-        # autotune; the remaining shapes pin a single b2b choice via
-        # test_configs.autotune_choice_desc_regex to keep the compile
+        # The first shape autotunes the full set of B2B Triton candidates
+        # (the decorator's name regex drops the unoptimized fallback); the
+        # remaining shapes use _B2B_GOOD_SHAPE_PIN to keep the compile
         # matrix cheap.
-        pin = {
-            "test_configs.autotune_choice_desc_regex": (
-                r"^BLOCK_SIZE_M=128, BLOCK_SIZE_N=16, "
-                r"BLOCK_SIZE_O=16, BLOCK_SIZE_P=16"
-            )
-        }
+        pin = _B2B_GOOD_SHAPE_PIN
         for idx, (M, N, O, P) in enumerate(
             (
                 (256, 32, 256, 32),
@@ -146,12 +153,7 @@ class B2BGEMMTest(TestCase):
             return f(m1, m2, m3).to(torch.float16)
 
         # Same pinning rationale as the left-assoc test above.
-        pin = {
-            "test_configs.autotune_choice_desc_regex": (
-                r"^BLOCK_SIZE_M=128, BLOCK_SIZE_N=16, "
-                r"BLOCK_SIZE_O=16, BLOCK_SIZE_P=16"
-            )
-        }
+        pin = _B2B_GOOD_SHAPE_PIN
         for idx, (M, N, O, P) in enumerate(
             (
                 (32, 256, 32, 256),
@@ -278,7 +280,11 @@ class B2BGEMMTest(TestCase):
     @torch._inductor.config.patch(
         b2b_gemm_pass=True,
         **{
-            "test_configs.autotune_choice_name_regex": r"^triton_b2b_gemm_(left|right)_"
+            "test_configs.autotune_choice_name_regex": r"^triton_b2b_gemm_(left|right)_",
+            # The assertions only need the template entrance and a single
+            # frame; the pin keeps each associativity from benchmarking the
+            # full B2B candidate set.
+            **_B2B_GOOD_SHAPE_PIN,
         },
     )
     def test_b2b_gemm_good_shape_dynamic_shapes(self):
