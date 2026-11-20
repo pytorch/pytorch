@@ -5,7 +5,10 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 import torch
-from torch._native.cutedsl.config import POINTWISE_ARCH_MAJORS
+from torch._native.cutedsl.config import (
+    POINTWISE_ARCH_MAJORS,
+    POINTWISE_HOST_CACHE_LIMIT,
+)
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -379,33 +382,46 @@ class TestPointwiseKernel(TestCase):
 
     @onlyCUDA
     @skipIfNoCuteDSL
-    def test_indexed_tensor_preserves_fraction(self, device: str) -> None:
+    @parametrize("host_scalar", (False, True))
+    def test_indexed_tensor_preserves_fraction(
+        self, device: str, host_scalar: bool
+    ) -> None:
         import cutlass.cute as cute
+        from cutlass import Float32
 
         from torch._native.cutedsl.dtypes import torch2cute
         from torch._native.ops.pointwise import kernel
+        from torch._native.ops.pointwise.signature import specialize
 
         @cute.jit
         def indexed(
-            i: Annotated[Any, torch.int64], x: Annotated[Any, "storage"]
-        ) -> Annotated[Any, "storage"]:
-            return x + x.__class__(i)
+            i: Annotated[Any, torch.int64],
+            scale: Annotated[Any, "compute"],
+            x: Annotated[Any, "storage"],
+        ) -> Annotated[Any, "compute"]:
+            return Float32(x) + scale * Float32(i)
 
+        sig = specialize(indexed, torch.float16, torch.float32, with_index=True)
         with torch.backends.python_native.cutedsl.disabled():
-            x = torch.full((3, 2), 1.5, device=device, dtype=torch.float32).t()
-            expected = x + torch.arange(6, device=device).reshape(2, 3)
+            x = torch.full((3, 2), 1.5, device=device, dtype=torch.float16).t()
+            scale = torch.tensor(
+                0.5, device="cpu" if host_scalar else device, dtype=torch.float32
+            )
+            expected = x.float() + 0.5 * torch.arange(6, device=device).reshape(2, 3)
         (actual,) = kernel.run(
             indexed,
-            ("indexed_input",),
-            1,
+            ("indexed_input", host_scalar),
+            2,
             1,
             (),
-            torch2cute[x.dtype],
-            [x],
-            (x.dtype,),
+            torch2cute[sig.compute],
+            [scale, x],
+            (torch.float32,),
             with_index=True,
+            input_casts=(sig.input_dtype(0, host_scalar), sig.input_dtype(1, False)),
+            result_dtypes=sig.results,
         )
-        self.assertEqual(actual, expected)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @onlyCUDA
     @skipIfNoCuteDSL
@@ -735,7 +751,10 @@ class TestPointwiseKernel(TestCase):
             ((2, 3, 5), (55, 17, 2), (2, 1, 5), (23, 0, 3), (49, 1, 7)),
             ((), (), (), (), ()),
             ((1,) * 30 + (3, 5), (0,) * 30 + (13, 2), (1,), (1,), (0,) * 30 + (17, 3)),
-        ) + tuple(((n,), (2,), (1,), (1,), (2,)) for n in range(1, 253))
+        ) + tuple(
+            ((n,), (2,), (1,), (1,), (2,))
+            for n in range(1, POINTWISE_HOST_CACHE_LIMIT + 1)
+        )
         count = None
         with torch.backends.python_native.cutedsl.disabled():
             for shape, strides, rhs_shape, rhs_strides, out_strides in cases * 2:
@@ -762,7 +781,7 @@ class TestPointwiseKernel(TestCase):
                 if count is None:
                     count = len(kernel._KERNELS)
                 self.assertEqual(len(kernel._KERNELS), count)
-                self.assertLessEqual(len(kernel._PLAN), 256)
+                self.assertLessEqual(len(kernel._PLAN), POINTWISE_HOST_CACHE_LIMIT)
 
     @onlyCUDA
     @skipIfNoCuteDSL
@@ -837,6 +856,207 @@ class TestPointwiseKernel(TestCase):
         )
         with torch.backends.python_native.cutedsl.disabled():
             self.assertEqual(actual, expected)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    @parametrize("empty", (False, True))
+    @parametrize(
+        "case",
+        (
+            "input_count",
+            "output_count",
+            "dtype_count",
+            "shape",
+            "dtype",
+            "device",
+            "cpu_rank",
+            "casts",
+            "results",
+        ),
+    )
+    def test_engine_rejects_invalid_operands_outputs(
+        self, device: str, empty: bool, case: str
+    ) -> None:
+        import cutlass
+
+        from torch._native.ops.pointwise import kernel, ops
+
+        n = 0 if empty else 8
+        x = torch.empty(n, device=device, dtype=torch.float32)
+        target = torch.empty_like(x)
+        inputs, outputs = [x], [target]
+        nin, out_dtypes = 1, (torch.float32,)
+        kwargs = {}
+        message = "outputs must match"
+        if case == "input_count":
+            nin, message = 2, "input count"
+        elif case == "output_count":
+            outputs, message = [], "output count"
+        elif case == "dtype_count":
+            out_dtypes, message = (torch.float32, torch.float32), "output dtype count"
+        elif case == "shape":
+            outputs = [target.view(1, n)]
+        elif case == "dtype":
+            outputs = [target.half()]
+        elif case == "device":
+            outputs = [torch.empty(n, dtype=torch.float32)]
+        elif case == "cpu_rank":
+            inputs, nin = [x, torch.empty(n, dtype=torch.float32)], 2
+            message = "CPU scalars"
+        elif case == "casts":
+            kwargs, message = {"input_casts": ()}, "input cast count"
+        elif case == "results":
+            kwargs, message = {"result_dtypes": ()}, "result dtype count"
+        with self.assertRaisesRegex(ValueError, message):
+            kernel.run(
+                ops.get_fn("_identity"),
+                ("engine_contract",),
+                nin,
+                1,
+                (),
+                cutlass.Float32,
+                inputs,
+                out_dtypes,
+                out=outputs,
+                **kwargs,
+            )
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    @parametrize(
+        "case", ("neg_input", "neg_output", "conj_input", "zero_input", "zero_output")
+    )
+    def test_engine_rejects_unlaunchable_views(self, device: str, case: str) -> None:
+        import cutlass
+
+        from torch._native.ops.pointwise import kernel, ops
+
+        x = torch.ones(8, device=device, dtype=torch.float32)
+        target = torch.empty_like(x)
+        message = "lazy neg/conj"
+        if case == "neg_input":
+            x = torch._neg_view(x)
+        elif case == "neg_output":
+            target = torch._neg_view(target)
+        elif case == "conj_input":
+            x = x.to(torch.complex64).conj()
+        else:
+            zero = torch._efficientzerotensor(x.shape, device=device, dtype=x.dtype)
+            x, target = (zero, target) if case == "zero_input" else (x, zero)
+            message = "real tensor storage"
+        with self.assertRaisesRegex(ValueError, message):
+            kernel.run(
+                ops.get_fn("_identity"),
+                ("engine_view",),
+                1,
+                1,
+                (),
+                cutlass.Float32,
+                [x],
+                (target.dtype,),
+                out=[target],
+            )
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    @parametrize("zero_input", (False, True))
+    def test_cpu_scalar_inputs_use_cuda_output(
+        self, device: str, zero_input: bool
+    ) -> None:
+        import cutlass
+
+        from torch._native.ops.pointwise import kernel, ops
+
+        x = (
+            torch._efficientzerotensor((), dtype=torch.float32)
+            if zero_input
+            else torch.tensor(2.0, dtype=torch.float32)
+        )
+        y = torch.tensor(3.0, dtype=torch.float32)
+        target = torch.empty((), device=device, dtype=torch.float32)
+        result = kernel.run(
+            ops.get_fn("_mul"),
+            ("host_scalar_output",),
+            2,
+            1,
+            (),
+            cutlass.Float32,
+            [x, y],
+            (torch.float32,),
+            out=[target],
+        )[0]
+        self.assertIs(result, target)
+        self.assertEqual(result, x.item() * y.item())
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    def test_bool_to_long_promotion(self, device: str) -> None:
+        from torch._native.cutedsl.dtypes import torch2cute
+        from torch._native.ops.pointwise import kernel, ops
+        from torch._native.ops.pointwise.signature import Functor
+        from torch._prims_common import (
+            elementwise_dtypes,
+            ELEMENTWISE_TYPE_PROMOTION_KIND as PromotionKind,
+        )
+
+        with torch.backends.python_native.cutedsl.disabled():
+            x = torch.tensor(
+                [False, False, True, False, False, False, False, True], device=device
+            )
+            y = torch.tensor(
+                [False, False, False, False, False, True, False, True], device=device
+            )
+            x, y = (value.as_strided((2, 2), (5, 2)) for value in (x, y))
+            compute, result = elementwise_dtypes(
+                x, y, type_promotion_kind=PromotionKind.BOOL_TO_LONG
+            )
+            expected = (x.to(compute) + y.to(compute)).to(result)
+        sig = Functor("_add").signature(
+            ((torch.bool, False),) * 2, PromotionKind.BOOL_TO_LONG
+        )
+        (actual,) = kernel.run(
+            ops.get_fn("_add"),
+            ("bool_to_long",),
+            2,
+            1,
+            (torch2cute[sig.compute](1),),
+            torch2cute[sig.compute],
+            [x, y],
+            sig.results,
+            input_casts=(sig.storage,) * 2,
+            result_dtypes=sig.results,
+        )
+        self.assertEqual(actual.dtype, expected.dtype)
+        self.assertEqual(actual, expected)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_copysign_preserves_storage_bits(
+        self, device: str, dtype: torch.dtype
+    ) -> None:
+        from torch._native.cutedsl.dtypes import torch2cute
+        from torch._native.ops.pointwise import kernel, ops
+        from torch._native.ops.pointwise.signature import Functor
+
+        with torch.backends.python_native.cutedsl.disabled():
+            bits = torch.arange(65536, device=device, dtype=torch.int32).to(torch.int16)
+            x, y = bits.view(dtype), (bits ^ -32768).view(dtype)
+            expected = torch.copysign(x, y)
+        sig = Functor("_copysign").signature(((dtype, False),) * 2)
+        (actual,) = kernel.run(
+            ops.get_fn("_copysign"),
+            ("copysign_bits",),
+            2,
+            1,
+            (),
+            torch2cute[sig.compute],
+            [x, y],
+            (dtype,),
+            input_casts=(dtype,) * 2,
+            result_dtypes=sig.results,
+        )
+        self.assertEqual(actual.view(torch.int16), expected.view(torch.int16))
 
 
 instantiate_device_type_tests(TestPointwiseKernel, globals(), only_for=("cuda",))
