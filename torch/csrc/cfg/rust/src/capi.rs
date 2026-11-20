@@ -27,7 +27,7 @@ pub const TCFG_ALLOW_SKIP_AUTOGRAD: u32 = 1;
 
 pub const TCFG_UNBOXED_RESULT: u32 = 1;
 
-pub const TCFG_API_VERSION: u32 = 10;
+pub const TCFG_API_VERSION: u32 = 11;
 
 #[repr(C)]
 pub struct TcfgPyOp {
@@ -82,6 +82,9 @@ impl TcfgTensorInfo {
     }
 }
 
+/// What the interpreter's frame hook offers a frame to (see cfg.h).
+pub type TakeFrame = unsafe extern "C" fn(Obj, *mut std::ffi::c_void, *mut Obj) -> i32;
+
 #[repr(C)]
 pub struct TcfgApi {
     pub version: u32,
@@ -110,6 +113,17 @@ pub struct TcfgApi {
     pub frame_held: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> i32>,
     pub frame_swap: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void>,
     pub frame_traced: Option<unsafe extern "C" fn() -> i32>,
+    pub frame_hook: Option<unsafe extern "C" fn(TakeFrame)>,
+    pub frame_want: Option<unsafe extern "C" fn(i32)>,
+    pub frame_adopt: Option<
+        unsafe extern "C" fn(
+            *mut std::ffi::c_void,
+            *mut *mut *mut u16,
+            *mut *mut u16,
+            *mut *mut Obj,
+        ) -> i32,
+    >,
+    pub frame_interpret: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> Obj>,
     pub is_tracing: unsafe extern "C" fn() -> i32,
     pub workspace_enter: unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void,
     pub workspace_leave: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void),

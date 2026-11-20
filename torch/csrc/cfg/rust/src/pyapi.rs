@@ -26,6 +26,9 @@ pub fn init(capsule: &Bound<'_, PyCapsule>) -> PyResult<()> {
         ));
     }
     capi::set_api(api);
+    if let Some(hook) = unsafe { (*api).frame_hook } {
+        unsafe { hook(vm::take_frame) };
+    }
     Ok(())
 }
 
@@ -103,6 +106,14 @@ pub fn register_getattr_shortcut(py: Python<'_>, function: &Bound<'_, PyAny>, di
     });
 }
 
+/// Whether a Python function that C code called now, on this thread, would
+/// be run in its compiled form: a compiled function is running, and what
+/// runs is its own code, not the runtime's.
+#[pyfunction]
+pub fn frames_offered() -> bool {
+    vm::frames_offered()
+}
+
 /// Leaves the functions whose code is in one of these files, or under one of
 /// these directories (with a trailing separator), to the interpreter, with
 /// all they call; `file::qualname` names one function of a file.
@@ -117,7 +128,7 @@ pub fn clear_shortcuts() {
 }
 
 #[pyfunction]
-#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, callees=true, shortcuts=true, demote=true, workspace=None))]
+#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, callees=true, shortcuts=true, demote=true, workspace=None, hook=true))]
 pub fn compile(
     py: Python<'_>,
     func: &Bound<'_, PyAny>,
@@ -133,6 +144,7 @@ pub fn compile(
     shortcuts: bool,
     demote: bool,
     workspace: Option<Bound<'_, PyAny>>,
+    hook: bool,
 ) -> PyResult<CfgFunction> {
     // What `torch._C._cfg_workspace` made: the memory the function keeps
     // between its calls.
@@ -157,6 +169,7 @@ pub fn compile(
         callees,
         shortcuts,
         demote,
+        hook: hook && callees && capi::api().is_some_and(|api| api.frame_want.is_some()),
         ..Options::default()
     };
     let function = vm::lower(py, &table, func, &options)?;

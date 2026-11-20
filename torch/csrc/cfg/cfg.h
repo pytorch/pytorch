@@ -97,7 +97,15 @@ struct TcfgTensorInfo {
 
 #define TCFG_NO_VERSION UINT64_MAX
 
-#define TCFG_API_VERSION 10
+#define TCFG_API_VERSION 11
+
+// What frame_hook registers. It is offered the frame the interpreter made
+// for a call of func, with the arguments bound and nothing run. It returns 0
+// to leave the frame to the interpreter, or 1 after it has run the call and
+// disposed of the frame (frame_adopt and frame_pop, or frame_interpret), with
+// *result a new reference, or null with a Python error set.
+typedef int32_t (
+    *TcfgTakeFrame)(PyObject* func, void* frame, PyObject** result);
 
 struct TcfgApi {
   uint32_t version;
@@ -174,6 +182,27 @@ struct TcfgApi {
   // Whether the thread has a trace function (sys.settrace): the interpreter
   // calls it for the frames it enters and the lines it runs in them.
   int32_t (*frame_traced)();
+
+  // The frames the interpreter makes itself: for the calls that C code makes
+  // (a constructor, a property, an operator, a callback), and for those that
+  // a function makes which the interpreter runs. frame_hook says who is
+  // offered them, once. They are offered while some thread wants them:
+  // frame_want(1), and frame_want(-1) when it no longer does. The
+  // interpreter's own calls are slower meanwhile, since it then starts every
+  // frame through this.
+  void (*frame_hook)(TcfgTakeFrame take);
+  void (*frame_want)(int32_t delta);
+  // Makes a frame that was offered the current one of the thread, as
+  // frame_push does for one it makes; frame_pop disposes of it. Returns 0
+  // with RecursionError set, and the frame gone.
+  int32_t (*frame_adopt)(
+      void* frame,
+      uint16_t*** instr,
+      uint16_t** code,
+      PyObject*** locals);
+  // Has the interpreter run a frame that was offered. Returns a new
+  // reference, or null with a Python error set.
+  PyObject* (*frame_interpret)(void* frame);
 
   // Whether torch.jit.trace is recording on this thread: one of the things
   // nn.Module.__call__ looks at before it calls forward.
