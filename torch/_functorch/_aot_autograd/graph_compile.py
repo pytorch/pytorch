@@ -33,11 +33,10 @@ from torch._dynamo.utils import (
     dynamo_timed,
     lazy_format_graph_code,
 )
-from torch._guards import CompileContext, require_python_fake_mode, TracingContext
+from torch._guards import CompileContext, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import getArtifactLogger, trace_structured
-from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
@@ -330,7 +329,7 @@ def _apply_tensorify_python_scalars(module: torch.fx.GraphModule) -> None:
     Util to apply tensorify_python_scalars.
     """
     # TODO(anijain2305) - Add tensorify_python_scalars to the HOP graph passes.
-    fake_mode = require_python_fake_mode(detect_fake_mode())
+    fake_mode = detect_fake_mode()
     if fake_mode is not None and fake_mode.shape_env is not None:
         tensorify_python_scalars(module, fake_mode.shape_env, fake_mode)
 
@@ -586,10 +585,10 @@ def _aot_stage2c_make_inference_function(
 
 
 def collect_fw_donated_buffer_idxs(
-    fw_ins: list[FakeTensor | None],
-    user_fw_outs: list[FakeTensor | None],
-    bw_outs: list[FakeTensor | None],
-    saved_tensors: list[FakeTensor | None],
+    fw_ins: list[Tensor | None],
+    user_fw_outs: list[Tensor | None],
+    bw_outs: list[Tensor | None],
+    saved_tensors: list[Tensor | None],
 ) -> list[int]:
     """
     Checks if the saved tensors are donated buffers, which means a saved tensor is not
