@@ -995,6 +995,8 @@ class ComboKernel(Kernel):
         }
         if max_persistent_rblock > 0:
             inductor_meta["max_persistent_rblock"] = max_persistent_rblock
+        if any(sub.asserts_need_real_inputs for sub in self.sub_kernels):
+            inductor_meta["asserts_need_real_inputs"] = True
 
         # Sum per-sub-kernel bandwidth / FLOP estimates for the combo launch.
         sub_metas = [sub.inductor_meta_per_kernel() for sub in self.sub_kernels]

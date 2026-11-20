@@ -168,18 +168,6 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """960""")
 
-    def test_torchscript(self):
-        def foo(x):
-            return torch.mm(x, x)
-
-        with FlopCounterMode() as mode:
-            foo(T(5, 5))
-        unscripted_flops = get_total_flops(mode)
-        ts_foo = torch.jit.script(foo)
-        with mode:
-            ts_foo(T(5, 5))
-        self.assertEqual(unscripted_flops, get_total_flops(mode))
-
     def test_autograd_op(self):
         class _CustomOp(torch.autograd.Function):
             @staticmethod

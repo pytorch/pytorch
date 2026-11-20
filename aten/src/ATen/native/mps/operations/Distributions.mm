@@ -192,7 +192,7 @@ static Tensor& bernoulli_tensor_mps_impl(Tensor& self, const Tensor& p_, std::op
         const auto numel = c10::checked_convert<uint32_t>(output.numel(), "uint32_t");
         mtl_setArgs(
             computeEncoder, output, p_float, std::array<long, 2>{seed, base_offset}, numel, stream->getErrorBuffer());
-        mtl_dispatch1DJob(computeEncoder, pso, at::ceil_div(numel, 4u));
+        mtl_dispatch1DJob(computeEncoder, pso, at::ceil_div<int64_t>(numel, 4));
       }
     });
   }

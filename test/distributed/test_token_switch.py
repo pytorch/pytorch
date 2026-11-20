@@ -1,7 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 
 
+import importlib.util
 import logging
+import subprocess
+import sys
+import unittest
 from dataclasses import dataclass
 
 import torch
@@ -22,10 +26,12 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TestCase,
 )
 
 
@@ -34,7 +40,7 @@ log = logging.getLogger(__name__)
 
 def _nccl_ep_available() -> bool:
     # The torch._nccl_ep extension is built only with USE_NCCL_EP, and a
-    # USE_SYSTEM_NCCL=ON build additionally needs the nccl4py wheel at runtime.
+    # USE_SYSTEM_NCCL=ON build additionally needs the nccl-extensions wheel at runtime.
     # Actually importing it is the real check: find_spec would only locate the
     # extension without dlopening it, so it would miss a missing libnccl_ep.so.
     if not torch.cuda.is_available():
@@ -50,8 +56,56 @@ def _nccl_ep_available() -> bool:
 def requires_nccl_ep():
     return skip_but_pass_in_sandcastle_if(
         not _nccl_ep_available(),
-        "Test requires a USE_NCCL_EP build (plus nccl4py for USE_SYSTEM_NCCL=ON)",
+        "Test requires a USE_NCCL_EP build (plus nccl-extensions for USE_SYSTEM_NCCL=ON)",
     )
+
+
+@unittest.skipIf(
+    not torch.cuda.is_available() or importlib.util.find_spec("torch._nccl_ep") is None,
+    "Test requires CUDA and a USE_NCCL_EP build",
+)
+class TokenSwitchNCCLLoadingTest(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def _run_script(self, script):
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_import_without_python_bindings(self):
+        self._run_script("""
+import sys
+from unittest.mock import patch
+
+from torch.distributed._token_switch import _import_nccl_ep
+
+with patch.dict(sys.modules, {"nccl.ep": None, "nccl._extensions": None}):
+    _import_nccl_ep()
+""")
+
+    def test_without_runtime_package(self):
+        self._run_script("""
+import sys
+from unittest.mock import patch
+
+from torch.distributed._token_switch import _import_nccl_ep
+from torch.testing._internal.common_utils import TestCase
+
+checks = TestCase()
+with patch.dict(sys.modules, {"nccl": None, "nccl.ep": None}):
+    try:
+        import torch._nccl_ep
+    except ImportError:
+        with checks.assertRaisesRegex(ImportError, "nccl-extensions"):
+            _import_nccl_ep()
+    else:
+        native = _import_nccl_ep()
+        checks.assertTrue(hasattr(native, "_NcclEpGroup"))
+""")
 
 
 NUM_TOKENS = 16
@@ -1232,21 +1286,27 @@ class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
     def backend_str(cls):
         return "nccl"
 
+    def _get_token_switch(self):
+        cls = type(self)
+        if cls._cached_token_switch is None:
+            pg = dist.distributed_c10d._get_default_group()
+            dist.barrier(pg)
+            cls._cached_token_switch = TokenSwitchNCCL(
+                pg,
+                self.world_size,
+                NUM_TOKENS,
+                self.world_size * NUM_TOKENS,
+                TOKEN_SIZE_BYTES,
+            )
+        return cls._cached_token_switch
+
     @skip_if_lt_x_gpu(2)
     @dtypes(torch.int32, torch.int64)
     @parametrize("layout", ["flat", "expert_major"])
     def test_dispatch_combine_roundtrip(self, device, dtype, layout):
         device = torch.device(torch.device(device).type, self.rank)
         torch.cuda.set_device(device)
-        max_recv_tokens = self.world_size * NUM_TOKENS
-        cls = type(self)
-        if cls._cached_token_switch is None:
-            pg = dist.distributed_c10d._get_default_group()
-            dist.barrier(pg)
-            cls._cached_token_switch = TokenSwitchNCCL(
-                pg, self.world_size, NUM_TOKENS, max_recv_tokens, TOKEN_SIZE_BYTES
-            )
-        ts = cls._cached_token_switch
+        ts = self._get_token_switch()
         topk_idx, topk_weights = _generate_topk(
             self.rank, self.world_size, NUM_TOKENS, TOP_K, device
         )
@@ -1256,7 +1316,7 @@ class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
             (NUM_TOKENS, HIDDEN), self.rank + 1, dtype=torch.bfloat16, device=device
         )
         dispatched, weights, indices = ts.dispatch(
-            routing, tokens, topk_weights, max_recv_tokens
+            routing, tokens, topk_weights, ts.max_recv_tokens_per_rank
         )
         src_rank = (self.rank - 1) % self.world_size
         self.assertEqual(dispatched[:NUM_TOKENS], torch.full_like(tokens, src_rank + 1))
@@ -1268,6 +1328,43 @@ class TokenSwitchRoutingDtypeTest(MultiProcContinuousTest):
         combined = ts.combine(routing, dispatched[:NUM_TOKENS].contiguous())
         self.assertEqual(combined, tokens)
         self.assertEqual(topk_idx.dtype, dtype)
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "layout,output_index",
+        [
+            ("flat", None),
+            ("flat", 0),
+            ("flat", 1),
+            ("flat", 2),
+            ("expert_major", None),
+            ("expert_major", 0),
+            ("expert_major", 1),
+        ],
+    )
+    def test_dispatch_requires_full_capacity(self, device, layout, output_index):
+        device = torch.device(torch.device(device).type, self.rank)
+        torch.cuda.set_device(device)
+        ts = self._get_token_switch()
+        topk_idx, topk_weights = _generate_topk(
+            self.rank, self.world_size, NUM_TOKENS, TOP_K, device
+        )
+        routing = ts.create_routing(topk_idx, layout=layout)
+        num_recv = routing.handle.get_num_recv_tokens()
+        self.assertEqual(num_recv, NUM_TOKENS)
+        self.assertLess(num_recv, ts.max_recv_tokens_per_rank)
+        tokens = torch.zeros(NUM_TOKENS, HIDDEN, dtype=torch.bfloat16, device=device)
+        error = f"require at least {ts.max_recv_tokens_per_rank} rows"
+        if output_index is None:
+            with self.assertRaisesRegex(ValueError, error):
+                ts.dispatch(routing, tokens, topk_weights, num_recv)
+        else:
+            out = list(
+                ts.dispatch(routing, tokens, topk_weights, ts.max_recv_tokens_per_rank)
+            )
+            out[output_index] = out[output_index][:num_recv]
+            with self.assertRaisesRegex(ValueError, error):
+                ts.dispatch(routing, tokens, topk_weights, out=tuple(out))
 
 
 instantiate_device_type_tests(TokenSwitchRoutingDtypeTest, globals(), only_for="cuda")

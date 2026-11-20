@@ -3,8 +3,15 @@
 # Forwarding rule: an environment variable reaches CMake (as a cache variable of
 # the same name) if it (a) starts with BUILD_, USE_, or CMAKE_, (b) ends with
 # EXITCODE or EXITCODE__TRYRUN_OUTPUT, or (c) appears in the _ENV_ALIASES /
-# _ENV_PASSTHROUGH / _LOW_PRIORITY_ALIASES lists below. Anything else is not
+# _ENV_PASSTHROUGH lists below. Anything else is not
 # forwarded -- set it as a CMake option with -D / cmake.define instead.
+#
+# Precedence: a forwarded variable overrides the cache on every configure, so the
+# environment wins over -D / cmake.define, which win over pyproject.toml, and all
+# three win over what the build directory remembers from the last configure. To
+# change one setting for a single command, put the variable in front of the
+# command. An alias applies only when its canonical name is not in the
+# environment itself.
 #
 # ============================================================================
 # Build environment variable reference. Vars below that match the forwarding
@@ -128,12 +135,6 @@
 #   USE_NINJA                select the generator via CMAKE_GENERATOR=Ninja instead
 #                            (ninja is the default when available).
 
-# Additional env vars that are forwarded with a different CMake variable name.
-set(_ENV_ALIASES
-  "CUDNN_LIB_DIR=CUDNN_LIBRARY"
-  "USE_CUDA_STATIC_LINK=CAFFE2_STATIC_LINK_CUDA"
-)
-
 # Additional env vars forwarded with the same name.
 set(_ENV_PASSTHROUGH
   UBSAN_FLAGS
@@ -172,31 +173,17 @@ set(_ENV_PASSTHROUGH
   PYTHON_SIX_SOURCE_DIR
 )
 
-# Low-priority aliases: if the canonical var is not set, use the alias.
-set(_LOW_PRIORITY_ALIASES
+# Env vars forwarded under a different CMake name ("env name=cmake name"). Where
+# several aliases name the same variable, the first listed one wins.
+set(_ENV_ALIASES
+  "CUDNN_LIB_DIR=CUDNN_LIBRARY"
+  "USE_CUDA_STATIC_LINK=CAFFE2_STATIC_LINK_CUDA"
   "CUDA_HOST_COMPILER=CMAKE_CUDA_HOST_COMPILER"
   "CUDAHOSTCXX=CUDA_HOST_COMPILER"
   "CMAKE_CUDA_HOST_COMPILER=CUDA_HOST_COMPILER"
   "CMAKE_CUDA_COMPILER=CUDA_NVCC_EXECUTABLE"
   "CUDACXX=CUDA_NVCC_EXECUTABLE"
 )
-
-# Forward aliased env vars (env name -> different cmake name)
-foreach(_alias IN LISTS _ENV_ALIASES)
-  string(REPLACE "=" ";" _parts "${_alias}")
-  list(GET _parts 0 _env_name)
-  list(GET _parts 1 _cmake_name)
-  if(DEFINED ENV{${_env_name}} AND NOT DEFINED ${_cmake_name})
-    set(${_cmake_name} "$ENV{${_env_name}}" CACHE STRING "From env ${_env_name}" FORCE)
-  endif()
-endforeach()
-
-# Forward passthrough env vars (same name)
-foreach(_var IN LISTS _ENV_PASSTHROUGH)
-  if(DEFINED ENV{${_var}} AND NOT DEFINED ${_var})
-    set(${_var} "$ENV{${_var}}" CACHE STRING "From env ${_var}" FORCE)
-  endif()
-endforeach()
 
 # Forward all BUILD_*, USE_*, CMAKE_* environment variables (plus names ending
 # in EXITCODE / EXITCODE__TRYRUN_OUTPUT) into the CMake cache, mirroring the -D
@@ -288,14 +275,25 @@ if(NOT _envfwd_rc EQUAL 0)
 endif()
 cmake_language(EVAL CODE "${_envfwd_code}")
 
-# Low-priority aliases
-foreach(_alias IN LISTS _LOW_PRIORITY_ALIASES)
+# Passthrough names, same semantics as the prefix names above.
+foreach(_var IN LISTS _ENV_PASSTHROUGH)
+  if(DEFINED ENV{${_var}})
+    _envfwd_apply("${_var}" "$ENV{${_var}}")
+  endif()
+endforeach()
+
+# Aliases apply with the same semantics, but only when the canonical name is not
+# in the environment itself (the prefix and passthrough passes above already
+# applied it), and the first listed alias of a name wins over later ones.
+set(_envfwd_aliased "")
+foreach(_alias IN LISTS _ENV_ALIASES)
   string(REPLACE "=" ";" _parts "${_alias}")
   list(GET _parts 0 _env_name)
   list(GET _parts 1 _cmake_name)
-  if(DEFINED ENV{${_env_name}} AND NOT DEFINED ${_cmake_name})
-    _envfwd_note("${_cmake_name}")
-    set(${_cmake_name} "$ENV{${_env_name}}" CACHE STRING "From env alias ${_env_name}" FORCE)
+  if(DEFINED ENV{${_env_name}} AND NOT DEFINED ENV{${_cmake_name}}
+     AND NOT "${_cmake_name}" IN_LIST _envfwd_aliased)
+    list(APPEND _envfwd_aliased "${_cmake_name}")
+    _envfwd_apply("${_cmake_name}" "$ENV{${_env_name}}")
   endif()
 endforeach()
 

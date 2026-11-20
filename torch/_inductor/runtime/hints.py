@@ -373,6 +373,7 @@ class InductorMeta(typing.TypedDict, total=False):
     tma_min_block_sizes: dict[str, int]
     uses_tma: bool
     uses_device_tma: bool
+    asserts_need_real_inputs: bool
     host_tma_descriptor_args: dict[str, dict[str, typing.Any]]
     tiling_scores: typing.Any
     min_xblock: int
@@ -404,6 +405,7 @@ class InductorMeta(typing.TypedDict, total=False):
     extra_launcher_args: typing.Any
     fixed_grid: typing.Any
     precomputed_grids: typing.Any
+    declared_constexpr_names: list[str]
     config_args: typing.Any
     use_fast_triton_launcher: bool
 
