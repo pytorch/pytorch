@@ -1,9 +1,6 @@
 # Owner(s): ["module: inductor"]
 """Tests for cat multi-consumer and pad-as-cat optimizations."""
 
-import functools
-import unittest
-
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import metrics
@@ -11,12 +8,8 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification
-from torch.testing._internal.inductor_utils import HAS_MPS, HAS_TRITON
+from torch.testing._internal.inductor_utils import requires_triton
 
-
-requires_triton_or_mps = functools.partial(
-    unittest.skipIf, not (HAS_TRITON or HAS_MPS), "requires TRITON or MPS"
-)
 
 # required so that metrics.num_bytes_accessed is populated
 torch._logging.set_logs(inductor_metrics=True)
@@ -26,7 +19,7 @@ class TestCatMultiConsumer(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @torch._inductor.config.patch(fx_graph_cache=False)
-    @requires_triton_or_mps()
+    @requires_triton()
     def test_other_cat_input_is_not_external_consumer(self, device):
         """A use feeding another input of the same cat is internal."""
 
@@ -43,7 +36,7 @@ class TestCatMultiConsumer(TestCase):
         self.assertNotIn("reinterpret_tensor(", code)
 
     @torch._inductor.config.patch(fx_graph_cache=False)
-    @requires_triton_or_mps()
+    @requires_triton()
     def test_external_consumer_still_uses_concat_kernel(self, device):
         """A consumer outside the cat inputs remains a multi-consumer."""
 
@@ -62,7 +55,7 @@ class TestCatMultiConsumer(TestCase):
         self.assertIn("reinterpret_tensor(", code)
 
     @torch._inductor.config.patch(fx_graph_cache=False)
-    @requires_triton_or_mps()
+    @requires_triton()
     def test_cat_to_fp16(self, device):
         """Multi-consumer cat avoids duplicate computation."""
 
@@ -96,7 +89,7 @@ class TestCatMultiConsumer(TestCase):
         )
 
     @torch._inductor.config.patch(fx_graph_cache=False)
-    @requires_triton_or_mps()
+    @requires_triton()
     def test_single_consumer_cat_unchanged(self, device):
         """Single-consumer cat unchanged."""
 
@@ -126,7 +119,7 @@ class TestCatMultiConsumer(TestCase):
 class TestPadAsCat(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_triton_or_mps()
+    @requires_triton()
     def test_mul_pad_addmm(self, device):
         """Multi-consumer F.pad uses ConcatKernel zero-copy."""
         counters.clear()
@@ -151,7 +144,7 @@ class TestPadAsCat(TestCase):
         self.assertIn("reinterpret_tensor", code)
         self.assertGreater(counters["inductor"]["pad_rewritten_as_cat"], 0)
 
-    @requires_triton_or_mps()
+    @requires_triton()
     def test_single_consumer_pad(self, device):
         """Single-consumer F.pad is decomposed into cat, which fuses via pointwise_cat."""
         counters.clear()
