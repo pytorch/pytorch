@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import unittest
 from unittest import mock
 
@@ -31,6 +32,7 @@ from torch._inductor.kernel.mm import blackwell_ws_persistent_tma_mm_template
 from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.lowering import lowerings
+from torch._inductor.scheduler import Scheduler
 from torch._inductor.select_algorithm import NoValidChoicesError
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_num_sms, run_and_get_code
@@ -1038,6 +1040,122 @@ class TestBlackwellTMALoadFusion(TestCase):
             ".load(["
         ).run(code[0])
 
+
+@instantiate_parametrized_tests
+class TestBlackwellTMAPrologueFusion(TestCase):
+    """Producers fused into the Blackwell persistent TMA templates' A/B loads
+    read their own sources through TMA descriptors."""
+
+    _MM_KEYS = (
+        ("triton::blackwell_ws_persistent_tma", "cuda", "mm"),
+        ("triton::blackwell_ws_persistent_tma", "cuda", "addmm"),
+    )
+
+    @contextlib.contextmanager
+    def _one_cta_config(self):
+        from torch._inductor.heuristics.template.registry import get_template_heuristic
+
+        test_config = BlackwellGPUGemmConfig(
+            128, 128, 64, 3, 4, warp_specialize=False, flatten=False
+        )
+        orig = {}
+        for key in self._MM_KEYS:
+            heuristic = get_template_heuristic(*key)
+            orig[key] = heuristic.mm_configs
+            heuristic.mm_configs = [test_config]
+        try:
+            yield
+        finally:
+            for key, configs in orig.items():
+                if key in _HEURISTIC_CACHE:
+                    _HEURISTIC_CACHE[key].mm_configs = configs
+
+    def _compile(self, fn, *args, force: bool = True, one_cta: bool = True):
+        patches = {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "prologue_fusion": True,
+            "benchmark_template_fusion": False,
+            "triton.enable_persistent_tma_matmul": True,
+        }
+        if config.test_configs.autotune_choice_name_regex is None:
+            patches["test_configs.autotune_choice_name_regex"] = (
+                "blackwell_ws_persistent_tma"
+            )
+        with contextlib.ExitStack() as stack:
+            if one_cta:
+                stack.enter_context(self._one_cta_config())
+            stack.enter_context(config.patch(patches))
+            if force:
+                stack.enter_context(
+                    mock.patch.object(
+                        Scheduler,
+                        "check_prologue_fusion_heuristics_fusable",
+                        return_value=True,
+                    )
+                )
+            torch._dynamo.reset()
+            return run_and_get_code(torch.compile(fn), *args)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("case", ("contiguous", "transposed", "row_broadcast"))
+    def test_prologue_sources_load_through_descriptors(self, case: str):
+        M, N, K = 512, 256, 256
+
+        def randn(*size, dtype=torch.float32):
+            return torch.randn(*size, device=GPU_TYPE, dtype=dtype)
+
+        w = randn(K, N, dtype=torch.bfloat16)
+        if case == "contiguous":
+            args = (randn(M, K), randn(M, K), w)
+
+            def fn(x, y, w):
+                return (x * y).to(torch.bfloat16) @ w
+
+        elif case == "transposed":
+            args = (randn(K, M), w)
+
+            def fn(x, w):
+                return (x.t() * 2.0).to(torch.bfloat16) @ w
+
+        else:
+            args = (randn(M, K), randn(M, 1), w)
+
+            def fn(x, mu, w):
+                return (x - mu).to(torch.bfloat16) @ w
+
+        actual, code = self._compile(fn, *args)
+        torch.testing.assert_close(actual, fn(*args), atol=5e-2, rtol=5e-2)
+        # The producer runs inside the template; no separate pointwise kernel.
+        self.assertNotIn("def triton_poi", code[0])
+        FileCheck().check("prologue_descriptor0 = tl.make_tensor_descriptor").check(
+            "prologue_descriptor0.load(["
+        ).run(code[0])
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_bmm_prologue_sources_load_through_descriptors(self):
+        B, M, N, K = 64, 128, 128, 128
+        x = torch.randn(B, K, M, device=GPU_TYPE)
+        w = torch.randn(B, K, N, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        def fn(x, w):
+            return torch.bmm((x.transpose(1, 2) * 2.0).to(torch.bfloat16), w)
+
+        with config.patch(
+            {"test_configs.autotune_choice_name_regex": "blackwell_bmm"}
+        ):
+            actual, code = self._compile(fn, x, w, one_cta=False)
+        torch.testing.assert_close(actual, fn(x, w), atol=5e-2, rtol=5e-2)
+        self.assertNotIn("def triton_poi", code[0])
+        FileCheck().check("prologue_descriptor0 = tl.make_tensor_descriptor").run(
+            code[0]
+        )
 
 @instantiate_parametrized_tests
 class TestBlackwellExhaustiveConfigs(TestCase):
