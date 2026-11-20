@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import pathlib
+from collections.abc import Callable
 from typing import Any
 
 import sympy
@@ -42,7 +43,7 @@ class MultiKernelState:
     def define_kernel(
         self,
         kernels: list[Any],
-        kernel_shape_keys: list[None | tuple[tuple[int, ...], ...]] | None = None,
+        write_definition: Callable[[IndentedBuffer, str, tuple[str, ...]], None],
     ) -> str:
         """
         Previously we name the multi kernel as "multi_kernel_{kernel_names[0]}".
@@ -60,9 +61,9 @@ class MultiKernelState:
 
         kernels:
             A list of kernels
-        kernel_shape_keys:
-            Specified for size-hint multi-kernels.
-            Each list element is a shape key, corresponding to the concrete input & output size hints each kernel was tuned for.
+        write_definition:
+            Writes `name = async_compile.<dispatcher>(...)` for the multi-kernel kind,
+            given the buffer, the multi-kernel name and the sub-kernel names.
         """
         # Prevent circular import
         from ..select_algorithm import TritonTemplateKernel
@@ -102,7 +103,6 @@ class MultiKernelState:
             for i in range(len(kernels)):
                 arg_index[i] = [slice(0, len(call_args))]
 
-        keyed_by_sizes = kernel_shape_keys is not None
         buf = self.kernel_defs
         buf.writeline("")
         buf.writeline("arg_index = {")
@@ -110,32 +110,7 @@ class MultiKernelState:
             slice_reprs = ", ".join(repr(s) for s in slice_list)
             buf.writeline(f"    {key}: [{slice_reprs}],")
         buf.writeline("}")
-
-        if not keyed_by_sizes:  # no size hint keys, just call with list of kernels
-            buf.writeline(
-                f"{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, ["
-            )
-            with buf.indent():
-                for name in kernel_names:
-                    buf.writeline(f"{name},")
-            buf.writeline("], arg_index=arg_index)")
-        else:  # call with dict[size hint key, kernel]
-            if not isinstance(kernels[0], TritonTemplateKernel):
-                raise AssertionError("expected kernels[0] to be a TritonTemplateKernel")
-            if not isinstance(kernel_shape_keys, list):
-                raise AssertionError("expected kernel_shape_keys to be a list")
-            if len(kernels) != len(kernel_shape_keys):
-                raise AssertionError(
-                    f"expected len(kernels) == len(kernel_shape_keys), "
-                    f"got {len(kernels)} != {len(kernel_shape_keys)}"
-                )
-            buf.writeline(
-                f"{multi_kernel_name} = async_compile.size_hint_multi_kernel({multi_kernel_name!r}, {{"
-            )
-            with buf.indent():
-                for shape_key, name in zip(kernel_shape_keys, kernel_names):
-                    buf.writeline(f"{shape_key}: {name},")
-            buf.writeline("}, arg_index=arg_index)")
+        write_definition(buf, multi_kernel_name, kernel_names)
 
         if config.triton.autotune_at_compile_time:
             V.graph.wrapper_code.src_to_kernel["\n".join(kernel_names)] = (
@@ -154,10 +129,23 @@ class MultiKernelBase:
     """
     Compile-time state shared by every kernel that wraps several sub-kernels and
     launches one of them. Subclasses decide how the launched one is picked:
-    MultiKernel benchmarks them, ConditionalMultiKernel checks conditions.
+    MultiKernel benchmarks them once and keeps the fastest, SizeHintMultiKernel
+    picks the one tuned for the nearest size hint (both are DispatchedMultiKernels:
+    the pick happens at run time, in MultiKernelCall / SizeHintMultiKernelCall),
+    and ConditionalMultiKernel checks conditions on every launch, generated inline.
     """
 
     kernels: list[Any]
+
+    # A placeholder: multi-kernels have no argument list of their own (their leaves
+    # do). It exists because the scheduler tells a real kernel handler from the
+    # NullHandler with hasattr(V.kernel, "args") (SchedulerBuffer.allocate and the
+    # in-place reuse check in scheduler.py), and a multi-kernel is V.kernel while
+    # its nodes' buffers are allocated (mark_run). Without it, in-place reuse would
+    # be silently skipped.
+    # TODO: replace those hasattr checks with an explicit test for a real kernel
+    # handler and drop this attribute.
+    args: object = object()
 
     @property
     def kernel_name(self) -> str:
@@ -234,37 +222,28 @@ class MultiKernelBase:
         pass
 
 
-# TODO: rename to BenchmarkedMultiKernel (keeping a MultiKernel alias): it benchmarks
-# the sub-kernels once and keeps the fastest, unlike ConditionalMultiKernel.
-class MultiKernel(MultiKernelBase):
+class DispatchedMultiKernel(MultiKernelBase):
     """
-    This class maintains the compile time state for multi kernels.
-
-    Assume we do codegen for a MultiKernel encapsulating kernel1 and kernel2.
-    The generated definition for the multi-kernel will looks like:
-    ```
-    multi_kernel_kernel1 = MultiKernelCall(
-        [kernel1, kernel2], multi_kernel_definition_code
-    )
-    ```
-
-    Here is a concrete example: https://gist.github.com/shunting314/d9f3fb6bc6cee3dbae005825ca196d39
+    A multi-kernel launched through a run-time dispatcher: the wrapper defines
+    `multi_kernel_0 = async_compile.<kind>("multi_kernel_0", ...)` (written when
+    kernel_name is first read) and launches `multi_kernel_0.run(...)`, and the
+    dispatcher picks the sub-kernel. Subclasses choose the dispatcher through how
+    they register in kernel_name.
     """
-
-    def __init__(self, kernels):
-        if len(kernels) < 2:
-            raise AssertionError(f"expected at least 2 kernels, got {len(kernels)}")
-
-        self.kernels = kernels
-
-        # need this since some code in inductor check if the kernel object has an args
-        # attribute to decide if it's a non-null kernel.
-        self.args = object()
 
     @functools.cached_property
     def kernel_name(self) -> str:  # type: ignore[override]
         # Registered on first use: the sub-kernels only have names once defined.
-        return V.graph.wrapper_code.multi_kernel_state.define_kernel(self.kernels)
+        return V.graph.wrapper_code.multi_kernel_state.define_kernel(
+            self.kernels, self.write_definition
+        )
+
+    def write_definition(
+        self, buf: IndentedBuffer, name: str, kernel_names: tuple[str, ...]
+    ) -> None:
+        """Write `name = async_compile.<dispatcher>(...)`: the run-time object that
+        picks the sub-kernel. An `arg_index` table is already defined above it."""
+        raise NotImplementedError
 
     def launched_kernel_name(self) -> str:
         """The kernel the generated code actually launches.
@@ -352,6 +331,37 @@ class MultiKernel(MultiKernelBase):
 
         for ws in reversed(self.kernels[0].args.workspace_args):
             V.graph.wrapper_code.generate_workspace_deallocation(ws)
+
+
+# TODO: rename to BenchmarkedMultiKernel (keeping a MultiKernel alias): it benchmarks
+# the sub-kernels once and keeps the fastest, unlike ConditionalMultiKernel.
+class MultiKernel(DispatchedMultiKernel):
+    """
+    Launches the fastest of several interchangeable sub-kernels, e.g. persistent
+    and looped variants of one reduction (see add_multi_kernel_choices); each is
+    correct for every input. The wrapper defines
+
+        multi_kernel_0 = async_compile.multi_kernel("multi_kernel_0", [k0, k1], ...)
+
+    and at run time MultiKernelCall benchmarks the sub-kernels on the first call
+    and keeps the fastest (cached on disk); with the cpp wrapper the pick is made
+    at compile time.
+    """
+
+    def __init__(self, kernels):
+        if len(kernels) < 2:
+            raise AssertionError(f"expected at least 2 kernels, got {len(kernels)}")
+
+        self.kernels = kernels
+
+    def write_definition(
+        self, buf: IndentedBuffer, name: str, kernel_names: tuple[str, ...]
+    ) -> None:
+        buf.writeline(f"{name} = async_compile.multi_kernel({name!r}, [")
+        with buf.indent():
+            for kernel_name in kernel_names:
+                buf.writeline(f"{kernel_name},")
+        buf.writeline("], arg_index=arg_index)")
 
 
 class MultiKernelCall:
@@ -603,9 +613,11 @@ class MultiKernelCall:
         return row
 
 
-class SizeHintMultiKernel(MultiKernel):
+class SizeHintMultiKernel(DispatchedMultiKernel):
     """
-    Version of multi-kernel that generates kernels based on specified size hints.
+    Launches the sub-kernel tuned for the size hint nearest to the input shapes:
+    one template kernel is tuned per hint, and at run time SizeHintMultiKernelCall
+    picks by distance to the actual shapes, cached per shape.
     Currently only performs 1-d search over hints; doesn't perform combinatorial n-d search
     if n > 1 dynamic dimensions are specified.
 
@@ -622,15 +634,19 @@ class SizeHintMultiKernel(MultiKernel):
             self.kernels.append(kernel)
             self.kernel_shape_keys.append(shape_key)
 
-        # need this since some code in inductor check if the kernel object has an args
-        # attribute to decide if it's a non-null kernel.
-        self.args = object()
+    def write_definition(
+        self, buf: IndentedBuffer, name: str, kernel_names: tuple[str, ...]
+    ) -> None:
+        # Prevent circular import
+        from ..select_algorithm import TritonTemplateKernel
 
-    @functools.cached_property
-    def kernel_name(self) -> str:  # type: ignore[override]
-        return V.graph.wrapper_code.multi_kernel_state.define_kernel(
-            self.kernels, self.kernel_shape_keys
-        )
+        if not isinstance(self.kernels[0], TritonTemplateKernel):
+            raise AssertionError("expected kernels[0] to be a TritonTemplateKernel")
+        buf.writeline(f"{name} = async_compile.size_hint_multi_kernel({name!r}, {{")
+        with buf.indent():
+            for shape_key, kernel_name in zip(self.kernel_shape_keys, kernel_names):
+                buf.writeline(f"{shape_key}: {kernel_name},")
+        buf.writeline("}, arg_index=arg_index)")
 
 
 class ConditionalMultiKernel(MultiKernelBase):
@@ -658,10 +674,6 @@ class ConditionalMultiKernel(MultiKernelBase):
             choices = [*choices[:-1], (sympy.true, choices[-1][1])]
         self.choices = choices
         self.kernels = [kernel for _, kernel in choices]
-
-        # need this since some code in inductor check if the kernel object has an args
-        # attribute to decide if it's a non-null kernel.
-        self.args = object()
 
     @property
     def kernel_name(self) -> str:

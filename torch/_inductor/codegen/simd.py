@@ -4804,11 +4804,15 @@ class SIMDScheduling(BaseScheduling):
         kernel_features: SIMDKernelFeatures,
         index_dtype: torch.dtype | None = None,
     ) -> SIMDKernel | MultiKernelBase:
-        """Create the kernel for a node schedule and generate its kernels' bodies.
+        """Build step of codegen_node_schedule: pick the tiling, create the kernel
+        codegen objects (one kernel, or a multi-kernel over several leaf kernels) and
+        replay the nodes into each leaf, filling its loads, compute and stores.
 
-        Only builds kernels: nothing is written to the wrapper and no graph state
-        changes, so it can run more than once for one schedule. index_dtype forces
-        the index dtype instead of deriving it (and its guard) from the sizes.
+        Returns the kernel to launch. Its leaves have no source or name yet
+        (_define_node_schedule_kernels adds them). Nothing is written to the wrapper
+        and no graph state changes, so this can run more than once for one schedule.
+        index_dtype forces the index dtype instead of deriving it (and its guard)
+        from the sizes.
         """
         tiling, tiling_score = self.get_tiling_and_scores(
             kernel_features.node_schedule,
@@ -4834,10 +4838,14 @@ class SIMDScheduling(BaseScheduling):
     def _define_node_schedule_kernels(
         self, kernels: list[SIMDKernel], node_schedule: list[NodeScheduleEntry]
     ) -> None:
-        """Generate and define the source of kernels that one launch picks between.
+        """Define step of codegen_node_schedule, on every leaf kernel built by
+        _create_node_schedule_kernel for one launch: merge their workspaces, then
+        render each one's Triton source and write its definition
+        (`name = async_compile.triton(...)`) into the output module, setting its
+        kernel_name and code_hash.
 
-        Workspaces are merged first because the merged size is part of each
-        kernel's source.
+        Runs once, after all the leaves exist: the merged workspace size is part of
+        each source.
         """
         MultiKernel.merge_workspaces_inplace(kernels)
 
