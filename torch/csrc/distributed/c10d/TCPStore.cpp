@@ -315,6 +315,10 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     tlsCert_ = tls.cert;
     tlsKey_ = tls.key;
     tlsCa_ = tls.ca;
+    if (!tls.peerCertOid.empty()) {
+      tlsPeerCertOid_ = tls.peerCertOid;
+      tlsPeerCertValue_ = tls.peerCertValue;
+    }
   }
   if (!tls.psk.empty()) {
     tlsPsk_ = tls.psk;
@@ -332,6 +336,8 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
       serverOpts.tlsCa = tlsCa_;
       serverOpts.tlsPsk = tlsPsk_;
       serverOpts.tlsPskFile.reset();
+      serverOpts.tlsPeerCertOid = tlsPeerCertOid_;
+      serverOpts.tlsPeerCertValue = tlsPeerCertValue_;
       server_ = detail::TCPServer::start(serverOpts);
       // server successfully started
       C10D_DEBUG("The server has started on port = {}.", server_->port());
@@ -434,6 +440,8 @@ c10::intrusive_ptr<Store> TCPStore::clone() {
   opts.tlsKey = tlsKey_;
   opts.tlsCa = tlsCa_;
   opts.tlsPsk = tlsPsk_;
+  opts.tlsPeerCertOid = tlsPeerCertOid_;
+  opts.tlsPeerCertValue = tlsPeerCertValue_;
 
   return c10::make_intrusive<TCPStore>(addr_.host, opts);
 }

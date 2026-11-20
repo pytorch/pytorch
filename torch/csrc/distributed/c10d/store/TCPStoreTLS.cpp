@@ -78,6 +78,30 @@ constexpr int kTls13Version = 0x0304;
 constexpr std::string_view kPskIdentity = "torch.distributed.TCPStore.psk.v1";
 constexpr std::array<unsigned char, 2> kTlsAes128GcmSha256 = {0x13, 0x01};
 
+int verifyCertificateIdentity(int preverifyOk, void* storeCtx) {
+  if (!preverifyOk) {
+    return 0;
+  }
+  const auto& lib = openssl();
+  if (lib.X509_STORE_CTX_get_error_depth(storeCtx) != 0) {
+    return 1;
+  }
+  void* ssl = lib.X509_STORE_CTX_get_ex_data(
+      storeCtx, lib.SSL_get_ex_data_X509_STORE_CTX_idx());
+  const auto* ctx = ssl
+      ? static_cast<const TLSContext*>(
+            lib.SSL_CTX_get_ex_data(lib.SSL_get_SSL_CTX(ssl), 0))
+      : nullptr;
+  if (ctx &&
+      ctx->verifyPeerCertificate(
+          lib.X509_STORE_CTX_get_current_cert(storeCtx))) {
+    return 1;
+  }
+  // X509_V_ERR_APPLICATION_VERIFICATION. Never override a chain failure.
+  lib.X509_STORE_CTX_set_error(storeCtx, 50);
+  return 0;
+}
+
 int rejectCertificate(int /*preverifyOk*/, void* /*storeCtx*/) {
   return 0;
 }
@@ -207,13 +231,15 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
   TLSConfig config;
   std::string pskFile;
   if (opts.tlsCert || opts.tlsKey || opts.tlsCa || opts.tlsPsk ||
-      opts.tlsPskFile) {
+      opts.tlsPskFile || opts.tlsPeerCertOid || opts.tlsPeerCertValue) {
     config = {
         value(opts.tlsCert, "tls_cert"),
         value(opts.tlsKey, "tls_key"),
         value(opts.tlsCa, "tls_ca"),
         value(opts.tlsPsk, "tls_psk")};
     pskFile = value(opts.tlsPskFile, "tls_psk_file");
+    config.peerCertOid = value(opts.tlsPeerCertOid, "tls_peer_cert_oid");
+    config.peerCertValue = value(opts.tlsPeerCertValue, "tls_peer_cert_value");
   } else {
     auto env = [&](const char* name) {
       return value(c10::utils::get_env(name), name);
@@ -225,6 +251,20 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
         env("TORCH_TCPSTORE_TLS_PSK"),
         /*fromEnv=*/true};
     pskFile = env("TORCH_TCPSTORE_TLS_PSK_FILE");
+    config.peerCertOid = env("TORCH_TCPSTORE_TLS_PEER_CERT_OID");
+    config.peerCertValue = env("TORCH_TCPSTORE_TLS_PEER_CERT_VALUE");
+  }
+  if (!config.peerCertOid.empty() || !config.peerCertValue.empty()) {
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        !config.peerCertOid.empty() && !config.peerCertValue.empty() &&
+            !config.cert.empty() && !config.key.empty() && !config.ca.empty() &&
+            config.psk.empty() && pskFile.empty(),
+        "TCPStore TLS: peer certificate OID and value require certificate mode and both identity settings");
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        config.peerCertValue.find(',') == std::string::npos,
+        "TCPStore TLS: peer certificate value must be a single identity (no comma)");
   }
   if (!config.enabled() && pskFile.empty()) {
     TORCH_CHECK_WITH(
@@ -395,13 +435,72 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
       ssl.SSL_CTX_load_verify_locations(ctx, ca.c_str(), nullptr) == 1,
       "CA",
       ca);
+  if (!config.peerCertOid.empty()) {
+    res->peerCertOid_ = ssl.OBJ_txt2obj(config.peerCertOid.c_str(), 1);
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        res->peerCertOid_,
+        "TCPStore TLS: invalid peer certificate numeric OID");
+    res->peerCertValue_ = config.peerCertValue;
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        ssl.SSL_CTX_set_ex_data(ctx, 0, res.get()) == 1,
+        "TCPStore TLS: failed to initialize certificate identity context");
+  }
   ssl.SSL_CTX_set_verify(
-      ctx, kSslVerifyPeer | kSslVerifyFailIfNoPeerCert, nullptr);
+      ctx,
+      kSslVerifyPeer | kSslVerifyFailIfNoPeerCert,
+      res->peerCertOid_ ? verifyCertificateIdentity : nullptr);
   return res;
 #endif
 }
 
+bool TLSContext::verifyPeerCertificate(void* cert) const {
+  const auto& lib = openssl();
+  if (!cert || !peerCertOid_) {
+    return false;
+  }
+  const int index = lib.X509_get_ext_by_OBJ(cert, peerCertOid_, -1);
+  if (index < 0 || lib.X509_get_ext_by_OBJ(cert, peerCertOid_, index) >= 0) {
+    return false;
+  }
+  void* ext = lib.X509_EXTENSION_get_data(lib.X509_get_ext(cert, index));
+  const int size = lib.ASN1_STRING_length(ext);
+  const unsigned char* data = lib.ASN1_STRING_get0_data(ext);
+  if (size <= 0 || !data || *data != 0x0c) {
+    return false;
+  }
+  const unsigned char* end = data + size;
+  void* value = lib.d2i_ASN1_UTF8STRING(nullptr, &data, size);
+  auto free = c10::make_scope_exit([&] { lib.ASN1_UTF8STRING_free(value); });
+  if (!value || data != end ||
+      lib.i2d_ASN1_UTF8STRING(value, nullptr) != size) {
+    return false;
+  }
+  // MBSTRING_UTF8 and B_ASN1_UTF8STRING: validate every code point,
+  // without allocating another string. d2i alone accepts invalid UTF-8.
+  const auto* bytes = lib.ASN1_STRING_get0_data(value);
+  const int length = lib.ASN1_STRING_length(value);
+  if (lib.ASN1_mbstring_copy(nullptr, bytes, length, 0x1000, 0x2000) != 12) {
+    return false;
+  }
+  std::string_view remaining(reinterpret_cast<const char*>(bytes), length);
+  // Exact, case-sensitive tokens only: no substring, wildcard, or whitespace
+  // normalization. This also handles single-identity UTF8String extensions.
+  while (true) {
+    auto comma = remaining.find(',');
+    if (remaining.substr(0, comma) == peerCertValue_) {
+      return true;
+    }
+    if (comma == std::string_view::npos) {
+      return false;
+    }
+    remaining.remove_prefix(comma + 1);
+  }
+}
+
 TLSContext::~TLSContext() {
+  openssl().ASN1_OBJECT_free(peerCertOid_);
   openssl().SSL_CTX_free(ctx_);
 }
 
