@@ -2122,19 +2122,27 @@ class GraphModule(torch.nn.Module):
             return x + t1 + t2
 
         args = [torch.randn(16, 16, device=GPU_TYPE) for _ in range(4)]
-        compiled_fn = torch.compile(fn)
-        _, (code,) = run_and_get_code(compiled_fn, *args)
-        for i in range(3):
-            inputs = [t + i * 0.1 for t in args]
-            expected = fn(*inputs)
-            device_module.synchronize()
-            actual = compiled_fn(*inputs)
-            device_module.synchronize()
-            self.assertEqual(actual, expected)
-        self.assertIn("triton_for_fused", code)
-        # default -> side stream -> default; the bug moved the foreach kernel
-        # back to the default stream.
-        self.assertEqual(_count_generated_stream_contexts(code), 3)
+        expected = fn(*args)
+        device_module.synchronize()
+        actual, (code,) = run_and_get_code(torch.compile(fn), *args)
+        device_module.synchronize()
+        self.assertEqual(actual, expected)
+
+        # Small inputs rarely expose the race in the output, so check where the
+        # foreach kernel is emitted: under the side stream, not default_stream.
+        ctx = None
+        foreach_ctx = None
+        for line in code[code.find("def call(") :].split("\n"):
+            stripped = line.strip()
+            if stripped.startswith(("with stream", "with default_stream")):
+                ctx = stripped
+            if "triton_for_fused" in line and ".run(" in line:
+                foreach_ctx = ctx
+        self.assertIsNotNone(foreach_ctx, "foreach kernel not found")
+        self.assertTrue(
+            foreach_ctx.startswith("with stream"),
+            f"foreach kernel must run on the side stream, got: {foreach_ctx}",
+        )
 
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")

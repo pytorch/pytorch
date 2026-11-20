@@ -6565,11 +6565,11 @@ class Scheduler:
         Reads the stream_idx field set on IR nodes during lowering to determine
         which stream each scheduler node should run on. This field is propagated
         from 'custom.stream' FX node metadata via IRNode.current_stream_idx().
+        Group nodes that already exist here (e.g. foreach) have no IR node of
+        their own; they take the stream of their members.
         """
         from .stream_constants import DEFAULT_STREAM_IDX
 
-        # Foreach nodes already exist here and have no IR node of their own, so
-        # assign their members; get_node_stream derives the group's stream.
         for node in itertools.chain.from_iterable(n.get_nodes() for n in self.nodes):
             stream_idx = DEFAULT_STREAM_IDX
 
@@ -6586,6 +6586,9 @@ class Scheduler:
             # Mutation renames are resolved at lookup time via get_buf_stream.
             for buf in node.get_buffer_names():
                 self.buff_to_stream[buf] = stream_idx
+
+        for node in self.nodes:
+            self.get_node_stream(node)
 
         # Propagate a device to device-less nodes (e.g. record_event,
         # wait_event) so they naturally enter the device guard in the
