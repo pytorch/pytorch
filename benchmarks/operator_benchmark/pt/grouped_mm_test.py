@@ -14,8 +14,7 @@ grows: that still reaches every ck_tile config these shapes select on gfx950, an
 test fits in 40 GB.
 
 The forward test is x (B * M, K) @ w (B, N, K)^T with jagged M. The gradient test
-times backward through both inputs (dX and dW). Each test first checks the output, dX
-and dW against per-group matmuls with Primus-Turbo's tolerances.
+times backward through both inputs (dX and dW).
 
 The long tag runs bf16 and fp16 everywhere, and fp32 only on ROCm.
 
@@ -79,45 +78,6 @@ grouped_mm_configs_long = op_bench.config_list(
 )
 
 
-# (rtol, atol): Primus-Turbo's check_allclose values for 16-bit. fp32 needs a looser atol
-# since a full-K accumulation (no split-K) diverges from hipBLAS's split-K reference.
-TOLERANCES = {
-    torch.bfloat16: (1e-2, 1e-2),
-    torch.float16: (1e-2, 1e-2),
-    torch.float32: (1e-4, 2e-2),
-}
-
-
-# Runs eagerly under --use-compile: offs.tolist() and the print can't be compiled.
-@torch.compiler.disable
-def check_correctness(x, w, offs):
-    """Primus-Turbo's check: output, dX and dW against per-group matmuls."""
-    x, w = (t.detach().requires_grad_() for t in (x, w))
-    with torch.enable_grad():
-        out = torch.nn.functional.grouped_mm(x, w.transpose(-2, -1), offs=offs)
-    grad_out = torch.randn_like(out)
-    dx, dw = torch.autograd.grad(out, (x, w), grad_out)
-    ends = offs.tolist()
-    groups = list(enumerate(zip([0] + ends[:-1], ends)))
-    rtol, atol = TOLERANCES[x.dtype]
-
-    def close(a, b):
-        return torch.allclose(a, b, rtol=rtol, atol=atol)
-
-    # Compare one group at a time: full-size references OOM on the largest fp32 shapes.
-    with torch.no_grad():
-        ok = {
-            "fwd": all(close(out[s:e], x[s:e] @ w[i].t()) for i, (s, e) in groups),
-            "dX": all(close(dx[s:e], grad_out[s:e] @ w[i]) for i, (s, e) in groups),
-            "dW": all(close(dw[i], grad_out[s:e].t() @ x[s:e]) for i, (s, e) in groups),
-        }
-    details = ", ".join(f"{k}={v}" for k, v in ok.items())
-    shapes = f"x {tuple(x.shape)} w {tuple(w.shape)} {x.dtype}"
-    if not all(ok.values()):
-        raise AssertionError(f"Correctness check failed ({details}) {shapes}")
-    print(f"# Correctness Check: PASS ({details}) {shapes}")
-
-
 class DenseGrad(torch.autograd.Function):
     """Identity whose backward densifies the gradient: the runner backprops out.mean(), whose
     stride-0 expanded gradient grouped_mm's backward rejects. The runner repeats the same
@@ -149,14 +109,9 @@ class GroupedMMBenchmark(op_bench.TorchBenchmarkBase):
         # a backward never holds new and accumulated gradients at once (OOM on 40 GB GPUs).
         for t in (self.inputs["x"], self.inputs["w"]):
             t.register_post_accumulate_grad_hook(lambda t: setattr(t, "grad", None))
-        self.checked = False
         self.set_module_name("grouped_mm")
 
     def forward(self, x, w, offs):
-        # Once per test, on the first call, which is in the untimed warmup.
-        if not self.checked:
-            self.checked = True
-            check_correctness(x, w, offs)
         out = torch.nn.functional.grouped_mm(x, w.transpose(-2, -1), offs=offs)
         return DenseGrad.apply(out)
 

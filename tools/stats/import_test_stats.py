@@ -153,9 +153,17 @@ def get_td_heuristic_profiling_json() -> dict[str, Any]:
     )
 
 
-def get_td_scorer(max_bytes: int) -> bytes | None:
-    """Raw bytes of the TD scorer model, at most max_bytes + 1 of them, or None."""
-    url = f"{GENERATED_STATS_URL}/td-scorer.json"
+TD_SCORER_FILE = "td-scorer.json"
+TD_SCORER_BUDGET_FILE = "td-scorer-budget.json"
+
+
+def get_td_scorer(max_bytes: int, name: str = TD_SCORER_FILE) -> bytes | None:
+    """Raw bytes of a TD scorer model file, at most max_bytes + 1 of them, or None.
+
+    TD_SCORER_FILE never carries a test budget; TD_SCORER_BUDGET_FILE is the same
+    model with the budget block when one is on.
+    """
+    url = f"{GENERATED_STATS_URL}/{name}"
     print(f"Downloading {url}")
     for _ in range(3):
         try:
