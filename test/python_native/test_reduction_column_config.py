@@ -37,11 +37,17 @@ class TestColumnConfig(TestCase):
     def select(self, dtype=torch.float32, size=256, columns=4096, **kwargs):
         itemsize = dtype.itemsize
         args = dict(
+            cc=(10, 3),
+            dtype=dtype,
             rows=(size << 20) // (columns * itemsize),
             columns=columns,
             batches=1,
             nfields=1,
+            trait_type=T.SumOps,
             itemsize=itemsize,
+            acc_bits=32,
+            nouts=1,
+            welford_outs=0,
         )
         args.update(kwargs)
         return ct.select_col_config(**args)
@@ -91,7 +97,7 @@ class TestColumnConfig(TestCase):
     @parametrize(
         "kwargs,rule,geometry",
         [
-            ({"threads_per_block": 128}, "default", (128, 4)),
+            ({"threads_per_block": 128}, "explicit", (128, 4)),
             ({"npar": 7}, "explicit", (7, 4)),
             # Two-wide vectors make 2048 lanes, which want 64 partitions, not 128.
             ({"vec": 2}, "explicit", (64, 2)),
@@ -157,6 +163,75 @@ class TestColumnConfig(TestCase):
         self.assertEqual(view(packed, {1}, 2**30 - 1, 4).dim(), 3)
         wide = torch.empty(2, 2**30, 2, device="meta")
         self.assertIsNone(view(wide, {1}, 2**30, 4))
+
+    @parametrize(
+        "dtype,trait_type,rows,columns,partials,expected",
+        [
+            # Looped views keep the default mapping.
+            (torch.float32, T.SumOps, 8192, 4096, 1, None),
+            (torch.float16, T.SumOps, 8192, 4096, 1, None),
+            (torch.float32, T.SumOps, 65536, 1024, 8, (0, 16)),
+            (torch.float32, T.SumOps, 32768, 257, 4, (0, 16)),
+            (torch.float32, T.SumOps, 131072, 257, 16, (0, 32)),
+            # The band stops at 65536 rows.
+            (torch.float32, T.SumOps, 65536, 256, 8, (0, 16)),
+            (torch.float32, T.SumOps, 65537, 256, 9, (0, 32)),
+            (torch.float32, T.SumOps, 65536, 128, 8, (0, 16)),
+            (torch.float32, T.SumOps, 65537, 128, 9, (0, 32)),
+            (torch.float16, T.MeanOps, 65536, 191, 8, (0, 16)),
+            (torch.float32, T.SumOps, 131072, 191, 16, (0, 32)),
+            # It starts at 32768 rows and spans 128-257 columns.
+            (torch.float32, T.SumOps, 32767, 256, 4, (0, 32)),
+            (torch.float32, T.SumOps, 32768, 127, 4, (0, 32)),
+            (torch.float32, T.SumOps, 32768, 258, 4, (0, 32)),
+            (torch.bfloat16, T.AMaxOps, 32768, 4096, 4, (0, 16)),
+            (torch.bfloat16, T.AMaxOps, 262144, 4096, 32, (0, 32)),
+            (torch.bfloat16, T.AMinOps, 32768, 4096, 4, (0, 32)),
+        ],
+    )
+    def test_b200_ordered_column_mappings(
+        self, dtype, trait_type, rows, columns, partials, expected
+    ):
+        """Pin B200 ordered column widths, which apply to any outputs."""
+        for output in {dtype, torch.float32}:
+            with self.subTest(output=output):
+                cfg = ct.select_ordered_col_config(
+                    (10, 0),
+                    dtype,
+                    columns,
+                    1,
+                    partials,
+                    trait_type=trait_type,
+                    nfields=1,
+                    acc_bits=32,
+                    out_dtypes=(output,),
+                    rows=rows,
+                )
+                if expected is None:
+                    self.assertIsNone(cfg)
+                    continue
+                min_blocks, tile_columns = expected
+                want = ct.OrderedColConfig(min_blocks, tile_columns=tile_columns)
+                self.assertEqual(cfg, want._replace(full_tiles=True))
+
+    def test_b200_ordered_column_mapping_guards(self):
+        """Split views the fallback does not serve get None, multi-field ones too."""
+        args = dict(
+            cc=(10, 0),
+            dtype=torch.float32,
+            trait_type=T.SumOps,
+            columns=1024,
+            batches=1,
+            partials=8,
+            nfields=1,
+            acc_bits=32,
+            out_dtypes=(torch.float32,),
+            rows=65536,
+        )
+        index = {"trait_type": T.ArgMaxOps, "nfields": 2, "out_dtypes": (torch.int32,)}
+        for updates in ({"batches": 2}, {"acc_bits": 64}, {"cc": (10, 3)}, index):
+            with self.subTest(**updates):
+                self.assertIsNone(ct.select_ordered_col_config(**(args | updates)))
 
 
 class TestColumnCombine(TestCase):
@@ -259,6 +334,31 @@ class TestColumnCombine(TestCase):
         # Six key fields precede TileReduce.cache_sig, whose unroll is its seventh field.
         unrolls = {k[12] for k in ct._CACHE if k[:2] == ("coltile", "unroll")}
         self.assertEqual(unrolls, {2})
+        with (
+            native._unconditional_masked(),
+            torch.backends.python_native.cutedsl.disabled(),
+        ):
+            expected = x.sum(0)
+        self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
+
+    @parametrize("columns", [16, 64])
+    def test_inner_tree_order_hands_off(self, device, columns):
+        """inner_tree configs serve views the ordered kernel accepts, which takes the
+        default looped mapping at 64 columns, and fall back to coltile when it declines
+        views narrower than a warp."""
+        x = torch.randn((257, columns), device=device)
+        cfg = ct.ColConfig("test_order", 64, 7, 4, "column", kernel_order="inner_tree")
+        trait = T.SumOps(acc=cutlass.Float32)
+        key = f"order_{columns}"
+        args = (trait, key, x, [torch.float32], 1, None, None, None)
+        # No policy picks inner_tree at these shapes, so patch one in.
+        with patch.object(ct, "select_col_config", return_value=cfg) as select:
+            got = ct._reduce_col_tile(*args)[0]
+        tags = {k[0] for k in ct._CACHE if k[1] == key} & {"ordered_col", "coltile"}
+        self.assertEqual(tags, {"ordered_col" if columns >= 32 else "coltile"})
+        # A declined view re-selects without the inner-tree hand-off.
+        itree = [call.kwargs.get("itree", True) for call in select.call_args_list]
+        self.assertEqual(itree, [True] if columns >= 32 else [True, False])
         with (
             native._unconditional_masked(),
             torch.backends.python_native.cutedsl.disabled(),
