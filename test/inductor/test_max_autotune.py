@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import ast
 import contextlib
 import dataclasses
 import functools
@@ -504,11 +503,11 @@ class TestMaxAutotune(TestCase):
         M, N, K = 168, 248, 88
         a = torch.randn((M, K), dtype=dtype, device=GPU_TYPE)
         b = torch.randn((K, N), dtype=dtype, device=GPU_TYPE)
-        triton_mm_configs: dict[bool, set[tuple[int, ...]]] = {}
+        triton_mm_configs: dict[bool, set[tuple[str, int, int]]] = {}
         xpu_template_names: dict[bool, set[str]] = {}
 
         for enable_xpu_templates in (True, False):
-            configs: set[tuple[int, ...]] = set()
+            configs: set[tuple[str, int, int]] = set()
             names: set[str] = set()
 
             def record_choices(choices):
@@ -519,9 +518,9 @@ class TestMaxAutotune(TestCase):
                         names.add(choice.name.rsplit("_", 1)[0])
                         continue
                     info = choice.info_dict()
-                    block_m, block_k, block_n = ast.literal_eval(info["tile_shape"])
-                    num_stages, num_warps = info["num_stages"], info["num_warps"]
-                    configs.add((block_m, block_n, block_k, num_stages, num_warps))
+                    configs.add(
+                        (info["tile_shape"], info["num_stages"], info["num_warps"])
+                    )
                 return choices
 
             add_preprocessing_fn(record_choices)
@@ -548,8 +547,9 @@ class TestMaxAutotune(TestCase):
             triton_mm_configs[enable_xpu_templates] = configs
             xpu_template_names[enable_xpu_templates] = names
 
+        # tile_shape is logged as str((BLOCK_M, BLOCK_K, BLOCK_N)).
         companion_configs = {
-            (c.block_m, c.block_n, c.block_k, c.num_stages, c.num_warps)
+            (str((c.block_m, c.block_k, c.block_n)), c.num_stages, c.num_warps)
             for c in XPUMMTemplateConfigHeuristic.xpu_template_companion_configs
         }
         self.assertEqual(
