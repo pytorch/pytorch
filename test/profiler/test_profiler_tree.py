@@ -112,12 +112,8 @@ class TorchDispatchTensor(torch.Tensor):
 
 
 class ProfilerTree:
-    # Not a test class: it only exposes `test` as a decorator for the trace
-    # tests below. The device-agnostic declaration matches that role.
-    hw_classification = HardwareClassification.GENERIC
-
     @staticmethod
-    def test(f):
+    def mark(f):
         """Mark unit test that will be using ProfilerTree to test traces.
 
         This decorator serves two purposes. First, it provides a method name
@@ -345,7 +341,7 @@ class TestProfilerTree(_TestProfilerTreeBase):
     )
     # GC can resume unrelated generators and add frames to the recorded tree.
     @disable_gc()
-    @ProfilerTree.test
+    @ProfilerTree.mark
     def test_profiler_experimental_tree_with_stack_and_modules(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -472,7 +468,7 @@ class TestProfilerTree(_TestProfilerTreeBase):
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
-    @ProfilerTree.test
+    @ProfilerTree.mark
     def test_profiler_experimental_tree_with_stack_and_torch_function(self):
         x = TorchFunctionTensor(torch.ones((1,)))
         y = torch.ones((1,))
@@ -513,7 +509,7 @@ class TestProfilerTree(_TestProfilerTreeBase):
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
-    @ProfilerTree.test
+    @ProfilerTree.mark
     def test_profiler_experimental_tree_with_stack_and_torch_dispatch(self):
         x = TorchDispatchTensor(torch.ones((1,)))
         y = torch.ones((1,))
@@ -558,7 +554,7 @@ class TestProfilerTree(_TestProfilerTreeBase):
 class TestProfilerTreeCPU(_TestProfilerTreeBase):
     hw_classification = HardwareClassification.CPU
 
-    @ProfilerTree.test
+    @ProfilerTree.mark
     def test_profiler_experimental_tree_cpu_profile(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile(
@@ -613,7 +609,7 @@ class TestProfilerTreeCPU(_TestProfilerTreeBase):
                   detach""",
         )
 
-    @ProfilerTree.test
+    @ProfilerTree.mark
     def test_profiler_experimental_tree_with_record_function(self):
         with torch.profiler.profile(
             activities=[torch.profiler.ProfilerActivity.CPU]
@@ -663,7 +659,7 @@ class TestProfilerTreeCPU(_TestProfilerTreeBase):
                       aten::copy_""",
         )
 
-    @ProfilerTree.test
+    @ProfilerTree.mark
     def test_profiler_experimental_tree_with_memory(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile(
@@ -741,7 +737,7 @@ class TestProfilerTreeCPU(_TestProfilerTreeBase):
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
-    @ProfilerTree.test
+    @ProfilerTree.mark
     def test_profiler_experimental_tree_with_memory_and_stack(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
@@ -858,7 +854,7 @@ class TestProfilerTreeCUDA(_TestProfilerTreeBase):
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
-    @ProfilerTree.test
+    @ProfilerTree.mark
     def test_profiler_experimental_tree_cuda_detailed(self):
         # Do lazy imports ahead of time to avoid it showing up in the tree
         import torch.nested._internal.nested_tensor
@@ -1071,7 +1067,7 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/83606")
-    @ProfilerTree.test
+    @ProfilerTree.mark
     def test_profiler_experimental_tree(self, device):
         with torch.profiler.profile(profile_memory=True) as p:
             weight = torch.ones(1, device=device, requires_grad=True)
@@ -1319,7 +1315,7 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
 
     @onlyAccelerator
     @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/83606")
-    @ProfilerTree.test
+    @ProfilerTree.mark
     def test_profiler_experimental_tree_with_stream(self, device):
         device_module = torch.get_device_module(device)
         streams = [device_module.Stream() for _ in range(3)]
