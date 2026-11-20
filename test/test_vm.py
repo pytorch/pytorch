@@ -3079,6 +3079,22 @@ class TestVmMoreBytecodes(TestCase):
                 compiled(bad)
             self.assertEqual(str(got.exception), str(expected.exception))
 
+    def test_star_arguments_made_in_a_loop(self):
+        def collect(*args, **kwargs):
+            return args, kwargs
+
+        def f(xs):
+            return (
+                collect(*xs, *[x * 2 for x in xs]),
+                collect(1, *[x for x in xs if x], k=2),
+                collect(*tuple(x + 1 for x in xs), **{str(x): x for x in xs}),
+            )
+
+        # The NULL next to `collect` is on the stack while the loops run.
+        compiled = torch.vm(f, fallback=False)
+        for xs in ([1, 2, 3], [], (0, 5)):
+            self.assertEqual(compiled(xs), f(xs))
+
     def test_class_statement(self):
         def f(x):
             class Point:
