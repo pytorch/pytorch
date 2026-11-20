@@ -770,6 +770,7 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
             self.assertTrue(work.is_completed())
 
 
+@instantiate_parametrized_tests
 class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
     @property
     def world_size(self) -> int:
@@ -808,6 +809,104 @@ class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
         dist.destroy_process_group()
         del work
         gc.collect()
+
+    def _reconfigure_options(
+        self, store: dist.Store, uuid: int, timeout: timedelta
+    ) -> ReconfigureOptions:
+        key = f"nccl2_reconfigure/{uuid}"
+        store.set(f"{key}/{self.rank}", dist.group.WORLD.get_reconfigure_handle())
+        opts = ReconfigureOptions()
+        opts.uuid = uuid
+        opts.handles = [
+            store.get(f"{key}/{rank}").decode() for rank in range(self.world_size)
+        ]
+        opts.timeout = timeout
+        return opts
+
+    @requires_nccl()
+    @requires_nccl_version((2, 28), "Need NCCL 2.28+ for reconfigure")
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        and dist.is_nccl_available()
+        and torch.cuda.nccl.version() < (2, 30, 7),
+        "nccl2 reconfigure requires RCCL 2.30.7 or later",
+    )
+    @skip_if_lt_x_gpu(2)
+    @parametrize("blocking_wait", [False, True])
+    def test_reconfigure_old_work(self, blocking_wait: bool) -> None:
+        device = torch.device("cuda", self.rank)
+        torch.cuda.set_device(device)
+        timeout = timedelta(seconds=30)
+        store = dist.FileStore(self.file_name, self.world_size)
+        store.set_timeout(timeout)
+        env = {"TORCH_NCCL_BLOCKING_WAIT": str(int(blocking_wait))}
+        with mock.patch.dict(os.environ, env):
+            dist.init_process_group(
+                "nccl2",
+                world_size=self.world_size,
+                rank=self.rank,
+                store=store,
+                timeout=timeout,
+                enable_reconfigure=True,
+                device_id=device,
+            )
+        try:
+            group = dist.group.WORLD
+            group.reconfigure(self._reconfigure_options(store, 1, timeout)).wait()
+            next_options = self._reconfigure_options(store, 2, timeout)
+
+            # Finished before reconfigure(), so it still succeeds. Async ops run on
+            # an internal stream, so sync the device.
+            completed = torch.tensor([self.rank + 1], device=device)
+            completed_work = dist.all_reduce(completed, async_op=True)
+            torch.cuda.synchronize(device)
+
+            # No other rank issues this collective, so it cannot complete.
+            waited: list[RuntimeError] = []
+            aborted: list[int] = []
+            if self.rank == 0:
+                group.register_abort_hook(0, lambda: aborted.append(1))
+                old_work = dist.all_reduce(torch.ones(4, device=device), async_op=True)
+
+                def on_cancel(_: torch.futures.Future) -> None:
+                    try:
+                        old_work.wait()
+                    except RuntimeError as e:
+                        waited.append(e)
+
+                # Runs inside reconfigure(), once old_work is cancelled.
+                old_work.get_future_result().then(on_cancel)
+            store.set(f"reconfigure_ready/{self.rank}", "1")
+            for rank in range(self.world_size):
+                store.get(f"reconfigure_ready/{rank}")
+
+            group.reconfigure(next_options).wait()
+            # Before rank 0's assertions, so a failure cannot hang the peer.
+            health = torch.tensor([self.rank + 1], device=device)
+            dist.all_reduce(health)
+            self.assertEqual(int(health.item()), sum(range(1, self.world_size + 1)))
+            if self.rank == 0:
+                # on_cancel ran inside reconfigure(), not in the wait() below.
+                self.assertEqual(len(waited), 1)
+                self.assertIsInstance(waited[0], dist.DistBackendError)
+                self.assertIn("cancelled by reconfigure", str(waited[0]))
+                with self.assertRaisesRegex(
+                    dist.DistBackendError, "cancelled by reconfigure"
+                ):
+                    old_work.wait()
+                # A cancelled work is not a failure of the new communicator.
+                self.assertEqual(aborted, [])
+                old_result = old_work.get_future_result()
+                self.assertTrue(old_result.done())
+                self.assertEqual(WorkResult(old_result.wait()), WorkResult.COMM_ERROR)
+            completed_result = completed_work.get_future_result()
+            self.assertTrue(completed_result.done())
+            self.assertEqual(WorkResult(completed_result.wait()), WorkResult.SUCCESS)
+            completed_work.wait()
+            expected = sum(range(1, self.world_size + 1))
+            self.assertEqual(completed, torch.full_like(completed, expected))
+        finally:
+            dist.destroy_process_group()
 
 
 _TEST_PSK = "0123456789abcdef0123456789abcdef"

@@ -8135,6 +8135,13 @@ def _reconfigure(
     """
     Reconfigure ``group`` with a new set of peers for fault tolerance.
 
+    With the NCCL backend, work issued on ``group`` that has not completed when
+    its current communicator is torn down is cancelled: ``Work.wait()`` raises
+    ``DistBackendError`` and ``Work.get_future_result()`` reports
+    ``WorkResult.COMM_ERROR``. ``Work.get_future()`` does not report the
+    cancellation; its outputs are then undefined. Do not issue operations on
+    ``group`` concurrently with this call.
+
     .. warning::
         This API is experimental and subject to change or removal.
 
