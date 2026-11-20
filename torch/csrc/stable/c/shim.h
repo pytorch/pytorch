@@ -495,6 +495,21 @@ AOTI_TORCH_EXPORT AOTITorchError torch_new_list_pyobject(
     size_t length,
     void** ret); // returns new reference
 
+// Wrap a Python torch.Generator (or a subclass) as a new AtenGeneratorHandle
+// that shares its RNG state, which the caller frees with
+// torch_delete_generator.
+AOTI_TORCH_EXPORT AOTITorchError torch_generator_from_pyobject(
+    void* py_obj,
+    AtenGeneratorHandle* ret); // returns new reference
+
+// Wrap an AtenGeneratorHandle as a Python torch.Generator that shares its RNG
+// state. If the generator already has an associated Python object, that object
+// is returned. generator is borrowed and must be a non-null handle to a defined
+// generator.
+AOTI_TORCH_EXPORT AOTITorchError torch_generator_to_pyobject(
+    AtenGeneratorHandle generator,
+    void** ret); // returns new reference
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #ifdef __cplusplus
