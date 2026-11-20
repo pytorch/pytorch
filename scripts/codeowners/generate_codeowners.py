@@ -60,6 +60,17 @@ def string_list(value, *, where: str) -> tuple[str, ...]:
     return tuple(value)
 
 
+def check_handles(handles: tuple[str, ...], *, where: str) -> None:
+    # Auto PR Triage requests owners with the workflow token, which can't request
+    # a team or map an email to a login, so every handle must be a user login.
+    emails = [h for h in handles if "@" in h]
+    if emails:
+        raise ValueError(f"{where}: list GitHub logins instead of emails {emails}")
+    teams = [h for h in handles if "/" in h]
+    if teams:
+        raise ValueError(f"{where}: list people instead of teams {teams}")
+
+
 def mapping(value, *, where: str) -> dict:
     if not isinstance(value, dict):
         raise ValueError(f"{where} must be a mapping, got {value!r}")
@@ -74,6 +85,7 @@ def parse_path_rule(entry, *, where: str) -> PathRule:
         notify = string_list(handles, where=f"{where} {path}")
         if not notify:
             raise ValueError(f"{where} {path}: write a quiet path as a bare string")
+        check_handles(notify, where=f"{where} {path}")
     else:
         raise ValueError(
             f"{where}: expected '/path' or '/path: [handles]', got {entry!r}"
@@ -97,6 +109,7 @@ def parse_group(entry, *, sections: tuple[str, ...]) -> LabelGroup:
         raise ValueError(f"{where}: missing keys {sorted(missing)}")
     labels = string_list(entry.get("labels", []), where=f"{where} labels")
     owners = string_list(entry["owners"], where=f"{where} owners")
+    check_handles(owners, where=f"{where} owners")
     if owners and not labels:
         raise ValueError(f"{where}: a group without labels can't have owners")
     if entry["section"] not in sections:
@@ -167,8 +180,8 @@ def load_ownership(path: Path) -> OwnershipFile:
 
 
 def handle(name: str) -> str:
-    """Handles are stored without "@" (as in merge_rules.yaml); emails keep theirs."""
-    return name if "@" in name else f"@{name}"
+    """Handles are stored without "@" (as in merge_rules.yaml)."""
+    return f"@{name}"
 
 
 def render_rule(rule: PathRule) -> str:
