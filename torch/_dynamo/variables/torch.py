@@ -356,6 +356,9 @@ ctc_loss_fns: frozenset[Callable[..., Any]] = frozenset(
     }
 )
 
+# Ops whose fresh unbacked symbols never reach their outputs
+ops_with_dropped_unbacked_symbols = ops_consuming_unbacked_scalars | ctc_loss_fns
+
 
 @functools.cache
 def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
@@ -4264,7 +4267,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 saved_out_args.append((out_kwarg_vt, saved_out_shapes))
 
         ctx = nullcontext
-        if fn_ in ops_consuming_unbacked_scalars or fn_ in ctc_loss_fns:
+        if fn_ in ops_with_dropped_unbacked_symbols:
             if tx.fake_mode and tx.fake_mode.shape_env:
                 ctx = tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols
 
