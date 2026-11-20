@@ -4,7 +4,7 @@
 use crate::bytecode::{self, OpcodeTable};
 use crate::capi::{self, TcfgApi, TCFG_API_VERSION};
 use crate::ir::*;
-use crate::pyffi::{self, Obj, PyObj};
+use crate::pyffi::{Obj, PyObj};
 use crate::spec::{self, CfgPass, PassCx, Pipeline, PyPass, Unit, ValueObs};
 use crate::vm::{self, Callees, Compiled, Options};
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
@@ -484,7 +484,7 @@ impl Region {
     }
 
     /// The instructions as dicts with keys index, op, dst, uses and text;
-    /// replayable and steppable; and kernel, the operator an instruction was
+    /// replayable; and kernel, the operator an instruction was
     /// seen to be exactly one call of (`aten::mul.Tensor`), or None.
     fn instructions(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let (unit, cx) = self.parts()?;
@@ -501,7 +501,6 @@ impl Region {
             d.set_item("uses", uses)?;
             d.set_item("text", text)?;
             d.set_item("replayable", u.origin as usize == i && u.inst.op.is_replayable())?;
-            d.set_item("steppable", u.origin as usize == i && u.inst.op.is_steppable())?;
             let slot = cx.slots.get(u.origin as usize).and_then(|slot| slot.as_ref());
             d.set_item("kernel", slot.and_then(|slot| unsafe { slot.operator() }))?;
             out.append(d)?;
@@ -666,38 +665,6 @@ impl Region {
         Ok(true)
     }
 
-    /// Puts a call of `callable` in front of the instruction at `start`,
-    /// which must still be the generic one, and leaves the instructions as
-    /// they are. The callable gets the values that are needed from `start`
-    /// on, which are returned, with `torch._cfg_rs.UNDEFINED` for one that
-    /// has no value. If it returns None the instructions run; otherwise it
-    /// returns `(block, index, values, cleared)` and execution goes on at
-    /// instruction `index` of `block`, anywhere in the function, with the
-    /// values of the dict `values` (by value number) set and those in the
-    /// list `cleared` unset. Returns None for a function with exception
-    /// handlers, whose frame slots a leap would not carry over.
-    fn leap(&self, start: usize, callable: &Bound<'_, PyAny>) -> PyResult<Option<Vec<V>>> {
-        let (unit, cx) = self.parts()?;
-        if start >= unit.insts.len() {
-            return Err(PyIndexError::new_err("no such instruction"));
-        }
-        if unit.insts[start].origin as usize != start || cx.func().exc_reg != NONE {
-            return Ok(None);
-        }
-        let inputs: Vec<V> = cx.cf.live_at(unit.block, start).iter().collect();
-        let callee = unsafe { PyObj::from_borrowed(callable.as_ptr()) };
-        let bc = unit.insts[start].inst.bc;
-        unit.insts.insert(
-            start,
-            crate::spec::UInst {
-                inst: Inst { dst: NONE, op: Op::Leap(callee, inputs.clone()), bc, kills: Vec::new() },
-                origin: NONE,
-                removable: false,
-            },
-        );
-        Ok(Some(inputs))
-    }
-
     /// Replaces the instruction at `index` with the constant True, False or
     /// None.
     fn replace_with_const(&self, index: usize, value: &Bound<'_, PyAny>) -> PyResult<()> {
@@ -798,7 +765,7 @@ impl Replay {
     fn run(&self, py: Python<'_>, lo: usize, hi: usize, env: &Bound<'_, PyDict>, traced: bool) -> PyResult<()> {
         self.check(lo, hi)?;
         let compiled = self.compiled()?;
-        match unsafe { compiled.replay(self.block, lo, hi, env.as_ptr(), traced, false) } {
+        match unsafe { compiled.replay(self.block, lo, hi, env.as_ptr(), traced) } {
             Ok(()) => Ok(()),
             Err(index) => {
                 let err = PyErr::fetch(py);
@@ -810,74 +777,6 @@ impl Replay {
 
     // What follows is about the function as a whole, for code that goes
     // on from the range into other blocks.
-
-    /// The generic instructions of a block, as `Region.instructions` gives
-    /// them for the block of a pass.
-    fn instructions_of(&self, py: Python<'_>, block: usize) -> PyResult<Py<PyAny>> {
-        let compiled = self.compiled()?;
-        let func = &compiled.func;
-        let Some(found) = func.blocks.get(block) else {
-            return Err(PyIndexError::new_err("no such block"));
-        };
-        let out = PyList::empty(py);
-        for (i, inst) in found.insts.iter().enumerate() {
-            let d = PyDict::new(py);
-            let text = func.op_repr(&inst.op);
-            d.set_item("index", i)?;
-            d.set_item("op", text.split_whitespace().next().unwrap_or(""))?;
-            d.set_item("dst", if inst.dst == NONE { None } else { Some(inst.dst) })?;
-            let mut uses = Vec::new();
-            inst.op.for_each_use(|v| uses.push(v));
-            d.set_item("uses", uses)?;
-            d.set_item("text", text)?;
-            d.set_item("replayable", inst.op.is_replayable())?;
-            d.set_item("steppable", inst.op.is_steppable())?;
-            out.append(d)?;
-        }
-        Ok(out.into_any().unbind())
-    }
-
-    /// How a block ends: its kind (`jump`, `br`, `br_null`, or `leave` for
-    /// what ends the function), the value it looks at, and the blocks it
-    /// goes to (`br`: if true, if false; `br_null`: if the value is unset, if
-    /// it is set).
-    fn terminator(&self, block: usize) -> PyResult<(String, Option<V>, Vec<usize>)> {
-        let compiled = self.compiled()?;
-        let Some(found) = compiled.func.blocks.get(block) else {
-            return Err(PyIndexError::new_err("no such block"));
-        };
-        Ok(match &found.term {
-            Term::Jump(b) => ("jump".to_string(), None, vec![*b as usize]),
-            Term::Br { cond, then_, else_ } => {
-                ("br".to_string(), Some(*cond), vec![*then_ as usize, *else_ as usize])
-            }
-            Term::BrNull { v, null, nonnull } => {
-                ("br_null".to_string(), Some(*v), vec![*null as usize, *nonnull as usize])
-            }
-            _ => ("leave".to_string(), None, Vec::new()),
-        })
-    }
-
-    /// What going from block `pred` to block `block` does to the values: the
-    /// moves `(to, from)` that the phis of `block` stand for, all at once
-    /// (`from` is None for a value that is unset on this edge), and the
-    /// values that are not needed beyond the edge.
-    fn edge(&self, pred: usize, block: usize) -> PyResult<(Vec<(V, Option<V>)>, Vec<V>)> {
-        let compiled = self.compiled()?;
-        let position = compiled
-            .func
-            .blocks
-            .get(block)
-            .and_then(|found| found.preds.iter().position(|p| *p as usize == pred));
-        let Some(position) = position else {
-            return Err(PyIndexError::new_err("no such edge"));
-        };
-        let moves = compiled.analysis.edge_moves[block][position]
-            .iter()
-            .map(|(dst, src)| (*dst, (*src != UNDEF).then_some(*src)))
-            .collect();
-        Ok((moves, compiled.analysis.edge_kills[block][position].clone()))
-    }
 
     /// The values that are needed from instruction `index` of a block on;
     /// with `read`, only those that an instruction reads, not the ones that
@@ -893,48 +792,6 @@ impl Replay {
             return Ok(compiled.read_at(block, index).iter().collect());
         }
         Ok(compiled.live_at(block, index).iter().collect())
-    }
-
-    /// Whether `Region.leap` works in this function: not in one with
-    /// exception handlers.
-    #[getter]
-    fn leaps(&self) -> PyResult<bool> {
-        Ok(self.compiled()?.func.exc_reg == NONE)
-    }
-
-    /// The globals of the function.
-    #[getter]
-    fn globals(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let compiled = self.compiled()?;
-        Ok(unsafe { Bound::from_borrowed_ptr(py, compiled.func.globals.as_ptr()).unbind() })
-    }
-
-    /// `run` for the instructions lo..hi of any block, which may also be
-    /// ones that work on what a replay made itself (see `steppable` in
-    /// `instructions_of`).
-    #[pyo3(signature = (block, lo, hi, env, traced=false))]
-    fn step(
-        &self,
-        py: Python<'_>,
-        block: usize,
-        lo: usize,
-        hi: usize,
-        env: &Bound<'_, PyDict>,
-        traced: bool,
-    ) -> PyResult<()> {
-        let compiled = self.compiled()?;
-        let fits = compiled.func.blocks.get(block).is_some_and(|found| lo <= hi && hi <= found.insts.len());
-        if !fits {
-            return Err(PyIndexError::new_err("no such instructions"));
-        }
-        match unsafe { compiled.replay(block, lo, hi, env.as_ptr(), traced, true) } {
-            Ok(()) => Ok(()),
-            Err(index) => {
-                let err = PyErr::fetch(py);
-                let _ = err.value(py).setattr("cfg_index", index);
-                Err(err)
-            }
-        }
     }
 
     /// Leaves `note` on the block for the pass and has the block specialized
@@ -984,191 +841,6 @@ pub fn plan_changed() {
 #[pyfunction]
 pub fn profiling_depth() -> usize {
     vm::profiling_depth()
-}
-
-/// A number that stays what it is for as long as an `nn.Module` and the
-/// modules below it hold what they hold: which of their attributes are
-/// tensors (objects of one of the types in `tensors`), lists with tensors or
-/// None, their `training` flags, the names of their parameters, buffers and
-/// submodules, which of those are None, the submodules themselves, and
-/// whether they have hooks. Which tensor an attribute holds is not part of
-/// it. Reading it costs a walk over the dicts of the modules, and nothing
-/// has to be told when one of them changes.
-#[pyfunction]
-pub fn module_stamp(module: &Bound<'_, PyAny>, tensors: &Bound<'_, PyTuple>) -> PyResult<u64> {
-    Ok(stamp_of(module, tensors, false)?.0)
-}
-
-/// `module_stamp`, and a number for which `module_epoch` is asked from then
-/// on: while that gives the same number, no dict the stamp was read from
-/// has changed, and the stamp is what another walk would find. With
-/// `watch` the dicts of the modules are watched for that (their own, and
-/// those of their parameters, buffers, submodules and hooks). None instead
-/// of the number without `watch`, when the interpreter has no watcher to
-/// give, and for a module that keeps tensors in a list, which nothing
-/// watches.
-#[pyfunction]
-pub fn module_look(
-    module: &Bound<'_, PyAny>,
-    tensors: &Bound<'_, PyTuple>,
-    watch: bool,
-) -> PyResult<(u64, Option<u64>)> {
-    let epoch = pyffi::modules_version();
-    let (stamp, watched) = stamp_of(module, tensors, watch)?;
-    Ok((stamp, if watch && watched { Some(epoch) } else { None }))
-}
-
-/// What a change to a dict that `module_look` watches bumps.
-#[pyfunction]
-pub fn module_epoch() -> u64 {
-    pyffi::modules_version()
-}
-
-fn stamp_of(module: &Bound<'_, PyAny>, tensors: &Bound<'_, PyTuple>, watch: bool) -> PyResult<(u64, bool)> {
-    static NAMES: std::sync::OnceLock<[PyObj; 8]> = std::sync::OnceLock::new();
-    let names = NAMES.get_or_init(|| {
-        let intern = |name: &std::ffi::CStr| unsafe {
-            PyObj::from_owned(ffi::PyUnicode_InternFromString(name.as_ptr()))
-        };
-        [
-            intern(c"training"),
-            intern(c"_parameters"),
-            intern(c"_buffers"),
-            intern(c"_modules"),
-            intern(c"_forward_hooks"),
-            intern(c"_forward_pre_hooks"),
-            intern(c"_backward_hooks"),
-            intern(c"_backward_pre_hooks"),
-        ]
-    });
-    let types: Vec<usize> = tensors.iter().map(|t| t.as_ptr() as usize).collect();
-    let mut stamp: u64 = 0xcbf2_9ce4_8422_2325;
-    let mut mix = |v: u64| stamp = (stamp ^ v).wrapping_mul(0x0000_0100_0000_01b3);
-    let mut pending = vec![module.as_ptr()];
-    let mut seen = 0usize;
-    // Whether every dict that is read tells of its changes.
-    let mut watched = true;
-    unsafe {
-        let is_tensor = |o: Obj| types.contains(&(ffi::Py_TYPE(o) as usize));
-        let none = ffi::Py_None();
-        while let Some(m) = pending.pop() {
-            seen += 1;
-            if seen > 1_000_000 {
-                return Err(pyo3::exceptions::PyRecursionError::new_err(
-                    "a module that contains itself",
-                ));
-            }
-            mix(m as u64);
-            let slot = pyffi::_PyObject_GetDictPtr(m);
-            if slot.is_null() || (*slot).is_null() {
-                continue;
-            }
-            if watch {
-                watched = watched && pyffi::watch_module_dict(*slot);
-            }
-            let (mut pos, mut key, mut value) = (0, null_mut(), null_mut());
-            while ffi::PyDict_Next(*slot, &mut pos, &mut key, &mut value) != 0 {
-                let which = names.iter().position(|n| n.as_ptr() == key);
-                if watch && which.is_some_and(|w| w >= 1) && ffi::PyDict_Check(value) != 0 {
-                    watched = watched && pyffi::watch_module_dict(value);
-                }
-                let kind: u64 = match which {
-                    Some(0) => 2 + (value == ffi::Py_True()) as u64,
-                    Some(1..=3) if ffi::PyDict_Check(value) != 0 => {
-                        let (mut p, mut k, mut v) = (0, null_mut(), null_mut());
-                        let mut held = 4u64;
-                        while ffi::PyDict_Next(value, &mut p, &mut k, &mut v) != 0 {
-                            held = held.wrapping_mul(31).wrapping_add(k as u64);
-                            if which == Some(3) {
-                                held = held.wrapping_mul(31).wrapping_add(v as u64);
-                                if v != none {
-                                    pending.push(v);
-                                }
-                            } else {
-                                held = held.wrapping_mul(31).wrapping_add((v == none) as u64);
-                            }
-                        }
-                        held
-                    }
-                    Some(4..) => 5 + (ffi::PyObject_IsTrue(value) != 0) as u64,
-                    _ if value == none => 7,
-                    _ if is_tensor(value) => 8,
-                    _ if ffi::PyList_CheckExact(value) != 0 => {
-                        let n = ffi::PyList_GET_SIZE(value);
-                        let mut held = 9u64.wrapping_add((n as u64) << 32);
-                        for i in 0..n {
-                            let item = is_tensor(ffi::PyList_GET_ITEM(value, i));
-                            held = held.wrapping_mul(31).wrapping_add(item as u64);
-                            // What a list holds changes without a word.
-                            watched = watched && !item;
-                        }
-                        held
-                    }
-                    _ => continue,
-                };
-                mix(key as u64);
-                mix(kind);
-            }
-        }
-        if !ffi::PyErr_Occurred().is_null() {
-            return Err(PyErr::fetch(module.py()));
-        }
-    }
-    Ok((stamp, watched))
-}
-
-/// A number that changes when an `nn.Module` or a module below it is given
-/// another object for anything it holds: an attribute, a parameter, a
-/// buffer, a submodule, a hook. Unlike `module_stamp` it is about the very
-/// objects, so it says whether a stretch of code left the modules as they
-/// were. Attributes named in `skip` are not looked at.
-#[pyfunction]
-pub fn module_identity(module: &Bound<'_, PyAny>, skip: &Bound<'_, PyTuple>) -> PyResult<u64> {
-    let skipped: Vec<usize> = skip.iter().map(|name| name.as_ptr() as usize).collect();
-    let mut stamp: u64 = 0xcbf2_9ce4_8422_2325;
-    let mut mix = |v: u64| stamp = (stamp ^ v).wrapping_mul(0x0000_0100_0000_01b3);
-    let mut pending = vec![module.as_ptr()];
-    let mut seen = 0usize;
-    unsafe {
-        let modules = ffi::PyUnicode_InternFromString(c"_modules".as_ptr());
-        let none = ffi::Py_None();
-        while let Some(m) = pending.pop() {
-            seen += 1;
-            if seen > 1_000_000 {
-                ffi::Py_XDECREF(modules);
-                return Err(pyo3::exceptions::PyRecursionError::new_err(
-                    "a module that contains itself",
-                ));
-            }
-            mix(m as u64);
-            let slot = pyffi::_PyObject_GetDictPtr(m);
-            if slot.is_null() || (*slot).is_null() {
-                continue;
-            }
-            let (mut pos, mut key, mut value) = (0, null_mut(), null_mut());
-            while ffi::PyDict_Next(*slot, &mut pos, &mut key, &mut value) != 0 {
-                if skipped.contains(&(key as usize)) {
-                    continue;
-                }
-                mix(key as u64);
-                mix(value as u64);
-                // The dicts of parameters, buffers, submodules and hooks are
-                // changed in place.
-                if ffi::PyDict_Check(value) != 0 {
-                    let (mut p, mut k, mut v) = (0, null_mut(), null_mut());
-                    while ffi::PyDict_Next(value, &mut p, &mut k, &mut v) != 0 {
-                        mix(k as u64);
-                        mix(v as u64);
-                        if key == modules && v != none {
-                            pending.push(v);
-                        }
-                    }
-                }
-            }
-        }
-        ffi::Py_XDECREF(modules);
-    }
-    Ok(stamp)
 }
 
 pub fn run_python_pass(callable: &PyObj, unit: &mut Unit, cx: &PassCx) -> PyResult<bool> {
