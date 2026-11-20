@@ -1296,26 +1296,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 counters["aot_autograd"]["autograd_cache_hit"] += 1
                 cache_state = "hit"
                 cache_event_time = time.time_ns()
-                forward_time_saved = entry.forward_time_taken_ns // 1e6
-                backward_time_saved = entry.backward_time_taken_ns // 1e6
-                cache_info.update(
-                    {
-                        "forward_time_saved_ms": forward_time_saved,
-                        "backward_time_saved_ms": backward_time_saved,
-                        "time_saved_ms": forward_time_saved + backward_time_saved,
-                    }
-                )
-                time_saved_ns = (
-                    entry.forward_time_taken_ns + entry.backward_time_taken_ns
-                )
-                # TODO: should we use the same field for remote cache time saved for both
-                # FXGraphCache and AOTAutogradCache?
-                # get_metrics_context().increment(...)
-                if (
-                    ephemeral_increase
-                    := add_ephemeral_timeout_increase_for_distributed(time_saved_ns)
-                ) != 0:
-                    cache_info["ephemeral_timeout_increase"] = ephemeral_increase
+                cache_info.update(AOTAutogradCache._time_saved_cache_info(entry))
 
         if compiled_fn is None and cache_state is None:
             log.info("AOTAutograd cache miss for key %s", cache_key)
@@ -1343,6 +1324,46 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 "components": debug_lines,
             }
         )
+        AOTAutogradCache._log_cache_event(
+            cache_state, cache_event_time, cache_info, local, remote
+        )
+        return compiled_fn, aot_config
+
+    @staticmethod
+    def _time_saved_cache_info(
+        entry: GenericAOTAutogradResult[Any, Any],
+    ) -> dict[str, Any]:
+        """
+        cache_info fields for a final cache hit: the compile time the hit saved,
+        and the NCCL timeout increase granted for it, if any.
+        """
+        forward_time_saved = entry.forward_time_taken_ns // 1e6
+        backward_time_saved = entry.backward_time_taken_ns // 1e6
+        info: dict[str, Any] = {
+            "forward_time_saved_ms": forward_time_saved,
+            "backward_time_saved_ms": backward_time_saved,
+            "time_saved_ms": forward_time_saved + backward_time_saved,
+        }
+        time_saved_ns = entry.forward_time_taken_ns + entry.backward_time_taken_ns
+        # TODO: should we use the same field for remote cache time saved for both
+        # FXGraphCache and AOTAutogradCache?
+        # get_metrics_context().increment(...)
+        ephemeral_increase = add_ephemeral_timeout_increase_for_distributed(
+            time_saved_ns
+        )
+        if ephemeral_increase != 0:
+            info["ephemeral_timeout_increase"] = ephemeral_increase
+        return info
+
+    @staticmethod
+    def _log_cache_event(
+        cache_state: str | None,
+        cache_event_time: int,
+        cache_info: dict[str, Any],
+        local: bool,
+        remote: bool,
+    ) -> None:
+        """Report the outcome of try_load to the chromium event log and tlparse."""
         if chromium_event_log_active():
             CompileEventLogger.instant(
                 f"autograd_cache_{cache_state}",
@@ -1368,8 +1389,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             },
             payload_fn=lambda: json.dumps(cache_info),
         )
-
-        return compiled_fn, aot_config
 
     @classmethod
     def generate_guards_expression(
