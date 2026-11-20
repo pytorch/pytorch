@@ -1312,6 +1312,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         set,
         frozenset,
         list,
+        object,
     }
 
     @staticmethod
