@@ -1468,7 +1468,6 @@ class MetaConverter(Generic[_TensorT]):
                             # means there is another dtype-converting view function
                             # that hasn't been handled here
                             base = self._checked_cast_tensor_t(base.view(t.dtype))
-                    
 
                 from torch._dynamo.source import EphemeralSource
                 from torch.fx.experimental.symbolic_shapes import (
