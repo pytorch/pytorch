@@ -226,6 +226,7 @@ class optims(_TestParametrizer):
                 def test_wrapper(*args, **kwargs):
                     return test(*args, **kwargs)
 
+                test_wrapper._preserves_device_arguments = test_wrapper
                 decorator_fn = functools.partial(
                     optim_info.get_decorators,
                     generic_cls.__name__,

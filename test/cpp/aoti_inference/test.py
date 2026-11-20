@@ -209,9 +209,9 @@ class Serializer(torch.nn.Module):
             setattr(self, key, data[key])
 
 
-torch.jit.script(Serializer(data)).save("data.pt")
-torch.jit.script(Serializer(large_data)).save("large_data.pt")
-torch.jit.script(Serializer(data_with_tensor_constants)).save(
+torch.jit._script.script(Serializer(data)).save("data.pt")
+torch.jit._script.script(Serializer(large_data)).save("large_data.pt")
+torch.jit._script.script(Serializer(data_with_tensor_constants)).save(
     "data_with_tensor_constants.pt"
 )
-torch.jit.script(Serializer(cuda_alloc_data)).save("cuda_alloc_data.pt")
+torch.jit._script.script(Serializer(cuda_alloc_data)).save("cuda_alloc_data.pt")

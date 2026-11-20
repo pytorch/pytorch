@@ -36,6 +36,8 @@ TD_HEURISTIC_HISTORICAL_EDITED_FILES = "td_heuristic_historical_edited_files.jso
 TD_HEURISTIC_PREVIOUSLY_FAILED = "previous_failures.json"
 TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL = "previous_failures_additional.json"
 
+GENERATED_STATS_URL = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats"  # @lint-ignore
+
 FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
 
 
@@ -151,6 +153,28 @@ def get_td_heuristic_profiling_json() -> dict[str, Any]:
     )
 
 
+TD_SCORER_FILE = "td-scorer.json"
+TD_SCORER_BUDGET_FILE = "td-scorer-budget.json"
+
+
+def get_td_scorer(max_bytes: int, name: str = TD_SCORER_FILE) -> bytes | None:
+    """Raw bytes of a TD scorer model file, at most max_bytes + 1 of them, or None.
+
+    TD_SCORER_FILE never carries a test budget; TD_SCORER_BUDGET_FILE is the same
+    model with the budget block when one is on.
+    """
+    url = f"{GENERATED_STATS_URL}/{name}"
+    print(f"Downloading {url}")
+    for _ in range(3):
+        try:
+            with urlopen(url, timeout=5) as response:
+                return cast(bytes, response.read(max_bytes + 1))
+        except Exception as e:
+            print(f"Could not download {url} because: {e}.")
+    print(f"All retries exhausted, downloading {url} failed.")
+    return None
+
+
 def copy_pytest_cache() -> None:
     original_path = REPO_ROOT / ".pytest_cache/v/cache/lastfailed"
     if not original_path.exists():
@@ -178,7 +202,7 @@ def copy_additional_previous_failures() -> None:
 def get_from_test_infra_generated_stats(
     from_file: str, to_file: str, failure_explanation: str
 ) -> dict[str, Any]:
-    url = f"https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/{from_file}"
+    url = f"{GENERATED_STATS_URL}/{from_file}"
     try:
         return fetch_and_cache(
             REPO_ROOT / ADDITIONAL_CI_FILES_FOLDER, to_file, url, lambda x: x

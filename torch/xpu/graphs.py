@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import typing
 from collections.abc import Callable
-from typing import overload, TYPE_CHECKING, TypeAlias
-from typing_extensions import ParamSpec, Self, TypeVar
+from typing import overload, Self, TYPE_CHECKING, TypeAlias
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 from torch import Tensor

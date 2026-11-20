@@ -1159,7 +1159,8 @@
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   dispatch:
     Default:
-      self: grad.expand_symint(self.sym_sizes()) / self.sym_numel()
+      # Keep double backward finite for empty reductions.
+      self: (grad / self.sym_numel().max(1)).expand_symint(self.sym_sizes())
       result: auto_linear
     AutogradNestedTensor:
       # TODO: replace this with grad.expand_as(self) / self.sym_numel() when that is supported
@@ -1396,6 +1397,21 @@
   mean: at::zeros_symint(mean.sym_sizes(), grad.options())
   std: at::zeros_symint(std.sym_sizes(), grad.options())
   result: zeros_like(mean_t)
+
+# Reparameterized gradients.
+- name: _philox_uniform.Tensor(Tensor self, Tensor key, Tensor low, Tensor high) -> Tensor
+  self: zeros_like(grad)
+  key: non_differentiable
+  low, high: philox_uniform_bounds_backward(grad, key, low, high, grad_input_mask)
+  result: (low_t + (high_t - low_t) * at::empty_like(result)._philox_uniform_(key)).to(result.scalar_type())
+
+# Separate in-place entry: a forward formula derived from the out-of-place one
+# would never read self_t.
+- name: _philox_uniform_.Tensor(Tensor(a!) self, Tensor key, Tensor low, Tensor high) -> Tensor(a!)
+  self: zeros_like(grad)
+  key: non_differentiable
+  low, high: philox_uniform_bounds_backward(grad, key, low, high, grad_input_mask)
+  result: self_t.copy_(low_t + (high_t - low_t) * at::empty_like(result)._philox_uniform_(key))
 
 - name: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
   input, tau: householder_product_backward(grad, result, input, tau)
@@ -2943,6 +2959,11 @@
 - name: _scaled_dot_product_flash_attention_for_cpu(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, *, Tensor? attn_mask=None, float? scale=None) -> (Tensor output, Tensor logsumexp)
   output_differentiability: [True, False]
   query, key, value: _scaled_dot_product_flash_attention_for_cpu_backward(grad, query, key, value, output, logsumexp, dropout_p, is_causal, attn_mask, scale)
+
+- name: _scaled_dot_product_attention_math_for_mps(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, Tensor? dropout_mask=None, *, float? scale=None, bool enable_gqa=False) -> (Tensor, Tensor)
+  output_differentiability: [True, False]
+  query, key, value, attn_mask: _scaled_dot_product_attention_math_for_mps_backward(grad, query, key, value, attn_mask, is_causal, grad_input_mask, scale)
+  dropout_mask: non_differentiable
 
 - name: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, bool return_debug_mask, *, float? scale=None, SymInt? window_size_left=None, SymInt? window_size_right=None, Tensor? seqused_k=None, Tensor? alibi_slopes=None, Tensor? block_table=None, int? num_splits=None) -> (Tensor output, Tensor softmax_logsumexp, Tensor rng_state, Tensor unused, Tensor debug_attn_mask)
   output_differentiability: [True, False, False, False, False]

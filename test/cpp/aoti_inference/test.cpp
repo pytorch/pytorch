@@ -314,8 +314,8 @@ void test_aoti_constants_update(
   // works when running AotInductorTest.RuntimeUpdateConstantsCuda individually.
   try {
     runner->update_constant_buffer_from_cpu(missing_map, false, true);
-  } catch (const std::runtime_error& e) {
-    EXPECT_THAT(e.what(), ::testing::HasSubstr("API call failed at"));
+  } catch (const std::exception& e) {
+    EXPECT_THAT(e.what(), ::testing::HasSubstr("Cannot find constants"));
   }
 
   // Update random weight to buffer #1.

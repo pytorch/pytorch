@@ -72,9 +72,7 @@ __device__ static inline int64_t get_target_prime(
 // computed when we start a new block_s. This is why we have our own for loop here.
 template<typename scalar_t, typename target_t>
 __global__ void
-#if defined (USE_ROCM)
 C10_LAUNCH_BOUNDS_2((std::is_same_v<scalar_t, float> ? 1024 : 896), 1)
-#endif
 ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
                                     const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths, int64_t max_input_length,
                                     const target_t* __restrict__ targets_data, const int64_t* __restrict__ target_lengths, int64_t max_target_length,
@@ -682,7 +680,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   // Note that for OK problems target length <= input length, so we
   // only consider input length.
   bool is_large = (2*log_probs.size(0)+(24*batch_size)/10+(2*num_labels)/10) > 450;
-  if (is_large) { // large alphabet, large batch
+  if (is_large && !globalContext().deterministicAlgorithms()) { // large alphabet, large batch
     // this computes the probs, minuend in (16)
     at::exp_out(grad, log_probs);
     // now we compute the subtrahend for the blanks. It is a straightforward reduction because we know that
@@ -732,7 +730,8 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
        tg_batch_offsets.template const_data_ptr<int64_t>(), tg_target_stride,
        batch_size, zero_infinity);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-  } else { // small problem, use naive algorithm
+  } else { // Small problem or deterministic mode: use the naive algorithm.
+    // Reuse the collect kernel to avoid atomic accumulation.
     // Still no block/grid configuration guru...
     int threads_input = max_threads;
     while (threads_input / 2 >= log_probs.size(0) && threads_input > 1) {
@@ -799,9 +798,6 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu(const Tensor& log_probs, const Tensor& t
 
 Tensor ctc_loss_backward_gpu(const Tensor& grad, const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
                              const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK, bool zero_infinity) {
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("ctc_loss_backward_gpu");
   return AT_DISPATCH_FLOATING_TYPES(log_probs.scalar_type(), "ctc_loss_backward_cuda", [&] {
       if (targets.scalar_type() == kLong) {
         return ctc_loss_backward_gpu_template<scalar_t, kLong>(grad, log_probs, targets, input_lengths, target_lengths, neg_log_likelihood, log_alpha, BLANK, zero_infinity);

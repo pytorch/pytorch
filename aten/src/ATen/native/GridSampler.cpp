@@ -72,6 +72,10 @@ namespace {
   // The taps sit around the unclipped index. A tap the padding drops takes a negative index,
   // contributes a zero value and keeps its coefficient, as get_value_bounded does in 4-D.
   template <typename scalar_t, typename index_t>
+#if defined(__GNUC__) && __GNUC__ == 16 && __GNUC_MINOR__ < 2
+  // GCC PR125953: range queries on vectorizer pattern statements can crash.
+  __attribute__((optimize("no-tree-loop-vectorize")))
+#endif
   static inline void resolve_cubic_taps(
       scalar_t coord,
       index_t size,

@@ -47,6 +47,29 @@
       "type": "string",
       "description": "Destination owner/repo, only for decision=transfer."
     },
+    "possible_duplicate": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "One ordinary same-repository issue that may report the same underlying bug, after reading its body and relevant comments. Suggestion only: the source stays open. Use with label or triage_review, never with umbrella or a close decision."
+    },
+    "umbrella": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue", "match"],
+      "properties": {
+        "issue": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "One candidate from this repository's checked-in umbrellas.json catalog; never a URL."
+        },
+        "match": {
+          "type": "string",
+          "enum": ["covered", "uncertain"],
+          "description": "covered means full issue/comment context establishes the catalog scope and exclusions; uncertain permits only a link and human review. The catalog, not the model, chooses link or close."
+        }
+      },
+      "description": "Optional approved umbrella reference on the new issue. Do not combine with a close decision; info/reproduction requests remain link-only."
+    },
     "reasoning": {
       "type": "string",
       "description": "2-6 sentences: what the issue is about and why these labels."

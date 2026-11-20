@@ -78,7 +78,6 @@ from ..utils import (
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
     is_gpu,
-    is_using_cudagraph_partition,
     LineContext,
     make_codegen_buffer,
     sanitize_constexpr_for_repr,
@@ -120,6 +119,10 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+# The autotune block's dict of whether each kernel it keeps at its first config would
+# have had a config choice to make.
+KEPT_KERNELS_HAD_CHOICES = "kept_kernels_had_choices"
 
 pexpr = PythonPrinter().doprint
 
@@ -1053,9 +1056,10 @@ class _KernelConfigs(DeferredLineBase):
         rows = "".join(f"    {name!r}: {cfg!r},\n" for name, cfg in pinned.items())
         return (
             "# The config each kernel below launches with when this file is run on its own,\n"
-            "# chosen by autotuning at compile time. A kernel missing here autotunes on its\n"
-            "# first launch, as does one whose config does not fit the GPU (after a retry\n"
-            "# with pipelining off).\n"
+            "# chosen at compile time: by autotuning, or the first config of a kernel with a\n"
+            "# device assert that autotuning inputs could trip. A kernel missing here\n"
+            "# autotunes on its first launch, as does one whose config does not fit the GPU\n"
+            "# (after a retry with pipelining off).\n"
             f"{KERNEL_CONFIGS_NAME} = {{\n{rows}}}"
         )
 
@@ -1134,6 +1138,22 @@ class WrapperLine:
 
 
 @dataclasses.dataclass
+class ProfilerMarkerLine(WrapperLine):
+    marker: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        # No `_is_profiler_enabled` guard: that Python flag stays False for
+        # on-demand (Kineto daemon) sessions, while _RecordFunctionFast checks
+        # the native profiler state and does nothing when no profiler is active.
+        code.writeline(
+            f"with torch._C._profiler._RecordFunctionFast({self.marker!r}): pass"
+        )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_profiler_marker
+
+
+@dataclasses.dataclass
 class EnterSubgraphLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     graph: GraphLowering
@@ -1209,6 +1229,74 @@ class CommentLine(WrapperLine):
     @staticmethod
     def codegen_fx(converter: FxConverter) -> FxConversionFunc:
         return converter._generate_comment
+
+
+@dataclasses.dataclass
+class SizeAssertLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    name: str
+    size: list[sympy.Expr]
+    stride: list[sympy.Expr]
+    op_name: str | None = None
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        size_str = self.wrapper.codegen_python_shape_tuple(self.size)
+        stride_str = self.wrapper.codegen_python_shape_tuple(self.stride)
+        if self.op_name is not None:
+            code.writeline(
+                f"assert_size_stride({self.name}, {size_str}, {stride_str}, {self.op_name!r})"
+            )
+        else:
+            code.writeline(f"assert_size_stride({self.name}, {size_str}, {stride_str})")
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_assert_size_stride
+
+
+@dataclasses.dataclass
+class NanAssertLine(WrapperLine):
+    """
+    Checks for both NaN and Inf values.  This matches the existing behavior of
+    PythonWrapperCodegen.codegen_input_nan_asserts() which checks both despite
+    the config flag being named ``nan_asserts``.
+    """
+
+    wrapper: PythonWrapperCodegen
+    name: str
+    tensor_name: str | None = None
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        if self.tensor_name is None:
+            code.writeline(f"assert not {self.name}.isnan().any().item()")
+            code.writeline(f"assert not {self.name}.isinf().any().item()")
+        else:
+            nan_msg = f"{self.tensor_name} contains NaN"
+            inf_msg = f"{self.tensor_name} contains Inf"
+            code.writeline(f"assert not {self.name}.isnan().any().item(), {nan_msg!r}")
+            code.writeline(f"assert not {self.name}.isinf().any().item(), {inf_msg!r}")
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_nan_assert
+
+
+@dataclasses.dataclass
+class ScalarAssertLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    scalar: sympy.Basic
+    msg: str
+    output_name: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        sizevar = self.wrapper.codegen_python_sizevar(self.scalar, simplify=False)
+        code.writeline(f"if not ({sizevar}):")
+        code.writeline(f"    raise RuntimeError({repr(self.msg)})")
+        code.writeline(f"{self.output_name} = None")
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_scalar_assert
 
 
 @dataclasses.dataclass
@@ -2184,14 +2272,19 @@ class UnbackedSymbolDefsLine(WrapperLine):
 class AssertSizeStrideLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     name: str
-    size: str
-    stride: str
+    size: Sequence[Expr]
+    stride: Sequence[Expr]
     op_name: str = "input"
     dtype: torch.dtype | None = None
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper._codegen_assert_size_stride(
-            code, self.name, self.size, self.stride, self.op_name, self.dtype
+            code,
+            self.name,
+            self.wrapper.codegen_shape_tuple(self.size),
+            self.wrapper.codegen_shape_tuple(self.stride),
+            self.op_name,
+            self.dtype,
         )
 
     @staticmethod
@@ -2202,12 +2295,21 @@ class AssertSizeStrideLine(WrapperLine):
 @dataclasses.dataclass
 class GroupedAssertSizeStrideLine(WrapperLine):
     wrapper: PythonWrapperCodegen
-    asserts: list[tuple[str, str, str]]
+    asserts: list[tuple[str, Sequence[Expr], Sequence[Expr]]]
     op_name: str = "input"
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper._codegen_assert_size_stride_grouped(
-            code, self.asserts, self.op_name
+            code,
+            [
+                (
+                    name,
+                    self.wrapper.codegen_shape_tuple(size),
+                    self.wrapper.codegen_shape_tuple(stride),
+                )
+                for name, size, stride in self.asserts
+            ],
+            self.op_name,
         )
 
     @staticmethod
@@ -2308,7 +2410,9 @@ class PythonWrapperCodegen(CodeGen):
     def __init__(self):
         super().__init__()
         self._last_default_stream_device: int | None = None
-        self._pending_input_asserts: dict[str, tuple[str, str]] = {}
+        self._pending_input_asserts: dict[
+            str, tuple[Sequence[Expr], Sequence[Expr]]
+        ] = {}
         self._pending_alignment_copies: OrderedSet[str] = OrderedSet()
         # Inputs read on more than one stream get a copy_if_misaligned per
         # consuming stream (each cloning a preserved copy of the original), so
@@ -2352,10 +2456,13 @@ class PythonWrapperCodegen(CodeGen):
         # Each module-level kernel that reads its launch config from KERNEL_CONFIGS, and
         # that config, which generate_and_run_autotune_block fills in.
         self.kernel_configs: dict[str, dict[str, Any] | None] = {}
-        # kernel_autotune_names across the root and its subgraphs: the kernels the
-        # autotune block launches.
+        # kernel_autotune_names across the root and its subgraphs: the kernels whose
+        # config the autotune block chooses.
         self.kernel_autotune_names_all_graphs: OrderedSet[str] = OrderedSet()
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
+        # The device type of each kernel, across the root and its subgraphs, that the
+        # autotune block keeps at its first config because of its device asserts.
+        self.kernels_kept_for_asserts: dict[str, str] = {}
         # Kernel argument name -> cached tensor and its lifetime/storage metadata.
         self.kernel_autotune_example_arg_cache: dict[str, AutotuneExampleArg] = {}
         # Base buffer name -> generated backing tensor and its last consuming kernel.
@@ -2417,6 +2524,10 @@ class PythonWrapperCodegen(CodeGen):
         if not is_codegen_graph_partition_subgraph(self):
             # See [Note: Removed Graph Partition Arguments]
             self.write_prefix()
+
+        # Queue before kernel codegen; partition prefixes are written afterwards.
+        if config.size_asserts and not V.graph.is_const_graph:
+            self.codegen_input_size_asserts()
 
         self.write_kernel_autotune_defs_header()
 
@@ -2822,19 +2933,51 @@ class PythonWrapperCodegen(CodeGen):
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
             if sympy_product(buf.get_size()) == 0:
                 continue
-            size = self.codegen_shape_tuple(buf.get_size())
-            stride = self.codegen_shape_tuple(buf.get_stride())
-            self._pending_input_asserts[name] = (size, stride)
+            self._codegen_input_size_assert(name, buf)
+
+    def _codegen_input_size_assert(self, name: str, buf: ir.IRNode) -> None:
+        self._pending_input_asserts[name] = (
+            tuple(buf.get_size()),
+            tuple(buf.get_stride()),
+        )
 
     def codegen_input_nan_asserts(self) -> None:
         self.prefix.writeline("# make sure graph inputs are not nan/inf")
         for name, buf in self.get_graph_inputs().items():
             if isinstance(buf, (sympy.Basic, ir.TorchBindObject)):
                 continue
-            line = f"assert not {name}.isnan().any().item()"
-            self.prefix.writeline(line)
-            line = f"assert not {name}.isinf().any().item()"
-            self.prefix.writeline(line)
+            self._codegen_input_nan_assert(name)
+
+    def _codegen_input_nan_assert(self, name: str) -> None:
+        NanAssertLine(self, name).codegen(self.prefix)
+
+    def codegen_nan_assert(self, name: str, tensor_name: str | None = None) -> None:
+        if V.graph.cpp_wrapper:
+            self.writeline(
+                f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{tensor_name or name}", {name}));'
+            )
+        else:
+            self.writeline(NanAssertLine(self, name, tensor_name))
+
+    def codegen_scalar_assert(
+        self,
+        scalar: sympy.Basic,
+        msg: str,
+        output_name: str,
+        symbol: sympy.Symbol | None,
+    ) -> None:
+        if V.graph.cpp_wrapper:
+            symbol_str = (
+                f"std::to_string({symbol})"
+                if symbol is not None
+                else f'std::string("{scalar}")'
+            )
+            sizevar = self.codegen_cpp_sizevar(scalar, simplify=False)
+            self.writeline(
+                f'if (!({sizevar})) {{ throw std::runtime_error("Expected {msg} but received " + {symbol_str}); }}'
+            )
+        else:
+            self.writeline(ScalarAssertLine(self, scalar, msg, output_name))
 
     def write_async_compile_wait(self) -> None:
         # None of these lines is a use of async_compile: a module that compiles nothing
@@ -2850,7 +2993,7 @@ class PythonWrapperCodegen(CodeGen):
         self.prefix.writeline("args.clear()")
 
     def write_launcher_fn_call_get_indent(self) -> int:
-        if config.graph_partition:
+        if V.graph.partition_plan.uses_graph_partition:
             self.prefix.splice(
                 """
                 class Runner:
@@ -2900,17 +3043,15 @@ class PythonWrapperCodegen(CodeGen):
 
             self.codegen_inputs()
 
-            # avoid duplicating asserts for both partition functions and
-            # the call function when using cudagraph partition
+            # Under cudagraph partitioning, leave NaN/alignment checks to partitions
+            # to avoid duplicates; call()-only inputs do not get these checks.
             if not (
-                is_using_cudagraph_partition()
-                and (not is_codegen_graph_partition_subgraph(self))
+                V.graph.partition_plan.cudagraphs_per_partition
+                and not is_codegen_graph_partition_subgraph(self)
             ):
-                self.codegen_input_size_and_nan_asserts()
+                self.codegen_input_alignment_and_nan_asserts()
 
-    def codegen_input_size_and_nan_asserts(self) -> None:
-        if config.size_asserts:
-            self.codegen_input_size_asserts()
+    def codegen_input_alignment_and_nan_asserts(self) -> None:
         if config.alignment_asserts_inputs:
             self.codegen_input_alignment_asserts()
         if config.nan_asserts:
@@ -2933,12 +3074,12 @@ class PythonWrapperCodegen(CodeGen):
                 self.write_assert_alignment(name, GPU_ALIGN_BYTES, "input")
         self.lines.extend(body)
 
-    # Input size/stride assertions are deferred from the top of call() to just
-    # before the first kernel that uses each input. This avoids a block of N
-    # sequential assert calls (~1 us each) on the critical path before the first
-    # GPU kernel launch. Called from the scheduler codegen loop.
+    # Input size/stride assertions are deferred from the start of each wrapper
+    # function to just before the first kernel that uses each input. This avoids
+    # a block of N sequential assert calls (~1 us each) on the critical path
+    # before the first GPU kernel launch. Called from the scheduler codegen loop.
     def codegen_deferred_input_asserts(self, input_names: Iterable[str]) -> None:
-        grouped_asserts: list[tuple[str, str, str]] = []
+        grouped_asserts: list[tuple[str, Sequence[Expr], Sequence[Expr]]] = []
         for name in input_names:
             if name in self._pending_input_asserts:
                 size, stride = self._pending_input_asserts.pop(name)
@@ -2952,13 +3093,15 @@ class PythonWrapperCodegen(CodeGen):
     def write_assert_size_stride(
         self,
         name: str,
-        size: str,
-        stride: str,
+        size: Sequence[Expr],
+        stride: Sequence[Expr],
         op_name: str,
         dtype: torch.dtype | None = None,
     ) -> None:
         """Queue an assert_size_stride for emission during replay."""
-        self.writeline(AssertSizeStrideLine(self, name, size, stride, op_name, dtype))
+        self.writeline(
+            AssertSizeStrideLine(self, name, tuple(size), tuple(stride), op_name, dtype)
+        )
 
     def _codegen_assert_size_stride(
         self,
@@ -3005,7 +3148,9 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def write_assert_size_stride_grouped(
-        self, asserts: list[tuple[str, str, str]], op_name: str
+        self,
+        asserts: list[tuple[str, Sequence[Expr], Sequence[Expr]]],
+        op_name: str,
     ) -> None:
         """Queue a grouped assert_size_stride for emission during replay."""
         self.writeline(GroupedAssertSizeStrideLine(self, asserts, op_name))
@@ -3315,7 +3460,7 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def generate_after_suffix(self, result: IndentedBuffer) -> None:
-        if config.graph_partition:
+        if V.graph.partition_plan.uses_graph_partition:
             all_partition_name_list = ", ".join(self.all_partition_names) + (
                 "," if len(self.all_partition_names) == 1 else ""
             )
@@ -3355,6 +3500,7 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(ExternKernelAllocLine(self, node))
         if isinstance(node.layout, ir.Layout):
             node.codegen_size_asserts(self)
+        self.codegen_free_unused_outputs(node)
 
     def _generate_extern_kernel_alloc_helper(self, extern_kernel, args):
         # If it's a NoneLayout then the extern_kernel should essentially be
@@ -3583,7 +3729,7 @@ class PythonWrapperCodegen(CodeGen):
             return self._generate(is_inference)
 
     def get_wrapper_call_indent(self) -> int:
-        if config.graph_partition:
+        if V.graph.partition_plan.uses_graph_partition:
             return 2
         else:
             return 1
@@ -3728,7 +3874,9 @@ class PythonWrapperCodegen(CodeGen):
             del async_compile
         """
         )
-        scope = {}  # type: ignore[var-annotated]
+        if self.kernels_kept_for_asserts:
+            self.kernel_autotune_defs.writeline(f"{KEPT_KERNELS_HAD_CHOICES} = {{}}")
+        scope: dict[str, Any] = {}
         if config.triton.autotune_at_compile_time and V.graph.autotuning_inputs:
             scope = {
                 self.get_autotuning_input_name(idx): v  # type: ignore[attr-defined]
@@ -3765,8 +3913,31 @@ class PythonWrapperCodegen(CodeGen):
                 exec(tuning_code, scope)
             except Exception as e:
                 raise RuntimeError(f"Failed to run autotuning code block: {e}") from e
-        # Only the kernels the block launched: async_compile precompiles every kernel,
-        # so one launcher alone does not show that it was tuned.
+        untuned = [
+            name
+            for name, had_choices in scope.get(KEPT_KERNELS_HAD_CHOICES, {}).items()
+            if had_choices
+        ]
+        if untuned:
+            message = (
+                "Did not autotune %d Triton kernel(s) at compile time, because they have "
+                "device-side asserts that the generated autotuning inputs could trip. "
+                "They use their first config and may run slower."
+            )
+            # The C++ wrapper builds CPU Triton kernels only in this block, so turning
+            # it off is not an option for them.
+            if not V.graph.cpp_wrapper or all(
+                self.kernels_kept_for_asserts[name] != "cpu" for name in untuned
+            ):
+                message += (
+                    " To tune them on real inputs, set "
+                    "torch._inductor.config.triton.autotune_at_compile_time=False "
+                    "(AOTInductor then tunes them on the example inputs, torch.compile "
+                    "on the first call)."
+                )
+            log.warning(message, len(untuned))
+        # Only the kernels whose config the block chose: async_compile precompiles
+        # every kernel, so one launcher alone does not show that a config was chosen.
         for name in self.kernel_configs.keys() & self.kernel_autotune_names_all_graphs:
             kernel = scope.get(name)
             if isinstance(kernel, CachingAutotuner) and len(kernel.launchers) == 1:
@@ -3920,7 +4091,7 @@ class PythonWrapperCodegen(CodeGen):
         ):
             return
         else:
-            if torch._inductor.config.graph_partition:
+            if V.graph.partition_plan.uses_graph_partition:
                 pass
             else:
                 raise AssertionError(f"Unknown value type: {type(value)}")
@@ -5656,10 +5827,38 @@ class PythonWrapperCodegen(CodeGen):
 
         self.write_triton_header_once()
 
-        if (
+        autotune_in_block = (
             config.triton.autotune_at_compile_time
             and kernel_name not in self.kernel_autotune_names
+        )
+        if (
+            autotune_in_block
+            and inductor_meta
+            and inductor_meta.get("asserts_need_real_inputs")
         ):
+            # The block runs kernels on generated tensors, which need not hold
+            # what the asserts check (an index computed from zeros can be out of
+            # range), and a failed device assert leaves the device unusable. So
+            # the kernel keeps its first config: the C++ wrapper needs its binary
+            # now, and a Python module launches it from KERNEL_CONFIGS, because a
+            # precompiled module must not tune when it runs. A multi-kernel has no
+            # row and picks its sub-kernel at its first launch, which is why
+            # precompile turns multi-kernels off.
+            log.info(
+                "Skipping compile-time autotuning for kernel %s, which has device asserts.",
+                kernel_name,
+            )
+            # A kernel the root and a subgraph both call is kept once, so that the
+            # second call does not overwrite whether it had choices.
+            if kernel_name not in self.kernels_kept_for_asserts and (
+                V.graph.cpp_wrapper or not kernel_name.startswith("multi_kernel_")
+            ):
+                self.kernel_autotune_calls.writeline(
+                    f"{KEPT_KERNELS_HAD_CHOICES}[{kernel_name!r}] = "
+                    f"{kernel_name}.use_first_config(stream={stream_name})"
+                )
+                self.kernels_kept_for_asserts[kernel_name] = device.type
+        elif autotune_in_block:
             # Create example args for autotune in a separate epilogue
             if not (arg_types is not None and len(call_args) == len(arg_types)):
                 raise AssertionError("call_args and arg_types do not match")
@@ -5885,6 +6084,7 @@ class PythonWrapperCodegen(CodeGen):
                         "<del_call>",
                     )
                 )
+        if autotune_in_block:
             self.kernel_autotune_names.add(kernel_name)
             self.kernel_autotune_names_all_graphs.add(kernel_name)
             if V.graph.cpp_wrapper:
@@ -6033,6 +6233,10 @@ class PythonWrapperCodegen(CodeGen):
     def make_free_by_names(self, names_to_del: list[str]):
         return f"del {', '.join(name for name in names_to_del)}"
 
+    def codegen_free_unused_outputs(self, node: ir.ExternKernelAlloc) -> None:
+        # The Python wrapper drops unused outputs when it deletes the result tuple.
+        pass
+
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
         return f"{self.declare_maybe_reference}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
 
@@ -6042,9 +6246,15 @@ class PythonWrapperCodegen(CodeGen):
         debug_handle: int | None = None,
     ):
         if debug_handle is not None:
-            self.writeline(
+            self.make_comment(
                 f"{self.comment} [Provenance debug handles] {kernel_name}:{debug_handle}"
             )
+            if config.trace.provenance_profiler_markers and not V.graph.cpp_wrapper:
+                self.writeline(
+                    ProfilerMarkerLine(
+                        f"inductor_provenance:{kernel_name}:{debug_handle}"
+                    )
+                )
 
     def make_buffer_reuse(self, old: BufferLike, new: BufferLike, delete_old: bool):
         if old.get_dtype() != new.get_dtype():
@@ -6440,12 +6650,7 @@ class PythonWrapperCodegen(CodeGen):
                 if inductor_config_patches
                 else contextlib.nullcontext()
             )
-            # do not graph partition inside subgraph bodies
-            with (
-                ctx,
-                config.patch("graph_partition", False),
-                V.set_graph_handler(subgraph.graph),
-            ):
+            with ctx, V.set_graph_handler(subgraph.graph):
                 # Call the codegen of subgraph recursively
                 subgraph_code, _ = subgraph.graph.codegen()
             subgraph_name = subgraph.graph.name
@@ -6793,6 +6998,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.names_used_unscanned = root.names_used_unscanned
         self.kernel_configs = root.kernel_configs
         self.kernel_autotune_names_all_graphs = root.kernel_autotune_names_all_graphs
+        self.kernels_kept_for_asserts = root.kernels_kept_for_asserts
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of

@@ -177,6 +177,9 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reconfigure(
   initialized_ = true;
   reconfigureUuid_ = opts.uuid;
 
+  // FlightRecorderHook publishes the membership at attach and does not
+  // republish on reconfigure (it has no current mapping for every backend), so
+  // gloo updates its own recorder instance here.
   FlightRecorder<c10::Event>::get()->record_pg_ranks(
       std::make_tuple(pg_uid_, pg_desc_), groupRanks());
   return makeCompletedWork();
