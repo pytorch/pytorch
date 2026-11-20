@@ -7,7 +7,7 @@ import functools
 import logging
 import sys
 from collections import Counter
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -27,9 +27,17 @@ from .codegen import PyCodegen
 from .exc import format_frame_info, unimplemented
 from .graph_break_hints import DYNAMO_BUG
 from .output_graph import GraphCompileReason, StackLocalsMetadata
-from .variables.base import VariableTracker
-from .variables.ctx_manager import ContextWrappingVariable, WithExitFunctionVariable
-from .variables.functions import LocalGeneratorObjectVariable
+from .variables.base import AttributeMutationNew, VariableTracker
+from .variables.constant import ConstantVariable
+from .variables.ctx_manager import (
+    AutocastModeVariable,
+    ContextWrappingVariable,
+    WithExitFunctionVariable,
+)
+from .variables.functions import (
+    LocalGeneratorFunctionVariable,
+    LocalGeneratorObjectVariable,
+)
 from .variables.misc import NullVariable, UnknownVariable
 
 
@@ -293,7 +301,16 @@ def _handle_comprehension_graph_break(
     saved_values = tx.stack[-stack_pops:-1]
 
     def check_context_value(value: VariableTracker) -> None:
-        if isinstance(value, (ContextWrappingVariable, LocalGeneratorObjectVariable)):
+        # Locally constructed contexts and generators are already realized.
+        unsafe_context = type.__instancecheck__(ContextWrappingVariable, value) and (
+            value.source is None
+            or (
+                type.__instancecheck__(AutocastModeVariable, value)
+                and cast(AutocastModeVariable, value).cleanup_fn is not None
+            )
+        )
+        unsafe_generator = type.__instancecheck__(LocalGeneratorObjectVariable, value)
+        if unsafe_context or unsafe_generator:
             unimplemented(
                 gb_type="Unsafe value live across comprehension graph break",
                 context=f"{value}, frame skipped: {format_frame_info(tx.f_code)}",
@@ -305,7 +322,54 @@ def _handle_comprehension_graph_break(
                 ],
                 skip_frame=True,
                 preserve_skip_frame_after_inline=True,
+                apply_to_code=False,
             )
+
+    def close_can_run_code(gen: LocalGeneratorObjectVariable) -> bool:
+        if gen._frame_state_finished():
+            return False
+        if not (gen._frame_state_created() or gen._frame_state_suspended()):
+            return True
+        if gen.pygen_yf() is not None:
+            return True
+        tracer = gen.inline_tracer
+        if gen._frame_state_suspended():
+            entry = tracer.current_instruction.exn_tab_entry
+            # The terminal StopIteration handler only reraises GeneratorExit.
+            handler = tracer.instructions[-2:]
+            if entry is not None and not (
+                len(handler) == 2
+                and entry.target is handler[0]
+                and handler[0].opname == "CALL_INTRINSIC_1"
+                and handler[0].argval == 3
+                and handler[1].opname == "RERAISE"
+                and handler[1].arg == 1
+                and all(inst.exn_tab_entry is None for inst in handler)
+            ):
+                return True
+        # Releasing the frame can finalize objects with no other runtime owner.
+        frame_refs: list[VariableTracker] = []
+        VariableTracker.visit(
+            frame_refs.append,
+            [
+                tracer.stack,
+                tracer.symbolic_locals,
+                tracer.symbolic_cellvars,
+                tracer.gi_exc_state.items,
+                tracer.funcvar,
+            ],
+            side_effects=tx.output.side_effects,
+        )
+        return any(
+            id(value) not in live_refs
+            and not type.__instancecheck__(LocalGeneratorFunctionVariable, value)
+            and not (
+                type.__instancecheck__(ConstantVariable, value)
+                and type(cast(ConstantVariable, value).value)
+                in (type(None), bool, int, float, complex, str, bytes)
+            )
+            for value in frame_refs
+        )
 
     # SWAP moves the last saved local below the earlier ones. Keep their original
     # bindings in the frame metadata used by the post-comprehension continuation.
@@ -313,41 +377,52 @@ def _handle_comprehension_graph_break(
     for name, value in zip(saved_names, saved_values):
         tx.symbolic_locals[name] = value
 
-    # Active with exits are reconstructed separately; ordinary context values
-    # can replay a state-changing constructor while restoring frame values.
-    # Reconstructing or closing a local generator can discover more values.
-    # Unstarted and finished generators cannot execute more bytecode on close.
-    values: list[Any] = [
-        [
-            gen
-            for gen in tx.output.local_generators
-            if not gen._frame_state_created() and not gen._frame_state_finished()
-        ],
-        [
-            value
-            for value in tx.output.side_effects.id_to_variable.values()
-            if tx.output.side_effects.is_modified(value)
-        ],
-        tx.output.side_effects.store_attr_mutations,
-        tx.output.side_effects.tensor_hooks,
-        tx.output.side_effects.save_for_backward,
-        tx.output.backward_state,
-    ]
+    # Active with exits are reconstructed separately. Inactive sourced contexts
+    # load their original objects; sourceless values may replay constructors.
+    values: list[Any] = []
+    owned_values: list[Any] = []
     cur_tx: InstructionTranslatorBase | None = tx
     while cur_tx is not None:
         cur_tx.prune_dead_locals()
-        values.extend(
-            [cur_tx.symbolic_locals, cur_tx.symbolic_cellvars, cur_tx.debug_locals]
-        )
-        values.extend(
+        frame_values: list[Any] = [cur_tx.symbolic_locals, cur_tx.symbolic_cellvars]
+        frame_values.extend(
             value
             for value in cur_tx.stack
-            if not isinstance(value, WithExitFunctionVariable)
+            if not type.__instancecheck__(WithExitFunctionVariable, value.unwrap())
         )
+        values.extend([*frame_values, cur_tx.debug_locals])
+        owned_values.extend(frame_values)
         cur_tx = cur_tx.parent
-    VariableTracker.visit(
-        check_context_value, values, side_effects=tx.output.side_effects
+
+    # Real heap pruning follows context exits in compile_subgraph.
+    side_effects = tx.output.side_effects.clone()
+    side_effects.prune_dead_object_new(tx)
+    live_vars = {id(value) for value in side_effects.id_to_variable.values()}
+    mutation_values: list[Any] = [
+        [
+            value
+            for value in side_effects.id_to_variable.values()
+            if side_effects.is_modified(value)
+        ],
+        {
+            value: attrs
+            for value, attrs in side_effects.store_attr_mutations.items()
+            if not isinstance(value.mutation_type, AttributeMutationNew)
+            or id(value) in live_vars
+        },
+        side_effects.tensor_hooks,
+        side_effects.save_for_backward,
+        tx.output.backward_state,
+    ]
+    values.extend(mutation_values)
+    owned_values.extend(mutation_values)
+    refs: list[VariableTracker] = []
+    VariableTracker.visit(refs.append, owned_values, side_effects=side_effects)
+    live_refs = {id(value) for value in refs}
+    values.append(
+        [gen for gen in tx.output.local_generators if close_can_run_code(gen)]
     )
+    VariableTracker.visit(check_context_value, values, side_effects=side_effects)
 
     # --- Step 1: Compile the graph up to the comprehension ---
 

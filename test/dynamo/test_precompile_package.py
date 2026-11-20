@@ -1988,11 +1988,13 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
         def flat(x):
             act = pick()
+            x = act(x)
             torch._dynamo.graph_break()
             return act(x * 2)
 
         def callee(y):
             act = pick()
+            y = act(y)
             torch._dynamo.graph_break()
             return act(y)
 
