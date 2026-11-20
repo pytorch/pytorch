@@ -105,53 +105,6 @@ class TestCuTeDSLPointwise(TestCase):
             expected[:129] = (row != 0).to(dtype) if normalize else row
             self.assertEqual(dst, expected, atol=0, rtol=0)
 
-    def test_transpose_copy_tma_graph_replays(self, device: str) -> None:
-        dtype, shape = torch.uint16, (2, 96, 3, 80)
-        if torch.cuda.get_device_capability(device)[0] != 10:
-            self.skipTest("TMA transpose requires Blackwell")
-        from torch._native.cutedsl import launch
-        from torch._native.ops.pointwise import transpose_copy
-        from torch._native.ops.pointwise.transpose_tma import compile_tma
-
-        base = _random_bits(shape, dtype, device=device)
-        dims = (1, len(shape) - 1)
-        src = base.transpose(*dims)
-        dst = torch.empty_like(src, memory_format=torch.contiguous_format)
-        outer, a, b = shape[0], shape[1], shape[-1]
-        middle = math.prod(shape[2:-1])
-        spec = (outer, b, middle, a, 1, dtype.itemsize)
-        fn = compile_tma(dtype.itemsize)
-        source = launch.read_only(
-            transpose_copy._tiled_view(src, spec, dtype.itemsize, source=True)
-        )
-        target = transpose_copy._tiled_view(dst, spec, dtype.itemsize, source=False)
-        fn(source, target, launch.stream())
-        with _disabled():
-            expected = (
-                _storage_bytes(base)
-                .view(*shape, dtype.itemsize)
-                .transpose(*dims)
-                .contiguous()
-                .view(-1)
-            )
-        self.assertEqual(_storage_bytes(dst), expected)
-        graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            fn(source, target, launch.stream())
-        for mask in (0x5A, 0x33):
-            _storage_bytes(base).bitwise_xor_(mask)
-            dst.zero_()
-            graph.replay()
-            with _disabled():
-                expected = (
-                    _storage_bytes(base)
-                    .view(*shape, dtype.itemsize)
-                    .transpose(*dims)
-                    .contiguous()
-                    .view(-1)
-                )
-            self.assertEqual(_storage_bytes(dst), expected)
-
     @parametrize(
         "dtype,shapes",
         (

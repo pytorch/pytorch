@@ -241,14 +241,15 @@ def fill_random(
     alignment = _L.supported_alignment(out, 16)
     arch = _hw.caps(out.device).cc
     grid, counter_offset, num_iters = launch_plan(n, dev)
+    is_capture = torch.cuda.is_current_stream_capturing()
+    target = out.view(-1)
+    compiled = _compile(kind, torch2cute[out.dtype], is_capture, dev, alignment, arch)
+    dummy = None if is_capture else state_dummy(dev)
     seed_t, offset_t, intra = philox_args(dev, counter_offset)
-    is_capture = seed_t.is_cuda
     if is_capture:
         st, st2, seed_val, off_val = seed_t, offset_t, 0, 0
     else:
-        st = st2 = state_dummy(dev)
+        st = st2 = dummy
         seed_val, off_val = seed_t.item(), offset_t.item()
-    _compile(kind, torch2cute[out.dtype], is_capture, dev, alignment, arch)(
-        out.view(-1), st, st2, seed_val, off_val, intra, a, b, c, num_iters, grid
-    )
+    compiled(target, st, st2, seed_val, off_val, intra, a, b, c, num_iters, grid)
     return out
