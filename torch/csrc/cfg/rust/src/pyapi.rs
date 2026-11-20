@@ -34,8 +34,8 @@ pub fn init(capsule: &Bound<'_, PyCapsule>) -> PyResult<()> {
     Ok(())
 }
 
-/// The instructions the frontend sees in a code object, as (offset, opcode
-/// name, argument, jump target) tuples.
+/// The instructions of a code object, as (offset, opcode name, argument, jump
+/// target) tuples. The frontend sees them after `bytecode::simplify`.
 #[pyfunction]
 pub fn decode(
     py: Python<'_>,

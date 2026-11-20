@@ -21,6 +21,8 @@ pub const NONE: V = u32::MAX;
 /// The undefined value (an unbound local). Its register is always null.
 pub const UNDEF: V = 0;
 
+pub const CONVERT_ONLY: u8 = 4;
+
 pub const CMP_SYMBOLS: [&str; 6] = ["<", "<=", "==", "!=", ">", ">="];
 
 pub const BINARY_SYMBOLS: [&str; 26] = [
@@ -51,8 +53,10 @@ pub enum Op {
     /// The second operand is the constant with the variable's name.
     CellGet(V, u32),
     CellSet(V, V),
-    /// Any operand but the code object can be NONE.
-    MakeFunction { code: V, defaults: V, kwdefaults: V, annotations: V, closure: V },
+    /// Any operand but the code object can be NONE. The annotations are a
+    /// tuple of names and values; `annotate` is the function that computes
+    /// them when they are asked for (3.14).
+    MakeFunction { code: V, defaults: V, kwdefaults: V, annotations: V, annotate: V, closure: V },
     /// `import name`, with the from-list and level the bytecode supplies.
     ImportName { name: u32, fromlist: V, level: V },
     /// The attribute of a module named in `from module import name`.
@@ -119,6 +123,10 @@ pub enum Op {
     /// The third operand is NONE for a two-argument slice.
     BuildSlice(V, V, V),
     BuildString(Vec<V>),
+    /// What a replacement field of an f-string does to its value: the
+    /// conversion (1 for `!s`, 2 for `!r`, 3 for `!a`, 0 for none), and then
+    /// `format(value, spec)`, which a str without a spec is spared. With
+    /// CONVERT_ONLY in `conv` it is the conversion alone.
     Format { val: V, conv: u8, spec: V },
     ListAppend(V, V),
     SetAdd(V, V),
@@ -293,9 +301,9 @@ impl Op {
             | Op::FrameLeave
             | Op::CaughtLasti
             | Op::CaughtException => {}
-            Op::MakeFunction { code, defaults, kwdefaults, annotations, closure } => {
+            Op::MakeFunction { code, defaults, kwdefaults, annotations, annotate, closure } => {
                 f(*code);
-                for v in [defaults, kwdefaults, annotations, closure] {
+                for v in [defaults, kwdefaults, annotations, annotate, closure] {
                     opt(*v, &mut f)
                 }
             }
@@ -725,7 +733,9 @@ impl Function {
             }
             Op::BuildString(vs) => format!("build_string ({})", self.values(vs)),
             Op::Format { val, conv, spec } => {
-                if *spec == NONE {
+                if conv & CONVERT_ONLY != 0 {
+                    format!("convert {} conv={}", n(val), conv & 3)
+                } else if *spec == NONE {
                     format!("format {} conv={}", n(val), conv)
                 } else {
                     format!("format {} conv={} spec={}", n(val), conv, n(spec))
