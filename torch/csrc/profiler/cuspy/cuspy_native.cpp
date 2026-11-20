@@ -219,31 +219,28 @@ CuspyDecoder& CuspyDecoder::get() {
   return instance;
 }
 
+CuspyDecoder::CuspyDecoder() {
+  // Register the pool's destructor first so it outlives the decoder.
+  CuspyBuffers::get();
+}
+
 CuspyDecoder::~CuspyDecoder() {
-  // The clean path is stop(), which joins the worker. If we reach destruction
-  // with it still running (process exiting without stop()), wake it out of
-  // get_completed() and join: leaving it parked on the pool's condvar would
-  // both std::terminate (~thread on a joinable thread) and hang teardown when
-  // the pool condvar is destroyed with a waiter. The pool outlives the decoder
-  // (constructed first), so this is safe; the join is bounded -- the worker
-  // drains and exits.
+  // stop() normally joins the worker; handle an active worker at process exit.
   running_.store(false);
-  CuspyBuffers::get().shutdown();
   if (thread_.joinable()) {
+    CuspyBuffers::get().shutdown();
     thread_.join();
   }
 }
 
 void CuspyDecoder::configure(
-    uintptr_t subscriber,
-    uintptr_t get_next_record_fn,
+    uintptr_t /*subscriber*/,
+    uintptr_t /*get_next_record_fn*/,
     uint32_t fence_kind,
     int fence_end_field,
     bool self_flush,
     uint64_t flush_period_ns,
     uintptr_t flush_fn) {
-  subscriber_ = subscriber;
-  get_next_record_fn_ = get_next_record_fn;
   fence_kind_ = fence_kind;
   fence_end_field_ = fence_end_field;
   self_flush_ = self_flush;
@@ -275,8 +272,8 @@ void CuspyDecoder::stop() {
 void CuspyDecoder::worker_loop() {
   // Single native thread: drives the periodic plain flush (when self_flush_ is
   // set) AND decodes. cuptiActivityFlushAll(0) is called through the address
-  // Python passed (like the record iterator), so this file needs no libcupti
-  // link. We track the time since the last flush and re-flush
+  // Python passed, so this file needs no libcupti link. We track the time
+  // since the last flush and re-flush
   // before waiting once the period has elapsed, so the cadence holds no matter
   // how busy the decode is. The wait is bounded by the period so an idle thread
   // still re-checks the cadence; without self-flush it blocks until a buffer or
@@ -300,8 +297,7 @@ void CuspyDecoder::worker_loop() {
       auto now = std::chrono::steady_clock::now();
       if (now - last_flush >= period) {
         // cuptiActivityFlushAll(flag). Called via the address Python passed
-        // (see decode_buffer for the same pattern), so this TU needs no
-        // libcupti link.
+        // so this TU needs no libcupti link.
         using FlushAllFn = int (*)(uint32_t);
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         auto flush_all = reinterpret_cast<FlushAllFn>(flush_fn_);
@@ -323,21 +319,11 @@ void CuspyDecoder::worker_loop() {
 }
 
 void CuspyDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
-  if (get_next_record_fn_ == 0 || buf.valid_size == 0) {
+  if (buf.valid_size == 0) {
     return;
   }
   buffers_decoded_.fetch_add(1);
   valid_bytes_.fetch_add(buf.valid_size);
-  // cuptiActivityGetNextRecord_v2(subscriber, buffer, validSize, &record).
-  // Called via the address Python passed (libcupti is loaded Python-side), so
-  // this TU needs no CUPTI header/link. CUPTI_SUCCESS == 0; any other status
-  // (MAX_LIMIT_REACHED at end-of-buffer, INVALID_KIND, real errors) ends the
-  // buffer.
-  using GetNextRecordFn = int (*)(void*, uint8_t*, size_t, void**);
-  // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  auto get_next = reinterpret_cast<GetNextRecordFn>(get_next_record_fn_);
-  // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  auto* subscriber = reinterpret_cast<void*>(subscriber_);
 
   // Accumulate locally (no lock during the record walk), then merge once.
   // Grouped by kind -> layout signature so records sharing a layout stay
@@ -349,16 +335,26 @@ void CuspyDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
   std::map<uint32_t, const CuptiRecordLayout*> layout_by_kind;
   std::map<uint32_t, CuptiLayoutKey> key_by_kind;
   uint64_t local_max_sync = 0;
-  void* record = nullptr;
-  while (get_next(subscriber, buf.ptr, buf.valid_size, &record) == 0) {
-    const auto* rec = static_cast<const uint8_t*>(record);
-    uint32_t kind = *reinterpret_cast<const uint32_t*>(rec); // KIND @ offset 0
+  size_t pos = 0;
+  while (buf.valid_size - pos >= sizeof(uint32_t)) {
+    const auto* rec = buf.ptr + pos;
+    uint32_t kind = 0;
+    std::memcpy(&kind, rec, sizeof(kind));
+    if (kind == 0x7fffffff) {
+      break; // CUPTI padding record
+    }
     auto cached = layout_by_kind.find(kind);
     const CuptiRecordLayout* layout = nullptr;
     if (cached == layout_by_kind.end()) {
       for (const auto& cand : buf.layouts) {
         if (cand.kind == kind) {
-          layout = &cand;
+          if (cand.record_size >= sizeof(kind) &&
+              std::ranges::none_of(cand.fields, [&](const auto& field) {
+                return field.offset > cand.record_size ||
+                    field.size > cand.record_size - field.offset;
+              })) {
+            layout = &cand;
+          }
           break;
         }
       }
@@ -368,8 +364,9 @@ void CuspyDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
     } else {
       layout = cached->second;
     }
-    if (layout == nullptr) {
-      continue; // no captured layout for this kind; skip
+    if (layout == nullptr || layout->record_size < sizeof(kind) ||
+        layout->record_size > buf.valid_size - pos) {
+      break; // missing layout or trailing partial record
     }
     auto& kind_cols = local[kind][key_by_kind[kind]];
     for (const auto& field : layout->fields) {
@@ -387,6 +384,7 @@ void CuspyDecoder::decode_buffer(const CompletedCuptiBuffer& buf) {
         }
       }
     }
+    pos += layout->record_size;
   }
 
   if (local_max_sync > 0) {
