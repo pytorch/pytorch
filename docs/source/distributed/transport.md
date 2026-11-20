@@ -20,10 +20,17 @@ until unregistration or close, and tensors must not be resized or have their sto
 
 A batch transfers a sequence of `(local view, remote buffer)` pairs as one
 operation. Pairs may name different peers and complete in any order;
-zero-length pairs are validated but not transferred. A batch is not atomic: its
-Work completes once every transfer is terminal and fails if any transfer failed,
-leaving every destination range unspecified. `timeout` bounds the wait for the
-whole batch.
+zero-length pairs are validated but not transferred. The built-in backends
+check every pair before starting any, so invalid buffers, unconnected peers,
+oversized views, and inactive registrations raise with nothing in flight. A
+batch is not atomic: its Work completes once every transfer is terminal and fails if any
+transfer failed, leaving every destination range unspecified. A transfer can
+still fail to start after others have, for example if the backend rejects it or
+memory is concurrently unregistered; the started transfers finish before the
+error is reported. `timeout` bounds the wait for the whole batch, including,
+for `read_batch_async`/`write_batch_async`, time spent waiting for an executor
+thread. No transfer starts once the deadline has passed; the batch fails with
+`TimeoutError` after any started transfers finish.
 
 Ordinary reads and writes are not ordered on CUDA streams. The API does not
 provide tracing. Views and remote buffers support `slice(offset, length)`
@@ -143,8 +150,8 @@ must remain running to drive that future. Completed work needs no event loop.
 
 Native metadata, registration, request submission, status checks, and cleanup
 calls execute synchronously on the calling thread, except that
-`read_batch_async`/`write_batch_async` submit from a worker thread. Their timeouts bound lock
-acquisition and transfer completion waits, not execution inside NIXL. Python
+`read_batch_async`/`write_batch_async` submit from a worker thread. Their timeouts bound
+waiting for that thread, lock acquisition, and transfer completion waits, not execution inside NIXL. Python
 cannot interrupt a blocked native call, even when it releases the GIL.
 
 ```{eval-rst}
