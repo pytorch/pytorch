@@ -2,6 +2,9 @@
 
 import asyncio
 import concurrent.futures
+import faulthandler
+import subprocess
+import sys
 import threading
 import time
 import unittest
@@ -18,13 +21,45 @@ from torch.distributed._watchdog import (
     shutdown,
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 def _on_loop(wd: _Watchdog, fn):
     fut: concurrent.futures.Future = concurrent.futures.Future()
     wd._loop.call_soon_threadsafe(lambda: fut.set_result(fn()))
     return fut.result(timeout=5.0)
+
+
+def _block_loop(wd: _Watchdog) -> threading.Event:
+    blocked = threading.Event()
+    released = threading.Event()
+
+    def block() -> None:
+        blocked.set()
+        released.wait(timeout=30.0)
+
+    wd._loop.call_soon_threadsafe(block)
+    blocked.wait(timeout=5.0)
+    return released
+
+
+_FAST_HEALTH = {"health_interval": 0.05, "stuck_timeout": 0.2}
+
+_GIL_HELD_CHILD = """
+import ctypes, threading
+from torch.distributed._watchdog import _get_watchdog, init
+
+init(health_interval=0.1, stuck_timeout=0.5, stuck_action="exit")
+heartbeat_ran = threading.Event()
+_get_watchdog()._loop.call_soon_threadsafe(heartbeat_ran.set)
+heartbeat_ran.wait()
+ctypes.PyDLL(None).sleep(120)  # PyDLL keeps holding the GIL
+"""
 
 
 class _QueryProbe:
@@ -265,38 +300,78 @@ class TestWatchdog(TestCase):
                 fired.wait(timeout=5.0), "stream timeout should fire after block"
             )
 
-    def test_health_watchdog_detects_stuck(self) -> None:
-        with patch.dict(
-            "os.environ",
-            {
-                "TORCH_WATCHDOG_HEALTH_INTERVAL_SECS": "0.1",
-                "TORCH_WATCHDOG_STUCK_ACTION": "log",
-            },
-        ):
-            wd = _Watchdog()
-            released = threading.Event()
+    @patch.object(faulthandler, "dump_traceback_later")
+    def test_stuck_loop_logs(self, _: MagicMock) -> None:
+        warned = threading.Event()
+        messages: list[str] = []
+
+        def record(msg: str, *args: object) -> None:
+            messages.append(msg % args)
+            warned.set()
+
+        wd = _Watchdog(**_FAST_HEALTH, stuck_action="log")
+        released = _block_loop(wd)
+        try:
+            with (
+                patch("torch.distributed._watchdog.logger.warning", side_effect=record),
+                patch("torch.distributed._watchdog.os.abort") as abort,
+            ):
+                self.assertTrue(warned.wait(timeout=5.0), "no stuck warning")
+            self.assertIn("stuck", messages[0])
+            abort.assert_not_called()
+        finally:
+            released.set()
+            wd.shutdown()
+
+    @parametrize("action,target", [("abort", "abort"), ("exit", "_exit")])
+    @patch.object(faulthandler, "dump_traceback")
+    @patch.object(faulthandler, "dump_traceback_later")
+    def test_stuck_loop_kills(self, *_: MagicMock, action: str, target: str) -> None:
+        called = threading.Event()
+        with patch(f"torch.distributed._watchdog.os.{target}") as terminate:
+            terminate.side_effect = lambda *args: called.set()
+            wd = _Watchdog(**_FAST_HEALTH, stuck_action=action)
+            released = _block_loop(wd)
             try:
-                blocked = threading.Event()
-
-                def block_loop() -> None:
-                    blocked.set()
-                    released.wait(timeout=5.0)
-
-                wd._loop.call_soon_threadsafe(block_loop)
-                blocked.wait(timeout=2.0)
-
-                with self.assertLogs(
-                    "torch.distributed._watchdog", level="WARNING"
-                ) as cm:
-                    time.sleep(0.4)
-
-                self.assertTrue(
-                    any("stuck" in msg.lower() for msg in cm.output),
-                    f"Expected 'stuck' warning, got: {cm.output}",
-                )
+                self.assertTrue(called.wait(timeout=5.0), f"os.{target} not called")
             finally:
                 released.set()
                 wd.shutdown()
+
+    def test_default_stuck_action_is_abort(self) -> None:
+        wd = _Watchdog()
+        try:
+            self.assertEqual(wd._stuck_action, "abort")
+            self.assertEqual(wd._stuck_timeout, 480.0)
+        finally:
+            wd.shutdown()
+
+    def test_invalid_stuck_action(self) -> None:
+        with self.assertRaisesRegex(ValueError, "stuck_action"):
+            _Watchdog(stuck_action="ignore")
+
+    @parametrize("action", ["abort", "exit", "log"])
+    @patch.object(faulthandler, "cancel_dump_traceback_later")
+    @patch.object(faulthandler, "dump_traceback_later")
+    def test_backstop_armed_only_for_abort_and_exit(
+        self, arm: MagicMock, cancel: MagicMock, action: str
+    ) -> None:
+        wd = _Watchdog(health_interval=10.0, stuck_timeout=60.0, stuck_action=action)
+        _on_loop(wd, lambda: None)
+        wd.shutdown()
+        if action == "log":
+            arm.assert_not_called()
+            cancel.assert_not_called()
+        else:
+            arm.assert_called_once_with(80.0, exit=True)
+            cancel.assert_called_once()
+
+    def test_backstop_exits_when_gil_held(self) -> None:
+        cmd = [sys.executable, "-c", _GIL_HELD_CHILD]
+        proc = subprocess.run(cmd, capture_output=True, timeout=120)
+        self.assertEqual(proc.returncode, 1, proc.stderr.decode())
+        self.assertIn(b"Timeout (", proc.stderr)
+        self.assertIn(b"most recent call first", proc.stderr)
 
     def test_singleton_lifecycle(self) -> None:
         wd1 = _get_watchdog()
@@ -341,6 +416,9 @@ class TestWatchdog(TestCase):
                 self.assertFalse(fired.is_set(), "callback fired despite cancel")
             finally:
                 wd.shutdown()
+
+
+instantiate_parametrized_tests(TestWatchdog)
 
 
 if __name__ == "__main__":
