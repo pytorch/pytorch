@@ -375,6 +375,33 @@ def test_flydsl_loader_main(value, stream):
 
     @requires_gpu()
     @requires_triton()
+    @parametrize("method", ("subprocess", "fork"))
+    def test_pool_compile_on_one_rank_without_triton_cache_dir(self, method):
+        # compile_on_one_rank kernels carry no device index, and a worker forked after
+        # CUDA initialization cannot look up the current device to pick a cache dir.
+        def fn(x, y):
+            return x + y
+
+        x = torch.rand(10, device=GPU_TYPE)
+        y = torch.rand(10, device=GPU_TYPE)
+
+        with (
+            config.patch(worker_start_method=method, compile_threads=2),
+            torch.compiler.config.patch(compile_on_one_rank=True),
+            patch.dict(os.environ),
+        ):
+            os.environ.pop("TRITON_CACHE_DIR", None)
+            shutdown_compile_workers()
+            try:
+                AsyncCompile.wait_pool_ready()
+                self.assertTrue(AsyncCompile.use_process_pool())
+                self.assertFalse(AsyncCompile.should_use_thread_workers())
+                self.assertEqual(torch.compile(fn)(x, y), fn(x, y))
+            finally:
+                shutdown_compile_workers()
+
+    @requires_gpu()
+    @requires_triton()
     def test_bad_kernel(self):
         shutdown_compile_workers()
 
