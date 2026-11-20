@@ -512,6 +512,17 @@ def requires_nccl():
     )
 
 
+# The legacy ProcessGroupNCCL ("nccl-legacy") is only built internally.
+TEST_NCCL_LEGACY = c10d.is_available() and c10d.distributed_c10d._NCCL_LEGACY_AVAILABLE
+
+
+def requires_nccl_legacy():
+    return skip_but_pass_in_sandcastle_if(
+        not TEST_NCCL_LEGACY,
+        "c10d was not compiled with the legacy NCCL backend",
+    )
+
+
 def requires_xccl():
     return skip_but_pass_in_sandcastle_if(
         not c10d.is_xccl_available(),

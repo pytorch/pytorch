@@ -33,6 +33,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
+    TEST_NCCL_LEGACY,
 )
 from torch.testing._internal.common_symmem import (
     captured_signal_pad_order,
@@ -294,6 +295,9 @@ class TestNCCL(TestCase):
 # Every NCCL-backend op that synchronizes ranks through PyTorch's signal pad or
 # an NCCL device communicator, with all_to_all_nd once per guarded path.
 # put_wait_signal cannot run eagerly: nccl_wait_for_signal never clears the pad.
+# "nccl-legacy" is only built internally.
+_NCCL_BACKENDS = ["nccl", "nccl-legacy"] if TEST_NCCL_LEGACY else ["nccl"]
+
 _NCCL_EAGER_PAD_OPS = (
     "barrier",
     "reduce_scatter_offset",
@@ -1596,7 +1600,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 28), "NCCL symmetric kernels need nccl 2.28")
     @skip_if_lt_x_gpu(2)
-    @parametrize("backend", ["nccl", "nccl-legacy"])
+    @parametrize("backend", _NCCL_BACKENDS)
     def test_nccl_symmem_mem_pool_all_reduce_symk(self, backend: str):
         pg, nccl_backend, pool = self._symm_mem_pool_group(backend)
         try:
@@ -1614,7 +1618,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 28), "NCCL copy-engine collectives need nccl 2.28")
     @skip_if_lt_x_gpu(2)
-    @parametrize("backend", ["nccl", "nccl-legacy"])
+    @parametrize("backend", _NCCL_BACKENDS)
     def test_nccl_symmem_mem_pool_all_gather_copy_engine(self, backend: str):
         pg, nccl_backend, pool = self._symm_mem_pool_group(
             backend, c10d.ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO
@@ -1968,7 +1972,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         ):
             _ = handle.buffer_ptrs
 
-    @parametrize("backend_name", ["nccl", "nccl-legacy"])
+    @parametrize("backend_name", _NCCL_BACKENDS)
     @skip_if_lt_x_gpu(2)
     def test_stale_handle_rejected_across_same_name_restart(
         self, backend_name: str
@@ -2035,7 +2039,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
             if c10d.is_initialized():
                 c10d.destroy_process_group()
 
-    @parametrize("backend_name", ["nccl", "nccl-legacy"])
+    @parametrize("backend_name", _NCCL_BACKENDS)
     @skip_if_lt_x_gpu(2)
     def test_retained_handle_rejected_after_abort(self, backend_name: str) -> None:
         # Aborting invalidates the comm through NCCLComm::abort() rather than
@@ -2072,7 +2076,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         ):
             symm_mem.rendezvous(tensor, group=group_name)
 
-    @parametrize("backend_name", ["nccl", "nccl-legacy"])
+    @parametrize("backend_name", _NCCL_BACKENDS)
     @skip_if_lt_x_gpu(2)
     def test_retained_handle_stale_after_wait_timeout_abort(
         self, backend_name: str
@@ -2105,7 +2109,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         finally:
             side_store.set("peer_done", "1")
 
-    @parametrize("backend_name", ["nccl", "nccl-legacy"])
+    @parametrize("backend_name", _NCCL_BACKENDS)
     @skip_if_lt_x_gpu(2)
     def test_retained_handle_stale_after_watchdog_abort(
         self, backend_name: str
