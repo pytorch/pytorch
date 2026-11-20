@@ -1019,26 +1019,41 @@ def registered_inductor_choices() -> tuple[tuple[str, InductorChoicesFactory], .
     return tuple(_registered_inductor_choices.items())
 
 
-def register_inductor_choices(key: str, factory: InductorChoicesFactory) -> None:
+def _replace_registrations(
+    registrations: dict[str, InductorChoicesFactory],
+) -> None:
+    """Make ``registrations`` the registry. The calling thread's choices
+    handler is replaced right away; every other thread whose handler was built
+    from the registry rebuilds it on its next use."""
     global _registered_inductor_choices
-    registrations = dict(_registered_inductor_choices)
-    registrations[key] = factory
+    from torch._inductor import virtualized
+    from torch._inductor.heuristics.template import tlx
+
+    # As in virtualized._choices_default: installing the torchTLX integration
+    # sets inductor_choices_class, so it has to come first.
+    tlx.maybe_install()
+    # Built before the registry changes, so a factory that fails leaves the
+    # registry as it was.
     handler = _create_inductor_choices(
         config.inductor_choices_class, tuple(registrations.items())
     )
     _registered_inductor_choices = registrations
-    V.set_choices_handler(handler)
+    virtualized._choices_registry_generation += 1
+    virtualized._install_registry_choices(
+        handler, virtualized._choices_registry_generation
+    )
+
+
+def register_inductor_choices(key: str, factory: InductorChoicesFactory) -> None:
+    registrations = dict(_registered_inductor_choices)
+    registrations[key] = factory
+    _replace_registrations(registrations)
 
 
 def unregister_inductor_choices(key: str) -> None:
-    global _registered_inductor_choices
     registrations = dict(_registered_inductor_choices)
     registrations.pop(key, None)
-    handler = _create_inductor_choices(
-        config.inductor_choices_class, tuple(registrations.items())
-    )
-    _registered_inductor_choices = registrations
-    V.set_choices_handler(handler)
+    _replace_registrations(registrations)
 
 
 def inductor_choices_cache_key(factory: InductorChoicesFactoryConfig) -> Any:

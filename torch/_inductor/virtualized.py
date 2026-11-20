@@ -248,12 +248,18 @@ _active_user_lowering_ops: Virtualized[OrderedSet[Any]] = Virtualized(
 )
 
 
-def _choices_default():
-    """
-    Lazy init the global choices handler
+# Bumped by register_inductor_choices / unregister_inductor_choices. A thread's
+# choices handler built from the registry records the generation it was built
+# at (_ChoicesVirtualized), and is rebuilt on its next use once the registry
+# has changed, so registrations reach threads that already built a handler
+# (the autograd thread compiles backwards with its own).
+_choices_registry_generation: int = 0
+_CHOICES_BUILT_KEY = "__torchinductor_choices_registry_built"
 
-    We virtualize InductorChoices to allow changing inductor heuristics from out of tree.
-    """
+
+def _build_registry_choices() -> InductorChoices:
+    """The choices handler the current configuration and registry describe,
+    installed on this thread as following the registry."""
     from torch._inductor import config
     from torch._inductor.choices import create_inductor_choices
     from torch._inductor.heuristics.template import tlx
@@ -262,12 +268,48 @@ def _choices_default():
     # integration is what sets it.
     tlx.maybe_install()
 
+    generation = _choices_registry_generation
     rv = create_inductor_choices(config.inductor_choices_class)
-    setattr(threadlocal, _choices._key, rv)
+    _install_registry_choices(rv, generation)
     return rv
 
 
-_choices: Virtualized[InductorChoices] = Virtualized("choices", _choices_default)
+def _install_registry_choices(handler: InductorChoices, generation: int) -> None:
+    """Make ``handler`` this thread's choices handler, built from the registry
+    at ``generation``."""
+    setattr(threadlocal, _choices._key, handler)
+    setattr(threadlocal, _CHOICES_BUILT_KEY, (generation, id(handler)))
+
+
+def _choices_default():
+    """
+    Lazy init the global choices handler
+
+    We virtualize InductorChoices to allow changing inductor heuristics from out of tree.
+    """
+    return _build_registry_choices()
+
+
+class _ChoicesVirtualized(Virtualized["InductorChoices"]):
+    """The choices handler. A handler built from the registry is rebuilt when
+    the registry changed since; one installed with set_choices_handler is
+    kept as is."""
+
+    def _get_handler(self, check_poisoned: bool = True) -> InductorChoices:
+        value = super()._get_handler(check_poisoned)
+        built = getattr(threadlocal, _CHOICES_BUILT_KEY, None)
+        if (
+            built is not None
+            and built[1] == id(value)
+            and built[0] != _choices_registry_generation
+        ):
+            return _build_registry_choices()
+        return value
+
+
+_choices: Virtualized[InductorChoices] = _ChoicesVirtualized(
+    "choices", _choices_default
+)
 
 
 class OpsValue:

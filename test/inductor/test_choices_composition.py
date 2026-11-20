@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any
@@ -368,6 +369,61 @@ class ChoicesCompositionTest(TestCase):
             runtime_uuid,
             ("composed_inductor_choices", ("alpha:_alpha:7", "beta")),
         )
+
+    def test_registry_changes_reach_a_thread_with_a_built_handler(self) -> None:
+        # A thread that already built its handler (as the autograd thread
+        # does when it compiles a backward) sees later registrations and
+        # unregistrations. One worker thread runs every submit.
+        def current() -> type[InductorChoices]:
+            return type(V.choices)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            seen = [executor.submit(current).result()]
+            register_inductor_choices("alpha", AlphaChoices)
+            seen.append(executor.submit(current).result())
+            unregister_inductor_choices("alpha")
+            seen.append(executor.submit(current).result())
+
+        self.assertEqual(seen, [InductorChoices, AlphaChoices, InductorChoices])
+
+    def test_handler_set_directly_on_another_thread_is_kept(self) -> None:
+        direct = BetaChoices()
+        ready, registered = threading.Event(), threading.Event()
+
+        def worker() -> InductorChoices:
+            with V.set_choices_handler(direct):
+                ready.set()
+                registered.wait()
+                return V.choices
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(worker)
+            ready.wait()
+            register_inductor_choices("alpha", AlphaChoices)
+            registered.set()
+            self.assertIs(future.result(), direct)
+
+    def test_registration_installs_tlx_first(self) -> None:
+        # The thread already has a handler, so only the registration itself
+        # can install the torchTLX integration here.
+        self.assertIs(type(V.choices), InductorChoices)
+        with patch(
+            "torch._inductor.heuristics.template.tlx.maybe_install"
+        ) as maybe_install:
+            register_inductor_choices("alpha", AlphaChoices)
+        maybe_install.assert_called_once_with()
+
+    def test_failing_factory_leaves_every_thread_unchanged(self) -> None:
+        register_inductor_choices("alpha", AlphaChoices)
+        with self.assertRaises(RuntimeError):
+            register_inductor_choices("bad", PlainChoices)
+        self.assertEqual(
+            tuple(key for key, _ in registered_inductor_choices()), ("alpha",)
+        )
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            self.assertIsInstance(
+                executor.submit(lambda: V.choices).result(), AlphaChoices
+            )
 
     def test_inherited_default_is_used_when_nobody_overrides(self) -> None:
         register_inductor_choices("beta", BetaChoices)
