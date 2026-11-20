@@ -89,7 +89,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.11", "3.12", "3.13", "3.14", "3.14t", "3.15", "3.15t" ]
+        # 3.12 builds a cp312-abi3 wheel covering 3.12+; free-threaded builds
+        # cannot use the limited API and stay version-specific.
+        py_vers: [ "3.11", "3.12", "3.14t", "3.15t" ]
         device: ["xpu"]
     timeout-minutes: 40
     env:
@@ -155,6 +157,9 @@ jobs:
           export RELEASE=""
           if [[ "${IS_RELEASE_TAG}" == true ]]; then
             export RELEASE="--release"
+          fi
+          if [[ "${PY_VERS}" == "3.12" ]]; then
+            export TRITON_STABLE_ABI=ON
           fi
           .github/scripts/windows/build_triton.bat
           mkdir -p "${RUNNER_TEMP}/artifacts/"
