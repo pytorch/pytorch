@@ -31,10 +31,6 @@
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.vm.regions
-```
-
-```{eval-rst}
 .. autofunction:: torch.vm.memory
 ```
 
@@ -66,10 +62,6 @@
 
 ```{eval-rst}
 .. autoclass:: torch.vm.passes.ModuleShortcuts
-```
-
-```{eval-rst}
-.. autoclass:: torch.vm.passes.Graphs
 ```
 
 ```{eval-rst}
