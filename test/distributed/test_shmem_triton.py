@@ -1006,8 +1006,19 @@ class SHMEMTritonTest(MultiProcContinuousTest):
     def test_triton_rocshmem_constexpr_nonworld_team(self, op: str) -> None:
         self._init_device()
         buf = torch.empty(4, dtype=torch.int64, device=self.device)
-        with self.assertRaisesRegex(CompilationError, "Only team 0 is supported"):
+        with self.assertRaises(CompilationError) as cm:
             my_collective_constexpr_team_kernel[(1,)](buf, buf, 4, TEAM=1, OP=op)
+        # Triton wraps errors raised in a nested @triton.jit call in a
+        # CompilationError that only carries the call site; the reason is on
+        # the __cause__ chain.
+        msgs = []
+        exc = cm.exception
+        while exc is not None:
+            msgs.append(str(exc))
+            exc = exc.__cause__
+        msg = "\n".join(msgs)
+        self.assertIn(f"Unsupported rocSHMEM {op} team: 1", msg)
+        self.assertIn("Only team 0 is supported", msg)
 
     @requires_triton()
     @requires_h100()
