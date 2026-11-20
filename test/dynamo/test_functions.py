@@ -9414,12 +9414,17 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 return x + 1
 
         x = torch.ones(1)
+        with self.assertRaisesRegex(
+            Unsupported, "type\\(\\) with non-constant class arguments"
+        ):
+            torch.compile(invalid_fn, backend="eager", fullgraph=True)(x)
+
         invalid_counter = torch._dynamo.testing.CompileCounter()
         self.assertEqual(
-            torch.compile(invalid_fn, backend=invalid_counter, fullgraph=True)(x),
+            torch.compile(invalid_fn, backend=invalid_counter)(x),
             x + 1,
         )
-        self.assertEqual(invalid_counter.frame_count, 1)
+        self.assertEqual(invalid_counter.frame_count, 0)
 
         eager_cls = fn(x)[1]
         counter = torch._dynamo.testing.CompileCounter()
