@@ -578,7 +578,6 @@ class BaseSetVariable(VariableTracker):
             )
 
     tp_methods = {
-        "__contains__": Method.from_slot(sq_contains_impl),
         "isdisjoint": Method(isdisjoint),
     }
 
@@ -832,6 +831,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
         return self
 
     tp_methods = {
+        "__contains__": Method.from_slot(BaseSetVariable.sq_contains_impl),
         "intersection": Method(BaseSetVariable.intersection),
         "union": Method(BaseSetVariable.union),
         "difference": Method(BaseSetVariable.difference),

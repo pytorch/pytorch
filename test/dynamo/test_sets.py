@@ -280,6 +280,19 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(), torch.compile(fn, backend="eager", fullgraph=True)())
 
+    def test_ordered_set_contains_unhashable_set_raises(self):
+        # Only set/frozenset retry an unhashable set key as a frozenset.
+        from torch.utils._ordered_set import OrderedSet
+
+        def fn():
+            try:
+                OrderedSet([frozenset({1})]).__contains__({1})
+                return "no error"
+            except TypeError:
+                return "TypeError"
+
+        self.assertEqual(fn(), torch.compile(fn, backend="eager", fullgraph=True)())
+
 
 @instantiate_parametrized_tests
 class DictSetOperandTests(torch._dynamo.test_case.TestCase):

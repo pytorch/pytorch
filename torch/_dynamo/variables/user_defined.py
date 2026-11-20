@@ -55,7 +55,6 @@ from ..exc import (
     CompileOnOneRankUnsupported,
     handle_observed_exception,
     ObservedAttributeError,
-    ObservedKeyError,
     raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
@@ -5351,17 +5350,6 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
     ) -> VariableTracker:
         # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
         # TODO(follow-up): add test for unhashable/invalid key type, Counter missing key
-        method = self._maybe_get_baseclass_method("__getitem__")
-        if method in self._base_methods:
-            try:
-                return super().mp_subscript_impl(tx, key)
-            except ObservedKeyError:
-                if issubclass(
-                    self.python_type(), dict
-                ) and self._maybe_get_baseclass_method("__missing__"):
-                    return self.call_method(tx, "__missing__", [key], {})
-                else:
-                    raise
         return super().mp_subscript_impl(tx, key)
 
     def tp_init_impl(
