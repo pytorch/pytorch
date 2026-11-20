@@ -2896,13 +2896,7 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
                     )
                 )
 
-        # Only CPU recognizes this unsqueezed view as channels-last.
-        expected_format = (
-            torch.channels_last
-            if torch.device(device).type == "cpu"
-            else torch.contiguous_format
-        )
-        self.assertTrue(out[1].is_contiguous(memory_format=expected_format))
+        self.assertTrue(out[1].is_contiguous())
         self.checkMetaProps(out[0], out[1])
 
     @parametrize(
@@ -2926,12 +2920,16 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
         op = getattr(torch.ops.aten, op_name).default
         spatial = (5, 6) if op_name.endswith(("2d", "2d_aa")) else (4, 5, 6)
         args = [[2 * s for s in spatial]] + ([] if "nearest" in op_name else [False])
+        # uint8 views are recognized as channels-last on CPU; trilinear has no uint8 kernel.
+        on_cpu = torch.device(device).type == "cpu"
+        dtype = torch.uint8 if on_cpu and "trilinear" not in op_name else torch.float32
         out = []
         mode = FakeTensorMode()
         for context in [contextlib.nullcontext, lambda: mode]:
             with context():
                 # Channels-last except for the stride of the size-1 batch dim.
-                x = torch.empty(*spatial, 3, device=device).movedim(-1, 0)[None]
+                x = torch.empty(*spatial, 3, dtype=dtype, device=device)
+                x = x.movedim(-1, 0)[None]
                 out.append(op(x, *args))
         self.checkMetaProps(out[0], out[1])
 
