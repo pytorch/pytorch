@@ -14,8 +14,6 @@ from torch._C._profiler import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCPU,
-    onlyCUDA,
     skipCUDAIf,
 )
 from torch.testing._internal.common_utils import (
@@ -114,6 +112,10 @@ class TorchDispatchTensor(torch.Tensor):
 
 
 class ProfilerTree:
+    # Not a test class: it only exposes `test` as a decorator for the trace
+    # tests below. The device-agnostic declaration matches that role.
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def test(f):
         """Mark unit test that will be using ProfilerTree to test traces.
@@ -553,12 +555,11 @@ class TestProfilerTree(_TestProfilerTreeBase):
 
 
 @unittest.skipIf(IS_ARM64, "Not working on ARM")
-class TestProfilerTreeDevice(_TestProfilerTreeBase):
-    hw_classification = HardwareClassification.ACCELERATOR
+class TestProfilerTreeCPU(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.CPU
 
-    @onlyCPU
     @ProfilerTree.test
-    def test_profiler_experimental_tree_cpu_profile(self, device):
+    def test_profiler_experimental_tree_cpu_profile(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile(
             activities=[torch.profiler.ProfilerActivity.CPU]
@@ -612,9 +613,8 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
                   detach""",
         )
 
-    @onlyCPU
     @ProfilerTree.test
-    def test_profiler_experimental_tree_with_record_function(self, device):
+    def test_profiler_experimental_tree_with_record_function(self):
         with torch.profiler.profile(
             activities=[torch.profiler.ProfilerActivity.CPU]
         ) as p:
@@ -663,9 +663,8 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
                       aten::copy_""",
         )
 
-    @onlyCPU
     @ProfilerTree.test
-    def test_profiler_experimental_tree_with_memory(self, device):
+    def test_profiler_experimental_tree_with_memory(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile(
             activities=[torch.profiler.ProfilerActivity.CPU], profile_memory=True
@@ -742,9 +741,8 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
-    @onlyCPU
     @ProfilerTree.test
-    def test_profiler_experimental_tree_with_memory_and_stack(self, device):
+    def test_profiler_experimental_tree_with_memory_and_stack(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
             z = torch.add(t1, t2)
@@ -851,13 +849,17 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
                   ...""",
         )
 
+
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
+class TestProfilerTreeCUDA(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
-    @onlyCUDA
     @ProfilerTree.test
-    def test_profiler_experimental_tree_cuda_detailed(self, device):
+    def test_profiler_experimental_tree_cuda_detailed(self):
         # Do lazy imports ahead of time to avoid it showing up in the tree
         import torch.nested._internal.nested_tensor
 
@@ -1062,6 +1064,11 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
                     ...""",
             allow_failure=ALLOW_CUDA_FAILURE,
         )
+
+
+@unittest.skipIf(IS_ARM64, "Not working on ARM")
+class TestProfilerTreeDevice(_TestProfilerTreeBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/83606")
     @ProfilerTree.test
@@ -1406,9 +1413,7 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
             )
 
 
-instantiate_device_type_tests(
-    TestProfilerTreeDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
-)
+instantiate_device_type_tests(TestProfilerTreeDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
