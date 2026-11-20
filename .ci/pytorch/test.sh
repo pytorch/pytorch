@@ -661,9 +661,12 @@ PY
 # and _refs.prod's float16 test_ref_duplicate_values runs on a (4, 4) input.
 # test_noncontiguous_ mostly compares an override with itself on a contiguous copy;
 # only test_noncontiguous_all checks it against ATen (its strided side is unaligned, so
-# declined), except for prod, whose full reduction is not overridden. test_nan_policy_
-# checks NaN propagation. Apart from test_noncontiguous_all's ATen comparison, only test_ops
-# and test_reductions_cutedsl.py check bfloat16 results against a reference.
+# declined), except for prod, whose full reduction is not overridden, and half-precision
+# _refs reductions, which upcast to a contiguous copy, so both sides are served;
+# _refs.prod and masked.prod are also served on contiguous intermediates.
+# test_nan_policy_ checks NaN propagation. Apart from test_noncontiguous_all's ATen
+# comparison, only test_ops and test_reductions_cutedsl.py check bfloat16 results
+# against a reference.
 PYTHON_NATIVE_REDUCTIONS_FILTER='(test_ref_ or test_noncontiguous_ or test_nan_policy_) and cuda and not large_input and (_sum_ or _mean_ or _amax_ or _amin_ or _prod_) and (float16 or float32)'
 PYTHON_NATIVE_REDUCTION_OPS_FILTER='(_sum_cuda or _mean_cuda or _amax_cuda or _amin_cuda or _prod_cuda) and not scatter_reduce and not index_reduce and not cartesian and not var_mean and not std_mean and not number_mean'
 

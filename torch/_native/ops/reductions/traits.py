@@ -3,9 +3,10 @@
 # use leaf/combine, so leaf must include every element transform. has_combine_equal opts a
 # trait into combine_equal, a closed-form merge of equal-count states, and
 # has_combine_uniform into combine_uniform, which folds equal-count partials deriving
-# counts from their index. Other names mirror SharedReduceOps.h. Accumulator dtypes
-# provide their identities. Scalar conditionals lower only inside cute.jit methods;
-# cute.arch.fmax suppresses NaNs, so traits handle them.
+# counts from their index; uniform combines assume the count is the trait's last field.
+# Other names mirror SharedReduceOps.h. Accumulator dtypes provide their identities.
+# Scalar conditionals lower only inside cute.jit methods; cute.arch.fmax suppresses
+# NaNs, so traits handle them.
 
 import cutlass
 import cutlass.cute as cute
