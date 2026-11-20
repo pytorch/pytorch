@@ -58,6 +58,14 @@ def _contract(trait):
     return contract | dict(trait_type=type(trait), welford_outs=welford)
 
 
+def _outputs(trait, dtype):
+    """trait's output dtypes for dtype inputs: int64 indices, values in dtype."""
+    nouts = getattr(trait, "nouts", 1)
+    if getattr(trait, "has_index", False):
+        return (dtype,) * (nouts - 1) + (torch.int64,)
+    return (dtype,) * nouts
+
+
 # Contracts by _TRAITS key, for parametrized selector rows.
 _CONTRACTS = {key: _contract(trait) for key, trait in _TRAITS.items()}
 
@@ -559,7 +567,7 @@ class TestReductionConfig(TestCase):
             contract = _contract(trait)
             nfields = contract.pop("nfields")
             args = ((10, 0), torch.float32, rows, 4095, 1, nfields)
-            outs = (torch.float32,)
+            outs = _outputs(trait, torch.float32)
             kw = dict(itemsize=4, acc_bits=32, alignment=16, out_dtypes=outs)
             cfg = ct.select_col_config(*args, **kw, **contract)
             self.assertEqual(cfg.rule, rule, type(trait).__name__)
@@ -674,7 +682,7 @@ class TestReductionConfig(TestCase):
         contract = _contract(_TRAITS[trait])
         nfields = contract.pop("nfields")
         args = ((10, 0), dtype, rows, columns, 1, nfields)
-        outs = (torch.float32,)
+        outs = _outputs(_TRAITS[trait], dtype)
         kw = dict(itemsize=itemsize, acc_bits=32, alignment=16, out_dtypes=outs)
         cfg = ct.select_col_config(*args, **kw, **contract)
         self.assertEqual(cfg.rule, expected_rule)
@@ -813,7 +821,7 @@ class TestReductionConfig(TestCase):
         contract = _contract(_TRAITS[trait])
         nfields = contract.pop("nfields")
         args = ((10, 0), dtype, rows, columns, 1, nfields)
-        outs = (torch.float32,)
+        outs = _outputs(_TRAITS[trait], dtype)
         kw = dict(itemsize=itemsize, acc_bits=32, alignment=16, out_dtypes=outs)
         cfg = ct.select_col_config(*args, **kw, **contract)
         self.assertEqual(cfg, expected)
