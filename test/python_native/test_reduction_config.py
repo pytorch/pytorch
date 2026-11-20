@@ -525,7 +525,7 @@ class TestReductionConfig(TestCase):
         "case,updates,expected_rule",
         [
             ("anchor", {}, "b200_ragged_c257"),
-            ("explicit_threads", {"threads_per_block": 64}, "default"),
+            ("explicit_threads", {"threads_per_block": 64}, "explicit"),
             ("explicit_npar", {"npar": 1024}, "explicit"),
             ("explicit_vec", {"vec": 1}, "explicit"),
             ("row_below", {"rows": (16 << 20) // 514 - 1}, "default"),
