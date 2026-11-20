@@ -2447,6 +2447,26 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("tuple_output", [False, True])
+    def test_quack_make_fx_graph_keeps_body_output_structure(self, tuple_output):
+        from torch._inductor.compile_fx import compile_fx
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def body(acc):
+            return (acc + 1, acc * 2) if tuple_output else acc + 1
+
+        def fn(a, b):
+            out = flex_gemm(torch.mm, (a, b), body, kernel_options={"backend": "QUACK"})
+            return out[0] * 2 if tuple_output else out * 2
+
+        a = torch.randn(64, 32, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(32, 64, device="cuda", dtype=torch.bfloat16)
+        compiled = compile_fx(make_fx(fn)(a, b), [a, b])
+        self.assertEqual(compiled(a, b), fn(a, b), atol=2e-2, rtol=2e-2)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_generated_captured_scalar_scales_reduction_finalizer(self):
         m, n, group = 64, 64, 16
 
