@@ -642,6 +642,21 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
   }
 }
 
+MPSScalar getMPSScalar(const TensorBase& cpu_scalar) {
+  TORCH_CHECK(cpu_scalar.dim() == 0, "Passed CPU tensor to MPS op");
+  const auto type = cpu_scalar.scalar_type();
+  if (type == kDouble) [[unlikely]] {
+    return getMPSScalar(*cpu_scalar.const_data_ptr<double>(), type);
+  }
+  if (type == kComplexDouble) [[unlikely]] {
+    return getMPSScalar(*cpu_scalar.const_data_ptr<c10::complex<double>>(), type);
+  }
+  MPSScalar s{.size = static_cast<size_t>(cpu_scalar.element_size()), .type = type};
+  TORCH_CHECK(s.size <= sizeof(s.value), "Unsupported CPU scalar type ", type);
+  std::memcpy(&s.value, cpu_scalar.const_data_ptr(), s.size);
+  return s;
+}
+
 MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar) {
   scalar.buffer = getIMPSAllocator()->allocScalarBufferWithValue(&scalar.value, scalar.size);
   return [[[MPSGraphTensorData alloc] initWithMTLBuffer:scalar.getMTLBuffer()
@@ -1823,6 +1838,10 @@ void MetalKernelFunction::setArg(unsigned idx, const at::TensorBase& t) {
 void MetalKernelFunction::setArg(unsigned idx, const void* ptr, uint64_t size) {
   TORCH_CHECK(size > 0);
   [encoder setBytes:ptr length:size atIndex:idx];
+}
+
+void MetalKernelFunction::setTensorListArg(unsigned idx, c10::ArrayRef<at::Tensor> tensors) {
+  mtl_setTensorList(encoder, tensors, idx);
 }
 
 void MetalKernelFunction::setErrorBufferIndex(unsigned idx) {
