@@ -22,7 +22,8 @@ mod vm;
 
 use pyo3::prelude::*;
 
-#[pymodule]
+// The VM's state is only guarded by the GIL.
+#[pymodule(gil_used = true)]
 fn _cfg_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pyapi::init, m)?)?;
     m.add_function(wrap_pyfunction!(pyapi::compile, m)?)?;
