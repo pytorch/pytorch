@@ -49,7 +49,7 @@ def ownership_config(
     codepath = {
         "source": {
             "repository": repository,
-            "path": "CODEOWNERS",
+            "path": "OWNERSHIP.yaml",
             "ref": "a" * 40,
             "blob_sha": "c" * 40,
         },
