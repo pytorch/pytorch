@@ -1,10 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 
 import asyncio
+import concurrent.futures
 import threading
 import time
+import unittest
 from unittest.mock import MagicMock, patch
 
+import torch
 from torch.distributed._watchdog import (
     _CancelHandle,
     _get_watchdog,
@@ -14,7 +17,28 @@ from torch.distributed._watchdog import (
     op_timeout,
     shutdown,
 )
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+def _on_loop(wd: _Watchdog, fn):
+    fut: concurrent.futures.Future = concurrent.futures.Future()
+    wd._loop.call_soon_threadsafe(lambda: fut.set_result(fn()))
+    return fut.result(timeout=5.0)
+
+
+class _QueryProbe:
+    """Wraps a CUDA event; reports incomplete until released, signals each query."""
+
+    def __init__(self, event: torch.cuda.Event) -> None:
+        self.event = event
+        self.queried = threading.Event()
+        self.released = False
+
+    def query(self) -> bool:
+        self.event.query()
+        self.queried.set()
+        return self.released
 
 
 class TestCancelHandle(TestCase):
@@ -143,24 +167,72 @@ class TestWatchdog(TestCase):
                 wd.shutdown()
 
     @patch("torch.distributed._watchdog.torch.cuda.Event")
-    def test_stream_timeout_handles_graph_capture(self, MockEvent: MagicMock) -> None:
-        mock_event = MagicMock()
-        mock_event.query.side_effect = [
-            RuntimeError("capture in progress"),
-            True,
-        ]
-        MockEvent.return_value = mock_event
+    def test_stream_query_error_fires_callback(self, MockEvent: MagicMock) -> None:
+        bad_event = MagicMock()
+        bad_event.query.side_effect = RuntimeError("CUDA error")
+        MockEvent.return_value = bad_event
 
+        completed = threading.Event()
         fired = threading.Event()
+        wd = _Watchdog(poll_interval=0.01)
+        try:
+            wd.stream_complete(completed.set, event=bad_event)
+            wd.stream_timeout(60.0, fired.set)
+            self.assertTrue(fired.wait(timeout=5.0), "callback did not fire on error")
+            self.assertEqual(_on_loop(wd, lambda: len(wd._stream_monitors)), 0)
+            self.assertFalse(completed.is_set())
+        finally:
+            wd.shutdown()
 
-        with patch.dict("os.environ", {"TORCH_WATCHDOG_POLL_INTERVAL_SECS": "0.05"}):
-            wd = _Watchdog()
-            try:
-                wd.stream_timeout(2.0, fired.set)
-                time.sleep(0.3)
-                self.assertFalse(fired.is_set())
-            finally:
-                wd.shutdown()
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_stream_monitors_skipped_during_capture(self) -> None:
+        fired = threading.Event()
+        wd = _Watchdog(poll_interval=0.01)
+        try:
+            x = torch.zeros(1, device="cuda")
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g):
+                x.add_(1)
+                timeout_handle = wd.stream_timeout(0.01, fired.set)
+                complete_handle = wd.stream_complete(fired.set)
+            self.assertTrue(timeout_handle.is_cancelled)
+            self.assertTrue(complete_handle.is_cancelled)
+            self.assertEqual(_on_loop(wd, lambda: len(wd._stream_monitors)), 0)
+
+            for _ in range(3):
+                g.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(x, torch.full((1,), 3.0, device="cuda"))
+            self.assertFalse(fired.is_set())
+        finally:
+            wd.shutdown()
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_poll_during_capture_keeps_capture_valid(self) -> None:
+        wd = _Watchdog(poll_interval=0.01)
+        side = torch.cuda.Stream()
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(1_000_000)
+            event = torch.cuda.Event()
+            event.record()
+        probe = _QueryProbe(event)
+        try:
+            wd.stream_complete(lambda: None, event=probe)
+            self.assertTrue(probe.queried.wait(timeout=5.0))
+
+            x = torch.zeros(1, device="cuda")
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g):
+                x.add_(1)
+                probe.queried.clear()
+                self.assertTrue(probe.queried.wait(timeout=5.0), "no poll")
+
+            g.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(x, torch.ones(1, device="cuda"))
+        finally:
+            probe.released = True
+            wd.shutdown()
 
     @patch("torch.distributed._watchdog.torch.cuda.Event")
     def test_op_timeout_cpu_fires_during_block(self, MockEvent: MagicMock) -> None:

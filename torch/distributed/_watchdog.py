@@ -39,11 +39,15 @@ Usage:
     # Context manager form
     with op_timeout(60.0, lambda: print("timed out!")):
         some_operation()
+
+CUDA graphs: work issued during graph capture is not monitored, since events
+recorded during capture cannot be queried. Monitor ``graph.replay()`` instead.
 """
 
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import faulthandler
 import logging
 import os
@@ -70,6 +74,19 @@ __all__ = [
     "cpu_timeout",
     "op_timeout",
 ]
+
+
+def _set_thread_local_capture_mode() -> None:
+    # In the default global capture mode, querying an event from this thread
+    # invalidates a capture in progress on any other thread. Matches the
+    # CUDAStreamCaptureModeGuard used by ProcessGroupNCCL's watchdog.
+    from torch.cuda._utils import _check_cuda, _get_gpu_runtime_library
+
+    lib = _get_gpu_runtime_library()
+    prefix = "hip" if torch.version.hip else "cu"
+    exchange = getattr(lib, f"{prefix}ThreadExchangeStreamCaptureMode")
+    mode = ctypes.c_int(1)  # cudaStreamCaptureModeThreadLocal
+    _check_cuda(exchange(ctypes.byref(mode)))
 
 
 def _default_timeout_callback() -> None:
@@ -168,6 +185,8 @@ class _Watchdog:
         self._stream_monitors: dict[int, _StreamMonitor] = {}
         self._next_monitor_id: int = 0
         self._poll_handle: asyncio.TimerHandle | None = None
+        self._capture_mode_set = False
+        self._warned_capture = False
 
         self._del_queue: queue.SimpleQueue[object] = queue.SimpleQueue()
 
@@ -192,9 +211,22 @@ class _Watchdog:
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
 
+    def _skip_captured(self) -> _CancelHandle:
+        if not self._warned_capture:
+            self._warned_capture = True
+            logger.warning(
+                "Watchdog does not monitor work issued during CUDA graph capture; "
+                "monitor graph.replay() instead"
+            )
+        handle = _CancelHandle()
+        handle.cancel()
+        return handle
+
     def stream_complete(
         self, callback: Callable[[], None], event: object | None = None
     ) -> _CancelHandle:
+        if torch.cuda.is_current_stream_capturing():
+            return self._skip_captured()
         self._drain_del_queue()
         handle = _CancelHandle()
         if event is None:
@@ -216,6 +248,8 @@ class _Watchdog:
             callback = _default_timeout_callback
         if isinstance(timeout, timedelta):
             timeout = timeout.total_seconds()
+        if torch.cuda.is_current_stream_capturing():
+            return self._skip_captured()
         self._drain_del_queue()
         handle = _CancelHandle()
         event = torch.cuda.Event(enable_timing=False)
@@ -242,6 +276,12 @@ class _Watchdog:
 
     def _poll_monitors(self) -> None:
         self._poll_handle = None
+        if not self._capture_mode_set and torch.cuda.is_initialized():
+            self._capture_mode_set = True
+            try:
+                _set_thread_local_capture_mode()
+            except Exception:
+                logger.warning("Failed to set watchdog capture mode", exc_info=True)
         now = time.monotonic()
         to_remove: list[int] = []
 
@@ -250,12 +290,13 @@ class _Watchdog:
                 to_remove.append(mid)
                 continue
 
-            completed = False
             try:
                 completed = monitor.event.query()  # type: ignore[union-attr]
             except RuntimeError:
-                # event.query() raises during CUDA graph capture
-                pass
+                logger.exception("CUDA error querying watchdog event (id=%d)", mid)
+                self._fire_callback(monitor.callback, "stream", mid)
+                to_remove.append(mid)
+                continue
 
             if completed:
                 if monitor.on_complete is not None:
