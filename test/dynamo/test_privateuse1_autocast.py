@@ -261,6 +261,169 @@ class TestPrivateUse1Autocast(TestCase):
 
         self.assert_enter_autocast_args(backend, (BACKEND, torch.bfloat16, False, None))
 
+    def test_registered_wrapper_class_attributes(self):
+        class BackendAutocast(torch.amp.autocast_mode.autocast):
+            _dynamo_autocast_passthrough = True
+
+            def __init__(self, dtype=None, enabled=True, cache_enabled=None):
+                super().__init__(
+                    BACKEND,
+                    dtype=dtype,
+                    enabled=enabled,
+                    cache_enabled=cache_enabled,
+                )
+
+            @staticmethod
+            def scale(t):
+                return t * 3
+
+            @classmethod
+            def bfloat16(cls):
+                return cls(dtype=torch.bfloat16)
+
+        device_module = self.device_module
+        with mock.patch.object(
+            device_module.amp, "autocast", BackendAutocast, create=True
+        ):
+            backend = EagerAndRecordGraphs()
+
+            @torch.compile(backend=backend, fullgraph=True)
+            def fn(x):
+                device_module.amp.autocast.flag = 7
+                with device_module.amp.autocast.bfloat16():
+                    return (
+                        device_module.amp.autocast.scale(x),
+                        torch.get_autocast_dtype(BACKEND),
+                    )
+
+            x = torch.randn(4)
+            self.assertEqual(fn(x), (x * 3, torch.bfloat16))
+            self.assertEqual(BackendAutocast.flag, 7)
+
+        self.assert_enter_autocast_args(backend, (BACKEND, torch.bfloat16, True, None))
+
+    def test_graph_break_inside_wrapper_resumes(self):
+        class BackendAutocast(torch.amp.autocast_mode.autocast):
+            _dynamo_autocast_passthrough = True
+
+            def __init__(self, dtype=None, enabled=True, cache_enabled=None):
+                super().__init__(
+                    BACKEND,
+                    dtype=dtype,
+                    enabled=enabled,
+                    cache_enabled=cache_enabled,
+                )
+
+        device_module = self.device_module
+        with mock.patch.object(
+            device_module.amp, "autocast", BackendAutocast, create=True
+        ):
+            backend = EagerAndRecordGraphs()
+
+            def fn(x):
+                with device_module.amp.autocast(dtype=torch.bfloat16):
+                    y = x + 1
+                    torch._dynamo.graph_break()
+                    return (
+                        y * 2,
+                        torch.is_autocast_enabled(BACKEND),
+                        torch.get_autocast_dtype(BACKEND),
+                    )
+
+            x = torch.randn(4)
+            expected = fn(x)
+            actual = torch.compile(fn, backend=backend)(x)
+            self.assertEqual(actual, expected)
+
+        self.assertEqual(len(backend.graphs), 2)
+        for graph in backend.graphs:
+            nodes = [
+                node
+                for node in graph.graph.nodes
+                if node.target is torch.amp._enter_autocast
+            ]
+            self.assertEqual(len(nodes), 1)
+            self.assertEqual(nodes[0].args, (BACKEND, torch.bfloat16, True, None))
+
+    def test_closure_rebound_wrapper_recompiles(self):
+        class RegisteredAutocast(torch.amp.autocast_mode.autocast):
+            _dynamo_autocast_passthrough = True
+
+            def __init__(self, dtype=None, enabled=True, cache_enabled=None):
+                super().__init__(
+                    BACKEND,
+                    dtype=dtype,
+                    enabled=enabled,
+                    cache_enabled=cache_enabled,
+                )
+
+        class UnregisteredAutocast(torch.amp.autocast_mode.autocast):
+            def __init__(self, dtype=None, enabled=True, cache_enabled=None):
+                super().__init__(
+                    BACKEND,
+                    dtype=torch.bfloat16,
+                    enabled=enabled,
+                    cache_enabled=cache_enabled,
+                )
+
+        autocast_cls = RegisteredAutocast
+
+        def inner(x):
+            with autocast_cls():
+                return x + 1, torch.get_autocast_dtype(BACKEND)
+
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(backend=backend)
+        def outer(x):
+            return inner(x)
+
+        x = torch.randn(4)
+        with mock.patch.object(
+            self.device_module.amp, "autocast", RegisteredAutocast, create=True
+        ):
+            self.assertEqual(outer(x), inner(x))
+            autocast_cls = UnregisteredAutocast
+            self.assertEqual(outer(x), (x + 1, torch.bfloat16))
+
+        self.assertEqual(len(backend.graphs), 2)
+        self.assert_enter_autocast_args(backend, (BACKEND, None, True, None))
+        self.assert_no_enter_autocast(backend.graphs[1])
+
+    def test_constant_result_wrapper_class_routes(self):
+        class BackendAutocast(torch.amp.autocast_mode.autocast):
+            _dynamo_autocast_passthrough = True
+
+            def __init__(self, dtype=None, enabled=True, cache_enabled=None):
+                super().__init__(
+                    BACKEND,
+                    dtype=dtype,
+                    enabled=enabled,
+                    cache_enabled=cache_enabled,
+                )
+
+        device_module = self.device_module
+
+        # The class arrives with a ConstantSource, which cannot be guarded.
+        @torch._dynamo.assume_constant_result
+        def get_autocast_cls():
+            return device_module.amp.autocast
+
+        with mock.patch.object(
+            device_module.amp, "autocast", BackendAutocast, create=True
+        ):
+            backend = EagerAndRecordGraphs()
+
+            @torch.compile(backend=backend, fullgraph=True)
+            def fn(x):
+                with get_autocast_cls()(dtype=torch.bfloat16):
+                    return x + 1, torch.get_autocast_dtype(BACKEND)
+
+            x = torch.randn(4)
+            self.assertEqual(fn(x), (x + 1, torch.bfloat16))
+
+        self.assert_enter_autocast_args(backend, (BACKEND, torch.bfloat16, True, None))
+
     def test_registered_entrypoint_rebind_recompiles(self):
         class RegisteredAutocast(torch.amp.autocast_mode.autocast):
             _dynamo_autocast_passthrough = True
@@ -304,7 +467,7 @@ class TestPrivateUse1Autocast(TestCase):
         self.assert_enter_autocast_args(backend, (BACKEND, None, True, None))
         self.assert_no_enter_autocast(backend.graphs[1])
 
-    def test_sourceless_registered_entrypoint_rebind_recompiles(self):
+    def test_typing_metadata_registered_entrypoint_rebind_recompiles(self):
         class RegisteredAutocast(torch.amp.autocast_mode.autocast):
             _dynamo_autocast_passthrough = True
 
@@ -319,13 +482,11 @@ class TestPrivateUse1Autocast(TestCase):
         class ReplacementAutocast(RegisteredAutocast):
             pass
 
-        class Sub(RegisteredAutocast):
-            pass
+        annotated = typing.Annotated[int, RegisteredAutocast]
 
         def fn(x):
-            # Sub is not registered, so only SourcelessBuilder sees the
-            # registered class (via __bases__ of a sourceless origin).
-            autocast_cls = typing.Annotated[Sub, "metadata"].__origin__.__bases__[0]
+            # Metadata produces a class value without a direct class source.
+            autocast_cls = typing.Annotated[annotated, "metadata"].__metadata__[0]
             with autocast_cls():
                 return x + 1
 
