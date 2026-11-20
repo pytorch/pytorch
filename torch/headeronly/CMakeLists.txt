@@ -20,7 +20,6 @@ configure_file(
 
 file(GLOB HEADERONLY_HEADERS CONFIGURE_DEPENDS
     core/**/*.h
-    cpu/*.h
     cpu/**/*.h
     cuda/*.h
     cuda/detail/*.h

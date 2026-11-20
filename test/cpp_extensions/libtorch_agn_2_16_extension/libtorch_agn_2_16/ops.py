@@ -22,6 +22,16 @@ def my_add(self, other, alpha=1.0) -> torch.Tensor:
     return torch.ops.libtorch_agn_2_16.my_add.default(self, other, alpha)
 
 
+def my_l1d_cache_size() -> int:
+    """Return the L1 data cache size in bytes, or 0 if unavailable."""
+    return torch.ops.libtorch_agn_2_16.my_l1d_cache_size.default()
+
+
+def my_l2_cache_size() -> int:
+    """Return the L2 cache size in bytes, or 0 if unavailable."""
+    return torch.ops.libtorch_agn_2_16.my_l2_cache_size.default()
+
+
 def my_is_conj(t: torch.Tensor) -> bool:
     return torch.ops.libtorch_agn_2_16.my_is_conj.default(t)
 
