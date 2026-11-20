@@ -2659,6 +2659,15 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
+    # Elements per SM cycle a template sustains when it applies a fused
+    # producer to a TMA-loaded operand tile (load the sources, compute, store
+    # the operand for the MMA), used by the prologue fusion cost model. The
+    # default is measured on B200 with autoWS, where the producer runs in the
+    # epilogue partition, serialized with the MMA.
+    prologue_transform_elems_per_cycle = float(
+        os.environ.get("TORCHINDUCTOR_PROLOGUE_TRANSFORM_ELEMS_PER_CYCLE", "6")
+    )
+
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
     # If set to true, will generate PDL code on devices that support it.
     # If set to false, will never generate PDL code.
