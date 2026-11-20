@@ -223,8 +223,8 @@ class B2BGEMMTest(TestCase):
         for M, N, O, P in (
             (100, 100, 100, 100),
             (64, 64, 64, 64),
-            # Gate/scoring consistency case from review: rejected by the
-            # load-ratio gate and by autotune with the shared config set.
+            # The load-ratio gate rejects (64, 16, 32, 64), so autotune never
+            # runs and the b2b_gemm counter must stay at zero.
             (64, 16, 32, 64),
         ):
             with self.subTest(shape=(M, N, O, P)):
@@ -236,9 +236,10 @@ class B2BGEMMTest(TestCase):
                 C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
                 res, codes = run_and_get_code(f_opt, A, B, C)
                 code = "\n".join(codes)
-                self.assertTrue(torch.allclose(f(A, B, C), res, atol=0.1, rtol=0.01))
+                self.assertEqual(f(A, B, C), res, atol=0.1, rtol=0.01)
                 self.assertNotIn("B2B_GEMM_LEFT_TRITON_ENTRANCE", code)
                 self.assertNotIn("B2B_GEMM_RIGHT_TRITON_ENTRANCE", code)
+                self.assertEqual(counters["inductor"]["b2b_gemm"], 0)
 
     @torch._inductor.config.patch(
         b2b_gemm_pass=True,
@@ -251,10 +252,7 @@ class B2BGEMMTest(TestCase):
 
         for is_left_assoc in (True, False):
             with self.subTest(associativity="left" if is_left_assoc else "right"):
-                if torch.version.hip and not is_left_assoc:
-                    self.skipTest(
-                        "right-associative B2B GEMM Triton choice is unavailable on ROCm"
-                    )
+                counters.clear()
 
                 def f(
                     m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor

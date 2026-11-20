@@ -4,7 +4,7 @@ from collections import deque
 
 import torch
 from torch.fx.experimental.symbolic_shapes import (
-    free_unbacked_symbols,
+    has_free_unbacked_symbols,
     optimization_hint,
 )
 from torch.utils._ordered_set import OrderedSet
@@ -388,7 +388,7 @@ def is_b2b_gemm_good_on(
         return False
     if not all([len(A.shape) == 2, len(B.shape) == 2, len(C.shape) == 2]):
         return False
-    if free_unbacked_symbols(fake_tensors):
+    if has_free_unbacked_symbols(fake_tensors):
         return False
     # size checks: we only dispatch to B2B-GEMM when the average load ratio is > 1
     M, N = A.shape
@@ -402,8 +402,8 @@ def is_b2b_gemm_good_on(
     # `all_reach_via_pointwise_with_no_other_inputs` (enforced during matching)
     # forbids external operands in the epilogue, so B's extents are fully
     # determined by A and C. The templates read only B's strides and derive its
-    # extents from A and C; keep this check so any future relaxation of that
-    # constraint cannot turn an extent mismatch into an out-of-bounds B load.
+    # extents from A and C. This is a belt-and-suspenders sanity check on the
+    # example values above; it does not prove symbolic extent agreement.
     if 0 in (M, N, O, P) or N != B_N or B_O != O:
         return False
     ratios = []
