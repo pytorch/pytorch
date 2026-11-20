@@ -1072,7 +1072,6 @@ class TestSliceScatterChunkingPinnedCopyBase(TestCase):
 instantiate_device_type_tests(
     TestSliceScatterChunking,
     globals(),
-    allow_mps=True,
     allow_xpu=True,
 )
 instantiate_device_type_tests(
