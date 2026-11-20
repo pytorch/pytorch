@@ -9371,6 +9371,14 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn(4, 1, 8), torch.randn(4, 6, 8), torch.randn(4, 6, 8)),
         )
 
+    def test_cat_clamped_relative_position(self):
+        def fn(emb, x):
+            pos = torch.arange(x.shape[0], device=x.device)
+            bias = emb[(pos[:, None] - pos[None, :]).clamp(-4, 4) + 4]
+            return torch.cat([bias, x.new_zeros(x.shape[0], 1, emb.shape[1])], 1)
+
+        self.common(fn, (torch.randn(9, 8), torch.randn(32, 8)))
+
     def test_cat_uint8(self):
         def fn(x):
             batch_shape = x.shape[:1]

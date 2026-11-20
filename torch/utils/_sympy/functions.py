@@ -1401,6 +1401,12 @@ class Identity(sympy.Function):
 
     precedence = 10
 
+    @classmethod
+    def eval(cls, arg: sympy.Expr) -> sympy.Expr | None:
+        if arg.is_Number and arg.is_comparable:
+            return arg
+        return None
+
     def __repr__(self) -> str:  # type: ignore[override]
         return f"Identity({self.args[0]})"
 
