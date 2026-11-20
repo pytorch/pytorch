@@ -13,6 +13,7 @@
 
 use crate::analysis::BitSet;
 use crate::capi::{self, SiteSlot, TCFG_METHOD};
+use crate::graph::{GraphSite, Graphs, Left, Path};
 use crate::ir::*;
 use crate::pyffi::{self, PyObj};
 use crate::vm::Compiled;
@@ -135,6 +136,11 @@ impl ValueObs {
             _ => None,
         }
     }
+
+    /// Whether the value was an exact int, float or bool every time.
+    pub fn is_number(&self) -> bool {
+        matches!(self, ValueObs::Int { .. } | ValueObs::Float | ValueObs::Bool { .. })
+    }
 }
 
 /// How many dispatcher calls the profiling tier saw an instruction make.
@@ -191,6 +197,12 @@ pub struct InstFacts {
 }
 
 impl InstFacts {
+    /// Whether every run made no dispatcher call, entered no frame, wrote to
+    /// no tensor and did not raise.
+    pub fn quiet(&self) -> bool {
+        self.runs > 0 && self.kernels == Kernels::None && !self.frames && !self.raised && !self.wrote
+    }
+
     pub fn saw_kernels(&mut self, kernels: Kernels) {
         self.kernels = match (self.kernels, kernels) {
             (seen, Kernels::Unseen) => seen,
@@ -229,6 +241,10 @@ pub struct Unit {
     /// for a block that keeps failing its guards, so that it settles on code
     /// that holds for every input.
     pub speculate: bool,
+    /// The graphs the graph pass made of the unit, each with its path, and
+    /// what it left out of them.
+    pub graphs: Vec<(Arc<GraphSite>, Path)>,
+    pub left: Vec<Left>,
 }
 
 impl Unit {
@@ -249,6 +265,8 @@ impl Unit {
             term: b.term.clone(),
             entry_guards: Vec::new(),
             speculate,
+            graphs: Vec::new(),
+            left: Vec::new(),
         }
     }
 
@@ -350,6 +368,9 @@ pub struct PassCx<'a> {
     pub obs: &'a [ValueObs],
     /// Per generic instruction of the block.
     pub facts: &'a [InstFacts],
+    /// Per generic instruction of the block: why one that made dispatcher
+    /// calls is no call site.
+    pub reasons: &'a [Option<String>],
 }
 
 impl PassCx<'_> {
@@ -383,6 +404,12 @@ impl PassCx<'_> {
 pub trait CfgPass: Send + Sync {
     fn name(&self) -> String;
     fn run(&self, unit: &mut Unit, cx: &PassCx) -> PyResult<bool>;
+
+    /// Whether the pass runs once, on what the others made of the unit when
+    /// none of them changes it anymore.
+    fn finishes(&self) -> bool {
+        false
+    }
 }
 
 impl Pipeline {
@@ -399,12 +426,13 @@ pub fn builtin_pass(name: &str) -> Option<Box<dyn CfgPass>> {
         "narrow_dims" => Some(Box::new(NarrowDims)),
         "fold" => Some(Box::new(Fold)),
         "dce" => Some(Box::new(Dce)),
+        "graphs" => Some(Box::new(Graphs::default())),
         _ => None,
     }
 }
 
-pub const BUILTIN_PASSES: [&str; 6] =
-    ["resolve_dispatch", "method_calls", "tensor_accessors", "narrow_dims", "fold", "dce"];
+pub const BUILTIN_PASSES: [&str; 7] =
+    ["resolve_dispatch", "method_calls", "tensor_accessors", "narrow_dims", "fold", "dce", "graphs"];
 
 /// Replaces operations the profile found to be a single dispatcher call with
 /// a direct call of the post-dispatch kernel.
@@ -821,18 +849,22 @@ const MAX_ROUNDS: usize = 8;
 
 impl Pipeline {
     /// Runs the passes in order, again and again, until the unit stops
-    /// changing. Returns whether anything changed at all.
+    /// changing, and then the ones that finish. Returns whether anything
+    /// changed at all.
     pub fn run(&self, unit: &mut Unit, cx: &PassCx) -> PyResult<bool> {
         let mut any = false;
         for _ in 0..MAX_ROUNDS {
             let mut changed = false;
-            for pass in &self.passes {
+            for pass in self.passes.iter().filter(|pass| !pass.finishes()) {
                 changed |= pass.run(unit, cx)?;
             }
             any |= changed;
             if !changed {
                 break;
             }
+        }
+        for pass in self.passes.iter().filter(|pass| pass.finishes()) {
+            any |= pass.run(unit, cx)?;
         }
         Ok(any)
     }
@@ -912,11 +944,18 @@ pub fn finalize(unit: Unit, cf: &Compiled, id: u32) -> Result<BlockCode, String>
         return Err(format!("{} is needed after the block but not defined", func.value_name(v)));
     }
     let term_kills = crate::analysis::compute_kills(&mut insts, &unit.term, &analysis.live_out[b]);
+    let mut graphs = Vec::with_capacity(unit.graphs.len());
+    for (site, path) in unit.graphs {
+        site.install(path, id);
+        graphs.push(site);
+    }
     Ok(BlockCode {
         insts,
         term: unit.term,
         term_kills,
         entry_guards: unit.entry_guards,
         id,
+        graphs,
+        left: unit.left,
     })
 }

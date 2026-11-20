@@ -70,6 +70,16 @@ default list::
     @torch.vm(passes=torch.vm.DEFAULT_PASSES)
     def forward(model, x): ...
 
+A list of one's own is the default one with more passes. The engine makes
+graphs of the tensor work of each block when it is asked to, and runs them
+itself, with the results of eager mode::
+
+    passes = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+
+
+    @torch.vm(passes=passes)
+    def forward(model, x): ...
+
 A pass that has a setting is made with it::
 
     # loops of up to 16 iterations, where the default is 8
@@ -95,7 +105,7 @@ import torch
 
 from . import _shortcuts, passes
 from ._passes import fuse_checked, Mismatch, swap
-from .passes import BuiltinPass, Inline, Unroll
+from .passes import BuiltinPass, Graphs, Inline, Unroll
 
 
 __all__ = [
@@ -108,6 +118,7 @@ __all__ = [
     "load_passes",
     "memory",
     "passes",
+    "regions",
     "swap",
     "vm",
 ]
@@ -200,12 +211,14 @@ def is_available() -> bool:
     return True
 
 
-def _plan(given: Iterable[Any]) -> tuple[list[Any], dict[str, bool], dict[str, Any]]:
+def _plan(
+    given: Iterable[Any],
+) -> tuple[list[Any], dict[str, bool], Graphs | None, dict[str, Any]]:
     """Checks a list of passes, and sorts it into what the engine is given.
 
     Returns the passes over a block in their order (the engine's own by name),
-    which of the passes over the control-flow graph are asked for, and what the
-    passes were made with.
+    which of the passes over the control-flow graph are asked for, the graph
+    pass if there is one, and what the passes were made with.
     """
     listed = tuple(given)
     for one in listed:
@@ -230,13 +243,14 @@ def _plan(given: Iterable[Any]) -> tuple[list[Any], dict[str, bool], dict[str, A
         if isinstance(one, BuiltinPass) and one.kind == "cfg":
             whole[one.engine] = True
             settings.update(dataclasses.asdict(one))
+    found = next((one for one in listed if isinstance(one, Graphs)), None)
     block = [
         one
         for one in listed
         if not (isinstance(one, BuiltinPass) and one.kind == "cfg")
     ]
     engine = [one.engine if isinstance(one, BuiltinPass) else one for one in block]
-    return engine, whole, settings
+    return engine, whole, found, settings
 
 
 def vm(
@@ -354,7 +368,7 @@ def vm(
         return types.MethodType(vm(fn.__func__, **options), fn.__self__)
     if not isinstance(fn, types.FunctionType):
         raise TypeError(f"torch.vm expects a function, not {type(fn).__name__}")
-    block, whole, settings = _plan(passes)
+    block, whole, found, settings = _plan(passes)
     runtime = _load_runtime()
     try:
         return runtime.compile(
@@ -373,12 +387,28 @@ def vm(
             max_respecializations=max_respecializations,
             workspace=torch._C._cfg_workspace() if keep_memory else None,
             hook=os.environ.get("TORCH_VM_EVAL_FRAME", "1") != "0",
+            graphs=None if found is None else found.min_ops,
         )
     except NotImplementedError as e:
         if not fallback:
             raise Unsupported(f"{fn.__qualname__}: {e}") from None
         warnings.warn(f"torch.vm left {fn.__qualname__} as it is: {e}", stacklevel=2)
         return fn
+
+
+def regions(fn: Any) -> list[dict[str, Any]]:
+    """What :class:`passes.Graphs` made of a rewritten function and of what it calls.
+
+    One dict per graph, with ``where`` (function, block and instruction of its
+    first operation), ``state`` (``"built"``: the engine
+    runs it), ``ops`` (how many operations it has) and ``operators`` (which,
+    as the dispatcher names them). And one dict per instruction or run of
+    instructions with tensor work that is in no graph, with ``state``
+    ``"vm"``, the ``reason``, and for one instruction its ``text``.
+    """
+    fn = getattr(fn, "__func__", fn)
+    graphs = getattr(fn, "graphs", None)
+    return graphs() if graphs is not None else []
 
 
 def memory(fn: Any) -> dict[str, int] | None:
@@ -403,7 +433,9 @@ def is_exact(passes: Iterable[Any] | None = None) -> bool:
 
     True when every pass is one of the engine's own that leaves every result
     what it was: they change how the same kernels are reached, not which ones
-    run or in what order. A pass of one's own is not taken to be one.
+    run or in what order. ``torch.vm.passes.Graphs()`` is such a pass: the
+    engine runs its graphs with those kernels. A pass of one's own is not
+    taken to be one.
     """
     listed = DEFAULT_PASSES if passes is None else tuple(passes)
     return all(getattr(one, "exact", False) is True for one in listed)

@@ -4,13 +4,15 @@
 //! (`frontend`), which a register VM executes (`vm`). Blocks start out in a
 //! generic tier with the semantics of the bytecode, are profiled on real
 //! tensors with the dispatcher's capture hook (`capi`), and are then
-//! specialized by a pipeline of passes (`spec`).
+//! specialized by a pipeline of passes (`spec`). The tensor work of a
+//! specialized block is described as graphs (`graph`).
 
 mod analysis;
 mod bytecode;
 mod capi;
 mod chunks;
 mod frontend;
+mod graph;
 mod inline;
 mod ir;
 mod pyapi;

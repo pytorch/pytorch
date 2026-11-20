@@ -463,6 +463,17 @@ impl Callees {
         (compiled, interpreted)
     }
 
+    /// The compiled forms of the functions that were called, in the order
+    /// of their files, lines and names.
+    pub fn compiled(&self) -> Vec<Arc<Compiled>> {
+        let mut all: Vec<Arc<Compiled>> = self.entries.borrow().values().map(|callee| callee.compiled.clone()).collect();
+        all.sort_by(|a, b| {
+            let key = |c: &Compiled| (c.func.filename.clone(), c.func.firstlineno, c.func.qualname.clone());
+            key(a).cmp(&key(b))
+        });
+        all
+    }
+
     /// Qualified names of the compiled functions that were measured to run
     /// faster in the interpreter and were left to it.
     pub fn demoted(&self) -> Vec<String> {
@@ -1600,6 +1611,8 @@ impl Compiled {
                 term_kills,
                 entry_guards: Vec::new(),
                 id: 0,
+                graphs: Vec::new(),
+                left: Vec::new(),
             }));
         }
         let blocks = func
@@ -4074,7 +4087,7 @@ impl Compiled {
     unsafe fn specialize(&self, b: usize) {
         // The passes are not the function's code.
         let _nobody = Hooked::nobody();
-        let (slots, obs, facts, speculate, id) = {
+        let (slots, obs, facts, reasons, speculate, id) = {
             let mut st = self.state.borrow_mut();
             let obs = st.obs.clone();
             let bs = &mut st.blocks[b];
@@ -4087,10 +4100,10 @@ impl Compiled {
             let id = bs.next_version_id;
             bs.next_version_id += 1;
             // The last attempt must hold for every input.
-            (bs.slots.clone(), obs, bs.facts.clone(), bs.respec_left > 0, id)
+            (bs.slots.clone(), obs, bs.facts.clone(), bs.reasons.clone(), bs.respec_left > 0, id)
         };
         let mut unit = Unit::from_generic(&self.func, b, speculate);
-        let cx = PassCx { cf: self, slots: &slots, obs: &obs, facts: &facts };
+        let cx = PassCx { cf: self, slots: &slots, obs: &obs, facts: &facts, reasons: &reasons };
         let outcome = match self.pipeline.run(&mut unit, &cx) {
             Ok(true) => spec::finalize(unit, self, id).map(Some),
             Ok(false) => Ok(None),
