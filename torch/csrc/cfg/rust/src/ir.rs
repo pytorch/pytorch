@@ -149,6 +149,13 @@ pub enum Op {
     /// Calls a fixed Python object with these values. A pass puts it where
     /// it found something that does the work of a run of instructions.
     CallObject(PyObj, Vec<V>),
+    /// A call without arguments of what the global `locals`, `vars` or `dir`
+    /// is. If it is that builtin, the result is made here, from the
+    /// function's variables that have a value: each is given by its name (a
+    /// constant), its value, and whether the value is a cell to look into.
+    /// The builtin itself would look for them in the frame, where a compiled
+    /// function does not keep them. Anything else is just called.
+    Locals(V, Vec<(u32, V, bool)>),
     /// len(v) as an int: what a sequence pattern of `match` compares.
     GetLen(V),
     /// Whether the type of v is a sequence (false) or a mapping (true) for
@@ -359,6 +366,10 @@ impl Op {
                 f(*names)
             }
             Op::CallObject(_, args) => args.iter().for_each(|v| f(*v)),
+            Op::Locals(callee, entries) => {
+                f(*callee);
+                entries.iter().for_each(|(_, v, _)| f(*v))
+            }
             Op::SuperObject { global_super, class, this, .. } => {
                 f(*global_super);
                 f(*class);
@@ -403,6 +414,7 @@ impl Op {
                 | Op::CallMethod { .. }
                 | Op::CallEx { .. }
                 | Op::CallObject(..)
+                | Op::Locals(..)
                 | Op::Dispatch(_)
         )
     }
@@ -727,6 +739,13 @@ impl Function {
             Op::CallObject(callee, args) => {
                 let repr = unsafe { crate::pyffi::repr(callee.as_ptr()) };
                 format!("call_object {}({})", repr.chars().take(60).collect::<String>(), self.values(args))
+            }
+            Op::Locals(callee, entries) => {
+                let names: Vec<String> = entries
+                    .iter()
+                    .map(|(name, v, _)| format!("{}={}", self.name_str(*name), n(v)))
+                    .collect();
+                format!("locals {}({})", n(callee), names.join(", "))
             }
             Op::GetLen(a) => format!("get_len {}", n(a)),
             Op::MatchKind(a, mapping) => {
