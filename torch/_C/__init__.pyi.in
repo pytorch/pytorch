@@ -1791,6 +1791,9 @@ _after_autograd_keyset: DispatchKeySet
 
 class _SafeKernelFunction:
     def call_boxed(self, keyset: DispatchKeySet, *args, **kwargs) -> Any: ...
+    def _call_boxed_from_python_kernel(
+        self, keyset: DispatchKeySet, *args: Any, **kwargs: Any
+    ) -> Any: ...
     @property
     def op_handle(self) -> _DispatchOperatorHandle: ...
 
