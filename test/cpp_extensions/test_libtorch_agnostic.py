@@ -1302,6 +1302,22 @@ for warning in w:
 
     @skipIfTorchVersionLessThan(2, 16)
     @onlyCPU
+    def test_stable_cpu_cache_sizes(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        capabilities = torch._C._cpu._get_cpu_capability()
+        # The map may omit cache sizes; stable getters return 0 when absent.
+        self.assertEqual(
+            libtorch_agnostic.ops.my_l1d_cache_size(),
+            capabilities.get("l1d_cache_size", 0),
+        )
+        self.assertEqual(
+            libtorch_agnostic.ops.my_l2_cache_size(),
+            capabilities.get("l2_cache_size", 0),
+        )
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
     @parametrize("flag", ["conj", "neg", "inference"])
     def test_is_conj_is_neg_is_inference(self, device, flag):
         import libtorch_agn_2_16 as libtorch_agnostic
