@@ -233,6 +233,16 @@ sycl::event scaled_grouped_matmul(
   int64_t N = mat_b.size(-1);
   int64_t group_count = offs.size(0);
 
+  // oneDNN cannot create grouped memory descriptors with zero-sized dims.
+  if (out.numel() == 0) {
+    return sycl::event();
+  }
+  if (K == 0) {
+    // Empty reduction: the result is all zeros, but `out` is uninitialized.
+    out.zero_();
+    return sycl::event();
+  }
+
   auto [prepared_mat_a, prepared_mat_b, prepared_out] =
       prepare_grouped_matmul_inputs(mat_a, mat_b, out, a_is_2d, b_is_2d);
 

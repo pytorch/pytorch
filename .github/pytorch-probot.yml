@@ -8,6 +8,7 @@ ciflow_push_tags:
 - ciflow/binaries
 - ciflow/binaries_libtorch
 - ciflow/binaries_wheel
+- ciflow/cpp-faketensor
 - ciflow/docker
 - ciflow/dtensor
 - ciflow/gb300
