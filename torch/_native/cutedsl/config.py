@@ -1,5 +1,6 @@
 # Shared with declarations loaded before torch is built.
 POINTWISE_ARCH_MAJORS: tuple[int, ...] = (10,)
+POINTWISE_HOST_CACHE_LIMIT = 256
 POINTWISE_REFERENCE_LANES = 148 * 2048
 POINTWISE_DENSE_MIN = 8 * 1024 * 1024
 POINTWISE_PADDED_TMA_MIN = 16 * 1024 * 1024

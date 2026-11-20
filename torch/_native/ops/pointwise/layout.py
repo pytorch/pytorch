@@ -1,9 +1,11 @@
-r"""Host layout classification for pointwise kernels."""
-
 from __future__ import annotations
 
+
+r"""Host layout classification for pointwise kernels."""
+
+
 import math
-from functools import cache
+from functools import lru_cache
 from typing import NamedTuple, TYPE_CHECKING
 
 import torch
@@ -21,7 +23,7 @@ TMA_THREADS = config.TMA_THREADS
 TMA_SMEM_ALIGNMENT = config.TMA_SMEM_ALIGNMENT
 
 
-@cache
+@lru_cache(maxsize=config.POINTWISE_HOST_CACHE_LIMIT)
 def output_strides(
     operands: tuple[tuple[torch.dtype, Shape, Shape], ...], dtype: torch.dtype
 ) -> Shape:
@@ -72,7 +74,7 @@ def iteration_layout(
     )
 
 
-@cache
+@lru_cache(maxsize=config.POINTWISE_HOST_CACHE_LIMIT)
 def tma_layout(
     operands: tuple[tuple[torch.dtype, Shape, Shape], ...],
     shape: Shape,

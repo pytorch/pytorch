@@ -1,6 +1,7 @@
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field, InitVar
+from threading import RLock
 from typing import Any, NamedTuple, TYPE_CHECKING
 
 import cuda.bindings.driver as cuda
@@ -19,6 +20,7 @@ from torch._prims_common import (
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.config import (
     POINTWISE_ARCH_MAJORS,
+    POINTWISE_HOST_CACHE_LIMIT,
     POINTWISE_PADDED_TMA_MIN,
     pointwise_presets,
     POINTWISE_REFERENCE_LANES as _B200_DEVICE_LANES,
@@ -26,6 +28,7 @@ from ...cutedsl.config import (
 from ...cutedsl.dtypes import cute2torch, scalar_arg, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from ...cutedsl.types import Index, MathFn, MathResult, NumericType, Scalar
+from ...utils.capability import is_traced
 from ...utils.device import check_current
 from ...utils.tensor import can_use_32bit_indexing, const_data_ptr
 from ._types import CacheKey, DTypes, Load, Path, RowGap, Shape
@@ -48,6 +51,7 @@ if TYPE_CHECKING:
 _VEC_BITS = 128
 _PLAN: dict[CacheKey, "_Plan"] = {}
 _KERNELS: dict[CacheKey, "Function"] = {}
+_PLAN_LOCK = RLock()
 
 
 class _PointwiseConfig(NamedTuple):
@@ -544,6 +548,56 @@ def tma_eligible(
     return layout if smem <= hw.smem_per_block_optin else None
 
 
+def _validate_operands(
+    nin: int,
+    nout: int,
+    inputs: Sequence[torch.Tensor],
+    out_dtypes: DTypes,
+    out: Sequence[torch.Tensor] | None,
+    input_casts: DTypes | None,
+    result_dtypes: DTypes | None,
+) -> tuple[torch.Tensor, Shape]:
+    if nin != len(inputs):
+        raise ValueError("pointwise input count must match nin")
+    if nout < 1 or nout != len(out_dtypes):
+        raise ValueError("pointwise output dtype count must match positive nout")
+    if out is not None and len(out) != nout:
+        raise ValueError("pointwise output count must match nout")
+    if input_casts is not None and len(input_casts) != nin:
+        raise ValueError("pointwise input cast count must match nin")
+    if result_dtypes is not None and len(result_dtypes) != nout:
+        raise ValueError("pointwise result dtype count must match nout")
+    tensors = (*inputs, *(out or ()))
+    if not all(isinstance(t, torch.Tensor) for t in tensors):
+        raise TypeError("pointwise operands and outputs must be tensors")
+    if any(t.layout is not torch.strided or t.is_neg() or t.is_conj() for t in tensors):
+        raise ValueError(
+            "pointwise tensors must be strided without lazy neg/conj views"
+        )
+    ref = next((t for t in tensors if t.is_cuda), None)
+    if ref is None:
+        raise ValueError("pointwise run requires a CUDA input or output")
+    if any(
+        (t.is_cuda and t.device != ref.device)
+        or (not t.is_cuda and (t.device.type != "cpu" or t.dim() != 0))
+        for t in inputs
+    ):
+        raise ValueError("pointwise inputs must share a CUDA device or be CPU scalars")
+    shape = (
+        tuple(torch.broadcast_shapes(*(t.shape for t in inputs)))
+        if inputs
+        else tuple(ref.shape)
+    )
+    if out is not None and any(
+        tuple(t.shape) != shape or t.dtype != dtype or t.device != ref.device
+        for t, dtype in zip(out, out_dtypes)
+    ):
+        raise ValueError(
+            "pointwise outputs must match broadcast shape, dtype and device"
+        )
+    return ref, shape
+
+
 def _build_plan(
     fn: MathFn,
     op_name: str,
@@ -562,19 +616,8 @@ def _build_plan(
     input_casts: DTypes | None = None,
     result_dtypes: DTypes | None = None,
 ) -> _Plan:
-    ref = (
-        next((t for t in inputs if t.is_cuda), None)
-        if inputs
-        else out_refs[0]
-        if out_refs
-        else None
-    )
-    if ref is None:
-        raise AssertionError("nullary pointwise plan needs a target tensor")
-    shape = (
-        tuple(torch.broadcast_shapes(*(t.shape for t in inputs)))
-        if inputs
-        else tuple(ref.shape)
+    ref, shape = _validate_operands(
+        nin, nout, inputs, out_dtypes, out_refs, input_casts, result_dtypes
     )
     if math.prod(shape) >= 2**31 - 1 or any(
         not can_use_32bit_indexing(t) for t in (*inputs, ref, *(out_refs or ()))
@@ -841,32 +884,20 @@ def run(
     *,
     load: Load | None = None,
 ) -> tuple[torch.Tensor, ...]:
-    r"""Run matching nin/nout on the current CUDA device, with CPU inputs limited to 0D.
-    Default device loads round through the common dtype before ``compute`` math;
-    explicit ``input_casts`` bind functor types. Callers validate aliases and outputs."""
-    ref = (
-        next((t for t in inputs if t.is_cuda), None)
-        if inputs
-        else out[0]
-        if out
-        else None
+    r"""Run on current CUDA with CPU scalars and exact broadcast-shaped outputs.
+    Loads round through common dtype unless casts are explicit; callers check aliases."""
+    ref, shape = _validate_operands(
+        nin, nout, inputs, out_dtypes, out, input_casts, result_dtypes
     )
-    if ref is None:
-        raise AssertionError("nullary pointwise run needs a target tensor")
+    if any(
+        is_traced(t) or (t.is_cuda and t._is_zerotensor() and math.prod(shape) != 0)
+        for t in (*inputs, *(out or ()))
+    ):
+        raise ValueError("pointwise launch requires real tensor storage")
     device = ref.get_device()
     check_current(device)
-    shape = (
-        tuple(torch.broadcast_shapes(*(t.shape for t in inputs)))
-        if inputs
-        else tuple(ref.shape)
-    )
     if math.prod(shape) == 0:
         if out is not None:
-            if len(out) != nout or any(
-                tuple(t.shape) != shape or t.dtype != dtype or t.device != ref.device
-                for t, dtype in zip(out, out_dtypes)
-            ):
-                raise ValueError("empty outputs must match shape, dtype and device")
             return tuple(out)
         return tuple(torch.empty(shape, device=ref.device, dtype=d) for d in out_dtypes)
     layouts = tuple(
@@ -898,28 +929,31 @@ def run(
         input_casts,
         result_dtypes,
     )
-    plan = cached_plan(
-        _PLAN,
-        plan_key,
-        lambda: _build_plan(
-            fn,
-            f"aten::{key[0]}",
-            nin,
-            nout,
-            consts,
-            compute,
-            inputs,
-            out_dtypes,
-            block,
-            work_per_thread,
-            vec_bits,
-            load,
-            out,
-            with_index,
-            input_casts,
-            result_dtypes,
-        ),
-    )
+    with _PLAN_LOCK:
+        plan = cached_plan(
+            _PLAN,
+            plan_key,
+            lambda: _build_plan(
+                fn,
+                f"aten::{key[0]}",
+                nin,
+                nout,
+                consts,
+                compute,
+                inputs,
+                out_dtypes,
+                block,
+                work_per_thread,
+                vec_bits,
+                load,
+                out,
+                with_index,
+                input_casts,
+                result_dtypes,
+            ),
+        )
+        if len(_PLAN) > POINTWISE_HOST_CACHE_LIMIT:
+            _PLAN.pop(next(iter(_PLAN)))
     dev = ref.device
     outs = (
         list(out)
