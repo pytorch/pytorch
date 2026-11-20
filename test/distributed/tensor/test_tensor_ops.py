@@ -4,7 +4,7 @@
 import unittest
 
 import torch
-from torch.distributed._local_tensor import LocalTensorMode
+from torch.distributed._local_tensor import LocalTensor, LocalTensorMode
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -1716,6 +1716,83 @@ class DistToCopyTest(LocalDTensorTestBase):
                         p.is_replicate(),
                         lambda msg: f"{msg}\n{reduce_op}→{target_dtype}: {p}",
                     )
+
+
+class DistToDtypeRoundedTest(LocalDTensorTestBase):
+    @with_comms
+    def test_partial_reduces_unless_rounding_commutes(self):
+        # (reduce_op, dtype, expect_partial)
+        cases = [
+            ("sum", torch.float16, False),  # rounding partial sums
+            ("avg", torch.bfloat16, False),
+            ("max", torch.float16, True),  # monotonic
+            ("min", torch.bfloat16, True),
+            ("min", torch.float8_e4m3fn, False),  # no float8 min to reduce with
+            ("max", torch.float8_e8m0fnu, False),
+        ]
+        per_rank = [
+            torch.randn(4, 4, device=self.device_type) for _ in range(self.world_size)
+        ]
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = self.build_device_mesh()
+            # Different values on each rank, so that keeping a Partial sum or
+            # average would give other results.
+            input_tensor = LocalTensor(dict(enumerate(per_rank)))
+            for reduce_op, dtype, expect_partial in cases:
+                dt = DTensor.from_local(input_tensor, mesh, [Partial(reduce_op)])
+                result = dt.to(dtype, round="toward_positive")
+                p = result.placements[0]
+                if expect_partial:
+                    self.assertTrue(
+                        p.is_partial(),
+                        lambda msg: f"{msg}\n{reduce_op}->{dtype}: {p}",
+                    )
+                    self.assertEqual(p.reduce_op, reduce_op)
+                else:
+                    self.assertTrue(
+                        p.is_replicate(),
+                        lambda msg: f"{msg}\n{reduce_op}->{dtype}: {p}",
+                    )
+                expected = dt.full_tensor().to(dtype, round="toward_positive")
+                self.assertEqual(
+                    result.full_tensor().float(), expected.float(), atol=0, rtol=0
+                )
+
+    @with_comms
+    def test_memory_format(self):
+        # memory_format is part of the sharding cache key, so the strides of
+        # the result follow it from one call to the next.
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = self.build_device_mesh()
+            x = torch.randn(2, 8, 3, 3, device=self.device_type)
+            dt = distribute_tensor(x, mesh, [Shard(1)])
+            for memory_format in (
+                torch.contiguous_format,
+                torch.channels_last,
+                torch.contiguous_format,
+            ):
+                result = dt.to(
+                    torch.bfloat16, round="toward_zero", memory_format=memory_format
+                )
+                self.assertTrue(result.is_contiguous(memory_format=memory_format))
+                self.assertTrue(
+                    result.to_local().is_contiguous(memory_format=memory_format)
+                )
+
+    @with_comms
+    def test_shard(self):
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = self.build_device_mesh()
+            x = torch.randn(8, 4, device=self.device_type)
+            dt = distribute_tensor(x, mesh, [Shard(0)])
+            result = dt.to(torch.bfloat16, round="toward_zero")
+            self.assertEqual(result.placements, (Shard(0),))
+            self.assertEqual(
+                result.full_tensor(),
+                x.to(torch.bfloat16, round="toward_zero"),
+                atol=0,
+                rtol=0,
+            )
 
 
 class DistArgMaxArgMinTest(DTensorContinuousTestBase):
