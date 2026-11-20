@@ -794,8 +794,8 @@ class TestOrderedColRoute(TestCase):
 
     def test_policy_table_mappings(self):
         """Keep every table entry a mapping the kernel accepts."""
-        # The table has no entries yet, so seed one to run the checks.
-        seed = {(9, 0): {"sum": ct.OrderedColConfig(4, out_dtypes=(torch.float32,))}}
+        # The table has no entries yet, so seed one under a cc no device reports.
+        seed = {(0, 0): {"sum": ct.OrderedColConfig(4, out_dtypes=(torch.float32,))}}
         with mock.patch.dict(ct._ORDERED_COL_CONFIGS, seed):
             for cc, configs in ct._ORDERED_COL_CONFIGS.items():
                 for trait_key, cfg in configs.items():
