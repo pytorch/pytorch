@@ -599,12 +599,14 @@ class TestKernelGeneral(TestCase):
             block=block,
             uniform_tree=True,
         )
+        xc = x.contiguous()
         plain = kg.ReduceBlock(
             trait,
             count=count,
             num_o=rows,
             red_pairs=((count, 1),),
             kept_pairs=((rows, count),),
+            in_base=xc.storage_offset(),
             nouts=len(outs),
             block=block,
             uniform_tree=True,
@@ -614,7 +616,7 @@ class TestKernelGeneral(TestCase):
         # plain compiles the shared key for contiguous geometry, or reuses an earlier
         # case's kernel, so a strided or offset op runs a kernel built for other geometry.
         dense = [torch.empty_like(out) for out in outs]
-        kg._launch(plain, key, [kg._flat(x.contiguous())], dense)
+        kg._launch(plain, key, [kg._flat(xc)], dense)
         kg._launch(op, key, [kg._flat(x)], outs)
         with torch.backends.python_native.cutedsl.disabled():
             var, mean = torch.var_mean(x.double(), dim=1)
@@ -1123,13 +1125,18 @@ class TestKernelGeneral(TestCase):
         self.assertEqual(got, want)
 
     def test_replay_inside_a_recording_runs_unrecorded(self):
-        # A cold call inside a recording takes the full path and stores nothing, so the
-        # outer recording captures its launches.
+        # A call inside a recording takes the full path and stores nothing, even for a
+        # warm key, so the outer recording captures its launches.
         x = torch.randn(64, 256, device="cuda")
         trait = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
+        key = "replay_nested"
+        kg.replay_reduce(trait, key, x, 1, torch.float32)
+        warm = {k: r for k, r in kg._REPLAYS.items() if k[0] == key}
+        self.assertTrue(warm)
+        self.assertNotIn(None, warm.values())
         with _L.recording(x) as record:
-            out = kg.replay_reduce(trait, "replay_nested", x, 1, torch.float32)
-        self.assertNotIn("replay_nested", [k[0] for k in kg._REPLAYS])
+            out = kg.replay_reduce(trait, key, x, 1, torch.float32)
+        self.assertEqual({k: r for k, r in kg._REPLAYS.items() if k[0] == key}, warm)
         replay = record.finish([out])
         self.assertIsNotNone(replay)
         fresh = torch.randn(64, 256, device="cuda")
