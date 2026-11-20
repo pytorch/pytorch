@@ -183,6 +183,11 @@ class ArgProperty(TypedDict, total=False):
 
 
 log = logging.getLogger(__name__)
+
+# Lowering contract for the exact two-input cat/cast prologue supported by the
+# Blackwell decompose-K template. The value is the ordered pair of source
+# buffer names. FX origins are provenance and must not be used as this contract.
+CAT2_FP32_TO_BF16_SOURCES = "cat2_fp32_to_bf16_sources"
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
 
