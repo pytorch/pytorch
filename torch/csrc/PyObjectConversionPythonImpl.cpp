@@ -13,6 +13,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 
 namespace torch::detail {
@@ -228,6 +229,32 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
         PyGILState_Check(),
         "torch_double_to_pyobject requires the GIL to be held");
     PyObject* py = PyFloat_FromDouble(value);
+    TORCH_CHECK_PYTHON(py != nullptr);
+    return py;
+  }
+
+  std::string string_from_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_string_from_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(
+        THPUtils_checkString(obj),
+        "torch_string_from_pyobject: expected str or bytes, got ",
+        Py_TYPE(obj)->tp_name);
+    return THPUtils_unpackString(obj);
+  }
+
+  PyObject* string_to_pyobject(std::string_view str) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_string_to_pyobject requires the GIL to be held");
+    TORCH_CHECK(
+        str.size() <= static_cast<size_t>(PY_SSIZE_T_MAX),
+        "torch_string_to_pyobject: string is too long");
+    // Same as THPUtils_packString(const std::string&), without the copy.
+    PyObject* py = PyUnicode_FromStringAndSize(
+        str.data(), static_cast<Py_ssize_t>(str.size()));
     TORCH_CHECK_PYTHON(py != nullptr);
     return py;
   }
