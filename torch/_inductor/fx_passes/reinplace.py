@@ -358,11 +358,20 @@ def decompose_generalized_scatter(graph: torch.fx.Graph) -> None:
             or scatter_always_uses_mutation(node)
         )
 
+        prev = node.prev
         with graph.inserting_before(node):
             if use_mutation:
                 new_node = _decompose_scatter_mutating(graph, node)
             else:
                 new_node = _decompose_scatter_functional(graph, node)
+
+        # Keep user stream/mempool annotations on the decomposed nodes, so they
+        # run in the same context as the scatter they replace.
+        if custom := node.meta.get("custom"):
+            inserted = node.prev
+            while inserted is not prev:
+                inserted.meta["custom"] = custom.copy()
+                inserted = inserted.prev
 
         node.replace_all_uses_with(new_node)
         graph.erase_node(node)
@@ -421,6 +430,9 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
         def can_fuse():
             if src.target is not _generalized_scatter:  # type: ignore[union-attr]
                 return False
+            # Fusing would move one scatter into the other's stream/mempool.
+            if src.meta.get("custom") != node.meta.get("custom"):  # type: ignore[union-attr]
+                return False
             src_inp, _src_src, _src_scatter_view_op = src.args  # type: ignore[union-attr]
 
             inp_base = node_to_view_base.get(inp, inp)  # type: ignore[arg-type]
@@ -430,6 +442,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                 scatter_view_op,
             ]
 
+        custom = node.meta.get("custom")
         if not can_fuse():
             with graph.inserting_before(node):
                 new_node = graph_call_function(
@@ -439,6 +452,8 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                     src,
                     [scatter_view_op],
                 )
+            if custom:
+                new_node.meta["custom"] = custom.copy()
             node.replace_all_uses_with(new_node)
             graph.erase_node(node)
             return
@@ -452,6 +467,8 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                 src_src,
                 [scatter_view_op, *src_scatter_view_op],  # type: ignore[misc]
             )
+            if custom:
+                new_node.meta["custom"] = custom.copy()
             node.replace_all_uses_with(new_node)
             graph.erase_node(node)
 
@@ -463,6 +480,8 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                     *node.args[2:],
                     **node.kwargs,
                 )
+                if custom:
+                    new_src.meta["custom"] = custom.copy()
 
                 handle_views(new_src)
                 src.replace_all_uses_with(new_src)  # type: ignore[union-attr]
