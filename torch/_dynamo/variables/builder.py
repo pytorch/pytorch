@@ -24,6 +24,7 @@ import contextlib
 import contextvars
 import copy
 import dataclasses
+import datetime
 import enum
 import functools
 import gc
@@ -6006,7 +6007,15 @@ class SourcelessBuilder:
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
         elif isinstance(
-            value, (importlib.machinery.ModuleSpec, torch.utils._pytree.TreeSpec)
+            value,
+            (
+                importlib.machinery.ModuleSpec,
+                torch.utils._pytree.TreeSpec,
+                datetime.date,
+                datetime.time,
+                datetime.timedelta,
+                datetime.tzinfo,
+            ),
         ):
             return UserDefinedObjectVariable(value)
         elif isinstance(value, (re.Pattern, re.Match)):
