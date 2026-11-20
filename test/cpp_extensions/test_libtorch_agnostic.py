@@ -259,13 +259,11 @@ class TestLibtorchAgnostic(TestCase):
         if target == 16:
             if _torchVersionLessThan(2, 16):
                 self.skipTest("Target 2.16 requires PyTorch >= 2.16")
-            import libtorch_agn_2_16  # noqa: F401
-
-            ops = torch.ops.libtorch_agn_2_16
+            import libtorch_agn_2_16 as libtorch_agnostic
         else:
-            import libtorch_agn_2_14  # noqa: F401
+            import libtorch_agn_2_14 as libtorch_agnostic
 
-            ops = torch.ops.libtorch_agn_2_14
+        ops = libtorch_agnostic.ops
         self.assertEqual(ops.integer_symint_dispatch(value), value)
 
     @onlyCPU
@@ -277,13 +275,11 @@ class TestLibtorchAgnostic(TestCase):
         if target == 16:
             if _torchVersionLessThan(2, 16):
                 self.skipTest("Target 2.16 requires PyTorch >= 2.16")
-            import libtorch_agn_2_16  # noqa: F401
-
-            ops = torch.ops.libtorch_agn_2_16
+            import libtorch_agn_2_16 as libtorch_agnostic
         else:
-            import libtorch_agn_2_14  # noqa: F401
+            import libtorch_agn_2_14 as libtorch_agnostic
 
-            ops = torch.ops.libtorch_agn_2_14
+        ops = libtorch_agnostic.ops
         x = torch.arange(12, device=device).view(3, 4)
         if valid:
             if case == "select":
