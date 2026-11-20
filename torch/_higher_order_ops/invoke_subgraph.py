@@ -798,7 +798,12 @@ def _get_output_metadata_by_execution(subgraph, *operands):
 
 
 def trace_joint_graph_as_bwd(
-    subgraph, num_primals, joint_operands, include_key_set, exclude_key_set
+    subgraph,
+    num_primals,
+    joint_operands,
+    include_key_set,
+    exclude_key_set,
+    autocast_dtypes,
 ):
     """
     Naively trace out a joint graph. This simplifies the reconstruction of joint
@@ -847,6 +852,10 @@ def trace_joint_graph_as_bwd(
                 stack.enter_context(
                     torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
                 )
+                for device, dtype in autocast_dtypes.items():
+                    prev_dtype = torch.get_autocast_dtype(device)
+                    stack.callback(torch.set_autocast_dtype, device, prev_dtype)
+                    torch.set_autocast_dtype(device, dtype)
                 subgraph_decomp_table = _extract_nested_region_config(subgraph)
                 with torch.enable_grad():
                     return _maybe_reenter_make_fx(
@@ -920,6 +929,11 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
+        # The key sets only record whether autocast is enabled, not its dtype.
+        ctx._fw_autocast_dtypes = {
+            device: torch.get_autocast_dtype(device)
+            for device in torch._C._autocast_supported_devices()
+        }
 
         save_values_for_backward(ctx, operands)
 
@@ -1028,6 +1042,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
             )
         )
         tangent_metadata.append(aliasing_groups)
+        tangent_metadata.append(tuple(ctx._fw_autocast_dtypes.values()))
 
         # pyrefly: ignore [bad-assignment]
         tangent_metadata = tuple(tangent_metadata)
@@ -1062,6 +1077,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                     primals_and_tangents,
                     ctx._fw_include_key_set,
                     ctx._fw_exclude_key_set,
+                    ctx._fw_autocast_dtypes,
                 )
                 if (
                     hasattr(subgraph, "meta")
