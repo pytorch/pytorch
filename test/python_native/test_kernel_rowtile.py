@@ -869,12 +869,28 @@ class TestKernelRowTile(TestCase):
         with self.assertRaisesRegex(ValueError, "nonempty rows"):
             rt.tile.TileReduce(trait, f16, "row", 0, ragged_vector=True)
 
-    def test_one_thread_rows_reject_empty_rows(self):
+    def test_tma_rejects_empty_rows(self):
         """TMA's one-thread rows raise ValueError for an empty row, which has no box."""
         trait, x = T.SumOps(acc=cutlass.Float32), torch.empty(1, 0, device="cuda")
         kwargs = {"threads_per_row": 1, "use_tma": True}
         with self.assertRaisesRegex(ValueError, "nonempty power-of-two row"):
             rt.reduce_row_tile(trait, "empty", x, [torch.float32], **kwargs)
+
+    def test_one_thread_empty_rows_fold_to_identity(self):
+        """Non-TMA one-thread rows fold an empty row to the identity, through both the
+        single-field and the multi-field branch of fold_linear_rolled."""
+        x = torch.empty(4, 4, device="cuda")[:, :0]
+        kw, f32 = {"threads_per_row": 1, "use_tma": False}, [torch.float32]
+        zeros = torch.zeros(4, device="cuda")
+        sum_trait = T.SumOps(acc=cutlass.Float32)
+        (got,) = rt.reduce_row_tile(sum_trait, "tpr1_empty_sum", x, f32, **kw)
+        self.assertEqual(got, zeros, atol=0, rtol=0)
+        trait = T.WelfordOps(acc=cutlass.Float32)
+        parts = rt.reduce_row_tile(
+            trait, "tpr1_empty_welford", x, f32 * trait.nfields, final=False, **kw
+        )
+        for part in parts:
+            self.assertEqual(part, zeros, atol=0, rtol=0)
 
     def test_ragged_vector_pitched_rows(self):
         """Take each row's edges from its own start: pitched rows, and whole-vector rows

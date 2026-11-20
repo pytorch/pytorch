@@ -916,17 +916,21 @@ class TestOrderedColRoute(TestCase):
 
     def test_policy_table_mappings(self):
         """Keep every table entry a mapping the kernel accepts."""
-        for cc, configs in ct._ORDERED_COL_CONFIGS.items():
-            for trait_type, cfg in configs.items():
-                with self.subTest(cc=cc, trait=trait_type.__name__):
-                    ct._check_ordered_mapping(cfg.worker_warps, cfg.tile_columns)
-                    self.assertGreaterEqual(cfg.min_blocks, 0)
-                    self.assertIsInstance(cfg.full_tiles, bool)
-                    outs = cfg.out_dtypes
-                    if outs is not None:
-                        self.assertIsInstance(outs, tuple)
-                        self.assertTrue(outs)
-                        self.assertTrue(all(isinstance(d, torch.dtype) for d in outs))
+        # The table has no entries yet, so seed one to run the checks.
+        entry = ct.OrderedColConfig(4, out_dtypes=(torch.float32,))
+        with mock.patch.dict(ct._ORDERED_COL_CONFIGS, {(9, 0): {T.SumOps: entry}}):
+            for cc, configs in ct._ORDERED_COL_CONFIGS.items():
+                for trait_type, cfg in configs.items():
+                    with self.subTest(cc=cc, trait=trait_type.__name__):
+                        ct._check_ordered_mapping(cfg.worker_warps, cfg.tile_columns)
+                        self.assertGreaterEqual(cfg.min_blocks, 0)
+                        self.assertIsInstance(cfg.full_tiles, bool)
+                        outs = cfg.out_dtypes
+                        if outs is not None:
+                            self.assertIsInstance(outs, tuple)
+                            self.assertTrue(outs)
+                            for dt in outs:
+                                self.assertIsInstance(dt, torch.dtype)
         # B200 split views without an entry take the fallback, narrowed at some shapes.
         for rows, width in ((None, 32), (65536, 16)):
             cfg = ct.select_ordered_col_config(
