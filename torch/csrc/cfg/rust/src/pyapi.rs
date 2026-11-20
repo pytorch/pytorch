@@ -103,6 +103,14 @@ pub fn register_getattr_shortcut(py: Python<'_>, function: &Bound<'_, PyAny>, di
     });
 }
 
+/// Leaves the functions whose code is in one of these files, or under one of
+/// these directories (with a trailing separator), to the interpreter, with
+/// all they call; `file::qualname` names one function of a file.
+#[pyfunction]
+pub fn leave_to_interpreter(places: Vec<String>) {
+    vm::leave_to_interpreter(places);
+}
+
 #[pyfunction]
 pub fn clear_shortcuts() {
     crate::shortcuts::clear();
