@@ -222,7 +222,8 @@ You can always work with StableIValue abstractions in your custom kernel for typ
 | ? | ? | at::Generator | Generator |
 | std::vector<T>/torch::headeronly::HeaderOnlyArrayRef<T> | raw bitwise copy into leading bytes of uint64_t of pointer to a new StableIValue pointing to a list of StableIValues recursively representing the underlying elements. | c10::List\<T> | Type[] |
 | ? | ? | ivalue::Tuple\<T> | (Type, ...) |
-| torch::stable::SymInt (2.16+) | an owning 64-bit word; integers in [-2^62, 2^63-1] are stored directly, otherwise the word refers to a reference-counted node | c10::SymInt | SymInt |
+| int64_t (v1 or v2 target < 2.16) | raw bitwise copy of the full-range integer | c10::SymInt | SymInt |
+| torch::stable::SymInt (v2 target >= 2.16) | an owning 64-bit word; integers in [-2^62, 2^63-1] are stored directly, otherwise the word refers to a reference-counted node | c10::SymInt | SymInt |
 | ? | ? | c10::SymFloat | SymFloat |
 | ? | ? | c10::SymBool | SymBool |
 | ? | ? | at::QScheme | QScheme |
@@ -260,6 +261,24 @@ The above is relevant in two places:
     }
     ```
 
+    For SymInt schemas registered with v2 and target >= 2.16, use
+    `torch::stable::SymInt` for kernel inputs and outputs, including optional and
+    list elements, rather than `int64_t`. For example:
+
+    ```cpp
+    torch::stable::SymInt identity(torch::stable::SymInt value) {
+        return value;
+    }
+    STABLE_TORCH_LIBRARY_FRAGMENT(myops, m) {
+        m.def("identity(SymInt value) -> SymInt");
+    }
+    STABLE_TORCH_LIBRARY_IMPL(myops, CompositeImplicitAutograd, m) {
+        m.impl("identity", TORCH_BOX(&identity));
+    }
+    ```
+
+    Lower targets and raw legacy C registrations keep integer-typed callbacks.
+
 2. Calling the dispatcher
     From C++, you may call the PyTorch dispatcher with `torch::stable::call_dispatcher` from `torch/csrc/stable/ops.h`:
 
@@ -296,6 +315,29 @@ The above is relevant in two places:
     Pass `TORCH_ABI_VERSION` for build. When `TORCH_TARGET_VERSION` is defined,
     pass it for target; otherwise pass `TORCH_ABI_VERSION` as the effective target.
     Target version must be nonzero and <= build version.
+
+    SymInt schema values in `torch_call_dispatcher`, `torch_library_impl`, and the original
+    `aoti_*` dispatcher/registration APIs always use full-range `int64_t` integers,
+    including list and optional elements. Native symbolic values are concretized
+    with `guard_int`; unresolved values raise an error. Ordinary `int` schema values
+    retain all 64 integer bits in every API.
+
+    The 2.16 shims `torch_call_dispatcher_v2` and `torch_library_impl_v2` select the
+    SymInt encoding by target, recursively for arguments and returns. Build
+    continues to select schema adapters. Targets below 2.16 keep the integer
+    protocol. Targets >= 2.16 use owning words: construct numeric values with
+    `stable::SymInt`, box with `from`, and reclaim with `to<stable::SymInt>`.
+    Heap words transfer one reference through the stack; copying their bits does
+    not acquire a reference. Existing binaries and extensions targeting versions
+    below 2.16 retain integer registration. Rebuilding with target >= 2.16 makes
+    the standard `m.impl(name, TORCH_BOX(&fn))` select v2, so SymInt schema callbacks
+    must use SymInt-aware argument/return types. Deliberate integer callbacks can
+    instead use the raw legacy C registration APIs; fresh target-2.16 builds are
+    not promised the old integer callback encoding.
+    A 2.16 build targeting 2.14 can keep v1 and run on both 2.14 and 2.16 runtimes.
+    Dispatcher-backed numeric wrappers in `ops.h` preserve their integer signatures
+    and box SymInt schema slots through `stable::SymInt` for targets >= 2.16;
+    ordinary integer slots are unchanged.
 
     We caution against using this API to call functions that have been registered to the dispatcher by other extensions
     unless the caller can guarantee that the signature they expect matches that which the custom extension has

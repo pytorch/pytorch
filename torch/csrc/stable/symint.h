@@ -12,9 +12,23 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
-// An inline integer or one owned reference to a heap node.
-// Pointer encoding is private to libtorch.
-// Minimum compatible version: PyTorch 2.16.
+/// Opaque owning transport for numeric or symbolic integers through the
+/// dispatcher. Stores an inline integer or one owned heap reference; node
+/// encoding is private to libtorch.
+///
+/// Minimum compatible version: PyTorch 2.16.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// Unlike c10::SymInt, this class has no numeric extraction or is_symbolic
+/// query. get() returns raw encoded bits borrowing the owned reference, not an
+/// integer value. release() accepts lvalues and returns an encoded word, unlike
+/// native c10::SymInt's rvalue-only node-pointer release().
+///
+/// Box with from(sym), not from(sym.get()): boxing borrowed bits as an integer
+/// does not acquire a reference. SymInt(other.get()) also interprets the word
+/// as a numeric input, not as an existing node. Copy other to share ownership,
+/// or use reclaim() only for a word whose reference has been transferred to
+/// you.
 class SymInt {
  public:
   // Constructs inline zero, with no reference to own.

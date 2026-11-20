@@ -43,6 +43,15 @@ StableIValue from(T val);
 template <typename T>
 T to(StableIValue val);
 
+/*
+ * The const-reference Tensor overload below and the SymInt overload borrow
+ * their input rather than making a by-value copy. Declare SymInt's overload
+ * before the generic container definitions so qualified detail::from(elem)
+ * finds it by ordinary lookup, avoiding an extra incref/decref pair per
+ * element.
+ * [[maybe_unused]] suppresses warnings from clang12- and gcc11-; these
+ * overloads are used (see https://godbolt.org/z/859cshxrW for Tensor).
+ */
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 inline StableIValue from(const torch::stable::SymInt& val);
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
@@ -996,8 +1005,6 @@ inline StableIValue from(const std::optional<T>& val) {
       val, aoti_torch_abi_version(), /*is_internal=*/false);
 }
 
-// The below overload is used! See https://godbolt.org/z/859cshxrW
-// We are suppressing the warning for versions clang12- and gcc11-
 [[maybe_unused]] inline StableIValue from(const torch::stable::Tensor& val) {
   return detail::FromImpl<torch::stable::Tensor>::call(
       val, aoti_torch_abi_version(), /*is_internal=*/false);

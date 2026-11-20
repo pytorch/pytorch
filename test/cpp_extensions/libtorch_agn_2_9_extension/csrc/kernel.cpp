@@ -5,6 +5,10 @@
 #include <torch/csrc/stable/macros.h>
 #include <torch/csrc/stable/tensor.h>
 #include <torch/csrc/stable/ops.h>
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+#include <torch/csrc/stable/symint.h>
+#include <array>
+#endif
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/core/ScalarType.h>
 
@@ -255,9 +259,26 @@ Tensor my_narrow(Tensor t, int64_t dim, int64_t start, int64_t length) {
   return narrow(t, dim, start, length);
 }
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+Tensor my_narrow_symint(
+    Tensor t,
+    int64_t dim,
+    torch::stable::SymInt start,
+    torch::stable::SymInt length) {
+  std::array<StableIValue, 4> stack{
+      torch::stable::detail::from(t),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(start),
+      torch::stable::detail::from(length)};
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::narrow", "", stack.data()));
+  return clone(torch::stable::detail::to<Tensor>(stack[0]));
+}
+#else
 Tensor my_narrow_symint(Tensor t, int64_t dim, int64_t start, int64_t length) {
   return clone(narrow(t, dim, start, length));
 }
+#endif
 
 Tensor my_new_empty_dtype_variant(Tensor t) {
   // Still using a std::vector below even though people can just pass in an

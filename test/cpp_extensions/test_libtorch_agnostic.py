@@ -172,24 +172,32 @@ class TestLibtorchAgnostic(TestCase):
     @parametrize("case", ["view", "slice", "slice_none", "size"])
     @parametrize("symbolic", [False, True])
     def test_symint_dispatcher(self, device, case, symbolic):
-        import libtorch_agn_2_16  # noqa: F401
+        import libtorch_agn_2_16 as libtorch_agnostic
 
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         shape_env = ShapeEnv()
-        ops = torch.ops.libtorch_agn_2_16
+        ops = libtorch_agnostic.ops
         mode = FakeTensorMode(shape_env=shape_env) if symbolic else nullcontext()
         with mode:
             size = shape_env.create_unbacked_symint() if symbolic else 3
-            x = torch.empty(size, 4, device=device)
+            x = torch.empty(
+                size + 2 if case == "slice" and not symbolic else size,
+                4,
+                device=device,
+            )
             if case == "size":
                 result = ops.symint_size(x, 0)
+            elif case == "view":
+                result = ops.symint_view(x, [4, size])
+                self.assertEqual(result.shape[0], 4)
+                result = result.shape[1]
             else:
-                if case == "view":
-                    result = ops.symint_view(x, [size, 4])
-                elif case == "slice":
-                    result = ops.symint_slice(x, 0, 0, size, 1)
+                if case == "slice":
+                    result = ops.symint_slice(
+                        x, 0, 0 if symbolic else 1, size if symbolic else size + 1, 1
+                    )
                 else:
                     result = ops.symint_slice(x, 0, None, None, 1)
                 self.assertEqual(result.shape[1], 4)
@@ -199,7 +207,102 @@ class TestLibtorchAgnostic(TestCase):
                 self.assertEqual(result.node.expr, size.node.expr)
             else:
                 self.assertEqual(result, size)
-            self.assertEqual(shape_env.guards, [])
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_symint_dispatcher_backed_size(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        from torch._dynamo.source import LocalSource
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        source = LocalSource("size")
+        expr = shape_env.create_symbol(3, source)
+        size = shape_env.create_symintnode(expr, hint=3, source=source)
+        with FakeTensorMode(shape_env=shape_env):
+            x = torch.empty(size, 4, device=device)
+            x.view(4, size)
+            guards_before = list(shape_env.guards)
+            viewed = libtorch_agnostic.ops.symint_view(x, [4, size])
+            result = libtorch_agnostic.ops.symint_size(viewed, 1)
+            self.assertIsInstance(result, torch.SymInt)
+            self.assertEqual(result.node.expr, size.node.expr)
+            sliced = libtorch_agnostic.ops.symint_slice(
+                torch.empty(size + 2, 4, device=device), 0, 1, size + 1, 1
+            )
+            self.assertEqual(sliced.shape[0].node.expr, size.node.expr)
+            self.assertEqual(shape_env.guards, guards_before)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_symint_dispatcher_backed_step(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        from torch._dynamo.source import LocalSource
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        source = LocalSource("step")
+        expr = shape_env.create_symbol(2, source)
+        step = shape_env.create_symintnode(expr, hint=2, source=source)
+        self.assertIsInstance(step, torch.SymInt)
+        x = torch.arange(36, device=device).reshape(9, 4)
+        result = libtorch_agnostic.ops.symint_slice(x, 0, 1, 8, step)
+        self.assertEqual(result, x[1:8:2])
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 14)
+    @parametrize("target", [14, 16])
+    @parametrize("value", [0, -1, -(2**62), -(2**62) - 1, -(2**63), 2**63 - 1])
+    def test_symint_integer_target(self, device, target, value):
+        if target == 16:
+            if _torchVersionLessThan(2, 16):
+                self.skipTest("Target 2.16 requires PyTorch >= 2.16")
+            import libtorch_agn_2_16  # noqa: F401
+
+            ops = torch.ops.libtorch_agn_2_16
+        else:
+            import libtorch_agn_2_14  # noqa: F401
+
+            ops = torch.ops.libtorch_agn_2_14
+        self.assertEqual(ops.integer_symint_dispatch(value), value)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 14)
+    @parametrize("target", [14, 16])
+    @parametrize("case", ["select", "view"])
+    @parametrize("valid", [False, True])
+    def test_symint_numeric_wrapper(self, device, target, case, valid):
+        if target == 16:
+            if _torchVersionLessThan(2, 16):
+                self.skipTest("Target 2.16 requires PyTorch >= 2.16")
+            import libtorch_agn_2_16  # noqa: F401
+
+            ops = torch.ops.libtorch_agn_2_16
+        else:
+            import libtorch_agn_2_14  # noqa: F401
+
+            ops = torch.ops.libtorch_agn_2_14
+        x = torch.arange(12, device=device).view(3, 4)
+        if valid:
+            if case == "select":
+                self.assertEqual(ops.integer_symint_select(x, 1), x[1])
+            else:
+                self.assertEqual(ops.integer_symint_view(x, [4, 3]), x.view(4, 3))
+        elif case == "select":
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"select\(\): index -9223372036854775808 out of range",
+            ):
+                ops.integer_symint_select(x, -(2**63))
+        else:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"(invalid shape dimension -9223372036854775808 at index 0|"
+                r"heap-allocated concrete SymInt at index 0: -9223372036854775808)",
+            ):
+                ops.integer_symint_view(x, [-(2**63)])
 
     @onlyCPU
     def test_slow_sgd(self, device):

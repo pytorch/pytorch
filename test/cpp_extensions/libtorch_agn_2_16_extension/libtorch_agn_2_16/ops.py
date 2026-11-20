@@ -50,6 +50,24 @@ def test_stable_torch_warn_once(value) -> None:
     torch.ops.libtorch_agn_2_16.test_stable_torch_warn_once.default(value)
 
 
+def symint_view(self: torch.Tensor, sizes: list[int | torch.SymInt]) -> torch.Tensor:
+    return torch.ops.libtorch_agn_2_16.symint_view.default(self, sizes)
+
+
+def symint_slice(
+    self: torch.Tensor,
+    dim: int,
+    start: int | torch.SymInt | None,
+    end: int | torch.SymInt | None,
+    step: int | torch.SymInt,
+) -> torch.Tensor:
+    return torch.ops.libtorch_agn_2_16.symint_slice.default(self, dim, start, end, step)
+
+
+def symint_size(self: torch.Tensor, dim: int) -> int | torch.SymInt:
+    return torch.ops.libtorch_agn_2_16.symint_size.default(self, dim)
+
+
 def __getattr__(name):
     """Proxy for inherited ops from previous versions."""
     if name.startswith("_"):

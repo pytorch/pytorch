@@ -1,4 +1,5 @@
 #include <torch/csrc/stable/library.h>
+#include <torch/csrc/stable/ops.h>
 #include <torch/csrc/stable/symint.h>
 #include <torch/csrc/stable/tensor.h>
 
@@ -15,8 +16,8 @@ using torch::stable::detail::to;
 
 Tensor symint_view(Tensor self, const std::vector<SymInt>& sizes) {
   std::array<StableIValue, 2> stack{from(self), from(sizes)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::view", "", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(torch::stable::call_dispatcher(
+      "aten::view", "", stack.data()));
   return to<Tensor>(stack[0]);
 }
 
@@ -28,15 +29,15 @@ Tensor symint_slice(
     SymInt step) {
   std::array<StableIValue, 5> stack{
       from(self), from(dim), from(start), from(end), from(step)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::slice", "Tensor", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(torch::stable::call_dispatcher(
+      "aten::slice", "Tensor", stack.data()));
   return to<Tensor>(stack[0]);
 }
 
 SymInt symint_size(Tensor self, int64_t dim) {
   std::array<StableIValue, 2> stack{from(self), from(dim)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::sym_size", "int", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(torch::stable::call_dispatcher(
+      "aten::sym_size", "int", stack.data()));
   return to<SymInt>(stack[0]);
 }
 
