@@ -458,6 +458,7 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "cpp.cxx": DEFAULT,  # Out of Scope
         "TYPE_CHECKING": DEFAULT,  # Not a config
         "max_autotune_pointwise": DEFAULT,  # Timing
+        "max_autotune_reduction": DEFAULT,  # Timing
         "max_autotune_gemm": DEFAULT,  # Timing, re-enable when autotune speed improvements merged.
         "max_autotune_gemm_backends": DEFAULT,  # Timing
         "max_autotune_conv_backends": DEFAULT,  # Timing
