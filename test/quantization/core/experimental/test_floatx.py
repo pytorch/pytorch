@@ -343,6 +343,10 @@ class TestFloat8Dtype(TestCase):
                 )
                 fp32_pt_e8m0 = fp32_pt_start.to(torch.float8_e8m0fnu)
                 fp32_pt_e8m0_fp32 = fp32_pt_e8m0.to(torch.float)
+                # the float comparison below cannot tell apart exponents near 2^-127
+                self.assertEqual(
+                    fp32_pt_e8m0.view(torch.uint8).item(), new_biased_exponent
+                )
 
                 expected = fp32_e8m0_fp32_emulated
                 if biased_exponent == 254 and grs >= 4:
@@ -462,7 +466,7 @@ class TestFloat8Dtype(TestCase):
             atol=0,
             rtol=0,
         )
-        self.assertEqual(x[2, 3].item(), codes.view(dtype)[2, 3].item())
+        self.assertEqual(x[2, 3].item(), codes.view(dtype)[2, 3].item(), atol=0, rtol=0)
 
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfXPU(*XPU_FLOAT8_DTYPES)

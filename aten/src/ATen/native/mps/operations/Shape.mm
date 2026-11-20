@@ -3,6 +3,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/Copy.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/TypeProperties.h>
@@ -88,12 +89,12 @@ static void cat_out_mps_contiguous_impl(const ITensorListRef& inputs, int64_t di
   }
 }
 
-// NOTE: `output` is expected to already have the correct size.
-// float4_e2m1fn_x2 has no Metal type and cannot be cast, so its elements are moved as bytes
+// float4_e2m1fn_x2 has no Metal type; cat_out_mps rejects casts to or from it, so its elements are moved as bytes
 static std::string cat_type_str(const Tensor& t) {
   return t.scalar_type() == kFloat4_e2m1fn_x2 ? "uchar" : scalarToMetalTypeString(t);
 }
 
+// NOTE: `output` is expected to already have the correct size.
 template <typename idx_type_t>
 static void cat_out_mps_impl(const ITensorListRef& inputs, int64_t dimension, const Tensor& output) {
   const auto idx_type_name = get_type_str<idx_type_t>();
@@ -174,6 +175,10 @@ TORCH_IMPL_FUNC(cat_out_mps)
   }
 
   auto materialized_inputs = inputs.materialize();
+  // cat converts each input to out's dtype without going through copy_, so reject the casts copy_ would
+  for (const Tensor& t : materialized_inputs) {
+    check_shell_dtype_cast(t.scalar_type(), out.scalar_type());
+  }
   // The int32 cat kernel needs each tensor's linear offset to fit in int32.
   bool has_large_tensor = isTooLargeForMPSGraph(out, /*useMPSStridedAPI=*/true, /*checkLinearOffset=*/true) ||
       std::any_of(materialized_inputs.begin(), materialized_inputs.end(), [](auto& t) {
