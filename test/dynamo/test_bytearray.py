@@ -568,6 +568,42 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(b2.title(), self.type2test(b"They'Re Bill'S Friends"))
         self.assertRaises(TypeError, lambda: b.title(1))
 
+    @make_dynamo_test
+    def test_capitalize(self):
+        b = self.type2test(b"hELLO wORLD")
+        self.assertEqual(b.capitalize(), self.type2test(b"Hello world"))
+        # Non-ASCII bytes are unchanged (ASCII-only case mapping)
+        b2 = self.type2test(b"\xffABC")
+        self.assertEqual(b2.capitalize(), self.type2test(b"\xffabc"))
+        self.assertEqual(self.type2test().capitalize(), self.type2test())
+        # The result is a new object and the input is unchanged
+        self.assertIsNot(b.capitalize(), b)
+        self.assertEqual(b, self.type2test(b"hELLO wORLD"))
+        self.assertRaises(TypeError, lambda: b.capitalize(1))
+
+    @make_dynamo_test
+    def test_swapcase(self):
+        b = self.type2test(b"HeLLo cOmpUteRs")
+        self.assertEqual(b.swapcase(), self.type2test(b"hEllO CoMPuTErS"))
+        b2 = self.type2test(b"\xff\xfeAbC")
+        self.assertEqual(b2.swapcase(), self.type2test(b"\xff\xfeaBc"))
+        self.assertEqual(self.type2test().swapcase(), self.type2test())
+        self.assertIsNot(b.swapcase(), b)
+        self.assertEqual(b, self.type2test(b"HeLLo cOmpUteRs"))
+        self.assertRaises(TypeError, lambda: b.swapcase(1))
+
+    def test_input_bytearray_capitalize_swapcase(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.capitalize(), ba.swapcase()
+
+        ba = bytearray(b"hELLO wORLD")
+        self.assertEqual(
+            fn(ba),
+            (bytearray(b"Hello world"), bytearray(b"Hello World")),
+        )
+        self.assertEqual(ba, bytearray(b"hELLO wORLD"))
+
     def test_input_bytearray_upper_lower_title(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(ba):
