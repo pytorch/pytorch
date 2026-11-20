@@ -1,4 +1,5 @@
-# Source of truth for CODEOWNERS. After editing, regenerate CODEOWNERS with
+# Source of truth for scripts/codeowners/CODEOWNERS. After editing, regenerate
+# it with
 #   python scripts/codeowners/generate_codeowners.py
 # or `spin fixlint`; the CODEOWNERS_GENERATED lint fails until they match.
 #
@@ -7,10 +8,11 @@
 # doesn't change when a label is renamed; it is the group's most specific label
 # followed by its other labels, or the CODEOWNERS section name for paths without
 # labels. Ownership status is `owners` alone; `[]` means no owner recorded yet.
-# Handles are written without the leading @. A path with handles is an active
-# CODEOWNERS rule (those handles get review requests); a bare path is a
-# commented rule. `section` is the CODEOWNERS section the group's paths are
-# written under; it is kept temporarily for scripts/codeowners/owners.py.
+# Handles are written without the leading @ and must be user logins, not teams
+# or emails. A path with handles is an active CODEOWNERS rule (Auto PR Triage
+# requests reviews from those handles); a bare path is a commented rule.
+# `section` is the CODEOWNERS section the group's paths are written under; it is
+# kept temporarily for scripts/codeowners/owners.py.
 
 planned_labels: ["module: tvm", "module: operator benchmarks", "module: mobile delegates", "module: hipify", "module: headeronly", "module: github automation"]
 # CODEOWNERS section order (temporary, see above).
@@ -1806,6 +1808,6 @@ ownership:
     owners: []
     section: protected_codeownership
     paths:
-      - /CODEOWNERS: [albanD, malfet]
+      - /scripts/codeowners/CODEOWNERS: [albanD, malfet]
       - /OWNERSHIP.yaml: [albanD, malfet]
       - /.github/merge_rules.yaml: [izaitsevfb, jeanschmidt, huydhn, albanD, malfet]

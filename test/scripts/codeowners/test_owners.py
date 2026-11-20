@@ -27,7 +27,7 @@ class TestCollectTestOwners(TestCase):
 /test/core/ @owner
 """
         files = {
-            "CODEOWNERS": codeowners,
+            "scripts/codeowners/CODEOWNERS": codeowners,
             "c10/test/test_unowned.cpp": "// Native tests carry no owner header.\n",
             "test/core/test_ignored_label.py": "import torch\n",
             "test/dynamo/test_empty_header.py": "# Owner(s): []\n",

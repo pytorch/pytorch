@@ -1084,8 +1084,8 @@ command = [
 [[linter]]
 code = 'CODEOWNERS_GENERATED'
 include_patterns = [
-    'CODEOWNERS',
     'OWNERSHIP.yaml',
+    'scripts/codeowners/CODEOWNERS',
     'scripts/codeowners/generate_codeowners.py',
 ]
 command = [

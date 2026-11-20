@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from schemas import IntakeResult, LLMInput, LLMResult, OwnershipResult
+from schemas import (
+    IntakeResult,
+    LLMInput,
+    LLMResult,
+    OwnershipGroup,
+    OwnershipResult,
+    PathGroup,
+)
 from tests.stage_fixtures import (
     BYPASS_CRITERIA,
     changed_file,
@@ -127,7 +134,7 @@ class OwnershipResultMainTest(unittest.TestCase):
         self.assertEqual(record["validation_errors"], [])
         self.assertEqual(record["llm_metadata"]["num_turns"], 1)
         self.assertIn("| Open non-draft PR against main | true |", step_summary)
-        self.assertIn("| Already handled | false |", step_summary)
+        self.assertIn("| Opted out | false |", step_summary)
         self.assertIn("| Author has triage permission | false |", step_summary)
         self.assertIn("| Actionable issue linked | true |", step_summary)
         self.assertIn("| Maintainer activity | false |", step_summary)
@@ -238,7 +245,7 @@ class OwnershipResultMainTest(unittest.TestCase):
                 is_open_non_draft_pr_against_main=False,
                 has_actionable_linked_issue=False,
             ),
-            "already_handled": intake_result(is_already_handled=True),
+            "opted_out": intake_result(is_opted_out=True),
         }
         for name, intake in cases.items():
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
@@ -518,6 +525,38 @@ class ActionExecutionTest(unittest.TestCase):
         self.assertIn(r"+\u003a\u003anotice\u003a\u003anot a command", rendered)
         self.assertIn(r"\u0023\u0023[warning] This is still untrusted text.", rendered)
         self.assertIn(r"\u0023\u0023[add-mask]secret", rendered)
+
+
+class OwnershipGroupTest(unittest.TestCase):
+    def test_path_groups_merge_into_their_ownership_group(self) -> None:
+        files = tuple(changed_file(path=f"torch/{name}.py") for name in ("a", "b", "c"))
+        prepared = llm_input(codepath_owners=["@x", "@y", "@z"], files=files)
+        codepath = prepared.trusted_context.codepath_owners
+        path_groups = (
+            PathGroup(("@x", "@y"), (0,), "nn", "path_handles"),
+            PathGroup(("@x",), (1,), "nn", "path_handles"),
+            PathGroup(("@y", "@z"), (2,), "autograd", "path_handles"),
+        )
+        prepared = replace(
+            prepared,
+            trusted_context=replace(
+                prepared.trusted_context,
+                codepath_owners=replace(codepath, matched_path_groups=path_groups),
+            ),
+        )
+
+        result = normalize(prepared=prepared, llm_failed=True)
+
+        # One OWNERSHIP.yaml group can span path groups whose rules list
+        # different owners; the group holds their union.
+        self.assertEqual(
+            result.ownership_groups,
+            {
+                "autograd": OwnershipGroup(("@y", "@z"), ("torch/c.py",), "path_handles"),
+                "nn": OwnershipGroup(("@x", "@y"), ("torch/a.py", "torch/b.py"), "path_handles"),
+            },
+        )
+        self.assertEqual(result.codepath_owners["@x"], ("torch/a.py", "torch/b.py"))
 
 
 class ValidationTest(unittest.TestCase):

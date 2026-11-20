@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from check_taxonomy import (
+    CODEOWNERS_PATH,
     compile_glob,
     parse_patterns,
     pattern_specificity,
@@ -71,7 +72,7 @@ def header_owners(path: Path) -> set[str]:
 
 def collect_test_owners(repo: Path) -> dict[str, list[str]]:
     """Map tracked tests to header modules, CODEOWNERS modules, or review surfaces."""
-    index = TaxonomyIndex(parse_patterns(repo / "CODEOWNERS")[0])
+    index = TaxonomyIndex(parse_patterns(repo / CODEOWNERS_PATH)[0])
     test_globs = [compile_glob(test_glob) for test_glob in TEST_GLOBS]
     owners_by_file = {}
     for path in tracked_paths(repo):

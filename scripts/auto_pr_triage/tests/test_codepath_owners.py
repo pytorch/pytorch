@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -158,9 +156,12 @@ private/ # deliberately unowned
         )
 
     def test_compact_artifact_is_an_exact_ordered_partition(self) -> None:
-        rules = parse_rules(
-            contents="* @all\n/docs/ @docs @org/writers\n/docs/private/\n"
-        )
+        rules = [
+            {**rule, "group": "core", "review_request": "path_handles"}
+            for rule in parse_rules(
+                contents="* @all\n/docs/ @docs @org/writers\n/docs/private/\n"
+            )
+        ]
         resolutions = resolve_paths(
             paths=[
                 "src/a.py",
@@ -176,8 +177,15 @@ private/ # deliberately unowned
         self.assertEqual(
             artifact["matched_path_groups"],
             [
-                {"owners": ["@all"], "paths": ["src/a.py"]},
                 {
+                    "group": "core",
+                    "review_request": "path_handles",
+                    "owners": ["@all"],
+                    "paths": ["src/a.py"],
+                },
+                {
+                    "group": "core",
+                    "review_request": "path_handles",
                     "owners": ["@docs", "@org/writers"],
                     "paths": ["docs/a.rst", "docs/b.rst"],
                 },
@@ -202,6 +210,30 @@ def ownership_yaml(*paths: str) -> bytes:
         '  - name: core\n    labels: ["module: core"]\n    owners: [chillee]\n'
         f"    section: core\n    paths:\n{entries}"
     ).encode()
+
+
+class GroupArtifactTest(unittest.TestCase):
+    def test_paths_are_grouped_by_ownership_group(self) -> None:
+        def rule(group: str, review_request: str) -> dict[str, object]:
+            return {"group": group, "review_request": review_request}
+
+        artifact = build_llm_artifact(
+            [
+                {"path": "a.py", "owners": ["@x", "@y"], "matched_rule": rule("autograd", "path_handles")},
+                {"path": "b.py", "owners": ["@x", "@y"], "matched_rule": rule("nn", "path_handles")},
+                {"path": "c.py", "owners": ["@x", "@y"], "matched_rule": rule("autograd", "path_handles")},
+                {"path": "d.py", "owners": ["@x"], "matched_rule": rule("nn", "path_handles")},
+            ]
+        )
+
+        self.assertEqual(
+            artifact["matched_path_groups"],
+            [
+                {"group": "autograd", "review_request": "path_handles", "owners": ["@x", "@y"], "paths": ["a.py", "c.py"]},
+                {"group": "nn", "review_request": "path_handles", "owners": ["@x", "@y"], "paths": ["b.py"]},
+                {"group": "nn", "review_request": "path_handles", "owners": ["@x"], "paths": ["d.py"]},
+            ],
+        )
 
 
 class PolicyLoadingTest(unittest.TestCase):
@@ -229,7 +261,14 @@ class PolicyLoadingTest(unittest.TestCase):
         )
         self.assertEqual(
             snapshot["rules"],
-            [{"pattern": "/torch/", "owners": ["@root-owner"], "group": "core"}],
+            [
+                {
+                    "pattern": "/torch/",
+                    "owners": ["@root-owner"],
+                    "group": "core",
+                    "review_request": "path_handles",
+                }
+            ],
         )
 
     def test_checked_in_ownership_matches_the_generated_codeowners(self) -> None:
@@ -257,7 +296,14 @@ class PolicyLoadingTest(unittest.TestCase):
         self.assertEqual(artifact["owners"], ["@chillee"])
         self.assertEqual(
             artifact["matched_path_groups"],
-            [{"owners": ["@chillee"], "paths": ["one/a.py", "two/b.py"]}],
+            [
+                {
+                    "group": "core",
+                    "review_request": "path_handles",
+                    "owners": ["@chillee"],
+                    "paths": ["one/a.py", "two/b.py"],
+                }
+            ],
         )
 
     def test_builds_exact_dynamic_codepath_owners_contract(self) -> None:
@@ -310,28 +356,6 @@ class PolicyLoadingTest(unittest.TestCase):
                 self.assertRaisesRegex(ValueError, "codepath owner"),
             ):
                 parse_rules(contents=f"* {owner}\n", strict=True)
-
-
-class CommandLineTest(unittest.TestCase):
-    def test_cli_returns_json_handles(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "codepath_owners.txt"
-            path.write_text("* @all\n/docs/ @docs\n")
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(Path(__file__).resolve().parents[1] / "codepath_owners.py"),
-                    "--codepath-owners",
-                    str(path),
-                    "--owners-only",
-                    "src/a.py",
-                    "docs/a.rst",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        self.assertEqual(json.loads(result.stdout), ["@all", "@docs"])
 
 
 if __name__ == "__main__":

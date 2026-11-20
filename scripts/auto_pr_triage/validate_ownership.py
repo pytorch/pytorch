@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stage 2c: validate the LLM's owner suggestions into an ownership result.
 
-An inactive or handled PR gets a skipped result without LLM output. Any
+An inactive PR gets a skipped result without LLM output. Any
 LLM, schema, or validation failure yields a failed result that keeps the
 deterministic codepath owners. Each suggested owner is accepted on its own
 confidence and on its own supporting files having complete patches.
@@ -22,6 +22,7 @@ from schemas import (
     IntakeResult,
     LLMInput,
     LLMResult,
+    OwnershipGroup,
     OwnershipResult,
 )
 from step_summary import print_log_json, summary_code, summary_prose
@@ -213,12 +214,30 @@ def build_ownership_result(
     codepath = llm_input.trusted_context.codepath_owners
     paths = [file.path for file in llm_input.untrusted_context.files]
     codepath_owners: dict[str, set[str]] = {owner: set() for owner in codepath.owners}
-    for group in codepath.matched_path_groups:
-        for owner in group.owners:
-            codepath_owners[owner].update(paths[i] for i in group.file_indices)
+    # One OWNERSHIP.yaml group can span several path groups with different owners.
+    group_owners: dict[str, set[str]] = {}
+    group_files: dict[str, set[str]] = {}
+    review_requests: dict[str, str] = {}
+    for path_group in codepath.matched_path_groups:
+        files = {paths[i] for i in path_group.file_indices}
+        for owner in path_group.owners:
+            codepath_owners[owner].update(files)
+        group_owners.setdefault(path_group.group, set()).update(path_group.owners)
+        group_files.setdefault(path_group.group, set()).update(files)
+        review_requests[path_group.group] = path_group.review_request
+    ownership_groups = {
+        name: OwnershipGroup(
+            tuple(sorted(group_owners[name], key=str.casefold)),
+            tuple(sorted(group_files[name])),
+            review_requests[name],
+        )
+        for name in group_owners
+    }
     if llm_failed:
         return OwnershipResult.create(
-            llm_run_status="failed", codepath_owners=codepath_owners
+            llm_run_status="failed",
+            codepath_owners=codepath_owners,
+            ownership_groups=ownership_groups,
         )
     if llm_result is None:
         raise ValueError("a succeeded LLM run is missing its LLM result")
@@ -242,6 +261,7 @@ def build_ownership_result(
         additional_owner_concerns=accepted,
         discarded_additional_owner_concerns=discarded,
         uncovered_concerns=llm_result.uncovered_concerns,
+        ownership_groups=ownership_groups,
     )
 
 
@@ -272,7 +292,7 @@ def write_github_step_summary(
             "Open non-draft PR against main",
             str(facts.is_open_non_draft_pr_against_main).lower(),
         ),
-        ("Already handled", str(facts.is_already_handled).lower()),
+        ("Opted out", str(facts.is_opted_out).lower()),
         (
             "Author has triage permission",
             str(facts.author_has_triage_permission).lower(),

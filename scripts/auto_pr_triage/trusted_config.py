@@ -106,6 +106,7 @@ def load_codepath_owners(
             "pattern": rule.path,
             "owners": list(dict.fromkeys(f"@{h}".casefold() for h in rule.notify)),
             "group": group.name,
+            "review_request": group.review_request,
         }
         for _, groups in sections
         for group in groups
