@@ -22,7 +22,10 @@ bool check_flash_attention_hardware_support(
     sdp_params const& params,
     bool debug) {
   if (!at::xpu::is_available()) {
-    TORCH_CHECK(false, "FlashAttentionXPU: XPU device is not available.");
+    if (debug) {
+      TORCH_WARN("FlashAttentionXPU: XPU device is not available.");
+    }
+    return false;
   }
 
   constexpr auto supported_architectures =
