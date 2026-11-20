@@ -40,22 +40,14 @@ class MultiKernelState:
         self._num_names = 0
 
     def define_kernel(self, multi_kernel: "DispatchedMultiKernel") -> str:
-        """
-        Previously we name the multi kernel as "multi_kernel_{kernel_names[0]}".
-        This has some minor issue.
+        """Register a dispatched multi-kernel and return its name.
 
-        E.g. for persistent reduction https://gist.github.com/shunting314/39e7c00ff8bb2055942ed5a3255d61ca ,
-        there are 2 flavors of non-persistent reduction:
-          https://gist.github.com/shunting314/056d43d35907e87efb883970b35c17d4
-        and
-          https://gist.github.com/shunting314/02ee753b65c513c54e695626afe682bd
-
-        The only different is cache eviction policy.
-
-        We should name the multi-kernel differently in these 2 cases.
-
-        Writes the shared `arg_index` table, then the kind-specific definition
-        (multi_kernel.write_definition), and returns the multi-kernel's name.
+        Multi-kernels with the same sub-kernels share one name; otherwise a new
+        `multi_kernel_N` is assigned (numbered from the root state, since subgraph
+        definitions land in the parent module) and its definition is written to
+        kernel_defs: the shared `arg_index` table (which call args each sub-kernel
+        takes), then the kind-specific line from multi_kernel.write_definition.
+        Nothing is written in the second pass of cpp-wrapper codegen.
         """
         # Prevent circular import
         from ..select_algorithm import TritonTemplateKernel
