@@ -2350,6 +2350,21 @@ class <lambda>(torch.nn.Module):
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
 
+    @parametrize("op", ["cond", "switch", "map"])
+    def test_autograd_replays_forward_rng(self, op):
+        def dropout(x):
+            return torch.nn.functional.dropout(x, 0.5, training=True)
+
+        fn = {
+            "cond": lambda x: cond(x.sum() > 0, dropout, dropout, (x,)),
+            "switch": lambda x: switch(torch.tensor(0), (dropout, dropout), (x,)),
+            "map": lambda x: control_flow.map(dropout, x),
+        }[op]
+        x = torch.ones(4, 64, requires_grad=True)
+        y = fn(x)
+        (grad,) = torch.autograd.grad(y.sum(), x)
+        self.assertEqual(grad, y)
+
     def test_map_autograd_higher_order(self):
         from torch.autograd.functional import hessian as hes, jacobian as jac
 
