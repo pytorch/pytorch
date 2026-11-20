@@ -712,10 +712,7 @@ def itree_combine_plan(
         # The async copy maps one warp's lanes onto a row's partials.
         raise ValueError("combine_async requires combine_rpb <= WARP")
     mode = arch.uniform_combine
-    if mode not in tile.UNIFORM_COMBINE_MODES:
-        raise ValueError(
-            f"uniform_combine must be 'off', 'counts' or 'weights', got {mode!r}"
-        )
+    tile.check_uniform_combine_mode(mode)
     caps = _hw.caps(device)
     nbatch = itree.split[0]
     rpb = arch.combine_rpb
@@ -1079,7 +1076,8 @@ def reduce_row_tile(
     Other rows need stride(0) to be a multiple of vec_size(N). A ragged row's scalar
     prefix depends on its start, so identical rows can round differently. Callers must
     pre-check a 16-byte base for ragged rows: whole rows at a misaligned base take
-    narrow loads, but ragged rows raise.
+    narrow loads, but ragged rows raise. use_tma=True raises ValueError unless N is a
+    nonempty power of two.
     """
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
