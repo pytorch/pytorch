@@ -109,6 +109,7 @@ inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = 
     "aten.baddbmm.out": {},
     "aten.bernoulli_.float": {},
     "aten.bernoulli_.Tensor": {},
+    "aten.bmm.dtype_out": {"since": "TORCH_VERSION_2_16_0"},
     "aten.bmm.out": {},
     "aten.bucketize.Tensor": {},
     "aten.cat.default": {},
@@ -229,4 +230,5 @@ aten_shimified_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = {
     "aten.new_zeros.default": {},
     "aten.full.default": {"since": "TORCH_VERSION_2_10_0"},
     "aten.subtract.Tensor": {"since": "TORCH_VERSION_2_10_0"},
+    "aten.add.Tensor": {"since": "TORCH_VERSION_2_16_0"},
 }

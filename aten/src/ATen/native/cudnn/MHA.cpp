@@ -12,8 +12,10 @@
 
 namespace at::native {
 
-// Check the pointer and stride alignment cuDNN requires for varlen tensors.
-bool has_aligned_varlen_layout(const Tensor& tensor) {
+namespace {
+
+// Check the pointer and stride alignment cuDNN requires.
+bool has_aligned_layout(const Tensor& tensor, bool allow_broadcast) {
   constexpr int64_t alignment_bytes = 16;
   if (!tensor.numel()) {
     return true;
@@ -26,11 +28,18 @@ bool has_aligned_varlen_layout(const Tensor& tensor) {
   const int64_t alignment = alignment_bytes / tensor.element_size();
   for (int64_t dim = 0; dim < tensor.dim() - 1; ++dim) {
     if (tensor.size(dim) > 1 &&
-        (tensor.stride(dim) <= 0 || tensor.stride(dim) % alignment != 0)) {
+        ((!allow_broadcast && tensor.stride(dim) <= 0) ||
+         tensor.stride(dim) % alignment != 0)) {
       return false;
     }
   }
   return true;
+}
+
+} // namespace
+
+bool has_aligned_varlen_layout(const Tensor& tensor) {
+  return has_aligned_layout(tensor, /*allow_broadcast=*/false);
 }
 
 } // namespace at::native
@@ -171,7 +180,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
 #include <ATen/native/utils/ParamsHash.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/util/TypeCast.h>
+#include <c10/util/safe_conv.h>
 #include <cudnn.h>
 
 #include <cstdint>
@@ -376,6 +385,22 @@ void checkInt32Alignment(const Tensor& tensor, const char* name) {
       " data pointer must be aligned to ",
       kRequiredInt32Alignment,
       " bytes for the selected cuDNN Frontend");
+}
+
+// cuDNN does not see data pointers when checking graph support.
+void checkSDPAAlignment(const Tensor& tensor, const char* name) {
+  TORCH_CHECK(
+      has_aligned_layout(tensor, /*allow_broadcast=*/true),
+      "cuDNN attention requires ",
+      name,
+      " to have 16-byte-aligned storage and strides, with a contiguous last dimension");
+}
+
+void checkSDPABiasAlignment(const std::optional<Tensor>& attn_bias) {
+  TORCH_CHECK(
+      !attn_bias.has_value() ||
+          reinterpret_cast<uintptr_t>(attn_bias->const_data_ptr()) % 16 == 0,
+      "cuDNN attention requires attn_bias data pointer to be aligned to 16 bytes");
 }
 
 // Record an auxiliary tensor layout in the zero-initialized cache key.
@@ -1035,8 +1060,8 @@ std::unique_ptr<fe::graph::Graph> build_graph_nestedtensor(
         .set_paged_attention_v_table(
             page_table_tensor(PAGE_TABLE_V, "page_table_v"))
         // cuDNN derives its maximum KV length from the page-table width.
-        .set_paged_attention_max_seq_len_kv(c10::checked_convert<int>(
-            max_seq_len_kv, "paged attention maximum KV sequence length"));
+        .set_paged_attention_max_seq_len_kv(
+            c10::safe_conv<int>(max_seq_len_kv, "int"));
   } else {
     K_ = mha_graph->tensor(fe::graph::Tensor_attributes()
                                .set_uid(K)
@@ -1395,7 +1420,9 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward_nestedtensor(
                                    .set_attn_scale(attn_scale)
                                    .set_seq_len_q(SEQ_LEN_Q_)
                                    .set_seq_len_kv(SEQ_LEN_KV_)
-                                   .set_padding_mask(true);
+                                   .set_padding_mask(true)
+                                   .set_max_total_seq_len_q(q.size(0))
+                                   .set_max_total_seq_len_kv(k.size(0));
   if (dropout_probability != 0.0f) {
     auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
                                       .set_uid(SEED)
@@ -1581,6 +1608,10 @@ void run_cudnn_SDP_fprop(
     return;
   }
   check_cudnn_sdpa_decode(s_q);
+  checkSDPAAlignment(q, "query");
+  checkSDPAAlignment(k, "key");
+  checkSDPAAlignment(v, "value");
+  checkSDPABiasAlignment(attn_bias);
   Tensor seqlen_q, seqlen_kv;
   Tensor rag_off_q, rag_off_k, rag_off_v, rag_off_o, rag_off_lse;
 
@@ -1950,6 +1981,11 @@ void run_cudnn_SDP_bprop(
     return;
   }
   check_cudnn_sdpa_decode(s_q);
+  checkSDPAAlignment(q, "query");
+  checkSDPAAlignment(k, "key");
+  checkSDPAAlignment(v, "value");
+  checkSDPAAlignment(o, "out");
+  checkSDPABiasAlignment(attn_bias);
   Tensor seqlen_q, seqlen_kv;
   Tensor rag_off_q, rag_off_k, rag_off_v, rag_off_o, rag_off_lse;
 
@@ -1984,6 +2020,11 @@ void run_cudnn_SDP_bprop(
     permute_to_matching_layout(o, dO_);
   }
 #endif
+  // Autograd may pass a misaligned grad_output view (e.g. from cat backward).
+  if (!has_aligned_layout(dO_, /*allow_broadcast=*/true)) {
+    dO_ = at::empty_like(o);
+    dO_.copy_(dO);
+  }
   if (use_ragged_in_dense(q, k, v, o, attn_bias.has_value())) {
     seqlen_q = at::full({b, 1, 1, 1}, s_q, q.options().dtype(kInt));
     seqlen_kv = at::full({b, 1, 1, 1}, s_kv, q.options().dtype(kInt));
@@ -2120,6 +2161,13 @@ void run_cudnn_SDP_bprop_nestedtensor(
     dV.zero_();
     return;
   }
+  // cuDNN uses Q's ragged offsets for the packed dQ accumulator.
+  // TODO: Remove this copy when cuDNN uses the accumulator's own offsets.
+  Tensor q_ = q;
+  if (q.strides() != dQ.strides()) {
+    q_ = at::empty_like(dQ);
+    q_.copy_(q);
+  }
   check_cudnn_sdpa_decode(s_q);
   TORCH_CHECK(
       softmaxstats.dim() == 2, "cuDNN SDPA expected a 2D (H, T) softmax_lse");
@@ -2139,7 +2187,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
   const bool shared_cum_seqlen = cum_seqlen_q.is_same(cum_seqlen_kv);
   auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
   auto seqlen_kv = shared_cum_seqlen ? seqlen_q : at::diff(cum_seqlen_kv, 1, 0);
-  check_ragged_offset_capacity(q, "query");
+  check_ragged_offset_capacity(q_, "query");
   check_ragged_offset_capacity(k, "key");
   check_ragged_offset_capacity(v, "value");
   check_ragged_offset_capacity(o, "out");
@@ -2147,7 +2195,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
   check_ragged_offset_capacity(dQ, "grad_query");
   check_ragged_offset_capacity(dK, "grad_key");
   check_ragged_offset_capacity(dV, "grad_value");
-  const int64_t q_token_stride = q.stride(-3);
+  const int64_t q_token_stride = q_.stride(-3);
   const int64_t kv_token_stride = k.stride(-3);
   auto rag_q_off = cum_seqlen_q.mul(q_token_stride);
   auto rag_k_off = shared_cum_seqlen && kv_token_stride == q_token_stride
@@ -2187,7 +2235,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
       s_kv, // max-seqlen-kv
       d_qk,
       d_v,
-      q,
+      q_,
       k,
       v,
       attn_bias,
@@ -2216,7 +2264,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
         dropout_probability,
         cum_seqlen_q,
         cum_seqlen_kv,
-        q,
+        q_,
         k,
         v,
         attn_bias,
@@ -2234,7 +2282,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
   const fe::graph::Graph& mha_graph = *cache_it->second;
   std::unordered_map<int64_t, void*> variant_pack = {
       // inputs
-      {Q, q.mutable_data_ptr()},
+      {Q, q_.mutable_data_ptr()},
       {K, k.mutable_data_ptr()},
       {V, v.mutable_data_ptr()},
       {O, o.mutable_data_ptr()},

@@ -1639,6 +1639,7 @@ def gen_pyi(
             ],
             "element_size": [defs("element_size", ["self"], "_int")],
             "data_ptr": [defs("data_ptr", ["self"], "_int")],
+            "const_data_ptr": [defs("const_data_ptr", ["self"], "_int")],
             "dim": [defs("dim", ["self"], "_int")],
             "nonzero": [
                 defs(
@@ -2007,6 +2008,7 @@ def gen_pyi(
             "float8_e5m2",
             "float8_e5m2fnuz",
             "float8_e8m0fnu",
+            "float8_e5m3fnu",
             "float4_e2m1fn_x2",
             "half",
             "uint8",

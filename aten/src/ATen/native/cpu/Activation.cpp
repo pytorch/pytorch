@@ -234,7 +234,7 @@ void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scal
           auto [b0, b1] = convert_to_float<scalar_t>(b);
           auto cmp0 = (b0 > zero_vec);
           auto cmp1 = (b1 > zero_vec);
-          auto get_res_masked = [&](Vectorized<float>& cmp, Vectorized<float>& a, Vectorized<float>& b) {
+          auto get_res_masked = [&](const VecBool<float>& cmp, Vectorized<float>& a, Vectorized<float>& b) {
             if (is_result) {
               return !cmp.zero_mask() ? a * poscoef_vec :
                 Vectorized<float>::blendv(a * negiptcoef_vec * (b + negcoef_vec), a * poscoef_vec, cmp);
@@ -290,20 +290,12 @@ void GeluKernelImpl(TensorIteratorBase& it, GeluType approximate) {
   auto grain_size = at::internal::GRAIN_SIZE;
   // Numbers based on benchmarking.
   // Benchmark: benchmarks/operator_benchmarks/pt/gelu_test.py
-#ifdef C10_MOBILE
-  // Benchmarked on S8 US phone.
-  // Internal benchmarking that converts operator benchmark into
-  // a torchscript module and run that on mobile.
-  // Same benchmark as server side.
-  constexpr int64_t GELU_MIN_ELEMENTS_FOR_MULTI_THREADING{6144};
-#else
   // Benchmarked on i9 8 core 16 thread machine.
   // 1 thread: cd benchmark/operator_benchmarks;
   //           python -m pt.gelu_test --tag_filter long --omp_num_threads 1
   // 2 threads: cd benchmark/operator_benchmarks;
   //           python -m pt.gelu_test --tag_filter long --omp_num_threads 1
   constexpr int64_t GELU_MIN_ELEMENTS_FOR_MULTI_THREADING{16384};
-#endif
   if (it.numel() > GELU_MIN_ELEMENTS_FOR_MULTI_THREADING) {
     grain_size = it.numel() / at::get_num_threads();
   }

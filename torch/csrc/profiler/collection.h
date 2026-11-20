@@ -476,11 +476,9 @@ struct KinetoObserverContext : public at::ObserverContext {
   // down and event_ freed, so the exit drops without touching event_.
   uint64_t session_generation_{0};
 
-  // True if begin_op pushed an external correlation id for this op. The
-  // matching pop must run on every exit path (including teardown /
-  // stale-session early exits), or the id leaks onto the device profiling
-  // backend's per-thread correlation stack, which is not reset across profiler
-  // sessions.
+  // True if begin_op pushed an external correlation id for this op. Every exit
+  // path pops it to keep the backend's per-thread correlation stack balanced,
+  // except global exits after the exit hook, since Kineto may be destroyed.
   bool pushed_correlation_id_{false};
 };
 

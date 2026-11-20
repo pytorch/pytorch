@@ -399,6 +399,41 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
     def world_size(self):
         return 2
 
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_set_keep_unsharded_storage(self):
+        """Tests storage retention and recursion across state-dict resharding."""
+        device = torch.device(device_type.type, 0)
+        model = nn.Sequential(nn.Linear(8, 8, device=device))
+        fully_shard(model[0], reshard_after_forward=False)
+        fully_shard(model, reshard_after_forward=False)
+
+        # Enable storage retention recursively and verify the child parameters
+        model.set_keep_unsharded_storage(keep=True, recurse=True)
+        param_group = model[0]._get_fsdp_state()._fsdp_param_group
+        self.assertIsNotNone(param_group)
+        self.assertTrue(
+            all(param.keep_unsharded_storage for param in param_group.fsdp_params)
+        )
+
+        def get_data_ptrs() -> list[int]:
+            return [
+                param.unsharded_param.data_ptr() for param in param_group.fsdp_params
+            ]
+
+        with torch.inference_mode():
+            model(torch.randn(2, 8, device=device))
+        data_ptrs = get_data_ptrs()
+
+        # State dict reshards without releasing the unsharded storage
+        model.state_dict()
+        self.assertTrue(param_group.is_sharded)
+        self.assertEqual(get_data_ptrs(), data_ptrs)
+
+        # Forward triggers an unshard that should reuse the retained storage
+        with torch.inference_mode():
+            model(torch.randn(2, 8, device=device))
+        self.assertEqual(get_data_ptrs(), data_ptrs)
+
     @skip_if_lt_x_gpu(1)
     def test_rank0_offload_full_state_dict(self):
         # Construct a reference unsharded model on all ranks

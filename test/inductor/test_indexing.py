@@ -17,6 +17,7 @@ from torch._inductor.codegen.wrapper import pexpr
 from torch._inductor.dependencies import MemoryDep
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.sizevars import (
+    join_dimensions,
     simplify_index_in_vec_range,
     SizeVarAllocator,
     stride_at_vec_range,
@@ -422,6 +423,17 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(simplified, FloorDiv(i0, 3))
         self.assertEqual(expr6.subs({i0: 39485}), simplified.subs({i0: 39485}))
 
+        # terms without ModularIndexing or FloorDiv are left alone
+        expr7 = expr1 + 7 * i1 + 3
+        self.assertEqual(
+            join_dimensions(expr7), ModularIndexing(i0, 1, 128) + 7 * i1 + 3
+        )
+
+        # the FloorDiv pattern can simplify away: FloorDiv(64 * i0, 64) is i0, so
+        # the matching term has no FloorDiv
+        expr8 = ModularIndexing(64 * i0, 1, 64) + 64 * i0
+        self.assertEqual(join_dimensions(expr8), 64 * i0)
+
     def test_modular_indexing_pairs_merged(self):
         sizevars = SizeVarAllocator()
         x = sympy.Symbol("x", integer=True, positive=True)
@@ -640,7 +652,7 @@ class ExprPrinterTests(InductorTestCase):
                 self.assertExpectedInline(pexpr(expr), """math.floor((1/2)*s1)""")
                 self.assertExpectedInline(
                     texpr(expr),
-                    """libdevice.floor((1/2)*s1).to(tl.int64)""",
+                    """triton_helpers.rounding_to_int((1/2)*s1, tl.int64, 'floor')""",
                 )
                 self.assertExpectedInline(cexpr(expr), """std::floor((1.0/2.0)*s1)""")
 

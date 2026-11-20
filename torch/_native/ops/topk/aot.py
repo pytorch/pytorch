@@ -1,10 +1,11 @@
 """Native-AOT declaration for aten::topk @ CUDA.
 
 Eligibility is stated three times, deliberately: covered_axes() subtracts from JIT
-coverage, cpp_covers() is its C++ fast path and must decide the same set, and
-cpp_dispatch_prelude()/cpp_dispatch() are the AOT library's dispatch chain. Keep them
-in sync by hand; drift is benign but wasteful, since a call all sides decline lands on
-stock aten.
+coverage, cpp_covers() is its C++ fast path and must decide the same
+declaration-level set, and cpp_dispatch_prelude()/cpp_dispatch() are the AOT
+library's dispatch chain. Codegen conjoins the shipped-target and ABI gates. Keep
+the declaration logic in sync by hand; drift is benign but wasteful, since a call
+all sides decline lands on stock aten.
 
 Module scope must stay torch-free, because torchgen loads this before torch is built;
 torch is imported lazily inside covered_axes.
@@ -13,11 +14,9 @@ torch is imported lazily inside covered_axes.
 ATEN_OP = "topk"
 DISPATCH_KEY = "CUDA"
 KERNEL_MODULE = "cutedsl_kernels.py"
-# Stated rather than defaulted: the declared ranges and work rungs are measured
-# against aten on Hopper and Blackwell.
-# Both spellings of each capability, since either can appear in TORCH_CUDA_ARCH_LIST
-# and they are distinct nvcc targets.
-ARCHS = ("sm_90", "sm_90a", "sm_100", "sm_100a")
+# The declared ranges and kernel configurations are measured against aten on
+# Hopper and Blackwell.
+ARCHS = ("sm_90", "sm_100f")
 
 _DTYPES = {"float32": "at::kFloat", "bfloat16": "at::kBFloat16"}
 _RADIX_KS = (64, 128, 256, 512, 1024)
@@ -223,7 +222,8 @@ def covered_axes(self, k, dim=-1, largest=True, sorted=True):
 
 
 def cpp_covers():
-    # C++ port of covered_axes plus grid matching, registered as
+    # C++ port of covered_axes plus grid matching. Codegen conjoins artifact gates
+    # and registers it as
     # torch.ops._native_aot.covers_topk, so a call does not walk the full grid in
     # Python.
     dtype_accept = " || ".join(f"st == {t}" for t in _DTYPES.values())

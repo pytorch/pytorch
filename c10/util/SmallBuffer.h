@@ -1,4 +1,5 @@
 #pragma once
+#include <c10/macros/Macros.h>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -55,31 +56,31 @@ class SmallBuffer {
       delete[] data_;
     }
   }
-  [[nodiscard]] T& operator[](size_t idx) {
+  [[nodiscard]] T& operator[](size_t idx) C10_LIFETIMEBOUND {
     return data()[idx];
   }
-  [[nodiscard]] const T& operator[](size_t idx) const {
+  [[nodiscard]] const T& operator[](size_t idx) const C10_LIFETIMEBOUND {
     return data()[idx];
   }
-  [[nodiscard]] T* data() {
+  [[nodiscard]] T* data() C10_LIFETIMEBOUND {
     return data_;
   }
-  [[nodiscard]] const T* data() const {
+  [[nodiscard]] const T* data() const C10_LIFETIMEBOUND {
     return data_;
   }
   [[nodiscard]] size_t size() const {
     return size_;
   }
-  [[nodiscard]] T* begin() {
+  [[nodiscard]] T* begin() C10_LIFETIMEBOUND {
     return data_;
   }
-  [[nodiscard]] const T* begin() const {
+  [[nodiscard]] const T* begin() const C10_LIFETIMEBOUND {
     return data_;
   }
-  [[nodiscard]] T* end() {
+  [[nodiscard]] T* end() C10_LIFETIMEBOUND {
     return data_ + size_;
   }
-  [[nodiscard]] const T* end() const {
+  [[nodiscard]] const T* end() const C10_LIFETIMEBOUND {
     return data_ + size_;
   }
 };

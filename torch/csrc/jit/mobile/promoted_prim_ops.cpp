@@ -93,8 +93,7 @@ void device(Stack& stack) {
 }
 
 void device_with_index(Stack& stack) {
-  std::string type = pop(stack).toStringRef();
-  auto index = pop(stack).toInt();
+  auto [type, index] = pop<std::string, int64_t>(stack);
   std::string device_str = fmt::format("{}:{}", type, index);
   auto device = c10::Device(device_str);
   push(stack, device);

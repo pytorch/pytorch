@@ -5,7 +5,7 @@ using namespace metal;
 
 template <typename T, typename IdxT>
 void im2col_kernel(
-    constant T* input,
+    device const T* input,
     device T* output,
     uint2 kernel_size,
     vec<make_signed_t<IdxT>, 2> input_offset,
@@ -32,7 +32,7 @@ void im2col_kernel(
 
 template <typename T, typename IdxT>
 kernel void im2col(
-    constant T* inputData [[buffer(0)]],
+    device const T* inputData [[buffer(0)]],
     device T* outputData [[buffer(1)]],
     constant uint4& kernel_dilation [[buffer(2)]],
     constant int4& padding_stride [[buffer(3)]],
@@ -65,16 +65,16 @@ kernel void im2col(
       output_strides.y);
 }
 
-#define INSTANTIATE_IM2COL_IDX(DTYPE, IDX, SUFFIX)                     \
-  template [[host_name("im2col_" #DTYPE "_" #SUFFIX)]] kernel void     \
-  im2col<DTYPE, IDX>(                                                  \
-      constant DTYPE * inputData [[buffer(0)]],                        \
-      device DTYPE * outputData [[buffer(1)]],                         \
-      constant uint4 & kernel_dilation [[buffer(2)]],                  \
-      constant int4 & padding_stride [[buffer(3)]],                    \
-      constant vec<IDX, 4> & input_strides [[buffer(4)]],              \
-      constant vec<IDX, 4> & output_strides [[buffer(5)]],             \
-      constant vec<make_signed_t<IDX>, 4> & input_sizes [[buffer(6)]], \
+#define INSTANTIATE_IM2COL_IDX(DTYPE, IDX, SUFFIX)                    \
+  template [[host_name("im2col_" #DTYPE "_" #SUFFIX)]] kernel void    \
+  im2col<DTYPE, IDX>(                                                 \
+      device const DTYPE* inputData [[buffer(0)]],                    \
+      device DTYPE* outputData [[buffer(1)]],                         \
+      constant uint4& kernel_dilation [[buffer(2)]],                  \
+      constant int4& padding_stride [[buffer(3)]],                    \
+      constant vec<IDX, 4>& input_strides [[buffer(4)]],              \
+      constant vec<IDX, 4>& output_strides [[buffer(5)]],             \
+      constant vec<make_signed_t<IDX>, 4>& input_sizes [[buffer(6)]], \
       uint3 thread_index [[thread_position_in_grid]])
 
 #define INSTANTIATE_IM2COL(DTYPE)           \

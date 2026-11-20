@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -77,12 +78,15 @@ class TORCH_API MPSStream {
     return _serialQueue;
   }
 
+  // NOTE: After encoding work onto the command buffer, call `markWorkEncoded`.
   MPSCommandBuffer_t commandBuffer();
   // Must be called from a block running on queue(), and the returned encoder
   // is only valid for the rest of that block.
   MTLComputeCommandEncoder_t commandEncoder();
   void endKernelCoalescing();
   void synchronize(SyncType syncType);
+  // Commits once enough kernels are encoded, so that the GPU runs them while the host keeps encoding
+  void commitIfNeeded();
   void copy(MTLBuffer_t srcBuffer,
             MTLBuffer_t dstBuffer,
             size_t length,
@@ -102,6 +106,19 @@ class TORCH_API MPSStream {
                        NSDictionary* results,
                        SyncType syncType = SyncType::NONE);
   void addCompletedHandler(MTLCommandBufferHandler block);
+
+  bool query();
+
+  // If work was encoded since the last query signal, encodes a new one and
+  // returns true, and the caller must commit it. Otherwise, the query signal is
+  // not encoded and returns false, and the caller does not need to commit.
+  bool encodeQuerySignalIfNeeded();
+
+  // Any caller that encodes work into `commandBuffer` must call this function
+  // so that `query` detects the newly encoded work.
+  void markWorkEncoded() {
+    _hasWorkSinceQuerySignal = true;
+  }
 
   /// Get the MPS device index that this stream is associated with.
   c10::DeviceIndex device_index() const {
@@ -131,8 +148,17 @@ class TORCH_API MPSStream {
   MPSGraphExecutionDescriptor* _executionDescriptor = nil;
   MPSGraphCompilationDescriptor* _compilationDescriptor = nil;
   dispatch_queue_t _serialQueue = nullptr;
+
+  // Event and signal counter used for `query`ing the stream
+  MTLSharedEvent_t _queryEvent = nullptr;
+  uint64_t _querySignalCounter = 0;
+  // Whether work may have been encoded since the last query signal or full sync
+  bool _hasWorkSinceQuerySignal = false;
+
   // CommitAndContinue is enabled by default
   bool _enableCommitAndContinue = true;
+  uint32_t _kernelsSinceCommit = 0;
+  std::atomic<uint32_t> _commandBuffersInFlight{0};
   // Buffer that contains last raised error
   MTLBuffer_t _errorBuffer = nil;
   // First execution error reported by an asynchronously committed command buffer

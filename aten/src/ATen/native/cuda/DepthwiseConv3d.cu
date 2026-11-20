@@ -66,8 +66,9 @@ __global__ void conv_depthwise3d_cuda_kernel(
 
     accscalar_t sum = 0;
     const scalar_t *kernel_ptr = kernel[out_channel].data();
-    const scalar_t *input_ptr =
-        &input[batch][in_channel][in_frame_start][in_row_start][in_col_start];
+    // Index from the channel base: with padding, the window origin lies
+    // before the input, and forming such a pointer is undefined behavior.
+    const scalar_t *input_ptr = input[batch][in_channel].data();
     for (int k_frame = 0; k_frame < kT; ++k_frame) {
       const int in_frame = in_frame_start + k_frame * dilationT;
       for (int k_row = 0; k_row < kH; ++k_row) {
@@ -77,13 +78,10 @@ __global__ void conv_depthwise3d_cuda_kernel(
           const int in_col = in_col_start + k_col * dilationW;
           if (in_frame >= 0 && in_row >= 0 && in_col >= 0 &&
               in_frame < iT && in_row < iH && in_col < iW) {
-            sum += op1 * *(input_ptr);
+            sum += op1 * *(input_ptr + (in_frame * iH + in_row) * iW + in_col);
           }
-          input_ptr += dilationW;
         }
-        input_ptr += iW * dilationH - kW * dilationW;
       }
-      input_ptr += iW * (iH * dilationT - kH * dilationH);
     }
     if (bias != nullptr) {
       sum += bias[out_channel];

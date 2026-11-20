@@ -1,5 +1,6 @@
 import ast
 import contextlib
+import functools
 import inspect
 import logging
 import threading
@@ -392,6 +393,8 @@ def triton_op(
     """
 
     def dec(fn: Callable[..., object]) -> CustomOpDef:
+        # Takes fn's __module__, so the op's module is the user's, not this one.
+        @functools.wraps(fn, updated=())
         def backend_fn(*args, **kwargs):  # type: ignore[no-untyped-def]
             # Optimization: we're passing regular Tensors into the triton kernel, so
             # no need to go through HOP dispatch

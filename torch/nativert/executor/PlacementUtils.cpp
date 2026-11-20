@@ -1,26 +1,21 @@
+#include <ATen/DeviceAccelerator.h>
 #include <torch/nativert/executor/Placement.h>
 
 namespace torch::nativert {
 
 bool isSameDevice(const c10::Device& a, const c10::Device& b) {
-  if (a.is_cpu()) {
-    return b.is_cpu();
+  if (a.type() != b.type()) {
+    return false;
   }
-  if (a.is_cuda()) {
-    if (b.is_cuda()) {
-      auto aIndex = a.has_index() ? a.index() : 0;
-      auto bIndex = b.has_index() ? b.index() : 0;
-      return aIndex == bIndex;
-    } else {
-      return false;
+  if (!at::accelerator::isAccelerator(a.type())) {
+    return true;
+  }
+  auto resolveIndex = [](const c10::Device& d) -> c10::DeviceIndex {
+    if (d.has_index()) {
+      return d.index();
     }
-  }
-  if (a.is_meta()) {
-    return b.is_meta();
-  }
-  if (a.is_mtia()) {
-    return b.is_mtia();
-  }
-  TORCH_CHECK(false, "isSameDevice: Unsupported device type ", a, " and ", b);
+    return at::accelerator::getDeviceIndex();
+  };
+  return resolveIndex(a) == resolveIndex(b);
 }
 } // namespace torch::nativert
