@@ -817,6 +817,154 @@ AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError
+torch_layout_from_pyobject(void* py_obj, int32_t* ret_layout) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret_layout != nullptr, "ret_layout must not be null");
+    // The layout code crossing the ABI is the c10::Layout enum value, the same
+    // encoding as aoti_torch_layout_*().
+    *ret_layout = static_cast<int32_t>(
+        torch::detail::getPyObjectConversionImpl().layout_from_pyobject(
+            static_cast<PyObject*>(py_obj)));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_layout_to_pyobject(int32_t layout, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    TORCH_CHECK(
+        layout >= 0 && layout < static_cast<int32_t>(c10::Layout::NumOptions),
+        "torch_layout_to_pyobject: invalid layout code ",
+        layout);
+    *ret = torch::detail::getPyObjectConversionImpl().layout_to_pyobject(
+        static_cast<c10::Layout>(layout));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_memory_format_from_pyobject(void* py_obj, int32_t* ret_memory_format) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(
+        ret_memory_format != nullptr, "ret_memory_format must not be null");
+    // The memory format code crossing the ABI is the c10::MemoryFormat enum
+    // value, the same encoding as aoti_torch_memory_format_*().
+    *ret_memory_format = static_cast<int32_t>(
+        torch::detail::getPyObjectConversionImpl().memory_format_from_pyobject(
+            static_cast<PyObject*>(py_obj)));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_memory_format_to_pyobject(int32_t memory_format, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    TORCH_CHECK(
+        memory_format >= 0 &&
+            memory_format < static_cast<int32_t>(c10::MemoryFormat::NumOptions),
+        "torch_memory_format_to_pyobject: invalid memory format code ",
+        memory_format);
+    *ret = torch::detail::getPyObjectConversionImpl().memory_format_to_pyobject(
+        static_cast<c10::MemoryFormat>(memory_format));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_bool_from_pyobject(void* py_obj, bool* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().bool_from_pyobject(
+        static_cast<PyObject*>(py_obj));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_bool_to_pyobject(bool value, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().bool_to_pyobject(value);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_int64_from_pyobject(void* py_obj, int64_t* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().int64_from_pyobject(
+        static_cast<PyObject*>(py_obj));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_int64_to_pyobject(int64_t value, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().int64_to_pyobject(value);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_double_from_pyobject(void* py_obj, double* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().double_from_pyobject(
+        static_cast<PyObject*>(py_obj));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_double_to_pyobject(double value, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().double_to_pyobject(value);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_string_from_pyobject(void* py_obj, StringHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = reinterpret_cast<StringHandle>(new std::string(
+        torch::detail::getPyObjectConversionImpl().string_from_pyobject(
+            static_cast<PyObject*>(py_obj))));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_string_to_pyobject(const char* data, size_t length, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(
+        data != nullptr || length == 0,
+        "data must not be null unless length is 0");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().string_to_pyobject(
+        std::string_view(data, length));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_none_pyobject(void* py_obj, bool* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().is_none_pyobject(
+        static_cast<PyObject*>(py_obj));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_new_none_pyobject(void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().new_none_pyobject();
+  });
+}
+
 // Most other dtypes defined in torch/csrc/inductor/aoti_torch/shim_common.cpp
 #define TORCH_DTYPE_IMPL(dtype, stype)                    \
   AOTI_TORCH_EXPORT int32_t torch_dtype_##dtype() {       \

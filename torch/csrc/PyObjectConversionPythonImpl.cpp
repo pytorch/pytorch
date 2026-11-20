@@ -8,8 +8,13 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Layout.h>
+#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/tensor_memoryformats.h>
 
 namespace torch::detail {
 
@@ -115,6 +120,159 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
     TORCH_CHECK(
         py != nullptr, "torch_device_to_pyobject: THPDevice_New returned null");
     return py;
+  }
+
+  at::Layout layout_from_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_layout_from_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(
+        THPLayout_Check(obj),
+        "torch_layout_from_pyobject: expected torch.layout, got ",
+        Py_TYPE(obj)->tp_name);
+    return reinterpret_cast<THPLayout*>(obj)->layout;
+  }
+
+  PyObject* layout_to_pyobject(at::Layout layout) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_layout_to_pyobject requires the GIL to be held");
+    // getTHPLayout returns a borrowed reference to the registered singleton.
+    PyObject* py = reinterpret_cast<PyObject*>(torch::getTHPLayout(layout));
+    Py_INCREF(py);
+    return py;
+  }
+
+  at::MemoryFormat memory_format_from_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_memory_format_from_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(
+        THPMemoryFormat_Check(obj),
+        "torch_memory_format_from_pyobject: expected torch.memory_format, got ",
+        Py_TYPE(obj)->tp_name);
+    return reinterpret_cast<THPMemoryFormat*>(obj)->memory_format;
+  }
+
+  PyObject* memory_format_to_pyobject(
+      at::MemoryFormat memory_format) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_memory_format_to_pyobject requires the GIL to be held");
+    // getTHPMemoryFormat returns a borrowed reference to the registered
+    // singleton.
+    PyObject* py = torch::utils::getTHPMemoryFormat(memory_format);
+    Py_INCREF(py);
+    return py;
+  }
+
+  // The scalar conversions pair each type check with the matching
+  // THPUtils_unpack* helper. A failure inside CPython (e.g. an int too large
+  // for a double) leaves its Python exception set via TORCH_CHECK_PYTHON.
+
+  bool bool_from_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_bool_from_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(
+        PyBool_Check(obj),
+        "torch_bool_from_pyobject: expected bool, got ",
+        Py_TYPE(obj)->tp_name);
+    return THPUtils_unpackBool(obj);
+  }
+
+  PyObject* bool_to_pyobject(bool value) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_bool_to_pyobject requires the GIL to be held");
+    return PyBool_FromLong(value);
+  }
+
+  int64_t int64_from_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_int64_from_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(
+        THPUtils_checkLong(obj),
+        "torch_int64_from_pyobject: expected int, got ",
+        Py_TYPE(obj)->tp_name);
+    return THPUtils_unpackLong(obj);
+  }
+
+  PyObject* int64_to_pyobject(int64_t value) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_int64_to_pyobject requires the GIL to be held");
+    PyObject* py = THPUtils_packInt64(value);
+    TORCH_CHECK_PYTHON(py != nullptr);
+    return py;
+  }
+
+  double double_from_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_double_from_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(
+        THPUtils_checkDouble(obj),
+        "torch_double_from_pyobject: expected float, got ",
+        Py_TYPE(obj)->tp_name);
+    return THPUtils_unpackDouble(obj);
+  }
+
+  PyObject* double_to_pyobject(double value) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_double_to_pyobject requires the GIL to be held");
+    PyObject* py = PyFloat_FromDouble(value);
+    TORCH_CHECK_PYTHON(py != nullptr);
+    return py;
+  }
+
+  std::string string_from_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_string_from_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(
+        THPUtils_checkString(obj),
+        "torch_string_from_pyobject: expected str or bytes, got ",
+        Py_TYPE(obj)->tp_name);
+    return THPUtils_unpackString(obj);
+  }
+
+  PyObject* string_to_pyobject(std::string_view str) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_string_to_pyobject requires the GIL to be held");
+    TORCH_CHECK(
+        str.size() <= static_cast<size_t>(PY_SSIZE_T_MAX),
+        "torch_string_to_pyobject: string is too long");
+    // Same as THPUtils_packString(const std::string&), without the copy.
+    PyObject* py = PyUnicode_FromStringAndSize(
+        str.data(), static_cast<Py_ssize_t>(str.size()));
+    TORCH_CHECK_PYTHON(py != nullptr);
+    return py;
+  }
+
+  bool is_none_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_is_none_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    return obj == Py_None;
+  }
+
+  PyObject* new_none_pyobject() const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_new_none_pyobject requires the GIL to be held");
+    Py_INCREF(Py_None);
+    return Py_None;
   }
 };
 
