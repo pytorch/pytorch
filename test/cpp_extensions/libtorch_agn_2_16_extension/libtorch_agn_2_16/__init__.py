@@ -12,9 +12,12 @@ if len(so_files) != 1:
 
 torch.ops.load_library(str(so_files[0]))
 
-from . import ops
+# _interop is a separate importable module exposing the Python interop helpers
+# used by the interop tests.
+from . import _interop, ops
 
 
 __all__ = [
+    "_interop",
     "ops",
 ]
