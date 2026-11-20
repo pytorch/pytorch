@@ -5151,8 +5151,9 @@ def interpolate(  # noqa: F811
         and ``align_corners=False``, the result matches PIL's ``Image.LANCZOS`` resampling filter.
 
     .. note::
-        Mode ``mode='inter-area'`` matches OpenCV's ``cv2.resize`` with ``interpolation=cv2.INTER_AREA``,
-        including how ``scale_factor`` is used. It only supports 4-D input and CPU, and doesn't support
+        Mode ``mode='inter-area'`` matches OpenCV's ``cv2.resize`` with ``interpolation=cv2.INTER_AREA``
+        for the same output size. With ``scale_factor``, the output size is computed as for the other modes,
+        which can differ from OpenCV's. It only supports 4-D input and CPU, and doesn't support
         ``align_corners``, ``antialias`` or backward. For ``uint8`` inputs, outputs can differ from OpenCV's by 1.
 
     .. note::
