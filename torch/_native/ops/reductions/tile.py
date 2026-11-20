@@ -584,7 +584,15 @@ def ragged_vector_width(N: int, itemsize: int, order: str | None, use_tma: bool)
 
 @cute.jit
 def _fold_aligned_vector(
-    reduce_fn, acc_dt, accs, aligned, frag, base, group, vec, nacc
+    reduce_fn,
+    acc_dt,
+    accs,
+    aligned,
+    frag,
+    base,
+    group,
+    vec: cutlass.Constexpr,
+    nacc: cutlass.Constexpr,
 ):
     # Fold vector `group` of the row's aligned interior (element `base` onward) into the
     # per-lane accumulators.
@@ -637,6 +645,8 @@ def fold_row_aligned(
     # Both edges are under vec long. Lane i folds prefix element i and tail element i;
     # one-thread rows fold them all in lane 0. Compare the remaining count: tail + i can
     # pass 2^31 - 1 for N near it.
+    if const_expr(1 < threads_per_row < vec):
+        raise AssertionError(f"threads_per_row must be 1 or >= vec: {threads_per_row}")
     if const_expr(threads_per_row >= vec):
         prefix_valid = lane < prefix
         prefix_index = lane if prefix_valid else Int32(0)
@@ -720,10 +730,11 @@ def fold_linear_rolled(
 
     Single-field traits fold element e into accumulator e % WARP and combine those like
     warp_reduce: chains of every WARP-th element, then a tree. For rows narrower than
-    128 elements that is ATen's association at the M >= 16 the dispatcher routes here.
-    Accumulators past a short row stay at init and combine as identities. Multi-field
-    traits keep fold_row_rolled's per-lane accumulators. `unroll` applies to multi-field
-    traits only; each single-field wave already issues WARP elements of loads.
+    128 elements that is ATen's association (CUDA) for M >= 16, which covers every M the
+    dispatcher routes here. Accumulators past a short row stay at init and combine as
+    identities. Multi-field traits keep fold_row_rolled's per-lane accumulators.
+    `unroll` applies to multi-field traits only; each single-field wave already issues
+    WARP elements of loads.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     gv = cute.flat_divide(mX[Int64(r), None], (vec,))
@@ -2079,8 +2090,10 @@ class TileReduce:
         elif const_expr(self.use_tma):
             accs = (self._fold_tma(mIns[0], tma_atom, bx, tx),)
         elif const_expr(self.ragged_vector):
-            # One kernel per launch class: on B200 16-bit odd-width sums ran a
-            # median 0.90-1.11x of a kernel baked per width, fp32 1.07-1.17x.
+            # One kernel per launch class. On B200, sum and amax at widths 1001-16383
+            # and 16-256 MiB took a median 0.96x (fp16), 0.97x (bf16) and 1.06x (fp32)
+            # of the time of the per-width kernels this replaced.
+            # Ragged rows must not read tm.N: cache_sig leaves N out for them.
             acc = fold_row_aligned(
                 trait,
                 mIns[0],

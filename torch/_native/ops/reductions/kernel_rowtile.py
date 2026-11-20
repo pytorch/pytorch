@@ -890,10 +890,10 @@ def reduce_row_tile(
     order="inner_tree" and use_tma=True for every N. Rows of whole 16-byte vectors at a
     pitch of whole vectors otherwise fall through to normal path selection; ragged rows
     need a 16-byte aligned base and raise ValueError on any other rather than fall back.
-    Other rows need a pitch of whole N-wide vectors. A ragged row's scalar prefix depends
-    on its start, so identical rows can round differently. Callers must pre-check a
-    16-byte base for ragged rows: whole rows at a misaligned base take narrow loads, but
-    ragged rows raise.
+    Other rows need stride(0) to be a multiple of vec_size(N). A ragged row's scalar
+    prefix depends on its start, so identical rows can round differently. Callers must
+    pre-check a 16-byte base for ragged rows: whole rows at a misaligned base take
+    narrow loads, but ragged rows raise.
     """
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
