@@ -109,6 +109,7 @@
                 unfused_load="a_desc.load([offs_am, offs_k])" if A_ROW_MAJOR else "a_desc.load([offs_k, offs_am]).T",
                 prologue_descriptor_offsets=("offs_am", "offs_k"),
                 prologue_descriptor_block_shape=("BLOCK_M", "BLOCK_K"),
+                prologue_reuse=(-1, "BLOCK_N", -2, "BLOCK_M"),
             )}}
             {%- else %}
             a_b = batch + tl.arange(0, 1)[:, None, None]
@@ -124,6 +125,7 @@
                 unfused_load="a_desc.load([batch, offs_am, offs_k])" if A_ROW_MAJOR else "tl.permute(a_desc.load([batch, offs_k, offs_am]), (0, 2, 1))",
                 prologue_descriptor_offsets=("batch", "offs_am", "offs_k"),
                 prologue_descriptor_block_shape=("1", "BLOCK_M", "BLOCK_K"),
+                prologue_reuse=(-1, "BLOCK_N", -2, "BLOCK_M"),
             )}}
             a = a.reshape((BLOCK_M, BLOCK_K))
             {%- endif %}
@@ -174,6 +176,7 @@
                 unfused_load="b_desc.load([batch, offs_k, offs_bn])" if B_ROW_MAJOR else "tl.permute(b_desc.load([batch, offs_bn, offs_k]), (0, 2, 1))",
                 prologue_descriptor_offsets=("batch", "offs_k", "offs_bn"),
                 prologue_descriptor_block_shape=("1", "BLOCK_K", "BLOCK_N"),
+                prologue_reuse=(-2, "BLOCK_M", -1, "BLOCK_N"),
             )}}
             b = b.reshape((BLOCK_K, BLOCK_N))
             {%- endif %}
