@@ -1410,6 +1410,22 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(out, bytearray(b"jello"))
         self.assertEqual(ba, bytearray(b"hello"))
 
+    @parametrize("method", ["strip", "lstrip", "rstrip"])
+    def test_strip_nonconstant_chars_graph_break(self, method):
+        class BytesSubclass(bytes):
+            pass
+
+        def fn(ba, chars):
+            return getattr(ba, method)(chars)
+
+        args = bytearray(b"-abc-"), BytesSubclass(b"-")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            f"Dynamo does not know how to trace method `{method}` of class `bytearray`",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        self.assertEqual(torch.compile(fn, backend="eager")(*args), fn(*args))
+
     def test_zfill_expandtabs_returns_new_bytearrays(self):
         def f(ba, x):
             return ba.zfill(1), ba.expandtabs(), x + 1
