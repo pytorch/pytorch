@@ -3297,6 +3297,24 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(torch.logcumsumexp(x, dim), expected, **tol)
 
     @onlyCUDA
+    @dtypes(*floating_types_and(torch.half, torch.bfloat16, torch.complex64))
+    def test_logcumsumexp_last_dim(self, device, dtype):
+        # On ROCm, last-dim and 1-D logcumsumexp launches that fit in one or two blocks per CU take
+        # 4 items per thread for (3, 1000) and (1023,) and 8 for (3, 2000) and (2047,), and rows
+        # with a block each take as few as cover them: 4 for (2000, 900), 8 for (2000, 1500). Some
+        # run the stock kernel or hipCUB instead, e.g. complex64 (3, 2000) and (2047,).
+        # Each runs aligned and one element into its storage. f16 / bf16 partial results are rounded
+        # to the dtype after every combine, which costs up to about 2 ulp on these lines.
+        ref_dtype = torch.complex128 if dtype.is_complex else torch.double
+        tol = {torch.half: {"atol": 4e-3, "rtol": 4e-3}, torch.bfloat16: {"atol": 3e-2, "rtol": 3e-2}}.get(dtype, {})
+        for shape in ((3, 1000), (1023,), (3, 2000), (2047,), (2000, 900), (2000, 1500)):
+            x = torch.randn(shape, dtype=dtype)
+            expected = torch.logcumsumexp(x.to(ref_dtype), -1).to(dtype)
+            for off in (0, 1):
+                x_dev = torch.empty(x.numel() + off, dtype=dtype, device=device)[off:].view(shape)
+                self.assertEqual(torch.logcumsumexp(x_dev.copy_(x), -1), expected, **tol)
+
+    @onlyCUDA
     @dtypes(*floating_types())
     def test_cumulative_ops_special_values(self, device, dtype):
         # -inf, inf and nan on lines long enough to cross the tile and chunk boundaries of the ROCm
