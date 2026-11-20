@@ -55,7 +55,8 @@ class TestInnerTreeCombineUnroll(TestCase):
             ({"combine_rpb": 64}, "combine_rpb"),
             (
                 {"uniform_combine": "weight"},
-                "^uniform_combine must be 'off', 'counts' or 'weights', got 'weight'$",
+                r"^uniform_combine must be one of \('off', 'counts', 'weights'\), "
+                r"got 'weight'$",
             ),
         ],
         name_fn=lambda u, e: next(iter(u)),
@@ -196,11 +197,13 @@ class TestInnerTreeCombineUnroll(TestCase):
 
         self.assertTrue(tile.uniform_combine_ok(CountsOnly(), split, "counts"))
         self.assertFalse(tile.uniform_combine_ok(CountsOnly(), split, "weights"))
+        # An unknown mode fails rather than folding as "counts".
+        self.assertFalse(tile.uniform_combine_ok(CountsOnly(), split, "weight"))
 
     @parametrize(
         "updates,msg",
         [
-            ({"uniform_combine": "weight"}, "must be 'off', 'counts' or 'weights'"),
+            ({"uniform_combine": "weight"}, r"must be one of \('off', 'counts'"),
             ({"shape": "split"}, "staged combine plan"),
             ({"combine_tile": 0}, "staged combine plan"),
             ({"trait": "sum"}, "combine_uniform, got SumOps"),
@@ -540,8 +543,8 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         unstaged = plan._replace(
             rows_per_block=128, combine_grp=1, combine_tile=0, combine_unroll=0
         )
-        # NaN count fields show that the candidate's arithmetic never reads counts (the
-        # smem budget test covers not staging them).
+        # NaN count fields show that the candidate's arithmetic never reads counts. The
+        # smem budget test checks only the planner's footprint, not kernel staging.
         poisoned = parts[:2] + [torch.full_like(parts[2], float("nan"))]
         # Distinct kernels, so the bits below compare three compiled folds.
         sigs = (
