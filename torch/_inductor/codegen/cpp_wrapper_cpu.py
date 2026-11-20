@@ -3308,7 +3308,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     # but is serialized as_bool and prefilled statically, so it
                     # must not be counted here.
                     if type(arg) is int:
-                        new_int_args.append(str(arg))
+                        # The magnitude of INT64_MIN is not a signed C++ literal.
+                        if arg == -(1 << 63):
+                            new_int_args.append("(-9223372036854775807LL - 1)")
+                        else:
+                            new_int_args.append(str(arg))
             elif isinstance(arg, ir.TorchBindObject):
                 # torchbind objects are loaded in proxy executor
                 pass

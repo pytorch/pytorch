@@ -112,6 +112,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
+    subtest,
     TEST_MPS,
     TEST_WITH_ROCM,
     TEST_XPU,
@@ -6550,7 +6551,7 @@ class AOTInductorTestsTemplate:
         # tensor", a wrapped number) on a no-c-shim op. complex64 forces div.Tensor to
         # fall back to the AOT ProxyExecutor (Inductor has no complex lowering and there
         # is no c-shim), and 2.0 lands in div.Tensor's Tensor-typed `other` slot.
-        # Exercises FallbackKernel._materialize_scalar_tensor_args: the scalar is
+        # Exercises FallbackKernel._prepare_aot_proxy_args: the scalar is
         # materialized into a constant tensor buffer so the proxy-executor path can
         # serialize it (this previously raised AssertionError: got <class 'float'> in
         # fill_args).
@@ -6561,6 +6562,49 @@ class AOTInductorTestsTemplate:
         example_args = (torch.randn((1, 300, 201), dtype=torch.complex64),)
         m = M()
         self.check_model(m, example_args)
+
+    @parametrize("shape", [(), (4,)])
+    @parametrize(
+        "dtype, scalar, expected_value",
+        [
+            subtest((torch.int8, 200, -56), name="int8_200"),
+            subtest((torch.int8, -(1 << 63), 0), name="int8_min"),
+            subtest((torch.int64, -(1 << 63), -(1 << 63)), name="int64_min"),
+        ],
+    )
+    def test_proxy_executor_mul_scalar(self, shape, dtype, scalar, expected_value):
+        from torch._inductor.lowering import fallbacks, force_fallback
+        from torchgen.aoti import fallback_ops
+
+        op = torch.ops.aten.mul.Tensor
+        if op not in fallbacks:
+            self.addCleanup(fallbacks.discard, op)
+
+        class M(nn.Module):
+            def forward(self, x):
+                return op(x, scalar)
+
+        model = M()
+        x = torch.ones(shape, dtype=dtype, device=self.device)
+        expected = model(x)
+        self.assertEqual(expected, torch.full_like(x, expected_value))
+        ep = export(model, (x,))
+        self.assertIn(op, [node.target for node in ep.graph.nodes])
+
+        # Simulate a backend with no mul.Tensor C shim.
+        shims = dict(fallback_ops.inductor_fallback_ops)
+        del shims[str(op)]
+        with (
+            patch.object(fallback_ops, "inductor_fallback_ops", shims),
+            force_fallback(op),
+        ):
+            package, code = run_and_get_cpp_code(
+                torch._inductor.aoti_compile_and_package,
+                ep,
+                inductor_configs={"force_disable_caches": True},
+            )
+        self.assertIn("aoti_torch_proxy_executor_call_function(proxy_executor,", code)
+        self.assertEqual(torch._inductor.aoti_load_package(package)(x), expected)
 
     def test_proxy_executor_symint_scalar_arg(self):
         # A SymInt (a symbolic scalar from a dynamic shape) bound to a Number/Scalar-typed
