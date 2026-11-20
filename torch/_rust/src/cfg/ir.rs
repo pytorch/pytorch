@@ -652,15 +652,55 @@ pub struct Cfg {
     pub trainings: Vec<Arc<Training>>,
     // What Op::Region instrs run.
     pub regions: Vec<Arc<RegionSpec>>,
+    // Stretches of blocks traced into one region together (see Span).
+    pub spans: Vec<Span>,
+}
+
+// Single-entry blocks, from `entry` to `exit` (or returning), that only
+// compute, write the frame's locals and change containers they make: run as
+// a compiled region of everything they do (see exec/run.rs's span_trace).
+#[derive(Clone, Debug)]
+pub struct Span {
+    pub entry: BlockId,
+    // None: it leaves by returning.
+    pub exit: Option<BlockId>,
+    // Its blocks (entry included), sorted.
+    pub blocks: Vec<BlockId>,
+    // Those never seen run: a trace that runs one gives up.
+    pub never: Vec<BlockId>,
+    // The locals it may read before writing them, and those it writes that
+    // may be read after it.
+    pub live_in: Vec<u32>,
+    pub live_out: Vec<u32>,
+    // The region's args: live_in's locals, or for one the span only reads
+    // attributes of, those attributes (read on entry: nothing it runs can
+    // change them), as (slot, Some(name index)).
+    pub inputs: Vec<(u32, Option<u32>)>,
+    pub name: String,
+    pub state: Arc<SpanState>,
+}
+
+// A span's regions (tried in order), and when to trace another. Shared by
+// every Cfg made from the one the span was found in.
+#[derive(Default)]
+pub struct SpanState {
+    pub regions: std::sync::Mutex<Vec<Arc<RegionSpec>>>,
+    pub runs: std::sync::atomic::AtomicU32,
+    pub off: std::sync::atomic::AtomicBool,
+}
+
+impl std::fmt::Debug for SpanState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SpanState({} regions)", self.regions.lock().unwrap().len())
+    }
 }
 
 // A pure block's version traced into an aten graph and compiled (see
-// exec/region.rs). `func` takes a list of the tensors at `tensor_args` (by
-// position among the Op::Region's args) and returns the graph's outputs;
-// each block output is built as `outputs` says.
+// exec/region.rs). `func` takes a list of the Op::Region's args and returns
+// the graph's outputs (None: its checks failed); each block output is built
+// as `outputs` says.
 pub struct RegionSpec {
     pub func: pyo3::Py<pyo3::PyAny>,
-    pub tensor_args: Vec<u32>,
     pub outputs: Vec<RegionOut>,
     // What RegionOut::Obj indexes.
     pub objects: Vec<pyo3::Py<pyo3::PyAny>>,
@@ -669,7 +709,7 @@ pub struct RegionSpec {
 
 impl std::fmt::Debug for RegionSpec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "RegionSpec({}, {} tensor args, {} outputs)", self.name, self.tensor_args.len(), self.outputs.len())
+        write!(f, "RegionSpec({}, {} outputs)", self.name, self.outputs.len())
     }
 }
 
@@ -682,6 +722,12 @@ pub enum RegionOut {
     Obj(u32),
     Tuple(Vec<RegionOut>),
     List(Vec<RegionOut>),
+    // Keys (RegionSpec::objects indices) and values.
+    Dict(Vec<u32>, Vec<RegionOut>),
+    // An iterator over what's left of the one the trace made (a list).
+    Iter(Box<RegionOut>),
+    // RegionSpec::objects[i] called on a list of these (rebuilding a pytree).
+    Call(u32, Vec<RegionOut>),
     Null,
 }
 
@@ -769,6 +815,7 @@ impl Cfg {
             const_pins: vec![],
             trainings: vec![],
             regions: vec![],
+            spans: vec![],
         }
     }
 
@@ -944,6 +991,22 @@ impl Cfg {
             }
             self.blocks.push(blk);
         }
+        self.spans.retain_mut(|sp| {
+            let Some(entry) = map[sp.entry.idx()] else { return false };
+            let exit = match sp.exit {
+                Some(x) => match map[x.idx()] {
+                    Some(x) => Some(x),
+                    None => return false,
+                },
+                None => None,
+            };
+            sp.entry = entry;
+            sp.exit = exit;
+            sp.blocks = sp.blocks.iter().filter_map(|b| map[b.idx()]).collect();
+            sp.blocks.sort();
+            sp.never = sp.never.iter().filter_map(|b| map[b.idx()]).collect();
+            true
+        });
         map
     }
 
