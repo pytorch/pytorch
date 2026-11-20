@@ -50,21 +50,22 @@ class TestMultipleWrapping(FSDPTestContinuous):
         This is required in cases where later in a session, the model is wrapped again in FSDP but
         contains nested FSDP wrappers within the module.
         """
-        inner_model = InnerModel(self.device_type)
-        model = FSDP(inner_model).to(self.device_type)
+        device_type = torch.device(device).type
+        inner_model = InnerModel(device_type)
+        model = FSDP(inner_model).to(device_type)
         optim = SGD(model.parameters(), lr=0.1)
         for _ in range(3):
-            input = torch.rand((1, 5), dtype=torch.float).to(self.device_type)
+            input = torch.rand((1, 5), dtype=torch.float).to(device_type)
             input.requires_grad = True
             output = model(input)
             output.sum().backward()
             optim.step()
             optim.zero_grad()
-        input = torch.rand((1, 5), dtype=torch.float).to(self.device_type)
+        input = torch.rand((1, 5), dtype=torch.float).to(device_type)
         output = model(input)
         # second time to rewrap the inner model
         # rewrapped_model = FSDP(inner_model, device_id=device)
-        rewrapped_model = FSDP(inner_model).to(self.device_type)
+        rewrapped_model = FSDP(inner_model).to(device_type)
         rewrapped_output = rewrapped_model(input)
         self.assertEqual(output, rewrapped_output)
 
