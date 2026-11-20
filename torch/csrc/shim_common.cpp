@@ -22,6 +22,7 @@
 #include <torch/csrc/stable/c/shim.h>
 
 #include <cstring>
+#include <iomanip>
 #include <type_traits>
 
 // The stable conversion currently uses c10::SymInt's data_ word directly.
@@ -344,8 +345,11 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
  public:
   StableIValueBoxedKernel(
       void (*fn)(StableIValue*, uint64_t, uint64_t),
-      uint64_t extension_build_version)
-      : fn_(fn), extension_build_version_(extension_build_version) {}
+      uint64_t extension_build_version,
+      uint64_t extension_target_version)
+      : fn_(fn),
+        extension_build_version_(extension_build_version),
+        extension_target_version_(extension_target_version) {}
 
   void operator()(
       const c10::OperatorHandle& op,
@@ -363,7 +367,10 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
       const c10::TypePtr& arg_type =
           schema.arguments()[ministack_idx].real_type();
       ministack[ministack_idx] = from_ivalue(
-          arg_type, torch::jit::pop(stack), extension_build_version_, 0);
+          arg_type,
+          torch::jit::pop(stack),
+          extension_build_version_,
+          extension_target_version_);
     }
 
     // boxed function is going to take a stack of StableIValues, cast them to
@@ -376,13 +383,19 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
       const c10::TypePtr& ret_type = schema.returns()[idx].real_type();
       torch::jit::push(
           stack,
-          to_ivalue(ret_type, ministack[idx], extension_build_version_, 0));
+          to_ivalue(
+              ret_type,
+              ministack[idx],
+              extension_build_version_,
+              extension_target_version_));
     }
   }
 
  private:
   void (*fn_)(StableIValue*, uint64_t, uint64_t);
   uint64_t extension_build_version_;
+  // Zero denotes an original API without explicit target metadata.
+  uint64_t extension_target_version_;
 };
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
@@ -393,7 +406,8 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
     reinterpret_cast<torch::Library*>(self)->impl(
         name,
         torch::CppFunction::makeFromBoxedFunctor(
-            std::make_unique<StableIValueBoxedKernel>(fn, TORCH_ABI_VERSION)));
+            std::make_unique<StableIValueBoxedKernel>(
+                fn, TORCH_ABI_VERSION, 0)));
   });
 }
 
@@ -422,7 +436,31 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_impl(
         name,
         torch::CppFunction::makeFromBoxedFunctor(
             std::make_unique<StableIValueBoxedKernel>(
-                fn, extension_build_version)));
+                fn, extension_build_version, 0)));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_library_impl_v2(
+    TorchLibraryHandle self,
+    const char* name,
+    void (*fn)(StableIValue*, uint64_t, uint64_t),
+    uint64_t extension_build_version,
+    uint64_t extension_target_version) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(
+        extension_target_version <= extension_build_version,
+        "extension_target_version must be <= extension_build_version",
+        " (target=0x",
+        std::hex,
+        extension_target_version,
+        ", build=0x",
+        extension_build_version,
+        ")");
+    reinterpret_cast<torch::Library*>(self)->impl(
+        name,
+        torch::CppFunction::makeFromBoxedFunctor(
+            std::make_unique<StableIValueBoxedKernel>(
+                fn, extension_build_version, extension_target_version)));
   });
 }
 
@@ -624,7 +662,13 @@ AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher_v2(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     TORCH_CHECK(
         extension_target_version <= extension_build_version,
-        "extension_target_version must be <= extension_build_version");
+        "extension_target_version must be <= extension_build_version",
+        " (target=0x",
+        std::hex,
+        extension_target_version,
+        ", build=0x",
+        extension_build_version,
+        ")");
     call_dispatcher(
         opName,
         overloadName,

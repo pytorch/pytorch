@@ -412,6 +412,17 @@ AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher_v2(
     uint64_t extension_build_version,
     uint64_t extension_target_version);
 
+// Like torch_library_impl, but also records the target version for
+// StableIValue conversions (target <= build). The library borrows fn for the
+// registration lifetime. Its uint64_t arguments remain input/output counts;
+// build and target versions are stored in the native registration.
+AOTI_TORCH_EXPORT AOTITorchError torch_library_impl_v2(
+    TorchLibraryHandle self,
+    const char* name,
+    void (*fn)(StableIValue*, uint64_t, uint64_t),
+    uint64_t extension_build_version,
+    uint64_t extension_target_version);
+
 // A SymInt word is the integer itself in [-2^62, 2^63-1]. Other words are
 // opaque references; only libtorch may interpret them.
 // Constructs an owning word, including for integers outside the inline range.

@@ -38,7 +38,7 @@ For complete API documentation of the stable operators, see the [Torch Stable AP
 
 (shim-overhead)=
 ```{note}
-Calling into libtorch through the stable wrappers and C shims comes with slight overhead compared to calling the equivalent `at::`/`c10::` APIs directly. Some ops in `torch/csrc/stable/ops.h` (e.g. `torch::stable::matmul`) go through [`torch_call_dispatcher`](stack-based-apis) internally, which adds extra overhead to each call from looking up the op by name and boxing and unboxing arguments and returns into their stable counterparts.
+Calling into libtorch through the stable wrappers and C shims comes with slight overhead compared to calling the equivalent `at::`/`c10::` APIs directly. Some ops in `torch/csrc/stable/ops.h` (e.g. `torch::stable::matmul`) go through the version-selecting [`torch::stable::call_dispatcher`](stack-based-apis) helper internally, while others use direct C shims. Dispatcher-backed calls add overhead from looking up the op by name and boxing and unboxing arguments and returns into their stable counterparts.
 ```
 
 ### Stable C headers
@@ -260,6 +260,14 @@ The above is relevant in two places:
     }
     ```
 
+    In 2.16, `torch_library_impl_v2` adds the target version alongside the header
+    build version for version-aware StableIValue conversions. The C++ wrapper
+    `m.impl(name, TORCH_BOX(&fn))` automatically selects v2 for targets >= 2.16,
+    passing the build and effective minimum runtime target; targets 2.10-2.15 use
+    the build-only v1 API, and 2.9 uses `aoti_torch_library_impl`. Native registration
+    stores both versions, with target <= build; the callback still receives input
+    and output counts. The raw v1 and `aoti_*` APIs retain their original contracts.
+
 2. Calling the dispatcher
     From C++, you may call the PyTorch dispatcher with `torch::stable::call_dispatcher` from `torch/csrc/stable/ops.h`:
 
@@ -275,18 +283,33 @@ The above is relevant in two places:
     the extension's target version to better support adapters for compatibility.
 
     ```cpp
-    torch_call_dispatcher(const char* opName, const char* overloadName, StableIValue* stack, uint64_t extension_build_version);
+    AOTITorchError aoti_torch_call_dispatcher(
+        const char* opName, const char* overloadName, StableIValue* stack);
+    AOTITorchError torch_call_dispatcher(
+        const char* opName, const char* overloadName, StableIValue* stack,
+        uint64_t extension_build_version);
+    AOTITorchError torch_call_dispatcher_v2(
+        const char* opName, const char* overloadName, StableIValue* stack,
+        uint64_t extension_build_version, uint64_t extension_target_version);
     ```
+
+    For target 2.9, C callers use `aoti_torch_call_dispatcher` without version
+    arguments. For targets 2.10-2.15, use `torch_call_dispatcher` with the build
+    version. For targets >= 2.16, use `torch_call_dispatcher_v2` with both build
+    and target. The v2 declaration is exposed only when targeting >= 2.16
+    (`TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0`); older targets use the
+    appropriate older C entrypoint. The C++ helper selects this automatically.
 
     `torch_call_dispatcher` will call the op overload defined by a given `opName`, `overloadName`, a stack of
     StableIValues and the `TORCH_ABI_VERSION` of the user extension. This call will populate any return values of the
     op into the stack in their StableIValue form, with `ret0` at index 0, `ret1` at index 1, and so on.
 
     `torch_call_dispatcher_v2` is the recommended version of `torch_call_dispatcher`
-    because it adds `extension_target_version` after `extension_build_version`. Pass
-    `TORCH_ABI_VERSION` for build and `TORCH_TARGET_VERSION` for target, where target
-    <= build. If no target is specified, it defaults to the build version;
-    `TORCH_FEATURE_VERSION` provides this effective target in either case.
+    because it adds `extension_target_version` after `extension_build_version`.
+    Pass `TORCH_ABI_VERSION` for build. When `TORCH_TARGET_VERSION` is defined,
+    pass it for target; otherwise pass `TORCH_ABI_VERSION` as the effective target.
+    Target must be <= build. Internally, `TORCH_FEATURE_VERSION` resolves this
+    default for the C++ wrappers.
 
     We caution against using this API to call functions that have been registered to the dispatcher by other extensions
     unless the caller can guarantee that the signature they expect matches that which the custom extension has
