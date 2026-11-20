@@ -310,7 +310,7 @@ def fold_uniform_tree(
     for load in cutlass.range_constexpr(nloads):
         r = tidx + Int32(const_expr(load * threads_per_block))
         off = obase + _decode_offset(r, None, rstrides, 1)
-        leaf = trait.leaf(trait.acc(mX[off]), r)
+        leaf = trait.leaf(mX[off], r)
         _equal_count_push(tree, leaf, load, trait.combine_equal)
     acc = _linear_reduce(tree, trait.combine)
     if const_expr(tail):
@@ -318,7 +318,7 @@ def fold_uniform_tree(
         valid = r < rb
         safe = r if valid else Int32(0)
         off = obase + _decode_offset(safe, None, rstrides, 1)
-        leaf = trait.leaf(trait.acc(mX[off]), safe)
+        leaf = trait.leaf(mX[off], safe)
         # Not trait.reduce: tree folds merge leaves via combine, not the online update.
         merged = trait.combine(acc, leaf)
         acc = tuple(
@@ -350,6 +350,7 @@ def fold_partials_run(
     acc = trait.init()
     n_full = rb // threads_per_block
     r = tidx
+    accs = ()
     if const_expr(nf == 1):
         group, step = const_expr(_PARTIAL_GROUP), const_expr(threads_per_block)
         accs = tuple(trait.init() for _ in range(_PARTIAL_ACCS))
@@ -455,10 +456,12 @@ def _equal_count_push(tree, val, load: int, combine_equal_fn) -> None:
 
 
 def _equal_count_reduce(vals, combine_equal_fn):
-    # Needs a power-of-two count of one-value states; others leave several roots.
+    # Needs a power-of-two count of one-value states; others raise.
     tree: list = []
     for i, val in enumerate(vals):
         _equal_count_push(tree, val, i, combine_equal_fn)
+    if len(tree) != 1:
+        raise ValueError(f"need a power-of-two count of states, got {len(vals)}")
     return tree[0]
 
 
@@ -695,41 +698,6 @@ def fold_row_aligned(
 
 
 @cute.jit
-def _fold_tail_vectors(
-    reduce_fn,
-    acc_dt,
-    gv,
-    gfrag,
-    accs,
-    c0,
-    e0,
-    rem,
-    vec: cutlass.Constexpr,
-    group: cutlass.Constexpr,
-    j: cutlass.Constexpr,
-):
-    # If j < rem, fold vector c0 + j (element e0 + j * vec onward) into accumulators
-    # j * vec onward and nest vector j + 1 in that branch, so a short remainder costs
-    # one test past its last vector.
-    if const_expr(j < group - 1):
-        lo = const_expr(j * vec)
-        if Int32(j) < rem:
-            cute.autovec_copy(gv[None, c0 + Int32(j)], gfrag[None, j])
-            accs = (
-                accs[:lo]
-                + tuple(
-                    reduce_fn(accs[lo + i], acc_dt(gfrag[i, j]), e0 + lo + i, True)
-                    for i in range(vec)
-                )
-                + accs[lo + vec :]
-            )
-            accs = _fold_tail_vectors(
-                reduce_fn, acc_dt, gv, gfrag, accs, c0, e0, rem, vec, group, j + 1
-            )
-    return accs
-
-
-@cute.jit
 def fold_linear_rolled(
     trait,
     mX: cute.Tensor,
@@ -764,13 +732,22 @@ def fold_linear_rolled(
                 reduce_fn(accs[k], acc_dt(gfrag[k % vec, k // vec]), e0 + k, True)
                 for k in range(WARP)
             )
-        # Every thread in the warp shares N, so these branches are uniform and skip the
-        # loads past the row.
+        # The rem < group tail vectors load independently. Callers keep rows nonempty,
+        # so tail lanes past the row clamp to vector 0 and fold masked.
         last = full * Int32(group)
         rem = nchunks - last
-        accs = _fold_tail_vectors(
-            reduce_fn, acc_dt, gv, gfrag, accs, last, last * vec, rem, vec, group, 0
+        oks = []
+        for j in cutlass.range_constexpr(group - 1):
+            ok = Int32(j) < rem
+            chunk = last + Int32(j) if ok else Int32(0)
+            cute.autovec_copy(gv[None, chunk], gfrag[None, j])
+            oks.append(ok)
+        t0, ntail = last * vec, const_expr((group - 1) * vec)
+        tail = tuple(
+            reduce_fn(accs[k], acc_dt(gfrag[k % vec, k // vec]), t0 + k, oks[k // vec])
+            for k in range(ntail)
         )
+        accs = tail + accs[ntail:]
         return _halving_reduce(accs, trait.combine)
     nacc = const_expr(min(vec, _FIELD_ACCS))
     accs = tuple(trait.init() for _ in range(nacc))
@@ -900,6 +877,10 @@ def fold_smem_rotated(trait, sX, rb, N: cutlass.Constexpr):
     return _linear_reduce(accs, trait.combine)
 
 
+# Rows per equal-count column tree; 1 folds every row online.
+_COL_GROUPS = (1, 4, 8, 16)
+
+
 @cute.jit
 def fold_cols_rolled(
     trait,
@@ -921,7 +902,7 @@ def fold_cols_rolled(
     a trait with combine_equal, which TileReduce checks. Each group already issues
     `group` independent loads, so only the online loop unrolls.
     """
-    if const_expr(col_group not in (1, 4, 8, 16)):
+    if const_expr(col_group not in _COL_GROUPS):
         raise AssertionError(f"col_group must be 1, 4, 8 or 16, got {col_group}")
     reduce_fn, acc_dt = trait.reduce, trait.acc
     accs = tuple(trait.init() for _ in range(vec))
@@ -1052,7 +1033,7 @@ class TileReduce:
         if axis == "col" and vec is None:
             # Column vec cannot be inferred from load width.
             raise ValueError("the col axis needs an explicit vec")
-        if col_group not in (1, 4, 8, 16):
+        if col_group not in _COL_GROUPS:
             raise ValueError(f"col_group must be 1, 4, 8 or 16, got {col_group}")
         if col_group > 1:
             issue = _col_group_issue(trait, axis, combine, vec)
@@ -2141,7 +2122,7 @@ class TileReduce:
         elif const_expr(self.ragged_vector):
             # One kernel per launch class. On B200, sum and amax at widths 1001-16383
             # and 16-256 MiB took a median 0.96x (fp16), 0.97x (bf16) and 1.06x (fp32)
-            # of the time of the per-width kernels this replaced.
+            # of the time of an earlier revision of this PR that compiled one per width.
             # Ragged rows must not read tm.N: cache_sig leaves N out for them.
             acc = fold_row_aligned(
                 trait,
