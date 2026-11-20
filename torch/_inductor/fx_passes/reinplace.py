@@ -508,12 +508,16 @@ def _is_layout_preserving_view_copy_back(
     mutated_arg: torch.fx.Node,
     src_base: torch.fx.Node,
 ) -> bool:
-    return _same_size_stride_and_storage_offset(
-        cast(torch.Tensor, src_base.meta["val"]),
-        cast(torch.Tensor, mutated_arg.meta["val"]),
-    ) and _same_size_stride_and_storage_offset(
-        cast(torch.Tensor, src.meta["val"]),
-        cast(torch.Tensor, dst.meta["val"]),
+    return (
+        src.meta["val"].dtype == dst.meta["val"].dtype
+        and _same_size_stride_and_storage_offset(
+            cast(torch.Tensor, src_base.meta["val"]),
+            cast(torch.Tensor, mutated_arg.meta["val"]),
+        )
+        and _same_size_stride_and_storage_offset(
+            cast(torch.Tensor, src.meta["val"]),
+            cast(torch.Tensor, dst.meta["val"]),
+        )
     )
 
 
@@ -617,7 +621,7 @@ def reinplace_inplaceable_ops_core(
 
             mutated_inputs.add(node.args[0])
 
-    def copy_nodes_after(node, mutated_arg):
+    def get_input_copybacks_after_candidate(node, mutated_arg):
         base = _get_view_base(mutated_arg)
         return (
             copy_node
@@ -848,8 +852,9 @@ def reinplace_inplaceable_ops_core(
         mutated_arg_base = mutated_arg
         if any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
             mutated_arg_base = _get_view_base(mutated_arg)
+            # Use the next input overwrite for permission and liveness checks.
             copy_node = min(
-                copy_nodes_after(node, mutated_arg_base),
+                get_input_copybacks_after_candidate(node, mutated_arg_base),
                 key=node_order.__getitem__,
                 default=None,
             )
@@ -922,10 +927,14 @@ def reinplace_inplaceable_ops_core(
         if copy_node is not None and copy_node._erased:
             copy_node = None
         if copy_node is None and isinstance(mutated_arg, torch.fx.Node):
+            # Only a layout-preserving copy of this candidate's result can be removed
+            # upon reinplacement of candidate.
             copy_node = min(
                 (
                     copy_node
-                    for copy_node in copy_nodes_after(node, mutated_arg)
+                    for copy_node in get_input_copybacks_after_candidate(
+                        node, mutated_arg
+                    )
                     if isinstance(copy_node.args[1], torch.fx.Node)
                     and _get_view_base(copy_node.args[1]) is node
                     and _is_layout_preserving_view_copy_back(
