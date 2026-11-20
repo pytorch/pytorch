@@ -1621,6 +1621,109 @@ class TestRangeIndex(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 3)
 
 
+@instantiate_parametrized_tests
+class TestRangeCount(torch._dynamo.test_case.TestCase):
+    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("value", [True, 1.0, 1 + 0j, 2.5])
+    def test_numeric_equality(self, backend, value):
+        def fn(x):
+            return x + range(3).count(value)
+
+        x = torch.tensor(0)
+        self.assertEqual(torch.compile(fn, backend=backend, fullgraph=True)(x), fn(x))
+
+    @parametrize("bounds", [(0, 5, 1), (5, 0, -2), (0, 0, 1)])
+    def test_custom_equality_counts_all_matches(self, bounds):
+        class Match:
+            def __init__(self):
+                self.seen = []
+
+            def __eq__(self, other):
+                self.seen.append(other)
+                return other % 2 == 1
+
+        def fn(x):
+            needle = Match()
+            return x + range(*bounds).count(needle), needle.seen
+
+        x = torch.tensor(0)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_int_subclass_uses_overridden_equality(self):
+        class Match(int):
+            def __eq__(self, other):
+                return other % 2 == 1
+
+        def fn(x):
+            return x + range(5).count(Match(99))
+
+        x = torch.tensor(0)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_int_subclass_uses_inherited_equality(self):
+        class IntSubclass(int):
+            pass
+
+        def fn(x):
+            return x + range(3).count(IntSubclass(1))
+
+        x = torch.tensor(0)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_symbolic_integer_needle(self):
+        def fn(x):
+            return x + range(10).count(x.shape[0])
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        for size in (3, 12):
+            x = torch.zeros(size)
+            self.assertEqual(compiled(x), fn(x))
+
+    def test_comparison_exception_propagates(self):
+        seen = []
+
+        class Match:
+            def __eq__(self, other):
+                seen.append(other)
+                if other == 2:
+                    raise RuntimeError("comparison failed")
+                return False
+
+        def fn():
+            try:
+                range(5).count(Match())
+            except RuntimeError:
+                return seen
+            return None
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(), [0, 1, 2]
+        )
+
+    def test_changed_bounds_and_search_value(self):
+        class EqualTo:
+            def __init__(self, target):
+                self.target = target
+
+            def __eq__(self, other):
+                return other == self.target
+
+        def fn(x, values, needle):
+            return x + values.count(needle)
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        x = torch.zeros(3)
+        needle = EqualTo(3)
+        self.assertEqual(compiled(x, range(5), needle), x + 1)
+        self.assertEqual(counter.frame_count, 1)
+        needle.target = 9
+        self.assertEqual(compiled(x, range(5), needle), x)
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(compiled(x, range(10, 0, -1), needle), x + 1)
+        self.assertEqual(counter.frame_count, 3)
+
+
 class TestRangeIteratorSetstate(torch._dynamo.test_case.TestCase):
     # range_iterator.__setstate__(k) sets the iterator index, clamped to
     # [0, len], mirroring CPython rangeiter_setstate.
@@ -1755,6 +1858,17 @@ class TestRangeContains(torch._dynamo.test_case.TestCase):
             )
 
         self.assertEqual(fn(), (True, True, True, True, True, False, False))
+
+    def test_symbolic_integer_needle(self):
+        def fn(x):
+            return x + (x.shape[0] in range(10))
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        for size in (3, 12):
+            x = torch.zeros(size)
+            self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(counter.frame_count, 2)
 
     def test_negative_step_and_strided(self):
         @torch.compile(backend="eager", fullgraph=True)

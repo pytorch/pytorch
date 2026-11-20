@@ -7,7 +7,7 @@
 
 namespace at::native {
 
-using BGEMMKernel_BFloat16 = std::function<void(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16))>;
+using BGEMMKernel_BFloat16 = std::function<bool(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16))>;
 
 
 struct IntTupleHash {
@@ -61,7 +61,7 @@ BGEMMKernel_BFloat16 dispatch_bfloat16_bgemm(CUDABLAS_BGEMM_ARGTYPES(at::BFloat1
 }
 
 template <>
-void bgemm_internal_ck<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
+bool bgemm_internal_ck<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   /*
   std::cerr << "bgemm_internal_ck: " << std::endl
    << "\t" << num_batches
@@ -81,7 +81,7 @@ void bgemm_internal_ck<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   */
 
   BGEMMKernel_BFloat16 bgemm_impl = dispatch_bfloat16_bgemm(CUDABLAS_BGEMM_ARGS(at::BFloat16));
-  bgemm_impl(CUDABLAS_BGEMM_ARGS(at::BFloat16));
+  return bgemm_impl(CUDABLAS_BGEMM_ARGS(at::BFloat16));
 }
 
 } // namespace at::native

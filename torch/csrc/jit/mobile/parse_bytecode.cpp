@@ -72,6 +72,13 @@ void applyUpgrader(mobile::Function* function, uint64_t operator_version) {
   for (size_t i = 0; i < code.instructions_.size(); i++) {
     Instruction& inst = code.instructions_[i];
     if (inst.op == OpCode::OP) {
+      TORCH_CHECK(
+          inst.X >= 0 && static_cast<size_t>(inst.X) < code.op_names_.size(),
+          "applyUpgrader: operator index ",
+          inst.X,
+          " out of range for ",
+          code.op_names_.size(),
+          " operators");
       std::string operator_name = code.op_names_[inst.X].name +
           (code.op_names_[inst.X].overload_name.empty()
                ? ""

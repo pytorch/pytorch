@@ -47,59 +47,6 @@ def get_weight(m):
         return result
     return getattr(m, 'weights', None)
 
-# NOTE [How to check NN module / functional API parity between Python and C++ frontends]
-#
-# The way to check API parity is to add parity tests for the NN module / functional of interest.
-# Here are the detailed steps:
-#
-# For NN module:
-# 1. Make sure you already have a test dict with the module configuration you want to test.
-# 2. Add `cpp_constructor_args` entry to the test dict, with its value exactly matching
-#    the Python module constructor arguments. For example, if in the test dict we pass
-#    `(10, 8)` to `torch.nn.Linear` constructor, then we should pass `torch::nn::LinearOptions(10, 8)`
-#    as the corresponding C++ constructor argument to `torch::nn::Linear`.
-# 3. If in the process of performing the above step you referenced any variables
-#    in the `cpp_constructor_args` entry, you must add `cpp_var_map` entry
-#    to the test dict to make sure that those variables are populated with the right Python values.
-#    For example, if the Python constructor call is
-#    `torch.nn.FractionalMaxPool2d(2, output_ratio=0.5, _random_samples=random_samples)`,
-#    the corresponding C++ constructor argument is
-#    `torch::nn::FractionalMaxPool2dOptions(2).output_ratio(0.5)._random_samples(random_samples)`,
-#    and the `cpp_var_map` entry must be
-#    `{'random_samples': random_samples}` in order to populate the C++ variable `random_samples`
-#    used in the C++ constructor argument with the Python tensor value `random_samples`.
-#
-# For NN functional:
-# 1. Make sure you already have a test dict with the functional configuration you want to test.
-# 2. If the test dict's `constructor` entry looks like `wrap_functional(F.some_functional_name, ...)`,
-#    then you must add `cpp_options_args` entry to the test dict, with its value exactly matching the Python
-#    functional optional arguments. For example, if the test dict's `constructor` entry is
-#    `wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest')`,
-#    then the `cpp_options_args` entry should be
-#    "F::InterpolateFuncOptions().size(std::vector<int64_t>({12})).scale_factor(std::nullopt).mode(torch::kNearest)".
-# 3. Otherwise, if the test dict's `constructor` entry looks like
-#    `wrap_functional(lambda i: F.some_functional_name(...))`,
-#    then you must add `cpp_function_call` entry to the test dict, with its value exactly matching the Python
-#    functional function call. For example, if the test dict's `constructor` entry is
-#    `wrap_functional(lambda i: F.poisson_nll_loss(i, t.type_as(i), reduction='none'))`,
-#    then the `cpp_function_call` entry should be
-#    "F::poisson_nll_loss(i, t.to(i.options()), F::PoissonNLLLossFuncOptions().reduction(torch::kNone))".
-# 4. If in the process of performing the above two steps you referenced any variables
-#    in the `cpp_options_args` or `cpp_function_call` entry, you must
-#    add `cpp_var_map` entry to the test dict to make sure that those variables
-#    are populated with the right Python values. For example, if the test dict's `constructor` entry is
-#    `wrap_functional(lambda i: F.poisson_nll_loss(i, t.type_as(i), reduction='none'))`,
-#    then the `cpp_function_call` entry should be
-#    "F::poisson_nll_loss(i, t.to(i.options()), F::PoissonNLLLossFuncOptions().reduction(torch::kNone))".
-#    Notice that there are two variables `i` and `t` that need to have their values provided,
-#    and the way to do so is to add a `cpp_var_map` entry: `cpp_var_map={'i': '_get_input()', 't': t}`.
-#    (Note that for `i`, since we want it to take the Python input value, we pass '_get_input()' string as value
-#    and the C++ parity test mechanism will populate `i` with the Python input value correctly.)
-#
-# There are also a few optional flags in the test dict to control the C++ parity test behavior:
-#
-# - `test_cpp_api_parity`: if `False`, skips the C++ parity test for this test dict. Default: True.
-# - `has_parity`: if `False`, expects this test dict to fail the C++ parity test. Default: True.
 
 
 module_tests = [
@@ -1799,8 +1746,6 @@ def get_new_module_tests():
         dict(
             fullname='EmbeddingBag_sparse',
             constructor=lambda: nn.EmbeddingBag(4, 3, sparse=True, dtype=torch.double),
-            cpp_constructor_args='''torch::nn::EmbeddingBagOptions(4, 3)
-                                    .sparse(true)._weight(torch::rand({4, 3}).to(torch::kFloat64))''',
             input_fn=lambda: torch.randperm(2).repeat(1, 2),
             check_gradgrad=False,
             has_sparse_gradients=True,

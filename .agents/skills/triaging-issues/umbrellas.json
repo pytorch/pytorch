@@ -1,0 +1,38 @@
+{
+  "pytorch/pytorch": {
+    "195547": {
+      "action": "close",
+      "scope": "Missing shape, size, list-length, or boundary validation causing out-of-bounds access, SIGFPE, or sanitizer-only undefined behavior in the missing-validation hardening class: invalid direct ATen/internal calls, extreme parameters, or empty/degenerate inputs. The check is absent in eager, not just lost under compilation. A fully covered instance may use this close policy without adding review solely for its OOB/SIGFPE/sanitizer symptom. Uncertain scope or additional unresolved impact requires review.",
+      "exclusions": [
+        "Ordinary supported public-API usage with an unresolved actionable crash or correctness problem; route for review instead of assuming hardening.",
+        "Eager rejects the input but compilation loses that validation (see #197554).",
+        "Numerical precision, range, or derivative formula bugs without missing validation.",
+        "An existing member's own resolution or checklist status: this policy applies only to the new issue being triaged."
+      ],
+      "evidence": [
+        "https://github.com/pytorch/pytorch/issues/195547",
+        "https://github.com/pytorch/pytorch/issues/195547#issuecomment-6357995747"
+      ]
+    },
+    "198017": {
+      "action": "link",
+      "scope": "Forward-mode or higher-order AD returns wrong derivatives from per-op hand-written derivative rules, including nested JVP/jacfwd and custom autograd.Function jvp composition. The tracker explicitly keeps individual reproducer issues open.",
+      "exclusions": [
+        "Unsupported forward AD or a missing derivative rule raising an error.",
+        "Low-precision inf/nan when the float64 derivative formula is correct.",
+        "Wrong derivatives only under torch.compile or first-order backward formula bugs."
+      ],
+      "evidence": ["https://github.com/pytorch/pytorch/issues/198017"]
+    },
+    "197554": {
+      "action": "link",
+      "scope": "Eager rejects an invalid input, but torch.compile, Dynamo, Inductor, or AOTInductor loses that validation and accepts it, returns garbage, or crashes. The tracker requests validation-preserving compiled paths and per-input coverage, without permission to close members as duplicates.",
+      "exclusions": [
+        "Missing validation in eager too (the hardening class may fit #195547).",
+        "Eager-versus-compiled numerics, dtype promotion, NaN/inf propagation, or accumulation-order differences without a lost validation check.",
+        "Compiled rejects an input eager accepts."
+      ],
+      "evidence": ["https://github.com/pytorch/pytorch/issues/197554"]
+    }
+  }
+}

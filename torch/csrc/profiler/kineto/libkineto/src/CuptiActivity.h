@@ -223,6 +223,9 @@ using CUpti_ActivityCudaEventType = CUpti_ActivityCudaEvent;
 template <>
 inline int64_t CuptiActivity<CUpti_ActivityCudaEventType>::timestamp() const {
 #if CUDA_VERSION >= 12080
+  if (activity_.deviceTimestamp == 0) {
+    return 0;
+  }
   return convertCuptiTimestamp(activity_.deviceTimestamp);
 #else
   // For CUDA < 12.8, deviceTimestamp doesn't exist, set to 0

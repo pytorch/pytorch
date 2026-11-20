@@ -21,12 +21,10 @@ namespace detail {
 
 const CUDAHooksInterface& getCUDAHooks() {
   auto create_impl = [] {
-#if !defined C10_MOBILE
     auto hooks = CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{});
     if (hooks) {
       return hooks;
     }
-#endif
     return std::make_unique<CUDAHooksInterface>();
   };
   // NB: The static initialization here implies that if you try to call any CUDA

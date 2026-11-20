@@ -231,6 +231,8 @@ std::pair<std::string_view, std::string_view> getDtypeNames(
     case c10::ScalarType::Float8_e8m0fnu:
       // TODO(#146647): macroify all of this
       return {"float8_e8m0fnu", ""};
+    case c10::ScalarType::Float8_e5m3fnu:
+      return {"float8_e5m3fnu", ""};
     case c10::ScalarType::Float4_e2m1fn_x2:
       return {"float4_e2m1fn_x2", ""};
     default:
@@ -258,6 +260,8 @@ std::string_view getScalarTypeAbbr(ScalarType scalarType) {
       return "f8e5m2fnuz";
     case ScalarType::Float8_e8m0fnu:
       return "f8e8m0fnu";
+    case ScalarType::Float8_e5m3fnu:
+      return "f8e5m3fnu";
     case ScalarType::Float4_e2m1fn_x2:
       return "f4e2m1fnx2";
     case ScalarType::ComplexHalf:

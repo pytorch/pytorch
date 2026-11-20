@@ -1,6 +1,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/NanCheck.hpp>
 #include <torch/library.h>
 
@@ -28,7 +29,7 @@ void check_for_nan_cpu(const at::Tensor& tensor) {
         auto numel = tensor.numel();
         std::atomic<bool> found{false};
         at::parallel_for(0, numel, 1024, [&](int64_t begin, int64_t end) {
-          for (int64_t i = begin; i < end; i++) {
+          for (const auto i : c10::irange(begin, end)) {
             if (at::_isnan(data[i])) {
               found.store(true, std::memory_order_relaxed);
               return;
