@@ -10084,7 +10084,7 @@ class TestNNDeviceType(NNTestCase):
 
     @parametrize_test("antialias", [True, False])
     @parametrize_test("num_channels", [3, 5])
-    @parametrize_test("mode", ["nearest", "nearest-exact", "bilinear", "bicubic", "lanczos"])
+    @parametrize_test("mode", ["nearest", "nearest-exact", "bilinear", "bicubic", "lanczos", "inter-area"])
     @parametrize_test("dtype", integral_types() + floating_types())
     @skipIfMPS  # Error message is wrong for some dtypes
     @onlyNativeDeviceTypes
@@ -10111,11 +10111,21 @@ class TestNNDeviceType(NNTestCase):
             if dtype in floating_types() or (device == "cpu" and dtype == torch.uint8):
                 should_raise_runtime_error = False
 
+        elif mode == "inter-area":
+            if torch.device(device).type != "cpu":
+                raise SkipTest("inter-area mode is only supported on CPU")
+            if antialias:
+                raise SkipTest("inter-area mode doesn't take antialias")
+            if dtype in floating_types() or dtype == torch.uint8:
+                should_raise_runtime_error = False
+
+        # Only the modes that take antialias are passed it.
+        kwargs = {} if mode == "inter-area" else dict(antialias=antialias)
         if should_raise_runtime_error:
             with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                F.interpolate(x, (12, 12), mode=mode, antialias=antialias)
+                F.interpolate(x, (12, 12), mode=mode, **kwargs)
         else:
-            _ = F.interpolate(x, (12, 12), mode=mode, antialias=antialias)
+            _ = F.interpolate(x, (12, 12), mode=mode, **kwargs)
 
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     def test_upsamplingBilinear2d_aa_correctness(self, device, memory_format):
