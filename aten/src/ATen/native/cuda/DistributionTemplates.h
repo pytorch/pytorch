@@ -557,17 +557,53 @@ struct GeometricKernel {
 
 // ================================================== Exponential =====================================================
 
+// -log(1 - u) for u = (x + 0.5) * 2^-32, curand_uniform's value for the raw draw x. transformation::exponential's
+// -log(u) takes small q from u near 1, where fp32 steps by 2^-24 and __logf is off by ~5e-8: q never drops below
+// 6e-8 and multinomial mis-samples categories with p below ~1e-7. Here small q comes from u near 0 through the
+// series of -log1p(-u) (within ~2 ulp for u < 2^-8) and larger q from 1 - u built from ~x, so both tails
+// keep the 2^-32 resolution of x.
+__device__ __forceinline__ float standard_exponential(uint32_t x) {
+  // u < 2^-8 exactly when x < 2^24 - 1 (fmaf rounds x = 2^24 - 1 up to 2^-8). v is u on that side and 1 - u on the
+  // other, so only one integer is converted.
+  const bool small = x < 0xFFFFFFu;
+  const float v = fmaf(static_cast<float>(small ? x : ~x), 0x1p-32f, 0x1p-33f);
+#if defined(USE_ROCM)
+  const float log_v = __logf(v);
+#else
+  // v >= 2^-33 is never denormal, so .ftz drops __logf's denormal rescaling without changing the result.
+  float log2_v;
+  asm("lg2.approx.ftz.f32 %0, %1;" : "=f"(log2_v) : "f"(v));
+  const float log_v = log2_v * c10::ln_2<float>;
+#endif
+  return small ? v * fmaf(v, fmaf(v, 1.f / 3.f, 0.5f), 1.f) : -log_v;
+}
+
 template<typename RNG>
 void exponential_kernel(TensorIteratorBase& iter, double lambda_, RNG gen) {
   TORCH_CHECK(isFloatingType(iter.dtype()), "Exponential distribution is a continuous probability distribution. dtype must be a floating point but you specified ", iter.dtype());
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "exponential_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto lambda = static_cast<accscalar_t>(lambda_);
-    // define lambda for exponential transformation
-    auto exponential_func = [lambda] __device__ (accscalar_t rand) {
-      return static_cast<scalar_t>(transformation::exponential<accscalar_t>(rand, lambda));
-    };
-    uniform_and_transform<scalar_t, accscalar_t>(iter, gen, exponential_func);
+    if constexpr (std::is_same_v<scalar_t, double>) {
+      // curand_uniform2_double resolves u to 2^-53 near 1 and log(double) is accurate, so -log(u) is fine here.
+      auto exponential_func = [lambda] __device__ (accscalar_t rand) {
+        return static_cast<scalar_t>(transformation::exponential<accscalar_t>(rand, lambda));
+      };
+      uniform_and_transform<scalar_t, accscalar_t>(iter, gen, exponential_func);
+    } else {
+      distribution_nullary_kernel<scalar_t, uint32_t, uint4>(iter, gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) -> uint4 { return curand4(state); },
+        [lambda] __device__ (uint32_t x) {
+          float q = standard_exponential(x);
+          if constexpr (std::is_same_v<scalar_t, at::Half>) {
+            // Keep the old 2^-24 floor (the smallest Half) so lambda <= 1 cannot round the result to 0.
+            q = fmaxf(
+                q,
+                static_cast<float>(std::numeric_limits<scalar_t>::denorm_min()));
+          }
+          return static_cast<scalar_t>(1.f / lambda * q);
+        });
+    }
    });
 }
 

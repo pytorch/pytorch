@@ -32,27 +32,37 @@ def _find_pkg_dir(name: str) -> str | None:
     return spec.submodule_search_locations[0]
 
 
-def _prepare_nccl4py() -> None:
+def _prepare_nccl_extensions() -> None:
     # Dynamic (USE_SYSTEM_NCCL=ON / wheel) build only: the extension NEEDED-links
-    # libnccl_ep.so, which the nccl4py wheel provides at runtime. Point nccl-ep's
-    # JIT at nccl4py's EP headers (NCCL_EP_HOME) and the nvidia.nccl wheel's NCCL
-    # headers (NCCL_HOME), and make libnccl_ep resolvable, before importing the
-    # extension (its libnccl dependency is already loaded by torch). The static
-    # build bakes all of this in and never reaches here.
+    # libnccl_ep.so, which the nccl-extensions wheel provides at runtime. Point
+    # nccl-ep's JIT at its EP headers (NCCL_EP_HOME) and the nvidia.nccl wheel's
+    # NCCL headers (NCCL_HOME), and make libnccl_ep resolvable before importing
+    # the extension (its libnccl dependency is already loaded by torch). The
+    # static build bakes all of this in and never reaches here.
+    # Locate nccl without importing its initializer or EP's Python bindings.
     nccl_pkg = _find_pkg_dir("nccl")
-    if nccl_pkg is None:
+    if nccl_pkg is None or not os.path.isdir(os.path.join(nccl_pkg, "ep")):
         raise ImportError(
-            "TokenSwitchNCCL needs the 'nccl4py' package for this build's "
-            "libnccl_ep.so and runtime JIT headers. Install it with "
-            "`pip install nccl4py==0.3.1`."
+            "This TokenSwitchNCCL build requires the nccl-extensions package. "
+            "Install it with `pip install nccl-extensions`."
         )
     ep_dir = os.path.join(nccl_pkg, "ep")
+    cuda_version = torch.version.cuda
+    if cuda_version is None:
+        raise ImportError("TokenSwitchNCCL requires a CUDA build of PyTorch.")
+    cuda_major = cuda_version.split(".")[0]
+    lib = os.path.join(ep_dir, "lib", f"cu{cuda_major}", "libnccl_ep.so")
+    if not os.path.isfile(lib):
+        raise ImportError(
+            f"nccl-extensions is missing the CUDA {cuda_major} library at {lib}. "
+            "Install it with `pip install nccl-extensions`."
+        )
     if "NCCL_EP_HOME" not in os.environ:
         ep_headers = os.path.join(ep_dir, "include", "nccl_ep")
         if not os.path.isdir(ep_headers):
             raise ImportError(
-                f"nccl4py at {nccl_pkg} is missing the EP JIT headers expected "
-                f"at {ep_headers}; reinstall nccl4py or set NCCL_EP_HOME."
+                f"nccl-extensions at {nccl_pkg} is missing the EP JIT headers "
+                f"expected at {ep_headers}; reinstall nccl-extensions or set NCCL_EP_HOME."
             )
         os.environ["NCCL_EP_HOME"] = ep_dir
 
@@ -60,25 +70,26 @@ def _prepare_nccl4py() -> None:
     # USE_SYSTEM_NCCL=ON torch (the only build that reaches this path) already
     # dynamically loaded the system libnccl, so libnccl_ep.so's NEEDED
     # libnccl.so.2 resolves to that already-loaded copy.
-    nvidia_nccl = _find_pkg_dir("nvidia.nccl")
-    if nvidia_nccl is not None and os.path.isdir(os.path.join(nvidia_nccl, "include")):
-        os.environ.setdefault("NCCL_HOME", nvidia_nccl)
+    if "NCCL_HOME" not in os.environ:
+        nvidia_nccl = _find_pkg_dir("nvidia.nccl")
+        if nvidia_nccl is not None and os.path.isdir(
+            os.path.join(nvidia_nccl, "include")
+        ):
+            os.environ.setdefault("NCCL_HOME", nvidia_nccl)
 
-    # nccl4py ships libnccl_ep unversioned (libnccl_ep.so) while the extension's
-    # NEEDED entry is its SONAME libnccl_ep.so.0; load it by path to register
-    # that SONAME for the import below.
-    lib = os.path.join(ep_dir, "lib", "libnccl_ep.so")
-    if os.path.isfile(lib):
-        _NCCL_EP_KEEPALIVE.append(ctypes.CDLL(lib, mode=ctypes.RTLD_LOCAL))
+    # nccl-extensions ships libnccl_ep unversioned (libnccl_ep.so) while the
+    # extension's NEEDED entry is its SONAME libnccl_ep.so.0; load it by path to
+    # register that SONAME for the import below.
+    _NCCL_EP_KEEPALIVE.append(ctypes.CDLL(lib, mode=ctypes.RTLD_LOCAL))
 
 
 def _import_nccl_ep() -> Any:
     # The EP bindings live in the optional torch._nccl_ep extension (USE_NCCL_EP).
     # A USE_SYSTEM_NCCL=OFF build links libnccl_ep statically and bakes its JIT
     # header paths, so the extension imports directly -- self-contained, no
-    # nccl4py. A USE_SYSTEM_NCCL=ON build NEEDED-links libnccl_ep from the nccl4py
-    # wheel, so the first import fails until nccl4py is set up; fall back to that
-    # and retry.
+    # nccl-extensions. A USE_SYSTEM_NCCL=ON build NEEDED-links libnccl_ep from the
+    # nccl-extensions wheel, so the first import fails until it is set up; fall
+    # back to that and retry.
     try:
         # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
         import torch._nccl_ep as _ep
@@ -87,14 +98,14 @@ def _import_nccl_ep() -> Any:
     except ImportError:
         pass
 
-    _prepare_nccl4py()
+    _prepare_nccl_extensions()
     try:
         # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
         import torch._nccl_ep as _ep
     except ImportError as e:
         raise ImportError(
             "torch._nccl_ep is unavailable; this PyTorch was not built with "
-            "USE_NCCL_EP (or, for a USE_SYSTEM_NCCL=ON build, the nccl4py wheel "
+            "USE_NCCL_EP (or, for a USE_SYSTEM_NCCL=ON build, the nccl-extensions wheel "
             "is missing)."
         ) from e
 
@@ -128,7 +139,6 @@ class _DispatchAutograd(torch.autograd.Function):
         )
         ctx.ts = ts
         ctx.routing = routing
-        ctx.tokens_shape = tokens.shape
         return out_tokens, out_topk_weights, out_topk_idx
 
     @staticmethod
@@ -138,10 +148,23 @@ class _DispatchAutograd(torch.autograd.Function):
         grad_out_tokens: torch.Tensor,
         grad_out_topk_weights: torch.Tensor | None,
         grad_out_topk_idx: torch.Tensor | None,
-    ) -> tuple[None, None, torch.Tensor, None, None]:
-        grad_tokens = grad_out_tokens.new_zeros(ctx.tokens_shape)
-        ctx.ts._combine(ctx.routing, grad_out_tokens.contiguous(), grad_tokens)
-        return None, None, grad_tokens, None, None
+    ) -> tuple[None, None, torch.Tensor, torch.Tensor, None]:
+        if grad_out_topk_weights is None:
+            raise NotImplementedError(
+                "TokenSwitch dispatch backward requires received topk_weights"
+            )
+        grad_tokens = grad_out_tokens.new_zeros(
+            ctx.routing.topk_idx.shape[0], grad_out_tokens.shape[-1]
+        )
+        grad_weights = grad_out_topk_weights.new_zeros(ctx.routing.topk_idx.shape)
+        ctx.ts._dispatch_backward(
+            ctx.routing,
+            grad_out_tokens.contiguous(),
+            grad_out_topk_weights.contiguous(),
+            grad_tokens,
+            grad_weights,
+        )
+        return None, None, grad_tokens, grad_weights, None
 
 
 class _CombineAutograd(torch.autograd.Function):
@@ -160,7 +183,6 @@ class _CombineAutograd(torch.autograd.Function):
         ctx.routing = routing
         ctx.expert_shape = expert_tokens.shape
         ctx.expert_dtype = expert_tokens.dtype
-        ctx.top_k = routing.topk_idx.shape[1]
         return out_tokens
 
     @staticmethod
@@ -170,35 +192,15 @@ class _CombineAutograd(torch.autograd.Function):
     ) -> tuple[None, None, torch.Tensor]:
         ts = ctx.ts
         H = ctx.expert_shape[-1]
-        N = grad_out_tokens.shape[0]
-        K = ctx.top_k
-        dtype = ctx.expert_dtype
-        # Allocate the full-size dispatch output buffer matching the layout's
-        # expected shape, dispatch the gradient into it, then slice back to
-        # ctx.expert_shape so the returned grad matches the combine input.
-        max_recv = ts.max_recv_tokens_per_rank
-        grad_expert_full, dummy_out_weights, dummy_out_idx = ts._alloc_dispatch_outputs(
-            ctx.routing,
-            grad_out_tokens,
-            grad_out_tokens.new_zeros(N, K, dtype=torch.float32),
-            max_recv,
-            H,
-            K,
+        grad_expert_full = grad_out_tokens.new_zeros(
+            ts.max_recv_tokens_per_rank, H, dtype=ctx.expert_dtype
         )
-        grad_expert_full = grad_expert_full.to(dtype)
-        dummy_weights = grad_out_tokens.new_zeros(N, K, dtype=torch.float32)
-        ctx.ts._dispatch(
+        ts._combine_backward(
             ctx.routing,
-            grad_out_tokens.to(dtype).contiguous(),
-            dummy_weights,
+            grad_out_tokens.to(ctx.expert_dtype).contiguous(),
             grad_expert_full,
-            dummy_out_weights,
-            dummy_out_idx,
         )
-        # Slice the leading dim back to expert_shape[0] (no-op for LL+EM where
-        # the full buffer was already the right size).
-        M = ctx.expert_shape[0]
-        return None, None, grad_expert_full[:M].contiguous()
+        return None, None, grad_expert_full[: ctx.expert_shape[0]].contiguous()
 
 
 class TokenSwitch(abc.ABC):
@@ -245,9 +247,10 @@ class TokenSwitch(abc.ABC):
     ) -> Routing:
         """Create expert routing for the current phase (e.g. top-k indices).
 
-        ``per_expert_token_counts`` is optional 1D int32, length >= local experts:
-        output buffer for per-expert receive counts (NCCL EP ``RECV_EXPERT_COUNTER``),
-        i.e. the number of received (token, local expert) pairs per local expert.
+        ``per_expert_token_counts`` is optional 1D int32 with exactly
+        ``num_experts // world_size`` elements: output buffer for per-expert
+        receive counts (NCCL EP ``RECV_EXPERT_COUNTER``), i.e. the number of
+        received (token, local expert) pairs per local expert.
         ``layout`` selects the dispatch output memory layout.
         """
         raise NotImplementedError
@@ -286,6 +289,27 @@ class TokenSwitch(abc.ABC):
     ) -> None:
         raise NotImplementedError
 
+    @abc.abstractmethod
+    def _combine_backward(
+        self,
+        routing: Routing,
+        grad_tokens: torch.Tensor,
+        out_expert_grads: torch.Tensor,
+    ) -> None:
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def _dispatch_backward(
+        self,
+        routing: Routing,
+        grad_recv_tokens: torch.Tensor,
+        grad_recv_topk_weights: torch.Tensor,
+        out_token_grads: torch.Tensor,
+        out_topk_weight_grads: torch.Tensor,
+    ) -> None:
+        r"""Reverse dispatch into both source-shaped token and routing-weight buffers."""
+        raise NotImplementedError
+
     def dispatch(
         self,
         routing: Routing,
@@ -296,7 +320,7 @@ class TokenSwitch(abc.ABC):
         out: tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]
         | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
-        """Route tokens to experts.
+        r"""Route tokens to experts.
 
         Returns ``(out_tokens, out_topk_weights, out_topk_idx)``.  For
         expert-major layouts ``out_topk_idx`` is ``None``; for LL+expert-major
@@ -306,7 +330,8 @@ class TokenSwitch(abc.ABC):
         provided buffers and returns them; no autograd support.
         Without ``out``: allocates output buffers and returns the tuple with
         autograd support.  ``max_recv_tokens`` is required when ``out`` is not
-        provided.  ``topk_weights`` receives no gradient (routing metadata).
+        provided. Backends must implement gradients for both tokens and routing
+        weights. NCCL supports first-order gradients for FP32 ``topk_weights``.
         """
         if out is not None:
             self._dispatch(routing, tokens, topk_weights, *out)
@@ -337,10 +362,12 @@ class TokenSwitch(abc.ABC):
 
 
 class TokenSwitchNCCL(TokenSwitch):
-    """Token switch backed by NCCL EP (:func:`ncclEpCreateGroup` / dispatch / combine).
+    r"""Token switch backed by NCCL EP (:func:`ncclEpCreateGroup` / dispatch / combine).
 
     The dispatch output layout is chosen per routing via
     :meth:`create_routing`'s ``layout`` argument.
+    All dispatch output buffers must have at least ``max_recv_tokens_per_rank``
+    rows, even when the actual receive count is smaller.
     """
 
     def __init__(
@@ -403,8 +430,10 @@ class TokenSwitchNCCL(TokenSwitch):
         *,
         layout: str,
     ) -> Routing:
-        """Create expert routing for this phase; pass to :meth:`dispatch` / :meth:`combine`.
+        r"""Create expert routing for this phase; pass to :meth:`dispatch` / :meth:`combine`.
 
+        ``topk_idx`` must have dtype ``torch.int32`` or ``torch.int64``.
+        The NCCL EP handle retains an int64 copy of int32 indices.
         ``layout`` (required) controls the dispatch output memory layout:
         ``"flat"`` or ``"expert_major"``.
         """
@@ -429,6 +458,14 @@ class TokenSwitchNCCL(TokenSwitch):
         out_topk_weights: torch.Tensor | None,
         out_topk_idx: torch.Tensor | None,
     ) -> None:
+        capacity = self._max_recv_tokens_per_rank
+        for t in (out_tokens, out_topk_weights, out_topk_idx):
+            if t is not None and t.ndim > 0 and t.shape[0] < capacity:
+                raise ValueError(
+                    f"NCCL EP dispatch outputs require at least {capacity} rows "
+                    f"(max_recv_tokens_per_rank), got {t.shape[0]}"
+                )
+
         self._ep._nccl_ep_dispatch(
             routing.handle,
             tokens,
@@ -448,4 +485,30 @@ class TokenSwitchNCCL(TokenSwitch):
             routing.handle,
             expert_tokens,
             out_tokens,
+        )
+
+    def _combine_backward(
+        self,
+        routing: Routing,
+        grad_tokens: torch.Tensor,
+        out_expert_grads: torch.Tensor,
+    ) -> None:
+        self._ep._nccl_ep_dispatch_backward(
+            routing.handle, grad_tokens, out_expert_grads
+        )
+
+    def _dispatch_backward(
+        self,
+        routing: Routing,
+        grad_recv_tokens: torch.Tensor,
+        grad_recv_topk_weights: torch.Tensor,
+        out_token_grads: torch.Tensor,
+        out_topk_weight_grads: torch.Tensor,
+    ) -> None:
+        self._ep._nccl_ep_combine_backward(
+            routing.handle,
+            grad_recv_tokens,
+            grad_recv_topk_weights,
+            out_token_grads,
+            out_topk_weight_grads,
         )

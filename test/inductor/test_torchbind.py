@@ -1,5 +1,6 @@
 # Owner(s): ["module: functorch"]
 import json
+import unittest
 import zipfile
 from pathlib import Path
 
@@ -14,13 +15,18 @@ from torch._inductor.codecache import WritableTempFile
 from torch._inductor.package import package_aoti
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import HardwareClassification, skipIfWindows
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_MACOS,
+    skipIfWindows,
+)
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
 )
 
 
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestTorchbind(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -423,6 +429,7 @@ class TestTorchbind(TestCase):
         self.assertEqual(result, orig_res)
 
 
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestTorchbindAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 

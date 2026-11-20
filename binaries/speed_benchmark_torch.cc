@@ -28,6 +28,7 @@
 
 #include <c10/mobile/CPUCachingAllocator.h>
 
+#include <c10/util/irange.h>
 #include <chrono>
 using namespace std::chrono;
 
@@ -305,7 +306,7 @@ int main(int argc, char** argv) {
       "Number of warm up runs should be non negative, provided ",
       FLAGS_warmup,
       ".");
-  for (int i = 0; i < FLAGS_warmup; ++i) {
+  for ([[maybe_unused]] const auto _ : c10::irange(FLAGS_warmup)) {
     runner->run(module, inputs);
   }
 
@@ -318,7 +319,7 @@ int main(int argc, char** argv) {
   caffe2::Timer timer;
   std::vector<float> times;
   auto micros = timer.MicroSeconds();
-  for (int i = 0; i < FLAGS_iter; ++i) {
+  for ([[maybe_unused]] const auto _ : c10::irange(FLAGS_iter)) {
     auto start = high_resolution_clock::now();
     runner->run(module, inputs);
     auto stop = high_resolution_clock::now();

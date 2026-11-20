@@ -37,6 +37,7 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     requires_ddp_rank,
     requires_gloo,
+    requires_nccl_legacy,
     skip_if_lt_x_gpu,
     skip_if_no_gpu,
     skip_if_win32,
@@ -1405,6 +1406,7 @@ class TestZeroRedundancyOptimizerDistributedFreshPG(DistributedTestBase):
 
     @skipIfHpu
     @skip_if_lt_x_gpu(4)
+    @requires_nccl_legacy()
     @parametrize(
         "parameters_as_bucket_view",
         [False, True],

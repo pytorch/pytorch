@@ -8,6 +8,7 @@
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
+#include <c10/util/irange.h>
 #include <utility>
 
 namespace at::native {
@@ -138,7 +139,7 @@ Tensor _nested_sum_backward_cpu(
     for (const auto i : c10::irange(ntensors)) {
       int64_t segments = num_segments[i].item<int64_t>();
       int64_t segment_length = segment_lengths[i].item<int64_t>();
-      for (int64_t j = 0; j < segments; j++) {
+      for ([[maybe_unused]] const auto _ : c10::irange(segments)) {
         scalar_t output_grad = output_grad_data[out_idx];
         for (int64_t k = 0; k < segment_length; k++) {
           self_grad_data[in_idx] = output_grad;

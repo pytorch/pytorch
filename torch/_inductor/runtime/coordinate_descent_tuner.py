@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from torch.utils._ordered_set import OrderedSet
 
+from .. import config as inductor_config
 from ..utils import get_max_numwarps
 from .hints import (
     InductorMeta,
@@ -17,6 +18,14 @@ from .hints import (
     TRITON_MAX_TENSOR_NUMEL,
 )
 from .runtime_utils import red_text, triton_config_to_hashable
+from .tiling import (
+    block_to_prefix,
+    get_max_block,
+    get_pointwise_prefixes,
+    get_reduction_prefixes,
+    pointwise_prefixes,
+    reduction_prefixes,
+)
 
 
 if TYPE_CHECKING:
@@ -71,7 +80,7 @@ class CoordescTuner:
     ):
         self.is_mm = is_mm  # we will tune num_stages for mm
 
-        # Native matmul codegen assumes ZBLOCK=1 always.
+        # Native matmul codegen assumes Z0_BLOCK=1 always.
         # This is because 3d tl.dot is slow and so we want to tile y and x only.
         # tl.dot also does not support size smaller than 16; we put this restriction.
         self.is_native_matmul = is_native_matmul
@@ -89,7 +98,7 @@ class CoordescTuner:
         )
 
     def get_config_max(self, prefix: str) -> int:
-        max_block = TRITON_MAX_BLOCK[prefix.upper()]
+        max_block = get_max_block(prefix, TRITON_MAX_BLOCK)
         size_hint = self.size_hints.get(prefix) if self.size_hints is not None else None
         return min(max_block, size_hint) if size_hint is not None else max_block
 
@@ -119,16 +128,20 @@ class CoordescTuner:
 
     @property
     def tunable_fields(self) -> list[str]:
+        prefixes = self.size_hints
+        if not prefixes:
+            max_tiles = inductor_config.triton.max_tiles
+            prefixes = (
+                (*pointwise_prefixes(max_tiles), *reduction_prefixes(max_tiles))
+                if max_tiles is not None
+                else tuple(p.lower() for p in TRITON_MAX_BLOCK)
+            )
         out: list[str] = [
-            "XBLOCK",
-            "YBLOCK",
-            "ZBLOCK",
+            *(f"{p.upper()}BLOCK" for p in reversed(get_pointwise_prefixes(prefixes))),
             # NOTE: we should not tune R0_BLOCK for persistent reduction.
             # We rely on the fact that persistent reduction's triton.Config
             # does not have the R0_BLOCK field to guarantee that.
-            "R0_BLOCK",
-            "R1_BLOCK",
-            "R2_BLOCK",
+            *(f"{p.upper()}BLOCK" for p in get_reduction_prefixes(prefixes)),
             # the following 3 are for mm
             "BLOCK_M",
             "BLOCK_N",
@@ -141,7 +154,7 @@ class CoordescTuner:
             out.append("waves_per_eu")
         if self.is_native_matmul:
             out.append("num_stages")
-            out.remove("ZBLOCK")  # ZBLOCK=1 always in native matmul
+            out = [field for field in out if field != "Z0_BLOCK"]
 
         if self.is_mix_order_reduction:
             # unlike TritonConfig.num_stages, this one is
@@ -167,7 +180,7 @@ class CoordescTuner:
 
         block_suffix = "BLOCK"
         if name.endswith(block_suffix):
-            prefix = name.strip(block_suffix).lower()
+            prefix = block_to_prefix(name)
             return val > self.get_config_max(prefix)
         if name == "num_warps":
             return val > self.get_warpsmax()
@@ -440,7 +453,7 @@ class CoordescTuner:
             # improvement immediately so subsequent fields see the
             # updated working point.
             for field in self.tunable_fields:
-                # Some kernels don't have R0_BLOCK / YBLOCK / ZBLOCK,
+                # Some kernels don't have R0_BLOCK / YBLOCK / Z0_BLOCK,
                 # so the field may be absent from ``best_config``.
                 # Filter here so ``get_neighbour_configs`` can assume
                 # the field is present.

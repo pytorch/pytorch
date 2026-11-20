@@ -28,10 +28,7 @@ from torch._dynamo.utils import (
 )
 from torch._guards import detect_fake_mode
 from torch._inductor.codecache import resolve_pre_grad_pass_timing
-
-# Runtime annotation consumers still resolve BoxedBool from module globals.
-from torch._subclasses import FakeTensorMode
-from torch._subclasses.fake_tensor import maybe_get_fake_mode
+from torch._subclasses.fake_tensor import FakeTensorMode, maybe_get_fake_mode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -170,6 +167,7 @@ if TYPE_CHECKING:
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
     from torch._ops import OperatorBase, OpOverload
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 _P = ParamSpec("_P")
@@ -483,7 +481,7 @@ def create_aot_state(
     fake_flat_args: FakifiedFlatArgs,
     flat_args_descs: list[AOTInput],
     aot_config: AOTConfig,
-    fake_mode: FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
     shape_env: ShapeEnv | None,
 ) -> AOTState:
     """
@@ -1066,7 +1064,7 @@ def prepare_aot_module_simplified(
     FakifiedFlatArgs,
     list[Any],
     AOTConfig,
-    FakeTensorMode,
+    FakeTensorMode | CppFakeTensorMode,
     ShapeEnv | None,
     pytree.TreeSpec | None,
     PytreeThunk | None,
