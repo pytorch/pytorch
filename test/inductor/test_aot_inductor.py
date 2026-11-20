@@ -6342,6 +6342,37 @@ class AOTInductorTestsTemplate:
                 # Not expect to see launchKernel("CUBIN_FILE_NAME"
                 FileCheck().check_not('launchKernel("').run(code)
 
+    @skip_if_device(lambda device: device != GPU_TYPE, "requires GPU")
+    def test_embed_kernel_binary_per_cubin_fallback_with_shared_cubin(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        # Different scalar args give two kernel names that compile to one cubin.
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                outs = []
+                for t in (x, y):
+                    out = torch.empty_like(t)
+                    add_kernel_autotuned_weird_param_order[t.numel() // 16,](
+                        in_ptr0=t, in_ptr1=t, n_elements=t.numel(), out_ptr=out
+                    )
+                    outs.append(out)
+                return outs
+
+        inputs = (
+            torch.randn(4, 4, device=self.device),
+            torch.randn(8, 8, device=self.device),
+        )
+        with (
+            config.patch({"aot_inductor.embed_kernel_binary": True}),
+            patch(
+                "torch._inductor.codecache.batch_convert_cubins_to_obj",
+                side_effect=subprocess.CalledProcessError(1, "cc"),
+            ) as batch_convert,
+        ):
+            self.check_model(Model(), inputs)
+        batch_convert.assert_called()
+
     @_skip_cpu_triton_backend
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"

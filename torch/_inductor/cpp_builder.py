@@ -506,7 +506,9 @@ def convert_cubin_to_obj(
     ld: str,
     objcopy: str,
 ) -> str:
-    obj_file = cubin_file + ".o"
+    # Kernels with identical code share one content-addressed cubin, so the
+    # object (which carries kernel-specific symbols) must be named per kernel.
+    obj_file = f"{cubin_file}.{kernel_name}.o"
     # Convert .cubin to .o
     cmd = f"{ld} -r -b binary -z noexecstack -o {obj_file} {cubin_file}"
     subprocess.run(cmd.split(), capture_output=True, text=True, check=True)
