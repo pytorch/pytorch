@@ -3420,15 +3420,22 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(dst, src.conj_physical())
 
     # Contiguous same-dtype copies on one device use hipMemcpyAsync, except on
-    # ROCm gfx1250 where copies of at least 8 MiB run an elementwise kernel
-    # (kGfx1250ElementwiseCopyMinBytes in Copy.cu). Check sizes around that
-    # gate, an unaligned src and dst, untouched neighbours, and a self copy.
+    # ROCm gfx1250 where 16-byte aligned copies of at least 8 MiB run an
+    # elementwise kernel (kGfx1250ElementwiseCopyMinBytes in Copy.cu). Check
+    # sizes around that gate, aligned and unaligned src and dst, untouched
+    # neighbours, and a self copy. Slices are compared on the device; only a
+    # mismatch is moved to the host for the failure message.
     @onlyCUDA
     @dtypes(torch.uint8, torch.bfloat16, torch.float32, torch.complex64, torch.bool)
     def test_copy_same_dtype_contiguous_sizes(self, device, dtype):
         es = torch.empty((), dtype=dtype).element_size()
         gate = 8 << 20  # bytes
         pad = 64
+
+        def assert_bytes_equal(actual, expected, msg):
+            if not torch.equal(actual.view(torch.uint8), expected.view(torch.uint8)):
+                self.assertEqual(actual.cpu().view(torch.uint8), expected.cpu().view(torch.uint8), msg=msg)
+
         for nbytes in (gate - es, gate, gate + es, gate + 4096 + es, 4 * gate):
             n = nbytes // es
             for offset in (0, 1):  # offset 1 breaks 16-byte alignment of src and dst
@@ -3438,18 +3445,42 @@ class TestTorchDeviceType(TestCase):
                 dst_base_before = dst_base.clone()
                 dst = dst_base[offset:offset + n]
                 dst.copy_(src)
-                self.assertEqual(dst.cpu().view(torch.uint8), src.cpu().view(torch.uint8),
-                                 msg=f"nbytes={nbytes} offset={offset}")
+                msg = f"nbytes={nbytes} offset={offset}"
+                assert_bytes_equal(dst, src, msg)
                 # elements outside the destination slice are unchanged
-                self.assertEqual(dst_base[:offset].cpu(), dst_base_before[:offset].cpu())
-                self.assertEqual(dst_base[offset + n:].cpu(), dst_base_before[offset + n:].cpu())
+                assert_bytes_equal(dst_base[:offset], dst_base_before[:offset], msg)
+                assert_bytes_equal(dst_base[offset + n:], dst_base_before[offset + n:], msg)
         # a self copy of a large tensor must be a no-op
         t = make_tensor((gate // es,), dtype=dtype, device=device)
-        expected = t.cpu().clone()
+        expected = t.clone()
         t.copy_(t)
-        self.assertEqual(t.cpu().view(torch.uint8), expected.view(torch.uint8))
+        assert_bytes_equal(t, expected, "self copy")
         # clone() goes through the same path
-        self.assertEqual(t.clone().cpu().view(torch.uint8), expected.view(torch.uint8))
+        assert_bytes_equal(t.clone(), expected, "clone")
+
+    # Large contiguous quantized copies must keep working on every backend: the
+    # gfx1250 elementwise copy kernel does not dispatch every quantized dtype,
+    # so quantized dtypes stay on memcpy. (The sub-byte quint4x2 / quint2x4
+    # dtypes are not covered: their element count is not their byte count, and
+    # memcpy-based copies of them are not supported on CUDA either way.)
+    @onlyCUDA
+    @parametrize("qdtype", (torch.qint8, torch.quint8),
+                 name_fn=lambda qdtype: str(qdtype).split(".")[-1])
+    def test_copy_quantized_large_clone(self, device, qdtype):
+        numel = 16 << 20
+        src = torch._empty_affine_quantized((numel,), scale=1.0, zero_point=0, dtype=qdtype, device=device)
+        raw = torch.randint(0, 256, (numel,), dtype=torch.uint8, device=device)
+        src.untyped_storage().copy_(raw.untyped_storage())
+
+        def storage_bytes(t):
+            return torch.empty(0, dtype=torch.uint8, device=device).set_(t.untyped_storage(), 0, (numel,))
+
+        out = src.clone()
+        self.assertEqual(out.dtype, qdtype)
+        self.assertTrue(torch.equal(storage_bytes(out), raw))
+        dst = torch._empty_affine_quantized((numel,), scale=1.0, zero_point=0, dtype=qdtype, device=device)
+        dst.copy_(src)
+        self.assertTrue(torch.equal(storage_bytes(dst), raw))
 
     # Exercises the tiled CUDA kernel for dense 2D transpose copies. The
     # shapes are deliberately larger than the 4 MB dispatch threshold, and
