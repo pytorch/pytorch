@@ -2276,14 +2276,11 @@ class BuiltinVariable(BaseBuiltinVariable):
             fail(args, kwargs)
 
         if check_constant_args(args[1:], kwargs):
-            const_args, const_kwargs = self.unwrap_unspec_args_kwargs(
-                list(args[1:]), kwargs
-            )
+            const_args = [a.as_python_constant() for a in args[1:]]
             try:
                 r = builtins.__build_class__(
                     fn,  # type: ignore[possibly-undefined]
                     *const_args,
-                    **const_kwargs,
                 )
             except Exception as exc:
                 # A class body that fails CPython's own validation (e.g. an
@@ -2543,6 +2540,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         if len(args) > 3:
             raise_type_error(tx, f"range expected at most 3 arguments, got {len(args)}")
         args = tuple(pynumber_index(tx, arg) for arg in args)
+        if (
+            len(args) == 3
+            and args[2].is_python_constant()
+            and args[2].as_python_constant() == 0
+        ):
+            raise_observed_exception(
+                ValueError, tx, args=["range() arg 3 must not be zero"]
+            )
         return variables.RangeVariable(list(args))
 
     def _dynamic_args(self, *args: VariableTracker, **kwargs: VariableTracker) -> bool:
