@@ -162,6 +162,7 @@ class TestPointwiseKernel(TestCase):
                 (torch.float32, torch.int32),
                 None,
                 None,
+                None,
                 out_refs=outputs,
             )
 
@@ -404,6 +405,39 @@ class TestPointwiseKernel(TestCase):
 
     @onlyCUDA
     @skipIfNoCuteDSL
+    @parametrize(
+        "storage,compute,vec_bits",
+        (
+            (torch.float64, torch.float32, 128),
+            (torch.float16, torch.float64, 64),
+            (torch.float16, torch.float64, 256),
+        ),
+    )
+    def test_storage_and_compute_widths(
+        self, device: str, storage: torch.dtype, compute: torch.dtype, vec_bits: int
+    ) -> None:
+        from torch._native.cutedsl.dtypes import torch2cute
+        from torch._native.ops.pointwise import kernel, ops
+
+        value = torch.arange(64, device=device, dtype=storage)
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = value.to(compute)
+        (actual,) = kernel.run(
+            ops.get_fn("_identity"),
+            ("copy_width", storage, compute, vec_bits),
+            1,
+            1,
+            (),
+            torch2cute[compute],
+            (value,),
+            (compute,),
+            vec_bits=vec_bits,
+        )
+        with torch.backends.python_native.cutedsl.disabled():
+            self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
     @parametrize("change", ("function", "output", "storage", "compute"))
     def test_fixed_key_preserves_specialization(self, device: str, change: str) -> None:
         from torch._native.cutedsl.dtypes import torch2cute
@@ -442,6 +476,54 @@ class TestPointwiseKernel(TestCase):
 
     @onlyCUDA
     @skipIfNoCuteDSL
+    @parametrize("work_per_thread", (1, 4))
+    def test_rowgap_inputs_preserve_output_layout(
+        self, device: str, work_per_thread: int
+    ) -> None:
+        from torch._native.cutedsl.dtypes import torch2cute
+        from torch._native.ops.pointwise import kernel, ops
+
+        count = None
+        with torch.backends.python_native.cutedsl.disabled():
+            for rows, cols, pitch in (
+                (8, 8, 16),
+                (12, 16, 20),
+                (4, 12, 24),
+                (5, 8, 9),
+                (8, 8, 16),
+            ):
+                x = torch.arange(
+                    rows * pitch, device=device, dtype=torch.float32
+                ).reshape(rows, pitch)[:, :cols]
+                expected = -x
+                for transposed in (False, True, False):
+                    out = torch.empty(
+                        (cols, rows) if transposed else (rows, cols), device=device
+                    )
+                    if transposed:
+                        out = out.t()
+                    strides = out.stride()
+                    (actual,) = kernel.run(
+                        ops.get_fn("_neg"),
+                        ("rowgap_output",),
+                        1,
+                        1,
+                        (),
+                        torch2cute[x.dtype],
+                        [x],
+                        (x.dtype,),
+                        out=[out],
+                        work_per_thread=work_per_thread,
+                    )
+                    self.assertIs(actual, out)
+                    self.assertEqual(out.stride(), strides)
+                    self.assertEqual(actual, expected, atol=0, rtol=0)
+                if count is None:
+                    count = len(kernel._KERNELS)
+                self.assertEqual(len(kernel._KERNELS), count)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
     @parametrize("kind", ("device", "host"))
     def test_scalar_vector_rounding_and_provenance(
         self, device: str, kind: str
@@ -471,6 +553,69 @@ class TestPointwiseKernel(TestCase):
         )
         with torch.backends.python_native.cutedsl.disabled():
             self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    @dtypes(torch.float16, torch.float32, torch.float64)
+    @parametrize("name", ("sin", "add"))
+    def test_dense_presets_reuse_changing_shapes(
+        self, device: str, dtype: torch.dtype, name: str
+    ) -> None:
+        from torch._native.cutedsl.dtypes import torch2cute
+        from torch._native.ops.pointwise import kernel, ops
+
+        ct = torch2cute[torch.float64 if dtype is torch.float64 else torch.float32]
+        with torch.backends.python_native.cutedsl.disabled():
+            before = len(kernel._KERNELS)
+            for size in (64, 256, 8 * 1024**2, 4 * 1024**2, 1024, 0, 64):
+                x = torch.randn(size, device=device, dtype=dtype)
+                inputs = [x, x] if name == "add" else [x]
+                expected = getattr(torch, name)(*inputs)
+                (actual,) = kernel.run(
+                    ops.get_fn("_" + name),
+                    ("changing_shape",),
+                    len(inputs),
+                    1,
+                    (ct(1),) if name == "add" else (),
+                    ct,
+                    inputs,
+                    (dtype,),
+                )
+                self.assertEqual(actual.shape, expected.shape)
+                self.assertEqual(actual, expected)
+                limit = 1 if name == "sin" and dtype is not torch.float16 else 2
+                self.assertLessEqual(len(kernel._KERNELS) - before, limit)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    @parametrize("cols", (1024, 1028, 4096))
+    def test_rowgap_wide_preset_handles_vector_tails(
+        self, device: str, cols: int
+    ) -> None:
+        import cutlass
+
+        from torch._native.ops.pointwise import kernel, ops
+
+        with torch.backends.python_native.cutedsl.disabled():
+            rows = 4096 if cols == 4096 else 2048
+            x, y = [
+                torch.randn(rows, cols + 16, device=device, dtype=torch.float16)[
+                    :, :cols
+                ]
+                for _ in range(2)
+            ]
+            expected = x + y
+            (actual,) = kernel.run(
+                ops.get_fn("_add"),
+                ("rowgap_tail",),
+                2,
+                1,
+                (cutlass.Float32(1),),
+                cutlass.Float32,
+                [x, y],
+                (x.dtype,),
+            )
+            self.assertEqual(actual, expected)
 
     @onlyCUDA
     @skipIfNoCuteDSL
