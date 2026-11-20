@@ -86,12 +86,12 @@ class MLPModuleEven(torch.nn.Module):
 
 class ComposabilityTest(MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls, device) -> str:
+    def backend_str(cls) -> str:
         # Testing with NCCL backend
         return backend
 
-    @property
-    def device_type(self) -> str:
+    @classmethod
+    def device_type(cls) -> str:
         return device_type
 
     world_size = 8

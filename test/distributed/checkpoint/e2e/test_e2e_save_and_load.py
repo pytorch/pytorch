@@ -154,10 +154,10 @@ def _train(model, optim, train_steps=1):
 
 
 class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
-    @classmethod
-    def backend_str(cls, device) -> str:
-        curr_backend = dist.get_default_backend_for_device(device)
-        return f"cpu:gloo,{device}:{curr_backend}"
+    @property
+    def backend(self):
+        curr_backend = dist.get_default_backend_for_device(self.device_type)
+        return f"cpu:gloo,{self.device_type}:{curr_backend}"
 
     def _create_model(self, compile, model_type, state_dict_options=None):
         dummy_model = TestDummyModel().to(self.device_type)
@@ -433,7 +433,7 @@ class TestCheckpointOrderingAndOverwrite(DTensorContinuousTestBase):
     world_size = NUM_DEVICES
 
     @classmethod
-    def backend_str(cls, device):
+    def backend_str(cls):
         device = _get_device_type(cls.world_size)
         if device == "cpu":
             return "gloo"
@@ -518,9 +518,9 @@ class TestCheckpointOrderingAndOverwrite(DTensorContinuousTestBase):
 
 
 class TestNoCPU(DTensorTestBase):
-    @classmethod
-    def backend_str(cls, device) -> str:
-        return dist.get_default_backend_for_device(device)
+    @property
+    def backend(self):
+        return dist.get_default_backend_for_device(self.device_type)
 
     @skip_if_lt_x_gpu(NUM_DEVICES)
     @with_comms

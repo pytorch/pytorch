@@ -58,17 +58,15 @@ class _DDPCommHookTestBase(MultiProcContinuousTest):
     world_size = 2
 
     @classmethod
-    def backend_str(cls, device):
-        return dist.get_default_backend_for_device(device)
+    def backend_str(cls):
+        return dist.get_default_backend_for_device(cls.device_type)
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
         device_type = cls.device_type
-        if isinstance(device_type, property):
-            device_type = device_type.fget(cls)
         if device_type != "cpu" and torch.accelerator.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
-        if cls.backend_str(device_type) in ("nccl", "xccl"):
+        if cls.backend_str() in ("nccl", "xccl"):
             device = torch.device(f"{device_type}:{rank}")
             torch.set_default_device(device)
             torch.accelerator.set_device_index(device)

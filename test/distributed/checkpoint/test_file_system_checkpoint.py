@@ -172,7 +172,7 @@ class _CheckpointContinuousTest(MultiProcContinuousTest):
     world_size = 2
 
     @classmethod
-    def backend_str(cls, device) -> str:
+    def backend_str(cls) -> str:
         return backend
 
     @classmethod

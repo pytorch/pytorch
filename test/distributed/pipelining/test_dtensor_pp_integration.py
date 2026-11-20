@@ -156,11 +156,11 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
     world_size = 4
 
     @classmethod
-    def backend_str(cls, device) -> str:
+    def backend_str(cls) -> str:
         return backend
 
-    @property
-    def device_type(self) -> str:
+    @classmethod
+    def device_type(cls) -> str:
         return device_type
 
     @property

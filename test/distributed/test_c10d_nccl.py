@@ -8119,7 +8119,7 @@ class CollectiveAnnotationTest(MultiProcContinuousTest):
     world_size = 2
 
     @classmethod
-    def backend_str(cls, device):
+    def backend_str(cls):
         return "nccl"
 
     @property

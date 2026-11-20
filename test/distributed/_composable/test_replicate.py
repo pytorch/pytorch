@@ -85,11 +85,11 @@ class ReplicateTest(MultiProcContinuousTest):
     world_size = 2
 
     @classmethod
-    def backend_str(cls, device) -> str:
+    def backend_str(cls) -> str:
         return "gloo"
 
-    @property
-    def device_type(self) -> str:
+    @classmethod
+    def device_type(cls) -> str:
         return "cpu"
 
     def _compare_module(self, mod, replicate_mod):
