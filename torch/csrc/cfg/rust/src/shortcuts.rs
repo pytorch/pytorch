@@ -167,11 +167,6 @@ fn resolved() -> &'static ResolvedCache {
 }
 
 #[inline(always)]
-unsafe fn dict_version(dict: Obj) -> u64 {
-    (*(dict as *mut ffi::PyDictObject)).ma_version_tag
-}
-
-#[inline(always)]
 unsafe fn type_version(ty: *mut ffi::PyTypeObject) -> u32 {
     if ffi::PyType_HasFeature(ty, ffi::Py_TPFLAGS_VALID_VERSION_TAG) != 0 {
         (*ty).tp_version_tag
@@ -185,7 +180,7 @@ unsafe fn type_version(ty: *mut ffi::PyTypeObject) -> u32 {
 unsafe fn holds_now(condition: &Condition) -> bool {
     match condition {
         Condition::GlobalFalsy(globals, name, seen) => {
-            let version = dict_version(globals.as_ptr());
+            let version = pyffi::dict_version(globals.as_ptr());
             let (seen_version, mut value) = seen.get();
             if seen_version != version {
                 value = ffi::PyDict_GetItemWithError(globals.as_ptr(), name.as_ptr());
@@ -273,7 +268,7 @@ pub unsafe fn call_target(obj: Obj, ty: *mut ffi::PyTypeObject, call: Obj) -> Ob
         && entry.type_version != 0
         && entry.type_version == type_version(ty)
         && entry.dict == dict as usize
-        && entry.dict_version == dict_version(dict);
+        && entry.dict_version == pyffi::dict_version(dict);
     if !fresh {
         let found = registry().borrow().calls.iter().copied().find(|s| s.function.as_ptr() == call);
         let looked = found.and_then(|shortcut| resolve(shortcut, ty, dict).map(|r| (shortcut, r)));
@@ -288,7 +283,7 @@ pub unsafe fn call_target(obj: Obj, ty: *mut ffi::PyTypeObject, call: Obj) -> Ob
             // Read after the lookups, which may have given the type one.
             type_version: type_version(ty),
             dict: dict as usize,
-            dict_version: dict_version(dict),
+            dict_version: pyffi::dict_version(dict),
             shortcut: looked.map(|(shortcut, _)| shortcut),
             target: looked.map_or(null_mut(), |(_, (target, _))| target),
             watched: looked.map_or([null_mut(); MAX_WATCHED], |(_, (_, watched))| watched),
@@ -356,6 +351,37 @@ unsafe fn getattr_shortcut(ty: *mut ffi::PyTypeObject) -> usize {
         all.types[slot] = (ty as usize, version, which);
     }
     which
+}
+
+/// Whether a getattr shortcut applies to the instances of a type.
+pub unsafe fn has_getattr(ty: *mut ffi::PyTypeObject) -> bool {
+    getattr_shortcut(ty) != 0
+}
+
+/// Whether one of the dicts of a getattr shortcut has the name, for an
+/// object of a type that has such a shortcut: the lookup then ends there,
+/// without the function the shortcut stands for.
+pub unsafe fn finds(obj: Obj, name: Obj) -> bool {
+    let which = getattr_shortcut(ffi::Py_TYPE(obj));
+    let shortcut = registry().borrow().getattrs.get(which.wrapping_sub(1)).copied();
+    let dict = instance_dict(obj);
+    let (Some(shortcut), false) = (shortcut, dict.is_null()) else {
+        return false;
+    };
+    for key in &shortcut.dicts {
+        let entries = ffi::PyDict_GetItemWithError(dict, key.as_ptr());
+        if entries.is_null() {
+            continue;
+        }
+        if ffi::PyDict_Check(entries) == 0 {
+            break;
+        }
+        if !ffi::PyDict_GetItemWithError(entries, name).is_null() {
+            return true;
+        }
+    }
+    ffi::PyErr_Clear();
+    false
 }
 
 /// `getattr(obj, name)` through a getattr shortcut. Returns a new reference;
