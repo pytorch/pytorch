@@ -1456,9 +1456,7 @@ class MetaConverter(Generic[_TensorT]):
                         if base.dtype == t.dtype:
                             pass
                         elif is_c_of_r(base.dtype, t.dtype):
-                            base = self._checked_cast_tensor_t(
-                                torch.view_as_real(base)
-                            )
+                            base = self._checked_cast_tensor_t(torch.view_as_real(base))
                         elif is_c_of_r(t.dtype, base.dtype):
                             base = self._checked_cast_tensor_t(
                                 torch.view_as_complex(base)
