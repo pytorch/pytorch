@@ -1310,7 +1310,9 @@ def _register_overrides_from_graph(
         if _coerce_scalars is not None:
             coerced = _coerce_scalars(args)
             if coerced is None:
-                return _fallback.call_boxed(keyset, *original_args, **kwargs)
+                return _fallback._call_boxed_from_python_kernel(
+                    keyset, *original_args, **kwargs
+                )
             args, cast_dtype = coerced
         result = _dispatch(
             args,
@@ -1319,7 +1321,9 @@ def _register_overrides_from_graph(
             initialize_runtime=True,
         )
         if result is _NO_MATCH:
-            return _fallback.call_boxed(keyset, *original_args, **kwargs)
+            return _fallback._call_boxed_from_python_kernel(
+                keyset, *original_args, **kwargs
+            )
         if _orig_overload is not None and _orig_overload._schema.is_mutable:
             return result
         return _cast_to_weak_dtype(result, cast_dtype)

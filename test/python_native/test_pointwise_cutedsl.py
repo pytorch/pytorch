@@ -300,7 +300,6 @@ class TestCuTeDSLPointwise(TestCase):
     @parametrize(
         "dtype,shape,dims,offset",
         (
-            (torch.int1, (5, 7, 9), (0, 2), 0),
             (torch.bool, (5, 7, 9), (0, 1), 0),
             (torch.complex128, (35, 31), (0, 1), 1),
         ),
@@ -316,17 +315,78 @@ class TestCuTeDSLPointwise(TestCase):
         base = _random_bits(shape, dtype, device=device, offset=offset)
         src = base.transpose(*dims)
         with _disabled():
-            if dtype is torch.int1:
-                ref = (
-                    _storage_bytes(base)
-                    .view(*shape, dtype.itemsize)
-                    .transpose(*dims)
-                    .contiguous()
-                    .view(-1)
-                )
-            else:
-                ref = _storage_bytes(src.contiguous())
+            ref = _storage_bytes(src.contiguous())
         self._assert_transpose(src.contiguous(), src, ref)
+
+    def test_transpose_shell_dtype_preserves_native_error(self, device: str) -> None:
+        src = _random_bits((5, 7, 9), torch.int1, device=device).transpose(0, 2)
+        self._assert_native_error(lambda: src.contiguous())
+
+    def test_dense_copy_prefers_native(self, device: str) -> None:
+        from torch._native.ops.pointwise import overrides
+
+        with _disabled():
+            src = torch.arange(32, device=device, dtype=torch.float32)
+            wider = src.double()
+            target = torch.empty_like(src)
+        self.assertFalse(overrides._copy_cond(src, src))
+        self.assertFalse(overrides._copy_cond(target, src))
+        self.assertFalse(overrides._to_copy_cond(src, dtype=src.dtype))
+        self.assertTrue(overrides._copy_cond(target, wider))
+        self.assertTrue(overrides._to_copy_cond(src, dtype=torch.float64))
+        self.assertIs(src.copy_(src), src)
+        self.assertIs(overrides._copy_impl(target, wider), target)
+        self.assertEqual(target, src)
+
+    def test_quantized_clone_with_nan_scale(self, device: str) -> None:
+        from torch._native.ops.pointwise import overrides
+
+        src = torch._empty_affine_quantized(
+            (32, 32), scale=float("nan"), zero_point=0, dtype=torch.qint8, device=device
+        ).t()
+        _quantized_storage_bytes(src).fill_(0xA5)
+        kwargs = {"memory_format": torch.contiguous_format}
+        with _disabled():
+            expected = src.clone(**kwargs)
+        self.assertTrue(overrides._quantized_clone_cond(src, **kwargs))
+        actual = overrides._quantized_clone_impl(src, **kwargs)
+        self.assertEqual(actual.shape, expected.shape)
+        self.assertTrue(math.isnan(actual.q_scale()))
+        got = _quantized_storage_bytes(actual)
+        self.assertEqual(got, _quantized_storage_bytes(expected))
+
+    def test_transpose_external_storage_word_alignment(self, device: str) -> None:
+        from torch._native.ops.pointwise import overrides, transpose_copy
+
+        size = 512 * 512
+        with _disabled():
+            storage = torch.arange(size + 16, device=device).to(torch.uint8)
+            external = torch.from_dlpack(storage[1:])
+            src = external[15:].view(512, 512).t()
+            expected = src.contiguous()
+            target = torch.empty_like(expected)
+        self.assertNotEqual(src.storage_offset() % 4, 0)
+        spec = (1, 512, 1, 512, 1, 1)
+        self.assertFalse(transpose_copy.indexing_supported(src, target, spec))
+        self.assertFalse(overrides._copy_cond(target, src))
+        self.assertIs(target.copy_(src), target)
+        self.assertEqual(target, expected)
+
+    def test_transpose_metadata_cache_is_bounded(self, device: str) -> None:
+        from torch._native.cutedsl.config import POINTWISE_HOST_CACHE_LIMIT
+        from torch._native.ops.pointwise import overrides
+
+        for rows in (*range(2, POINTWISE_HOST_CACHE_LIMIT + 3), 2):
+            with _disabled():
+                base = torch.arange(6 * rows, device=device)
+                src = base.view(2, rows, 3).transpose(0, 1)
+                expected = src.contiguous()
+                target = torch.empty_like(expected)
+            self.assertIs(target.copy_(src), target)
+            self.assertEqual(target, expected)
+            self.assertLessEqual(
+                len(overrides._TRANSPOSE_SPECS), POINTWISE_HOST_CACHE_LIMIT
+            )
 
     def test_transpose_copy_zero_tensor(self, device: str) -> None:
         dtype = torch.complex64
@@ -1082,13 +1142,33 @@ class TestCuTeDSLPointwise(TestCase):
         if not zero_dim:
             x = x.reshape(1)
         keyset = torch._C._dispatch_keys(x)
+        other = torch.tensor(
+            scalar,
+            device="cpu",
+            dtype=torch.float64 if isinstance(scalar, float) else torch.int64,
+        )
         with _disabled():
             native = torch.library.get_kernel("aten::eq.Tensor", "CUDA")
-            expected = native.call_boxed(keyset, x, scalar)
+            expected = native.call_boxed(keyset, x, other)
         kernel = torch.library.get_kernel("aten::eq.Tensor", "CUDA")
-        actual = kernel.call_boxed(keyset, x, scalar)
+        actual = kernel.call_boxed(keyset, x, other)
         with _disabled():
             self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @parametrize(
+        "name,mask",
+        (("bitwise_and_", 63), ("bitwise_and", 256), ("bitwise_xor", 256)),
+    )
+    def test_scalar_bitwise_fallback_preserves_dtype_and_bits(
+        self, device: str, name: str, mask: int
+    ) -> None:
+        with _disabled():
+            x = torch.tensor(255, device=device, dtype=torch.uint8)
+            expected = getattr(x.clone(), name)(mask)
+        actual = getattr(x, name)(mask)
+        with _disabled():
+            self.assertEqual(actual.dtype, expected.dtype)
+            self.assertEqual(actual, expected)
 
     @parametrize(
         "dtype,start,end,step,size",
