@@ -4922,6 +4922,30 @@ class SIMDScheduling(BaseScheduling):
                 f"expected empty producer_group, got {len(producer_group)}"
             )
 
+        # A producer the template reads in another loop order (e.g. transposed)
+        # was fused on the promise that its loops can be reordered to match;
+        # reorder them. Source-only codegen (benchmarking a candidate fusion)
+        # restores them afterwards.
+        from ..scheduler import _LoopStateSnapshot
+
+        prologue_snapshot = (
+            _LoopStateSnapshot.create(tuple(prologue_nodes))
+            if only_gen_src_code
+            else None
+        )
+        for template_snode in template_node.get_nodes():
+            if not template_snode.is_template():
+                continue
+            for producer_group in buf_name_to_prologue_group.values():
+                if self.scheduler._template_prologue_read(
+                    producer_group, template_snode
+                ) is not None and not self.scheduler.reorder_template_prologue_loops(
+                    producer_group, template_snode
+                ):
+                    raise AssertionError(
+                        "template producer loops no longer match the template read"
+                    )
+
         # Remove producer-fused inputs from input_buffers so that
         # remove_kernel_local_buffers can remove them.
         fused_inputs = kernel.load_input_fused_inputs | kernel.store_output_fused_inputs
@@ -4952,6 +4976,8 @@ class SIMDScheduling(BaseScheduling):
         node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
 
         if only_gen_src_code:
+            if prologue_snapshot is not None:
+                prologue_snapshot.restore()
             return src_code
 
         # Unfused epilogues are codegen'd separately in call_kernel;
