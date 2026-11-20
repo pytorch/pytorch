@@ -374,7 +374,10 @@ class NIXLTransport(Transport):
         *,
         async_op: bool = False,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> int | Work:
+        if notification is not None:
+            self._check_notification(notification)
         return self._start(
             "WRITE",
             local_buffer,
@@ -391,7 +394,10 @@ class NIXLTransport(Transport):
         *,
         async_op: bool = False,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> int | Work:
+        if notification is not None:
+            self._check_notification(notification)
         return self._start(
             "READ",
             local_buffer,
@@ -425,7 +431,10 @@ class NIXLTransport(Transport):
         remote_buffer: RemoteBuffer,
         *,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> None:
+        if notification is not None:
+            self._check_notification(notification)
         await self._transfer_async(
             "WRITE", local_buffer, remote_buffer, mutable=False, timeout=timeout
         )
@@ -436,7 +445,10 @@ class NIXLTransport(Transport):
         remote_buffer: RemoteBuffer,
         *,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> None:
+        if notification is not None:
+            self._check_notification(notification)
         await self._transfer_async(
             "READ", local_buffer, remote_buffer, mutable=True, timeout=timeout
         )
