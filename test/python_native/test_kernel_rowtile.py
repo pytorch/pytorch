@@ -885,6 +885,10 @@ class TestKernelRowTile(TestCase):
         sum_trait = T.SumOps(acc=cutlass.Float32)
         (got,) = rt.reduce_row_tile(sum_trait, "tpr1_empty_sum", x, f32, **kw)
         self.assertEqual(got, zeros, atol=0, rtol=0)
+        # A nonzero identity catches a kernel that leaves the empty output unwritten.
+        prod_trait = T.ProdOps(acc=cutlass.Float32)
+        (got,) = rt.reduce_row_tile(prod_trait, "tpr1_empty_prod", x, f32, **kw)
+        self.assertEqual(got, torch.ones(4, device="cuda"), atol=0, rtol=0)
         trait = T.WelfordOps(acc=cutlass.Float32)
         parts = rt.reduce_row_tile(
             trait, "tpr1_empty_welford", x, f32 * trait.nfields, final=False, **kw
