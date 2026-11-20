@@ -1081,6 +1081,21 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         ):
             b.replace(b"a", b"b", b"0")
 
+    @parametrize("buffer_type", [bytes, bytearray])
+    def test_maketrans(self, buffer_type):
+        def f(x, source, target):
+            return x + bytearray.maketrans(source, target)[ord("a")]
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.tensor(1)
+        source, target = buffer_type(b"a"), buffer_type(b"z")
+        self.assertEqual(compiled(x, source, target), f(x, source, target))
+
+    @make_dynamo_test
+    def test_maketrans_invalid_length(self):
+        with self.assertRaises(ValueError):
+            bytearray.maketrans(b"a", b"xy")
+
     @make_dynamo_test
     def test_translate(self):
         b = self.type2test(b"hello")
