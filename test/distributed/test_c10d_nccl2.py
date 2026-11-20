@@ -36,10 +36,8 @@ from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
     requires_nccl,
-    requires_nccl_legacy,
     requires_nccl_version,
     skip_if_lt_x_gpu,
-    TEST_NCCL_LEGACY,
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
@@ -872,15 +870,6 @@ class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
         self._new_pg(None)
         with self.assertRaisesRegex(RuntimeError, "differs"):
             self._new_pg(_TEST_PSK[::-1])
-        if not TEST_NCCL_LEGACY:
-            return
-        with self.assertRaisesRegex(RuntimeError, "use the nccl2 backend"):
-            dist.ProcessGroupNCCL(
-                dist.FileStore(self.file_name, self.world_size),
-                self.rank,
-                self.world_size,
-                _psk_options(_TEST_PSK),
-            )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -940,24 +929,6 @@ class ProcessGroupNCCL2EncryptionTest(MultiProcessTestCase):
             with self.assertRaisesRegex(RuntimeError, "first nccl2 group"):
                 dist.shrink_group([1], group=group, pg_options=_psk_options(_TEST_PSK))
         dist.barrier(group=group)
-        dist.destroy_process_group()
-
-    @requires_nccl_legacy()
-    @skip_if_lt_x_gpu(2)
-    def test_encryption_psk_legacy_shrink(self) -> None:
-        device = torch.device("cuda", self.rank)
-        dist.init_process_group(
-            "nccl-legacy",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=dist.FileStore(self.file_name, self.world_size),
-            device_id=device,
-        )
-        dist.barrier()
-        if self.rank == 0:
-            with self.assertRaisesRegex(RuntimeError, "use the nccl2 backend"):
-                dist.shrink_group([1], pg_options=_psk_options(_TEST_PSK))
-        dist.barrier()
         dist.destroy_process_group()
 
     @requires_nccl()
@@ -1030,13 +1001,6 @@ class ProcessGroupNCCLLazyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
     @classmethod
     def backend_str(cls) -> str:
         return "nccl-lazy"
-
-
-@unittest.skipIf(not TEST_NCCL_LEGACY, "legacy NCCL backend is not built")
-class ProcessGroupNCCLLegacyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
-    @classmethod
-    def backend_str(cls) -> str:
-        return "nccl-legacy"
 
 
 class ProcessGroupNCCL2LazyInitTest(_ProcessGroupNCCL2OptionsTest):
@@ -1912,13 +1876,6 @@ class ProcessGroupNCCL2NonblockingOptionPrecedenceTest(_ProcessGroupNCCL2Options
         backend = dist.get_backend_impl(device=self.device)
         self.assertEqual(backend.options.config.blocking, 1)
         self._check_all_reduce()
-
-
-@unittest.skipIf(not TEST_NCCL_LEGACY, "legacy NCCL backend is not built")
-class ProcessGroupNCCLLegacyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
-    @classmethod
-    def backend_str(cls) -> str:
-        return "nccl-legacy"
 
 
 class ProcessGroupNCCL2ScalableInitTest(_ProcessGroupNCCL2OptionsTest):
