@@ -871,6 +871,60 @@ torch_memory_format_to_pyobject(int32_t memory_format, void** ret) {
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError
+torch_bool_from_pyobject(void* py_obj, bool* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().bool_from_pyobject(
+        static_cast<PyObject*>(py_obj));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_bool_to_pyobject(bool value, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().bool_to_pyobject(value);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_int64_from_pyobject(void* py_obj, int64_t* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().int64_from_pyobject(
+        static_cast<PyObject*>(py_obj));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_int64_to_pyobject(int64_t value, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().int64_to_pyobject(value);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_double_from_pyobject(void* py_obj, double* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().double_from_pyobject(
+        static_cast<PyObject*>(py_obj));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_double_to_pyobject(double value, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().double_to_pyobject(value);
+  });
+}
+
 // Most other dtypes defined in torch/csrc/inductor/aoti_torch/shim_common.cpp
 #define TORCH_DTYPE_IMPL(dtype, stype)                    \
   AOTI_TORCH_EXPORT int32_t torch_dtype_##dtype() {       \

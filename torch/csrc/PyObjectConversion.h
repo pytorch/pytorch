@@ -83,6 +83,25 @@ struct TORCH_API PyObjectConversionInterface {
   // at::MemoryFormat. The GIL must be held.
   virtual PyObject* memory_format_to_pyobject(
       at::MemoryFormat memory_format) const = 0;
+
+  // Read a Python bool (True or False only). The GIL must be held.
+  virtual bool bool_from_pyobject(PyObject* obj) const = 0;
+
+  // Return a new-reference Python bool. The GIL must be held.
+  virtual PyObject* bool_to_pyobject(bool value) const = 0;
+
+  // Read a Python int (not bool) as int64_t, erroring if it is out of range.
+  // The GIL must be held.
+  virtual int64_t int64_from_pyobject(PyObject* obj) const = 0;
+
+  // Return a new-reference Python int. The GIL must be held.
+  virtual PyObject* int64_to_pyobject(int64_t value) const = 0;
+
+  // Read a Python float or int as double. The GIL must be held.
+  virtual double double_from_pyobject(PyObject* obj) const = 0;
+
+  // Return a new-reference Python float. The GIL must be held.
+  virtual PyObject* double_to_pyobject(double value) const = 0;
 };
 
 // Install the conversion implementation. Called once by libtorch_python when it
