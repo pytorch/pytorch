@@ -10,7 +10,11 @@ import torch
 from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._higher_order_ops.user_kernel_hop import is_user_kernel_functional_hop
 from torch._logging import trace_structured, warning_once
-from torch.fx.experimental.symbolic_shapes import free_symbols, statically_known_true
+from torch.fx.experimental.symbolic_shapes import (
+    find_symbol_binding_fx_nodes,
+    free_symbols,
+    statically_known_true,
+)
 from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.reinplace import _get_view_type, _is_view_op, _ViewType
@@ -20,6 +24,7 @@ from torch.utils._ordered_set import OrderedSet
 from .. import config
 from ..pattern_matcher import (
     _common_custom_context,
+    _merge_custom_context,
     CallFunctionVarArgs,
     CallMethodVarArgs,
     get_arg_value,
@@ -547,7 +552,10 @@ class BatchLinearLHSFusion(BatchFusion):
         symbols = free_symbols(section)
         if not symbols:
             return True
-        bound = OrderedSet()
+        # Placeholder bindings: SymInt placeholders and unbacked bindings via
+        # the canonical helper, plus tensor inputs binding the dynamic shape
+        # and stride symbols of their values.
+        bound = OrderedSet(find_symbol_binding_fx_nodes(graph))
         for node in graph.nodes:
             if node.op != "placeholder":
                 continue
@@ -568,13 +576,11 @@ class BatchLinearLHSFusion(BatchFusion):
                 continue
             seen.add(cur)
             target = cur.target
-            if not isinstance(target, torch._ops.OpOverload):
-                continue
-            if target.overloadpacket.__name__ in (
-                "convert_element_type",
-                "_to_copy",
-                "to",
-                "type_as",
+            if target in (
+                torch.ops.prims.convert_element_type.default,
+                aten._to_copy.default,
+                aten.to.dtype,
+                aten.type_as.default,
             ):
                 src = cur.args[0]
                 if isinstance(src, torch.fx.Node):
@@ -695,15 +701,29 @@ class BatchLinearLHSFusion(BatchFusion):
         return False
 
     def match(self, node: torch.fx.Node):
+        # The mms only feed cat(s). Keep the zero-copy cat-mm buffer reuse
+        # when each cat feeds the graph output directly; fusing here would
+        # lower to cat + split_with_sizes and add copy kernels around the
+        # strided splits. A cat with further consumers can still fuse: its
+        # split sections cancel with the downstream split_with_sizes.
+        if node.users and all(user.target is aten.cat.default for user in node.users):
+            if all(
+                cat_node.users and all(user.op == "output" for user in cat_node.users)
+                for cat_node in node.users
+            ):
+                return None
         devices = self.graph_search_options.get("devices")
         if devices is not None:
+            if isinstance(devices, str):
+                devices = (devices,)
             value = node.meta.get("val")
             if not (isinstance(value, torch.Tensor) and value.device.type in devices):
                 return None
         if CallFunctionVarArgs(aten.mm.default).match(node):
             input_m, weight_m = node.args
             bias_m = None
-            # Leave add(mm(...), bias) for the addmm pattern matcher.
+            # Leave add(mm(...), bias) for the addmm pattern matcher. Any add
+            # user blocks the fusion here, including scalar adds.
             if any(user.target is aten.add.Tensor for user in node.users):
                 return None
         elif CallFunctionVarArgs(aten.addmm.default).match(
@@ -792,8 +812,7 @@ class BatchLinearLHSFusion(BatchFusion):
         custom_context = _common_custom_context(batch_nodes)
 
         def _copy_custom(new_node: torch.fx.Node) -> None:
-            if custom_context:
-                new_node.meta["custom"] = dict(custom_context)
+            _merge_custom_context(new_node.meta, custom_context)
 
         with graph.inserting_before(max(subset)):  # type: ignore[operator]
             cat_weights = graph.call_function(  # type: ignore[operator]
@@ -1995,7 +2014,7 @@ def _option_matches_graph_devices(
         return True
     if isinstance(devices, str):
         devices = (devices,)
-    if not isinstance(devices, (list, tuple, OrderedSet)):
+    if not isinstance(devices, (list, tuple, set, frozenset, OrderedSet)):
         return True
     return not graph_devices.isdisjoint(devices)
 
@@ -2018,7 +2037,8 @@ def group_batch_fusion_passes(
         # Keep the old pre-grad key working for fusions that moved post grad.
         for name in _PRE_GRAD_OPTIONS_FORWARDED_TO_POST_GRAD:
             if name in config.pre_grad_fusion_options:
-                # An explicit legacy option wins over the device-scoped default.
+                # The legacy key wins over the device-scoped default and also
+                # over an explicit post_grad entry with the same name.
                 warning_once(
                     log,
                     "Fusion option %s is post-grad; running it post grad. "
@@ -2027,17 +2047,21 @@ def group_batch_fusion_passes(
                     name,
                 )
                 post_grad_options[name] = config.pre_grad_fusion_options[name]
-        # Device-scoped defaults must not pay for the search on other devices.
-        graph_devices = OrderedSet()
-        for node in graph.nodes:
-            value = node.meta.get("val")
-            if isinstance(value, torch.Tensor):
-                graph_devices.add(value.device.type)
-        post_grad_options = {
-            name: options
-            for name, options in post_grad_options.items()
-            if _option_matches_graph_devices(options, graph_devices)
-        }
+        # Device-scoped defaults must not pay for the search on other
+        # devices. The "devices" filter applies to every group/batch fusion
+        # option, not just batch_linear_lhs, and the scan is skipped entirely
+        # when no option is device-scoped.
+        if any("devices" in options for options in post_grad_options.values()):
+            graph_devices = OrderedSet()
+            for node in graph.nodes:
+                value = node.meta.get("val")
+                if isinstance(value, torch.Tensor):
+                    graph_devices.add(value.device.type)
+            post_grad_options = {
+                name: options
+                for name, options in post_grad_options.items()
+                if _option_matches_graph_devices(options, graph_devices)
+            }
         fbgemm_fusion_keys = [
             x
             for x in post_grad_options
