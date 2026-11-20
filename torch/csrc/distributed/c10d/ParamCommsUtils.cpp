@@ -5,6 +5,8 @@
 
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 
 ParamCommsDebugInfo::ParamCommsDebugInfo(
@@ -33,7 +35,7 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
       globalRankStride_(globalRankStride),
       isAsynchronizedOp_(isAsynchronizedOp) {
   if (globalRankStride > 0) {
-    for (int i = 0; i < worldSize; i++) {
+    for (const auto i : c10::irange(worldSize)) {
       groupRanks_.push_back(globalRankStart + i * globalRankStride);
     }
   }

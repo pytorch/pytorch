@@ -62,7 +62,9 @@ DLDataType getDLDataType(const Tensor& t) {
       break;
     case ScalarType::BComplex32:
         TORCH_CHECK_BUFFER(false, "BComplex32 type is not supported by dlpack");
-        break;
+    case ScalarType::Float8_e5m3fnu:
+      TORCH_CHECK_BUFFER(
+          false, "Float8_e5m3fnu type is not supported by dlpack");
     case ScalarType::BFloat16:
       dtype.code = DLDataTypeCode::kDLBfloat;
       break;
@@ -93,14 +95,12 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::QUInt4x2:
     case ScalarType::QUInt2x4:
       TORCH_CHECK_BUFFER(false, "QUInt/QInt types are not supported by dlpack");
-      break;
     case ScalarType::Bits1x8:
     case ScalarType::Bits2x4:
     case ScalarType::Bits4x2:
     case ScalarType::Bits8:
     case ScalarType::Bits16:
       TORCH_CHECK_BUFFER(false, "Bit types are not supported by dlpack");
-      break;
     case ScalarType::Undefined:
       TORCH_CHECK_BUFFER(false, "Undefined is not a valid ScalarType");
     case ScalarType::NumOptions:
@@ -113,7 +113,8 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
   DLDevice ctx;
 
   ctx.device_id =
-      (device.is_cuda() || device.is_privateuseone() || device.is_mtia())
+      (device.is_cuda() || device.is_xpu() || device.is_privateuseone() ||
+       device.is_mtia())
       ? static_cast<int32_t>(static_cast<unsigned char>(device.index()))
       : 0;
 
@@ -138,7 +139,6 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
       break;
     case DeviceType::XPU:
       ctx.device_type = DLDeviceType::kDLOneAPI;
-      ctx.device_id = at::detail::getXPUHooks().getGlobalIdxFromDevice(device);
       break;
     case DeviceType::MAIA:
       ctx.device_type = DLDeviceType::kDLMAIA;
@@ -162,7 +162,7 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
 Device dlDeviceToTorchDevice(
     DLDeviceType type,
     c10::DeviceIndex index,
-    void* data) {
+    void* data [[maybe_unused]]) {
   switch (type) {
     case DLDeviceType::kDLCPU:
       return at::Device(DeviceType::CPU);
@@ -181,8 +181,7 @@ Device dlDeviceToTorchDevice(
       return at::Device(DeviceType::HIP, index);
 #endif
     case DLDeviceType::kDLOneAPI:
-      TORCH_CHECK(data != nullptr, "Can't get ATen device for XPU without XPU data.");
-      return at::detail::getXPUHooks().getDeviceFromPtr(data);
+      return at::Device(DeviceType::XPU, index);
     case DLDeviceType::kDLMAIA:
       return at::Device(DeviceType::MAIA, index);
     case DLDeviceType::kDLExtDev:

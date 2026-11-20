@@ -16,7 +16,7 @@ from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.ir import Buffer, Layout
 from torch._inductor.runtime.runtime_utils import next_power_of_2
 
-from ...utils import IndentedBuffer, is_dynamic, try_import_ck_lib
+from ...utils import IndentedBuffer, is_dynamic, rocm_gfx_arch, try_import_ck_lib
 
 
 _, gen_ops_library, gen_ops_preselected, CKGemmOperation = try_import_ck_lib()
@@ -419,6 +419,13 @@ class CKGemmTemplate(CKTemplate):
             return None
         if self.is_blocked_by_tf32_setting(op):
             return None
+        # CK compiles K1 >= 32 instances to an empty kernel body on anything but
+        # gfx950 (GridwiseGemm::IsValidCompilationParameter), yet IsSupportedArgument
+        # still accepts them, so they would launch without writing the output.
+        # Check every arch being compiled for, not just the current device.
+        archs = [a.split(":")[0] for a in config.rocm.arch] or [rocm_gfx_arch()]
+        if max(op.a_k1, op.b_k1) >= 32 and any(a != "gfx950" for a in archs):
+            return None
         # disable the instance if layouts don't match
         if op.a_layout != torch_layout_to_ck_layout(X_meta):
             return None
@@ -665,10 +672,12 @@ class CKGemmTemplate(CKTemplate):
                 else:
                     op.c_elementwise_op = "MultiplyMultiply"
                 op.c_shuffle_dtype = "F32"
-                op.ds_layouts = (
-                    torch_layout_to_ck_layout(scale_x.get_layout()),
-                    torch_layout_to_ck_layout(scale_w.get_layout()),
-                )
+                # Rowwise scales are contiguous [M, 1] and [1, N] and are
+                # passed with a zero leading dimension (see ds_strides below),
+                # so the layout alone selects the indexing: Col reads scale_x
+                # by row and Row reads scale_w by column. Strides cannot decide
+                # this: [M, 1] and [1, 1] tensors can both have strides (1, 1).
+                op.ds_layouts = ("Col", "Row")
                 op.ds_element_dtypes = (
                     self._TORCH_DTYPE_TO_CK[scale_x.get_layout().dtype],
                     self._TORCH_DTYPE_TO_CK[scale_w.get_layout().dtype],

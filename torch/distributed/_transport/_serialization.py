@@ -3,8 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from typing import Any, ClassVar
-from typing_extensions import Self
+from typing import Any, ClassVar, Self
 
 
 def _object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

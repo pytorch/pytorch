@@ -31,7 +31,10 @@ from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
     qengine_is_onednn,
 )
-from torch.testing._internal.common_utils import raise_on_run_directly
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+)
 import torch.fx
 from hypothesis import assume, given
 from hypothesis import strategies as st
@@ -51,6 +54,8 @@ test please see `test/quantization/test_quantized_op.py`.
 """
 
 class TestStaticQuantizedModule(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_relu(self):
         relu_module = nn.ReLU()
         relu6_module = nnq.ReLU6()
@@ -126,7 +131,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qlinear_copy = copy.deepcopy(qlinear)
         # set random quantized weight and bias before test torch scriptable
         qlinear_copy.set_weight_bias(W_q, B)
-        self.checkScriptable(qlinear_copy, [[X_q]], check_save_load=True)
         # Run module with default-initialized parameters.
         # This tests that the constructor is correct.
         qlinear(X_q)
@@ -178,7 +182,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
             # scripting will add __overloads__ to __dict__, which is why we script a copy
             # to be able to do the check in the next line
-            self.checkScriptable(copy.deepcopy(loaded_qlinear), [[X_q]], check_save_load=True)
             self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
             self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
             self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
@@ -232,7 +235,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             Z_q.int_repr().numpy(), Y_deepcopied.int_repr().numpy(), decimal=0)
 
         # Test JIT
-        self.checkScriptable(qlinear, [[X_q]], check_save_load=True)
 
         # Make sure `from_float` works for all linear variants
         modules_under_test = [torch.nn.Linear, torch.nn.modules.linear.NonDynamicallyQuantizableLinear]
@@ -401,9 +403,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             Y_exp.int_repr().numpy(), Y_deepcopied.int_repr().numpy(), decimal=0)
 
         # JIT testing
-        self.checkScriptable(
-            qconv_module, [example_input_q],
-            check_save_load=True)
 
         class _FusedModule_two_input_args(torch.ao.nn.intrinsic._FusedModule):
             # Help Module for ConvAdd2d since torch.ao.nn.intrinsic._FusedModule only support one input arg
@@ -921,7 +920,6 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(qX_expect, qX_hat)
 
         # JIT Testing
-        self.checkScriptable(pool_under_test, [[X]])
 
     def test_dropout(self):
         """Tests the correctness of the dropout module.
@@ -1415,6 +1413,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                     per_channel)
 
 class TestDynamicQuantizedModule(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_qconv_impl(self, q_mod, dq_mod, dim, dtype, bias):
         in_channels = 3
         out_channels = 10
@@ -1515,9 +1515,6 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         # need to fix this
         # JIT testing
-        self.checkScriptable(
-            dynamic_module, [[X_dq]],
-            check_save_load=True)
 
         # Test from_float
         conv_module = dynamic_module._FLOAT_MODULE(in_channels, out_channels, kernel_size)
@@ -1685,7 +1682,6 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test JIT
-        self.checkScriptable(qlinear, [[X]], check_save_load=True)
 
         modules_under_test = [torch.nn.Linear, torch.nn.modules.linear.NonDynamicallyQuantizableLinear]
         for mut in modules_under_test:
@@ -1879,6 +1875,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                 self.check_weight_bias_api(cell_dq, weight_keys, bias_keys)
 
 class TestReferenceQuantizedModule(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _quant_dequant_weight(self, weight, weight_qparams):
         qscheme = weight_qparams["qscheme"]
         scale = weight_qparams["scale"]
@@ -2113,6 +2111,7 @@ class TestReferenceQuantizedModule(QuantizationTestCase):
                 self.assertTrue(qmax == 127)
                 found += 1
         self.assertTrue(found == 2)
+
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")

@@ -49,13 +49,15 @@ _PYTEST_SUITE = _TEST_DIR / "junit_xml_testdata/pytest_suite.py"
 _REPORT_TESTDATA = Path(__file__).resolve().parent / "testdata"
 # Run the fixture as the default config: drop the job's CI / PYTORCH_TEST_* /
 # PYTEST_ADDOPTS settings and a PYTHONPATH whose repo root would shadow the
-# installed torch, and don't write bytecode into test/.
+# installed torch, and don't write bytecode into test/. These tests pin how
+# skipped tests are reported, so keep test/conftest.py's collection pruner from
+# deselecting the mark-skipped fixtures.
 _CHILD_ENV = {
     k: v
     for k, v in os.environ.items()
     if k not in ("PYTHONPATH", "CI", "PYTEST_ADDOPTS")
     and not k.startswith("PYTORCH_TEST_")
-} | {"PYTHONDONTWRITEBYTECODE": "1"}
+} | {"PYTHONDONTWRITEBYTECODE": "1", "PYTEST_ADDOPTS": "-p no:prune_skips_plugin"}
 
 # The fixture's run context, which the report records, without the job's device
 # filter (XPU and CUDA jobs set PYTORCH_TESTING_DEVICE_ONLY_FOR).
@@ -74,6 +76,7 @@ _REPORT_CHILD_ENV = {
 _RUN_TYPES = {
     "type": str,
     "schema_version": str,
+    "id": str,
     "file": str,
     "suite": str,
     "case_name": str,
@@ -103,8 +106,9 @@ def _assert_run_line(
 ) -> None:
     test.assertEqual([(k, type(v)) for k, v in run.items()], list(_RUN_TYPES.items()))
     test.assertEqual(
-        (run["type"], run["schema_version"], run["properties"]), ("run", "0.1", {})
+        (run["type"], run["schema_version"], run["properties"]), ("run", "1.0", {})
     )
+    test.assertEqual(str(uuid.UUID(run["id"])), run["id"])
     test.assertIn(run["language"], ("python", "cpp"))
     test.assertIn(run["outcome"], _RUN_OUTCOMES)
     test.assertTrue(t0_ms <= run["started_at"] <= run["ended_at"] <= t1_ms, run)
@@ -247,7 +251,7 @@ test_no_rerun_needed      | 0            | passed  |""",
             ],
         )
         self.assertEqual(report["type"], "report")
-        self.assertEqual(report["schema_version"], "0.1")
+        self.assertEqual(report["schema_version"], "1.0")
         self.assertEqual(report["repo"], "pytorch/pytorch")
         self.assertEqual(report["github_workflow_job_id"], 123456789)
         self.assertEqual(str(uuid.UUID(report["report_uuid"])), report["report_uuid"])
@@ -267,6 +271,8 @@ test_no_rerun_needed      | 0            | passed  |""",
         for run in runs:
             _assert_run_line(self, run, self.t0_ms, self.t1_ms)
             self.assertEqual(run["language"], "python")
+        # A new uuid per line, not one per report or per test.
+        self.assertEqual(len({run["id"] for run in runs}), len(runs))
 
     def test_identities(self) -> None:
         rendered = {}
@@ -585,8 +591,8 @@ class TestReportEnablement(TestCase):
             # Other repos' CI, such as forks' and out-of-tree backends', writes none.
             (True, "someone/pytorch", None, None),
             (True, "pytorch/pytorch", None, ci_dir),
-            # XPU builds write none.
-            (True, "pytorch/pytorch", "20250101", None),
+            # XPU builds too (test_capture_xpu_device_count).
+            (True, "pytorch/pytorch", "20250101", ci_dir),
         ):
             with (
                 unittest.mock.patch.object(run_test_module, "IS_CI", is_ci),
@@ -594,6 +600,162 @@ class TestReportEnablement(TestCase):
                 unittest.mock.patch.object(torch.version, "xpu", xpu),
             ):
                 self.assertEqual(default(), expected)
+
+
+@skipIfTorchDynamo("tests run_test.py's scheduling, not the tests it runs")
+class TestSerialFileXdistWorkers(TestCase):
+    """run_test.py runs the non-@serial tests of XDIST_SERIAL_FILES under xdist
+    only where each worker keeps the per-process isolation it needs, and
+    XDIST_SERIAL_CPU_LIST files only on CPU-only jobs."""
+
+    def workers(
+        self,
+        file="inductor/test_flex_attention",
+        *,
+        cuda=True,
+        accelerator=None,
+        hip=None,
+        gib=24,
+        env=None,
+        rerun_disabled=False,
+    ):
+        run_test_module = importlib.import_module("run_test")
+        options = types.SimpleNamespace(pytest_xdist_workers=None)
+        properties = types.SimpleNamespace(total_memory=gib * 2**30)
+        has_accelerator = cuda if accelerator is None else accelerator
+        with contextlib.ExitStack() as stack:
+            patch = functools.partial(unittest.mock.patch.object, run_test_module)
+            stack.enter_context(patch("TEST_CUDA", cuda))
+            stack.enter_context(patch("RERUN_DISABLED_TESTS", rerun_disabled))
+            stack.enter_context(
+                unittest.mock.patch.object(
+                    torch.accelerator, "is_available", lambda: has_accelerator
+                )
+            )
+            stack.enter_context(unittest.mock.patch.object(torch.version, "hip", hip))
+            stack.enter_context(
+                unittest.mock.patch.object(
+                    torch.cuda, "get_device_properties", lambda _: properties
+                )
+            )
+            stack.enter_context(unittest.mock.patch.dict(os.environ, env or {}))
+            return run_test_module.serial_file_xdist_workers(file, options, 3)
+
+    def test_listed_file_on_cuda_and_cpu(self) -> None:
+        self.assertEqual(self.workers(), 3)
+        self.assertEqual(self.workers(cuda=False), 3)
+
+    def test_unlisted_file(self) -> None:
+        self.assertEqual(self.workers("test_ops"), 1)
+
+    def test_cpu_only_file(self) -> None:
+        self.assertEqual(self.workers("test_nn", cuda=False), 3)
+        self.assertEqual(self.workers("test_nn"), 1)
+
+    def test_backends_without_per_worker_isolation(self) -> None:
+        self.assertEqual(self.workers(hip="6.4"), 1)
+        # e.g. XPU: an accelerator without CUDA's per-process memory cap.
+        self.assertEqual(self.workers(cuda=False, accelerator=True), 1)
+
+    def test_serial_modes(self) -> None:
+        self.assertEqual(self.workers(rerun_disabled=True), 1)
+        self.assertEqual(
+            self.workers(env={"PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL": "1"}), 1
+        )
+
+    def test_workers_shrink_to_fit_gpu_memory(self) -> None:
+        self.assertEqual(self.workers(gib=16), 3)
+        self.assertEqual(self.workers(gib=10), 2)
+        self.assertEqual(self.workers(gib=8), 1)
+
+    def run_xdist_pass(
+        self, xdist_exit_code: int, lastfailed: list[str] | None = None
+    ) -> tuple[list, list]:
+        """Runs run_test.run_test on flex under xdist with retry_shell exiting
+        with xdist_exit_code and pytest's lastfailed cache holding lastfailed;
+        returns the xdist commands and the retried (command, keep-going, env,
+        node ids) calls."""
+        if lastfailed is None:
+            lastfailed = [
+                "test/inductor/test_flex_attention.py::TestFlexAttentionCUDA::test_a",
+                "test/test_nn.py::TestNN::test_b",
+            ]
+        run_test_module = importlib.import_module("run_test")
+        with unittest.mock.patch.object(sys, "argv", ["run_test.py"]):
+            options = run_test_module.parse_args()
+        options.pytest = True
+        options.pipe_logs = False
+        options.pytest_xdist_workers = 3
+        options.continue_through_error = True
+        options.additional_args = ["-m", "(not serial)"]
+        xdist_commands, retried = [], []
+
+        def retry_shell(command, *args, **kwargs):
+            xdist_commands.append(command)
+            return xdist_exit_code, False
+
+        def run_test_retries(
+            command,
+            test_directory,
+            env,
+            timeout,
+            key,
+            output,
+            continue_through_error,
+            *args,
+        ):
+            (path,) = [
+                arg.split("=", 1)[1]
+                for arg in command
+                if arg.startswith("--nodeid-file=")
+            ]
+            with open(path) as f:
+                nodeids = f.read().splitlines()
+            retried.append((command, continue_through_error, env, nodeids))
+            return 0, False
+
+        test = run_test_module.ShardedTest("inductor/test_flex_attention", 1, 1, 600)
+        with (
+            unittest.mock.patch.object(run_test_module, "retry_shell", retry_shell),
+            unittest.mock.patch.object(
+                run_test_module, "run_test_retries", run_test_retries
+            ),
+            unittest.mock.patch.object(
+                run_test_module, "read_lastfailed", lambda: lastfailed
+            ),
+            unittest.mock.patch.object(
+                run_test_module, "drop_lastfailed", lambda prefix: None
+            ),
+            unittest.mock.patch.dict(os.environ, {"NUM_PARALLEL_PROCS": "3"}),
+        ):
+            ret_code = run_test_module.run_test(test, "test", options)
+        self.assertEqual(ret_code, 0 if retried else xdist_exit_code)
+        return xdist_commands, retried
+
+    def test_xdist_failures_rerun_without_xdist(self) -> None:
+        (xdist_command,), [(command, continue_through_error, env, nodeids)] = (
+            self.run_xdist_pass(xdist_exit_code=1)
+        )
+        # The xdist pass runs every test, so the rerun covers all its failures,
+        # and only this file's.
+        self.assertIn("-n", xdist_command)
+        self.assertNotIn("-x", xdist_command)
+        self.assertNotIn("-n", command)
+        self.assertEqual(
+            nodeids,
+            ["test/inductor/test_flex_attention.py::TestFlexAttentionCUDA::test_a"],
+        )
+        # Keep-going still classifies every failure.
+        self.assertTrue(continue_through_error)
+        self.assertNotIn("NUM_PARALLEL_PROCS", env)
+
+    def test_xdist_timeout_crash_or_unrecorded_failure_is_not_rerun(self) -> None:
+        for exit_code in (124, -11, 2):
+            _, retried = self.run_xdist_pass(xdist_exit_code=exit_code)
+            self.assertEqual(retried, [])
+        # Without recorded failures to rerun, the xdist failure stands.
+        _, retried = self.run_xdist_pass(xdist_exit_code=1, lastfailed=[])
+        self.assertEqual(retried, [])
 
 
 # gtest's JSON test list (--gtest_list_tests --gtest_output=json:<file>), with the
@@ -1031,6 +1193,50 @@ class TestReportHelpers(TestCase):
             environment.capture()
         probe.assert_not_called()
 
+    @skipIfTorchDynamo("Dynamo calls the patched torch.xpu functions while tracing")
+    @parametrize("zes_count", [subtest(2, name="sysman"), subtest(-1, name="runtime")])
+    def test_capture_xpu_device_count(self, zes_count):
+        # The writer's only XPU device query is torch.xpu.device_count(), which
+        # common_utils' TEST_XPU already made, so it can't poison fork where that
+        # didn't: the runtime count, which poisons fork, runs only when Level Zero
+        # Sysman can't count. It never initializes XPU.
+        environment = importlib.import_module(
+            "torch.testing._internal.torchci.environment"
+        )
+        name = "Intel(R) Data Center GPU Max 1100"
+        check_output = subprocess.check_output
+
+        def xpu_smi(args, *rest, **kwargs):
+            if args[:1] == ["xpu-smi"]:
+                return json.dumps({"device_list": [{"device_name": name}]})
+            return check_output(args, *rest, **kwargs)
+
+        runtime_count = unittest.mock.Mock(return_value=2)
+        lazy_init = unittest.mock.Mock()
+        with (
+            unittest.mock.patch.object(
+                environment, "_accelerator", return_value=("xpu", "20250101")
+            ),
+            unittest.mock.patch.multiple(
+                torch.xpu,
+                _initialized=False,
+                _cached_device_count=None,
+                _lazy_init=lazy_init,
+            ),
+            unittest.mock.patch.object(torch.xpu, "_is_compiled", return_value=True),
+            unittest.mock.patch.object(
+                torch.xpu, "_device_count_zes", return_value=zes_count
+            ),
+            unittest.mock.patch.object(
+                torch._C, "_xpu_getDeviceCount", runtime_count, create=True
+            ),
+            unittest.mock.patch.object(subprocess, "check_output", xpu_smi),
+        ):
+            captured = environment.capture()
+        self.assertEqual((captured.device_count, captured.device_name), (2, name))
+        self.assertEqual(runtime_count.call_count, 0 if zes_count >= 0 else 1)
+        lazy_init.assert_not_called()
+
     def test_rocm_version(self):
         environment = importlib.import_module(
             "torch.testing._internal.torchci.environment"
@@ -1253,6 +1459,41 @@ class TestEnvVarValues(TestCase):
             values,
             {"FOO_EV_ALLOC_CONF": conf, "FOO_EV_DSL": "triton", "FOO_EV_INT": "08"},
         )
+        # The repro command gets the same strings, which are what the shell needs.
+        repro = {
+            k: v
+            for k, v in TestEnvironment.repro_env_vars.items()
+            if k.startswith("FOO_EV_")
+        }
+        self.assertEqual(
+            repro,
+            {"FOO_EV_ALLOC_CONF": conf, "FOO_EV_DSL": "triton", "FOO_EV_INT": "08"},
+        )
+
+    def test_include_in_report_separate_from_repro(self):
+        env = {"FOO_EV_REPORT_ONLY": "x", "FOO_EV_REPRO_ONLY": "y"}
+        with unittest.mock.patch.dict(os.environ, env):
+            self._def_setting(
+                "FOO_EV_REPORT_ONLY",
+                env_var="FOO_EV_REPORT_ONLY",
+                include_in_repro=False,
+                include_in_report=True,
+            )
+            self._def_setting(
+                "FOO_EV_REPRO_ONLY",
+                env_var="FOO_EV_REPRO_ONLY",
+                include_in_repro=True,
+                include_in_report=False,
+            )
+        self.assertEqual(TestEnvironment.env_var_values["FOO_EV_REPORT_ONLY"], "x")
+        self.assertNotIn("FOO_EV_REPORT_ONLY", TestEnvironment.repro_env_vars)
+        self.assertNotIn("FOO_EV_REPRO_ONLY", TestEnvironment.env_var_values)
+        self.assertEqual(TestEnvironment.repro_env_vars["FOO_EV_REPRO_ONLY"], "y")
+
+    def test_repro_env_var_prefix_quotes_values(self):
+        with unittest.mock.patch.dict(os.environ, {"FOO_EV_SPACE": "a b"}):
+            self._def_setting("FOO_EV_SPACE", env_var="FOO_EV_SPACE")
+        self.assertIn("FOO_EV_SPACE='a b'", TestEnvironment.repro_env_var_prefix())
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/cpu/int_mm_kernel.h>
+#include <ATen/native/cpu/SumKernel.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ReduceOps.h>
@@ -2660,8 +2661,8 @@ Tensor compute_T18_scale_square(
   std::vector<Tensor> output_pieces;
   output_pieces.reserve(section_numel);
   auto acc = mexp_scaled.index_select(0, sorted_s_inds);
-  for (int64_t i = 0; i < section_numel; ++i) {
-    for (int64_t j = 0; j < pts[i]; j++) {
+  for (const auto i : c10::irange(section_numel)) {
+    for ([[maybe_unused]] const auto _ : c10::irange(pts[i])) {
       // To avoid AMP autocasting caused by at::matmul
       auto acc_out = at::empty_like(acc);
       acc = at::matmul_out(acc_out, acc, acc);
@@ -2710,7 +2711,7 @@ Tensor mexp_impl(
       compute_T8<scalar_t>, compute_T12<scalar_t>
     };
 
-    for (int i = 0; i < total_n_degs - 1; ++i) {
+    for (const auto i : c10::irange(total_n_degs - 1)) {
       auto norm_lower_bound = (i == 0) ? static_cast<scalar_t>(-1) : thetas[i - 1];
       auto norm_upper_bound = thetas[i];
       // nonzero returns a 2D tensor, hence squeeze(-1) to make it 1D
@@ -2887,6 +2888,27 @@ Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
   );
 }
 
+// The CPU cascade summation (cpu/SumKernel.h) can add partial sums into its
+// output, so reduce half and bfloat16 into a float temporary and round once at
+// the end. A single-element result is written once and needs no temporary.
+static bool cpu_powsum_in_float(const char* name, const Tensor& result, const Tensor& self,
+                                OptionalIntArrayRef dim, bool keepdim, double ord, bool is_norm) {
+  const auto in_dtype = self.scalar_type();
+  if (!self.is_cpu() || !isReducedFloatingType(in_dtype) || result.scalar_type() != in_dtype ||
+      result.numel() == 1 || !cascade_powsum_supports(ord, is_norm)) {
+    return false;
+  }
+  Tensor result_float = at::empty({0}, result.options().dtype(kFloat));
+  auto iter = make_reduction(name, result_float, self, dim, keepdim, in_dtype, kFloat);
+  if (is_norm) {
+    norm_stub(iter.device_type(), iter, ord);
+  } else {
+    powsum_stub(iter.device_type(), iter, ord);
+  }
+  result.copy_(result_float);
+  return true;
+}
+
 TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype, const Tensor& result) {
   // Casting a large integer to a double will just introduce an error for
   // values larger than 10^53 (same for negative numbers), so that's fine.
@@ -2949,6 +2971,10 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
     self_ = self;
   }
 
+  if (cpu_powsum_in_float("vector_norm", result, self_, dim, keepdim, ord, /*is_norm=*/true)) {
+    return;
+  }
+
   auto iter = make_reduction("vector_norm", const_cast<Tensor&>(result), self_, dim, keepdim, result.scalar_type());
   norm_stub(iter.device_type(), iter, ord);
 }
@@ -3004,6 +3030,10 @@ Tensor linalg__powsum(
     self_ = self.to(*opt_dtype);
   } else {
     self_ = self;
+  }
+
+  if (cpu_powsum_in_float("powsum", result, self_, dim, keepdim, ord, /*is_norm=*/false)) {
+    return result;
   }
 
   auto iter = make_reduction("powsum", result, self_, dim, keepdim, result.scalar_type());

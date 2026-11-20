@@ -8,6 +8,7 @@
 // ${generated_comment}
 
 #include <ATen/Tensor.h>
+#include <string_view>
 
 ${namespace_prologue}
 

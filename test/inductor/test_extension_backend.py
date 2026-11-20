@@ -84,6 +84,7 @@ class DeviceToAtenTests(TestCase):
             ("xpu", "at::kXPU"),
             ("mps", "at::kMPS"),
             ("meta", "at::kMeta"),
+            ("mtia", "at::kMTIA"),
         ],
     )
     def test_builtin_device_types(self, device, expected):
@@ -107,9 +108,8 @@ class DeviceToAtenTests(TestCase):
         with self.assertRaisesRegex(RuntimeError, "must return.*at::k"):
             device_to_aten(device)
 
-    @parametrize("device", ["tpu", "mtia"])
+    @parametrize("device", ["tpu"])
     def test_unsupported_device_types(self, device):
-        # MTIA has no aoti_torch_device_type_mtia shim yet; update this when it does.
         with self.assertRaisesRegex(RuntimeError, "No ATen device type mapping"):
             device_to_aten(device)
 
