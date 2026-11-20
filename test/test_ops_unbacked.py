@@ -67,7 +67,7 @@ apply_skip_decorators(
 
 
 class TestOpsUnbacked(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CPU
 
     def _has_valid_unbacked_dims(self, t: torch.Tensor) -> bool:
         """Check if tensor has dimensions that can be marked as unbacked."""
