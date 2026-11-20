@@ -52,6 +52,7 @@ from torch.testing._internal.common_device_type import (
     E5M2_MAX_POS,
     expectedFailureCUDA,
     expectedFailureXPU,
+    onlyMPS,
     skipCUDAIf,
     skipMPS,
     skipXPU,
@@ -3023,6 +3024,77 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             sqnr = compute_error(C_ref, C)
             if sqnr.item() <= approx_match_sqnr_target:
                 raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
+
+    @onlyMPS
+    @parametrize("recipe", ["mxfp8", "nvfp4"])
+    @parametrize("layout", ["dense", "padded", "unaligned"])
+    @parametrize("mnk", [(1, 7, 2048), (3, 130, 1024), (4, 64, 512), (8, 100, 256), (64, 96, 2048)],
+                 name_fn=lambda mnk: f"{mnk[0]}_{mnk[1]}_{mnk[2]}")
+    def test_blockwise_mps_layouts(self, recipe, layout, mnk, device) -> None:
+        # MPS picks a decode kernel for M <= 4, MPP or tiles otherwise, and the native
+        # Metal 4.1 kernel for dense MXFP8; padded and unaligned operands must take or
+        # fall back to a kernel that handles them.
+        M, N, K = mnk
+        block = 16 if recipe == "nvfp4" else 32
+        packed = 2 if recipe == "nvfp4" else 1
+        dtype = torch.float4_e2m1fn_x2 if recipe == "nvfp4" else torch.float8_e4m3fn
+        scale_dtype = torch.float8_e4m3fn if recipe == "nvfp4" else torch.float8_e8m0fnu
+        pad = {"dense": 0, "padded": 32, "unaligned": 0}[layout]
+        offset = 1 if layout == "unaligned" else 0
+
+        def operand(rows):
+            codes = torch.randint(0, 256, (rows * (K // packed + pad) + offset,), dtype=torch.uint8)
+            if recipe == "mxfp8":
+                # avoid the NaN codes 0x7f and 0xff
+                codes = codes.view(torch.float8_e4m3fn).float().nan_to_num().to(torch.float8_e4m3fn).view(torch.uint8)
+            # take the views on the device too: copying a view to MPS makes it dense
+
+            def view(t):
+                return t[offset:].view(rows, K // packed + pad)[:, : K // packed].view(dtype)
+
+            return view(codes), view(codes.to(device))
+
+        def scales(rows):
+            if recipe == "nvfp4":
+                s = (torch.rand(rows, K // block) + 0.25).to(scale_dtype)
+            else:
+                s = torch.randint(118, 128, (rows, K // block), dtype=torch.uint8).view(scale_dtype)
+            return s, s.to(device)
+
+        def dequant(data, s):
+            if recipe == "nvfp4":
+                u8 = data.view(torch.uint8)
+                codes = torch.stack([u8 & 0xF, u8 >> 4], -1).flatten(-2)
+                values = _floatx_unpacked_to_f32(codes, 2, 1).double()
+            else:
+                values = data.double()
+            return (values.unflatten(-1, (-1, block)) * s.double().unsqueeze(-1)).flatten(-2)
+
+        (a, a_dev), (b, b_dev) = operand(M), operand(N)
+        (sa, sa_dev), (sb, sb_dev) = scales(M), scales(N)
+        recipe_enum = ScalingType.BlockWise1x16 if recipe == "nvfp4" else ScalingType.BlockWise1x32
+        out = torch._scaled_mm_v2(
+            a_dev, b_dev.t(), [sa_dev], [recipe_enum], [SwizzleType.NO_SWIZZLE],
+            [sb_dev], [recipe_enum], [SwizzleType.NO_SWIZZLE], None, torch.float32,
+        )
+        ref = dequant(a, sa) @ dequant(b, sb).t()
+        # float32 accumulation over K: measure the error against the output's magnitude
+        err = ((out.cpu().double() - ref).abs() / (ref.abs() + ref.abs().mean())).max().item()
+        self.assertLess(err, 1e-5)
+
+    @onlyMPS
+    def test_blockwise_mxfp8_extreme_scales_mps(self, device) -> None:
+        # A large and a small e8m0 scale whose product is 1 must not overflow, whichever kernel M selects
+        for M in (1, 8):
+            a = torch.ones(M, 32, device=device).to(torch.float8_e4m3fn)
+            b = torch.ones(16, 32, device=device).to(torch.float8_e4m3fn)
+            sa = torch.full((M, 1), 127 + 120, dtype=torch.uint8, device=device).view(torch.float8_e8m0fnu)
+            sb = torch.full((16, 1), 127 - 120, dtype=torch.uint8, device=device).view(torch.float8_e8m0fnu)
+            out = torch._scaled_mm_v2(
+                a, b.t(), [sa], [ScalingType.BlockWise1x32], [SwizzleType.NO_SWIZZLE],
+                [sb], [ScalingType.BlockWise1x32], [SwizzleType.NO_SWIZZLE], None, torch.float32,
+            )
+            self.assertEqual(out, torch.full_like(out, 32.0))
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)

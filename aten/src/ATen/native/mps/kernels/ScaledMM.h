@@ -19,7 +19,7 @@ C10_METAL_CONSTEXPR uint32_t scaled_mm_few_rows_lane_chunk =
     scaled_mm_few_rows_load_bytes * 2;
 C10_METAL_CONSTEXPR float scaled_mm_decode_scale = 256.0f;
 // K values each lane of the block-scaled few rows kernel decodes per step: one
-// MXFP8 block or two NVFP4 blocks, 16 or 32 bytes.
+// MXFP8 block (32 bytes) or two NVFP4 blocks (16 bytes).
 C10_METAL_CONSTEXPR uint32_t scaled_mm_blockwise_chunk = 32;
 
 template <typename index_t = int64_t>

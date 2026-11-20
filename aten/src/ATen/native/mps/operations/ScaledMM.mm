@@ -35,8 +35,8 @@ const std::array<scaled::ScaleKernelDispatchEntry, 5> scale_kernel_dispatch = {{
      scaled::ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE},
 }};
 
-// Block-scaled recipes decode their operands while staging the tiles, so A must be row-major and B column-major (both
-// K-contiguous, like cuBLASLt) and the scales unswizzled [rows, K / block]. The validator has checked the scale shapes.
+// Block-scaled recipes read A row-major and B column-major (both K-contiguous, like cuBLASLt) with unswizzled
+// [rows, K / block] scales; the validator has checked the scale shapes.
 void scaled_mm_blockwise_out(const Tensor& mat_a,
                              const Tensor& mat_b,
                              ArrayRef<Tensor> scale_a,
@@ -71,9 +71,10 @@ void scaled_mm_blockwise_out(const Tensor& mat_a,
       .has_bias = bias.has_value(),
       .bias_bfloat16 = bias.has_value() && bias->scalar_type() == kBFloat16,
   };
-  // Metal 4.1 MPP applies MX block scales natively; it needs whole blocks along K and int32 strides
-  const bool native = !nvfp4 && has_metal_4_1() && k % 32 == 0 && std::in_range<int32_t>(mat_a.stride(0)) &&
-      std::in_range<int32_t>(mat_b.stride(1));
+  // Metal 4.1 MPP applies MX block scales natively. It needs whole blocks along K and dense operands, since it derives
+  // the scale plane's row pitch from the data's, and indexes each tile in int32.
+  const bool native = !nvfp4 && has_metal_4_1() && k % 32 == 0 && mat_a.stride(0) == k && mat_b.stride(1) == k &&
+      std::in_range<int32_t>(scaled_mm_native_tile * k);
   // The few rows kernel reads whole chunks of K with 16-byte vector loads
   const auto aligned16 = [](const Tensor& mat, int64_t leading_stride) {
     return mat.storage_offset() % 16 == 0 && leading_stride % 16 == 0;

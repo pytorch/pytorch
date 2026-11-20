@@ -231,7 +231,7 @@ struct nvfp4_format {
     return c10::metal::detail::fp8e4m3fn_to_fp32(s);
   }
   // The decode kernels read 32 values (two blocks, 16 bytes) per lane step and
-  // decode them without the 2^14 rebias, which unbiased_scale applies once per
+  // decode them without the 2^14 rebias, which apply_scales applies once per
   // block. Masks put one nibble per 16-bit lane of a half2: magnitude into the
   // exponent and mantissa, sign into bit 15. That permutes the values within
   // each group of 8, which a dot product with an operand decoded the same way
@@ -251,8 +251,8 @@ struct nvfp4_format {
       }
     }
   }
-  static float unbiased_scale(uchar s) {
-    return scale(s) * 16384.0f;
+  static float apply_scales(float dot, uchar a_scale, uchar b_scale) {
+    return dot * (scale(a_scale) * 16384.0f) * (scale(b_scale) * 16384.0f);
   }
 };
 
@@ -267,7 +267,7 @@ struct mxfp8_format {
     return c10::metal::detail::fp8e8m0fnu_to_fp32(s);
   }
   // 32 values (one block, 32 bytes) per lane step, decoded at 1/256 of their
-  // value by scaled_mm_decode_scaled; unbiased_scale makes up for it.
+  // value by scaled_mm_decode_scaled; apply_scales makes up for it.
   static constexpr constant uint chunk_bytes = 32;
   static void decode_chunk(device const uchar* data, thread float* v) {
     const auto raw = reinterpret_cast<device const uint4*>(data);
@@ -283,8 +283,15 @@ struct mxfp8_format {
       }
     }
   }
-  static float unbiased_scale(uchar s) {
-    return scale(s) * scaled_mm_decode_scale;
+  // Adds the scale exponents rather than multiplying the scales, which would
+  // overflow for a large and a small scale whose product is representable.
+  static float apply_scales(float dot, uchar a_scale, uchar b_scale) {
+    if (a_scale == 0xff || b_scale == 0xff) {
+      return NAN;
+    }
+    // e8m0 biases its exponent by 127; 2^16 undoes the decode's 1/256 per
+    // operand
+    return ldexp(dot, int(a_scale) + int(b_scale) - 2 * 127 + 16);
   }
 };
 
@@ -481,7 +488,8 @@ kernel void scaled_mm_few_rows(
 
 static_assert(
     scaled_mm_few_rows_max == 4,
-    "register scaled_mm_few_rows for every row count up to the maximum");
+    "register scaled_mm_few_rows and scaled_mm_blockwise_few_rows for every "
+    "row count up to the maximum");
 
 REGISTER_SCALED_MM_FEW_ROWS_WITH_OUT_T(float);
 REGISTER_SCALED_MM_FEW_ROWS_WITH_OUT_T(half);
@@ -508,15 +516,11 @@ kernel void scaled_mm_blockwise_few_rows(
   }
   const uint k_blocks = p.k / F::block;
   const auto b_col = b + col * p.b_col_stride;
+  const auto b_scales = scale_b + ulong(col) * k_blocks;
   float accum[rows] = {};
   for (uint c = lane; c < p.k / chunk; c += c10::metal::simdgroup_size) {
     float bv[chunk];
     F::decode_chunk(b_col + c * F::chunk_bytes, bv);
-    float b_scale[blocks];
-#pragma unroll
-    for (uint j = 0; j < blocks; ++j) {
-      b_scale[j] = F::unbiased_scale(scale_b[col * k_blocks + c * blocks + j]);
-    }
 #pragma unroll
     for (uint r = 0; r < rows; ++r) {
       float av[chunk];
@@ -528,9 +532,9 @@ kernel void scaled_mm_blockwise_few_rows(
         for (uint i = j * F::block; i < (j + 1) * F::block; ++i) {
           dot = fma(av[i], bv[i], dot);
         }
-        const auto a_scale =
-            F::unbiased_scale(scale_a[r * k_blocks + c * blocks + j]);
-        accum[r] = fma(dot, a_scale * b_scale[j], accum[r]);
+        const uint kb = c * blocks + j;
+        accum[r] +=
+            F::apply_scales(dot, scale_a[r * k_blocks + kb], b_scales[kb]);
       }
     }
   }
@@ -790,7 +794,10 @@ REGISTER_SCALED_MM_NATIVE_WITH_OUT_T(bfloat);
 REGISTER_SCALED_MM_NATIVE_WITH_OUT_T(float8_e4m3fn);
 
 // MXFP8 on Metal 4.1: MPP applies the ue8m0 block scales itself, taking each
-// operand's scales as a [rows, K / 32] plane alongside its fp8 data.
+// operand's scales as a [rows, K / 32] plane alongside its fp8 data. MPP
+// derives the plane's row pitch from the data's, so the host only routes dense
+// operands (leading stride == K) here. MPP rejects const-qualified element
+// types, hence the non-const pointers.
 template <typename T>
 [[max_total_threads_per_threadgroup(scaled_mm_threads)]]
 kernel void scaled_mm_native_mxfp8(
@@ -815,18 +822,25 @@ kernel void scaled_mm_native_mxfp8(
       dextents<int32_t, 2>,
       tensor_inline,
       scales_t>;
-  const auto operand =
-      [&](device uchar* data, device uchar* scales, uint rows, int64_t ld) {
-        return fp8_tensor(
-            data,
-            dextents<int32_t, 2>(p.k, rows),
-            array<int32_t, 2>{1, int32_t(ld)},
-            scales_t(scales));
-      };
+  const uint k_blocks = p.k / mxfp8_format::block;
+  // Each tile gets its own tensors, starting at its first row or column with
+  // 64-bit offsets: MPP indexes a tensor in 32 bits, so slicing one that spans
+  // the whole matrix wraps once the offset passes 2^31.
+  const auto operand = [&](device uchar* data,
+                           device uchar* scales,
+                           uint start,
+                           uint size,
+                           int64_t ld) {
+    return fp8_tensor(
+        data + start * ld,
+        dextents<int32_t, 2>(p.k, min(tile, size - start)),
+        array<int32_t, 2>{1, int32_t(ld)},
+        scales_t(scales + ulong(start) * k_blocks));
+  };
   const uint row_start = group.y * tile;
   const uint col_start = group.x * tile;
-  auto a_tile = operand(a, scale_a, p.m, p.a_row_stride).slice(0, row_start);
-  auto b_tile = operand(b, scale_b, p.n, p.b_col_stride).slice(0, col_start);
+  auto a_tile = operand(a, scale_a, row_start, p.m, p.a_row_stride);
+  auto b_tile = operand(b, scale_b, col_start, p.n, p.b_col_stride);
   constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
       tile, tile, static_cast<int>(dynamic_extent), false, true);
   mpp::tensor_ops::matmul2d<desc, execution_simdgroups<scaled_mm_simdgroups>>
