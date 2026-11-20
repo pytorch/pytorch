@@ -416,8 +416,8 @@ class TORCH_API Reducer {
     // If no hook is registered, a temporary vanilla allreduce hook is used.
     c10::intrusive_ptr<at::ivalue::Future> future_work;
 
-    // Retained for lazy buckets so finalize_backward can release NCCL's tensor
-    // stash on the autograd thread after communication completes.
+    // Wait in finalize_backward to release the backend's tensor references
+    // before lazy bucket storage is released or initial buckets are rebuilt.
     c10::intrusive_ptr<c10d::Work> allreduce_work;
 
     // if this bucket contains complex parameters

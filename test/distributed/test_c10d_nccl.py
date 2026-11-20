@@ -4888,6 +4888,36 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         except OSError:
             pass
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("backend", ["nccl-legacy", "nccl2"])
+    def test_ddp_releases_initial_bucket_after_backward(self, backend):
+        from torch.multiprocessing.reductions import StorageWeakRef
+
+        device = torch.device(self.device)
+        torch.cuda.set_device(device)
+        c10d.init_process_group(
+            backend,
+            store=c10d.FileStore(self.file_name, self.world_size),
+            rank=self.rank,
+            world_size=self.world_size,
+            device_id=device,
+        )
+        ddp = DistributedDataParallel(
+            nn.Linear(4, 4, device=device),
+            device_ids=[device],
+            # Make weight.grad share the bucket's storage so the weak reference
+            # below tracks the lifetime of the all-reduce bucket.
+            gradient_as_bucket_view=True,
+        )
+        ddp(torch.ones(1, 4, device=device)).sum().backward()
+        bucket = StorageWeakRef(ddp.module.weight.grad.untyped_storage())
+        ddp.zero_grad(set_to_none=True)
+        # Drop the reducer without issuing another collective that could
+        # release the backend's reference to the initial bucket.
+        del ddp
+        self.assertTrue(bucket.expired())
+
     def _test_broadcast_coalesced(self, process_group, device, root_rank):
         half = torch.float16
 
