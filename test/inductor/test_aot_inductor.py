@@ -4052,6 +4052,35 @@ class AOTInductorTestsTemplate:
                 example_inputs=example_inputs,
             )
 
+    @skip_if_device(
+        lambda device: device not in ("cuda", "xpu"), "requires a Triton accelerator"
+    )
+    @common_utils.parametrize("view_kind", ["repeat", "dtype", "slice"])
+    @config.patch({"triton.autotune_at_compile_time": False})
+    def test_cond_lazy_autotune_view_handle_lifetime(self, view_kind):
+        class Model(torch.nn.Module):
+            def forward(self, pred, x, y):
+                if view_kind == "repeat":
+                    y = y.repeat_interleave(1, 0)
+                elif view_kind == "dtype":
+                    y = y.view(torch.int32)
+                else:
+                    y = y[1:]
+                return torch.cond(pred, lambda x, y: x + y, lambda x, y: x - y, (x, y))
+
+        if view_kind == "dtype":
+            x = torch.randint(0, 10, (1024,), dtype=torch.int32, device=self.device)
+            y = torch.randint(0, 10, (1024,), dtype=torch.int32, device=self.device)
+            y = y.view(torch.float32)
+        else:
+            x = torch.randn(1024, device=self.device)
+            y = torch.randn(1025 if view_kind == "slice" else 1024, device=self.device)
+        inputs = [
+            (torch.tensor(selector, device=self.device), x, y)
+            for selector in (True, False, True)
+        ]
+        self.check_model_with_multiple_inputs(Model(), inputs)
+
     def test_switch_simple(self):
         inputs = (torch.randn((10, 20), device=self.device),)
         dim0_x = Dim("s0", min=2, max=1024)

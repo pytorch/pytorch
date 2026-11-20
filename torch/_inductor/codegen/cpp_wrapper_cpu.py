@@ -3030,7 +3030,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_switch(self, node) -> None:
         """Emit ABI-compatible C++ for a higher-order cond/switch."""
-        outer_inputs = [f"{buf.codegen_reference()}" for buf in node.operands]
+        # The dual-wrapper JIT pass visits every branch, so each input must
+        # borrow the same live handle rather than recreate an owning temporary.
+        outer_inputs = [
+            self.create_tmp_raii_handle_var_if_needed(buf.codegen_reference())
+            for buf in node.operands
+        ]
         outer_outputs = []
         for out in node.outputs:
             # in ABI-compatible mode, ir.MultiOutput is not codegened,
