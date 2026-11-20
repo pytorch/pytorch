@@ -161,6 +161,49 @@ class TestSWAUtilsGeneric(TestCase):
 
         self.assertEqual(cnn.bn.momentum, 0.3)
 
+    def test_bn_update_restores_submodule_modes(self):
+        # Submodules put in eval mode inside a model in train mode must stay
+        # in eval mode after update_bn.
+        x = torch.rand(20, 4)
+        dl_x = torch.utils.data.DataLoader(x, batch_size=5)
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.BatchNorm1d(4),
+            torch.nn.Dropout(0.5),
+            torch.nn.BatchNorm1d(4),
+        )
+        model.train()
+        model[2].eval()
+        model[3].eval()
+        update_bn(dl_x, model)
+        self.assertEqual(
+            [m.training for m in model.modules()], [True, True, True, False, False]
+        )
+
+    def test_bn_update_calls_overridden_train(self):
+        # Modules that override train() must see it called when their mode is
+        # restored, so side effects of train(True) are undone.
+        class Net(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bn = torch.nn.BatchNorm1d(4)
+                self.modes = []
+
+            def forward(self, x):
+                return self.bn(x)
+
+            def train(self, mode=True):
+                self.modes.append(mode)
+                return super().train(mode)
+
+        dl_x = torch.utils.data.DataLoader(torch.rand(20, 4), batch_size=5)
+        model = torch.nn.Sequential(Net())
+        model.eval()
+        model[0].modes.clear()
+        update_bn(dl_x, model)
+        self.assertEqual(model[0].modes, [True, False])
+        self.assertFalse(model.training)
+
 
 instantiate_parametrized_tests(TestSWAUtilsGeneric)
 

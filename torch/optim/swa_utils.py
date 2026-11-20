@@ -409,7 +409,9 @@ def update_bn(
     if not momenta:
         return
 
-    was_training = model.training
+    # Record every module's mode, not just the root's, so submodules the caller
+    # put in eval mode (e.g. frozen BatchNorm or Dropout) are restored too.
+    was_training = {module: module.training for module in model.modules()}
     model.train()
     for module in momenta:
         module.momentum = None
@@ -424,7 +426,11 @@ def update_bn(
 
     for bn_module in momenta:
         bn_module.momentum = momenta[bn_module]
-    model.train(was_training)
+    # modules() is pre-order, so a parent's recursive train() runs before its
+    # children are checked. Calling train() keeps any overrides' side effects.
+    for module, training in was_training.items():
+        if module.training != training:
+            module.train(training)
 
 
 class SWALR(LRScheduler):
