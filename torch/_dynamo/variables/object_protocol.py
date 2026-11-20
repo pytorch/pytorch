@@ -80,6 +80,15 @@ def vt_identity_compare(
     if left is right:
         return ConstantVariable.create(True)
 
+    from .dicts import DunderDictVariable
+
+    while isinstance(left, DunderDictVariable) and left.replacement is not None:
+        left = left.replacement
+    while isinstance(right, DunderDictVariable) and right.replacement is not None:
+        right = right.replacement
+    if left is right:
+        return ConstantVariable.create(True)
+
     left_val = left.get_real_python_backed_value()
     right_val = right.get_real_python_backed_value()
     left_known = left_val is not NO_SUCH_SUBOBJ

@@ -1823,6 +1823,16 @@
       ]
     }
   ],
+  "GB2508": [
+    {
+      "Gb_type": "HOP: Nested side effect",
+      "Context": "description",
+      "Explanation": "A nested higher-order operator mutated an outer-scope object, but its enclosing operator does not support side effects.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0115": [
     {
       "Gb_type": "Unexpected failure during itertools.groupby() iteration",
@@ -2637,6 +2647,16 @@
       "Gb_type": "hasattr() on unsupported type",
       "Context": "hasattr({obj}, {attr})",
       "Explanation": "hasattr() is not supported on type {type(obj).__name__}",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9093": [
+    {
+      "Gb_type": "Unsupported instance dictionary replacement",
+      "Context": "pending __dict__ replacement",
+      "Explanation": "Tracing a pending instance dictionary replacement requires a plain dictionary with captured storage.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -5539,6 +5559,16 @@
       "Explanation": "Unable to create higher order operator variable for {value.__name__}.",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB4963": [
+    {
+      "Gb_type": "Unsupported cached_property instance dictionary",
+      "Context": "cached_property {name}",
+      "Explanation": "Tracing cached_property requires a plain instance dictionary.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

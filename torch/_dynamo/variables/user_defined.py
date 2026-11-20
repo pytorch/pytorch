@@ -42,7 +42,7 @@ from typing_extensions import is_typeddict
 import torch._dynamo.config
 import torch.nn
 from torch._C._dynamo import PyNumberSlots
-from torch._guards import Guard, Source, TracingContext
+from torch._guards import Source, TracingContext
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 from torch.utils._pytree import GetAttrKey, is_structseq_class
@@ -65,9 +65,9 @@ from ..graph_bytecode_inputs import get_external_object_by_index
 from ..guards import GuardBuilder, install_guard, install_not_in_instance_dict_guard
 from ..source import (
     AttrSource,
-    CachedPropertySource,
     CallFunctionNoArgsSource,
     DictGetItemSource,
+    GenericAttrSource,
     get_global_source_name,
     GetItemSource,
     is_from_local_source,
@@ -95,6 +95,7 @@ from ..utils import (
     is_pybind11_enum_member,
     is_torch_class,
     istype,
+    iter_mro_static_dicts,
     list_methods,
     namedtuple_fields,
     no_keywords,
@@ -2096,76 +2097,6 @@ def call_random_fn(
     return VariableBuilder(tx, source).wrap_unspecialized_primitive(example_value)
 
 
-def install_cached_property_guards(
-    tx: "InstructionTranslatorBase", source: CachedPropertySource, value: object
-) -> bool:
-    root = get_global_source_name(source.base)
-    if (
-        tx.output.frame_state is None
-        or tx.output.package is not None
-        or config.caching_precompile
-        or not (
-            is_from_local_source(source.base)
-            or (root is not None and root not in tx.output.installed_globals)
-        )
-    ):
-        return False
-    descriptor = inspect.getattr_static(type(value), source.member, None)
-    for cls in (type(value), type(descriptor)):
-        meta = type(cls)
-        if type(meta) is not type:
-            return False
-        for attr, expected in (
-            ("__getattribute__", type.__getattribute__),
-            ("__dict__", type.__dict__["__dict__"]),
-            ("__mro__", type.__dict__["__mro__"]),
-        ):
-            if mro_lookup(meta, attr) is not expected:
-                return False
-
-    guards: list[Guard] = [source.base.make_guard(GuardBuilder.TYPE_MATCH)]
-    cls_source = TypeSource(source.base)
-    mro_source = TypeMROSource(cls_source)
-    # Stamping may bypass instance lookup and reuse an already tracked value.
-    # Bind the protocol to this receiver, even when descriptors are shared.
-    for attr in (source.member, "__getattribute__"):
-        for idx, klass in enumerate(type(value).__mro__):
-            owner_cls: Source = cls_source
-            if idx:
-                owner_cls = GetItemSource(mro_source, idx)
-            dict_source = TypeDictSource(owner_cls)
-            if attr in klass.__dict__:
-                owner = DictGetItemSource(dict_source, attr)
-                if attr != source.member:
-                    guards.append(owner.make_guard(GuardBuilder.ID_MATCH))
-                else:
-                    guards.append(owner.make_guard(GuardBuilder.TYPE_MATCH))
-                    desc_source = TypeSource(owner)
-                    desc_mro = TypeMROSource(desc_source)
-                    guards.append(desc_mro.make_guard(GuardBuilder.SEQUENCE_LENGTH))
-                    for desc_idx, _ in enumerate(type(descriptor).__mro__):
-                        desc_cls: Source = desc_source
-                        if desc_idx:
-                            desc_cls = GetItemSource(desc_mro, desc_idx)
-                        for slot in ("__set__", "__delete__"):
-                            guards.append(
-                                TypeDictSource(desc_cls).make_guard(
-                                    functools.partial(
-                                        GuardBuilder.DICT_NOT_CONTAINS, key=slot
-                                    )
-                                )
-                            )
-                break
-            guards.append(
-                dict_source.make_guard(
-                    functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key=attr)
-                )
-            )
-    guards.append(source.make_guard(GuardBuilder.TYPE_MATCH))
-    install_guard(*guards)
-    return all(guard in tx.output.guards for guard in guards)
-
-
 class UserDefinedObjectVariable(UserDefinedVariable):
     """
     Mostly objects of defined type.  Catch-all for something where we only know the type.
@@ -3809,50 +3740,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # TODO(guilhermeleobas): This can trigger a side effect
         return key in self.value.__dict__
 
-    def _can_use_cached_property_source(
-        self, tx: "InstructionTranslatorBase", descriptor: object, name: str
-    ) -> bool:
-        attrname = inspect.getattr_static(descriptor, "attrname", None)
-        # Direct capture omits frame_state; precompile can drop protocol guards.
-        if (
-            self.source is None
-            or tx.output.frame_state is None
-            or tx.output.package is not None
-            or config.caching_precompile
-            or self._object_has_getattribute
-            or type(descriptor) is not functools.cached_property
-            or type(attrname) is not str
-            or attrname != name
-            or is_data_descriptor(descriptor)
-        ):
-            return False
-        for cls in (type(self.value), type(descriptor)):
-            meta = type(cls)
-            if type(meta) is not type:
-                return False
-            for attr, expected in (
-                ("__getattribute__", type.__getattribute__),
-                ("__dict__", type.__dict__["__dict__"]),
-                ("__mro__", type.__dict__["__mro__"]),
-            ):
-                if mro_lookup(meta, attr) is not expected:
-                    return False
-        if (
-            self.lookup_class_mro_attr("__getattribute__")
-            is not object.__getattribute__
-        ):
-            return False
-        dict_descriptor = self.lookup_class_mro_attr("__dict__")
-        if not isinstance(dict_descriptor, types.GetSetDescriptorType):
-            return False
-        if type(self.value.__dict__) is not dict:
-            return False
-        # A discarded trace removes globals installed by its OutputGraph.
-        root = get_global_source_name(self.source)
-        return is_from_local_source(self.source) or (
-            root is not None and root not in tx.output.installed_globals
-        )
-
     def get_source_by_walking_mro(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> DictGetItemSource:
@@ -3880,11 +3767,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
                 install_guard(guard)
                 if (
-                    self._can_use_cached_property_source(tx, descriptor, name)
+                    self._can_guard_cached_property(tx, descriptor, name)
                     and guard in tx.output.guards
                 ):
-                    # Eager fallback can fill the cache after the failed trace
-                    # that discovered this stable instance-dict dependency.
+                    # Preserve the cache miss when restarting past a failed HOP.
                     tx.speculation_log.retry_guards.add(guard)
 
             out_source = mro_attr_source(tx, type(self.value), self.cls_source, name)
@@ -3899,6 +3785,42 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 f"Ensure the name `{name}` is defined somewhere in {self.value}'s type hierarchy.",
                 *graph_break_hints.USER_ERROR,
             ],
+        )
+
+    def _can_guard_cached_property(
+        self, tx: "InstructionTranslatorBase", descriptor: object, name: str
+    ) -> bool:
+        if (
+            type(descriptor) is not functools.cached_property
+            or type(type(descriptor)) is not type
+        ):
+            return False
+        attrname = inspect.getattr_static(descriptor, "attrname", None)
+        descriptor_mro = type(descriptor).__mro__
+        accessor = self.lookup_class_mro_attr("__getattribute__")
+        dict_descriptor = self.lookup_class_mro_attr("__dict__")
+        root = get_global_source_name(self.source)
+        return (
+            self.source is not None
+            and self.cls_source is not None
+            and tx.output.frame_state is not None
+            and tx.output.package is None
+            and not config.caching_precompile
+            and type(attrname) is str
+            and attrname == name
+            and not is_data_descriptor(descriptor)
+            and len(descriptor_mro) == 2
+            and descriptor_mro[1] is object
+            and type(type(self.value)) is type
+            and accessor is object.__getattribute__
+            and type(dict_descriptor) is types.GetSetDescriptorType
+            and type(self.value.__dict__) is dict
+            and (
+                is_from_local_source(self.source)
+                or root is not None
+                and type(tx.output.global_scope) is dict
+                and root not in tx.output.installed_globals
+            )
         )
 
     def _class_vt(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -4324,7 +4246,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker | None:
         source: Source | None = AttrSource(self.source, name) if self.source else None
-
         if tx.output.side_effects.has_pending_mutation_of_attr(
             self,
             name,
@@ -4343,19 +4264,79 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return dict_vt.getitem(name)
             return None
 
+        descriptor = self.lookup_class_mro_attr(name)
+        if self.source and type(descriptor) is functools.cached_property:
+            dict_descriptor = self.lookup_class_mro_attr("__dict__")
+            if (
+                type(dict_descriptor) is not types.GetSetDescriptorType
+                or type(object.__getattribute__(self.value, "__dict__")) is not dict
+            ):
+                unimplemented(
+                    gb_type="Unsupported cached_property instance dictionary",
+                    context=f"cached_property {name}",
+                    explanation="Tracing cached_property requires a plain instance dictionary.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
         if hasattr(self.value, "__dict__") and name in self.value.__dict__:
             subobj = self.value.__dict__[name]
             if (
                 self.source
                 and self.cls_source
-                and self._can_use_cached_property_source(
-                    tx, self.lookup_class_mro_attr(name), name
-                )
+                and self._can_guard_cached_property(tx, descriptor, name)
             ):
-                cache_source = CachedPropertySource(self.source, name)
-                if install_cached_property_guards(tx, cache_source, self.value):
-                    source = cache_source
-                    tx.output.current_tracer.traced_sources.add(source)
+                # A missing cache key must fail guards without running the getter.
+                install_guard(self.cls_source.make_guard(GuardBuilder.TYPE_MATCH))
+                cls = type(self.value)
+                cls_mro = TypeMROSource(self.cls_source)
+                install_guard(cls_mro.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+                for index in range(1, len(cls.__mro__)):
+                    install_guard(
+                        GetItemSource(cls_mro, index).make_guard(GuardBuilder.ID_MATCH)
+                    )
+                descriptor_source = None
+                for attr in ("__getattribute__", "__dict__", name):
+                    for index, (_, namespace) in enumerate(iter_mro_static_dicts(cls)):
+                        entry_source = (
+                            self.cls_source
+                            if index == 0
+                            else GetItemSource(cls_mro, index)
+                        )
+                        namespace_source = TypeDictSource(entry_source)
+                        if attr in namespace:
+                            attr_source = DictGetItemSource(namespace_source, attr)
+                            break
+                        install_guard(
+                            namespace_source.make_guard(
+                                functools.partial(
+                                    GuardBuilder.DICT_NOT_CONTAINS, key=attr
+                                )
+                            )
+                        )
+                    else:
+                        raise AssertionError(f"Missing source for {attr}")
+                    if attr == name:
+                        descriptor_source = attr_source
+                    else:
+                        install_guard(attr_source.make_guard(GuardBuilder.ID_MATCH))
+                if descriptor_source is None:
+                    raise AssertionError(f"Missing source for {name}")
+                descriptor_type = TypeSource(descriptor_source)
+                mro_source = TypeMROSource(descriptor_type)
+                install_guard(descriptor_source.make_guard(GuardBuilder.TYPE_MATCH))
+                install_guard(mro_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+                install_guard(
+                    GetItemSource(mro_source, 1).make_guard(GuardBuilder.ID_MATCH)
+                )
+                for slot in ("__set__", "__delete__"):
+                    install_guard(
+                        TypeDictSource(descriptor_type).make_guard(
+                            functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key=slot)
+                        )
+                    )
+                dict_source = GenericAttrSource(self.source, "__dict__")
+                install_guard(dict_source.make_guard(GuardBuilder.TYPE_MATCH))
+                source = DictGetItemSource(dict_source, name)
             source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
             return VariableTracker.build(tx, subobj, source)
 

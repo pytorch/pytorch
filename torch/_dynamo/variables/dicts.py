@@ -1825,9 +1825,15 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             for key, value in example_value_dict.items()
         }
 
-    def __init__(self, item: VariableTracker, tx: "InstructionTranslatorBase") -> None:
+    def __init__(
+        self,
+        item: VariableTracker,
+        tx: "InstructionTranslatorBase",
+        replacement: ConstDictVariable | None = None,
+    ) -> None:
         self.item = item
         self.output_graph_weakref = weakref.ref(tx.output)
+        self.replacement = replacement
         self.item_dict = self.get_value___dict__(tx, item)
 
     @property
@@ -1861,6 +1867,10 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
 
     def __getitem__(self, key: kV) -> VariableTracker:
         name = self._maybe_unwrap_key(key)
+        if self.replacement is not None:
+            return self.replacement.items[
+                HashableTracker(ConstantVariable.create(name))
+            ]
         if self.side_effects.has_pending_mutation_of_attr(
             self.item, name, AttrMutationKind.INSTANCE_DICT
         ):
@@ -1874,16 +1884,26 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         # instance-dict mutations replay with object_setattr_ignore_descriptor
         # (a plain __dict__ store), so a non-str constant key is fine.
         name = self._maybe_unwrap_key(key)
+        if self.replacement is not None:
+            self._mutate_replacement(name, value)
+            return
         self.side_effects.store_instance_dict_attr(self.item, name, value)
 
     def __delitem__(self, key: kV) -> None:
         name = self._maybe_unwrap_key(key)
+        if self.replacement is not None:
+            self._mutate_replacement(name, None)
+            return
         self.side_effects.store_instance_dict_attr(
             self.item, name, variables.DeletedVariable()
         )
 
     def __contains__(self, key: kV) -> bool:  # type: ignore[bad-override]
         name = self._maybe_unwrap_key(key)
+        if self.replacement is not None:
+            return (
+                HashableTracker(ConstantVariable.create(name)) in self.replacement.items
+            )
         if self.side_effects.has_pending_mutation_of_attr(
             self.item, name, AttrMutationKind.INSTANCE_DICT
         ):
@@ -1895,6 +1915,9 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         return sum(1 for _ in self)
 
     def __iter__(self) -> Iterator[HashableTracker]:
+        if self.replacement is not None:
+            yield from self.replacement.items
+            return
         Hasher = HashableTracker
         d = self.side_effects_table()
         for k, v in d.items():
@@ -1905,6 +1928,22 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         for k, v in self.item_dict.items():
             if k not in d:
                 yield Hasher(ConstantVariable.create(k))
+
+    def _mutate_replacement(self, name: str, value: VariableTracker | None) -> None:
+        replacement = self.replacement
+        if replacement is None:
+            raise AssertionError("Expected a pending instance dictionary replacement")
+        self.side_effects.check_allowed_side_effect(self.item)
+        replacement.install_dict_keys_match_guard()
+        self.side_effects.mutation(replacement)
+        if self.item.source is not None:
+            self.side_effects.mutated_sources.add(AttrSource(self.item.source, name))
+        key = HashableTracker(ConstantVariable.create(name))
+        if value is None:
+            del replacement.items[key]
+            replacement.should_reconstruct_all = True
+        else:
+            replacement.items[key] = value
 
 
 class DunderDictVariable(ConstDictVariable):
@@ -1923,10 +1962,38 @@ class DunderDictVariable(ConstDictVariable):
     ) -> "DunderDictVariable":
         mutation = AttributeMutationExisting() if vt.source else AttributeMutationNew()
         source = vt.source and AttrSource(vt.source, "__dict__")
+        replacement = None
+        if isinstance(
+            vt, variables.UserDefinedObjectVariable
+        ) and tx.output.side_effects.has_pending_mutation_of_attr(
+            vt, "__dict__", AttrMutationKind.GENERIC_SETATTR
+        ):
+            pending = tx.output.side_effects.load_attr(vt, "__dict__")
+            if isinstance(pending, ConstDictVariable):
+                storage = pending
+                while (
+                    isinstance(storage, DunderDictVariable)
+                    and storage.replacement is not None
+                ):
+                    storage = storage.replacement
+                # An existing facade follows its receiver, not retained storage.
+                if (
+                    isinstance(storage, DunderDictVariable)
+                    or storage.python_type() is not dict
+                ):
+                    unimplemented(
+                        gb_type="Unsupported instance dictionary replacement",
+                        context="pending __dict__ replacement",
+                        explanation="Tracing a pending instance dictionary replacement requires a plain dictionary with captured storage.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                replacement = pending
+                mutation, source = pending.mutation_type, pending.source
 
         return cls(
             vt,
             tx=tx,
+            replacement=replacement,
             mutation_type=mutation,
             source=source,
         )
@@ -1935,10 +2002,18 @@ class DunderDictVariable(ConstDictVariable):
         self,
         vt: VariableTracker,
         tx: "InstructionTranslatorBase",
+        replacement: ConstDictVariable | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__({}, **kwargs)
-        self.items = SideEffectsProxyDict(vt, tx)
+        self.replacement = replacement
+        self.items = SideEffectsProxyDict(vt, tx, replacement)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        if self.replacement is not None:
+            codegen(self.replacement)
+        else:
+            super().reconstruct(codegen)
 
     def setitem(self, name: str, value: VariableTracker) -> None:
         self.items[name] = value
