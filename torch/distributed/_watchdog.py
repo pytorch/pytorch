@@ -9,9 +9,12 @@ polls CUDA events to detect stuck GPU work, and provides CPU-side timers
 for host-blocking operations. It fires user-configurable
 callbacks when a timeout is exceeded.
 
-A second daemon thread ("health watchdog") periodically pings the
-event loop. If the ping doesn't complete, the event loop is stuck and
-the health watchdog takes a configurable action.
+The event loop records a heartbeat every health interval. A second daemon
+thread ("health watchdog") takes a configurable action (default: abort) if no
+heartbeat arrives within the stuck timeout. Because both threads need the GIL,
+the "abort" and "exit" actions also arm ``faulthandler.dump_traceback_later``
+from each heartbeat: its native thread dumps all Python stacks and exits the
+process even if the GIL is never released.
 
 Usage:
 
@@ -52,7 +55,6 @@ import faulthandler
 import logging
 import os
 import queue
-import sys
 import threading
 import time
 from collections.abc import Callable, Generator  # noqa: TC003
@@ -163,6 +165,7 @@ class _Watchdog:
         *,
         poll_interval: float | None = None,
         health_interval: float | None = None,
+        stuck_timeout: float | None = None,
         stuck_action: str | None = None,
     ) -> None:
         self._poll_interval = (
@@ -175,9 +178,20 @@ class _Watchdog:
             if health_interval is not None
             else float(os.environ.get("TORCH_WATCHDOG_HEALTH_INTERVAL_SECS", "30.0"))
         )
+        self._stuck_timeout = (
+            stuck_timeout
+            if stuck_timeout is not None
+            else float(os.environ.get("TORCH_WATCHDOG_STUCK_TIMEOUT_SECS", "480.0"))
+        )
         self._stuck_action = (
-            stuck_action or os.environ.get("TORCH_WATCHDOG_STUCK_ACTION", "log")
+            stuck_action or os.environ.get("TORCH_WATCHDOG_STUCK_ACTION", "abort")
         ).lower()
+        if self._stuck_action not in ("log", "abort", "exit"):
+            raise ValueError(
+                f"stuck_action must be 'log', 'abort' or 'exit', got {self._stuck_action!r}"
+            )
+        self._backstop = self._stuck_action != "log"
+        self._last_heartbeat = time.monotonic()
 
         self._loop: asyncio.AbstractEventLoop = asyncio.new_event_loop()
         self._stop_event = threading.Event()
@@ -194,6 +208,7 @@ class _Watchdog:
             target=self._run_loop, daemon=True, name="pt_pywd_loop"
         )
         self._loop_thread.start()
+        self._loop.call_soon_threadsafe(self._heartbeat)
 
         self._health_thread = threading.Thread(
             target=self._health_watchdog_loop, daemon=True, name="pt_pywd_health"
@@ -201,9 +216,10 @@ class _Watchdog:
         self._health_thread.start()
 
         logger.info(
-            "Watchdog started (poll=%.1fs, health=%.1fs, stuck_action=%s)",
+            "Watchdog started (poll=%.1fs, health=%.1fs, stuck_timeout=%.1fs, stuck_action=%s)",
             self._poll_interval,
             self._health_interval,
+            self._stuck_timeout,
             self._stuck_action,
         )
 
@@ -353,34 +369,45 @@ class _Watchdog:
             logger.error("Default timeout callback fired, calling os.abort()")
             os.abort()
 
+    def _heartbeat(self) -> None:
+        self._last_heartbeat = time.monotonic()
+        self._loop.call_later(self._health_interval, self._heartbeat)
+        if not self._backstop:
+            return
+        # Fires only if the health thread could not act first (e.g. the GIL is
+        # never released); the margin leaves room for its check interval.
+        backstop_timeout = self._stuck_timeout + 2 * self._health_interval
+        try:
+            faulthandler.dump_traceback_later(backstop_timeout, exit=True)
+        except Exception:
+            self._backstop = False
+            logger.warning("Failed to arm the faulthandler backstop", exc_info=True)
+
     def _health_watchdog_loop(self) -> None:
-        while not self._stop_event.is_set():
-            healthy = threading.Event()
-            try:
-                self._loop.call_soon_threadsafe(healthy.set)
-            except RuntimeError:
-                return
-
-            self._stop_event.wait(timeout=self._health_interval)
-            if self._stop_event.is_set():
-                return
-
-            if not healthy.is_set():
+        stuck = False
+        while not self._stop_event.wait(timeout=self._health_interval):
+            if time.monotonic() - self._last_heartbeat <= self._stuck_timeout:
+                stuck = False
+            elif not stuck:
+                stuck = True
                 self._handle_stuck_loop()
 
     def _handle_stuck_loop(self) -> None:
-        msg = (
-            "Watchdog event loop appears stuck "
-            f"(no response within {self._health_interval:.1f}s)"
-        )
-        if self._stuck_action == "abort":
-            logger.error("%s -- aborting process", msg)
-            os.abort()
-        elif self._stuck_action == "exit":
-            logger.error("%s -- exiting process", msg)
-            sys.exit(1)
-        else:
+        elapsed = time.monotonic() - self._last_heartbeat
+        msg = f"Watchdog event loop appears stuck (no heartbeat for {elapsed:.1f}s)"
+        if self._stuck_action == "log":
             logger.warning(msg)
+            return
+        verb = "aborting" if self._stuck_action == "abort" else "exiting"
+        logger.error("%s -- %s process", msg, verb)
+        try:
+            faulthandler.dump_traceback(all_threads=True)
+        except Exception:
+            logger.exception("Failed to dump thread stacks")
+        if self._stuck_action == "abort":
+            os.abort()
+        else:
+            os._exit(1)
 
     def _drain_del_queue(self) -> int:
         """Destroy retired CUDA events from the caller's thread.
@@ -408,6 +435,8 @@ class _Watchdog:
             pass
         self._loop_thread.join(timeout=5.0)
         self._health_thread.join(timeout=5.0)
+        if self._backstop:
+            faulthandler.cancel_dump_traceback_later()
         self._loop.close()
         self._drain_del_queue()
         logger.info("Watchdog shut down")
@@ -448,6 +477,7 @@ def init(
     *,
     poll_interval: float | None = None,
     health_interval: float | None = None,
+    stuck_timeout: float | None = None,
     stuck_action: str | None = None,
 ) -> None:
     """Configure and start the watchdog.
@@ -458,8 +488,9 @@ def init(
 
     Args:
         poll_interval: Seconds between CUDA event polls (env: TORCH_WATCHDOG_POLL_INTERVAL_SECS, default 1.0).
-        health_interval: Seconds between health pings (env: TORCH_WATCHDOG_HEALTH_INTERVAL_SECS, default 30.0).
-        stuck_action: Action when event loop is stuck: "log", "abort", or "exit" (env: TORCH_WATCHDOG_STUCK_ACTION, default "log").
+        health_interval: Seconds between event loop heartbeats and health checks (env: TORCH_WATCHDOG_HEALTH_INTERVAL_SECS, default 30.0).
+        stuck_timeout: Seconds without a heartbeat before the loop counts as stuck (env: TORCH_WATCHDOG_STUCK_TIMEOUT_SECS, default 480.0).
+        stuck_action: Action when the event loop is stuck: "log", "abort", or "exit" (env: TORCH_WATCHDOG_STUCK_ACTION, default "abort").
 
     Example::
         from torch.distributed._watchdog import init
@@ -473,6 +504,7 @@ def init(
         _watchdog = _Watchdog(
             poll_interval=poll_interval,
             health_interval=health_interval,
+            stuck_timeout=stuck_timeout,
             stuck_action=stuck_action,
         )
     if old is not None:
