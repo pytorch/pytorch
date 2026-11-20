@@ -342,7 +342,10 @@ def _uniform_combine_issue(trait, split, mode) -> str | None:
 
 
 def uniform_combine_ok(trait, split, mode):
-    """Whether combine_uniform can fold a split plan's partials with derived counts."""
+    """Whether combine_uniform can fold a split plan's partials with derived counts.
+
+    Only mode "weights" adds a check (uniform_weight); callers validate the mode first.
+    """
     return _uniform_combine_issue(trait, split, mode) is None
 
 
@@ -788,22 +791,23 @@ def fold_linear_rolled(
                 reduce_fn(accs[k], acc_dt(gfrag[k % vec, k // vec]), e0 + k, True)
                 for k in range(WARP)
             )
-        # The rem < group tail vectors load independently. Callers keep rows nonempty,
-        # so tail lanes past the row clamp to vector 0 and fold masked.
+        # The rem < group tail vectors load independently. reduce_row_tile rejects empty
+        # one-thread rows, so tail lanes past the row clamp to vector 0 and fold masked.
         last = full * Int32(group)
         rem = nchunks - last
-        oks = []
-        for j in cutlass.range_constexpr(group - 1):
-            ok = Int32(j) < rem
-            chunk = last + Int32(j) if ok else Int32(0)
-            cute.autovec_copy(gv[None, chunk], gfrag[None, j])
-            oks.append(ok)
-        t0, ntail = last * vec, const_expr((group - 1) * vec)
-        tail = tuple(
-            reduce_fn(accs[k], acc_dt(gfrag[k % vec, k // vec]), t0 + k, oks[k // vec])
-            for k in range(ntail)
-        )
-        accs = tail + accs[ntail:]
+        if rem > Int32(0):
+            oks = []
+            for j in cutlass.range_constexpr(group - 1):
+                ok = Int32(j) < rem
+                chunk = last + Int32(j) if ok else Int32(0)
+                cute.autovec_copy(gv[None, chunk], gfrag[None, j])
+                oks.extend([ok] * vec)
+            t0, ntail = last * vec, const_expr((group - 1) * vec)
+            tail = tuple(
+                reduce_fn(accs[k], acc_dt(gfrag[k % vec, k // vec]), t0 + k, oks[k])
+                for k in range(ntail)
+            )
+            accs = tail + accs[ntail:]
         return _halving_reduce(accs, trait.combine)
     nacc = const_expr(min(vec, _FIELD_ACCS))
     accs = tuple(trait.init() for _ in range(nacc))
@@ -933,7 +937,7 @@ def fold_smem_rotated(trait, sX, rb, N: cutlass.Constexpr):
     return _linear_reduce(accs, trait.combine)
 
 
-# Rows per equal-count column tree; 1 folds every row online.
+# Rows per equal-count column tree; 1 disables equal-count trees.
 _COL_GROUPS = (1, 4, 8, 16)
 
 
@@ -953,13 +957,13 @@ def fold_cols_rolled(
 
     Single-field traits fold the leading nrows % group rows online, then each column's
     remaining rows as in-register trees of `group` rows, so no serial chain spans the
-    whole column. col_group in {4, 8, 16} groups any trait that way regardless of
-    nfields, as equal-count combine_equal trees of col_group rows; it needs vec == 1 and
-    a trait with combine_equal, which TileReduce checks. Each group already issues
-    `group` independent loads, so only the online loop unrolls.
+    whole column. col_group > 1 (see _COL_GROUPS) groups any trait that way
+    regardless of nfields, as equal-count combine_equal trees of col_group rows; it
+    needs vec == 1 and a trait with combine_equal, which TileReduce checks. Each group
+    already issues `group` independent loads, so only the online loop unrolls.
     """
     if const_expr(col_group not in _COL_GROUPS):
-        raise AssertionError(f"col_group must be 1, 4, 8 or 16, got {col_group}")
+        raise AssertionError(f"col_group must be one of {_COL_GROUPS}, got {col_group}")
     reduce_fn, acc_dt = trait.reduce, trait.acc
     accs = tuple(trait.init() for _ in range(vec))
     frag = cute.make_rmem_tensor(cute.make_layout(vec), mX.element_type)
@@ -1090,7 +1094,7 @@ class TileReduce:
             # Column vec cannot be inferred from load width.
             raise ValueError("the col axis needs an explicit vec")
         if col_group not in _COL_GROUPS:
-            raise ValueError(f"col_group must be 1, 4, 8 or 16, got {col_group}")
+            raise ValueError(f"col_group must be one of {_COL_GROUPS}, got {col_group}")
         if col_group > 1:
             issue = _col_group_issue(trait, axis, combine, vec)
             if issue is not None:
@@ -2245,9 +2249,7 @@ class TileReduce:
         elif const_expr(self.use_tma):
             accs = (self._fold_tma(mIns[0], tma_atom, bx, tx),)
         elif const_expr(self.ragged_vector):
-            # One kernel per launch class. On B200, sum and amax at widths 1001-16383
-            # and 16-256 MiB took a median 0.96x (fp16), 0.97x (bf16) and 1.06x (fp32)
-            # of the time of an earlier revision of this PR that compiled one per width.
+            # One kernel per launch class.
             # Ragged rows must not read tm.N: cache_sig leaves N out for them.
             acc = fold_row_aligned(
                 trait,
