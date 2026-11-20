@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -37,6 +38,7 @@ class FakeModel {
  public:
   bool is_finished() {
     std::lock_guard lk(mutex_);
+    AOTI_RUNTIME_CHECK(!status_query_fails_, "status query failed");
     return state_ == State::kIdle;
   }
 
@@ -67,6 +69,12 @@ class FakeModel {
   void fail() {
     set_state(State::kFailed);
   }
+  // Makes is_finished() throw, as AOTInductorModel's does on a CUDA error,
+  // until the next state change.
+  void fail_status_query() {
+    std::lock_guard lk(mutex_);
+    status_query_fails_ = true;
+  }
 
  private:
   enum class State { kIdle, kRunning, kFailed };
@@ -75,6 +83,7 @@ class FakeModel {
     {
       std::lock_guard lk(mutex_);
       state_ = state;
+      status_query_fails_ = false;
     }
     cv_.notify_all();
   }
@@ -83,13 +92,13 @@ class FakeModel {
   std::condition_variable cv_;
   State state_{State::kIdle};
   bool waited_on_{false};
+  bool status_query_fails_{false};
 };
 
 using Stream = void*;
 using Pool = ModelPool<FakeModel, Stream>;
 
-// Only checkout() creates leases: the constructor is private, so a caller
-// can't wrap a bare model in one.
+// A caller can't build a lease from a bare model.
 static_assert(
     !std::is_constructible_v<Pool::ModelLease, Pool&, FakeModel*>,
     "A lease must not be constructible from a bare model");
@@ -210,6 +219,31 @@ TEST(ModelPoolTest, ReusesNewestFinishedRun) {
   middle->finish();
   EXPECT_EQ(model_of(checkout(t.pool)), middle);
   newest->finish();
+}
+
+// A checkout whose reclaim stops partway, because a model's status query
+// throws, leaves every model in exactly one state: none is handed out twice.
+TEST(ModelPoolTest, FailedStatusQueryKeepsPoolConsistent) {
+  TestPool t(3);
+  FakeModel* oldest = start_run(t.pool);
+  FakeModel* middle = start_run(t.pool);
+  FakeModel* newest = start_run(t.pool);
+  oldest->finish();
+  newest->fail_status_query();
+  EXPECT_EQ(
+      runtime_error_of([&] { (void)checkout(t.pool); }), "status query failed");
+  middle->finish();
+  newest->finish();
+  std::vector<Pool::ModelLease> leases;
+  std::set<FakeModel*> held;
+  for (size_t i = 0; i < t.models.size(); ++i) {
+    leases.push_back(checkout(t.pool));
+    held.insert(model_of(leases.back()));
+  }
+  EXPECT_EQ(held.size(), t.models.size());
+  auto waiter = blocked_checkout(t.pool);
+  leases.clear();
+  wait_or_abort(waiter);
 }
 
 // A run that throws drops its lease, which returns the model to the available
