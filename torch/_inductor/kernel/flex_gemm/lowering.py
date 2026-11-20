@@ -1236,7 +1236,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     ]
     if output_storage_dtype is not output_meta.dtype:
         result = TensorBox(ir.DtypeView.create(result, output_meta.dtype))
-    return (result, *ordered_aux_outs)
+    # Like every other FlexGEMM impl and lowering, return the body's output structure.
+    _, out_spec = pytree.tree_flatten(subgraph.graph_module.graph.output_node().args[0])
+    return pytree.tree_unflatten([result, *ordered_aux_outs], out_spec)
 
 
 @register_lowering(flex_gemm_hop, type_promotion_kind=None)
