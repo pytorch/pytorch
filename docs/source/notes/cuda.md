@@ -1019,26 +1019,19 @@ with torch.cuda.use_mem_pool(pool):
 (cuda-pinned-host-memory-pools)=
 ## Pinned host memory pools
 
-{class}`torch.cuda.use_mem_pool` also routes pinned host allocations, such as
+Given a {class}`torch.cuda.HostMemPool`, a pool of pinned host memory,
+{class}`torch.cuda.use_mem_pool` routes the current thread's pinned host allocations, such as
 `torch.empty(n, pin_memory=True)`, `tensor.pin_memory()` and the outputs of
-`tensor.to("cpu", non_blocking=True)`. Pass `pinned=True` with a {class}`torch.cuda.MemPool`
-to route device and pinned allocations to one pool, or pass a {class}`torch.cuda.HostMemPool`,
-a pool of pinned host memory only:
+`tensor.to("cpu", non_blocking=True)`, to the pool:
 
 ```python
-pool = torch.cuda.MemPool()
-with torch.cuda.use_mem_pool(pool, pinned=True):
-    x = torch.empty(1024, device="cuda")      # device memory from pool
-    buf = torch.empty(1024, pin_memory=True)  # pinned memory from pool
-
 host_pool = torch.cuda.HostMemPool()
 with torch.cuda.use_mem_pool(host_pool):
     buf = torch.empty(1024, pin_memory=True)  # pinned memory from host_pool
 ```
 
 What a pool guarantees is cache isolation: a pinned block freed by any thread returns to the
-pool it came from, and is handed out again only to threads inside that pool, or to the capture
-of a graph that uses it as its `pool`.
+pool it came from, and is handed out again only to threads inside that pool.
 
 Routing follows the thread:
 
@@ -1048,12 +1041,11 @@ Routing follows the thread:
 * Contexts that route pinned memory must be exited in reverse order, on the thread that
   entered them; anything else raises an error and changes nothing. When a thread exits inside
   a context, its pinned routes are ended.
-* CUDA graph capture follows the same rules for device and pinned memory: the newest of the
-  capture and the context takes the capturing stream. Entered inside a capture, the context
-  wins and the graph keeps the pool until it is reset. A HostMemPool, like a MemPool, can be the
-  `pool` of a graph. Pinned blocks allocated during the capture and then used by a stream are
-  reused only once the capture's pool loses its last reference: every graph that keeps it is
-  reset and, if it is a HostMemPool or a MemPool used with `pinned=True`, the pool is deleted.
+* CUDA graph capture follows the same rules as for a MemPool: the newest of the capture and
+  the context takes the capturing stream. Entered inside a capture, the context wins and the
+  graph keeps the pool until it is reset. A HostMemPool cannot be the `pool` of a graph. Pinned
+  blocks allocated on the capturing stream and then used by a stream are reused only once
+  every graph that uses the capture's pool is reset.
 * Use contexts from synchronous code, on threads you control. A context that stays open across
   an `await` or a generator's `yield` also routes whatever runs on the thread in between. The
   pin-memory thread of {class}`torch.utils.data.DataLoader` is not covered yet.
@@ -1107,9 +1099,7 @@ The allocator knows nothing about NUMA, so placement depends on the setup:
 * `pinned_use_cuda_host_register` with `pinned_num_register_threads` greater than 1 touches
   the pages from a shared thread pool, which then decides where they go.
 * A pool's new blocks never come from the `pinned_reserve_segment_size_mb` segment, which the
-  first allocating thread placed for the whole process. This includes the blocks allocated
-  during the capture of a graph whose `pool` is the pool; the capturing thread places them. A
-  MemPool counts as a pool here only from its first use with `pinned=True`.
+  first allocating thread placed for the whole process.
 * On ROCm 7.2 and later, a pool's new blocks come from `hipHostMalloc` with
   `hipHostMallocNumaUser`, so HIP follows the thread's memory policy, but only `MPOL_BIND` and
   `MPOL_PREFERRED`: with CPU affinity alone, or on earlier ROCm, HIP takes the pages from the
@@ -2093,8 +2083,7 @@ g1.replay()
 g2.replay()
 ```
 
-The `pool` argument also accepts {class}`~torch.cuda.MemPool` and
-{class}`~torch.cuda.HostMemPool`. If
+The `pool` argument also accepts {class}`~torch.cuda.MemPool`. If
 {func}`~torch.cuda.use_mem_pool` is used during capture, the graph retains that
 pool until the graph is reset or destroyed. {meth}`torch.cuda.CUDAGraph.pool`
 returns the primary capture pool, while `CUDAGraph.pools()` returns all pools
