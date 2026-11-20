@@ -1968,6 +1968,32 @@ class GuardedCache(Generic[T]):
         raise NotImplementedError("Implement _record_result on parent class")
 
     @classmethod
+    def _local_entry_path(cls: type[GuardedCache[T]], key: str, content: bytes) -> str:
+        """
+        Where to store a serialized entry on disk. The file name is a hash of the
+        content; it only needs to be unique, since a lookup iterates over every
+        entry in the key's subdir.
+        """
+        return os.path.join(cls._get_tmp_dir_for_key(key), sha256_hash(content))
+
+    @staticmethod
+    def _put_remote(
+        remote_cache: RemoteCache[JsonDataTy],
+        key: str,
+        content: bytes,
+        time_taken_ms: int,
+    ) -> None:
+        """
+        Store a serialized entry in the remote cache, in the format that
+        iterate_over_candidates decodes.
+        """
+        cache_data: JsonDataTy = {
+            "data": base64.b64encode(content).decode("ascii"),
+            "time_taken_ms": time_taken_ms,
+        }
+        remote_cache.put(key, cache_data)
+
+    @classmethod
     def iterate_over_candidates(
         cls: type[GuardedCache[T]],
         local: bool,
@@ -2425,14 +2451,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
     @staticmethod
     def _write_to_local_cache(key: str, content: bytes) -> None:
-        subdir = FxGraphCache._get_tmp_dir_for_key(key)
-        if not os.path.exists(subdir):
-            os.makedirs(subdir, exist_ok=True)
-
-        # Use a hash of the serialized CompiledFxGraph to get a unique file
-        # name. The specific name doesn't matter since a lookup involves
-        # iterating over all entries in the parent subdir.
-        path = os.path.join(subdir, sha256_hash(content))
+        path = FxGraphCache._local_entry_path(key, content)
         write_atomic(path, content, make_dirs=True)
 
     @staticmethod
@@ -2491,11 +2510,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
             if remote_cache:
                 time_taken_ms = int((disk_compiled_graph._time_taken_ns or 0) // 1e6)
-                cache_data: JsonDataTy = {
-                    "data": base64.b64encode(content).decode("ascii"),
-                    "time_taken_ms": time_taken_ms,
-                }
-                remote_cache.put(key, cache_data)
+                FxGraphCache._put_remote(remote_cache, key, content, time_taken_ms)
         except Exception:
             log.warning("fx graph unable to write to cache", exc_info=True)
             counters["inductor"]["fxgraph_cache_write_error"] += 1
