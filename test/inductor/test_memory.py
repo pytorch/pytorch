@@ -59,6 +59,7 @@ class Foo(torch.nn.Module):
 # score_fusion_memory threshold will cause different fusion decisions and
 # generate a different wrapper. Override the threshold to make these tests
 # happy.
+@config.patch("post_grad_fusion_options", {})
 @config.patch("score_fusion_memory_threshold", 1)
 @instantiate_parametrized_tests
 class TestOperatorReorderForPeakMemory(TestCase):
