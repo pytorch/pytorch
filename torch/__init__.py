@@ -209,6 +209,7 @@ if sys.platform == "win32":
             sysconfig.get_config_var("userbase"), "Library", "bin"
         )
         py_root_bin_path = os.path.join(sys.exec_prefix, "bin")
+        cudnn_dll_path = th_dll_path
         if cuda_version:
             try:
                 # CUDA Pathfinder locates and loads the CUDA runtime DLLs installed
@@ -229,7 +230,9 @@ if sys.platform == "win32":
                     "cudnn",
                 ):
                     try:
-                        load_nvidia_dynamic_lib(lib)
+                        loaded = load_nvidia_dynamic_lib(lib)
+                        if lib == "cudnn" and loaded.abs_path:
+                            cudnn_dll_path = os.path.dirname(loaded.abs_path)
                     except Exception:
                         warnings.warn(
                             f"cuda-pathfinder is unable to find {lib} lib in the current python environment or sys PATH variable",
@@ -312,6 +315,16 @@ if sys.platform == "win32":
                     """
                 ).strip()
             )
+
+        # cudnn64_9.dll loads its sub-libraries (cudnn_graph64_9.dll, ...) by bare
+        # name on first use, which searches PATH. Preload them from the directory
+        # cudnn64_9.dll comes from (cuda-pathfinder's, else torch\lib) so a missing
+        # or different cuDNN on PATH is never used.
+        kernel32.LoadLibraryExW.restype = ctypes.c_void_p
+        for dll in glob.glob(os.path.join(cudnn_dll_path, "cudnn*.dll")):
+            if kernel32.LoadLibraryExW(dll, None, 0x00001100) is None:
+                err = ctypes.WinError(ctypes.get_last_error()).strerror
+                warnings.warn(f'Failed to preload "{dll}": {err}', stacklevel=2)
 
         kernel32.SetErrorMode(prev_error_mode)
 
@@ -1808,6 +1821,7 @@ def use_deterministic_algorithms(
           an MPS tensor
         * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
           in some cases
+        * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -1832,7 +1846,6 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.NLLLoss` when called on a CUDA tensor
-        * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
           ``mode='max'``
         * :func:`torch.Tensor.put_` when ``accumulate=False``
@@ -2680,9 +2693,7 @@ del _LegacyStorage
 # needs to be before the submodule imports to avoid circular dependencies
 def _assert(condition: object, message: object) -> None:
     r"""A wrapper around Python's assert which is symbolically traceable."""
-    if type(condition) is not torch.Tensor and overrides.has_torch_function(
-        (condition,)
-    ):
+    if overrides.has_torch_function((condition,)):
         return overrides.handle_torch_function(
             _assert, (condition,), condition, message
         )

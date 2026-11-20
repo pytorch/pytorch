@@ -4,15 +4,16 @@
 
 _original_gm is a deepcopy of the pre-compiled FX graph, stored when
 wrap_inductor_compiled_regions is enabled. It is used for FakeTensor
-shape inference (inductor_compiled_code_fake). Regular pickle cannot
-serialize GraphModules containing higher-order ops with lifted buffers
-(e.g. flex_attention with BlockMask mask_mod_other_buffers), because
-deserialization retraces via KeepModules().trace() which calls
-validate_subgraph_args_types on Proxy-typed arguments.
+shape inference (inductor_compiled_code_fake).
 
 prepare_for_serialization converts _original_gm to bytes via
 GraphPickler (which serializes the graph structure directly without
-retracing), and post_compile deserializes it back on load.
+retracing), and post_compile deserializes it back on load. Regular pickle
+retraces the graph's code with Proxy arguments (KeepModules().trace()), which
+fails for some graphs, e.g. ones calling math.sqrt on a symbolic size. It
+also failed for higher-order ops with lifted buffers (e.g. flex_attention
+with BlockMask mask_mod_other_buffers) until validate_subgraph_args_types
+accepted Proxy arguments.
 """
 
 import torch
@@ -67,9 +68,10 @@ class TestCompiledFxGraphSerialization(TestCase):
     def test_prepare_with_hop_containing_lifted_buffers(self):
         """GraphModule with flex_attention HOP + lifted buffers serializes cleanly.
 
-        This is the exact pattern that crashes with regular pickle:
-        flex_attention with non-empty mask_mod_other_buffers. GraphPickler
-        handles it without retracing.
+        This is the pattern that crashed regular pickle before
+        validate_subgraph_args_types accepted Proxy arguments: flex_attention
+        with non-empty mask_mod_other_buffers. GraphPickler handles it
+        without retracing.
         """
         score_mod = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         for name in ["score", "b", "h", "m", "n"]:

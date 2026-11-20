@@ -102,6 +102,7 @@ AOTI_TORCH_DEVICE_TYPE_IMPL(cuda, CUDA)
 AOTI_TORCH_DEVICE_TYPE_IMPL(meta, Meta)
 AOTI_TORCH_DEVICE_TYPE_IMPL(xpu, XPU)
 AOTI_TORCH_DEVICE_TYPE_IMPL(mps, MPS)
+AOTI_TORCH_DEVICE_TYPE_IMPL(mtia, MTIA)
 AOTI_TORCH_DEVICE_TYPE_IMPL(privateuse1, PrivateUse1)
 #undef AOTI_TORCH_DEVICE_TYPE_IMPL
 
@@ -1574,4 +1575,11 @@ AOTITorchError aoti_torch_get_current_stream(
 AOTITorchError aoti_torch_get_current_device_index(int32_t* ret_device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
       { *ret_device_index = at::accelerator::getDeviceIndex(); });
+}
+
+AOTITorchError aoti_torch_synchronize_device(int32_t device_index) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::accelerator::synchronizeDevice(
+        static_cast<c10::DeviceIndex>(device_index));
+  });
 }

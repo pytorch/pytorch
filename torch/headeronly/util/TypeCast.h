@@ -360,8 +360,10 @@ C10_HOST_DEVICE To convert(From f) {
 
 template <typename To, typename From>
 To checked_convert(From f, const char* name) {
+  constexpr bool strict_unsigned =
+      std::is_integral_v<To> && std::is_integral_v<From>;
   // Converting to bool can't overflow so we exclude this case from checking.
-  if (!std::is_same_v<To, bool> && overflows<To, From>(f)) {
+  if (!std::is_same_v<To, bool> && overflows<To, From>(f, strict_unsigned)) {
     report_overflow(name);
   }
   return convert<To, From>(f);
