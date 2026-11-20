@@ -5,7 +5,7 @@ use crate::bytecode::{self, OpcodeTable};
 use crate::capi::{self, TcfgApi, TCFG_API_VERSION};
 use crate::ir::*;
 use crate::pyffi::{Obj, PyObj};
-use crate::spec::{self, CfgPass, PassCx, Pipeline, PyPass, Unit, ValueObs};
+use crate::spec::{self, CalleeFact, CalleeKind, CfgPass, InstFacts, Kernels, PassCx, Pipeline, PyPass, Unit, ValueObs};
 use crate::vm::{self, Callees, Compiled, Options};
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
 use pyo3::ffi;
@@ -444,6 +444,69 @@ impl CfgFunction {
         }
         Ok(out.into_any().unbind())
     }
+
+    /// What the profiling tier saw the instructions of the function do: for
+    /// every instruction that ran there, its block, index and text, and
+    /// `runs`, `kernels` ("none", "one" or "many" dispatcher calls; None
+    /// where they were not counted), `frames` (a Python frame was entered),
+    /// `raised`, `callee` (the Python function a call entered: its `name`,
+    /// `code` and `kind`, "function", "method" or "instance"; "many" for
+    /// more than one; None for none) and `wrote` (it wrote to a tensor it
+    /// was given, in place).
+    fn facts(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let cf = &self.inner;
+        let found: Vec<(usize, usize, InstFacts)> = {
+            let state = cf.state.borrow();
+            let blocks = state.blocks.iter().enumerate();
+            blocks
+                .flat_map(|(b, bs)| bs.facts.iter().enumerate().map(move |(i, f)| (b, i, f.clone())))
+                .filter(|(_, _, f)| f.runs > 0)
+                .collect()
+        };
+        let out = PyList::empty(py);
+        for (b, i, facts) in found {
+            let d = facts_dict(py, &facts)?;
+            d.set_item("block", b)?;
+            d.set_item("index", i)?;
+            d.set_item("instruction", cf.func.op_repr(&cf.func.blocks[b].insts[i].op))?;
+            out.append(d)?;
+        }
+        Ok(out.into_any().unbind())
+    }
+}
+
+/// The facts of an instruction as `CfgFunction.facts` gives them.
+fn facts_dict<'py>(py: Python<'py>, facts: &InstFacts) -> PyResult<Bound<'py, PyDict>> {
+    let d = PyDict::new(py);
+    d.set_item("runs", facts.runs)?;
+    let kernels = match facts.kernels {
+        Kernels::Unseen => None,
+        Kernels::None => Some("none"),
+        Kernels::One => Some("one"),
+        Kernels::Many => Some("many"),
+    };
+    d.set_item("kernels", kernels)?;
+    d.set_item("frames", facts.frames)?;
+    d.set_item("raised", facts.raised)?;
+    match &facts.callee {
+        CalleeFact::Unseen => d.set_item("callee", py.None())?,
+        CalleeFact::Many => d.set_item("callee", "many")?,
+        CalleeFact::One(code, kind) => {
+            let code = unsafe { Bound::from_borrowed_ptr(py, code.as_ptr()) };
+            let callee = PyDict::new(py);
+            callee.set_item("name", code.getattr("co_qualname")?)?;
+            let kind = match kind {
+                CalleeKind::Function => "function",
+                CalleeKind::Method => "method",
+                CalleeKind::Instance => "instance",
+            };
+            callee.set_item("kind", kind)?;
+            callee.set_item("code", code)?;
+            d.set_item("callee", callee)?;
+        }
+    }
+    d.set_item("wrote", facts.wrote)?;
+    Ok(d)
 }
 
 /// The region a pass is transforming. Only valid while the pass runs.
@@ -488,8 +551,10 @@ impl Region {
     }
 
     /// The instructions as dicts with keys index, op, dst, uses and text;
-    /// replayable; and kernel, the operator an instruction was
-    /// seen to be exactly one call of (`aten::mul.Tensor`), or None.
+    /// replayable; kernel, the operator an instruction was
+    /// seen to be exactly one call of (`aten::mul.Tensor`), or None; and
+    /// facts, what the profiling tier saw it do (see `CfgFunction.facts`),
+    /// or None for one that did not run there.
     fn instructions(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let (unit, cx) = self.parts()?;
         let func = cx.func();
@@ -507,6 +572,10 @@ impl Region {
             d.set_item("replayable", u.origin as usize == i && u.inst.op.is_replayable())?;
             let slot = cx.slots.get(u.origin as usize).and_then(|slot| slot.as_ref());
             d.set_item("kernel", slot.and_then(|slot| unsafe { slot.operator() }))?;
+            match cx.facts.get(u.origin as usize).filter(|facts| facts.runs > 0) {
+                Some(facts) => d.set_item("facts", facts_dict(py, facts)?)?,
+                None => d.set_item("facts", py.None())?,
+            }
             out.append(d)?;
         }
         Ok(out.into_any().unbind())
@@ -537,6 +606,16 @@ impl Region {
                 d.set_item("kind", "int")?;
                 d.set_item("lo", *lo)?;
                 d.set_item("hi", *hi)?;
+            }
+            ValueObs::Float => d.set_item("kind", "float")?,
+            ValueObs::None => d.set_item("kind", "none")?,
+            ValueObs::Str { same, .. } => {
+                d.set_item("kind", "str")?;
+                d.set_item("same", *same)?;
+            }
+            ValueObs::Object { len, .. } => {
+                d.set_item("kind", "object")?;
+                d.set_item("len", *len)?;
             }
             ValueObs::Other => d.set_item("kind", "other")?,
         }
