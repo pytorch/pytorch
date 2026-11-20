@@ -3,15 +3,18 @@
 
 use crate::bytecode::{self, OpcodeTable};
 use crate::capi::{self, TcfgApi, TCFG_API_VERSION};
+use crate::graph::{GraphSite, GraphState, Graphs};
 use crate::ir::*;
-use crate::pyffi::{self, Obj, PyObj};
-use crate::spec::{self, CfgPass, PassCx, Pipeline, PyPass, Unit, ValueObs};
+use crate::pyffi::{Obj, PyObj};
+use crate::spec::{self, CalleeFact, CalleeKind, CfgPass, InstFacts, Kernels, PassCx, Pipeline, PyPass, Unit, ValueObs};
 use crate::vm::{self, Callees, Compiled, Options};
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
 use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyCapsule, PyDict, PyList, PyTuple};
 use std::cell::Cell;
+use std::ffi::c_void;
+use std::os::raw::c_char;
 use std::ptr::null_mut;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -19,18 +22,21 @@ use std::sync::Arc;
 /// Hands the C function table of torch._C to the VM.
 #[pyfunction]
 pub fn init(capsule: &Bound<'_, PyCapsule>) -> PyResult<()> {
-    let api = capsule.pointer() as *mut TcfgApi;
-    if api.is_null() || unsafe { (*api).version } != TCFG_API_VERSION {
+    let api = capsule.pointer_checked(Some(c"torch._C._cfg_c_api"))?.as_ptr() as *mut TcfgApi;
+    if unsafe { (*api).version } != TCFG_API_VERSION {
         return Err(PyRuntimeError::new_err(
             "torch._C and the torch.vm runtime were built from different sources",
         ));
     }
     capi::set_api(api);
+    if let Some(hook) = unsafe { (*api).frame_hook } {
+        unsafe { hook(vm::take_frame) };
+    }
     Ok(())
 }
 
-/// The instructions the frontend sees in a code object, as (offset, opcode
-/// name, argument, jump target) tuples.
+/// The instructions of a code object, as (offset, opcode name, argument, jump
+/// target) tuples. The frontend sees them after `bytecode::simplify`.
 #[pyfunction]
 pub fn decode(
     py: Python<'_>,
@@ -38,7 +44,7 @@ pub fn decode(
 ) -> PyResult<Vec<(u32, String, u32, Option<u32>)>> {
     let table = OpcodeTable::load(py)?;
     let co_code = code.getattr("co_code")?;
-    let co_code = co_code.downcast::<PyBytes>()?;
+    let co_code = co_code.cast::<PyBytes>()?;
     Ok(bytecode::decode(&table, co_code)
         .into_iter()
         .map(|ins| (ins.off, table.names[ins.code as usize].clone(), ins.arg, ins.target))
@@ -51,7 +57,7 @@ pub fn builtin_passes() -> Vec<&'static str> {
 }
 
 fn interned(py: Python<'_>, name: &str) -> PyObj {
-    unsafe { PyObj::from_borrowed(pyo3::types::PyString::intern_bound(py, name).as_ptr()) }
+    unsafe { PyObj::from_borrowed(pyo3::types::PyString::intern(py, name).as_ptr()) }
 }
 
 /// Registers that a call of an instance whose class has `function` as its
@@ -103,13 +109,29 @@ pub fn register_getattr_shortcut(py: Python<'_>, function: &Bound<'_, PyAny>, di
     });
 }
 
+/// Whether a Python function that C code called now, on this thread, would
+/// be run in its compiled form: a compiled function is running, and what
+/// runs is its own code, not the runtime's.
+#[pyfunction]
+pub fn frames_offered() -> bool {
+    vm::frames_offered()
+}
+
+/// Leaves the functions whose code is in one of these files, or under one of
+/// these directories (with a trailing separator), to the interpreter, with
+/// all they call; `file::qualname` names one function of a file.
+#[pyfunction]
+pub fn leave_to_interpreter(places: Vec<String>) {
+    vm::leave_to_interpreter(places);
+}
+
 #[pyfunction]
 pub fn clear_shortcuts() {
     crate::shortcuts::clear();
 }
 
 #[pyfunction]
-#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, callees=true, shortcuts=true, demote=true, workspace=None))]
+#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, max_trip_count=8, callees=true, shortcuts=true, demote=true, workspace=None, hook=true, graphs=None, export=None))]
 pub fn compile(
     py: Python<'_>,
     func: &Bound<'_, PyAny>,
@@ -121,11 +143,20 @@ pub fn compile(
     max_respecializations: u32,
     inline: bool,
     unroll: bool,
+    max_trip_count: i64,
     callees: bool,
     shortcuts: bool,
     demote: bool,
     workspace: Option<Bound<'_, PyAny>>,
+    hook: bool,
+    graphs: Option<(usize, usize)>,
+    export: Option<Bound<'_, PyAny>>,
 ) -> PyResult<CfgFunction> {
+    // What the pass "graphs" is made with: the least number of operations
+    // of a graph and the most exported forms of one; and what makes an
+    // exported form of the description of a graph (it returns the callable
+    // and the guards of the passes, or the reason there is none), if the
+    // graphs are to be exported at all.
     // What `torch._C._cfg_workspace` made: the memory the function keeps
     // between its calls.
     let mut memory = 0usize;
@@ -137,6 +168,8 @@ pub fn compile(
         }
         memory = pointer as usize;
     }
+    // From the first function on: see `chunks`.
+    crate::chunks::keep();
     let table = OpcodeTable::load(py)?;
     let options = Options {
         specialize,
@@ -146,15 +179,24 @@ pub fn compile(
         max_respecializations,
         inline,
         unroll,
+        max_trip_count,
         callees,
         shortcuts,
         demote,
+        hook: hook && callees && capi::api().is_some_and(|api| api.frame_want.is_some()),
         ..Options::default()
     };
     let function = vm::lower(py, &table, func, &options)?;
     let mut pipeline: Vec<Box<dyn CfgPass>> = Vec::new();
     for pass in passes {
         if let Ok(name) = pass.extract::<String>() {
+            if name == "graphs" {
+                let made = Graphs::default();
+                let (min_ops, max_variants) = graphs.unwrap_or((made.min_ops, made.max_variants));
+                let export = export.as_ref().map(|e| unsafe { PyObj::from_borrowed(e.as_ptr()) });
+                pipeline.push(Box::new(Graphs { min_ops, max_variants, export }));
+                continue;
+            }
             match spec::builtin_pass(&name) {
                 Some(p) => pipeline.push(p),
                 None => {
@@ -196,10 +238,10 @@ pub fn compile(
 #[pyclass(module = "torch._cfg_rs", name = "CfgFunction", frozen, weakref)]
 pub struct CfgFunction {
     inner: Arc<Compiled>,
-    wrapped: PyObject,
+    wrapped: Py<PyAny>,
     /// The capsule of the function's workspace and the address in it, or
     /// none and 0.
-    workspace: Option<PyObject>,
+    workspace: Option<Py<PyAny>>,
     memory: usize,
 }
 
@@ -218,7 +260,7 @@ impl CfgFunction {
         py: Python<'_>,
         args: &Bound<'_, PyTuple>,
         kwargs: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         // For the time of the call, tensors get their memory from what the
         // function kept of its earlier calls.
         let memory = self.memory as *mut std::ffi::c_void;
@@ -232,7 +274,7 @@ impl CfgFunction {
         if result.is_null() {
             Err(PyErr::fetch(py))
         } else {
-            Ok(unsafe { PyObject::from_owned_ptr(py, result) })
+            Ok(unsafe { Bound::from_owned_ptr(py, result) }.unbind())
         }
     }
 
@@ -240,7 +282,7 @@ impl CfgFunction {
         slf: &Bound<'_, Self>,
         obj: Option<&Bound<'_, PyAny>>,
         _owner: Option<&Bound<'_, PyAny>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let py = slf.py();
         match obj {
             Some(obj) if !obj.is_none() => unsafe {
@@ -248,7 +290,7 @@ impl CfgFunction {
                 if method.is_null() {
                     Err(PyErr::fetch(py))
                 } else {
-                    Ok(PyObject::from_owned_ptr(py, method))
+                    Ok(Bound::from_owned_ptr(py, method).unbind())
                 }
             },
             _ => Ok(slf.clone().into_any().unbind()),
@@ -256,20 +298,20 @@ impl CfgFunction {
     }
 
     #[getter]
-    fn __wrapped__(&self, py: Python<'_>) -> PyObject {
+    fn __wrapped__(&self, py: Python<'_>) -> Py<PyAny> {
         self.wrapped.clone_ref(py)
     }
 
     /// The workspace the function was compiled with, if any.
     #[getter]
-    fn workspace(&self, py: Python<'_>) -> Option<PyObject> {
+    fn workspace(&self, py: Python<'_>) -> Option<Py<PyAny>> {
         self.workspace.as_ref().map(|w| w.clone_ref(py))
     }
 
     /// Everything this object does not define itself is read from the
     /// function it was compiled from: `__code__`, `__defaults__`, `__dict__`
     /// and what decorators stored in it.
-    fn __getattr__(&self, py: Python<'_>, name: &Bound<'_, pyo3::types::PyString>) -> PyResult<PyObject> {
+    fn __getattr__(&self, py: Python<'_>, name: &Bound<'_, pyo3::types::PyString>) -> PyResult<Py<PyAny>> {
         self.wrapped.bind(py).getattr(name).map(|v| v.unbind())
     }
 
@@ -328,7 +370,12 @@ impl CfgFunction {
                         format!("    ; if {}", guards.join(" and "))
                     }
                 ));
-                func.dump_code(&mut out, &version.insts, &version.term);
+                // Where graphs are exported, a block is shown as it runs
+                // while they are there: with what enters them.
+                let entered = |site: &Arc<GraphSite>| site.exporter.is_some();
+                let entering = version.entering.as_ref().filter(|copy| copy.graphs.iter().any(entered));
+                let insts = entering.map_or(&version.insts, |copy| &copy.insts);
+                func.dump_code(&mut out, insts, &version.term);
             }
         }
         out
@@ -336,16 +383,16 @@ impl CfgFunction {
 
     /// Counters of the tiers, per block, and the instructions that made
     /// dispatcher calls but could not be turned into direct kernel calls.
-    fn stats(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn stats(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let cf = &self.inner;
         let state = cf.state.borrow();
-        let out = PyDict::new_bound(py);
+        let out = PyDict::new(py);
         out.set_item("calls", cf.calls())?;
-        let blocks = PyList::empty_bound(py);
-        let unlowered = PyList::empty_bound(py);
+        let blocks = PyList::empty(py);
+        let unlowered = PyList::empty(py);
         let (mut sites, mut hits, mut misses) = (0u64, 0u64, 0u64);
         for (b, bs) in state.blocks.iter().enumerate() {
-            let d = PyDict::new_bound(py);
+            let d = PyDict::new(py);
             d.set_item("block", b)?;
             let (entries, specialized) = cf.block_entries(b, bs);
             d.set_item("executions", entries)?;
@@ -384,12 +431,39 @@ impl CfgFunction {
         out.set_item("demoted", cf.is_demoted())?;
         out.set_item("measuring", cf.is_measuring())?;
         out.set_item("log", state.log.clone())?;
+        drop(state);
+        // The graphs of the function and of what it called: how many there
+        // are, how many times one was handed to the passes over graphs, how
+        // many calls ran what those made (`hits`) and how many came to a
+        // graph and ran its instructions (`misses`), and how many graphs
+        // are no longer exported.
+        let (mut built, mut exported, mut hits, mut misses, mut given_up) = (0usize, 0u64, 0u64, 0u64, 0usize);
+        let held = self.held();
+        for (cf, _, _, site) in self.graph_sites() {
+            // One whose operations a graph of a caller holds is no graph
+            // of its own.
+            if site.outer().is_some() || site.short().is_some() || Self::holder(&held, &cf, &site).is_some() {
+                continue;
+            }
+            built += 1;
+            exported += site.exports.load(Ordering::Relaxed);
+            given_up += matches!(*site.state.borrow(), GraphState::GivenUp(_)) as usize;
+            hits += site.hits.load(Ordering::Relaxed);
+            misses += site.misses.load(Ordering::Relaxed);
+        }
+        let graphs = PyDict::new(py);
+        graphs.set_item("built", built)?;
+        graphs.set_item("exported", exported)?;
+        graphs.set_item("hits", hits)?;
+        graphs.set_item("misses", misses)?;
+        graphs.set_item("given_up", given_up)?;
+        out.set_item("graphs", graphs)?;
         Ok(out.into_any().unbind())
     }
 
     /// The dispatch sites: for every instruction that calls kernels directly,
     /// its block, index, text, and one description per captured variant.
-    fn sites(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn sites(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let cf = &self.inner;
         let slots: Vec<(usize, usize, Arc<capi::SiteSlot>)> = {
             let state = cf.state.borrow();
@@ -403,20 +477,325 @@ impl CfgFunction {
             }
             v
         };
-        let out = PyList::empty_bound(py);
+        let out = PyList::empty(py);
         for (b, i, slot) in slots {
-            let d = PyDict::new_bound(py);
+            let d = PyDict::new(py);
             d.set_item("block", b)?;
             d.set_item("index", i)?;
             d.set_item("instruction", cf.func.op_repr(&cf.func.blocks[b].insts[i].op))?;
             d.set_item("hits", slot.hits.load(Ordering::Relaxed))?;
             d.set_item("misses", slot.misses.load(Ordering::Relaxed))?;
-            let variants = unsafe { PyObject::from_owned_ptr(py, slot.info()) };
+            let variants = unsafe { Bound::from_owned_ptr(py, slot.info()) };
             d.set_item("variants", variants)?;
             out.append(d)?;
         }
         Ok(out.into_any().unbind())
     }
+
+    /// What the profiling tier saw the instructions of the function do: for
+    /// every instruction that ran there, its block, index and text, and
+    /// `runs`, `kernels` ("none", "one" or "many" dispatcher calls; None
+    /// where they were not counted), `frames` (a Python frame was entered),
+    /// `raised`, `callee` (the Python function a call entered: its `name`,
+    /// `code` and `kind`, "function", "method" or "instance"; "many" for
+    /// more than one; None for none) and `wrote` (it wrote to a tensor it
+    /// was given, in place).
+    fn facts(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let cf = &self.inner;
+        let found: Vec<(usize, usize, InstFacts)> = {
+            let state = cf.state.borrow();
+            let blocks = state.blocks.iter().enumerate();
+            blocks
+                .flat_map(|(b, bs)| bs.facts.iter().enumerate().map(move |(i, f)| (b, i, f.clone())))
+                .filter(|(_, _, f)| f.runs > 0)
+                .collect()
+        };
+        let out = PyList::empty(py);
+        for (b, i, facts) in found {
+            let d = facts_dict(py, &facts)?;
+            d.set_item("block", b)?;
+            d.set_item("index", i)?;
+            d.set_item("instruction", cf.func.op_repr(&cf.func.blocks[b].insts[i].op))?;
+            out.append(d)?;
+        }
+        Ok(out.into_any().unbind())
+    }
+
+    /// The graphs of the function and of the functions it called, and what
+    /// was left out of them. One dict per graph, with `where` (function,
+    /// block, and the generic instructions of the block from its first
+    /// operation to the last of its run there), `state` ("built": the VM
+    /// runs it; "waiting": it is exported at its next call; "compiled":
+    /// what the passes over it made runs in its place, with a `reason` if
+    /// it is not exported for further kinds of calls; "vm" with a `reason`:
+    /// it is not exported, or not for the calls it has seen), `ops` and
+    /// `operators` of the path that ran last, `inputs` and `outputs` (how
+    /// many values that takes and gives), `branches` (how many branches and
+    /// loop tests it goes through) and `calls` (how many calls of Python
+    /// functions it goes into), `within` (for a graph of a function whose
+    /// operations a path of a caller holds: the caller's graph, which is
+    /// the one that runs them), `paths` (how many paths were taken
+    /// down), `ends` (per path, the block and instruction the function goes
+    /// on at behind it) and `why` (the last one ends there), `variants` (how
+    /// many exported forms it has), `hits` and `misses` (how many calls ran
+    /// an exported form, and how many came to the graph and ran its
+    /// instructions), `exports` (how many times it was handed to the passes
+    /// over graphs), `version` (of the block), and `forms`: per kind of call
+    /// it was recorded for, the one that ran last first, `checks` (what a
+    /// call has to be like, as text), `hits`, and the `reason` if calls of
+    /// the kind are not exported. And one per instruction or run of
+    /// instructions with tensor work that is in no graph, with `state` "vm",
+    /// the `reason`, and for one instruction its `text`. A graph that
+    /// starts where the path of another went through is part of that one,
+    /// and not listed.
+    fn graphs(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let out = PyList::empty(py);
+        let mut known: Vec<(String, String)> = Vec::new();
+        let mut shown: Vec<*const GraphSite> = Vec::new();
+        let mut left = |py: Python<'_>, place: String, reason: String, text: Option<String>| -> PyResult<()> {
+            let entry = (place, reason);
+            if known.contains(&entry) {
+                return Ok(());
+            }
+            let d = PyDict::new(py);
+            d.set_item("where", entry.0.clone())?;
+            d.set_item("state", "vm")?;
+            d.set_item("reason", entry.1.clone())?;
+            if let Some(text) = text {
+                d.set_item("text", text)?;
+            }
+            known.push(entry);
+            out.append(d)
+        };
+        let mut functions = vec![self.inner.clone()];
+        functions.extend(self.inner.callees.compiled());
+        let held = self.held();
+        for cf in &functions {
+            let func = &cf.func;
+            let holds = |b: usize, lo: usize, hi: usize| {
+                let insts = &func.blocks[b].insts[lo..hi.min(func.blocks[b].insts.len())];
+                insts.iter().any(|inst| held.iter().any(|(owner, bc, ..)| *owner == Arc::as_ptr(cf) && *bc == inst.bc))
+            };
+            let versions: Vec<(usize, Arc<BlockCode>)> = {
+                let state = cf.state.borrow();
+                let blocks = state.blocks.iter().enumerate();
+                blocks.flat_map(|(b, bs)| bs.versions.iter().map(move |version| (b, version.clone()))).collect()
+            };
+            let place = |b: usize, lo: usize, hi: usize| {
+                if hi == lo + 1 {
+                    (format!("{} (block {})[{}]", func.qualname, b, lo), func.blocks[b].insts.get(lo))
+                } else {
+                    (format!("{} (block {})[{}:{}]", func.qualname, b, lo, hi), None)
+                }
+            };
+            for (b, version) in versions {
+                for site in &version.graphs {
+                    if shown.contains(&Arc::as_ptr(site)) || site.outer().is_some() {
+                        continue;
+                    }
+                    shown.push(Arc::as_ptr(site));
+                    if site.entry && site.short().is_some() {
+                        continue;
+                    }
+                    if let Some(count) = site.short() {
+                        // A run that is too short to be a graph, and that
+                        // no path from it made longer.
+                        let seed = site.seed.borrow().clone();
+                        if seed.root.0 == seed.land.0 && holds(b, seed.root.1, seed.land.1) {
+                            continue;
+                        }
+                        let (place, inst) = place(b, seed.root.1, seed.land.1);
+                        let reason = format!("{} operations, fewer than min_ops ({})", count, site.min_ops);
+                        left(py, place, reason, inst.map(|inst| func.op_repr(&inst.op)))?;
+                        continue;
+                    }
+                    let path = site.path();
+                    let paths = site.paths();
+                    let (compiled, _) = site.forms();
+                    let forms: Vec<(Arc<crate::graph::Path>, Arc<crate::graph::Exported>)> = paths
+                        .iter()
+                        .flat_map(|path| path.exported.borrow().iter().map(|form| (path.clone(), form.clone())).collect::<Vec<_>>())
+                        .collect();
+                    let closed = forms.iter().find_map(|(_, form)| form.closed.clone());
+                    let (state, reason) = match &*site.state.borrow() {
+                        GraphState::GivenUp(reason) if compiled > 0 => ("compiled", Some(reason.clone())),
+                        GraphState::GivenUp(reason) => ("vm", Some(reason.clone())),
+                        GraphState::Waiting if compiled > 0 => ("compiled", None),
+                        GraphState::Waiting if closed.is_some() => ("vm", closed),
+                        GraphState::Waiting => ("waiting", None),
+                        GraphState::Built | GraphState::Small(_) => ("built", None),
+                    };
+                    let d = PyDict::new(py);
+                    // A graph is named by its first operation, whether its
+                    // path starts there or with the function.
+                    let named = match path.first {
+                        Some((block, first)) => format!("{} (block {})[{}]", func.qualname, block, first),
+                        None => site.name.clone(),
+                    };
+                    d.set_item("where", named)?;
+                    d.set_item("state", state)?;
+                    if let Some((caller, graph)) = Self::holder(&held, cf, site) {
+                        // Its operations are those of a graph of a caller,
+                        // which is the one that runs them.
+                        let name = match graph.path().first {
+                            Some((block, first)) => format!("{} (block {})[{}]", caller.func.qualname, block, first),
+                            None => graph.name.clone(),
+                        };
+                        d.set_item("within", name)?;
+                    }
+                    if let Some(reason) = reason {
+                        d.set_item("reason", reason)?;
+                    }
+                    d.set_item("ops", path.operators.len())?;
+                    d.set_item("operators", path.operators.clone())?;
+                    d.set_item("inputs", path.inputs.len())?;
+                    d.set_item("outputs", path.outputs.len())?;
+                    d.set_item("branches", path.branches)?;
+                    d.set_item("calls", path.calls)?;
+                    d.set_item("paths", paths.len())?;
+                    let mut ends: Vec<(usize, usize)> = paths.iter().map(|path| path.land).collect();
+                    if ends.is_empty() {
+                        ends.push(path.land);
+                    }
+                    ends.dedup();
+                    d.set_item("ends", ends)?;
+                    d.set_item("why", path.ends.clone())?;
+                    d.set_item("variants", compiled)?;
+                    d.set_item("hits", site.hits.load(Ordering::Relaxed))?;
+                    d.set_item("misses", site.misses.load(Ordering::Relaxed))?;
+                    d.set_item("exports", site.exports.load(Ordering::Relaxed))?;
+                    if crate::graph::timed() {
+                        let times: Vec<u64> = site.times.iter().map(|t| t.load(Ordering::Relaxed)).collect();
+                        d.set_item("times", times)?;
+                    }
+                    d.set_item("version", version.id)?;
+                    let listed = PyList::empty(py);
+                    for (path, form) in &forms {
+                        let one = PyDict::new(py);
+                        one.set_item("checks", unsafe { form.conditions(path) })?;
+                        one.set_item("hits", form.hits.load(Ordering::Relaxed))?;
+                        if let Some(reason) = &form.closed {
+                            one.set_item("reason", reason.clone())?;
+                        }
+                        listed.append(one)?;
+                    }
+                    d.set_item("forms", listed)?;
+                    out.append(d)?;
+                }
+                for entry in &version.left {
+                    // What a path of a graph of the block goes through, or
+                    // takes as an operation, is not left out.
+                    let taken = version.graphs.iter().any(|site| {
+                        site.paths().iter().any(|path| {
+                            let behind = path.land.0 != b || (entry.lo as usize) < path.land.1;
+                            path.root.0 == b && path.root.1 <= entry.lo as usize && behind && path.operators.len() >= site.min_ops
+                        })
+                    });
+                    if taken || holds(b, entry.lo as usize, entry.hi as usize) {
+                        continue;
+                    }
+                    let (place, inst) = place(b, entry.lo as usize, entry.hi as usize);
+                    left(py, place, entry.reason.clone(), inst.map(|inst| func.op_repr(&inst.op)))?;
+                }
+            }
+        }
+        Ok(out.into_any().unbind())
+    }
+}
+
+impl CfgFunction {
+    /// The operations that the paths of graphs hold, each by its function
+    /// and its place in the code of it, with the graph and the function it
+    /// is a graph of: also the operations of functions a path went into.
+    fn held(&self) -> Vec<(*const Compiled, u32, Arc<Compiled>, Arc<GraphSite>)> {
+        let mut held = Vec::new();
+        for (cf, _, _, site) in self.graph_sites() {
+            if matches!(*site.state.borrow(), GraphState::GivenUp(_) | GraphState::Small(_)) || site.outer().is_some() {
+                continue;
+            }
+            for path in site.paths().iter().filter(|path| path.operators.len() >= site.min_ops) {
+                let nodes = path.body.iter().filter(|inst| inst.kind == crate::graph::Kind::Node);
+                held.extend(nodes.map(|inst| (path.owners[inst.owner as usize], inst.bc, cf.clone(), site.clone())));
+            }
+        }
+        held
+    }
+
+    /// The graph of a caller, with its function, whose path holds the first
+    /// operation of a graph of a function it went into: where that one
+    /// runs, this one's operations are its own.
+    fn holder(
+        held: &[(*const Compiled, u32, Arc<Compiled>, Arc<GraphSite>)],
+        cf: &Arc<Compiled>,
+        site: &Arc<GraphSite>,
+    ) -> Option<(Arc<Compiled>, Arc<GraphSite>)> {
+        // The first operation of this graph, which may be one of a
+        // function it goes into itself, is on a path of a graph of another
+        // function that goes through this one.
+        let path = site.path();
+        let node = path.body.iter().find(|inst| inst.kind == crate::graph::Kind::Node)?;
+        let first = (path.owners[node.owner as usize], node.bc);
+        let of_caller = |(owner, at, caller, graph): &&(*const Compiled, u32, Arc<Compiled>, Arc<GraphSite>)| {
+            (*owner, *at) == first
+                && !Arc::ptr_eq(caller, cf)
+                && graph.paths().iter().any(|path| path.owners.contains(&Arc::as_ptr(cf)))
+        };
+        held.iter().find(of_caller).map(|(_, _, caller, graph)| (caller.clone(), graph.clone()))
+    }
+
+    /// The graphs of the live block versions of the function and of the
+    /// functions it called, each with its function, block and version.
+    fn graph_sites(&self) -> Vec<(Arc<Compiled>, usize, u32, Arc<GraphSite>)> {
+        let mut found = Vec::new();
+        let mut functions = vec![self.inner.clone()];
+        functions.extend(self.inner.callees.compiled());
+        for cf in functions {
+            let state = cf.state.borrow();
+            for (b, bs) in state.blocks.iter().enumerate() {
+                for version in &bs.versions {
+                    for site in &version.graphs {
+                        found.push((cf.clone(), b, version.id, site.clone()));
+                    }
+                }
+            }
+        }
+        found
+    }
+}
+
+/// The facts of an instruction as `CfgFunction.facts` gives them.
+fn facts_dict<'py>(py: Python<'py>, facts: &InstFacts) -> PyResult<Bound<'py, PyDict>> {
+    let d = PyDict::new(py);
+    d.set_item("runs", facts.runs)?;
+    let kernels = match facts.kernels {
+        Kernels::Unseen => None,
+        Kernels::None => Some("none"),
+        Kernels::One => Some("one"),
+        Kernels::Many => Some("many"),
+    };
+    d.set_item("kernels", kernels)?;
+    d.set_item("frames", facts.frames)?;
+    d.set_item("raised", facts.raised)?;
+    match &facts.callee {
+        CalleeFact::Unseen => d.set_item("callee", py.None())?,
+        CalleeFact::Many => d.set_item("callee", "many")?,
+        CalleeFact::One(code, kind) => {
+            let code = unsafe { Bound::from_borrowed_ptr(py, code.as_ptr()) };
+            let callee = PyDict::new(py);
+            callee.set_item("name", code.getattr("co_qualname")?)?;
+            let kind = match kind {
+                CalleeKind::Function => "function",
+                CalleeKind::Method => "method",
+                CalleeKind::Instance => "instance",
+            };
+            callee.set_item("kind", kind)?;
+            callee.set_item("code", code)?;
+            d.set_item("callee", callee)?;
+        }
+    }
+    d.set_item("wrote", facts.wrote)?;
+    d.set_item("operators", facts.operators.clone())?;
+    Ok(d)
 }
 
 /// The region a pass is transforming. Only valid while the pass runs.
@@ -460,13 +839,17 @@ impl Region {
         Ok(unit.dump(cx.func()))
     }
 
-    /// The instructions as dicts with keys index, op, dst, uses and text.
-    fn instructions(&self, py: Python<'_>) -> PyResult<PyObject> {
+    /// The instructions as dicts with keys index, op, dst, uses and text;
+    /// replayable; kernel, the operator an instruction was
+    /// seen to be exactly one call of (`aten::mul.Tensor`), or None; and
+    /// facts, what the profiling tier saw it do (see `CfgFunction.facts`),
+    /// or None for one that did not run there.
+    fn instructions(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let (unit, cx) = self.parts()?;
         let func = cx.func();
-        let out = PyList::empty_bound(py);
+        let out = PyList::empty(py);
         for (i, u) in unit.insts.iter().enumerate() {
-            let d = PyDict::new_bound(py);
+            let d = PyDict::new(py);
             let text = func.op_repr(&u.inst.op);
             d.set_item("index", i)?;
             d.set_item("op", text.split_whitespace().next().unwrap_or(""))?;
@@ -476,19 +859,24 @@ impl Region {
             d.set_item("uses", uses)?;
             d.set_item("text", text)?;
             d.set_item("replayable", u.origin as usize == i && u.inst.op.is_replayable())?;
-            d.set_item("steppable", u.origin as usize == i && u.inst.op.is_steppable())?;
+            let slot = cx.slots.get(u.origin as usize).and_then(|slot| slot.as_ref());
+            d.set_item("kernel", slot.and_then(|slot| unsafe { slot.operator() }))?;
+            match cx.facts.get(u.origin as usize).filter(|facts| facts.runs > 0) {
+                Some(facts) => d.set_item("facts", facts_dict(py, facts)?)?,
+                None => d.set_item("facts", py.None())?,
+            }
             out.append(d)?;
         }
         Ok(out.into_any().unbind())
     }
 
     /// What the profiling tier saw the SSA value be, or None.
-    fn observed(&self, py: Python<'_>, value: V) -> PyResult<PyObject> {
+    fn observed(&self, py: Python<'_>, value: V) -> PyResult<Py<PyAny>> {
         let (_, cx) = self.parts()?;
         let Some(obs) = cx.obs.get(value as usize) else {
             return Err(PyIndexError::new_err("no such value"));
         };
-        let d = PyDict::new_bound(py);
+        let d = PyDict::new(py);
         match obs {
             ValueObs::Unseen => return Ok(py.None()),
             ValueObs::Tensor { min_rank, dims, last } => {
@@ -507,6 +895,16 @@ impl Region {
                 d.set_item("kind", "int")?;
                 d.set_item("lo", *lo)?;
                 d.set_item("hi", *hi)?;
+            }
+            ValueObs::Float => d.set_item("kind", "float")?,
+            ValueObs::None => d.set_item("kind", "none")?,
+            ValueObs::Str { same, .. } => {
+                d.set_item("kind", "str")?;
+                d.set_item("same", *same)?;
+            }
+            ValueObs::Object { len, .. } => {
+                d.set_item("kind", "object")?;
+                d.set_item("len", *len)?;
             }
             ValueObs::Other => d.set_item("kind", "other")?,
         }
@@ -531,11 +929,11 @@ impl Region {
 
     /// What a pass left on this block with `Replay.settle`, or None.
     #[getter]
-    fn note(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn note(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let (unit, cx) = self.parts()?;
         let state = cx.cf.state.borrow();
         Ok(match &state.blocks[unit.block].note {
-            Some(note) => unsafe { PyObject::from_borrowed_ptr(py, note.as_ptr()) },
+            Some(note) => unsafe { Bound::from_borrowed_ptr(py, note.as_ptr()).unbind() },
             None => py.None(),
         })
     }
@@ -587,6 +985,10 @@ impl Region {
         // end: the values from before the range, and the ones it gives.
         let mut defined: Vec<V> = Vec::new();
         let mut held: Vec<V> = Vec::new();
+        // The variables the range binds are bound once it is done: to what
+        // they were bound to last, if that is from before the range or one
+        // of the values it gives, and to nothing otherwise.
+        let mut bound: Vec<(u32, V)> = Vec::new();
         for u in &unit.insts[start..end] {
             if let Op::Hold(values) = &u.inst.op {
                 for v in values {
@@ -594,6 +996,11 @@ impl Region {
                         held.push(*v);
                     }
                 }
+            }
+            if let Op::StoreLocal(slot, v) = &u.inst.op {
+                bound.retain(|(other, _)| other != slot);
+                let given = !defined.contains(v) || outputs.contains(v);
+                bound.push((*slot, if given { *v } else { UNDEF }));
             }
             if u.inst.dst != NONE {
                 defined.push(u.inst.dst);
@@ -619,40 +1026,15 @@ impl Region {
                 removable: false,
             });
         }
-        unit.insts.splice(start..end, fused);
-        Ok(true)
-    }
-
-    /// Puts a call of `callable` in front of the instruction at `start`,
-    /// which must still be the generic one, and leaves the instructions as
-    /// they are. The callable gets the values that are needed from `start`
-    /// on, which are returned, with `torch._cfg_rs.UNDEFINED` for one that
-    /// has no value. If it returns None the instructions run; otherwise it
-    /// returns `(block, index, values, cleared)` and execution goes on at
-    /// instruction `index` of `block`, anywhere in the function, with the
-    /// values of the dict `values` (by value number) set and those in the
-    /// list `cleared` unset. Returns None for a function with exception
-    /// handlers, whose frame slots a leap would not carry over.
-    fn leap(&self, start: usize, callable: &Bound<'_, PyAny>) -> PyResult<Option<Vec<V>>> {
-        let (unit, cx) = self.parts()?;
-        if start >= unit.insts.len() {
-            return Err(PyIndexError::new_err("no such instruction"));
-        }
-        if unit.insts[start].origin as usize != start || cx.func().exc_reg != NONE {
-            return Ok(None);
-        }
-        let inputs: Vec<V> = cx.cf.live_at(unit.block, start).iter().collect();
-        let callee = unsafe { PyObj::from_borrowed(callable.as_ptr()) };
-        let bc = unit.insts[start].inst.bc;
-        unit.insts.insert(
-            start,
-            crate::spec::UInst {
-                inst: Inst { dst: NONE, op: Op::Leap(callee, inputs.clone()), bc, kills: Vec::new() },
+        for (slot, v) in bound {
+            fused.push(crate::spec::UInst {
+                inst: Inst { dst: NONE, op: Op::StoreLocal(slot, v), bc, kills: Vec::new() },
                 origin: NONE,
                 removable: false,
-            },
-        );
-        Ok(Some(inputs))
+            });
+        }
+        unit.insts.splice(start..end, fused);
+        Ok(true)
     }
 
     /// Replaces the instruction at `index` with the constant True, False or
@@ -662,7 +1044,7 @@ impl Region {
         let func = cx.func();
         let c = if value.is_none() {
             func.const_none
-        } else if let Ok(b) = value.downcast::<pyo3::types::PyBool>() {
+        } else if let Ok(b) = value.cast::<pyo3::types::PyBool>() {
             if b.is_true() {
                 func.const_true
             } else {
@@ -755,11 +1137,11 @@ impl Replay {
     fn run(&self, py: Python<'_>, lo: usize, hi: usize, env: &Bound<'_, PyDict>, traced: bool) -> PyResult<()> {
         self.check(lo, hi)?;
         let compiled = self.compiled()?;
-        match unsafe { compiled.replay(self.block, lo, hi, env.as_ptr(), traced, false) } {
+        match unsafe { compiled.replay(self.block, lo, hi, env.as_ptr(), traced) } {
             Ok(()) => Ok(()),
             Err(index) => {
                 let err = PyErr::fetch(py);
-                let _ = err.value_bound(py).setattr("cfg_index", index);
+                let _ = err.value(py).setattr("cfg_index", index);
                 Err(err)
             }
         }
@@ -767,74 +1149,6 @@ impl Replay {
 
     // What follows is about the function as a whole, for code that goes
     // on from the range into other blocks.
-
-    /// The generic instructions of a block, as `Region.instructions` gives
-    /// them for the block of a pass.
-    fn instructions_of(&self, py: Python<'_>, block: usize) -> PyResult<PyObject> {
-        let compiled = self.compiled()?;
-        let func = &compiled.func;
-        let Some(found) = func.blocks.get(block) else {
-            return Err(PyIndexError::new_err("no such block"));
-        };
-        let out = PyList::empty_bound(py);
-        for (i, inst) in found.insts.iter().enumerate() {
-            let d = PyDict::new_bound(py);
-            let text = func.op_repr(&inst.op);
-            d.set_item("index", i)?;
-            d.set_item("op", text.split_whitespace().next().unwrap_or(""))?;
-            d.set_item("dst", if inst.dst == NONE { None } else { Some(inst.dst) })?;
-            let mut uses = Vec::new();
-            inst.op.for_each_use(|v| uses.push(v));
-            d.set_item("uses", uses)?;
-            d.set_item("text", text)?;
-            d.set_item("replayable", inst.op.is_replayable())?;
-            d.set_item("steppable", inst.op.is_steppable())?;
-            out.append(d)?;
-        }
-        Ok(out.into_any().unbind())
-    }
-
-    /// How a block ends: its kind (`jump`, `br`, `br_null`, or `leave` for
-    /// what ends the function), the value it looks at, and the blocks it
-    /// goes to (`br`: if true, if false; `br_null`: if the value is unset, if
-    /// it is set).
-    fn terminator(&self, block: usize) -> PyResult<(String, Option<V>, Vec<usize>)> {
-        let compiled = self.compiled()?;
-        let Some(found) = compiled.func.blocks.get(block) else {
-            return Err(PyIndexError::new_err("no such block"));
-        };
-        Ok(match &found.term {
-            Term::Jump(b) => ("jump".to_string(), None, vec![*b as usize]),
-            Term::Br { cond, then_, else_ } => {
-                ("br".to_string(), Some(*cond), vec![*then_ as usize, *else_ as usize])
-            }
-            Term::BrNull { v, null, nonnull } => {
-                ("br_null".to_string(), Some(*v), vec![*null as usize, *nonnull as usize])
-            }
-            _ => ("leave".to_string(), None, Vec::new()),
-        })
-    }
-
-    /// What going from block `pred` to block `block` does to the values: the
-    /// moves `(to, from)` that the phis of `block` stand for, all at once
-    /// (`from` is None for a value that is unset on this edge), and the
-    /// values that are not needed beyond the edge.
-    fn edge(&self, pred: usize, block: usize) -> PyResult<(Vec<(V, Option<V>)>, Vec<V>)> {
-        let compiled = self.compiled()?;
-        let position = compiled
-            .func
-            .blocks
-            .get(block)
-            .and_then(|found| found.preds.iter().position(|p| *p as usize == pred));
-        let Some(position) = position else {
-            return Err(PyIndexError::new_err("no such edge"));
-        };
-        let moves = compiled.analysis.edge_moves[block][position]
-            .iter()
-            .map(|(dst, src)| (*dst, (*src != UNDEF).then_some(*src)))
-            .collect();
-        Ok((moves, compiled.analysis.edge_kills[block][position].clone()))
-    }
 
     /// The values that are needed from instruction `index` of a block on;
     /// with `read`, only those that an instruction reads, not the ones that
@@ -852,48 +1166,6 @@ impl Replay {
         Ok(compiled.live_at(block, index).iter().collect())
     }
 
-    /// Whether `Region.leap` works in this function: not in one with
-    /// exception handlers.
-    #[getter]
-    fn leaps(&self) -> PyResult<bool> {
-        Ok(self.compiled()?.func.exc_reg == NONE)
-    }
-
-    /// The globals of the function.
-    #[getter]
-    fn globals(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let compiled = self.compiled()?;
-        Ok(unsafe { PyObject::from_borrowed_ptr(py, compiled.func.globals.as_ptr()) })
-    }
-
-    /// `run` for the instructions lo..hi of any block, which may also be
-    /// ones that work on what a replay made itself (see `steppable` in
-    /// `instructions_of`).
-    #[pyo3(signature = (block, lo, hi, env, traced=false))]
-    fn step(
-        &self,
-        py: Python<'_>,
-        block: usize,
-        lo: usize,
-        hi: usize,
-        env: &Bound<'_, PyDict>,
-        traced: bool,
-    ) -> PyResult<()> {
-        let compiled = self.compiled()?;
-        let fits = compiled.func.blocks.get(block).is_some_and(|found| lo <= hi && hi <= found.insts.len());
-        if !fits {
-            return Err(PyIndexError::new_err("no such instructions"));
-        }
-        match unsafe { compiled.replay(block, lo, hi, env.as_ptr(), traced, true) } {
-            Ok(()) => Ok(()),
-            Err(index) => {
-                let err = PyErr::fetch(py);
-                let _ = err.value_bound(py).setattr("cfg_index", index);
-                Err(err)
-            }
-        }
-    }
-
     /// Leaves `note` on the block for the pass and has the block specialized
     /// again, with that note, before this returns.
     fn settle(&self, note: &Bound<'_, PyAny>) -> PyResult<()> {
@@ -907,6 +1179,31 @@ impl Replay {
 
 /// Tells the VM that compiled code changed behind its back: measurements of
 /// compiled code against the interpreter that are under way start over.
+/// Says that what is running is not yet what it will be: a graph is
+/// still running its instructions, and what a pass makes of them will run
+/// in their place. A measurement that this falls into does not count
+/// against the compiled form of a function.
+#[pyfunction]
+pub fn unsettled() {
+    vm::unsettled();
+}
+
+/// Has the measurement of a function against the interpreter wait, with
+/// `settle()`, for the devices that run what it started: see
+/// `TRIAL_SETTLE`. `settle` must be a builtin, which runs without a frame
+/// for the hook to be offered; None for no waiting.
+#[pyfunction]
+pub fn trial_settles(settle: &Bound<'_, PyAny>) -> PyResult<()> {
+    if settle.is_none() {
+        vm::trial_settles(null_mut());
+    } else if unsafe { ffi::PyCFunction_Check(settle.as_ptr()) } == 0 {
+        return Err(pyo3::exceptions::PyTypeError::new_err("trial_settles takes a builtin"));
+    } else {
+        vm::trial_settles(settle.as_ptr());
+    }
+    Ok(())
+}
+
 #[pyfunction]
 pub fn plan_changed() {
     vm::plan_changed();
@@ -918,154 +1215,8 @@ pub fn profiling_depth() -> usize {
     vm::profiling_depth()
 }
 
-/// A number that stays what it is for as long as an `nn.Module` and the
-/// modules below it hold what they hold: which of their attributes are
-/// tensors (objects of one of the types in `tensors`), lists with tensors or
-/// None, their `training` flags, the names of their parameters, buffers and
-/// submodules, which of those are None, the submodules themselves, and
-/// whether they have hooks. Which tensor an attribute holds is not part of
-/// it. Reading it costs a walk over the dicts of the modules, and nothing
-/// has to be told when one of them changes.
-#[pyfunction]
-pub fn module_stamp(module: &Bound<'_, PyAny>, tensors: &Bound<'_, PyTuple>) -> PyResult<u64> {
-    static NAMES: std::sync::OnceLock<[PyObj; 8]> = std::sync::OnceLock::new();
-    let names = NAMES.get_or_init(|| {
-        let intern = |name: &std::ffi::CStr| unsafe {
-            PyObj::from_owned(ffi::PyUnicode_InternFromString(name.as_ptr()))
-        };
-        [
-            intern(c"training"),
-            intern(c"_parameters"),
-            intern(c"_buffers"),
-            intern(c"_modules"),
-            intern(c"_forward_hooks"),
-            intern(c"_forward_pre_hooks"),
-            intern(c"_backward_hooks"),
-            intern(c"_backward_pre_hooks"),
-        ]
-    });
-    let types: Vec<usize> = tensors.iter().map(|t| t.as_ptr() as usize).collect();
-    let mut stamp: u64 = 0xcbf2_9ce4_8422_2325;
-    let mut mix = |v: u64| stamp = (stamp ^ v).wrapping_mul(0x0000_0100_0000_01b3);
-    let mut pending = vec![module.as_ptr()];
-    let mut seen = 0usize;
-    unsafe {
-        let is_tensor = |o: Obj| types.contains(&(ffi::Py_TYPE(o) as usize));
-        let none = ffi::Py_None();
-        while let Some(m) = pending.pop() {
-            seen += 1;
-            if seen > 1_000_000 {
-                return Err(pyo3::exceptions::PyRecursionError::new_err(
-                    "a module that contains itself",
-                ));
-            }
-            mix(m as u64);
-            let slot = pyffi::_PyObject_GetDictPtr(m);
-            if slot.is_null() || (*slot).is_null() {
-                continue;
-            }
-            let (mut pos, mut key, mut value) = (0, null_mut(), null_mut());
-            while ffi::PyDict_Next(*slot, &mut pos, &mut key, &mut value) != 0 {
-                let which = names.iter().position(|n| n.as_ptr() == key);
-                let kind: u64 = match which {
-                    Some(0) => 2 + (value == ffi::Py_True()) as u64,
-                    Some(1..=3) if ffi::PyDict_Check(value) != 0 => {
-                        let (mut p, mut k, mut v) = (0, null_mut(), null_mut());
-                        let mut held = 4u64;
-                        while ffi::PyDict_Next(value, &mut p, &mut k, &mut v) != 0 {
-                            held = held.wrapping_mul(31).wrapping_add(k as u64);
-                            if which == Some(3) {
-                                held = held.wrapping_mul(31).wrapping_add(v as u64);
-                                if v != none {
-                                    pending.push(v);
-                                }
-                            } else {
-                                held = held.wrapping_mul(31).wrapping_add((v == none) as u64);
-                            }
-                        }
-                        held
-                    }
-                    Some(4..) => 5 + (ffi::PyObject_IsTrue(value) != 0) as u64,
-                    _ if value == none => 7,
-                    _ if is_tensor(value) => 8,
-                    _ if ffi::PyList_CheckExact(value) != 0 => {
-                        let n = ffi::PyList_GET_SIZE(value);
-                        let mut held = 9u64.wrapping_add((n as u64) << 32);
-                        for i in 0..n {
-                            let item = is_tensor(ffi::PyList_GET_ITEM(value, i));
-                            held = held.wrapping_mul(31).wrapping_add(item as u64);
-                        }
-                        held
-                    }
-                    _ => continue,
-                };
-                mix(key as u64);
-                mix(kind);
-            }
-        }
-        if !ffi::PyErr_Occurred().is_null() {
-            return Err(PyErr::fetch(module.py()));
-        }
-    }
-    Ok(stamp)
-}
-
-/// A number that changes when an `nn.Module` or a module below it is given
-/// another object for anything it holds: an attribute, a parameter, a
-/// buffer, a submodule, a hook. Unlike `module_stamp` it is about the very
-/// objects, so it says whether a stretch of code left the modules as they
-/// were. Attributes named in `skip` are not looked at.
-#[pyfunction]
-pub fn module_identity(module: &Bound<'_, PyAny>, skip: &Bound<'_, PyTuple>) -> PyResult<u64> {
-    let skipped: Vec<usize> = skip.iter().map(|name| name.as_ptr() as usize).collect();
-    let mut stamp: u64 = 0xcbf2_9ce4_8422_2325;
-    let mut mix = |v: u64| stamp = (stamp ^ v).wrapping_mul(0x0000_0100_0000_01b3);
-    let mut pending = vec![module.as_ptr()];
-    let mut seen = 0usize;
-    unsafe {
-        let modules = ffi::PyUnicode_InternFromString(c"_modules".as_ptr());
-        let none = ffi::Py_None();
-        while let Some(m) = pending.pop() {
-            seen += 1;
-            if seen > 1_000_000 {
-                ffi::Py_XDECREF(modules);
-                return Err(pyo3::exceptions::PyRecursionError::new_err(
-                    "a module that contains itself",
-                ));
-            }
-            mix(m as u64);
-            let slot = pyffi::_PyObject_GetDictPtr(m);
-            if slot.is_null() || (*slot).is_null() {
-                continue;
-            }
-            let (mut pos, mut key, mut value) = (0, null_mut(), null_mut());
-            while ffi::PyDict_Next(*slot, &mut pos, &mut key, &mut value) != 0 {
-                if skipped.contains(&(key as usize)) {
-                    continue;
-                }
-                mix(key as u64);
-                mix(value as u64);
-                // The dicts of parameters, buffers, submodules and hooks are
-                // changed in place.
-                if ffi::PyDict_Check(value) != 0 {
-                    let (mut p, mut k, mut v) = (0, null_mut(), null_mut());
-                    while ffi::PyDict_Next(value, &mut p, &mut k, &mut v) != 0 {
-                        mix(k as u64);
-                        mix(v as u64);
-                        if key == modules && v != none {
-                            pending.push(v);
-                        }
-                    }
-                }
-            }
-        }
-        ffi::Py_XDECREF(modules);
-    }
-    Ok(stamp)
-}
-
 pub fn run_python_pass(callable: &PyObj, unit: &mut Unit, cx: &PassCx) -> PyResult<bool> {
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         let region = Py::new(
             py,
             Region {
@@ -1080,4 +1231,256 @@ pub fn run_python_pass(callable: &PyObj, unit: &mut Unit, cx: &PassCx) -> PyResu
         r.cx.set(std::ptr::null());
         result?.is_truthy()
     })
+}
+
+// ----------------------------------------------------------------------
+// Passes written in Rust, in a library of the user's (see the crate in
+// ../sdk, which is the other side of what follows)
+// ----------------------------------------------------------------------
+
+const NATIVE_ABI_VERSION: u32 = 1;
+
+type NativeText = unsafe extern "C" fn(*mut c_void, usize, *mut u8, usize) -> usize;
+type NativeRun = unsafe extern "C" fn(*mut c_void, *mut c_void, *const NativeApi, *mut c_void) -> i32;
+
+#[repr(C)]
+pub struct NativeApi {
+    version: u32,
+    len: unsafe extern "C" fn(*mut c_void) -> usize,
+    op: NativeText,
+    kernel: NativeText,
+    dst: unsafe extern "C" fn(*mut c_void, usize) -> u32,
+    uses: unsafe extern "C" fn(*mut c_void, usize, *mut u32, usize) -> usize,
+    replayable: unsafe extern "C" fn(*mut c_void, usize) -> i32,
+    fuse: unsafe extern "C" fn(*mut c_void, usize, usize, *mut c_void) -> i32,
+    swap: unsafe extern "C" fn(*mut c_void, usize, usize, *mut c_void, u32) -> i32,
+    error: unsafe extern "C" fn(*const c_char),
+}
+
+#[repr(C)]
+struct NativeRaw {
+    name: *const c_char,
+    run: NativeRun,
+    state: *mut c_void,
+}
+
+/// The region a native pass was called with: the Python object, which the
+/// functions below reach the block through.
+unsafe fn native_region<'py>(region: *mut c_void) -> Bound<'py, Region> {
+    let py = Python::assume_attached();
+    Bound::from_borrowed_ptr(py, region as Obj).cast_into_unchecked()
+}
+
+unsafe fn native_inst<T>(region: *mut c_void, index: usize, read: impl FnOnce(&spec::UInst, &PassCx) -> T) -> Option<T> {
+    let region = native_region(region);
+    let region = region.borrow();
+    let (unit, cx) = region.parts().ok()?;
+    unit.insts.get(index).map(|inst| read(inst, cx))
+}
+
+unsafe fn native_text(text: Option<String>, buf: *mut u8, cap: usize) -> usize {
+    let text = text.unwrap_or_default();
+    std::ptr::copy_nonoverlapping(text.as_ptr(), buf, text.len().min(cap));
+    text.len()
+}
+
+unsafe extern "C" fn native_len(region: *mut c_void) -> usize {
+    let region = native_region(region);
+    let region = region.borrow();
+    region.parts().map_or(0, |(unit, _)| unit.insts.len())
+}
+
+unsafe extern "C" fn native_op(region: *mut c_void, index: usize, buf: *mut u8, cap: usize) -> usize {
+    let name = native_inst(region, index, |u, cx| {
+        cx.func().op_repr(&u.inst.op).split_whitespace().next().unwrap_or("").to_string()
+    });
+    native_text(name, buf, cap)
+}
+
+unsafe extern "C" fn native_kernel(region: *mut c_void, index: usize, buf: *mut u8, cap: usize) -> usize {
+    let name = native_inst(region, index, |u, cx| {
+        cx.slots.get(u.origin as usize).and_then(|slot| slot.as_ref()).and_then(|slot| slot.operator())
+    });
+    native_text(name.flatten(), buf, cap)
+}
+
+unsafe extern "C" fn native_dst(region: *mut c_void, index: usize) -> u32 {
+    native_inst(region, index, |u, _| u.inst.dst).unwrap_or(NONE)
+}
+
+unsafe extern "C" fn native_uses(region: *mut c_void, index: usize, buf: *mut u32, cap: usize) -> usize {
+    let uses = native_inst(region, index, |u, _| {
+        let mut uses = Vec::new();
+        u.inst.op.for_each_use(|v| uses.push(v));
+        uses
+    })
+    .unwrap_or_default();
+    std::ptr::copy_nonoverlapping(uses.as_ptr(), buf, uses.len().min(cap));
+    uses.len()
+}
+
+unsafe extern "C" fn native_replayable(region: *mut c_void, index: usize) -> i32 {
+    native_inst(region, index, |u, _| u.origin as usize == index && u.inst.op.is_replayable()).unwrap_or(false) as i32
+}
+
+unsafe fn native_status(py: Python<'_>, result: PyResult<bool>) -> i32 {
+    match result {
+        Ok(changed) => changed as i32,
+        Err(err) => {
+            err.restore(py);
+            -1
+        }
+    }
+}
+
+unsafe extern "C" fn native_fuse(region: *mut c_void, start: usize, end: usize, callable: *mut c_void) -> i32 {
+    let region = native_region(region);
+    let py = region.py();
+    let callable = Bound::from_borrowed_ptr(py, callable as Obj);
+    let result = region.borrow().fuse(start, end, &callable);
+    native_status(py, result)
+}
+
+unsafe extern "C" fn native_swap(
+    region: *mut c_void,
+    start: usize,
+    end: usize,
+    kernel: *mut c_void,
+    checks: u32,
+) -> i32 {
+    let region = native_region(region);
+    let py = region.py();
+    let kernel = Bound::from_borrowed_ptr(py, kernel as Obj);
+    let result = py
+        .import("torch.vm._passes")
+        .and_then(|module| module.getattr("fuse_checked"))
+        .and_then(|fuse| fuse.call1((&region, start, end, kernel, checks)))
+        .and_then(|done| done.extract::<bool>());
+    native_status(py, result)
+}
+
+unsafe extern "C" fn native_error(message: *const c_char) {
+    ffi::PyErr_SetString(ffi::PyExc_RuntimeError, message);
+}
+
+static NATIVE_API: NativeApi = NativeApi {
+    version: NATIVE_ABI_VERSION,
+    len: native_len,
+    op: native_op,
+    kernel: native_kernel,
+    dst: native_dst,
+    uses: native_uses,
+    replayable: native_replayable,
+    fuse: native_fuse,
+    swap: native_swap,
+    error: native_error,
+};
+
+/// A pass of a library that `load_passes` loaded. It is an entry for
+/// `passes=` as a Python pass is: called with a region, it runs.
+#[pyclass(module = "torch._cfg_rs", name = "NativePass", frozen)]
+pub struct NativePass {
+    name: String,
+    library: String,
+    run: NativeRun,
+    state: usize,
+    bound: Option<Py<PyAny>>,
+}
+
+#[pymethods]
+impl NativePass {
+    #[getter]
+    fn __name__(&self) -> String {
+        self.name.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("<torch.vm pass {} of {}>", self.name, self.library)
+    }
+
+    /// The pass with `object` handed to it each time it runs: the kernel it
+    /// puts in, as a rule.
+    fn bind(&self, object: Py<PyAny>) -> NativePass {
+        NativePass {
+            name: self.name.clone(),
+            library: self.library.clone(),
+            run: self.run,
+            state: self.state,
+            bound: Some(object),
+        }
+    }
+
+    fn __call__(&self, py: Python<'_>, region: &Bound<'_, Region>) -> PyResult<bool> {
+        let bound = self.bound.as_ref().map_or(null_mut(), |b| b.as_ptr());
+        let status = unsafe {
+            (self.run)(self.state as *mut c_void, region.as_ptr() as *mut c_void, &NATIVE_API, bound as *mut c_void)
+        };
+        match status {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(PyErr::take(py)
+                .unwrap_or_else(|| PyRuntimeError::new_err(format!("the pass {} failed", self.name)))),
+        }
+    }
+}
+
+#[cfg(unix)]
+extern "C" {
+    fn dlopen(filename: *const c_char, flag: std::os::raw::c_int) -> *mut c_void;
+    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+    fn dlerror() -> *const c_char;
+}
+
+/// Loads a library of passes (a `cdylib` built with the crate in
+/// torch/csrc/cfg/rust/sdk) and returns its passes by name. The library
+/// stays loaded.
+#[pyfunction]
+pub fn load_passes(py: Python<'_>, path: &str) -> PyResult<Py<PyAny>> {
+    #[cfg(not(unix))]
+    {
+        let _ = (py, path);
+        return Err(PyRuntimeError::new_err("loading passes is not supported on this platform"));
+    }
+    #[cfg(unix)]
+    unsafe {
+        let name = std::ffi::CString::new(path).map_err(|_| PyValueError::new_err("a path with a NUL in it"))?;
+        // RTLD_NOW: a library that does not resolve fails here, not in a pass.
+        let handle = dlopen(name.as_ptr(), 2);
+        if handle.is_null() {
+            let why = dlerror();
+            let why = if why.is_null() { String::new() } else { std::ffi::CStr::from_ptr(why).to_string_lossy().into_owned() };
+            return Err(PyRuntimeError::new_err(format!("cannot load {path}: {why}")));
+        }
+        let abi = dlsym(handle, c"torch_vm_abi".as_ptr());
+        let table = dlsym(handle, c"torch_vm_passes".as_ptr());
+        if abi.is_null() || table.is_null() {
+            return Err(PyRuntimeError::new_err(format!(
+                "{path} exports no passes: it needs export_passes! of the torch-vm-pass crate"
+            )));
+        }
+        let abi: unsafe extern "C" fn() -> u32 = std::mem::transmute(abi);
+        if abi() != NATIVE_ABI_VERSION {
+            return Err(PyRuntimeError::new_err(format!(
+                "{path} was built for version {} of the pass interface; this runtime has version {}",
+                abi(),
+                NATIVE_ABI_VERSION
+            )));
+        }
+        let table: unsafe extern "C" fn(*mut *const NativeRaw) -> usize = std::mem::transmute(table);
+        let mut first: *const NativeRaw = std::ptr::null();
+        let count = table(&mut first);
+        let out = PyDict::new(py);
+        for raw in std::slice::from_raw_parts(first, count) {
+            let name = std::ffi::CStr::from_ptr(raw.name).to_string_lossy().into_owned();
+            let pass = NativePass {
+                name: name.clone(),
+                library: path.to_string(),
+                run: raw.run,
+                state: raw.state as usize,
+                bound: None,
+            };
+            out.set_item(name, Py::new(py, pass)?)?;
+        }
+        Ok(out.into_any().unbind())
+    }
 }

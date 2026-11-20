@@ -28,7 +28,8 @@ use crate::pyffi::PyObj;
 use pyo3::ffi;
 use std::collections::{HashMap, HashSet};
 
-const MAX_TRIP_COUNT: i64 = 8;
+/// How many iterations a loop may have to be unrolled, unless the caller says.
+pub const MAX_TRIP_COUNT: i64 = 8;
 const MAX_UNROLLED_INSTS: usize = 600;
 
 struct Loop {
@@ -68,7 +69,12 @@ fn for_each_use(block: &Block, mut f: impl FnMut(V)) {
 
 /// The trip count if `v` is `range(k)` called on the builtin with a small
 /// constant `k`, and the value `range` was loaded into.
-unsafe fn constant_range(func: &Function, defs: &HashMap<V, (usize, usize)>, v: V) -> Option<(i64, V)> {
+unsafe fn constant_range(
+    func: &Function,
+    defs: &HashMap<V, (usize, usize)>,
+    v: V,
+    most: i64,
+) -> Option<(i64, V)> {
     let op = |v: V| defs.get(&v).map(|(b, i)| &func.blocks[*b].insts[*i].op);
     let Op::Call { callee, args, kwnames } = op(v)? else {
         return None;
@@ -91,14 +97,14 @@ unsafe fn constant_range(func: &Function, defs: &HashMap<V, (usize, usize)>, v: 
         return None;
     }
     let k = ffi::PyLong_AsLongLong(count);
-    if !(0..=MAX_TRIP_COUNT).contains(&k) {
+    if !(0..=most).contains(&k) {
         ffi::PyErr_Clear();
         return None;
     }
     Some((k, *callee))
 }
 
-fn find_loop(func: &Function, done: &HashSet<usize>) -> Option<Loop> {
+fn find_loop(func: &Function, done: &HashSet<usize>, most: i64) -> Option<Loop> {
     let defs = defs(func);
     'headers: for (h, block) in func.blocks.iter().enumerate() {
         if done.contains(&h) {
@@ -119,7 +125,7 @@ fn find_loop(func: &Function, done: &HashSet<usize>) -> Option<Loop> {
         let Op::GetIter(iterable) = &func.blocks[pre].insts[at].op else {
             continue;
         };
-        let Some((trip_count, range_value)) = (unsafe { constant_range(func, &defs, *iterable) }) else {
+        let Some((trip_count, range_value)) = (unsafe { constant_range(func, &defs, *iterable, most) }) else {
             continue;
         };
         let exit = *null as usize;
@@ -364,8 +370,9 @@ fn unroll(func: &mut Function, lp: &Loop) {
     }
 }
 
-/// Unrolls every loop that qualifies, and returns how many were.
-pub fn unroll_loops(func: &mut Function) -> usize {
+/// Unrolls every loop of at most `most` iterations that qualifies, and returns
+/// how many were.
+pub fn unroll_loops(func: &mut Function, most: i64) -> usize {
     // Headers that were unrolled stay behind as the fallback of their guard.
     let mut done: HashSet<usize> = HashSet::new();
     let mut unrolled = 0;
@@ -373,7 +380,7 @@ pub fn unroll_loops(func: &mut Function) -> usize {
     if func.exc_reg != NONE {
         return 0;
     }
-    while let Some(lp) = find_loop(func, &done) {
+    while let Some(lp) = find_loop(func, &done, most) {
         done.insert(lp.header);
         unroll(func, &lp);
         unrolled += 1;
