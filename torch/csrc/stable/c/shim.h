@@ -408,6 +408,17 @@ AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher_v2(
     uint64_t extension_build_version,
     uint64_t extension_target_version);
 
+// Like torch_library_impl, but also records the target version for
+// StableIValue conversions (target <= build). The library borrows fn for the
+// registration lifetime. Its uint64_t arguments remain input/output counts;
+// build and target versions are stored in the native registration.
+AOTI_TORCH_EXPORT AOTITorchError torch_library_impl_v2(
+    TorchLibraryHandle self,
+    const char* name,
+    void (*fn)(StableIValue*, uint64_t, uint64_t),
+    uint64_t extension_build_version,
+    uint64_t extension_target_version);
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #ifdef __cplusplus

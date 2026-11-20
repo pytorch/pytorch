@@ -171,3 +171,4 @@ torch_is_conj: TORCH_VERSION_2_16_0
 torch_is_inference: TORCH_VERSION_2_16_0
 torch_is_neg: TORCH_VERSION_2_16_0
 torch_is_warn_always_enabled: TORCH_VERSION_2_16_0
+torch_library_impl_v2: TORCH_VERSION_2_16_0
