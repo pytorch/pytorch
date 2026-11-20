@@ -26,7 +26,10 @@ if not dist.is_available():
 
 from torch._C._distributed_c10d import BarrierOptions, FlightRecorderHook, WorkResult
 from torch.distributed.distributed_c10d import _world
-from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    TEST_NCCL_LEGACY,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
@@ -1676,6 +1679,7 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
             ["nccl2:all_reduce"],
         )
 
+    @unittest.skipIf(not TEST_NCCL_LEGACY, "legacy NCCL backend is not built")
     def test_nccl_name_built_on_stock_is_not_hooked(self):
         pg, name = self._init_nccl("0")
         self.assertEqual(name, "nccl")
@@ -1691,6 +1695,7 @@ class FlightRecorderHookDefaultNcclTest(MultiProcessTestCase):
         names = [e["profiling_name"] for e in native.get("entries", [])]
         self.assertIn("nccl:all_reduce", names)
 
+    @unittest.skipIf(not TEST_NCCL_LEGACY, "legacy NCCL backend is not built")
     def test_gloo_half_of_stock_nccl_group_recorded_once(self):
         pg, name = self._init_nccl("0", backend="cpu:gloo,cuda:nccl")
         self.assertEqual(name, "nccl")
