@@ -768,8 +768,8 @@ def fold_linear_rolled(
                 reduce_fn(accs[k], acc_dt(gfrag[k % vec, k // vec]), e0 + k, True)
                 for k in range(WARP)
             )
-        # The rem < group tail vectors load independently. reduce_row_tile rejects empty
-        # one-thread rows, so tail lanes past the row clamp to vector 0 and fold masked.
+        # The rem < group tail vectors load independently. rem > 0 implies a vector 0,
+        # so tail lanes past the row clamp to it and fold masked.
         last = full * Int32(group)
         rem = nchunks - last
         if rem > Int32(0):
@@ -1163,10 +1163,11 @@ class TileReduce:
             raise ValueError(
                 f"TMA stages whole rows: needs row at threads_per_row 1, {axis=} {threads_per_row=}"
             )
-        if use_tma and N & (N - 1):
-            # The rotation mask duplicates and skips columns unless N is a power of two;
-            # caller-set use_tma can bypass tma_ok.
-            raise ValueError(f"TMA staging needs a power-of-two row length, got {N=}")
+        if use_tma and (N < 1 or N & (N - 1)):
+            # TMA boxes need a nonzero width, and fold_smem_rotated's rotation mask
+            # duplicates and skips columns unless N is a power of two; caller-set
+            # use_tma can bypass tma_ok.
+            raise ValueError(f"TMA staging needs a nonempty power-of-two row, got {N=}")
         self.trait = trait
         self.dtype = dtype
         self.axis = axis
