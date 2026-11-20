@@ -13,6 +13,26 @@ if TYPE_CHECKING:
 
 
 @dsl_user_op
+def round_float32(
+    x: Scalar, *, loc: ir.Location | None = None, ip: ir.InsertionPoint | None = None
+) -> cutlass.Float32:
+    """Keep FP32 rounding before a subsequent narrowing conversion."""
+    value = cutlass.Float32(x).ir_value(loc=loc, ip=ip)
+    return cutlass.Float32(
+        llvm.inline_asm(
+            value.type,
+            [value],
+            "",
+            "=f,0",
+            has_side_effects=False,
+            is_align_stack=False,
+            loc=loc,
+            ip=ip,
+        )
+    )
+
+
+@dsl_user_op
 def hypot(
     x: Scalar,
     y: Scalar,

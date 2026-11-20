@@ -4317,6 +4317,7 @@ class TestImports(TestCase):
                            'torch._native.ops.pointwise.kernel',
                            'torch._native.ops.pointwise.ops',
                            'torch._native.ops.pointwise.tma',
+                           'torch._native.ops.rng.cutedsl_kernels',
                            "torch._native.ops.reductions.traits",  # depends on cutlass
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
