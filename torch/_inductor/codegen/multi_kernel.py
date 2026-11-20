@@ -6,6 +6,8 @@ import os
 import pathlib
 from typing import Any
 
+import sympy
+
 from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
@@ -143,33 +145,27 @@ class MultiKernelState:
         return multi_kernel_name
 
 
-class MultiKernel:
+def leaf_kernels(kernel: Any) -> list[Any]:
+    """The compiled kernels behind kernel: itself, or a multi-kernel's sub-kernels."""
+    return kernel.leaf_kernels() if isinstance(kernel, MultiKernelBase) else [kernel]
+
+
+class MultiKernelBase:
     """
-    This class maintains the compile time state for multi kernels.
-
-    Assume we do codegen for a MultiKernel encapsulating kernel1 and kernel2.
-    The generated definition for the multi-kernel will looks like:
-    ```
-    multi_kernel_kernel1 = MultiKernelCall(
-        [kernel1, kernel2], multi_kernel_definition_code
-    )
-    ```
-
-    Here is a concrete example: https://gist.github.com/shunting314/d9f3fb6bc6cee3dbae005825ca196d39
+    Compile-time state shared by every kernel that wraps several sub-kernels and
+    launches one of them. Subclasses decide how the launched one is picked:
+    MultiKernel benchmarks them, ConditionalMultiKernel checks conditions.
     """
 
-    def __init__(self, kernels):
-        if len(kernels) < 2:
-            raise AssertionError(f"expected at least 2 kernels, got {len(kernels)}")
+    kernels: list[Any]
 
-        self.kernels = kernels
-        self.kernel_name = V.graph.wrapper_code.multi_kernel_state.define_kernel(
-            kernels
-        )
+    @property
+    def kernel_name(self) -> str:
+        raise NotImplementedError
 
-        # need this since some code in inductor check if the kernel object has an args
-        # attribute to decide if it's a non-null kernel.
-        self.args = object()
+    def leaf_kernels(self) -> list[Any]:
+        """The compiled kernels, with nested multi-kernels expanded."""
+        return [leaf for kernel in self.kernels for leaf in leaf_kernels(kernel)]
 
     @staticmethod
     def _merge_workspace_args(left: list[WorkspaceArg], right: list[WorkspaceArg]):
@@ -191,12 +187,84 @@ class MultiKernel:
             return
         # All kernels must share the same workspace
         workspace_args = functools.reduce(
-            MultiKernel._merge_workspace_args,
+            MultiKernelBase._merge_workspace_args,
             [kernel.args.workspace_args for kernel in kernels],
         )
         for kernel in kernels:
             kernel.args.workspace_args = workspace_args
         return workspace_args
+
+    def codegen_nan_check(self):
+        wrapper = V.graph.wrapper_code
+        seen: OrderedSet[str] = OrderedSet()
+        for k in self.leaf_kernels():
+            _, call_args, precompile_args, _ = k.args.python_argdefs()
+            for arg, precompile_arg in zip(call_args, precompile_args):
+                if arg in seen:
+                    continue
+                seen.add(arg)
+                if isinstance(precompile_arg, TensorArg):
+                    line = f"assert not {arg}.isnan().any().item()"
+                    wrapper.writeline(line)
+                    line = f"assert not {arg}.isinf().any().item()"
+                    wrapper.writeline(line)
+
+    @property
+    def removed_buffers(self):
+        return OrderedSet.intersection(*[k.removed_buffers for k in self.kernels])
+
+    @property
+    def inplaced_to_remove(self):
+        return OrderedSet.intersection(*[k.inplaced_to_remove for k in self.kernels])
+
+    @property
+    @cache_on_self
+    def inplace_update_buffers(self):
+        """
+        Make sure all kernels have the same inplace update mappings.
+        """
+        for k in self.kernels[1:]:
+            if k.inplace_update_buffers != self.kernels[0].inplace_update_buffers:
+                raise AssertionError(
+                    "expected all kernels to share the same inplace_update_buffers"
+                )
+        return self.kernels[0].inplace_update_buffers
+
+    def warn_mix_layout(self, kernel_name: str):
+        pass
+
+
+# TODO: rename to BenchmarkedMultiKernel (keeping a MultiKernel alias): it benchmarks
+# the sub-kernels once and keeps the fastest, unlike ConditionalMultiKernel.
+class MultiKernel(MultiKernelBase):
+    """
+    This class maintains the compile time state for multi kernels.
+
+    Assume we do codegen for a MultiKernel encapsulating kernel1 and kernel2.
+    The generated definition for the multi-kernel will looks like:
+    ```
+    multi_kernel_kernel1 = MultiKernelCall(
+        [kernel1, kernel2], multi_kernel_definition_code
+    )
+    ```
+
+    Here is a concrete example: https://gist.github.com/shunting314/d9f3fb6bc6cee3dbae005825ca196d39
+    """
+
+    def __init__(self, kernels):
+        if len(kernels) < 2:
+            raise AssertionError(f"expected at least 2 kernels, got {len(kernels)}")
+
+        self.kernels = kernels
+
+        # need this since some code in inductor check if the kernel object has an args
+        # attribute to decide if it's a non-null kernel.
+        self.args = object()
+
+    @functools.cached_property
+    def kernel_name(self) -> str:  # type: ignore[override]
+        # Registered on first use: the sub-kernels only have names once defined.
+        return V.graph.wrapper_code.multi_kernel_state.define_kernel(self.kernels)
 
     def launched_kernel_name(self) -> str:
         """The kernel the generated code actually launches.
@@ -284,45 +352,6 @@ class MultiKernel:
 
         for ws in reversed(self.kernels[0].args.workspace_args):
             V.graph.wrapper_code.generate_workspace_deallocation(ws)
-
-    def codegen_nan_check(self):
-        wrapper = V.graph.wrapper_code
-        seen: OrderedSet[str] = OrderedSet()
-        for k in self.kernels:
-            _, call_args, precompile_args, _ = k.args.python_argdefs()
-            for arg, precompile_arg in zip(call_args, precompile_args):
-                if arg in seen:
-                    continue
-                seen.add(arg)
-                if isinstance(precompile_arg, TensorArg):
-                    line = f"assert not {arg}.isnan().any().item()"
-                    wrapper.writeline(line)
-                    line = f"assert not {arg}.isinf().any().item()"
-                    wrapper.writeline(line)
-
-    @property
-    def removed_buffers(self):
-        return OrderedSet.intersection(*[k.removed_buffers for k in self.kernels])
-
-    @property
-    def inplaced_to_remove(self):
-        return OrderedSet.intersection(*[k.inplaced_to_remove for k in self.kernels])
-
-    @property
-    @cache_on_self
-    def inplace_update_buffers(self):
-        """
-        Make sure all kernels have the same inplace update mappings.
-        """
-        for k in self.kernels[1:]:
-            if k.inplace_update_buffers != self.kernels[0].inplace_update_buffers:
-                raise AssertionError(
-                    "expected all kernels to share the same inplace_update_buffers"
-                )
-        return self.kernels[0].inplace_update_buffers
-
-    def warn_mix_layout(self, kernel_name: str):
-        pass
 
 
 class MultiKernelCall:
@@ -592,13 +621,82 @@ class SizeHintMultiKernel(MultiKernel):
         for shape_key, kernel in kernels.items():
             self.kernels.append(kernel)
             self.kernel_shape_keys.append(shape_key)
-        self.kernel_name = V.graph.wrapper_code.multi_kernel_state.define_kernel(
-            self.kernels, self.kernel_shape_keys
-        )
 
         # need this since some code in inductor check if the kernel object has an args
         # attribute to decide if it's a non-null kernel.
         self.args = object()
+
+    @functools.cached_property
+    def kernel_name(self) -> str:  # type: ignore[override]
+        return V.graph.wrapper_code.multi_kernel_state.define_kernel(
+            self.kernels, self.kernel_shape_keys
+        )
+
+
+class ConditionalMultiKernel(MultiKernelBase):
+    """
+    Launches the first sub-kernel whose condition holds.
+
+    Unlike MultiKernel, the sub-kernels are not interchangeable: each one is only
+    correct when its condition holds, so the wrapper checks the conditions on every
+    launch instead of benchmarking once. Every input must match some condition: the
+    last condition is True, or the conditions together must be provably exhaustive,
+    in which case the last one is not checked at runtime. A sub-kernel can itself be
+    a multi-kernel; each emits its own launch inside its branch.
+    """
+
+    def __init__(self, choices: list[tuple[sympy.Basic, Any]]):
+        if len(choices) < 2:
+            raise AssertionError(f"expected at least 2 choices, got {choices}")
+        if choices[-1][0] is not sympy.true:
+            if not V.graph.sizevars.statically_known_true(
+                sympy.Or(*[cond for cond, _ in choices])
+            ):
+                raise AssertionError(
+                    f"conditions must cover every input; add a True fallback: {choices}"
+                )
+            choices = [*choices[:-1], (sympy.true, choices[-1][1])]
+        self.choices = choices
+        self.kernels = [kernel for _, kernel in choices]
+
+        # need this since some code in inductor check if the kernel object has an args
+        # attribute to decide if it's a non-null kernel.
+        self.args = object()
+
+    @property
+    def kernel_name(self) -> str:
+        return self.kernels[0].kernel_name
+
+    def call_kernel(self, kernel_name):
+        """Write one ConditionalKernelDispatchLine whose branches hold each
+        sub-kernel's own launch.
+
+        Each sub-kernel's call_kernel runs under capture_lines(), which collects the
+        lines it writes (numel arguments and the launch) for its branch instead of
+        adding them to the wrapper. capture_lines() also leaves out the workspace
+        allocation, so the shared workspaces are allocated before the dispatch line
+        and freed after it, here.
+        """
+        from .wrapper import ConditionalKernelDispatchLine
+
+        wrapper = V.graph.wrapper_code
+        leaves = self.leaf_kernels()
+        workspaces = leaves[0].args.workspace_args
+        if any(k.args.workspace_args != workspaces for k in leaves):
+            raise AssertionError("expected the sub-kernels to share merged workspaces")
+        for ws in workspaces:
+            wrapper.generate_workspace_allocation(ws)
+        branches = []
+        for cond, kernel in self.choices:
+            with wrapper.capture_lines() as lines:
+                kernel.call_kernel(kernel.kernel_name)
+            cond_str = (
+                None if cond is sympy.true else wrapper.codegen_python_sizevar(cond)
+            )
+            branches.append((cond_str, lines))
+        wrapper.writeline(ConditionalKernelDispatchLine(wrapper, branches))
+        for ws in reversed(workspaces):
+            wrapper.generate_workspace_deallocation(ws)
 
 
 class SizeHintMultiKernelCall(MultiKernelCall):

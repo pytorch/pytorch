@@ -12,7 +12,7 @@ from torch import dtype as torch_dtype
 
 from .. import config
 from ..virtualized import V
-from .multi_kernel import MultiKernel
+from .multi_kernel import MultiKernelBase
 
 
 if TYPE_CHECKING:
@@ -152,7 +152,7 @@ class DebugPrinterManager:
         kernel_type=None,
     ):
         # Note: MultiKernel debug printing is not supported for now
-        if isinstance(kernel, MultiKernel):
+        if isinstance(kernel, MultiKernelBase):
             log.info(
                 "MultiKernel type is not supported in AOTI debug printer tool yet."
             )

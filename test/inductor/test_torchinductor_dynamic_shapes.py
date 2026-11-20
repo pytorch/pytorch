@@ -8,6 +8,8 @@ import sys
 import unittest
 from functools import partial
 
+import sympy
+
 import torch
 import torch.library
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
@@ -809,6 +811,95 @@ class TestInductorDynamic(DynamicShapesTestCase):
         guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
         self.assertEqual("<= 2147483647" in guards, not avoid_guards)
         self.assertEqual("'xnumel': 'i64'" in code, avoid_guards)
+
+    @onlyOn(GPU_TYPE)
+    @parametrize("cooperative", [False, True])
+    def test_dual_index_dtype_reductions(self, device, cooperative):
+        from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
+
+        def fn(x):
+            return x.sum(-1), x.argmax(-1), torch.softmax(x, -1)
+
+        # Lower the int32 bound so that inputs above 64K elements run the int64 kernel.
+        int32_index_conditions = SIMDKernelFeatures.int32_index_conditions
+
+        def lowered_bound(self):
+            conds = int32_index_conditions(self)
+            return conds and [sympy.Le(cond.lhs, 64 * 1024) for cond in conds]
+
+        compiled = torch.compile(fn, dynamic=True)
+        with (
+            config.patch(
+                {
+                    "dual_index_dtype": True,
+                    "triton.force_cooperative_reductions": cooperative,
+                }
+            ),
+            unittest.mock.patch.object(
+                SIMDKernelFeatures, "int32_index_conditions", lowered_bound
+            ),
+        ):
+            x = torch.randn(64, 512, device=device)
+            actual, (code, *_) = run_and_get_code(compiled, x)
+            self.assertEqual(actual, fn(x))
+            for shape in [(512, 512), (3, 7), (300, 1000)]:
+                y = torch.randn(shape, device=device)
+                self.assertEqual(compiled(y), fn(y))
+
+        FileCheck().check("'r0_numel': 'i32'").check("'r0_numel': 'i64'").check(
+            "<= 65536:"
+        ).check(".run(").check("else:").check(".run(").run(code)
+        (entry,) = _debug_get_cache_entry_list(fn.__code__)
+        self.assertNotIn("2147483647", str(entry.guard_manager))
+
+    @onlyOn(GPU_TYPE)
+    def test_dual_index_dtype_multi_kernel(self, device):
+        from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
+
+        def fn(x):
+            return x.sum(-1), x.argmax(-1)
+
+        int32_index_conditions = SIMDKernelFeatures.int32_index_conditions
+
+        def lowered_bound(self):
+            conds = int32_index_conditions(self)
+            return conds and [sympy.Le(cond.lhs, 64 * 1024) for cond in conds]
+
+        # A static reduction size keeps the reduction persistent, so multi_kernel
+        # adds a looped variant on each side of the int32/int64 dispatch.
+        compiled = torch.compile(fn)
+        with (
+            config.patch({"dual_index_dtype": True, "triton.multi_kernel": 1}),
+            unittest.mock.patch.object(
+                SIMDKernelFeatures, "int32_index_conditions", lowered_bound
+            ),
+        ):
+            x = torch.randn(64, 512, device=device)
+            torch._dynamo.mark_dynamic(x, 0)
+            actual, (code, *_) = run_and_get_code(compiled, x)
+            self.assertEqual(actual, fn(x))
+            for rows in [256, 3]:
+                y = torch.randn(rows, 512, device=device)
+                self.assertEqual(compiled(y), fn(y))
+
+        FileCheck().check("<= 65536:").check("multi_kernel_").check(".run(").check(
+            "else:"
+        ).check("multi_kernel_").check(".run(").run(code)
+        (entry,) = _debug_get_cache_entry_list(fn.__code__)
+        self.assertNotIn("2147483647", str(entry.guard_manager))
+
+    @onlyOn(GPU_TYPE)
+    def test_dual_index_dtype_keeps_pointwise_guard(self, device):
+        def fn(x):
+            return x * 2 + 1
+
+        x = torch.randn(8, 1152, device=device)
+        with config.patch(dual_index_dtype=True):
+            actual, (code, *_) = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        self.assertEqual(actual, fn(x))
+        guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
+        self.assertIn("<= 2147483647", guards)
+        self.assertNotIn("'xnumel': 'i64'", code)
 
     @onlyOn(GPU_TYPE)
     @torch._dynamo.config.patch(
