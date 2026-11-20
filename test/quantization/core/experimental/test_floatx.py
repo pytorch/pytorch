@@ -525,6 +525,23 @@ class TestFloat4Dtype(TestCase):
             bits(torch.cat([x.t(), x.t()], dim=1)), torch.cat([codes.t(), codes.t()], 1)
         )
 
+    def test_float4_e2m1fn_x2_mixed_compare_raises(self, device):
+        # Comparing float4 with another dtype needs a cast, which is not defined
+        x = torch.zeros(4, dtype=torch.uint8, device=device).view(
+            torch.float4_e2m1fn_x2
+        )
+        others = (
+            True,
+            1,
+            0.5,
+            torch.tensor(5, dtype=torch.uint8, device=device),
+            torch.tensor(1.0, device=device).to(torch.float8_e4m3fn),
+        )
+        for other in others:
+            for op in (torch.eq, torch.ne):
+                with self.assertRaisesRegex(NotImplementedError, "is not supported"):
+                    op(x, other)
+
     def test_cast_raises_on_host(self, device):
         # Casting to or from fp4x2 used to device-assert on CUDA, poisoning the
         # context; it must raise on the host instead.
