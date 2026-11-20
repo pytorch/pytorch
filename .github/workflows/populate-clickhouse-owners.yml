@@ -4,7 +4,7 @@ name: Populate ClickHouse Owners
 on:
   pull_request:
     paths:
-      - CODEOWNERS
+      - OWNERSHIP.yaml
       - .github/workflows/populate-clickhouse-owners.yml
       - scripts/codeowners/**
       - torch/testing/_internal/torchci/populate_clickhouse_owners.py

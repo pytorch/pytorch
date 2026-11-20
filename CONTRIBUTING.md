@@ -203,7 +203,7 @@ This workflow is being rolled out. The following parts are still in progress:
 |---|---|
 | The `no automated triage` label on issues | The label exists, but the issue triage bot does not act on it yet. |
 | Requesting re-evaluation of an issue by removing its label. This needs `@pytorchbot` to support removing labels: today `@pytorchbot label` can only add labels and there is no command to remove one. | Comment on the issue with the new information and mention the maintainer who applied the label. |
-| PR triage: a bot assigns one reviewer per module and adds `triaged` | The bot only triages PRs labeled `open source` and only assigns reviewers for a few modules. Other reviewers are requested through [CODEOWNERS](CODEOWNERS) and manual reviewer assignment. |
+| PR triage: a bot assigns one reviewer per module and adds `triaged` | The bot requests every codepath owner from [OWNERSHIP.yaml](OWNERSHIP.yaml) and assigns semantic reviewers for only a few modules. Other reviewers are requested manually. |
 
 ### Why was my issue or PR closed?
 

@@ -18,12 +18,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+from check_taxonomy import CODEOWNERS_PATH
 
 
 SECTION_MARKER = "# Grouped review-surface definitions:"
 LINTER_CODE = "CODEOWNERS_GENERATED"
 TOP_LEVEL_KEYS = {"planned_labels", "sections", "section_notes", "ownership"}
-GROUP_KEYS = {"name", "labels", "owners", "section", "paths"}
+GROUP_KEYS = {"name", "labels", "owners", "section", "paths", "review_request"}
+# How Auto PR Triage requests reviews for a group's paths: everyone on the matching
+# path's handles (the default, as GitHub's CODEOWNERS did).
+REVIEW_REQUESTS = ("path_handles",)
 
 
 @dataclass(frozen=True)
@@ -44,6 +48,8 @@ class LabelGroup:
     # CODEOWNERS section the group's rules are written under (kept for owners.py).
     section: str
     paths: tuple[PathRule, ...]
+    # One of REVIEW_REQUESTS.
+    review_request: str = "path_handles"
 
 
 @dataclass(frozen=True)
@@ -116,12 +122,17 @@ def parse_group(entry, *, sections: tuple[str, ...]) -> LabelGroup:
         raise ValueError(f"{where}: section {entry['section']!r} is not in `sections`")
     if not isinstance(entry["paths"], list) or not entry["paths"]:
         raise ValueError(f"{where}: paths must be a non-empty list")
+    paths = tuple(parse_path_rule(rule, where=where) for rule in entry["paths"])
+    review_request = entry.get("review_request", "path_handles")
+    if review_request not in REVIEW_REQUESTS:
+        raise ValueError(f"{where}: review_request must be one of {REVIEW_REQUESTS}")
     return LabelGroup(
         name=name,
         labels=labels,
         owners=owners,
         section=entry["section"],
-        paths=tuple(parse_path_rule(rule, where=where) for rule in entry["paths"]),
+        paths=paths,
+        review_request=review_request,
     )
 
 
@@ -210,12 +221,13 @@ def render_header(ownership: OwnershipFile) -> list[str]:
         "# the script (or `spin fixlint`) instead of editing this file.",
         "",
         "# IMPORTANT:",
-        "# This file is ONLY used to subscribe for notifications for PRs",
-        "# related to a specific file path. Approvals from people in this",
-        "# file are not required for merges.",
+        "# GitHub doesn't read this file; it lives outside the paths GitHub reads",
+        "# CODEOWNERS from. Auto PR Triage (scripts/auto_pr_triage) requests reviews",
+        "# from these owners, reading the same rules from OWNERSHIP.yaml. Approvals",
+        "# from people in this file are not required for merges.",
         "",
         "# CODEOWNERS semantics:",
-        "# - GitHub uses the last matching pattern for each path.",
+        "# - The last matching pattern for each path wins, as in GitHub's CODEOWNERS.",
         "# - Active rules name who gets review requests. A commented rule adds no",
         "#   notification of its own; the path follows the last matching active rule,",
         "#   if there is one. Commenting a rule says nothing about ownership.",
@@ -401,12 +413,12 @@ def main() -> int:
             return 0
         print(f"error: OWNERSHIP.yaml is invalid: {error}", file=sys.stderr)
         return 1
-    codeowners = repo / "CODEOWNERS"
+    codeowners = repo / CODEOWNERS_PATH
     current = codeowners.read_text()
     if args.lintrunner:
         if current != generated:
             emit_lint_error(
-                path="CODEOWNERS",
+                path=CODEOWNERS_PATH,
                 description=(
                     "CODEOWNERS is generated from OWNERSHIP.yaml, so direct edits to "
                     "CODEOWNERS are discarded. Make the change in OWNERSHIP.yaml, then "

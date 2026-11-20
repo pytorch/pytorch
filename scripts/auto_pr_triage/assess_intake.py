@@ -46,15 +46,11 @@ PASSIVE_TIMELINE_EVENTS = frozenset(
         "unsubscribed",
     }
 )
-TRIGGER_LABEL = "open source"
-HANDLED_LABELS = frozenset(
-    {
-        "triaged",
-        "bot-triaged",
-        "bot-triage-error",
-        "no automated triage",
-    }
-)
+# Applied by pytorchbot to outside contributors' PRs; not a maintainer decision.
+OPEN_SOURCE_LABEL = "open source"
+# Auto PR Triage runs on every push, so an earlier outcome doesn't stop a run;
+# only this human opt-out does.
+OPT_OUT_LABELS = frozenset({"no automated triage"})
 # GitHub does not link references inside comments or code.
 UNRENDERED_MARKDOWN_RE = re.compile(
     r"<!--.*?(?:-->|\Z)|(`{3,}|~{3,}).*?(?:\1|\Z)|`[^`\n]*`", re.DOTALL
@@ -221,7 +217,7 @@ def fetch_maintainer_activity(
             if (
                 event_name in {"labeled", "unlabeled"}
                 and isinstance(label, dict)
-                and label.get("name") == TRIGGER_LABEL
+                and label.get("name") == OPEN_SOURCE_LABEL
             ):
                 continue
             login = _human_login(
@@ -344,8 +340,8 @@ def fetch_actionable_labelers(
     ][:limit]
 
 
-def is_already_handled(labels: Any) -> bool:
-    """Return whether a prior triage outcome or an opt-out label makes this run a no-op."""
+def is_opted_out(labels: Any) -> bool:
+    """Return whether an opt-out label makes this run a no-op."""
 
     if not isinstance(labels, list) or any(
         not isinstance(label, dict)
@@ -355,7 +351,7 @@ def is_already_handled(labels: Any) -> bool:
     ):
         raise RuntimeError("pull request labels are invalid")
     names = {label["name"].casefold() for label in labels}
-    return bool(names & HANDLED_LABELS)
+    return bool(names & OPT_OUT_LABELS)
 
 
 def fetch_issue_labels(
@@ -518,15 +514,15 @@ def assess_intake(
     )
     is_open_non_draft_pr_against_main = targets_main and state == "open" and not draft
 
-    already_handled = is_already_handled(pr_data.get("labels"))
+    opted_out = is_opted_out(pr_data.get("labels"))
     body = pr_data.get("body") or ""
     author_has_triage_permission = False
     actionable_linked_issues: list[int] = []
     maintainer_activity = None
     supporters: list[str] = []
     actionable_part_of_issues: list[int] = []
-    # Every fact is gathered for an active, unhandled PR; none can matter otherwise.
-    if is_open_non_draft_pr_against_main and not already_handled:
+    # Every fact is gathered for an active PR; none can matter otherwise.
+    if is_open_non_draft_pr_against_main and not opted_out:
         author_has_triage_permission = fetch_user_has_triage_permission(
             github=pr.github,
             repo=pr.repo,
@@ -573,7 +569,7 @@ def assess_intake(
         )
     facts = {
         "is_open_non_draft_pr_against_main": is_open_non_draft_pr_against_main,
-        "is_already_handled": already_handled,
+        "is_opted_out": opted_out,
         "author_has_triage_permission": author_has_triage_permission,
         "has_actionable_linked_issue": bool(actionable_linked_issues),
         "has_maintainer_activity": maintainer_activity is not None,
@@ -616,7 +612,10 @@ def assess_intake(
         actionable_labelers=tuple(actionable_labelers),
         maintainer_requested_reviewers=tuple(maintainer_requested_reviewers),
     )
-    return IntakeResult(identity, intake_facts, author_login, pr_data["title"], body)
+    labels = tuple(sorted(label["name"] for label in pr_data["labels"]))
+    return IntakeResult(
+        identity, intake_facts, author_login, pr_data["title"], body, labels
+    )
 
 
 def write_json(*, path: Path, value: Any) -> None:
@@ -672,8 +671,8 @@ def main() -> int:
         status = "passes intake"
     elif not facts.is_open_non_draft_pr_against_main:
         status = "PR is outside the active target state"
-    elif facts.is_already_handled:
-        status = "existing triage outcome or opt-out label recorded"
+    elif facts.is_opted_out:
+        status = "opted out with `no automated triage`"
     else:
         status = "fails intake unless a team's bypass matches"
     print(f"{args.repository}#{args.pr}: {status}", flush=True)

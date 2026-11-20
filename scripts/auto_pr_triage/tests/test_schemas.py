@@ -18,12 +18,16 @@ from schemas import (
     MAX_ADDITIONAL_OWNERS,
     MAX_CODEPATH_OWNERS,
     MISSING_ACTIONABLE_ISSUE_ACTIONS,
+    MISSING_ACTIONABLE_ISSUE_LABEL,
+    MISSING_ACTIONABLE_ISSUE_LABELS,
     OwnerMetadata,
+    OwnershipGroup,
     OwnershipResult,
     passes_intake,
     PathGroup,
     PlannerInput,
     PullRequestIdentity,
+    RemoveLabels,
     RequestReviewers,
     RESULT_SCHEMA,
     ReviewerSnapshot,
@@ -57,7 +61,7 @@ class IntakeFactsTest(unittest.TestCase):
         ) -> bool:
             return passes_intake(
                 is_open_non_draft_pr_against_main=target,
-                is_already_handled=handled,
+                is_opted_out=handled,
                 author_has_triage_permission=author,
                 has_actionable_linked_issue=issue,
                 has_maintainer_activity=activity,
@@ -73,7 +77,7 @@ class IntakeFactsTest(unittest.TestCase):
         self.assertTrue(
             passes_intake(
                 is_open_non_draft_pr_against_main=True,
-                is_already_handled=False,
+                is_opted_out=False,
                 author_has_triage_permission=False,
                 has_actionable_linked_issue=False,
                 has_maintainer_activity=False,
@@ -83,7 +87,7 @@ class IntakeFactsTest(unittest.TestCase):
         self.assertTrue(
             passes_intake(
                 is_open_non_draft_pr_against_main=True,
-                is_already_handled=False,
+                is_opted_out=False,
                 author_has_triage_permission=False,
                 has_actionable_linked_issue=False,
                 has_maintainer_activity=False,
@@ -91,7 +95,7 @@ class IntakeFactsTest(unittest.TestCase):
             )
         )
 
-    def test_signals_are_only_valid_on_an_active_unhandled_pr(self) -> None:
+    def test_signals_are_only_valid_on_an_active_pr(self) -> None:
         signals = (
             {"author_has_triage_permission": True},
             {"has_actionable_linked_issue": True},
@@ -100,7 +104,7 @@ class IntakeFactsTest(unittest.TestCase):
             {"has_supporter": True, "supporters": ["alice"]},
         )
         inactive_states = (
-            {"is_already_handled": True},
+            {"is_opted_out": True},
             {"is_open_non_draft_pr_against_main": False},
         )
         for signal in signals:
@@ -109,7 +113,7 @@ class IntakeFactsTest(unittest.TestCase):
                 facts.update(signal | state)
                 with (
                     self.subTest(signal=signal, state=state),
-                    self.assertRaisesRegex(RuntimeError, "inactive or handled PR"),
+                    self.assertRaisesRegex(RuntimeError, "inactive PR"),
                 ):
                     IntakeFacts.from_dict(facts)
 
@@ -122,11 +126,11 @@ class IntakeFactsTest(unittest.TestCase):
 
     def test_invalid_intake_facts_are_rejected(self) -> None:
         cases = {
-            "signals on an inactive or handled PR": [
+            "signals on an inactive PR": [
                 {
                     "has_supporter": True,
                     "supporters": ["a"],
-                    "is_already_handled": True,
+                    "is_opted_out": True,
                 },
             ],
             "has_supporter mismatches supporters": [
@@ -159,10 +163,10 @@ class IntakeFactsTest(unittest.TestCase):
                 },
             ],
             "handoff reviewers without intake": [
-                {"is_already_handled": True, "maintainer_requested_reviewers": ["bob"]},
+                {"is_opted_out": True, "maintainer_requested_reviewers": ["bob"]},
             ],
-            r"IntakeFacts\.is_already_handled \(int\) does not match bool": [
-                {"is_already_handled": 0},
+            r"IntakeFacts\.is_opted_out \(int\) does not match bool": [
+                {"is_opted_out": 0},
             ],
         }
         for message, overrides_list in cases.items():
@@ -190,7 +194,10 @@ class LLMInputTest(unittest.TestCase):
 
         owners = ("@owner", "@pytorch/team")
         self.assertEqual(codepath.owners, owners)
-        self.assertEqual(codepath.matched_path_groups, (PathGroup(owners, (0,)),))
+        self.assertEqual(
+            codepath.matched_path_groups,
+            (PathGroup(owners, (0,), "core", "path_handles"),),
+        )
         self.assertEqual(codepath.files_without_owners, ())
 
     def test_codepath_artifact_accepts_casefold_sorted_owners(self) -> None:
@@ -378,6 +385,12 @@ class OwnershipResultTest(unittest.TestCase):
                 "@pytorch/Zeta": ["torch/b.py", "torch/a.py"],
                 "@alice": ["torch/a.py"],
             },
+            ownership_groups={
+                "core": OwnershipGroup(
+                    ("@alice", "@pytorch/Zeta"), ("torch/a.py",), "path_handles"
+                ),
+                "nn": OwnershipGroup(("@pytorch/Zeta",), ("torch/b.py",), "path_handles"),
+            },
             additional_owner_concerns=concerns("zeta", "alpha"),
         )
 
@@ -395,6 +408,7 @@ class OwnershipResultTest(unittest.TestCase):
                 "additional_owner_concerns",
                 "discarded_additional_owner_concerns",
                 "uncovered_concerns",
+                "ownership_groups",
             },
         )
         self.assertNotIn("\n", result.to_json())
@@ -450,6 +464,21 @@ class OwnershipResultTest(unittest.TestCase):
                 ),
             ):
                 OwnershipResult(state, codepath, **lists)
+
+    def test_rejects_ownership_groups_that_disagree_with_codepath_owners(self) -> None:
+        core = OwnershipGroup(("@alice",), ("torch/file.py",), "path_handles")
+        cases = [
+            ({}, {"core": core}),
+            (owners("@alice"), {}),
+            (owners("@alice", "@bob"), {"core": core}),
+            (owners("@alice"), {"core": replace(core, files=("torch/other.py",))}),
+        ]
+        for codepath, groups in cases:
+            with (
+                self.subTest(codepath=codepath, groups=groups),
+                self.assertRaisesRegex(ValueError, "ownership groups do not match"),
+            ):
+                OwnershipResult("succeeded", codepath, ownership_groups=groups)
 
     def test_rejects_noncanonical_or_untrusted_owners(self) -> None:
         low = replace(additional_owner_concern("owner"), confidence="low")
@@ -548,8 +577,8 @@ class ActionPlanTest(unittest.TestCase):
                 "marks a PR on a rerun",
             ),
             (
-                {"facts": intake_facts(is_already_handled=True)},
-                "inactive or handled PR",
+                {"facts": intake_facts(is_opted_out=True)},
+                "inactive PR",
             ),
             (
                 {"bypass_intake_matches": ("nn",)},
@@ -628,8 +657,8 @@ class ActionPlanTest(unittest.TestCase):
                 },
                 "not the fixed set",
             ),
-            ({"actions": (labels, owners)}, "request reviewers, then add labels"),
-            ({"actions": (labels, labels)}, "request reviewers, then add labels"),
+            ({"actions": (labels, owners)}, "request reviewers, add labels"),
+            ({"actions": (labels, labels)}, "request reviewers, add labels"),
             ({"actions": (owners, owners)}, "repeated or unordered"),
             ({"facts": with_alice, "actions": (owners, supporter)}, "unordered"),
             ({"facts": with_alice, "actions": (supporter, owners)}, "reviewer twice"),
@@ -675,8 +704,67 @@ class ActionPlanTest(unittest.TestCase):
             ):
                 ActionPlan.from_dict({**plan.to_dict(), "actions": [action]})
 
+    def test_codepath_owner_requests_are_bounded_by_the_context(self) -> None:
+        fails_intake = intake_facts(has_actionable_linked_issue=False)
+        codepath = RequestReviewers(("codepath-owner",), "codepath_owner")
+        marks = AddLabels(MISSING_ACTIONABLE_ISSUE_LABELS)
+        # An unadmitted PR still gets its codepath owners, whatever the decision.
+        for decision, actions in (
+            ("kept_open", (codepath,)),
+            ("missing_actionable_issue", (codepath, marks)),
+        ):
+            with self.subTest(decision=decision):
+                plan = self.plan(facts=fails_intake, decision=decision, actions=actions)
+                self.assertEqual(plan.actions, actions)
+        cases = (
+            (
+                {"actions": (RequestReviewers(("stranger",), "codepath_owner"),)},
+                "unverified codepath_owner",
+            ),
+            (
+                {
+                    "facts": fails_intake,
+                    "decision": "kept_open",
+                    "actions": (RequestReviewers(("alice",), "owner_roster"),),
+                },
+                "not admitted",
+            ),
+        )
+        for overrides, message in cases:
+            with (
+                self.subTest(overrides=overrides),
+                self.assertRaisesRegex(RuntimeError, message),
+            ):
+                self.plan(**overrides)
+
+    def test_only_missing_actionable_issue_can_be_removed_from_an_admitted_pr(
+        self,
+    ) -> None:
+        labels = AddLabels(("triaged", "bot-triaged"))
+        remove = RemoveLabels((MISSING_ACTIONABLE_ISSUE_LABEL,))
+        plan = self.plan(actions=(labels, remove))
+        self.assertEqual(plan.actions, (labels, remove))
+        cases = (
+            ({"actions": (labels, RemoveLabels(("triaged",)))}, "may not remove"),
+            ({"actions": (remove, labels)}, "then remove labels"),
+            (
+                {
+                    "facts": intake_facts(has_actionable_linked_issue=False),
+                    "decision": "kept_open",
+                    "actions": (remove,),
+                },
+                "unadmitted PR",
+            ),
+        )
+        for overrides, message in cases:
+            with (
+                self.subTest(overrides=overrides),
+                self.assertRaisesRegex(RuntimeError, message),
+            ):
+                self.plan(**overrides)
+
     def test_request_reason_must_be_known(self) -> None:
-        for reason in ("handoff", "codepath_owner", "friends"):
+        for reason in ("handoff", "codepath", "friends"):
             with (
                 self.subTest(reason=reason),
                 self.assertRaisesRegex(RuntimeError, "reason"),

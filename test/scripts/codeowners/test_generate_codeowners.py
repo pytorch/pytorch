@@ -17,6 +17,7 @@ SCRIPT = (
     Path(__file__).resolve().parents[3] / "scripts/codeowners/generate_codeowners.py"
 )
 sys.path.insert(0, str(SCRIPT.parent))
+from check_taxonomy import CODEOWNERS_PATH
 from generate_codeowners import load_ownership, render_codeowners, SECTION_MARKER
 
 
@@ -179,6 +180,11 @@ class TestGenerateCodeowners(TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     render(replace_once(OWNERSHIP, old, new))
 
+    def test_invalid_review_request(self):
+        line = "review_request: everyone"
+        with self.assertRaisesRegex(ValueError, "review_request must be one of"):
+            render(replace_once(OWNERSHIP, "owners: [bob]\n", f"owners: [bob]\n    {line}\n"))
+
     def test_groups_nesting_both_ways(self):
         ownership = replace_once(
             OWNERSHIP,
@@ -198,7 +204,8 @@ def run_generator(*, ownership: str, codeowners: str, args: list[str]):
     """Run the generator in a throwaway repo; return the result and final CODEOWNERS."""
     with tempfile.TemporaryDirectory() as repo:
         Path(repo, "OWNERSHIP.yaml").write_text(ownership)
-        Path(repo, "CODEOWNERS").write_text(codeowners)
+        Path(repo, CODEOWNERS_PATH).parent.mkdir(parents=True)
+        Path(repo, CODEOWNERS_PATH).write_text(codeowners)
         subprocess.check_output(["git", "init", "-q"], cwd=repo)
         result = subprocess.run(
             [sys.executable, str(SCRIPT), *args],
@@ -206,7 +213,7 @@ def run_generator(*, ownership: str, codeowners: str, args: list[str]):
             capture_output=True,
             text=True,
         )
-        return result, Path(repo, "CODEOWNERS").read_text()
+        return result, Path(repo, CODEOWNERS_PATH).read_text()
 
 
 class TestGeneratorModes(TestCase):
@@ -241,7 +248,7 @@ class TestGeneratorModes(TestCase):
                 message["original"],
                 message["replacement"],
             ),
-            ("CODEOWNERS", "CODEOWNERS_GENERATED", "stale\n", generated),
+            (CODEOWNERS_PATH, "CODEOWNERS_GENERATED", "stale\n", generated),
         )
         result, codeowners = run_generator(
             ownership=OWNERSHIP, codeowners="stale\n", args=[]

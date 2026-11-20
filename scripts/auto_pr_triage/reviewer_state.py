@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from github_api import PullRequestRef
+from assess_intake import fetch_user_permissions
+from github_api import PullRequestRef, TIMELINE_PAGE_SIZE
 
 
 # Team attribution is omitted because its GraphQL fields require read:org,
@@ -96,3 +97,50 @@ def fetch_submitted_review_state(pr: PullRequestRef, /) -> frozenset[str]:
         if not has_next_page:
             return frozenset(reviewers)
         cursor = end_cursor
+
+
+def previously_requested_users(timeline: list[dict]) -> frozenset[str]:
+    """Return every user a review was ever requested from, as casefolded handles."""
+
+    return frozenset(
+        f"@{event['requested_reviewer']['login']}".casefold()
+        for event in timeline
+        if event.get("event") == "review_requested" and event.get("requested_reviewer")
+    )
+
+
+def fetch_previously_requested_users(pr: PullRequestRef, /) -> frozenset[str]:
+    """Return every user ever requested on the PR, from its whole timeline.
+
+    A removed request leaves its review_requested event behind, so this is how a
+    later run knows not to ask that person again. Unlike intake's fetch_timeline
+    there is no page limit: a missed early request would re-request them.
+    """
+
+    endpoint = f"repos/{pr.repo}/issues/{pr.number}/timeline"
+    users: set[str] = set()
+    page = 1
+    while True:
+        events = pr.github.json(f"{endpoint}?per_page={TIMELINE_PAGE_SIZE}&page={page}")
+        if not isinstance(events, list) or not all(isinstance(e, dict) for e in events):
+            raise RuntimeError("pull request timeline response is invalid")
+        users |= previously_requested_users(events)
+        if len(events) < TIMELINE_PAGE_SIZE:
+            return frozenset(users)
+        page += 1
+
+
+def has_push_access(pr: PullRequestRef, /, *, login: str) -> bool:
+    """Return whether one user has push access, which GitHub required of code owners.
+
+    gh reports a deleted or renamed account as HTTP 404. It can't be requested
+    either, so it counts as no access instead of failing the run.
+    """
+
+    try:
+        access = fetch_user_permissions(github=pr.github, repo=pr.repo, login=login)
+    except RuntimeError as exc:
+        if "(HTTP 404)" not in str(exc):
+            raise
+        return False
+    return access["push"]
