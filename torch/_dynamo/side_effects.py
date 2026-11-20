@@ -481,15 +481,15 @@ class SideEffects:
         )
 
     def _maybe_record_side_effect(self, item: VariableTracker) -> None:
-        """Record the first externally-visible side effect on the current tracer."""
+        """Record externally-visible mutation targets on the current tracer."""
         if item.mutation_type is not None and not is_side_effect_safe(
             item.mutation_type
         ):
             output_graph = self.output_graph_weakref()
             if output_graph:
                 tracer = output_graph.current_tx.output.current_tracer
-                if tracer.side_effect_stack is None:
-                    tracer.side_effect_stack = (
+                if item.mutation_type not in tracer.side_effect_stacks:
+                    tracer.side_effect_stacks[item.mutation_type] = (
                         torch._guards.TracingContext.extract_stack()
                     )
 

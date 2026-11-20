@@ -3754,6 +3754,416 @@ instantiate_device_type_tests(
 )
 
 
+_checkpoint_cached_owner = SimpleNamespace(score=0)
+
+
+class ActivationCheckpointingCachedPropertyTests(torch._dynamo.test_case.TestCase):
+    @parametrize("protocol", [False, True])
+    def test_cached_property_global_lookup(self, device, protocol):
+        import types
+
+        class Config:
+            def __init__(self, value):
+                self.value = value
+                self.getter_calls = 0
+
+            @functools.cached_property
+            def score(self):
+                self.getter_calls += 1
+                return self.value
+
+        class Namespace(dict):
+            def __init__(self, values, owner):
+                super().__init__(values)
+                self.owner = owner
+
+            def __getitem__(self, name):
+                if name == "_checkpoint_cached_owner":
+                    return self.owner
+                return dict.__getitem__(self, name)
+
+            def get(self, *args):
+                raise AssertionError("namespace get must not run")
+
+        def fn(x):
+            def block(y):
+                return y.sin() * _checkpoint_cached_owner.score
+
+            return checkpoint(block, x, use_reentrant=False) + 0.5 * x
+
+        first, second = Config(3), Config(11)
+        self.assertEqual(second.score, 11)
+        scope = dict(fn.__globals__)
+        scope["_checkpoint_cached_owner"] = first
+        if protocol:
+            scope = Namespace(scope, first)
+        target = types.FunctionType(fn.__code__, scope)
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(target, backend=counter)
+        x = torch.tensor([-1.3, -0.25, 0.7, 1.75], dtype=torch.float64, device=device)
+        for index, owner in enumerate((first, first, first, second, second)):
+            if isinstance(scope, Namespace):
+                scope.owner = owner
+            else:
+                scope["_checkpoint_cached_owner"] = owner
+            before = counter.frame_count
+            self.assertEqual(compiled(x), x.sin() * owner.value + 0.5 * x)
+            self.assertEqual((first.getter_calls, second.getter_calls), (1, 1))
+            targets = [
+                node.target for graph in counter.graphs for node in graph.graph.nodes
+            ]
+            self.assertEqual(
+                tag_activation_checkpoint in targets, not protocol and index != 0
+            )
+            if index:
+                if protocol or index in (2, 4):
+                    self.assertEqual(counter.frame_count, before)
+                else:
+                    self.assertGreater(counter.frame_count, before)
+
+    @parametrize("source", ["argument", "closure", "module"])
+    @parametrize("inherited", [False, True])
+    def test_cached_property_retry(self, device, source, inherited):
+        class Config:
+            def __init__(self):
+                self.getter_calls = 0
+                self.mode = True
+
+            @functools.cached_property
+            def is_jagged(self):
+                self.getter_calls += 1
+                return self.mode
+
+        class DerivedConfig(Config):
+            pass
+
+        def fn(x, config):
+            config.mode = False
+
+            def block(y):
+                return y.sin().cos() if config.is_jagged else y.cos().sin()
+
+            return checkpoint(block, x + 1, use_reentrant=False) * 2
+
+        class Module(nn.Module):
+            def __init__(self, config):
+                super().__init__()
+                self.config = config
+
+            def forward(self, x):
+                return fn(x, self.config)
+
+        config_type = DerivedConfig if inherited else Config
+        config, ref_config = config_type(), config_type()
+
+        def closure_fn(x):
+            return fn(x, config)
+
+        fns = {"argument": fn, "closure": closure_fn, "module": Module(config)}
+        args = (config,) if source == "argument" else ()
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fns[source], backend=counter, dynamic=True)
+        for iteration, size in enumerate((4, 4, 6, 4, 4, 6)):
+            if iteration == 3:
+                del config.is_jagged
+                del ref_config.is_jagged
+                config.mode = ref_config.mode = True
+            x = torch.randn(size, requires_grad=True, device=device)
+            ref_x = x.detach().clone().requires_grad_()
+            expected = fn(ref_x, ref_config)
+            actual = compiled(x, *args)
+            self.assertEqual(actual, expected)
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x),
+                torch.autograd.grad(expected.sum(), ref_x),
+            )
+            self.assertEqual(config.getter_calls, 1 + (iteration >= 3))
+            self.assertEqual(config.getter_calls, ref_config.getter_calls)
+            self.assertIs(config.__dict__["is_jagged"], False)
+            targets = [node.target for node in counter.graphs[-1].graph.nodes]
+            if iteration == 0:
+                self.assertEqual(counter.frame_count, 2)
+                self.assertNotIn(tag_activation_checkpoint, targets)
+            elif iteration == 1:
+                self.assertEqual(counter.frame_count, 3)
+                self.assertIn(tag_activation_checkpoint, targets)
+                warm_frames = counter.frame_count
+            elif iteration == 2:
+                self.assertEqual(counter.frame_count, warm_frames)
+            elif iteration == 3:
+                self.assertLessEqual(counter.frame_count, warm_frames + 2)
+                reset_frames = counter.frame_count
+            elif iteration == 4:
+                self.assertLessEqual(counter.frame_count, reset_frames + 1)
+                self.assertIn(tag_activation_checkpoint, targets)
+                steady_frames = counter.frame_count
+            else:
+                self.assertEqual(counter.frame_count, steady_frames)
+
+    @parametrize("allow_side_effects", [False, True])
+    def test_cached_tensor_in_nested_region(self, device, allow_side_effects):
+        class Config:
+            def __init__(self):
+                self.getter_calls = 0
+
+            @functools.cached_property
+            def bias(self):
+                self.getter_calls += 1
+                return torch.ones(4, dtype=torch.float64, device=device)
+
+        @torch.compiler.nested_compile_region
+        def block(y, config):
+            return y.sin() + config.bias
+
+        def fn(x, config):
+            result = checkpoint(block, x + 1, config, use_reentrant=False) * 2
+            return result, config.bias
+
+        warm, cold = Config(), Config()
+        warm.bias
+        counter = CompileCounterWithBackend("aot_eager")
+        x = torch.arange(4, dtype=torch.float64, device=device, requires_grad=True)
+        with torch._dynamo.config.patch(
+            skip_fwd_side_effects_in_bwd_under_checkpoint=allow_side_effects
+        ):
+            compiled = torch.compile(fn, backend=counter, dynamic=True)
+            for iteration, config in enumerate((warm, cold, cold, cold)):
+                actual, escaped = compiled(x, config)
+                expected = ((x + 1).sin() + 1) * 2
+                self.assertEqual(actual, expected)
+                self.assertEqual(
+                    torch.autograd.grad(actual.sum(), x),
+                    torch.autograd.grad(expected.sum(), x),
+                )
+                self.assertIs(escaped, config.__dict__["bias"])
+                self.assertEqual(config.getter_calls, 1)
+                if iteration == 0:
+                    self.assertEqual(counter.frame_count, 1)
+                    targets = [node.target for node in counter.graphs[0].graph.nodes]
+                    self.assertIn(tag_activation_checkpoint, targets)
+                else:
+                    self.assertEqual(
+                        counter.frame_count, 2 if allow_side_effects else 3
+                    )
+
+    def test_cached_property_shared_owner_mro(self, device):
+        class Base:
+            @functools.cached_property
+            def bias(self):
+                raise AssertionError("warm cached getter must not run")
+
+        class First(Base):
+            pass
+
+        class Second(Base):
+            pass
+
+        class NewBase:
+            @property
+            def bias(self):
+                return 100
+
+        first, second = First(), Second()
+        first.bias, second.bias = 3, 5
+
+        def fn(x, first, second):
+            return x + first.bias + second.bias
+
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.arange(4, dtype=torch.float64, device=device, requires_grad=True)
+        self.assertEqual(compiled(x, first, second), x + 8)
+        self.assertEqual(counter.frame_count, 1)
+        Second.__bases__ = (NewBase,)
+        for _ in range(2):
+            actual = compiled(x, first, second)
+            expected = x + 103
+            self.assertEqual(actual, expected)
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x),
+                torch.autograd.grad(expected.sum(), x),
+            )
+            self.assertEqual(counter.frame_count, 2)
+
+    @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
+    def test_cached_property_pending_dict_escape(self, device):
+        class Dictionary(dict):
+            def __getitem__(self, key):
+                raise AssertionError("custom getitem must not run")
+
+        class Config:
+            @functools.cached_property
+            def bias(self):
+                self.getter_calls += 1
+                return self.seed.sin()
+
+        @torch.compiler.nested_compile_region
+        def block(y, config):
+            return y.sin() + config.bias
+
+        def fn(x, config):
+            replacement = {"seed": x.cos(), "getter_calls": 0}
+            config.__dict__ = replacement
+            result = checkpoint(block, x + 1, config, use_reentrant=False)
+            alias = config.__dict__
+            result = result + (2 if alias is replacement else -2)
+            return result, config.bias, config.__dict__
+
+        config = Config()
+        config.__dict__ = Dictionary(bias=-999, getter_calls=-100)
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        old = None
+        for offset in (0, 2):
+            x = (
+                torch.arange(4, dtype=torch.float64, device=device) + offset
+            ).requires_grad_()
+            actual, bias, escaped = compiled(x, config)
+            expected = (x + 1).sin() + x.cos().sin() + 2
+            self.assertEqual(actual, expected)
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x),
+                torch.autograd.grad(expected.sum(), x),
+            )
+            self.assertIs(bias, config.__dict__["bias"])
+            self.assertIs(escaped, config.__dict__)
+            self.assertEqual(config.getter_calls, 1)
+            if old is not None:
+                self.assertIsNot(escaped, old)
+            old = escaped
+            self.assertEqual(counter.frame_count, 1)
+        self.assertIn(
+            tag_activation_checkpoint,
+            [node.target for node in counter.graphs[0].graph.nodes],
+        )
+
+    def test_cached_property_pending_dict_replacement(self, device):
+        class Dictionary(dict):
+            def __getitem__(self, key):
+                raise AssertionError("custom getitem must not run")
+
+        class Config:
+            @functools.cached_property
+            def bias(self):
+                raise AssertionError("cached getter must not run")
+
+        def fn(x, config):
+            config.__dict__ = {"bias": x.sin()}
+
+            def block(y):
+                return y.cos() + config.bias
+
+            return checkpoint(block, x + 1, use_reentrant=False) * 2
+
+        config = Config()
+        old_bias = torch.full((4,), 3, dtype=torch.float64, device=device)
+        config.__dict__ = Dictionary(bias=old_bias)
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.arange(4, dtype=torch.float64, device=device, requires_grad=True)
+        expected = ((x + 1).cos() + x.sin()) * 2
+        actual = compiled(x, config)
+        self.assertEqual(actual, expected)
+        self.assertEqual(
+            torch.autograd.grad(actual.sum(), x),
+            torch.autograd.grad(expected.sum(), x),
+        )
+        self.assertEqual(config.bias, x.sin())
+        self.assertEqual(counter.frame_count, 1)
+        self.assertIn(
+            tag_activation_checkpoint,
+            [node.target for node in counter.graphs[0].graph.nodes],
+        )
+
+    @parametrize("mutation", ["attribute", "list"])
+    @parametrize("fullgraph", [False, True])
+    @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=False)
+    def test_nested_mutation_is_local_to_checkpoint(self, device, mutation, fullgraph):
+        class Holder:
+            def __init__(self):
+                self.bias = 0
+
+        @torch.compiler.nested_compile_region
+        def inner(y, value):
+            if mutation == "attribute":
+                value.bias = 7
+            else:
+                value.append(y.sin())
+            return y.cos()
+
+        def block(y):
+            value = Holder() if mutation == "attribute" else []
+            result = inner(y, value)
+            return result + (value.bias if mutation == "attribute" else value[0])
+
+        def fn(x):
+            return checkpoint(block, x + 1, use_reentrant=False) * 2
+
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=fullgraph)
+        x = torch.arange(4, dtype=torch.float64, device=device, requires_grad=True)
+        ref_x = x.detach().clone().requires_grad_()
+        expected = fn(ref_x)
+        actual = compiled(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(
+            torch.autograd.grad(actual.sum(), x),
+            torch.autograd.grad(expected.sum(), ref_x),
+        )
+        self.assertEqual(counter.frame_count, 1)
+        self.assertIn(
+            tag_activation_checkpoint,
+            [node.target for node in counter.graphs[0].graph.nodes],
+        )
+
+    def test_cached_property_deleted_in_frame(self, device):
+        class Config:
+            def __init__(self):
+                self.is_jagged = False
+                self.getter_calls = 0
+
+            @functools.cached_property
+            def is_jagged(self):
+                self.getter_calls += 1
+                return True
+
+        def fn(x, config):
+            del config.is_jagged
+
+            def block(y):
+                return y.sin() if config.is_jagged else y.cos()
+
+            return checkpoint(block, x + 1, use_reentrant=False) * 2
+
+        config, ref_config = Config(), Config()
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+        for iteration in range(3):
+            x = torch.randn(4, requires_grad=True, device=device)
+            ref_x = x.detach().clone().requires_grad_()
+            expected = fn(ref_x, ref_config)
+            actual = compiled(x, config)
+            self.assertEqual(actual, expected)
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x),
+                torch.autograd.grad(expected.sum(), ref_x),
+            )
+            self.assertEqual(config.getter_calls, iteration + 1)
+            self.assertEqual(config.getter_calls, ref_config.getter_calls)
+            self.assertFalse(
+                any(
+                    node.target is tag_activation_checkpoint
+                    for graph in counter.graphs
+                    for node in graph.graph.nodes
+                )
+            )
+
+
+instantiate_device_type_tests(
+    ActivationCheckpointingCachedPropertyTests, globals(), allow_xpu=True
+)
+
+
 class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCase):
     """Tests for non-strict tracing flag interaction with checkpoint."""
 
