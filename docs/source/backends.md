@@ -598,7 +598,7 @@ Each DSL controller provides the following methods:
     # Query available DSLs
     print(pn.available_dsls)  # ['triton', 'cutedsl']
 
-    # Disable all Triton operations
+    # Disable Triton's conditional operations
     pn.triton.enabled = False
 
     # Temporarily disable CuteDSL operations

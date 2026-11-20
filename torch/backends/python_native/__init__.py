@@ -14,8 +14,8 @@ Example usage::
     import torch.backends.python_native as pn
 
     # DSL-level control
-    pn.triton.enabled = False  # Disable all triton ops
-    pn.cutedsl.enabled = True  # Enable all cutedsl ops
+    pn.triton.enabled = False  # Disable triton's conditional ops
+    pn.cutedsl.enabled = True  # Re-enable cutedsl's conditional ops
 
     # Individual operation control
     pn.disable_operations("sum.dim_IntList")  # Disable specific op across all DSLs
@@ -165,12 +165,12 @@ class DSLController:
             self.disable()
 
     def disable(self):
-        """Disable all operations for this DSL."""
+        """Disable the conditional operations from this DSL."""
         dsl_module = _get_dsl_module(self._dsl_name)
         dsl_module.deregister_op_overrides()
 
     def enable(self):
-        """Re-enable all operations for this DSL."""
+        """Re-enable the conditional operations from this DSL."""
         reenable_op_overrides = _get_registry_functions()[1]
         reenable_op_overrides(enable_dsl_names=self._dsl_name)
 
