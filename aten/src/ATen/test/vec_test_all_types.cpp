@@ -1284,16 +1284,10 @@ namespace {
             RESOLVE_OVERLOAD(filter_fmadd));
     }
 #endif
+    // Returns false on a mismatch.
     template<typename vec, typename VT, int64_t mask>
-    typename std::enable_if_t<(mask < 0 || mask> 255), void>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()])
-    {
-    }
-    template<typename vec, typename VT, int64_t mask>
-    typename std::enable_if_t<(mask >= 0 && mask <= 255), void>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()]) {
+    bool test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()]) {
         // generate expected_val. This works around a compiler bug rather than
         // being the natural way to write it: GCC 13 to 15 miscompile this loop
         // on SVE256 for some constant masks (for 253, the vectorized loop's
@@ -1313,8 +1307,13 @@ namespace {
         auto expected = vec::loadu(expected_val);
         auto actual = vec::template blend<mask>(vec_a, vec_b);
         auto mask_str = std::string("\nblend mask: ") + std::to_string(mask);
-        if (AssertVectorized<vec>(std::string(NAME_INFO(test_blend)) + mask_str, expected, actual).check()) return;
-        test_blend<vec, VT, mask - 1>(expected_val, a, b);
+        return !AssertVectorized<vec>(std::string(NAME_INFO(test_blend)) + mask_str, expected, actual).check();
+    }
+    template<typename vec, typename VT, int64_t... masks>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    void test_blend_masks(std::integer_sequence<int64_t, masks...>, VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()]) {
+        // Stops at the first mismatch.
+        (test_blend<vec, VT, masks>(expected_val, a, b) && ...);
     }
     template<typename vec, typename VT>
     std::enable_if_t<!is_complex<VT>::value, bool>
@@ -1384,8 +1383,17 @@ namespace {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT expected_val[vec::size()];
         blend_init(a, b);
-        constexpr int64_t power_sets = 1LL << (vec::size());
-        test_blend<vec, VT, power_sets - 1>(expected_val, a, b);
+        if constexpr (vec::size() <= 8) {
+            test_blend_masks<vec, VT>(std::make_integer_sequence<int64_t, 1 << vec::size()>{}, expected_val, a, b);
+        } else {
+            // blend takes its mask as a template argument, so each mask is a
+            // separate instantiation: check representative masks rather than
+            // all 2^16 (Blendv, whose mask is a run-time value, checks all).
+            static_assert(vec::size() == 16);
+            test_blend_masks<vec, VT>(
+                std::integer_sequence<int64_t, 0x0000, 0xFFFF, 0x5555, 0xAAAA, 0x00FF, 0xFF00, 0x0001, 0x8000, 0xFFFE, 0x7FFF>{},
+                expected_val, a, b);
+        }
     }
     template<typename vec, typename VT>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
