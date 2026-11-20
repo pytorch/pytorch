@@ -9946,21 +9946,11 @@ class TestNNDeviceType(NNTestCase):
             out = F.interpolate(x, size=size, mode=mode, antialias=antialias)
             expected = F.interpolate(x_ref, size=size, mode=mode, antialias=antialias)
             self.assertEqual(out, expected)
-            if torch.device(device).type == "cpu":
-                # Only CPU recognizes x as channels-last; the output has the layout of expected's.
+            if dtype == torch.uint8 and torch.device(device).type == "cpu" and mode in ("bilinear", "bicubic", "lanczos"):
+                # x is recognized as channels-last, for the uint8 AVX2 / NEON kernels.
                 self.assertEqual(out.stride(), expected.stride())
-
-    @parametrize_test("mode", ["nearest", "nearest-exact", "trilinear"])
-    def test_upsampling3d_channels_last_view_with_size1_batch(self, device, mode):
-        x = torch.rand(5, 31, 47, 3, device=device).permute(3, 0, 1, 2)[None]
-        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last_3d))
-        x_ref = torch.empty_like(x, memory_format=torch.channels_last_3d).copy_(x)
-        out = F.interpolate(x, size=(7, 20, 30), mode=mode)
-        expected = F.interpolate(x_ref, size=(7, 20, 30), mode=mode)
-        self.assertEqual(out, expected)
-        if torch.device(device).type == "cpu":
-            # Only CPU recognizes x as channels-last; the output has the layout of expected's.
-            self.assertEqual(out.stride(), expected.stride())
+            else:
+                self.assertTrue(out.is_contiguous())
 
     @onlyCUDA
     @skipIfRocm
@@ -10255,10 +10245,11 @@ class TestNNDeviceType(NNTestCase):
         if non_contig is False:
             self.assertTrue(input_ui8.is_contiguous(memory_format=memory_format))
 
-        if (batch_size == 1 and check_as_unsqueezed_3d_tensor and memory_format == torch.channels_last
-                and torch.device(device).type != "cpu"):
-            # Only CPU recognizes channels-last inputs whose size-1 batch dim has a non-standard stride.
-            self.assertTrue(output_ui8.is_contiguous())
+        if batch_size == 1 and check_as_unsqueezed_3d_tensor and memory_format == torch.channels_last:
+            # Channels-last inputs whose size-1 batch dim has a non-standard stride are only recognized
+            # as channels-last for uint8 on CPU.
+            self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format) if torch.device(device).type == "cpu"
+                            else output_ui8.is_contiguous())
             self.assertTrue(output_f32.is_contiguous())
         else:
             self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))

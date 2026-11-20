@@ -64,14 +64,15 @@ inline std::optional<double> get_scale_value(std::optional<c10::ArrayRef<double>
   return scales->at(idx);
 }
 
-// Memory format for the output of a forward upsampling op. suggest_memory_format() also requires
-// the stride of a size-1 batch dimension to fit the layout, so e.g. `hwc_image.permute(2, 0, 1)[None]`
-// would be reported as contiguous when really it's channels-last.
-// Only on CPU: the other devices' kernels, and the device-specific layout heuristics of the Python
-// decompositions, follow suggest_memory_format().
+// Memory format for the output of a forward bilinear, bicubic or lanczos upsampling op.
+// suggest_memory_format() also requires the stride of a size-1 batch dimension to fit the layout, so
+// e.g. `hwc_image.permute(2, 0, 1)[None]` would be reported as contiguous when really it's channels-last.
+// Only for uint8 CPU inputs, whose AVX2 / NEON kernels need a channels-last output; for other dtypes,
+// other modes and other devices, a channels-last output is slower for these inputs.
 inline c10::MemoryFormat output_memory_format(const Tensor& input) {
   auto memory_format = input.suggest_memory_format();
-  if (memory_format != c10::MemoryFormat::Contiguous || !input.is_cpu() || input.dim() < 4 || input.size(0) != 1) {
+  if (memory_format != c10::MemoryFormat::Contiguous || !input.is_cpu() || input.scalar_type() != at::kByte ||
+      input.dim() != 4 || input.size(0) != 1) {
     return memory_format;
   }
   auto sizes = input.sizes();
@@ -80,11 +81,8 @@ inline c10::MemoryFormat output_memory_format(const Tensor& input) {
   for (const auto i : c10::irange(1, input.dim())) {
     strides[0] = std::max(strides[0], strides[i] * sizes[i]);
   }
-  if (input.dim() == 4 && c10::is_channels_last_strides_2d(sizes, strides)) {
+  if (c10::is_channels_last_strides_2d(sizes, strides)) {
     return c10::MemoryFormat::ChannelsLast;
-  }
-  if (input.dim() == 5 && c10::is_channels_last_strides_3d(sizes, strides)) {
-    return c10::MemoryFormat::ChannelsLast3d;
   }
   return memory_format;
 }

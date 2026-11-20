@@ -3895,7 +3895,7 @@ def _upsample_nearest(
 
     if result.ndim in (4, 5):
         # convert output to correct memory format, if necessary
-        memory_format = utils.upsample_output_memory_format(input)
+        memory_format = utils.suggest_memory_format(input)
 
         # following "heuristic: only use channels_last path when it's faster than the contiguous path"
         n_channels = input.shape[1]

@@ -7875,7 +7875,7 @@ def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
     output = input.new_empty(full_output_size)
 
     # convert output to correct memory format, if necessary
-    memory_format = utils.upsample_output_memory_format(input)
+    memory_format = utils.suggest_memory_format(input)
 
     # following "heuristic: only use channels_last path when it's faster than the contiguous path"
     _, n_channels, _, _ = input.shape
@@ -7934,7 +7934,7 @@ def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_
         input.size(), output_size, num_spatial_dims=3
     )
     return input.new_empty(full_output_size).to(
-        memory_format=utils.upsample_output_memory_format(input)
+        memory_format=utils.suggest_memory_format(input)
     )
 
 
