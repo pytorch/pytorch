@@ -15941,6 +15941,16 @@ class TestMetalLibrary(TestCaseMPS):
         for inp in inputs:
             correct += inp
         self.assertEqual(correct, output)
+        # The kernel reaches the inputs only through their addresses, so unless they are
+        # declared to the encoder, it can run before the writes that fill them complete
+        for _ in range(20):
+            # Leave garbage in the memory that the inputs get allocated from
+            garbage = [torch.full((1 << 20,), -1000.0, device="mps") for _ in range(64)]
+            del garbage
+            inputs = [torch.full((1 << 20,), float(i), device="mps") for i in range(64)]
+            output = torch.empty_like(inputs[0])
+            lib.sum_all(output, inputs)
+            self.assertEqual(output, torch.full_like(output, sum(range(64))))
 
     @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")
     def test_metal_capture(self):
