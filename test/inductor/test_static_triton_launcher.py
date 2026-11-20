@@ -591,18 +591,15 @@ class TestStaticTritonLauncherUnit(TestCase):
         return static_kernel, metadata_group
 
 
-@instantiate_parametrized_tests
 class TestStaticTritonLauncherUnitMetadataGroup(TestCase):
-    """Launcher-cubin metadata-group resolution tests, split out of
-    TestStaticTritonLauncherUnit so that class holds only device-independent tests.
-
-    Classified CUDA and not instantiated: cubin metadata-group behavior is
-    CUDA-internal; device-class variants would duplicate coverage meaninglessly.
-    The _can_statically_launch helper stays on the unit class and is delegated by
-    reference. Nothing is copied.
+    """How the static launcher resolves the kernel cubin from a compiled
+    kernel's metadata_group: a group with exactly one binary wins, an
+    ambiguous group (zero or two binaries) rejects the static launch, and
+    reload_cubin_path rebuilds the path under TRITON_CACHE_DIR. Both tests
+    fake the compile result and touch no accelerator.
     """
 
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.GENERIC
 
     _can_statically_launch = TestStaticTritonLauncherUnit._can_statically_launch
 
