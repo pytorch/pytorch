@@ -4,7 +4,6 @@ Utils for caching the outputs of AOTAutograd
 
 from __future__ import annotations
 
-import base64
 import collections
 import contextlib
 import dataclasses
@@ -47,7 +46,6 @@ from torch._inductor.codecache import (
     FxGraphCachePickler,
     FxGraphHashDetails,
     GuardedCache,
-    sha256_hash,
     write_atomic,
 )
 from torch._inductor.custom_graph_pass import (
@@ -1508,12 +1506,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     @staticmethod
     def _write_to_local_cache(key: str, content: bytes) -> None:
         """Write an entry to the local cache."""
-        subdir = AOTAutogradCache._get_tmp_dir_for_key(key)
-
-        # Use a hash of the serialized entry to get a unique file
-        # name. The specific name doesn't matter since a lookup involves
-        # iterating over all entries in the parent subdir.
-        path = os.path.join(subdir, sha256_hash(content))
+        path = AOTAutogradCache._local_entry_path(key, content)
         log.info("Writing AOTAutograd cache entry to %s", path)
         write_atomic(path, content, make_dirs=True)
 
@@ -1622,11 +1615,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 time_taken_ms = int(
                     (entry.forward_time_taken_ns + entry.backward_time_taken_ns) // 1e6
                 )
-                cache_data: JsonDataTy = {
-                    "data": base64.b64encode(content).decode("ascii"),
-                    "time_taken_ms": time_taken_ms,
-                }
-                remote_cache.put(key, cache_data)
+                AOTAutogradCache._put_remote(remote_cache, key, content, time_taken_ms)
 
     @staticmethod
     @functools.cache
@@ -1663,9 +1652,26 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         serialized_bw_module: SerializedGraphModule | None,
         min_cut_info_str: str | None,
     ) -> GenericAOTAutogradResult[Any, Any]:
+        common_fields: dict[str, Any] = dict(
+            aot_joint_graph_str=aot_joint_graph_str,
+            aot_forward_graph_str=aot_forward_graph_str,
+            aot_backward_graph_str=aot_backward_graph_str,
+            min_cut_info_str=min_cut_info_str,
+            runtime_metadata=runtime_metadata,
+            dispatch_wrappers=dispatch_wrappers,
+            maybe_subclass_meta=maybe_subclass_meta,
+            num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
+            indices_of_inps_to_detach=indices_of_inps_to_detach,
+            forward_time_taken_ns=forward_time_taken_ns,
+            backward_time_taken_ns=backward_time_taken_ns,
+            sanitized_aot_config=sanitized_aot_config,
+            guards_expr=guards_expr,
+            serialized_bw_module=serialized_bw_module,
+        )
+
         if should_bundle_autograd_cache():
-            # Helper function to unwrap all the wrappers we added during aotdispatch
-            # They get reapplied on cache load
+            # Bundled entries store the OutputCode itself. Unwrap the wrappers
+            # added during aotdispatch; they get reapplied on cache load.
             def unwrap_output_code(obj: object) -> OutputCode:
                 while hasattr(obj, "__wrapped__"):
                     obj = obj.__wrapped__
@@ -1673,84 +1679,55 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                     raise AssertionError(f"expected OutputCode, got {type(obj)}")
                 return obj
 
-            compiled_fw_graph = unwrap_output_code(compiled_fw_func)
-            bundled_compiled_forward = BundledCompiledForward(compiled_fw_graph)
+            bundled_compiled_forward = BundledCompiledForward(
+                unwrap_output_code(compiled_fw_func)
+            )
             bundled_compiled_backward = None
             if compiled_bw_func is not None:
                 if backward_state_indices is None:
                     raise AssertionError("backward_state_indices must not be None")
                 if num_symints_saved_for_bw is None:
                     raise AssertionError("num_symints_saved_for_bw must not be None")
-                compiled_bw_graph = unwrap_output_code(compiled_bw_func)
                 bundled_compiled_backward = BundledCompiledBackward(
-                    compiled_bw_graph, backward_state_indices, num_symints_saved_for_bw
+                    unwrap_output_code(compiled_bw_func),
+                    backward_state_indices,
+                    num_symints_saved_for_bw,
                 )
-
             return BundledAOTAutogradResult(
                 compiled_fw=bundled_compiled_forward,
                 compiled_bw=bundled_compiled_backward,
-                aot_joint_graph_str=aot_joint_graph_str,
-                aot_forward_graph_str=aot_forward_graph_str,
-                aot_backward_graph_str=aot_backward_graph_str,
-                min_cut_info_str=min_cut_info_str,
-                runtime_metadata=runtime_metadata,
-                dispatch_wrappers=dispatch_wrappers,
-                maybe_subclass_meta=maybe_subclass_meta,
-                num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
-                indices_of_inps_to_detach=indices_of_inps_to_detach,
-                forward_time_taken_ns=forward_time_taken_ns,
-                backward_time_taken_ns=backward_time_taken_ns,
-                sanitized_aot_config=sanitized_aot_config,
-                guards_expr=guards_expr,
-                serialized_bw_module=serialized_bw_module,
+                **common_fields,
             )
 
-        else:
-            fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
-            fw_debug_lines = getattr(
-                compiled_fw_func, "_fx_graph_cache_debug_lines", []
+        # Unbundled entries store only the FxGraphCache keys of the compiled graphs.
+        fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
+        fw_debug_lines = getattr(compiled_fw_func, "_fx_graph_cache_debug_lines", [])
+        if fw_key is None:
+            raise AssertionError("fw_key must not be None")
+        compiled_forward = CompiledForward(
+            fx_graph_cache_info=(fw_key, fw_debug_lines),
+            fx_graph_guard_expr=getattr(compiled_fw_func, "guards_expr", None),
+        )
+        compiled_backward = None
+        if compiled_bw_func is not None:
+            bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
+            bw_debug_lines = getattr(
+                compiled_bw_func, "_fx_graph_cache_debug_lines", []
             )
-
-            if fw_key is None:
-                raise AssertionError("fw_key must not be None")
-            compiled_forward = CompiledForward(
-                fx_graph_cache_info=(fw_key, fw_debug_lines),
-                fx_graph_guard_expr=getattr(compiled_fw_func, "guards_expr", None),
+            if bw_key is None:
+                raise AssertionError("bw_key must not be None")
+            if backward_state_indices is None:
+                raise AssertionError("backward_state_indices must not be None")
+            if num_symints_saved_for_bw is None:
+                raise AssertionError("num_symints_saved_for_bw must not be None")
+            compiled_backward = CompiledBackward(
+                fx_graph_cache_info=(bw_key, bw_debug_lines),
+                fx_graph_guard_expr=getattr(compiled_bw_func, "guards_expr", None),
+                backward_state_indices=backward_state_indices,
+                num_symints_saved_for_bw_=num_symints_saved_for_bw,
             )
-            compiled_backward = None
-            if compiled_bw_func is not None:
-                bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
-                bw_debug_lines = getattr(
-                    compiled_bw_func, "_fx_graph_cache_debug_lines", []
-                )
-                if bw_key is None:
-                    raise AssertionError("bw_key must not be None")
-                if backward_state_indices is None:
-                    raise AssertionError("backward_state_indices must not be None")
-                if num_symints_saved_for_bw is None:
-                    raise AssertionError("num_symints_saved_for_bw must not be None")
-                compiled_backward = CompiledBackward(
-                    fx_graph_cache_info=(bw_key, bw_debug_lines),
-                    fx_graph_guard_expr=getattr(compiled_bw_func, "guards_expr", None),
-                    backward_state_indices=backward_state_indices,
-                    num_symints_saved_for_bw_=num_symints_saved_for_bw,
-                )
-
-            return AOTAutogradResult(
-                compiled_fw=compiled_forward,
-                compiled_bw=compiled_backward,
-                aot_joint_graph_str=aot_joint_graph_str,
-                aot_forward_graph_str=aot_forward_graph_str,
-                aot_backward_graph_str=aot_backward_graph_str,
-                min_cut_info_str=min_cut_info_str,
-                runtime_metadata=runtime_metadata,
-                dispatch_wrappers=dispatch_wrappers,
-                maybe_subclass_meta=maybe_subclass_meta,
-                num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
-                indices_of_inps_to_detach=indices_of_inps_to_detach,
-                forward_time_taken_ns=forward_time_taken_ns,
-                backward_time_taken_ns=backward_time_taken_ns,
-                sanitized_aot_config=sanitized_aot_config,
-                guards_expr=guards_expr,
-                serialized_bw_module=serialized_bw_module,
-            )
+        return AOTAutogradResult(
+            compiled_fw=compiled_forward,
+            compiled_bw=compiled_backward,
+            **common_fields,
+        )
