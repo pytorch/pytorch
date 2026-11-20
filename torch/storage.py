@@ -230,11 +230,7 @@ class _StorageBase:
         raise NotImplementedError
 
     def __repr__(self):
-        info_str = f"[{torch.typename(self)}(device={self.device}) of size {len(self)}]"
-        if self.device.type == "meta":
-            return "...\n" + info_str
-        data_str = " " + "\n ".join(str(self[i]) for i in range(self.size()))
-        return data_str + "\n" + info_str
+        return f"[{torch.typename(self)}(device={self.device}) of size {len(self)}]"
 
     def __iter__(self):
         return iter(self[i] for i in range(self.size()))
@@ -1123,21 +1119,12 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._untyped_storage.get_device()
 
-    def __str__(self):
+    def __repr__(self):
         _warn_typed_storage_removal()
-        info_str = (
+        return (
             f"[{torch.typename(self)}(dtype={self.dtype}, "
             f"device={self.device}) of size {len(self)}]"
         )
-        if self.device.type == "meta":
-            return "...\n" + info_str
-        else:
-            data_str = " " + "\n ".join(str(self[i]) for i in range(self.size()))
-            return data_str + "\n" + info_str
-
-    def __repr__(self):
-        _warn_typed_storage_removal()
-        return str(self)
 
     def __iter__(self):
         _warn_typed_storage_removal()

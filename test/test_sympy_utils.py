@@ -25,7 +25,9 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.utils._sympy.functions import (
+    CeilToInt,
     FloorDiv,
+    FloorToInt,
     Identity,
     IntTrueDiv,
     Max as TorchSymMax,
@@ -38,6 +40,8 @@ from torch.utils._sympy.functions import (
     RShift,
     BitwiseFn_bitwise_and,
     simple_floordiv_gcd,
+    ToFloat,
+    TruncToInt,
 )
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.numbers import int_oo, IntInfinity, NegativeIntInfinity
@@ -1143,6 +1147,79 @@ class TestSympySolve(TestCase):
 
 
 class TestSympyFunctions(TestCase):
+    def test_rounding_to_int_safely_canonicalizes_pytorch_integer_functions(self):
+        x, y = sympy.symbols("x y")
+        integer_exprs = (
+            CeilToInt(x),
+            FloorDiv(x, y),
+            FloorToInt(x),
+            TruncToInt(x),
+        )
+
+        for outer in (CeilToInt, FloorToInt, TruncToInt):
+            for inner in integer_exprs:
+                with self.subTest(outer=outer, inner=inner):
+                    self.assertIs(outer(inner), inner)
+
+        integer_symbol = sympy.Symbol("integer_symbol", integer=True)
+        for rounding in (CeilToInt, FloorToInt, TruncToInt):
+            with self.subTest(rounding=rounding):
+                self.assertIs(rounding(integer_symbol), integer_symbol)
+
+    def test_trunc_to_int_preserves_integer_composite_canonicalization(self):
+        integer_symbol = sympy.Symbol("integer_symbol", integer=True)
+        addition = integer_symbol + 1
+        multiplication = 2 * integer_symbol
+
+        self.assertIs(TruncToInt(addition), addition)
+        self.assertIs(TruncToInt(multiplication), multiplication)
+
+    @parametrize("modulo", (Mod, PythonMod))
+    @parametrize("rounding", (CeilToInt, FloorToInt, TruncToInt))
+    def test_rounding_to_int_canonicalizes_integer_modulo(self, modulo, rounding):
+        integer_symbol = sympy.Symbol("integer_symbol", integer=True)
+        expr = modulo(integer_symbol, sympy.Integer(3))
+
+        self.assertIs(expr.func, modulo)
+        self.assertIs(rounding(expr), expr)
+
+    @parametrize("modulo", (Mod, PythonMod))
+    @parametrize("rounding", (CeilToInt, FloorToInt))
+    def test_rounding_to_int_does_not_canonicalize_float_modulo(
+        self, modulo, rounding
+    ):
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        value = sympy.Float("0.7") * ToFloat(s0)
+        expr = modulo(value, sympy.Float(2.0))
+
+        self.assertIs(expr.func, modulo)
+        self.assertIs(rounding(expr).func, rounding)
+
+    def test_rounding_to_int_does_not_canonicalise_expressions_with_incorrect_assumptions(
+        self,
+    ):
+        s14 = sympy.Symbol("s14", integer=True, positive=True)
+        s37 = sympy.Symbol("s37", integer=True, positive=True)
+        s46 = sympy.Symbol("s46", integer=True, positive=True)
+        incorrectly_assumed_integer = sympy.Mul(
+            sympy.Rational(1, 22),
+            24 * s37 + 672,
+            FloorDiv(s14 * s46, 2016),
+        )
+
+        self.assertEqual(
+            incorrectly_assumed_integer.subs({s14: 2016, s37: 1, s46: 1}),
+            sympy.Rational(348, 11),
+        )
+        if incorrectly_assumed_integer.is_integer is not True:
+            self.skipTest("SymPy does not infer this expression to be integer-valued")
+
+        for rounding in (CeilToInt, FloorToInt):
+            with self.subTest(rounding=rounding):
+                result = rounding(incorrectly_assumed_integer)
+                self.assertIs(result.func, rounding)
+                self.assertEqual(result.args, (incorrectly_assumed_integer,))
+
     def test_shift_edges(self):
         x = sympy.Symbol("x", integer=True)
         self.assertEqual(LShift(x, 0), x)
@@ -1383,6 +1460,7 @@ instantiate_parametrized_tests(TestValueRanges)
 instantiate_parametrized_tests(TestSympyInterp)
 instantiate_device_type_tests(TestSympyInterpDevice, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestSympySolve)
+instantiate_parametrized_tests(TestSympyFunctions)
 
 
 if __name__ == "__main__":

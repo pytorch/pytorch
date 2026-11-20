@@ -41,7 +41,17 @@ from types import (
     MethodType,
     ModuleType,
 )
-from typing import Any, cast, Generic, Literal, NoReturn, Self, TYPE_CHECKING, TypeVar
+from typing import (
+    Any,
+    cast,
+    Generic,
+    Literal,
+    NoReturn,
+    NotRequired,
+    Self,
+    TYPE_CHECKING,
+    TypeVar,
+)
 from typing_extensions import override, TypedDict
 
 import torch
@@ -107,6 +117,7 @@ from torch._inductor.utils import (
     clear_on_fresh_cache,
     determine_aoti_mmap_flags,
     fp32_matmul_precision_key,
+    get_cpp_wrapper_header_device,
     is_linux,
     is_windows,
     parallel_num_threads,
@@ -158,6 +169,8 @@ T = TypeVar("T")
 
 class SystemDeviceInfo(TypedDict):
     name: str | None
+    # The XCC count depends on the compute partition mode, not on the arch.
+    xcc_count: NotRequired[int | None]
 
 
 class SystemVersionInfo(TypedDict, total=False):
@@ -356,6 +369,7 @@ class CacheBase:
                 version_info["cuda"] = torch.version.cuda
             else:
                 device_info["name"] = device_properties.gcnArchName
+                device_info["xcc_count"] = getattr(device_properties, "xcc_count", None)
                 version_info["hip"] = torch.version.hip
             hash_input["device"] = device_info
         except (AssertionError, RuntimeError):
@@ -4009,7 +4023,7 @@ def _get_cpp_prefix_header(device: str) -> str | None:
 def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
     """Given a device type (and optionally whether we're in AOT Inductor mode), returns
     the path to the cpp_wrapper header file to be precompiled."""
-    base_device = device.split(":", maxsplit=1)[0]
+    base_device = get_cpp_wrapper_header_device(device.split(":", maxsplit=1)[0])
     is_array_ref = config.aot_inductor.allow_stack_allocation and base_device == "cpu"
     return (
         "torch/csrc/inductor/"
