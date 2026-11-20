@@ -28,6 +28,20 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 class B2BGEMMTest(TestCase):
     device = GPU_TYPE
 
+    def _b2b_good_shape_case(self, f, f_32, M, N, O, P, entrance, extra=None):
+        """Compile f on (M, N, O, P) and assert the b2b choice is selected."""
+        torch._dynamo.reset()
+        counters.clear()
+        with torch._inductor.config.patch(**(extra or {})):
+            f_opt = torch.compile(f)
+            A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
+            B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
+            C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
+            res, codes = run_and_get_code(f_opt, A, B, C)
+        self.assertEqual(f_32(A, B, C), res, atol=0.1, rtol=0.01)
+        self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
+        self.assertIn(entrance, "\n".join(codes))
+
     @torch._inductor.config.patch(
         b2b_gemm_pass=True,
         **{"test_configs.autotune_choice_name_regex": r"^triton_b2b_gemm_left_"},
@@ -56,24 +70,36 @@ class B2BGEMMTest(TestCase):
             m3 = m3.to(torch.float32)
             return f(m1, m2, m3).to(torch.float16)
 
-        for M, N, O, P in (
-            (256, 32, 256, 32),
-            (128, 16, 128, 16),
-            (128, 16, 256, 16),
-            (128, 32, 128, 16),
-            (128, 16, 128, 32),
+        # The first shape exercises the full candidate set under real
+        # autotune; the remaining shapes pin a single b2b choice via
+        # test_configs.autotune_choice_desc_regex to keep the compile
+        # matrix cheap.
+        pin = {
+            "test_configs.autotune_choice_desc_regex": (
+                r"^BLOCK_SIZE_M=128, BLOCK_SIZE_N=16, "
+                r"BLOCK_SIZE_O=16, BLOCK_SIZE_P=16"
+            )
+        }
+        for idx, (M, N, O, P) in enumerate(
+            (
+                (256, 32, 256, 32),
+                (128, 16, 128, 16),
+                (128, 16, 256, 16),
+                (128, 32, 128, 16),
+                (128, 16, 128, 32),
+            )
         ):
             with self.subTest(shape=(M, N, O, P)):
-                torch._dynamo.reset()
-                counters.clear()
-                f_opt = torch.compile(f)
-                A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
-                B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
-                C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
-                res, codes = run_and_get_code(f_opt, A, B, C)
-                self.assertEqual(f_32(A, B, C), res, atol=0.1, rtol=0.01)
-                self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
-                self.assertIn("B2B_GEMM_LEFT_TRITON_ENTRANCE", "\n".join(codes))
+                self._b2b_good_shape_case(
+                    f,
+                    f_32,
+                    M,
+                    N,
+                    O,
+                    P,
+                    "B2B_GEMM_LEFT_TRITON_ENTRANCE",
+                    extra=None if idx == 0 else pin,
+                )
 
     @unittest.skipUnless(
         BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
@@ -119,24 +145,33 @@ class B2BGEMMTest(TestCase):
             m3 = m3.to(torch.float32)
             return f(m1, m2, m3).to(torch.float16)
 
-        for M, N, O, P in (
-            (32, 256, 32, 256),
-            (16, 128, 16, 128),
-            (16, 256, 16, 128),
-            (16, 128, 32, 128),
-            (32, 128, 16, 128),
+        # Same pinning rationale as the left-assoc test above.
+        pin = {
+            "test_configs.autotune_choice_desc_regex": (
+                r"^BLOCK_SIZE_M=128, BLOCK_SIZE_N=16, "
+                r"BLOCK_SIZE_O=16, BLOCK_SIZE_P=16"
+            )
+        }
+        for idx, (M, N, O, P) in enumerate(
+            (
+                (32, 256, 32, 256),
+                (16, 128, 16, 128),
+                (16, 256, 16, 128),
+                (16, 128, 32, 128),
+                (32, 128, 16, 128),
+            )
         ):
             with self.subTest(shape=(M, N, O, P)):
-                torch._dynamo.reset()
-                counters.clear()
-                f_opt = torch.compile(f)
-                A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
-                B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
-                C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
-                res, codes = run_and_get_code(f_opt, A, B, C)
-                self.assertEqual(f_32(A, B, C), res, atol=0.1, rtol=0.01)
-                self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
-                self.assertIn("B2B_GEMM_RIGHT_TRITON_ENTRANCE", "\n".join(codes))
+                self._b2b_good_shape_case(
+                    f,
+                    f_32,
+                    M,
+                    N,
+                    O,
+                    P,
+                    "B2B_GEMM_RIGHT_TRITON_ENTRANCE",
+                    extra=None if idx == 0 else pin,
+                )
 
     @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
@@ -210,7 +245,6 @@ class B2BGEMMTest(TestCase):
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" not in code)
 
-    @torch._dynamo.config.patch(recompile_limit=32)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
     def test_b2b_gemm_good_pattern_bad_shape(self):
         """
