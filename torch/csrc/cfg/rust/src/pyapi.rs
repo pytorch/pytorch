@@ -3,7 +3,7 @@
 
 use crate::bytecode::{self, OpcodeTable};
 use crate::capi::{self, TcfgApi, TCFG_API_VERSION};
-use crate::graph::{GraphState, Graphs};
+use crate::graph::{GraphSite, GraphState, Graphs};
 use crate::ir::*;
 use crate::pyffi::{Obj, PyObj};
 use crate::spec::{self, CalleeFact, CalleeKind, CfgPass, InstFacts, Kernels, PassCx, Pipeline, PyPass, Unit, ValueObs};
@@ -426,6 +426,29 @@ impl CfgFunction {
         out.set_item("demoted", cf.is_demoted())?;
         out.set_item("measuring", cf.is_measuring())?;
         out.set_item("log", state.log.clone())?;
+        drop(state);
+        // The graphs of the function and of what it called: how many there
+        // are, how many times one was handed to the passes over graphs, how
+        // many calls ran what those made (`hits`) and how many came to a
+        // graph and ran its instructions (`misses`), and how many graphs
+        // are no longer exported.
+        let (mut built, mut exported, mut hits, mut misses, mut given_up) = (0usize, 0u64, 0u64, 0u64, 0usize);
+        for (_, _, _, site) in self.graph_sites() {
+            built += 1;
+            exported += site.exports.load(Ordering::Relaxed);
+            given_up += matches!(*site.state.borrow(), GraphState::GivenUp(_)) as usize;
+            if let Some(path) = site.path() {
+                hits += path.hits.load(Ordering::Relaxed);
+                misses += path.misses.load(Ordering::Relaxed);
+            }
+        }
+        let graphs = PyDict::new(py);
+        graphs.set_item("built", built)?;
+        graphs.set_item("exported", exported)?;
+        graphs.set_item("hits", hits)?;
+        graphs.set_item("misses", misses)?;
+        graphs.set_item("given_up", given_up)?;
+        out.set_item("graphs", graphs)?;
         Ok(out.into_any().unbind())
     }
 
@@ -497,12 +520,18 @@ impl CfgFunction {
     /// made runs in its place, with a `reason` if it is not exported for
     /// further kinds of calls; "vm" with a `reason`: it is not exported, or
     /// not for the calls it has seen), `ops` and `operators`, `inputs` and
-    /// `outputs` (how many values it takes and gives), `variants` (how many
+    /// `outputs` (how many values it takes and gives), `ends` (the block and
+    /// instruction the code goes on at behind it) and `why` (it ends
+    /// there), `variants` (how many
     /// exported forms it has), `hits` and `misses` (how many calls ran an
     /// exported form, and how many came to the graph and ran its
-    /// instructions), and `version` (of the block). And one per instruction
-    /// or run of instructions with tensor work that is in no graph, with
-    /// `state` "vm", the `reason`, and for one instruction its `text`.
+    /// instructions), `exports` (how many times it was handed to the passes
+    /// over graphs), `version` (of the block), and `forms`: per kind of call
+    /// it was recorded for, the one that ran last first, `checks` (what a
+    /// call has to be like, as text), `hits`, and the `reason` if calls of
+    /// the kind are not exported. And one per instruction or run of
+    /// instructions with tensor work that is in no graph, with `state` "vm",
+    /// the `reason`, and for one instruction its `text`.
     fn graphs(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let out = PyList::empty(py);
         let mut known: Vec<(String, String)> = Vec::new();
@@ -520,8 +549,9 @@ impl CfgFunction {
                     let Some(path) = site.path() else {
                         continue;
                     };
+                    let forms: Vec<Arc<crate::graph::Exported>> = path.exported.borrow().clone();
                     let compiled = path.compiled();
-                    let closed = path.exported.borrow().iter().find_map(|form| form.closed.clone());
+                    let closed = forms.iter().find_map(|form| form.closed.clone());
                     let (state, reason) = match &*site.state.borrow() {
                         GraphState::GivenUp(reason) if compiled > 0 => ("compiled", Some(reason.clone())),
                         GraphState::GivenUp(reason) => ("vm", Some(reason.clone())),
@@ -540,10 +570,24 @@ impl CfgFunction {
                     d.set_item("operators", path.operators.clone())?;
                     d.set_item("inputs", path.inputs.len())?;
                     d.set_item("outputs", path.outputs.len())?;
+                    d.set_item("ends", vec![path.land])?;
+                    d.set_item("why", path.ends.clone())?;
                     d.set_item("variants", compiled)?;
                     d.set_item("hits", path.hits.load(Ordering::Relaxed))?;
                     d.set_item("misses", path.misses.load(Ordering::Relaxed))?;
+                    d.set_item("exports", site.exports.load(Ordering::Relaxed))?;
                     d.set_item("version", version.id)?;
+                    let listed = PyList::empty(py);
+                    for form in &forms {
+                        let one = PyDict::new(py);
+                        one.set_item("checks", unsafe { form.conditions(func) })?;
+                        one.set_item("hits", form.hits.load(Ordering::Relaxed))?;
+                        if let Some(reason) = &form.closed {
+                            one.set_item("reason", reason.clone())?;
+                        }
+                        listed.append(one)?;
+                    }
+                    d.set_item("forms", listed)?;
                     out.append(d)?;
                 }
                 for left in &version.left {
@@ -570,6 +614,27 @@ impl CfgFunction {
             }
         }
         Ok(out.into_any().unbind())
+    }
+}
+
+impl CfgFunction {
+    /// The graphs of the live block versions of the function and of the
+    /// functions it called, each with its function, block and version.
+    fn graph_sites(&self) -> Vec<(Arc<Compiled>, usize, u32, Arc<GraphSite>)> {
+        let mut found = Vec::new();
+        let mut functions = vec![self.inner.clone()];
+        functions.extend(self.inner.callees.compiled());
+        for cf in functions {
+            let state = cf.state.borrow();
+            for (b, bs) in state.blocks.iter().enumerate() {
+                for version in &bs.versions {
+                    for site in &version.graphs {
+                        found.push((cf.clone(), b, version.id, site.clone()));
+                    }
+                }
+            }
+        }
+        found
     }
 }
 
