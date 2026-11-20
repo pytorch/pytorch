@@ -38,11 +38,11 @@ ownership:
       - /torch/nn/modules/linear_cross_entropy.py: [pearu]
   - name: dynamo
     labels: ["module: dynamo"]
-    owners: [alice, pytorch/dev-infra]
+    owners: [alice, carol]
     section: compiler_dynamo
     paths:
       - /torch/_dynamo/
-      - /torch/_dynamo/eval_frame.py: [alice, someone@example.com]
+      - /torch/_dynamo/eval_frame.py: [alice, carol]
   - name: tvm_dynamo
     labels: ["module: dynamo", "module: tvm"]
     owners: []
@@ -102,9 +102,9 @@ class TestGenerateCodeowners(TestCase):
 # [compiler_dynamo]
 # /torch/_dynamo_unlabeled.py
 # label: module: dynamo
-# owner: @alice @pytorch/dev-infra
+# owner: @alice @carol
 # /torch/_dynamo/
-/torch/_dynamo/eval_frame.py @alice someone@example.com
+/torch/_dynamo/eval_frame.py @alice @carol
 # label: module: dynamo, module: tvm
 # owner: none
 # /torch/_dynamo/backends/tvm.py
@@ -153,6 +153,18 @@ class TestGenerateCodeowners(TestCase):
                 "owners: [pearu]\n    owner: pearu",
             ),
             "not valid YAML": ("planned_labels:", "planned_labels: [\n"),
+            "'nn' owners: list people instead of teams \\['pytorch/nn-team'\\]": (
+                "owners: [bob]",
+                "owners: [bob, pytorch/nn-team]",
+            ),
+            "/torch/nn/: list GitHub logins instead of emails \\['bob@example.com'\\]": (
+                "/torch/nn/: [bob]",
+                "/torch/nn/: [bob@example.com]",
+            ),
+            "/torch/nn/: list people instead of teams \\['pytorch/nn-team'\\]": (
+                "/torch/nn/: [bob]",
+                "/torch/nn/: [bob, pytorch/nn-team]",
+            ),
             "sits inside /torch/_dynamo/ in 'dynamo'": (
                 "/torch/_dynamo_unlabeled.py",
                 "/torch/_dynamo/unlabeled.py",
