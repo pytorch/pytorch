@@ -24,22 +24,17 @@
 #include <torch/csrc/stable/c/shim.h>
 
 namespace {
-// Keep the full capability map so shims can reuse the same detection.
-struct CPUCapabilitiesCache {
-  std::unordered_map<std::string, c10::IValue> values =
-      at::cpu::get_cpu_capabilities();
-};
-
 // Initialize on the first shim call.
-const CPUCapabilitiesCache& torch_get_cpu_capabilities() {
-  static const CPUCapabilitiesCache capabilities;
+const std::unordered_map<std::string, c10::IValue>&
+_torch_get_cpu_capabilities() {
+  static const auto capabilities = at::cpu::get_cpu_capabilities();
   return capabilities;
 }
 } // namespace
 
 AOTI_TORCH_EXPORT AOTITorchError torch_get_l1d_cache_size(int64_t* ret_size) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    const auto& capabilities = torch_get_cpu_capabilities().values;
+    const auto& capabilities = _torch_get_cpu_capabilities();
     const auto it = capabilities.find("l1d_cache_size");
     *ret_size = it == capabilities.end() ? 0 : it->second.toInt();
   });
@@ -47,7 +42,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_get_l1d_cache_size(int64_t* ret_size) {
 
 AOTI_TORCH_EXPORT AOTITorchError torch_get_l2_cache_size(int64_t* ret_size) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    const auto& capabilities = torch_get_cpu_capabilities().values;
+    const auto& capabilities = _torch_get_cpu_capabilities();
     const auto it = capabilities.find("l2_cache_size");
     *ret_size = it == capabilities.end() ? 0 : it->second.toInt();
   });
