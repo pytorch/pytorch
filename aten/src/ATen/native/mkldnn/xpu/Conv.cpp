@@ -7,6 +7,7 @@
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/ops/empty.h>
 #include <c10/util/Exception.h>
+#include <c10/util/strides.h>
 #include <torch/library.h>
 #include <optional>
 
@@ -252,10 +253,22 @@ static at::Tensor view3d(const at::Tensor& tensor) {
 
 using namespace impl;
 
-static bool has_dense_strides(const Tensor& t, at::MemoryFormat fmt) {
-  auto ref = at::empty(t.sizes(), t.options().device(at::kCPU), fmt);
-  return t.strides() == ref.strides();
-};
+// is_contiguous(fmt) ignores strides of size-1 dims; rewrite them to the
+// canonical ones (no copy) so oneDNN reads the layout we expect.
+static Tensor with_canonical_strides(const Tensor& t, at::MemoryFormat fmt) {
+  c10::DimVector expected;
+  if (fmt == at::MemoryFormat::Contiguous) {
+    expected = c10::contiguous_strides(t.sizes());
+  } else if (fmt == at::MemoryFormat::ChannelsLast) {
+    expected = c10::get_channels_last_strides_2d(t.sizes());
+  } else {
+    expected = c10::get_channels_last_strides_3d(t.sizes());
+  }
+  if (t.strides() == at::IntArrayRef(expected)) {
+    return t;
+  }
+  return t.as_strided(t.sizes(), expected);
+}
 
 Tensor _convolution_out(
     Tensor& output_r,
@@ -330,13 +343,8 @@ Tensor _convolution_out(
   auto bias = bias_r.defined() ? make_contiguous_and_aligned(bias_r) : bias_r;
   input = make_contiguous_and_aligned(input, mfmt);
   weight = make_contiguous_and_aligned(weight, mfmt);
-  // ensure canonical strides
-  if (!has_dense_strides(input, mfmt)) {
-    input = input.clone(mfmt);
-  }
-  if (!has_dense_strides(weight, mfmt)) {
-    weight = weight.clone(mfmt);
-  }
+  input = with_canonical_strides(input, mfmt);
+  weight = with_canonical_strides(weight, mfmt);
   check_shape_forward(input, weight, bias, params);
 
   Tensor output;
@@ -545,16 +553,9 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   grad_output_ = make_contiguous_and_aligned(grad_output_, mfmt);
   weight_ = make_contiguous_and_aligned(weight_, mfmt);
   input_ = make_contiguous_and_aligned(input_, mfmt);
-  // ensure canonical strides
-  if (!has_dense_strides(grad_output_, mfmt)) {
-    grad_output_ = grad_output_.clone(mfmt);
-  }
-  if (!has_dense_strides(weight_, mfmt)) {
-    weight_ = weight_.clone(mfmt);
-  }
-  if (!has_dense_strides(input_, mfmt)) {
-    input_ = input_.clone(mfmt);
-  }
+  grad_output_ = with_canonical_strides(grad_output_, mfmt);
+  weight_ = with_canonical_strides(weight_, mfmt);
+  input_ = with_canonical_strides(input_, mfmt);
 
   auto opt = grad_output_.options();
   Tensor grad_input;
