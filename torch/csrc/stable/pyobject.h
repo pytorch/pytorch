@@ -6,6 +6,8 @@
 #include <torch/csrc/stable/stableivalue_conversions.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/csrc/stable/version.h>
+#include <torch/headeronly/core/Layout.h>
+#include <torch/headeronly/core/MemoryFormat.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/shim_utils.h>
@@ -96,5 +98,95 @@ inline void* device_to_pyobject(const Device& device) {
 }
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
+// Like the dtype/device helpers, the layout and memory format helpers translate
+// codes through the stable enum mappings.
+
+// Read the Layout out of a Python torch.layout (PyObject* passed as void*).
+inline torch::headeronly::Layout layout_from_pyobject(void* py_obj) {
+  int32_t layout = 0;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_layout_from_pyobject(py_obj, &layout));
+  return torch::stable::detail::to<torch::headeronly::Layout>(
+      torch::stable::detail::from(layout));
+}
+
+// Wrap a Layout as a new-reference Python torch.layout.
+inline void* layout_to_pyobject(torch::headeronly::Layout layout) {
+  void* raw = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_layout_to_pyobject(
+      torch::stable::detail::to<int32_t>(torch::stable::detail::from(layout)),
+      &raw));
+  return raw;
+}
+
+// Read the MemoryFormat out of a Python torch.memory_format (PyObject* passed
+// as void*).
+inline torch::headeronly::MemoryFormat memory_format_from_pyobject(
+    void* py_obj) {
+  int32_t memory_format = 0;
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_memory_format_from_pyobject(py_obj, &memory_format));
+  return torch::stable::detail::to<torch::headeronly::MemoryFormat>(
+      torch::stable::detail::from(memory_format));
+}
+
+// Wrap a MemoryFormat as a new-reference Python torch.memory_format.
+inline void* memory_format_to_pyobject(
+    torch::headeronly::MemoryFormat memory_format) {
+  void* raw = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_memory_format_to_pyobject(
+      torch::stable::detail::to<int32_t>(
+          torch::stable::detail::from(memory_format)),
+      &raw));
+  return raw;
+}
+
+// Read a Python bool (PyObject* passed as void*). Only True and False are
+// accepted.
+inline bool bool_from_pyobject(void* py_obj) {
+  bool ret = false;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_bool_from_pyobject(py_obj, &ret));
+  return ret;
+}
+
+// Wrap a bool as a new-reference Python bool.
+inline void* bool_to_pyobject(bool value) {
+  void* raw = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_bool_to_pyobject(value, &raw));
+  return raw;
+}
+
+// Read a Python int (PyObject* passed as void*) as an int64_t. bool is
+// rejected, and so are values outside the int64_t range.
+inline int64_t int64_from_pyobject(void* py_obj) {
+  int64_t ret = 0;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_int64_from_pyobject(py_obj, &ret));
+  return ret;
+}
+
+// Wrap an int64_t as a new-reference Python int.
+inline void* int64_to_pyobject(int64_t value) {
+  void* raw = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_int64_to_pyobject(value, &raw));
+  return raw;
+}
+
+// Read a Python float or int (PyObject* passed as void*) as a double.
+inline double double_from_pyobject(void* py_obj) {
+  double ret = 0;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_double_from_pyobject(py_obj, &ret));
+  return ret;
+}
+
+// Wrap a double as a new-reference Python float.
+inline void* double_to_pyobject(double value) {
+  void* raw = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_double_to_pyobject(value, &raw));
+  return raw;
+}
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 HIDDEN_NAMESPACE_END(torch, stable)

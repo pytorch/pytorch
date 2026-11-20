@@ -399,6 +399,57 @@ torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
 
+// More Python interop shims; see the Python interop section above for the
+// libtorch_python / GIL contract.
+
+// Read the layout out of a Python torch.layout object. The returned code uses
+// the same encoding as aoti_torch_layout_*().
+AOTI_TORCH_EXPORT AOTITorchError
+torch_layout_from_pyobject(void* py_obj, int32_t* ret_layout);
+
+// Wrap a layout code (aoti_torch_layout_*() encoding) as a Python torch.layout.
+AOTI_TORCH_EXPORT AOTITorchError torch_layout_to_pyobject(
+    int32_t layout,
+    void** ret); // returns new reference
+
+// Read the memory format out of a Python torch.memory_format object. The
+// returned code uses the same encoding as aoti_torch_memory_format_*().
+AOTI_TORCH_EXPORT AOTITorchError
+torch_memory_format_from_pyobject(void* py_obj, int32_t* ret_memory_format);
+
+// Wrap a memory format code (aoti_torch_memory_format_*() encoding) as a Python
+// torch.memory_format.
+AOTI_TORCH_EXPORT AOTITorchError torch_memory_format_to_pyobject(
+    int32_t memory_format,
+    void** ret); // returns new reference
+
+// Read a Python bool. Only True and False are accepted.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_bool_from_pyobject(void* py_obj, bool* ret);
+
+// Wrap a bool as a Python bool.
+AOTI_TORCH_EXPORT AOTITorchError torch_bool_to_pyobject(
+    bool value,
+    void** ret); // returns new reference
+
+// Read a Python int (not bool) as an int64_t; errors if it is out of range.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_int64_from_pyobject(void* py_obj, int64_t* ret);
+
+// Wrap an int64_t as a Python int.
+AOTI_TORCH_EXPORT AOTITorchError torch_int64_to_pyobject(
+    int64_t value,
+    void** ret); // returns new reference
+
+// Read a Python float or int as a double.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_double_from_pyobject(void* py_obj, double* ret);
+
+// Wrap a double as a Python float.
+AOTI_TORCH_EXPORT AOTITorchError torch_double_to_pyobject(
+    double value,
+    void** ret); // returns new reference
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #ifdef __cplusplus

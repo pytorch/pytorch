@@ -2,6 +2,8 @@
 
 #include <ATen/core/Tensor.h>
 #include <c10/core/Device.h>
+#include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/python_stub.h>
 #include <torch/csrc/Export.h>
@@ -64,6 +66,42 @@ struct TORCH_API PyObjectConversionInterface {
   // Return a new-reference Python torch.device for the given at::Device. The
   // GIL must be held.
   virtual PyObject* device_to_pyobject(const at::Device& device) const = 0;
+
+  // Read the at::Layout out of a Python torch.layout (PyObject*). The GIL must
+  // be held.
+  virtual at::Layout layout_from_pyobject(PyObject* obj) const = 0;
+
+  // Return a new-reference Python torch.layout for the given at::Layout. The
+  // GIL must be held.
+  virtual PyObject* layout_to_pyobject(at::Layout layout) const = 0;
+
+  // Read the at::MemoryFormat out of a Python torch.memory_format (PyObject*).
+  // The GIL must be held.
+  virtual at::MemoryFormat memory_format_from_pyobject(PyObject* obj) const = 0;
+
+  // Return a new-reference Python torch.memory_format for the given
+  // at::MemoryFormat. The GIL must be held.
+  virtual PyObject* memory_format_to_pyobject(
+      at::MemoryFormat memory_format) const = 0;
+
+  // Read a Python bool (True or False only). The GIL must be held.
+  virtual bool bool_from_pyobject(PyObject* obj) const = 0;
+
+  // Return a new-reference Python bool. The GIL must be held.
+  virtual PyObject* bool_to_pyobject(bool value) const = 0;
+
+  // Read a Python int (not bool) as int64_t, erroring if it is out of range.
+  // The GIL must be held.
+  virtual int64_t int64_from_pyobject(PyObject* obj) const = 0;
+
+  // Return a new-reference Python int. The GIL must be held.
+  virtual PyObject* int64_to_pyobject(int64_t value) const = 0;
+
+  // Read a Python float or int as double. The GIL must be held.
+  virtual double double_from_pyobject(PyObject* obj) const = 0;
+
+  // Return a new-reference Python float. The GIL must be held.
+  virtual PyObject* double_to_pyobject(double value) const = 0;
 };
 
 // Install the conversion implementation. Called once by libtorch_python when it
