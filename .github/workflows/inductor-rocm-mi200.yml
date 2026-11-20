@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: inductor-rocm-mi200-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}-inductor-rocm-mi200
   cancel-in-progress: true
 
 permissions:

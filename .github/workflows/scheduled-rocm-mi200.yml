@@ -16,6 +16,8 @@ permissions:
   actions: read
 
 jobs:
+  # Job ids prefix the child job names, so DISABLED/UNSTABLE job issues match as
+  # "scheduled-rocm-mi200 / <job id>" for the whole family, not per test config.
   default:
     if: github.repository_owner == 'pytorch'
     uses: ./.github/workflows/rocm-mi200.yml

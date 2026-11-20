@@ -7,7 +7,7 @@ inputs:
     description: If set to any value, use GHA to download the artifact. Otherwise use s3.
     required: false
   artifact-suffix:
-    description: Must match the artifact-suffix passed to target_determination.yml.
+    description: The artifact-suffix that target_determination.yml uploaded with, appended verbatim.
     required: false
     default: ""
 

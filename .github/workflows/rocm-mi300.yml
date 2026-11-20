@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: rocm-mi300-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}-rocm-mi300
   cancel-in-progress: true
 
 permissions:
@@ -73,7 +73,7 @@ jobs:
       docker-image: ${{ needs.linux-noble-rocm-py3_11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-py3_11-build.outputs.test-matrix }}
       # The default config picks these up by discovery; inductor-rocm-mi300.yml already
-      # runs them on the same schedule. A PR tagged only for this workflow will
+      # runs them under scheduled-rocm-mi300.yml. A PR tagged only for this workflow will
       # not cover them, so tag both. Only affects default (see EXCLUDE_CLAUSE in
       # .ci/pytorch/test.sh).
       tests-to-exclude: >-

@@ -9,8 +9,9 @@ on:
         type: string
         default: ""
         description: |
-          Appended to the TD artifact names. Set it when several callers share one
-          run (e.g. under a workflow_call parent) so their uploads don't collide.
+          Appended verbatim to the TD artifact names (td_results<suffix> on S3,
+          td_results<suffix>.json on GHA), e.g. "-rocm-mi300". Set it when several
+          callers share one run so their uploads don't collide.
 
 permissions:
   id-token: write
