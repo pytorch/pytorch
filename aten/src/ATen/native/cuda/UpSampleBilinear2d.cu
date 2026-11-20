@@ -363,10 +363,14 @@ __device__ __forceinline__ void compute_output_range(
   }
   const int min_output_bound = static_cast<int>(std::ceil(lo));
   const int max_output_bound = static_cast<int>(std::floor(hi));
-  // The inverse bounds are rounded in accscalar_t. Include one extra output on
-  // each side and filter by exact interpolation participation below.
-  min_output = min_output_bound > 0 ? min_output_bound - 1 : 0;
-  max_output = max_output_bound < output_size - 1 ? max_output_bound + 1 : output_size - 1;
+  // The inverse bounds are rounded in accscalar_t, and so is the forward source
+  // index that the callers use to filter by exact interpolation participation.
+  // Include one extra output on each side. The rounding error grows with the
+  // output coordinate (about a few eps * output_size outputs), so widen the
+  // margin once an axis has 2^19 or more outputs. Below that the margin is 1.
+  const int margin = 1 + (output_size >> 19);
+  min_output = min_output_bound > margin ? min_output_bound - margin : 0;
+  max_output = max_output_bound < output_size - 1 - margin ? max_output_bound + margin : output_size - 1;
 }
 
 template <typename accscalar_t>

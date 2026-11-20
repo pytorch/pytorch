@@ -9762,6 +9762,29 @@ class TestNNDeviceType(NNTestCase):
         ).to(dtype=dtype)
         self.assertEqual(gi, ref)
 
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(MI300_ARCH + MI350_ARCH + MI450_ARCH)
+    @largeTensorTest("3GB", "cuda")
+    @parametrize_test("align_corners", [True, False])
+    def test_upsamplingBilinear2d_backward_nhwc_gather_large_axis(self, device, align_corners):
+        # 16777716 -> 33555432 along one axis, 8 contributions per grad_input
+        # address (gather on gfx950 and gfx1250; gfx942 fp32 scatters). The
+        # input axis is past 2^24, where the float rounding of the inverse
+        # output range is larger than a one-output margin, and the gather used
+        # to drop contributions there (weight sum short by ~500 and ~1000).
+        # Each grad_output element spreads a total weight of 1, so with ones
+        # the sum of grad_input must equal grad_output.numel(). The float
+        # source index still loses a few contributions at this size in the
+        # scatter as well (-8 on gfx950), hence the tolerance.
+        c, w_in, w_out = 4, 16777716, 33555432
+        go = torch.ones(1, c, 1, w_out, device=device, dtype=torch.float)
+        go = go.contiguous(memory_format=torch.channels_last)
+        gi = torch.ops.aten.upsample_bilinear2d_backward(
+            go, [1, w_out], [1, c, 1, w_in], align_corners, None, None,
+        )
+        self.assertLess(abs(gi.sum(dtype=torch.float64).item() - go.numel()), 64)
+
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("mode", ["nearest", "nearest-exact"])
