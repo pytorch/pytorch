@@ -656,6 +656,9 @@ pub struct Cfg {
     pub spans: Vec<Span>,
 }
 
+// Span::inputs' name index for a cell's contents.
+pub const CELL: u32 = u32::MAX;
+
 // Single-entry blocks, from `entry` to `exit` (or returning), that only
 // compute, write the frame's locals and change containers they make: run as
 // a compiled region of everything they do (see exec/run.rs's span_trace).
@@ -674,8 +677,14 @@ pub struct Span {
     pub live_out: Vec<u32>,
     // The region's args: live_in's locals, or for one the span only reads
     // attributes of, those attributes (read on entry: nothing it runs can
-    // change them), as (slot, Some(name index)).
+    // change them), as (slot, Some(name index)); then the contents of the
+    // cells it reads (it writes none), as (slot, Some(CELL)).
     pub inputs: Vec<(u32, Option<u32>)>,
+    // The entry's explicit params (by position) it only passes on to its
+    // exit. The region's args are the inputs, then the entry's explicit
+    // params; its outputs the live_out locals, then the exit's explicit
+    // params (or what it returns).
+    pub passed: Vec<u32>,
     pub name: String,
     pub state: Arc<SpanState>,
 }
@@ -687,6 +696,8 @@ pub struct SpanState {
     pub regions: std::sync::Mutex<Vec<Arc<RegionSpec>>>,
     pub runs: std::sync::atomic::AtomicU32,
     pub off: std::sync::atomic::AtomicBool,
+    // The types of its args over its runs while observing.
+    pub types: std::sync::Mutex<Vec<crate::exec::types::Slot>>,
 }
 
 impl std::fmt::Debug for SpanState {
@@ -1022,6 +1033,13 @@ impl Cfg {
 }
 
 // Iterative DFS postorder, reversed. `succs(n)` lists successors in rule order.
+impl Cfg {
+    // How the printer shows an instr's op (names and constants resolved).
+    pub fn op_text(&self, v: ValueId) -> String {
+        Printer::new(self, true, false, &()).op(&self[v].op)
+    }
+}
+
 pub fn rpo_by(n: usize, start: usize, succs: impl Fn(usize) -> Vec<usize>) -> Vec<usize> {
     let mut visited = vec![false; n];
     let mut post = Vec::with_capacity(n);
