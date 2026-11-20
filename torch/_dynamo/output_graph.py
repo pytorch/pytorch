@@ -197,6 +197,7 @@ if TYPE_CHECKING:
     from torch._dynamo.dynamo_profiler import DynamoProfilerState
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._dynamo.variables.base import MutationType
     from torch._dynamo.variables.functions import LocalGeneratorObjectVariable
     from torch._inductor import _CudagraphAnnotation
     from torch.multiprocessing.reductions import StorageWeakRef
@@ -4028,10 +4029,8 @@ class SubgraphTracer(fx.Tracer):
         # This is set when enable_side_effects_in_hop=True for HOPs like invoke_subgraph
         # and checkpoint (when skip_fwd_side_effects_in_bwd_under_checkpoint config is True).
         self.allow_side_effects_in_hop = False
-        # User code stack at the point where an externally-visible side effect
-        # was first detected and allowed (not raised).  None means no side
-        # effect; non-None means one occurred.
-        self.side_effect_stack: traceback.StackSummary | None = None
+        # Externally visible mutation targets and their first user stack.
+        self.side_effect_stacks: dict[MutationType, traceback.StackSummary] = {}
         # All sources accessed via VariableBuilder (and cell loads) during
         # this subtracer's trace. Used by invoke_subgraph reuse to collect
         # guards and detect mutations on captured variables.
@@ -4070,6 +4069,10 @@ class SubgraphTracer(fx.Tracer):
             )
 
         self.tracked_proxyable_vt: OrderedSet[VariableTracker] = OrderedSet()
+
+    @property
+    def side_effect_stack(self) -> traceback.StackSummary | None:
+        return next(iter(self.side_effect_stacks.values()), None)
 
     def record_proxyable_vt(self, vt: VariableTracker) -> None:
         self.tracked_proxyable_vt.add(vt)

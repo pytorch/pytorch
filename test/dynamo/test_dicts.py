@@ -25,6 +25,7 @@ from torch._dynamo.exc import UncapturedHigherOrderOpError, Unsupported
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
 from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -4584,6 +4585,49 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
 
 
 instantiate_parametrized_tests(DictGuardTests)
+
+
+class DictStorageTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_borrowed_dict_after_owner_replacement(self, device):
+        class Obj:
+            pass
+
+        def fn(x, original, borrower, events):
+            retained = original.__dict__
+            borrower.__dict__ = retained
+            original.__dict__ = {"new": 100}
+            events.append("borrow")
+            borrower.tag = x.sin()
+            events.append("write")
+            return borrower.tag
+
+        original, borrower = Obj(), Obj()
+        original.seed = 7
+        retained = original.__dict__
+        events = []
+        x = torch.tensor([0.25, -0.75], dtype=torch.float64, device=device)
+        with self.assertRaisesRegex(
+            Unsupported, "Unsupported instance dictionary replacement"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                x, original, borrower, events
+            )
+        self.assertIs(original.__dict__, retained)
+        self.assertEqual(retained, {"seed": 7})
+        self.assertEqual(borrower.__dict__, {})
+        self.assertEqual(events, [])
+
+        actual = torch.compile(fn, backend="eager")(x, original, borrower, events)
+        self.assertEqual(actual, x.sin())
+        self.assertEqual(original.__dict__, {"new": 100})
+        self.assertEqual(retained, {"seed": 7, "tag": x.sin()})
+        self.assertIs(borrower.__dict__, retained)
+        self.assertEqual(events, ["borrow", "write"])
+
+
+instantiate_device_type_tests(DictStorageTests, globals())
 
 
 if __name__ == "__main__":
