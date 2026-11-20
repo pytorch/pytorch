@@ -1294,8 +1294,13 @@ namespace {
     typename std::enable_if_t<(mask >= 0 && mask <= 255), void>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()]) {
-        // generate expected_val, from a mask that GCC can't constant-fold:
-        // GCC 13 to 15 miscompile this loop for some constant masks on SVE256.
+        // generate expected_val. This works around a compiler bug rather than
+        // being the natural way to write it: GCC 13 to 15 miscompile this loop
+        // on SVE256 for some constant masks (for 253, the vectorized loop's
+        // predicate leaves lane 5 unset; see
+        // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=128913). Reading the
+        // mask through a volatile makes it a run-time value, which GCC can't
+        // fold into the loop.
         volatile int64_t mask_v = mask;
         int64_t m = mask_v;
         for (int64_t i = 0; i < vec::size(); i++) {
