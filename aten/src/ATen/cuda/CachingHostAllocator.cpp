@@ -91,10 +91,15 @@ struct CUDACachingHostAllocatorImpl
       allocWithCudaHostRegister(ptr, size);
     } else {
       // Use cudaHostAlloc for allocating pinned memory (global lock in driver).
-      // Relaxed: a capture on any thread, or on another stream of this
-      // thread, would otherwise reject the call and be invalidated.
-      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
-      C10_CUDA_CHECK(cudaHostAlloc(ptr, size, flags));
+      // Relaxed while a capture is registered, as in query_event: a capture on
+      // any thread, or on another stream of this thread, would otherwise
+      // reject the call and be invalidated.
+      if (C10_UNLIKELY(any_capture_underway())) {
+        at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+        C10_CUDA_CHECK(cudaHostAlloc(ptr, size, flags));
+      } else {
+        C10_CUDA_CHECK(cudaHostAlloc(ptr, size, flags));
+      }
     }
 
     auto end = std::chrono::steady_clock::now();
@@ -270,9 +275,14 @@ struct CUDACachingHostAllocatorImpl
       mapPagesForRegister(*ptr, roundSize, 0, 1, pageSize);
     }
 
-    // Register the mapped pages using cudaHostRegister
-    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
-    AT_CUDA_CHECK(cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
+    // Register the mapped pages using cudaHostRegister, relaxed while a
+    // capture is registered, as for cudaHostAlloc.
+    if (C10_UNLIKELY(any_capture_underway())) {
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+      AT_CUDA_CHECK(cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
+    } else {
+      AT_CUDA_CHECK(cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
+    }
   }
 
   CUDAStream get_current_stream() const override {
