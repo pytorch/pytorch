@@ -161,6 +161,7 @@ def select_ordered_col_config(
     if the mapping has out_dtypes, only to those outputs. With rows, B200 single-field
     split views take 16-column tiles at measured shapes and over a band, R 32768-65536
     at C 128-257.
+    B200's 16-column narrowing overrides table entries too.
     Views filling fewer than the mapping's min_blocks useful 32-column blocks get None.
     """
     cfg = _ORDERED_COL_CONFIGS.get(cc, {}).get(trait_type)
@@ -243,7 +244,7 @@ def select_col_config(
     threads = _WIDE_ACC_THREADS_PER_BLOCK if nfields >= 3 else _THREADS_PER_BLOCK
     geometry = _col_geometry(rows, columns, batches, itemsize, npar=npar, vec=vec)
     cfg = ColConfig(
-        "default" if npar is None and vec is None else "explicit",
+        "explicit" if explicit else "default",
         threads if threads_per_block is None else threads_per_block,
         *geometry,
         "partition" if batches * columns >= _C_THREAD_STAGE2 else "column",

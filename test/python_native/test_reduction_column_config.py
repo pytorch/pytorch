@@ -97,7 +97,7 @@ class TestColumnConfig(TestCase):
     @parametrize(
         "kwargs,rule,geometry",
         [
-            ({"threads_per_block": 128}, "default", (128, 4)),
+            ({"threads_per_block": 128}, "explicit", (128, 4)),
             ({"npar": 7}, "explicit", (7, 4)),
             # Two-wide vectors make 2048 lanes, which want 64 partitions, not 128.
             ({"vec": 2}, "explicit", (64, 2)),
