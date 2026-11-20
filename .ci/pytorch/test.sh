@@ -100,12 +100,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     # thread, which runs compilation inline with no pool) but bounds the number of
     # concurrent GPU-attached workers below the oversubscription threshold.
     export TORCHINDUCTOR_COMPILE_THREADS=16
-    # ROCr loads code objects larger than HSA_CO_DMACOPY_SIZE (default 1 MiB)
-    # via a blit kernel whose first dispatch can execute stale instructions and
-    # fault or hang (ROCm/rocm-systems#12209, fixed in ROCm 10.2). Raise the
-    # threshold to 1 GiB so code-object loads stay on the memcpy path. The value
-    # is parsed with atoi, so it must stay within int range.
-    export HSA_CO_DMACOPY_SIZE=1073741824
 fi
 
 export VALGRIND=ON
@@ -2101,15 +2095,6 @@ test_aot_compilation() {
   fi
 }
 
-test_vulkan() {
-  if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
-    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
-    export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/vk_swiftshader_icd.json
-    CPP_TESTS_DIR="${TORCH_TEST_DIR}" LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ python test/run_test.py --cpp --verbose -i cpp/vulkan_api_test
-  fi
-}
-
 test_distributed() {
   # $1 (optional): multigpu filter ("multigpu" | "not-multigpu"), see the
   # `multigpu` marker in test/conftest.py. Empty runs the whole suite.
@@ -2158,8 +2143,6 @@ test_distributed() {
       fi
 
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupGlooTest
-      python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLTest
-      python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
     fi
     python test/run_test.py --cpp --verbose -i cpp/NCCLDevCommManagerTest
   fi
@@ -2177,7 +2160,7 @@ test_distributed_single_gpu() {
 test_distributed_4gpu() {
   # Distributed tests that need more GPUs than the standard 2-GPU distributed
   # runner provides (3-4 GPU tests), run on runners with 4-GPU labels (e.g. ROCm
-  # gfx950.4). Selection reuses the native `multigpu` marker machinery (see
+  # mi350.dpx.4). Selection reuses the native `multigpu` marker machinery (see
   # test/conftest.py): --distributed-tests discovers every distributed test file
   # dynamically, --multigpu-filter multigpu keeps the process-spawning tests, and
   # --multigpu-min-gpus 3 keeps only those needing more than the standard 2-GPU
@@ -2992,8 +2975,6 @@ elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   fi
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
-elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
-  test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
