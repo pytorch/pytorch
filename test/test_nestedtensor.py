@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     NestedTensorTestCase,
     parametrize,
+    periodic,
     run_tests,
     serialTest,
     skipIfCppFakeTensor,
@@ -9058,6 +9059,7 @@ COMPARE_TENSOR_COMPONENT_EQUALITY = {
 # OpInfo-based NJT tests. These tests utilize an NJT-specific op_db generated from the standard
 # op_db. Note that certain tradeoffs were made wrt coverage vs. time spent running tests:
 #   * All tests run with dtype=torch.float32 only
+@periodic
 @skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensorOpInfo(NestedTensorTestCase):
     # TODO: move this

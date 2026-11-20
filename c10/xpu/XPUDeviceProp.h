@@ -182,9 +182,9 @@ namespace c10::xpu {
   /* specialized hardware to compute MMA is supported on device. */            \
   _(subgroup_matrix_multiply_accumulate)                                       \
                                                                                \
-  /* specialized hardware to compute MMA for 32-bit floating-point is          \
+  /* specialized hardware to compute MMA with tf32 (TensorFloat-32) inputs is  \
    * supported on device. */                                                   \
-  _(subgroup_matrix_multiply_accumulate_tensor_float32)                        \
+  _(subgroup_matrix_multiply_accumulate_tf32)                                  \
                                                                                \
   /* block read operations for efficient matrix multiplication is supported on \
    * device. */                                                                \

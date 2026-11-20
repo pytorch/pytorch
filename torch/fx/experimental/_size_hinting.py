@@ -112,9 +112,10 @@ def _guarding_hint_or_throw_base(
     shape_env: ShapeEnv,
     expr: sympy.Expr | sympy.Basic | int | bool,
     precomputed_replacements: dict[sympy.Expr, sympy.Symbol],
-) -> int | bool:
+) -> int | bool | float:
     """
-    Return a concrete integer hint for an expression that is safe to use for guarding.
+    Return a concrete hint for an expression that is safe to use for guarding.
+    Float expressions return a Python float (never truncated to int).
 
     This function evaluates the expression using only backed-symbols hints. Unlike
     _optimization_hint_base(), this function does NOT use heuristics or fallback values
@@ -153,6 +154,8 @@ def _guarding_hint_or_throw_base(
     if isinstance(expr, sympy.Expr):
         expr = expr.expand(identity=True)
 
+    if isinstance(expr, sympy.Float):
+        return float(expr)
     result = _maybe_realize_expr(expr, None)
     if result is not None:
         return result
@@ -174,6 +177,9 @@ def _guarding_hint_or_throw_base(
         # but is it worth the overhead? probably not.
         raise shape_env._make_data_dependent_error(expr, expr)
 
+    # _maybe_realize_expr would truncate a float to int via int().
+    if isinstance(expr, sympy.Float):
+        return float(expr)
     result = _maybe_realize_expr(expr, None)
     if result is None:
         raise RuntimeError("unexpected None!", expr)

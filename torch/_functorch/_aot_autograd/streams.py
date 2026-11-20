@@ -7,6 +7,7 @@ import torch.fx.traceback
 import torch.utils._pytree as pytree
 from torch._dynamo.graph_utils import _get_flat_args
 from torch._dynamo.variables.streams import get_current_stream, new_event
+from torch._higher_order_ops.user_kernel_hop import is_user_kernel_functional_hop
 from torch.fx.node import map_arg
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._runtime_estimation import (
@@ -391,11 +392,12 @@ def _expand_dict_returning_deps(
     graph: torch.fx.Graph,
     sync_node: Node,
 ) -> list[Node]:
-    """Expand triton_kernel_wrapper_functional dict deps into per-key getitems.
+    """Expand user-kernel functional HOP dict deps into per-key getitems.
 
-    ``triton_kernel_wrapper_functional`` returns a flat ``dict[str, Tensor]``.
+    A user-kernel functional HOP (``triton_kernel_wrapper_functional``, ...) returns
+    a flat ``dict[str, Tensor]``.
     If such a node is threaded through ``control_deps`` as a pass-through
-    value, ``decompose_triton_kernel_wrapper_functional`` later replaces it
+    value, ``decompose_user_kernel_wrapper_functional`` later replaces it
     with a raw Python dict, corrupting every user that expected an FX Node.
 
     To avoid this, we insert ``operator.getitem`` nodes *before* the sync for
@@ -407,8 +409,7 @@ def _expand_dict_returning_deps(
     expanded: list[Node] = []
     for dep in deps:
         if not (
-            dep.op == "call_function"
-            and dep.target is torch.ops.higher_order.triton_kernel_wrapper_functional
+            dep.op == "call_function" and is_user_kernel_functional_hop(dep.target)
         ):
             expanded.append(dep)
             continue
@@ -431,7 +432,7 @@ def _expand_dict_returning_deps(
                 new_gi.meta.update(old_gi.meta)
                 if isinstance(new_gi.meta.get("val"), dict):
                     raise AssertionError(
-                        f"nested dict in triton kernel output for key {key}"
+                        f"nested dict in user kernel output for key {key}"
                     )
                 visited.add(new_gi)
                 expanded.append(new_gi)
@@ -494,7 +495,7 @@ def _wrap_sync_node(
         if any(pred(user) for user in dep.users):
             deps_with_uses_after_sync.append(dep)
 
-    # Expand dict-returning nodes (triton_kernel_wrapper_functional) into
+    # Expand dict-returning nodes (triton_kernel_wrapper_functional, ...) into
     # individual getitem outputs.  Passing a dict-valued node through
     # control_deps breaks post-grad passes: reinplace + decomposition replace
     # the dict node with a Python dict, corrupting any user that expected an

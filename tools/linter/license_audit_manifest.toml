@@ -48,7 +48,6 @@ excluded = [
   'third_party/protobuf/third_party/googletest/googlemock/scripts/generator/LICENSE',
   'third_party/protobuf/third_party/googletest/googletest/LICENSE',
   'third_party/protobuf/third_party/utf8_range/LICENSE',
-  'third_party/python-peachpy/LICENSE.rst',
   'third_party/tensorpipe/third_party/googletest/LICENSE',
   'third_party/tensorpipe/third_party/googletest/googlemock/LICENSE',
   'third_party/tensorpipe/third_party/googletest/googlemock/scripts/generator/LICENSE',
@@ -83,7 +82,6 @@ paths = [
 [[spdx]]
 expression = 'BSD-2-Clause'
 paths = [
-  'third_party/NNPACK/LICENSE',
   'third_party/cpuinfo/LICENSE',
   'third_party/cpuinfo/deps/clog/LICENSE',
   'third_party/fbgemm/external/cpuinfo/LICENSE',

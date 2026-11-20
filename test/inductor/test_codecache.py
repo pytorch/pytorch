@@ -96,6 +96,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
@@ -135,6 +136,19 @@ torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
 
 STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
+
+
+_skip_if_gpu_unavailable = decorateIf(
+    unittest.skip(f"requires {GPU_TYPE}"),
+    lambda params: params["device"] == GPU_TYPE and (not HAS_GPU),
+)
+_skip_if_cuda_bfloat16_unsupported = decorateIf(
+    unittest.skip("requires SM80 or later"),
+    lambda params: params["device"] == "cuda"
+    and torch.version.hip is None
+    and (params["dtype"] == torch.bfloat16)
+    and (not SM80OrLater),
+)
 
 
 @instantiate_parametrized_tests
@@ -882,6 +896,17 @@ class TestFxGraphCache(TestCase):
             any("example_inputs[0]" in line for line in cache_payloads[0]["components"])
         )
 
+    @_skip_if_gpu_unavailable
+    @_skip_if_cuda_bfloat16_unsupported
+    @decorateIf(
+        unittest.skip("Static triton launcher requires cuda/xpu and triton bundling"),
+        lambda params: params["use_static_triton_launcher"]
+        and (
+            not (
+                params["device"] in STATIC_LAUNCHER_DEVICES and params["bundle_triton"]
+            )
+        ),
+    )
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -1144,6 +1169,17 @@ class TestFxGraphCache(TestCase):
             torch.set_default_dtype(old_dtype)
             FxGraphCache.clear()
 
+    @_skip_if_gpu_unavailable
+    @_skip_if_cuda_bfloat16_unsupported
+    @decorateIf(
+        unittest.skip("Static cuda launcher requires cuda and triton bundling"),
+        lambda params: params["use_static_triton_launcher"]
+        and (
+            not (
+                params["device"] in STATIC_LAUNCHER_DEVICES and params["bundle_triton"]
+            )
+        ),
+    )
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -1215,6 +1251,8 @@ class TestFxGraphCache(TestCase):
         for k in global_stats.fx_graph.cache:
             self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
+    @_skip_if_gpu_unavailable
+    @_skip_if_cuda_bfloat16_unsupported
     @requires_triton()
     @config.patch(
         {
@@ -1307,6 +1345,8 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
+    @_skip_if_gpu_unavailable
+    @_skip_if_cuda_bfloat16_unsupported
     @requires_triton()
     @config.patch(
         {
@@ -1777,6 +1817,7 @@ class TestFxGraphCache(TestCase):
         _, cache_info = artifacts
         self.assertEqual(len(cache_info.test_artifacts), 1)
 
+    @_skip_if_gpu_unavailable
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -1817,6 +1858,14 @@ class TestFxGraphCache(TestCase):
         # And the results should be the same.
         self.assertEqual(grads1, grads2)
 
+    @_skip_if_gpu_unavailable
+    @decorateIf(
+        unittest.skip("requires CUDA SM80 or later"),
+        lambda params: params["device"] == "cuda"
+        and torch.version.hip is None
+        and (params["dtype"] == torch.bfloat16)
+        and (not SM80OrLater),
+    )
     @largeTensorTest("64GB", device=GPU_TYPE, inductor=True)
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -1872,6 +1921,8 @@ class TestFxGraphCache(TestCase):
 
             self.assertEqual(res1, res2)
 
+    @_skip_if_gpu_unavailable
+    @_skip_if_cuda_bfloat16_unsupported
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -2000,6 +2051,7 @@ class TestFxGraphCache(TestCase):
 
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
+    @_skip_if_gpu_unavailable
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -2873,6 +2925,13 @@ class TestFxGraphCache(TestCase):
         # without any additional cache misses or dynamo recompilations.
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
 
+    @_skip_if_gpu_unavailable
+    @decorateIf(
+        unittest.skip("mkldnn tensors unsupported"),
+        lambda params: params["device"] == "cpu"
+        and torch.backends.mkldnn.is_available()
+        and torch.ops.mkldnn._is_mkldnn_fp16_supported(),
+    )
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"freezing": True})
@@ -2982,6 +3041,11 @@ class TestStandaloneCompile(TestCase):
 
         return inner
 
+    @_skip_if_gpu_unavailable
+    @decorateIf(
+        unittest.skip("AOT mode does not support unpacked format"),
+        lambda params: params["is_aot"] and params["format"] == "unpacked",
+    )
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -3208,6 +3272,7 @@ class TestStandaloneCompile(TestCase):
                 )
                 self.assertEqual(mod.bias.grad, torch.full_like(mod.bias, x.shape[0]))
 
+    @_skip_if_gpu_unavailable
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -6686,6 +6751,97 @@ class TestAutotuneCacheExtraOptions(TestCase):
         mock_local_backend.put.assert_called_once()
         saved_data = mock_local_backend.put.call_args[0][1]
         self.assertNotIn("extra_options", saved_data)
+
+
+@instantiate_parametrized_tests
+class TestAutotuneCacheClusterShape(TestCase):
+    @staticmethod
+    def _configs():
+        from triton import Config
+
+        # Set as an attribute, so the code that only reads ctas_per_cga runs with
+        # any Triton; rebuilding a Config with it needs a Triton that has it. A
+        # list, as users write it, which triton.Config keeps as given.
+        plain = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        clustered = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        clustered.ctas_per_cga = [2, 1, 1]
+        return [plain, clustered]
+
+    @staticmethod
+    def _cache(configs, directory, coordinate_descent_tuning=False):
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        inductor_meta = {
+            "autotune_local_cache": True,
+            "autotune_remote_cache": False,
+            "is_fbcode": False,
+            "coordinate_descent_tuning": coordinate_descent_tuning,
+        }
+        filename = os.path.join(directory, "kernel.py")
+        cache = AutotuneCache.create(inductor_meta, filename, hash_configs(configs))
+        return cache, inductor_meta
+
+    @requires_triton()
+    @parametrize("winner", [0, 1])
+    def test_cache_hit_matches_ctas_per_cga(self, winner):
+        configs = self._configs()
+        with tempfile.TemporaryDirectory() as directory:
+            cache, inductor_meta = self._cache(configs, directory)
+            self.assertIsNotNone(cache)
+            cache.save(configs[winner], time_taken_ns=1000)
+            result = cache.read_best(inductor_meta, configs)
+        self.assertIs(result, configs[winner])
+
+    @requires_triton()
+    def test_cache_saves_ctas_per_cga_only_when_set(self):
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+
+        saved = []
+        for cfg in self._configs():
+            cache = AutotuneCache.__new__(AutotuneCache)
+            cache.configs_hash = "test_hash"
+            backend = mock.MagicMock()
+            cache.local_cache = (backend, "test_key")
+            cache.remote_cache = None
+            with mock.patch(
+                "torch._inductor.runtime.autotune_cache.AutotuneCacheBundler"
+            ):
+                cache.save(cfg, time_taken_ns=1000)
+            saved.append(backend.put.call_args[0][1])
+        self.assertNotIn("ctas_per_cga", saved[0])
+        self.assertEqual(saved[1]["ctas_per_cga"], [2, 1, 1])
+
+    @requires_triton()
+    def test_coordesc_cache_hit_keeps_ctas_per_cga(self):
+        from torch._inductor.runtime.triton_compat import _triton_config_has
+
+        if not _triton_config_has("ctas_per_cga"):
+            raise unittest.SkipTest("triton.Config has no ctas_per_cga")
+        configs = self._configs()
+        with tempfile.TemporaryDirectory() as directory:
+            cache, inductor_meta = self._cache(configs, directory, True)
+            self.assertIsNotNone(cache)
+            cache.save(configs[1], time_taken_ns=1000, found_by_coordesc=True)
+            result = cache.read_best(inductor_meta, configs)
+        self.assertIsInstance(result.ctas_per_cga, tuple)
+        self.assertEqual(result.ctas_per_cga, (2, 1, 1))
+
+    @requires_triton()
+    def test_configs_differing_in_ctas_per_cga_or_maxnreg_stay_distinct(self):
+        from triton import Config
+
+        from torch._inductor.runtime.triton_heuristics import (
+            hash_configs,
+            unique_configs,
+        )
+
+        plain, clustered = self._configs()
+        capped = Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        capped.maxnreg = 64
+        configs = [plain, clustered, capped]
+        self.assertEqual(unique_configs(configs), configs)
+        self.assertEqual(len({hash_configs([cfg]) for cfg in configs}), 3)
 
 
 if __name__ == "__main__":

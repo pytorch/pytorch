@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
 
-# libcupti soname for the supported CUDA major (Cuspy's floor is 13.3). Loaded
+# libcupti soname for the supported CUDA major (Cuspy's floor is 13.5). Loaded
 # by name so dlopen returns the copy already mapped into the process: torch front-loads
 # the nvidia-cuda-cupti wheel (torch._preload_cuda_deps) and cupti-python / kineto load
 # it otherwise, so every consumer shares one CUPTI -- a second instance would collide
@@ -65,9 +65,12 @@ CUPTI_ACTIVITY_FLAG_FLUSH_FORCED = 1
 # header) rather than hardcoded ints -- they are renumbered vs cupti-python's own enum.
 
 # Minimum libcupti Cuspy supports. The v2 user-defined-record API arrived in
-# 13.2, but only 13.3 populates pBufferCompleteInfo->ppRecordLayouts (CUPTI's own
-# per-kind record layout) that Cuspy decodes against, so 13.3 is the floor.
-LIBCUPTI_MIN_VERSION = 130300
+# 13.2 and 13.3 first populates pBufferCompleteInfo->ppRecordLayouts (CUPTI's own
+# per-kind record layout) that Cuspy decodes against; Cuspy is only supported on 13.5+.
+LIBCUPTI_MIN_VERSION = 130500
+
+# Minimum CUDA version PyTorch must be built with (torch.version.cuda) for Cuspy.
+CUDA_MIN_VERSION = (13, 5)
 
 # CUPTI overhead-kind codes (CUpti_ActivityOverheadKind in cupti_activity.h).
 # cupti-python does not surface these as an enum, so the code -> name mapping is
@@ -412,17 +415,22 @@ class _PyLibCupti:
             == CUPTI_SUCCESS
         )
 
-    def disarm_approx_timestamp_callback(self, sub_handle: int) -> None:
-        """Restore CUPTI's default CPU timer for this subscriber (callback_addr=0), the
-        inverse of arm_approx_timestamp_callback -- called before unsubscribe so a following
-        consumer isn't left with our callback."""
+    def disarm_approx_timestamp_callback(self, sub_handle: int) -> bool:
+        """Restore CUPTI's default CPU timer; return whether removal succeeded.
+
+        Teardown may ignore failure before unsubscribing. A live configuration
+        change must check this result before interpreting records on another clock.
+        """
         val = ctypes.c_void_p(None)
         size = ctypes.c_size_t(ctypes.sizeof(ctypes.c_void_p))
-        self._lib.cuptiActivitySetAttribute_v2(
-            ctypes.c_void_p(sub_handle),
-            ActivityAttr.TIMESTAMP_CALLBACK,
-            ctypes.byref(size),
-            ctypes.byref(val),
+        return (
+            self._lib.cuptiActivitySetAttribute_v2(
+                ctypes.c_void_p(sub_handle),
+                ActivityAttr.TIMESTAMP_CALLBACK,
+                ctypes.byref(size),
+                ctypes.byref(val),
+            )
+            == CUPTI_SUCCESS
         )
 
     def activity_flush_all(self, *, forced: bool = False) -> None:
@@ -462,6 +470,26 @@ class _PyLibCupti:
         self._check(
             self._lib.cuptiActivityEnableHWTrace(1 if enabled else 0),
             "cuptiActivityEnableHWTrace",
+        )
+
+    def activity_enable_hes(self, sub_handle: int, *, enabled: bool = True) -> None:
+        """Set HES on the subscriber that will collect user-defined records.
+
+        Enable this before CUDA driver initialization and before enabling activity kinds.
+        The global cuptiActivityEnableHWTrace API cannot be mixed with UDR, even as
+        a fallback; preserve the subscriber-scoped attribute's error instead.
+        Disabling is used only to roll back failed early initialization.
+        """
+        value = ctypes.c_uint8(1 if enabled else 0)
+        size = ctypes.c_size_t(1)
+        self._check(
+            self._lib.cuptiActivitySetAttribute_v2(
+                ctypes.c_void_p(sub_handle),
+                ActivityAttr.ENABLE_HES,
+                ctypes.byref(size),
+                ctypes.byref(value),
+            ),
+            "cuptiActivitySetAttribute_v2(ENABLE_HES)",
         )
 
     def finalize(self) -> None:
@@ -544,14 +572,18 @@ class _PyLibCupti:
             ),
             "cuptiActivitySetAttribute_v2",
         )
-        self._check(
-            self._lib.cuptiActivityRegisterCallbacks_v2(
-                ctypes.c_void_p(sub_handle),
-                ctypes.c_void_p(request_addr),
-                ctypes.c_void_p(complete_addr),
-            ),
-            "cuptiActivityRegisterCallbacks_v2",
-        )
+        try:
+            self._check(
+                self._lib.cuptiActivityRegisterCallbacks_v2(
+                    ctypes.c_void_p(sub_handle),
+                    ctypes.c_void_p(request_addr),
+                    ctypes.c_void_p(complete_addr),
+                ),
+                "cuptiActivityRegisterCallbacks_v2",
+            )
+        except Exception:
+            self.disarm_user_defined_records(sub_handle)
+            raise
 
     def disarm_user_defined_records(self, sub_handle: int) -> None:
         """Turn user-defined records back off for the subscription (the inverse of

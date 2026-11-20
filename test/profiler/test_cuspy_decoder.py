@@ -4,7 +4,7 @@ import time
 import unittest
 
 import torch
-from torch.testing._internal.common_cuda import TEST_CUPTI, TEST_CUPTI_V13_3
+from torch.testing._internal.common_cuda import TEST_CUPTI, TEST_CUPTI_V13_5
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -13,8 +13,8 @@ from torch.testing._internal.common_utils import (
 
 
 # The decode tests drive the real libcupti (pylibcupti); guard its import on TEST_CUPTI
-# (cupti-python imports its enums at load). TEST_CUPTI_V13_3 additionally requires a loaded
-# libcupti >= 13.3 (the v2 user-defined-record API the decode worker drives).
+# (cupti-python imports its enums at load). TEST_CUPTI_V13_5 additionally requires a loaded
+# libcupti >= 13.5 on a CUDA >= 13.5 build, the Cuspy test floor.
 if TEST_CUPTI:
     from torch.profiler._cuspy.cupti_python import pylibcupti
 
@@ -22,7 +22,9 @@ if TEST_CUPTI:
 class TestCuspyDecoderCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires a loaded libcupti >= 13.3")
+    @unittest.skipIf(
+        not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + a loaded libcupti >= 13.5"
+    )
     @unittest.skipIf(not torch.cuda.is_available(), "needs a CUDA context")
     def test_decoder_groups_distinct_layouts(self):
         # The native decode worker keys accumulated columns by (kind, layout) -- the

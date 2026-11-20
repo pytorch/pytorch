@@ -100,6 +100,9 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void enable_debug_mode();
   cudaGraph_t raw_cuda_graph();
   cudaGraphExec_t raw_cuda_graph_exec();
+  // Adopt an exec instantiated from raw_cuda_graph(). The caller owns the
+  // replaced exec; reset/destruction owns the installed exec. Null clears it.
+  void set_raw_cuda_graph_exec(cudaGraphExec_t graph_exec);
 
   static CUDAGraph* get_currently_capturing_graph();
   void begin_capture_to_if_node(const Tensor& scalar_cuda_pred_tensor);
@@ -127,6 +130,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void begin_capture_to_conditional_node(
       const Tensor& scalar_cuda_pred_tensor,
       cudaGraphConditionalNodeType conditional_type);
+  void route_pool_to_innermost_capture();
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 
  protected:

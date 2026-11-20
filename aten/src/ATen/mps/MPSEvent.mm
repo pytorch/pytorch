@@ -30,6 +30,14 @@ void MPSEvent::recordLocked(bool syncEvent, MPSStream* stream) {
   // active encoders must end before encoding or waiting
   m_stream->endKernelCoalescing();
   const uint64_t signalCounter = ++m_signalCounter;
+  if (syncEvent) {
+    // If there's pending work, encode a query signal before this event's
+    // signal, so that once this event's signal is observed, the query event is
+    // guaranteed to have signaled too. This is only done when committing
+    // (`syncEvent == true`), because an uncommitted query signal would make
+    // `query` report pending work that it never commits.
+    m_stream->encodeQuerySignalIfNeeded();
+  }
   id<MTLCommandBuffer> commandBuffer = m_stream->commandBuffer();
   if (m_enable_timing) {
     uint64_t timingGeneration;
@@ -61,6 +69,8 @@ bool MPSEvent::waitLocked(bool syncEvent, MPSStream* stream) {
   wait_stream->endKernelCoalescing();
   id<MTLCommandBuffer> commandBuffer = wait_stream->commandBuffer();
   [commandBuffer encodeWaitForEvent:m_event value:signalCounter];
+  // The stream is not idle until the awaited event signals
+  wait_stream->markWorkEncoded();
   if (syncEvent) {
     wait_stream->synchronize(SyncType::COMMIT);
   }

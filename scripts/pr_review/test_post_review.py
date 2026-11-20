@@ -869,6 +869,77 @@ class TestAnUnfinishedRunLeavesTheLastVerdict(unittest.TestCase):
         self.assertEqual(gh.writes(), [])
 
 
+class TestAddingTheOptOutLabelWithdrawsChangeRequests(unittest.TestCase):
+    def withdraw(self, gh):
+        with redirect_stdout(io.StringIO()):
+            post_review.withdraw_opted_out(gh, 1, AUTHOR, "no automated review")
+
+    def test_every_standing_request_of_ours_is_dismissed(self):
+        gh = FakeGitHub(
+            labels=("No Automated Review",),
+            reviews=[
+                old_review(5, state="CHANGES_REQUESTED"),
+                old_review(6, state="CHANGES_REQUESTED", commit=SHA),
+                old_review(7, state="CHANGES_REQUESTED", author="someone"),
+                old_review(8, state="CHANGES_REQUESTED", body="no marker"),
+                old_review(9),
+            ],
+        )
+        self.withdraw(gh)
+        self.assertEqual(dismissed(gh), ["5", "6"])
+        for w in gh.writes("PUT"):
+            self.assertEqual(w[2]["message"], post_review.OPTED_OUT)
+
+    def test_nothing_is_dismissed_once_the_label_is_gone(self):
+        gh = FakeGitHub(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        self.withdraw(gh)
+        self.assertEqual(gh.writes(), [])
+
+    def test_a_refused_dismissal_does_not_stop_the_others(self):
+        class RefuseFive(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if path.endswith("/reviews/5/dismissals"):
+                    raise GitHubError(403, "forbidden")
+                return super().request(method, path, body)
+
+        gh = RefuseFive(
+            labels=("no automated review",),
+            reviews=[
+                old_review(5, state="CHANGES_REQUESTED"),
+                old_review(6, state="CHANGES_REQUESTED"),
+            ],
+        )
+        self.withdraw(gh)
+        self.assertEqual(
+            [r["state"] for r in gh.reviews], ["CHANGES_REQUESTED", "DISMISSED"]
+        )
+
+    def test_main_reads_its_inputs_and_an_api_error_only_warns(self):
+        env = {
+            "GH_TOKEN": "t",
+            "REPO": "o/r",
+            "PR_NUMBER": "1",
+            "OPT_OUT_LABEL": "skip me",
+        }
+        with (
+            mock.patch.dict(post_review.os.environ, env, clear=True),
+            mock.patch.object(sys, "argv", ["post_review.py", "--withdraw-opted-out"]),
+            mock.patch.object(post_review, "withdraw_opted_out") as withdraw_,
+        ):
+            self.assertEqual(post_review.main(), 0)
+        self.assertEqual(withdraw_.call_args.args[1:], (1, AUTHOR, "skip me"))
+        with (
+            mock.patch.dict(post_review.os.environ, env, clear=True),
+            mock.patch.object(sys, "argv", ["post_review.py", "--withdraw-opted-out"]),
+            mock.patch.object(
+                post_review, "withdraw_opted_out", side_effect=GitHubError(500, "x")
+            ),
+            redirect_stdout(io.StringIO()) as out,
+        ):
+            self.assertEqual(post_review.main(), 0)
+        self.assertIn("::warning::automated review not withdrawn", out.getvalue())
+
+
 class TestACleanVerdictLeavesNoChangeRequest(unittest.TestCase):
     def clean(self):
         return row(verdict="ready_for_human_review", findings=[])
