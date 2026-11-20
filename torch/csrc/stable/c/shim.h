@@ -399,6 +399,21 @@ torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
 
+// Adds minimum runtime target metadata for version-aware conversions.
+// Pass TORCH_ABI_VERSION for build and TORCH_FEATURE_VERSION for target;
+// target must be <= build. Build selects schema adapters, while target is
+// forwarded through argument and return conversions, including list/optional
+// elements. All current encodings are unchanged, including full-range integers.
+// The stack transfers owning arguments to libtorch and receives owning returns;
+// consumed inputs must not be reused. Inline values need no reference
+// management.
+AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher_v2(
+    const char* opName,
+    const char* overloadName,
+    StableIValue* stack,
+    uint64_t extension_build_version,
+    uint64_t extension_target_version);
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #ifdef __cplusplus

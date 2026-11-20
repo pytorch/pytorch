@@ -18,6 +18,27 @@
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
+/// Calls a dispatcher overload with build and target metadata from the headers.
+/// Minimum compatible version: PyTorch 2.9.
+/// The caller supplies boxed arguments; the stack transfers owning arguments to
+/// libtorch and receives owning returns. Consumed inputs must not be reused.
+/// Returns AOTITorchError; use STABLE_TORCH_ERROR_CODE_CHECK to handle
+/// failures.
+inline AOTITorchError call_dispatcher(
+    const char* op_name,
+    const char* overload_name,
+    StableIValue* stack) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  return torch_call_dispatcher_v2(
+      op_name, overload_name, stack, TORCH_ABI_VERSION, TORCH_FEATURE_VERSION);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  return torch_call_dispatcher(
+      op_name, overload_name, stack, TORCH_ABI_VERSION);
+#else
+  return aoti_torch_call_dispatcher(op_name, overload_name, stack);
+#endif
+}
+
 /// A function pointer type for data deleters used with from_blob.
 /// The deleter is called with the data pointer when the tensor's storage
 /// is deallocated.
@@ -43,13 +64,8 @@ inline torch::stable::Tensor empty_like(const torch::stable::Tensor& self) {
       torch::stable::detail::from(std::nullopt),
       torch::stable::detail::from(std::nullopt),
       torch::stable::detail::from(std::nullopt)};
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::empty_like", "", stack.data(), TORCH_ABI_VERSION));
-#else
   STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::empty_like", "", stack.data()));
-#endif
+      torch::stable::call_dispatcher("aten::empty_like", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -313,13 +329,8 @@ inline torch::stable::Tensor transpose(
       torch::stable::detail::from(self),
       torch::stable::detail::from(dim0),
       torch::stable::detail::from(dim1)};
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::transpose", "int", stack.data(), TORCH_ABI_VERSION));
-#else
   STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::transpose", "int", stack.data()));
-#endif
+      torch::stable::call_dispatcher("aten::transpose", "int", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -335,13 +346,8 @@ inline torch::stable::Tensor transpose(
 inline torch::stable::Tensor zero_(torch::stable::Tensor& self) {
   const auto num_args = 1;
   std::array<StableIValue, num_args> stack{torch::stable::detail::from(self)};
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::zero_", "", stack.data(), TORCH_ABI_VERSION));
-#else
   STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::zero_", "", stack.data()));
-#endif
+      torch::stable::call_dispatcher("aten::zero_", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -367,13 +373,8 @@ inline torch::stable::Tensor copy_(
       torch::stable::detail::from(self),
       torch::stable::detail::from(src),
       torch::stable::detail::from(non_blocking.value_or(false))};
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::copy_", "", stack.data(), TORCH_ABI_VERSION));
-#else
   STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::copy_", "", stack.data()));
-#endif
+      torch::stable::call_dispatcher("aten::copy_", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -393,13 +394,8 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self),
       torch::stable::detail::from(std::nullopt)};
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::clone", "", stack.data(), TORCH_ABI_VERSION));
-#else
   STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::clone", "", stack.data()));
-#endif
+      torch::stable::call_dispatcher("aten::clone", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -424,13 +420,8 @@ inline torch::stable::Tensor flatten(
       torch::stable::detail::from(self),
       torch::stable::detail::from(start_dim),
       torch::stable::detail::from(end_dim)};
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::flatten", "using_ints", stack.data(), TORCH_ABI_VERSION));
-#else
-  STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::flatten", "using_ints", stack.data()));
-#endif
+  STABLE_TORCH_ERROR_CODE_CHECK(torch::stable::call_dispatcher(
+      "aten::flatten", "using_ints", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -452,13 +443,8 @@ inline torch::stable::Tensor unsqueeze(
   const auto num_args = 2;
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self), torch::stable::detail::from(dim)};
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::unsqueeze", "", stack.data(), TORCH_ABI_VERSION));
-#else
   STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::unsqueeze", "", stack.data()));
-#endif
+      torch::stable::call_dispatcher("aten::unsqueeze", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -480,13 +466,8 @@ inline torch::stable::Tensor squeeze(
   const auto num_args = 2;
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self), torch::stable::detail::from(dim)};
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::squeeze", "dim", stack.data(), TORCH_ABI_VERSION));
-#else
   STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::squeeze", "dim", stack.data()));
-#endif
+      torch::stable::call_dispatcher("aten::squeeze", "dim", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -514,13 +495,8 @@ inline torch::stable::Tensor select(
       torch::stable::detail::from(self),
       torch::stable::detail::from(dim),
       torch::stable::detail::from(index)};
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::select", "int", stack.data(), TORCH_ABI_VERSION));
-#else
   STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::select", "int", stack.data()));
-#endif
+      torch::stable::call_dispatcher("aten::select", "int", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -541,13 +517,8 @@ inline torch::stable::Tensor matmul(
   const auto num_args = 2;
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self), torch::stable::detail::from(other)};
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::matmul", "", stack.data(), TORCH_ABI_VERSION));
-#else
   STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::matmul", "", stack.data()));
-#endif
+      torch::stable::call_dispatcher("aten::matmul", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -629,8 +600,8 @@ inline torch::stable::Tensor empty(
       torch::stable::detail::from(device),
       torch::stable::detail::from(pin_memory),
       torch::stable::detail::from(memory_format)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::empty", "memory_format", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(torch::stable::call_dispatcher(
+      "aten::empty", "memory_format", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -651,8 +622,8 @@ inline torch::stable::Tensor reshape(
   const auto num_args = 2;
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self), torch::stable::detail::from(shape)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::reshape", "", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::reshape", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -674,7 +645,7 @@ inline torch::stable::Tensor view(
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self), torch::stable::detail::from(size)};
   STABLE_TORCH_ERROR_CODE_CHECK(
-      torch_call_dispatcher("aten::view", "", stack.data(), TORCH_ABI_VERSION));
+      torch::stable::call_dispatcher("aten::view", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -695,8 +666,8 @@ inline torch::stable::Tensor view(
   const auto num_args = 2;
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self), torch::stable::detail::from(dtype)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::view", "dtype", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::view", "dtype", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -870,8 +841,8 @@ inline torch::stable::Tensor to(
       torch::stable::detail::from(non_blocking),
       torch::stable::detail::from(copy),
       torch::stable::detail::from(memory_format)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::to", "dtype_layout", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::to", "dtype_layout", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -923,8 +894,8 @@ inline torch::stable::Tensor contiguous(
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self),
       torch::stable::detail::from(memory_format)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::contiguous", "", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::contiguous", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -959,8 +930,8 @@ inline torch::stable::Tensor new_empty(
       torch::stable::detail::from(layout),
       torch::stable::detail::from(device),
       torch::stable::detail::from(pin_memory)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::new_empty", "", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::new_empty", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -995,8 +966,8 @@ inline torch::stable::Tensor new_zeros(
       torch::stable::detail::from(layout),
       torch::stable::detail::from(device),
       torch::stable::detail::from(pin_memory)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::new_zeros", "", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::new_zeros", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -1024,8 +995,8 @@ inline torch::stable::Tensor sum(
       torch::stable::detail::from(dim),
       torch::stable::detail::from(keepdim),
       torch::stable::detail::from(dtype)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::sum", "dim_IntList", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::sum", "dim_IntList", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -1056,8 +1027,8 @@ inline torch::stable::Tensor& sum_out(
       torch::stable::detail::from(keepdim),
       torch::stable::detail::from(dtype),
       torch::stable::detail::from(out)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::sum", "IntList_out", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::sum", "IntList_out", stack.data()));
   // Clean up the handle in stack[0], discard the temporary
   (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
   return out;
@@ -1174,8 +1145,8 @@ inline torch::stable::Tensor bitwise_and(
   const auto num_args = 2;
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self), torch::stable::detail::from(other)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::bitwise_and", "Tensor", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(torch::stable::call_dispatcher(
+      "aten::bitwise_and", "Tensor", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -1195,8 +1166,8 @@ inline torch::stable::Tensor bitwise_or(
   const auto num_args = 2;
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self), torch::stable::detail::from(other)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::bitwise_or", "Tensor", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(torch::stable::call_dispatcher(
+      "aten::bitwise_or", "Tensor", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -1216,8 +1187,8 @@ inline torch::stable::Tensor bitwise_left_shift(
   const auto num_args = 2;
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self), torch::stable::detail::from(other)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::bitwise_left_shift", "Tensor", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(torch::stable::call_dispatcher(
+      "aten::bitwise_left_shift", "Tensor", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -1237,8 +1208,8 @@ inline torch::stable::Tensor bitwise_right_shift(
   const auto num_args = 2;
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self), torch::stable::detail::from(other)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::bitwise_right_shift", "Tensor", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(torch::stable::call_dispatcher(
+      "aten::bitwise_right_shift", "Tensor", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -1259,8 +1230,8 @@ inline torch::stable::Tensor permute(
   const auto num_args = 2;
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self), torch::stable::detail::from(dims)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::permute", "", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::permute", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -1285,8 +1256,8 @@ inline torch::stable::Tensor index_select(
       torch::stable::detail::from(self),
       torch::stable::detail::from(dim),
       torch::stable::detail::from(index)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::index_select", "", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::index_select", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -1306,8 +1277,8 @@ inline torch::stable::Tensor floor_divide(
   const auto num_args = 2;
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self), torch::stable::detail::from(other)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::floor_divide", "", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::floor_divide", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -1326,8 +1297,8 @@ inline bool is_pinned(const torch::stable::Tensor& self) {
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self),
       torch::stable::detail::from(std::nullopt)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::is_pinned", "", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::is_pinned", "", stack.data()));
   return torch::stable::detail::to<bool>(stack[0]);
 }
 
@@ -1352,7 +1323,7 @@ inline std::tuple<torch::stable::Tensor, torch::stable::Tensor> sort(
       torch::stable::detail::from(dim),
       torch::stable::detail::from(descending)};
   STABLE_TORCH_ERROR_CODE_CHECK(
-      torch_call_dispatcher("aten::sort", "", stack.data(), TORCH_ABI_VERSION));
+      torch::stable::call_dispatcher("aten::sort", "", stack.data()));
   return std::make_tuple(
       torch::stable::detail::to<torch::stable::Tensor>(stack[0]),
       torch::stable::detail::to<torch::stable::Tensor>(stack[1]));
@@ -1382,8 +1353,8 @@ inline std::tuple<torch::stable::Tensor, torch::stable::Tensor> sort(
       torch::stable::detail::from(stable),
       torch::stable::detail::from(dim),
       torch::stable::detail::from(descending)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::sort", "stable", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::sort", "stable", stack.data()));
   return std::make_tuple(
       torch::stable::detail::to<torch::stable::Tensor>(stack[0]),
       torch::stable::detail::to<torch::stable::Tensor>(stack[1]));
@@ -1405,8 +1376,8 @@ inline torch::stable::Tensor masked_select(
   const auto num_args = 2;
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self), torch::stable::detail::from(mask)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::masked_select", "", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::masked_select", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -1431,8 +1402,8 @@ inline torch::stable::Tensor& mm_out(
       torch::stable::detail::from(self),
       torch::stable::detail::from(mat2),
       torch::stable::detail::from(out)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::mm", "out", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::mm", "out", stack.data()));
   // Clean up the handle in stack[0], discard the temporary
   (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
   return out;
@@ -1462,8 +1433,8 @@ inline torch::stable::Tensor& mm_out(
       torch::stable::detail::from(mat2),
       torch::stable::detail::from(out_dtype),
       torch::stable::detail::from(out)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::mm", "dtype_out", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::mm", "dtype_out", stack.data()));
   // Clean up the handle in stack[0], discard the temporary
   (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
   return out;
@@ -1490,8 +1461,8 @@ inline torch::stable::Tensor& bmm_out(
       torch::stable::detail::from(self),
       torch::stable::detail::from(mat2),
       torch::stable::detail::from(out)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::bmm", "out", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::bmm", "out", stack.data()));
   // Clean up the handle in stack[0], discard the temporary
   (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
   return out;
@@ -1521,8 +1492,8 @@ inline torch::stable::Tensor& bmm_out(
       torch::stable::detail::from(mat2),
       torch::stable::detail::from(out_dtype),
       torch::stable::detail::from(out)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::bmm", "dtype_out", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::bmm", "dtype_out", stack.data()));
   // Clean up the handle in stack[0], discard the temporary
   (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
   return out;
@@ -1546,7 +1517,7 @@ inline torch::stable::Tensor flip(
   std::array<StableIValue, num_args> stack{
       torch::stable::detail::from(self), torch::stable::detail::from(dims)};
   STABLE_TORCH_ERROR_CODE_CHECK(
-      torch_call_dispatcher("aten::flip", "", stack.data(), TORCH_ABI_VERSION));
+      torch::stable::call_dispatcher("aten::flip", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
@@ -1584,8 +1555,8 @@ inline torch::stable::Tensor from_file(
       torch::stable::detail::from(layout),
       torch::stable::detail::from(device),
       torch::stable::detail::from(pin_memory)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::from_file", "", stack.data(), TORCH_ABI_VERSION));
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch::stable::call_dispatcher("aten::from_file", "", stack.data()));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 

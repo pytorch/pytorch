@@ -260,8 +260,18 @@ The above is relevant in two places:
     }
     ```
 
-2. `torch_call_dispatcher`
-    This API allows you to call the PyTorch dispatcher from C/C++ code. It has the following signature:
+2. Calling the dispatcher
+    For C++, prefer `torch::stable::call_dispatcher` from `torch/csrc/stable/ops.h`:
+
+    ```cpp
+    STABLE_TORCH_ERROR_CODE_CHECK(torch::stable::call_dispatcher(opName, overloadName, stack));
+    ```
+
+    It returns `AOTITorchError` and selects `torch_call_dispatcher_v2` for targets
+    >= 2.16, `torch_call_dispatcher` for 2.10-2.15, and
+    `aoti_torch_call_dispatcher` for 2.9. Callers supply boxed arguments and reclaim
+    returned values using the stack ownership conventions above.
+    The original C API remains available with its unchanged signature:
 
     ```cpp
     torch_call_dispatcher(const char* opName, const char* overloadName, StableIValue* stack, uint64_t extension_build_version);
@@ -270,6 +280,14 @@ The above is relevant in two places:
     `torch_call_dispatcher` will call the op overload defined by a given `opName`, `overloadName`, a stack of
     StableIValues and the `TORCH_ABI_VERSION` of the user extension. This call will populate any return values of the
     op into the stack in their StableIValue form, with `ret0` at index 0, `ret1` at index 1, and so on.
+
+    `torch_call_dispatcher_v2` adds `extension_target_version` after
+    `extension_build_version`. Pass `TORCH_ABI_VERSION` for build and
+    `TORCH_FEATURE_VERSION` for target, with target <= build. Build retains its
+    schema-adapter role; target is forwarded recursively through list and optional
+    conversions for future target-dependent encodings. All current encodings are
+    unchanged: `int` and `SymInt` schema values use full-range `int64_t` integers
+    for every target. Registration APIs are unchanged.
 
     We caution against using this API to call functions that have been registered to the dispatcher by other extensions
     unless the caller can guarantee that the signature they expect matches that which the custom extension has
