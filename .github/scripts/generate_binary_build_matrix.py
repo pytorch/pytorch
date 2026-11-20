@@ -34,6 +34,7 @@ CUDA_STABLE = "13.2"
 CUDA_ARCHES_FULL_VERSION = {
     "13.2": "13.2.2",
     "13.4": "13.4.3",
+    "13.5": "13.5.0",
 }
 # CUDA versions that can only produce the runtime docker image. The devel image
 # apt-installs cuda-toolkit-<major>-<minor> from NVIDIA's repo.
