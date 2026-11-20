@@ -2143,8 +2143,6 @@ test_distributed() {
       fi
 
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupGlooTest
-      python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLTest
-      python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
     fi
     python test/run_test.py --cpp --verbose -i cpp/NCCLDevCommManagerTest
   fi

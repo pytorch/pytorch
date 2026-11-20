@@ -15,6 +15,10 @@ if not dist.is_available() or not dist.is_nccl_available():
     print("c10d NCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
+if not dist.distributed_c10d._NCCL_LEGACY_AVAILABLE:
+    print("c10d legacy NCCL not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
 
 class ProcessGroupNCCLSingleRankTest(TestCase):
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
