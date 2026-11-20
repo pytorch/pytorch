@@ -539,15 +539,19 @@ struct Frame {
     code: *mut u16,
     /// The variables of the frame: an owned reference or null each.
     locals: *mut Obj,
+    /// Where the frame has its frame object: null until something looks at
+    /// the frame (a traceback, a debugger).
+    object: *mut Obj,
 }
 
 impl Frame {
-    const NONE: Frame = Frame { ptr: null_mut(), instr: null_mut(), code: null_mut(), locals: null_mut() };
+    const NONE: Frame =
+        Frame { ptr: null_mut(), instr: null_mut(), code: null_mut(), locals: null_mut(), object: null_mut() };
 
     unsafe fn push(function: Obj) -> Result<Frame, ()> {
         let mut frame = Frame::NONE;
         if let Some(push) = capi::api().and_then(|api| api.frame_push) {
-            frame.ptr = push(function, &mut frame.instr, &mut frame.code, &mut frame.locals);
+            frame.ptr = push(function, &mut frame.instr, &mut frame.code, &mut frame.locals, &mut frame.object);
             if frame.ptr.is_null() {
                 return Err(());
             }
@@ -1699,7 +1703,17 @@ impl Compiled {
     /// frame.
     #[inline(always)]
     unsafe fn run(&self, regs: &mut [Obj], frame: Frame) -> Obj {
-        let result = self.exec(regs, frame);
+        let mut result = self.exec(regs, frame);
+        // A debugger that was entered below this call has its trace function
+        // on the frame, and is told that the function returns.
+        if !frame.object.is_null() && !(*frame.object).is_null() && !result.is_null() {
+            if let Some(returns) = capi::api().and_then(|api| api.frame_returns) {
+                if returns(frame.ptr, result) != 0 {
+                    ffi::Py_DECREF(result);
+                    result = null_mut();
+                }
+            }
+        }
         // The traceback of an exception that leaves the function refers to
         // its frame, which takes its variables along.
         self.settle(frame);
@@ -1718,7 +1732,8 @@ impl Compiled {
     unsafe fn enter_frame(&self, function: Obj, made: *mut std::ffi::c_void) -> Obj {
         let api = capi::api().unwrap_unchecked();
         let mut frame = Frame { ptr: made, ..Frame::NONE };
-        if (api.frame_adopt.unwrap_unchecked())(made, &mut frame.instr, &mut frame.code, &mut frame.locals) == 0 {
+        let adopt = api.frame_adopt.unwrap_unchecked();
+        if adopt(made, &mut frame.instr, &mut frame.code, &mut frame.locals, &mut frame.object) == 0 {
             return null_mut();
         }
         let here = std::ptr::addr_of!(frame) as usize;

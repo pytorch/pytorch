@@ -161,13 +161,15 @@ struct TcfgApi {
   // the code's co_localsplusnames: the caller keeps them what the variables
   // of the function are bound to, the cells of the closure excepted, which
   // are there already. The frame counts as one Python call against the
-  // recursion limit. Returns null with a Python error set: RecursionError,
-  // or MemoryError.
+  // recursion limit. *object gets the address of the frame's frame object,
+  // which is null until something looks at the frame. Returns null with a
+  // Python error set: RecursionError, or MemoryError.
   void* (*frame_push)(
       PyObject* func,
       uint16_t*** instr,
       uint16_t** code,
-      PyObject*** locals);
+      PyObject*** locals,
+      PyObject*** object);
   // Pops the frame, which must be the current one. A frame object that
   // something still refers to (a traceback) takes the frame's contents over,
   // its variables among them.
@@ -199,10 +201,16 @@ struct TcfgApi {
       void* frame,
       uint16_t*** instr,
       uint16_t** code,
-      PyObject*** locals);
+      PyObject*** locals,
+      PyObject*** object);
   // Has the interpreter run a frame that was offered. Returns a new
   // reference, or null with a Python error set.
   PyObject* (*frame_interpret)(void* frame);
+  // For a frame that is about to return result and has a frame object: if
+  // a debugger put its trace function on the frame (it does so for every
+  // frame of the stack it is entered under), tells it of the return, as the
+  // interpreter does. Returns -1 with a Python error set if it raised.
+  int32_t (*frame_returns)(void* frame, PyObject* result);
 
   // Whether torch.jit.trace is recording on this thread: one of the things
   // nn.Module.__call__ looks at before it calls forward.
