@@ -2022,57 +2022,67 @@ class GuardedCache(Generic[T]):
         remote_cache: RemoteCache[JsonDataTy] | None,
         key: str,
     ) -> Generator[tuple[T, bytes, bool], None, None]:
+        """
+        Yield (entry, pickled_content, is_local) for every entry stored under
+        `key`: all local entries first, then the remote one, if any. Entries that
+        fail to load are logged and skipped.
+        """
         if local:
-            subdir = cls._get_tmp_dir_for_key(key)
-            try:
-                names = sorted(os.listdir(subdir))
-            except FileNotFoundError:
-                # Nothing was ever written for this key, or another process cleared
-                # the cache out from under us. The local cache root is shared across
-                # processes, so checking os.path.exists() first would only narrow the
-                # race, not close it. Either way there are no candidates: a miss.
-                names = []
-            except OSError:
-                # Anything else (a bad mode on the cache dir, a dead mount) is not a
-                # race and is worth surfacing, but it still leaves no candidates.
-                log.warning(
-                    "%s unable to list cache entries", cls.__name__, exc_info=True
-                )
-                names = []
-            for path in names:
-                if path.startswith("."):
-                    continue  # Skip temp files from concurrent write_atomic() calls
-                try:
-                    with open(os.path.join(subdir, path), "rb") as f:
-                        content = f.read()
-                        yield pickle.loads(content), content, True
-                except FileNotFoundError:
-                    continue  # Raced with a concurrent cache clear
-                except Exception:
-                    log.warning(
-                        "%s unable to load compiled graph",
-                        cls.__name__,
-                        exc_info=True,
-                    )
-
+            yield from cls._iterate_local_candidates(key)
         if remote_cache:
+            yield from cls._iterate_remote_candidates(remote_cache, key)
+
+    @classmethod
+    def _iterate_local_candidates(
+        cls: type[GuardedCache[T]], key: str
+    ) -> Generator[tuple[T, bytes, bool], None, None]:
+        subdir = cls._get_tmp_dir_for_key(key)
+        try:
+            names = sorted(os.listdir(subdir))
+        except FileNotFoundError:
+            # Nothing was ever written for this key, or another process cleared
+            # the cache out from under us. The local cache root is shared across
+            # processes, so checking os.path.exists() first would only narrow the
+            # race, not close it. Either way there are no candidates: a miss.
+            names = []
+        except OSError:
+            # Anything else (a bad mode on the cache dir, a dead mount) is not a
+            # race and is worth surfacing, but it still leaves no candidates.
+            log.warning("%s unable to list cache entries", cls.__name__, exc_info=True)
+            names = []
+        for path in names:
+            if path.startswith("."):
+                continue  # Skip temp files from concurrent write_atomic() calls
             try:
-                if (cache_data := remote_cache.get(key)) is not None:
-                    if not isinstance(cache_data, dict):
-                        raise AssertionError(
-                            f"Expected dict from remote cache, got {type(cache_data)}"
-                        )
-                    data = cache_data["data"]
-                    if not isinstance(data, (str, bytes)):
-                        raise AssertionError(
-                            f"Expected str or bytes for cache data, got {type(data)}"
-                        )
-                    content = base64.b64decode(data)
-                    yield pickle.loads(content), content, False
+                with open(os.path.join(subdir, path), "rb") as f:
+                    content = f.read()
+                    yield pickle.loads(content), content, True
+            except FileNotFoundError:
+                continue  # Raced with a concurrent cache clear
             except Exception:
                 log.warning(
                     "%s unable to load compiled graph", cls.__name__, exc_info=True
                 )
+
+    @classmethod
+    def _iterate_remote_candidates(
+        cls: type[GuardedCache[T]], remote_cache: RemoteCache[JsonDataTy], key: str
+    ) -> Generator[tuple[T, bytes, bool], None, None]:
+        try:
+            if (cache_data := remote_cache.get(key)) is not None:
+                if not isinstance(cache_data, dict):
+                    raise AssertionError(
+                        f"Expected dict from remote cache, got {type(cache_data)}"
+                    )
+                data = cache_data["data"]
+                if not isinstance(data, (str, bytes)):
+                    raise AssertionError(
+                        f"Expected str or bytes for cache data, got {type(data)}"
+                    )
+                content = base64.b64decode(data)
+                yield pickle.loads(content), content, False
+        except Exception:
+            log.warning("%s unable to load compiled graph", cls.__name__, exc_info=True)
 
     @classmethod
     def find_guarded_entry(
@@ -2095,16 +2105,14 @@ class GuardedCache(Generic[T]):
             hints: List of symint hints paired with evaluate_guards
 
         Returns:
-            A tuple of (graph, pickled_content) if found, or (None, None) if not found
+            A tuple of (entry, pickled_content, cache_info). entry and
+            pickled_content are None if no candidate passed its guards.
         """
         graph = None
         pickled_content = None
         result_status = "full_miss"
         sample_guards_expr = None
         in_local = False
-
-        # Iterate over any entries in the subdir for this key and evaluate
-        # guards to determine whether there's a hit.
 
         for candidate, content, in_local in cls.iterate_over_candidates(
             local, remote_cache, key
@@ -2113,28 +2121,20 @@ class GuardedCache(Generic[T]):
                 raise AssertionError(
                     f"Cache candidate {type(candidate)} missing 'guards_expr' attribute"
                 )
-            if not candidate.guards_expr:  # type: ignore[attr-defined]
-                # No guards to evaluate, so this is a hit.
-                graph = candidate
-                pickled_content = content
-                result_status = "hit"
-                break
-
-            # Evaluate the guard expression in the current context.
-            # If there's not a cache hit, we don't want the evaluation to
-            # affect the current env, e.g., cause the creation of new guards,
-            # so we evaluate with the hints instead of the symbols.
-            hit = bool(evaluate_guards(candidate.guards_expr, hints))  # type: ignore[attr-defined]
-            if hit:
-                graph = candidate
-                pickled_content = content
-                result_status = "hit"
-                sample_guards_expr = candidate.guards_expr
-                break
-            else:
-                # At least one guard missed, log this
-                result_status = "guard_miss"
-                sample_guards_expr = candidate.guards_expr
+            guards_expr = candidate.guards_expr  # type: ignore[attr-defined]
+            if guards_expr:
+                # If there's not a cache hit, we don't want the evaluation to
+                # affect the current env, e.g., cause the creation of new guards,
+                # so we evaluate with the hints instead of the symbols.
+                sample_guards_expr = guards_expr
+                if not evaluate_guards(guards_expr, hints):
+                    result_status = "guard_miss"
+                    continue
+            # No guards to evaluate, or they all passed: a hit.
+            graph = candidate
+            pickled_content = content
+            result_status = "hit"
+            break
 
         info: CacheInfo = {"cache_status_detailed": result_status}
         if sample_guards_expr is not None:
