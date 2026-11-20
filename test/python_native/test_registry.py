@@ -561,7 +561,10 @@ class TestRegistryRuntime(TestCase):
         self._install("neg", "SparseCPU")
         self.assertEqual(routed(sparse).to_dense(), torch.tensor([6.0, -9.0]))
 
-    def test_boxed_scalar_inputs_do_not_allow_numerical_tensor_results(self) -> None:
+    @parametrize("from_python_kernel", (False, True))
+    def test_boxed_scalar_inputs_do_not_allow_numerical_tensor_results(
+        self, from_python_kernel: bool
+    ) -> None:
         with torch.library._scoped_library("prims", "FRAGMENT") as library:
             library.define("_native_boxed_result_test(Tensor x) -> Tensor")
 
@@ -571,9 +574,19 @@ class TestRegistryRuntime(TestCase):
             library.impl("_native_boxed_result_test", impl, "CPU")
             kernel = torch.library.get_kernel("prims::_native_boxed_result_test", "CPU")
             keyset = torch._C._dispatch_keys(torch.empty(()))
-            self.assertEqual(kernel.call_boxed(keyset, 1.0), torch.tensor(1.0))
-            with self.assertRaises((TypeError, RuntimeError)):
-                kernel.call_boxed(keyset, 2.0)
+            call = (
+                kernel._call_boxed_from_python_kernel
+                if from_python_kernel
+                else kernel.call_boxed
+            )
+            self.assertEqual(call(keyset, 1.0), torch.tensor(1.0))
+            with self.assertRaisesRegex((TypeError, RuntimeError), "Tensor"):
+                call(keyset, 2.0)
+            native = torch.library.get_kernel("aten::eq.Tensor", "CPU")
+            with self.assertRaisesRegex(
+                RuntimeError, "Expected a value of type 'Tensor'"
+            ):
+                native.call_boxed(keyset, torch.ones(3), 1.0)
 
     @parametrize("route", ("eager", "compile"))
     def test_scalar_router_preserves_dimensional_promotion(self, route: str) -> None:
