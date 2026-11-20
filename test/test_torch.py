@@ -5894,6 +5894,7 @@ class TestTorchDeviceType(TestCase):
     def test_memory_format_to_non_strided(self, device):
         x = torch.randn(3, 4, device=device)
         nested = torch.nested.nested_tensor([torch.randn(2, 3), torch.randn(4, 3)], device=device)
+        # Known limitation: non-contiguous nested tensors still return self, since _to_copy can't copy them
         for t in (x.to_sparse(), x.to_sparse_csr(), nested, nested.transpose(1, 2)):
             self.assertIs(t.to(memory_format=torch.contiguous_format), t)
 
