@@ -3,9 +3,6 @@
 # to guarantee that compiling these symbols do not require linking libtorch
 # to ensure header-only-ness.
 
-# torch/headeronly/cpu/Utils.h
-populate_cpu_cache_sizes_from_sysconf
-
 # torch/headeronly/util/shim_utils.h
 TORCH_ERROR_CODE_CHECK
 
