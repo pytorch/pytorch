@@ -158,12 +158,6 @@ pub enum Op {
     /// Calls a fixed Python object with these values. A pass puts it where
     /// it found something that does the work of a run of instructions.
     CallObject(PyObj, Vec<V>),
-    /// Calls a fixed Python object with these values. It returns None, and
-    /// the instructions go on, or it says where in the function execution
-    /// continues and what the values are there (see `Compiled::leap`): a
-    /// pass puts it in front of instructions that something else can do the
-    /// work of, together with what follows them in other blocks.
-    Leap(PyObj, Vec<V>),
     /// A call without arguments of what the global `locals`, `vars` or `dir`
     /// is. If it is that builtin, the result is made here, from the
     /// function's variables that have a value: each is given by its name (a
@@ -381,7 +375,7 @@ impl Op {
                 f(*class);
                 f(*names)
             }
-            Op::CallObject(_, args) | Op::Leap(_, args) => args.iter().for_each(|v| f(*v)),
+            Op::CallObject(_, args) => args.iter().for_each(|v| f(*v)),
             Op::Locals(callee, entries) => {
                 f(*callee);
                 entries.iter().for_each(|(_, v, _)| f(*v))
@@ -430,7 +424,6 @@ impl Op {
                 | Op::CallMethod { .. }
                 | Op::CallEx { .. }
                 | Op::CallObject(..)
-                | Op::Leap(..)
                 | Op::Locals(..)
                 | Op::Dispatch(_)
         )
@@ -479,17 +472,6 @@ impl Op {
                 | Op::FrameEnter(_)
                 | Op::FrameLeave
         )
-    }
-
-    /// Whether the instruction can be run on its own, outside the loop that
-    /// runs a function: what can be replayed, and what works on objects a
-    /// replay made itself (an iterator, a cell, a container) or only looks.
-    pub fn is_steppable(&self) -> bool {
-        self.is_replayable()
-            || matches!(
-                self,
-                Op::GetIter(_) | Op::IterNext(_) | Op::MakeCell(_) | Op::CheckBound(..) | Op::SetItem { .. }
-            )
     }
 
     /// Instructions that can be dropped when their result is unused: they
@@ -769,10 +751,6 @@ impl Function {
             Op::CallObject(callee, args) => {
                 let repr = unsafe { crate::pyffi::repr(callee.as_ptr()) };
                 format!("call_object {}({})", repr.chars().take(60).collect::<String>(), self.values(args))
-            }
-            Op::Leap(callee, args) => {
-                let repr = unsafe { crate::pyffi::repr(callee.as_ptr()) };
-                format!("leap {}({})", repr.chars().take(60).collect::<String>(), self.values(args))
             }
             Op::Locals(callee, entries) => {
                 let names: Vec<String> = entries
