@@ -5150,7 +5150,7 @@ class GraphModule(torch.nn.Module):
         subgraph_1 = self.subgraph_0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', hidden);  subgraph_1 = None
         hidden_1: "i64[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        return (hidden_1, hidden)
+        return (hidden, hidden_1)
 
     class subgraph_0(torch.nn.Module):
         def forward(self, l_hidden_: "i64[]"):
