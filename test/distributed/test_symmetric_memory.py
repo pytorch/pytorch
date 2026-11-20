@@ -221,6 +221,102 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         backend = symm_mem.get_backend(device_type)
         self.assertIsNotNone(backend)
 
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
+    @parametrize("persistent", [False, True])
+    @parametrize(
+        "size,stride,expected_bytes",
+        [
+            ((2, 2), (1024, 1), 4104),
+            ((2, 2), (1, 2), 16),
+            ((2, 2), (0, 1), 8),
+            ((), (), 4),
+        ],
+    )
+    def test_empty_strided_p2p_storage_size(
+        self, persistent, size, stride, expected_bytes
+    ) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        alloc_id = random.SystemRandom().getrandbits(64) if persistent else None
+        tensor = _SymmetricMemory.empty_strided_p2p(
+            size,
+            stride,
+            torch.float32,
+            self.device,
+            group_name=group_name,
+            alloc_id=alloc_id,
+        )
+        self.assertEqual(tensor.size(), size)
+        self.assertEqual(tensor.stride(), stride)
+        self.assertEqual(tensor.untyped_storage().nbytes(), expected_bytes)
+        handle = _SymmetricMemory.rendezvous(tensor)
+        self.assertEqual(handle.buffer_size, expected_bytes)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @parametrize("persistent", [False, True])
+    @parametrize("size", [-1, -(2**63)])
+    def test_empty_strided_p2p_negative_size(self, persistent, size) -> None:
+        self._init_process()
+        alloc_id = random.SystemRandom().getrandbits(64) if persistent else None
+        with self.assertRaisesRegex(RuntimeError, "negative dimension"):
+            _SymmetricMemory.empty_strided_p2p(
+                (size,),
+                (0,),
+                torch.float32,
+                self.device,
+                group_name=dist.group.WORLD.group_name,
+                alloc_id=alloc_id,
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @parametrize("stride", [(2048, 1), (2, 1)])
+    def test_empty_strided_p2p_persistent_storage_size(self, stride) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        alloc_id = random.SystemRandom().getrandbits(64)
+        tensor = _SymmetricMemory.empty_strided_p2p(
+            (2, 2),
+            (1024, 1),
+            torch.float32,
+            self.device,
+            group_name=group_name,
+            alloc_id=alloc_id,
+        )
+        data_ptr = tensor.data_ptr()
+        del tensor
+
+        tensor = _SymmetricMemory.empty_strided_p2p(
+            (2, 2),
+            (1, 1024),
+            torch.float32,
+            self.device,
+            group_name=group_name,
+            alloc_id=alloc_id,
+        )
+        self.assertEqual(tensor.data_ptr(), data_ptr)
+        self.assertEqual(tensor.stride(), (1, 1024))
+        del tensor
+
+        with self.assertRaisesRegex(RuntimeError, "requested allocation size"):
+            _SymmetricMemory.empty_strided_p2p(
+                (2, 2),
+                stride,
+                torch.float32,
+                self.device,
+                group_name=group_name,
+                alloc_id=alloc_id,
+            )
+
     @skip_if_rocm_multiprocess
     @skipIf(device_type != "cuda", "NVLink DMA connectivity detection is CUDA-specific")
     @skip_if_lt_x_gpu(2)
