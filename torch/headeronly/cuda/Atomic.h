@@ -315,9 +315,9 @@ inline __device__ void atomicAdd(bool* address, bool val) {
 
 /* Note [explicitly non-returning atomics]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * gfx908 opts into atomicAddNoRet through ROCm 6.4. That function has
- * been HIP_DEPRECATED since ROCm 6.0; from ROCm 7 it only aliases
- * unsafeAtomicAdd. The no-return op cannot implement returning atomicAdd.
+ * On gfx908, HIP < 7 has the fast fp32 no-return atomic only as
+ * atomicAddNoRet (deprecated since ROCm 6.0; aliases unsafeAtomicAdd
+ * from ROCm 7). That cannot implement atomicAdd, hence gpuAtomicAddNoReturn.
  */
 template <typename T>
 inline __device__ void gpuAtomicAddNoReturn(

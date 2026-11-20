@@ -561,7 +561,7 @@ inline void inclusive_scan_by_key(
     int64_t num_items) {
   TORCH_CHECK(
       num_items <= std::numeric_limits<int>::max(),
-      "cub InclusiveSumByKey does not support more than INT_MAX elements");
+      "cub InclusiveScanByKey does not support more than INT_MAX elements");
   CUB_WRAPPER(
       NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScanByKey,
       keys,
