@@ -794,17 +794,21 @@ class TestOrderedColRoute(TestCase):
 
     def test_policy_table_mappings(self):
         """Keep every table entry a mapping the kernel accepts."""
-        for cc, configs in ct._ORDERED_COL_CONFIGS.items():
-            for trait_key, cfg in configs.items():
-                with self.subTest(cc=cc, trait=trait_key):
-                    ct._check_ordered_mapping(cfg.worker_warps, cfg.tile_columns)
-                    self.assertGreaterEqual(cfg.min_blocks, 0)
-                    self.assertIsInstance(cfg.full_tiles, bool)
-                    outs = cfg.out_dtypes
-                    if outs is not None:
-                        self.assertIsInstance(outs, tuple)
-                        self.assertTrue(outs)
-                        self.assertTrue(all(isinstance(d, torch.dtype) for d in outs))
+        # The table has no entries yet, so seed one to run the checks.
+        seed = {(9, 0): {"sum": ct.OrderedColConfig(4, out_dtypes=(torch.float32,))}}
+        with mock.patch.dict(ct._ORDERED_COL_CONFIGS, seed):
+            for cc, configs in ct._ORDERED_COL_CONFIGS.items():
+                for trait_key, cfg in configs.items():
+                    with self.subTest(cc=cc, trait=trait_key):
+                        ct._check_ordered_mapping(cfg.worker_warps, cfg.tile_columns)
+                        self.assertGreaterEqual(cfg.min_blocks, 0)
+                        self.assertIsInstance(cfg.full_tiles, bool)
+                        outs = cfg.out_dtypes
+                        if outs is not None:
+                            self.assertIsInstance(outs, tuple)
+                            self.assertTrue(outs)
+                            for dt in outs:
+                                self.assertIsInstance(dt, torch.dtype)
 
     def test_row_offsets_widen_past_int32(self):
         from torch._native.ops.reductions import kernel_rowtile as rt
