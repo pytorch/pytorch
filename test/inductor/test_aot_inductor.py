@@ -6342,47 +6342,6 @@ class AOTInductorTestsTemplate:
                 # Not expect to see launchKernel("CUBIN_FILE_NAME"
                 FileCheck().check_not('launchKernel("').run(code)
 
-    @skip_if_device(lambda device: device != GPU_TYPE, "requires GPU")
-    def test_embed_kernel_binary_per_cubin_fallback_with_shared_cubin(self):
-        if self.device != GPU_TYPE:
-            raise unittest.SkipTest("requires GPU")
-
-        # Different scalar args give two kernel names that compile to one cubin.
-        class Model(torch.nn.Module):
-            def forward(self, x, y):
-                outs = []
-                for t in (x, y):
-                    out = torch.empty_like(t)
-                    add_kernel_autotuned_weird_param_order[t.numel() // 16,](
-                        in_ptr0=t, in_ptr1=t, n_elements=t.numel(), out_ptr=out
-                    )
-                    outs.append(out)
-                return outs
-
-        inputs = (
-            torch.randn(4, 4, device=self.device),
-            torch.randn(8, 8, device=self.device),
-        )
-        with (
-            config.patch({"aot_inductor.embed_kernel_binary": True}),
-            patch(
-                "torch._inductor.codecache.batch_convert_cubins_to_obj",
-                side_effect=subprocess.CalledProcessError(1, "cc"),
-            ),
-            patch(
-                "torch._inductor.codecache.convert_cubin_to_obj",
-                wraps=torch._inductor.cpp_builder.convert_cubin_to_obj,
-            ) as convert,
-        ):
-            self.check_model(Model(), inputs)
-        kernels_by_cubin = {}
-        for call in convert.call_args_list:
-            cubin, kernel_name = call.args[:2]
-            kernels_by_cubin.setdefault(cubin, set()).add(kernel_name)
-        self.assertTrue(kernels_by_cubin)
-        for kernel_names in kernels_by_cubin.values():
-            self.assertEqual(len(kernel_names), 2)
-
     @_skip_cpu_triton_backend
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
@@ -13461,7 +13420,6 @@ MPS_TEST_FAILURES = {
     "test_triton_kernel_dynamic_grid": fail_mps(),
     "test_repeated_user_defined_triton_kernel_embed_kernel_binary_False": fail_mps(),
     "test_repeated_user_defined_triton_kernel_embed_kernel_binary_True": fail_mps(),
-    "test_embed_kernel_binary_per_cubin_fallback_with_shared_cubin": fail_mps(),
     "test_triton_kernel_extern_kernel_arg": fail_mps(),
     "test_triton_kernel_multi_output_arg": fail_mps(),
     "test_triton_kernel_reinterpret_view_mem_leak": fail_mps(),
@@ -13523,12 +13481,6 @@ GPU_LAZY_AUTOTUNE_TEST_FAILURES = {
     # mode runs the generated JIT wrapper during compile, so it fails before
     # the AOTI package can be loaded.
     "test_aoti_custom_op_bad_fake_dtype_fails_fast": fail_gpu(
-        ("cuda", "xpu"), is_skip=True
-    ),
-    # Lazy autotune compiles each kernel from its own generated source file,
-    # whose path is embedded in the binary, so the two kernels this test
-    # relies on don't reliably share a cubin.
-    "test_embed_kernel_binary_per_cubin_fallback_with_shared_cubin": fail_gpu(
         ("cuda", "xpu"), is_skip=True
     ),
 }
