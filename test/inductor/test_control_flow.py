@@ -1458,6 +1458,31 @@ class WhileLoopTests(TestCase):
         actual = torch.compile(fn, fullgraph=True, options={"cpp_wrapper": True})(x)
         self.assertEqual(actual, expected)
 
+    @torch.no_grad()
+    def test_while_loop_cpp_wrapper_carried_and_captured_views(self):
+        # The carried input and the mutated captured tensor are disjoint
+        # views of the same buffer.
+        def fn(buf):
+            carried, captured = buf[:4], buf[4:]
+
+            def cond_fn(i, acc):
+                return i < 2
+
+            def body_fn(i, acc):
+                captured.add_(1.0)
+                return i + 1, acc + captured
+
+            return torch.while_loop(
+                cond_fn, body_fn, (torch.zeros((), dtype=torch.int64), carried)
+            )
+
+        buf = torch.ones(8)
+        expected_buf = buf.clone()
+        expected = fn(expected_buf)
+        actual = torch.compile(fn, fullgraph=True, options={"cpp_wrapper": True})(buf)
+        self.assertEqual(actual, expected)
+        self.assertEqual(buf, expected_buf)
+
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
