@@ -12,11 +12,13 @@ from unittest import mock
 from apply_actions import ApplyOutcome
 from plan_actions import (
     build_action_plan,
+    choose_owner_reviewers,
     EngagementReason,
     gather_planner_input,
     main as plan_main,
     new_reviewer_requests,
     OwnerChoice,
+    OwnerGroup,
     pick_roster_member,
     ReviewerState,
     TeamOwnerReviewers,
@@ -28,6 +30,7 @@ from schemas import (
     BOT_TRIAGE_ERROR_LABEL,
     MISSING_ACTIONABLE_ISSUE_ACTIONS,
     PlannerInput,
+    PullRequestIdentity,
     RequestReviewers,
 )
 from tests.plan_fixtures import (
@@ -1459,6 +1462,43 @@ class TeamOwnerReviewersTest(unittest.TestCase):
 
         self.assertEqual(routing.roster_users, ("Bob",))
         self.assertEqual(routing.unresolved_owners, ("quantization",))
+
+    def test_owner_groups_keep_the_first_covering_state_or_get_a_pick(self) -> None:
+        identity = PullRequestIdentity("pytorch/ciforge", 9, HEAD_SHA, "a" * 40)
+        groups = (
+            OwnerGroup("autograd", ("@Alice", "@bob")),
+            OwnerGroup("compiler", ("@Carol", "@dave")),
+            OwnerGroup("nn", ("@erin", "@frank")),
+            OwnerGroup("solo", ("@Author",)),
+        )
+
+        choices = choose_owner_reviewers(
+            identity=identity,
+            groups=groups,
+            coverage=(
+                ("codepath_covered", frozenset({"@alice"})),
+                ("pending", frozenset({"@bob", "@carol", "@author"})),
+            ),
+            author_handle="@author",
+        )
+
+        self.assertEqual(
+            choices,
+            {
+                "autograd": OwnerChoice("@Alice", "codepath_covered"),
+                "compiler": OwnerChoice("@Carol", "pending"),
+                "nn": OwnerChoice(
+                    pick_roster_member(
+                        repository="pytorch/ciforge",
+                        number=9,
+                        owner="nn",
+                        members=("@erin", "@frank"),
+                        author_handle="@author",
+                    ),
+                    "selected",
+                ),
+            },
+        )
 
     def test_roster_pick_is_reproducible_and_skips_the_author(self) -> None:
         args = {

@@ -60,6 +60,17 @@ def string_list(value, *, where: str) -> tuple[str, ...]:
     return tuple(value)
 
 
+def check_handles(handles: tuple[str, ...], *, where: str) -> None:
+    # Auto PR Triage requests owners with the workflow token, which can't request
+    # a team or map an email to a login, so every handle must be a user login.
+    emails = [h for h in handles if "@" in h]
+    if emails:
+        raise ValueError(f"{where}: list GitHub logins instead of emails {emails}")
+    teams = [h for h in handles if "/" in h]
+    if teams:
+        raise ValueError(f"{where}: list people instead of teams {teams}")
+
+
 def mapping(value, *, where: str) -> dict:
     if not isinstance(value, dict):
         raise ValueError(f"{where} must be a mapping, got {value!r}")
@@ -74,6 +85,7 @@ def parse_path_rule(entry, *, where: str) -> PathRule:
         notify = string_list(handles, where=f"{where} {path}")
         if not notify:
             raise ValueError(f"{where} {path}: write a quiet path as a bare string")
+        check_handles(notify, where=f"{where} {path}")
     else:
         raise ValueError(
             f"{where}: expected '/path' or '/path: [handles]', got {entry!r}"
@@ -97,6 +109,7 @@ def parse_group(entry, *, sections: tuple[str, ...]) -> LabelGroup:
         raise ValueError(f"{where}: missing keys {sorted(missing)}")
     labels = string_list(entry.get("labels", []), where=f"{where} labels")
     owners = string_list(entry["owners"], where=f"{where} owners")
+    check_handles(owners, where=f"{where} owners")
     if owners and not labels:
         raise ValueError(f"{where}: a group without labels can't have owners")
     if entry["section"] not in sections:
@@ -131,8 +144,13 @@ def check_consistency(ownership: OwnershipFile) -> None:
 
 def load_ownership(path: Path) -> OwnershipFile:
     """Load and validate OWNERSHIP.yaml; every problem is a ValueError."""
+    return parse_ownership(path.read_text())
+
+
+def parse_ownership(text: str) -> OwnershipFile:
+    """Parse and validate OWNERSHIP.yaml's text; every problem is a ValueError."""
     try:
-        document = yaml.safe_load(path.read_text())
+        document = yaml.safe_load(text)
     except yaml.YAMLError as error:
         raise ValueError(f"not valid YAML: {error}") from error
     document = mapping(document, where="OWNERSHIP.yaml")
@@ -167,8 +185,8 @@ def load_ownership(path: Path) -> OwnershipFile:
 
 
 def handle(name: str) -> str:
-    """Handles are stored without "@" (as in merge_rules.yaml); emails keep theirs."""
-    return name if "@" in name else f"@{name}"
+    """Handles are stored without "@" (as in merge_rules.yaml)."""
+    return f"@{name}"
 
 
 def render_rule(rule: PathRule) -> str:
@@ -304,19 +322,33 @@ def check_unlabeled_order(groups: list[LabelGroup]) -> None:
                     )
 
 
-def render_codeowners(ownership: OwnershipFile) -> str:
-    lines = render_header(ownership)
+def ordered_groups(ownership: OwnershipFile) -> list[tuple[str, list[LabelGroup]]]:
+    """Return each section with its groups in CODEOWNERS order.
+
+    This is the order the last matching rule is taken from, so CODEOWNERS and Auto
+    PR Triage (scripts/auto_pr_triage/trusted_config.py) both read rules this way.
+    Within a section, groups without labels come first, then label blocks.
+    """
+    sections = []
     for section in ownership.sections:
-        lines.append(f"# [{section}]")
-        lines.extend(ownership.section_notes.get(section, ()))
         groups = [group for group in ownership.groups if group.section == section]
         check_unlabeled_order(groups)
+        unlabeled = [group for group in groups if not group.labels]
+        labeled = order_blocks([group for group in groups if group.labels])
+        sections.append((section, unlabeled + labeled))
+    return sections
+
+
+def render_codeowners(ownership: OwnershipFile) -> str:
+    lines = render_header(ownership)
+    for section, groups in ordered_groups(ownership):
+        lines.append(f"# [{section}]")
+        lines.extend(ownership.section_notes.get(section, ()))
         for group in groups:
-            if not group.labels:
-                lines.extend(map(render_rule, group.paths))
-        for group in order_blocks([group for group in groups if group.labels]):
-            lines.append(f"# label: {', '.join(group.labels)}")
-            lines.append(f"# owner: {' '.join(map(handle, group.owners)) or 'none'}")
+            if group.labels:
+                owners = " ".join(map(handle, group.owners)) or "none"
+                lines.append(f"# label: {', '.join(group.labels)}")
+                lines.append(f"# owner: {owners}")
             lines.extend(map(render_rule, group.paths))
         lines.append("#")
     return "\n".join(lines) + "\n"
