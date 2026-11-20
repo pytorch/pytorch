@@ -1266,6 +1266,12 @@ class TritonTemplateKernel(TritonKernel):
                 + [node_stride[d] for d in dim_order]
             ]
             launch_args = self._host_tma_launch_args(dims)
+            # def_kernel offsets the input's pointer in the kernel (A = arg_A + offset),
+            # but a host descriptor's base is data_ptr(), which already includes it.
+            if not V.graph.sizevars.statically_known_equals(
+                node.get_layout().offset, 0
+            ):
+                launch_args = None
             # def_kernel merges operands that view one buffer into a single arg,
             # and the launcher would hand that arg to all of them as one
             # TensorDescriptor. Views with dynamic dims have differing shapes, so
@@ -1328,20 +1334,33 @@ class TritonTemplateKernel(TritonKernel):
         A dim can be read at launch when it is an integer expression whose free
         symbols are all graph sizes (dynamic shapes), which become the kernel's
         size args (ks0), built only from operations that pexpr prints as plain
-        Python (see _host_tma_plain_dim). The C++ wrapper builds descriptors from
-        the tensor's own sizes, so there every dim must be a compile-time integer.
+        Python (see _host_tma_plain_dim). The C++ wrapper's kernel call wrapper
+        takes those size args as parameters and builds the descriptor from them
+        (cpp_wrapper_gpu._host_tma_cpp_dim), but only for kernels autotuned at
+        compile time; a dim it cannot render falls back here rather than failing
+        at codegen.
         """
         launch_args: OrderedSet[str] = OrderedSet()
-        for dim in dims:
-            dim = V.graph.sizevars.simplify(dim)
+        for raw_dim in dims:
+            dim = V.graph.sizevars.simplify(raw_dim)
             if not dim.free_symbols:
                 continue
-            if (
-                V.graph.cpp_wrapper
-                or not dim.is_integer
-                or not self._host_tma_plain_dim(dim)
-            ):
+            if not dim.is_integer or not self._host_tma_plain_dim(dim):
                 return None
+            if V.graph.cpp_wrapper:
+                if config.triton.autotune_at_compile_time is False:
+                    return None
+                from .codegen.cpp_wrapper_gpu import _host_tma_cpp_dim
+
+                renamed = self.rename_indexing(raw_dim)
+                try:
+                    _host_tma_cpp_dim(
+                        self._host_tma_dim(renamed),
+                        OrderedSet(str(sym) for sym in renamed.free_symbols),
+                        {},
+                    )
+                except NotImplementedError:
+                    return None
             if not all(
                 symbol_is_type(sym, (SymT.SIZE, SymT.PRECOMPUTED_SIZE))
                 for sym in dim.free_symbols
