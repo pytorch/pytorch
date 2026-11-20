@@ -2276,11 +2276,14 @@ class BuiltinVariable(BaseBuiltinVariable):
             fail(args, kwargs)
 
         if check_constant_args(args[1:], kwargs):
-            const_args = [a.as_python_constant() for a in args[1:]]
+            const_args, const_kwargs = self.unwrap_unspec_args_kwargs(
+                list(args[1:]), kwargs
+            )
             try:
                 r = builtins.__build_class__(
                     fn,  # type: ignore[possibly-undefined]
                     *const_args,
+                    **const_kwargs,
                 )
             except Exception as exc:
                 # A class body that fails CPython's own validation (e.g. an
