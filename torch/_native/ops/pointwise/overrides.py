@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import threading
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -13,7 +14,10 @@ from torch._prims_common import (
 from torch._tensor_iterator import nullary_op, TensorIterator
 
 from ... import cutedsl_utils as cu
-from ...cutedsl.config import POINTWISE_ARCH_MAJORS as _ARCH_MAJORS
+from ...cutedsl.config import (
+    POINTWISE_ARCH_MAJORS as _ARCH_MAJORS,
+    POINTWISE_HOST_CACHE_LIMIT,
+)
 from ...utils import capability as cap
 from ...utils.lazy import LazyModule
 from ...utils.scalar import check_scalar, f32, round_float
@@ -428,6 +432,7 @@ _CONV_DTYPES = (
     )
 )
 _CONV_SRC_DTYPES = _CONV_DTYPES + (torch.bool,)
+_TRANSPOSE_DTYPES = _CONV_SRC_DTYPES + (torch.complex64, torch.complex128)
 
 
 def _conv_serveable(src: torch.Tensor, dst_dtype: torch.dtype) -> bool:
@@ -531,7 +536,7 @@ def _to_copy_cond(
         return False
     dst = x.dtype if dtype is None else dtype
     # Rowvec preserves input gaps; _to_copy allocates contiguous output.
-    return _conv_serveable(x, dst) and x.is_contiguous()
+    return dst != x.dtype and _conv_serveable(x, dst) and x.is_contiguous()
 
 
 def _to_copy_impl(
@@ -556,6 +561,7 @@ def _transpose_source_serveable(
     if not (
         src.layout is torch.strided
         and src.is_quantized == quantized
+        and (quantized or src.dtype in _TRANSPOSE_DTYPES)
         and src.ndim >= 2
         and not src.is_contiguous()
         and (not check_dense or is_non_overlapping_and_dense_or_false(src))
@@ -578,7 +584,7 @@ def _transpose_source_serveable(
             torch.quint4x2,
             torch.quint2x4,
         )
-        or src.qscheme() not in (torch.per_tensor_affine, torch.per_tensor_symmetric)
+        or src.qscheme() != torch.per_tensor_affine
     ):
         return False
     if src.dtype in (torch.quint4x2, torch.quint2x4):
@@ -617,15 +623,19 @@ def _transpose_source_spec(
 
 
 _TRANSPOSE_SPECS: dict[CacheKey, TransposeSpec | None] = {}
+_TRANSPOSE_SPECS_LOCK = threading.RLock()
 
 
 def _transpose_iterator_spec(
     out: torch.Tensor, src: torch.Tensor
 ) -> TransposeSpec | None:
     key = (src.dtype, tuple(src.shape), src.stride(), out.stride())
-    if key not in _TRANSPOSE_SPECS:
-        _TRANSPOSE_SPECS[key] = _build_transpose_iterator_spec(out, src)
-    return _TRANSPOSE_SPECS[key]
+    with _TRANSPOSE_SPECS_LOCK:
+        if key not in _TRANSPOSE_SPECS:
+            _TRANSPOSE_SPECS[key] = _build_transpose_iterator_spec(out, src)
+            if len(_TRANSPOSE_SPECS) > POINTWISE_HOST_CACHE_LIMIT:
+                _TRANSPOSE_SPECS.pop(next(iter(_TRANSPOSE_SPECS)))
+        return _TRANSPOSE_SPECS[key]
 
 
 def _build_transpose_iterator_spec(
@@ -675,10 +685,10 @@ def _build_transpose_iterator_spec(
     return outer, b, middle, a, inner, src.element_size()
 
 
-def _transpose_copy_spec(
+def _transpose_copy_plan(
     out: torch.Tensor, src: torch.Tensor, *, quantized: bool = False
-) -> TransposeSpec | None:
-    if not _transpose_source_serveable(src, quantized, check_dense=False) or not (
+) -> tuple[TransposeSpec, TC._Plan] | None:
+    if not (
         out.layout is torch.strided
         and not out._is_zerotensor()
         and out.is_quantized == quantized
@@ -692,6 +702,8 @@ def _transpose_copy_spec(
         and not cap.is_traced(out)
         and not torch._C._is_alias_of(out, src)
     ):
+        return None
+    if not _transpose_source_serveable(src, quantized, check_dense=False):
         return None
     if quantized and (
         out.qscheme() != src.qscheme()
@@ -709,7 +721,7 @@ def _transpose_copy_spec(
         spec = _transpose_iterator_spec(out, src)
         if spec is None:
             return None
-    return spec if TC.indexing_supported(src, out, spec) else None
+    return spec, TC._plan(src, out, spec)
 
 
 def _copy_cond(
@@ -723,8 +735,17 @@ def _copy_cond(
         and can_use_32bit_indexing(self)
     ):
         return False
-    if _transpose_copy_spec(self, src) is not None:
-        return True
+    if (
+        self.dtype == src.dtype
+        and self.shape == src.shape
+        and self.is_contiguous()
+        and src.is_contiguous()
+    ):
+        return False
+    planned = _transpose_copy_plan(self, src)
+    if planned is not None:
+        spec, plan = planned
+        return TC.indexing_supported(src, self, spec, plan=plan)
     if not (_conv_serveable(src, self.dtype) and self.is_contiguous()):
         return False
     if cap.is_traced(self) or self.is_neg() or self.is_conj():
@@ -745,29 +766,33 @@ def _copy_cond(
 def _copy_impl(
     self: torch.Tensor, src: torch.Tensor, non_blocking: bool = False
 ) -> torch.Tensor:
-    spec = _transpose_copy_spec(self, src)
-    if spec is not None:
-        return TC.run(src, self, spec)
+    planned = _transpose_copy_plan(self, src)
+    if planned is not None:
+        spec, plan = planned
+        return TC.run(src, self, spec, plan=plan)
     return _run_conversion("copy_", src, self)
 
 
 def _quantized_copy_cond(
     self: torch.Tensor, src: torch.Tensor, non_blocking: bool = False
 ) -> bool:
-    return (
-        isinstance(src, torch.Tensor)
-        and src.device == self.device
-        and _transpose_copy_spec(self, src, quantized=True) is not None
-    )
+    if not isinstance(src, torch.Tensor) or src.device != self.device:
+        return False
+    planned = _transpose_copy_plan(self, src, quantized=True)
+    if planned is None:
+        return False
+    spec, plan = planned
+    return TC.indexing_supported(src, self, spec, plan=plan)
 
 
 def _quantized_copy_impl(
     self: torch.Tensor, src: torch.Tensor, non_blocking: bool = False
 ) -> torch.Tensor:
-    spec = _transpose_copy_spec(self, src, quantized=True)
-    if spec is None:
+    planned = _transpose_copy_plan(self, src, quantized=True)
+    if planned is None:
         raise AssertionError("quantized transpose copy no longer matches")
-    return TC.run(src, self, spec)
+    spec, plan = planned
+    return TC.run(src, self, spec, plan=plan)
 
 
 def _quantized_clone_cond(
@@ -783,7 +808,7 @@ def _quantized_clone_impl(
     self: torch.Tensor, *, memory_format: torch.memory_format | None = None
 ) -> torch.Tensor:
     out = torch.empty_like(self, memory_format=torch.contiguous_format)
-    spec = _transpose_copy_spec(out, self, quantized=True)
+    spec = _transpose_source_spec(self, quantized=True)
     if spec is None:
         raise AssertionError("quantized transpose clone no longer matches")
     return TC.run(self, out, spec)

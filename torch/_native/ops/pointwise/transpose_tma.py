@@ -6,10 +6,9 @@ import cutlass
 import cutlass.cute as cute
 import cutlass.utils.blackwell_helpers as sm100_utils
 from cutlass.cute.nvgpu import cpasync
-from cutlass.tensor_utils import LayoutEnum
 
 from ...cutedsl import launch as _L
-from ...cutedsl.compat import block_copy, SmemAllocator
+from ...cutedsl.compat import block_copy, LayoutEnum, SmemAllocator
 from ...cutedsl.types import NumericType
 from ._transpose import matrix_view
 
