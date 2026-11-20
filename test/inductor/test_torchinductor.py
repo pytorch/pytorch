@@ -12020,11 +12020,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
 
         for x in (
-            torch.randn(4, 8),
+            torch.randn(4, 8) * (torch.rand(4, 8) > 0.5),
             torch.randint(0, 2, (4, 8)),
             torch.rand(4, 8) > 0.5,
         ):
             self.common(fn, [x])
+
+    def test_any_empty_dim_no_alias(self):
+        def fn(x):
+            y = torch.any(x, dim=())
+            x.logical_not_()
+            return y
+
+        self.common(fn, [torch.rand(4, 8) > 0.5])
 
     @parametrize("reduction", ["any", "amax"])
     def test_bool_reduction_bitwise_op(self, reduction):
