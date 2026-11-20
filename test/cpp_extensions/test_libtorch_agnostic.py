@@ -753,6 +753,66 @@ class TestLibtorchAgnostic(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expected torch.memory_format"):
             libtorch_agnostic._interop.memory_format_roundtrip(torch.strided)
 
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_bool_roundtrip(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.bool_roundtrip
+        self.assertIs(roundtrip(True), True)
+        self.assertIs(roundtrip(False), False)
+        # No truthiness: only the bool singletons are accepted.
+        for value in (1, 0, None, "True"):
+            with self.assertRaisesRegex(RuntimeError, "expected bool"):
+                roundtrip(value)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    @parametrize("value", [0, -1, 2**63 - 1, -(2**63)])
+    def test_pyobject_int64_roundtrip(self, device, value):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        out = libtorch_agnostic._interop.int64_roundtrip(value)
+        self.assertIs(type(out), int)
+        self.assertEqual(out, value)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_int64_rejects(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.int64_roundtrip
+        # bool is an int subclass but is rejected; floats are not truncated.
+        for value in (True, 1.0):
+            with self.assertRaisesRegex(RuntimeError, "expected int"):
+                roundtrip(value)
+        for value in (2**63, -(2**63) - 1):
+            with self.assertRaisesRegex(RuntimeError, "Overflow"):
+                roundtrip(value)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    @parametrize("value", [1.5, -0.0, math.inf, -math.inf, math.nan, 3])
+    def test_pyobject_double_roundtrip(self, device, value):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        out = libtorch_agnostic._interop.double_roundtrip(value)
+        self.assertIs(type(out), float)
+        self.assertEqual(out, float(value))
+        self.assertEqual(math.copysign(1.0, out), math.copysign(1.0, value))
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_double_rejects(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.double_roundtrip
+        with self.assertRaisesRegex(RuntimeError, "expected float"):
+            roundtrip("1.0")
+        # CPython raises here; its exception is left set and propagates as is.
+        with self.assertRaisesRegex(OverflowError, "int too large to convert to float"):
+            roundtrip(10**400)
+
     @skipIfTorchVersionLessThan(2, 16)
     @skipIfTorchDynamo("Dynamo failed to run FX node with fake tensors")
     def test_my_add(self, device):
