@@ -129,8 +129,8 @@ int RocprofActivityApi::processActivities(
   std::vector<std::pair<uint64_t, uint64_t>>
       externalCorrelations[RocLogger::CorrelationDomain::size];
   {
-    // Match mergeThreadBuffers' lock order. Detach every batch before invoking
-    // handlers so callbacks can append records for the next processing pass.
+    // Match mergeThreadBuffers' lock order. Detach the batch before invoking
+    // handlers so callbacks can safely append records that remain pending.
     std::lock_guard<std::mutex> rowsLock(d->rowsMutex_);
     std::lock_guard<std::mutex> correlationsLock(d->externalCorrelationsMutex_);
     rows.swap(d->rows_);
@@ -155,9 +155,9 @@ int RocprofActivityApi::processActivities(
   }
 
   // Classify runtime-internal fill/copy kernels (dispatched to implement
-  // hipMemset/hipMemcpy calls) as GPU memsets/memcpies.  Done here, after
-  // the per-thread buffers are merged, so that every memset/memcpy runtime
-  // row is visible to the correlation lookup.
+  // hipMemset/hipMemcpy calls) as GPU memsets/memcpies using runtime rows in
+  // this batch. Classification and stream backfilling below build their maps
+  // per call; records in separate batches are not associated across calls.
   detail::classifyRuntimeInternalDispatches(rows);
 
   // Async ops are in CLOCK_MONOTONIC rather than junk clock.
