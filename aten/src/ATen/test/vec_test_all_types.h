@@ -1,4 +1,5 @@
 #pragma once
+#include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/vec_quant.h>
@@ -66,19 +67,6 @@ CACHE_ALIGN #define
 #define CHECK_DEQUANT_WITH_LOW_PRECISION 1
 #undef CHECK_WITH_FMA
 #endif
-
-template <typename scalar_t>
-struct OpMathType {
-  using type = scalar_t;
-};
-template <>
-struct OpMathType<c10::Half> {
-  using type = float;
-};
-template <>
-struct OpMathType<c10::BFloat16> {
-  using type = float;
-};
 
 
 template<typename T>
@@ -1360,7 +1348,7 @@ std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
         return static_cast<T>(std::fma(double(a), double(b), double(c)));
     }
     PreventFma noFma;
-    using op_math_t = typename OpMathType<T>::type;
+    using op_math_t = at::opmath_type<T>;
     auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
     return static_cast<T>(noFma.add(ab, op_math_t(c)));
 }
@@ -1371,7 +1359,7 @@ std::enable_if_t<!is_complex<T>::value, T> local_fmsub(T a, T b, T c) {
         return static_cast<T>(std::fma(double(a), double(b), -double(c)));
     }
     PreventFma noFma;
-    using op_math_t = typename OpMathType<T>::type;
+    using op_math_t = at::opmath_type<T>;
     auto ab = static_cast<op_math_t>(a) * static_cast<op_math_t>(b);
     return static_cast<T>(noFma.sub(ab, op_math_t(c)));
 }
