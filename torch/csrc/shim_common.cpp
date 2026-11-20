@@ -1007,6 +1007,29 @@ torch_new_list_pyobject(void* const* items, size_t length, void** ret) {
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError
+torch_generator_from_pyobject(void* py_obj, AtenGeneratorHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    // Copying the at::Generator shares its GeneratorImpl (RNG state).
+    *ret = torch::aot_inductor::generator_pointer_to_generator_handle(
+        new at::Generator(
+            torch::detail::getPyObjectConversionImpl().generator_from_pyobject(
+                static_cast<PyObject*>(py_obj))));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_generator_to_pyobject(AtenGeneratorHandle generator, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(generator != nullptr, "generator must not be null");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().generator_to_pyobject(
+        *torch::aot_inductor::generator_handle_to_generator_pointer(generator));
+  });
+}
+
 // Most other dtypes defined in torch/csrc/inductor/aoti_torch/shim_common.cpp
 #define TORCH_DTYPE_IMPL(dtype, stype)                    \
   AOTI_TORCH_EXPORT int32_t torch_dtype_##dtype() {       \

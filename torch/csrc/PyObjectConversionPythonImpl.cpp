@@ -8,6 +8,7 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -353,6 +354,37 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
       PyList_SET_ITEM(list.get(), static_cast<Py_ssize_t>(i), items[i]);
     }
     return list.release();
+  }
+
+  at::Generator generator_from_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_generator_from_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    // Check the actual type before reading cdata. THPGenerator_Check uses
+    // PyObject_IsInstance, which an overridden __class__ can fool.
+    TORCH_CHECK(
+        THPGeneratorClass &&
+            PyObject_TypeCheck(
+                obj, reinterpret_cast<PyTypeObject*>(THPGeneratorClass)),
+        "torch_generator_from_pyobject: expected torch.Generator, got ",
+        Py_TYPE(obj)->tp_name);
+    return reinterpret_cast<THPGenerator*>(obj)->cdata;
+  }
+
+  PyObject* generator_to_pyobject(
+      const at::Generator& generator) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_generator_to_pyobject requires the GIL to be held");
+    // THPGenerator_Wrap maps an undefined generator to None, which is not a
+    // torch.Generator.
+    TORCH_CHECK(
+        generator.defined(),
+        "torch_generator_to_pyobject: undefined generator");
+    PyObject* py = THPGenerator_Wrap(generator);
+    TORCH_CHECK_PYTHON(py != nullptr);
+    return py;
   }
 };
 

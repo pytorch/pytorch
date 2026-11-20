@@ -171,6 +171,8 @@ torch_bool_to_pyobject: TORCH_VERSION_2_16_0
 torch_decref_pyobject: TORCH_VERSION_2_16_0
 torch_double_from_pyobject: TORCH_VERSION_2_16_0
 torch_double_to_pyobject: TORCH_VERSION_2_16_0
+torch_generator_from_pyobject: TORCH_VERSION_2_16_0
+torch_generator_to_pyobject: TORCH_VERSION_2_16_0
 torch_int64_from_pyobject: TORCH_VERSION_2_16_0
 torch_int64_to_pyobject: TORCH_VERSION_2_16_0
 torch_is_conj: TORCH_VERSION_2_16_0

@@ -71,6 +71,8 @@ which will handle all the rough edges of the C API for the user.
 - `string_from_pyobject` (2.16+): `str` (encoded as UTF-8) or `bytes` (as is) -> `std::string`
 - `string_to_pyobject` (2.16+): `std::string_view` (decoded as UTF-8) -> `str`;
   embedded NUL bytes are preserved in both directions
+- `generator_from_pyobject` / `generator_to_pyobject` (2.16+): `torch.Generator`
+  <-> `torch::stable::Generator`, sharing the RNG state rather than copying it
 - `is_tensor_pyobject`: whether a Python object's actual type is `torch.Tensor`
   or a subclass; overridden `__class__` attributes are ignored, as in
   `tensor_from_pyobject`
