@@ -658,13 +658,19 @@ class TestKernelRowTile(TestCase):
         self.assertEqual(count, want_count, atol=0, rtol=0)
         self.assertEqual(mean, y.double().mean(dim=1).float(), atol=1e-4, rtol=1e-4)
 
-    def _assert_ragged_plan(self, trait_key, ragged):
-        # Row-tile keys end in TileReduce.cache_sig, whose 13th field keys N for TMA only
-        # and whose 23rd marks ragged vector rows, which take a runtime width.
-        trait = T.SumOps(acc=cutlass.Float32)
-        nsig = len(tile.TileReduce(trait, cutlass.Float32, "row", 128).cache_sig)
-        sigs = [k[len(k) - nsig :] for k in rt._CACHE if k[1] == trait_key]
-        self.assertEqual({(sig[12], sig[22]) for sig in sigs}, {(0, ragged)})
+    def _assert_ragged_plan(self, trait_key, *ragged):
+        # Row-tile keys end in TileReduce.cache_sig. Reference signatures locate its N
+        # field, which keys N for TMA only, and its ragged vector flag: ragged rows take
+        # a runtime width.
+        trait, f32 = T.SumOps(acc=cutlass.Float32), cutlass.Float32
+        ref = tile.TileReduce(trait, f32, "row", 512).cache_sig
+        tma = tile.TileReduce(trait, f32, "row", 512, use_tma=True).cache_sig
+        rag = tile.TileReduce(trait, f32, "row", 512, ragged_vector=True).cache_sig
+        n_at = tma.index(512)
+        (ragged_at,) = [i for i in range(len(ref)) if ref[i] != rag[i]]
+        sigs = [k[len(k) - len(ref) :] for k in rt._CACHE if k[1] == trait_key]
+        want = {(0, r) for r in ragged}
+        self.assertEqual({(sig[n_at], sig[ragged_at]) for sig in sigs}, want)
 
     @parametrize(
         "dtype,columns",
@@ -789,7 +795,7 @@ class TestKernelRowTile(TestCase):
             self._assert_ragged_plan(key, True)
 
     def test_ragged_vector_plans_share_widths_and_pitches(self):
-        # Ragged rows take a runtime width and pitch: one plan for every width, pitch and M.
+        # Ragged rows take a runtime width and pitch: one plan per launch class.
         trait = T.SumOps(acc=cutlass.Float32)
         rt._CACHE.clear()
         b = torch.randint(1, 9, (64, 2056), device="cuda").float()
@@ -803,6 +809,7 @@ class TestKernelRowTile(TestCase):
         self.assertEqual(
             len(mine), 2, f"expected one ragged and one rolled plan, got {mine}"
         )
+        self._assert_ragged_plan("ragged_width", True, False)
         # Whole-vector widths fall back to the rolled path's one plan per vector class.
         for columns in (2048, 2052):
             x = torch.randint(1, 9, (64, columns), device="cuda").float()
@@ -863,7 +870,7 @@ class TestKernelRowTile(TestCase):
 
     def test_ragged_vector_pitched_rows(self):
         """Take each row's edges from its own start: pitched rows, and whole-vector rows
-        at a pitch below the vector width, sum exactly."""
+        at a pitch that is not a multiple of the vector width, sum exactly."""
         trait = T.SumOps(acc=cutlass.Float32)
         cases = ((34, 4100, 4097), (33, 4099, 4096), (17, 1025, 1000))
         for rows, pitch, columns in cases:
