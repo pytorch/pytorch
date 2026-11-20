@@ -2022,57 +2022,67 @@ class GuardedCache(Generic[T]):
         remote_cache: RemoteCache[JsonDataTy] | None,
         key: str,
     ) -> Generator[tuple[T, bytes, bool], None, None]:
+        """
+        Yield (entry, pickled_content, is_local) for every entry stored under
+        `key`: all local entries first, then the remote one, if any. Entries that
+        fail to load are logged and skipped.
+        """
         if local:
-            subdir = cls._get_tmp_dir_for_key(key)
-            try:
-                names = sorted(os.listdir(subdir))
-            except FileNotFoundError:
-                # Nothing was ever written for this key, or another process cleared
-                # the cache out from under us. The local cache root is shared across
-                # processes, so checking os.path.exists() first would only narrow the
-                # race, not close it. Either way there are no candidates: a miss.
-                names = []
-            except OSError:
-                # Anything else (a bad mode on the cache dir, a dead mount) is not a
-                # race and is worth surfacing, but it still leaves no candidates.
-                log.warning(
-                    "%s unable to list cache entries", cls.__name__, exc_info=True
-                )
-                names = []
-            for path in names:
-                if path.startswith("."):
-                    continue  # Skip temp files from concurrent write_atomic() calls
-                try:
-                    with open(os.path.join(subdir, path), "rb") as f:
-                        content = f.read()
-                        yield pickle.loads(content), content, True
-                except FileNotFoundError:
-                    continue  # Raced with a concurrent cache clear
-                except Exception:
-                    log.warning(
-                        "%s unable to load compiled graph",
-                        cls.__name__,
-                        exc_info=True,
-                    )
-
+            yield from cls._iterate_local_candidates(key)
         if remote_cache:
+            yield from cls._iterate_remote_candidates(remote_cache, key)
+
+    @classmethod
+    def _iterate_local_candidates(
+        cls: type[GuardedCache[T]], key: str
+    ) -> Generator[tuple[T, bytes, bool], None, None]:
+        subdir = cls._get_tmp_dir_for_key(key)
+        try:
+            names = sorted(os.listdir(subdir))
+        except FileNotFoundError:
+            # Nothing was ever written for this key, or another process cleared
+            # the cache out from under us. The local cache root is shared across
+            # processes, so checking os.path.exists() first would only narrow the
+            # race, not close it. Either way there are no candidates: a miss.
+            names = []
+        except OSError:
+            # Anything else (a bad mode on the cache dir, a dead mount) is not a
+            # race and is worth surfacing, but it still leaves no candidates.
+            log.warning("%s unable to list cache entries", cls.__name__, exc_info=True)
+            names = []
+        for path in names:
+            if path.startswith("."):
+                continue  # Skip temp files from concurrent write_atomic() calls
             try:
-                if (cache_data := remote_cache.get(key)) is not None:
-                    if not isinstance(cache_data, dict):
-                        raise AssertionError(
-                            f"Expected dict from remote cache, got {type(cache_data)}"
-                        )
-                    data = cache_data["data"]
-                    if not isinstance(data, (str, bytes)):
-                        raise AssertionError(
-                            f"Expected str or bytes for cache data, got {type(data)}"
-                        )
-                    content = base64.b64decode(data)
-                    yield pickle.loads(content), content, False
+                with open(os.path.join(subdir, path), "rb") as f:
+                    content = f.read()
+                    yield pickle.loads(content), content, True
+            except FileNotFoundError:
+                continue  # Raced with a concurrent cache clear
             except Exception:
                 log.warning(
                     "%s unable to load compiled graph", cls.__name__, exc_info=True
                 )
+
+    @classmethod
+    def _iterate_remote_candidates(
+        cls: type[GuardedCache[T]], remote_cache: RemoteCache[JsonDataTy], key: str
+    ) -> Generator[tuple[T, bytes, bool], None, None]:
+        try:
+            if (cache_data := remote_cache.get(key)) is not None:
+                if not isinstance(cache_data, dict):
+                    raise AssertionError(
+                        f"Expected dict from remote cache, got {type(cache_data)}"
+                    )
+                data = cache_data["data"]
+                if not isinstance(data, (str, bytes)):
+                    raise AssertionError(
+                        f"Expected str or bytes for cache data, got {type(data)}"
+                    )
+                content = base64.b64decode(data)
+                yield pickle.loads(content), content, False
+        except Exception:
+            log.warning("%s unable to load compiled graph", cls.__name__, exc_info=True)
 
     @classmethod
     def find_guarded_entry(
