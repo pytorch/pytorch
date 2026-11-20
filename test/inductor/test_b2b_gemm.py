@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
+
 # Pin the good-shape autotune to a single B2B candidate: select_algorithm
 # skips benchmarking when a single choice remains, so only the first shape
 # per associativity pays for autotuning. The regex is unanchored because the
