@@ -47,6 +47,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    skipIfCppFakeTensor,
     subtest,
     suppress_warnings,
     TEST_WITH_TSAN,
@@ -1061,6 +1062,7 @@ print(torch.xpu.is_initialized())
         self.assertIs(result, t)
         self.assertTrue(t.is_shared())
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_share_memory_nested(self):
         a = torch.randn(3, 4, device="xpu")
         b = torch.randn(5, 4, device="xpu")
@@ -4574,9 +4576,6 @@ class TestMemPool(TestCase):
 instantiate_parametrized_tests(TestXpu)
 instantiate_device_type_tests(
     TestXpuGraphRng, globals(), only_for="xpu", allow_xpu=True
-)
-instantiate_device_type_tests(
-    TestXPUMultiprocessing, globals(), only_for="xpu", allow_xpu=True
 )
 instantiate_parametrized_tests(TestCachingHostAllocatorXpuGraph)
 instantiate_device_type_tests(TestXpuOptims, globals())

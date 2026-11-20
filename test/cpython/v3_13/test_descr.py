@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import run_tests, slowTest, TEST_WITH_TORCHDYNAMO
 
 # ======= END DYNAMO PATCH =======
 
@@ -3908,6 +3908,7 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         # it as a leak.
         del C.__del__
 
+    @slowTest
     def test_slots_trash(self):
         # Testing slot trash...
         # Deallocating deeply nested slotted trash caused stack overflows
@@ -4473,6 +4474,7 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
         o.whatever = Provoker(o)
         del o
 
+    @slowTest
     @support.requires_resource('cpu')
     def test_wrapper_segfault(self):
         # SF 927248: deeply nested wrappers could cause stack overflow

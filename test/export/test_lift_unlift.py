@@ -9,6 +9,7 @@ from torch._export.passes.lift_constants_pass import (
     ConstantAttrMap,
     lift_constants_pass,
 )
+from torch._subclasses.fake_tensor import FakeTensorMode, maybe_get_fake_constant
 from torch.export._unlift import _unlift_exported_program_lifted_states
 from torch.export.exported_program import (
     ExportGraphSignature,
@@ -21,16 +22,20 @@ from torch.export.exported_program import (
 from torch.export.graph_signature import CustomObjArgument
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_MACOS,
+    parametrize,
     run_tests,
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 class GraphBuilder:
     def __init__(self) -> None:
         self.graph = torch.fx.Graph()
+        self.fake_mode = FakeTensorMode()
         self.nodes = {}
         self.values = {}
         self.nn_module_stack_key: dict[str, int] = {}
@@ -39,7 +44,7 @@ class GraphBuilder:
 
     def input(self, name: str, value: torch.Tensor, kind: InputKind):
         node = self.graph.placeholder(name)
-        node.meta["val"] = value
+        node.meta["val"] = self.fake_mode.from_tensor(value)
         self.nodes[name] = node
         self.values[name] = value
         self.input_to_kind[node] = kind
@@ -146,6 +151,7 @@ class GraphBuilder:
 
 
 @unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
+@instantiate_parametrized_tests
 class TestLift(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -153,7 +159,8 @@ class TestLift(TestCase):
         super().setUp()
         load_torchbind_test_lib()
 
-    def test_lift_basic(self):
+    @parametrize("wrapped_constant", [False, True])
+    def test_lift_basic(self, wrapped_constant):
         builder = GraphBuilder()
 
         builder.input("param", torch.rand(2, 3), InputKind.PARAMETER)
@@ -164,7 +171,10 @@ class TestLift(TestCase):
         builder.add("x", "y", out="foo")
         builder.add("foo", "param", out="bar")
         builder.add("bar", "buffer", out="baz")
-        builder.constant("const_tensor", torch.rand(2, 3))
+        const_tensor = torch.rand(2, 3)
+        if wrapped_constant:
+            const_tensor = TwoTensor(const_tensor, torch.rand(2, 3))
+        builder.constant("const_tensor", const_tensor)
         builder.constant("const_obj", torch.classes._TorchScriptTesting._Foo(10, 20))
         builder.add("baz", "const_tensor", out="out")
         builder.call_function(
@@ -209,8 +219,13 @@ class TestLift(TestCase):
         # The lifted constant should be placed before user inputs but after params/buffers
         lifted_tensor_placeholder = placeholder_nodes[2]
         self.assertEqual(lifted_tensor_placeholder.target, "lifted_tensor_0")
-        # It should have a val equivalent to the constant
-        self.assertEqual(lifted_tensor_placeholder.meta["val"], const_tensor)
+        fake_constant = lifted_tensor_placeholder.meta["val"]
+        if wrapped_constant:
+            self.assertIs(fake_constant.constant, const_tensor)
+            self.assertIsNone(maybe_get_fake_constant(fake_constant.a))
+            self.assertIsNone(maybe_get_fake_constant(fake_constant.b))
+        else:
+            self.assertIs(maybe_get_fake_constant(fake_constant), const_tensor)
 
         lifted_obj_placeholder = placeholder_nodes[3]
         self.assertEqual(lifted_obj_placeholder.target, "lifted_custom_0")

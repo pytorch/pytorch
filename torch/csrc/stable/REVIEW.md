@@ -57,12 +57,20 @@ a new one is added, the difference should be documented.
 Public declarations must use stable or header-only types and headers. They must
 not expose ATen or other unstable implementation types. Route C shim failures
 through `STABLE_TORCH_ERROR_CODE_CHECK` NOT the outdated `TORCH_ERROR_CODE_CHECK`.
+Reuse `torch::stable::detail::from` and `torch::stable::detail::to` for boxing and
+unboxing where applicable. Avoid redundant conversion layers or round trips in
+high-level wrappers.
 
 For handles and callbacks, verify the ownership contract explicitly: borrowed
 versus owned handles, shared value semantics, who releases the resource, and
 whether a callback runs exactly once. Match the unstable type's RAII behavior
 rather than creating a new lifetime model, and derive inspiration from how
 lifetime is handled by existing stable IValues.
+
+For new or changed C shims, constructors, and conversion helpers, document
+ownership at their declarations. State whether inputs and outputs are borrowed
+or owned, which calls acquire or release references, and which transfer an
+existing reference without changing its count.
 
 Keep the patch limited to the wrapper, its required ABI plumbing, and focused
 tests. Unrelated refactors and speculative convenience APIs make compatibility
@@ -87,6 +95,11 @@ Add focused coverage under
 `test/cpp_extensions/test_libtorch_agnostic.py`. The test should compile the
 stable declaration with the intended `TORCH_TARGET_VERSION` and call the
 `torch::stable` API itself.
+
+Keep C++ test helpers small and generic. Prefer Python for input construction,
+case selection, and parametrization. Keep setup or checks in C++ when Python
+cannot construct the required fixture or observe the property being tested
+(e.g., copy-versus-borrow lifetime checks on native argument storage).
 
 These tests prove that the shim preserves access to the API; they do not need to
 re-prove the underlying operator. One representative end-to-end case is enough
