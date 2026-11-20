@@ -149,7 +149,7 @@ from .output_code import CompiledFxGraph
 from .remote_cache import cache_stats, create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
-from .triton_bundler import TritonBundler
+from .triton_bundler import TritonBundle, TritonBundler
 from .virtualized import V
 
 
@@ -2247,20 +2247,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         CompiledFxGraph.post_compile)
         """
         if bundle := graph._triton_bundle:
-            triton_bundler_meta = TritonBundler.read_and_emit(bundle)
-            if (meta := triton_bundler_meta) is not None:
-                cache_info["triton_bundler_meta"] = str(meta)
-                CompileEventLogger.try_add_pt2_compile(
-                    "inductor_compile", cached_kernel_names=meta.cached_kernel_names
-                )
-                CompileEventLogger.try_add_pt2_compile(
-                    "AOTAutogradCache.inductor_load",
-                    cached_kernel_names=meta.cached_kernel_names,
-                )
-                if len(meta.cached_kernel_names) > 0:
-                    CompileEventLogger.try_(
-                        CompileEventLogger.increment_toplevel, "num_triton_bundles"
-                    )
+            FxGraphCache._emit_triton_bundle(bundle, cache_info)
 
         try:
             artifact_path = graph.after_deserialization(constants)
@@ -2287,6 +2274,37 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
         counters["inductor"] += graph.counter_deltas
 
+        FxGraphCache._log_cache_hit_artifacts(graph, artifact_path)
+        return graph, cache_info
+
+    @staticmethod
+    def _emit_triton_bundle(bundle: TritonBundle, cache_info: CacheInfo) -> None:
+        """
+        Write the kernels bundled with a cache hit back into the Triton cache dir
+        and record which kernels were served from the bundle.
+        """
+        if (meta := TritonBundler.read_and_emit(bundle)) is None:
+            return
+        cache_info["triton_bundler_meta"] = str(meta)
+        CompileEventLogger.try_add_pt2_compile(
+            "inductor_compile", cached_kernel_names=meta.cached_kernel_names
+        )
+        CompileEventLogger.try_add_pt2_compile(
+            "AOTAutogradCache.inductor_load",
+            cached_kernel_names=meta.cached_kernel_names,
+        )
+        if len(meta.cached_kernel_names) > 0:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel, "num_triton_bundles"
+            )
+
+    @staticmethod
+    def _log_cache_hit_artifacts(graph: CompiledFxGraph, artifact_path: str) -> None:
+        """
+        Log the output code and the structured-trace artifacts for a graph loaded
+        from the cache.
+        """
+        code = graph.source_code
         output_code_log.debug("Output code: \n%s", code)
         output_code_log.debug("Output code written to: %s", artifact_path)
         # On cache hit, use artifact path as filename
@@ -2333,7 +2351,6 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             get_metrics_context().add_to_set(
                 "inductor_provenance", graph.inductor_provenance_stack_traces_str
             )
-        return graph, cache_info
 
     @staticmethod
     def _lookup_graph(
