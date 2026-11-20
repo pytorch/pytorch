@@ -36,6 +36,14 @@ if not c10d.is_available() or not (
     print("c10d NCCL/XCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
+# On CUDA these tests target the legacy backend (fbcode-only); XPU uses xccl.
+_acc = torch.accelerator.current_accelerator(True)
+if (
+    _acc is None or _acc.type == "cuda"
+) and not c10d.distributed_c10d._NCCL_LEGACY_AVAILABLE:
+    print("c10d legacy NCCL not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
 
 import test_c10d_common
 from test_c10d_common import (
