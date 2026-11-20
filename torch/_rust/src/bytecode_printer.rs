@@ -17,7 +17,7 @@ use crate::exec::ffi::{
     _PyInterpreterState_SetEvalFrameFunc,
 };
 
-extern "C" {
+unsafe extern "C" {
     fn PyUnstable_InterpreterFrame_GetCode(frame: *mut InterpreterFrame) -> *mut ffi::PyObject;
 }
 
