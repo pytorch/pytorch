@@ -194,7 +194,16 @@ pub struct InstFacts {
     /// The version counter of a tensor it was given moved: it wrote to it in
     /// place.
     pub wrote: bool,
+    /// For an instruction that made dispatcher calls and is no call site:
+    /// the operators it called itself, as the dispatcher names them, over
+    /// all its counted runs. With `UNKNOWN_OPERATOR` among them where they
+    /// could not all be taken down.
+    pub operators: Vec<String>,
 }
+
+/// Stands in `InstFacts::operators` for operators that are not known.
+pub const UNKNOWN_OPERATOR: &str = "?";
+const MAX_OPERATORS: usize = 12;
 
 impl InstFacts {
     /// Whether every run made no dispatcher call, entered no frame, wrote to
@@ -210,6 +219,19 @@ impl InstFacts {
             (seen, new) if seen == new => seen,
             _ => Kernels::Many,
         };
+    }
+
+    pub fn saw_operators(&mut self, names: Vec<String>) {
+        for name in names {
+            if self.operators.contains(&name) {
+                continue;
+            }
+            if self.operators.len() >= MAX_OPERATORS {
+                self.operators.push(UNKNOWN_OPERATOR.to_string());
+                break;
+            }
+            self.operators.push(name);
+        }
     }
 
     pub fn saw_callee(&mut self, code: PyObj, kind: CalleeKind) {

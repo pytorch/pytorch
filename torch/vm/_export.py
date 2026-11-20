@@ -49,8 +49,10 @@ def _overload(name: str, overload: str) -> Any:
 def graph_module(description: dict[str, Any]) -> torch.fx.GraphModule:
     """The graph the engine describes: a placeholder per tensor it takes, a
     call of the operator overload per kernel call with the arguments the
-    kernel was given, ``sym_size`` and the functions of ``operator`` for the
-    integers it computes, and a tuple of the values it gives as its output:
+    kernel was given (or, for an operation that is no call site, a call of
+    the function, method or subscript the code wrote), ``sym_size`` and the
+    functions of ``operator`` for the integers it computes, and a tuple of
+    the values it gives as its output:
     what the code behind the graph reads, and then the ranks and sizes that
     the engine checks of the tensors it does not get back.
     The type of what a kernel call returned in the run that was described is
@@ -59,8 +61,24 @@ def graph_module(description: dict[str, Any]) -> torch.fx.GraphModule:
     values: dict[int, Any] = {}
 
     def of(operand: tuple[str, Any]) -> Any:
+        # A value of the graph, a list or a tuple of operands (what the
+        # graph takes out of one it is handed), or a constant.
         kind, value = operand
-        return values[value] if kind == "v" else value
+        if kind == "v":
+            return values[value]
+        if kind == "l":
+            return [of(item) for item in value]
+        if kind == "t":
+            return tuple(of(item) for item in value)
+        return value
+
+    def call(operands: list[Any], kwnames: Any) -> tuple[tuple[Any, ...], dict]:
+        # The arguments of a call as the function wrote it: the last ones
+        # by the names of ``kwnames``.
+        given = [of(operand) for operand in operands]
+        named = len(kwnames or ())
+        positional = given[: len(given) - named]
+        return tuple(positional), dict(zip(kwnames or (), given[len(positional) :]))
 
     def typed(node: Any, meta: Any) -> Any:
         if meta is not None:
@@ -93,6 +111,20 @@ def graph_module(description: dict[str, Any]) -> torch.fx.GraphModule:
             target = _overload(site["op"], site["overload"])
             node = graph.call_function(target, tuple(args), kwargs)
             values[value] = typed(node, meta)
+        elif kind == "call":
+            # An operation that is no call site: the function it called.
+            callee, operands, kwnames, value, meta = parts
+            positional, named = call(operands, kwnames)
+            node = graph.call_function(of(callee), positional, named)
+            values[value] = typed(node, meta)
+        elif kind == "method":
+            name, operands, kwnames, value, meta = parts
+            positional, named = call(operands, kwnames)
+            values[value] = typed(graph.call_method(name, positional, named), meta)
+        elif kind == "getitem":
+            _, (tensor, index), _, value, meta = parts
+            node = graph.call_function(operator.getitem, (of(tensor), of(index)))
+            values[value] = typed(node, meta)
         elif kind == "size":
             tensor, dim, value = parts
             size = torch.ops.aten.sym_size.int
@@ -110,6 +142,12 @@ def graph_module(description: dict[str, Any]) -> torch.fx.GraphModule:
         elif kind == "tuple":
             items, value = parts
             values[value] = tuple(of(item) for item in items)
+        elif kind == "list":
+            items, value = parts
+            values[value] = [of(item) for item in items]
+        elif kind == "slice":
+            (start, stop, step), value = parts
+            values[value] = slice(of(start), of(stop), of(step))
         else:
             raise AssertionError(f"the engine describes no node of kind {kind!r}")
     given = [values[value] for value in description["outputs"]]
