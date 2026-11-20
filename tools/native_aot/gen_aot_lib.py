@@ -68,13 +68,8 @@ FILE_TMPL = """\
 //
 // {precompute_note}
 //
-// Includes: core/Tensor.h rather than ATen/ATen.h, which pulls ~1300 ATen/ops/*.h
-// and would make every generated file depend on unrelated ops -- what
-// AT_PER_OPERATOR_HEADERS exists to avoid. TensorIterator.h and ops/empty.h are
-// unconditional because preludes commonly need them and there is no
-// per-declaration include hook yet; a body calling another at:: FACTORY needs its
-// op header added here. torch/library.h registers the embedded architectures and
-// optional coverage predicate.
+// Use minimal ATen headers; cpp_includes adds declaration-specific dependencies.
+// torch/library.h registers embedded architectures and the coverage predicate.
 #include <ATen/core/Tensor.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NativeAotStubs.h>
@@ -498,7 +493,9 @@ def gen_op(
         covers_fn=covers_fn,
         covers_reg=covers_reg,
         archs=", ".join(str(major * 10 + minor) for major, minor in embedded_devices),
-        kernel_includes="\n".join(
+        kernel_includes=((getattr(d, "cpp_includes", None) or (lambda: ""))() or "")
+        + "\n"
+        + "\n".join(
             dict.fromkeys(  # ordered dedup across sidecars
                 line
                 for sc in sidecars
@@ -530,16 +527,23 @@ def _native_function(
         os.path.join(aten, "native", "tags.yaml"),
     )
     groups = get_grouped_native_functions(parsed.native_functions)
-    for g in groups:
-        if isinstance(g, NativeFunctionsGroup) and g.structured:
-            if structured:
-                fname = g.functional.func.name
-                if (str(fname) if "." in op else fname.name.base) == op:
-                    return g
-        elif not structured:
-            f = g.functional if isinstance(g, NativeFunctionsGroup) else g
+    if not structured:
+        for f in parsed.native_functions:
             if str(f.func.name) == op:
                 return f
+    else:
+        candidates = [
+            g
+            for g in groups
+            if isinstance(g, NativeFunctionsGroup)
+            and g.structured
+            and g.functional.func.name.name.base == op.split(".")[0]
+        ]
+        exact = [g for g in candidates if str(g.functional.func.name) == op]
+        if exact:
+            return exact[0]
+        if len(candidates) == 1 and "." not in op:
+            return candidates[0]
     raise RuntimeError(f"no native function for {op}")
 
 
@@ -571,11 +575,8 @@ def precomputed_args(op: str, *, structured: bool = True) -> list[str]:
 
 
 def covers_signature(op: str, *, structured: bool = True) -> tuple[str, str]:
-    """(C++ params, torch.library schema) for the fast coverage
-    predicate: the FUNCTIONAL schema arguments (SymInt degraded to int
-    -- symbolic sizes can't be covered anyway; a failed bind falls back
-    to the Python path) plus the out variant's outputs as trailing
-    optionals so calls arriving through the .out overload bind too.
+    r"""Return coverage C++ parameters and schema, with SymInt converted to int.
+    Out arguments bind as trailing optional tensors.
     """
     from torchgen.api.types import DispatcherSignature
     from torchgen.context import native_function_manager
@@ -586,22 +587,28 @@ def covers_signature(op: str, *, structured: bool = True) -> tuple[str, str]:
     with native_function_manager(f):
         sig = DispatcherSignature.from_schema(f.func, symint=False)
         params = [a.decl() for a in sig.arguments()]
-    # Render per-argument from the model (not string surgery on the
-    # whole schema): SymInt -> int argument-by-argument, and the
-    # kwarg-only marker reconstructed from the model's split.
+    if f.func.arguments.self_arg and f.func.arguments.self_arg.argument.annotation:
+        name = f.func.arguments.self_arg.argument.name
+        params = [
+            p.replace(f"at::Tensor & {name}", f"const at::Tensor & {name}")
+            for p in params
+        ]
+    # Preserve argument boundaries and the schema's keyword-only split.
     args = f.func.arguments
-    pos = [str(a).replace("SymInt", "int") for a in args.flat_positional]
+    from dataclasses import replace
+
+    pos = [
+        str(replace(a, annotation=None)).replace("SymInt", "int")
+        for a in args.flat_positional
+    ]
     kw = [str(a).replace("SymInt", "int") for a in args.flat_kwarg_only]
     pieces = pos + (["*", *kw] if kw else [])
-    # Trailing out-variant outputs bind the .out overload's kwargs;
-    # appended last, so kwarg-only exactly when the schema already has
-    # a kwarg section (matching the C++ params' positional binding).
+    # Append out arguments after the existing keyword-only split, matching C++ binding.
     for a in g.out.func.arguments.out if isinstance(g, NativeFunctionsGroup) else ():
         params.append(f"const std::optional<at::Tensor>& {a.name}")
         pieces.append(f"Tensor? {a.name}=None")
     schema_args = ", ".join(pieces)
-    # Op name in the registered schema is the decl_id (dots are illegal
-    # in custom-op names); the runtime resolves covers_<decl_id> too.
+    # Runtime and codegen use the same identifier for coverage lookup.
     return (
         ", ".join(params),
         f"covers_{decl.decl_id_for_op(op)}({schema_args}) -> bool",

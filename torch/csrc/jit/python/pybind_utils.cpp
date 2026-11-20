@@ -613,9 +613,12 @@ py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
     if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-      TORCH_INTERNAL_ASSERT(
-          tensor.device().is_cpu() ||
-          (tensor._is_zerotensor() && tensor.dim() == 0));
+      // Device wrapped scalars (e.g., from searchsorted) must stay tensors:
+      // unwrapping reads host storage. ZeroTensors need no storage reads.
+      if (!tensor.device().is_cpu() && !tensor._is_zerotensor()) {
+        return py::cast(std::move(tensor));
+      }
+      TORCH_INTERNAL_ASSERT(tensor.device().is_cpu() || tensor.dim() == 0);
       auto py_tensor = py::cast(tensor);
       if (PyObject_HasAttrString(py_tensor.ptr(), "_wrapped_number")) {
         return py_tensor.attr("_wrapped_number");
