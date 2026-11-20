@@ -26,6 +26,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCPU,
     onlyOn,
 )
@@ -827,7 +828,8 @@ class TestInductorDynamic(DynamicShapesTestCase):
             conds = int32_index_conditions(self)
             return conds and [sympy.Le(cond.lhs, 64 * 1024) for cond in conds]
 
-        compiled = torch.compile(fn, dynamic=True)
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
         with (
             config.patch(
                 {
@@ -842,15 +844,37 @@ class TestInductorDynamic(DynamicShapesTestCase):
             x = torch.randn(64, 512, device=device)
             actual, (code, *_) = run_and_get_code(compiled, x)
             self.assertEqual(actual, fn(x))
-            for shape in [(512, 512), (3, 7), (300, 1000)]:
+            # Both sides of the bound, in either order, without recompiling.
+            for shape in [(512, 512), (3, 7), (300, 1000), (64, 512)]:
                 y = torch.randn(shape, device=device)
                 self.assertEqual(compiled(y), fn(y))
+        self.assertEqual(counter.frame_count, 1)
 
         FileCheck().check("'r0_numel': 'i32'").check("'r0_numel': 'i64'").check(
             "<= 65536:"
         ).check(".run(").check("else:").check(".run(").run(code)
         (entry,) = _debug_get_cache_entry_list(fn.__code__)
         self.assertNotIn("2147483647", str(entry.guard_manager))
+
+    @onlyOn(GPU_TYPE)
+    @largeTensorTest("6GB", device=GPU_TYPE)
+    @parametrize("dual", [False, True])
+    def test_dual_index_dtype_past_int32(self, device, dual):
+        def fn(x):
+            return x.sum(-1)
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+        with config.patch(dual_index_dtype=dual):
+            x = torch.randint(-3, 3, (64, 2**15), dtype=torch.int8, device=device)
+            self.assertEqual(compiled(x), fn(x))
+            # 2**31 + 2**15 elements: past the int32 range.
+            big = torch.randint(
+                -3, 3, (2**16 + 1, 2**15), dtype=torch.int8, device=device
+            )
+            self.assertEqual(compiled(big), fn(big))
+        # Without dual kernels, the int32 kernel's size guard fails and recompiles.
+        self.assertEqual(counter.frame_count, 1 if dual else 2)
 
     @onlyOn(GPU_TYPE)
     def test_dual_index_dtype_multi_kernel(self, device):
