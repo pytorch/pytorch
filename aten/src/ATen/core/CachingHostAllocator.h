@@ -264,13 +264,12 @@ using c10::CachingDeviceAllocator::HostSegmentInfo;
  *
  * Besides the default pool there are private pools. A capture routes the
  * allocations of its streams to a pool (begin_allocate_to_pool). A thread
- * routes its own allocations to a host mem pool, one that create_pool or
- * create_or_incref_host_mem_pool made routable
- * (begin_allocate_current_thread_to_pool). A pool can be both. When a capture
- * and a route both match, the newest wins, as in the device allocator. A block
- * allocated on a capturing stream and then used by any stream is not reused
- * until the capture's pool loses its last reference
- * (reclaim_capture_blocks_under_lock).
+ * routes its own allocations to a host mem pool, one that create_pool made
+ * (begin_allocate_current_thread_to_pool); a host mem pool is never a
+ * capture's pool. When a capture and a route both match, the newest wins, as
+ * in the device allocator. A block allocated on a capturing stream and then
+ * used by any stream is not reused until the capture's pool loses its last
+ * reference (reclaim_capture_blocks_under_lock).
  * Once a pool has no owner left (release_pool) and no thread is routed to it,
  * it becomes freeable: empty_cache() frees its cached blocks, and erases it
  * once it has no blocks. A host mem pool has its cached blocks freed and is
@@ -330,11 +329,10 @@ struct HostPrivatePool {
 
   c10::MempoolId_t id;
   // References from owners: graphs (begin_allocate_to_pool, retain_pool), and
-  // the HostMemPool, or MemPool with pinned routing, that made it routable.
+  // the HostMemPool that made it routable.
   int use_count{1};
-  // Threads may route to it (create_pool, create_or_incref_host_mem_pool). It
-  // may also be a capture's pool. Either way, its new blocks come from
-  // allocate_host_mem_pool_memory.
+  // Made by create_pool: threads route to it, and it is never a capture's
+  // pool. Its new blocks come from allocate_host_mem_pool_memory.
   bool is_host_mem_pool{false};
   // Open thread routes to this pool, over all threads.
   int route_count{0};
@@ -1203,6 +1201,11 @@ struct CachingHostAllocatorImpl {
       c10::MempoolId_t pool_id,
       std::function<bool(c10::Stream)> filter) {
     std::unique_lock<std::shared_mutex> lg(instance_mutex_);
+    auto it = graph_pools_.find(pool_id);
+    TORCH_CHECK(
+        it == graph_pools_.end() || !it->second->is_host_mem_pool,
+        "Pool (", pool_id.first, ", ", pool_id.second,
+        ") belongs to a HostMemPool and cannot be used as a graph capture pool");
     create_or_incref_pool_under_lock(pool_id);
     for (auto it2 = captures_underway_.begin(); it2 != captures_underway_.end();
          ++it2) {
@@ -1245,26 +1248,18 @@ struct CachingHostAllocatorImpl {
     release_pool_and_reclaim(pool_id).free();
   }
 
-  // Takes a reference on an existing pool for a graph that uses it during
-  // capture, as the device allocator does for use_mem_pool. False if absent
-  // or already released.
+  // Takes a reference on a host mem pool for a graph that routes to it during
+  // capture, as the device allocator does for use_mem_pool. False if pool_id
+  // is not a host mem pool, or was already released.
   bool retain_pool(c10::MempoolId_t pool_id) {
     std::unique_lock<std::shared_mutex> lg(instance_mutex_);
     auto it = graph_pools_.find(pool_id);
-    if (it == graph_pools_.end() || it->second->use_count == 0) {
+    if (it == graph_pools_.end() || !it->second->is_host_mem_pool ||
+        it->second->use_count == 0) {
       return false;
     }
     it->second->use_count++;
     return true;
-  }
-
-  // Makes pool_id routable by threads, for a device MemPool that also routes
-  // pinned allocations. Creates the pool, or adopts one that a capture made.
-  void create_or_incref_host_mem_pool(c10::MempoolId_t pool_id) {
-    TORCH_CHECK(pool_id != c10::MempoolId_t({0, 0}), "(0, 0) is the default pool");
-    std::unique_lock<std::shared_mutex> lg(instance_mutex_);
-    create_or_incref_pool_under_lock(pool_id);
-    graph_pools_.at(pool_id)->is_host_mem_pool = true;
   }
 
   void create_pool(c10::MempoolId_t pool_id) {
@@ -1356,7 +1351,7 @@ struct CachingHostAllocatorImpl {
                           id.first, ",", id.second,
                           ") but the current stream is not capturing.");
         }
-        return {id, pit->second->blocks, pit->second->is_host_mem_pool, id};
+        return {id, pit->second->blocks, false, id};
       }
     }
     if (r != nullptr) {
@@ -1507,9 +1502,9 @@ private:
   }
 
   // Allocates the memory of a new block of a host mem pool, for a thread routed
-  // to it or a capture into it. A backend that carves blocks out of memory
-  // shared by all pools (CUDA's pinned reserve segment) must allocate afresh
-  // here, so that the memory comes from the calling thread.
+  // to it. A backend that carves blocks out of memory shared by all pools
+  // (CUDA's pinned reserve segment) must allocate afresh here, so that the
+  // memory comes from the calling thread.
   virtual void allocate_host_mem_pool_memory(size_t size, void** ptr) {
     allocate_host_memory(size, ptr);
   }
@@ -1863,8 +1858,8 @@ struct TORCH_API HostAllocator : public at::Allocator {
   // Creates a host mem pool holding one reference, which release_pool drops.
   // Take pool_id from the backend's graph pool id counter (for CUDA,
   // at::cuda::MemPool::graph_pool_handle), so it does not collide with an
-  // existing pool. A capture may also use it as its pool
-  // (begin_allocate_to_pool), and graphs may hold it (retain_pool). Once no
+  // existing pool. It cannot be a capture's pool (begin_allocate_to_pool),
+  // but graphs that route to it during capture hold it (retain_pool). Once no
   // reference and no thread route is left, the call that dropped the last one
   // (release_pool or end_allocate_current_thread_to_pool) frees its cached
   // blocks, with no allocator lock held, unless a capture is underway. Blocks
@@ -1899,14 +1894,15 @@ struct TORCH_API HostAllocator : public at::Allocator {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for get_pool_use_count");
   }
 
-  // A graph that routes to pool_id during capture takes a reference on it.
+  // A graph that routes to the host mem pool pool_id during capture takes a
+  // reference on it. Returns false if pool_id is not a live host mem pool.
   virtual bool retain_pool(c10::MempoolId_t /*pool_id*/) {
     return false;
   }
 
-  // Lets threads route to pool_id (a device MemPool with pinned routing).
-  virtual void create_or_incref_host_mem_pool(c10::MempoolId_t /*pool_id*/) {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for create_or_incref_host_mem_pool");
+  // Whether pool_id names a pool made by create_pool.
+  virtual bool is_host_mem_pool(c10::MempoolId_t /*pool_id*/) {
+    return false;
   }
 
   virtual void record_history(
@@ -2011,8 +2007,8 @@ struct CachingHostAllocatorInterface : public HostAllocator {
     return impl_->retain_pool(pool_id);
   }
 
-  void create_or_incref_host_mem_pool(c10::MempoolId_t pool_id) override {
-    impl_->create_or_incref_host_mem_pool(pool_id);
+  bool is_host_mem_pool(c10::MempoolId_t pool_id) override {
+    return impl_->is_host_mem_pool(pool_id);
   }
 
   void record_history(

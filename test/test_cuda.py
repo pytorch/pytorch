@@ -10988,10 +10988,10 @@ class TestHostMemPool(TestCase):
 
     def test_wrong_pool_type(self):
         hp = torch.cuda.HostMemPool()
-        with self.assertRaisesRegex(ValueError, "pinned=False does not apply"):
-            torch.cuda.use_mem_pool(hp, pinned=False)
         with self.assertRaisesRegex(ValueError, "device does not apply"):
             torch.cuda.use_mem_pool(hp, device=0)
+        with self.assertRaisesRegex(TypeError, "cannot be used as a graph"):
+            torch.cuda.graph(torch.cuda.CUDAGraph(), pool=hp)
 
     @parametrize("use_background_threads", [True, False])
     def test_pending_copy_delays_reuse(self, use_background_threads):
@@ -11071,9 +11071,6 @@ class TestHostMemPool(TestCase):
             self.assertEqual(hp.use_count(), 2)
         self.assertEqual(hp.use_count(), 1)
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
-    )
     def test_reserve_segment_not_used(self):
         script = """
 import torch
@@ -11083,15 +11080,13 @@ start = first.data_ptr()
 pool = torch.cuda.HostMemPool()
 with torch.cuda.use_mem_pool(pool):
     in_pool = torch.empty(1000, pin_memory=True)
-with torch.cuda.graph(torch.cuda.CUDAGraph(), pool=pool):
-    captured = torch.empty(1000, pin_memory=True)
 default = torch.empty(1000, pin_memory=True)
-print(*(start <= t.data_ptr() < start + size for t in (default, in_pool, captured)))
+print(start <= default.data_ptr() < start + size, start <= in_pool.data_ptr() < start + size)
 """
         env = os.environ.copy()
         env["PYTORCH_CUDA_ALLOC_CONF"] = "pinned_reserve_segment_size_mb:16"
         out = subprocess.check_output([sys.executable, "-c", script], env=env)
-        self.assertEqual(out.decode().strip().splitlines()[-1], "True False False")
+        self.assertEqual(out.decode().strip().splitlines()[-1], "True False")
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -11157,33 +11152,27 @@ print(*(start <= t.data_ptr() < start + size for t in (default, in_pool, capture
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
-    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "memory snapshot not supported")
-    def test_graph_pool_can_be_host_mem_pool(self):
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "private device pools not supported")
+    def test_not_a_graph_pool(self):
         hp = torch.cuda.HostMemPool()
         g = torch.cuda.CUDAGraph()
-        with self._record_host_segments():
-            with torch.cuda.graph(g, pool=hp, capture_error_mode="thread_local"):
-                t = torch.empty(1000, pin_memory=True)
-            self.assertEqual(self._pool_of(t), hp.id)
-        self.assertEqual(hp.use_count(), 2)  # the pool object and g
+        x = torch.zeros(1, device="cuda")
+        with torch.cuda.stream(torch.cuda.Stream()):
+            with self.assertRaisesRegex(RuntimeError, "belongs to a HostMemPool"):
+                g.capture_begin(pool=hp.id)
+            # The rejected call left the graph as it was.
+            g.capture_begin()
+            x.add_(1)
+            g.capture_end()
+        g.replay()
+        self.assertEqual(x.item(), 1)
+        self.assertEqual(hp.use_count(), 1)
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
-    )
-    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "MemPool and memory snapshot not supported")
-    def test_mem_pool_routes_pinned(self):
-        # use_mem_pool(pool, pinned=True) routes pinned memory to the pool's id,
-        # eagerly and when the context is entered inside a capture.
-        mp = torch.cuda.MemPool()
-        with self._record_host_segments():
-            with torch.cuda.use_mem_pool(mp, pinned=True):
-                eager = torch.empty(1000, pin_memory=True)
-            g = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(g, capture_error_mode="thread_local"):
-                with torch.cuda.use_mem_pool(mp, pinned=True):
-                    captured = torch.empty(1000, pin_memory=True)
-            self.assertEqual(self._pool_of(eager), mp.id)
-            self.assertEqual(self._pool_of(captured), mp.id)
+        # It also left no device allocator route to the pool.
+        device = torch.cuda.current_device()
+        torch._C._cuda_beginAllocateCurrentThreadToPool(device, hp.id)
+        torch._C._cuda_endAllocateToPool(device, hp.id)
+        torch._C._cuda_releasePool(device, hp.id)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"

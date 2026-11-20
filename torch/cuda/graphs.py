@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
     from torch.utils.hooks import RemovableHandle
 
-    _GraphPool: TypeAlias = _POOL_HANDLE | MemPool | HostMemPool
+    _GraphPool: TypeAlias = _POOL_HANDLE | MemPool
 else:
     _GraphPool: TypeAlias = typing.Any
 
@@ -71,7 +71,7 @@ def _get_pool_id(pool: _GraphPool | None) -> _POOL_HANDLE | None:
     if _is_mem_pool(pool):
         return typing.cast("_POOL_HANDLE", pool.id)
     if isinstance(pool, torch.cuda.HostMemPool):
-        return typing.cast("_POOL_HANDLE", pool.id)
+        raise TypeError("A HostMemPool cannot be used as a graph capture pool")
     return typing.cast("_POOL_HANDLE", pool)
 
 
@@ -615,8 +615,8 @@ class CUDAGraph(_CUDAGraph):
         Arguments:
             pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or
                 :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) or
-                :class:`~torch.cuda.MemPool` or :class:`~torch.cuda.HostMemPool` that hints
-                this graph may share memory with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
+                :class:`~torch.cuda.MemPool` that hints this graph may share memory
+                with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
             capture_error_mode (str, optional): specifies the cudaStreamCaptureMode for the graph capture stream.
                 Can be "global", "thread_local" or "relaxed". During cuda graph capture, some actions, such as cudaMalloc,
                 may be unsafe. "global" will error on actions in other threads, "thread_local" will only error for
@@ -807,7 +807,11 @@ class CUDAGraph(_CUDAGraph):
         r"""Return opaque tokens for all memory pools retained by this graph."""
         return [torch.cuda._POOL_HANDLE(pool) for pool in super().pools()]
 
-    def _retain_pool(self, pool: _GraphPool) -> None:
+    def _retain_pool(self, pool: _GraphPool | HostMemPool) -> None:
+        # A HostMemPool cannot be a graph's pool, but a graph that routes to it
+        # during capture keeps it.
+        if isinstance(pool, torch.cuda.HostMemPool):
+            return super()._retain_pool(typing.cast("_POOL_HANDLE", pool.id))
         pool_id = _get_pool_id(pool)
         if pool_id is None:
             raise RuntimeError("CUDAGraph._retain_pool expected a memory pool")
@@ -1255,8 +1259,8 @@ class graph:
         cuda_graph (torch.cuda.CUDAGraph): Graph object used for capture.
         pool (optional): Opaque token (returned by a call to :func:`~torch.cuda.graph_pool_handle()` or
             :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) or
-            :class:`~torch.cuda.MemPool` or :class:`~torch.cuda.HostMemPool` hinting this
-            graph's capture may share memory from the specified pool. See :ref:`Graph memory management<graph-memory-management>`.
+            :class:`~torch.cuda.MemPool` hinting this graph's capture may share memory
+            from the specified pool. See :ref:`Graph memory management<graph-memory-management>`.
         stream (torch.cuda.Stream, optional): If supplied, will be set as the current stream in the context.
             If not supplied, ``graph`` sets its own internal side stream as the current stream in the context.
         capture_error_mode (str, optional): specifies the cudaStreamCaptureMode for the graph capture stream.
@@ -1637,8 +1641,8 @@ def make_graphed_callables(
             (and therefore their grad is always zero) is an error. Defaults to False.
         pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or
             :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) or
-            :class:`~torch.cuda.MemPool` or :class:`~torch.cuda.HostMemPool` that hints
-            this graph may share memory with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
+            :class:`~torch.cuda.MemPool` that hints this graph may share memory
+            with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
         enable_annotations (bool, optional): If ``True``, the forward and backward
             captures record kernel annotations from
             :func:`torch.cuda.graph_annotations.mark_kernels` scopes inside the

@@ -764,9 +764,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             else:
                 return GradModeVariable.create(tx, False)
         elif self.value is torch.cuda.use_mem_pool:
-            unexpected_kwargs = [
-                k for k in kwargs if k not in ("pool", "device", "pinned")
-            ]
+            unexpected_kwargs = [k for k in kwargs if k not in ("pool", "device")]
             if unexpected_kwargs:
                 raise_type_error(
                     tx,
@@ -791,15 +789,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 raise_type_error(
                     tx,
                     "use_mem_pool() missing 1 required positional argument: 'pool'",
-                )
-            pinned = kwargs.get("pinned")
-            if pinned is not None and not (
-                pinned.is_python_constant() and not pinned.as_python_constant()
-            ):
-                raise_type_error(
-                    tx,
-                    "torch.cuda.use_mem_pool(pinned=True) is not supported "
-                    "under torch.compile",
                 )
             mempool = args[0] if args else kwargs["pool"]
             device = args[1] if len(args) > 1 else kwargs.get("device")
