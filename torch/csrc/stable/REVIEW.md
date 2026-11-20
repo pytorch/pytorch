@@ -57,14 +57,13 @@ a new one is added, the difference should be documented.
 Public declarations must use stable or header-only types and headers. They must
 not expose ATen or other unstable implementation types. Route C shim failures
 through `STABLE_TORCH_ERROR_CODE_CHECK` NOT the outdated `TORCH_ERROR_CODE_CHECK`.
-Reuse `torch::stable::detail::from` and `torch::stable::detail::to` for boxing and
-unboxing where applicable. Avoid redundant conversion layers or round trips in
-high-level wrappers.
 
-Use enum-specific `from`/`to` conversions from `stableivalue_conversions.h` for
-runtime integer encodings across C shims, not raw casts of extension enums. If
-no such conversion exists, define and document the stable encoding; preserve
-the unstable API's unsupported-value behavior.
+Reuse `torch::stable::detail::from` and `torch::stable::detail::to` for boxing and
+unboxing where applicable, especially for correctness of runtime integer/enum
+encodings across C shims (vs a raw cast). If no conversion exists, define and
+document where an encoding must be kept stable.
+
+Avoid redundant conversion layers or round trips in high-level wrappers.
 
 For handles and callbacks, verify the ownership contract explicitly: borrowed
 versus owned handles, shared value semantics, who releases the resource, and
