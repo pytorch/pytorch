@@ -2084,7 +2084,7 @@ def upsample_output_memory_format(input: TensorLikeType) -> torch.memory_format:
     strides = list(input.stride())
     strides[0] = 1
     for s, n in zip(input.stride()[1:], input.shape[1:]):
-        strides[0] = sym_max(strides[0], s * n)
+        strides[0] = cast(int, sym_max(strides[0], s * n))
     if are_strides_like_channels_last_or_false(input.shape, strides):
         return torch.channels_last
     return memory_format
