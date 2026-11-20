@@ -190,6 +190,11 @@ def reviewer_choice_reason(
             f"{reviewer} is a codepath owner and has no request or review yet, so "
             "this run requests them."
         ),
+        "picked": (
+            f"{reviewer} was picked at random from the owners of `{owner}`, which "
+            "requests one of its owners, seeded by this PR so that reruns pick the "
+            "same member."
+        ),
         "no_push_access": (
             f"{reviewer} is a codepath owner without push access, so, as with "
             "GitHub's CODEOWNERS, they are not requested."
@@ -200,7 +205,7 @@ def reviewer_choice_reason(
         ),
         "codepath_covered": (
             f"{reviewer} covers `{owner}` through codepath ownership; no `{owner}` "
-            "roster pick was needed."
+            "pick was needed."
         ),
         "submitted": (
             f"{reviewer} already submitted a review{covering}; no new request is needed."
@@ -390,10 +395,11 @@ def fetch_reviewer_state(pr: PullRequestRef, /) -> ReviewerState:
 # A team owner's reviewer is selected, codepath_covered, submitted, pending, or
 # previously_requested. A codepath owner's state is requested, submitted,
 # pending, previously_requested, no_push_access, or unconfirmed (no reviewer
-# state).
+# state); a one_of_owners group's is picked or one of the covered states.
 ChoiceState = Literal[
     "selected",
     "requested",
+    "picked",
     "codepath_covered",
     "submitted",
     "pending",
@@ -1020,7 +1026,8 @@ class TeamOwnerReviewers:
 class CodepathOwnerReviewers:
     """Hold each codepath owner's state; its requests derive from it.
 
-    choices maps every codepath owner other than the author to its state.
+    choices maps every codepath owner other than the author, and every touched
+    one_of_owners group, to its state.
     """
 
     choices: dict[str, OwnerChoice]
@@ -1030,7 +1037,8 @@ class CodepathOwnerReviewers:
     def users(self) -> tuple[str, ...]:
         """Return the codepath owners this run requests, as logins."""
 
-        picks = {c.reviewer[1:] for c in self.choices.values() if c.state == "requested"}
+        new = {"requested", "picked"}
+        picks = {c.reviewer[1:] for c in self.choices.values() if c.state in new}
         return tuple(sorted(picks, key=str.casefold))
 
 
@@ -1040,11 +1048,13 @@ def resolve_codepath_owner_reviewers(
     """Request each codepath owner nobody has involved yet, as GitHub's CODEOWNERS did.
 
     Each touched OWNERSHIP.yaml group's review_request decides how its owners
-    are requested. In a path_handles group, the only kind so far, each owner is a
-    group of one, so everyone on the matching path is requested unless they are
-    the author, lack push access, are pending, have reviewed, or were ever
-    requested on the PR. Without the reviewer state nobody is requested, since a
-    removed request couldn't be told apart, and the plan is incomplete.
+    are requested. In a path_handles group each owner is a group of one, so
+    everyone on the matching path is requested unless they are the author, lack
+    push access, are pending, have reviewed, or were ever requested on the PR.
+    A one_of_owners group needs only one of its owners: one is picked unless a
+    member is already involved or requested on their own by this run. Without
+    the reviewer state nobody is requested, since a removed request couldn't be
+    told apart, and the plan is incomplete.
     """
 
     intake = planner_input.intake
@@ -1052,6 +1062,7 @@ def resolve_codepath_owner_reviewers(
     snapshot = planner_input.reviewers
     author_handle = f"@{intake.author_login}".casefold()
     groups = ownership.ownership_groups
+    one_of_groups = {n: g for n, g in groups.items() if g.review_request == "one_of_owners"}
     path_handles = {
         o for g in groups.values() if g.review_request == "path_handles" for o in g.owners
     }
@@ -1063,7 +1074,7 @@ def resolve_codepath_owner_reviewers(
         and USER_HANDLE_RE.fullmatch(o)
         and o.casefold() != author_handle
     ]
-    if not owners:
+    if not owners and not one_of_groups:
         return CodepathOwnerReviewers({}, ())
     existing = existing_reviewers(snapshot)
     without_push = snapshot.codepath_owners_without_push
@@ -1077,18 +1088,38 @@ def resolve_codepath_owner_reviewers(
         for o in owners
         if o.casefold() in without_push
     }
-    picks = choose_owner_reviewers(
+    singles = tuple(OwnerGroup(o, (o,)) for o in owners if o not in choices)
+    # A member without push access is never picked, so the pick always lands.
+    one_of_owner_groups = tuple(
+        OwnerGroup(name, tuple(o for o in group.owners if o.casefold() not in without_push))
+        for name, group in one_of_groups.items()
+    )
+    involved = (
+        ("submitted", existing.submitted_reviewers),
+        ("pending", existing.requested_reviewers),
+        ("previously_requested", existing.previously_requested),
+    )
+    single_picks = choose_owner_reviewers(
         identity=intake.identity,
-        groups=tuple(OwnerGroup(o, (o,)) for o in owners if o not in choices),
-        coverage=(
-            ("submitted", existing.submitted_reviewers),
-            ("pending", existing.requested_reviewers),
-            ("previously_requested", existing.previously_requested),
-        ),
+        groups=singles,
+        coverage=involved,
         author_handle=author_handle,
     )
-    for owner, pick in picks.items():
-        state = "requested" if pick.state == "selected" else pick.state
+    # An owner requested on their own this run also covers their one_of_owners groups.
+    requested_now = frozenset(
+        pick.reviewer.casefold()
+        for pick in single_picks.values()
+        if pick.state == "selected"
+    )
+    one_of_picks = choose_owner_reviewers(
+        identity=intake.identity,
+        groups=one_of_owner_groups,
+        coverage=(("codepath_covered", requested_now), *involved),
+        author_handle=author_handle,
+    )
+    for owner, pick in {**single_picks, **one_of_picks}.items():
+        new_state = "picked" if owner in one_of_groups else "requested"
+        state = new_state if pick.state == "selected" else pick.state
         choices[owner] = OwnerChoice(pick.reviewer, state)
     return CodepathOwnerReviewers(choices, ())
 
@@ -1163,6 +1194,9 @@ def explain_plan(
     def provenance_for(owner: str) -> dict[str, Any]:
         if owner in ownership.codepath_owners:
             return {"source": "codepath", "files": ownership.codepath_owners[owner]}
+        if owner in ownership.ownership_groups:
+            files = ownership.ownership_groups[owner].files
+            return {"source": "codepath", "files": files}
         return {"source": "semantic", **concerns[owner].to_dict()}
 
     # Team owners, as chosen by resolve_team_owner_reviewers.

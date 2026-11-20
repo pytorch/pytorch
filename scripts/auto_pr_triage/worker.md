@@ -34,8 +34,8 @@ result from the repository's `OWNERSHIP.yaml` file:
 - matched_path_groups uses file_indices into untrusted_context.files and
   owners to show which changed files produced those owners. Each entry
   belongs to one `OWNERSHIP.yaml` group, named by group; review_request says
-  how that group's reviewers are requested (path_handles: everyone in owners).
-  Neither changes who counts as a codepath owner.
+  whether everyone in owners is requested (path_handles) or one of them
+  (one_of_owners). Neither changes who counts as a codepath owner.
 - files_without_owners lists indices into untrusted_context.files of changed
   files that have no codepath owner.
 

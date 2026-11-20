@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import copy
 import json
 import subprocess
@@ -43,6 +44,7 @@ from tests.plan_fixtures import (
     plan_pr,
     printed_plan,
     printed_reviewer_routing,
+    REPOSITORY,
     run_apply,
     run_args,
     run_plan,
@@ -1157,7 +1159,7 @@ class ApplyTriageTest(unittest.TestCase):
         routing = printed_reviewer_routing(output)
         self.assertIn(
             "@soulitzer covers `autograd` through codepath ownership; "
-            "no `autograd` roster pick was needed.",
+            "no `autograd` pick was needed.",
             routing,
         )
         self.assertIn("Semantic owner `autograd`", routing)
@@ -1435,6 +1437,87 @@ class RepeatedRunTest(unittest.TestCase):
         self.assertEqual(mutations(github)[0][1], "repos/pytorch/ciforge/issues/123/labels")
         choice = printed_plan(output)["owner_choices"]["autograd"]
         self.assertEqual(choice["state"], "previously_requested")
+
+
+class OneOfOwnersGroupTest(unittest.TestCase):
+    """A group with review_request: one_of_owners gets one of its owners."""
+
+    def group_args(self, **overrides: Any) -> argparse.Namespace:
+        results = {
+            "codepath_owners": (),
+            "one_of_owners_groups": {"autograd": ("@alband", "@soulitzer")},
+            **overrides,
+        }
+        return run_args(stage_results=stage_results(**results))
+
+    def test_group_requests_one_seeded_owner(self) -> None:
+        github = FakeGitHub()
+
+        with configured(), mock.patch("builtins.print") as output:
+            result = plan_and_apply(args=self.group_args(), github=github)
+
+        expected = pick_roster_member(
+            repository=REPOSITORY,
+            number=123,
+            owner="autograd",
+            members=("@alband", "@soulitzer"),
+            author_handle="@external-author",
+        )
+        self.assertEqual(result, ApplyOutcome("triaged", 1))
+        self.assertEqual(mutations(github)[0][2], {"reviewers": [expected[1:]]})
+        choice = printed_plan(output)["owner_choices"]["autograd"]
+        self.assertEqual((choice["reviewer"], choice["state"]), (expected, "picked"))
+        self.assertEqual(choice["provenance"]["files"], ["torch/autograd/x.py"])
+
+    def test_member_requested_before_covers_the_group(self) -> None:
+        github = FakeGitHub(previously_requested=["soulitzer"])
+
+        with configured():
+            plan = plan_pr(args=self.group_args(), github=github)
+
+        self.assertFalse(any(isinstance(a, RequestReviewers) for a in plan.actions))
+
+    def test_member_without_push_access_is_never_picked(self) -> None:
+        github = FakeGitHub(without_push=["alband"])
+
+        with configured():
+            plan = plan_pr(args=self.group_args(), github=github)
+
+        self.assertEqual(plan.actions[0], RequestReviewers(("soulitzer",), "codepath_owner"))
+
+    def test_member_without_push_access_is_dropped_whatever_its_casing(self) -> None:
+        for alband in ("@alband", "@albanD"):
+            github = FakeGitHub(without_push=["alband"])
+            args = self.group_args(one_of_owners_groups={"autograd": (alband,)})
+
+            with self.subTest(member=alband), configured():
+                plan = plan_pr(args=args, github=github)
+
+                self.assertFalse(any(isinstance(a, RequestReviewers) for a in plan.actions))
+
+    def test_owner_with_files_outside_the_group_is_also_requested(self) -> None:
+        github = FakeGitHub(previously_requested=["soulitzer"])
+        args = self.group_args(codepath_owners=("@alband",))
+
+        with configured():
+            plan = plan_pr(args=args, github=github)
+
+        # albanD owns torch/file.py outside the group, so they are requested
+        # for it; the group itself is covered by soulitzer's earlier request.
+        self.assertEqual(plan.actions[0], RequestReviewers(("alband",), "codepath_owner"))
+
+    def test_owner_requested_on_their_own_covers_the_group(self) -> None:
+        github = FakeGitHub()
+        args = self.group_args(codepath_owners=("@alband",))
+
+        with configured(), mock.patch("builtins.print") as output:
+            plan = plan_pr(args=args, github=github)
+
+        # albanD is requested for torch/file.py, which also covers the group,
+        # so soulitzer isn't picked whatever the seeded pick would be.
+        self.assertEqual(plan.actions[0], RequestReviewers(("alband",), "codepath_owner"))
+        choice = printed_plan(output)["owner_choices"]["autograd"]
+        self.assertEqual((choice["reviewer"], choice["state"]), ("@alband", "codepath_covered"))
 
 
 class BypassIntakeTest(unittest.TestCase):

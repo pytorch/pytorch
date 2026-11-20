@@ -88,6 +88,7 @@ def stage_results(
     bypass_intake_matches: tuple[str, ...] = (),
     has_discarded_bypass_intake_match: bool = False,
     labels: tuple[str, ...] = (),
+    one_of_owners_groups: dict[str, tuple[str, ...]] | None = None,
 ) -> tuple[IntakeResult, OwnershipResult]:
     if additional_owner_concerns is None:
         additional_owner_concerns = tuple(
@@ -138,12 +139,19 @@ def stage_results(
         actionable_labelers=actionable_labelers,
         maintainer_requested_reviewers=maintainer_requested_reviewers,
     )
-    # Codepath owners own torch/file.py through one path_handles group.
-    groups = (
-        {"core": OwnershipGroup(tuple(codepath_owners), ("torch/file.py",), "path_handles")}
-        if codepath_owners
-        else {}
-    )
+    # Codepath owners own torch/file.py through one path_handles group; each
+    # one_of_owners group owns torch/autograd/x.py.
+    groups = {
+        **(
+            {"core": OwnershipGroup(tuple(codepath_owners), ("torch/file.py",), "path_handles")}
+            if codepath_owners
+            else {}
+        ),
+        **{
+            name: OwnershipGroup(owners, ("torch/autograd/x.py",), "one_of_owners")
+            for name, owners in (one_of_owners_groups or {}).items()
+        },
+    }
     files_by_owner: dict[str, set[str]] = {}
     for group in groups.values():
         for owner in group.owners:
