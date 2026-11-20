@@ -318,8 +318,6 @@ class TestKernelGeneral(TestCase):
     def test_ti_row_and_column_views_take_the_fast_kernels(self):
         """TI views pitched, offset and channels-last layouts as rows or columns at a
         runtime pitch, so they run the row and column kernels, not the general decode."""
-        from torch._native.ops.reductions import kernel_coltile as ct
-
         trait = T.SumOps(acc=cutlass.Float32)
         base = torch.randn(256, 1032, device="cuda")
         cl = torch.randn(8, 64, 14, 14, device="cuda")
@@ -342,8 +340,6 @@ class TestKernelGeneral(TestCase):
     def test_overlapping_ti_views_keep_the_general_path(self):
         """Expanded rows and columns overlap: rows would pick TMA at a zero row stride and
         columns would lose the general split's broadcast rotation, so both decline."""
-        from torch._native.ops.reductions import kernel_coltile as ct
-
         trait = T.SumOps(acc=cutlass.Float32)
         t = torch.randn(64, device="cuda")
         for name, x, dim in (
