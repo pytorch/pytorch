@@ -82,6 +82,7 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
       std::vector<void*> buffers,
       std::vector<void*> signal_pads,
       void* mc_signal_pad_addr,
+      size_t barrier_state_offset,
       HandleType mc_handle,
       void* mc_addr,
       size_t buffer_size,
@@ -95,6 +96,8 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
   std::vector<void*> buffers_;
   std::vector<void*> signal_pads_;
   void* mc_signal_pad_addr_;
+  // Bytes from a signal pad to the multimem barrier's state; see alloc().
+  size_t barrier_state_offset_;
   HandleType mc_handle_;
   void* mc_addr_;
   size_t buffer_size_;
@@ -116,7 +119,8 @@ struct Block : public c10::intrusive_ptr_target {
   size_t block_size;
   size_t buffer_size;
   // Byte offset from the allocation base (alloc_ref->ptr) to the start of the
-  // user buffer; the signal pad occupies [0, buffer_offset).
+  // user buffer. The signal pad occupies the first two thirds of
+  // [0, buffer_offset) and the multimem barrier's state the last; see alloc().
   size_t buffer_offset;
   std::optional<std::string> default_group_name;
   std::map<std::string, c10::intrusive_ptr<CUDAPeerAllocInfo>> symm_mems;
