@@ -6966,6 +6966,29 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_typing_typevar_construct(self):
+        def fn(x):
+            T = typing.TypeVar("T")
+            B = typing.TypeVar("B", bound=int, covariant=True)
+            C = typing.TypeVar("C", int, str)
+            try:
+                typing.TypeVar("E", int)
+            except TypeError:
+                x = x + 1
+            return x + 1, T, B, C, list[T]
+
+        x = torch.randn(3)
+        ref = fn(x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref[0], res[0])
+        _, T, B, C, alias = res
+        self.assertEqual(T.__name__, "T")
+        self.assertEqual(T.__module__, __name__)
+        self.assertIs(B.__bound__, int)
+        self.assertTrue(B.__covariant__)
+        self.assertEqual(C.__constraints__, (int, str))
+        self.assertIs(alias.__parameters__[0], T)
+
     def test_typing_union_and_optional(self):
         def fn(x):
             a = torch.jit.annotate(typing.Dict[str, typing.Optional[torch.Tensor]], {})

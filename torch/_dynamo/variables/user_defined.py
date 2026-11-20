@@ -33,6 +33,7 @@ import random
 import sys
 import threading
 import types
+import typing
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
@@ -2138,6 +2139,19 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 seed = None
             random_object = random.Random(seed)
             return SourcelessUserDefinedObjectBuilder.create(tx, random_object)
+        elif self.value is typing.TypeVar and constant_args:
+            try:
+                type_var = self.value(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+            except Exception as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            # CPython's typevar_new sets __module__ from the calling function;
+            # at trace time that would be Dynamo's frame, not the user's.
+            module: Any = tx.f_globals.get("__name__")
+            type_var.__module__ = module
+            return VariableTracker.build(tx, type_var)
         elif self.value is types.MappingProxyType and len(args) == 1:
             # types.MappingProxyType is a read-only proxy of the dict. If the
             # original dict changes, the changes are reflected in proxy as well.

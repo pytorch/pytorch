@@ -27,6 +27,7 @@ import random
 import re
 import sys
 import types
+import typing
 import weakref
 from collections.abc import Callable, Sequence
 from random import Random
@@ -1888,6 +1889,12 @@ class TypingVariable(VariableTracker):
         return self.value
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        if isinstance(self.value, typing.TypeVar):
+            # A TypeVar built during tracing. Load the trace-time object so it
+            # stays identical to the one inside any typing constants built
+            # from it (e.g. list[T].__parameters__).
+            codegen.append_output(codegen.create_load_const_unchecked(self.value))
+            return
         if not isinstance(self.value, types.GenericAlias):
             return super().reconstruct(codegen)
         # We're just trying to load the type here. Reconstructing the type from
