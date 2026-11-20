@@ -30,6 +30,7 @@ from torch._inductor.compile_worker.subproc_pool import (
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -1063,6 +1064,8 @@ class _FakeTritonKernel:
 
 
 class TestSubprocessEnv(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def assert_path_in_dir(self, path, expected_dir):
         expected_dir = os.path.abspath(expected_dir)
         self.assertEqual(
@@ -1394,6 +1397,8 @@ class TestSubprocessEnv(TestCase):
 
 
 class TestSetTritonLibdevicePath(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(CUDA_HOME is None, "CUDA_HOME not set")
     @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
@@ -1520,8 +1525,10 @@ class TestSetTritonLibdevicePath(TestCase):
 
 
 class TestTritonCompileWorker(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @unittest.skipIf(not HAS_TRITON, "requires triton")
-    def test_worker_compile_triton_warm_cache_skips_gpu_driver_setup(self):
+    def test_worker_compile_triton_warm_cache_skips_gpu_driver_setup(self, device):
         from torch._inductor.runtime import triton_helpers
         from torch._inductor.runtime.compile_tasks import _worker_compile_triton
 
@@ -1560,7 +1567,7 @@ class TestTritonCompileWorker(TestCase):
                 triton_helpers.set_driver_to_gpu()
 
     @unittest.skipIf(not HAS_TRITON, "requires triton")
-    def test_worker_compile_triton_restores_gpu_driver_setup_after_error(self):
+    def test_worker_compile_triton_restores_gpu_driver_setup_after_error(self, device):
         from torch._inductor.runtime import triton_helpers
         from torch._inductor.runtime.compile_tasks import _worker_compile_triton
 
@@ -1582,6 +1589,10 @@ class TestTritonCompileWorker(TestCase):
             with self.assertRaisesRegex(RuntimeError, "0 active drivers"):
                 triton_helpers.set_driver_to_gpu()
 
+
+instantiate_device_type_tests(
+    TestTritonCompileWorker, globals(), allow_xpu=True, except_for="cpu"
+)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
