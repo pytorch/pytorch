@@ -113,7 +113,7 @@ class GraphModuleSerializableCallable(SerializableCallable):
 
     @classmethod
     def deserialize_compile_artifacts(cls, data: bytes) -> Any:
-        from torch._subclasses import FakeTensorMode
+        from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx._graph_pickler import GraphPickler
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 

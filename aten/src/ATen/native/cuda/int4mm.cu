@@ -1310,7 +1310,7 @@ struct RocmMmaGfx12 {
 // 0-7 and 8-15, so one instruction covers the pair and cTmp[1] stays zero.
 // Defined only for gfx1250: older compilers (ROCm 7.0) do not declare its WMMA
 // builtin, and a non-template body is parsed for every offload arch.
-#if defined(__gfx1250__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
 struct RocmMmaGfx1250 : RocmMmaGfx12 {
   // gfx1250 has a packed bf16 FMA and no v_dot2_f32_bf16, so dequantizing each
   // B value before the multiply is cheaper than the factored form's row sums
@@ -1392,7 +1392,7 @@ using RocmMma = RocmMmaCdna;
 using RocmMma = RocmMmaGfx12;
 #elif defined(__GFX11__)
 using RocmMma = RocmMmaGfx11;
-#elif defined(__gfx1250__)
+#elif defined(__gfx1250__) || defined(__gfx1250_strict__)
 using RocmMma = RocmMmaGfx1250;
 #elif defined(__GFX12__)
 using RocmMma = RocmMmaGfx12;

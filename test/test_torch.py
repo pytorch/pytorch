@@ -464,6 +464,16 @@ class TestTorchDeviceType(TestCase):
         s = t.storage()
         self._check_storage_meta(s, s_check)
 
+    def test_storage_repr(self, device):
+        t = torch.ones(4, device=device)
+        untyped = f"[torch.storage.UntypedStorage(device={t.device}) of size 16]"
+        typed = f"[torch.storage.TypedStorage(dtype=torch.float32, device={t.device}) of size 4]"
+        # Printing must not read the data: on CUDA that would sync once per element.
+        with CudaSyncGuard("error") if t.is_cuda else contextlib.nullcontext():
+            for s, expected in ((t.untyped_storage(), untyped), (t.storage(), typed)):
+                self.assertEqual(repr(s), expected)
+                self.assertEqual(str(s), expected)
+
     @onlyAccelerator
     def test_module_share_memory(self, device):
         # Test fix for issue #80733
@@ -6174,7 +6184,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(found_inf, 1.0)
 
     @onlyNativeDeviceTypes
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5375")
     def test_grad_scaling_state_dict(self, device):
         device = torch.device(device)
         GradScaler = partial(torch.GradScaler, device=device.type)
@@ -6188,10 +6197,8 @@ class TestTorchDeviceType(TestCase):
             if lazy_init_scale:
                 # Dummy scale() call to ensure the scale tensor is lazily initialized.
                 s1.scale(torch.full((1,), 4.0, dtype=torch.float32, device=device))
-                if "cuda" == device.type:
-                    self.assertTrue(isinstance(s1._scale, torch.cuda.FloatTensor))
-                else:
-                    self.assertTrue(isinstance(s1._scale, torch.FloatTensor))
+                self.assertEqual(s1._scale.dtype, torch.float32)
+                self.assertEqual(s1._scale.device, device)
 
             s1.load_state_dict(s0.state_dict())
 
