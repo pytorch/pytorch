@@ -701,6 +701,11 @@ class BatchLinearLHSFusion(BatchFusion):
         return False
 
     def match(self, node: torch.fx.Node):
+        """
+        Return None to skip the fusion when the mms only feed cat(s) that go
+        straight to the graph output; otherwise fall through to the shared
+        device check and the base-class matching logic.
+        """
         # The mms only feed cat(s). Keep the zero-copy cat-mm buffer reuse
         # when each cat feeds the graph output directly; fusing here would
         # lower to cat + split_with_sizes and add copy kernels around the
@@ -2014,7 +2019,7 @@ def _option_matches_graph_devices(
         return True
     if isinstance(devices, str):
         devices = (devices,)
-    if not isinstance(devices, (list, tuple, set, frozenset, OrderedSet)):
+    if not isinstance(devices, (list, tuple, OrderedSet, frozenset, OrderedSet)):
         return True
     return not graph_devices.isdisjoint(devices)
 
