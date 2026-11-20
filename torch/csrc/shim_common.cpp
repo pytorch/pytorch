@@ -843,6 +843,34 @@ torch_layout_to_pyobject(int32_t layout, void** ret) {
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError
+torch_memory_format_from_pyobject(void* py_obj, int32_t* ret_memory_format) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(
+        ret_memory_format != nullptr, "ret_memory_format must not be null");
+    // The memory format code crossing the ABI is the c10::MemoryFormat enum
+    // value, the same encoding as aoti_torch_memory_format_*().
+    *ret_memory_format = static_cast<int32_t>(
+        torch::detail::getPyObjectConversionImpl().memory_format_from_pyobject(
+            static_cast<PyObject*>(py_obj)));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_memory_format_to_pyobject(int32_t memory_format, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    TORCH_CHECK(
+        memory_format >= 0 &&
+            memory_format < static_cast<int32_t>(c10::MemoryFormat::NumOptions),
+        "torch_memory_format_to_pyobject: invalid memory format code ",
+        memory_format);
+    *ret = torch::detail::getPyObjectConversionImpl().memory_format_to_pyobject(
+        static_cast<c10::MemoryFormat>(memory_format));
+  });
+}
+
 // Most other dtypes defined in torch/csrc/inductor/aoti_torch/shim_common.cpp
 #define TORCH_DTYPE_IMPL(dtype, stype)                    \
   AOTI_TORCH_EXPORT int32_t torch_dtype_##dtype() {       \

@@ -3,6 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/python_stub.h>
 #include <torch/csrc/Export.h>
@@ -73,6 +74,15 @@ struct TORCH_API PyObjectConversionInterface {
   // Return a new-reference Python torch.layout for the given at::Layout. The
   // GIL must be held.
   virtual PyObject* layout_to_pyobject(at::Layout layout) const = 0;
+
+  // Read the at::MemoryFormat out of a Python torch.memory_format (PyObject*).
+  // The GIL must be held.
+  virtual at::MemoryFormat memory_format_from_pyobject(PyObject* obj) const = 0;
+
+  // Return a new-reference Python torch.memory_format for the given
+  // at::MemoryFormat. The GIL must be held.
+  virtual PyObject* memory_format_to_pyobject(
+      at::MemoryFormat memory_format) const = 0;
 };
 
 // Install the conversion implementation. Called once by libtorch_python when it
