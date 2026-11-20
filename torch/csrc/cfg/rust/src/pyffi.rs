@@ -117,6 +117,73 @@ extern "C" {
     pub fn _PyObject_FunctionStr(x: Obj) -> Obj;
 }
 
+/// A number that is another one once `dict` has changed.
+#[cfg(not(Py_3_14))]
+#[inline(always)]
+#[allow(deprecated)]
+pub unsafe fn dict_version(dict: Obj) -> u64 {
+    (*(dict as *mut ffi::PyDictObject)).ma_version_tag
+}
+
+// From 3.14 on a dict has no version of its own. The dicts that are asked
+// about are watched instead, and share one version, which a change to any
+// of them bumps.
+#[cfg(Py_3_14)]
+static WATCHED_VERSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+/// The bit of our watcher in a dict's watcher tag; 0 until there is one.
+#[cfg(Py_3_14)]
+static WATCHER_BIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(Py_3_14)]
+extern "C" {
+    fn PyDict_AddWatcher(callback: unsafe extern "C" fn(c_int, Obj, Obj, Obj) -> c_int) -> c_int;
+}
+
+#[cfg(Py_3_14)]
+unsafe extern "C" fn watched_dict_changed(_event: c_int, _dict: Obj, _key: Obj, _value: Obj) -> c_int {
+    WATCHED_VERSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    0
+}
+
+#[cfg(Py_3_14)]
+#[inline(always)]
+pub unsafe fn dict_version(dict: Obj) -> u64 {
+    use std::sync::atomic::Ordering::Relaxed;
+    // The start of PyDictObject; the watchers of a dict are the low bits of
+    // the word that used to be its version.
+    #[repr(C)]
+    struct Head {
+        ob_base: ffi::PyObject,
+        ma_used: ffi::Py_ssize_t,
+        watcher_tag: u64,
+    }
+    if (*(dict as *const Head)).watcher_tag & WATCHER_BIT.load(Relaxed) == 0 {
+        return watch_dict(dict);
+    }
+    WATCHED_VERSION.load(Relaxed)
+}
+
+#[cfg(Py_3_14)]
+#[cold]
+unsafe fn watch_dict(dict: Obj) -> u64 {
+    use std::sync::atomic::Ordering::Relaxed;
+    static WATCHER: std::sync::OnceLock<c_int> = std::sync::OnceLock::new();
+    let id = *WATCHER.get_or_init(|| {
+        let id = PyDict_AddWatcher(watched_dict_changed);
+        if id >= 0 {
+            WATCHER_BIT.store(1 << id, Relaxed);
+        }
+        id
+    });
+    if id < 0 || ffi::PyDict_Watch(id, dict) < 0 {
+        // The interpreter has no watcher left to give: a version that is
+        // never seen twice, so nothing is assumed about the dict.
+        ffi::PyErr_Clear();
+        return WATCHED_VERSION.fetch_add(1, Relaxed);
+    }
+    WATCHED_VERSION.load(Relaxed)
+}
+
 /// How the interpreter names a callable in the errors of a call: `f()` or
 /// `module.f()`.
 pub unsafe fn function_str(func: Obj) -> String {

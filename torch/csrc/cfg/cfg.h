@@ -97,7 +97,15 @@ struct TcfgTensorInfo {
 
 #define TCFG_NO_VERSION UINT64_MAX
 
-#define TCFG_API_VERSION 7
+#define TCFG_API_VERSION 15
+
+// What frame_hook registers. It is offered the frame the interpreter made
+// for a call of func, with the arguments bound and nothing run. It returns 0
+// to leave the frame to the interpreter, or 1 after it has run the call and
+// disposed of the frame (frame_adopt and frame_pop, or frame_interpret), with
+// *result a new reference, or null with a Python error set.
+typedef int32_t (
+    *TcfgTakeFrame)(PyObject* func, void* frame, PyObject** result);
 
 struct TcfgApi {
   uint32_t version;
@@ -143,23 +151,72 @@ struct TcfgApi {
   // Interpreter frames, so that whatever looks at the Python stack while a
   // compiled function runs (a traceback, a warning, sys._getframe, the module
   // a new class is attributed to) finds the function there. Both are null
-  // where the layout of CPython's frames is not known: anything but 3.12.
+  // where the layout of CPython's frames is not known: it is for 3.12, and
+  // for the default build of 3.14 on 64-bit platforms other than Windows.
   //
   // Pushes a frame for func, a Python function, and makes it the current
   // frame of the thread. *instr gets the address of the frame's instruction
   // pointer and *code that of the first instruction of the function's code,
-  // so the caller can keep the pointer on what it is executing. The frame
-  // counts as one Python call against the recursion limit. Returns null with
-  // a Python error set: RecursionError, or MemoryError.
-  void* (*frame_push)(PyObject* func, uint16_t*** instr, uint16_t** code);
+  // so the caller can keep the pointer on what it is executing. *locals gets
+  // the frame's variables, one owned reference or null each (in 3.14 as the
+  // stack reference that stands for it), in the order of the code's
+  // co_localsplusnames: the caller keeps them what the variables
+  // of the function are bound to, the cells of the closure excepted, which
+  // are there already. The frame counts as one Python call against the
+  // recursion limit. *object gets the address of the frame's frame object,
+  // which is null until something looks at the frame. Returns null with a
+  // Python error set: RecursionError, or MemoryError.
+  void* (*frame_push)(
+      PyObject* func,
+      uint16_t*** instr,
+      uint16_t** code,
+      PyObject*** locals,
+      PyObject*** object);
   // Pops the frame, which must be the current one. A frame object that
   // something still refers to (a traceback) takes the frame's contents over,
-  // and with them `kept` (a reference that is consumed; may be null): what
-  // the locals of the function were bound to, which lives as long as the
-  // frame object then, as the locals of an interpreted function do.
-  void (*frame_pop)(void* frame, PyObject* kept);
+  // its variables among them.
+  void (*frame_pop)(void* frame);
   // Whether something other than the stack refers to the frame.
   int32_t (*frame_held)(void* frame);
+  // Makes a frame that is on the stack of the thread the current one and
+  // returns the one that was, for the same call to put back: what runs in
+  // between finds itself called by the function of that frame, whatever
+  // frames were pushed since.
+  void* (*frame_swap)(void* frame);
+  // Whether the thread has a trace function (sys.settrace): the interpreter
+  // calls it for the frames it enters and the lines it runs in them. In 3.14
+  // the same goes for a debugger or a coverage tool that asked sys.monitoring
+  // for the functions that start, which is how pdb listens there.
+  int32_t (*frame_traced)();
+
+  // The frames the interpreter makes itself: for the calls that C code makes
+  // (a constructor, a property, an operator, a callback), and for those that
+  // a function makes which the interpreter runs. frame_hook says who is
+  // offered them, once. They are offered while some thread wants them:
+  // frame_want(1), and frame_want(-1) when it no longer does. The
+  // interpreter's own calls are slower meanwhile, since it then starts every
+  // frame through this.
+  void (*frame_hook)(TcfgTakeFrame take);
+  void (*frame_want)(int32_t delta);
+  // Makes a frame that was offered the current one of the thread, as
+  // frame_push does for one it makes; frame_pop disposes of it. Returns 0
+  // with RecursionError set, and the frame gone.
+  int32_t (*frame_adopt)(
+      void* frame,
+      uint16_t*** instr,
+      uint16_t** code,
+      PyObject*** locals,
+      PyObject*** object);
+  // Has the interpreter run a frame that was offered. Returns a new
+  // reference, or null with a Python error set.
+  PyObject* (*frame_interpret)(void* frame);
+  // For a frame that is about to return result and has a frame object: if
+  // a debugger put its trace function on the frame (it does so for every
+  // frame of the stack it is entered under), tells it of the return, as the
+  // interpreter does: through the thread's trace function, or in 3.14
+  // through what the debugger registered with sys.monitoring for the returns
+  // of the frame's code. Returns -1 with a Python error set if it raised.
+  int32_t (*frame_returns)(void* frame, PyObject* result);
 
   // Whether torch.jit.trace is recording on this thread: one of the things
   // nn.Module.__call__ looks at before it calls forward.
@@ -170,6 +227,42 @@ struct TcfgApi {
   // from it. Enter returns what leave is to put back.
   void* (*workspace_enter)(void* workspace);
   void (*workspace_leave)(void* workspace, void* previous);
+
+  // The modes of the thread that a graph depends on, as one number: whether
+  // gradients are recorded (bit 0), inference mode (1), autocast for CUDA
+  // (2) and for the CPU (3), the default dtype (bits 8 to 15) and, from bit
+  // 16, how many torch function modes are active.
+  uint64_t (*call_modes)();
+
+  // New reference: what a graph that has the call of a site as a node is
+  // built from, a dict with the operator ("op", "overload"), per schema
+  // argument where its value comes from ("args": tuples of the name, whether
+  // it is keyword-only, and "operand" with the operand and its conversion,
+  // "packed" with the operands of an int list, or "const" with the value as a
+  // Python object), per operand what the site checks of it ("guards": "none",
+  // "tensor", "exact", "is_none" or "identity"), what it returns ("returns":
+  // "tensor", "bool", "int" or "float"), and whether the operator writes to an
+  // argument ("writes") or draws random numbers ("random").
+  PyObject* (*site_export)(const TcfgSite*);
+
+  // How many dispatcher calls a capture saw at its top level, those of the
+  // captures that began and ended inside it included.
+  int32_t (*trace_calls)(const TcfgTrace*);
+
+  // The dispatch keys the thread adds to and takes from every call: what a
+  // site compares with the ones it was captured under before it runs.
+  void (*dispatch_keys)(uint64_t* included, uint64_t* excluded);
+
+  // How many frames the interpreter has started or resumed on this thread
+  // while some thread wanted them offered (frame_want): calls of functions,
+  // class bodies, and every resumption of a generator or coroutine. Null
+  // where frame_push is.
+  uint64_t (*frame_count)();
+
+  // Whether a tensor carries a forward-mode gradient, which a graph that was
+  // compiled for tensors without one would drop. obj may be an unboxed
+  // tensor.
+  int32_t (*tensor_forward_grad)(PyObject* obj);
 };
 
 } // extern "C"
