@@ -142,6 +142,19 @@ class TestInnerTreeCombineUnroll(TestCase):
             self.assertEqual(candidate.combine_tile, want)
             self.assertEqual(candidate.uniform_combine, mode)
 
+    def test_uniform_combine_rejects_unknown_modes(self):
+        import cutlass
+
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
+
+        trait = T.VarMeanOps(correction=1, acc=cutlass.Float32)
+        split = rt._ItreePlan(
+            "split", 4, 16, 1, 2, (), (), (1024, 8192, 8192, 512, 512)
+        )
+        arch = rt._ITREE_ARCH["default"]._replace(uniform_combine="weight")
+        with self.assertRaisesRegex(ValueError, "must be off, counts or weights"):
+            rt.itree_combine_plan(split, 4, trait=trait, arch=arch)
+
     @parametrize(
         "split", [(2**24, 8192, 8192, 512, 512), (1024, 2**24, 2**24, 512, 512)]
     )
@@ -182,6 +195,7 @@ class TestInnerTreeCombineUnroll(TestCase):
     @parametrize(
         "updates,msg",
         [
+            ({"uniform_combine": "weight"}, "must be off, counts or weights"),
             ({"shape": "split"}, "staged combine plan"),
             ({"combine_tile": 0}, "staged combine plan"),
             ({"trait": "sum"}, "combine_uniform, got SumOps"),

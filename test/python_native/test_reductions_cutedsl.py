@@ -5,6 +5,8 @@
 
 import functools
 import os
+import subprocess
+import sys
 import unittest
 from unittest import mock
 
@@ -209,6 +211,25 @@ class TestCuTeDSLReductionWiring(TestCase):
                 x = torch._to_functional_tensor(x)
         self.assertFalse(ov._cond(x, -1))
         self.assertFalse(ov._dtype_cond(x, -1))
+
+    def test_fake_input_declines_without_initializing_cuda(self, device):
+        """Decline a fake CUDA tensor before querying, and so initializing, CUDA."""
+        # This process has initialized CUDA already, so check in a fresh one.
+        code = (
+            "import torch\n"
+            "from torch._native.ops.reductions import overrides as ov\n"
+            "from torch._subclasses.fake_tensor import FakeTensorMode\n"
+            "with FakeTensorMode():\n"
+            "    x = torch.empty(4, 128, device='cuda')\n"
+            "assert not torch.cuda.is_initialized()\n"
+            "assert not ov._cond(x, -1)\n"
+            "assert not torch.cuda.is_initialized()\n"
+            "print('FAKE_OK')\n"
+        )
+        cmd = [sys.executable, "-c", code]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("FAKE_OK", proc.stdout)
 
     def test_cow_input_served_and_preserved(self, device):
         """Read copy-on-write inputs without materializing or mutating their storage."""
