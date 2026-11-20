@@ -9843,7 +9843,7 @@ class KernelTestsCudaClusters(_KernelTestsBase):
             add_kernel[grid](x, output, n_elements)
             return output
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=GPU_TYPE)
         with inductor_config.patch(
             {"triton.autotune_at_compile_time": autotune_at_compile_time}
         ):
