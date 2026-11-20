@@ -92,6 +92,7 @@ from .exception import (
 )
 from .functions import (
     BaseUserFunctionVariable,
+    BoundBuiltinCallableMethodVariable,
     CollectionsNamedTupleFunction,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
@@ -102,6 +103,7 @@ from .functions import (
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     LruCacheWrapperVariable,
+    MethodTypeVariableMixin,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     PyTreeGetNodeTypeFunctionVariable,
@@ -322,6 +324,8 @@ __all__ = [
     "UserDefinedTupleVariable",
     "UserFunctionVariable",
     "UserMethodVariable",
+    "BoundBuiltinCallableMethodVariable",
+    "MethodTypeVariableMixin",
     "VariableTracker",
     "WithEnterFunctionVariable",
     "WithExitFunctionVariable",
