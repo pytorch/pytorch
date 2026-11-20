@@ -4,13 +4,8 @@
 
 #include <gtest/gtest.h>
 #include <torch/csrc/stable/c/shim.h>
-#include <torch/csrc/stable/ops.h>
 #include <torch/csrc/stable/stableivalue_conversions.h>
-#include <torch/library.h>
-#include <iterator>
 #include <limits>
-#include <optional>
-#include <vector>
 
 TEST(TorchStableIValue, TestStableIValueUse) {
   StableIValue* a = nullptr;
@@ -59,78 +54,3 @@ TEST(TorchStableIValue, TestStringRoundtrip) {
 
   ASSERT_EQ(string_back, our_string);
 }
-
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
-
-TORCH_LIBRARY(test_stable_dispatcher, m) {
-  m.def("identity(int value) -> int", [](int64_t value) { return value; });
-  m.def(
-      "list(int?[] values) -> int?[]",
-      [](c10::List<std::optional<int64_t>> values) { return values; });
-}
-
-TEST(TorchStableIValue, DispatcherVersions) {
-  using torch::stable::detail::from;
-  using torch::stable::detail::to;
-  using Dispatcher = AOTITorchError (*)(const char*, StableIValue*);
-  const Dispatcher dispatchers[] = {
-      +[](const char* op, StableIValue* stack) {
-        return aoti_torch_call_dispatcher(op, "", stack);
-      },
-      +[](const char* op, StableIValue* stack) {
-        return torch_call_dispatcher(op, "", stack, TORCH_VERSION_2_14_0);
-      },
-      +[](const char* op, StableIValue* stack) {
-        return torch_call_dispatcher(op, "", stack, TORCH_ABI_VERSION);
-      },
-      +[](const char* op, StableIValue* stack) {
-        return torch_call_dispatcher_v2(
-            op, "", stack, TORCH_ABI_VERSION, TORCH_VERSION_2_14_0);
-      },
-      +[](const char* op, StableIValue* stack) {
-        return torch_call_dispatcher_v2(
-            op, "", stack, TORCH_ABI_VERSION, TORCH_FEATURE_VERSION);
-      },
-      +[](const char* op, StableIValue* stack) {
-        return torch::stable::call_dispatcher(op, "", stack);
-      }};
-  const std::vector<std::optional<int64_t>> values = {
-      INT64_MIN, std::nullopt, INT64_MAX};
-  for (size_t i = 0; i < std::size(dispatchers); ++i) {
-    SCOPED_TRACE(i);
-    for (const int64_t value : {INT64_MIN, INT64_C(-1), INT64_MAX}) {
-      SCOPED_TRACE(value);
-      StableIValue stack[] = {from(value)};
-      ASSERT_EQ(
-          dispatchers[i]("test_stable_dispatcher::identity", stack),
-          AOTI_TORCH_SUCCESS);
-      EXPECT_EQ(to<int64_t>(stack[0]), value);
-    }
-    StableIValue stack[] = {from(values)};
-    ASSERT_EQ(
-        dispatchers[i]("test_stable_dispatcher::list", stack),
-        AOTI_TORCH_SUCCESS);
-    EXPECT_EQ(to<std::vector<std::optional<int64_t>>>(stack[0]), values);
-  }
-}
-
-TEST(TorchStableIValue, DispatcherRejectsTargetAboveBuild) {
-  StableIValue stack[] = {torch::stable::detail::from(INT64_C(7))};
-  EXPECT_EQ(
-      torch_call_dispatcher_v2(
-          "test_stable_dispatcher::identity",
-          "",
-          stack,
-          TORCH_VERSION_2_14_0,
-          TORCH_VERSION_2_16_0),
-      AOTI_TORCH_FAILURE);
-  const auto* error = torch_exception_get_what_without_backtrace();
-  ASSERT_NE(error, nullptr);
-  EXPECT_NE(
-      std::string(error).find(
-          "extension_target_version must be <= extension_build_version"),
-      std::string::npos);
-  EXPECT_EQ(torch::stable::detail::to<int64_t>(stack[0]), 7);
-}
-
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0

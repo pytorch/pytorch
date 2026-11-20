@@ -416,23 +416,6 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_impl(
   });
 }
 
-static void call_dispatcher(
-    const char* opName,
-    const char* overloadName,
-    StableIValue* stack,
-    uint64_t extension_build_version,
-    uint64_t extension_target_version,
-    bool use_schema_adapters);
-
-AOTITorchError aoti_torch_call_dispatcher(
-    const char* opName,
-    const char* overloadName,
-    StableIValue* stack) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    call_dispatcher(opName, overloadName, stack, TORCH_ABI_VERSION, 0, false);
-  });
-}
-
 // Schema Adapter Infrastructure
 // SchemaAdapterRegistry contains the adapters registered via
 // register_schema_adapter that define how to convert the StableIValue argument
@@ -557,15 +540,21 @@ static void call_dispatcher(
   const auto num_arguments = schema.arguments().size();
 
   torch::jit::Stack ivalue_stack;
+  // Check if we need an adapter for this operation
   auto adapter = use_schema_adapters
       ? SchemaAdapterRegistry::instance().get_adapter(
             opName, extension_build_version)
       : std::nullopt;
   if (adapter) {
+    // Use adapter to create IValue stack
     ivalue_stack = (*adapter)(
         schema, stack, extension_build_version, extension_target_version);
   } else {
+    // No adapter needed - implementation matches aoti_torch_call_dispatcher
+    // we will only need max(num_args, num_returns)
     ivalue_stack.reserve(std::max(num_arguments, num_returns));
+
+    // convert StableIValue stack to c10::IValue stack
     for (const auto idx : c10::irange(num_arguments)) {
       auto stable_ivalue = stack[idx];
       auto arg_type = schema.arguments()[idx].real_type();
@@ -581,7 +570,8 @@ static void call_dispatcher(
 
   op.callBoxed(ivalue_stack);
 
-  // Convert returns back to the extension's selected encoding.
+  // there should then be num_returns IValues on the stack, which
+  // we will convert to StableIValue and repopulate user input stack
   for (const auto idx : c10::irange(num_returns)) {
     const auto stack_idx = num_returns - idx - 1;
     const c10::TypePtr& ret_type = schema.returns()[idx].real_type();
@@ -591,6 +581,15 @@ static void call_dispatcher(
         extension_build_version,
         extension_target_version);
   }
+}
+
+AOTITorchError aoti_torch_call_dispatcher(
+    const char* opName,
+    const char* overloadName,
+    StableIValue* stack) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    call_dispatcher(opName, overloadName, stack, TORCH_ABI_VERSION, 0, false);
+  });
 }
 
 AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(

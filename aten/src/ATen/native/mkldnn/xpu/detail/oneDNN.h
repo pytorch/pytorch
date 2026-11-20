@@ -228,11 +228,11 @@ sycl::event scaled_matmul(
 sycl::event scaled_grouped_matmul(
     const Tensor& mat_a,
     const Tensor& mat_b,
-    const std::optional<Tensor> scale_a,
-    const std::optional<Tensor> scale_b,
-    const std::optional<at::blas::ScalingType> scaling_choice_a,
-    const std::optional<at::blas::ScalingType> scaling_choice_b,
+    const std::optional<Tensor>& scale_a,
+    const std::optional<Tensor>& scale_b,
+    const std::optional<at::blas::ScalingType>& scaling_choice_a,
+    const std::optional<at::blas::ScalingType>& scaling_choice_b,
     const Tensor& offs,
     Tensor& out,
-    const std::optional<Tensor> alpha = std::nullopt);
+    const std::optional<Tensor>& alpha = std::nullopt);
 } // namespace at::native::onednn

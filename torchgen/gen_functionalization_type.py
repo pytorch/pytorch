@@ -86,6 +86,16 @@ CUMULATIVE_OUT_OPS_PRESERVING_OUT_DTYPE = {
     OperatorName.parse("cumprod.out"),
 }
 
+# Out ops whose functional result can have different strides than a correctly sized
+# out (_grouped_mm pads rows to 16 bytes). Functionalization would otherwise hand out
+# the functional strides, while the eager out kernel keeps out's own strides. Listed
+# ops must keep a correctly sized out's strides and make a resized out contiguous, as
+# resize_output does. Other out ops, such as the structured _scaled_grouped_mm_v2.out,
+# can diverge the same way and are not handled here.
+OUT_OPS_PRESERVING_OUT_STRIDES = {
+    OperatorName.parse("_grouped_mm.out"),
+}
+
 # This file contains codegen that relates to the functionalization pass.
 # It includes:
 # - gen_functionalization_definition
@@ -645,6 +655,23 @@ def maybe_replace_cumulative_out_dtype_exprs(
     return adjusted_exprs
 
 
+def maybe_preserve_out_strides(f: NativeFunction, tmp_name: str) -> str:
+    if f.func.name not in OUT_OPS_PRESERVING_OUT_STRIDES:
+        return ""
+    if len(f.func.arguments.out) != 1:
+        raise AssertionError(
+            f"Expected a single out argument for stride-preserving out op: {f.func.name}"
+        )
+    out = f"{f.func.arguments.out[0].name}_"
+    # Match the eager out kernel: a correctly sized out keeps its strides, a resized one is contiguous.
+    return f"""
+          if (!TORCH_GUARD_OR_FALSE(c10::sym_equals({out}.sym_sizes(), {tmp_name}.sym_sizes()))) {{
+            {tmp_name} = {tmp_name}.contiguous();
+          }} else if (!TORCH_GUARD_OR_FALSE(c10::sym_equals({out}.sym_strides(), {tmp_name}.sym_strides()))) {{
+            {tmp_name} = at::_ops::copy::call({out}, {tmp_name}, false);
+          }}"""
+
+
 # Generates the Functionalization kernel for:
 # - mutation ops (inplace and out= ops)
 @with_native_function_and
@@ -760,7 +787,7 @@ def emit_inplace_functionalization_body(
         {return_type} tmp_output;
         {{
           at::AutoDispatchSkipFunctionalize guard;
-          tmp_output = at::_ops::{g.functional.func.name.unambiguous_name()}::call({", ".join(functional_exprs)});
+          tmp_output = at::_ops::{g.functional.func.name.unambiguous_name()}::call({", ".join(functional_exprs)});{maybe_preserve_out_strides(f, "tmp_output")}
         }}
         {wrap_propagate_mutations_and_return(f, g.functional, "tmp_output")}
       }}

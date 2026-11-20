@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     set_default_dtype,
+    skipIfCppFakeTensor,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
 )
@@ -815,6 +816,7 @@ user_stack=None)
             "tensor 'x' stride mismatch" in debug_info.verbose_code_parts[0]
         )
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_tensor_match_guard_throw_restores_torch_function(self):
         # The root disables the TorchFunction TLS while its accessors run and
         # restores it on scope exit, so a C++ throw out of an accessor leaves
