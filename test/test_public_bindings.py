@@ -453,6 +453,7 @@ class TestPublicBindings(TestCase):
             cuda_dep_prefixes = (
                 "torch._native.ops.pointwise.kernel",
                 "torch._native.ops.pointwise.ops",
+                "torch._native.ops.pointwise.tma",
                 "torch._native.cutedsl.",
                 "torch._native.ops.reductions.traits",
                 "torch._native.ops.foreach_mm.",
