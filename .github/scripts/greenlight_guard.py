@@ -17,7 +17,7 @@ from __future__ import annotations
 import enum
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import TYPE_CHECKING
 
 from greenlight_identity import GREENLIGHT_LOGIN, is_greenlight
@@ -327,7 +327,7 @@ def evaluate_greenlight_guard(
     ``fetch_states`` is resolved here rather than bound as a default argument, so that
     patching the ledger reader in a test actually takes effect.
     """
-    moment = now if now is not None else datetime.now(timezone.utc)
+    moment = now if now is not None else datetime.now(UTC)
     fetch = fetch_states if fetch_states is not None else fetch_ledger_states
     guarded = [pr for pr in prs if _needs_greenlight(pr)]
     if not guarded:

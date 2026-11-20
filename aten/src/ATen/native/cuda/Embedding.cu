@@ -405,7 +405,9 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
     const int64_t *num_unique_indices_ptr = num_unique_indices.const_data_ptr<int64_t>();
     dim3 grid = unique_indices.numel();
     dim3 block = num_threads();
-    int dim = self.stride(0);
+    // The kernel addresses rows and columns through self's strides; the row
+    // length is size(1), which differs from stride(0) for non-contiguous weights.
+    int64_t dim = self.size(1);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_renorm_cuda_", [&] {
       using accscalar_t = acc_type<scalar_t, true>;

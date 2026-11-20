@@ -4,6 +4,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -39,7 +40,7 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_rows_mps(const Tensor& self,
   const auto rows = self.size(0), cols = self.size(1);
 
   // Step 1: sort (unless consecutive).
-  TORCH_CHECK_NOT_IMPLEMENTED(consecutive || rows <= std::numeric_limits<int32_t>::max(),
+  TORCH_CHECK_NOT_IMPLEMENTED(consecutive || std::in_range<int32_t>(rows),
                               "unique: sorting more than 2^31 - 1 elements is not supported on MPS");
   Tensor sorted_values = self;
   Tensor sort_idx;
@@ -83,7 +84,7 @@ static std::tuple<Tensor, Tensor, Tensor> _unique_rows_mps(const Tensor& self,
   });
 
   // Step 3: inclusive scan of mask.
-  const auto scan_dtype = rows <= std::numeric_limits<int32_t>::max() ? kInt : kLong;
+  const auto scan_dtype = std::in_range<int32_t>(rows) ? kInt : kLong;
   Tensor scan = at::cumsum(mask, /*dim=*/0, scan_dtype);
   const auto scan_suffix = std::to_string(c10::elementSize(scan_dtype) * 8);
 

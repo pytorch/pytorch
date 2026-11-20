@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
-from typing_extensions import final, override
+from typing import Any, final, TYPE_CHECKING
+from typing_extensions import override
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._inductor.output_code import (

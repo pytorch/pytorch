@@ -67,6 +67,12 @@ updates:
       - dependency-name: "scikit-image"
       - dependency-name: "scipy"
       - dependency-name: "tensorboard"
+      # MKL is pinned in four places that have to move together (install_mkl.sh,
+      # requirements-ci.txt, build_pytorch.bat, build_install_deps.py), and
+      # intel-openmp is capped below 2026.2.0 for #201218. Bump these by hand.
+      - dependency-name: "mkl-static"
+      - dependency-name: "mkl-include"
+      - dependency-name: "intel-openmp"
     commit-message:
       prefix: "[Dependabot] Update"
       include: "scope"

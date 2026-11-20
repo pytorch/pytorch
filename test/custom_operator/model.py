@@ -23,7 +23,7 @@ class Model(torch.jit.ScriptModule):
         super().__init__()
         self.p = torch.nn.Parameter(torch.eye(5))
 
-    @torch.jit.script_method
+    @torch.jit._script.script_method
     def forward(self, input):
         return torch.ops.custom.op_with_defaults(input)[0] + 1
 

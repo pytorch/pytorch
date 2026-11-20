@@ -15,7 +15,9 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/add.h>
 #include <ATen/ops/empty_strided.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -621,7 +623,6 @@ void spgemm(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-
   IntArrayRef A_sizes = A.sizes();
   auto ndim = A.dim();
   auto m = A_sizes[ndim - 2];
@@ -804,6 +805,41 @@ void addmm_out_sparse_csr(
     result.copy_(input);
   }
 
+  // If beta != 0, spgemm is correct only when the sparsity pattern
+  // of mat1 @ mat2 is that of result, i.e. sp(mat1 @ mat2) = sp(result).
+  // Since sp(mat1 @ mat2) is not known in advance, we need to materialize it
+  // in an external memory, and then deal with accumulation into result.
+  const auto is_csr_or_csc = [](const Tensor& t) {
+    return t.layout() == kSparseCsr || t.layout() == kSparseCsc;
+  };
+  if (beta.toComplexDouble() != 0. && is_csr_or_csc(mat1) && is_csr_or_csc(mat2) && is_csr_or_csc(result)) {
+    // NOTE: beta == 0 implies that the result is overwritten, not accumulated into.
+    auto AB = at::zeros(result.sizes(), result.options());
+    addmm_out_sparse_csr(AB, mat1, mat2, static_cast<Scalar>(0), alpha, AB);
+
+    // Handling accumulation into result.
+    // No add for reduced dtypes, so we try to deploy add on values,
+    // and that only possible when sp(mat1 @ mat2) == sp(result), which we check.
+    // When sp do no match, we use float32 add instead.
+    const auto [AB_compressed, AB_plain] = at::sparse_csr::getCompressedPlainIndices(AB);
+    const auto [C_compressed, C_plain] = at::sparse_csr::getCompressedPlainIndices(result);
+    if (
+      (AB._nnz() == result._nnz())
+      && AB_compressed.eq(C_compressed).all().logical_and_(AB_plain.eq(C_plain).all()).item<bool>()
+    ) {
+      (beta.toComplexDouble() == 1. ? result.values() : result.values().mul_(beta)).add_(AB.values());
+    } else {
+      const auto add_dtype = at::isReducedFloatingType(result.scalar_type()) ? kFloat : result.scalar_type();
+      // CUDA sparse add supports CSR only, and the transpose of a CSC tensor is CSR.
+      const auto t = [&](const Tensor& x) {
+        return result.layout() == kSparseCsc ? x.transpose(-2, -1) : x;
+      };
+      const auto res = t(at::add(t(AB).to(add_dtype), t(result).to(add_dtype), beta));
+      result.resize_as_sparse_(res).copy_(res);
+    }
+    return;
+  }
+
   // mm functions that assume that result contains input:
   if (mat1.layout() == kStrided) {
     if (mat2.layout() == kSparseCsr) {
@@ -867,12 +903,22 @@ void addmm_out_sparse_csr(
             mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result); return;
       }
       if (result.layout() == kSparseCsc) {
+        // spgemm may change nnz by resizing or replacing the member tensors of
+        // the transposed view, which share storage with those of result, but
+        // not sizes. Hence result adopts the view's member tensors.
+        auto result_t = result.transpose(-2, -1);
         spgemm(
             mat2.transpose(-2, -1),
             mat1.transpose(-2, -1),
             beta,
             alpha,
-            result.transpose(-2, -1)); return;
+            result_t);
+        static_cast<SparseCsrTensorImpl*>(result.unsafeGetTensorImpl())->set_member_tensors(
+            result_t.crow_indices(),
+            result_t.col_indices(),
+            result_t.values(),
+            result.sizes());
+        return;
       }
     }
   }
@@ -999,7 +1045,7 @@ void add_out_sparse_csr(
   auto A_32 = at::native::_sparse_csr_tensor_unsafe(
       A.crow_indices().to(kInt),
       A.col_indices().to(kInt),
-      A.values(),
+      A.values().contiguous(),
       A.sizes(),
       A.scalar_type(),
       A.layout(),
@@ -1007,7 +1053,7 @@ void add_out_sparse_csr(
   auto B_32 = at::native::_sparse_csr_tensor_unsafe(
       B.crow_indices().to(kInt),
       B.col_indices().to(kInt),
-      B.values(),
+      B.values().contiguous(),
       B.sizes(),
       B.scalar_type(),
       B.layout(),

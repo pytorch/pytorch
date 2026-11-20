@@ -89,13 +89,6 @@ class ContextWrappingVariable(VariableTracker):
                 f"Sequence, got {type(target_values).__name__}"
             )
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if hasattr(self, "_call_func"):
             self._call_func(tx, self.target_values)
@@ -1766,10 +1759,13 @@ class DynamoConfigPatchVariable(ContextWrappingVariable):
         super().__init__(
             target_values=(target_values_tuple,), initial_values=None, **kwargs
         )
+        # Save the raw override rather than the resolved value so that exiting
+        # leaves a previously unset key unset.
+        entries = torch._dynamo.config._config  # type: ignore[attr-defined]
         # pyrefly: ignore [implicit-any]
         initial_values_dict = {}
         for key, _ in target_values_tuple:
-            initial_values_dict[key] = torch._dynamo.config.__getattr__(key)  # type: ignore[attr-defined]
+            initial_values_dict[key] = entries[key].user_override.get()
         self.initial_values = (tuple(initial_values_dict.items()),)
 
     def _call_func(self, tx: "InstructionTranslatorBase", values: Any) -> None:
@@ -1895,13 +1891,6 @@ class WithEnterFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.ctx = ctx
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def python_type(self) -> type:
         return types.MethodType
 
@@ -1954,13 +1943,6 @@ class WithExitFunctionVariable(VariableTracker):
         ctx: ContextWrappingVariable | GenericContextWrappingVariable, target: Any
     ) -> "WithExitFunctionVariable":
         return WithExitFunctionVariable(ctx, target)
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def __init__(
         self,

@@ -11,9 +11,8 @@ import operator
 import types
 import typing
 from collections import defaultdict
-from collections.abc import Callable, Sequence
-from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
-from typing_extensions import Never
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any, Never, Optional, Protocol, TYPE_CHECKING, Union
 
 import sympy
 
@@ -21,16 +20,20 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C import DispatchKey
+from torch._higher_order_ops.reinplace_trigger import ReInplaceTrigger
 from torch._higher_order_ops.user_kernel_hop import (
     functional_hop_dense,
     functional_hop_fake,
     functionalize_functional_hop,
     functionalize_mutation_hop,
     KernelSideTable,
+    register_user_kernel_hop,
     register_user_kernel_hop_dispatch,
     store_non_graphable_args,
     trace_user_kernel_wrapper,
     UserKernelHOPifier,
+    UserKernelHOPInfo,
+    UserKernelLayoutConstraint,
     UserKernelWrapperHOP,
 )
 from torch._higher_order_ops.utils import register_fake
@@ -2000,6 +2003,43 @@ register_user_kernel_hop_dispatch(
     triton_kernel_wrapper_mutation, triton_kernel_wrapper_functional
 )
 
+
+def get_triton_kernel_name(hop_kwargs: Mapping[str, Any]) -> str:
+    from triton.runtime.autotuner import Autotuner
+    from triton.runtime.jit import JITFunction
+
+    from torch._inductor import config
+
+    kernel = kernel_side_table.get_kernel(hop_kwargs["kernel_idx"])
+    if isinstance(kernel, JITFunction):
+        return kernel.fn.__name__
+    elif isinstance(kernel, Autotuner):
+        if config.is_fbcode():
+            # Autotuner has different implementations for AMD and NV
+            import torch
+
+            if torch.version.hip is None:
+                return kernel.base_fn.__name__
+            else:
+                return kernel.fn.__name__
+        else:
+            return kernel.base_fn.__name__
+    else:
+        raise AssertionError("Unknown triton kernel type")
+
+
+def get_triton_layout_constraint() -> UserKernelLayoutConstraint:
+    from torch._inductor import config
+
+    # The config module does not check values against their Literal type.
+    constraint = config.triton_kernel_default_layout_constraint
+    if constraint not in typing.get_args(UserKernelLayoutConstraint):
+        raise RuntimeError(
+            f"Unknown triton_kernel_default_layout_constraint: {constraint}"
+        )
+    return constraint
+
+
 ###############################################################################
 # The "TritonHOPifier": a class that transforms a call to a triton kernel into
 # a call to the triton_kernel_wrapper_mutation HOP.
@@ -2894,3 +2934,22 @@ class TraceableTritonKernelWrapper:
         if isinstance(arg, (torch.SymInt, torch.SymBool, torch.SymFloat)):
             return guard_scalar(arg)
         return arg
+
+
+register_user_kernel_hop(
+    UserKernelHOPInfo(
+        dsl="triton",
+        mutation=triton_kernel_wrapper_mutation,
+        functional=triton_kernel_wrapper_functional,
+        get_mutated_tensors=lambda hop_kwargs, kwargs: get_mutated_tensors(
+            hop_kwargs["kernel_idx"],
+            hop_kwargs["constant_args_idx"],
+            kwargs,
+            hop_kwargs["tma_descriptor_metadata"],
+        ),
+        get_kernel_name=get_triton_kernel_name,
+        get_layout_constraint=get_triton_layout_constraint,
+        reinplace_trigger=ReInplaceTrigger.TRITON_OPS,
+        serializable=True,
+    )
+)
