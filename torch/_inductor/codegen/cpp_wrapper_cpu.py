@@ -2975,11 +2975,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 name = mutation_output_names[name]
             return name
 
+        # Carries mutated in place by body_fn have no MultiOutput. Match by index
+        # rather than buffer name: a carried view can share its buffer with a
+        # mutated captured view.
+        non_mutated_idxs = OrderedSet(out.indices[0][1] for out in while_loop.outputs)
         output_names = []
         output_idx = 0
-        for carried_input in while_loop.carried_inputs:
+        for idx, carried_input in enumerate(while_loop.carried_inputs):
             carried_input_name = carried_input.get_name()
-            mutation_output_name = resolve_mutation_output_name(carried_input_name)
+            if idx in non_mutated_idxs:
+                mutation_output_name = carried_input_name
+            else:
+                mutation_output_name = resolve_mutation_output_name(carried_input_name)
             if mutation_output_name != carried_input_name:
                 output_names.append(mutation_output_name)
                 continue
