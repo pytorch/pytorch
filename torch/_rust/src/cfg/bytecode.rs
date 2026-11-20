@@ -95,6 +95,11 @@ pub fn decode(info: &CodeInfo) -> Result<Decoded, CfgError> {
             op = code[2 * u];
         }
         arg = (arg << 8) | u32::from(code[2 * u + 1]);
+        // Meta's CPython 3.12 (lazy imports) numbers IMPORT_NAME 183 and gives
+        // 108 to EAGER_IMPORT_NAME; both run as an eager import here.
+        if op == oc::META_LAZY_IMPORT_NAME {
+            op = oc::IMPORT_NAME;
+        }
         let ncache = oc::caches(op)
             .ok_or_else(|| CfgError::unsupported(u as u32 * 2, "", format!("unknown opcode {op}")))?;
         let idx = insns.len();
