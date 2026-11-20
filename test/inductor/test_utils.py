@@ -280,6 +280,58 @@ class TestFlopsFx(TestCase):
         self.assertEqual(shape_env.replacements, replacements)
 
 
+@instantiate_parametrized_tests
+class TestCutlassTemplateEligibility(TestCase):
+    @parametrize(
+        "arch,supported",
+        (
+            ("75", False),
+            ("80", True),
+            ("89", True),
+            ("90a", True),
+            ("sm_100", True),
+            ("103", True),
+            ("120", False),
+            ("invalid", False),
+            (None, False),
+        ),
+    )
+    def test_cuda_arch(self, arch, supported):
+        self._check_eligibility("cuda", arch, supported)
+
+    @parametrize("device_type", ("xpu", "cpu"))
+    def test_other_device(self, device_type):
+        self._check_eligibility(device_type, None, device_type == "xpu")
+
+    def _check_eligibility(self, device_type, arch, supported):
+        from torch._inductor.ir import FixedLayout
+
+        layout = FixedLayout(torch.device(device_type), torch.float16, [4, 4])
+        graph = mock.MagicMock()
+        graph.sizevars.optimization_hint.return_value = 64
+        settings = {"max_autotune": True, "max_autotune_gemm_backends": "CUTLASS"}
+        with (
+            inductor_config.patch(settings),
+            V.set_graph_handler(graph),
+            mock.patch.object(torch.version, "hip", None),
+            mock.patch(
+                "torch._inductor.codegen.cutlass.utils.get_cuda_arch", return_value=arch
+            ) as get_arch,
+            mock.patch(
+                "torch._inductor.codegen.cutlass.utils.try_import_cutlass",
+                return_value=True,
+            ) as import_cutlass,
+            mock.patch.object(
+                inductor_utils, "_use_template_for_gpu", return_value=True
+            ) as use_template,
+        ):
+            result = inductor_utils.use_cutlass_template(layout, 4, 4, 4)
+            self.assertEqual(result, supported)
+        self.assertEqual(import_cutlass.call_count, int(supported))
+        self.assertEqual(use_template.call_count, int(supported))
+        self.assertEqual(get_arch.call_count, int(device_type == "cuda"))
+
+
 class TestUtils(TestCase):
     @unittest.skipIf(torch.version.hip is not None, "SM threshold is not used on ROCm")
     def test_is_big_gpu_min_sms_config(self):
