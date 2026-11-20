@@ -15,6 +15,7 @@ C10_DIAGNOSTIC_POP()
 #include <ATen/cudnn/Handle.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/cudnn/ConvShared.h>
+#include <ATen/native/cudnn/LRUCache.h>
 #include <ATen/native/utils/ParamsHash.h>
 #include <cudnn_frontend_find_plan.h>
 #include <cudnn_frontend_get_plan.h>
@@ -22,9 +23,6 @@ C10_DIAGNOSTIC_POP()
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/util/env.h>
-
-#include <list>
-#include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -283,63 +281,18 @@ int getLRUCacheLimit() {
 
 template <typename T, typename KeyType>
 struct BenchmarkCache {
-  std::list<KeyType> engine_cache_order;
-  std::unordered_map<
-      KeyType,
-      std::pair<
-          cudnn_frontend::ExecutionPlan,
-          typename std::list<KeyType>::iterator>,
-      ParamsWrapperHash<KeyType>>
-      engine_cache;
+  LRUCache<KeyType, T, ParamsWrapperHash<KeyType>> engine_cache{
+      getLRUCacheLimit()};
 
   // no mutexes here as caches are now thread local for v8, can also return a
   // pointer to the Execution Plan if we know it will not be invalidated by
   // another thread
-  cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
-    const int lru_cache_limit = getLRUCacheLimit();
-    if (lru_cache_limit < 0) {
-      return nullptr;
-    }
-    auto it = engine_cache.find(key);
-    if (it == engine_cache.end()) {
-      return nullptr;
-    }
-    if (lru_cache_limit) {
-      // update most recently accessed
-      engine_cache_order.splice(
-          engine_cache_order.begin(), engine_cache_order, it->second.second);
-    }
-    return &(it->second.first);
+  T* find(const KeyType& key) {
+    return engine_cache.find(key);
   }
 
   void update(const KeyType& key, T& results) {
-    int lru_cache_limit = getLRUCacheLimit();
-    if (lru_cache_limit < 0) {
-      return;
-    } else if (lru_cache_limit) {
-      auto it = engine_cache.find(key);
-      if (it == engine_cache.end()) {
-        if ((long)engine_cache.size() >= lru_cache_limit) {
-          auto erase_count = engine_cache.erase(engine_cache_order.back());
-          TORCH_INTERNAL_ASSERT(
-              erase_count == 1,
-              "CUDNN V8 LRU Cache Corrupted (eviction key not in map). Please report a bug to PyTorch.");
-          engine_cache_order.pop_back();
-        }
-        engine_cache_order.emplace_front(key);
-        engine_cache.emplace(
-            key, std::make_pair(results, engine_cache_order.begin()));
-      } else {
-        it->second.first = results;
-        // update most recently accessed
-        engine_cache_order.splice(
-            engine_cache_order.begin(), engine_cache_order, it->second.second);
-      }
-    } else {
-      engine_cache.insert_or_assign(
-          key,
-          std::make_pair(results, engine_cache_order.end())); // dummy iterator
-    }
+    engine_cache.update(key, results);
   }
 };
 
