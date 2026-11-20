@@ -111,7 +111,9 @@ class Graphs(BuiltinPass):
     operation that writes to one of its arguments or draws random numbers, a
     number read from a tensor and the branch on it, a store into an object.
     ``torch.vm.regions(fn)`` reports the graphs, and what was left out of
-    them with the reason.
+    them with the reason. Graphs start in one's own code and in the code of
+    models in torch (``torch.nn``, ``torch.nn.functional``, ``torch.optim``),
+    not in the rest of the library.
 
     The engine runs a graph itself: the same kernels, on the same values, in
     the same order, on the autograd tape of eager mode. With this pass alone a
