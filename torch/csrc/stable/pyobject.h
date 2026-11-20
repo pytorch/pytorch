@@ -2,6 +2,7 @@
 
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/device_struct.h>
+#include <torch/csrc/stable/generator_struct.h>
 #include <torch/csrc/stable/macros.h>
 #include <torch/csrc/stable/stableivalue_conversions.h>
 #include <torch/csrc/stable/tensor_struct.h>
@@ -219,6 +220,24 @@ inline void* string_to_pyobject(std::string_view str) {
   return raw;
 }
 
+// Wrap a Python torch.Generator (or a subclass; PyObject* passed as void*) as a
+// stable Generator that shares its RNG state.
+inline Generator generator_from_pyobject(void* py_obj) {
+  AtenGeneratorHandle handle = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_generator_from_pyobject(py_obj, &handle));
+  return Generator(handle);
+}
+
+// Wrap a defined stable Generator as a new-reference Python torch.Generator
+// sharing its RNG state, reusing its existing Python object if it has one.
+// The underlying handle must not be null.
+inline void* generator_to_pyobject(const Generator& generator) {
+  void* raw = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_generator_to_pyobject(generator.get(), &raw));
+  return raw;
+}
+
 // Generic conversions, composing the helpers above. See from_pyobject /
 // to_pyobject below.
 
@@ -317,6 +336,16 @@ struct PyObjectConverter<std::string> {
   }
   static void* to(const std::string& value) {
     return string_to_pyobject(value);
+  }
+};
+
+template <>
+struct PyObjectConverter<Generator> {
+  static Generator from(void* py_obj) {
+    return generator_from_pyobject(py_obj);
+  }
+  static void* to(const Generator& value) {
+    return generator_to_pyobject(value);
   }
 };
 
