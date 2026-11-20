@@ -54,6 +54,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
     skipCUDAIf,
     skipMPS,
+    skipXPU,
     skipXPUIf,
     skipCUDAIfNotRocm,
 )
@@ -69,6 +70,7 @@ from torch.testing._internal.common_utils import (
     NAVI_ARCH,
     parametrize,
     instantiate_parametrized_tests,
+    subtest,
     random_matrix_with_scaled_reduction_dim,
     run_tests,
     runOnRocmArch,
@@ -1125,6 +1127,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @onlyAccelerator
     @skipMPS
+    @skipXPU  # XPU scaled grouped mm does not support 2d x 2d yet
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
     @parametrize("M", [2048, 2049])
@@ -1210,14 +1213,14 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @parametrize("M", [16640])
     @parametrize("N", [8192])
     @parametrize("K", [4096])
-    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
+    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda or torch.version.xpu else []))
     @parametrize("use_out", [False, True])
     def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, use_out, device):
         torch.manual_seed(42)
 
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
         # 2D inputs with groups along M, 3D weights.
-        block_size = 32
+        block_size = 16 if format == "nvfp4" else 32
         total_M = M  # Alias for clarity that M dim contains groups.
         X = torch.randn((total_M, K), dtype=torch.bfloat16, device=device) * 0.1
         W = torch.randn((G, N, K), dtype=torch.bfloat16, device=device) * 0.01
@@ -1304,6 +1307,11 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             return xh, xq, x_scale, x_global_scales
 
         xh, xq, x_blocked_scales, x_global_scales = _2d_to_blocked_scaled(X, K, G, input_group_end_offsets, format)
+
+        if torch.device(device).type == "xpu":
+            # XPU OneDNN GroupedMM expects weight scales in [G, K/blocks, N] layout;
+            # the helper above returns them as [G, N, K/blocks], so transpose them here.
+            w_blocked_scales = w_blocked_scales.transpose(-2, -1)
 
         if format in ["mxfp8", "mxfp4"]:
             kwargs = _build_scaled_grouped_mm_kwargs(
@@ -3149,6 +3157,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     # _scaled_grouped_mm(), for supporting more than one inputs layout
     # combinations.
     @onlyAccelerator
+    @skipXPU  # XPU scaled grouped mm does not support 2d x 2d yet
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
@@ -3191,7 +3200,13 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
     @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
-    @parametrize("wrap_v2", [True, False])
+    @parametrize(
+        "wrap_v2",
+        [
+            True,
+            subtest(False, decorators=[skipXPU]),  # v1 _scaled_grouped_mm has no XPU kernel
+        ],
+    )
     def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided, wrap_v2, device):
 
         fp8_dtype = e4m3_type
@@ -3233,6 +3248,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
 
     @onlyAccelerator
+    @skipXPU  # XPU scaled grouped mm does not support 3d x 3d yet
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
@@ -3259,6 +3275,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
 
     @onlyAccelerator
+    @skipXPU  # XPU scaled grouped mm does not support 3d x 2d yet
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
@@ -3662,6 +3679,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
 
     @onlyAccelerator
+    @skipXPU  # XPU scaled grouped mm does not support 2d x 2d yet
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     def test_scaled_grouped_mm_v2_fullgraph(self, device) -> None:
         fp8_dtype = e4m3_type
