@@ -2066,12 +2066,15 @@ def upsample_output_memory_format(input: TensorLikeType) -> torch.memory_format:
     # Mirrors at::native::upsample::output_memory_format: suggest_memory_format() also requires
     # the stride of a size-1 batch dimension to fit the layout, so e.g. `hwc.permute(2, 0, 1)[None]`
     # is reported as contiguous; on CPU, retry with a batch stride that fits any layout.
+    from torch._subclasses.fake_tensor import maybe_get_fake_device
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     memory_format = suggest_memory_format(input)
+    # Inside a fake tensor's meta function, input.device is "meta".
+    device = maybe_get_fake_device(input) or input.device
     if (
         memory_format != torch.contiguous_format
-        or input.device.type != "cpu"
+        or device.type != "cpu"
         or input.ndim not in (4, 5)
         or not guard_or_false(input.shape[0] == 1)
     ):
