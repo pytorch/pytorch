@@ -223,6 +223,7 @@ fn check_project(cfg: &Cfg, ver: &Version, k: usize, i: u32, seen: &mut HashSet<
         // As many as the overload returns, checked when it runs.
         Op::Aten { .. } => usize::MAX,
         Op::Autograd(t) => cfg.trainings.get(*t as usize).map_or(0, |t| t.outputs.len()),
+        Op::Region(r) => cfg.regions.get(*r as usize).map_or(0, |r| r.outputs.len()),
         Op::Bytecode { opcode, arg } => opcodes::signature(*opcode, *arg, false).map_or(0, |s| {
             let all_new = s.outputs.iter().all(|o| *o == opcodes::Out::New);
             if all_new && s.outputs.len() > 1 { s.outputs.len() } else { 0 }
