@@ -130,7 +130,7 @@ def make_gemm_gfx950_param(
     has_k_tail: bool = False,
     *,
     out_dtype_id: int | None = None,
-    num_xccs: int = 8,
+    num_xccs: int = 8,  # full MI355X; Inductor passes the device's count
 ) -> GemmGfx950Param:
     # Keep the kernel implementation's internal block terminology unchanged.
     block_m, block_n, block_k = tile_m, tile_n, tile_k

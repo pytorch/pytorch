@@ -27,6 +27,7 @@ from torch._inductor.runtime.flydsl_cache import (
     run_cached_flydsl,
     run_flydsl_template,
 )
+from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import OrderedSet, run_and_get_code
@@ -409,16 +410,20 @@ class TestFlyDSLTemplate(TestCase):
             kernels as flydsl_kernels,
         )
 
+        device = torch.device("cuda", 1)
+
         def node(size):
             return SimpleNamespace(
                 get_size=lambda: size,
                 get_dtype=lambda: torch.bfloat16,
-                get_device_or_error=lambda: torch.device("cuda", 0),
+                get_device_or_error=lambda: device,
             )
 
         gemm_config = {"TILE_M": 128}
         with (
-            mock.patch.object(mm_grouped, "flydsl_xcc_count", return_value=4),
+            mock.patch.object(
+                mm_grouped, "flydsl_xcc_count", return_value=4
+            ) as xcc_count,
             mock.patch.dict(
                 flydsl_kernels.__dict__, {"GEMM_DTYPE_BF16": 2, "GEMM_DTYPE_FP16": 3}
             ),
@@ -437,15 +442,20 @@ class TestFlyDSLTemplate(TestCase):
             result = mm_grouped.get_flydsl_grouped_mm_template_kwargs(mat_a, mat_b)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["NUM_XCCS"], 4)
+        xcc_count.assert_called_once_with(device)
 
-    @parametrize("xcc_count,expected", ((None, 4), (1, 1), (2, 2)))
-    def test_flydsl_xcc_count(self, xcc_count, expected):
+    @parametrize("xcc_count,expected", ((None, 4), (0, 4), (1, 1), (2, 2)))
+    @parametrize("index,resolved_index", ((None, 0), (1, 1)))
+    def test_flydsl_xcc_count(self, xcc_count, expected, index, resolved_index):
         from torch._inductor.utils import flydsl_xcc_count
 
         # Without a reported XCC count, 128 CUs at 32 CUs per XCC gives 4.
         props = SimpleNamespace(multi_processor_count=128, xcc_count=xcc_count)
-        with mock.patch("torch.cuda.get_device_properties", return_value=props):
-            self.assertEqual(flydsl_xcc_count(torch.device("cuda", 0)), expected)
+        with mock.patch.object(
+            DeviceProperties, "create", return_value=props
+        ) as create:
+            self.assertEqual(flydsl_xcc_count(torch.device("cuda", index)), expected)
+        create.assert_called_once_with(torch.device("cuda", resolved_index))
 
     @parametrize(
         "a_is_transposed,b_is_transposed",
@@ -483,7 +493,7 @@ class TestFlyDSLTemplate(TestCase):
             V.set_graph_handler(SimpleNamespace(sizevars=sizevars)),
             mock.patch.object(mm, "use_flydsl_gemm_template", return_value=True),
             mock.patch.object(mm, "is_unaligned", return_value=False),
-            mock.patch.object(mm, "flydsl_xcc_count", return_value=4),
+            mock.patch.object(mm, "flydsl_xcc_count", return_value=4) as xcc_count,
             mock.patch.object(
                 flydsl_heuristics, "get_gemm_configs", return_value=[gemm_config]
             ) as get_configs,
@@ -516,6 +526,7 @@ class TestFlyDSLTemplate(TestCase):
             self.assertEqual(result[0]["A_IS_TRANSPOSED"], a_is_transposed)
             self.assertEqual(result[0]["B_IS_TRANSPOSED"], b_is_transposed)
             self.assertEqual(result[0]["NUM_XCCS"], 4)
+            xcc_count.assert_called_once_with(layout.device)
             get_configs.assert_called_once_with(m, n, k, None)
             validate.assert_called_once_with(
                 m,
@@ -1926,7 +1937,7 @@ class TestFlyDSLTemplate(TestCase):
                 "is_mxfp8_grouped_gemm_config_valid_for_shape",
                 return_value=True,
             ),
-            mock.patch("torch.cuda.get_device_properties", props),
+            mock.patch.object(DeviceProperties, "create", props),
         ):
             result = mm_grouped.get_flydsl_mxfp8_grouped_mm_template_kwargs(
                 mat_a, mat_b, scale_a, scale_b, offs, layout, True
@@ -1939,7 +1950,7 @@ class TestFlyDSLTemplate(TestCase):
             [{"BLOCK_R": 256, "BLOCK_C": 256, "GEMM_G": g, "GEMM_N": n, "GEMM_K": k}],
         )
         configs.assert_called_once_with(512, n, k, g, 128)
-        props.assert_called_once_with(device.index)
+        props.assert_called_once_with(device)
 
     def _assert_compiled_mxfp8_grouped_mm(
         self, group_sizes, k, n, *, expect_flydsl: bool = True
@@ -2262,8 +2273,7 @@ class TestFlyDSLTemplate(TestCase):
             "offs_strided",
         ),
     )
-    @parametrize("xcc_count", (None, 2))
-    def test_flydsl_mxfp8_wgrad_gate(self, case, xcc_count):
+    def test_flydsl_mxfp8_wgrad_gate(self, case):
         """M (the token count) may be dynamic, matched across operands by hint."""
         from torch._inductor.ir import FlexibleLayout
         from torch._inductor.kernel import mm_grouped
@@ -2338,8 +2348,8 @@ class TestFlyDSLTemplate(TestCase):
                 _maybe_evaluate_static=lambda e: e if e.is_number else None
             ),
         )
-        # Without a reported XCC count, 128 CUs at 32 CUs per XCC gives 4.
-        device_props = SimpleNamespace(multi_processor_count=128, xcc_count=xcc_count)
+        # The reported XCC count wins over the CU-based fallback (128 // 32 = 4).
+        device_props = SimpleNamespace(multi_processor_count=128, xcc_count=2)
         props = mock.Mock(return_value=device_props)
         with (
             V.set_graph_handler(graph),
@@ -2347,7 +2357,7 @@ class TestFlyDSLTemplate(TestCase):
                 mm_grouped, "use_flydsl_gemm_template", return_value=True
             ),
             mock.patch.object(mm_grouped, "is_unaligned", return_value=False),
-            mock.patch("torch.cuda.get_device_properties", props),
+            mock.patch.object(DeviceProperties, "create", props),
         ):
             kwargs = mm_grouped.get_flydsl_mxfp8_wgrad_template_kwargs(
                 mat_a, mat_b, scale_a, scale_b, offs, layout, True
@@ -2361,11 +2371,10 @@ class TestFlyDSLTemplate(TestCase):
             "dynamic_m_independent_scale_symbols",
         )
         if case in accepted:
-            num_xcd = xcc_count or 4
             self.assertEqual(
-                kwargs, [{"GEMM_N": n, "GEMM_K": k, "GEMM_G": g, "NUM_XCD": num_xcd}]
+                kwargs, [{"GEMM_N": n, "GEMM_K": k, "GEMM_G": g, "NUM_XCCS": 2}]
             )
-            props.assert_called_once_with(device.index)
+            props.assert_called_once_with(device)
             for operand in operands:
                 operand.freeze_layout_with_exact_strides.assert_called_once_with(
                     operand.get_stride()
@@ -2632,7 +2641,7 @@ print("completed")
             get_output=lambda: "output",
             kernel_name="kernel",
         )
-        namespace.update(GEMM_N=256, GEMM_K=384, GEMM_G=2, NUM_XCD=8)
+        namespace.update(GEMM_N=256, GEMM_K=384, GEMM_G=2, NUM_XCCS=8)
         exec(compile(source, "<flydsl wgrad template>", "exec"), namespace)
         return namespace
 
