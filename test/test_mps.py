@@ -5897,6 +5897,21 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(cpu_x > -1, mps_x > -1)
         self.assertEqual(cpu_x < -1, mps_x < -1)
 
+    def test_half_comparison_with_scalar(self):
+        # Like CPU, a double scalar compared with a float16 tensor is rounded once, straight to float16.
+        # Rounding it through float32 first turns 1 + 2**-11 + 2**-40 into a tie that rounds down to 1.
+        cpu_x = torch.tensor([1.0, 1.0 + 2**-10, 0.1, 65504.0, -math.inf, math.nan], dtype=torch.float16).repeat(2, 1)
+        mps_x = cpu_x.to('mps')
+        for scalar in [1.0 + 2**-11 + 2**-40, 0.1, 65520.0, 1e5, -math.inf, math.nan, 1e-8]:
+            lhs = torch.tensor(scalar, dtype=torch.float64)
+            for op in [torch.eq, torch.ne, torch.lt, torch.le, torch.gt, torch.ge]:
+                self.assertEqual(op(mps_x, scalar), op(cpu_x, scalar))
+                self.assertEqual(op(lhs, mps_x), op(lhs, cpu_x))
+                # Transposed and single-element tensors and non-bool outputs take other kernels
+                self.assertEqual(op(mps_x.t(), scalar), op(cpu_x.t(), scalar))
+                self.assertEqual(op(mps_x[0, :1], scalar), op(cpu_x[0, :1], scalar))
+                self.assertEqual(op(mps_x, scalar, out=mps_x.float()), op(cpu_x, scalar, out=cpu_x.float()))
+
     def test_ne_scalar(self):
         def helper(shape):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
