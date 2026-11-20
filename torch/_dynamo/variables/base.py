@@ -668,6 +668,17 @@ def _wrap_hashfunc(
     from .constant import ConstantVariable, FakeValueKind
 
     h, is_fake = func(self, tx)
+    if is_fake and self.source is not None:
+        # A folded identity hash has no guard, so comparing it could go stale.
+        unimplemented(
+            gb_type="Identity-based __hash__ escapes to user code",
+            context=f"{self}.__hash__()",
+            explanation="Dynamo cannot guard an identity-based hash, so its value could go stale.",
+            hints=[
+                "Use hash(x) if calling x's own hash implementation is intended.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
     if is_fake:
         return SourcelessBuilder.create_internal_fake_id(h, kind=FakeValueKind.HASH)
     return ConstantVariable.create(h)
@@ -943,6 +954,10 @@ def _wrap_setattr(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 2:
         raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
+    if not issubclass(args[0].python_type(), str):
+        raise_type_error(
+            tx, f"attribute name must be string, not '{args[0].python_type_name()}'"
+        )
     return func(self, tx, args[0], args[1])
 
 
@@ -958,6 +973,10 @@ def _wrap_delattr(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 1:
         raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    if not issubclass(args[0].python_type(), str):
+        raise_type_error(
+            tx, f"attribute name must be string, not '{args[0].python_type_name()}'"
+        )
     return func(self, tx, args[0], None)
 
 
@@ -1844,31 +1863,29 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     }
     tp_members: dict[str, Member] = {}
 
-    def _lookup_tp_table(self, name: str, *table_attrs: str) -> Any:
+    @classmethod
+    def _lookup_tp_table(cls, name: str, *table_attrs: str) -> Any:
         """Resolve *name* in the given declarative tables across the class MRO.
 
         Mirrors CPython method/getset/member inheritance: each class contributes
         its own table entries into its own tp_dict, and lookup walks the MRO with
         the most-derived class winning. A subclass table therefore *adds* to
         (rather than replaces) the entries it inherits. Within a class the tables
-        are consulted in the order given. A table may be a property of the
-        instance, for a VT that wraps several Python types.
+        are consulted in the order given.
         """
-        for klass in type(self).__mro__:
+        for klass in cls.__mro__:
             d = klass.__dict__
             for attr in table_attrs:
                 table = d.get(attr)
-                if isinstance(table, property):
-                    table = table.__get__(self)
                 if table is not None and name in table:
                     return table[name]
         return None
 
     def lookup_tp_getset_member(self, name: str) -> GetSet | Member | None:
-        return self._lookup_tp_table(name, "tp_getset", "tp_members")
+        return type(self)._lookup_tp_table(name, "tp_getset", "tp_members")
 
     def lookup_tp_method(self, name: str) -> Method | None:
-        return self._lookup_tp_table(name, "tp_methods")
+        return type(self)._lookup_tp_table(name, "tp_methods")
 
     def lookup_slotdefs(self, name: str) -> SlotDef | None:
         return self._slotdefs.get(name)

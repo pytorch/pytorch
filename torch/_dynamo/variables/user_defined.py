@@ -89,9 +89,11 @@ from ..utils import (
     deque_methods,
     deque_rev_iterator,
     dict_methods,
+    float_methods,
     frozenset_methods,
     get_custom_getattr,
     has_torch_function,
+    int_methods,
     is_lru_cache_wrapped_function,
     is_namedtuple_cls,
     is_pybind11_enum_member,
@@ -106,6 +108,7 @@ from ..utils import (
     proxy_args_kwargs,
     raise_args_mismatch,
     set_methods,
+    str_methods,
     tensortype_to_dtype,
     tracked_repr,
     tuple_methods,
@@ -128,7 +131,12 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import ConstantVariable
+from .constant import (
+    ConstantVariable,
+    FloatConstantVariable,
+    IntConstantVariable,
+    StrConstantVariable,
+)
 from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
@@ -253,6 +261,32 @@ if sys.version_info < (3, 13):
 
 def is_standard_setattr(val: object) -> bool:
     return val in _STANDARD_SETATTRS
+
+
+def setattr_hackcheck(
+    tx: "InstructionTranslatorBase", obj: VariableTracker, slot_wrapper: Any
+) -> None:
+    """Reject a receiver whose nearest C-level __setattr__/__delattr__ is not
+    *slot_wrapper*'s slot (e.g. `object.__setattr__(cls, ...)`).
+
+    ref: https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L9040-L9086
+    """
+    name = slot_wrapper.__name__
+    standard = _STANDARD_SETATTRS if name == "__setattr__" else _STANDARD_DELATTRS
+    for base in obj.python_type().__mro__:
+        slot = base.__dict__.get(name)
+        if isinstance(slot, types.WrapperDescriptorType):
+            if slot is not slot_wrapper and not (
+                slot in standard and slot_wrapper in standard
+            ):
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        f"can't apply this {name} to {obj.python_type_name()} object"
+                    ],
+                )
+            return
 
 
 def is_forbidden_context_manager(ctx: object) -> bool:
@@ -4967,7 +5001,6 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable, ExceptionVar
         # was designed to model. self.exc_type here is an arbitrary
         # user-defined class, so import it from its actual defining module
         # instead.
-        from .constant import ConstantVariable
 
         codegen.add_push_null(
             lambda: codegen.load_import_from(
@@ -4979,12 +5012,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable, ExceptionVar
 
         def codegen_attr(name: str) -> None:
             attr = getattr(self, name)
-            if istype(attr, ConstantVariable):
-                if attr.value not in (True, False, None):
-                    raise AssertionError(
-                        f"attr.value must be True, False, or None, got {attr}"
-                    )
-            else:
+            if not attr.is_constant_match(True, False, None):
                 codegen.dup_top()
                 codegen(attr)
                 codegen.extend_output(codegen.rot_n(2))
@@ -5073,26 +5101,16 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
 
 _CONSTANT_BASE_TYPES = (int, float, str)
 
-_constant_base_methods: dict[type, set[Any]] = {
-    t: {m for m in t.__dict__.values() if callable(m)} for t in _CONSTANT_BASE_TYPES
-}
 
-
-class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
+class UserDefinedConstantVariable(UserDefinedObjectVariable):
     """
-    Represents user-defined objects that subclass immutable constant types
-    (int, float, str).
+    Base for user-defined objects that subclass immutable constant types
+    (int, float, str). Each builtin base has a subclass below that also
+    inherits the builtin's constant VT, so its slots and methods come through
+    the MRO, as for UserDefinedListVariable and ListVariable.
     """
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
-        super().__init__(value, **kwargs)
-        for base in type(value).__mro__:
-            if base in _CONSTANT_BASE_TYPES:
-                self._constant_base = base
-                self._base_methods = _constant_base_methods[base]
-                break
-        else:
-            raise AssertionError(f"No constant base type found in MRO of {type(value)}")
+    _constant_base: type
 
     def as_python_constant(self) -> Any:
         return self.value
@@ -5100,6 +5118,30 @@ class UserDefinedConstantVariable(UserDefinedObjectVariable, ConstantVariable):
     def as_proxy(self) -> Any:
         # Put the plain builtin in the graph, not the user subclass instance.
         return self._constant_base(self.value)
+
+    @staticmethod
+    def cls_for(value_type: type) -> "type[UserDefinedConstantVariable]":
+        base = next(b for b in value_type.__mro__ if b in _CONSTANT_BASE_TYPES)
+        return {
+            int: UserDefinedIntVariable,
+            float: UserDefinedFloatVariable,
+            str: UserDefinedStrVariable,
+        }[base]
+
+
+class UserDefinedIntVariable(UserDefinedConstantVariable, IntConstantVariable):
+    _constant_base = int
+    _base_methods = int_methods
+
+
+class UserDefinedFloatVariable(UserDefinedConstantVariable, FloatConstantVariable):
+    _constant_base = float
+    _base_methods = float_methods
+
+
+class UserDefinedStrVariable(UserDefinedConstantVariable, StrConstantVariable):
+    _constant_base = str
+    _base_methods = str_methods
 
 
 class IntWrapperVariable(UserDefinedObjectVariable):
@@ -5321,7 +5363,7 @@ class DefaultDictVariable(ConstDictVariable):
         return isinstance(
             arg,
             (
-                variables.BaseBuiltinVariable,
+                variables.TypeVariable,
                 variables.functions.BaseUserFunctionVariable,
                 variables.functions.PolyfilledFunctionVariable,
                 variables.functions._WrappedSkipFunctionMethodDescriptorCommonVariable,
@@ -5392,12 +5434,8 @@ class DefaultDictVariable(ConstDictVariable):
 
         https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2233-L2254
         """
-        from .constant import ConstantVariable
 
-        if (
-            istype(self.default_factory, ConstantVariable)
-            and self.default_factory.value is None
-        ):
+        if self.default_factory.is_constant_none():
             raise_observed_exception(KeyError, tx, args=[key])
         default_var = self.default_factory.call_function(tx, [], {})
         self.call_method(tx, "__setitem__", [key, default_var], {})

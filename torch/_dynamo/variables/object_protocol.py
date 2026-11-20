@@ -198,6 +198,7 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
 # Flag Include/object.h
 Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
 Py_TPFLAGS_IMMUTABLETYPE = 1 << 8
+Py_TPFLAGS_HEAPTYPE = 1 << 9
 
 
 def type_is_immutable(obj_type: type, /) -> bool:
@@ -2405,7 +2406,7 @@ def _is_skipped_constant_property(
         return False
     obj = obj.realize()
     if (
-        type(obj) is not variables.ConstantVariable
+        not variables.ConstantVariable.is_constant_vt(obj)
         or tx.output.side_effects.has_pending_mutation_of_attr(obj, name)
         or obj.lookup_tp_getset_member(name) is not None
     ):
@@ -2578,8 +2579,7 @@ def object_generic_getattr(
         # graph nodes, suppression) that MRO-based resolution via
         # UserMethodVariable would bypass.
         if _is_method_type(type_attr) and (
-            obj._lookup_tp_table(name, "tp_methods") is not None
-            or _has_custom_call_method(obj)
+            obj.lookup_tp_method(name) is not None or _has_custom_call_method(obj)
         ):
             return variables.CallMethodVariable(obj, name, source=source)
 

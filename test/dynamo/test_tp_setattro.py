@@ -349,7 +349,6 @@ class TpSetattroTests(TestCase):
     # in trace_rules.lookup_callable), and BuiltinVariable.tp_getattro_impl
     # returns a blanket GetAttrVariable, so `type(e).args` never resolves to a
     # GetSetDescriptorVariable and tp_descr_set_impl is never reached.
-    @unittest.expectedFailure
     def test_getset_descriptor_dunder_set(self):
         # BaseException.args is a getset with a real C setter, reached here
         # through the descriptor rather than STORE_ATTR.
@@ -735,10 +734,7 @@ class TpSetattroTests(TestCase):
 
         self._check(fn, torch.ones(3))
 
-    @unittest.expectedFailure
     def test_type_setattr_unbound(self):
-        # _wrap_setattr counts the explicit class argument and reports
-        # "expected 2 arguments, got 3".
         class K:
             pass
 
