@@ -54,6 +54,7 @@ from torch._inductor.runtime.hints import (
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
     ReductionHint,
+    TileHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_TENSOR_NUMEL,
 )
@@ -388,7 +389,10 @@ class TestTritonHeuristics(TestCase):
             (2048, 2048, ReductionHint.INNER, None, [(1, 8)]),
         ],
     )
-    @parametrize("max_autotune_flag", ["max_autotune", "max_autotune_pointwise"])
+    @parametrize(
+        "max_autotune_flag",
+        ["max_autotune", "max_autotune_pointwise", "max_autotune_reduction"],
+    )
     def test_persistent_max_autotune_includes_default_config(
         self,
         xnumel,
@@ -424,6 +428,88 @@ class TestTritonHeuristics(TestCase):
             expected_max_configs,
         )
 
+    def test_max_autotune_reduction_false_keeps_default_reduction_configs(self):
+        from torch._inductor.runtime import triton_heuristics
+
+        triton_meta = {"device": self._fake_cuda_device_properties()}
+        pointwise_only = {
+            "max_autotune_pointwise": True,
+            "max_autotune_reduction": False,
+        }
+
+        def keys(configs):
+            return [triton_config_to_hashable(c) for c in configs]
+
+        def persistent(meta):
+            return keys(
+                _persistent_reduction_configs(
+                    size_hints={"x": 2048, "r0_": 256},
+                    reduction_hint=ReductionHint.INNER,
+                    inductor_meta=meta,
+                    triton_meta=triton_meta,
+                )
+            )
+
+        def looped(meta):
+            return keys(
+                _reduction_configs(
+                    size_hints={"x": 2048, "r0_": 4096},
+                    inductor_meta={"reduction_hint": ReductionHint.OUTER, **meta},
+                    triton_meta=triton_meta,
+                )
+            )
+
+        def pointwise_square(meta):
+            return keys(
+                triton_heuristics.pointwise(
+                    {"y": 1024, "x": 1024},
+                    triton_meta,
+                    tile_hint=TileHint.SQUARE,
+                    inductor_meta=meta,
+                    return_configs=True,
+                )
+            )
+
+        for configs in (persistent, looped, pointwise_square):
+            self.assertNotEqual(configs({}), configs({"max_autotune_pointwise": True}))
+        self.assertEqual(persistent(pointwise_only), persistent({}))
+        self.assertEqual(looped(pointwise_only), looped({}))
+        self.assertEqual(
+            pointwise_square(pointwise_only),
+            pointwise_square({"max_autotune_pointwise": True}),
+        )
+        reduction_only = {"max_autotune_reduction": True}
+        self.assertEqual(
+            persistent(reduction_only), persistent({"max_autotune_pointwise": True})
+        )
+        self.assertEqual(pointwise_square(reduction_only), pointwise_square({}))
+        self.assertEqual(
+            persistent({"max_autotune": True, "max_autotune_reduction": False}),
+            persistent({"max_autotune": True}),
+        )
+
+    @parametrize(
+        "max_autotune_pointwise,max_autotune_reduction,expected",
+        [
+            (False, None, False),
+            (True, None, True),
+            (True, False, False),
+            (False, True, True),
+        ],
+    )
+    def test_max_autotune_reduction_inductor_meta(
+        self, max_autotune_pointwise, max_autotune_reduction, expected
+    ):
+        from torch._inductor.codegen.triton import TritonKernel
+
+        with config.patch(
+            max_autotune_pointwise=max_autotune_pointwise,
+            max_autotune_reduction=max_autotune_reduction,
+        ):
+            meta = TritonKernel.inductor_meta_common()
+        self.assertIs(meta["max_autotune_reduction"], expected)
+        self.assertIs(meta["max_autotune_pointwise"], max_autotune_pointwise)
+
     @parametrize(
         "heuristic_cls,device_type,warp_size,expected_max_configs",
         [
@@ -436,7 +522,10 @@ class TestTritonHeuristics(TestCase):
             (XPUReductionHeuristic, "xpu", 32, [(8, 8), (1, 2), (8, 2)]),
         ],
     )
-    @parametrize("max_autotune_flag", ["max_autotune", "max_autotune_pointwise"])
+    @parametrize(
+        "max_autotune_flag",
+        ["max_autotune", "max_autotune_pointwise", "max_autotune_reduction"],
+    )
     def test_backend_persistent_max_autotune_retains_candidates(
         self,
         heuristic_cls,
