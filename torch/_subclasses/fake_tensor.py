@@ -153,9 +153,8 @@ def _pin_device_index(device: torch.device) -> torch.device:
     compare or key on a device has to pin it first, or two calls made under
     different current devices look identical when they are not.
 
-    Deliberately does not initialize the device context the way
-    FakeTensor._normalize_fake_device does around it: callers include cache-key
-    construction, which must not allocate.
+    Deliberately does not initialize the device context: callers include
+    cache-key construction, which must not allocate.
     """
     if device.index is not None or not _is_indexed_device_type(device.type):
         return device
@@ -1719,37 +1718,6 @@ def _validate_and_convert_non_fake_tensors(
     return validated_args, flat_arg_fake_tensors
 
 
-@functools.cache
-def init_gpu_context(device: torch.device) -> None:
-    # Backward errors on accelerator FakeTensors unless a real tensor was created on
-    # that device first. Compare types before is_available(), which can poison fork.
-    acc = torch.accelerator.current_accelerator()
-    if acc is None or acc.type != device.type:
-        return
-    try:
-        if not torch.accelerator.is_available():
-            return
-        if (
-            device.index is not None
-            and device.index >= torch.accelerator.device_count()
-        ):
-            device = torch.device(device.type)
-        # device_lazy_init skips runtime init while a FAKE mode is in TLS, and the
-        # meta include would route the allocation to the meta kernel.
-        with (
-            unset_fake_temporarily(),
-            no_dispatch(),
-            torch._C._PreserveDispatchKeyGuard(),
-        ):
-            torch._C._set_meta_in_tls_dispatch_include(False)
-            alloc = torch.empty if torch.version.hip is None else torch.zeros
-            alloc(1, device=device)
-    except Exception as err:
-        log.warning(
-            "Skipping the FakeTensor accelerator warm-up on %s: %s", device, err
-        )
-
-
 # Replaces mock.patch.object(mode, "allow_non_fake_inputs", True). On exit,
 # mock.patch.object restores an attribute missing from the instance __dict__ by
 # deleting it, which raises for CppFakeTensorMode's allow_non_fake_inputs
@@ -2070,8 +2038,7 @@ class FakeTensor(Tensor):
 
     @staticmethod
     def _normalize_fake_device(device: torch.device) -> torch.device:
-        """Normalize device by initializing the accelerator context and index."""
-        init_gpu_context(device)
+        """Normalize device by setting the device index."""
         return _pin_device_index(device)
 
     @staticmethod
