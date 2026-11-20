@@ -88,6 +88,9 @@ pub enum Assert {
     /// names, in this order.
     Sequence(PathValue, usize, usize),
     Keys(PathValue, Vec<PyObj>),
+    /// The number is this one: the place of an item that the path takes
+    /// out of a list it filled itself.
+    Equals(PathValue, PyObj),
 }
 
 impl Assert {
@@ -100,7 +103,8 @@ impl Assert {
             | Assert::Count(v)
             | Assert::Absent(v, _)
             | Assert::Sequence(v, ..)
-            | Assert::Keys(v, _) => *v,
+            | Assert::Keys(v, _)
+            | Assert::Equals(v, _) => *v,
             Assert::Guard(cond) => cond.value(),
         }
     }

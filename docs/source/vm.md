@@ -169,6 +169,27 @@ found["where"], found["ops"], found["inputs"]  # ('collect (block 3)[4]', 9, 1)
 found["operators"][-3:]  # ['aten::cat', 'aten::tanh', 'aten::sum']
 ```
 
+An item that the function reads back out of such a list, at a place that is
+a number, is the value that was put there, so an operation can take it. The
+place is one of the checks of the path. A list that gets tensors and other
+things has its items in the order the function put them where the path
+ends:
+
+```python
+def routed(xs):
+    out = []
+    for x in xs:
+        out.append(x.sin() * 2)
+    return (out[0] + out[-1]).tanh().sum()
+
+
+g = torch.vm(routed, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs()))
+for _ in range(4):
+    same = torch.equal(g(xs), routed(xs))
+(found,) = torch.vm.regions(g)
+found["ops"], found["why"]  # (9, 'the function returns')
+```
+
 What ends a path:
 
 - a call that the path does not go into ("Paths across calls" below says
