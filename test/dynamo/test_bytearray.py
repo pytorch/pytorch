@@ -1140,14 +1140,14 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
     def test_input_bytearray_removeprefix_removesuffix(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(ba):
-            return ba.removeprefix(b"he"), ba.removesuffix(b"lo")
+            return ba.removeprefix(b"he"), ba.removesuffix(b"llo")
 
         ba = bytearray(b"hello")
         prefix_result, suffix_result = fn(ba)
         self.assertIs(type(prefix_result), bytearray)
         self.assertIs(type(suffix_result), bytearray)
         self.assertEqual(prefix_result, bytearray(b"llo"))
-        self.assertEqual(suffix_result, bytearray(b"hel"))
+        self.assertEqual(suffix_result, bytearray(b"he"))
         self.assertEqual(ba, bytearray(b"hello"))
 
     @parametrize("name", ["removeprefix", "removesuffix"])
