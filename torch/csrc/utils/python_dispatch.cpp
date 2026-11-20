@@ -1083,27 +1083,48 @@ void initDispatchBindings(PyObject* module) {
             c10::parseDispatchKey(dispatch));
       });
 
+  const auto call_safe_kernel = [](const c10::SafeKernelFunction& self,
+                                   c10::DispatchKeySet keyset,
+                                   const py::args& args,
+                                   const py::kwargs& kwargs,
+                                   bool allow_numbers) {
+    const auto& op = self.opHandle();
+    auto stack = [&] {
+      torch::jit::ToIValueAllowNumbersAsTensors guard(allow_numbers);
+      return torch::jit::createStackForSchema(
+          op.schema(), args, kwargs, /*self=*/std::nullopt);
+    }();
+    self.callBoxed(op, keyset, &stack);
+    return torch::jit::createPyObjectForStack(std::move(stack));
+  };
+
   // Bind SafeKernelFunction class
   py::class_<c10::SafeKernelFunction>(m, "_SafeKernelFunction")
       .def(
           "call_boxed",
-          [](const c10::SafeKernelFunction& self,
-             c10::DispatchKeySet keyset,
-             const py::args& args,
-             const py::kwargs& kwargs) {
+          [call_safe_kernel](
+              const c10::SafeKernelFunction& self,
+              c10::DispatchKeySet keyset,
+              const py::args& args,
+              const py::kwargs& kwargs) {
             const auto& op = self.opHandle();
             const auto symbol = c10::Symbol::fromQualString(op.schema().name());
-            auto stack = [&] {
-              torch::jit::ToIValueAllowNumbersAsTensors allow_numbers(
-                  symbol.is_prims() || symbol.is_nvprims() ||
-                  (symbol.is_aten() &&
-                   torch::should_allow_numbers_as_tensors(
-                       symbol.toUnqualString())));
-              return torch::jit::createStackForSchema(
-                  op.schema(), args, kwargs, /*self=*/std::nullopt);
-            }();
-            self.callBoxed(op, keyset, &stack);
-            return torch::jit::createPyObjectForStack(std::move(stack));
+            const bool allow_numbers = symbol.is_prims() ||
+                symbol.is_nvprims() ||
+                (symbol.is_aten() &&
+                 torch::should_allow_numbers_as_tensors(
+                     symbol.toUnqualString()));
+            return call_safe_kernel(self, keyset, args, kwargs, allow_numbers);
+          })
+      .def(
+          "_call_boxed_from_python_kernel",
+          [call_safe_kernel](
+              const c10::SafeKernelFunction& self,
+              c10::DispatchKeySet keyset,
+              const py::args& args,
+              const py::kwargs& kwargs) {
+            // Python kernels receive wrapped Tensor scalars as numbers.
+            return call_safe_kernel(self, keyset, args, kwargs, true);
           })
       .def(
           "__repr__",
