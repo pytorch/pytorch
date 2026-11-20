@@ -90,7 +90,7 @@ struct TcfgTensorInfo {
   int32_t device;
 };
 
-#define TCFG_API_VERSION 5
+#define TCFG_API_VERSION 6
 
 struct TcfgApi {
   uint32_t version;
@@ -157,6 +157,12 @@ struct TcfgApi {
   // Whether torch.jit.trace is recording on this thread: one of the things
   // nn.Module.__call__ looks at before it calls forward.
   int32_t (*is_tracing)();
+
+  // The memory a compiled function keeps between its calls (workspace.h),
+  // for the time of a call: tensors made on this thread get their memory
+  // from it. Enter returns what leave is to put back.
+  void* (*workspace_enter)(void* workspace);
+  void (*workspace_leave)(void* workspace, void* previous);
 };
 
 } // extern "C"

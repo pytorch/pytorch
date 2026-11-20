@@ -1805,6 +1805,17 @@ int32_t isTracing() {
   return torch::jit::tracer::isTracing();
 }
 
+void* workspaceEnterRaw(void* workspace) {
+  return torch::cfg::workspaceEnter(
+      static_cast<torch::cfg::Workspace*>(workspace));
+}
+
+void workspaceLeaveRaw(void* workspace, void* previous) {
+  torch::cfg::workspaceLeave(
+      static_cast<torch::cfg::Workspace*>(workspace),
+      static_cast<torch::cfg::Workspace*>(previous));
+}
+
 constexpr const char* kWorkspaceCapsule = "torch._C._cfg_workspace";
 
 void workspaceCapsuleFree(PyObject* capsule) {
@@ -1813,29 +1824,18 @@ void workspaceCapsuleFree(PyObject* capsule) {
 }
 
 const TcfgApi api_table = {
-    TCFG_API_VERSION,
-    &captureBegin,
-    &captureEnd,
-    &traceFree,
-    &traceRecords,
-    &siteFromTrace,
-    &siteFree,
-    &siteCall,
-    &siteInfo,
-    &tensorInfo,
-    &tensorBox,
-    &tensorRetain,
+    TCFG_API_VERSION, &captureBegin,      &captureEnd,        &traceFree,
+    &traceRecords,    &siteFromTrace,     &siteFree,          &siteCall,
+    &siteInfo,        &tensorInfo,        &tensorBox,         &tensorRetain,
     &tensorRelease,
 #ifdef TCFG_HAS_FRAMES
-    &framePush,
-    &framePop,
-    &frameHeld,
+    &framePush,       &framePop,          &frameHeld,
 #else
     nullptr,
     nullptr,
     nullptr,
 #endif
-    &isTracing,
+    &isTracing,       &workspaceEnterRaw, &workspaceLeaveRaw,
 };
 
 } // namespace
