@@ -93,6 +93,7 @@ from . import config, dependencies
 from .codegen.common import (
     BackendFeature,
     CodegenSymbol,
+    get_aten_c_shim_ops,
     get_scheduling_for_device,
     index_prevent_reordering,
     Kernel,
@@ -7773,9 +7774,9 @@ class ExternKernel(InputsKernel):
                 # variant so new AOTI artifacts match the current op schema. The
                 # unversioned shim is retained solely for BC with existing
                 # already-compiled artifacts.
-                from torchgen.aoti.fallback_ops import inductor_fallback_ops
-
-                version_info = inductor_fallback_ops.get(f"aten.{kernel.__name__}", {})
+                version_info = get_aten_c_shim_ops(self.get_device()).get(
+                    f"aten.{kernel.__name__}", {}
+                )
                 latest_version = max(
                     (int(v[1:]) for v in version_info if v.startswith("v")),
                     default=1,
@@ -10406,16 +10407,18 @@ class FallbackKernel(ExternKernelAlloc):
             if not isinstance(kernel, torch._ops.OpOverload):
                 raise AssertionError(type(kernel))
             if V.graph.cpp_wrapper:
-                from torchgen.aoti.fallback_ops import inductor_fallback_ops
-
-                if str(kernel) not in inductor_fallback_ops:
-                    # C shim v2 is torchgen-ed, which should cover all aten ops.
-                    # If you do hit a missed op, please update fallback_ops.py.
-                    log.warning(
-                        "%s is missing a c-shim implementation, using proxy executor as fallback",
-                        kernel,
-                    )
+                device = self.get_device()
+                if self._uses_aot_proxy_executor(kernel, device):
                     self.use_runtime_dispatch = True
+                    from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+                    if get_aten_c_shim_ops(device) is inductor_fallback_ops:
+                        # C shim v2 is torchgen-ed, which should cover all aten ops.
+                        # If you do hit a missed op, please update fallback_ops.py.
+                        log.warning(
+                            "%s is missing a c-shim implementation, using proxy executor as fallback",
+                            kernel,
+                        )
         elif kernel.namespace == "_quantized":
             # Internal Quantized Fallback Ops
             if not isinstance(kernel, torch._ops.OpOverload):
@@ -10538,8 +10541,10 @@ class FallbackKernel(ExternKernelAlloc):
                     )
 
     @staticmethod
-    def _uses_aot_proxy_executor(kernel: torch._ops.OpOverload) -> bool:
-        # Mirror FallbackKernel.codegen's c-shim availability check: an op with no c-shim
+    def _uses_aot_proxy_executor(
+        kernel: torch._ops.OpOverload, device: torch.device | None
+    ) -> bool:
+        # Share codegen's c-shim availability check: an op with no c-shim
         # is dispatched through the AOT ProxyExecutor, whose only runtime channels are an
         # int64[] and an AtenTensorHandle[]. That is the path where a Python scalar bound
         # to a Tensor-typed schema arg cannot be serialized (fill_args has no channel for
@@ -10548,9 +10553,7 @@ class FallbackKernel(ExternKernelAlloc):
         if not V.graph.cpp_wrapper:
             return False
         if kernel.namespace == "aten":
-            from torchgen.aoti.fallback_ops import inductor_fallback_ops
-
-            return str(kernel) not in inductor_fallback_ops
+            return str(kernel) not in get_aten_c_shim_ops(device)
         if kernel.namespace == "_quantized":
             return False
         return kernel not in config.aot_inductor.custom_ops_to_c_shims
@@ -10626,14 +10629,7 @@ class FallbackKernel(ExternKernelAlloc):
         # Returns the rewritten (args, kwargs) plus whether anything was materialized;
         # the caller needs to know because process_kernel feeds graph constants back in
         # as *real* tensors (see the V.graph.constants branch there).
-        if not isinstance(kernel, torch._ops.OpOverload):
-            return args, kwargs, False
-        # Materialize for anything codegen() will send to the proxy executor: no C-shim,
-        # or a scalar the C-shim's double ABI cannot represent.
-        if not (
-            cls._uses_aot_proxy_executor(kernel)
-            or cls._cshim_scalar_abi_forces_proxy(kernel, args, kwargs)
-        ):
+        if not V.graph.cpp_wrapper or not isinstance(kernel, torch._ops.OpOverload):
             return args, kwargs, False
 
         tensor_dtypes: list[torch.dtype] = []
@@ -10656,6 +10652,12 @@ class FallbackKernel(ExternKernelAlloc):
                     device = None
         if device is None:
             device = torch.device("cpu")
+
+        if not (
+            cls._uses_aot_proxy_executor(kernel, device)
+            or cls._cshim_scalar_abi_forces_proxy(kernel, args, kwargs)
+        ):
+            return args, kwargs, False
 
         def scalar_dtype(value: int | float | complex) -> torch.dtype:
             if tensor_dtypes:
