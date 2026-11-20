@@ -1,5 +1,5 @@
-"""What a pass over the graph of a region is given, and what it can say with it: the types of the values of the
-graph, and the guards a rewrite is valid under."""
+"""What a pass over a graph is given, and what it can say with it: the types of the values of the graph, and the
+guards a rewrite is valid under."""
 
 import dataclasses
 import sys
@@ -10,6 +10,9 @@ import torch
 
 # Under this name in the ``meta`` of a graph: the guards a pass brought.
 _GUARDS = "torch.vm.guards"
+# Under this name in the ``meta`` of a node: its type, where the graph was
+# made from a run on real tensors.
+_TYPE = "torch.vm.type"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -40,8 +43,8 @@ class Interval:
 
 
 class Type:
-    """What a value of the graph of a region is like on every call that the
-    graph is run for."""
+    """What a value of a graph is like on every call that the graph is run
+    for."""
 
 
 @dataclasses.dataclass(frozen=True, repr=False)
@@ -92,39 +95,25 @@ class IntType(Type):
     range: Interval
 
 
-def _interval(size: Any) -> Interval:
-    if isinstance(size, int):
-        return Interval(size, size)
-    found = size.node.shape_env.bound_sympy(size.node.expr)
-    try:
-        lo = max(int(found.lower), 0)
-    except Exception:
-        lo = 0
-    try:
-        hi = min(int(found.upper), sys.maxsize)
-    except Exception:
-        hi = sys.maxsize
-    return Interval(lo, hi)
-
-
 def type_of_value(value: Any) -> Type | None:
-    """The type of what a node of a traced graph stands for; None for what
-    is neither a tensor nor an integer."""
+    """The type of a value of a call: of a tensor, with the sizes it has; None
+    for what is neither a tensor nor an integer."""
     if isinstance(value, torch.Tensor):
-        dims = tuple(_interval(size) for size in value.shape)
+        dims = tuple(Interval(size, size) for size in value.shape)
         return TensorType(value.dtype, value.device, value.requires_grad, dims)
-    if isinstance(value, (int, torch.SymInt)) and not isinstance(value, bool):
-        return IntType(_interval(value))
+    if isinstance(value, int) and not isinstance(value, bool):
+        return IntType(Interval(value, value))
     return None
 
 
 def type_of(gm: torch.fx.GraphModule, input_types: list[Any], node: Any) -> Type | None:
     """The type of a node of the graph a pass was given: of an input, the one
-    in ``input_types``; of an intermediate, what the trace found."""
+    in ``input_types``; of an intermediate, what it was in the call the graph
+    was made from. None for a node a pass added."""
     placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
     if node in placeholders and placeholders.index(node) < len(input_types):
         return input_types[placeholders.index(node)]
-    return type_of_value(node.meta.get("val"))
+    return node.meta.get(_TYPE)
 
 
 def materialize(
@@ -132,7 +121,7 @@ def materialize(
 ) -> torch.Tensor:
     """Random data of type ``t``, for a pass to try a kernel on: with every
     open size at its lower (``at="lo"``, the default) or upper (``"hi"``) end,
-    and the first size ``dim0`` if that is given. It never runs the region."""
+    and the first size ``dim0`` if that is given. It never runs the graph."""
     sizes = [dim.hi if at == "hi" else dim.lo for dim in t.dims]
     if dim0 is not None:
         if dim0 not in t.dim(0):
@@ -230,7 +219,7 @@ def guard(gm: torch.fx.GraphModule, node: Any, *checks: Check) -> Any:
     checked before every call of what is made of it. Returns ``node``."""
     if node.op != "placeholder":
         raise ValueError(
-            f"a guard is on an input of the region, and {node.name} is computed in it: "
+            f"a guard is on an input of the graph, and {node.name} is computed in it: "
             "guard the inputs it is computed from"
         )
     for check in checks:

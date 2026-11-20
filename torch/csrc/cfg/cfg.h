@@ -93,14 +93,11 @@ struct TcfgTensorInfo {
   // does not count that (one made under inference mode).
   const void* data;
   uint64_t version;
-  // Whether the storage of the tensor is waiting to tell of the next request
-  // for a writable pointer to its memory (tensor_watch).
-  int32_t watched;
 };
 
 #define TCFG_NO_VERSION UINT64_MAX
 
-#define TCFG_API_VERSION 13
+#define TCFG_API_VERSION 15
 
 // What frame_hook registers. It is offered the frame the interpreter made
 // for a call of func, with the arguments bound and nothing run. It returns 0
@@ -237,17 +234,35 @@ struct TcfgApi {
   // 16, how many torch function modes are active.
   uint64_t (*call_modes)();
 
-  // Writes to the memory of a tensor that its version counter does not count
-  // (through `p.data`, say). With arm, has the storage of the tensor tell of
-  // the next request for a writable pointer to its memory, unless it is
-  // doing so already, and returns the number it was given when it was asked
-  // to, which no storage was given before; without, only returns that
-  // number. 0 if the storage is not waiting to tell: it was written to
-  // since, was never asked, or cannot be (it shares its memory with a lazy
-  // clone, which tells in its own way). watch_serial is the last number
-  // given.
-  uint64_t (*tensor_watch)(PyObject* tensor, int32_t arm);
-  uint64_t (*watch_serial)();
+  // New reference: what a graph that has the call of a site as a node is
+  // built from, a dict with the operator ("op", "overload"), per schema
+  // argument where its value comes from ("args": tuples of the name, whether
+  // it is keyword-only, and "operand" with the operand and its conversion,
+  // "packed" with the operands of an int list, or "const" with the value as a
+  // Python object), per operand what the site checks of it ("guards": "none",
+  // "tensor", "exact", "is_none" or "identity"), what it returns ("returns":
+  // "tensor", "bool", "int" or "float"), and whether the operator writes to an
+  // argument ("writes") or draws random numbers ("random").
+  PyObject* (*site_export)(const TcfgSite*);
+
+  // How many dispatcher calls a capture saw at its top level, those of the
+  // captures that began and ended inside it included.
+  int32_t (*trace_calls)(const TcfgTrace*);
+
+  // The dispatch keys the thread adds to and takes from every call: what a
+  // site compares with the ones it was captured under before it runs.
+  void (*dispatch_keys)(uint64_t* included, uint64_t* excluded);
+
+  // How many frames the interpreter has started or resumed on this thread
+  // while some thread wanted them offered (frame_want): calls of functions,
+  // class bodies, and every resumption of a generator or coroutine. Null
+  // where frame_push is.
+  uint64_t (*frame_count)();
+
+  // Whether a tensor carries a forward-mode gradient, which a graph that was
+  // compiled for tensors without one would drop. obj may be an unboxed
+  // tensor.
+  int32_t (*tensor_forward_grad)(PyObject* obj);
 };
 
 } // extern "C"
