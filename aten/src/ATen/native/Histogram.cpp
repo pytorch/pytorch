@@ -401,6 +401,9 @@ histogram_meta(const Tensor& self, const Tensor& bins,
         ? weight.value().reshape_symint({ weight.value().sym_numel() }) : weight;
     TensorList bins_in = bins;
     histogramdd_check_inputs(reshaped_self, bins_in, reshaped_weight);
+        TORCH_SYM_CHECK(bins.sym_numel().sym_gt(1),
+            "torch.histogram(): bins must be > 0, but got ", bins.sym_numel() - 1,
+            " for dimension 0");
 
     Tensor hist = at::empty_symint({bins.sym_numel() - 1}, self.options(), MemoryFormat::Contiguous);
     Tensor bin_edges = at::empty_symint({bins.sym_numel()}, bins.options(), MemoryFormat::Contiguous);
@@ -457,9 +460,6 @@ std::tuple<Tensor&, Tensor&>
 histogram_out_meta(const Tensor& self, const Tensor& bins,
         const std::optional<Tensor>& weight, bool density,
         Tensor& hist, Tensor& bin_edges) {
-    TORCH_SYM_CHECK(bins.sym_numel().sym_gt(1),
-            "torch.histogram(): bins must be > 0, but got ", bins.sym_numel() - 1,
-            " for dimension 0");
     auto [hist_meta, bin_edges_meta] = histogram_meta(self, bins, weight, density);
     return histogram_resize_meta_outputs(self, hist_meta, bin_edges_meta, hist, bin_edges);
 }
