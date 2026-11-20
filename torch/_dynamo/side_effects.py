@@ -586,6 +586,17 @@ class SideEffects:
             deferred = self.snapshot_attr_mutation(item, name, value)
         if not deferred:
             self.check_allowed_side_effect(item)
+        pending = self.store_attr_mutations.get(item, {}).get(name)
+        if (
+            isinstance(item, variables.PythonModuleVariable)
+            and isinstance(pending, variables.DeletedVariable)
+            and not isinstance(value, variables.DeletedVariable)
+        ):
+            # Eager re-inserts a re-bound global at the end of the module
+            # __dict__; drop the pending delete so the re-store takes a fresh
+            # insertion index, as store_instance_dict_attr does.
+            del self.store_attr_mutations[item][name]
+            del self.attr_mutation_kinds[item][name]
         if item not in self.store_attr_mutations:
             self.store_attr_mutations[item] = {}
         if item not in self.attr_mutation_kinds:
@@ -1998,6 +2009,19 @@ def _skip_attribute_mutation_replay(var: VariableTracker) -> bool:
     )
 
 
+def _rebinds_deleted_global(cg: PyCodegen, var: VariableTracker, name: str) -> bool:
+    # A store after a traced delete of a pre-existing global must delete the
+    # name first, so it moves to the end of the dict as in eager.
+    if isinstance(var, variables.NewGlobalVariable):
+        globals_dict = cg.tx.output.global_scope
+    elif isinstance(var, variables.PythonModuleVariable):
+        globals_dict = var.value.__dict__
+    else:
+        return False
+    entry = cg.tx.output.deleted_globals_by_dict.get(id(globals_dict))
+    return entry is not None and name in entry[1] and name in globals_dict
+
+
 @register_side_effect_replay_handler(
     name="attribute_mutation",
     matcher=lambda ctx: ctx.side_effects.is_attribute_mutation(ctx.var),
@@ -2068,7 +2092,10 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
             else:
                 cg.tx.output.update_co_names(name)
                 cg(value)
-                ctx.suffixes.append([create_instruction("STORE_GLOBAL", argval=name)])
+                suffix = [create_instruction("STORE_GLOBAL", argval=name)]
+                if _rebinds_deleted_global(cg, var, name):
+                    suffix.insert(0, create_instruction("DELETE_GLOBAL", argval=name))
+                ctx.suffixes.append(suffix)
                 side_effect_occurred = True
         elif isinstance(value, variables.DeletedVariable):
             if isinstance(var, variables.CellVariable):
@@ -2153,7 +2180,11 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
             cg.tx.output.update_co_names(name)
             cg(value)
             cg(var)
-            ctx.suffixes.append([create_instruction("STORE_ATTR", argval=name)])
+            suffix = [create_instruction("STORE_ATTR", argval=name)]
+            if _rebinds_deleted_global(cg, var, name):
+                cg(var)
+                suffix.insert(0, create_instruction("DELETE_ATTR", argval=name))
+            ctx.suffixes.append(suffix)
             side_effect_occurred = True
 
     if side_effect_occurred:
