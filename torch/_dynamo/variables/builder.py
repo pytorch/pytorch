@@ -73,12 +73,14 @@ from torch._library.opaque_object import (
 )
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     FakeTensor,
     FakeTensorMode,
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
     maybe_get_item_memo,
+    unset_fake_temporarily,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch.fx.experimental._backward_state import BackwardState
@@ -1631,6 +1633,9 @@ class VariableBuilder:
                     source=self.source,
                 )
             else:
+                # A lazy VT for a globals dict realized after a delete in the
+                # trace hands out a stale model.
+                self.tx.output.check_deleted_global_access(value, None)
                 result = ConstDictVariable(
                     result,  # type: ignore[arg-type]
                     source=self.source,
@@ -2833,7 +2838,8 @@ class VariableBuilder:
             and type(value) not in common_constant_types
         ):
             self.install_guards(GuardBuilder.CONSTANT_SUBCLASS_MATCH)
-            result = UserDefinedConstantVariable(value, source=self.source)
+            vt_cls = UserDefinedConstantVariable.cls_for(type(value))
+            result = vt_cls(value, source=self.source)
         elif is_generic_ctx_manager_cls(type(value)):
             # A generic context manager built inside the compiled region (via
             # SideEffects.get_variable_cls) must wrap the same way when it is
@@ -4272,7 +4278,9 @@ def _dataclasses_fields_lambda(obj: VariableTracker) -> TupleVariable:
     return TupleVariable(items)
 
 
-def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
+def _clone_input(
+    value: Any, fake_mode: FakeTensorMode | CppFakeTensorMode | None
+) -> Any:
     if isinstance(value, torch.Tensor):
         # tensor subclasses will not be converted to FakeTensors and need to be cloned
         if not (
@@ -4285,7 +4293,8 @@ def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
             or value.is_nested
         ):
             # NB: ensure strides are preserved
-            value = clone_input(value)
+            with unset_fake_temporarily():
+                value = clone_input(value)
 
     return value
 
@@ -4730,7 +4739,7 @@ def handle_traced_output(
         return EventVariable(proxy, example_value, None, **options)
     elif proxy.node.target == "query" and proxy.node.op == "call_method":
         set_example_value(proxy.node, example_value)
-        return ConstantVariable(example_value, **options)
+        return ConstantVariable.create(example_value, **options)
     elif (
         example_value is not None
         and isinstance(example_value, torch.Event)
@@ -6092,7 +6101,7 @@ class SourcelessBuilder:
             type, Callable[[InstructionTranslatorBase, Any], VariableTracker]
         ] = {}
         for t in common_constant_types:
-            handlers[t] = lambda tx, value: ConstantVariable(value)
+            handlers[t] = lambda tx, value: ConstantVariable.create(value)
         handlers[set] = lambda tx, value: SetVariable(
             [create(tx, x) for x in value], mutation_type=ValueMutationNew()
         )

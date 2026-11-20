@@ -1086,6 +1086,8 @@ class Tracer(TracerBase):
 # We key by the globals dict id and function name to ensure we're wrapping a given
 # function only once.
 _wrapped_fns_to_patch: dict[tuple[int, str], dict[str, Any]] = {}
+# The thread that registered each _wrapped_fns_to_patch entry.
+_wrapped_fn_threads: dict[tuple[int, str], int] = {}
 
 # List of methods on classes to wrap (class type, function name)
 # this currently only works for Tensor.* methods that aren't traced properly
@@ -1135,6 +1137,10 @@ def _create_wrapped_func(orig_fn: Callable[_P, _T]) -> Callable[_P, _T]:
             return return_proxy
         return orig_fn(*args, **kwargs)
 
+    # Scripting a caller of a patched global, e.g. on another thread mid-trace,
+    # compiles orig_fn rather than this wrapper, whose globals are this module's.
+    if isinstance(orig_fn, FunctionType):
+        wrapped.__prepare_scriptable__ = lambda: orig_fn  # type: ignore[attr-defined]
     return wrapped
 
 
@@ -1401,18 +1407,23 @@ def _patch_wrapped_functions(patcher: _Patcher, *, aliases: bool | None = None) 
     """
     if aliases is None:
         aliases = Tracer.wrap_aliases
-    # Resolving a lazy import may run a body that registers more wraps.
+    this_thread = threading.get_ident()
     patched: set[tuple[int, str]] = set()
-    while pending := [k for k in list(_wrapped_fns_to_patch) if k not in patched]:
+    pending = list(_wrapped_fns_to_patch)
+    while pending:
         for key in pending:
             patched.add(key)
             frame_dict = _wrapped_fns_to_patch[key]
             name = key[1]
             _resolve_lazy_imports(patcher, frame_dict, (name,))
-            if name not in frame_dict and hasattr(builtins, name):
+            if name in frame_dict:
+                orig_fn = frame_dict[name]
+            elif hasattr(builtins, name):
                 orig_fn = getattr(builtins, name)
             else:
-                orig_fn = frame_dict[name]
+                # Its module body has not defined it yet, e.g. one another thread is
+                # running.
+                continue
             if not aliases:  # one wrapper per registration
                 patcher.patch(frame_dict, name, _create_wrapped_func(orig_fn))
                 continue
@@ -1430,6 +1441,14 @@ def _patch_wrapped_functions(patcher: _Patcher, *, aliases: bool | None = None) 
             patcher.wrapped_fns.setdefault(id(defined_fn), frame_dict[name])
             if _is_defined_in(defined_fn, frame_dict):
                 patcher.importable_fn_ids.add(id(defined_fn))
+        # A module body _resolve_lazy_imports ran may have registered more wraps.
+        # Another thread's body may still be running, e.g. about to script a caller
+        # of the name it just registered, so leave its registrations alone.
+        pending = [
+            k
+            for k in list(_wrapped_fns_to_patch)
+            if k not in patched and _wrapped_fn_threads.get(k) == this_thread
+        ]
 
     for cls, name in _wrapped_methods_to_patch:
         patcher.patch_method(cls, name, _create_wrapped_method(cls, name))
@@ -1565,7 +1584,9 @@ def wrap(fn_or_name: str | Callable[..., Any]) -> str | Callable[..., Any]:
                 "wrap must be called at the top level of a module"
             )
 
-        _wrapped_fns_to_patch[(id(f.f_globals), fn_name)] = f.f_globals
+        key = (id(f.f_globals), fn_name)
+        _wrapped_fn_threads[key] = threading.get_ident()
+        _wrapped_fns_to_patch[key] = f.f_globals
     finally:
         # Holding our own frame in a local makes a reference cycle that keeps the
         # entire calling stack (and its tensors) alive until the next gc. That stack

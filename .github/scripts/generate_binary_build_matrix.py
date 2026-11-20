@@ -34,6 +34,7 @@ CUDA_STABLE = "13.2"
 CUDA_ARCHES_FULL_VERSION = {
     "13.2": "13.2.2",
     "13.4": "13.4.3",
+    "13.5": "13.5.0",
 }
 # CUDA versions that can only produce the runtime docker image. The devel image
 # apt-installs cuda-toolkit-<major>-<minor> from NVIDIA's repo.
@@ -45,7 +46,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "13.5": "9",
 }
 
-ROCM_ARCHES = ["10.0", "10.1"]
+ROCM_ARCHES = ["10.1", "10.2"]
 
 
 class RocmPreviewLane(NamedTuple):
@@ -128,8 +129,8 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         ),
     },
     # dependency on latest patch version for (major, minor)
-    "10.0": ("rocm[libraries,device-all]==10.0.*"),
     "10.1": ("rocm[libraries,device-all]==10.1.*"),
+    "10.2": ("rocm[libraries,device-all]==10.2.*"),
     # binary_populate_env.sh appends ==<pin> at build time, so pin bumps
     # don't change generated workflows.
     ROCM_PREVIEW.arch: (

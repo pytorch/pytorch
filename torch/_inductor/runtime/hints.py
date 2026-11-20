@@ -234,6 +234,7 @@ class DeviceProperties(typing.NamedTuple):
     max_threads_per_multi_processor: int | None = None
     max_threads_per_block: int | None = None
     warp_size: int | None = None
+    xcc_count: int | None = None
 
     @property
     def warp_size_or_default(self) -> int:
@@ -269,6 +270,7 @@ class DeviceProperties(typing.NamedTuple):
             ),
             max_threads_per_block=getattr(props, "max_threads_per_block", 1024),
             warp_size=getattr(props, "warp_size", None),
+            xcc_count=getattr(props, "xcc_count", None),
         )
 
 
@@ -342,6 +344,7 @@ class InductorMeta(typing.TypedDict, total=False):
     incremental_autotune_max_dispatches: int
     max_autotune: bool
     max_autotune_pointwise: bool
+    max_autotune_reduction: bool
     min_split_scan_rblock: int
     spill_threshold: int
     store_cubin: bool
