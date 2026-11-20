@@ -558,8 +558,10 @@ def itree_combine_plan(
         # The async copy maps one warp's lanes onto a row's partials.
         raise ValueError("combine_async requires combine_rpb <= WARP")
     mode = arch.uniform_combine
-    if mode not in ("off", "counts", "weights"):
-        raise ValueError(f"uniform_combine must be off, counts or weights: {mode!r}")
+    if mode not in tile.UNIFORM_COMBINE_MODES:
+        raise ValueError(
+            f"uniform_combine must be 'off', 'counts' or 'weights', got {mode!r}"
+        )
     caps = _hw.caps(device)
     nbatch = itree.split[0]
     rpb = arch.combine_rpb
@@ -569,7 +571,7 @@ def itree_combine_plan(
         rpb = 1 << (live - 1).bit_length()
     grp = arch.combine_group_bytes // itemsize
     g = max(1, math.gcd(nbatch, grp)) if grp else 1
-    uniform = mode != "off" and tile.uniform_combine_ok(trait, itree.split)
+    uniform = mode != "off" and tile.uniform_combine_ok(trait, itree.split, mode)
     weights = uniform and mode == "weights"
     # Uniform counts stage no count field; weights stage one row shared by the block.
     row_fields = nfields - 1 if uniform else nfields
@@ -935,7 +937,7 @@ def reduce_row_tile(
     # Rows of whole vectors at a pitch of whole vectors have no edges; normal path
     # selection folds them with one kernel per vector class.
     if ragged_vector:
-        vec = tile.ragged_vector_width(N, x.element_size(), order, use_tma)
+        vec = tile.ragged_vector_width(N, x.element_size(), order, bool(use_tma))
         ragged_vector = N % vec != 0 or (M > 1 and x.stride(0) % vec != 0)
     itree = None
     if order == "inner_tree" and final and threads_per_row is None:
