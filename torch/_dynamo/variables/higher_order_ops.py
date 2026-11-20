@@ -68,7 +68,7 @@ from ..utils import (
     specialize_symnode,
     unpack_iterable,
 )
-from .base import VariableTracker
+from .base import is_side_effect_safe, MutationType, VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
@@ -140,11 +140,16 @@ class SubgraphTracingInfo:
     Future additions may include aliasing info, mutation info, etc.
     """
 
-    # User code stack at the point where the first externally-visible side
-    # effect was detected.  None means no side effect was observed.
-    side_effect_stack: traceback.StackSummary | None = None
+    # External mutation targets and the user stack at their first mutation.
+    side_effect_stacks: dict[MutationType, traceback.StackSummary] = field(
+        default_factory=dict
+    )
     # All sources accessed via VariableBuilder during the subgraph trace.
     traced_sources: OrderedSet[Any] = field(default_factory=OrderedSet)
+
+    @property
+    def side_effect_stack(self) -> traceback.StackSummary | None:
+        return next(iter(self.side_effect_stacks.values()), None)
 
 
 # This function is a syntax sugar for creating a dummy new subtracer so that
@@ -334,7 +339,9 @@ def overwrite_tensor_vt_requires_grad(
 
 
 def overwrite_tensor_vt_proxy(
-    graph_output_vts: Iterable[VariableTracker], flat_variable: VariableTracker
+    tx: "InstructionTranslatorBase",
+    graph_output_vts: Iterable[VariableTracker],
+    flat_variable: VariableTracker,
 ) -> None:
     # wrap_fx_proxy creates fresh variable trackers. However, the main program
     # after the speculate subgraph can still use the original tensor vts that
@@ -369,6 +376,7 @@ def overwrite_tensor_vt_proxy(
                     "Expected subgraph_vt to be a tensor, SymNodeVariable, or CustomClassObjectVariable"
                 )
             orig_vt.proxy = subgraph_vt.proxy
+            tx.output.current_tracer.record_proxyable_vt(orig_vt)
 
 
 def _call_function_with_auto_output_flattening(
@@ -407,7 +415,7 @@ def _call_function_with_auto_output_flattening(
     flat_variable = add_call_function(tx, fn, args, kwargs, flat_example_value, config)
     if body_r is not None:
         # pyrefly: ignore[bad-argument-type]
-        overwrite_tensor_vt_proxy(graph_output_vts, flat_variable)
+        overwrite_tensor_vt_proxy(tx, graph_output_vts, flat_variable)
     return body_r
 
 
@@ -1966,6 +1974,14 @@ def speculate_subgraph_with_auto_output_flattening(
             has_side_effects = (
                 subtracer.side_effect_stack is not None or traced_externally
             )
+            if has_side_effects and not (allow_side_effects or traced_externally):
+                unimplemented(
+                    gb_type="HOP: Nested side effect",
+                    context=description,
+                    explanation="A nested higher-order operator mutated an outer-scope object, "
+                    "but its enclosing operator does not support side effects.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             if (allow_side_effects or traced_externally) and has_side_effects:
                 extra_outputs = collect_intermediate_outputs(
                     tx, subtracer, graph_output_vts, filter_aliased_intermediates
@@ -2024,7 +2040,7 @@ def speculate_subgraph_with_auto_output_flattening(
             #   FX graph outputs (basically the vts associated with graph outputs)
             # - `tracing_info`: Properties observed during subgraph tracing
             tracing_info = SubgraphTracingInfo(
-                side_effect_stack=subtracer.side_effect_stack,
+                side_effect_stacks=subtracer.side_effect_stacks,
                 traced_sources=subtracer.traced_sources,
             )
 
@@ -3927,6 +3943,12 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             supports_aliasing=self.supports_aliasing,
         )
 
+        # A mutation external to the child can be local to its enclosing HOP.
+        parent_tracer = tx.output.current_tracer
+        for mutation, stack in tracing_info.side_effect_stacks.items():
+            if not is_side_effect_safe(mutation):
+                parent_tracer.side_effect_stacks.setdefault(mutation, stack)
+
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
         body_name = self.install_subgraph_in_output_graph(
             tx,
@@ -5491,7 +5513,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             tx, autograd_function_apply, p_args, kwargs_for_fn, example_value
         )
         # type: ignore[arg-type]
-        overwrite_tensor_vt_proxy(fwd_graph_output_vts, flat_variable)
+        overwrite_tensor_vt_proxy(tx, fwd_graph_output_vts, flat_variable)
         # type: ignore[arg-type]
         overwrite_tensor_vt_requires_grad(fwd_graph_output_vts, flat_variable)
         return fwd_out

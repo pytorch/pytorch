@@ -62,6 +62,7 @@ from torch._guards import Guard, InlinedCodeCache, tracing, TracingContext
 from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_leaves
 
 from . import (
@@ -356,8 +357,7 @@ class SpeculationLog:
     """
 
     entries: list[SpeculationEntry] = dataclasses.field(default_factory=list)
-    # Keep dependencies that let a cached graph break retry after eager execution.
-    retry_guards: set[Guard] = dataclasses.field(default_factory=set)
+    retry_guards: OrderedSet[Guard] = dataclasses.field(default_factory=OrderedSet)
     index: int = 0
     # If True, graph break at autograd.grad instead of tracing it.
     # Set when we detect that autograd.grad consumed grad_fns that are returned.
