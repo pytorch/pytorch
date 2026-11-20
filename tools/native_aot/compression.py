@@ -2,16 +2,31 @@
 
 from __future__ import annotations
 
+import logging
 import struct
 from pathlib import Path
 from typing import Any
 
 
+_FATBIN_MAGIC = 0xBA55ED50
+_FATBIN_HEADER = struct.Struct("<IHHQ")
+_FATBIN_ENTRY = struct.Struct("<HHIQ")
+_FATBIN_ELF = 2
+log = logging.getLogger(__name__)
+
+
 def compress_cuda_image(cubin: bytes, arch: str) -> bytes:
     """Keep the cubin unchanged when a compressed CUDA image would be larger."""
     from cuda.bindings import nvfatbin
+    from cuda.pathfinder import DynamicLibNotFoundError
 
-    handle = nvfatbin.create(["-64", "-compress-all"], 2)
+    try:
+        handle = nvfatbin.create(["-64", "-compress-all"], 2)
+    except DynamicLibNotFoundError as error:
+        raise RuntimeError(
+            "native-AOT compression requires libnvfatbin from CUDA Toolkit 13; "
+            "check CUDA library paths or set TORCH_NATIVE_AOT=0 to disable native AOT"
+        ) from error
     try:
         nvfatbin.add_cubin(handle, cubin, len(cubin), arch.removeprefix("sm_"), "")
         compressed = bytearray(nvfatbin.size(handle))
@@ -33,6 +48,7 @@ def compress_cute_module(compiled: Any, arch: str | None = None) -> None:
     if not isinstance(cubin, bytes):
         raise RuntimeError("CuTeDSL did not capture its cubin for native AOT")
     module = compiled.ir_module
+    matched = False
     with module.context:
         for op in module.body.operations:
             if op.operation.name != "llvm.mlir.global" or "value" not in op.attributes:
@@ -41,18 +57,28 @@ def compress_cute_module(compiled: Any, arch: str | None = None) -> None:
             if not isinstance(value, ir.StringAttr):
                 continue
             data = ir.StringAttr(value).value_bytes
-            if len(data) < 32 or not data.startswith(struct.pack("<I", 0xBA55ED50)):
+            if len(data) < _FATBIN_HEADER.size:
                 continue
-            kind, _, header, size = struct.unpack_from("<HHIQ", data, 16)
-            # Replace only the captured ELF's single-image wrapper.
+            magic, _, header, _ = _FATBIN_HEADER.unpack_from(data)
             if (
-                kind != 2
-                or 16 + header + size != len(data)
-                or data[16 + header :] != cubin
+                magic != _FATBIN_MAGIC
+                or header < _FATBIN_HEADER.size
+                or header + _FATBIN_ENTRY.size > len(data)
             ):
                 continue
+            kind, _, entry_header, size = _FATBIN_ENTRY.unpack_from(data, header)
+            payload = header + entry_header
+            # Replace only the captured ELF's single-image wrapper.
+            if (
+                kind != _FATBIN_ELF
+                or entry_header < _FATBIN_ENTRY.size
+                or payload + size != len(data)
+                or data[payload:] != cubin
+            ):
+                continue
+            matched = True
             compressed = compress_cuda_image(cubin, arch)
-            if len(compressed) >= len(data):
+            if len(compressed) >= len(cubin):
                 continue
             old_type = op.attributes["global_type"]
             symbol = ir.StringAttr(op.attributes["sym_name"]).value
@@ -78,3 +104,5 @@ def compress_cute_module(compiled: Any, arch: str | None = None) -> None:
                 return ir.WalkResult.ADVANCE
 
             module.operation.walk(update_gep)
+    if not matched:
+        log.debug("No supported CuTeDSL cubin buffer; retaining original images")

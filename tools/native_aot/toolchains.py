@@ -164,7 +164,7 @@ class CuteDslToolchain(Toolchain):
     # tvm_ffi: the JIT wrappers pass --enable-tvm-ffi, and cutlass imports it during
     # compile even though the exported ABI does not use it.
     REQUIRED_RUNTIMES = ("cutlass", "tvm_ffi", "cuda.bindings.nvfatbin")
-    RUNTIME_DISTS = ("nvidia-cutlass-dsl", "apache-tvm-ffi")
+    RUNTIME_DISTS = ("nvidia-cutlass-dsl", "apache-tvm-ffi", "cuda-bindings")
     REQUIRED_BUILD_KEYS = ("fn", "fake_args", "tensor_args")
 
     # Rendered into the generated file's anonymous namespace, so the module handle,
@@ -250,16 +250,14 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                 )
             host_opt = f"--host-target '{self._HOST_TARGETS[machine]}'"
             opts = f"{opts} {host_opt}" if opts else host_opt
-        with tempfile.TemporaryDirectory(dir=out_dir) as dump_dir:
+        with tempfile.TemporaryDirectory() as dump_dir:
             opts = f"{opts} --keep-cubin --dump-dir {shlex.quote(dump_dir)}"
             if arch:
                 # --gpu-arch outranks the CUTE_DSL_ARCH env var, so one process can
                 # export for several arches.
-                opts = f"{opts} --gpu-arch {arch}" if opts else f"--gpu-arch {arch}"
+                opts = f"{opts} --gpu-arch {arch}"
                 self._warm_up_exporter()
-            compiled = cute.compile(
-                b["fn"], *b["fake_args"], **({"options": opts} if opts else {})
-            )
+            compiled = cute.compile(b["fn"], *b["fake_args"], options=opts)
             compress_cute_module(compiled, arch)
             compiled.export_to_c(
                 file_path=out_dir, file_name=b["prefix"], function_prefix=b["prefix"]
@@ -515,7 +513,7 @@ class TritonToolchain(Toolchain):
     link_exts = ()
     # Triton compiles the cubin, so its version decides what an artifact is.
     REQUIRED_RUNTIMES = ("triton", "cuda.bindings.nvfatbin")
-    RUNTIME_DISTS = ("triton",)
+    RUNTIME_DISTS = ("triton", "cuda-bindings")
     # ATen's NVRTC table: dlopen'd, so torch never link-depends on libcuda. The same
     # wrapper every other cubin launcher in the tree uses (jiterator, nativert's Triton
     # kernel manager, inductor's static launcher).
@@ -701,7 +699,8 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                     f"{field.removesuffix('_size')}, which the generated launcher "
                     f"has no way to allocate"
                 )
-        image = compress_cuda_image(compiled.asm["cubin"], f"sm_{target.arch}")
+        image_arch = f"sm_{target.arch}{'a' if target.arch >= 90 else ''}"
+        image = compress_cuda_image(compiled.asm["cubin"], image_arch)
         with open(os.path.join(out_dir, b["prefix"] + ".cubin"), "wb") as f:
             f.write(image)
         return {
