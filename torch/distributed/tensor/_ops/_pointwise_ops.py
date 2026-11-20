@@ -304,11 +304,9 @@ non_decreasing_unary_ops = [
     aten.trunc.default,
     aten.trunc_.default,
     aten.trunc.out,
-    # nan_to_num is non-decreasing on its entire domain (including nan/inf):
-    # it maps -inf→min, nan→0, inf→max, and is identity elsewhere.
-    aten.nan_to_num.default,
-    aten.nan_to_num_.default,
-    aten.nan_to_num.out,
+    # nan_to_num does not belong here: max/min propagate nan, which nan_to_num
+    # then replaces (nan_to_num(max(nan, 1)) = 0, not 1), and custom
+    # posinf/neginf replacements can make it decreasing.
     # hardshrink: x if |x|>lambd else 0. Non-decreasing on entire domain.
     aten.hardshrink.default,
     # I1(x) is monotonically non-decreasing for all real x.
