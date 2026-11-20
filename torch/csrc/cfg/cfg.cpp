@@ -12,6 +12,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -21,6 +22,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/tensor_memoryformats.h>
 
 #ifdef _WIN32
 #include <c10/util/win32-headers.h>
@@ -1620,6 +1622,20 @@ PyObject* siteCall(
   END_HANDLE_TH_ERRORS
 }
 
+const char* retName(Ret ret) {
+  switch (ret) {
+    case Ret::Tensor:
+      return "tensor";
+    case Ret::Bool:
+      return "bool";
+    case Ret::Int:
+      return "int";
+    case Ret::Double:
+      return "float";
+  }
+  return "tensor";
+}
+
 PyObject* siteInfo(const TcfgSite* site) {
   HANDLE_TH_ERRORS
   const auto& schema = site->op.schema();
@@ -1674,8 +1690,141 @@ PyObject* siteInfo(const TcfgSite* site) {
     operand_args.append(found);
   }
   info["operand_args"] = operand_args;
+  info["returns"] = retName(site->ret);
+  info["writes"] = schema.is_mutable();
+  info["random"] = site->op.hasTag(at::Tag::nondeterministic_seeded);
   return info.release().ptr();
   END_HANDLE_TH_ERRORS
+}
+
+const char* convName(Conv conv) {
+  switch (conv) {
+    case Conv::Tensor:
+      return "tensor";
+    case Conv::Bool:
+      return "bool";
+    case Conv::Int:
+      return "int";
+    case Conv::IntAsDouble:
+      return "int_as_double";
+    case Conv::IntAsList:
+      return "int_as_list";
+    case Conv::Double:
+      return "double";
+    case Conv::WrappedNumber:
+      return "wrapped_number";
+    case Conv::IntSeq:
+      return "int_seq";
+  }
+  return "tensor";
+}
+
+const char* guardName(OperandGuard::Kind kind) {
+  switch (kind) {
+    case OperandGuard::None:
+      return "none";
+    case OperandGuard::Tensor:
+      return "tensor";
+    case OperandGuard::ExactType:
+      return "exact";
+    case OperandGuard::IsNone:
+      return "is_none";
+    case OperandGuard::Identity:
+      return "identity";
+  }
+  return "none";
+}
+
+// A constant of a site as the object an operator called from Python is given
+// for it: the number a wrapped-number tensor was made of, and the dtype,
+// layout or memory format that a kernel takes as an int.
+py::object constantObject(const c10::Argument& argument, const c10::IValue& v) {
+  if (v.isTensor()) {
+    const auto& t = v.toTensor();
+    if (t.defined() && t.dim() == 0 &&
+        t.unsafeGetTensorImpl()->is_wrapped_number()) {
+      return torch::jit::toPyObject(c10::IValue(t.item()));
+    }
+  }
+  if (v.isInt()) {
+    c10::TypePtr type = argument.real_type();
+    if (const auto optional = type->cast<c10::OptionalType>()) {
+      type = optional->getElementType();
+    }
+    const auto value = v.toInt();
+    switch (type->kind()) {
+      case c10::TypeKind::ScalarTypeType:
+        return py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(
+            torch::getTHPDtype(static_cast<at::ScalarType>(value))));
+      case c10::TypeKind::LayoutType:
+        return py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(
+            torch::getTHPLayout(static_cast<at::Layout>(value))));
+      case c10::TypeKind::MemoryFormatType:
+        return py::reinterpret_borrow<py::object>(
+            torch::utils::getTHPMemoryFormat(
+                static_cast<at::MemoryFormat>(value)));
+      default:
+        break;
+    }
+  }
+  return torch::jit::toPyObject(v);
+}
+
+PyObject* siteExport(const TcfgSite* site) {
+  HANDLE_TH_ERRORS
+  const auto& schema = site->op.schema();
+  py::dict info;
+  info["op"] = site->op.operator_name().name;
+  info["overload"] = site->op.operator_name().overload_name;
+  py::list args;
+  for (size_t a = 0; a < site->args.size(); a++) {
+    const ArgTemplate& arg = site->args[a];
+    const auto& argument = schema.arguments()[a];
+    py::object from;
+    py::object value;
+    switch (arg.kind) {
+      case ArgTemplate::Operand:
+        from = py::str("operand");
+        value = py::make_tuple(arg.operand, convName(arg.conv));
+        break;
+      case ArgTemplate::PackedInts: {
+        py::list packed;
+        for (int32_t k : arg.packed) {
+          packed.append(k);
+        }
+        from = py::str("packed");
+        value = std::move(packed);
+        break;
+      }
+      default:
+        from = py::str("const");
+        value = constantObject(argument, arg.constant);
+        break;
+    }
+    args.append(
+        py::make_tuple(argument.name(), argument.kwarg_only(), from, value));
+  }
+  info["args"] = args;
+  py::list guards;
+  for (const auto& g : site->guards) {
+    guards.append(guardName(g.kind));
+  }
+  info["guards"] = guards;
+  info["returns"] = retName(site->ret);
+  info["writes"] = schema.is_mutable();
+  info["random"] = site->op.hasTag(at::Tag::nondeterministic_seeded);
+  return info.release().ptr();
+  END_HANDLE_TH_ERRORS
+}
+
+int32_t traceCalls(const TcfgTrace* trace) {
+  return trace->top_level + trace->nested_top_level;
+}
+
+void dispatchKeys(uint64_t* included, uint64_t* excluded) {
+  const auto tls = c10::impl::tls_local_dispatch_key_set();
+  *included = tls.included_.raw_repr();
+  *excluded = tls.excluded_.raw_repr();
 }
 
 int32_t tensorInfo(PyObject* obj, TcfgTensorInfo* out) {
@@ -1720,6 +1869,24 @@ int32_t tensorInfo(PyObject* obj, TcfgTensorInfo* out) {
   out->device = (static_cast<int32_t>(device.type()) << 16) |
       (static_cast<int32_t>(device.index()) + 1);
   return 1;
+}
+
+int32_t tensorForwardGrad(PyObject* obj) {
+  if (isUnboxed(obj)) {
+    auto* impl = unboxedImpl(obj);
+    return impl->autograd_meta() != nullptr &&
+            torch::autograd::isFwGradDefined(BorrowedTensor(impl).tensor)
+        ? 1
+        : 0;
+  }
+  if (!THPVariable_Check(obj)) {
+    return 0;
+  }
+  const auto& t = THPVariable_Unpack(obj);
+  return t.defined() && t.unsafeGetTensorImpl()->autograd_meta() != nullptr &&
+          torch::autograd::isFwGradDefined(t)
+      ? 1
+      : 0;
 }
 
 PyObject* tensorBox(PyObject* tagged) {
@@ -2033,6 +2200,8 @@ bool hook_linked = false;
 int32_t hook_wanted = 0;
 // The frame this thread is handing on to what is below.
 thread_local _PyInterpreterFrame* hook_handing = nullptr;
+// How many frames the interpreter brought here on this thread.
+thread_local uint64_t hook_frames = 0;
 // The interpreter the hook was registered in: the only one PyTorch runs in.
 PyInterpreterState* hook_interp = nullptr;
 
@@ -2056,6 +2225,7 @@ PyObject* evalFrame(
   if (frame == hook_handing) {
     return _PyEval_EvalFrameDefault(tstate, frame, throwflag);
   }
+  hook_frames++;
   // Offered: the frame of a call of a function, before its first
   // instruction. Not the body of a class or a module, which has its
   // variables in a dict; not a generator or a coroutine, whose frame outlives
@@ -2114,6 +2284,10 @@ PyObject* frameInterpret(void* frame) {
   return handOn(
       PyThreadState_Get(), static_cast<_PyInterpreterFrame*>(frame), 0);
 }
+
+uint64_t frameCount() {
+  return hook_frames;
+}
 #endif
 
 int32_t isTracing() {
@@ -2150,14 +2324,14 @@ void workspaceCapsuleFree(PyObject* capsule) {
 }
 
 const TcfgApi api_table = {
-    TCFG_API_VERSION, &captureBegin,      &captureEnd,        &traceFree,
-    &traceRecords,    &siteFromTrace,     &siteFree,          &siteCall,
-    &siteInfo,        &tensorInfo,        &tensorBox,         &tensorRetain,
+    TCFG_API_VERSION,   &captureBegin,      &captureEnd,        &traceFree,
+    &traceRecords,      &siteFromTrace,     &siteFree,          &siteCall,
+    &siteInfo,          &tensorInfo,        &tensorBox,         &tensorRetain,
     &tensorRelease,
 #ifdef TCFG_HAS_FRAMES
-    &framePush,       &framePop,          &frameHeld,         &frameSwap,
-    &frameTraced,     &frameHook,         &frameWant,         &frameAdopt,
-    &frameInterpret,  &frameReturns,
+    &framePush,         &framePop,          &frameHeld,         &frameSwap,
+    &frameTraced,       &frameHook,         &frameWant,         &frameAdopt,
+    &frameInterpret,    &frameReturns,
 #else
     nullptr,
     nullptr,
@@ -2170,7 +2344,14 @@ const TcfgApi api_table = {
     nullptr,
     nullptr,
 #endif
-    &isTracing,       &workspaceEnterRaw, &workspaceLeaveRaw, &callModes,
+    &isTracing,         &workspaceEnterRaw, &workspaceLeaveRaw, &callModes,
+    &siteExport,        &traceCalls,        &dispatchKeys,
+#ifdef TCFG_HAS_FRAMES
+    &frameCount,
+#else
+    nullptr,
+#endif
+    &tensorForwardGrad,
 };
 
 } // namespace
@@ -2251,6 +2432,13 @@ void initCfgBindings(PyObject* module) {
       throw py::error_already_set();
     }
     return info;
+  });
+  site_class.def("export", [](const TcfgSite& site) {
+    auto exported = py::reinterpret_steal<py::object>(siteExport(&site));
+    if (!exported) {
+      throw py::error_already_set();
+    }
+    return exported;
   });
   // Returns NotImplemented when a guard of the site does not hold.
   site_class.def("call", [](TcfgSite& site, const py::args& operands) {
