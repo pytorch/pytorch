@@ -139,11 +139,13 @@ bool mkl_xf16_gemm(
     const scalar_t *b, int64_t ldb,
     float beta,
     scalar_t *c, int64_t ldc) {
-  // MKL's bf16/f16 gemm parallelizes poorly over few columns, while the transa
-  // dot-product kernel in cpu/BlasKernel.cpp splits the rows of A across threads,
-  // so for transa/no-transb problems (the nn.Linear layout) the ATen kernel wins
-  // below a column count that grows with the thread count and the size of A.
-  // The threshold is measured on AVX2 and AVX-512 without AMX
+  // in cpu/BlasKernel.cpp beats MKL's bf16/f16 gemm when B has few columns.
+  // For small size problem MKL wins from about 24 columns at any thread count.
+  // For larger problem the ATen kernel splits the m rows of C across threads, so its
+  // time scales with problem size / threads, while at small n MKL's time is nearly
+  // flat in n and scales poorly with threads; so the crossover grows with the
+  // thread count. The constants come from a sweep on one Xeon 8570 with AVX2 and
+  // AVX-512 without AMX emulated by capping the ISA 
   const int64_t threads = at::in_parallel_region() ? 1 : at::get_num_threads();
   const int64_t min_cols_transa = m * k <= 1024 * 1024 ? 24 : 24 + 6 * threads;
   const bool skinny_transa = transa != TransposeType::NoTranspose &&
