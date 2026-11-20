@@ -1509,54 +1509,89 @@ for warning in w:
 
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_roll(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
         x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
-        actual = torch.ops.libtorch_agn_2_10.my_roll(x, [-1], [1])
+        actual = libtorch_agnostic.ops.my_roll(x, [-1], [1])
         self.assertEqual(actual, x.roll(-1, 1))
 
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_repeat_interleave(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
         x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
-        actual = torch.ops.libtorch_agn_2_10.my_repeat_interleave(x, 2, 1, 6)
+        actual = libtorch_agnostic.ops.my_repeat_interleave(x, 2, 1, 6)
         self.assertEqual(actual, x.repeat_interleave(2, dim=1, output_size=6))
+        actual = libtorch_agnostic.ops.my_repeat_interleave(x, 2)
+        self.assertEqual(actual, x.repeat_interleave(2))
+        with self.assertRaisesRegex(RuntimeError, "Invalid output_size"):
+            libtorch_agnostic.ops.my_repeat_interleave(x, 2, 1, 5)
+        ops = torch.ops.libtorch_agn_2_10
+        repeats = torch.tensor([1, 3, 0], device=device)
+        self.assertEqual(
+            ops.my_repeat_interleave_tensor(repeats, 4),
+            torch.repeat_interleave(repeats, output_size=4),
+        )
+        self.assertEqual(
+            ops.my_repeat_interleave_self_tensor(x, repeats, -1, 4),
+            x.repeat_interleave(repeats, dim=-1, output_size=4),
+        )
 
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_equal(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
         x = torch.tensor([0, 3, 1], device=device)
-        equal = torch.ops.libtorch_agn_2_10.my_equal
+        equal = libtorch_agnostic.ops.my_equal
         self.assertTrue(equal(x, x.clone()))
         self.assertFalse(equal(x, x + 1))
 
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_nonzero(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
         x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
-        self.assertEqual(torch.ops.libtorch_agn_2_10.my_nonzero(x), x.nonzero())
+        self.assertEqual(libtorch_agnostic.ops.my_nonzero(x), x.nonzero())
 
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_expand(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
         x = torch.tensor([[0, 3, 1]], device=device)
-        actual = torch.ops.libtorch_agn_2_10.my_expand(x, [2, 3])
+        actual = libtorch_agnostic.ops.my_expand(x, [2, 3])
         expected = x.expand(2, 3)
         self.assertEqual(actual, expected)
         self.assertEqual(actual.stride(), expected.stride())
 
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_all(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
         x = torch.tensor([True, False], device=device)
-        self.assertEqual(torch.ops.libtorch_agn_2_10.my_all(x), x.all())
+        self.assertEqual(libtorch_agnostic.ops.my_all(x), x.all())
+        ops = torch.ops.libtorch_agn_2_10
+        x = torch.tensor([[True, False], [True, True]], device=device)
+        self.assertEqual(ops.my_all_dim(x, 0, True), x.all(0, keepdim=True))
+        self.assertEqual(ops.my_all_dims(x, [0, 1], True), x.all((0, 1), keepdim=True))
 
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_median(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
         x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
-        actual = torch.ops.libtorch_agn_2_10.my_median(x, 1, True)
+        actual = libtorch_agnostic.ops.my_median(x, 1, True)
         self.assertEqual(actual, x.median(1, keepdim=True))
+        self.assertEqual(torch.ops.libtorch_agn_2_10.my_median_default(x), x.median())
 
     @skipIfTorchVersionLessThan(2, 10)
-    def test_my_index_fill(self, device):
+    def test_my_index_fill_(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
         x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
         index = torch.tensor([1], device=device)
         value = torch.tensor(7, device=device)
         expected = x.clone().index_fill_(1, index, value)
-        actual = torch.ops.libtorch_agn_2_10.my_index_fill(x, 1, index, value)
+        actual = libtorch_agnostic.ops.my_index_fill_(x, 1, index, value)
         self.assertEqual(actual, expected)
         self.assertEqual(x, expected)
 

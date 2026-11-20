@@ -191,6 +191,40 @@ def my_slice(self, dim=0, start=None, end=None, step=1) -> Tensor:
     return torch.ops.libtorch_agn_2_10.my_slice.default(self, dim, start, end, step)
 
 
+def my_roll(self, shifts, dims=()) -> Tensor:
+    return torch.ops.libtorch_agn_2_10.my_roll.default(self, shifts, dims)
+
+
+def my_repeat_interleave(self, repeats, dim=None, output_size=None) -> Tensor:
+    return torch.ops.libtorch_agn_2_10.my_repeat_interleave.default(
+        self, repeats, dim, output_size
+    )
+
+
+def my_equal(self, other) -> bool:
+    return torch.ops.libtorch_agn_2_10.my_equal.default(self, other)
+
+
+def my_nonzero(self) -> Tensor:
+    return torch.ops.libtorch_agn_2_10.my_nonzero.default(self)
+
+
+def my_expand(self, size, implicit=False) -> Tensor:
+    return torch.ops.libtorch_agn_2_10.my_expand.default(self, size, implicit)
+
+
+def my_all(self) -> Tensor:
+    return torch.ops.libtorch_agn_2_10.my_all.default(self)
+
+
+def my_median(self, dim, keepdim=False) -> tuple[Tensor, Tensor]:
+    return torch.ops.libtorch_agn_2_10.my_median.default(self, dim, keepdim)
+
+
+def my_index_fill_(self, dim, index, value) -> Tensor:
+    return torch.ops.libtorch_agn_2_10.my_index_fill_.default(self, dim, index, value)
+
+
 def my_reshape(t, shape) -> Tensor:
     """
     Returns a tensor with the same data but different shape.
