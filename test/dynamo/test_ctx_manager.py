@@ -3129,11 +3129,10 @@ class AcceleratorCtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertExpectedInline(str(cnts.op_count), """17""")
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6305")
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     def test_accelerator_device(self):
         def fn(x):
-            with torch.device(max(x.device.index - 1, 0)):
+            with torch.get_device_module(GPU_TYPE).device(max(x.device.index - 1, 0)):
                 x = torch.sin(x + 1)
             return x
 
