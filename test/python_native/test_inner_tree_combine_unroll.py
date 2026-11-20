@@ -47,11 +47,12 @@ class TestInnerTreeCombineUnroll(TestCase):
 
     @parametrize(
         "updates",
-        [{"combine_unroll": -1}, {"combine_rpb": 64}],
+        [{"combine_unroll": -1}, {"combine_rpb": 64}, {"uniform_combine": "weight"}],
         name_fn=lambda u: next(iter(u)),
     )
     def test_invalid_policy(self, updates):
-        """Reject a negative unroll and async staging with more rows than copying lanes."""
+        """Reject a negative unroll, async staging with more rows than copying lanes and
+        an unknown uniform_combine mode."""
         import cutlass
 
         from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
@@ -139,19 +140,6 @@ class TestInnerTreeCombineUnroll(TestCase):
             self.assertEqual(candidate.combine_tile, want)
             self.assertEqual(candidate.uniform_combine, mode)
 
-    def test_uniform_combine_rejects_unknown_modes(self):
-        import cutlass
-
-        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
-
-        trait = T.VarMeanOps(correction=1, acc=cutlass.Float32)
-        split = rt._ItreePlan(
-            "split", 4, 16, 1, 2, (), (), (1024, 8192, 8192, 512, 512)
-        )
-        arch = rt._ITREE_ARCH["default"]._replace(uniform_combine="weight")
-        with self.assertRaisesRegex(ValueError, "must be off, counts or weights"):
-            rt.itree_combine_plan(split, 4, trait=trait, arch=arch)
-
     @parametrize(
         "split", [(2**24, 8192, 8192, 512, 512), (1024, 2**24, 2**24, 512, 512)]
     )
@@ -162,7 +150,7 @@ class TestInnerTreeCombineUnroll(TestCase):
         from torch._native.ops.reductions import tile, traits as T
 
         trait = T.VarMeanOps(correction=1, acc=cutlass.Float32)
-        self.assertTrue(tile.uniform_combine_ok(trait, split))
+        self.assertTrue(tile.uniform_combine_ok(trait, split, "weights"))
 
     def test_uniform_combine_flag_is_per_class(self):
         """Accept combine_uniform only for subclasses that declare has_combine_uniform."""
@@ -185,14 +173,24 @@ class TestInnerTreeCombineUnroll(TestCase):
         self.assertTrue(OptedIn.has_combine_uniform)
         self.assertFalse(OptedIn.has_combine_equal)
         self.assertFalse(KeepsOptIn.has_combine_uniform)
-        self.assertFalse(tile.uniform_combine_ok(OwnCombine(acc=acc), split))
-        self.assertTrue(tile.uniform_combine_ok(OptedIn(acc=acc), split))
-        self.assertFalse(tile.uniform_combine_ok(KeepsOptIn(acc=acc), split))
+        self.assertFalse(tile.uniform_combine_ok(OwnCombine(acc=acc), split, "weights"))
+        self.assertTrue(tile.uniform_combine_ok(OptedIn(acc=acc), split, "weights"))
+        self.assertFalse(tile.uniform_combine_ok(KeepsOptIn(acc=acc), split, "weights"))
+
+        class CountsOnly:
+            has_combine_uniform = True
+            acc = cutlass.Float32
+
+            def combine_uniform(self, a, b, index, count, weight=None):
+                return a
+
+        self.assertTrue(tile.uniform_combine_ok(CountsOnly(), split, "counts"))
+        self.assertFalse(tile.uniform_combine_ok(CountsOnly(), split, "weights"))
 
     @parametrize(
         "updates,msg",
         [
-            ({"uniform_combine": "weight"}, "must be off, counts or weights"),
+            ({"uniform_combine": "weight"}, "must be 'off', 'counts' or 'weights'"),
             ({"shape": "split"}, "staged combine plan"),
             ({"combine_tile": 0}, "staged combine plan"),
             ({"trait": "sum"}, "combine_uniform, got SumOps"),
@@ -208,7 +206,10 @@ class TestInnerTreeCombineUnroll(TestCase):
             ({"split": (1024, 6144, 6144, 512, 512)}, "two count up to .*, got 6144"),
             ({"split": (1024, 8192, 8191, 512, 512)}, "one count, got 8192 and 8191"),
             ({"rows_per_block": 64}, "at most 32 threads per block, got 64"),
-            ({"wpr": 2}, "at most 32 threads per block, got 64"),
+            (
+                {"wpr": 2, "uniform_combine": "off"},
+                "at most 32 threads per block, got 64",
+            ),
             # The general axis rejects stage_e outright, so the row axis covers it.
             (
                 {"axis": "row", "stage_e": 4, "rows_per_block": 2},
@@ -458,7 +459,8 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         unstaged = plan._replace(
             rows_per_block=128, combine_grp=1, combine_tile=0, combine_unroll=0
         )
-        # The candidate derives counts, so a poisoned count field must not reach it.
+        # NaN count fields show that the candidate's arithmetic never reads counts (the
+        # smem budget test covers not staging them).
         poisoned = parts[:2] + [torch.full_like(parts[2], float("nan"))]
         # Distinct kernels, so the bits below compare three compiled folds.
         sigs = (
