@@ -106,6 +106,34 @@ __all__ = [
 ]
 
 
+def _is_integer_check_safe(expr: sympy.Basic) -> bool:
+    """Return whether rounding an expression is known to be a no-op.
+
+    Trust integer literals, symbols declared ``integer=True``, integer-returning
+    division, indexing, and rounding functions, and modulo functions whose
+    operands are recursively trusted. SymPy's inferred ``is_integer`` on
+    composite expressions and other PyTorch functions are not sufficient.
+    """
+
+    if isinstance(expr, sympy.Integer):
+        return True
+    if isinstance(expr, sympy.Symbol):
+        return expr.is_integer is True
+    if isinstance(expr, (Mod, PythonMod)):
+        return all(_is_integer_check_safe(arg) for arg in expr.args)
+    return isinstance(
+        expr,
+        (
+            FloorDiv,
+            ModularIndexing,
+            CeilToInt,
+            FloorToInt,
+            TruncToInt,
+            RoundToInt,
+        ),
+    )
+
+
 def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
     # No need to check that two args are not the same, since expr is pre-optimized but we do it anyway.
     return (
@@ -563,6 +591,8 @@ class CeilToInt(sympy.Function):
             return int_oo
         if number in (-sympy.oo, -int_oo):
             return -int_oo
+        if _is_integer_check_safe(number):
+            return number
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.ceil(float(number)))
         return None
@@ -581,7 +611,7 @@ class FloorToInt(sympy.Function):
             return int_oo
         if number in (-sympy.oo, -int_oo):
             return -int_oo
-        if isinstance(number, sympy.Integer):
+        if _is_integer_check_safe(number):
             return number
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.floor(float(number)))
@@ -1312,7 +1342,8 @@ class TruncToInt(sympy.Function):
             return int_oo
         if number in (-sympy.oo, -int_oo):
             return -int_oo
-        if number.is_integer is True:
+        # Float(0.0).is_integer is True in sympy, but it must become Integer(0)
+        if number.is_integer is True and not number.is_Float:
             return number
         if isinstance(number, IntTrueDiv):
             base, divisor = number.args

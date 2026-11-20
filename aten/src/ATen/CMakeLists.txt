@@ -227,6 +227,8 @@ file(GLOB flash_attention_cuda_kernels_cu CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR
 file(GLOB flash_attention_cuda_cpp CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cpp)
 file(GLOB native_flash_attn_api_cpp CONFIGURE_DEPENDS "native/transformers/cuda/flash_attn/flash_api.cpp")
 
+file(GLOB native_xpu_cpp CONFIGURE_DEPENDS "native/xpu/*.cpp")
+file(GLOB native_xpu_h CONFIGURE_DEPENDS "native/xpu/*.h")
 
 # flash_attention hip sources
 file(GLOB flash_attention_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/flash_attn/*.hip")
@@ -310,6 +312,11 @@ if(USE_FLASH_ATTENTION)
         CK_TILE_FMHA_FWD_APPENDKV_API=1
         CK_TILE_FMHA_FWD_PAGEDKV_API=1
         __GCC_HAVE_DWARF2_CFI_ASM=1
+        # Newer composable_kernel defaults ck_tile to its unified MMA framework,
+        # which needs a single GPU target at compile time (CK_CMAKE_GPU_TARGET_IDS)
+        # that a multi-arch build cannot give. Keep the WarpGemm path, which is
+        # what older CK uses by default.
+        USE_NEW_UNIFIED_FRAMEWORK=0
         USE_ROCM_CK_SDPA)
 
     message(STATUS "Generating CK kernel instances...")
@@ -577,6 +584,7 @@ endif()
 
 if(USE_XPU)
   list(APPEND ATen_XPU_SRCS ${mkldnn_xpu_cpp})
+  list(APPEND ATen_XPU_SRCS ${native_xpu_cpp})
   list(APPEND ATen_XPU_SRCS ${native_transformers_xpu_cpp})
   list(APPEND ATen_XPU_DEPENDENCY_LIBS xpu_mkldnn)
 
@@ -698,6 +706,9 @@ if(USE_ROCM)
       POSITION_INDEPENDENT_CODE ON
       HIP_ARCHITECTURES "${_ck_gemm_hip_arches}")
     target_compile_options(ck_gemm PRIVATE ${HIP_CXX_FLAGS})
+    # ck_tile_group_gemm.hip uses ck_tile: see USE_NEW_UNIFIED_FRAMEWORK in
+    # CK_SDPA_EXTRA_HIPCC_OPTIONS above.
+    target_compile_definitions(ck_gemm PRIVATE USE_NEW_UNIFIED_FRAMEWORK=0)
     target_include_directories(ck_gemm PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/hip
       ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include
@@ -798,11 +809,6 @@ if(NOT MSVC)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS m)
 endif()
 
-if(AT_NNPACK_ENABLED)
-  include_directories(${NNPACK_INCLUDE_DIRS})
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS nnpack) # cpuinfo is added below
-endif()
-
 if(MKLDNN_FOUND)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ${MKLDNN_LIBRARIES})
 endif(MKLDNN_FOUND)
@@ -812,7 +818,7 @@ if(USE_MKLDNN_ACL)
     list(APPEND ATen_CPU_DEPENDENCY_LIBS ${ACL_LIBRARIES})
 endif()
 
-if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
+if(NOT EMSCRIPTEN)
   if(NOT MSVC)
     # Bump up optimization level for sleef to -O1, since at -O0 the compiler
     # excessively spills intermediate vector registers to the stack
@@ -928,11 +934,9 @@ endif()
       list(APPEND ATen_HIP_DEPENDENCY_LIBS torch::magma)
     endif(USE_ROCM)
     if(MSVC)
-      if($ENV{TH_BINARY_BUILD})
-        # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
-        # in caffe2/CMakeLists.txt
-        list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
-      endif($ENV{TH_BINARY_BUILD})
+      # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
+      # in caffe2/CMakeLists.txt
+      list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
     endif(MSVC)
   endif(USE_MAGMA)
 
@@ -1054,24 +1058,16 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
   DESTINATION "${AT_INSTALL_SHARE_DIR}/cmake/ATen")
 
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_nested_h} ${ATen_TRANSFORMER_HEADERS})
-if(NOT INTERN_BUILD_MOBILE)
-  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${xpu_h} ${mps_h} ${native_kleidiai_h} ${native_mps_h} ${native_utils_h} ${miopen_h})
-  # Metal
-  if(USE_PYTORCH_METAL_EXPORT)
-    # Add files needed from exporting metal models(optimized_for_mobile)
-    list(APPEND INSTALL_HEADERS ${metal_h} ${metal_prepack_h})
-  elseif(APPLE AND USE_PYTORCH_METAL)
-    # Needed by Metal kernels
-    list(APPEND INSTALL_HEADERS ${metal_h} ${native_metal_h})
-  else()
-    list(APPEND INSTALL_HEADERS ${metal_h})
-  endif()
+list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${xpu_h} ${native_xpu_h} ${mps_h} ${native_kleidiai_h} ${native_mps_h} ${native_utils_h} ${miopen_h})
+# Metal
+if(USE_PYTORCH_METAL_EXPORT)
+  # Add files needed from exporting metal models(optimized_for_mobile)
+  list(APPEND INSTALL_HEADERS ${metal_h} ${metal_prepack_h})
+elseif(APPLE AND USE_PYTORCH_METAL)
+  # Needed by Metal kernels
+  list(APPEND INSTALL_HEADERS ${metal_h} ${native_metal_h})
 else()
-  if(IOS AND USE_PYTORCH_METAL)
-      list(APPEND INSTALL_HEADERS ${metal_h} ${native_metal_h})
-  else()
-      list(APPEND INSTALL_HEADERS ${metal_h} ${metal_prepack_h})
-  endif()
+  list(APPEND INSTALL_HEADERS ${metal_h})
 endif()
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
