@@ -113,22 +113,22 @@ uncoordinated race-closing reads to apply.
 ## Codepath owners come from CODEOWNERS
 
 GitHub requests codepath owners itself, through the repository's `CODEOWNERS`
-file; Auto PR Triage never requests them. It parses the same file to tell the
-LLM which changed files are already owned and, in planning, to skip a roster
-pick for a team whose member is a codepath owner and to explain each codepath
-owner. GitHub can legitimately fail to send a request: the file can be invalid
-or over GitHub's size limit, an owner can no longer exist or lack repository
-access, or GitHub's processing can be delayed. So the explanation reports what
-the reviewer state showed for each codepath owner (a pending request, a review,
-neither, or unreadable state), and "neither" flags a request that GitHub may
-not have sent or that someone removed. Like GitHub, the parser skips
-`CODEOWNERS` lines it cannot read, such as an email owner, and the ownership
-input step logs each skipped line; a skipped line's owners get no provenance.
+file; Auto PR Triage never requests them. It reads the same rules from
+`OWNERSHIP.yaml`, which `CODEOWNERS` is generated from, in the generated file's
+order (`ordered_groups` in `generate_codeowners.py`), so both agree on which rule
+matches a path last. It uses them to tell the LLM which changed files are
+already owned and, in planning, to skip a roster pick for a team whose member is
+a codepath owner and to explain each codepath owner. GitHub can legitimately
+fail to send a request: an owner can no longer exist or lack repository access,
+or GitHub's processing can be delayed. So the explanation reports what the
+reviewer state showed for each codepath owner (a pending request, a review,
+neither, or unreadable state), and "neither" flags a request that GitHub may not
+have sent or that someone removed.
 
 ## Operating notes
 
 - **Prerequisites.** The default branch needs the workflow and composite action,
-  root `CODEOWNERS`, the two files in `.github/auto-pr-triage/`, and the
+  `OWNERSHIP.yaml`, the two files in `.github/auto-pr-triage/`, and the
   `open source`, `actionable`, `triaged`, `bot-triaged`, `bot-triage-error`,
   and `missing actionable issue` labels. The workflow does not create labels.
 - **Shadow mode leaves no outcome label,** so a later eligible event analyzes

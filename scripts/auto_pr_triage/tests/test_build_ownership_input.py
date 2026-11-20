@@ -195,7 +195,7 @@ class OwnershipInputMainTest(unittest.TestCase):
         codepath_policy = {
             "source": {
                 "repository": REPOSITORY,
-                "path": "CODEOWNERS",
+                "path": "OWNERSHIP.yaml",
                 "ref": "a" * 40,
                 "blob_sha": "c" * 40,
             },
@@ -205,7 +205,6 @@ class OwnershipInputMainTest(unittest.TestCase):
                     "owners": ["@soulitzer"],
                 }
             ],
-            "parse_diagnostics": [],
         }
         (directory / "intake.json").write_text(json.dumps(intake.to_dict()))
         github_output = directory / "github-output"
