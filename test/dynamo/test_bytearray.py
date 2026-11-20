@@ -582,6 +582,112 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             ),
         )
 
+    @make_dynamo_test
+    def test_isalnum(self):
+        self.assertTrue(self.type2test(b"abc123").isalnum())
+        self.assertFalse(self.type2test(b"abc 123").isalnum())
+        self.assertFalse(self.type2test(b"").isalnum())
+        # Classification is ASCII-only
+        self.assertFalse(self.type2test(b"abc\xe9").isalnum())
+        self.assertRaises(TypeError, lambda: self.type2test(b"a").isalnum(1))
+
+    @make_dynamo_test
+    def test_isalpha(self):
+        self.assertTrue(self.type2test(b"abcXYZ").isalpha())
+        self.assertFalse(self.type2test(b"abc1").isalpha())
+        self.assertFalse(self.type2test(b"").isalpha())
+        self.assertFalse(self.type2test(b"\xe9").isalpha())
+        self.assertRaises(TypeError, lambda: self.type2test(b"a").isalpha(1))
+
+    @make_dynamo_test
+    def test_isascii(self):
+        self.assertTrue(self.type2test(b"abc \x00\x7f").isascii())
+        self.assertFalse(self.type2test(b"abc\x80").isascii())
+        # Unlike the other predicates, an empty bytearray is ASCII
+        self.assertTrue(self.type2test(b"").isascii())
+        self.assertRaises(TypeError, lambda: self.type2test(b"a").isascii(1))
+
+    @make_dynamo_test
+    def test_isdigit(self):
+        self.assertTrue(self.type2test(b"0123456789").isdigit())
+        self.assertFalse(self.type2test(b"12a").isdigit())
+        self.assertFalse(self.type2test(b"").isdigit())
+        self.assertFalse(self.type2test(b"\xb2").isdigit())
+        self.assertRaises(TypeError, lambda: self.type2test(b"1").isdigit(1))
+
+    @make_dynamo_test
+    def test_islower(self):
+        self.assertTrue(self.type2test(b"abc 1!").islower())
+        self.assertFalse(self.type2test(b"aBc").islower())
+        # Needs at least one cased character
+        self.assertFalse(self.type2test(b"123").islower())
+        self.assertFalse(self.type2test(b"").islower())
+        self.assertRaises(TypeError, lambda: self.type2test(b"a").islower(1))
+
+    @make_dynamo_test
+    def test_isspace(self):
+        self.assertTrue(self.type2test(b" \t\n\r\x0b\x0c").isspace())
+        self.assertFalse(self.type2test(b" a ").isspace())
+        self.assertFalse(self.type2test(b"").isspace())
+        self.assertFalse(self.type2test(b"\xa0").isspace())
+        self.assertRaises(TypeError, lambda: self.type2test(b" ").isspace(1))
+
+    @make_dynamo_test
+    def test_istitle(self):
+        self.assertTrue(self.type2test(b"Hello World").istitle())
+        self.assertTrue(self.type2test(b"A1 B2").istitle())
+        self.assertFalse(self.type2test(b"Hello world").istitle())
+        self.assertFalse(self.type2test(b"HEllo").istitle())
+        self.assertFalse(self.type2test(b"").istitle())
+        self.assertRaises(TypeError, lambda: self.type2test(b"A").istitle(1))
+
+    @make_dynamo_test
+    def test_isupper(self):
+        self.assertTrue(self.type2test(b"ABC 1!").isupper())
+        self.assertFalse(self.type2test(b"AbC").isupper())
+        self.assertFalse(self.type2test(b"123").isupper())
+        self.assertFalse(self.type2test(b"").isupper())
+        self.assertRaises(TypeError, lambda: self.type2test(b"A").isupper(1))
+
+    def test_input_bytearray_is_methods(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return (
+                ba.isalnum(),
+                ba.isalpha(),
+                ba.isascii(),
+                ba.isdigit(),
+                ba.islower(),
+                ba.isspace(),
+                ba.istitle(),
+                ba.isupper(),
+            )
+
+        for data in (b"Hello", b"abc123", b"   ", b"", b"\xff"):
+            ba = bytearray(data)
+            expected = (
+                ba.isalnum(),
+                ba.isalpha(),
+                ba.isascii(),
+                ba.isdigit(),
+                ba.islower(),
+                ba.isspace(),
+                ba.istitle(),
+                ba.isupper(),
+            )
+            self.assertEqual(fn(ba), expected)
+            self.assertEqual(ba, bytearray(data))
+
+    def test_input_bytearray_is_methods_after_mutation(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            ba = bytearray(b"abc")
+            before = ba.isdigit()
+            ba[:] = b"123"
+            return before, ba.isdigit()
+
+        self.assertEqual(fn(), (False, True))
+
     def test_find(self):
         b = self.type2test(b"mississippi")
         self.assertEqual(b.find(b"i"), 1)
