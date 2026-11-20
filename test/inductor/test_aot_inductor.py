@@ -9242,6 +9242,59 @@ class AOTInductorTestsTemplate:
             self.assertNotRegex(code, r"\bdouble\s+scaling_factor[,\s)]")
             self.assertNotRegex(code, r"\bdouble\s+var_\d+\s*=\s*scaling_factor;")
 
+    @skip_if_device(
+        lambda device: device not in ("cuda", "xpu"), "requires a Triton accelerator"
+    )
+    @common_utils.parametrize("debug_level", ["0", "1", "2", "3"])
+    def test_user_triton_view_debug_handle_lifetime(self, debug_level):
+        import triton
+
+        from torch.testing._internal.triton_utils import add_kernel
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                y = y.view(torch.int32)
+                out = torch.empty_like(x)
+                torch.library.wrap_triton(add_kernel)[(triton.cdiv(x.numel(), 256),)](
+                    x, y, out, x.numel(), BLOCK_SIZE=256
+                )
+                return out
+
+        x = torch.randint(0, 10, (1024,), dtype=torch.int32, device=self.device)
+        y = torch.randint(0, 10, (1024,), dtype=torch.int32, device=self.device)
+        y = y.view(torch.float32)
+        inputs = [(x, y), (x + 1, y), (x, y)]
+        with tempfile.TemporaryDirectory() as directory, contextlib.chdir(directory):
+            _, output_code = run_and_get_cpp_code(
+                self.check_model_with_multiple_inputs,
+                Model(),
+                inputs,
+                options={"aot_inductor.debug_intermediate_value_printer": debug_level},
+            )
+            if debug_level in ("1", "2"):
+                paths = re.findall(
+                    r"AOT wrapper code written to: ([^\n]+)", output_code
+                )
+                self.assertTrue(paths)
+                code = pathlib.Path(paths[-1].strip()).read_text()
+                binding = re.search(
+                    r"auto (?P<owner>var_\d+) = (?P<expr>RAIIAtenTensorHandle\([^\n]*\));",
+                    code,
+                )
+                self.assertIsNotNone(binding)
+                owner = binding["owner"]
+                self.assertEqual(code.count(binding["expr"]), 1)
+                printer = "save" if debug_level == "1" else "print"
+                callback = f"aoti_torch_{printer}_tensor_handle({owner},"
+                self.assertEqual(code.count(callback), 2)
+                call = re.search(rf"\bcall_\w+\([^;\n]*\b{owner}[^;\n]*\);", code)
+                self.assertIsNotNone(call)
+                reset = f"{owner}.reset();"
+                self.assertEqual(code.count(reset), 1)
+                FileCheck().check(binding[0]).check(callback).check(call[0]).check(
+                    callback
+                ).check(reset).run(code)
+
     @skip_if_device(lambda device: device != GPU_TYPE, "requires GPU")
     def test_aoti_debug_printer_user_defined_triton_kernel(self):
         if self.device != GPU_TYPE:
