@@ -11,14 +11,29 @@ application control plane, or connect peers by rank through a trusted Store with
 copies from the remote base to a writable local view. Offsets and lengths are bytes;
 shape and dtype agreement is the application's responsibility.
 
-Synchronous reads/writes return zero; `async_op=True` returns
-{class}`torch.distributed.Work`. Successful completion means the transfer completed,
-not that the remote application consumed or acknowledged the data. Asyncio callers
-can use `read_async`, `write_async`, or `wait_all`. Registration remains valid
+Synchronous reads/writes, including `read_batch`/`write_batch`, return zero;
+`async_op=True` returns {class}`torch.distributed.Work`. Successful completion means
+the transfer completed, not that the remote application consumed or acknowledged
+the data. Asyncio callers can use `read_async`, `write_async`, `read_batch_async`,
+`write_batch_async`, or `wait_all`. Registration remains valid
 until unregistration or close, and tensors must not be resized or have their storage replaced.
 
+A batch transfers a sequence of `(local view, remote buffer)` pairs as one
+operation. Pairs may name different peers and complete in any order;
+zero-length pairs are validated but not transferred. The built-in backends
+check every pair before starting any, so invalid buffers, unconnected peers,
+oversized views, and inactive registrations raise with nothing in flight. A
+batch is not atomic: its Work completes once every transfer is terminal and fails if any
+transfer failed, leaving every destination range unspecified. A transfer can
+still fail to start after others have, for example if the backend rejects it or
+memory is concurrently unregistered; the started transfers finish before the
+error is reported. `timeout` bounds the wait for the whole batch, including,
+for `read_batch_async`/`write_batch_async`, time spent waiting for an executor
+thread. No transfer starts once the deadline has passed; the batch fails with
+`TimeoutError` after any started transfers finish.
+
 Ordinary reads and writes are not ordered on CUDA streams. The API does not
-provide tracing or batching. Views and remote buffers support `slice(offset, length)`
+provide tracing. Views and remote buffers support `slice(offset, length)`
 and step-1 `[a:b]` byte ranges. Like Python sequences, `[a:b]` counts negative
 bounds from the end and clamps out-of-range ones, while `slice` raises; a
 transfer of a clamped view copies fewer bytes. Non-slice keys raise `TypeError`
@@ -109,7 +124,7 @@ including previously created views, exported descriptors, and their slices, beco
 Register again and exchange fresh descriptors before resuming transfers.
 
 NIXL transfers return Work objects that retain their request handles until
-completion. `wait_all`, `read_async`, and `write_async` await Work futures.
+completion. `wait_all` and the `*_async` methods await Work futures.
 The NIXL adapter resolves those futures by checking native transfer status.
 Each live transfer owns a distinct request handle.
 Independent requests may overlap; explicitly wait before issuing dependent or
@@ -134,8 +149,9 @@ For pending NIXL work, `get_future` requires a running asyncio loop; the loop
 must remain running to drive that future. Completed work needs no event loop.
 
 Native metadata, registration, request submission, status checks, and cleanup
-calls execute synchronously on the calling thread. Their timeouts bound lock
-acquisition and transfer completion waits, not execution inside NIXL. Python
+calls execute synchronously on the calling thread, except that
+`read_batch_async`/`write_batch_async` submit from a worker thread. Their timeouts bound
+waiting for that thread, lock acquisition, and transfer completion waits, not execution inside NIXL. Python
 cannot interrupt a blocked native call, even when it releases the GIL.
 
 ```{eval-rst}
