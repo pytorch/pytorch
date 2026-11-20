@@ -63,7 +63,7 @@ from .wrapper import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
     from ..graph import GraphLowering
     from ..runtime.hints import TritonMeta
@@ -3002,7 +3002,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         Same shape as codegen_switch / codegen_while_loop: pre-declare an owning
         handle per output, then inline the region body via codegen_subgraph.
         """
-        outer_inputs = [buf.codegen_reference() for buf in invoke_subgraph.inputs]
+        outer_inputs, input_owners = self._prepare_subgraph_inputs(
+            invoke_subgraph.inputs
+        )
 
         outer_outputs = []
         for out in invoke_subgraph.outputs:
@@ -3027,10 +3029,36 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, outer_outputs)
             self.writeline(ExitSubgraphLine(self))
         self.writeline("}")
+        self._release_owned_tensor_handles(input_owners)
+
+    def _prepare_temporary_tensor_handles(
+        self, inputs: Iterable[str]
+    ) -> tuple[list[str], list[str]]:
+        references = []
+        owners = []
+        # Bind each emitted handle before another allocation can throw.
+        for reference in inputs:
+            local = self.create_tmp_raii_handle_var_if_needed(reference)
+            references.append(local)
+            if local != reference:
+                owners.append(local)
+        return references, owners
+
+    def _prepare_subgraph_inputs(
+        self, inputs: Sequence[ir.IRNode]
+    ) -> tuple[list[str], list[str]]:
+        return self._prepare_temporary_tensor_handles(
+            buf.codegen_reference() for buf in inputs
+        )
+
+    def _release_owned_tensor_handles(self, owners: Sequence[str]) -> None:
+        # Synthetic owners are invisible to the memory planner.
+        for owner in reversed(owners):
+            self.writeline(f"{owner}.reset();")
 
     def codegen_switch(self, node) -> None:
         """Emit ABI-compatible C++ for a higher-order cond/switch."""
-        outer_inputs = [f"{buf.codegen_reference()}" for buf in node.operands]
+        outer_inputs, input_owners = self._prepare_subgraph_inputs(node.operands)
         outer_outputs = []
         for out in node.outputs:
             # in ABI-compatible mode, ir.MultiOutput is not codegened,
@@ -3074,7 +3102,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline("}")
 
         if not V.graph.is_dual_wrapper_mode:
-            return emit_switch_body()
+            emit_switch_body()
+            self._release_owned_tensor_handles(input_owners)
+            return
 
         graphs = tuple(branch.graph for branch in node.branches)
         jit_code = IndentedBuffer(initial_indent=self.wrapper_call._indent)
@@ -3100,6 +3130,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             emit_switch_body()
 
         self.writeline(DualWrapperCodeLine(jit_code, aot_code))
+        self._release_owned_tensor_handles(input_owners)
 
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
         # TODO (desertfire) - This function is the old way of supporting
@@ -3146,16 +3177,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
             while_loop.cond_subgraph.graph.graph_outputs[0], ir.ShapeAsConstantBuffer
         )
         name = while_loop.get_name()
-        outer_carried_inputs = [
-            buf.codegen_reference() for buf in while_loop.carried_inputs
-        ]
-        # Captured view references may be owning temporaries. Preserve one owner
-        # across the condition, body, and all iterations instead of deleting the
-        # same raw handle after the first subgraph call.
-        outer_additional_inputs = [
-            self.create_tmp_raii_handle_var_if_needed(buf.codegen_reference())
-            for buf in while_loop.additional_inputs
-        ]
+        outer_carried_inputs, carried_input_owners = self._prepare_subgraph_inputs(
+            while_loop.carried_inputs
+        )
+        outer_additional_inputs, input_owners = self._prepare_subgraph_inputs(
+            while_loop.additional_inputs
+        )
         carried_output_names = self._get_while_loop_carried_output_names(while_loop)
         cond_result_name = f"{name}_cond_result"
         if is_bool_pred:
@@ -3175,6 +3202,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             self.writeline(f"RAIIAtenTensorHandle {out_name}({out_name}_handle);")
             cond_outer_inputs.append(out_name)
+        self._release_owned_tensor_handles(carried_input_owners)
 
         # additional inputs will be assigned within the while_loop
         # iteration directly from the corresponding outer graph buffers
@@ -3208,7 +3236,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.writeline("}")
 
         if not V.graph.is_dual_wrapper_mode:
-            return codegen_original_while_loop()
+            codegen_original_while_loop()
+            self._release_owned_tensor_handles(input_owners)
+            return
 
         graphs = (
             while_loop.cond_subgraph.graph,
@@ -3242,6 +3272,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             codegen_original_while_loop()
 
         self.writeline(DualWrapperCodeLine(jit_code, aot_code))
+        self._release_owned_tensor_handles(input_owners)
 
     def generate_extern_kernel_args_decl_if_needed(
         self,
