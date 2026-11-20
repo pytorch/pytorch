@@ -403,7 +403,7 @@ _B200_INDEX = (ArgMaxOps, ArgMinOps)
 # nansum and the norms were not, so they keep the default config.
 _B200_STRIDED_C256 = (SumOps, MeanOps, AMaxOps, AMinOps, *_B200_INDEX)
 # Input dtypes and view-size anchors of the SM107 launch policies, and the one-field
-# trait types they measured (by rule name). Their rules are named rubin_*. They come from
+# trait types they measured. Their rules are named rubin_*. They come from
 # SM107 measurements at the _SM107_SIZES anchors; unlike the B200 rules, the ratios are
 # not recorded here.
 _SM107_DTYPES = (torch.float32, torch.bfloat16)
@@ -412,12 +412,7 @@ _SM107_MIN_SIZE, _SM107_MID_SIZE = 16 << 20, 64 << 20
 _SM107_256MIB, _SM107_MAX_SIZE = 256 << 20, 2 << 30
 _SM107_SIZES = (_SM107_MIN_SIZE, _SM107_MID_SIZE, _SM107_256MIB, _SM107_MAX_SIZE)
 _SM107_FULL_SIZES = _SM107_SIZES[2:]
-_SM107_ONE_FIELD_NAMES: dict[type, str] = {
-    SumOps: "sum",
-    MeanOps: "mean",
-    AMaxOps: "amax",
-}
-_SM107_ONE_FIELD = tuple(_SM107_ONE_FIELD_NAMES)
+_SM107_ONE_FIELD = (SumOps, MeanOps, AMaxOps)
 
 
 def _sm107_outputs(
