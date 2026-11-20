@@ -1457,6 +1457,11 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
 
     let globals = func.getattr("__globals__")?;
     globals.downcast::<PyDict>()?;
+    // The interpreter reads the globals of such a function through the
+    // mapping protocol (a `__missing__`, a `__getitem__` of its own).
+    if !globals.is_exact_instance_of::<PyDict>() {
+        return unsupported("the globals of the function are not a plain dict");
+    }
     let builtins = func.getattr("__builtins__")?;
     let builtins = if builtins.downcast::<PyDict>().is_ok() {
         builtins
