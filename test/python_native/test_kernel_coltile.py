@@ -670,7 +670,7 @@ class TestColTileHost(TestCase):
     @parametrize(
         "case,error",
         [
-            (dict(col_group=2), "col_group must be 1, 4, 8 or 16"),
+            (dict(col_group=2), r"col_group must be one of \(1, 4, 8, 16\), got 2$"),
             (dict(axis="row"), "column groups need the col axis, got axis='row'$"),
             (dict(combine=True), "column groups need a fold of inputs, not partials$"),
             (dict(vec=4), "column groups need vec=1, got vec=4$"),
