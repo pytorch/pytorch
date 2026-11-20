@@ -28,6 +28,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCPU,
+    preserves_device_selection,
     skipPRIVATEUSE1,
 )
 from torch.testing._internal.common_utils import (
@@ -50,29 +51,52 @@ from torch.testing._internal.inductor_utils import (
     patch_inductor_backend,
     RUN_CPU,
 )
+from torch.utils._triton import has_triton_for_device
 
 
 def _triton_unavailable(device_type):
-    """Whether inductor would lower `device_type` through Triton but no working
-    Triton installation is present.
+    """Whether inductor would lower `device_type` through Triton but cannot.
 
-    Derived from the backend inductor selects for the injected device instead
-    of a table of device names, so out-of-tree accelerators and future in-tree
-    backends are handled without editing this file.
+    The backend inductor picks decides whether the question applies at all, so
+    non-Triton devices (MPS) and future in-tree backends need no table here.
 
-    The answer is per device: HAS_TRITON is process-wide (has_triton() returns
-    True as soon as any registered device has a working Triton), so it would
-    not skip a backend that lacks Triton on a machine with two accelerators.
-    Out-of-tree backends that don't override DeviceInterface.is_triton_capable
-    are reported as incapable by the base implementation, so fall back to the
-    process-wide flag for them instead of skipping them wholesale.
+    Backends that report their own Triton support are asked through
+    has_triton_for_device, which answers per device: HAS_TRITON is process-wide
+    and can be True because a *different* device has a working Triton. Backends
+    that leave is_triton_capable at the base implementation cannot be asked
+    (the base reports False, and has_triton only counts interfaces reporting
+    True), so they fall back to HAS_TRITON. That is a deliberate policy: it
+    keeps such accelerators, torch_npu among them, covered instead of skipping
+    them wholesale; they can opt into the exact answer by overriding the hook.
     """
     if not is_triton_backend(device_type):
         return False
-    interface = get_interface_for_device(device_type)
+    try:
+        interface = get_interface_for_device(device_type)
+    except NotImplementedError:
+        # No registered interface: nothing can lower this device through Triton.
+        return True
     if interface.is_triton_capable is DeviceInterface.is_triton_capable:
         return not HAS_TRITON
-    return not interface.is_triton_capable()
+    return not has_triton_for_device(device_type)
+
+
+def _copy_collection_device(prefix):
+    """Mirror the instantiated device onto `_device_at_collection`.
+
+    instantiate_device_type_tests records the device each variant was built for
+    in `_device_type_at_collection`, and only when the class's setup hooks are
+    marked as preserving device selection. The decorators that decide skips
+    during collection read `_device_at_collection` instead - copy_tests used to
+    set it directly - so without this they can only skip at run time.
+    """
+    for name in list(globals()):
+        if not name.startswith(prefix):
+            continue
+        cls = globals()[name]
+        device = vars(cls).get("_device_type_at_collection")
+        if device is not None:
+            cls._device_at_collection = device
 
 
 # Make the helper files in test/ importable
@@ -264,6 +288,11 @@ if not TEST_WITH_ASAN:
         DynamicShapesOpTests, DynamicShapesCommonTemplate, DynamicShapesTestCase
     ):
         hw_classification = HardwareClassification.ACCELERATOR
+        # Lets instantiate_device_type_tests record the device it built each
+        # variant for; see _copy_collection_device.
+        setUpClass = classmethod(
+            preserves_device_selection(DynamicShapesTestCase.setUpClass.__func__)
+        )
 
         # Only the harness is decoupled here. CommonTemplate (in
         # test_torchinductor.py) still reads GPU_TYPE in ~271 places, e.g. the
@@ -310,6 +339,7 @@ if not TEST_WITH_ASAN:
                     lowp_opts["rtol"] = max(2e-3, lowp_opts["rtol"])
                 check_model(self, model, example_inputs, kwargs, **lowp_opts)
 
+        @preserves_device_selection
         def setUp(self):
             # Skip devices whose inductor backend needs (but lacks) a working
             # Triton installation instead of failing with "Cannot find a
@@ -371,6 +401,8 @@ if not TEST_WITH_ASAN:
                 )
                 setattr(_variant_cls, _name, _marker(_copy))
 
+        _copy_collection_device("DynamicShapesGPUTests")
+
         # gfx950 shows deterministic mismatches for these two generated tests
         # (conv_with_as_strided numerical mismatch, randint64 distribution for
         # high bounds). The guards are applied per variant after instantiation:
@@ -398,9 +430,15 @@ if not TEST_WITH_ASAN:
 
 class TestInductorDynamic(DynamicShapesTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+    # Lets instantiate_device_type_tests record the device it built each
+    # variant for; see _copy_collection_device.
+    setUpClass = classmethod(
+        preserves_device_selection(DynamicShapesTestCase.setUpClass.__func__)
+    )
 
     compile_fn = staticmethod(functools.partial(torch.compile, dynamic=True))
 
+    @preserves_device_selection
     def setUp(self):
         # Pre-PR boundary: the CPU variant only ran on machines with a
         # first-party GPU backend. Keep that for CPU without gating
@@ -1788,6 +1826,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
+_copy_collection_device("TestInductorDynamic")
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
