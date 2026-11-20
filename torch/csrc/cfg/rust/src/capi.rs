@@ -4,7 +4,7 @@
 use crate::pyffi::{self, Obj, Shared};
 use pyo3::ffi;
 use std::os::raw::c_char;
-use std::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicU8, Ordering};
 
 #[repr(C)]
 pub struct TcfgTrace {
@@ -27,7 +27,7 @@ pub const TCFG_ALLOW_SKIP_AUTOGRAD: u32 = 1;
 
 pub const TCFG_UNBOXED_RESULT: u32 = 1;
 
-pub const TCFG_API_VERSION: u32 = 12;
+pub const TCFG_API_VERSION: u32 = 15;
 
 #[repr(C)]
 pub struct TcfgPyOp {
@@ -133,6 +133,11 @@ pub struct TcfgApi {
     pub workspace_enter: unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void,
     pub workspace_leave: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void),
     pub call_modes: unsafe extern "C" fn() -> u64,
+    pub site_export: unsafe extern "C" fn(*const TcfgSite) -> Obj,
+    pub trace_calls: unsafe extern "C" fn(*const TcfgTrace) -> i32,
+    pub dispatch_keys: unsafe extern "C" fn(*mut u64, *mut u64),
+    pub frame_count: Option<unsafe extern "C" fn() -> u64>,
+    pub tensor_forward_grad: unsafe extern "C" fn(Obj) -> i32,
 }
 
 /// Whether compiled functions run under an interpreter frame of their own.
@@ -204,9 +209,19 @@ pub struct SiteSlot {
     pub kind: i32,
     variants: Shared<Vec<*mut TcfgSite>>,
     descriptions: Shared<Vec<String>>,
+    /// What keeps the calls of its sites out of a graph: the SITE_* bits of
+    /// every variant.
+    traits: AtomicU8,
     pub hits: AtomicU64,
     pub misses: AtomicU64,
 }
+
+/// The site returns a number or a bool, read from the data of a tensor.
+pub const SITE_SCALAR: u8 = 1;
+/// The operator writes to one of its arguments.
+pub const SITE_WRITES: u8 = 2;
+/// The operator draws random numbers.
+pub const SITE_RANDOM: u8 = 4;
 
 unsafe impl Send for SiteSlot {}
 unsafe impl Sync for SiteSlot {}
@@ -217,6 +232,7 @@ impl SiteSlot {
             kind,
             variants: Shared::new(Vec::new()),
             descriptions: Shared::new(Vec::new()),
+            traits: AtomicU8::new(0),
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
         }
@@ -233,9 +249,14 @@ impl SiteSlot {
 
     /// Takes ownership of the site.
     pub unsafe fn push(&self, site: *mut TcfgSite) {
-        let description = describe_site(site);
+        let (description, traits) = describe_site(site);
         self.variants.borrow_mut().push(site);
         self.descriptions.borrow_mut().push(description);
+        self.traits.fetch_or(traits, Ordering::Relaxed);
+    }
+
+    pub fn traits(&self) -> u8 {
+        self.traits.load(Ordering::Relaxed)
     }
 
     pub fn describe(&self) -> String {
@@ -288,14 +309,15 @@ impl Drop for SiteSlot {
     }
 }
 
-unsafe fn describe_site(site: *mut TcfgSite) -> String {
+/// The text of a site for dumps, and its SITE_* bits.
+unsafe fn describe_site(site: *mut TcfgSite) -> (String, u8) {
     let Some(api) = api() else {
-        return "?".to_string();
+        return ("?".to_string(), 0);
     };
     let info = (api.site_info)(site);
     if info.is_null() {
         ffi::PyErr_Clear();
-        return "?".to_string();
+        return ("?".to_string(), 0);
     }
     let get = |key: &str| -> Obj {
         let k = std::ffi::CString::new(key).unwrap();
@@ -322,6 +344,17 @@ unsafe fn describe_site(site: *mut TcfgSite) -> String {
             text.push_str(" with autograd excluded");
         }
     }
+    let returns = get("returns");
+    let mut traits = 0;
+    if !returns.is_null() && pyffi::str_to_string(returns) != "tensor" {
+        traits |= SITE_SCALAR;
+    }
+    if get("writes") == ffi::Py_True() {
+        traits |= SITE_WRITES;
+    }
+    if get("random") == ffi::Py_True() {
+        traits |= SITE_RANDOM;
+    }
     ffi::Py_DECREF(info);
-    text
+    (text, traits)
 }

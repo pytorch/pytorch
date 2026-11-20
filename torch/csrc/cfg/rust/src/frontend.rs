@@ -1696,6 +1696,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
     }
     match op {
         Op::Const(_)
+        | Op::Object(_)
         | Op::LoadGlobal(_)
         | Op::LoadDeref(_)
         | Op::LoadClosure(_)
@@ -1733,6 +1734,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::CheckBound(a, _)
         | Op::IsFunction { v: a, .. }
         | Op::TensorSize { t: a, .. }
+        | Op::Part(_, a)
         | Op::TensorDim(a) => r!(a),
         Op::Binary(_, a, b)
         | Op::Compare(_, a, b)
@@ -1750,7 +1752,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::WithExceptStart { exit: a, exc: b }
         | Op::CellSet(a, b) => r!(a, b),
         Op::MatchClass { subject, class, names, .. } => r!(subject, class, names),
-        Op::CallObject(_, args) | Op::Leap(_, args) => {
+        Op::CallObject(_, args) => {
             for v in args.iter_mut() {
                 r!(v);
             }
@@ -1789,7 +1791,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
             }
         }
         Op::CallEx { callee, args, kwargs } => r!(callee, args, kwargs),
-        Op::Dispatch(_) | Op::Guard(_) => {}
+        Op::Dispatch(_) | Op::Guard(_) | Op::Graph(_) => {}
     }
     Ok(())
 }
