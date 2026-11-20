@@ -143,4 +143,3 @@ if(NOT DEFINED CAN_COMPILE_METAL_41)
     message(STATUS "Metal toolchain supports Metal 4.1: ${CAN_COMPILE_METAL_41}")
     set(CAN_COMPILE_METAL_41 ${CAN_COMPILE_METAL_41} CACHE BOOL "Host can compile Metal 4.1 shaders")
 endif()
-
