@@ -35,7 +35,10 @@ class BuiltinPass:
     kind: ClassVar[str] = "block"
 
     def __repr__(self) -> str:
-        return f"torch.vm.passes.{type(self).__name__}()"
+        fields = dataclasses.fields(self)  # type: ignore[arg-type]
+        made = [f for f in fields if getattr(self, f.name) != f.default]
+        inner = ", ".join(f"{f.name}={getattr(self, f.name)!r}" for f in made)
+        return f"torch.vm.passes.{type(self).__name__}({inner})"
 
 
 @dataclasses.dataclass(frozen=True, repr=False)
@@ -50,13 +53,26 @@ class Inline(BuiltinPass):
 
 @dataclasses.dataclass(frozen=True, repr=False)
 class Unroll(BuiltinPass):
-    """``for i in range(k)`` with a constant ``k`` of at most 8 is replaced by
-    ``k`` copies of its body, under a guard on ``range``. A loop whose copies
-    would come to more than 600 instructions is left as it is. Applied after
-    :class:`Inline`."""
+    """``for i in range(k)`` with a constant ``k`` of at most ``max_trip_count``
+    is replaced by ``k`` copies of its body, under a guard on ``range``. A loop
+    whose copies would come to more than 600 instructions is left as it is.
+    Applied after :class:`Inline`."""
 
     engine: ClassVar[str] = "unroll"
     kind: ClassVar[str] = "cfg"
+
+    max_trip_count: int = 8
+
+    def __post_init__(self) -> None:
+        most = self.max_trip_count
+        if isinstance(most, bool) or not isinstance(most, int):
+            raise TypeError(
+                f"Unroll takes a number of iterations, not {type(most).__name__}"
+            )
+        if most < 1:
+            raise ValueError(
+                f"Unroll({most}): at least one iteration; to unroll nothing, leave the pass out of the list"
+            )
 
 
 @dataclasses.dataclass(frozen=True, repr=False)
