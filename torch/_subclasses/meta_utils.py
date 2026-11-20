@@ -1469,6 +1469,11 @@ class MetaConverter(Generic[_TensorT]):
                             # that hasn't been handled here
                             base = self._checked_cast_tensor_t(base.view(t.dtype))
 
+                    with maybe_suppress():
+                        return self._checked_cast_tensor_t(
+                            base.as_strided(sizes, strides, storage_offset)
+                        )
+
                 from torch._dynamo.source import EphemeralSource
                 from torch.fx.experimental.symbolic_shapes import (
                     StatelessSymbolicContext,
