@@ -94,6 +94,7 @@ class TestGradAcc(FSDPTestContinuous):
 
     def _test_grad_acc(
         self,
+        device_id,
         batch_dim: int,
         configs: list[_GradAccConfig],
         cpu_offload: CPUOffload,
@@ -139,7 +140,7 @@ class TestGradAcc(FSDPTestContinuous):
             deterministic=True,
             add_bn=False,  # disable BN since the test uses varying batch sizes
         )
-        device = torch.device(self.device_type)
+        device = torch.device(device_id).type
         optim = torch.optim.SGD(
             fsdp_model.parameters(),
             lr=0.01,
@@ -277,6 +278,7 @@ class TestGradAcc(FSDPTestContinuous):
         self.run_subtests(
             subtest_config,
             self._test_grad_acc,
+            device_id=device,
             batch_dim=1,
             configs=configs.configs,
             use_orig_params=use_orig_params,
@@ -304,6 +306,7 @@ class TestGradAcc(FSDPTestContinuous):
         self.run_subtests(
             subtest_config,
             self._test_grad_acc,
+            device_id=device,
             batch_dim=1,
             configs=configs.configs,
             use_orig_params=use_orig_params,
