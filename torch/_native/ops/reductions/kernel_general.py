@@ -66,7 +66,7 @@ class ReduceBlock:
         block: int = 128,
         order: Literal["linear", "inner_tree"] = "linear",
         itree: Any = None,
-        uniform_tree: bool = False,
+        uniform_tree: bool = False,  # preconditions: tile._uniform_tree_issue
     ) -> None:
         self.trait = trait
         self.count = count  # elements reduced per output (= prod red exts)
