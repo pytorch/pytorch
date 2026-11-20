@@ -25,12 +25,18 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable)
 /// boxed returns: ret0 at index 0, ret1 at index 1, and so on. Owning arguments
 /// transfer to libtorch; the caller owns returned values and must unbox them.
 ///
-/// This supplies TORCH_ABI_VERSION and TORCH_FEATURE_VERSION to the C
-/// dispatcher API selected by the extension's minimum runtime target: v2 for
-/// >=2.16, torch_call_dispatcher for 2.10-2.15, and aoti_torch_call_dispatcher
-/// for 2.9.
+/// The C dispatcher API is selected by TORCH_TARGET_VERSION (or the build
+/// version when no target is defined): v2 for >=2.16 receives build and target
+/// metadata, torch_call_dispatcher for 2.10-2.15 receives only the build
+/// version, and aoti_torch_call_dispatcher for 2.9 receives neither version.
+/// TORCH_FEATURE_VERSION resolves the effective target used by the wrapper.
+///
+/// Legacy C entrypoints without target metadata use 0 internally to mark an
+/// unknown target and retain their original conversion contract. An undefined
+/// TORCH_TARGET_VERSION defaults to the build version, not to 0.
 ///
 /// Minimum compatible version: PyTorch 2.9.
+/// Build time minimum version: PyTorch 2.16.
 ///
 /// @param op_name Qualified operator name, e.g. "aten::add".
 /// @param overload_name Overload name, e.g. "Tensor", or "" for the default.
