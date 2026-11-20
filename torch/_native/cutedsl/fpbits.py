@@ -32,6 +32,11 @@ def signbit(x: Scalar, dtype: cutlass.Constexpr = None) -> ScalarResult:
 def copysign(x: Scalar, y: Scalar, dtype: cutlass.Constexpr = None) -> ScalarResult:
     r"""Return x's magnitude with y's sign bit."""
     dt = type(x) if dtype is None else dtype
+    if const_expr(dt in (cutlass.Float16, cutlass.BFloat16)):
+        xi = Int16(arith.bitcast(T.i16(), x.ir_value()))
+        yi = Int16(arith.bitcast(T.i16(), y.ir_value()))
+        bits = (xi & Int16(0x7FFF)) | (yi & Int16(-0x8000))
+        return dt(arith.bitcast(x.ir_value().type, bits.ir_value()))
     if const_expr(dt is Float32):
         xi = Int32(arith.bitcast(T.i32(), x.ir_value()))
         yi = Int32(arith.bitcast(T.i32(), y.ir_value()))

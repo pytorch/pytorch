@@ -397,8 +397,7 @@ def _lerp_scalar(x: StorageScalar, y: StorageScalar, w: ComputeScalar) -> Comput
 
 
 @cute.jit
-def _copysign(x: StorageScalar, y: StorageScalar) -> ComputeScalar:
-    x, y = _opmath(x), _opmath(y)
+def _copysign(x: StorageScalar, y: StorageScalar) -> StorageScalar:
     return _fpbits.copysign(x, y)
 
 
