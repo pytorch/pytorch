@@ -8,15 +8,13 @@ the order of the list, and again until no pass changes the block anymore.
 """
 
 import dataclasses
-from collections.abc import Callable
-from typing import Any, ClassVar
+from typing import ClassVar
 
 
 __all__ = [
     "BuiltinPass",
     "DCE",
     "Fold",
-    "Graphs",
     "Inline",
     "MethodCalls",
     "ModuleShortcuts",
@@ -88,67 +86,6 @@ class ModuleShortcuts(BuiltinPass):
 
     engine: ClassVar[str] = "shortcuts"
     kind: ClassVar[str] = "cfg"
-
-
-@dataclasses.dataclass(frozen=True, repr=False)
-class Graphs(BuiltinPass):
-    """Hands the tensor work of each basic block to a graph compiler.
-
-    ``"inductor"`` traces every run of instructions of a block that a trace can
-    capture, together with what those instructions call, into one ATen graph,
-    and compiles it with AOTAutograd and Inductor: with gradients enabled, the
-    tensors such a region returns have one compiled autograd function as their
-    ``grad_fn``. The outermost region that traces is the one that is compiled;
-    where an instruction does not trace, the VM runs it and the blocks of what
-    it calls are tried in turn. ``"aot_eager"`` builds the same graphs and runs
-    them with the eager kernels. A callable
-    ``backend(graph_module, example_inputs)`` returning a callable is used as
-    given. ``torch.vm.regions(fn)`` reports what was compiled and what was left
-    to the VM, with the reason. See ``torch/vm/_regions.py`` for what a
-    compiled region checks on every call and what it does not.
-
-    This is the pass that makes a function faster than its kernels allow, and
-    the one that may change its numerics: what a graph compiler makes of the
-    operations is not what eager runs. It is not in
-    :data:`torch.vm.DEFAULT_PASSES`: it is asked for by putting it in the list.
-    Wherever it stands there, it sees the instructions of a block as the
-    function wrote them, and the other passes over a block get what it leaves
-    to the VM.
-
-    Args:
-        backend: see above.
-        min_ops: a region with fewer tensor operations than this is left to the
-            VM, whose direct kernel calls are cheaper than entering a compiled
-            graph.
-        max_variants: how many graphs a region gives the backend before further
-            kinds of inputs (dtypes, ranks, modules, modes) run its
-            instructions as they are. Inputs that trace to the same graph, as
-            the layers of a model do when a region is called with one after the
-            other, share what the backend made of it, and sizes that differ
-            from call to call are left open in one graph rather than compiled
-            one by one.
-        freeze: with ``"inductor"``, build the parameters and buffers of the
-            modules a region reads into its graph when the call is one of
-            inference (no gradients recorded, every module in eval mode), so
-            that Inductor folds what follows from them alone (a batch norm into
-            the convolution before it) and lays convolution weights out for the
-            kernels. Such a graph is checked on every call: a tensor that was
-            written to since (in place, through ``.data``, by an optimizer) or
-            replaced makes the region compile again with that tensor as an
-            input of the graph. Not built in: a tensor the region itself
-            writes, the matrix of a matrix product or of an embedding lookup
-            (nothing folds, and it would be a second copy), and memory PyTorch
-            does not see the writes to (shared with another process, or a NumPy
-            array's). ``regions()`` reports ``frozen`` per region. On by
-            default (``TORCH_VM_FREEZE=0`` turns it off).
-    """
-
-    engine: ClassVar[str] = "graphs"
-
-    backend: str | Callable[..., Any] = "inductor"
-    min_ops: int = 4
-    max_variants: int = 32
-    freeze: bool | None = None
 
 
 @dataclasses.dataclass(frozen=True, repr=False)
