@@ -26,7 +26,7 @@ class MemoryDelta(ContextDecorator):
     def __enter__(self):
         self.active_memory_enter = (
             torch.accelerator.memory_stats()["active_bytes.all.current"]
-            if self.device.type == "cuda" or self.device.type == "xpu"
+            if self.device.type != "cpu"
             else 0
         )
         return self
@@ -34,7 +34,7 @@ class MemoryDelta(ContextDecorator):
     def __exit__(self, *exc):
         self.active_memory_exit = (
             torch.accelerator.memory_stats()["active_bytes.all.current"]
-            if self.device.type == "cuda" or self.device.type == "xpu"
+            if self.device.type != "cpu"
             else 0
         )
 
@@ -97,6 +97,7 @@ def check_tensor_only(
     test_case: TestCase,
     net: nn.Module,
     x: torch.Tensor,
+    device: torch.device,
 ) -> None:
     x1 = x.clone()
     x2 = x.clone()
@@ -107,17 +108,17 @@ def check_tensor_only(
     net2 = deepcopy(net)
 
     # no checkpoint
-    with MemoryDelta(x.device) as mem1:
+    with MemoryDelta(device) as mem1:
         loss1 = net1(x1).sum()
     loss1.backward()
 
     # with checkpoint
     checkpoint(net2.seq)
-    with MemoryDelta(x.device) as mem2:
+    with MemoryDelta(device) as mem2:
         loss2 = net2(x2).sum()
     loss2.backward()
 
-    if x.is_cuda or x.is_xpu:
+    if device.type != "cpu":
         test_case.assertTrue(mem2.delta() < mem1.delta())
 
     for p1, p2 in zip(net1.parameters(), net2.parameters()):
@@ -142,7 +143,7 @@ class TestCheckpoint(TestCase):
     def test_tensor_only_cpu(self):
         x = torch.randn(20, 100)
         net = ToyModel()
-        check_tensor_only(self, net, x)
+        check_tensor_only(self, net, x, torch.device("cpu"))
 
     def test_random_cpu(self):
         x1 = torch.randn(20, 100, requires_grad=True)
@@ -335,9 +336,10 @@ class TestCheckpointAccelerator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_tensor_for_accelerator(self, device):
-        x = torch.randn(20, 100, device=f"{self.device_type}:0")
-        net = ToyModel().to(f"{self.device_type}:0")
-        check_tensor_only(self, net, x)
+        device0 = torch.device(torch.device(device).type, 0)
+        x = torch.randn(20, 100, device=device0)
+        net = ToyModel().to(device0)
+        check_tensor_only(self, net, x, device0)
 
 
 instantiate_device_type_tests(
