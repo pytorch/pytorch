@@ -117,6 +117,7 @@ jobs:
       test-matrix: |
         { include: [
           { config: "inductor-triton-cpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-32-128" },
+          { config: "inductor-triton-cpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx512-32-128" },
         ]}
       python-version: "3.12"
       compiler: gcc11
@@ -161,7 +162,9 @@ jobs:
           # failures are triaged. Drop the key to promote; delete the entries if nobody
           # is driving the failures down.
           { config: "inductor_aoti_fallback", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", unstable: "unstable" },
+          { config: "inductor_aoti_fallback", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx512-8-64", unstable: "unstable" },
           { config: "inductor_aoti_fallback", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", unstable: "unstable" },
+          { config: "inductor_aoti_fallback", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx512-8-64", unstable: "unstable" },
         ]}
       python-version: "3.11"
       compiler: gcc11
