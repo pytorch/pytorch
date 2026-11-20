@@ -414,11 +414,11 @@ def _wait_done(fut: torch.futures.Future, timeout: float = 60.0):
 
 class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property
@@ -991,11 +991,11 @@ class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
     """Base for groups initialized with backend specific options."""
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property
@@ -1028,14 +1028,14 @@ class ProcessGroupNCCL2CommPtrTest(_ProcessGroupNCCL2OptionsTest):
 
 class ProcessGroupNCCLLazyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl-lazy"
 
 
 @unittest.skipIf(not TEST_NCCL_LEGACY, "legacy NCCL backend is not built")
 class ProcessGroupNCCLLegacyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl-legacy"
 
 
@@ -1088,7 +1088,7 @@ class ProcessGroupNCCL2LazyInitTest(_ProcessGroupNCCL2OptionsTest):
 
 class ProcessGroupNCCLLazyLazyInitTest(ProcessGroupNCCL2LazyInitTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl-lazy"
 
 
@@ -1498,8 +1498,11 @@ class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
             raise AssertionError("Expected rdvz_file to not be None")
         os.environ["LOCAL_RANK"] = str(rank)
         store = dist.FileStore(rdvz_file, world_size)
+        device = cls.device_type
+        if isinstance(device, property):
+            device = device.fget(cls)
         dist.init_process_group(
-            backend=cls.backend_str(),
+            backend=cls.backend_str(device),
             world_size=world_size,
             rank=rank,
             store=store,
@@ -1890,7 +1893,7 @@ class ProcessGroupNCCL2TimingTest(_ProcessGroupNCCL2OptionsTest):
 
 class ProcessGroupNCCLLazyTimingTest(ProcessGroupNCCL2TimingTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl-lazy"
 
 
@@ -1917,7 +1920,7 @@ class ProcessGroupNCCL2NonblockingOptionPrecedenceTest(_ProcessGroupNCCL2Options
 @unittest.skipIf(not TEST_NCCL_LEGACY, "legacy NCCL backend is not built")
 class ProcessGroupNCCLLegacyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl-legacy"
 
 
@@ -1955,11 +1958,11 @@ class _ProcessGroupNCCL2SubgroupTest(MultiProcContinuousTest):
     """
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2318,11 +2321,11 @@ class ProcessGroupNCCL2DumpTimeoutBoundTest(_ProcessGroupNCCL2SubgroupTest):
 
 class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2362,11 +2365,11 @@ class ProcessGroupNCCL2MemPoolTest(MultiProcContinuousTest):
     Megatron's nccl_allocator drives (megatron/core/nccl_allocator.py)."""
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2488,7 +2491,7 @@ class ProcessGroupNCCL2MemPoolTest(MultiProcContinuousTest):
 
 class ProcessGroupNCCLLazyMemPoolTest(ProcessGroupNCCL2MemPoolTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl-lazy"
 
     @requires_nccl()
@@ -2534,11 +2537,11 @@ class ProcessGroupNCCL2MemPoolNoWindowTest(MultiProcContinuousTest):
     every NCCL_WIN_COLL_SYMMETRIC registration fails."""
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2577,7 +2580,7 @@ class ProcessGroupNCCL2MemPoolNoWindowTest(MultiProcContinuousTest):
 
 class ProcessGroupNCCLLazyTest(ProcessGroupNCCL2Test):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl-lazy"
 
     @requires_nccl()
@@ -2630,7 +2633,7 @@ class ProcessGroupNCCLLazyTest(ProcessGroupNCCL2Test):
 
 class ProcessGroupNCCLLazyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl-lazy"
 
     @unittest.skip("nccl-lazy does not support communicator shrink")
@@ -2663,11 +2666,11 @@ class _DeterministicNVLSTest(MultiProcContinuousTest):
     preset_nccl_algo: str | None = None
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2730,11 +2733,11 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
     """What nccl2 reports about a collective to profilers and flight recorders."""
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl2"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property
@@ -2755,7 +2758,7 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
         # (process group, sequence number).
         groups = [
             dist.new_group(
-                backend=self.backend_str(),
+                backend=self.backend_str(self.device_type),
                 use_local_synchronization=True,
                 timeout=timedelta(seconds=60),
             )
