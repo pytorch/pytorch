@@ -249,6 +249,17 @@ class TestCuTeDSLRng(TestCase):
         self.assertEqual(samples[0], samples[1], atol=0, rtol=0)
         self.assertEqual(offsets[0], offsets[1])
 
+    def test_kernel_preparation_error_preserves_state(self, device: str) -> None:
+        from torch._native.ops.rng.cutedsl_kernels import fill_random
+
+        out = torch.full((32,), 7 + 3j, device=device, dtype=torch.complex64)
+        before = out.clone()
+        state = self.gen.get_state()
+        with self.assertRaisesRegex(KeyError, "complex64"):
+            fill_random(out, "uniform", 1.0, 0.0)
+        self.assertEqual(out, before)
+        self.assertEqual(self.gen.get_state(), state)
+
 
 instantiate_device_type_tests(TestCuTeDSLRng, globals(), only_for=("cuda",))
 
