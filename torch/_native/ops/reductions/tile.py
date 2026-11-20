@@ -691,6 +691,7 @@ def fold_linear_rolled(
     vec: cutlass.Constexpr,
     nchunks: Int32,
     unroll: cutlass.Constexpr = _ROLL_UNROLL,
+    chains: cutlass.Constexpr = WARP,
 ):
     """Fold row `r` with a runtime chunk loop. Returns an acc tuple. threads_per_row == 1 only.
 
@@ -698,15 +699,21 @@ def fold_linear_rolled(
     warp_reduce: chains of every WARP-th element, then a tree. For rows narrower than
     128 elements that is ATen's association (CUDA) for M >= 16, which covers every M the
     dispatcher routes here. Accumulators past a short row stay at init and combine as
-    identities. Multi-field traits keep fold_row_rolled's per-lane accumulators.
+    identities; TileReduce.row_chains drops them for rows of at most 8 or 16 elements.
+    Those rows fold at most one element per accumulator, so a whole wave takes leaves
+    and the result combines with init once. Their leaves differ from reduce(init, x)
+    only in a sum's -0.0, which that combine restores, and in add or mul NaN payloads,
+    which the tree's own ops canonicalize (row_chains keeps WARP for traits whose leaves
+    differ further). Multi-field traits keep fold_row_rolled's per-lane accumulators.
     `unroll` applies to multi-field traits only; each single-field wave already issues
-    WARP elements of loads.
+    `chains` elements of loads.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     gv = cute.flat_divide(mX[Int64(r), None], (vec,))
     if const_expr(trait.nfields == 1):
-        group = const_expr(max(1, WARP // vec))  # vectors per WARP elements
-        accs = tuple(trait.init() for _ in range(WARP))
+        group = const_expr(max(1, chains // vec))  # vectors per wave
+        leaf_fn = trait.leaf
+        accs = tuple(trait.init() for _ in range(chains))
         gfrag = cute.make_rmem_tensor(cute.make_layout((vec, group)), mX.element_type)
         full = nchunks // Int32(group)
         for g in cutlass.range(full):
@@ -714,10 +721,13 @@ def fold_linear_rolled(
             for j in cutlass.range_constexpr(group):
                 cute.autovec_copy(gv[None, c0 + Int32(j)], gfrag[None, j])
             e0 = c0 * vec
-            accs = tuple(
-                reduce_fn(accs[k], acc_dt(gfrag[k % vec, k // vec]), e0 + k, True)
-                for k in range(WARP)
-            )
+            vals = [acc_dt(gfrag[k % vec, k // vec]) for k in range(chains)]
+            if const_expr(chains < WARP):
+                accs = tuple(leaf_fn(vals[k], e0 + k) for k in range(chains))
+            else:
+                accs = tuple(
+                    reduce_fn(accs[k], vals[k], e0 + k, True) for k in range(chains)
+                )
         # The rem < group tail vectors load independently. rem > 0 implies a vector 0,
         # so tail lanes past the row clamp to it and fold masked.
         last = full * Int32(group)
@@ -735,7 +745,10 @@ def fold_linear_rolled(
                 for k in range(ntail)
             )
             accs = tail + accs[ntail:]
-        return _halving_reduce(accs, trait.combine)
+        acc = _halving_reduce(accs, trait.combine)
+        if const_expr(chains < WARP):
+            acc = trait.combine(acc, trait.init())
+        return acc
     nacc = const_expr(min(vec, _FIELD_ACCS))
     accs = tuple(trait.init() for _ in range(nacc))
     frag = cute.make_rmem_tensor(cute.make_layout(vec), mX.element_type)
@@ -1126,6 +1139,23 @@ class TileReduce:
         self.warps_per_row = (
             threads_per_row // WARP
         )  # 0 at threads_per_row == 1: nothing to merge
+        from .traits import AbsMaxOps, AbsMinOps, NormOps
+
+        # fold_linear_rolled's single-field accumulators. For rows no wider than 8 or
+        # 16, the top ones of WARP only combine identities into the rest, which every
+        # single-field trait returns bitwise (a sum leaf 0.0 + y is never -0.0), so
+        # fewer keep the bits. Narrow rows then fold leaves, not reduce(init, x): a
+        # norm's leaf rounds its square on its own, and an abs-extremum leaf can carry
+        # another NaN payload than max(0.0, |x|).
+        narrow = (
+            axis == "row"
+            and order == "linear"
+            and threads_per_row == 1
+            and not (use_tma or ragged_vector)
+            and trait.nfields == 1
+            and not isinstance(trait, (AbsMaxOps, AbsMinOps, NormOps))
+        )
+        self.row_chains = next((n for n in (8, 16) if narrow and N <= n), WARP)
         self.tiler = (threads_per_block, N)  # TMA box: threads_per_block whole rows
 
     @property
@@ -1153,6 +1183,7 @@ class TileReduce:
             self.batched_col,
             self.pc,
             self.trait.nfields,
+            self.row_chains,
             self.N if self.use_tma else 0,
             self.npairs_red,
             self.npairs_kept,
@@ -2089,6 +2120,7 @@ class TileReduce:
                     const_expr(self.vec),
                     nchunks,
                     const_expr(self.unroll),
+                    const_expr(self.row_chains),
                 ),
             )
         else:
