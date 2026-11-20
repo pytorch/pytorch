@@ -17,12 +17,11 @@ from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCPU,
-    skipMPS,
 )
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -127,7 +126,6 @@ class TestDecomp(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
-    @skipMPS
     @onlyAccelerator
     @unittest.skipUnless(has_triton(), "Triton not available")
     @parametrize("dtype", [torch.float, torch.bfloat16])
@@ -146,7 +144,6 @@ class TestDecomp(NNTestCase):
             run_comp_nocomp(torch_mm, t1, t2, rtol=rtol, atol=atol)
             run_comp_nocomp(torch_addmm, tadd, t1, t2, rtol=rtol, atol=atol)
 
-    @skipMPS
     @onlyAccelerator
     @unittest.skipUnless(has_triton(), "Triton not available")
     @parametrize(
@@ -172,7 +169,6 @@ class TestDecomp(NNTestCase):
             run_comp_nocomp(torch_mm, t1, t2, rtol=rtol, atol=atol)
         self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 1)
 
-    @skipMPS
     @onlyAccelerator
     @unittest.skipUnless(has_triton(), "Triton not available")
     @config.patch(shape_padding=True)
@@ -193,7 +189,6 @@ class TestDecomp(NNTestCase):
         self.assertEqual(should_pad.call_count, 0)
         self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 1)
 
-    @skipMPS
     @onlyAccelerator
     @unittest.skipUnless(has_triton(), "Triton not available")
     @parametrize(
@@ -239,7 +234,6 @@ class TestDecomp(NNTestCase):
             run_comp_nocomp(fn, t1, t2, rtol=rtol, atol=atol)
         self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 1)
 
-    @skipMPS
     @onlyAccelerator
     @unittest.skipUnless(has_triton(), "Triton not available")
     def test_small_mm_no_pointwise_for_large_dims(self, device):
@@ -255,7 +249,6 @@ class TestDecomp(NNTestCase):
         torch.compile(fn)(a, b)
         self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 0)
 
-    @skipMPS
     @onlyAccelerator
     @unittest.skipUnless(has_triton(), "Triton not available")
     @config.patch(max_autotune_gemm=True)
@@ -272,7 +265,6 @@ class TestDecomp(NNTestCase):
         torch.compile(fn)(a, b)
         self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 0)
 
-    @skipMPS
     @onlyAccelerator
     @unittest.skipUnless(has_triton(), "Triton not available")
     @parametrize(
@@ -300,7 +292,6 @@ class TestDecomp(NNTestCase):
                         torch_baddbmm, tadd, t1, t2, alpha, beta, rtol=rtol, atol=atol
                     )
 
-    @skipMPS
     @onlyAccelerator
     @unittest.skipUnless(has_triton(), "Triton not available")
     @config.patch(coordinate_descent_tuning=True)
@@ -325,7 +316,6 @@ class TestDecomp(NNTestCase):
         self.assertIsNot(out, NotImplemented)
         self.assertEqual(expected, out)
 
-    @skipMPS
     @onlyAccelerator
     @unittest.skipUnless(has_triton(), "Triton not available")
     def test_bmm_outer_product_k_is_one_with_unbacked_k(self, device):
@@ -391,7 +381,6 @@ class TestDecomp(NNTestCase):
             self.assertIsNot(out, NotImplemented)
             self.assertEqual(expected, out, exact_stride=True)
 
-    @skipMPS
     @onlyAccelerator
     @unittest.skipUnless(has_triton(), "Triton not available")
     @parametrize("dtype", [torch.float, torch.bfloat16, torch.int])
@@ -412,7 +401,6 @@ class TestDecomp(NNTestCase):
             init_tensor([[1], [2], [3], [4]], dtype=dtype, device=device),
         )
 
-    @skipMPS
     @onlyAccelerator
     @unittest.skipUnless(has_triton(), "Triton not available")
     @parametrize("dtype", [torch.float, torch.bfloat16, torch.int])
@@ -469,9 +457,12 @@ class TestDecomp(NNTestCase):
         a = torch.full(shape, 100.0, dtype=torch.float16, device=device)
         self.assertEqual(torch.compile(fn, fullgraph=True)(x, a, a), fn(x, a, a))
 
-    @onlyCPU
+
+class TestDecompOnlyCpu(NNTestCase):
+    hw_classification = HardwareClassification.CPU
+
     @parametrize("op", [torch.addmm, torch.baddbmm])
-    def test_zero_beta_aten_reads_no_zeros(self, device, op):
+    def test_zero_beta_aten_reads_no_zeros(self, op):
         from torch._inductor import metrics
 
         def fn(x, a, b):
@@ -484,9 +475,8 @@ class TestDecomp(NNTestCase):
         self.assertEqual(torch.compile(fn, fullgraph=True)(x, a, a), fn(x, a, a))
         self.assertEqual(metrics.generated_kernel_count, 0)
 
-    @onlyCPU
     @parametrize("beta,m", [(0, 1), (0, 32), (1, 1)])
-    def test_addmm_checks_bias_shape(self, device, beta, m):
+    def test_addmm_checks_bias_shape(self, beta, m):
         def fn(x, a, b):
             return torch.addmm(x, a, b, beta=beta)
 
@@ -496,8 +486,7 @@ class TestDecomp(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "expand"):
             torch.compile(fn, fullgraph=True)(*args)
 
-    @onlyCPU
-    def test_addmm_unbacked_alpha(self, device):
+    def test_addmm_unbacked_alpha(self):
         shape_env = ShapeEnv()
         with FakeTensorMode(shape_env=shape_env):
             alpha = shape_env.create_unbacked_symint()
@@ -507,7 +496,6 @@ class TestDecomp(NNTestCase):
             out = decomp_addmm(bias, a, b, alpha=alpha)
         self.assertEqual(out.shape, (4, 4))
 
-    @onlyCPU
     @parametrize(
         "bias_device,bias_shape,msg",
         [
@@ -516,7 +504,7 @@ class TestDecomp(NNTestCase):
             ("cpu", (), "device"),
         ],
     )
-    def test_addmm_checks_xpu_metadata(self, device, bias_device, bias_shape, msg):
+    def test_addmm_checks_xpu_metadata(self, bias_device, bias_shape, msg):
         with FakeTensorMode():
             bias = torch.empty(bias_shape, device=bias_device)
             a = torch.empty(4, 1, device="xpu")
@@ -524,9 +512,8 @@ class TestDecomp(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 decomp_addmm(bias, a, b, beta=0)
 
-    @onlyCPU
     @parametrize("dtype", [torch.float, torch.bfloat16])
-    def test_dynamic_shape_mm(self, device, dtype):
+    def test_dynamic_shape_mm(self, dtype):
         # Test that the mm decomp does not evaluate expressions for dynamic shapes
 
         shape_env = ShapeEnv()
@@ -537,11 +524,11 @@ class TestDecomp(NNTestCase):
 
             # Create the fake tensors
             t1 = create_fake_tensor_with_dynamic_size(
-                rand_math_tensor((a1_0, a1_1), dtype=dtype, device=device),
+                rand_math_tensor((a1_0, a1_1), dtype=dtype, device="cpu"),
                 fake_mode,
             )
             t2 = create_fake_tensor_with_dynamic_size(
-                rand_math_tensor((a2_0, a2_1), dtype=dtype, device=device),
+                rand_math_tensor((a2_0, a2_1), dtype=dtype, device="cpu"),
                 fake_mode,
             )
 
@@ -587,7 +574,8 @@ class TestDecomp(NNTestCase):
                 self.assertTrue(r_expr_types[1] == og_t2_expr_types[1])
 
 
-instantiate_device_type_tests(TestDecomp, globals(), allow_mps=True, allow_xpu=True)
+instantiate_device_type_tests(TestDecomp, globals(), allow_xpu=True)
+instantiate_parametrized_tests(TestDecompOnlyCpu)
 
 
 if __name__ == "__main__":
