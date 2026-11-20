@@ -524,52 +524,6 @@ inline torch::stable::Tensor select(
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-/// Stable version of the slice.Tensor op.
-///
-/// Returns a view of the input tensor sliced along the specified dimension.
-///
-/// Minimum compatible version: PyTorch 2.10.
-/// Build time minimum version: PyTorch 2.16.
-///
-/// @param self The input tensor.
-/// @param dim The dimension to slice. Defaults to 0.
-/// @param start The inclusive start index. Defaults to the start of the
-/// dimension.
-/// @param end The exclusive end index. Defaults to the end of the dimension.
-/// @param step The positive step between elements. Defaults to 1.
-/// @return A sliced view of the input tensor.
-inline torch::stable::Tensor slice(
-    const torch::stable::Tensor& self,
-    int64_t dim = 0,
-    std::optional<int64_t> start = std::nullopt,
-    std::optional<int64_t> end = std::nullopt,
-    int64_t step = 1) {
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
-  AtenTensorHandle ret0 = nullptr;
-  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_slice_Tensor(
-      self.get(),
-      dim,
-      start ? &*start : nullptr,
-      end ? &*end : nullptr,
-      step,
-      &ret0));
-  return torch::stable::Tensor(ret0);
-#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  std::array<StableIValue, 5> stack{
-      torch::stable::detail::from(self),
-      torch::stable::detail::from(dim),
-      torch::stable::detail::from(start),
-      torch::stable::detail::from(end),
-      torch::stable::detail::from(step)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::slice", "Tensor", stack.data(), TORCH_ABI_VERSION));
-  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
-#endif
-}
-
-#endif
-
 /// Stable version of the matmul op.
 ///
 /// Performs matrix multiplication between two tensors. The behavior depends on
@@ -736,6 +690,49 @@ inline torch::stable::Tensor empty_strided(
       torch::stable::detail::from(pin_memory)};
   STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::empty_strided", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
+}
+
+/// Stable version of the slice.Tensor op.
+///
+/// Returns a view of the input tensor sliced along the specified dimension.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @param self The input tensor.
+/// @param dim The dimension to slice. Defaults to 0.
+/// @param start The inclusive start index. Defaults to the start of the
+/// dimension.
+/// @param end The exclusive end index. Defaults to the end of the dimension.
+/// @param step The positive step between elements. Defaults to 1.
+/// @return A sliced view of the input tensor.
+inline torch::stable::Tensor slice(
+    const torch::stable::Tensor& self,
+    int64_t dim = 0,
+    std::optional<int64_t> start = std::nullopt,
+    std::optional<int64_t> end = std::nullopt,
+    int64_t step = 1) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_slice_Tensor(
+      self.get(),
+      dim,
+      start ? &*start : nullptr,
+      end ? &*end : nullptr,
+      step,
+      &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  std::array<StableIValue, 5> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(start),
+      torch::stable::detail::from(end),
+      torch::stable::detail::from(step)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::slice", "Tensor", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 #endif
 }

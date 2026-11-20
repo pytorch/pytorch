@@ -1334,7 +1334,6 @@ for warning in w:
         cases = [
             {},
             {"dtype": torch.int32},
-            {"layout": torch.strided},
             {"device": device},
             {"pin_memory": False},
             {
@@ -1357,6 +1356,13 @@ for warning in w:
                 if options.get("pin_memory"):
                     self.assertTrue(actual.is_pinned())
 
+        for empty_strided in (
+            torch.empty_strided,
+            libtorch_agnostic.ops.my_empty_strided,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "SparseCPU"):
+                empty_strided(size, stride, layout=torch.sparse_coo, device="cpu")
+
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize(
         "target",
@@ -1372,10 +1378,10 @@ for warning in w:
 
         x = torch.arange(12, device=device).reshape(2, 6)
         self.assertEqual(libtorch_agnostic.ops.my_slice(x), x[:])
-        view = libtorch_agnostic.ops.my_slice(x, -1, 1, 6, 2)
-        self.assertEqual(view, x[:, 1:6:2])
+        view = libtorch_agnostic.ops.my_slice(x, -1, 1, 5, 2)
+        self.assertEqual(view, x[:, 1:5:2])
         expected = x.clone()
-        expected[:, 1:6:2] = -1
+        expected[:, 1:5:2] = -1
         view.fill_(-1)
         self.assertEqual(x, expected)
 
