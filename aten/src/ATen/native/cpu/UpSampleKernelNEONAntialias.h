@@ -22,15 +22,16 @@
 
 namespace {
 
-// This is the NEON counterpart of UpSampleKernelAVXAntialias.h. It also
-// separates the horizontal and vertical passes, and it's conceptually fairly
-// similar, with differences outlined where relevant.
+// This is the NEON counterpart of the AVX2 UpSampleKernelAVXAntialias.h.
+// Results are bitwise equal, and implementation is similar, with differences
+// outlined where relevant. Both horizontal and vertical passes compute, for
+// each output value, sum(pixel * w) over the K input pixels that contribute to
+// it, entirely in integers: the weights are fixed-point int16 values, see NOTE
+// [ Weights computation for uint8_t and multiplication trick ] in
+// UpSampleKernel.cpp.
 //
-// Both passes compute, for each output value, sum(pixel * w) over the K input
-// pixels that contribute to it, entirely in integers: the weights are
-// fixed-point int16 values, see NOTE [ Weights computation for uint8_t and
-// multiplication trick ] in UpSampleKernel.cpp.  That is the same arithmetic as
-// the AVX2 kernels, so the results are identical across these implementations.
+// All registers here are 128 bits, read as 16 bytes (u8 in intrinsic names), 8 16-bit integers
+// (s16) or 4 32-bit integers (u32, s32), depending on the instruction.
 
 // aarch64 builds target a baseline CPU without the dotprod and i8mm extensions, so the compiler doesn't
 // use their instructions by default. The functions below that need them are compiled with them
@@ -322,9 +323,6 @@ inline NeonHorizontalKernel choose_neon_horizontal_kernel(int ksize, bool negati
 // An output pixel's K input pixels are processed in groups of 4 (weights zero-padded to a multiple
 // of 4). For each group:
 //
-// All registers here are 128 bits, read as 16 bytes (u8 in intrinsic names), 8 16-bit integers
-// (s16) or 4 32-bit integers (u32, s32), depending on the instruction.
-//
 //   byte:                                 0  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15
 //   LD1 (vld1q_u8), 16 x u8:              R0 G0 B0 R1 G1 B1 R2 G2 B2 R3 G3 B3 .  .  .  .
 //   TBL (vqtbl1q_u8), 16 x u8:            R0 R1 R2 R3 G0 G1 G2 G3 B0 B1 B2 B3 0  0  0  0
@@ -354,11 +352,12 @@ inline NeonHorizontalKernel choose_neon_horizontal_kernel(int ksize, bool negati
 // Of the shapes benchmarked (1x2, 4x1, 4x2, 4x4, 8x1 and 8x2 output pixels x rows), 4x4 was the
 // fastest.
 //
-// The AVX2 kernel follows the same load / shuffle / multiply-add steps, but
-// computes 1 output pixel (instead of 4) in each of 4 rows per iteration and
-// multiplies 16-bit values with _mm256_madd_epi16. NEON has no equivalent
-// 16-bit multiply-add instruction, which is why we use the 8-bit dot product
-// (UDOT) twice on the 16-bit weights split into 2 bytes.
+// This is very similar to the the AVX2 kernel which follows the same load /
+// shuffle / multiply-add steps, but computes 1 output pixel (instead of 4) in
+// each of 4 rows per iteration and multiplies 16-bit values with
+// _mm256_madd_epi16. NEON has no equivalent 16-bit multiply-add instruction,
+// which is why we use the 8-bit dot product (UDOT) twice on the 16-bit weights
+// split into 2 bytes.
 //
 // Not all aarch64 CPUs will have support for UDOT, or for the i8mm extension needed for signed weights.
 // For those, we fallback at runtime to a different horizontal kernel (see
