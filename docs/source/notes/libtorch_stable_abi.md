@@ -270,9 +270,7 @@ The above is relevant in two places:
     It returns `AOTITorchError` and will select one of the following C implementations depending
     on your extension's minimum runtime target version (`TORCH_TARGET_VERSION`).
 
-    We used to provide the following C API which remains available, but is no longer recommended.
-    Please instead use `call_dispatcher` from C++ or `torch_call_dispatcher_v2`, which also tracks
-    the extension's target version to better support adapters for compatibility.
+    The C entrypoints are:
 
     ```cpp
     AOTITorchError torch_call_dispatcher_v2(
@@ -285,15 +283,19 @@ The above is relevant in two places:
         const char* opName, const char* overloadName, StableIValue* stack);
     ```
 
-    `torch_call_dispatcher` will call the op overload defined by a given `opName`, `overloadName`, a stack of
-    StableIValues and the `TORCH_ABI_VERSION` of the user extension. This call will populate any return values of the
-    op into the stack in their StableIValue form, with `ret0` at index 0, `ret1` at index 1, and so on.
+    `torch_call_dispatcher_v2` calls the op overload identified by `opName` and
+    `overloadName` with boxed arguments in schema order. It consumes owning input
+    values in `stack` and writes boxed returns starting at index 0; the caller
+    retains the stack allocation and owns the returned values. Consumed inputs
+    must not be unboxed or reused, even if the call fails after consuming them.
 
-    `torch_call_dispatcher_v2` is the recommended version of `torch_call_dispatcher`
-    because it adds `extension_target_version` after `extension_build_version`.
+    `torch_call_dispatcher_v2` is the recommended C entrypoint (available when
+    targeting >= 2.16). `torch_call_dispatcher` and `aoti_torch_call_dispatcher`
+    remain available for older targets with the same stack ownership contract.
+    V2 adds `extension_target_version` after `extension_build_version`.
     Pass `TORCH_ABI_VERSION` for build. When `TORCH_TARGET_VERSION` is defined,
     pass it for target; otherwise pass `TORCH_ABI_VERSION` as the effective target.
-    Target version must be <= build version.
+    Target version must be nonzero and <= build version.
 
     We caution against using this API to call functions that have been registered to the dispatcher by other extensions
     unless the caller can guarantee that the signature they expect matches that which the custom extension has

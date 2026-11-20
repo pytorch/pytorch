@@ -34,6 +34,24 @@ static_assert(
     "Update the stable SymInt conversion when c10::SymInt's layout changes");
 static_assert(c10::SymInt::min_representable_int() == -(INT64_C(1) << 62));
 
+static void check_target_version(
+    uint64_t extension_build_version,
+    uint64_t extension_target_version) {
+  TORCH_CHECK(
+      extension_target_version != 0 &&
+          extension_target_version <= extension_build_version,
+      "extension_target_version must be <= extension_build_version and nonzero",
+      " (target=0x",
+      std::hex,
+      std::setfill('0'),
+      std::setw(16),
+      extension_target_version,
+      ", build=0x",
+      std::setw(16),
+      extension_build_version,
+      ")");
+}
+
 AOTITorchError torch_new_list_reserve_size(size_t size, StableListHandle* ret) {
   auto list_ptr = std::make_unique<std::vector<StableIValue>>();
   list_ptr->reserve(size);
@@ -447,15 +465,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_impl_v2(
     uint64_t extension_build_version,
     uint64_t extension_target_version) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    TORCH_CHECK(
-        extension_target_version <= extension_build_version,
-        "extension_target_version must be <= extension_build_version",
-        " (target=0x",
-        std::hex,
-        extension_target_version,
-        ", build=0x",
-        extension_build_version,
-        ")");
+    check_target_version(extension_build_version, extension_target_version);
     reinterpret_cast<torch::Library*>(self)->impl(
         name,
         torch::CppFunction::makeFromBoxedFunctor(
@@ -574,6 +584,8 @@ static struct AdapterInitializer {
   }
 } adapter_initializer;
 
+// Original C entrypoints pass 0 for an unknown extension target, preserving
+// their original conversion contract. V2 callers must supply a nonzero target.
 static void call_dispatcher(
     const char* opName,
     const char* overloadName,
@@ -660,15 +672,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher_v2(
     uint64_t extension_build_version,
     uint64_t extension_target_version) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    TORCH_CHECK(
-        extension_target_version <= extension_build_version,
-        "extension_target_version must be <= extension_build_version",
-        " (target=0x",
-        std::hex,
-        extension_target_version,
-        ", build=0x",
-        extension_build_version,
-        ")");
+    check_target_version(extension_build_version, extension_target_version);
     call_dispatcher(
         opName,
         overloadName,
