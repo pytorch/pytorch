@@ -18,7 +18,9 @@
 // ROCM_VERSION arrives as -DROCM_VERSION=FB_ROCM_VERSION and collapses to 0
 // wherever the tp2 toolchain does not substitute it, which selects this branch.
 #if ROCM_VERSION < 60400
-// LLVM 18+. __MEMORY_SCOPE_DEVICE is the agent scope.
+// Scoped builtins need LLVM 18 (ROCm 6.2+). Keep the old calls before that.
+#if defined(__has_builtin) && __has_builtin(__scoped_atomic_load_n) && \
+    __has_builtin(__scoped_atomic_compare_exchange_n)
 #define TORCH_ROCM_AGENT_LOAD(ptr) \
   __scoped_atomic_load_n((ptr), __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE)
 #define TORCH_ROCM_AGENT_CAS_STRONG(ptr, expected, desired) \
@@ -30,6 +32,18 @@
       __ATOMIC_RELAXED,                                     \
       __ATOMIC_RELAXED,                                     \
       __MEMORY_SCOPE_DEVICE)
+#else
+#define TORCH_ROCM_AGENT_LOAD(ptr) \
+  __hip_atomic_load((ptr), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT)
+#define TORCH_ROCM_AGENT_CAS_STRONG(ptr, expected, desired) \
+  __hip_atomic_compare_exchange_strong(                     \
+      (ptr),                                                \
+      (expected),                                           \
+      (desired),                                            \
+      __ATOMIC_RELAXED,                                     \
+      __ATOMIC_RELAXED,                                     \
+      __HIP_MEMORY_SCOPE_AGENT)
+#endif
 __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(
     __hip_bfloat162* address,
     __hip_bfloat162 value) {

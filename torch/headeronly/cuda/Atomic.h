@@ -11,6 +11,7 @@
 #endif
 
 #if defined(USE_ROCM)
+#include <hip/hip_version.h>
 #include <torch/headeronly/cuda/detail/ROCmMacros.h>
 #endif
 
@@ -314,11 +315,10 @@ inline __device__ void atomicAdd(bool* address, bool val) {
 
 /* Note [explicitly non-returning atomics]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * AMD's MI100 (gfx908) provides an optimized fp32 atomicAdd, exposed via
- * atomicAddNoRet(). Due to compiler limitations, callers must opt-in to
- * guarantee the optimized instruction. This non-returning atomicAddNoRet cannot
- * be used to implement the returning atomicAdd, therefore we need a new API
- * 'gpuAtomicAddNoReturn'.
+ * Through ROCm 6.4, MI100 (gfx908) exposes its fp32 no-return atomic via
+ * atomicAddNoRet(), and callers must opt in. From ROCm 7 that function is a
+ * deprecated alias of unsafeAtomicAdd, so gpuAtomicAddNoReturn calls
+ * unsafeAtomicAdd directly. It cannot implement the returning atomicAdd.
  */
 template <typename T>
 inline __device__ void gpuAtomicAddNoReturn(
@@ -366,8 +366,9 @@ inline __device__ void gpuAtomicAddNoReturn(
  */
 #if defined(USE_ROCM)
 inline __device__ void gpuAtomicAddNoReturn(float* address, float val) {
-  // Since ROCm 10.2, atomicAddNoRet is a deprecated alias of unsafeAtomicAdd.
-#if defined(ROCM_VERSION) && ROCM_VERSION >= 100200
+  // HIP_VERSION comes from hip/hip_version.h, so cpp extensions see it.
+  // ROCm 7+ (HIP 7) makes atomicAddNoRet a deprecated alias of unsafeAtomicAdd.
+#if HIP_VERSION_MAJOR >= 7
   (void)unsafeAtomicAdd(address, val);
 #else
   if (__builtin_amdgcn_processor_is("gfx908"))

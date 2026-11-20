@@ -2,20 +2,13 @@
 #include <ATen/cuda/cub.h>
 
 #include <cstddef>
-#include <type_traits>
 #include <iterator>
 #include <limits>
+#include <type_traits>
 
+#include <functional>
 #ifndef USE_ROCM
 #include <cuda/std/functional>
-#else
-// hipcub::Equality is deprecated in favor of hip::std::equal_to.
-#if defined(__has_include) && __has_include(<hip/std/functional>)
-#include <hip/std/functional>
-#define TORCH_HIPCUB_EQUAL_TO ::hip::std::equal_to<>()
-#else
-#define TORCH_HIPCUB_EQUAL_TO hipcub::Equality()
-#endif
 #endif
 
 #include <ATen/cuda/cub_definitions.cuh>
@@ -533,34 +526,75 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
 }
 
 
-template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT>
-inline void inclusive_sum_by_key(KeysInputIteratorT keys, ValuesInputIteratorT input, ValuesOutputIteratorT output, int64_t num_items) {
-  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
-    "cub InclusiveSumByKey does not support more than INT_MAX elements");
+template <
+    typename KeysInputIteratorT,
+    typename ValuesInputIteratorT,
+    typename ValuesOutputIteratorT>
+inline void inclusive_sum_by_key(
+    KeysInputIteratorT keys,
+    ValuesInputIteratorT input,
+    ValuesOutputIteratorT output,
+    int64_t num_items) {
+  TORCH_CHECK(
+      num_items <= std::numeric_limits<int>::max(),
+      "cub InclusiveSumByKey does not support more than INT_MAX elements");
 #if !defined(USE_ROCM)
-  CUB_WRAPPER(at_cuda_detail::cub::DeviceScan::InclusiveSumByKey,
-      keys, input, output, num_items, NO_ROCM(::cuda)::std::equal_to<>(), at::cuda::getCurrentCUDAStream());
+  CUB_WRAPPER(
+      at_cuda_detail::cub::DeviceScan::InclusiveSumByKey,
+      keys,
+      input,
+      output,
+      num_items,
+      NO_ROCM(::cuda)::std::equal_to<>(),
+      at::cuda::getCurrentCUDAStream());
 #else
-  CUB_WRAPPER(cub::DeviceScan::InclusiveSumByKey,
-      keys, input, output, num_items, TORCH_HIPCUB_EQUAL_TO, at::cuda::getCurrentCUDAStream());
+  CUB_WRAPPER(
+      cub::DeviceScan::InclusiveSumByKey,
+      keys,
+      input,
+      output,
+      num_items,
+      NO_ROCM(::cuda)::std::equal_to<>(),
+      at::cuda::getCurrentCUDAStream());
 #endif
 }
 
-template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT, typename ScanOpT>
-inline void inclusive_scan_by_key(KeysInputIteratorT keys, ValuesInputIteratorT input, ValuesOutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
-  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
-    "cub InclusiveSumByKey does not support more than INT_MAX elements");
+template <
+    typename KeysInputIteratorT,
+    typename ValuesInputIteratorT,
+    typename ValuesOutputIteratorT,
+    typename ScanOpT>
+inline void inclusive_scan_by_key(
+    KeysInputIteratorT keys,
+    ValuesInputIteratorT input,
+    ValuesOutputIteratorT output,
+    ScanOpT scan_op,
+    int64_t num_items) {
+  TORCH_CHECK(
+      num_items <= std::numeric_limits<int>::max(),
+      "cub InclusiveSumByKey does not support more than INT_MAX elements");
 #if !defined(USE_ROCM)
-  CUB_WRAPPER(at_cuda_detail::cub::DeviceScan::InclusiveScanByKey,
-      keys, input, output, scan_op, num_items, NO_ROCM(::cuda)::std::equal_to<>(), at::cuda::getCurrentCUDAStream());
+  CUB_WRAPPER(
+      at_cuda_detail::cub::DeviceScan::InclusiveScanByKey,
+      keys,
+      input,
+      output,
+      scan_op,
+      num_items,
+      NO_ROCM(::cuda)::std::equal_to<>(),
+      at::cuda::getCurrentCUDAStream());
 #else
-  CUB_WRAPPER(cub::DeviceScan::InclusiveScanByKey,
-      keys, input, output, scan_op, num_items, TORCH_HIPCUB_EQUAL_TO, at::cuda::getCurrentCUDAStream());
+  CUB_WRAPPER(
+      cub::DeviceScan::InclusiveScanByKey,
+      keys,
+      input,
+      output,
+      scan_op,
+      num_items,
+      NO_ROCM(::cuda)::std::equal_to<>(),
+      at::cuda::getCurrentCUDAStream());
 #endif
 }
-#ifdef USE_ROCM
-#undef TORCH_HIPCUB_EQUAL_TO
-#endif
 
 
 template <typename InputIteratorT, typename OutputIteratorT, typename NumSelectedIteratorT>
