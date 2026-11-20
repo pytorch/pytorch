@@ -1122,8 +1122,14 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         b = self.type2test(b"hello")
         for name in ("removeprefix", "removesuffix"):
             method = getattr(b, name)
-            self.assertRaises(TypeError, method)
-            self.assertRaises(TypeError, method, b"he", b"l")
+            with self.assertRaisesRegex(
+                TypeError, r"takes exactly one argument \(0 given\)"
+            ):
+                method()
+            with self.assertRaisesRegex(
+                TypeError, r"takes exactly one argument \(2 given\)"
+            ):
+                method(b"he", b"l")
             with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
                 method("he")
             with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
@@ -1137,18 +1143,25 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             return ba.removeprefix(b"he"), ba.removesuffix(b"lo")
 
         ba = bytearray(b"hello")
-        self.assertEqual(fn(ba), (bytearray(b"llo"), bytearray(b"hel")))
+        prefix_result, suffix_result = fn(ba)
+        self.assertIs(type(prefix_result), bytearray)
+        self.assertIs(type(suffix_result), bytearray)
+        self.assertEqual(prefix_result, bytearray(b"llo"))
+        self.assertEqual(suffix_result, bytearray(b"hel"))
         self.assertEqual(ba, bytearray(b"hello"))
 
-    def test_input_bytearray_removeprefix_mutate_result(self):
+    @parametrize("name", ["removeprefix", "removesuffix"])
+    def test_input_bytearray_removeprefix_removesuffix_mutate_result(self, name):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(ba):
-            out = ba.removeprefix(b"x")
+            out = getattr(ba, name)(b"x")
             out[0] = ord("j")
             return out
 
         ba = bytearray(b"hello")
-        self.assertEqual(fn(ba), bytearray(b"jello"))
+        out = fn(ba)
+        self.assertIs(type(out), bytearray)
+        self.assertEqual(out, bytearray(b"jello"))
         self.assertEqual(ba, bytearray(b"hello"))
 
     @parametrize("buffer_type", [bytes, bytearray])

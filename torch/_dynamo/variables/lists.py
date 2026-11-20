@@ -2861,10 +2861,6 @@ class ByteArrayVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        # bytearray_removeprefix_impl: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
-        # METH_O, so Method.__call__ has already checked there is exactly one
-        # argument. CPython always returns a new bytearray, even when the
-        # prefix is absent.
         return self._bytearray_constant_method(tx, args, kwargs, "removeprefix")
 
     def bytearray_removesuffix(
@@ -2873,7 +2869,6 @@ class ByteArrayVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        # bytearray_removesuffix_impl: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
         return self._bytearray_constant_method(tx, args, kwargs, "removesuffix")
 
     def bytearray_translate(
