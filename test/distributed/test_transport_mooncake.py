@@ -454,6 +454,30 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         first.send_notification(second.peer_id, b"after").wait()
         self.assertEqual(self._receive(second), [(first.peer_id, b"after")])
 
+    def test_notify_construction_failure_raises_before_transfer(self):
+        first, second = self.make_transport_pair()
+        view = first.register_memory(torch.ones(8, dtype=torch.uint8)).to_view()
+        remote = second.register_memory(torch.zeros(8, dtype=torch.uint8))
+        error = AttributeError("no TransferNotify")
+        with patch.object(first._backend, "TransferNotify", side_effect=error):
+            with self.assertRaisesRegex(AttributeError, "no TransferNotify"):
+                first.write(view, remote.to_remote_buffer(), notification=b"x")
+        self.assertEqual(first._pending, {})
+        first.close()
+
+    def test_notify_dispatch_failure_settles_work(self):
+        first, second = self.make_transport_pair()
+        view = first.register_memory(torch.ones(8, dtype=torch.uint8)).to_view()
+        remote = second.register_memory(torch.zeros(8, dtype=torch.uint8))
+        error = TypeError("bad binding call")
+        with patch.object(first, "_send_notify", side_effect=error):
+            work = first.write(
+                view, remote.to_remote_buffer(), async_op=True, notification=b"x"
+            )
+            with self.assertRaisesRegex(TypeError, "bad binding call"):
+                work.wait(timedelta(seconds=30))
+        first.close()
+
     def test_foreign_notifies_are_dropped(self):
         first, second = self.make_transport_pair()
         engine = second._engine
