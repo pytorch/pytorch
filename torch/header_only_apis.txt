@@ -42,6 +42,10 @@ Float8_e5m3fnu
 # torch/headeronly/util/Float8_e8m0fnu.h
 Float8_e8m0fnu
 
+# torch/headeronly/util/FloatRounding.h
+RoundingMode
+convert_with_rounding
+
 # torch/headeronly/util/Half.h
 Half
 fp16_ieee_from_fp32_value
