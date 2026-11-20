@@ -162,13 +162,16 @@ std::string runtime_error_of(Fn&& fn) {
 // returned within kBlocked of its thread calling it.
 constexpr auto kBlocked = std::chrono::milliseconds(100);
 
-std::future<Pool::ModelLease> blocked_checkout(Pool& pool) {
+std::future<Pool::ModelLease> blocked_checkout(
+    Pool& pool,
+    Stream stream = nullptr) {
   std::promise<void> entering;
   auto entered = entering.get_future();
   auto lease = std::async(
-      std::launch::async, [&pool, entering = std::move(entering)]() mutable {
+      std::launch::async,
+      [&pool, stream, entering = std::move(entering)]() mutable {
         entering.set_value();
-        return pool.checkout();
+        return pool.checkout(stream);
       });
   entered.wait();
   EXPECT_EQ(lease.wait_for(kBlocked), std::future_status::timeout);
@@ -337,6 +340,46 @@ TEST(ModelPoolTest, DeviceFailureClearsStreamBinding) {
       t.pool.get_stream_affinity_model_index(stream_handle(1)),
       AOTI_STREAM_AFFINITY_UNBOUND);
   EXPECT_EQ(model_of(checkout(t.pool, stream_handle(1))), t.models[0]);
+}
+
+// A stream's first two calls, both waiting for a model, share the one model the
+// first binds instead of binding two: the second waits until the first's run is
+// in flight, then for that run to finish.
+TEST(ModelPoolTest, FirstCallsOnOneStreamShareOneModel) {
+  TestPool t(2);
+  t.pool.set_use_stream_affinity(true);
+  FakeModel* oldest = start_run(t.pool);
+  FakeModel* newest = start_run(t.pool);
+  auto first = std::async(
+      std::launch::async, [&] { return t.pool.checkout(stream_handle(1)); });
+  oldest->wait_until_waited_on();
+  auto second = blocked_checkout(t.pool, stream_handle(1));
+  // A second call that bound a model of its own would get this one.
+  newest->finish();
+  EXPECT_EQ(second.wait_for(kBlocked), std::future_status::timeout);
+  oldest->finish();
+  auto lease = wait_or_abort(first);
+  EXPECT_EQ(model_of(lease), oldest);
+  lease->start();
+  lease.mark_in_flight();
+  EXPECT_EQ(second.wait_for(kBlocked), std::future_status::timeout);
+  oldest->finish();
+  EXPECT_EQ(model_of(wait_or_abort(second)), oldest);
+}
+
+// With more streams than models, a stream's first call rebinds a model bound to
+// another stream.
+TEST(ModelPoolTest, OversubscribedStreamRebindsModel) {
+  TestPool t(1);
+  t.pool.set_use_stream_affinity(true);
+  start_run(t.pool, stream_handle(1))->finish();
+  auto lease = checkout(t.pool, stream_handle(2));
+  EXPECT_EQ(model_of(lease), t.models[0]);
+  EXPECT_EQ(t.pool.get_stream_affinity_model_index(stream_handle(2)), 0);
+  EXPECT_EQ(
+      t.pool.get_stream_affinity_model_index(stream_handle(1)),
+      AOTI_STREAM_AFFINITY_UNBOUND);
+  lease.mark_in_flight();
 }
 
 #endif
