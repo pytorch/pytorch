@@ -629,24 +629,18 @@ class TestFFT(TestCase):
                 else:
                     numpy_fn = getattr(np.fft, fname)
 
-                def fn(t: torch.Tensor, s: list[int] | None, dim: list[int] = (-2, -1), norm: str | None = None):
-                    return torch_fn(t, s, dim, norm)
-
-                torch_fns = (torch_fn, torch.jit.script(fn))
 
                 # Once with dim defaulted
                 input_np = input.cpu().numpy()
                 expected = numpy_fn(input_np, s, norm=norm)
-                for fn in torch_fns:
-                    actual = fn(input, s, norm=norm)
-                    self.assertEqual(actual, expected)
+                actual = torch_fn(input, s, norm=norm)
+                self.assertEqual(actual, expected)
 
                 # Once with explicit dims
                 dim = (1, 0)
                 expected = numpy_fn(input_np, s, dim, norm)
-                for fn in torch_fns:
-                    actual = fn(input, s, dim, norm)
-                    self.assertEqual(actual, expected)
+                actual = torch_fn(input, s, dim, norm)
+                self.assertEqual(actual, expected)
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes

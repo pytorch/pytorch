@@ -28,7 +28,6 @@ from torch.testing._internal.common_utils import (
     first_sample,
     HardwareClassification,
     instantiate_parametrized_tests,
-    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
@@ -637,32 +636,23 @@ class TestPythonRegistration(TestCase):
                     x = torch.tensor([1, 2])
                     self.assertEqual(getattr(torch.ops, self.test_ns).sum3(x), x)
 
-    @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
-    def test_alias_analysis(self):
-        def test_helper(alias_analysis=""):
-            my_lib1 = Library(self.test_ns, "DEF")  # noqa: SCOPED_LIBRARY
-
-            called = [0]
+    @parametrize("alias_analysis", ("", "FROM_SCHEMA", "CONSERVATIVE"))
+    def test_alias_analysis_compilation_unit(self, alias_analysis):
+        with _scoped_library(self.test_ns, "DEF") as library:
 
             @torch.library.define(
-                my_lib1, "_op() -> None", alias_analysis=alias_analysis
+                library, "_op() -> None", alias_analysis=alias_analysis
             )
-            def _op(*args, **kwargs):
-                called[0] += 1
+            def operation():
+                return None
 
-            @torch.jit.script
-            def _test():
-                torch.ops._test_python_registration._op()
-
-            if "_test_python_registration::_op" not in str(_test.graph):
-                raise AssertionError("expected _test_python_registration::_op in graph")
-
-        with self.assertRaises(AssertionError):
-            test_helper("")  # alias_analysis="FROM_SCHEMA"
-
-        # Run gc to make sure the previous Library is removed.  This is needed in dynamo-wrapped 3.14t
-        gc.collect()
-        test_helper("CONSERVATIVE")
+            unit = torch.jit.CompilationUnit(
+                f"def check_alias() -> None:\n    torch.ops.{self.test_ns}._op()\n"
+            )
+            self.assertEqual(
+                f"{self.test_ns}::_op" in str(unit.check_alias.graph),
+                alias_analysis == "CONSERVATIVE",
+            )
 
     def test_error_for_unsupported_ns_or_kind(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported kind"):
@@ -2030,6 +2020,24 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                 self.assertEqual(s.stream_id, 1)
                 self.assertEqual(s.device_index, 2)
                 self.assertEqual(s.device_type, 3)
+
+    def test_mode_returning_wrong_number_of_values(self) -> None:
+        def returning(n):
+            class Mode(TorchDispatchMode):
+                def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                    return tuple(torch.ones(2) for _ in range(n))
+
+            return Mode()
+
+        # Built outside the mode: otherwise the mode also intercepts this
+        # single-return op and fails before max.dim is ever reached.
+        t = torch.ones(2)
+        for n in (3, 1):
+            with self.assertRaisesRegex(
+                RuntimeError, f"to return 2 values but it returned {n} instead"
+            ):
+                with returning(n):
+                    torch.ops.aten.max.dim(t, 0)
 
     def test_none_wrapping(self):
         # A Tensor subclass that returns None when doing add
