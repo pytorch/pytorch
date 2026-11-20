@@ -1160,11 +1160,12 @@ std::optional<c10::ScalarType> out_dtype) {
   }
 #elif defined(USE_ROCM_CK_GEMM)
   // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
-  // CK-tile is on by default and gated by should_use_ck_tile_group_gemm; ROCM_ALLOW_GROUP_GEMM_CK_TILE=0 disables it.
+  // ROCM_ALLOW_GROUP_GEMM_CK_TILE=1 forces CK-tile, =0 disables it, unset lets should_use_ck_tile_group_gemm pick.
   // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
   const bool supported_ck_tile_arch = at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"});
-  if (at::globalContext().rocmAllowGroupGemmCkTile() && supported_ck_tile_arch &&
-      ck_tile_group_gemm_supported(mat_a, mat_b, offs) && should_use_ck_tile_group_gemm(mat_a, mat_b, offs)) {
+  const std::optional<bool> ck_tile_env = at::globalContext().rocmAllowGroupGemmCkTile();
+  if (ck_tile_env != false && supported_ck_tile_arch && ck_tile_group_gemm_supported(mat_a, mat_b, offs) &&
+      (ck_tile_env == true || should_use_ck_tile_group_gemm(mat_a, mat_b, offs))) {
     return GroupedMMKernel::CkTile;
   }
   if (at::globalContext().rocmAllowGroupGemmCk() && (supported_ck_tile_arch || at::detail::getCUDAHooks().isGPUArch({"gfx90a"}))) {

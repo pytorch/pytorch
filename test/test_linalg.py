@@ -12775,7 +12775,7 @@ class TestGroupedMM(TestCase):
         offs = None if offsets is None else torch.tensor(offsets, device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=backward)
 
-    # ck_tile is on by default, but its per-call heuristic can still send a case (e.g. fp32 k128) to hipBLASLt.
+    # ROCM_ALLOW_GROUP_GEMM_CK_TILE=1 forces ck_tile; unset, a heuristic picks ck_tile or hipBLASLt per call.
     @onlyCUDA
     @skipCUDAIfNotRocm
     @parametrize("backend", ["ck_tile"])
@@ -12824,8 +12824,6 @@ class TestGroupedMM(TestCase):
 
         if not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
             self.skipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
-        if not any(gpu in torch.cuda.get_device_name(device) for gpu in ("MI300A", "MI300X", "MI350X", "MI355X")):
-            self.skipTest("ck_tile grouped gemm is only dispatched on the GPUs in ck_tile_group_gemm/device_info.h")
         props = torch.cuda.get_device_properties(device)
         arch_cus = (props.gcnArchName.split(":")[0], props.multi_processor_count)
         key = (*arch_cus, dtype)
