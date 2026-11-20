@@ -161,7 +161,7 @@ def select_ordered_col_config(
     if the mapping has out_dtypes, only to those outputs. With rows, B200 single-field
     split views take 16-column tiles at measured shapes and over a band, R 32768-65536
     at C 128-257.
-    B200's 16-column narrowing overrides table entries too.
+    B200's 16-column rule replaces table entries' tile_columns too.
     Views filling fewer than the mapping's min_blocks useful 32-column blocks get None.
     """
     cfg = _ORDERED_COL_CONFIGS.get(cc, {}).get(trait_type)
@@ -170,7 +170,7 @@ def select_ordered_col_config(
     if (
         cfg is None
         and cc in kg._B200_CCS
-        and dtype in kg._ORDERED_COL_DTYPES
+        and dtype in kg._B200_DTYPES
         and partials > 1
         and nfields == 1
     ):
