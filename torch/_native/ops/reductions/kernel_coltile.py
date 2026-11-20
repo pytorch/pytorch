@@ -133,14 +133,14 @@ class OrderedColConfig(NamedTuple):
 # kernel_general._reduce routes columns here only on its _ORDERED_COL_CCS, and
 # _reduce_col_tile hands off here only on _B200_CCS (b200_ragged_c4095_ordered) and
 # (10, 7); entries for other architectures serve direct reduce_ordered_col calls alone.
-# Keys are trait types, so variants (NormOps p, WelfordOps var, std and return_mean)
-# share an entry; a measured entry must hold for all of them.
-# There are no (10, 0) entries: B200 split views (from _reduce or direct
+# Keys are trait types, so variants (NormOps p, WelfordOps var and std) share an entry;
+# a measured entry must hold for all of them. WelfordOps return_mean traits drop it.
+# There are no (10, 0) entries: B200 single-field split views (from _reduce or direct
 # reduce_ordered_col calls) take select_ordered_col_config's fallback,
-# OrderedColConfig(0, tile_columns=WARP, full_tiles=...), which its B200 full-tile rules
-# narrow to 16-column tiles at some shapes. Looped B200 views (partials == 1), from
-# _reduce and from the b200_ragged_c4095_ordered hand-off, get None and run on
-# OrderedColConfig(0).
+# OrderedColConfig(0, tile_columns=WARP, full_tiles=True), which its B200 rules for
+# split views (partials > 1) narrow to 16-column tiles at some shapes; multi-field split
+# views decline. Looped B200 views (partials == 1), from _reduce and from the
+# b200_ragged_c4095_ordered hand-off, get None and run on OrderedColConfig(0).
 _ORDERED_COL_CONFIGS: dict[tuple[int, int], dict[type, OrderedColConfig]] = {
     # WelfordOps covers var and std of any correction.
     (10, 7): {
@@ -216,6 +216,7 @@ def select_ordered_col_config(
     32 otherwise. Other mapped views with full_tiles get 16-column full tiles at
     65536 x 1024 unless nfields == 2, full tiles at column anchors, and, replacing the
     mapping, 16-column full tiles at 256 columns and 32768-131072 rows.
+    B200's 16-column narrowing overrides table entries too.
     Views filling fewer than the mapping's min_blocks useful 32-column blocks get None.
     """
     # In-tree routing reaches SM107 entries only through select_col_config's hand-offs.
@@ -347,7 +348,7 @@ def select_col_config(
     threads = _WIDE_ACC_THREADS_PER_BLOCK if nfields >= 3 else _THREADS_PER_BLOCK
     geometry = _col_geometry(rows, columns, batches, itemsize, npar=npar, vec=vec)
     cfg = ColConfig(
-        "default" if npar is None and vec is None else "explicit",
+        "explicit" if explicit else "default",
         threads if threads_per_block is None else threads_per_block,
         *geometry,
         "partition" if batches * columns >= _C_THREAD_STAGE2 else "column",
@@ -1207,7 +1208,8 @@ def _reduce_col_tile(
         ordered = reduce_ordered_col(trait, trait_key, x, out_dtypes, nouts, cc=cc)
         if ordered is not None:
             return ordered
-        # Declined views (e.g. pitched ones) take the shape's measured linear rule.
+        # Declined views (e.g. pitched ones) take the shape's measured linear rule. The
+        # re-select only changes the config on B200: SM107 rules ignore itree.
         cfg = select(itree=False)
     # A default vec narrows to the row pitch; an explicit one must divide it.
     pitch_vec = math.gcd(cfg.vec, rows.stride(0)) if vec is None else cfg.vec

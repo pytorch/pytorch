@@ -661,8 +661,11 @@ PY
 # test_reductions and test_ops checks of the CuTeDSL sum, mean, amax, amin and prod overrides.
 # test_ops keeps its dtype-less tests (test_dtypes_, test_errors_, ...). In test_reductions,
 # "float16" also selects bfloat16. test_ref_ compares with NumPy and has no bfloat16 variants;
-# for float16 sum and prod, its tests are skipped or pass 0-d inputs, which the overrides
-# decline. test_noncontiguous_ mostly compares an override with itself on a contiguous copy;
+# for the base float16 sum and prod OpInfos and _refs.sum, its tests are skipped or
+# pass 0-d inputs, which the overrides decline. masked.sum and masked.prod override
+# only tolerances, so their float16 tests call sum/prod(dim=...) on non-0-d inputs,
+# and _refs.prod's float16 test_ref_duplicate_values runs on a (4, 4) input.
+# test_noncontiguous_ mostly compares an override with itself on a contiguous copy;
 # only test_noncontiguous_all checks it against ATen (its strided side is unaligned, so
 # declined), except for prod, whose full reduction is not overridden. test_nan_policy_
 # checks NaN propagation. Apart from test_noncontiguous_all's ATen comparison, only test_ops

@@ -297,7 +297,14 @@ class TestReductionConfig(TestCase):
             {"dtype": torch.float16, "M": 131072},
             {"N": 2048, "M": 32768},
             {"M": 65535},
-            {"trait_type": T.ProdOps, "nfields": 1, "welford_outs": 0},
+            # fp32 256 MiB at N = 4096 takes the inner tree but for the trait guard.
+            {
+                "trait_type": T.ProdOps,
+                "nfields": 1,
+                "welford_outs": 0,
+                "N": 4096,
+                "M": 16384,
+            },
         ],
         name_fn=_updates_name,
     )
@@ -817,7 +824,7 @@ class TestReductionConfig(TestCase):
         "case,updates,expected_rule",
         [
             ("anchor", {}, "b200_ragged_c257"),
-            ("explicit_threads", {"threads_per_block": 64}, "default"),
+            ("explicit_threads", {"threads_per_block": 64}, "explicit"),
             ("explicit_npar", {"npar": 1024}, "explicit"),
             ("explicit_vec", {"vec": 1}, "explicit"),
             ("row_below", {"rows": (16 << 20) // 514 - 1}, "default"),
