@@ -36,6 +36,9 @@ from torch._prims_common import (
     make_contiguous_strides_for,
 )
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.passes.graph_transform_observer import (
+    GraphTransformObserver as GraphTransformObserverBase,
+)
 from torch.fx.passes.reinplace import _is_view_op
 from torch.utils._ordered_set import OrderedSet
 
@@ -378,7 +381,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     The IR here has been normalized and functionalized.
     """
     GraphTransformObserver = functools.partial(
-        torch.fx.passes.graph_transform_observer.GraphTransformObserver,
+        GraphTransformObserverBase,
         subsystem="post_grad_passes",
     )
 
@@ -690,8 +693,17 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
         if introduced_mutation:
             fake_tensor_updater.incremental_update()
+    auto_functionalized_decomposition_enabled = (
+        not GraphTransformObserverBase.is_pass_disabled(
+            "decompose_auto_functionalized", "post_grad_passes"
+        )
+    )
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
-        functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
+        functools.partial(
+            reinplace_inplaceable_ops,
+            fake_tensor_updater,
+            rewire_auto_functionalized_outputs=auto_functionalized_decomposition_enabled,
+        ),
     )
 
     # Fix aliasing detection for dtype views AFTER reinplace determines cloning needs
@@ -704,9 +716,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
     ).apply_graph_pass(decompose_user_kernel_wrapper_functional)
-    GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
-        decompose_auto_functionalized
-    )
+    if auto_functionalized_decomposition_enabled:
+        GraphTransformObserver(
+            gm, "decompose_auto_functionalized", subsystem=None
+        ).apply_graph_pass(decompose_auto_functionalized)
     GraphTransformObserver(gm, "decompose_scan_to_while_loop").apply_gm_pass(
         decompose_scan_to_while_loop
     )
@@ -1493,7 +1506,11 @@ def slice_noop(self, dim=0, start=None, end=None, step=1):
 
     slice_dim_size = self.shape[dim]
     if (
-        statically_known_true(sym_eq(start, 0))
+        (
+            statically_known_true(sym_eq(start, 0))
+            # negative starts at or below -slice_dim_size normalize to 0
+            or statically_known_true(start <= -slice_dim_size)
+        )
         and (
             statically_known_true(end >= 2**63 - 1)
             or statically_known_true(end >= slice_dim_size)
@@ -1578,16 +1595,20 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
         end = 2**63 - 1
     slice_scatter_dim_size = self.shape[dim]
     full_replacement = (
-        self.shape == src.shape
-        and start == 0
+        statically_known_true(sym_eq(self.shape, src.shape))
+        and (
+            statically_known_true(sym_eq(start, 0))
+            # negative starts at or below -slice_scatter_dim_size normalize to 0
+            or statically_known_true(start <= -slice_scatter_dim_size)
+        )
         and (
             statically_known_true(end >= 2**63 - 1)
             or statically_known_true(end >= slice_scatter_dim_size)
         )
-        and step == 1
+        and statically_known_true(sym_eq(step, 1))
     )
     partial_self_replacement = (
-        step == 1
+        statically_known_true(sym_eq(step, 1))
         and self.dim() == src.dim()
         and all(
             statically_known_true(sym_eq(src.shape[d], self.shape[d]))

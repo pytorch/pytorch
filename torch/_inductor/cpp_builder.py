@@ -794,8 +794,16 @@ def _remove_dir(path_dir: str) -> None:
 def _run_compile_cmd(cmd_line: str, cwd: str) -> None:
     cmd = shlex.split(cmd_line)
     try:
+        # This runs on compile-pool threads. Without env=, the child execs with the
+        # live C environ, which a concurrent os.environ insert on another thread can
+        # reallocate and free, so the compiler may start without PATH.
         subprocess.run(
-            cmd, cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+            cmd,
+            cwd=cwd,
+            env=os.environ.copy(),
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         )
     except subprocess.CalledProcessError as e:
         output = e.stdout.decode(*SUBPROCESS_DECODE_ARGS)
@@ -1271,6 +1279,12 @@ def get_cpp_options(
         ldflags.append("flto=thin")
 
     passthrough_args.append(" ".join(extra_flags))
+    # Linux only. One argument per list: the builder drops repeated arguments,
+    # which would separate a repeated flag such as -mllvm from its value.
+    if _IS_LINUX and config.cpp.extra_cflags:
+        passthrough_args.append(" ".join(config.cpp.extra_cflags))
+    if _IS_LINUX and do_link and config.cpp.extra_ldflags:
+        passthrough_args.append(" ".join(config.cpp.extra_ldflags))
 
     if config.aot_inductor.cross_target_platform == "windows":
         passthrough_args.extend(["-static-libstdc++", "-static-libgcc"])

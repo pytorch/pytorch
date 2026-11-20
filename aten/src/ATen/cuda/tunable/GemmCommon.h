@@ -299,6 +299,35 @@ inline std::string to_string_epilogue(const at::cuda::blas::GEMMAndBiasActivatio
   }
 }
 
+// Activation epilogue suffix for a TunableOp key, as a labelled "_act_<name>"
+// token like the existing _ld_, _compute_ and _swz_ ones. Empty for None rather
+// than a literal _None, so the token appears only where an epilogue does. There
+// is no default case on purpose, so adding an epilogue without naming it here
+// cannot quietly share a key with an existing one.
+inline const char* epilogue_signature(const at::cuda::blas::GEMMAndBiasActivationEpilogue& value) {
+  switch (value) {
+    case at::cuda::blas::GEMMAndBiasActivationEpilogue::None:
+      return "";
+    case at::cuda::blas::GEMMAndBiasActivationEpilogue::RELU:
+      return "_act_RELU";
+    case at::cuda::blas::GEMMAndBiasActivationEpilogue::GELU:
+      return "_act_GELU";
+  }
+  TORCH_CHECK(false, "unhandled GEMMAndBiasActivationEpilogue in TunableOp key");
+  return ""; // unreachable - TORCH_CHECK(false) throws
+}
+
+// Bias presence for a TunableOp key, spelled like ScaledGemmParams' _bias_None.
+// The pointer is null exactly when use_bias_ptr_lt is false in Blas.cpp. On
+// CUDA the term that reaches a key is self not being 1-D; the other two either
+// keep the call off this path or are rejected outright while TunableOp is on,
+// so they emit nothing. cuBLASLt then gets a plain epilogue and beta 1 instead
+// of the _BIAS one and beta 0, so the two need separate keys. Empty when a bias
+// is present. ROCm never emits it.
+inline const char* bias_signature(const void* bias) {
+  return bias == nullptr ? "_bias_None" : "";
+}
+
 namespace detail {
 
 static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t size, const NumericalCheckConfig& config) {
@@ -467,8 +496,9 @@ struct GemmAndBiasParams : OpParams {
 
   std::string Signature() const override {
     return fmt::sprintf(
-        "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld%s",
-        transa, transb, m, n, k, lda, ldb, ldc, ComputeTypeSignature<T>());
+        "%c%c_%ld_%ld_%ld_ld_%ld_%ld_%ld%s%s%s",
+        transa, transb, m, n, k, lda, ldb, ldc, ComputeTypeSignature<T>(),
+        epilogue_signature(activation), bias_signature(bias));
   }
 
   std::string DynamicSignature() const override {
@@ -476,7 +506,7 @@ struct GemmAndBiasParams : OpParams {
     const bool dynamic_n = this->IsDynamicN();
     const bool dynamic_k = this->IsDynamicK();
     return fmt::sprintf(
-        "%c%c_%s_%s_%s_ld_%s_%s_%s%s",
+        "%c%c_%s_%s_%s_ld_%s_%s_%s%s%s%s",
         transa, transb,
         MaybeWildcardInt(m, dynamic_m),
         MaybeWildcardInt(n, dynamic_n),
@@ -484,7 +514,8 @@ struct GemmAndBiasParams : OpParams {
         MaybeWildcardInt(lda, ShouldWildcardLda(transa, dynamic_m, dynamic_k, lda, m, k)),
         MaybeWildcardInt(ldb, ShouldWildcardLdb(transb, dynamic_n, dynamic_k, ldb, n, k)),
         MaybeWildcardInt(ldc, ShouldWildcardLdc(dynamic_m, ldc, m)),
-        ComputeTypeSignature<T>());
+        ComputeTypeSignature<T>(),
+        epilogue_signature(activation), bias_signature(bias));
   }
 
   size_t GetSizeA() const {

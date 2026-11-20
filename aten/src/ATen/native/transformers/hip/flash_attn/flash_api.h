@@ -172,7 +172,10 @@ mha_fwd_ck(
     int window_size_right,
     const bool return_softmax,
     std::optional<at::Generator> gen_,
-    const std::optional<at::Tensor>& attn_bias_); // batch_size x nheads x seqlen_q x seqlen_k
+    const std::optional<at::Tensor>& attn_bias_, // batch_size x nheads x seqlen_q x seqlen_k
+    // Align the causal mask to the top-left (mem-efficient attention semantics)
+    // instead of the bottom-right (flash attention semantics).
+    const bool causal_top_left = false);
 
 std::tuple<
     at::Tensor,
@@ -233,7 +236,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_bwd_c
     int window_size_right,
     const bool deterministic,
     const at::Tensor philox_seed,
-    const at::Tensor philox_offset);
+    const at::Tensor philox_offset,
+    const bool causal_top_left = false);
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_varlen_bwd_ck(
     const at::Tensor& dout, // total_q x num_heads, x head_size

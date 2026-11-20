@@ -47,6 +47,14 @@ class Stream(torch._C._MPSStreamBase):
         r"""Wait for all the kernels in this stream to complete."""
         super().synchronize()
 
+    def query(self) -> bool:
+        r"""Check if all the work submitted has been completed.
+
+        Returns:
+            A boolean indicating if all kernels in this stream are completed.
+        """
+        return super().query()
+
     @property
     def stream_id(self) -> int:
         return super().stream_id

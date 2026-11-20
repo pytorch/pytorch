@@ -746,7 +746,8 @@ namespace at::hip::detail {
             with_ck_type(mat_a.scalar_type(), [&](auto data_tag) {
                 constexpr amdgcn_target_id Arch = decltype(arch_tag)::value;
                 using DataType = decltype(data_tag);
-                if constexpr (GroupGemmConfigs<CkTileGroupGemmConfigs<Arch, DataType>>) {
+                if constexpr (ck_tile::get_warp_size() == 64 &&
+                              GroupGemmConfigs<CkTileGroupGemmConfigs<Arch, DataType>>) {
                     launch_ck_tile_group_gemm<Arch, DataType>(
                             mat_a, mat_b, offs, out, group_args, a_row_major, b_row_major,
                             static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K), static_cast<int32_t>(group_count),

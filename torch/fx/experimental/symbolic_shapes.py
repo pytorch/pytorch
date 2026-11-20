@@ -43,6 +43,7 @@ from typing import (
     Generic,
     NamedTuple,
     NoReturn,
+    overload,
     TYPE_CHECKING,
     TypeAlias,
     TypeGuard,
@@ -128,32 +129,48 @@ from torch.fx.experimental._size_hinting import (
 )
 
 
+@overload
+def guarding_hint_or_throw(a: torch.SymBool | bool) -> bool: ...
+
+
+@overload
+def guarding_hint_or_throw(a: torch.SymInt | int) -> int: ...
+
+
+@overload
+def guarding_hint_or_throw(a: torch.SymFloat | float) -> float: ...
+
+
+@overload
+def guarding_hint_or_throw(a: SymNode) -> int | bool | float: ...
+
+
 def guarding_hint_or_throw(
-    a: torch.SymInt | torch.SymBool | int | bool | SymNode,
-) -> int | bool:
+    a: torch.SymInt | torch.SymFloat | torch.SymBool | int | float | bool | SymNode,
+) -> int | bool | float:
     """
     Return a concrete hint for a symbolic value, for use in guarding decisions.
 
     Returns Python bool (True/False) for boolean inputs (SymBool, bool),
-    and Python int for integer inputs (SymInt, int).
+    Python int for integer inputs (SymInt, int), Python float for floating-point
+    inputs (SymFloat, float), and for a SymNode a value matching its pytype.
     """
     if isinstance(a, SymNode):
-        # maybe_set_item_memo relies on this never filling in a SymFloat's hint
-        if a.pytype not in (int, bool):
-            raise AssertionError(f"Expected an int or bool SymNode, got {a.pytype}")
         if a._hint is not None:
             return a._hint  # pyrefly: ignore[bad-return]
         if a.shape_env is None:
             raise AssertionError("shape_env is required for guarding_hint_or_throw")
         hint = a.shape_env.guarding_hint_or_throw(a.expr)
-        a._hint = hint
+        # maybe_set_item_memo relies on this never filling in a SymFloat's hint
+        if a.pytype is not float:
+            a._hint = hint
         return hint
-    if isinstance(a, (torch.SymInt, torch.SymBool)):
+    if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         return guarding_hint_or_throw(a.node)
     if isinstance(a, bool):
         return a
-    if type(a) is not int:
-        raise AssertionError(f"Expected int, got {type(a)}")
+    if type(a) not in (int, float):
+        raise AssertionError(f"Expected int or float, got {type(a)}")
     return a
 
 
@@ -189,6 +206,18 @@ class PendingUnbackedSymbolNotFound(RuntimeError):
 
 class _ShapeEnvGuardError(RuntimeError):
     """Raised when a guard is attempted while the ShapeEnv is in error-on-guard mode."""
+
+
+class _FallbackTaken(Exception):
+    """Raised so that lru_cache does not keep evaluate_expr's fallback results."""
+
+
+class _UseFallback:
+    pass
+
+
+# Returned by _evaluate_expr when the result is unknown and a fallback is allowed.
+_USE_FALLBACK = _UseFallback()
 
 
 aten = torch._ops.ops.aten  # type: ignore[has-type]
@@ -4860,7 +4889,7 @@ class ShapeEnv:
 
         Temporarily freezes the ShapeEnv and makes _check_frozen raise
         instead of warn, so that guard-installing code paths produce an
-        exception that is not cached by the _inner_evaluate_expr LRU cache.
+        exception that is not cached by the evaluate_expr LRU caches.
         """
         old_frozen = self.frozen
         old_error = self._error_on_new_guards
@@ -4872,7 +4901,7 @@ class ShapeEnv:
             self.frozen = old_frozen
             self._error_on_new_guards = old_error
 
-    def _get_key(self) -> tuple[int, int, int, int, int]:
+    def _get_key(self) -> tuple[int, int, int, int, int, int]:
         """
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
@@ -4882,6 +4911,7 @@ class ShapeEnv:
             len(self.divisible),
             self.num_deferred_runtime_asserts,
             len(self.real_tensor_prop_unbacked_vals),
+            len(self.axioms),
             self._var_to_range_version_counter,
         )
 
@@ -7459,24 +7489,20 @@ class ShapeEnv:
             return result
         return None
 
-    def _maybe_evaluate_range_only(
-        self,
-        expr: sympy.Basic,
-        fallback: sympy.Basic | None = None,
-    ) -> sympy.Basic | None:
+    def _maybe_evaluate_range_only(self, expr: sympy.Basic) -> sympy.Basic | None:
         """
         Lightweight range-based evaluation using only bound_sympy (value range
         analysis), without expensive simplification, axiom matching, or symbol
         reallocation.
 
         Returns the resolved value if range analysis determines it, otherwise
-        returns fallback.
+        returns None.
         """
         var_ranges = {x: self.var_to_range.get(x) for x in expr.free_symbols}
         out = bound_sympy(expr, var_ranges)  # type: ignore[arg-type]
         if out.is_singleton():
             return out.lower
-        return fallback
+        return None
 
     @_lru_cache
     def _maybe_evaluate_static(
@@ -7524,10 +7550,7 @@ class ShapeEnv:
             return singleton_int_expr
 
         def resimplify_floor_div(axioms: dict[sympy.Expr, sympy.Expr]) -> None:
-            if not self._resimplify_floor_div_axioms:
-                return
-            self._resimplify_floor_div_axioms = False
-            new_items = {}
+            new_items: dict[sympy.Expr, sympy.Expr] = {}
             for k, v in list(axioms.items()):
                 # A FloorDiv in implications could have became CleanDiv at this point, due to new facts
                 # to the shapeEnv. This handles such issue but its not ideal. This is the only expression
@@ -7540,7 +7563,10 @@ class ShapeEnv:
 
         # Pattern matching
         if axioms is None:
-            resimplify_floor_div(self.axioms)
+            if self._resimplify_floor_div_axioms:
+                self._resimplify_floor_div_axioms = False
+                resimplify_floor_div(self.axioms)
+                self._update_version_counter()
             subst = self.axioms
         else:
             subst = {}
@@ -7549,7 +7575,8 @@ class ShapeEnv:
                 if e.free_symbols.issubset(expr_free_symbols):
                     subst.update(dict(self.get_implications(self.simplify(e))))
 
-            resimplify_floor_div(subst)
+            if self._resimplify_floor_div_axioms:
+                resimplify_floor_div(subst)
 
         expr = expr.xreplace(subst)
         # TODO: compute hint might have gotten broken here
@@ -7929,12 +7956,12 @@ class ShapeEnv:
         return result_expr
 
     @lru_cache(256)
-    def guarding_hint_or_throw(self, expr: sympy.Expr | int) -> int | bool:
+    def guarding_hint_or_throw(self, expr: sympy.Expr | int) -> int | bool | float:
         """
         Return a concrete hint for an expression.
 
         Returns Python bool (True/False) for boolean expressions (e.g. Eq, Ne),
-        and Python int for integer expressions.
+        Python float for float expressions, and Python int for integer expressions.
         """
         return _guarding_hint_or_throw_base(self, expr, {})
 
@@ -8800,7 +8827,17 @@ class ShapeEnv:
 
         # Add extra state that evaluate_expr() depends on.
         suppress_guards_tls = ShapeEnv._suppress_guards_tls()
-        return self._inner_evaluate_expr(
+        if fallback_value is None:
+            return self._cached_evaluate_expr(
+                orig_expr,
+                hint,
+                fx_node,
+                size_oblivious,
+                forcing_spec,
+                suppress_guards_tls,
+                allow_fallback=False,
+            )
+        return self._cached_evaluate_expr_or_fallback(
             orig_expr,
             hint,
             fx_node,
@@ -8810,7 +8847,77 @@ class ShapeEnv:
             fallback_value,
         )
 
+    # NOTE [evaluate_expr caching with fallback_value]
+    # guard_or_true/guard_or_false pass a fallback_value that evaluate_expr
+    # returns when it cannot decide the expression. That answer is an
+    # assumption: a guard or range refinement added later may decide the
+    # expression, so it must not be cached for good. Every other result is a
+    # decision that stays valid as the ShapeEnv learns more, whether it was
+    # derived from known facts or made true by a guard or runtime assert that
+    # evaluate_expr installed, so it can be cached for good.
+    #
+    # Two caches implement this:
+    #  - _cached_evaluate_expr (plain lru_cache) keeps decided results for the
+    #    life of the ShapeEnv. lru_cache stores every return value but never an
+    #    exception, so when _evaluate_expr reports that it could not decide (by
+    #    returning _USE_FALLBACK), this layer raises _FallbackTaken instead.
+    #  - _cached_evaluate_expr_or_fallback (_lru_cache, cleared whenever the
+    #    ShapeEnv version changes) is only used when fallback_value is set. It
+    #    catches _FallbackTaken and returns fallback_value, so an assumed answer
+    #    is only reused until the ShapeEnv learns something new.
+    @functools.partial(_lru_cache, maxsize=256)
+    def _cached_evaluate_expr_or_fallback(
+        self,
+        orig_expr: sympy.Basic,
+        hint: int | bool | float | None,
+        fx_node: torch.fx.Node | None,
+        size_oblivious: bool,
+        forcing_spec: bool,
+        _suppress_guards_tls: bool,
+        fallback_value: bool,
+    ) -> sympy.Basic:
+        try:
+            return self._cached_evaluate_expr(
+                orig_expr,
+                hint,
+                fx_node,
+                size_oblivious,
+                forcing_spec,
+                _suppress_guards_tls,
+                allow_fallback=True,
+            )
+        except _FallbackTaken:
+            self._log_suppressed_dde(orig_expr, fallback_value)
+            return fallback_value
+
     @lru_cache(256)
+    def _cached_evaluate_expr(
+        self,
+        orig_expr: sympy.Basic,
+        hint: int | bool | float | None,
+        fx_node: torch.fx.Node | None,
+        size_oblivious: bool,
+        forcing_spec: bool,
+        _suppress_guards_tls: bool,
+        *,
+        allow_fallback: bool,
+    ) -> sympy.Basic:
+        """Caches decided results only; see NOTE [evaluate_expr caching with
+        fallback_value].
+        """
+        result = self._inner_evaluate_expr(
+            orig_expr,
+            hint,
+            fx_node,
+            size_oblivious,
+            forcing_spec,
+            _suppress_guards_tls,
+            allow_fallback,
+        )
+        if isinstance(result, _UseFallback):
+            raise _FallbackTaken
+        return result
+
     @record_shapeenv_event(save_tracked_fakes=True, name="evaluate_expr")
     def _inner_evaluate_expr(
         self,
@@ -8820,15 +8927,15 @@ class ShapeEnv:
         size_oblivious: bool,
         forcing_spec: bool,
         _suppress_guards_tls: bool,
-        fallback_value: bool | None = None,
-    ) -> sympy.Basic:
+        allow_fallback: bool,
+    ) -> sympy.Basic | _UseFallback:
         try:
             return self._evaluate_expr(
                 orig_expr,
                 hint,
                 fx_node,
                 size_oblivious,
-                fallback_value,
+                allow_fallback,
                 forcing_spec=forcing_spec,
             )
         except Exception as e:
@@ -8845,6 +8952,8 @@ class ShapeEnv:
             raise
 
     def _log_suppressed_dde(self, a: SymBool, assumed_value: bool) -> None:
+        if not log.isEnabledFor(logging.INFO):
+            return
         sloc, extra = self._get_stack_summary(True)
         log.info(
             "could not evaluate %s due to data dependency, it was assumed to be %s with no runtime assertions %s %s",
@@ -8860,10 +8969,14 @@ class ShapeEnv:
         hint: bool | int | float | None = None,
         fx_node: torch.fx.Node | None = None,
         size_oblivious: bool = False,
-        fallback_value: bool | None = None,
+        allow_fallback: bool = False,
         *,
         forcing_spec: bool = False,
-    ) -> sympy.Basic:
+    ) -> sympy.Basic | _UseFallback:
+        """Returns _USE_FALLBACK when allow_fallback and the result is unknown.
+
+        See NOTE [evaluate_expr caching with fallback_value].
+        """
         # TODO: split conjunctions and evaluate them separately
         if isinstance(
             orig_expr,
@@ -8903,7 +9016,7 @@ class ShapeEnv:
         #   3. the guard should not be suppressed
         #   4. the guard doesn't contain backed symfloat symbols
         #      since z3 can't handle floats
-        #   5. fallback_value is none.
+        #   5. no fallback is allowed.
         # If all of the above check, we create an FX node representing the
         # actual expression to be guarded.
         node = None
@@ -8914,7 +9027,7 @@ class ShapeEnv:
             and not self._suppress_guards_tls()
             and not size_oblivious
             and not any(symbol_is_type(s, SymT.FLOAT) for s in orig_expr.free_symbols)
-            and fallback_value is None
+            and not allow_fallback
         ):
             # TODO: does this even worked with unbacked :think:
             concrete_val = compute_concrete_val()
@@ -8977,17 +9090,14 @@ class ShapeEnv:
             aggressive_level = (
                 torch.fx.experimental._config.aggressive_guard_free_semantics
             )
-            if hint is None and aggressive_level > 0 and fallback_value is not None:
+            if hint is None and aggressive_level > 0 and allow_fallback:
                 if aggressive_level >= AggressiveGuardFreeMode.SKIP_RANGE_ANALYSIS:
                     # Skip range analysis entirely
-                    self._log_suppressed_dde(orig_expr, fallback_value)
-                    return fallback_value
+                    return _USE_FALLBACK
                 else:
                     # Level 1: try range analysis first
-                    range_result = self._maybe_evaluate_range_only(expr, fallback_value)
-                    if range_result is fallback_value:
-                        self._log_suppressed_dde(orig_expr, fallback_value)
-                    return range_result
+                    range_result = self._maybe_evaluate_range_only(expr)
+                    return _USE_FALLBACK if range_result is None else range_result
 
             static_expr = self._maybe_evaluate_static(
                 expr, size_oblivious=size_oblivious
@@ -9025,10 +9135,9 @@ class ShapeEnv:
                 if not (new_expr.free_symbols <= self.backed_var_to_val.keys()):
                     ok = False
 
-                    # fallback_value is set when guard_or_true or guard_or_false are used.
-                    if not ok and fallback_value is not None:
-                        self._log_suppressed_dde(orig_expr, fallback_value)
-                        return fallback_value
+                    # allow_fallback is set when guard_or_true or guard_or_false are used.
+                    if not ok and allow_fallback:
+                        return _USE_FALLBACK
 
                     # real_tensor_prop_unbacked_vals is not None iff propagate_real_tensors is on.
                     # if propagate_real_tensors is on, we check the example values to generate (unsound_result)
@@ -9119,6 +9228,7 @@ class ShapeEnv:
                     )
                     self.guards.append(guard)
                     self.axioms.update(dict(self.get_implications(self.simplify(g))))
+                    self._update_version_counter()
             else:
                 self._log_guard("eval [guard suppressed]", g, forcing_spec=forcing_spec)
 

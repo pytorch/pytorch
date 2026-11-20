@@ -88,6 +88,31 @@ class CommonTemplate:
         x = torch.randn(1024 + 16, device=self.device)
         self.common(fn, (x,), check_lowp=False)
 
+    def test_assert_alignment_none(self):
+        from torch._C._dynamo.guards import assert_alignment
+
+        self.assertTrue(assert_alignment(None, 16))
+        with self.assertRaisesRegex(AssertionError, "alignment cannot be 0"):
+            assert_alignment(None, 0)
+
+    @config.patch(
+        fx_graph_cache=False,
+        implicit_fallbacks=True,
+        alignment_asserts=True,
+    )
+    def test_fallback_undefined_output(self):
+        def fn(*args):
+            q, qkv_weight, qkv_bias, proj_weight, proj_bias = (a + 1 for a in args)
+            return torch._native_multi_head_attention(
+                q, q, q, 6, 2, qkv_weight, qkv_bias, proj_weight, proj_bias, None, False
+            )
+
+        mk = lambda *s: torch.randn(*s, device=self.device)  # noqa: E731
+        args = (mk(1, 3, 6), mk(18, 6), mk(18), mk(6, 6), mk(6))
+        out, (code,) = run_and_get_code(torch.compile(fn), *args)
+        self.assertEqual(out, fn(*args))
+        FileCheck().check_count("assert_alignment(", 2, exactly=True).run(code)
+
     @config.patch(implicit_fallbacks=True)
     def test_no_align_for_custom_op(self):
         def slice1d(x):
