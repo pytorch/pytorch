@@ -17,7 +17,7 @@ Tensor my_slice(
 
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def(
-      "my_slice(Tensor self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor");
+      "my_slice(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
