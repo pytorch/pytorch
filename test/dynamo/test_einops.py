@@ -11,6 +11,7 @@ from torch import nn
 from torch._dynamo.test_case import TestCase
 from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.testing._internal.common_utils import (
+    decorateIf,
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
@@ -216,6 +217,10 @@ print(normalize_gm(graph.print_readable(print_output=False)))
             else:
                 self.assertIn(einops_method, output)
 
+    @decorateIf(
+        unittest.skip("Required einops method is unavailable"),
+        lambda p: not HAS_EINOPS or not hasattr(einops, p["method"]),
+    )
     @parametrize(
         "method",
         ["reduce", "repeat", "pack", "unpack", "einsum", "rearrange"],
@@ -248,6 +253,10 @@ print(normalize_gm(graph.print_readable(print_output=False)))
             self.fail(method)
         self._run_in_subprocess(flag, method, einops_method, snippet)
 
+    @decorateIf(
+        unittest.skip("Required einops method is unavailable"),
+        lambda p: p["method"] in ("pack", "unpack") and not HAS_EINOPS_PACK,
+    )
     @parametrize(
         "method",
         ["rearrange", "pack", "unpack", "einsum"],

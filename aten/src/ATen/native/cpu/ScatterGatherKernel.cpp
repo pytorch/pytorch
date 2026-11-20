@@ -908,7 +908,6 @@ std::pair<K*, V*> radix_sort_parallel(
 
 template <typename scalar_t, ReductionType reduce>
 void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, const Tensor& src, bool include_self) {
-  const int64_t* index_data = index.const_data_ptr<int64_t>();
   scalar_t* self_data = self.data_ptr<scalar_t>();
   const scalar_t* src_data = src.const_data_ptr<scalar_t>();
 
@@ -922,16 +921,19 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
   auto values = std::make_unique<int64_t[]>(nnz);
   auto keys_tmp = std::make_unique<int64_t[]>(nnz);
   auto values_tmp = std::make_unique<int64_t[]>(nnz);
-  at::parallel_for(0, nnz, 1, [&](int64_t begin, int64_t end) {
-    for (const auto i : c10::irange(begin, end)) {
-      int64_t index = index_data[i];
-      TORCH_CHECK(index >= 0 && index < index_upper_bound,
-                  "index ", index,
-                  " is out of bounds for dimension ", 0,
-                  " with size ", index_upper_bound);
-      keys[i] = index;
-      values[i] = i;
-    }
+  AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "scatter_expanded_index_keys", [&] {
+    const index_t* index_data = index.const_data_ptr<index_t>();
+    at::parallel_for(0, nnz, 1, [&](int64_t begin, int64_t end) {
+      for (const auto i : c10::irange(begin, end)) {
+        int64_t index = index_data[i];
+        TORCH_CHECK(index >= 0 && index < index_upper_bound,
+                    "index ", index,
+                    " is out of bounds for dimension ", 0,
+                    " with size ", index_upper_bound);
+        keys[i] = index;
+        values[i] = i;
+      }
+    });
   });
 
   int64_t* sorted_col_index_keys = nullptr;
@@ -1046,10 +1048,9 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
   });
 }
 
-template <typename scalar_t>
-void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& _index, const Tensor& self) {
-  Tensor index = _index.to(ScalarType::Long);
-  const int64_t* index_data = index.const_data_ptr<int64_t>();
+template <typename scalar_t, typename index_t>
+void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& index, const Tensor& self) {
+  const index_t* index_data = index.const_data_ptr<index_t>();
   scalar_t* result_data = result.data_ptr<scalar_t>();
   const scalar_t* self_data = self.const_data_ptr<scalar_t>();
 
@@ -1106,7 +1107,9 @@ void scatter_reduce_expanded_index_kernel(
 void gather_expanded_index_kernel(const Tensor& result, const Tensor& self, const Tensor& index) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
     ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "gather_expanded_index", [&] {
-      cpu_gather_expanded_index_kernel<scalar_t>(result, index, self);
+      AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "gather_expanded_index_index", [&] {
+        cpu_gather_expanded_index_kernel<scalar_t, index_t>(result, index, self);
+      });
   });
 }
 

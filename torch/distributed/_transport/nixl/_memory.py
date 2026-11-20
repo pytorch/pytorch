@@ -1,39 +1,18 @@
 from __future__ import annotations
 
-import builtins
-import operator
 from dataclasses import dataclass, replace
-from typing import Any, Literal, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, Literal, Self, TYPE_CHECKING
 
+from .._api import _slice_range, _subrange
 from .._serialization import _WireDescriptor
 
 
 if TYPE_CHECKING:
+    import builtins
+
     import torch
 
     from ._transport import NIXLTransport
-
-
-def _subrange(
-    size: int, offset: int | None, length: int | None, name: str = "registered memory"
-) -> tuple[int, int]:
-    offset = 0 if offset is None else operator.index(offset)
-    if offset < 0 or offset > size:
-        raise ValueError(f"offset is outside the {name}")
-    length = size - offset if length is None else operator.index(length)
-    if length < 0 or length > size - offset:
-        raise ValueError(f"range exceeds the {name}")
-    return offset, length
-
-
-def _slice_range(size: int, key: builtins.slice) -> tuple[int, int]:
-    if not isinstance(key, builtins.slice):
-        raise TypeError("expected a slice such as [a:b]")
-    start, stop, step = key.indices(size)
-    if step != 1:
-        raise ValueError("slice step must be 1")
-    return start, max(stop - start, 0)
 
 
 @dataclass(frozen=True)

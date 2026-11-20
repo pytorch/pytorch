@@ -112,11 +112,11 @@ Tensor mkldnn_linear(
   const ideep::tensor x = itensor_from_mkldnn(self_reshaped);
   // weight_t can be a mkldnn tensor or dense tensor.
   const Tensor weight = (weight_t.is_mkldnn() || weight_t.is_contiguous()) ? weight_t : weight_t.contiguous();
-  const ideep::tensor w = itensor_from_tensor(weight);
+  const ideep::tensor w = itensor_from_const_tensor(weight);
 
   ideep::tensor y;
   if (bias.defined()) {
-    const ideep::tensor b = itensor_from_tensor(bias);
+    const ideep::tensor b = itensor_from_const_tensor(bias);
     ideep::inner_product_forward::compute(x, w, b, y);
   } else {
     ideep::inner_product_forward::compute(x, w, y);
@@ -147,7 +147,7 @@ Tensor mkldnn_linear_backward_input(
   ideep::tensor& grady = itensor_from_mkldnn(grad_output_reshaped);
   // weight_t always dense tensor for training.
   const Tensor weight = weight_t.is_contiguous() ? weight_t : weight_t.contiguous();
-  const ideep::tensor w = itensor_view_from_dense(weight);
+  const ideep::tensor w = itensor_view_from_const_dense(weight);
 
   std::vector<int64_t> input_reshaped_size;
   input_reshaped_size.push_back(grad_output_reshaped.size(0));
@@ -214,13 +214,13 @@ Tensor mkldnn_linear_pointwise(
     std::string_view attr,
     c10::List<std::optional<at::Scalar>> scalars,
     std::optional<std::string_view> algorithm) {
-  auto aprop_kind = ideep::prop_kind::forward;
+  auto aprop_kind = dnnl::prop_kind::forward;
   bool maybe_backward = GradMode::is_enabled() &&
       (input_t.requires_grad() || weight_t.requires_grad() ||
        (bias_opt.has_value() && bias_opt->defined() &&
         bias_opt->requires_grad()));
   if (!maybe_backward) {
-    aprop_kind = ideep::prop_kind::forward_inference;
+    aprop_kind = dnnl::prop_kind::forward_inference;
   }
   auto input = input_t.contiguous();
   auto input_size = input.sizes();
@@ -251,13 +251,13 @@ Tensor mkldnn_linear_pointwise(
       at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  const ideep::tensor mkldnn_input = itensor_view_from_dense(input_reshaped);
+  const ideep::tensor mkldnn_input = itensor_view_from_const_dense(input_reshaped);
 
   std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
-    mkldnn_bias = itensor_from_tensor(bias);
+    mkldnn_bias = itensor_from_const_tensor(bias);
   }
-  const ideep::tensor w = itensor_from_tensor(weight_t);
+  const ideep::tensor w = itensor_from_const_tensor(weight_t);
 
   ideep::attr_t op_attr = ideep::attr_t();
   if (attr != "none") {
@@ -348,18 +348,18 @@ Tensor mkldnn_linear_pointwise_binary(
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   ideep::tensor mkldnn_output = itensor_from_tensor(output);
-  const ideep::tensor mkldnn_other = itensor_from_tensor(other_reshaped);
-  const ideep::tensor mkldnn_input = itensor_view_from_dense(input_reshaped);
+  const ideep::tensor mkldnn_other = itensor_from_const_tensor(other_reshaped);
+  const ideep::tensor mkldnn_input = itensor_view_from_const_dense(input_reshaped);
 
   std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
-    mkldnn_bias = itensor_from_tensor(bias);
+    mkldnn_bias = itensor_from_const_tensor(bias);
   }
-  const ideep::tensor w = itensor_from_tensor(weight_t);
+  const ideep::tensor w = itensor_from_const_tensor(weight_t);
 
   auto other_desc = mkldnn_other.get_desc();
   auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
-  auto aprop_kind = ideep::prop_kind::forward_inference;
+  auto aprop_kind = dnnl::prop_kind::forward_inference;
 
   if (use_mkldnn_bf32_linear() && input_t.scalar_type() == at::kFloat){
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
@@ -441,7 +441,7 @@ Tensor mkl_linear(
     const ideep::tensor& w = itensor_from_mkldnn(mkl_weight_t);
     auto in_ptr = self_.const_data_ptr<float>();
     auto weight_ptr = (float*)(w.get_data_handle());
-    auto out_ptr = output.data_ptr<float>();
+    auto out_ptr = output.mutable_data_ptr<float>();
     if (bias.defined()) {
       auto bias_ = bias.is_contiguous() ? bias : bias.contiguous();
       const auto bias_ptr = bias_.const_data_ptr<float>();
@@ -538,8 +538,8 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
        *out_dtype == ScalarType::Float8_e5m2)) {
     output_scale = scale_result.value().item<float>();
   }
-  auto src = at::native::itensor_view_from_dense(mat1_c);
-  auto weight_t = at::native::itensor_view_from_dense(mat2_c);
+  auto src = at::native::itensor_view_from_const_dense(mat1_c);
+  auto weight_t = at::native::itensor_view_from_const_dense(mat2_c);
   bool with_bias = bias.has_value();
   int64_t K = mat1_sizes[1], M = mat1_sizes[0],
           N = mat2_sizes[1];
@@ -552,30 +552,30 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
   auto src_desc = ideep::tensor::desc(
       src_dims,
       get_mkldnn_dtype(mat1.scalar_type()),
-      ideep::format_tag::any);
+      dnnl::memory::format_tag::any);
   auto weights_desc = ideep::tensor::desc(
       weight_dims,
       get_mkldnn_dtype(mat2.scalar_type()),
-      ideep::format_tag::any);
+      dnnl::memory::format_tag::any);
   auto dst_desc = ideep::tensor::desc(
       dst_dims,
       get_mkldnn_dtype(out.scalar_type()),
-      ideep::format_tag::any);
+      dnnl::memory::format_tag::any);
   ideep::tensor onednn_bias;
   if (with_bias) {
     auto bias_value = bias.value();
     if (bias_value.dim() == 1) {
       auto b_reshape = bias_value.reshape({1, bias_value.size(0)});
-      onednn_bias = at::native::itensor_view_from_dense(b_reshape);
+      onednn_bias = at::native::itensor_view_from_const_dense(b_reshape);
     } else {
-      onednn_bias = at::native::itensor_view_from_dense(bias_value);
+      onednn_bias = at::native::itensor_view_from_const_dense(bias_value);
     }
   }
   auto bias_desc = ideep::tensor::desc();
   if (with_bias) {
     bias_desc = ideep::tensor::desc(onednn_bias.get_dims(),
                         get_mkldnn_dtype(bias.value().scalar_type()),
-                        ideep::format_tag::any);
+                        dnnl::memory::format_tag::any);
   }
   auto op_attr = ideep::attr_t();
   if (input_scale != 1.0f) {
@@ -600,7 +600,7 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
 
   // Prepare args and execute primitive
   ideep::tensor scratchpad(primitive_desc.scratchpad_desc());
-  ideep::exec_args args;
+  std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, src});
   args.insert({DNNL_ARG_WEIGHTS, expected_weight});
   args.insert({DNNL_ARG_DST, dst});
@@ -608,9 +608,9 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
   if (with_bias) {
     args.insert({DNNL_ARG_BIAS, onednn_bias});
   }
-  ideep::tensor src_scales_t = ideep::tensor(ideep::scale_t(1, input_scale));
-  ideep::tensor wei_scales_t = ideep::tensor(ideep::scale_t(1, weight_scale));
-  ideep::tensor dst_scales_t = ideep::tensor(ideep::scale_t(1, output_scale));
+  ideep::tensor src_scales_t = ideep::tensor(std::vector<float>(1, input_scale));
+  ideep::tensor wei_scales_t = ideep::tensor(std::vector<float>(1, weight_scale));
+  ideep::tensor dst_scales_t = ideep::tensor(std::vector<float>(1, output_scale));
 
   if (input_scale != 1.0f) {
     args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_t});

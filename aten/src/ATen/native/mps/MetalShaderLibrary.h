@@ -30,6 +30,7 @@ typedef void* MTLBuffer_t;
 
 // Forward declaration of TensorBase and TensorIteratorBase
 namespace at {
+class Tensor;
 class TensorBase;
 struct TensorIteratorBase;
 } // namespace at
@@ -70,6 +71,7 @@ class MetalKernelFunction {
   void startEncoding();
   void setArg(unsigned idx, const at::TensorBase& t);
   void setArg(unsigned idx, const void* ptr, uint64_t size);
+  void setTensorListArg(unsigned idx, c10::ArrayRef<at::Tensor> tensors);
   void setErrorBufferIndex(unsigned idx);
   template <
       typename T,
@@ -195,11 +197,13 @@ class MetalShaderLibrary {
   // `alpha` is the scalar ternary ops such as addcmul carry next to their
   // three tensors; `scalar_arg_type` is the dtype it is narrowed to before
   // binding (defaults to the kernel's compute dtype).
+  // With `beta`, the scalars are packed as an {alpha, beta} pair.
   void exec_ternary_kernel(
       TensorIteratorBase& iter,
       const std::string& name,
       const std::optional<c10::Scalar> alpha = std::nullopt,
-      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
+      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt,
+      const std::optional<c10::Scalar> beta = std::nullopt);
 
   template <typename T>
   void exec_unary_kernel_with_params(

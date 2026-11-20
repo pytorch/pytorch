@@ -22,7 +22,7 @@ namespace {
 std::string maybeRevisedStaticDispatchTarget(const Node& node) {
   auto overloadName = selectScalarOverloadName(node);
 
-  if (!overloadName.empty() && !c10::ends_with(node.target(), overloadName)) {
+  if (!overloadName.empty() && !node.target().ends_with(overloadName)) {
     const std::string newTarget =
         std::string(node.target())
             .replace(
@@ -87,8 +87,7 @@ void register_kernel_handlers() {
         KernelFactoryHandler(
             [](const Node& node,
                const torch::nativert::ExecutorConfig& /* executorConfig */) {
-              return c10::starts_with(
-                  node.target(),
+              return node.target().starts_with(
                   "torch.ops.higher_order.executorch_call_delegate");
             },
             [](const Node& node,

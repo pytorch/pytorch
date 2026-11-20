@@ -1,6 +1,6 @@
 from collections.abc import Callable
-from typing import Any, overload, TypeAlias
-from typing_extensions import Never, ParamSpec, TypeIs, TypeVar
+from typing import Any, Never, overload, TypeAlias
+from typing_extensions import ParamSpec, TypeIs, TypeVar
 
 import torch
 from torch import Tensor
@@ -121,6 +121,17 @@ def register_force_test(
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
     """Will attempt to test these ops even if they err on "normal" inputs"""
     FORCE_TEST_LIST.append(op)
+    return register_complex(op, func_impl)
+
+
+REAL_TO_COMPLEX_OPS: set[OpOverload] = set()
+
+
+def register_real_to_complex(
+    op: OpOverload, func_impl: Callable[..., Any] | None = None
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
+    """Register a real-input op that constructs a ComplexTensor under WrapComplexMode."""
+    REAL_TO_COMPLEX_OPS.add(op)
     return register_complex(op, func_impl)
 
 
@@ -323,6 +334,10 @@ class WrapComplexMode(TorchDispatchMode):
             kwargs = {}
         args = tree_map(_as_complex_tensor, args)
         kwargs = tree_map(_as_complex_tensor, kwargs)
+        if func in REAL_TO_COMPLEX_OPS:
+            impl = lookup_complex(func, *args, **kwargs)
+            if impl is not None:
+                return tree_map(_as_complex_tensor, impl(*args, **kwargs))
         return tree_map(_as_complex_tensor, func(*args, **kwargs))
 
 

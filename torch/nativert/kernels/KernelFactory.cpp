@@ -128,21 +128,18 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
 
     if (PrimKernelRegistry()->Has(target)) {
       nodeKernels.push_back(PrimKernelRegistry()->Create(target, &node));
-    } else if (c10::starts_with(
-                   node.target(), "torch.ops.higher_order.call_torchbind")) {
+    } else if (node.target().starts_with(
+                   "torch.ops.higher_order.call_torchbind")) {
       nodeKernels.push_back(std::make_unique<CallTorchBindKernel>(&node));
-    } else if (c10::starts_with(
-                   node.target(),
+    } else if (node.target().starts_with(
                    "torch.ops.higher_order.triton_kernel_wrapper_functional")) {
       nodeKernels.push_back(
           std::make_unique<TritonKernel>(&node, pytorchStreamReader.get()));
     } else if (
-        c10::starts_with(
-            node.target(),
+        node.target().starts_with(
             "torch.ops.higher_order.auto_functionalized") ||
-        c10::starts_with( // TODO Remove this condition once the old
-                          // pt2 archives are expired.
-            node.target(),
+        node.target().starts_with( // TODO Remove this condition once the old
+                                   // pt2 archives are expired.
             "torch._higher_order_ops.auto_functionalize.auto_functionalized")) {
       nodeKernels.push_back(
           std::make_unique<UnsafeAutoFunctionalizeKernel>(&node));
@@ -167,7 +164,7 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
             std::end(kScalarBinaryOps),
             node.target()) != std::end(kScalarBinaryOps)) {
       nodeKernels.push_back(std::make_unique<ScalarBinaryOpKernel>(&node));
-    } else if (c10::starts_with(node.target(), "torch.ops.higher_order")) {
+    } else if (node.target().starts_with("torch.ops.higher_order")) {
       std::vector<std::unique_ptr<GraphExecutorBase>> graphExecutors;
       for (const auto& attr : node.attributes()) {
         if (std::holds_alternative<std::unique_ptr<Graph>>(attr.value)) {
@@ -200,7 +197,7 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
       }
       nodeKernels.push_back(std::make_unique<HigherOrderKernel>(
           &node, std::move(graphExecutors)));
-    } else if (c10::starts_with(node.target(), "torch.ops")) {
+    } else if (node.target().starts_with("torch.ops")) {
       nodeKernels.push_back(std::make_unique<C10Kernel>(&node));
 
       std::string opName = std::string(node.target());

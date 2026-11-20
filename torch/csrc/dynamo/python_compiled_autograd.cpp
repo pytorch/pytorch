@@ -320,14 +320,14 @@ static PyObject* convert_pyobj_list(std::vector<c10::SafePyObject>& inputs) {
 }
 
 static PyObject* check(PyObject* pyresult) {
-  if (C10_UNLIKELY(pyresult == nullptr)) {
+  if (pyresult == nullptr) [[unlikely]] {
     throw_python_error();
   }
   return pyresult;
 }
 
 static void check(bool result) {
-  if (C10_UNLIKELY(!result))
+  if (!result) [[unlikely]]
     check(nullptr);
 }
 

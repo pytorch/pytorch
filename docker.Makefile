@@ -33,6 +33,9 @@ BUILD_TYPE               ?= dev
 BUILD_PROGRESS           ?= auto
 # Intentionally left blank
 TRITON_VERSION           ?=
+# Changes on every invocation, so the Dockerfile step that resolves the torch
+# dependency versions always runs; it is cheap and must see the current index.
+RESOLVE_CACHE_BUST       ?= $(shell date -u +%Y%m%d%H%M%S)
 BUILD_ARGS                = --build-arg BASE_IMAGE=$(BASE_IMAGE) \
 							--build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
 							--build-arg CUDA_VERSION=$(CUDA_VERSION) \
@@ -40,6 +43,7 @@ BUILD_ARGS                = --build-arg BASE_IMAGE=$(BASE_IMAGE) \
 							--build-arg PYTORCH_VERSION=$(PYTORCH_VERSION) \
 							--build-arg INSTALL_CHANNEL=$(INSTALL_CHANNEL) \
 							--build-arg TRITON_VERSION=$(TRITON_VERSION) \
+							--build-arg RESOLVE_CACHE_BUST=$(RESOLVE_CACHE_BUST) \
 							--build-arg BUILD_TYPE=$(BUILD_TYPE) \
 							--build-arg CMAKE_VARS="$(CMAKE_VARS)"
 EXTRA_DOCKER_BUILD_FLAGS ?=
@@ -51,6 +55,12 @@ PUSH_FLAG                ?=
 USE_BUILDX               ?=
 BUILD_PLATFORMS          ?=
 WITH_PUSH                ?= false
+# BuildKit registry cache (buildx only), e.g. ghcr.io/pytorch/pytorch-nightly:buildcache-x.
+# Lets a builder with an empty local cache reuse the layers an earlier build
+# produced, with the same digests, so the unchanged layers of a nightly image
+# are not pushed, or pulled by users, again. Read on every build; written only
+# when pushing, and a failure to write never fails the build.
+CACHE_REF                ?=
 # Setup buildx flags
 ifneq ("$(USE_BUILDX)","")
 BUILD                     = buildx build
@@ -60,6 +70,12 @@ endif
 # Only set platforms flags if using buildx
 ifeq ("$(WITH_PUSH)","true")
 PUSH_FLAG                 = --push
+endif
+ifneq ("$(CACHE_REF)","")
+EXTRA_DOCKER_BUILD_FLAGS += --cache-from=type=registry,ref=$(CACHE_REF)
+ifeq ("$(WITH_PUSH)","true")
+EXTRA_DOCKER_BUILD_FLAGS += --cache-to=type=registry,ref=$(CACHE_REF),mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
+endif
 endif
 endif
 

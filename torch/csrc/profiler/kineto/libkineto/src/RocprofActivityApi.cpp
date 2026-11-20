@@ -125,20 +125,40 @@ int RocprofActivityApi::processActivities(
 
   d->mergeThreadBuffers();
 
+  std::vector<rocprofBase*> rows;
+  std::vector<std::pair<uint64_t, uint64_t>>
+      externalCorrelations[RocLogger::CorrelationDomain::size];
+  {
+    // Match mergeThreadBuffers' lock order. Detach the batch before invoking
+    // handlers so callbacks can safely append records that remain pending.
+    std::lock_guard<std::mutex> rowsLock(d->rowsMutex_);
+    std::lock_guard<std::mutex> correlationsLock(d->externalCorrelationsMutex_);
+    rows.swap(d->rows_);
+    d->processedRows_ += rows.size();
+    for (int it = RocLogger::CorrelationDomain::begin;
+         it < RocLogger::CorrelationDomain::end;
+         ++it) {
+      externalCorrelations[it].swap(d->externalCorrelations_[it]);
+    }
+  }
+
   // Process all external correlations pairs
   for (int it = RocLogger::CorrelationDomain::begin;
        it < RocLogger::CorrelationDomain::end;
        ++it) {
-    auto& externalCorrelations = d->externalCorrelations_[it];
-    for (auto& item : externalCorrelations) {
+    for (auto& item : externalCorrelations[it]) {
       correlationHandler(
           item.first,
           item.second,
           static_cast<RocLogger::CorrelationDomain>(it));
     }
-    std::lock_guard<std::mutex> lock(d->externalCorrelationsMutex_);
-    externalCorrelations.clear();
   }
+
+  // Classify runtime-internal fill/copy kernels (dispatched to implement
+  // hipMemset/hipMemcpy calls) as GPU memsets/memcpies using runtime rows in
+  // this batch. Classification and stream backfilling below build their maps
+  // per call; records in separate batches are not associated across calls.
+  detail::classifyRuntimeInternalDispatches(rows);
 
   // Async ops are in CLOCK_MONOTONIC rather than junk clock.
   // Convert these timestamps, poorly.
@@ -147,18 +167,17 @@ int RocprofActivityApi::processActivities(
   // much better job.
   auto toffset = getTimeOffset();
 
-  const bool logCopies = isLogged(ActivityType::GPU_MEMCPY);
-  const bool logKernels = isLogged(ActivityType::CONCURRENT_KERNEL);
-  if (logCopies || logKernels) {
-    detail::backfillAsyncStreams(
-        d->rows_, [logCopies, logKernels](const rocprofAsyncRow& async) {
-          return (logCopies && isAsyncCopy(async)) ||
-              (logKernels && isAsyncKernel(async));
-        });
+  if (isLogged(ActivityType::GPU_MEMCPY) ||
+      isLogged(ActivityType::GPU_MEMSET) ||
+      isLogged(ActivityType::CONCURRENT_KERNEL)) {
+    detail::backfillAsyncStreams(rows, [this](const rocprofAsyncRow& async) {
+      return (isAsyncCopy(async) || isAsyncKernel(async)) &&
+          detail::isAsyncRowLogged(async, activityMaskSnapshot_);
+    });
   }
 
   // All Runtime API Calls
-  for (auto& item : d->rows_) {
+  for (auto& item : rows) {
     bool filtered = false;
     if (item->type != ROCTRACER_ACTIVITY_ASYNC &&
         !isLogged(ActivityType::CUDA_RUNTIME)) {
@@ -171,8 +190,13 @@ int RocprofActivityApi::processActivities(
           break;
         case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
         default:
-          if (!isLogged(ActivityType::CONCURRENT_KERNEL))
+          if (item->type == ROCTRACER_ACTIVITY_ASYNC) {
+            filtered = !detail::isAsyncRowLogged(
+                *reinterpret_cast<rocprofAsyncRow*>(item),
+                activityMaskSnapshot_);
+          } else if (!isLogged(ActivityType::CONCURRENT_KERNEL)) {
             filtered = true;
+          }
           break;
       }
     }

@@ -8,6 +8,7 @@
  * Env:
  *   GH_TOKEN                  read token for gh
  *   TRIAGE_REPO               owner/repo the tools may read
+ *   TRIAGE_SOURCE_ISSUE       optional workflow-bound source excluded from search
  *   TRIAGE_REPLAY_ISSUE       optional issue number to show as it was before the
  *                             triage bot acted: open, with the labels and the
  *                             human comments from before its first label event
@@ -68,6 +69,7 @@ export default function (pi: ExtensionAPI) {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
     throw new Error("github-issue-tools: TRIAGE_REPO must be owner/repo");
   }
+  const sourceIssue = Number(process.env.TRIAGE_SOURCE_ISSUE ?? 0);
   const issueNumber = Type.Integer({ minimum: 1, description: `Issue number in ${repo}` });
 
   pi.registerTool({
@@ -120,16 +122,29 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "search_issues",
     label: "Search Issues",
-    description: `Search issues in ${repo} (GitHub search syntax, e.g. "flex attention backward is:open"). Returns up to 10 matches.`,
+    description: `Search issues only in ${repo} (e.g. "flex attention backward is:open"). Use separate calls instead of OR; repo/org/user qualifiers and grouping are not allowed. Returns up to 10 matches.`,
     parameters: Type.Object({ query: Type.String({ minLength: 1, maxLength: 256 }) }),
     async execute(_id, { query }, signal) {
+      const syntax = query.replace(/"(?:\\.|[^"\\])*"/g, " ");
+      if (/[\p{Cc}\p{Cf}]/u.test(query) || /\b(?:repo|org|user)\s*:/i.test(query)
+        || /["\\()]|\bOR\b/i.test(syntax)) {
+        throw new Error("search_issues: search only the workflow repository; omit repo/org/user qualifiers, grouping and OR, and use balanced quoted phrases");
+      }
       const result = (await ghApi(
         ["-X", "GET", "search/issues", "-f", `q=repo:${repo} is:issue ${query}`, "-f", "per_page=10"],
         signal,
       )) as any;
       return text(
-        // A replayed issue must not leak its own post-triage labels.
-        result.items.filter((item: any) => item.number !== replayIssue).map((item: any) => ({
+        // Query syntax can broaden the search; validate returned identities independently.
+        result.items.slice(0, 10).filter((item: any) => {
+          const number = item?.number;
+          const repositoryUrl = `https://api.github.com/repos/${repo}`.toLowerCase();
+          return Number.isSafeInteger(number) && number > 0 && number !== sourceIssue && number !== replayIssue
+            && !item.pull_request && typeof item.url === "string"
+            && item.url.toLowerCase() === `${repositoryUrl}/issues/${number}`
+            && (item.repository_url === undefined || item.repository_url?.toLowerCase() === repositoryUrl)
+            && (item.html_url === undefined || item.html_url?.toLowerCase() === `https://github.com/${repo}/issues/${number}`.toLowerCase());
+        }).map((item: any) => ({
           number: item.number,
           title: item.title,
           state: item.state,
