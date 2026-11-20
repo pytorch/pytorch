@@ -255,6 +255,32 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 dot_prod_attention, args1=args, contains=False, check_train=False
             )
 
+    def _test_sdpa_rewriter_11_broadcast_kv(self):
+        # Multi-query attention with batch > 1: expanding key and value over the
+        # heads copies them, and the pattern expects that copy
+        def dot_prod_attention(
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+        ) -> torch.Tensor:
+            """Input tensors assumed to have shape (batch_size, seq_len, n_head, embed_dim)"""
+            q = query.transpose(1, 2)
+            k = key.transpose(1, 2)
+            v = value.transpose(1, 2)
+            return (
+                torch.matmul(q, k.transpose(-2, -1))
+                .div(math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .matmul(v)
+            )
+
+        args = (
+            torch.randn((2, 16, 8, 64), device=self.device),
+            torch.randn((2, 16, 1, 64), device=self.device),
+            torch.randn((2, 16, 1, 64), device=self.device),
+        )
+        self._check_common(
+            dot_prod_attention, args1=args, contains=False, check_train=False
+        )
+
     def _test_insignificant_strides(self):
         f32 = torch.float32
 
@@ -2406,6 +2432,9 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_sdpa_rewriter_1_freezing = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_1_freezing
         )
+        test_sdpa_rewriter_1_broadcast_kv_gpu = (
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_1_broadcast_kv
+        )
         test_insignificant_strides = (
             TestSDPAPatternRewriterTemplate._test_insignificant_strides
         )
@@ -2463,6 +2492,9 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         )
         test_sdpa_rewriter_11_gpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_11
+        )
+        test_sdpa_rewriter_11_broadcast_kv_gpu = (
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_11_broadcast_kv
         )
         test_sdpa_rewriter_12_gpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_12
@@ -2637,6 +2669,9 @@ if RUN_CPU:
         )
         test_sdpa_rewriter_11_cpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_11
+        )
+        test_sdpa_rewriter_11_broadcast_kv_cpu = (
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_11_broadcast_kv
         )
         test_sdpa_rewriter_12_cpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_12

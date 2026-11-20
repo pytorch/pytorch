@@ -5407,9 +5407,16 @@ def _matmul_fold_broadcast_batch(
     from torch.fx.experimental.symbolic_shapes import guard_or_false
     from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-    if guard_or_false(tensor1.numel() == 0) or any(
-        is_traceable_wrapper_subclass(mb_unwrap_functional_tensor(t))
-        for t in (tensor1, tensor2)
+    # Unlike eager, keep the expand path when both inputs are 4-D: Inductor's attention
+    # patterns (fuse_attention.py) match it when key and value have one head that
+    # broadcasts over the heads of query (multi-query attention)
+    if (
+        tensor1.dim() == tensor2.dim() == 4
+        or guard_or_false(tensor1.numel() == 0)
+        or any(
+            is_traceable_wrapper_subclass(mb_unwrap_functional_tensor(t))
+            for t in (tensor1, tensor2)
+        )
     ):
         return None
     sizes1 = tensor1.shape

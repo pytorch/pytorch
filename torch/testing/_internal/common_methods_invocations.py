@@ -7861,7 +7861,8 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False
                   )
     # matmul folds these broadcast batch dims into bmm rows, while out= and tensor
     # subclasses expand them. Small integer values make both give the same result.
-    fold_cases = (((S, S, M, M), (S, 1, M, S)),
+    # The first one is 5-D because the decomposition does not fold 4-D x 4-D.
+    fold_cases = (((S, 2, 2, S, M), (S, 2, 1, M, S)),
                   ((S, S, 1, M), (S, M, S)))
 
     def make_int_arg(shape):
