@@ -1,4 +1,5 @@
 import collections
+import functools
 from collections.abc import Callable
 from typing import Any, Optional
 
@@ -747,8 +748,49 @@ _stream_fn_to_variable_cls: dict[object, type[StreamVariable]] = {
 }
 
 
+@functools.cache
+def _stream_variable_cls_for_interface(
+    stream_type: type, handle_attr: str | None, name: str
+) -> type[StreamVariable]:
+    """Derive a StreamVariable subclass for a device interface.
+
+    Keyed on (Stream, handle attr, name) rather than the interface object,
+    so re-registering with different attributes cannot serve a stale class.
+    """
+    attrs: dict[str, Any] = {"_cpython_type": stream_type}
+    if handle_attr is not None:
+        attrs["_device_handle_attr"] = handle_attr
+        attrs["tp_getset"] = {
+            handle_attr: GetSet(
+                StreamVariable._stream_device_handle_get, readonly_setter
+            )
+        }
+    return type(f"{name}StreamVariable", (StreamVariable,), attrs)
+
+
 def _get_stream_variable_cls(stream_fn: object) -> type[StreamVariable] | None:
-    return _stream_fn_to_variable_cls.get(stream_fn)
+    cls = _stream_fn_to_variable_cls.get(stream_fn)
+    if cls is not None:
+        return cls
+    # Generic upcast path: derive from the first interface owning this fn
+    # whose Stream is a proper torch.Stream subclass, so partial fills and
+    # torch.Stream aliases (MTIA) cannot shadow a capable match.
+    from ..device_interface import get_registered_device_interfaces
+
+    for _, di in get_registered_device_interfaces():
+        if getattr(di, "current_stream", None) is not stream_fn:
+            continue
+        stream_type = getattr(di, "Stream", None)
+        # Stricter than exposes_streams(): also skips torch.Stream aliases.
+        if (
+            isinstance(stream_type, type)
+            and stream_type is not torch.Stream
+            and issubclass(stream_type, torch.Stream)
+        ):
+            return _stream_variable_cls_for_interface(
+                stream_type, getattr(di, "stream_handle_attr", None), di.__name__
+            )
+    return None
 
 
 class EventVariable(VariableTracker):
