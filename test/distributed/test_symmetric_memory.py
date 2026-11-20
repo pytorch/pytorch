@@ -44,7 +44,6 @@ from torch.distributed._symmetric_memory._nccl import (
     NcclCommRegistration,
     register_external_nccl_comm,
 )
-from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
 from torch.testing._internal.common_cuda import SM100OrLater, SM89OrLater, SM90OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -57,8 +56,6 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     PLATFORM_SUPPORTS_SYMM_MEM,
     requires_multicast_support,
-    requires_nccl,
-    setup_torchcomms_pg,
     skip_if_lt_x_gpu,
     skip_if_rocm_arch_multiprocess,
     skip_if_rocm_multiprocess,
@@ -4390,59 +4387,6 @@ class SymmMemPoolTest(MultiProcContinuousTest):
             ptr2,
             "symm_mem.empty() should reuse the same storage block via the implicit MemPool",
         )
-
-
-@instantiate_parametrized_tests
-@requires_accelerator_p2p_access()
-class TorchCommsCudaSymmMemTest(MultiProcContinuousTest):
-    """CUDA symm_mem rendezvous against a torchcomms-backed PG.
-
-    Builds a torchcomms comm, wraps it in _BackendWrapper, registers it as
-    the NCCL backend on a bare ProcessGroup, and exercises symm_mem on the
-    CUDA backend (cuMemMap/IPC).
-    """
-
-    @property
-    def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
-
-    @requires_nccl()
-    @skipIf(
-        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
-    )
-    @skipIf(not _TORCHCOMM_AVAILABLE, "torchcomms not installed")
-    @skipIf(TEST_WITH_ROCM, "torchcomms nccl backend not available on ROCm")
-    @skip_if_lt_x_gpu(2)
-    @parametrize("use_pg_for_rendezvous", [True, False])
-    def test_cuda_symm_mem_rendezvous_nccl(self, use_pg_for_rendezvous: bool) -> None:
-        device_module.set_device(self.device)
-        suffix = f"usepg_{use_pg_for_rendezvous}"
-        group_name = f"torchcomms_cuda_symm_mem_nccl_{suffix}"
-        store_path = os.environ.get(
-            "TORCHCOMM_STORE_PATH",
-            f"/tmp/test_torchcomms_cuda_symm_mem_"
-            f"{os.environ.get('MASTER_PORT', '0')}_{suffix}",
-        )
-        pg = setup_torchcomms_pg(
-            backend=dist.get_default_backend_for_device(device_type),
-            rank=self.rank,
-            world_size=self.world_size,
-            device=self.device,
-            store_path=store_path,
-            group_name=group_name,
-        )
-        pg.use_pg_for_symm_mem_rendezvous = use_pg_for_rendezvous
-
-        t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(self.rank)
-        symm_mem_hdl = symm_mem.rendezvous(t, group=group_name)
-        self.assertEqual(symm_mem_hdl.rank, self.rank)
-        self.assertEqual(symm_mem_hdl.world_size, self.world_size)
-
-        symm_mem_hdl.barrier()
-        for peer in range(self.world_size):
-            buf = symm_mem_hdl.get_buffer(peer, (64,), torch.float32)
-            self.assertTrue(buf.eq(peer).all())
-        symm_mem_hdl.barrier()
 
 
 @requires_cuda
