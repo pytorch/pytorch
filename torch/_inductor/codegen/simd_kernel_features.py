@@ -241,7 +241,9 @@ class SIMDKernelFeatures:
     @cache_on_self
     def int32_index_conditions(self) -> list[sympy.Expr] | None:
         """Conditions under which int32 indexing is valid for this kernel, without
-        installing guards. Empty if int32 is always valid; None if it never is."""
+        installing guards. Empty if int32 is always valid; None if it never is or
+        the current size hints already exceed it (the default policy then uses
+        int64 without a guard)."""
         from .simd import SIMDScheduling
 
         if self.any_index_expr_overflows_int32():
@@ -256,6 +258,11 @@ class SIMDKernelFeatures:
             if sizevars.statically_known_true(size <= int_max):
                 continue
             if sizevars.statically_known_true(size > int_max):
+                return None
+            if (
+                sizevars.shape_env.has_guarding_hint(size)
+                and sizevars.guarding_hint_or_throw(size) > int_max
+            ):
                 return None
             unproven.append(size)
         # Drop sizes bounded by another one, e.g. a row count by the full numel.

@@ -13101,16 +13101,21 @@ class Scheduler:
                 V.graph.wrapper_code.codegen_cuda_mempool_exit()
 
             if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
-                from .codegen.multi_kernel import MultiKernelBase
+                from .codegen.multi_kernel import leaf_kernels
                 from .codegen.triton import TritonKernel
 
+                # Track, per stream, the nodes launched since the last PDL wait, so
+                # the next kernel knows whose writes it may have to wait for. A
+                # kernel with workspaces doesn't use PDL, so the chain restarts
+                # after it; any leaf of a multi-kernel can be the one launched.
                 waited = isinstance(kernel, TritonKernel) and kernel._pdl_has_wait
                 if self.previous_nodes is None or waited:
                     previous_nodes_by_stream[stream_key] = []
                 previous_nodes_by_stream[stream_key].append(node)
-                if isinstance(kernel, MultiKernelBase):
-                    kernel = kernel.leaf_kernels()[0]
-                if isinstance(kernel, TritonKernel) and kernel.args.workspace_args:
+                if any(
+                    isinstance(k, TritonKernel) and k.args.workspace_args
+                    for k in leaf_kernels(kernel)
+                ):
                     previous_nodes_by_stream.pop(stream_key, None)
             else:
                 previous_nodes_by_stream.pop(stream_key, None)

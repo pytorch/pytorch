@@ -4712,11 +4712,30 @@ class SIMDScheduling(BaseScheduling):
             # launch yet).
             and not V.graph.cpp_wrapper
             and not config.fx_wrapper
+            # TODO: support compile-time autotuning (needed with the cpp wrapper, where it
+            # is on by default): its block launches every captured kernel without
+            # checking the branch conditions.
+            and not config.triton.autotune_at_compile_time
         )
 
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
         """
-        Generate code for nodes in kernel_features
+        Generate code for one fused scheduler node. kernel_features holds its
+        SchedulerNodes in codegen order (node_schedule) and its sizes; every kernel
+        built below computes all of them, and one is launched. In three steps:
+
+        1. Build (_create_node_schedule_kernel): pick the tiling, create the kernel
+           codegen objects (one, or a multi-kernel wrapping several leaf kernels) and
+           generate each leaf's body into them. Nothing is rendered or written to the
+           wrapper, so this can run more than once; the dual index dtype path builds
+           an int32 and an int64 kernel and wraps them in a ConditionalMultiKernel.
+        2. Define (_define_node_schedule_kernels), on the leaf kernels from step 1:
+           merge their workspaces, then render each one's Triton source and write its
+           definition (`name = async_compile.triton(...)`) into the output module,
+           which sets its kernel_name. This runs once, after every leaf exists,
+           because the merged workspace size is part of each source.
+        3. Emit: allocate the nodes' output buffers in the wrapper (mark_run) and
+           write the launch of the kernel from step 1.
         """
         node_schedule = kernel_features.node_schedule
 
