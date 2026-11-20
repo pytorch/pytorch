@@ -353,15 +353,6 @@ unsafe fn getattr_shortcut(ty: *mut ffi::PyTypeObject) -> usize {
     which
 }
 
-/// Whether a type looks attributes up as `object` does, before any
-/// `__getattr__` it has.
-pub unsafe fn plain_getattribute(ty: *mut ffi::PyTypeObject) -> bool {
-    static NAME: OnceLock<PyObj> = OnceLock::new();
-    let name = NAME.get_or_init(|| PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__getattribute__".as_ptr())));
-    let object = std::ptr::addr_of_mut!(ffi::PyBaseObject_Type);
-    pyffi::_PyType_Lookup(ty, name.as_ptr()) == pyffi::_PyType_Lookup(object, name.as_ptr())
-}
-
 /// Whether a getattr shortcut applies to the instances of a type.
 pub unsafe fn has_getattr(ty: *mut ffi::PyTypeObject) -> bool {
     getattr_shortcut(ty) != 0

@@ -1231,12 +1231,20 @@ enum Taken {
 }
 
 /// What a path goes into in place of an instruction (see
-/// `Compiled::follow`): a call; a call of a method.
+/// `Compiled::follow`): a call; a call of a method; the function that the
+/// class of an object has for what the interpreter does with the object,
+/// the second value being the key of an item; the getter of a property,
+/// the `__get__` of a descriptor, or the `__getattr__` of the class, for
+/// an attribute of a name.
 enum Form<'a> {
     Call { callee: V, args: &'a [V], kwnames: u32 },
     Method { recv: V, name: u32, args: &'a [V], kwnames: u32 },
     /// A call that hands on a sequence with `*` and a dict with `**`.
     Spread { callee: V, args: V, kwargs: V },
+    Special(&'static PyObj, V, Option<V>),
+    Property(V, u32),
+    Descriptor(V, u32),
+    Getattr(V, u32),
 }
 
 impl Form<'_> {
@@ -1244,6 +1252,10 @@ impl Form<'_> {
         match self {
             Form::Call { .. } | Form::Spread { .. } => "a call",
             Form::Method { .. } => "a call of a method",
+            Form::Special(..) => "a function of a class",
+            Form::Property(..) => "a property",
+            Form::Descriptor(..) => "a descriptor",
+            Form::Getattr(..) => "a __getattr__",
         }
     }
 }
@@ -3641,6 +3653,20 @@ impl Compiled {
                         new_ref(pyffi::PyMethod_Self(held))
                     }
                     Part::Target => self.target(held).map_or(null_mut(), |(func, ..)| new_ref(func)),
+                    Part::Type => new_ref(ffi::Py_TYPE(held) as Obj),
+                    Part::OfType(name) => {
+                        let found = pyffi::_PyType_Lookup(ffi::Py_TYPE(held), name.as_ptr());
+                        ffi::Py_XINCREF(found);
+                        found
+                    }
+                    Part::Descriptor(name) => {
+                        let found = graph::data_descriptor(held, name.as_ptr());
+                        ffi::Py_XINCREF(found);
+                        found
+                    }
+                    Part::Getter if ffi::Py_TYPE(held) == std::ptr::addr_of_mut!(ffi::PyProperty_Type) => {
+                        ffi::PyObject_GetAttrString(held, c"fget".as_ptr())
+                    }
                     Part::Index(i) => {
                         let plain = ffi::PyTuple_CheckExact(held) != 0 || ffi::PyList_CheckExact(held) != 0;
                         let there = plain && ffi::PyObject_Size(held) > *i as isize;
@@ -4658,6 +4684,9 @@ impl Compiled {
                         let function = reg(own, *v);
                         !function.is_null() && self.follows(function) == Some(*compiled)
                     }
+                    Assert::Iterator(v) => !reg(own, *v).is_null() && ffi::PyIter_Check(reg(own, *v)) != 0,
+                    Assert::Count(v) => !reg(own, *v).is_null() && graph::is_count(reg(own, *v)),
+                    Assert::Absent(v, name) => graph::absent(reg(own, *v), name.as_ptr()),
                     Assert::Sequence(v, class, count) => {
                         let held = reg(own, *v);
                         !held.is_null()
@@ -5419,7 +5448,10 @@ impl Compiled {
 
     /// Takes down, in place of an instruction that enters a Python
     /// function, the instructions of that function (`follow`): a call, a
-    /// call of a method. None for
+    /// call of a method, and what the interpreter does through a function
+    /// of the class of an object (iterating over it, counting it, taking an
+    /// item of it, reading an attribute that is a property, a descriptor
+    /// of a class defined in Python, or left to `__getattr__`). None for
     /// any other instruction, which is then looked at as it was before.
     unsafe fn record_call(
         &self,
@@ -5431,12 +5463,37 @@ impl Compiled {
         api: &TcfgApi,
     ) -> Option<Taken> {
         let inst = &(&(*at.1).insts)[at.2];
+        let names = graph::specials();
+        let f = &self.func;
+        let special = |v: V, name: &PyObj| !graph::special(reg(regs, v), name).is_null();
         let form = match &inst.op {
-            Op::Call { callee, args, kwnames } => Form::Call { callee: *callee, args, kwnames: *kwnames },
+            Op::Call { callee, args, kwnames } => {
+                let held = reg(regs, *callee);
+                let plain = *kwnames == NONE && !held.is_null() && !capi::is_unboxed(held);
+                if plain && args.len() == 1 && graph::is_len(held) && special(args[0], &names.len) {
+                    Form::Special(&names.len, args[0], None)
+                } else if plain && graph::goes_over(held) && args.iter().any(|v| special(*v, &names.iter)) {
+                    return Some(self.record_over(t, site, at, *callee, args, regs, frames, api));
+                } else {
+                    Form::Call { callee: *callee, args, kwnames: *kwnames }
+                }
+            }
             Op::CallMethod { recv, name, args, kwnames } => {
                 Form::Method { recv: *recv, name: *name, args, kwnames: *kwnames }
             }
             Op::CallEx { callee, args, kwargs } => Form::Spread { callee: *callee, args: *args, kwargs: *kwargs },
+            Op::GetIter(v) if special(*v, &names.iter) => Form::Special(&names.iter, *v, None),
+            Op::GetItem(a, key) if special(*a, &names.getitem) => Form::Special(&names.getitem, *a, Some(*key)),
+            Op::LoadAttr(a, name) if !reg(regs, *a).is_null() && !self.quiet(regs, &inst.op, api) => {
+                let descr = graph::data_descriptor(reg(regs, *a), f.consts[*name as usize].as_ptr());
+                if descr.is_null() {
+                    Form::Getattr(*a, *name)
+                } else if ffi::Py_TYPE(descr) == std::ptr::addr_of_mut!(ffi::PyProperty_Type) {
+                    Form::Property(*a, *name)
+                } else {
+                    Form::Descriptor(*a, *name)
+                }
+            }
             _ => return None,
         };
         let (result, value) = match self.follow(t, site, at, regs, frames, api, &form) {
@@ -5445,6 +5502,34 @@ impl Compiled {
             Followed::Left(result, reason) => return Some(Taken::Cut(result, reason)),
             Followed::Returned(result, value) => (result, value),
         };
+        // What the interpreter asks of what such a function returns.
+        if let Form::Special(name, ..) = &form {
+            if std::ptr::eq(*name, &names.iter) {
+                if ffi::PyIter_Check(result) == 0 {
+                    set_error(
+                        ffi::PyExc_TypeError,
+                        format!("iter() returned non-iterator of type '{}'", pyffi::type_name(result)),
+                    );
+                    ffi::Py_DECREF(result);
+                    return Some(Taken::Raised);
+                }
+                t.check(Assert::Iterator(value), inst.bc);
+            } else if std::ptr::eq(*name, &names.len) {
+                if !graph::is_count(result) {
+                    let count = ffi::PyNumber_AsSsize_t(result, ffi::PyExc_OverflowError);
+                    ffi::Py_DECREF(result);
+                    if count < 0 {
+                        if ffi::PyErr_Occurred().is_null() {
+                            set_error(ffi::PyExc_ValueError, "__len__() should return >= 0".to_string());
+                        }
+                        return Some(Taken::Raised);
+                    }
+                    let reason = "a __len__ returns what is no count".to_string();
+                    return Some(Taken::Cut(ffi::PyLong_FromSsize_t(count), reason));
+                }
+                t.check(Assert::Count(value), inst.bc);
+            }
+        }
         t.unmark();
         if inst.dst == NONE {
             capi::release(result);
@@ -5457,6 +5542,92 @@ impl Compiled {
             t.kill(*v);
         }
         Some(Taken::Went)
+    }
+
+    /// `record_call` for a builtin that goes over its arguments
+    /// (`enumerate`, `zip`, `iter`, `list`, `tuple`) where the class of one
+    /// has an `__iter__` in Python: the path goes into that function, and
+    /// the builtin gets the iterator it returned, which is the path's own.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn record_over(
+        &self,
+        t: &mut Trace,
+        site: &Arc<GraphSite>,
+        at: (usize, *const BlockCode, usize),
+        callee: V,
+        args: &[V],
+        regs: &mut [Obj],
+        frames: &mut Frames,
+        api: &TcfgApi,
+    ) -> Taken {
+        let inst = &(&(*at.1).insts)[at.2];
+        let names = graph::specials();
+        let builtin = reg(regs, callee);
+        let mut given: Vec<PyObj> = args.iter().map(|v| PyObj::from_borrowed(self.obj(regs, *v))).collect();
+        let mut values: Vec<PathValue> = vec![NONE; args.len()];
+        // The call as the interpreter makes it, on what the arguments are
+        // by now, for a path that cannot go on.
+        let call = |given: &[PyObj]| {
+            let objects: Vec<Obj> = given.iter().map(|o| o.as_ptr()).collect();
+            ffi::PyObject_Vectorcall(builtin, objects.as_ptr(), objects.len(), null_mut())
+        };
+        for (i, v) in args.iter().enumerate() {
+            if graph::special(reg(regs, *v), &names.iter).is_null() {
+                continue;
+            }
+            let form = Form::Special(&names.iter, *v, None);
+            let stopped = match self.follow(t, site, at, regs, frames, api, &form) {
+                Followed::Returned(iterator, value) if ffi::PyIter_Check(iterator) != 0 => {
+                    t.check(Assert::Iterator(value), inst.bc);
+                    given[i] = PyObj::from_owned(iterator);
+                    values[i] = value;
+                    continue;
+                }
+                // The builtin says what is wrong with it.
+                Followed::Returned(other, _) => {
+                    given[i] = PyObj::from_owned(other);
+                    "an __iter__ returns what is no iterator".to_string()
+                }
+                Followed::Raised => return Taken::Raised,
+                Followed::Left(result, _) if result.is_null() => return Taken::Raised,
+                Followed::Left(result, reason) => {
+                    given[i] = PyObj::from_owned(result);
+                    reason
+                }
+                Followed::Not if t.mark.is_none() || !t.outermost() => {
+                    return Taken::Ends(format!("{} goes over what enters Python code", pyffi::function_str(builtin)));
+                }
+                Followed::Not => "an __iter__ that is not gone into".to_string(),
+            };
+            return Taken::Cut(call(&given), stopped);
+        }
+        let objects: Vec<Obj> = given.iter().map(|o| o.as_ptr()).collect();
+        let Some(own) = graph::pure_call(builtin, &objects, |i| values[i] != NONE, api) else {
+            return Taken::Cut(call(&given), "a call that goes over what enters Python code".to_string());
+        };
+        let result = call(&given);
+        if result.is_null() {
+            return Taken::Raised;
+        }
+        let function = self.path_value(t, regs, callee);
+        for (i, v) in args.iter().enumerate() {
+            if values[i] == NONE {
+                values[i] = self.path_value(t, regs, *v);
+            }
+        }
+        let made = t.derive(Op::Call { callee: function, args: values, kwnames: NONE }, Kind::Pure, own, new_ref(result), inst.bc);
+        t.unmark();
+        if inst.dst == NONE {
+            capi::release(result);
+        } else {
+            capi::release(std::mem::replace(&mut regs[inst.dst as usize], result));
+            t.rename(inst.dst, made);
+        }
+        for v in &inst.kills {
+            capi::release(take(regs, *v));
+            t.kill(*v);
+        }
+        Taken::Went
     }
 
     /// Goes into the Python function that an instruction enters, if that
@@ -5480,6 +5651,7 @@ impl Compiled {
     ) -> Followed {
         let f = &self.func;
         let bc = (&(*at.1).insts)[at.2].bc;
+        let names = graph::specials();
         let not = |why: &str| {
             if graph::debug() {
                 eprintln!("torch.vm graph {}: {} is not gone into: {}", site.name, form.text(), why);
@@ -5491,7 +5663,7 @@ impl Compiled {
         }
         // What is called, what it comes down to, and what it is handed.
         let mut read: Vec<PyObj> = Vec::new();
-        let (mut called, receiver): (Obj, Obj);
+        let (mut called, mut receiver, mut descr): (Obj, Obj, Obj) = (null_mut(), null_mut(), null_mut());
         let mut items: Vec<Obj> = Vec::new();
         // The names of the values that are handed over under one, which
         // are the last of them.
@@ -5559,6 +5731,38 @@ impl Compiled {
                     }
                 }
                 func
+            }
+            Form::Special(name, v, key) => {
+                items.push(reg(regs, *v));
+                if let Some(key) = key {
+                    items.push(self.obj(regs, *key));
+                }
+                graph::special(items[0], name)
+            }
+            Form::Property(v, name) => {
+                descr = graph::data_descriptor(reg(regs, *v), f.consts[*name as usize].as_ptr());
+                let getter = ffi::PyObject_GetAttrString(descr, c"fget".as_ptr());
+                if getter.is_null() {
+                    ffi::PyErr_Clear();
+                    return Followed::Not;
+                }
+                read.push(PyObj::from_owned(getter));
+                items.push(reg(regs, *v));
+                getter
+            }
+            Form::Descriptor(v, name) => {
+                descr = graph::data_descriptor(reg(regs, *v), f.consts[*name as usize].as_ptr());
+                let held = reg(regs, *v);
+                items.extend([descr, held, ffi::Py_TYPE(held) as Obj]);
+                graph::special(descr, &names.get)
+            }
+            Form::Getattr(v, name) => {
+                let attr = f.consts[*name as usize].as_ptr();
+                if !graph::absent(reg(regs, *v), attr) {
+                    return Followed::Not;
+                }
+                items.extend([reg(regs, *v), attr]);
+                graph::special(items[0], &names.getattr)
             }
         };
         if func.is_null() || ffi::PyFunction_Check(func) == 0 {
@@ -5669,6 +5873,33 @@ impl Compiled {
                     }
                 }
                 function
+            }
+            Form::Special(name, v, key) => {
+                given.push(self.path_value(t, regs, *v));
+                if let Some(key) = key {
+                    given.push(self.path_value(t, regs, *key));
+                }
+                t.derive(Op::Part(Part::OfType((*name).clone()), given[0]), Kind::Read, false, new_ref(func), bc)
+            }
+            Form::Property(v, name) | Form::Descriptor(v, name) => {
+                let value = self.path_value(t, regs, *v);
+                let part = Part::Descriptor(f.consts[*name as usize].clone());
+                let found = t.derive(Op::Part(part, value), Kind::Read, false, new_ref(descr), bc);
+                if let Form::Property(..) = form {
+                    given.push(value);
+                    t.derive(Op::Part(Part::Getter, found), Kind::Read, false, new_ref(func), bc)
+                } else {
+                    let class = t.derive(Op::Part(Part::Type, value), Kind::Read, false, new_ref(items[2]), bc);
+                    given.extend([found, value, class]);
+                    t.derive(Op::Part(Part::OfType(names.get.clone()), found), Kind::Read, false, new_ref(func), bc)
+                }
+            }
+            Form::Getattr(v, name) => {
+                let value = self.path_value(t, regs, *v);
+                t.check(Assert::Absent(value, f.consts[*name as usize].clone()), bc);
+                let attr = t.derive(Op::Const(*name), Kind::Pure, false, new_ref(items[1]), bc);
+                given.extend([value, attr]);
+                t.derive(Op::Part(Part::OfType(names.getattr.clone()), value), Kind::Read, false, new_ref(func), bc)
             }
         };
         t.check(Assert::Enters(function, compiled), bc);

@@ -281,6 +281,12 @@ torch has a hook registered, so a model whose modules call each other is one
 graph. A call that the engine has inlined is part of the path like the other
 instructions of the function, and so is a function of torch that graphs do
 not start in.
+The same goes for what the interpreter calls for an object without a call
+being written: its `__iter__` where a `for` goes over it (an `nn.Sequential`
+or an `nn.ModuleList`, also through `enumerate`, `zip`, `list` and `tuple`),
+its `__len__`, its `__getitem__`, and where an attribute is read, the getter
+of a property, the `__get__` of a descriptor whose class is written in
+Python, or the `__getattr__` of the class for a name that is not there.
 
 ```python
 class Block(torch.nn.Module):
@@ -311,6 +317,21 @@ for _ in range(4):
     same = torch.equal(g(v), net(v))
 [(found["where"], found["ops"]) for found in torch.vm.regions(g) if "ops" in found]
 # [('Block.forward (block 0)[0]', 4), ('Net.forward (block 0)[0]', 9)]
+```
+
+```python
+model = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.ReLU(), torch.nn.Linear(8, 2))
+
+
+def infer(model, x):
+    return model(x)
+
+
+g = torch.vm(infer, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(min_ops=3)))
+for _ in range(4):
+    same = torch.equal(g(model, v), infer(model, v))
+[found["operators"] for found in torch.vm.regions(g) if found["where"].startswith("infer")]
+# [['aten::linear', 'aten::relu', 'aten::linear']]
 ```
 
 On every later call the path checks, in front of each function it went into,
@@ -344,10 +365,6 @@ A path does not go into every call. It ends in front of a call
 - whose arguments do not fit the function: the call raises the `TypeError`
   where the function has it;
 - that hands on `**kwargs` from a dict whose keys are no strs;
-- that the interpreter makes for an object without it being written: a
-  `for` over an object whose class has an `__iter__` in Python (an
-  `nn.Sequential`, an `nn.ModuleList`), its `len`, an item of it, a
-  property;
 - while a trace function is set (a debugger, coverage).
 
 A path starts and ends in one function. Where it would end inside a function
