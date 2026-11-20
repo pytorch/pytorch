@@ -1056,7 +1056,8 @@ def in_vm(model_iter_fn):
         def iterate(model, example_inputs, collect_outputs=True):
             return model_iter_fn(model, example_inputs, collect_outputs=collect_outputs)
 
-        passes = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs("inductor"))
+        graphs = (torch.vm.passes.Graphs(), torch.vm.passes.Inductor())
+        passes = (*torch.vm.DEFAULT_PASSES, *graphs)
         found = _IN_VM[key] = torch.vm(iterate, passes=passes)
     return found
 
@@ -1077,7 +1078,8 @@ class _VmForward:
         def call(*args, **kwargs):
             return forward(*args, **kwargs)
 
-        passes = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs("inductor"))
+        graphs = (torch.vm.passes.Graphs(), torch.vm.passes.Inductor())
+        passes = (*torch.vm.DEFAULT_PASSES, *graphs)
         self.compiled = torch.vm(call, passes=passes)
 
     def __call__(self, *args, **kwargs):
@@ -1095,24 +1097,26 @@ def _vm_of(fn, model):
 
 def settle_vm(fn, model, example_inputs, most=1000, seconds=600.0, calm=16, **kwargs):
     """Calls what ``in_vm`` returned until it has stopped compiling and
-    measuring: ``torch.vm`` compiles a region after some calls of it, and
-    then times the function and what it calls against the interpreter for a
-    while, one level of calls after the other: a training step, which goes
-    through an optimizer, takes some hundred calls where a model's forward
-    takes twenty. Over when ``calm`` calls in a row changed nothing; a call
-    that is slow is given fewer. ``kwargs`` are what the calls that will be
-    timed pass: an argument is part of what a region is compiled for. Returns
-    the number of calls that took, and the time of one of the calm ones (0 if
-    there was none)."""
+    measuring: ``torch.vm`` has a graph compiled once a call has shown it
+    the way through the function, and then times the function and what it
+    calls against the interpreter for a while, one level of calls after the
+    other: some thirty calls for the forward of a resnet, a hundred and more
+    for a model of many small functions and for a training step, which goes
+    through an optimizer as well. Over when ``calm`` calls in a row changed
+    nothing; a call that is slow is given fewer. ``kwargs`` are what the
+    calls that will be timed pass, so that the calls made here do what those
+    do. Returns the number of calls that took, and the time of one of the
+    calm ones (0 if there was none)."""
     quiet, before, start, calls = 0, None, time.perf_counter(), 0
     calm_start = start
     watched = _vm_of(fn, model)
     while calls < most:
         fn(model, example_inputs, **kwargs)
         calls += 1
-        regions = torch.vm.regions(watched)
-        now = (len(regions), sum(r.get("variants", 0) for r in regions))
-        if watched.stats()["measuring"] or now != before:
+        stats = watched.stats()
+        graphs = stats["graphs"]
+        now = (graphs["built"], graphs["exported"], graphs["given_up"])
+        if stats["measuring"] or now != before:
             synchronize()
             quiet, calm_start = 0, time.perf_counter()
         else:
@@ -2527,10 +2531,8 @@ class BenchmarkRunner:
                     )
 
                 force_max_multiplier = False
-                # torch.vm builds the weights of inference into its graphs,
-                # as freezing does.
                 if (
-                    (self.args.freezing or self.args.vm)
+                    self.args.freezing
                     and self.args.bfloat16
                     and torch._dynamo.utils.counters["inductor"]["binary_folding_conv"]
                     > 0
@@ -3060,8 +3062,9 @@ class BenchmarkRunner:
                 if self.args.vm and mode == "dynamo":
                     # Its compile time is spread over the calls it takes to
                     # settle, not all in the first one. They are made as the
-                    # timed ones will be: with another collect_outputs the
-                    # first timed call would compile its graph once more.
+                    # timed ones will be: with another collect_outputs a
+                    # training step also collects its results, and the time
+                    # of these calls is what the compile time is taken from.
                     settled["calls"], settled["steady"] = settle_vm(
                         fn,
                         model,
@@ -3217,12 +3220,17 @@ class BenchmarkRunner:
                 compilation_time = dynamo_latency - settled["steady"] * settled["calls"]
             if self.args.vm:
                 watched = _vm_of(optimized_model_iter_fn, model)
+                # A graph of a called function that a graph of a caller holds
+                # is listed as well, and is not one more.
                 found = [
-                    r for r in torch.vm.regions(watched) if r["state"] == "compiled"
+                    r
+                    for r in torch.vm.regions(watched)
+                    if r["state"] == "compiled" and "within" not in r
                 ]
                 print(
                     f"torch.vm: {sum(r['variants'] for r in found)} graphs of "
-                    f"{sum(r['ops'] for r in found)} operations after "
+                    f"{sum(r['ops'] for r in found)} operations "
+                    f"({sum(r['hits'] for r in found)} hits) after "
                     f"{settled['calls']} calls, "
                     f"demoted: {watched.stats()['demoted']}"
                 )
