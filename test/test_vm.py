@@ -6131,7 +6131,8 @@ class GraphTools:
 
     def noted(self, x):
         y = x.sin() * 2
-        self.log.append(1)
+        # A call that a path does not go through (and that gives 0).
+        self.log.append(1 + int(random.random()))
         return y.cos().tanh() + 1
 
     def picky(self, x, fail):
@@ -6274,7 +6275,7 @@ class GraphLogs(torch.nn.Module):
 
     def forward(self, x):
         y = self.inner(x)
-        GRAPH_TOOLS.log.append(1)
+        GRAPH_TOOLS.log.append(1 + int(random.random()))
         return y.tanh() * 2
 
 
@@ -6387,8 +6388,79 @@ class GraphRouted(torch.nn.Module):
                 x = x + out[back]
             out.append(x if self.kept[i] else [])
             if i == 4:
-                GRAPH_TOOLS.log.append(len(out))
+                GRAPH_TOOLS.log.append(len(out) + int(random.random()))
         return x
+
+
+class GraphHolder:
+    def __init__(self):
+        self.value = 0
+
+
+class GraphStores(torch.nn.Module):
+    """Stores of every kind between its operations, and reads behind them."""
+
+    def __init__(self):
+        super().__init__()
+        self.fc = torch.nn.Linear(4, 4)
+        self.register_buffer("grid", torch.zeros(4))
+        self.calls = 0
+        self.nx = self.ny = 0
+        self.seen = []
+        self.last = None
+        self.box = GraphHolder()
+
+    def forward(self, x, notes, other, fail=False):
+        y = (self.fc(x).sin() * 2).cos()
+        self.calls += 1
+        self.nx, self.ny = x.shape[0], x.shape[1]
+        self.grid = y.mean(0)
+        z = y.view(self.nx, self.ny) + self.grid
+        self.seen.append(self.calls)
+        self.seen.extend([self.nx, self.ny])
+        notes["calls"] = self.calls
+        notes["next"] = notes["calls"] + 1
+        self.box.value = self.calls
+        other.value += 10
+        self.seen[0] = -self.box.value
+        if fail:
+            raise ValueError("behind the stores")
+        self.last = z
+        self.calls += 1
+        return (z + 1).exp().tanh(), [z, self.last]
+
+    def state(self, notes, other):
+        seen, noted = list(self.seen), dict(notes)
+        kept = (self.calls, self.nx, self.ny, seen, noted, self.box.value, other.value)
+        return kept, self.grid.clone(), self.last
+
+
+class GraphGuarded(GraphStores):
+    """What it stores goes through a `__setattr__` of its own."""
+
+    def __setattr__(self, name, value):
+        if name == "calls":
+            value = value * 1
+        super().__setattr__(name, value)
+
+
+class GraphRebinds(torch.nn.Module):
+    """Stores that `nn.Module.__setattr__` does more for than keep them."""
+
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.ones(4))
+        self.act = torch.nn.Tanh()
+        self.count = 0
+
+    def forward(self, x, fresh, layer):
+        y = (x.sin() * self.weight).cos().tanh()
+        self.count += 1
+        if fresh is not None:
+            self.weight = fresh
+        if layer is not None:
+            self.act = layer
+        return self.act(y * self.weight).exp().sin()
 
 
 def graph_saves(x):
@@ -6404,6 +6476,58 @@ def graph_rated(x, rate):
 def graph_inner(x):
     y = (x.sin() + 1).cos().tanh().exp()
     return y * random.random()
+
+
+class GraphPair:
+    def __init__(self):
+        self.n = 0
+        self.items = [0]
+
+
+def graph_two_names(x, a, b):
+    y = (x.sin() * 2 + 1).cos()
+    a.n = 1
+    b.n = 2
+    b.items.append(a.n)
+    return (y + a.n).exp().tanh() * b.n, a.n
+
+
+def graph_two_lists(x, a, b):
+    y = (x.sin() * 2 + 1).cos()
+    a.items.append(y.shape[0])
+    return (y * 2).exp().tanh().sum(), len(b.items), b.items[-1], sum(b.items)
+
+
+def graph_through_dict(x, a, b):
+    y = (x.sin() * 2 + 1).cos()
+    a.__dict__["n"] = 7
+    return (y * 2).exp().tanh().sum(), b.n
+
+
+def graph_through_getattr(x, a, b):
+    y = (x.sin() * 2 + 1).cos()
+    a.n = 7
+    return (y * 2).exp().tanh().sum(), getattr(b, "n"), hasattr(b, "n")  # noqa: B009
+
+
+def graph_through_iterator(x, a, b):
+    y = (x.sin() * 2 + 1).cos()
+    over = iter(b.items)
+    a.items.append(5)
+    return (y * 2).exp().tanh().sum(), list(over)
+
+
+def graph_dict_of(x, entries, b):
+    y = (x.sin() * 2 + 1).cos()
+    entries["n"] = 7
+    return (y * 2).exp().tanh().sum(), b.n
+
+
+def graph_fills(x, fresh):
+    y = (x.sin() * 2 + 1).cos()
+    fresh.append(y.shape[0])
+    fresh[0] = 7
+    return (y * 2).exp().tanh().sum()
 
 
 def graph_remembers(x, w):
@@ -8143,9 +8267,10 @@ print(json.dumps(found))
                 self.assertEqual(gains[-1], gains[-2])
         GRAPH_TOOLS.k = 3.0
         self.assertEqual(model.calls, len(kinds))
-        # The operations in front of the stores and behind them are graphs.
+        # The stores are effects of the path: the operations in front of
+        # them and behind them are one graph.
         graphs = [g for g in self.graphs(compiled) if g["hits"]]
-        self.assertEqual(sorted(g["ops"] for g in graphs), [5, 5])
+        self.assertEqual(sorted(g["ops"] for g in graphs), [10])
 
     def test_a_list_that_holds_tensors_and_other_things_lands_in_order(self):
         def keep(gm, input_types):
@@ -8214,6 +8339,112 @@ print(json.dumps(found))
                 for name, value in expected.items():
                     what = f"{said} {name}"
                     self.assertEqual(state[name], value, msg=what, **tolerance)
+
+    # --- stores as effects of a path
+
+    def stores(self, make, passes, kinds):
+        """Calls a model that stores (``make``), compiled with ``passes``,
+        and a copy of it that is not: the results and what was stored
+        after every call, for each of ``kinds`` (False: a call like the
+        last; True: one that raises behind the stores; 5: another batch
+        size; "self": the holder it is handed is its own)."""
+        torch.manual_seed(0)
+        model = make().eval()
+        reference = copy.deepcopy(model)
+        compiled = torch.vm(model, passes=passes, fallback=False)
+        notes, holders = [{}, {}], [GraphHolder(), GraphHolder()]
+        with torch.no_grad():
+            for kind in kinds:
+                x = torch.randn(5 if kind == 5 else 3, 4)
+                found = []
+                mine = (compiled, model, notes[0], holders[0])
+                theirs = (reference, reference, notes[1], holders[1])
+                for fn, net, note, holder in (mine, theirs):
+                    other = net.box if kind == "self" else holder
+                    try:
+                        out, (first, second) = fn(x, note, other, kind is True)
+                        found.append((out, first, first is second, second is net.last))
+                    except ValueError as raised:
+                        found.append(str(raised))
+                    found.append(net.state(note, other))
+                self.assertEqual(found[0], found[2], atol=0, rtol=0, msg=str(kind))
+                self.assertEqual(found[1], found[3], atol=0, rtol=0, msg=str(kind))
+        return compiled
+
+    def test_stores_into_objects_are_effects_of_a_path(self):
+        def keep(gm, input_types):
+            return gm
+
+        # Hits, a call that raises behind the stores, another batch size (a
+        # miss), a holder that is the model's own (another path), and hits.
+        kinds = [False] * 8 + [True, False, True, 5, 5, False]
+        kinds += ["self", "self", False, False]
+        compiled = self.stores(GraphStores, (*DEFAULT, P.Graphs(), keep), kinds)
+        (graph,) = [g for g in self.graphs(compiled) if g["hits"]]
+        # The stores end no graph: the operations in front of them and
+        # behind them are one.
+        self.assertEqual((graph["ops"], graph["why"]), (10, "the function returns"))
+        self.assertGreaterEqual(graph["hits"], 10)
+        # A number that is new on every call is stored, not checked: the
+        # forms are those of the two batch sizes and the two holders.
+        self.assertLessEqual(graph["exports"], 4)
+        # With a compiler behind the graphs.
+        passes = (*DEFAULT, P.Graphs(), P.AOTAutograd())
+        compiled = self.stores(GraphStores, passes, kinds)
+        self.assertTrue(any(g["hits"] for g in self.graphs(compiled)))
+
+    def test_nothing_is_stored_for_a_graph_that_was_given_up(self):
+        def fails(tensor):
+            raise RuntimeError("what was made of the graph does not run")
+
+        def breaks(gm, input_types):
+            # The graph, with a call at its end that raises.
+            first = next(n for n in gm.graph.nodes if n.op == "placeholder")
+            last = next(n for n in gm.graph.nodes if n.op == "output")
+            with gm.graph.inserting_before(last):
+                gm.graph.call_function(fails, (first,))
+            gm.recompile()
+            return gm
+
+        compiled = self.stores(GraphStores, (*DEFAULT, P.Graphs(), breaks), [False] * 8)
+        (graph,) = [g for g in self.graphs(compiled) if g["ops"] == 10]
+        self.assertEqual(graph["hits"], 0)
+        self.assertIn("does not run", graph["reason"])
+
+    def test_a_store_that_runs_python_code_ends_the_path(self):
+        def keep(gm, input_types):
+            return gm
+
+        # A `__setattr__` of the class.
+        compiled = self.stores(GraphGuarded, (*DEFAULT, P.Graphs(), keep), [False] * 8)
+        graphs = [g for g in self.graphs(compiled) if g["hits"]]
+        self.assertTrue(graphs)
+        self.assertNotIn(10, [g["ops"] for g in graphs])
+        self.assertIn("stores into an object", [g["why"] for g in graphs])
+        # A parameter and a module that are assigned: `nn.Module` registers
+        # them, which the instructions do.
+        torch.manual_seed(0)
+        model = GraphRebinds().eval()
+        reference = copy.deepcopy(model)
+        compiled = torch.vm(model, passes=(*DEFAULT, P.Graphs(), keep), fallback=False)
+        x = torch.randn(3, 4)
+        fresh = [torch.nn.Parameter(torch.full((4,), 2.0)), torch.nn.Sigmoid()]
+        calls = [(None, None)] * 6 + [(fresh[0], None), (None, None)]
+        calls += [(None, fresh[1]), (None, None), (None, None)]
+        with torch.no_grad():
+            for weight, layer in calls:
+                got, expected = compiled(x, weight, layer), reference(x, weight, layer)
+                self.assertEqual(got, expected, atol=0, rtol=0)
+                self.assertEqual(model.count, reference.count)
+                self.assertEqual(model.weight, reference.weight, atol=0, rtol=0)
+                self.assertIs(type(model.act), type(reference.act))
+                self.assertEqual(list(model._parameters), ["weight"])
+                self.assertEqual(list(model._modules), ["act"])
+        self.assertIs(model.weight, fresh[0])
+        self.assertIs(model.act, fresh[1])
+        # The counter in front of them is a store of the path: a call that
+        # assigns neither is one graph.
+        self.assertIn(8, [g["ops"] for g in self.graphs(compiled) if g["hits"]])
 
     def test_a_write_to_what_autograd_saved_raises_as_in_eager(self):
         def keep(gm, input_types):
@@ -8359,6 +8590,99 @@ print(json.dumps(found))
             compiled(x, x)
         left = ["aten::equal gives a number read from a tensor"]
         self.assertEqual(self.left(compiled), left)
+
+    # --- what reads behind the stores and the writes of a path see
+
+    def against_eager(self, fn, schedule, passes, exact=True):
+        """Calls ``fn`` under torch.vm and in eager mode with what
+        ``schedule`` makes for each call (twice, alike), and compares what
+        they return and what they leave in what they were handed."""
+        listed = (*DEFAULT, P.Graphs(), *passes)
+        compiled = torch.vm(fn, passes=listed, fallback=False, demote=False)
+        tolerance = dict(atol=0, rtol=0) if exact else dict(rtol=1e-4, atol=1e-5)
+        for at, make in enumerate(schedule):
+            mine, theirs = make(), make()
+            outcomes = []
+            for call, args in ((compiled, mine), (fn, theirs)):
+                try:
+                    outcomes.append(call(*args))
+                except Exception as e:
+                    outcomes.append(type(e).__name__)
+            self.assertEqual(outcomes[0], outcomes[1], msg=f"call {at}", **tolerance)
+            left, wanted = self.left_in(mine), self.left_in(theirs)
+            self.assertEqual(left, wanted, msg=f"what call {at} left", **tolerance)
+        return compiled
+
+    def left_in(self, args):
+        said = []
+        for value in args:
+            if isinstance(value, torch.Tensor):
+                said.append(value.detach())
+            elif isinstance(value, GraphPair):
+                said.append((value.n, value.items))
+            elif isinstance(value, (list, dict)):
+                said.append(value)
+        return said
+
+    def test_a_read_behind_a_store_goes_past_it_only_where_that_is_checked(self):
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(4, 4)
+
+        def boxes(shared, borg=False):
+            def make():
+                a, b = GraphPair(), GraphPair()
+                if borg and shared:
+                    b.__dict__ = a.__dict__
+                return (x, a, a) if shared and not borg else (x, a, b)
+
+            return make
+
+        def with_dict(shared):
+            def make():
+                b = GraphPair()
+                return (x, b.__dict__ if shared else {"n": 0}, b)
+
+            return make
+
+        apart_then_one = [False] * 5 + [True, True, False, True]
+        cases = [
+            # Two stores under one name through two arguments, and a read
+            # through the first: the second store is the later one where
+            # the two are one object.
+            (graph_two_names, boxes, 8),
+            # A list under two names; an iterator over it.
+            (graph_two_lists, boxes, 8),
+            (graph_through_iterator, boxes, 8),
+            # The same attribute by other ways: the dict of the object,
+            # `getattr`, two objects that keep their attributes in one dict,
+            # a dict that is the one an object keeps them in.
+            (graph_through_dict, boxes, 8),
+            (graph_through_getattr, boxes, 8),
+            (graph_through_getattr, lambda shared: boxes(shared, borg=True), 8),
+            (graph_dict_of, with_dict, 8),
+        ]
+        for fn, make, ops in cases:
+            calls = [make(shared) for shared in apart_then_one]
+            compiled = self.against_eager(fn, calls, (keep,))
+            # The calls with two objects run the graph.
+            ran = [g for g in self.graphs(compiled) if g["hits"]]
+            self.assertEqual([g["ops"] for g in ran], [ops], msg=fn.__name__)
+            self.assertGreaterEqual(ran[0]["hits"], 4, msg=fn.__name__)
+
+    def test_stores_that_follow_from_one_another_are_exported_once(self):
+        exported = []
+
+        def keep(gm, input_types):
+            exported.append(1)
+            return gm
+
+        # An item of a list at a place that the path appended.
+        calls = [lambda: (torch.ones(3, 4), [])] * 12
+        compiled = self.against_eager(graph_fills, calls, (keep,))
+        (graph,) = self.graphs(compiled)
+        self.assertEqual((len(exported), graph["exports"], graph["hits"]), (1, 1, 10))
 
     def test_why_a_graph_is_not_exported_is_said(self):
         def helper(gm):
