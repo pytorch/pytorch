@@ -85,7 +85,9 @@ def tma_ok(
 
 # --- INNER-TREE ORDER (opt-in) --- Unlike launch-shape orders, this fixes the DAG from N,
 # making it hash-pinnable, and covers every N to prevent silent fallback. It costs
-# 0.92-1.41x the rolled fold and requires per-N compilation. Its independent env var avoids
+# 0.92-1.41x the rolled fold and requires per-N compilation. Column layouts take the
+# general axis's decoded-gather tree ahead of coltile: x.sum(0) of fp32 (65536, 256) took
+# 68.4us against 17.2us (B200 CUDA graphs, L2-cold). Its independent env var avoids
 # affecting upstream kernels, which register first.
 _INNER_TREE_ENV = "PYTORCH_NATIVE_INNER_TREE"
 # Block size for both one-thread-per-row shapes and fixed multirow carry cap.
