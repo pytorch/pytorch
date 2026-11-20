@@ -3298,8 +3298,15 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
     ) -> VariableTracker | None:
         if args:
-            if len(args) != 2 or not check_unspec_or_constant_args([obj, *args], {}):
+            if len(args) != 2:
                 return None
+            if not all(v.is_python_constant() for v in (obj, *args)):
+                unimplemented(
+                    gb_type="type() with non-constant class arguments",
+                    context=f"type({obj}, {args[0]}, {args[1]})",
+                    explanation="Dynamo can only reconstruct classes created from constant arguments.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             name, bases, namespace = [v.as_python_constant() for v in (obj, *args)]
             # Avoid running user hooks, or copying mutable namespace values.
             if (
@@ -3310,7 +3317,12 @@ class BuiltinVariable(TypeVariable):
                     ConstantVariable.is_base_literal(v) for v in namespace.values()
                 )
             ):
-                return None
+                unimplemented(
+                    gb_type="type() with unsupported class arguments",
+                    context=f"type({name!r}, {bases!r}, {namespace!r})",
+                    explanation="Dynamo only reconstructs plain classes with literal namespaces.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
             namespace = namespace.copy()
             if "__module__" not in namespace and "__name__" in tx.f_globals:
                 namespace["__module__"] = tx.f_globals["__name__"]
@@ -3324,8 +3336,8 @@ class BuiltinVariable(TypeVariable):
                 VariableTracker.build(tx, namespace.copy()),
             ]
             result = variables.user_defined.NewClassVariable(cls, constructor_args)
-            return tx.output.side_effects.track_object_existing(
-                cls, result, mutation_type_cls=AttributeMutationNew
+            return tx.output.side_effects.track_mutable(
+                cls, result, AttributeMutationNew
             )
 
         try:
@@ -4079,6 +4091,7 @@ class SetAttrBuiltinVariable(BuiltinVariable):
                 variables.ExceptionVariable,
                 variables.TracebackVariable,
                 variables.DequeVariable,
+                variables.user_defined.NewClassVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
@@ -4104,19 +4117,6 @@ class SetAttrBuiltinVariable(BuiltinVariable):
             and name_var.is_python_constant()
         ):
             name = name_var.as_python_constant()
-            if isinstance(obj, variables.user_defined.NewClassVariable):
-                if not isinstance(name, str):
-                    raise_type_error(
-                        tx, f"attribute name must be string, not '{type(name).__name__}'"
-                    )
-                meta_attr = obj.lookup_metaclass_attr(name)
-                if name != "__doc__" and meta_attr is not NO_SUCH_SUBOBJ:
-                    unimplemented(
-                        gb_type="Unsupported attribute write on a new class",
-                        context=f"setattr({obj}, {name}, {val})",
-                        explanation="Dynamo does not model this metaclass attribute setter.",
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
             if obj.is_tensor():
                 from .builder import wrap_fx_proxy
 

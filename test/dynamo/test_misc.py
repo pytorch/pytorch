@@ -253,19 +253,78 @@ class MiscTests(torch._inductor.test_case.TestCase):
             cls = type("A", (), {})
             cls.answer = 42
             cls.__doc__ = "updated"
-            return x + cls.answer, cls.__doc__, cls
+            cls.__name__ = "B"
+            return x + cls.answer, cls.__doc__, cls.__name__, cls
 
         cnt = CompileCounter()
         compiled = torch.compile(fn, backend=cnt, fullgraph=True)
         x = torch.ones(2)
         first = compiled(x)
         second = compiled(x)
-        self.assertEqual(first[:2], fn(x)[:2])
-        self.assertEqual(second[:2], first[:2])
-        self.assertEqual(first[2].answer, 42)
-        self.assertEqual(first[2].__doc__, "updated")
-        self.assertIsNot(first[2], second[2])
+        self.assertEqual(first[:3], fn(x)[:3])
+        self.assertEqual(second[:3], first[:3])
+        self.assertEqual(first[3].answer, 42)
+        self.assertEqual(first[3].__doc__, "updated")
+        self.assertEqual(first[3].__name__, "B")
+        self.assertIsNot(first[3], second[3])
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_new_class_observed_errors(self):
+        def invalid_name_type(x):
+            type(1, (), {})
+            return x
+
+        def invalid_name_encoding(x):
+            type("\ud800", (), {})
+            return x
+
+        x = torch.ones(2)
+        for fn, error in (
+            (invalid_name_type, TypeError),
+            (invalid_name_encoding, UnicodeEncodeError),
+        ):
+            with self.assertRaises(error):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        def invalid_attr(x):
+            cls = type("A", (), {})
+            setattr(cls, 1, 2)
+            return x
+
+        with self.assertRaises(TypeError):
+            torch.compile(invalid_attr, backend="eager", fullgraph=True)(x)
+
+    def test_new_class_rejected_inputs(self):
+        class Base:
+            pass
+
+        def non_object_base(x):
+            return x, type("A", (Base,), {})
+
+        def non_literal_namespace(x):
+            return type("A", (), {"value": x})
+
+        x = torch.ones(2)
+        for fn in (non_object_base, non_literal_namespace):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "type\\(\\) with"
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_new_class_unsafe_uses_graph_break(self):
+        def read_dict(x):
+            cls = type("A", (), {})
+            cls.answer = 42
+            return x + int("answer" in cls.__dict__)
+
+        def instantiate(x):
+            cls = type("A", (), {})
+            cls.answer = 42
+            return x + cls().answer
+
+        x = torch.ones(2)
+        for fn in (read_dict, instantiate):
+            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
     def test_new_class_attribute_list_alias(self):
         def fn(x):
@@ -304,6 +363,20 @@ class MiscTests(torch._inductor.test_case.TestCase):
             self.assertEqual(result, expected)
             self.assertEqual(cls.__doc__, eager_cls.__doc__)
             self.assertEqual(cls.items, eager_cls.items)
+
+    def test_existing_class_doc_mutation_graph_break(self):
+        class Existing:
+            pass
+
+        def fn(x):
+            Existing.__doc__ = "updated"
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x, Existing.__doc__
+
+        result, doc = torch.compile(fn, backend="eager")(torch.ones(2))
+        self.assertEqual(result, torch.full((2,), 2.0))
+        self.assertEqual(doc, "updated")
 
     def test_existing_class_descriptor_owner_mutation(self):
         class Descriptor:

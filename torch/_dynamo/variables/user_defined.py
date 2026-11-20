@@ -758,7 +758,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # type.__doc__ reads the class dictionary, including deferred writes.
         if (
             metacls is type
-            and name == "__doc__"
+            and name
+            in {
+                "__doc__",
+                "__module__",
+                "__name__",
+                "__qualname__",
+            }
             and tx.output.side_effects.has_pending_mutation_of_attr(self, name)
         ):
             return tx.output.side_effects.load_attr(self, name)
@@ -2272,6 +2278,63 @@ class NewClassVariable(UserDefinedClassVariable):
     ) -> None:
         super().__init__(value, **kwargs)
         self.constructor_args = constructor_args
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="Instantiating a class created in the same frame",
+            context=str(self.value),
+            explanation="Dynamo cannot preserve the identity of this class and its instances.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__setattr__" and len(args) == 2 and not kwargs:
+            name_var, value = args
+            if not name_var.is_python_constant() or not isinstance(
+                attr_name := name_var.as_python_constant(), str
+            ):
+                raise_type_error(tx, "attribute name must be string")
+            meta_attr = self.lookup_metaclass_attr(attr_name)
+            if (
+                meta_attr is not NO_SUCH_SUBOBJ
+                and is_data_descriptor(meta_attr)
+                and (
+                    attr_name
+                    not in {"__doc__", "__module__", "__name__", "__qualname__"}
+                )
+            ):
+                unimplemented(
+                    gb_type="Unsupported attribute write on a new class",
+                    context=f"setattr({self}, {attr_name}, {value})",
+                    explanation="Dynamo does not model this metaclass attribute setter.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            tx.output.side_effects.store_attr(self, attr_name, value)
+            return variables.ConstantVariable.create(None)
+        return super().call_method(tx, name, args, kwargs)
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name in {"__base__", "__bases__", "__dict__", "__mro__"}:
+            unimplemented(
+                gb_type="Introspection on a class created in the same frame",
+                context=f"{self.value}.{name}",
+                explanation="Dynamo cannot safely materialize this class metadata.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return super().tp_getattro_impl(tx, name)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen.load_import_from("builtins", "type"))
