@@ -16,8 +16,8 @@ permissions:
   actions: read
 
 jobs:
-  # Job ids prefix the child job names, so DISABLED/UNSTABLE job issues must be titled
-  # "scheduled-rocm-mi300 / <job id>[ / test (<config>)]". A title that includes the
+  # Job ids prefix the child job names, so DISABLED/UNSTABLE job issues match titles
+  # like "scheduled-rocm-mi300 / <job id>[ / test (<config>)]". A title that includes the
   # build environment, as HUD proposes, is ignored by filter_test_configs.py.
   default:
     if: github.repository_owner == 'pytorch'
