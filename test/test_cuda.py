@@ -83,6 +83,7 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     gcIfJetson,
     get_cycles_per_ms,
+    getRocmVersion,
     instantiate_parametrized_tests,
     IS_ARM64,
     IS_FBCODE,
@@ -871,6 +872,16 @@ print(t.is_pinned())
         self.assertGreaterEqual(
             props.shared_memory_per_block_optin, props.shared_memory_per_block
         )
+
+    def test_cuda_xcc_count(self):
+        reported = TEST_WITH_ROCM and getRocmVersion() >= (7, 0)
+        for device in range(torch.cuda.device_count()):
+            xcc_count = torch.cuda.get_device_properties(device).xcc_count
+            if not reported:
+                self.assertIsNone(xcc_count)
+            else:
+                self.assertIsInstance(xcc_count, int)
+                self.assertGreaterEqual(xcc_count, 1)
 
     @unittest.skipIf(
         IS_JETSON, "oom reporting has issues on jetson igx due to partial nvml support"
@@ -5212,8 +5223,10 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
         results_filename = torch.cuda.tunable.get_filename()
         max_duration = torch.cuda.tunable.get_max_tuning_duration()
         max_iterations = torch.cuda.tunable.get_max_tuning_iterations()
-        try:
-            with tempfile.TemporaryDirectory() as results_dir:
+        with tempfile.TemporaryDirectory() as results_dir:
+            # Restore TunableOp state before results_dir is removed, so the
+            # results file is closed (Windows cannot delete an open file).
+            try:
                 torch.cuda.tunable.set_filename(
                     os.path.join(results_dir, "tunableop_results.csv")
                 )
@@ -5239,12 +5252,12 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
                 graph.replay()
                 stream.synchronize()
                 self.assertEqual(captured, expected)
-        finally:
-            torch.cuda.tunable.set_max_tuning_iterations(max_iterations)
-            torch.cuda.tunable.set_max_tuning_duration(max_duration)
-            torch.cuda.tunable.tuning_enable(was_tuning)
-            torch.cuda.tunable.enable(was_enabled)
-            torch.cuda.tunable.set_filename(results_filename)
+            finally:
+                torch.cuda.tunable.set_max_tuning_iterations(max_iterations)
+                torch.cuda.tunable.set_max_tuning_duration(max_duration)
+                torch.cuda.tunable.tuning_enable(was_tuning)
+                torch.cuda.tunable.enable(was_enabled)
+                torch.cuda.tunable.set_filename(results_filename)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -10540,6 +10553,30 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
             self.assertEqual(
                 torch.cuda.host_memory_stats()["num_host_free"], num_host_free + 1
             )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_free_during_global_capture_on_other_thread(self, use_cuda_host_register):
+        # Another thread's empty_cache() frees a block while this thread
+        # captures in global mode, which forbids unsafe calls on every thread.
+        # The free runs in relaxed mode, so it neither fails nor invalidates
+        # the capture.
+        x = torch.zeros(1, device="cuda")
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            # So that data is a new block, allocated in this mode.
+            torch.cuda.synchronize()
+            torch._C._host_emptyCache()
+            data = torch.empty(1024, pin_memory=True)
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g, capture_error_mode="global"):
+                x.add_(1)
+                del data
+                with ThreadPoolExecutor(1) as executor:
+                    executor.submit(torch._C._host_emptyCache).result()
+            g.replay()
+            self.assertEqual(x.item(), 1)
 
     def test_unpinned_memory_use(self):
         # Copying between CPU and CUDA tensors during graph capture

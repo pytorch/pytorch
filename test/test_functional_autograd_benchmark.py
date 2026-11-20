@@ -96,7 +96,7 @@ class TestFunctionalAutogradBenchmarkSlow(_FunctionalAutogradBenchmarkHarness, T
             self._test_runner(task, -1)
 
 
-instantiate_device_type_tests(TestFunctionalAutogradBenchmark, globals())
+instantiate_device_type_tests(TestFunctionalAutogradBenchmark, globals(), allow_xpu=True, allow_mps=True)
 
 if __name__ == "__main__":
     run_tests()
