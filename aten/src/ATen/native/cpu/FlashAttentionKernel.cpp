@@ -341,6 +341,30 @@ inline void pad_remain_row_col_zero(
 
 }
 
+// Reorder buffers for the packed path, reused across calls: allocating them per
+// call faults their pages in again every time. Keyed to the calling thread; the
+// parallel_for workers only write through the pointer they are handed.
+struct PackedScratch {
+  at::Tensor key_reorder;
+  at::Tensor value_reorder;
+  at::Tensor query_padding;
+  at::Tensor transpose;
+};
+
+inline PackedScratch& packed_scratch() {
+  static thread_local PackedScratch scratch;
+  return scratch;
+}
+
+// Grow-only. Callers index these by hand, so a flat allocation is enough.
+template <typename scalar_t>
+inline scalar_t* reserve_scratch(at::Tensor& buf, int64_t numel) {
+  constexpr auto dtype = c10::CppTypeToScalarType<scalar_t>::value;
+  if (!buf.defined() || buf.numel() < numel || buf.scalar_type() != dtype) {
+    buf = at::empty({numel}, dtype);
+  }
+  return buf.data_ptr<scalar_t>();
+}
 
 template <typename scalar_t, typename mask_t, int64_t q_split_size, int64_t kv_split_size, bool with_pack=false>
 void cpu_flash_attention(
@@ -428,8 +452,10 @@ void cpu_flash_attention(
   const auto dtype = query.scalar_type();
   const auto accumulate_dtype = toOpMathType(dtype);
 
-  // Whether pack is needed
+  // Whether pack is needed. at::vec::pack_vnni2 is AVX512-only, and this kernel
+  // can still be dispatched from a non-AVX512 build, so guard the whole block.
   bool need_pack = false;
+#if defined(CPU_CAPABILITY_AVX512)
   if (with_pack) {
     // BFloat16 requires larger size as the fallback implementation
     // mkl_gemm_bf16bf16f32 is faster than mkl_gemm_f16f16f32
@@ -445,11 +471,6 @@ void cpu_flash_attention(
       need_pack = gemm_size_per_thread / pack_size >= (dtype == at::ScalarType::BFloat16 ? 4 : 1);
     }
   }
-#if !defined(CPU_CAPABILITY_AVX512)
-  // at::vec::pack_vnni2 only has an AVX512 implementation, and this copy of the
-  // kernel can still be dispatched on AVX512 hardware (ATEN_CPU_CAPABILITY, or a
-  // build without AVX512 kernels). Drop to the unpacked gemm path.
-  need_pack = false;
 #endif
 
   // Pad is needed for packing when K is not even
@@ -489,33 +510,23 @@ void cpu_flash_attention(
   scalar_t* value_reorder_ptr = nullptr;
   scalar_t* query_padding_ptr = nullptr;
   int64_t kv_padding_size = (kvSize - 1) / kvSplitSize * ekvSplitSize + ekvTail;
-  at::Tensor key_t_reorder;
-  at::Tensor value_t_reorder;
-  at::Tensor qeury_t_padding;
+  PackedScratch& scratch = packed_scratch();
   if (need_pack) {
-    key_t_reorder = at::empty(
-      {batchSize, kv_num_head, eheadSize, kvSize},
-      c10::CppTypeToScalarType<scalar_t>::value);
-    value_t_reorder = at::empty(
-      {batchSize, kv_num_head, kv_padding_size, headSize},
-      c10::CppTypeToScalarType<scalar_t>::value);
-    key_reorder_ptr = key_t_reorder.data_ptr<scalar_t>();
-    value_reorder_ptr = value_t_reorder.data_ptr<scalar_t>();
+    key_reorder_ptr = reserve_scratch<scalar_t>(
+      scratch.key_reorder, batchSize * kv_num_head * eheadSize * kvSize);
+    value_reorder_ptr = reserve_scratch<scalar_t>(
+      scratch.value_reorder, batchSize * kv_num_head * kv_padding_size * headSize);
   }
 
   if (!headSize_even && need_pack) {
-    qeury_t_padding = at::empty(
-      {num_thread, qSplitSize, eheadSize},
-      c10::CppTypeToScalarType<scalar_t>::value);
-    query_padding_ptr = qeury_t_padding.data_ptr<scalar_t>();
+    query_padding_ptr = reserve_scratch<scalar_t>(
+      scratch.query_padding, num_thread * qSplitSize * eheadSize);
   }
 
   // Reorder K, V
   if (need_pack) {
-    at::Tensor tranpose_t_reorder = at::empty(
-      {num_thread, kvSplitSize, headSize},
-      c10::CppTypeToScalarType<scalar_t>::value);
-    scalar_t* transpose_buffer_ptr = tranpose_t_reorder.data_ptr<scalar_t>();
+    scalar_t* transpose_buffer_ptr = reserve_scratch<scalar_t>(
+      scratch.transpose, num_thread * kvSplitSize * headSize);
     at::parallel_for(0, batchSize * kv_num_head * kvSlice, 1, [&](int64_t begin, int64_t end) {
         int ompIdx = at::get_thread_num();
         int64_t i = 0, kv_j = 0, l = 0, n = 0;
@@ -1173,11 +1184,9 @@ void flash_attention_kernel_impl(
 
   // When q_seq_len and k_seq_len are long enough,
   // cpu_flash_attention with pack has better performance.
-  // BFloat16 also takes this path on avx512 without AMX: could_pack() is false
-  // there, but the brgemm ukernel is available and still wants VNNI-packed B.
+  // can_use_brgemm(kBFloat16) already covers AMX hosts, so one check suffices.
   bool use_brgemm = ((query.scalar_type() == kHalf && cpublas::could_pack(kHalf)) ||
-                     (query.scalar_type() == kBFloat16 &&
-                      (cpublas::could_pack(kBFloat16) || cpublas::can_use_brgemm(kBFloat16))));
+                     (query.scalar_type() == kBFloat16 && cpublas::can_use_brgemm(kBFloat16)));
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, query.scalar_type(), "flash_attention", [&] {
     if (!attn_mask.has_value()) {
