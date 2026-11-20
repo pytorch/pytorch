@@ -201,7 +201,7 @@ class _RowReduction:
         # There are no inner-tree callables, so calls decline while a variable that
         # orders them on the JIT route is set: cutedsl_impl's adapter also orders sum
         # and prod under PYTORCH_SUM_INNER_TREE.
-        self._order_envs = (_INNER_TREE_ENV,)
+        self._order_envs: tuple[str, ...] = (_INNER_TREE_ENV,)
         if trait in ("sum", "prod"):
             self._order_envs += (_SUM_INNER_TREE_ENV,)
 
