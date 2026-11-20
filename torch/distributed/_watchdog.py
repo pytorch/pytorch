@@ -225,7 +225,7 @@ class _Watchdog:
     def stream_complete(
         self, callback: Callable[[], None], event: object | None = None
     ) -> _CancelHandle:
-        if torch.cuda.is_current_stream_capturing():
+        if torch.backends.cuda.is_built() and torch.cuda.is_current_stream_capturing():
             return self._skip_captured()
         self._drain_del_queue()
         handle = _CancelHandle()
@@ -248,7 +248,7 @@ class _Watchdog:
             callback = _default_timeout_callback
         if isinstance(timeout, timedelta):
             timeout = timeout.total_seconds()
-        if torch.cuda.is_current_stream_capturing():
+        if torch.backends.cuda.is_built() and torch.cuda.is_current_stream_capturing():
             return self._skip_captured()
         self._drain_del_queue()
         handle = _CancelHandle()
