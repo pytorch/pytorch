@@ -69,6 +69,53 @@ void visitXpuDeviceMetadata(
   visitor.visit(
       DevicePropertyFields::kDriverVersion,
       device.get_info<sycl::info::device::driver_version>());
+
+  // CUDA-named aliases, only where the meaning matches: an SM is an Xe-core
+  // (maxComputeUnits counts EUs). warpSize and maxThreadsPerMultiprocessor
+  // depend on the kernel's sub-group size and GRF mode, so they are omitted.
+  const auto localMemSize = static_cast<uint64_t>(
+      device.get_info<sycl::info::device::local_mem_size>());
+  visitor.visit(
+      DevicePropertyFields::kMaxThreadsPerBlock,
+      static_cast<int64_t>(
+          device.get_info<sycl::info::device::max_work_group_size>()));
+  visitor.visit(DevicePropertyFields::kSharedMemPerBlock, localMemSize);
+  visitor.visit(DevicePropertyFields::kSharedMemPerBlockOptin, localMemSize);
+
+  const auto sizes = device.get_info<sycl::info::device::sub_group_sizes>();
+  visitor.visit(
+      DevicePropertyFields::kSubGroupSizes,
+      std::vector<int64_t>(sizes.begin(), sizes.end()));
+
+  namespace intel_info = sycl::ext::intel::info::device;
+  if (device.has(sycl::aspect::ext_intel_gpu_eu_count_per_subslice)) {
+    const auto eusPerXeCore =
+        device.get_info<intel_info::gpu_eu_count_per_subslice>();
+    visitor.visit(
+        DevicePropertyFields::kEusPerXeCore,
+        static_cast<uint64_t>(eusPerXeCore));
+    // Same formula as torch.xpu's gpu_subslice_count.
+    if (device.has(sycl::aspect::ext_intel_gpu_eu_count) && eusPerXeCore > 0) {
+      const auto numXeCores =
+          device.get_info<intel_info::gpu_eu_count>() / eusPerXeCore;
+      visitor.visit(
+          DevicePropertyFields::kNumXeCores, static_cast<uint64_t>(numXeCores));
+      visitor.visit(
+          DevicePropertyFields::kNumSms, static_cast<int64_t>(numXeCores));
+    }
+  }
+  if (device.has(sycl::aspect::ext_intel_gpu_hw_threads_per_eu)) {
+    visitor.visit(
+        DevicePropertyFields::kHwThreadsPerEu,
+        static_cast<uint64_t>(
+            device.get_info<intel_info::gpu_hw_threads_per_eu>()));
+  }
+  if (device.has(sycl::aspect::ext_intel_gpu_eu_simd_width)) {
+    visitor.visit(
+        DevicePropertyFields::kSimdWidth,
+        static_cast<uint64_t>(
+            device.get_info<intel_info::gpu_eu_simd_width>()));
+  }
 }
 
 } // namespace

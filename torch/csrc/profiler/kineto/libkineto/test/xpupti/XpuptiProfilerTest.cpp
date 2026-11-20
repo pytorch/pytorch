@@ -154,6 +154,30 @@ TEST(XpuptiProfilerTest, DevicePropertiesJsonPreservesLegacyFields) {
   }
 }
 
+TEST(XpuptiProfilerTest, DevicePropertiesJsonHasOccupancyLimits) {
+  const auto devices =
+      nlohmann::json::parse("[" + KN::getXpuDeviceProperties() + "]");
+  ASSERT_FALSE(devices.empty());
+
+  for (const auto& device : devices) {
+    EXPECT_EQ(device.at("maxThreadsPerBlock"), device.at("maxWorkGroupSize"));
+    EXPECT_EQ(device.at("sharedMemPerBlock"), device.at("localMemSize"));
+    EXPECT_EQ(device.at("sharedMemPerBlockOptin"), device.at("localMemSize"));
+    EXPECT_FALSE(device.at("subGroupSizes").empty());
+    EXPECT_FALSE(device.contains("warpSize"));
+    EXPECT_FALSE(device.contains("maxThreadsPerMultiprocessor"));
+
+    // The topology fields come from Intel extension aspects; check them where
+    // the device reports them. numSms counts Xe-cores, not EUs.
+    if (device.contains("numXeCores")) {
+      EXPECT_EQ(device.at("numSms"), device.at("numXeCores"));
+      EXPECT_LT(
+          device.at("numSms").get<uint64_t>(),
+          device.at("maxComputeUnits").get<uint64_t>());
+    }
+  }
+}
+
 TEST(XpuptiProfilerTest, XpuDriverEvents) {
   KN::Config cfg;
 

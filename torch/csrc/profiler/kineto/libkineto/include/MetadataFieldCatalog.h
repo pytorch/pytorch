@@ -105,6 +105,12 @@ inline constexpr MetadataField<uint64_t> kMaxMemAllocSize{"maxMemAllocSize"};
 inline constexpr MetadataField<uint64_t> kLocalMemSize{"localMemSize"};
 inline constexpr MetadataField<std::string> kVendor{"vendor"};
 inline constexpr MetadataField<std::string> kDriverVersion{"driverVersion"};
+inline constexpr MetadataField<uint64_t> kNumXeCores{"numXeCores"};
+inline constexpr MetadataField<uint64_t> kEusPerXeCore{"eusPerXeCore"};
+inline constexpr MetadataField<uint64_t> kHwThreadsPerEu{"hwThreadsPerEu"};
+inline constexpr MetadataField<uint64_t> kSimdWidth{"simdWidth"};
+inline constexpr MetadataField<std::vector<int64_t>> kSubGroupSizes{
+    "subGroupSizes"};
 } // namespace libkineto::DevicePropertyMetadataFields
 
 namespace libkineto::CudaMetadataFields {
