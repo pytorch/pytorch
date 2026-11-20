@@ -13,13 +13,16 @@ permissions:
 
 jobs:
   default:
+    if: github.repository_owner == 'pytorch'
     uses: ./.github/workflows/rocm-mi300.yml
     secrets: inherit
 
   distributed:
+    if: github.repository_owner == 'pytorch'
     uses: ./.github/workflows/periodic-rocm-mi300.yml
     secrets: inherit
 
   inductor:
+    if: github.repository_owner == 'pytorch'
     uses: ./.github/workflows/inductor-rocm-mi300.yml
     secrets: inherit
