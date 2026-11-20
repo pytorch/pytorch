@@ -47,6 +47,23 @@ class TestKernelColTile(TestCase):
         )
         self.assertEqual(out, x.sum(dim=0), atol=1e-2, rtol=1e-2)
 
+    def test_plans_key_and_require_the_current_device(self):
+        trait = T.SumOps(acc=cutlass.Float32)
+        # A split over a thread-per-column width adds a "coltile2" stage-two plan.
+        x = torch.randn(4096, ct._C_THREAD_STAGE2 + 256, device="cuda")
+        before = set(ct._CACHE)
+        # One GPU has no other device, so pretend another one is current.
+        other = x.get_device() + 1
+        with mock.patch.object(torch.cuda, "current_device", return_value=other):
+            with self.assertRaisesRegex(AssertionError, "is current"):
+                ct.reduce_col_tile(trait, "bydevice", x, torch.float32)
+        self.assertEqual(set(ct._CACHE), before)
+        ct.reduce_col_tile(trait, "bydevice", x, torch.float32)
+        # Both keys put the index sixth; without it, the slot holds the "col" axis.
+        keys = {k[0]: k[5] for k in ct._CACHE if k[1] == "bydevice"}
+        index = x.get_device()
+        self.assertEqual(keys, {"coltile": index, "coltile2": index})
+
     def test_reduce_col_tile_split_reduced_axis(self):
         # Exercise a ragged reduced-axis split and stage-2 partial combination.
         x = torch.randn(4097, 256, device="cuda")
