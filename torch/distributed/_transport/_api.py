@@ -623,7 +623,7 @@ class Transport(ABC):
 
         Must not have side effects. Backends should reject here everything they
         can detect up front; failures only detectable at submit time fall under
-        the non-atomic batch contract in ``_submit_batch``.
+        the non-atomic batch contract in ``_transfer_batch``.
         """
 
     def _cuda_stream(self, stream: torch.cuda.Stream) -> _CudaStreamOrdering:
