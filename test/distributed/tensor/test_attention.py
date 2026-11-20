@@ -52,7 +52,6 @@ from torch.nn.attention.flex_attention import (
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -73,25 +72,20 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 c10d_functional = torch.ops.c10d_functional
+
+# Context parallel turns SDPA into ring attention by intercepting the fused
+# SDPA ops in DTensor dispatch, so the tests below only work with backends
+# that really dispatch to one of them. XPU advertises mem-efficient support
+# but has no such kernel: select_sdp_backend_xpu resolves EFFICIENT_ATTENTION
+# to math, which CP does not intercept, and the math decomposition then adds
+# its locally built causal mask to a DTensor.
 backends = []
 if PLATFORM_SUPPORTS_FLASH_ATTENTION:
     backends.append(SDPBackend.FLASH_ATTENTION)
-if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
+if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION and not TEST_XPU:
     backends.append(SDPBackend.EFFICIENT_ATTENTION)
 if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
     backends.append(SDPBackend.CUDNN_ATTENTION)
-
-# Context parallel turns SDPA into ring attention by intercepting the fused SDPA
-# ops in DTensor dispatch, so only a backend that really dispatches to one of
-# them is usable here. XPU advertises mem-efficient support but has no such
-# kernel: select_sdp_backend_xpu resolves EFFICIENT_ATTENTION to math, which CP
-# does not intercept, and the math decomposition then adds its locally built
-# causal mask to a DTensor.
-cp_backends = [
-    backend
-    for backend in backends
-    if not (TEST_XPU and backend == SDPBackend.EFFICIENT_ATTENTION)
-]
 
 rotater_enum_to_str = {
     _RotateMethod.ALL_GATHER: "allgather",
@@ -128,7 +122,7 @@ class RingAttentionTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(
-        not cp_backends,
+        not backends,
         "No fused attention backend that context parallel can intercept",
     )
     @with_comms
@@ -137,7 +131,7 @@ class RingAttentionTest(DTensorTestBase):
             {
                 "is_causal": [True, False],
                 "compiled": [True, False],
-                "backend": cp_backends,
+                "backend": backends,
                 "load_balance": [True, False],
                 "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
                 "test_forward_only": [True, False],
@@ -899,8 +893,8 @@ class TestSharding(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @with_comms
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
-        "Does not support flash nor efficient attention",
+        not backends,
+        "Does not support flash, efficient, nor cudnn attention",
     )
     def test_attention_shard_without_cp(self) -> None:
         """Test that sharding on sequence dimension without CP enabled is not supported."""
