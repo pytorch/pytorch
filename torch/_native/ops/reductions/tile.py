@@ -248,6 +248,7 @@ def fold_partials_run(
     acc = trait.init()
     n_full = rb // threads_per_block
     r = tidx
+    accs = ()
     if const_expr(nf == 1):
         group, step = const_expr(_PARTIAL_GROUP), const_expr(threads_per_block)
         accs = tuple(trait.init() for _ in range(_PARTIAL_ACCS))
