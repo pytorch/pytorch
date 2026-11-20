@@ -1088,6 +1088,8 @@ code = 'CODEOWNERS_GENERATED'
 include_patterns = [
     'CODEOWNERS',
     'OWNERSHIP.yaml',
+    '.github/label_to_label.yml',
+    'tools/linter/adapters/pytorch_labels.json',
     'scripts/codeowners/generate_codeowners.py',
 ]
 command = [
