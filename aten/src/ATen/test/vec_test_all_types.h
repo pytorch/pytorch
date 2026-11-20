@@ -563,11 +563,7 @@ filter_mult_overflow(T& val1, T& val2) {
         // product fits. This only ever shrinks |val1|, as tests filter it
         // against several values.
         T c = std::abs((std::numeric_limits<T>::max() - 1) / val2);
-        if (val1 > c) {
-            val1 = c;
-        } else if (val1 < -c) {
-            val1 = -c;
-        }
+        val1 = std::clamp<T>(val1, -c, c);
     }  // is_zero
 }
 
