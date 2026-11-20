@@ -7,6 +7,7 @@
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/Copy.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/Resize.h>
@@ -503,6 +504,16 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
       TORCH_CHECK(canCast(common_dtype_, op.current_dtype),
                   "result type ", common_dtype_, " can't be cast to the "
                   "desired output type ", op.current_dtype);
+    }
+
+    // Shell dtypes (e.g. float4_e2m1fn_x2) have no value conversions. CPU rejects
+    // promoting to or from one when it creates the temporaries below through
+    // copy_; check it here so every device (and meta) rejects the same casts.
+    if (config.promote_inputs_to_common_dtype_ && !op.is_output && op.current_dtype != common_dtype_) {
+      at::native::check_shell_dtype_cast(op.current_dtype, common_dtype_);
+    }
+    if (config.cast_common_dtype_to_outputs_ && op.is_output && op.current_dtype != common_dtype_) {
+      at::native::check_shell_dtype_cast(common_dtype_, op.current_dtype);
     }
 
     // Creates temporaries for CPU operations, if needed and requested
