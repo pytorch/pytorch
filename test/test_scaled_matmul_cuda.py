@@ -5415,7 +5415,7 @@ print("tunableop_keys_ok")
         if torch.version.hip:
             with self.assertRaisesRegex(
                 NotImplementedError,
-                r"NVFP4 block scaling on ROCm requires gfx1250/gfx1250-strict with ROCm 10\.0 and SWIZZLE_128",  # noqa: B950
+                r"NVFP4 block scaling on ROCm requires gfx1250/gfx1250-strict with ROCm 10\.0 and SWIZZLE_128",
             ):
                 _ = torch.nn.functional.scaled_mm(
                     x,
