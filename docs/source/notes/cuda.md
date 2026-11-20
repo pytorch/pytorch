@@ -1059,8 +1059,8 @@ Creating a pool allocates nothing. While the pool is alive, emptying the host ca
 no graph keeps it, its cached pinned blocks are freed at once, by the deletion or by the reset
 of the last graph that keeps it. Deleting a HostMemPool frees them with the GIL released, since
 `cudaFreeHost` waits for the work already issued on the current device. Blocks that tensors,
-pending copies or other graphs still use, and the whole cache if a CUDA graph capture is
-underway at that point, are freed by a later {func}`torch.accelerator.empty_host_cache`.
+pending copies or other graphs still use are freed by a later
+{func}`torch.accelerator.empty_host_cache`.
 
 ### One pool per NUMA node
 

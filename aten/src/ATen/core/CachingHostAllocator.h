@@ -273,9 +273,8 @@ using c10::CachingDeviceAllocator::HostSegmentInfo;
  * Once a pool has no owner left (release_pool) and no thread is routed to it,
  * it becomes freeable: empty_cache() frees its cached blocks, and erases it
  * once it has no blocks. A host mem pool has its cached blocks freed and is
- * erased right away if it can be, like a device MemPool, unless a capture is
- * underway; blocks still in use or waiting for events, and the whole cache
- * during a capture, go at a later empty_cache().
+ * erased right away if it can be, like a device MemPool; blocks still in use
+ * or waiting for events go at a later empty_cache().
  *
  * In order to gather statistics about caching host allocator while minimally
  * impacting performance, we stage the stats before reporting them. Per-bucket
@@ -1176,14 +1175,13 @@ struct CachingHostAllocatorImpl {
 
   // Called under the exclusive instance_mutex_ once pp has no owner and no
   // thread route left. A graph pool waits for empty_cache(). A host mem pool
-  // has its cache moved into frees at once, unless a capture is underway:
-  // cudaFreeHost would invalidate it, so the pool waits for empty_cache() too.
+  // has its cache moved into frees at once, even during a capture, since
+  // free_block runs in relaxed capture mode.
   void make_freeable_under_lock(PrivatePool& pp, PendingHostFrees& frees) {
     auto id = pp.id;
     bool inserted = graph_pools_freeable_.insert({id, &pp}).second;
     TORCH_INTERNAL_ASSERT(inserted);
-    if (pp.is_host_mem_pool && captures_underway_.empty() &&
-        empty_released_pool_under_lock(pp, frees)) {
+    if (pp.is_host_mem_pool && empty_released_pool_under_lock(pp, frees)) {
       graph_pools_freeable_.erase(id);
     }
   }
@@ -1862,9 +1860,8 @@ struct TORCH_API HostAllocator : public at::Allocator {
   // but graphs that route to it during capture hold it (retain_pool). Once no
   // reference and no thread route is left, the call that dropped the last one
   // (release_pool or end_allocate_current_thread_to_pool) frees its cached
-  // blocks, with no allocator lock held, unless a capture is underway. Blocks
-  // still in use or waiting for events, and a cache left during a capture,
-  // are freed by a later empty_cache().
+  // blocks, with no allocator lock held. Blocks still in use or waiting for
+  // events are freed by a later empty_cache().
   virtual void create_pool(c10::MempoolId_t /*pool_id*/) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for create_pool");
   }

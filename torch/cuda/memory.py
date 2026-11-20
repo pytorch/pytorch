@@ -1843,8 +1843,8 @@ class HostMemPool(_HostMemPool):
     ``pool``, but a graph keeps the pool until it is reset if the pool's
     context is entered while the current stream is capturing into the graph.
     Deleting the pool frees its cached blocks, or, if a graph keeps the pool,
-    the reset of the last such graph does, unless a capture is underway; what
-    remains is freed by a later :func:`torch.accelerator.empty_host_cache`.
+    the reset of the last such graph does; what remains is freed by a later
+    :func:`torch.accelerator.empty_host_cache`.
     """
 
     @property

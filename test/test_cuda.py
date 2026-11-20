@@ -11165,22 +11165,21 @@ print(start <= default.data_ptr() < start + size, start <= in_pool.data_ptr() < 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
-    def test_del_during_capture_defers_free(self):
+    def test_del_during_capture_frees(self):
         hp = torch.cuda.HostMemPool()
         with torch.cuda.use_mem_pool(hp):
             torch.empty(1000, pin_memory=True)
         allocations = self._allocations()
         x = torch.zeros(1, device="cuda")
         g = torch.cuda.CUDAGraph()
-        # cudaFreeHost would invalidate the capture, so the cached block waits.
+        # The free runs in relaxed mode, so it does not break the global-mode
+        # capture of this same thread.
         with torch.cuda.graph(g):
             x.add_(1)
             del hp
-        self.assertEqual(self._allocations(), allocations)
+            self.assertEqual(self._allocations(), allocations - 1)
         g.replay()
         self.assertEqual(x.item(), 1)
-        torch.accelerator.empty_host_cache()
-        self.assertEqual(self._allocations(), allocations - 1)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"

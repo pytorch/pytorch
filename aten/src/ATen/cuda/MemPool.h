@@ -47,8 +47,7 @@ struct TORCH_CUDA_CPP_API MemPool {
 // allocator. A thread routes its pinned allocations to the pool with
 // at::HostAllocator::begin_allocate_current_thread_to_pool. Once the pool is
 // destroyed, no graph holds it and no thread is routed to it, its cached
-// memory is freed, unless a graph capture is underway; what remains is freed
-// by a later host empty_cache().
+// memory is freed; what remains is freed by a later host empty_cache().
 struct TORCH_CUDA_CPP_API HostMemPool {
   HostMemPool();
   HostMemPool(const HostMemPool&) = delete;
