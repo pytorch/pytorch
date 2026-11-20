@@ -200,7 +200,19 @@ def run_one(args):
         elif mode == "compile":
             compiled = torch.compile(fn)
         else:
-            passes = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs("inductor"))
+            compiling = []
+
+            class Inductor(torch.vm.passes.Inductor):
+                # torch.vm does not say what compiling its graphs took, so
+                # the pass that compiles them is timed.
+                def __call__(self, gm, input_types):
+                    start = time.perf_counter()
+                    try:
+                        return super().__call__(gm, input_types)
+                    finally:
+                        compiling.append(time.perf_counter() - start)
+
+            passes = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs(), Inductor())
             compiled = torch.vm(fn, passes=passes, fallback=False)
 
         def compiled_so_far():
@@ -210,8 +222,8 @@ def run_one(args):
 
                 return sum(counters["frames"].values())
             if mode == "cfg":
-                regions = torch.vm.regions(compiled)
-                return len(regions), sum(r.get("variants", 0) for r in regions)
+                graphs = compiled.stats()["graphs"]
+                return graphs["built"], graphs["exported"], graphs["given_up"]
             return None
 
         opt = optimizer(model) if training else None
@@ -230,10 +242,10 @@ def run_one(args):
                 d = difference(r, reference[i] if training else reference[0])
                 worst = float("inf") if d is None else max(worst, d)
             # A JIT is warm when it has stopped compiling and changing its
-            # mind: a region gets another graph for inputs it has not seen,
-            # torch.compile recompiles, and torch.vm goes on measuring
-            # compiled code against the interpreter for a while after it has
-            # compiled, the function and what it calls.
+            # mind: a graph of torch.vm is exported again for a kind of call
+            # it has not seen, torch.compile recompiles, and torch.vm goes
+            # on measuring compiled code against the interpreter for a while
+            # after it has compiled, the function and what it calls.
             measuring = mode == "cfg" and compiled.stats()["measuring"]
             now = compiled_so_far()
             calm = 0 if measuring or now != before else calm + 1
@@ -279,26 +291,33 @@ def run_one(args):
                 )
         elif mode == "cfg":
             regions = torch.vm.regions(compiled)
-            hot = [r for r in regions if r["state"] == "compiled"]
+            # The graphs that Inductor's code runs in place of. One of a
+            # called function that a graph of a caller holds is listed as
+            # well: its operations are counted with that graph.
+            hot = [r for r in regions if r["state"] == "compiled" and "within" not in r]
             out["graphs"] = sum(r["variants"] for r in hot)
             out["ops"] = sum(r["ops"] for r in hot)
-            out["compile_s"] = sum(r["seconds"] for r in hot)
-            # Why the VM kept an instruction, where that says something about
-            # the model rather than about plain Python.
-            dull = ("no tensor or module involved", "not worth a graph")
-            out["why"] = [
-                f"{r['where']}: {r['reason']}"[:160]
+            out["hits"] = sum(r["hits"] for r in hot)
+            out["compile_s"] = sum(compiling)
+            # Why the model is not one graph: what a graph ends in front of
+            # when that is not the end of the function, and what the VM kept
+            # or stopped exporting, where that says something about the
+            # model (a run of fewer operations than a graph has does not).
+            why = [
+                f"{r['where']} ends: {r['why']}"
+                for r in hot
+                if r["why"] != "the function returns"
+            ]
+            why += [
+                f"{r['where']}: {r['reason']}"
                 for r in regions
-                if r["state"] == "vm" and not any(d in r["reason"] for d in dull)
-            ][:6]
+                if "reason" in r and "fewer than min_ops" not in r["reason"]
+            ]
+            out["why"] = [text[:160] for text in why[:6]]
             out["demoted"] = bool(compiled.stats()["demoted"])
             if args.paired and out["call_s"] <= args.paired_limit:
                 try:
-                    # A copy of its own, also where calls do not change the
-                    # model: what Inductor makes asks for writable pointers
-                    # to the weights, which moves the ones torch.vm has
-                    # built into a graph and watches (``freeze=``).
-                    other_model = copy.deepcopy(model)
+                    other_model = copy.deepcopy(model) if training else model
                     other_opt = optimizer(other_model) if training else None
                     other = torch.compile(fn)
                     settle = []

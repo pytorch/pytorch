@@ -10,6 +10,7 @@
 //! between them a matter of picking an instruction index.
 
 use crate::capi::SiteSlot;
+use crate::graph::{GraphSite, Left};
 use crate::pyffi::{self, PyObj};
 use std::fmt::Write;
 use std::sync::Arc;
@@ -20,6 +21,8 @@ pub type B = u32;
 pub const NONE: V = u32::MAX;
 /// The undefined value (an unbound local). Its register is always null.
 pub const UNDEF: V = 0;
+
+pub const CONVERT_ONLY: u8 = 4;
 
 pub const CMP_SYMBOLS: [&str; 6] = ["<", "<=", "==", "!=", ">", ">="];
 
@@ -51,8 +54,10 @@ pub enum Op {
     /// The second operand is the constant with the variable's name.
     CellGet(V, u32),
     CellSet(V, V),
-    /// Any operand but the code object can be NONE.
-    MakeFunction { code: V, defaults: V, kwdefaults: V, annotations: V, closure: V },
+    /// Any operand but the code object can be NONE. The annotations are a
+    /// tuple of names and values; `annotate` is the function that computes
+    /// them when they are asked for (3.14).
+    MakeFunction { code: V, defaults: V, kwdefaults: V, annotations: V, annotate: V, closure: V },
     /// `import name`, with the from-list and level the bytecode supplies.
     ImportName { name: u32, fromlist: V, level: V },
     /// The attribute of a module named in `from module import name`.
@@ -69,6 +74,15 @@ pub enum Op {
     LoadSlot(V),
     /// Writes a frame slot; storing the undefined value empties it.
     StoreSlot(V, V),
+    /// Binds a variable of the interpreter frame the function runs under to
+    /// v, or unbinds it for the undefined value: the other half of what
+    /// STORE_FAST does, next to giving the value a register. The first
+    /// operand is the variable's index among those of the frame. Whatever
+    /// reads the frame (a traceback, a debugger, `eval`, `super()`) finds the
+    /// variables there, and the frame keeps what they are bound to alive.
+    /// Does nothing where compiled functions have no frame, or outside the
+    /// loop that runs a function (a replay).
+    StoreLocal(u32, V),
     /// The exception a handler block was entered with. First in its block.
     CaughtException,
     /// Which instruction of the function raised into a handler block, as the
@@ -110,6 +124,10 @@ pub enum Op {
     /// The third operand is NONE for a two-argument slice.
     BuildSlice(V, V, V),
     BuildString(Vec<V>),
+    /// What a replacement field of an f-string does to its value: the
+    /// conversion (1 for `!s`, 2 for `!r`, 3 for `!a`, 0 for none), and then
+    /// `format(value, spec)`, which a str without a spec is spared. With
+    /// CONVERT_ONLY in `conv` it is the conversion alone.
     Format { val: V, conv: u8, spec: V },
     ListAppend(V, V),
     SetAdd(V, V),
@@ -149,12 +167,6 @@ pub enum Op {
     /// Calls a fixed Python object with these values. A pass puts it where
     /// it found something that does the work of a run of instructions.
     CallObject(PyObj, Vec<V>),
-    /// Calls a fixed Python object with these values. It returns None, and
-    /// the instructions go on, or it says where in the function execution
-    /// continues and what the values are there (see `Compiled::leap`): a
-    /// pass puts it in front of instructions that something else can do the
-    /// work of, together with what follows them in other blocks.
-    Leap(PyObj, Vec<V>),
     /// A call without arguments of what the global `locals`, `vars` or `dir`
     /// is. If it is that builtin, the result is made here, from the
     /// function's variables that have a value: each is given by its name (a
@@ -188,6 +200,48 @@ pub enum Op {
     TensorSize { t: V, dim: i64 },
     TensorDim(V),
     Guard(Box<GuardOp>),
+    /// Only on a path: a part of an object, read where the path follows a
+    /// call (see `Part`).
+    Part(Part, V),
+    /// Only on a path: an object the path has itself, a name that a call
+    /// hands a value under.
+    Object(PyObj),
+    /// In front of the first operation of a graph: runs what was made of
+    /// the graph in place of its instructions when it holds for the values
+    /// of the call, or has the instructions that follow recorded as a path,
+    /// and otherwise does nothing (see `Compiled::enter_graph`).
+    Graph(Arc<GraphSite>),
+}
+
+/// What a path reads of an object where it follows a call into the function
+/// that the call enters: none of these runs Python code.
+#[derive(Clone)]
+pub enum Part {
+    /// What cell `i` of the closure of a function holds.
+    Cell(u32),
+    /// The object a bound method is bound to.
+    Receiver,
+    /// The Python function that calling the object enters: the function
+    /// itself, the function of a bound method, or for an instance of a
+    /// class what its `__call__` comes down to (`Compiled::target`).
+    Target,
+    /// A default of a function: `__defaults__[i]`, or the keyword-only
+    /// default of a name.
+    Default(u32),
+    KwDefault(PyObj),
+    /// The class of the object.
+    Type,
+    /// What the class of the object has under a name, as it is there.
+    OfType(PyObj),
+    /// The same, for a name that is read as an attribute of the object and
+    /// comes down to it (`graph::data_descriptor`).
+    Descriptor(PyObj),
+    /// The function that reads a property.
+    Getter,
+    /// An item of an exact tuple or list, an entry of an exact dict: what
+    /// a call hands on with `*` and `**`.
+    Index(u32),
+    Entry(PyObj),
 }
 
 /// A call of a post-dispatch kernel. `operands` feed the prepared call sites
@@ -282,6 +336,7 @@ impl Op {
         };
         match self {
             Op::Const(_)
+            | Op::Object(_)
             | Op::LoadGlobal(_)
             | Op::LoadDeref(_)
             | Op::LoadClosure(_)
@@ -289,10 +344,11 @@ impl Op {
             | Op::FrameEnter(_)
             | Op::FrameLeave
             | Op::CaughtLasti
-            | Op::CaughtException => {}
-            Op::MakeFunction { code, defaults, kwdefaults, annotations, closure } => {
+            | Op::CaughtException
+            | Op::Graph(_) => {}
+            Op::MakeFunction { code, defaults, kwdefaults, annotations, annotate, closure } => {
                 f(*code);
-                for v in [defaults, kwdefaults, annotations, closure] {
+                for v in [defaults, kwdefaults, annotations, annotate, closure] {
                     opt(*v, &mut f)
                 }
             }
@@ -304,6 +360,7 @@ impl Op {
             | Op::ImportFrom(a, _)
             | Op::StoreDeref(_, a)
             | Op::StoreSlot(_, a)
+            | Op::StoreLocal(_, a)
             | Op::PushExcInfo(a)
             | Op::PopExcInfo(a)
             | Op::LoadSpecial(a, _)
@@ -324,6 +381,7 @@ impl Op {
             | Op::CheckBound(a, _)
             | Op::IsFunction { v: a, .. }
             | Op::TensorSize { t: a, .. }
+            | Op::Part(_, a)
             | Op::TensorDim(a) => f(*a),
             Op::Binary(_, a, b)
             | Op::Compare(_, a, b)
@@ -371,7 +429,7 @@ impl Op {
                 f(*class);
                 f(*names)
             }
-            Op::CallObject(_, args) | Op::Leap(_, args) => args.iter().for_each(|v| f(*v)),
+            Op::CallObject(_, args) => args.iter().for_each(|v| f(*v)),
             Op::Locals(callee, entries) => {
                 f(*callee);
                 entries.iter().for_each(|(_, v, _)| f(*v))
@@ -420,9 +478,52 @@ impl Op {
                 | Op::CallMethod { .. }
                 | Op::CallEx { .. }
                 | Op::CallObject(..)
-                | Op::Leap(..)
                 | Op::Locals(..)
                 | Op::Dispatch(_)
+                | Op::Graph(_)
+        )
+    }
+
+    /// Whether running the instruction can run code that is not the VM's own:
+    /// a method of an object, a function, a kernel. What cannot neither
+    /// enters a frame nor calls the dispatcher.
+    pub fn calls_out(&self) -> bool {
+        !matches!(
+            self,
+            Op::Const(_)
+                | Op::LoadGlobal(_)
+                | Op::LoadDeref(_)
+                | Op::LoadClosure(_)
+                | Op::MakeCell(_)
+                | Op::CellGet(..)
+                | Op::CellSet(..)
+                | Op::StoreDeref(..)
+                | Op::MakeFunction { .. }
+                | Op::Hold(_)
+                | Op::LoadSlot(_)
+                | Op::StoreSlot(..)
+                | Op::StoreLocal(..)
+                | Op::CaughtException
+                | Op::CaughtLasti
+                | Op::PushExcInfo(_)
+                | Op::PopExcInfo(_)
+                | Op::Is(..)
+                | Op::IsNone(..)
+                | Op::BuildTuple(_)
+                | Op::BuildList(_)
+                | Op::BuildSlice(..)
+                | Op::ListAppend(..)
+                | Op::ListToTuple(_)
+                | Op::TupleGet(..)
+                | Op::CheckBound(..)
+                | Op::IsFunction { .. }
+                | Op::FrameEnter(_)
+                | Op::FrameLeave
+                | Op::TensorSize { .. }
+                | Op::TensorDim(_)
+                | Op::Part(..)
+                | Op::Object(_)
+                | Op::Guard(_)
         )
     }
 
@@ -458,6 +559,7 @@ impl Op {
                 | Op::ToBool(_)
                 | Op::Format { .. }
                 | Op::Hold(_)
+                | Op::StoreLocal(..)
                 | Op::ListToTuple(_)
                 | Op::ListExtend(..)
                 | Op::ListAppend(..)
@@ -468,17 +570,6 @@ impl Op {
                 | Op::FrameEnter(_)
                 | Op::FrameLeave
         )
-    }
-
-    /// Whether the instruction can be run on its own, outside the loop that
-    /// runs a function: what can be replayed, and what works on objects a
-    /// replay made itself (an iterator, a cell, a container) or only looks.
-    pub fn is_steppable(&self) -> bool {
-        self.is_replayable()
-            || matches!(
-                self,
-                Op::GetIter(_) | Op::IterNext(_) | Op::MakeCell(_) | Op::CheckBound(..) | Op::SetItem { .. }
-            )
     }
 
     /// Instructions that can be dropped when their result is unused: they
@@ -557,6 +648,16 @@ pub struct BlockCode {
     pub entry_guards: Vec<GuardCond>,
     /// Version number, for specialized code; 0 for generic code.
     pub id: u32,
+    /// Per instruction: the generic instruction it stands for, or NONE.
+    pub origins: Vec<u32>,
+    /// The graphs that start in a specialized version, and what the graph
+    /// pass left out of them.
+    pub graphs: Vec<Arc<GraphSite>>,
+    pub left: Vec<Left>,
+    /// This code with `Op::Graph` in front of each of its graphs: it runs
+    /// in its place while one of them has something to do (a path to take
+    /// down, an exported form to run).
+    pub entering: Option<Arc<BlockCode>>,
 }
 
 #[derive(Clone)]
@@ -685,6 +786,7 @@ impl Function {
             Op::Hold(vs) => format!("hold {}", self.values(vs)),
             Op::LoadSlot(s) => format!("load_slot {}", n(s)),
             Op::StoreSlot(s, v) => format!("store_slot {} {}", n(s), n(v)),
+            Op::StoreLocal(slot, v) => format!("store_local {} {}", slot, n(v)),
             Op::CaughtException => "caught_exception".to_string(),
             Op::CaughtLasti => "caught_lasti".to_string(),
             Op::PushExcInfo(v) => format!("push_exc_info {}", n(v)),
@@ -731,7 +833,9 @@ impl Function {
             }
             Op::BuildString(vs) => format!("build_string ({})", self.values(vs)),
             Op::Format { val, conv, spec } => {
-                if *spec == NONE {
+                if conv & CONVERT_ONLY != 0 {
+                    format!("convert {} conv={}", n(val), conv & 3)
+                } else if *spec == NONE {
                     format!("format {} conv={}", n(val), conv)
                 } else {
                     format!("format {} conv={} spec={}", n(val), conv, n(spec))
@@ -757,10 +861,6 @@ impl Function {
             Op::CallObject(callee, args) => {
                 let repr = unsafe { crate::pyffi::repr(callee.as_ptr()) };
                 format!("call_object {}({})", repr.chars().take(60).collect::<String>(), self.values(args))
-            }
-            Op::Leap(callee, args) => {
-                let repr = unsafe { crate::pyffi::repr(callee.as_ptr()) };
-                format!("leap {}({})", repr.chars().take(60).collect::<String>(), self.values(args))
             }
             Op::Locals(callee, entries) => {
                 let names: Vec<String> = entries
@@ -811,6 +911,9 @@ impl Function {
             Op::TensorSize { t, dim } => format!("tensor_size {} {}", n(t), dim),
             Op::TensorDim(t) => format!("tensor_dim {}", n(t)),
             Op::Guard(g) => format!("guard {}    ; else resume generic at {}", self.guard_repr(&g.cond), g.resume),
+            Op::Part(_, a) => format!("part {}", n(a)),
+            Op::Object(_) => "object".to_string(),
+            Op::Graph(site) => format!("graph {}", site.describe()),
         }
     }
 
