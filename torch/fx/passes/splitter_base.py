@@ -73,6 +73,16 @@ TRACKER_MODE: Literal["0", "1", "2", "3"] = os.environ.get(
 
 
 class _SplitterSettingBase:
+    """
+    Settings for _SplitterBase.
+
+    A nonzero --min-acc-module-size and the flags --skip-fusion,
+    --allow-non-tensor and --move-non-tensor-nodes-on-boundary in sys.argv (or
+    their underscore spellings) override the matching constructor arguments.
+    Everything else in sys.argv, including -h and shortened flag names, is
+    ignored. A malformed splitter flag raises argparse.ArgumentError.
+    """
+
     def __init__(
         self,
         min_acc_module_size: int = DEFAULT_MIN_ACC_MODULE_SIZE,
@@ -81,20 +91,17 @@ class _SplitterSettingBase:
         max_acc_splits: int = -1,
         move_non_tensor_nodes_on_boundary: bool = False,
     ) -> None:
-        parser = argparse.ArgumentParser()
+        # This parses the host program's sys.argv, so it must not react to that
+        # program's own flags or exit it.
+        parser = argparse.ArgumentParser(
+            add_help=False, allow_abbrev=False, exit_on_error=False
+        )
         parser.add_argument(
             "--min-acc-module-size",
             "--min_acc_module_size",
             required=False,
             type=int,
             help="Minimum size limit of an accelerator subgraph.",
-        )
-        parser.add_argument(
-            "--max-acc-splits",
-            "--max_acc_splits",
-            required=False,
-            type=int,
-            help="Enforce a maximum number of split subgraphs.",
         )
         parser.add_argument(
             "--skip-fusion",

@@ -76,6 +76,7 @@ from ..utils import (
     extract_fake_example_value,
     get_fake_value,
     has_torch_function,
+    is_safe_constant,
     is_tensor_getset_descriptor,
     is_torch_class,
     istype,
@@ -191,7 +192,7 @@ IN_PLACE_DESUGARING_MAP = {
 
 _BUILTIN_CONSTANT_FOLDABLE_METHODS: dict[type, frozenset[str]] = {
     int: frozenset({"__new__", "from_bytes"}),
-    bool: frozenset({"__new__", "from_bytes"}),
+    bool: frozenset({"__new__", "__hash__", "from_bytes"}),
     float: frozenset({"fromhex", "hex"}),
 }
 if sys.version_info >= (3, 14):
@@ -346,6 +347,10 @@ def _try_computed_lazy_constant(
         ):
             any_unrealized = True
         elif not isinstance(arg, ConstantVariable):
+            return None
+        elif arg.source is None and not is_safe_constant(arg.as_python_constant()):
+            # Output bytecode recomputes the op from its operands, so each one
+            # must be loadable from a source or as a LOAD_CONST
             return None
     if not any_unrealized:
         return None
@@ -1964,9 +1969,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         key: tuple[object, ...]
         if kwargs:
             kwargs = {k: v.realize() for k, v in kwargs.items()}
-            key = (self.fn, *(type(x) for x in args), True)
+            key = (self.fn, *map(type, args), True)
         else:
-            key = (self.fn, *(type(x) for x in args))
+            key = (self.fn, *map(type, args))
 
         handler = self.call_function_handler_cache.get(key)
         if not handler:
@@ -2147,9 +2152,22 @@ class BuiltinVariable(BaseBuiltinVariable):
             # e.g., int.__invert__(4) → ~4
             return pynumber_invert(tx, args[0])
 
-        if name == "__hash__" and len(args) == 1 and not kwargs:
+        if (
+            isinstance(self.fn, type)
+            and name == "__hash__"
+            and len(args) == 1
+            and not kwargs
+        ):
             arg = args[0]
-            generic_hash(tx, arg)
+            unimplemented(
+                gb_type="Unsupported unbound builtin __hash__ call",
+                context=f"{self.fn.__name__}.__hash__({arg})",
+                explanation="Dynamo cannot safely trace this explicit builtin type's __hash__ method.",
+                hints=[
+                    "Use hash(x) if calling x's own hash implementation is intended.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -2664,6 +2682,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         # Reuse existing HashableTracker keys from a set/frozenset/dict operand
         # instead of re-hashing, mirroring CPython's set_update_internal fast
         # path (do-not-rehash-dict-keys).
+        if isinstance(args[0], variables.ConstDictVariable):
+            args[0].install_dict_order_guard(tx)
         if isinstance(
             args[0],
             (
@@ -3159,7 +3179,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                 case_name="unknown_python_type",
             ) from None
 
-        source = obj.source and TypeSource(obj.source)
+        source = (
+            TypeSource(obj.source)
+            if obj.source and obj.source.subguards_allowed()
+            else None
+        )
         if (
             source is None
             and isinstance(obj, variables.UserDefinedObjectVariable)
@@ -3341,7 +3365,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         left: VariableTracker,
         right: VariableTracker,
     ) -> VariableTracker:
-        from .tensor import supported_tensor_comparison_op_values
+        from .tensor import _richcompare_operand, supported_tensor_comparison_op_values
 
         op = self.fn
 
@@ -3358,16 +3382,15 @@ class BuiltinVariable(BaseBuiltinVariable):
         # must be a type that can participate in a traced numeric comparison.
         # Anything else (classes, DataPtrVariable, etc.) is a different type
         # entirely — the comparison result is known at compile time.
-        non_symnode = right if isinstance(left, SymNodeVariable) else left
-        if not isinstance(
-            non_symnode, (SymNodeVariable, ConstantVariable, TensorVariable)
-        ):
+        if isinstance(left, SymNodeVariable):
+            args = (left.as_proxy(), _richcompare_operand(right))
+        else:
+            args = (_richcompare_operand(left), right.as_proxy())
+        if any(arg is NotImplemented for arg in args):
             # pyrefly: ignore [bad-argument-type]
             return VariableTracker.build(tx, op(object(), None))
 
-        proxy = tx.output.create_proxy(
-            "call_function", op, (left.as_proxy(), right.as_proxy()), {}
-        )
+        proxy = tx.output.create_proxy("call_function", op, args, {})
         return SymNodeVariable.create(
             tx,
             proxy,
@@ -3625,7 +3648,22 @@ class DictBuiltinVariable(BaseBuiltinVariable):
 
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:
-            obj = args[0]
+            obj = args[0].realize()
+            if name == "__repr__":
+                if not isinstance(obj, ConstDictVariable):
+                    unimplemented(
+                        gb_type="Unsupported builtin dictionary storage operation",
+                        context=f"dict.{name} on {obj.python_type_name()}",
+                        explanation="Dynamo cannot yet preserve builtin dictionary storage for this operation.",
+                        hints=[],
+                    )
+                # Explicit dict slots bypass OrderedDict's linked-order behavior.
+                slotdef = obj.lookup_slotdefs(name)
+                if slotdef is None:
+                    raise AssertionError(f"Missing dict slot for {name}")
+                return slotdef.wrapper(
+                    obj, tx, getattr(ConstDictVariable, slotdef.impl), args[1:], kwargs
+                )
             if isinstance(obj, UserDefinedObjectVariable):
                 return obj.call_base_method(tx, name, args[1:], kwargs)
             return obj.call_method(tx, name, args[1:], kwargs)
@@ -3824,23 +3862,10 @@ class HasAttrBuiltinVariable(BaseBuiltinVariable):
             ]
         if len(args) != 2 or kwargs:
             raise_observed_exception(TypeError, tx)
+        from .object_protocol import generic_hasattr
+
         obj, attr = args
-        if not attr.is_python_constant():
-            raise_observed_exception(TypeError, tx)
-        attr_name = attr.as_python_constant()
-        if not isinstance(attr_name, str):
-            raise_type_error(
-                tx, f"attribute name must be string, not '{attr.python_type_name()}'"
-            )
-        result = obj.call_obj_hasattr(tx, attr_name)
-        if result is None:
-            unimplemented(
-                gb_type="hasattr() on unsupported type",
-                context=f"hasattr({obj}, {attr})",
-                explanation=f"hasattr() is not supported on type {obj.python_type_name()}",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return result
+        return generic_hasattr(tx, obj, attr)
 
 
 class SetAttrBuiltinVariable(BaseBuiltinVariable):
@@ -4206,6 +4231,25 @@ class ByteArrayBuiltinVariable(BaseBuiltinVariable):
 
     def __repr__(self) -> str:
         return "ByteArrayBuiltinVariable()"
+
+    def maketrans(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        if not check_constant_args(args, kwargs):
+            return None
+        try:
+            table = bytearray.maketrans(
+                *(arg.as_python_constant() for arg in args),
+                **{key: val.as_python_constant() for key, val in kwargs.items()},
+            )
+        except (TypeError, ValueError) as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
+        return VariableTracker.build(tx, table)
+
+    tp_methods = {"maketrans": Method(maketrans)}
 
     def _constant_fold_constructor(
         self,

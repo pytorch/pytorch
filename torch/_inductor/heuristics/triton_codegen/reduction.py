@@ -22,6 +22,7 @@ from torch._inductor.runtime.hints import (
     TRITON_MAX_MIX_ORDER_XBLOCK,
 )
 from torch._inductor.runtime.runtime_utils import last_power_of_2, next_power_of_2
+from torch._inductor.runtime.tiling import get_max_block
 from torch._inductor.utils import prefix_is_reduction
 from torch.utils._ordered_set import OrderedSet
 
@@ -82,7 +83,7 @@ def _match_target_block_product(
         dim, score = max(relative_scores.items(), key=lambda item: item[1])
 
         if (
-            block_sizes[dim] >= TRITON_MAX_BLOCK[dim.capitalize()]
+            block_sizes[dim] >= get_max_block(dim, TRITON_MAX_BLOCK)
             or block_sizes[dim] >= size_hints[dim]
         ):
             del relative_scores[dim]
@@ -153,9 +154,14 @@ def _outer_config_opt(
     elif num_dynamic > 1:
         outer_r_block = max(min((rnumel // 64), 64), 8)
     elif num_dynamic == 1:
-        outer_r_block = (
-            1 if load_factor >= 3 else min(next_power_of_2(max(rnumel, 128) // 128), 8)
-        )
+        if load_factor >= 3 and inductor_meta.get("sm100_outer_reduction_r0_block_8"):
+            outer_r_block, num_warps = 8, 2
+        else:
+            outer_r_block = (
+                1
+                if load_factor >= 3
+                else min(next_power_of_2(max(rnumel, 128) // 128), 8)
+            )
     else:
         x_block = max(min(max_x_block, next_power_of_2(x // 4096)), x_block)
         if load_factor < 4 or rnumel <= 128:
@@ -179,6 +185,17 @@ def _outer_config_opt(
 # ------------------------------------------------------------------
 # Default (CUDA) reduction heuristic
 # ------------------------------------------------------------------
+
+
+def _max_autotune_reduction_enabled(inductor_meta: dict[str, Any]) -> bool:
+    # Kernels whose inductor_meta predates max_autotune_reduction carry only
+    # max_autotune_pointwise, which used to cover reductions.
+    return bool(
+        inductor_meta.get("max_autotune")
+        or inductor_meta.get(
+            "max_autotune_reduction", inductor_meta.get("max_autotune_pointwise")
+        )
+    )
 
 
 @register_codegen_heuristic("reduction")
@@ -206,9 +223,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         reduction_hint = inductor_meta.get("reduction_hint")
         rnumel = get_total_reduction_numel(size_hints)
 
-        max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
-            "max_autotune_pointwise"
-        )
+        max_autotune_enabled = _max_autotune_reduction_enabled(inductor_meta)
 
         register_intensive = False
         loads_and_red = inductor_meta.get("num_load", 0) + inductor_meta.get(
@@ -453,9 +468,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 r0_block=native_matmul_rblock,
             )
 
-        max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
-            "max_autotune_pointwise"
-        )
+        max_autotune_enabled = _max_autotune_reduction_enabled(inductor_meta)
 
         xblock_vals = self._persistent_xblock_vals()
 
@@ -659,9 +672,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
         from torch._inductor.runtime.triton_heuristics import unique_configs
 
-        max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
-            "max_autotune_pointwise"
-        )
+        max_autotune_enabled = _max_autotune_reduction_enabled(inductor_meta)
 
         rsplit_size = inductor_meta.get("RSPLIT_SIZE")
         if not rsplit_size:
