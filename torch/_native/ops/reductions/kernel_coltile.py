@@ -125,7 +125,8 @@ class OrderedColConfig(NamedTuple):
     worker_warps: int = _ORDERED_WORKER_WARPS
     tile_columns: int = WARP
     full_tiles: bool = False
-    # The outputs this mapping was measured with; None applies to any outputs.
+    # The outputs this mapping was measured with; None applies to any outputs, except
+    # on SM107, where select_ordered_col_config substitutes _sm107_outputs.
     out_dtypes: tuple[torch.dtype, ...] | None = None
 
 
