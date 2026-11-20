@@ -777,6 +777,22 @@ class ForeachTests(TestCase):
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     @torch._dynamo.config.patch("assume_static_by_default", False)
     @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
+    @parametrize("cap,expected_kernels", [(4, 3), (16, 1)])
+    def test_dynamic_cat_combo_kernel_cap(self, cap, expected_kernels):
+        def fn(*xs):
+            return torch.cat(xs, dim=1)
+
+        inputs = [torch.rand(8, 4 * (i + 1), device=GPU_TYPE) for i in range(12)]
+        with torch._inductor.config.patch(combo_kernel_dynamic_max_num_nodes=cap):
+            self.check_model_gpu(fn, inputs)
+        self.assertEqual(
+            torch._inductor.metrics.generated_kernel_count, expected_kernels
+        )
+
+    @requires_gpu
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
+    @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
     @torch._inductor.config.patch("cpp_wrapper", True)
     def test_enable_dynamic_shapes_cpp_wrapper_cuda(self, op=torch._foreach_add):
         def fn(a0, a1, b0, b1):

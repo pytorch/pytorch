@@ -345,8 +345,16 @@ class ComboKernel(Kernel):
         partition_state: PartitionState,
         node_rw_count: int,
         node_info: BaseSchedulerNode,
+        max_num_nodes: int | None = None,
     ) -> None:
-        if partition_state.cur_count + node_rw_count > config.combo_kernel_max_num_args:
+        too_many_args = (
+            partition_state.cur_count + node_rw_count > config.combo_kernel_max_num_args
+        )
+        too_many_nodes = (
+            max_num_nodes is not None
+            and len(partition_state.cur_partition) >= max_num_nodes
+        )
+        if too_many_args or too_many_nodes:
             partition_state.partitions.append(partition_state.cur_partition)
             partition_state.cur_partition = [node_info]
             partition_state.cur_count = node_rw_count
@@ -387,6 +395,16 @@ class ComboKernel(Kernel):
 
             read_writes = node.read_writes
             read_write_count = len(read_writes.reads) + len(read_writes.writes)
+            # Each dynamic-shape subkernel adds its own size arguments and index
+            # math, so a combo kernel over many of them gets slow to compile.
+            max_num_nodes = (
+                config.combo_kernel_dynamic_max_num_nodes
+                if any(
+                    isinstance(v, sympy.Expr) and v.free_symbols
+                    for v in tiled_groups.values()
+                )
+                else None
+            )
 
             ndim = len(tiled_groups)
             if ndim < 2:
@@ -402,14 +420,14 @@ class ComboKernel(Kernel):
                 y_elem = tiled_groups["y"]
                 partition_state = yelem_to_partition_state[y_elem]
                 ComboKernel._update_partition(
-                    partition_state, read_write_count, node_info
+                    partition_state, read_write_count, node_info, max_num_nodes
                 )
             else:
                 if not (mixed_sizes or ndim <= 3):
                     raise AssertionError(f"No mixed sizes: tile {tiled_groups}")
                 partition_state = ndim_to_partition_state[ndim]
                 ComboKernel._update_partition(
-                    partition_state, read_write_count, node_info
+                    partition_state, read_write_count, node_info, max_num_nodes
                 )
 
         for partition_state in ndim_to_partition_state.values():

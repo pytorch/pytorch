@@ -1272,6 +1272,10 @@ combo_kernel_foreach_dynamic_shapes = True
 combo_kernel_max_num_args = 250
 # Maximum number of sub-kernels allowed in a single combo kernel
 combo_kernel_max_num_nodes = 8
+# Maximum number of dynamic-shape sub-kernels in a single combo/foreach kernel.
+# Each one adds its own size arguments and index math, and Triton compile time
+# grows faster than linearly in kernel size.
+combo_kernel_dynamic_max_num_nodes = 16
 # When True, each combo sub-kernel gets its own block sizes (XBLOCK_0, YBLOCK_0, etc.)
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
