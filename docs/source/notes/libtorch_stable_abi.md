@@ -260,8 +260,19 @@ The above is relevant in two places:
     }
     ```
 
-2. `torch_call_dispatcher`
-    This API allows you to call the PyTorch dispatcher from C/C++ code. It has the following signature:
+2. Calling the dispatcher
+    From C++, you may call the PyTorch dispatcher with `torch::stable::call_dispatcher` from `torch/csrc/stable/ops.h`:
+
+    ```cpp
+    STABLE_TORCH_ERROR_CODE_CHECK(torch::stable::call_dispatcher(opName, overloadName, stack));
+    ```
+
+    It returns `AOTITorchError` and will select one of the following C implementations depending
+    on your extension's minimum runtime target version (`TORCH_TARGET_VERSION`).
+
+    We used to provide the following C API which remains available, but is no longer recommended.
+    Please instead use `call_dispatcher` from C++ or `torch_call_dispatcher_v2`, which also tracks
+    the extension's target version to better support adapters for compatibility.
 
     ```cpp
     torch_call_dispatcher(const char* opName, const char* overloadName, StableIValue* stack, uint64_t extension_build_version);
@@ -270,6 +281,12 @@ The above is relevant in two places:
     `torch_call_dispatcher` will call the op overload defined by a given `opName`, `overloadName`, a stack of
     StableIValues and the `TORCH_ABI_VERSION` of the user extension. This call will populate any return values of the
     op into the stack in their StableIValue form, with `ret0` at index 0, `ret1` at index 1, and so on.
+
+    `torch_call_dispatcher_v2` is the recommended version of `torch_call_dispatcher`
+    because it adds `extension_target_version` after `extension_build_version`. Pass
+    `TORCH_ABI_VERSION` for build and `TORCH_TARGET_VERSION` for target, where target
+    <= build. If no target is specified, it defaults to the build version;
+    `TORCH_FEATURE_VERSION` provides this effective target in either case.
 
     We caution against using this API to call functions that have been registered to the dispatcher by other extensions
     unless the caller can guarantee that the signature they expect matches that which the custom extension has

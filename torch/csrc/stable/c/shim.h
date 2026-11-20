@@ -403,6 +403,15 @@ torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
 
+// Same as torch_call_dispatcher EXCEPT we also require passing the extension's
+// target version (on top of build version).
+AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher_v2(
+    const char* opName,
+    const char* overloadName,
+    StableIValue* stack,
+    uint64_t extension_build_version,
+    uint64_t extension_target_version);
+
 // A SymInt word is the integer itself in [-2^62, 2^63-1]. Other words are
 // opaque references; only libtorch may interpret them.
 // Constructs an owning word, including for integers outside the inline range.

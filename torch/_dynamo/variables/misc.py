@@ -190,7 +190,7 @@ class SuperVariable(VariableTracker):
             # objvar itself is a type (e.g. `super(Base, cls)` or
             # `super(Base, list)`); as_python_constant() works uniformly here
             # since objvar must be a type-representing VariableTracker
-            # (UserDefinedClassVariable, BaseBuiltinVariable, ...), unlike
+            # (UserDefinedClassVariable, TypeVariable, ...), unlike
             # `.value` which only some of those define.
             type_to_use = self.objvar.as_python_constant()
             type_to_use_source = self.objvar.source
@@ -1771,6 +1771,11 @@ class PythonModuleVariable(VariableTracker):
     ) -> VariableTracker:
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
+
+        if tx.output.deleted_globals_by_dict:
+            tx.output.check_deleted_global_access(
+                self.value.__dict__, None if name == "__dict__" else name
+            )
 
         attr_value = None
         if self.is_torch or name not in self.value.__dict__:
