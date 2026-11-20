@@ -512,7 +512,6 @@ class TestPointwiseKernel(TestCase):
                     [x, y],
                     (torch.float32,),
                     out=[out],
-                    load="direct",
                 )
                 self.assertIs(actual, out)
                 self.assertEqual(actual, expected)
