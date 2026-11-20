@@ -59,9 +59,8 @@ not expose ATen or other unstable implementation types. Route C shim failures
 through `STABLE_TORCH_ERROR_CODE_CHECK` NOT the outdated `TORCH_ERROR_CODE_CHECK`.
 
 Reuse `torch::stable::detail::from` and `torch::stable::detail::to` for boxing and
-unboxing where applicable.
-
-Avoid redundant conversion layers or round trips in high-level wrappers.
+unboxing where applicable. Avoid redundant conversion layers or round trips in
+high-level wrappers.
 
 For handles and callbacks, verify the ownership contract explicitly: borrowed
 versus owned handles, shared value semantics, who releases the resource, and
