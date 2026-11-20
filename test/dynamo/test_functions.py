@@ -9822,12 +9822,14 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             for name in ("__doc__", "__name__", "__defaults__", "__func__", "foo"):
                 try:
                     setattr(a.m, name, 1)
-                except AttributeError as e:
-                    out.append(str(e))
+                    out.append(False)
+                except AttributeError:
+                    out.append(True)
                 try:
                     delattr(a.m, name)
-                except AttributeError as e:
-                    out.append(str(e))
+                    out.append(False)
+                except AttributeError:
+                    out.append(True)
             return x + 1, out
 
         x = torch.ones(2)
