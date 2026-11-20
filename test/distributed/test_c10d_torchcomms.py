@@ -1012,9 +1012,12 @@ class TestC10dGroupNameHashSalt(TestCase):
         super().setUp()
         self._saved_group_count = c10d._world.group_count
         self._saved_pg_names = dict(c10d._world.pg_names)
+        self._saved_local_sync_counts = dict(c10d._world._local_sync_group_counts)
 
     def tearDown(self):
         c10d._world.group_count = self._saved_group_count
+        c10d._world._local_sync_group_counts.clear()
+        c10d._world._local_sync_group_counts.update(self._saved_local_sync_counts)
         c10d._world.pg_names.clear()
         c10d._world.pg_names.update(self._saved_pg_names)
         super().tearDown()
@@ -1085,6 +1088,19 @@ class TestC10dGroupNameHashSalt(TestCase):
         c10d._world.group_count = 0
         first = c10d._process_group_name([2, 3], use_hashed_name=True)
         second = c10d._process_group_name([2, 3], use_hashed_name=True)
+        self.assertNotEqual(first, second)
+
+    def test_local_sync_group_name_keeps_group_count(self):
+        # Only member ranks create a local-synchronization group, so advancing
+        # group_count would desync the names of later groups every rank creates.
+        c10d._world.group_count = 10
+        c10d._local_sync_group_name([0, 1])
+        self.assertEqual(c10d._world.group_count, 10)
+
+    def test_repeated_local_sync_same_ranks_get_distinct_names(self):
+        c10d._world._local_sync_group_counts.clear()
+        first = c10d._local_sync_group_name([2, 3])
+        second = c10d._local_sync_group_name([2, 3])
         self.assertNotEqual(first, second)
 
 
