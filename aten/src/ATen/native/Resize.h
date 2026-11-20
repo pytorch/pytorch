@@ -98,7 +98,7 @@ inline void checkInBoundsForStorage(
     storage_size_plus_offset_bytes = at::detail::computeStorageNbytesContiguous(
         size, data_type.itemsize(), storage_offset);
   }
-  const int64_t element_per_byte = at::detail::subByteElementPerByte(data_type);
+  const int64_t element_per_byte = subByteElementPerByte(data_type);
   if (element_per_byte > 1) {
     storage_size_bytes =
         (storage_size_bytes + element_per_byte - 1) / element_per_byte;

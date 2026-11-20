@@ -82,7 +82,7 @@ QTensorImpl* get_qtensorimpl(const TensorBase& self) {
 }
 
 static int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::ScalarType t) {
-  const int64_t element_per_byte = at::detail::subByteElementPerByte(t);
+  const int64_t element_per_byte = at::native::subByteElementPerByte(t);
   // zero dim tensor
   if (sizes.empty()) {
     return c10::multiply_integers(sizes) * dtype_itemsize;

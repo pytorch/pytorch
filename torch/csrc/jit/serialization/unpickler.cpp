@@ -1026,7 +1026,7 @@ void Unpickler::rebuildTensor(bool quantized, bool has_explicit_dtype) {
     const size_t itemsize = result.dtype().itemsize();
     const size_t storage_nbytes = storage_tensor.storage().nbytes();
     const size_t element_per_byte =
-        at::detail::subByteElementPerByte(result.dtype());
+        at::native::subByteElementPerByte(result.dtype());
     // Bound storage_offset independently
     size_t offset_nbytes = 0;
     const bool offset_overflow = c10::mul_overflows(
