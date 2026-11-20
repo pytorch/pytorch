@@ -25,6 +25,8 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/target_determination.yml
+    with:
+      artifact-suffix: -rocm-mi200
     permissions:
       id-token: write
       contents: read
@@ -76,6 +78,7 @@ jobs:
       - linux-jammy-rocm-py3_11-build
       - target-determination
     with:
+      td-artifact-suffix: -rocm-mi200
       build-environment: ${{ needs.linux-jammy-rocm-py3_11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-rocm-py3_11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_11-build.outputs.test-matrix }}
