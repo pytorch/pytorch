@@ -3672,6 +3672,38 @@ class TestVmEndToEnd(TestCase):
 instantiate_parametrized_tests(TestVmEndToEnd)
 
 
+def region_small(x, y):
+    return x + y
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmRegions(TestCase):
+    """Runs of a block compiled as one graph by a ``graphs`` pass."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_numbers_of_a_call(self):
+        runtime = importlib.import_module("torch._cfg_rs")
+        torch.vm(region_small)
+        a, b = torch.randn(4, 12, 8), torch.nn.Parameter(torch.randn(3))
+        view = a[:, 2:9]
+        kinds, numbers, offsets = runtime.tensor_key([a, view, b], [5, -2])
+        # The sizes and then the strides of each tensor, then the integers.
+        self.assertEqual(
+            memoryview(numbers).cast("q").tolist(),
+            [4, 12, 8, 96, 8, 1, 4, 7, 8, 96, 8, 1, 3, 1, 5, -2],
+        )
+        self.assertEqual(memoryview(offsets).cast("q").tolist(), [0, 16, 0])
+        # Other elements, or gradients, make another kind of tensor of the
+        # same numbers.
+        for other in (a.double(), a.clone().requires_grad_()):
+            key = runtime.tensor_key([other, view, b], [5, -2])
+            self.assertNotEqual(kinds, key[0])
+            self.assertEqual(numbers, key[1])
+        with self.assertRaises(TypeError):
+            runtime.tensor_key([a, 3], [])
+
+
 def vm_scaled(x, y):
     return unr_loop(x, y)[0] * 2
 

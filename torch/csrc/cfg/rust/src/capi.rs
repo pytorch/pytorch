@@ -27,7 +27,7 @@ pub const TCFG_ALLOW_SKIP_AUTOGRAD: u32 = 1;
 
 pub const TCFG_UNBOXED_RESULT: u32 = 1;
 
-pub const TCFG_API_VERSION: u32 = 4;
+pub const TCFG_API_VERSION: u32 = 5;
 
 #[repr(C)]
 pub struct TcfgPyOp {
@@ -47,11 +47,24 @@ pub struct TcfgTensorInfo {
     pub requires_grad: i32,
     pub sizes: *const i64,
     pub key_set: u64,
+    pub strides: *const i64,
+    pub storage_offset: i64,
+    pub dtype: i32,
+    pub device: i32,
 }
 
 impl TcfgTensorInfo {
     pub fn empty() -> TcfgTensorInfo {
-        TcfgTensorInfo { ndim: 0, requires_grad: 0, sizes: std::ptr::null(), key_set: 0 }
+        TcfgTensorInfo {
+            ndim: 0,
+            requires_grad: 0,
+            sizes: std::ptr::null(),
+            key_set: 0,
+            strides: std::ptr::null(),
+            storage_offset: 0,
+            dtype: 0,
+            device: 0,
+        }
     }
 
     /// The size of dimension `dim` (negative counts from the end), if it

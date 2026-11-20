@@ -1682,6 +1682,18 @@ int32_t tensorInfo(PyObject* obj, TcfgTensorInfo* out) {
   out->sizes = sizes.data();
   out->requires_grad = impl->requires_grad() ? 1 : 0;
   out->key_set = impl->key_set().raw_repr();
+  // Not every kind of tensor has strides, and those that do not throw.
+  try {
+    out->strides = impl->strides().data();
+    out->storage_offset = impl->storage_offset();
+  } catch (...) {
+    out->strides = nullptr;
+    out->storage_offset = 0;
+  }
+  out->dtype = static_cast<int32_t>(impl->dtype().toScalarType());
+  const auto device = impl->device();
+  out->device = (static_cast<int32_t>(device.type()) << 16) |
+      (static_cast<int32_t>(device.index()) + 1);
   return 1;
 }
 
