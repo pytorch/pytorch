@@ -133,6 +133,12 @@ reads the rules from `OWNERSHIP.yaml` in the generated file's order
 matches a path last. Requests go out with `GITHUB_TOKEN`, which can't request
 teams or map emails to logins, so `OWNERSHIP.yaml` allows only user logins.
 
+A group with `review_request: one_of_owners` in `OWNERSHIP.yaml` is requested
+as one group instead: one of its owners, picked per PR (seeded, so every run on
+the PR picks the same member) from those with push access, unless one of them is
+already pending, has reviewed, or was requested before. An owner reached only
+through such groups gets no request of their own.
+
 The same rules tell the LLM which changed files are already owned, and in
 planning a team whose roster member is a requested codepath owner needs no
 roster pick. The explanation reports each codepath owner's state: requested by

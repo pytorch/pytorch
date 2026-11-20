@@ -535,7 +535,7 @@ class OwnershipGroupTest(unittest.TestCase):
         path_groups = (
             PathGroup(("@x", "@y"), (0,), "nn", "path_handles"),
             PathGroup(("@x",), (1,), "nn", "path_handles"),
-            PathGroup(("@y", "@z"), (2,), "autograd", "path_handles"),
+            PathGroup(("@y", "@z"), (2,), "autograd", "one_of_owners"),
         )
         prepared = replace(
             prepared,
@@ -552,7 +552,7 @@ class OwnershipGroupTest(unittest.TestCase):
         self.assertEqual(
             result.ownership_groups,
             {
-                "autograd": OwnershipGroup(("@y", "@z"), ("torch/c.py",), "path_handles"),
+                "autograd": OwnershipGroup(("@y", "@z"), ("torch/c.py",), "one_of_owners"),
                 "nn": OwnershipGroup(("@x", "@y"), ("torch/a.py", "torch/b.py"), "path_handles"),
             },
         )

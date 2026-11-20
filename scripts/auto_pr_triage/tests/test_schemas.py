@@ -389,7 +389,7 @@ class OwnershipResultTest(unittest.TestCase):
                 "core": OwnershipGroup(
                     ("@alice", "@pytorch/Zeta"), ("torch/a.py",), "path_handles"
                 ),
-                "nn": OwnershipGroup(("@pytorch/Zeta",), ("torch/b.py",), "path_handles"),
+                "nn": OwnershipGroup(("@pytorch/Zeta",), ("torch/b.py",), "one_of_owners"),
             },
             additional_owner_concerns=concerns("zeta", "alpha"),
         )

@@ -356,8 +356,8 @@ class IntakeResult(_Record):
 
 
 # How an OWNERSHIP.yaml group's reviewers are requested: everyone on the
-# matching path.
-ReviewRequest = Literal["path_handles"]
+# matching path, or one of the group's owners.
+ReviewRequest = Literal["path_handles", "one_of_owners"]
 
 
 @dataclass(frozen=True)
@@ -366,7 +366,7 @@ class PathGroup(_Record):
 
     If files 0 and 2 both match autograd rules listing @alband and @soulitzer, the
     group is PathGroup(("@alband", "@soulitzer"), (0, 2), "autograd",
-    "path_handles"). Indices point into untrusted_context.files.
+    "one_of_owners"). Indices point into untrusted_context.files.
     """
 
     owners: tuple[str, ...]
@@ -713,8 +713,8 @@ class OwnershipGroup(_Record):
     """Hold one OWNERSHIP.yaml group the PR touches.
 
     owners are the handles on the touched files' rules, files are those touched
-    files, and review_request says how the group's reviewers are requested.
-    Which owner matched which file is in OwnershipResult.codepath_owners.
+    files, and review_request says whether everyone in owners is requested or one
+    of them. Which owner matched which file is in OwnershipResult.codepath_owners.
     """
 
     error = ValueError

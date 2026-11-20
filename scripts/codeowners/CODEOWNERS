@@ -361,11 +361,11 @@
 # owner: @albanD @soulitzer
 /torch/autograd/ @albanD @soulitzer
 /torch/csrc/autograd/ @albanD @soulitzer
-/test/test_ops_fwd_gradients.py @soulitzer
-/test/test_ops_gradients.py @soulitzer
-/test/autograd/ @soulitzer
-/test/test_autograd.py @soulitzer
-/test/test_autograd_fallback.py @soulitzer
+/test/test_ops_fwd_gradients.py @albanD @soulitzer
+/test/test_ops_gradients.py @albanD @soulitzer
+/test/autograd/ @albanD @soulitzer
+/test/test_autograd.py @albanD @soulitzer
+/test/test_autograd_fallback.py @albanD @soulitzer
 #
 # [core_csrc_misc]
 # /torch/csrc/CudaIPCTypes.cpp

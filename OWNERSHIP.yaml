@@ -13,6 +13,11 @@
 # requests reviews from those handles); a bare path is a commented rule.
 # `section` is the CODEOWNERS section the group's paths are written under; it is
 # kept temporarily for scripts/codeowners/owners.py.
+#
+# `review_request: one_of_owners` makes Auto PR Triage request one of the group's
+# owners, picked per PR, for any of its paths, instead of everyone on the matching
+# path; no request is sent if one of them is already involved. Such a group lists
+# its paths as bare strings, and CODEOWNERS lists all of its owners on each.
 
 planned_labels: ["module: tvm", "module: operator benchmarks", "module: mobile delegates", "module: hipify", "module: headeronly", "module: github automation"]
 # CODEOWNERS section order (temporary, see above).
@@ -239,14 +244,15 @@ ownership:
     labels: ["module: autograd"]
     owners: [albanD, soulitzer]
     section: autograd
+    review_request: one_of_owners
     paths:
-      - /torch/autograd/: [albanD, soulitzer]
-      - /torch/csrc/autograd/: [albanD, soulitzer]
-      - /test/test_ops_fwd_gradients.py: [soulitzer]
-      - /test/test_ops_gradients.py: [soulitzer]
-      - /test/autograd/: [soulitzer]
-      - /test/test_autograd.py: [soulitzer]
-      - /test/test_autograd_fallback.py: [soulitzer]
+      - /torch/autograd/
+      - /torch/csrc/autograd/
+      - /test/test_ops_fwd_gradients.py
+      - /test/test_ops_gradients.py
+      - /test/autograd/
+      - /test/test_autograd.py
+      - /test/test_autograd_fallback.py
   - name: abi
     labels: ["module: abi"]
     owners: [janeyx99]
