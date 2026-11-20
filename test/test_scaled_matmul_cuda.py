@@ -78,7 +78,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_CUDA,
-    TEST_MPS,
     HardwareClassification,
     TestCase,
 )
@@ -2631,7 +2630,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
     @onlyAccelerator
-    @unittest.skipIf(not (PLATFORM_SUPPORTS_MX_GEMM or TEST_MPS), mx_skip_msg)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("mkn", [
         # Nice shapes
         (128, 128, 128),
@@ -2702,7 +2701,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
     @onlyAccelerator
-    @unittest.skipIf(not (PLATFORM_SUPPORTS_MX_GEMM or TEST_MPS), mx_skip_msg)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("test_case_name", [
         "a_eye_b_eye",
         "a_ones_b_ones",
@@ -3442,11 +3441,17 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         unittest.skip('MXFP4 on CUDA only supported on B200/B300'),
         lambda p: p['recipe'] == 'mxfp4' and IS_SM12X,
     )
+    @decorateIf(
+        unittest.skip('MXFP4 is not supported on MPS'),
+        lambda p: 'mps' in p['device'] and p['recipe'] == 'mxfp4',
+    )
     def test_blockwise_nvfp4_mxfp4_compile(self, device, recipe) -> None:
         if recipe == "nvfp4" and torch.version.hip and not rocm_nvfp4_supported():
             raise unittest.SkipTest("nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping")
         if recipe == "mxfp4" and IS_SM12X:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+        if "mps" in device and recipe == "mxfp4":
+            raise unittest.SkipTest("MXFP4 is not supported on MPS")
 
         M, K, N = 128, 128, 128
         BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
