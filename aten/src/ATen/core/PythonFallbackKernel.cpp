@@ -153,14 +153,25 @@ void pythonTLSSnapshotFallback(const c10::OperatorHandle &op, c10::DispatchKeySe
 // Unfortunately, no: we need a real kernel that is not a fallthrough, in order for the PythonDispatcher to interpose on it.
 // Alternatively, we could have hardcoded this kernel (in C++) to directly call in TorchProxyDispatchMode.
 // Doing that in C++ is a pain though, so it's done in python using the PythonDispatcher for convenience.
+thread_local at::impl::PreDispatchHook tls_pre_dispatch_hook = nullptr;
+
 void preDispatchFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
-  op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::PreDispatch), stack);
+  auto keys = dispatch_keys & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::PreDispatch);
+  if (tls_pre_dispatch_hook) {
+    tls_pre_dispatch_hook(op, keys, stack);
+    return;
+  }
+  op.redispatchBoxed(keys, stack);
 }
 
 } // anonymous namespace
 
 
 namespace at::impl {
+
+PreDispatchHook set_pre_dispatch_hook(PreDispatchHook hook) {
+  return std::exchange(tls_pre_dispatch_hook, hook);
+}
 
 RestorePythonTLSSnapshot::RestorePythonTLSSnapshot() : saved_(safe_get_tls_on_entry()), guard_(safe_get_tls_on_entry()) {
   tls_on_entry = std::nullopt;
