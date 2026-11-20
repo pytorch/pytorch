@@ -881,20 +881,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             if driver == 'gels' and rcond is None:
                 check_solution_correctness(a, b, sol)
 
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_linalg_lstsq_gelsy_jpvt_is_reset(self, device, dtype):
-        a = torch.zeros(2, 3, 3, device=device, dtype=dtype)
-        a[0] = torch.eye(3, device=device, dtype=dtype)
-        a[1, 0, 1] = 1
-        a[1, 1, 2] = 1
-
-        b = torch.ones(2, 3, 1, device=device, dtype=dtype)
-
-        result = torch.linalg.lstsq(a, b, driver='gelsy')
-        expected_rank = torch.tensor([3, 2], device=device)
-        self.assertEqual(result.rank, expected_rank)
-
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -2415,7 +2401,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                     self.assertEqual(result, expected)
 
     def test_powsum_dtype_kwarg_1d_reduction(self, device):
-        # Test dtype kwarg on CPU with bfloat16 input and float32 computation
+        # Test dtype kwarg with bfloat16 input and float32 computation
         # Tests both the 1D reduction path (explicit conversion) and larger reductions (kernel handles it)
         ords = [0.5, 1, 2, 3]
 
@@ -3482,14 +3468,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                                 self.assertEqual(tensor.shape, reference.shape)
                                 self.assertEqual(tensor.dtype, reference.dtype)
                                 self.assertEqual(tensor.stride(), reference.stride())
-
-    def test_svd_driver_cpu(self, device):
-        msg = "keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend"
-
-        for driver in ("gesvd", "gesvdj", "gesvda"):
-            for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
-                self._assert_svd_driver_error(
-                    torch.empty(shape, device=device), driver, msg)
 
     @onlyNativeDeviceTypes
     @skipCPUIfNoLapack
@@ -5963,8 +5941,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
 
     def test_renorm_ps(self, device):
         # full reduction
-        x = torch.randn(5, 5)
-        xn = x.numpy()
+        x = torch.randn(5, 5, device=device)
         for p in [1, 2, 3, 4, inf]:
             res = x.renorm(p, 1, 1)
             expected = x / x.norm(p, 0, keepdim=True).clamp(min=1)
@@ -7649,6 +7626,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             coeffs = torch.rand([2, 2], device=device, dtype=dtype)
             res = torch._compute_linear_combination(x, coeffs)
 
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.complex64)
     def test_linalg_matrix_exp_no_warnings(self, device, dtype):
@@ -7659,6 +7637,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             tens = (0.5 * (tens.transpose(-1, -2) + tens))
             with warnings.catch_warnings(record=True) as w:
                 tens.imag = torch.matrix_exp(tens.imag)
+                w = [item for item in w if "Aten Op fallback" not in str(item.message)]
                 self.assertFalse(len(w))
 
     @skipCPUIfNoLapack
@@ -9033,43 +9012,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
         nrhss = (1, 7)
         for shape, batch, nrhs, hermitian in itertools.product(shapes, batches, nrhss, hermitians):
             run_test(shape, batch, nrhs, hermitian)
-
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_ldl_solve_cpu_errors(self, device, dtype):
-        # Regression test for https://github.com/pytorch/pytorch/issues/163450:
-        # malformed pivots used to be passed straight to Lapack SYTRS which
-        # would write past the end of the matrix and corrupt the heap; they
-        # should now surface as a clean RuntimeError.
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        hermitian = dtype.is_complex
-        n = 5
-        A = random_hermitian_pd_matrix(n, dtype=dtype, device=device)
-        B = make_tensor((n, 1), dtype=dtype, device=device)
-        LD, pivots, _ = torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
-
-        # Sanity: the factorization output round-trips.
-        torch.linalg.ldl_solve(LD, pivots, B, hermitian=hermitian)
-
-        # Lapack uses 1-based pivot indices, so zero is invalid.
-        bad = pivots.clone()
-        bad[0] = 0
-        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| >= 1"):
-            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
-
-        # Out-of-range positive pivot.
-        bad = pivots.clone()
-        bad[0] = n + 1
-        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| <= LD\.size\(-2\)"):
-            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
-
-        # Negative pivots encode 2x2 block pivots and are legal, but |pivot|
-        # must still be <= N.
-        bad = pivots.clone()
-        bad[0] = -(n + 1)
-        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| <= LD\.size\(-2\)"):
-            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
 
     @dtypes(torch.float, torch.half, torch.bfloat16)
     @parametrize("transpose_a", [True, False])
@@ -12856,6 +12798,65 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             torch.testing.assert_close(res, ref, atol=1e-2, rtol=1e-2)
         finally:
             torch._C._set_cpu_allow_fp16_reduced_precision_reduction(prev)
+
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_linalg_lstsq_gelsy_jpvt_is_reset(self, device, dtype):
+        a = torch.zeros(2, 3, 3, device=device, dtype=dtype)
+        a[0] = torch.eye(3, device=device, dtype=dtype)
+        a[1, 0, 1] = 1
+        a[1, 1, 2] = 1
+
+        b = torch.ones(2, 3, 1, device=device, dtype=dtype)
+
+        result = torch.linalg.lstsq(a, b, driver='gelsy')
+        expected_rank = torch.tensor([3, 2], device=device)
+        self.assertEqual(result.rank, expected_rank)
+
+    def test_svd_driver_cpu(self, device):
+        msg = "keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend"
+
+        for driver in ("gesvd", "gesvdj", "gesvda"):
+            for shape in ((2, 2), (0, 0), (2, 0), (0, 2), (0, 2, 2)):
+                self._assert_svd_driver_error(
+                    torch.empty(shape, device=device), driver, msg)
+
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_ldl_solve_cpu_errors(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/163450:
+        # malformed pivots used to be passed straight to Lapack SYTRS which
+        # would write past the end of the matrix and corrupt the heap; they
+        # should now surface as a clean RuntimeError.
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        hermitian = dtype.is_complex
+        n = 5
+        A = random_hermitian_pd_matrix(n, dtype=dtype, device=device)
+        B = make_tensor((n, 1), dtype=dtype, device=device)
+        LD, pivots, _ = torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
+
+        # Sanity: the factorization output round-trips.
+        torch.linalg.ldl_solve(LD, pivots, B, hermitian=hermitian)
+
+        # Lapack uses 1-based pivot indices, so zero is invalid.
+        bad = pivots.clone()
+        bad[0] = 0
+        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| >= 1"):
+            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
+
+        # Out-of-range positive pivot.
+        bad = pivots.clone()
+        bad[0] = n + 1
+        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| <= LD\.size\(-2\)"):
+            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
+
+        # Negative pivots encode 2x2 block pivots and are legal, but |pivot|
+        # must still be <= N.
+        bad = pivots.clone()
+        bad[0] = -(n + 1)
+        with self.assertRaisesRegex(RuntimeError, r"\|pivot\| <= LD\.size\(-2\)"):
+            torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
 
 
 _GROUPED_MM_CASES = [
