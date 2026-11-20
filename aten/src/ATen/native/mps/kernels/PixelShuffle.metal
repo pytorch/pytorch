@@ -1,7 +1,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
-template <typename T>
+template <typename T, typename I>
 kernel void pixel_shuffle(
     device const T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
@@ -15,29 +15,34 @@ kernel void pixel_shuffle(
   const uint n = pos.z / z_dim, z = pos.z - n * z_dim;
   const uint channel = channel_major ? pos.x : z,
              hd = channel_major ? z : pos.y, wd = channel_major ? pos.y : pos.x;
-  const long in_base = n * in_strides[0] + channel * in_strides[1] +
-      hd * in_strides[2] + wd * in_strides[3];
-  const long out_base = n * out_strides[0] + channel * out_strides[1] +
-      hd * out_strides[2] + wd * out_strides[3];
+  const I in_base = n * I(in_strides[0]) + channel * I(in_strides[1]) +
+      hd * I(in_strides[2]) + wd * I(in_strides[3]);
+  const I out_base = n * I(out_strides[0]) + channel * I(out_strides[1]) +
+      hd * I(out_strides[2]) + wd * I(out_strides[3]);
   for (uint i = 0; i < factor; ++i) {
-    long in = in_base + i * in_strides[4], out = out_base + i * out_strides[4];
+    I in = in_base + i * I(in_strides[4]),
+      out = out_base + i * I(out_strides[4]);
     for (uint j = 0; j < factor;
-         ++j, in += in_strides[5], out += out_strides[5]) {
+         ++j, in += I(in_strides[5]), out += I(out_strides[5])) {
       output[out] = input[in];
     }
   }
 }
 
-#define REGISTER_PIXEL_SHUFFLE(WIDTH, DTYPE)                  \
-  template [[host_name("pixel_shuffle_" #WIDTH)]] kernel void \
-  pixel_shuffle<DTYPE>(                                       \
-      device const DTYPE* input,                              \
-      device DTYPE* output,                                   \
-      constant long* in_strides,                              \
-      constant long* out_strides,                             \
-      constant uint2& factor_zdim,                            \
-      constant bool& channel_major,                           \
+#define REGISTER_PIXEL_SHUFFLE_IDX(WIDTH, DTYPE, IDX, SUFFIX)             \
+  template [[host_name("pixel_shuffle_" #WIDTH "_" #SUFFIX)]] kernel void \
+  pixel_shuffle<DTYPE, IDX>(                                              \
+      device const DTYPE* input,                                          \
+      device DTYPE* output,                                               \
+      constant long* in_strides,                                          \
+      constant long* out_strides,                                         \
+      constant uint2& factor_zdim,                                        \
+      constant bool& channel_major,                                       \
       uint3 pos);
+
+#define REGISTER_PIXEL_SHUFFLE(WIDTH, DTYPE)          \
+  REGISTER_PIXEL_SHUFFLE_IDX(WIDTH, DTYPE, uint, u32) \
+  REGISTER_PIXEL_SHUFFLE_IDX(WIDTH, DTYPE, long, u64)
 
 REGISTER_PIXEL_SHUFFLE(1, uchar);
 REGISTER_PIXEL_SHUFFLE(2, ushort);

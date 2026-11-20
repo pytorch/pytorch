@@ -588,6 +588,22 @@ class TestPixelShuffle(TestCaseMPS):
         test_pixel_shuffle_unshuffle_4D()
         test_pixel_shuffle_unshuffle_5D()
 
+    @serialTest()
+    @largeTensorTest("5GB", device="mps")
+    def test_pixel_shuffle_unshuffle_large_offset(self):
+        # Views whose max element offset is 2**32 must take the 64-bit indexing kernels
+        base = torch.zeros(2**32 + 64, dtype=torch.uint8, device="mps")
+        x = torch.arange(1, 25, dtype=torch.uint8).view(1, 4, 3, 2)
+        S = 2**31 - 4
+        for h, w in itertools.product(range(3), range(2)):
+            base[h * S + 5 * w:h * S + 5 * w + 4] = x[0, :, h, w]
+        self.assertEqual(F.pixel_shuffle(base.as_strided(x.shape, (1, 1, S, 5)), 2).cpu(), F.pixel_shuffle(x, 2))
+        y = torch.arange(1, 9, dtype=torch.uint8).view(1, 1, 4, 2)
+        S = (2**32 - 1) // 3
+        for h in range(4):
+            base[h * S:h * S + 2] = y[0, 0, h]
+        self.assertEqual(F.pixel_unshuffle(base.as_strided(y.shape, (1, 1, S, 1)), 2).cpu(), F.pixel_unshuffle(y, 2))
+
 class MPSReluTest(TestCaseMPS):
     def _npRelu(self, np_features):
         return np.maximum(np_features, np.zeros(np_features.shape)).astype(np_features.dtype)
