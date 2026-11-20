@@ -45,6 +45,14 @@ struct NoopPyObjectConversion final : PyObjectConversionInterface {
   PyObject* layout_to_pyobject(at::Layout /*layout*/) const override {
     TORCH_CHECK(false, kNoImplMsg);
   }
+  at::MemoryFormat memory_format_from_pyobject(
+      PyObject* /*obj*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
+  PyObject* memory_format_to_pyobject(
+      at::MemoryFormat /*memory_format*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
 };
 
 const NoopPyObjectConversion noop_impl;

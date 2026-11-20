@@ -172,3 +172,5 @@ torch_is_neg: TORCH_VERSION_2_16_0
 torch_is_warn_always_enabled: TORCH_VERSION_2_16_0
 torch_layout_from_pyobject: TORCH_VERSION_2_16_0
 torch_layout_to_pyobject: TORCH_VERSION_2_16_0
+torch_memory_format_from_pyobject: TORCH_VERSION_2_16_0
+torch_memory_format_to_pyobject: TORCH_VERSION_2_16_0

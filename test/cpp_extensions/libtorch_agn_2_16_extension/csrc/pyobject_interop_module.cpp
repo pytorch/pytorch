@@ -33,8 +33,16 @@ PyObject* layout_roundtrip(PyObject* /*self*/, PyObject* obj) {
   });
 }
 
+PyObject* memory_format_roundtrip(PyObject* /*self*/, PyObject* obj) {
+  return call([&] {
+    return torch::stable::memory_format_to_pyobject(
+        torch::stable::memory_format_from_pyobject(obj));
+  });
+}
+
 PyMethodDef methods[] = {
     {"layout_roundtrip", layout_roundtrip, METH_O, nullptr},
+    {"memory_format_roundtrip", memory_format_roundtrip, METH_O, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyModuleDef moduledef = {
