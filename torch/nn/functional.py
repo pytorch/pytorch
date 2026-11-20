@@ -5153,7 +5153,7 @@ def interpolate(  # noqa: F811
     .. note::
         Mode ``mode='inter-area'`` matches OpenCV's ``cv2.resize`` with ``interpolation=cv2.INTER_AREA``,
         including how ``scale_factor`` is used. It only supports 4-D input and CPU, and doesn't support
-        ``align_corners``, ``antialias`` or backward. For ``uint8`` inputs, outputs can differ from OpenCV's by 1.
+        ``align_corners`` or ``antialias``. For ``uint8`` inputs, outputs can differ from OpenCV's by 1.
 
     .. note::
         Mode ``mode='nearest-exact'`` matches Scikit-Image and PIL nearest neighbours interpolation
