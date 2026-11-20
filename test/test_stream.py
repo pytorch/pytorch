@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipCUDANonDefaultStreamIf,
+    subtest,
     TEST_ACCELERATOR,
     TEST_CUDA,
     TestCase,
@@ -70,7 +71,11 @@ class TestStream(TestCase):
         else:
             return torch.get_device_module(self.device_type).Stream()
 
-    @parametrize("use_generic_stream", [True, False])
+    @parametrize(
+        "use_generic_stream",
+        # `torch.xpu.Stream` does not support comparison to `torch.Stream`
+        [subtest(True, decorators=[expectedFailureXPU]), False],
+    )
     def test_stream(self, device, use_generic_stream):
         m = torch.get_device_module(device)
         s0 = self._get_user_stream(use_generic_stream)
@@ -88,7 +93,11 @@ class TestStream(TestCase):
         with m.stream(None):
             self.assertEqual(m.current_stream(), prev_stream)
 
-    @parametrize("use_generic_stream", [True, False])
+    @parametrize(
+        "use_generic_stream",
+        # `torch.xpu.Stream` does not support comparison to `torch.Stream`
+        [subtest(True, decorators=[expectedFailureXPU]), False],
+    )
     def test_set_stream(self, device, use_generic_stream):
         m = torch.get_device_module(device)
         s0 = self._get_user_stream(use_generic_stream)
@@ -205,7 +214,11 @@ class TestStream(TestCase):
 
     # Check that the stream is reset correctly if an exception is raised within
     # another stream's context.
-    @parametrize("use_generic_stream", [True, False])
+    @parametrize(
+        "use_generic_stream",
+        # `torch.xpu.Stream` does not support comparison to `torch.Stream`
+        [subtest(True, decorators=[expectedFailureXPU]), False],
+    )
     def test_exception_reset(self, device, use_generic_stream):
         m = torch.get_device_module(device)
         s1 = self._get_user_stream(use_generic_stream)
@@ -226,7 +239,11 @@ class TestStream(TestCase):
             self.assertEqual(m.current_stream(), prev_stream)
 
     @parametrize("stream_init", ["default", "user"])
-    @parametrize("use_generic_stream", [True, False])
+    @parametrize(
+        "use_generic_stream",
+        # `torch.xpu.Stream` does not support comparison to `torch.Stream`
+        [subtest(True, decorators=[expectedFailureXPU]), False],
+    )
     def test_stream_context_manager(self, device, stream_init, use_generic_stream):
         m = torch.get_device_module(device)
         m.set_stream(self._get_stream_by_name(stream_init))
@@ -236,7 +253,11 @@ class TestStream(TestCase):
         self.assertEqual(prev_stream, m.current_stream())
 
     # Check that the stream is reset correctly with nested contexts
-    @parametrize("use_generic_stream", [True, False])
+    @parametrize(
+        "use_generic_stream",
+        # `torch.xpu.Stream` does not support comparison to `torch.Stream`
+        [subtest(True, decorators=[expectedFailureXPU]), False],
+    )
     def test_nested_reset(self, device, use_generic_stream):
         m = torch.get_device_module(device)
         s0 = m.current_stream()
