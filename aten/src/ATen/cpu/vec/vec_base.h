@@ -1263,8 +1263,7 @@ inline Vectorized<T> fmadd(
     const Vectorized<T>& b,
     const Vectorized<T>& c) {
   if constexpr (is_reduced_floating_point_v<T>) {
-    // Compute in float, where the product of two reduced floating-point
-    // values is exact (for BFloat16, unless it overflows or underflows),
+    // Compute in float with a fused multiply-add, like the specializations,
     // rather than round the product to T before adding.
     __at_align__ T va[Vectorized<T>::size()];
     __at_align__ T vb[Vectorized<T>::size()];
@@ -1273,9 +1272,10 @@ inline Vectorized<T> fmadd(
     b.store(vb);
     c.store(vc);
     for (int i = 0; i != Vectorized<T>::size(); i++) {
-      va[i] = static_cast<T>(
-          static_cast<float>(va[i]) * static_cast<float>(vb[i]) +
-          static_cast<float>(vc[i]));
+      va[i] = static_cast<T>(std::fma(
+          static_cast<float>(va[i]),
+          static_cast<float>(vb[i]),
+          static_cast<float>(vc[i])));
     }
     return Vectorized<T>::loadu(va);
   } else {

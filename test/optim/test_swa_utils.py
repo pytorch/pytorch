@@ -10,11 +10,15 @@ from torch.optim.swa_utils import (
     get_swa_multi_avg_fn,
     update_bn,
 )
-from torch.testing._internal.common_device_type import onlyAccelerator
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
+    run_tests,
     TestCase,
 )
 
@@ -316,5 +320,8 @@ class TestSWAUtils(TestCase):
         self.assertTrue(cnn.training)
 
 
+instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
+
+
 if __name__ == "__main__":
-    print("These tests should be run through test/test_optim.py instead")
+    run_tests()

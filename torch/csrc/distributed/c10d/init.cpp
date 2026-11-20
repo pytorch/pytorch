@@ -20,6 +20,7 @@
 #endif
 #include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/py/IntrusivePtrNoGilDestructor.hpp>
 #include <torch/csrc/distributed/c10d/py/PyBackend.hpp>
 #include <torch/csrc/distributed/c10d/py/PyProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/python_callback_work.hpp>
@@ -35,8 +36,8 @@
 #endif
 
 #ifdef USE_C10D_NCCL
+#include <torch/csrc/distributed/c10d/NCCLCommon.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl/NCCLXStub.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLLazy.hpp>
@@ -131,60 +132,14 @@ bool registerGcCountGetter() {
 static bool registered_gc_count_getter = registerGcCountGetter();
 #endif // USE_C10D_GLOO
 
-// Wrapper to ensure GIL is released before destructing ProcessGroupGloo
-// TODO: move this somewhere more generally useful
-template <typename T>
-class IntrusivePtrNoGilDestructor {
-  c10::intrusive_ptr<T> impl_{};
-
- public:
-  IntrusivePtrNoGilDestructor() = default;
-  IntrusivePtrNoGilDestructor(const IntrusivePtrNoGilDestructor&) = default;
-  IntrusivePtrNoGilDestructor(IntrusivePtrNoGilDestructor&&) noexcept = default;
-  IntrusivePtrNoGilDestructor& operator=(const IntrusivePtrNoGilDestructor&) =
-      default;
-  IntrusivePtrNoGilDestructor& operator=(
-      IntrusivePtrNoGilDestructor&&) noexcept = default;
-  /* implicit */ IntrusivePtrNoGilDestructor(c10::intrusive_ptr<T> impl)
-      : impl_(std::move(impl)) {}
-  // This ctor is very important; see
-  // https://github.com/pybind/pybind11/issues/2957
-  explicit IntrusivePtrNoGilDestructor(T* impl)
-      // NOLINTNEXTLINE(bugprone-exception-escape)
-      : impl_(c10::intrusive_ptr<T>::unsafe_steal_from_new(impl)) {}
-  // NOLINTNEXTLINE(bugprone-exception-escape)
-  ~IntrusivePtrNoGilDestructor() {
-    if (impl_) {
-      if (PyGILState_Check()) {
-        pybind11::gil_scoped_release release;
-        impl_.reset();
-      } else {
-        impl_.reset();
-      }
-    }
-  }
-  T& operator*() const noexcept {
-    return *impl_;
-  }
-  T* operator->() const noexcept {
-    return impl_.get();
-  }
-  [[nodiscard]] T* get() const noexcept {
-    return impl_.get();
-  }
-  void reset() noexcept {
-    impl_.reset();
-  }
-  operator bool() const noexcept {
-    return impl_;
-  }
-};
-
 } // anonymous namespace
 
-PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true)
-
 namespace torch::distributed::c10d {
+
+#ifdef USE_C10D_NCCL_LEGACY
+// Binds the legacy ProcessGroupNCCL ("nccl-legacy"); defined in fb/.
+void initNCCLLegacyBindings(py::module& module);
+#endif // USE_C10D_NCCL_LEGACY
 
 namespace {
 
@@ -4415,131 +4370,26 @@ supported.
 #endif
 
 #ifdef USE_C10D_NCCL
-  auto processGroupNCCL =
-      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupNCCL>(
-          module, "ProcessGroupNCCL", backend)
-          .def(
-              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                          int rank,
-                          int size,
-                          c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>
-                              options) {
-                // gil_scoped_release is not safe as a call_guard in init.
-                // https://github.com/pybind/pybind11/issues/5473
-                py::gil_scoped_release nogil{};
-
-                return c10::make_intrusive<::c10d::ProcessGroupNCCL>(
-                    store, rank, size, std::move(options));
-              }),
-              py::arg("store"),
-              py::arg("rank"),
-              py::arg("size"),
-              py::arg("options"),
-              R"(Create a new ProcessGroupNCCL instance.)")
-          .def(
-              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                          int rank,
-                          int size,
-                          const std::chrono::milliseconds& timeout) {
-                // gil_scoped_release is not safe as a call_guard in init.
-                // https://github.com/pybind/pybind11/issues/5473
-                py::gil_scoped_release nogil{};
-
-                auto options = ::c10d::ProcessGroupNCCL::Options::create();
-                options->is_high_priority_stream = false;
-                options->timeout = timeout;
-                return c10::make_intrusive<::c10d::ProcessGroupNCCL>(
-                    store, rank, size, options);
-              }),
-              py::arg("store"),
-              py::arg("rank"),
-              py::arg("size"),
-              py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
-              R"(Create a new ProcessGroupNCCL instance.)")
-          .def("_comm_ptr", &::c10d::ProcessGroupNCCL::getCommPtr)
-          .def_property_readonly(
-              "comm_ptr",
-              &::c10d::ProcessGroupNCCL::getCommPtr,
-              R"(
-            The communicator of the current device, as an opaque handle.
-
-            .. warning ::
-                Unsafe to use. The collectives launched into the communicator
-                externally outside ProcessGroupNCCL are not monitored by the
-                watchdog. Please do not modify or free the communicator as the
-                communicator is managed by the ProcessGroupNCCL. Please also
-                check the readiness of the communicator before launching any
-                collectives into the communicator.
-            )")
-          .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
-          .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
-          .def(
-              "comm_split_count",
-              &::c10d::ProcessGroupNCCL::getCommSplitCounter)
-          .def(
-              "_set_default_timeout",
-              &::c10d::ProcessGroupNCCL::setTimeout,
-              py::arg("timeout"),
-              py::call_guard<py::gil_scoped_release>())
-          .def_property_readonly(
-              "options",
-              &::c10d::ProcessGroupNCCL::getOptions,
-              R"(Return the options used to create this ProcessGroupNCCL instance.)")
-          .def_property_readonly(
-              "uid", &::c10d::ProcessGroupNCCL::getUid, R"(Return the uid.)")
-          .def_property(
-              "bound_device_id",
-              &::c10d::ProcessGroupNCCL::getBoundDeviceId,
-              &::c10d::ProcessGroupNCCL::setBoundDeviceId,
-              R"(Return the bound device id.)")
-          .def(
-              "perform_nocolor_split",
-              &::c10d::ProcessGroupNCCL::performNocolorSplit)
-          .def(
-              "register_mem_pool",
-              &::c10d::ProcessGroupNCCL::registerMemPool,
-              py::arg("pool"),
-              py::arg("symm") = false,
-              R"(Register ``pool``'s segments with this communicator. With ``symm=True``, unregistered segments are registered as NCCL symmetric windows instead; already registered segments are left as is. This is collective, as are later allocations from the pool. ``symm`` is ignored when PyTorch is built against NCCL older than 2.27.)")
-          .def(
-              "deregister_mem_pool",
-              &::c10d::ProcessGroupNCCL::deregisterMemPool,
-              py::arg("pool"),
-              R"(Deregister ``pool``'s segments from this communicator.)")
-          .def(
-              "_is_initialized",
-              &::c10d::ProcessGroupNCCL::isInitialized,
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "get_error",
-              &::c10d::ProcessGroupNCCL::getError,
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "_set_enable_nan_check",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
-                 bool enable_nan_check) {
-                self->setEnableNanCheck(enable_nan_check);
-              },
-              py::arg("enable_nan_check"),
-              py::call_guard<py::gil_scoped_release>())
-          .def_static(
-              "get_build_nccl_version",
-              [] {
-                return std::make_tuple(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH);
-              })
-          .def_static("get_runtime_nccl_version", [] {
-            return ::c10d::getNcclVersionTuple();
-          });
+  auto processGroupNCCL2 =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCL>(
+          module, "ProcessGroupNCCL2", backend);
+  processGroupNCCL2
+      .def_static(
+          "get_build_nccl_version",
+          [] { return std::make_tuple(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH); })
+      .def_static("get_runtime_nccl_version", [] {
+        return ::c10d::getNcclVersionTuple();
+      });
 
 #ifdef NCCL_HAS_CTA_POLICY
-  processGroupNCCL.def_property_readonly_static(
+  processGroupNCCL2.def_property_readonly_static(
       "NCCL_CTA_POLICY_DEFAULT",
       [](const py::object&) { return NCCL_CTA_POLICY_DEFAULT; });
-  processGroupNCCL.def_property_readonly_static(
+  processGroupNCCL2.def_property_readonly_static(
       "NCCL_CTA_POLICY_EFFICIENCY",
       [](const py::object&) { return NCCL_CTA_POLICY_EFFICIENCY; });
 #ifdef NCCL_CTA_POLICY_ZERO // requires NCCL version >= 2.28
-  processGroupNCCL.def_property_readonly_static(
+  processGroupNCCL2.def_property_readonly_static(
       "NCCL_CTA_POLICY_ZERO",
       [](const py::object&) { return NCCL_CTA_POLICY_ZERO; });
 #endif // NCCL_CTA_POLICY_ZERO
@@ -4550,7 +4400,7 @@ supported.
       &::c10d::intra_node_comm::getIntraNodeCommUsageCounter);
 
   py::class_<ncclConfig_t>(
-      processGroupNCCL,
+      processGroupNCCL2,
       "NCCLConfig",
       R"(
 ncclConfig_t data type for configuring NCCL communicators.
@@ -4631,8 +4481,8 @@ for details.
           },
           py::arg("memo"));
 
-  intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
-      processGroupNCCL,
+  intrusive_ptr_class_<::c10d::NCCLOptions>(
+      processGroupNCCL2,
       "Options",
       backendOptions,
       R"(
@@ -4691,32 +4541,34 @@ Example::
     >>> dist.init_process_group("nccl", pg_options=nccl_options)
       )")
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
-      .def_readwrite("config", &::c10d::ProcessGroupNCCL::Options::config)
+      .def_readwrite("config", &::c10d::NCCLOptions::config)
       .def_readwrite(
           "is_high_priority_stream",
-          &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream)
-      .def_readwrite(
-          "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
-      .def_readwrite(
-          "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
-      .def_readwrite("lazy_init", &::c10d::ProcessGroupNCCL::Options::lazy_init)
-      .def_readwrite(
-          "encryption_psk", &::c10d::ProcessGroupNCCL::Options::encryption_psk)
+          &::c10d::NCCLOptions::is_high_priority_stream)
+      .def_readwrite("split_from", &::c10d::NCCLOptions::split_from)
+      .def_readwrite("split_color", &::c10d::NCCLOptions::split_color)
+      .def_readwrite("lazy_init", &::c10d::NCCLOptions::lazy_init)
+      .def_readwrite("encryption_psk", &::c10d::NCCLOptions::encryption_psk)
       .def_readwrite(
           "use_pg_for_symm_mem_rendezvous",
-          &::c10d::ProcessGroupNCCL::Options::use_pg_for_symm_mem_rendezvous)
+          &::c10d::NCCLOptions::use_pg_for_symm_mem_rendezvous)
       .def(
           "__copy__",
-          [](const ::c10d::ProcessGroupNCCL::Options& self) {
-            return ::c10d::ProcessGroupNCCL::Options(self);
+          [](const ::c10d::NCCLOptions& self) {
+            return ::c10d::NCCLOptions(self);
           })
       .def(
           "__deepcopy__",
-          [](const ::c10d::ProcessGroupNCCL::Options& self,
-             const py::dict& /*memo*/) {
-            return ::c10d::ProcessGroupNCCL::Options(self);
+          [](const ::c10d::NCCLOptions& self, const py::dict& /*memo*/) {
+            return ::c10d::NCCLOptions(self);
           },
           py::arg("memo"));
+
+#ifdef USE_C10D_NCCL_LEGACY
+  initNCCLLegacyBindings(module);
+#else
+  module.attr("ProcessGroupNCCL") = processGroupNCCL2;
+#endif // USE_C10D_NCCL_LEGACY
 
 #endif
 
@@ -4852,16 +4704,15 @@ Returns:
 #endif
 
 #ifdef USE_C10D_NCCL
-  auto processGroupNCCL2 =
-      intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCL>(
-          module, "ProcessGroupNCCL2", backend)
-          .def(
-              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                          int rank,
-                          int size,
-                          c10::intrusive_ptr<
-                              ::c10d::nccl2::ProcessGroupNCCL::Options> options,
-                          std::optional<at::Device> device_id) {
+  processGroupNCCL2
+      .def(
+          py::init(
+              [](const c10::intrusive_ptr<::c10d::Store>& store,
+                 int rank,
+                 int size,
+                 c10::intrusive_ptr<::c10d::nccl2::ProcessGroupNCCL::Options>
+                     options,
+                 std::optional<at::Device> device_id) {
                 // gil_scoped_release is not safe as a call_guard in init.
                 // https://github.com/pybind/pybind11/issues/5473
                 py::gil_scoped_release nogil{};
@@ -4871,52 +4722,50 @@ Returns:
                 backend->setBoundDeviceId(device_id);
                 return backend;
               }),
-              py::arg("store"),
-              py::arg("rank"),
-              py::arg("size"),
-              py::arg("options"),
-              py::arg("device_id") = std::nullopt,
-              R"(Create a new ProcessGroupNCCL2 instance.)")
-          .def(
-              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                          int rank,
-                          int size) {
-                py::gil_scoped_release nogil{};
-                auto options =
-                    ::c10d::nccl2::ProcessGroupNCCL::Options::create();
-                auto backend =
-                    c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
-                        store, rank, size, options);
-                backend->setBoundDeviceId(std::nullopt);
-                return backend;
-              }),
-              py::arg("store"),
-              py::arg("rank"),
-              py::arg("size"),
-              R"(Create a new ProcessGroupNCCL2 instance.)")
-          .def(
-              "get_error",
-              &::c10d::nccl2::ProcessGroupNCCL::getError,
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "register_mem_pool",
-              &::c10d::nccl2::ProcessGroupNCCL::registerMemPool,
-              py::arg("pool"),
-              py::arg("symm") = false,
-              R"(Register ``pool``'s segments with this communicator. With ``symm=True``, its segments also get symmetric windows; this is collective, as are later allocations from the pool. Call :meth:`deregister_mem_pool` before re-registering with a different ``symm``.)")
-          .def(
-              "deregister_mem_pool",
-              &::c10d::nccl2::ProcessGroupNCCL::deregisterMemPool,
-              py::arg("pool"),
-              R"(Deregister ``pool`` from this communicator and tear down its segment windows.)")
-          .def(
-              "perform_nocolor_split",
-              &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
-          .def("_comm_ptr", &::c10d::nccl2::ProcessGroupNCCL::getCommPtr)
-          .def_property_readonly(
-              "comm_ptr",
-              &::c10d::nccl2::ProcessGroupNCCL::getCommPtr,
-              R"(
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("size"),
+          py::arg("options"),
+          py::arg("device_id") = std::nullopt,
+          R"(Create a new ProcessGroupNCCL2 instance.)")
+      .def(
+          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                      int rank,
+                      int size) {
+            py::gil_scoped_release nogil{};
+            auto options = ::c10d::nccl2::ProcessGroupNCCL::Options::create();
+            auto backend = c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
+                store, rank, size, options);
+            backend->setBoundDeviceId(std::nullopt);
+            return backend;
+          }),
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("size"),
+          R"(Create a new ProcessGroupNCCL2 instance.)")
+      .def(
+          "get_error",
+          &::c10d::nccl2::ProcessGroupNCCL::getError,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "register_mem_pool",
+          &::c10d::nccl2::ProcessGroupNCCL::registerMemPool,
+          py::arg("pool"),
+          py::arg("symm") = false,
+          R"(Register ``pool``'s segments with this communicator. With ``symm=True``, its segments also get symmetric windows; this is collective, as are later allocations from the pool. Call :meth:`deregister_mem_pool` before re-registering with a different ``symm``.)")
+      .def(
+          "deregister_mem_pool",
+          &::c10d::nccl2::ProcessGroupNCCL::deregisterMemPool,
+          py::arg("pool"),
+          R"(Deregister ``pool`` from this communicator and tear down its segment windows.)")
+      .def(
+          "perform_nocolor_split",
+          &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
+      .def("_comm_ptr", &::c10d::nccl2::ProcessGroupNCCL::getCommPtr)
+      .def_property_readonly(
+          "comm_ptr",
+          &::c10d::nccl2::ProcessGroupNCCL::getCommPtr,
+          R"(
             This process group's ``ncclComm_t``, as an opaque handle.
 
             The process group holds a single communicator, created in its
@@ -4928,12 +4777,10 @@ Returns:
                 process group are not monitored by the watchdog, so check the
                 communicator's readiness before launching any.
             )")
-          .def_property_readonly(
-              "options",
-              &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
-              R"(Return the options used to create this ProcessGroupNCCL2 instance.)");
-
-  processGroupNCCL2.attr("Options") = processGroupNCCL.attr("Options");
+      .def_property_readonly(
+          "options",
+          &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
+          R"(Return the options used to create this ProcessGroupNCCL2 instance.)");
 
   intrusive_ptr_no_gil_destructor_class_<::c10d::nccl2::ProcessGroupNCCLLazy>(
       module, "ProcessGroupNCCLLazy", backend)
@@ -5327,15 +5174,14 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                       int rank,
                       int size,
-                      c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>
-                          options) {
+                      c10::intrusive_ptr<::c10d::NCCLOptions> options) {
             return c10::make_intrusive<::c10d::NCCLXStub>(
                 store, rank, size, std::move(options));
           }),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          py::arg("options") = ::c10d::ProcessGroupNCCL::Options::create());
+          py::arg("options") = ::c10d::NCCLOptions::create());
 #endif
 
   auto pythonCallbackWork =
