@@ -579,7 +579,10 @@ class ExportMetaData:
 
 
 def _canonicalize_graph(
-    graph: fx.Graph, *, owning_module: torch.nn.Module | None = None
+    graph: fx.Graph,
+    *,
+    owning_module: torch.nn.Module | None = None,
+    reorder_inputs_only: bool = False,
 ) -> None:
     """Canonicalize a Dynamo output graph's node order and names.
 
@@ -589,6 +592,7 @@ def _canonicalize_graph(
     source is missing or ambiguous, placeholders retain their original order and
     names while the rest of the graph is still canonicalized. ``owning_module``
     resolves HOP subgraphs before ``graph`` is wrapped in a GraphModule.
+    ``reorder_inputs_only`` leaves all node names and computation order intact.
     """
     from torch.fx.passes.canonicalize import (
         _canonical_node_key,
@@ -610,6 +614,12 @@ def _canonicalize_graph(
         node: (0, source_names[i] if can_reorder_placeholders else i)
         for i, node in enumerate(placeholders)
     }
+    if reorder_inputs_only:
+        if can_reorder_placeholders:
+            ordered_inputs = sorted(placeholders, key=placeholder_keys.__getitem__)
+            for before, after in itertools.pairwise(ordered_inputs):
+                before.append(after)
+        return
 
     def _key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> object:
         if node.op == "placeholder":
@@ -3216,13 +3226,22 @@ class OutputGraph(OutputGraphCommon):
             #
             # Export canonicalizes in torch.export._trace._produce_aten_artifact
             # so both strict and non-strict export produce the same node order.
+            from torch._functorch import config as functorch_config
+
             if (
-                config.canonicalize_output_graph_node_order
+                (
+                    config.canonicalize_output_graph_node_order
+                    or functorch_config._sync_decision_cross_ranks
+                )
                 and not self.export
                 and not torch.compiler.is_exporting()
                 and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
             ):
-                _canonicalize_graph(self.graph, owning_module=root)
+                _canonicalize_graph(
+                    self.graph,
+                    owning_module=root,
+                    reorder_inputs_only=not config.canonicalize_output_graph_node_order,
+                )
 
             gm = _make_graph_module(root, self.graph)
 
