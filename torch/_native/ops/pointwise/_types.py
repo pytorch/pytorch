@@ -11,5 +11,6 @@ PromotionOperands = tuple[tuple[torch.dtype, bool], ...]
 CacheKey = tuple[Hashable, ...]
 Number = bool | int | float | complex
 Mode = str | None
-Path = Literal["vec", "strided"]
+Load = Literal["direct", "tma"]
+Path = Literal["vec", "strided", "tma"]
 OperatorResult = torch.Tensor | tuple[torch.Tensor, ...]
