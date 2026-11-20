@@ -4164,6 +4164,161 @@ instantiate_device_type_tests(
 )
 
 
+_checkpoint_retry_flag = True
+
+
+class ActivationCheckpointingConditionalBreakTests(torch._dynamo.test_case.TestCase):
+    @parametrize("source", ["argument", "closure", "global", "global_protocol"])
+    @parametrize("site", ["graph_break", "disable"])
+    def test_conditional_break_retry(self, device, source, site):
+        import types
+
+        global _checkpoint_retry_flag
+        self.addCleanup(
+            globals().__setitem__, "_checkpoint_retry_flag", _checkpoint_retry_flag
+        )
+        flag = True
+        get_events = []
+
+        class Namespace(dict):
+            def __init__(self, values):
+                super().__init__(values)
+                self.flag = dict.__getitem__(self, "_checkpoint_retry_flag")
+
+            def __getitem__(self, key):
+                if key == "_checkpoint_retry_flag":
+                    return self.flag
+                return dict.__getitem__(self, key)
+
+            def get(self, key, *args):
+                if key == "_checkpoint_retry_flag":
+                    get_events.append(key)
+                    raise AssertionError("globals get override must not run")
+                return super().get(key, *args)
+
+        @torch.compiler.disable
+        def disabled(y):
+            return y.sin()
+
+        def break_site(y):
+            if site == "disable":
+                return disabled(y)
+            torch._dynamo.graph_break()
+            return y.sin()
+
+        def argument_fn(x, value):
+            def block(y):
+                return break_site(y) if value else y.cos()
+
+            return checkpoint(block, x + 1, use_reentrant=False) * 2
+
+        def closure_fn(x):
+            def block(y):
+                return break_site(y) if flag else y.cos()
+
+            return checkpoint(block, x + 1, use_reentrant=False) * 2
+
+        def global_fn(x):
+            def block(y):
+                return break_site(y) if _checkpoint_retry_flag else y.cos()
+
+            return checkpoint(block, x + 1, use_reentrant=False) * 2
+
+        fns = {
+            "argument": argument_fn,
+            "closure": closure_fn,
+            "global": global_fn,
+            "global_protocol": global_fn,
+        }
+        fn = fns[source]
+        if source == "global_protocol":
+            fn = types.FunctionType(
+                fn.__code__,
+                Namespace(fn.__globals__),
+                fn.__name__,
+                None,
+                fn.__closure__,
+            )
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+        for iteration, value in enumerate((True, False, False, True)):
+            flag = _checkpoint_retry_flag = value
+            namespace = fn.__globals__
+            if isinstance(namespace, Namespace):
+                namespace["_checkpoint_retry_flag"] = value if iteration != 3 else False
+                namespace.flag = value
+            args = (value,) if source == "argument" else ()
+            x = torch.randn(4, dtype=torch.float64, requires_grad=True, device=device)
+            ref_x = x.detach().clone().requires_grad_()
+            shifted = ref_x + 1
+            expected = 2 * (shifted.sin() if value else shifted.cos())
+            self.assertEqual(fn(ref_x, *args), expected)
+            actual = compiled(x, *args)
+            self.assertEqual(actual, expected)
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x),
+                torch.autograd.grad(expected.sum(), ref_x),
+            )
+            self.assertEqual(
+                counter.frame_count,
+                2 if iteration == 0 or source == "global_protocol" else 3,
+            )
+            targets = [node.target for node in counter.graphs[-1].graph.nodes]
+            self.assertEqual(
+                tag_activation_checkpoint in targets,
+                source != "global_protocol" and iteration != 0,
+            )
+            self.assertEqual(get_events, [])
+
+    @parametrize("condition", ["unrelated", "overwritten"])
+    def test_conditional_break_does_not_retain_unrelated_guards(
+        self, device, condition
+    ):
+        global _checkpoint_retry_flag
+        self.addCleanup(
+            globals().__setitem__, "_checkpoint_retry_flag", _checkpoint_retry_flag
+        )
+
+        def fn(x):
+            def block(y):
+                flag = _checkpoint_retry_flag
+                if condition == "overwritten":
+                    flag = True
+                if flag:
+                    y = y.sin()
+                torch._dynamo.graph_break()
+                return y.cos()
+
+            return checkpoint(block, x + 1, use_reentrant=False) * 2
+
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+        for value in (True, False, True):
+            _checkpoint_retry_flag = value
+            x = torch.randn(4, requires_grad=True, device=device)
+            ref_x = x.detach().clone().requires_grad_()
+            expected = fn(ref_x)
+            actual = compiled(x)
+            self.assertEqual(actual, expected)
+            self.assertEqual(
+                torch.autograd.grad(actual.sum(), x),
+                torch.autograd.grad(expected.sum(), ref_x),
+            )
+            self.assertEqual(counter.frame_count, 2)
+            self.assertFalse(
+                any(
+                    node.target is tag_activation_checkpoint
+                    for graph in counter.graphs
+                    for node in graph.graph.nodes
+                )
+            )
+
+
+instantiate_device_type_tests(
+    ActivationCheckpointingConditionalBreakTests, globals(), allow_xpu=True
+)
+
+
 class ActivationCheckpointingNonStrictTracerTests(torch._dynamo.test_case.TestCase):
     """Tests for non-strict tracing flag interaction with checkpoint."""
 
