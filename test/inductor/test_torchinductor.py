@@ -9371,6 +9371,7 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn(4, 1, 8), torch.randn(4, 6, 8), torch.randn(4, 6, 8)),
         )
 
+    @config.patch(force_pointwise_cat=True)
     def test_cat_clamped_relative_position(self):
         def fn(emb, x):
             pos = torch.arange(x.shape[0], device=x.device)

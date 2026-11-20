@@ -1396,7 +1396,10 @@ class ToFloat(sympy.Function):
 
 class Identity(sympy.Function):
     """
-    Prevents expansion and other optimizations
+    Prevents expansion and other optimizations.
+
+    Identity(number) simplifies to just the number, e.g. Identity(0) -> 0.
+    Use evaluate=False if you need to keep the Identity.
     """
 
     precedence = 10
