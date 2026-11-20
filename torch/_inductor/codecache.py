@@ -2404,12 +2404,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
         # Validate extern_libs (e.g. libdevice) match the current env.
         if graph.extern_libs_key is not None:
-            try:
-                backend = torch.utils._triton.triton_backend()
-                current = torch.utils._triton._extern_libs_key(backend)
-            except Exception:
-                current = None
-            if current != graph.extern_libs_key:
+            if FxGraphCache._current_extern_libs_key() != graph.extern_libs_key:
                 cache_info["cache_status_detailed"] = "guard_miss"
                 return None, cache_info
 
@@ -2427,6 +2422,18 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             )
 
         return FxGraphCache.cache_hit_post_compile(graph, cache_info, constants)
+
+    @staticmethod
+    def _current_extern_libs_key() -> str | None:
+        """
+        Fingerprint of the extern libs (e.g. libdevice) the current Triton backend
+        links against, or None if it can't be computed (e.g. no Triton backend).
+        """
+        try:
+            backend = torch.utils._triton.triton_backend()
+            return torch.utils._triton._extern_libs_key(backend)
+        except Exception:
+            return None
 
     @staticmethod
     def _write_to_local_cache(key: str, content: bytes) -> None:
@@ -2469,13 +2476,8 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         compiled_graph.guards_expr = shape_env.produce_guards_expression(
             placeholders=symints, guards=guards
         )
-        try:
-            backend = torch.utils._triton.triton_backend()
-            compiled_graph.extern_libs_key = torch.utils._triton._extern_libs_key(
-                backend
-            )
-        except Exception:
-            pass
+        if (extern_libs_key := FxGraphCache._current_extern_libs_key()) is not None:
+            compiled_graph.extern_libs_key = extern_libs_key
         disk_compiled_graph = copy(compiled_graph)
         disk_compiled_graph.prepare_for_serialization()
 
