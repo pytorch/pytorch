@@ -6,7 +6,13 @@ import numpy as np
 import torch
 import torch._C
 import torch._dynamo
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 from torch.utils.backend_registration import _setup_privateuseone_for_python_backend
 
 
@@ -130,6 +136,7 @@ def pow_scalar(scalar, exponent):
     return wrap(ans, ans.shape, torch.float32)
 
 
+@instantiate_parametrized_tests
 class PrivateUse1BackendTest(TestCase):
     @classmethod
     def setupClass(cls):
@@ -156,6 +163,73 @@ class PrivateUse1BackendTest(TestCase):
         c = (a + b).sum()
         c.backward()
         self.assertTrue(np.allclose(a.grad.raw_data, np.ones((2, 2))))
+
+    @parametrize("requires_grad", [False, True])
+    def test_fake_tensor_view(self, requires_grad):
+        x = torch.empty((2, 3), device="npy", requires_grad=requires_grad)
+        with FakeTensorMode() as mode:
+            fake = mode.from_tensor(x)
+            flat = fake.view(-1)
+
+        self.assertTrue(mode.is_our_fake(flat))
+        self.assertEqual(flat.shape, (6,))
+        self.assertEqual(flat.device, x.device)
+        self.assertEqual(flat.dtype, x.dtype)
+        self.assertEqual(flat.requires_grad, requires_grad)
+        self.assertIs(flat._base, fake)
+
+    @parametrize("tracing", [False, True])
+    @torch._dynamo.disable
+    def test_make_subclass_meta_detach_preserves_callback_dispatch(self, tracing):
+        base = torch.empty(2, device="meta", requires_grad=True)
+        data = torch.Tensor._make_subclass(
+            torch.Tensor, base, True, device_for_backend_keys=torch.device("npy")
+        )
+        cpu_a = torch.ones(2)
+        cpu_b = torch.ones(2)
+        detach_devices = []
+        trace_devices = []
+        wrapped = []
+
+        def detach_on_meta(t):
+            detach_devices.append((cpu_a + cpu_b).device.type)
+            return aten.detach.default._op_dk(
+                torch.DispatchKey.CompositeExplicitAutograd, t
+            )
+
+        def lookup_name(t):
+            if t.device.type == "meta":
+                trace_devices.append((cpu_a + cpu_b).device.type)
+            return ""
+
+        def make_subclass(t):
+            result = torch.Tensor._make_subclass(
+                torch.Tensor, t, device_for_backend_keys=torch.device("meta")
+            )
+            wrapped.append(result)
+            return result
+
+        with torch.library._scoped_library("aten", "IMPL", "Meta") as lib:
+            lib.impl("detach", detach_on_meta)
+            if tracing:
+                fn = torch._C._create_function_from_trace(
+                    "make_subclass", make_subclass, (data,), lookup_name, True, False
+                )
+                self.assertIn("aten::detach", str(fn.graph))
+            else:
+                make_subclass(data)
+
+        if tracing:
+            self.assertEqual(trace_devices, ["cpu"])
+        self.assertEqual(detach_devices, ["cpu"])
+        (result,) = wrapped
+        self.assertTrue(torch._C._is_alias_of(result, data))
+        self.assertTrue(data.requires_grad)
+        self.assertFalse(result.requires_grad)
+        torch.autograd.graph.increment_version(data)
+        self.assertEqual(result._version, data._version)
+        real = torch.empty(2, device="npy")
+        self.assertIs(unwrap(real.detach()), unwrap(real))
 
     def test_ldexp(self):
         a_cpu = torch.tensor([1.0, 2.0], dtype=torch.float32)

@@ -34,6 +34,7 @@
 #include <c10/util/SmallVector.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
+#include <torch/library.h>
 #include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -80,6 +81,7 @@
 #include <ATen/ops/concatenate_native.h>
 #include <ATen/ops/dense_dim_native.h>
 #include <ATen/ops/detach_native.h>
+#include <ATen/ops/detach_ops.h>
 #include <ATen/ops/diag.h>
 #include <ATen/ops/diag_embed.h>
 #include <ATen/ops/diag_embed_native.h>
@@ -4409,6 +4411,35 @@ Tensor detach(const Tensor& self) {
       // appropriate values if it runs; otherwise these are the values.
       /*version_counter=*/0,
       /*allow_tensor_metadata_change=*/false));
+}
+
+namespace {
+
+Tensor detach_backend_select(c10::DispatchKeySet ks, const Tensor& self) {
+  constexpr auto after_backend_select = c10::DispatchKeySet(
+      c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::BackendSelect);
+  auto keys = ks & after_backend_select;
+  // Newly created Meta tensors can inherit the backend keys of a fake input.
+  // Select the kernel for their actual device without changing dispatch state.
+  if (self.defined() &&
+      self.unsafeGetTensorImpl()->device_type() == c10::DeviceType::Meta &&
+      keys.highestBackendKey() != c10::BackendComponent::MetaBit &&
+      !self.key_set().has_any(c10::DispatchKeySet(
+          {c10::DispatchKey::Python, c10::DispatchKey::Fake})) &&
+      self.is_meta()) [[unlikely]] {
+    // The fallthrough mask depends on the backend. Recompute it for Meta.
+    static const auto op =
+        c10::Dispatcher::singleton().findSchemaOrThrow("aten::detach", "");
+    keys = op.dispatchKeyExtractor().getDispatchKeySetFromRawDispatchKeySet(
+        keys.add(c10::DispatchKey::Meta), after_backend_select);
+  }
+  return at::_ops::detach::redispatch(keys, self);
+}
+
+} // namespace
+
+TORCH_LIBRARY_IMPL(aten, BackendSelect, m) {
+  m.impl("detach", TORCH_FN(detach_backend_select));
 }
 
 Tensor unfold(const Tensor& self, int64_t d, int64_t size, int64_t step) {
