@@ -561,6 +561,7 @@ class TestMaxAutotune(TestCase):
         self.assertEqual(triton_mm_configs[True], companion_configs)
         # Without them, the default pool is untouched and strictly larger.
         self.assertTrue(companion_configs < triton_mm_configs[False])
+
     def test_use_triton_tma_template_rejects_descriptor_shapes_exceeding_int32(self):
         from torch._inductor.utils import use_triton_tma_template
 
