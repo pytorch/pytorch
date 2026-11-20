@@ -28,7 +28,8 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    skipIf,
+    skipMPSIf,
+    skipXPUIf,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -989,7 +990,8 @@ class TestPoolingNNDevice(NNTestCase):
                 output_size=[1, 1, 1],
             )(samples)
 
-    @skipIf(True, "pooling int overflow check is CPU/CUDA only", ("xpu", "mps"))
+    @skipMPSIf(True, "pooling int overflow check is CPU/CUDA only")
+    @skipXPUIf(True, "pooling int overflow check is CPU/CUDA only")
     def test_MaxPool3d_errors(self, device):
         samples = torch.randn(1, 3, 10, 10, 10, device=device)
         with self.assertRaisesRegex(
@@ -1014,7 +1016,8 @@ class TestPoolingNNDevice(NNTestCase):
                 kernel_size=-1,
             )(samples)
 
-    @skipIf(True, "pooling int overflow check is CPU/CUDA only", ("xpu", "mps"))
+    @skipMPSIf(True, "pooling int overflow check is CPU/CUDA only")
+    @skipXPUIf(True, "pooling int overflow check is CPU/CUDA only")
     def test_MaxPool2d_dilation_overflow(self, device):
         samples = torch.randn(1, 3, 10, 10, device=device)
         with self.assertRaisesRegex(
@@ -1026,7 +1029,8 @@ class TestPoolingNNDevice(NNTestCase):
                 dilation=(1, 9223372036854775803),
             )(samples)
 
-    @skipIf(True, "pooling int overflow check is CPU/CUDA only", ("xpu", "mps"))
+    @skipMPSIf(True, "pooling int overflow check is CPU/CUDA only")
+    @skipXPUIf(True, "pooling int overflow check is CPU/CUDA only")
     def test_AvgPool3d_stride_overflow(self, device):
         samples = torch.randn(1, 3, 10, 10, 10, device=device)
         with self.assertRaisesRegex(
@@ -1038,7 +1042,8 @@ class TestPoolingNNDevice(NNTestCase):
                 stride=(1, 1, 9223372036854775803),
             )(samples)
 
-    @skipIf(True, "pooling int overflow check is CPU/CUDA only", ("xpu", "mps"))
+    @skipMPSIf(True, "pooling int overflow check is CPU/CUDA only")
+    @skipXPUIf(True, "pooling int overflow check is CPU/CUDA only")
     def test_pooling_backward_overflow(self, device):
         input2d = torch.randn(1, 1, 4, 4, device=device)
         grad2d = torch.randn(1, 1, 2, 2, device=device)
