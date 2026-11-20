@@ -49,11 +49,18 @@ class TestInnerTreeCombineUnroll(TestCase):
         self.assertEqual(plan._replace(combine_unroll=0), baseline)
 
     @parametrize(
-        "updates",
-        [{"combine_unroll": -1}, {"combine_rpb": 64}, {"uniform_combine": "weight"}],
-        name_fn=lambda u: next(iter(u)),
+        "updates,error",
+        [
+            ({"combine_unroll": -1}, "combine_unroll"),
+            ({"combine_rpb": 64}, "combine_rpb"),
+            (
+                {"uniform_combine": "weight"},
+                "^uniform_combine must be 'off', 'counts' or 'weights', got 'weight'$",
+            ),
+        ],
+        name_fn=lambda u, e: next(iter(u)),
     )
-    def test_invalid_policy(self, updates):
+    def test_invalid_policy(self, updates, error):
         """Reject a negative unroll, async staging with more rows than copying lanes and
         an unknown uniform_combine mode."""
         import cutlass
@@ -62,7 +69,7 @@ class TestInnerTreeCombineUnroll(TestCase):
 
         policy = rt._ITREE_ARCH[(10, 0)]._replace(**updates)
         trait = T.SumOps(acc=cutlass.Float32)
-        with self.assertRaisesRegex(ValueError, next(iter(updates))):
+        with self.assertRaisesRegex(ValueError, error):
             rt.itree_combine_plan(None, 4, arch=policy, trait=trait)
 
     @parametrize(
