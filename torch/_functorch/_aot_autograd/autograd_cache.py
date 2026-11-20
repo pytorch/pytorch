@@ -1296,7 +1296,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 counters["aot_autograd"]["autograd_cache_hit"] += 1
                 cache_state = "hit"
                 cache_event_time = time.time_ns()
-                cache_info.update(AOTAutogradCache._time_saved_cache_info(entry))
+                cache_info.update(AOTAutogradCache._record_time_saved(entry))
 
         if compiled_fn is None and cache_state is None:
             log.info("AOTAutograd cache miss for key %s", cache_key)
@@ -1330,12 +1330,14 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         return compiled_fn, aot_config
 
     @staticmethod
-    def _time_saved_cache_info(
+    def _record_time_saved(
         entry: GenericAOTAutogradResult[Any, Any],
     ) -> dict[str, Any]:
         """
-        cache_info fields for a final cache hit: the compile time the hit saved,
-        and the NCCL timeout increase granted for it, if any.
+        Grant the distributed NCCL timeout increase for a final cache hit and
+        return its cache_info fields: the compile time saved and the increase, if
+        any. Call once per hit, only after the hit is final; each call bumps the
+        timeout again.
         """
         forward_time_saved = entry.forward_time_taken_ns // 1e6
         backward_time_saved = entry.backward_time_taken_ns // 1e6
