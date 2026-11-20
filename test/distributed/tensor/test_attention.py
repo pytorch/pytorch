@@ -78,7 +78,8 @@ c10d_functional = torch.ops.c10d_functional
 # that really dispatch to one of them. XPU advertises mem-efficient support
 # but has no such kernel: select_sdp_backend_xpu resolves EFFICIENT_ATTENTION
 # to math, which CP does not intercept, and the math decomposition then adds
-# its locally built causal mask to a DTensor.
+# its locally built causal mask to a DTensor. Once a real mem-efficient XPU
+# kernel lands (intel/torch-xpu-ops#6282), drop the `not TEST_XPU` guard.
 backends = []
 if PLATFORM_SUPPORTS_FLASH_ATTENTION:
     backends.append(SDPBackend.FLASH_ATTENTION)
