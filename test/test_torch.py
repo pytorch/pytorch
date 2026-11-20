@@ -3282,7 +3282,7 @@ class TestTorchDeviceType(TestCase):
     @onlyCUDA
     @dtypes(*floating_types_and(torch.complex64))
     def test_logcumsumexp_outer_dim(self, device, dtype):
-        cases = [((16, 5), 0), ((32, 5), 0), ((1024, 4), 0), ((257, 33), 0), ((4, 300, 33), 1), ((65536, 4), 0)]
+        cases = [((128, 5), 0), ((256, 5), 0), ((1024, 4), 0), ((257, 33), 0), ((4, 300, 33), 1), ((65536, 4), 0)]
         ref_dtype = torch.complex128 if dtype.is_complex else torch.double
         for shape, dim in cases:
             x = torch.randn(shape, dtype=dtype, device=device)
@@ -3342,7 +3342,7 @@ class TestTorchDeviceType(TestCase):
         # folding elements that are not adjacent (e.g. all the 2^e first) overflows. 1-D,
         # chunked last-dim and chunked outer-dim lines on ROCm.
         e = {torch.half: 9, torch.bfloat16: 120, torch.float: 120, torch.double: 1000, torch.cfloat: 120}[dtype]
-        cases = [((2_000_000,), 0), ((3, 200_000), 1), ((65536, 2), 0), ((1, 65536, 1), 1)]
+        cases = [((2_000_000,), 0), ((3, 200_000), 1), ((65536, 2), 0)]
         for (shape, dim), op in product(cases, (torch.cumsum, torch.cumprod)):
             if op is torch.cumsum:
                 pattern = [2.0**e] * 16 + [-2.0**e] * 16

@@ -923,12 +923,29 @@ constexpr int64_t kMinTilesPerChunk = 2;
 constexpr int64_t kMinChunks = 3;
 constexpr int64_t kMaxChunks = 1024;
 // hipCUB is as fast or faster on 1-D scans of a cheap op with at least kMinCubLine and fewer than
-// kMaxCubLine elements, and of a compute-bound op (logcumsumexp) with more than kMaxNonCheapLine,
-// to which chunking applies binary_op about twice per element and hipCUB's single pass once. Not on
-// gfx1250 (outer_scan::has_tdm()), where the chunked scan is faster at every length.
+// kMaxCubLine elements, except on gfx1250 (outer_scan::has_tdm()), where the chunked scan is faster
+// at every length.
 constexpr int64_t kMinCubLine = 8192;
 constexpr int64_t kMaxCubLine = int64_t{1} << 20;
-constexpr int64_t kMaxNonCheapLine = 4096;
+
+// On 1-D scans of a compute-bound op (logcumsumexp), to which chunking applies binary_op about twice
+// per element and hipCUB's single pass once, hipCUB is faster above a length that falls with the
+// cost of the op. On gfx1250 it is faster from shorter lengths up to a limit per dtype, past which
+// the chunked scan wins again.
+template <typename T>
+bool cub_faster_non_cheap(int64_t n, bool tdm) {
+  if (!tdm) {
+    return n > (c10::is_complex<T>::value ? 1024 : sizeof(T) == 8 ? 2048 : 4096);
+  }
+  if constexpr (std::is_same_v<T, c10::complex<float>>) {
+    return n > 64;
+  } else if constexpr (c10::is_complex<T>::value || sizeof(T) == 8) {
+    return n > (c10::is_complex<T>::value ? 512 : 1024) && n <= (int64_t{1} << 20);
+  } else {
+    return n > (sizeof(T) == 4 ? 32768 : 16384) &&
+        n <= (std::is_same_v<T, c10::Half> ? int64_t{1} << 22 : int64_t{1} << 19);
+  }
+}
 
 inline Plan make_plan(int64_t num_rows, int64_t row_size, int64_t num_sms, int64_t items) {
   if (row_size <= kLogicalWarp * items) {
@@ -1094,8 +1111,8 @@ void launch(T* tgt, const T* src, int64_t num_rows, int64_t row_size, T init, Bi
   launch_with<Tr::kItems, Tr::kVec, Tr::kRun>(tgt, src, num_rows, row_size, init, binary_op);
 }
 
-// Rows of 2 or fewer scan faster on the stock last-dim kernel, which gives such a row up to 512
-// threads, at these lengths.
+// Two rows scan faster on the stock last-dim kernel, which gives such a row up to 512 threads, at
+// these lengths. A single row never gets here: scan_dim scans it in its 1-D branch.
 constexpr int64_t kStockFewRows = 2;
 constexpr int64_t kStockFewRowsMinLength = 65;
 constexpr int64_t kStockFewRowsMaxLength = 1024;
@@ -1108,8 +1125,8 @@ constexpr int64_t kStockManyRowsPerSM = 32;
 // steps of 2 << get_log_num_threads_x_inner_scan elements and applies binary_op about twice per
 // element; the row kernels pad a row to whole tiles and apply it about 2 + 6 / items times per
 // element. With kStockManyRowsPerSM rows per SM the stock kernel wins once the row kernels do more
-// than 1.8 times its work. Half / bfloat16 stay on the row kernels: the stock kernel's rounding
-// error exceeds the logcumsumexp tolerance on such rows.
+// than 1.8 times its work. Half / bfloat16 skip that rule: the stock kernel's rounding error
+// exceeds the logcumsumexp tolerance on such rows.
 template <typename T, class BinaryFunction>
 bool stock_faster(int64_t num_rows, int64_t row_size) {
   using Tr = Traits<T, BinaryFunction>;
@@ -1188,6 +1205,8 @@ constexpr int64_t kChunkBlocksPerSM = 4;
 // ...and each group has at least this many tiles; shorter columns don't repay the extra launches.
 constexpr int64_t kMinTilesToChunk = 16;
 constexpr int64_t kMinTilesPerChunk = 2;
+// Columns of 8-byte elements on 32-lane waves scan faster tiled from this many tiles.
+constexpr int64_t kMinTilesWave32x8 = 20;
 // Two chunks cost two extra launches and a re-read of half of every column, more than halving the
 // serial chain saves, so such columns stay in one piece.
 constexpr int64_t kMinChunks = 3;
@@ -1195,9 +1214,9 @@ constexpr int64_t kMinChunks = 3;
 // for only a block or two per CU. Once a row of the tensor holds this many bytes per SM (128 f32
 // columns), the one-thread-per-column kernel already keeps the memory system busy and is faster.
 constexpr int64_t kStockRowBytesPerSM = 512;
-// Also without it, rows of 1- and 2-byte elements that are not a whole number of vectors are
-// copied an element at a time, which loses to the one-thread-per-column kernel on columns shorter
-// than this once there are kScalarCopyMinColumns columns...
+// Also without it, rows of 1- and 2-byte elements that are not a whole number of vectors, or not
+// vector-aligned, are copied an element at a time, which loses to the one-thread-per-column kernel
+// on columns shorter than this once there are kScalarCopyMinColumns columns...
 constexpr int64_t kScalarCopyMaxRows = 512;
 constexpr int64_t kScalarCopyMinColumns = 64;
 // ...and on columns shorter than these (1- and 2-byte elements) when there are fewer. With the
@@ -1695,24 +1714,33 @@ inline bool has_tdm() {
   return per_device[c10::cuda::current_device()];
 }
 
+template <typename T>
+bool aligned(const T* tgt, const T* src) {
+  constexpr uintptr_t kAlign = inner_scan::kGlobalAlign<T>;
+  return reinterpret_cast<uintptr_t>(src) % kAlign == 0 && reinterpret_cast<uintptr_t>(tgt) % kAlign == 0;
+}
+
 template <typename T, bool kCheapOp>
-bool should_use(int64_t num_orows, int64_t row_size, int64_t num_irows) {
+bool should_use(const T* tgt, const T* src, int64_t num_orows, int64_t row_size, int64_t num_irows) {
   const int64_t min_rows = kCheapOp ? (has_tdm() ? kMinRowsTdm : kMinRows)
                                     : kMinColumnBytesExpensiveOp / static_cast<int64_t>(sizeof(T));
   if (num_orows <= 0 || num_irows <= 0 || row_size < min_rows) {
     return false;
   }
-  const bool scalar_copy = num_irows % Traits<T>::kVec != 0;
+  const bool odd_columns = num_irows % Traits<T>::kVec != 0;
   const bool few_columns = num_orows * num_irows < kScalarCopyMinColumns;
   if (has_tdm()) {
-    return !(sizeof(T) == 1 && scalar_copy && few_columns && row_size < kFewColumnsMinRows1Tdm);
+    return !(sizeof(T) == 1 && odd_columns && few_columns && row_size < kFewColumnsMinRows1Tdm);
   }
+  const bool scalar_copy = odd_columns || !aligned(tgt, src);
   // A row at least a block wide gives each thread a column of kRows-row tiles to scan alone, as
   // the one-thread-per-column kernel does. Copied an element at a time, or as 8-byte elements, that
   // is slower until the columns hold kMinTilesToChunk tiles and get split into chunks.
-  if (num_irows >= kBlock && (sizeof(T) == 8 || scalar_copy) &&
-      row_size < kMinTilesToChunk * Traits<T>::kRows) {
-    return false;
+  if (num_irows >= kBlock && (sizeof(T) == 8 || scalar_copy)) {
+    const int64_t min_tiles = sizeof(T) == 8 && at::cuda::warp_size() == 32 ? kMinTilesWave32x8 : kMinTilesToChunk;
+    if (ceil_div(row_size, int64_t{Traits<T>::kRows}) < min_tiles) {
+      return false;
+    }
   }
   if (sizeof(T) <= 2 && scalar_copy) {
     const int64_t scalar_min_rows =
@@ -1758,9 +1786,7 @@ template <typename T, class BinaryFunction>
 void launch(T* tgt, const T* src, int64_t num_orows, int64_t row_size, int64_t num_irows, T init,
             BinaryFunction binary_op) {
   constexpr size_t smem = Traits<T>::kSmemBytes;
-  constexpr uintptr_t kAlign = inner_scan::kGlobalAlign<T>;
-  const bool vec_ok = num_irows % Traits<T>::kVec == 0 && reinterpret_cast<uintptr_t>(src) % kAlign == 0 &&
-      reinterpret_cast<uintptr_t>(tgt) % kAlign == 0;
+  const bool vec_ok = num_irows % Traits<T>::kVec == 0 && aligned(tgt, src);
   const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   const int64_t max_blocks = num_sms * 8;
   const Problem p = make_problem<T>(num_orows, row_size, num_irows, num_sms, vec_ok);
@@ -1821,7 +1847,7 @@ __host__ void scan_outer_dim(const TensorBase& self, const TensorBase& result,
       !std::is_same_v<BinaryFunction, std::multiplies<scalar_t>>;
   if constexpr (sizeof(scalar_t) <= 8 && !kComplexLogAddExp) {
     if (outer_scan::should_use<scalar_t, inner_scan::Traits<scalar_t, BinaryFunction>::kCheapOp>(
-            num_orows, row_size, num_irows)) {
+            result.const_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(), num_orows, row_size, num_irows)) {
       outer_scan::launch<scalar_t>(
           result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
           num_orows, row_size, num_irows, init, binary_op);
@@ -1871,15 +1897,24 @@ void scan_innermost_dim(const TensorBase& self, const TensorBase& result,
   check_fits_in_unsigned(num_rows, "Number of rows (self.numel()/self.size(self.dim()-1))");
   check_fits_in_unsigned(row_size, "row_size");
 
-  tensor_kernel_scan_innermost_dim<scalar_t><<<grid, threads, num_threads * 2 * sizeof(scalar_t),
-                                               at::cuda::getCurrentCUDAStream()>>>(
-    result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
-    num_rows, row_size, log_num_threads_x, init, binary_op);
+#if defined(USE_ROCM)
+  // cumsum / cumprod never get here, so the stock kernel is not built for them.
+  constexpr bool kStockKernel = !inner_scan::Traits<scalar_t, BinaryFunction>::kCheapOp;
+#else
+  constexpr bool kStockKernel = true;
+#endif
+  if constexpr (kStockKernel) {
+    tensor_kernel_scan_innermost_dim<scalar_t><<<grid, threads, num_threads * 2 * sizeof(scalar_t),
+                                                 at::cuda::getCurrentCUDAStream()>>>(
+      result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
+      num_rows, row_size, log_num_threads_x, init, binary_op);
+  }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-// binary_op must be associative. On CUDA it must also be commutative: the stock last-dim kernel
-// passes operands as (later, earlier).
+// binary_op must be associative. Where the stock last-dim kernel runs (every last-dim scan on CUDA,
+// some logcumsumexp shapes on ROCm) it must also be commutative: that kernel passes operands as
+// (later, earlier).
 template<typename scalar_t, typename BinaryFunction>
 void scan_dim(const TensorBase& self, const TensorBase& result,
      int64_t dim, scalar_t init, BinaryFunction binary_op) {
@@ -1891,10 +1926,10 @@ void scan_dim(const TensorBase& self, const TensorBase& result,
 #if defined(USE_ROCM)
     // Elsewhere the chunked row scan is faster than hipCUB, and deterministic.
     const int64_t n = self.numel();
-    const bool cub_faster = !outer_scan::has_tdm() &&
-        (inner_scan::Traits<scalar_t, BinaryFunction>::kCheapOp
-             ? n >= inner_scan::kMinCubLine && n < inner_scan::kMaxCubLine
-             : n > inner_scan::kMaxNonCheapLine);
+    const bool tdm = outer_scan::has_tdm();
+    const bool cub_faster = inner_scan::Traits<scalar_t, BinaryFunction>::kCheapOp
+        ? !tdm && n >= inner_scan::kMinCubLine && n < inner_scan::kMaxCubLine
+        : inner_scan::cub_faster_non_cheap<scalar_t>(n, tdm);
     if (!cub_faster && n <= std::numeric_limits<uint32_t>::max()) {
       inner_scan::launch<scalar_t>(
           result.mutable_data_ptr<scalar_t>(), self_->const_data_ptr<scalar_t>(),
