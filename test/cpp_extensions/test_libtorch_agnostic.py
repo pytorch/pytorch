@@ -727,6 +727,32 @@ class TestLibtorchAgnostic(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expected torch.layout"):
             libtorch_agnostic._interop.layout_roundtrip(torch.float32)
 
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    @parametrize(
+        "memory_format",
+        [
+            torch.contiguous_format,
+            torch.preserve_format,
+            torch.channels_last,
+            torch.channels_last_3d,
+        ],
+    )
+    def test_pyobject_memory_format_roundtrip(self, device, memory_format):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        out = libtorch_agnostic._interop.memory_format_roundtrip(memory_format)
+        # torch.memory_format objects are singletons.
+        self.assertIs(out, memory_format)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_non_memory_format_raises(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with self.assertRaisesRegex(RuntimeError, "expected torch.memory_format"):
+            libtorch_agnostic._interop.memory_format_roundtrip(torch.strided)
+
     @skipIfTorchVersionLessThan(2, 16)
     @skipIfTorchDynamo("Dynamo failed to run FX node with fake tensors")
     def test_my_add(self, device):

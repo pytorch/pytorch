@@ -7,6 +7,7 @@
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/csrc/stable/version.h>
 #include <torch/headeronly/core/Layout.h>
+#include <torch/headeronly/core/MemoryFormat.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/shim_utils.h>
@@ -100,8 +101,8 @@ inline void* device_to_pyobject(const Device& device) {
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
-// Like the dtype/device helpers, the layout helpers translate codes through the
-// stable enum mappings.
+// Like the dtype/device helpers, the layout and memory format helpers translate
+// codes through the stable enum mappings.
 
 // Read the Layout out of a Python torch.layout (PyObject* passed as void*).
 inline torch::headeronly::Layout layout_from_pyobject(void* py_obj) {
@@ -116,6 +117,28 @@ inline void* layout_to_pyobject(torch::headeronly::Layout layout) {
   void* raw = nullptr;
   STABLE_TORCH_ERROR_CODE_CHECK(torch_layout_to_pyobject(
       torch::stable::detail::to<int32_t>(torch::stable::detail::from(layout)),
+      &raw));
+  return raw;
+}
+
+// Read the MemoryFormat out of a Python torch.memory_format (PyObject* passed
+// as void*).
+inline torch::headeronly::MemoryFormat memory_format_from_pyobject(
+    void* py_obj) {
+  int32_t memory_format = 0;
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_memory_format_from_pyobject(py_obj, &memory_format));
+  return torch::stable::detail::to<torch::headeronly::MemoryFormat>(
+      torch::stable::detail::from(memory_format));
+}
+
+// Wrap a MemoryFormat as a new-reference Python torch.memory_format.
+inline void* memory_format_to_pyobject(
+    torch::headeronly::MemoryFormat memory_format) {
+  void* raw = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_memory_format_to_pyobject(
+      torch::stable::detail::to<int32_t>(
+          torch::stable::detail::from(memory_format)),
       &raw));
   return raw;
 }
