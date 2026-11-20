@@ -334,12 +334,17 @@ if sys.platform == "win32":
         from torch.version import xpu as xpu_version
 
         if xpu_version:
+            path_entries = os.environ.get("PATH", "").split(os.pathsep)
+            on_path = {os.path.normcase(os.path.normpath(p)) for p in path_entries if p}
             xpu_dll_paths = [
-                p for p in (py_dll_path, base_py_dll_path) if p and os.path.exists(p)
+                p
+                for p in (py_dll_path, base_py_dll_path)
+                if p
+                and os.path.exists(p)
+                and os.path.normcase(os.path.normpath(p)) not in on_path
             ]
-            os.environ["PATH"] = os.pathsep.join(
-                [*xpu_dll_paths, os.environ.get("PATH", "")]
-            )
+            if xpu_dll_paths:
+                os.environ["PATH"] = os.pathsep.join([*xpu_dll_paths, *path_entries])
 
         kernel32.SetErrorMode(prev_error_mode)
 
