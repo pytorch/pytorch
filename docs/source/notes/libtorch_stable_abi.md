@@ -68,6 +68,9 @@ which will handle all the rough edges of the C API for the user.
 - `bool_from_pyobject` / `bool_to_pyobject` (2.16+): `bool` (only `True` or `False`) <-> `bool`
 - `int64_from_pyobject` / `int64_to_pyobject` (2.16+): `int` (not `bool`; values outside the `int64_t` range raise) <-> `int64_t`
 - `double_from_pyobject` / `double_to_pyobject` (2.16+): `float` or `int` <-> `double`
+- `string_from_pyobject` (2.16+): `str` (encoded as UTF-8) or `bytes` (as is) -> `std::string`
+- `string_to_pyobject` (2.16+): `std::string_view` (decoded as UTF-8) -> `str`;
+  embedded NUL bytes are preserved in both directions
 - `is_tensor_pyobject`: whether a Python object's actual type is `torch.Tensor`
   or a subclass; overridden `__class__` attributes are ignored, as in
   `tensor_from_pyobject`

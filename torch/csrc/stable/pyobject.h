@@ -12,6 +12,10 @@
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/shim_utils.h>
 
+#include <memory>
+#include <string>
+#include <string_view>
+
 // Header-only helpers converting between Python objects (passed as raw
 // PyObject* / void*) and their torch::stable equivalents. These are
 // libtorch-only to link against, but require libtorch_python to be loaded at
@@ -184,6 +188,29 @@ inline double double_from_pyobject(void* py_obj) {
 inline void* double_to_pyobject(double value) {
   void* raw = nullptr;
   STABLE_TORCH_ERROR_CODE_CHECK(torch_double_to_pyobject(value, &raw));
+  return raw;
+}
+
+// Copy a Python str (as UTF-8) or bytes (as is) (PyObject* passed as void*)
+// into an owned std::string. Embedded NUL bytes are preserved.
+inline std::string string_from_pyobject(void* py_obj) {
+  StringHandle raw = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_string_from_pyobject(py_obj, &raw));
+  std::unique_ptr<StringOpaque, void (*)(StringHandle)> handle(
+      raw, [](StringHandle h) { torch_delete_string(h); });
+  size_t length = 0;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_string_length(handle.get(), &length));
+  const char* data = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_string_c_str(handle.get(), &data));
+  return std::string(data, length);
+}
+
+// Decode UTF-8 bytes as a new-reference Python str. The bytes are copied, so
+// str only needs to stay alive for the call; invalid UTF-8 errors.
+inline void* string_to_pyobject(std::string_view str) {
+  void* raw = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_string_to_pyobject(str.data(), str.size(), &raw));
   return raw;
 }
 

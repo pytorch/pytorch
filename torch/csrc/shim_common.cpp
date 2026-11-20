@@ -925,6 +925,29 @@ torch_double_to_pyobject(double value, void** ret) {
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError
+torch_string_from_pyobject(void* py_obj, StringHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = reinterpret_cast<StringHandle>(new std::string(
+        torch::detail::getPyObjectConversionImpl().string_from_pyobject(
+            static_cast<PyObject*>(py_obj))));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_string_to_pyobject(const char* data, size_t length, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(
+        data != nullptr || length == 0,
+        "data must not be null unless length is 0");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().string_to_pyobject(
+        std::string_view(data, length));
+  });
+}
+
 // Most other dtypes defined in torch/csrc/inductor/aoti_torch/shim_common.cpp
 #define TORCH_DTYPE_IMPL(dtype, stype)                    \
   AOTI_TORCH_EXPORT int32_t torch_dtype_##dtype() {       \

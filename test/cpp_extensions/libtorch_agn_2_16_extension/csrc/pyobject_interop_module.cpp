@@ -61,12 +61,20 @@ PyObject* double_roundtrip(PyObject* /*self*/, PyObject* obj) {
   });
 }
 
+PyObject* string_roundtrip(PyObject* /*self*/, PyObject* obj) {
+  return call([&] {
+    return torch::stable::string_to_pyobject(
+        torch::stable::string_from_pyobject(obj));
+  });
+}
+
 PyMethodDef methods[] = {
     {"layout_roundtrip", layout_roundtrip, METH_O, nullptr},
     {"memory_format_roundtrip", memory_format_roundtrip, METH_O, nullptr},
     {"bool_roundtrip", bool_roundtrip, METH_O, nullptr},
     {"int64_roundtrip", int64_roundtrip, METH_O, nullptr},
     {"double_roundtrip", double_roundtrip, METH_O, nullptr},
+    {"string_roundtrip", string_roundtrip, METH_O, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyModuleDef moduledef = {
