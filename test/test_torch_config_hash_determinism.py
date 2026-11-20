@@ -5,7 +5,11 @@ import re
 import socket
 
 from torch._inductor import config as inductor_config
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 PATH_PATTERN = re.compile(
@@ -19,6 +23,7 @@ HOSTNAME = socket.gethostname()
 
 
 class TestConfigModule(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     # Config keys that legitimately contain absolute paths, for example,
     # /opt/clang-15/bin/clang
     KNOWN_PATH_CONFIGS = {"cpp.cxx"}

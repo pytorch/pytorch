@@ -307,7 +307,7 @@ class TestNVUniversalGemmPDLMetadata(TestCase):
         kernel.mix_order_reduction = False
         kernel.args = SimpleNamespace(workspace_args=())
         graph = MagicMock()
-        graph.scheduler.previous_node = previous_node
+        graph.scheduler.previous_nodes = [previous_node]
         graph.get_current_device_or_throw.return_value = torch.device("cuda")
         return kernel, graph, previous_node, current_node, current_read
 
@@ -2564,6 +2564,20 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 has_output_scale=has_output_scale,
             )
 
+    @parametrize("cc", (100, 103, 107))
+    def test_compile_uses_device_capability(self, cc):
+        from torch._inductor.codegen.nv_universal_gemm import (
+            nv_universal_gemm_kernel as nvgemm,
+        )
+
+        kernel = MagicMock()
+        with patch.object(nvgemm, "_create_gemm_arguments") as args:
+            nvgemm._compile_nvgemm(
+                "SCALED_GEMM", (), None, None, kernel_obj=kernel, cc=cc
+            )
+
+        kernel.compile.assert_called_once_with(args.return_value, target_sm=f"{cc}a")
+
     def test_atomic_reduction_fusion_hooks(self):
         from torch._inductor.codegen.cuda_combined_scheduling import (
             CUDACombinedScheduling,
@@ -3178,8 +3192,8 @@ class TestNVUniversalGemmHeuristics(TestCase):
         finally:
             torch.cuda.set_device(original_device)
 
-    @parametrize("tuned", (False, True))
-    def test_flex_gemm_nvgemm_tuned_config(self, tuned):
+    @parametrize("autotune", (False, True))
+    def test_flex_gemm_nvgemm_autotune_config(self, autotune):
         from torch._inductor.kernel.flex_gemm import lowering
 
         graph_module = MagicMock()
@@ -3211,13 +3225,14 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 subgraph,
                 (),
                 {},
-                {"backend": "NVGEMM", "tuned": tuned},
+                {"backend": "NVGEMM", "autotune": autotune},
             )
             self.assertEqual(observed["max_autotune"], True)
             self.assertEqual(observed["backends"], "NVGEMM")
-            self.assertEqual(observed["max_configs"], None if tuned else 3)
-            self.assertEqual(observed["supplements"], tuned)
-            self.assertEqual(observed["swap_ab"], tuned)
+            # Without autotune, NVGEMM keeps only its top heuristic config.
+            self.assertEqual(observed["max_configs"], None if autotune else 1)
+            self.assertEqual(observed["supplements"], autotune)
+            self.assertEqual(observed["swap_ab"], autotune)
             self.assertEqual(config.nvgemm_max_profiling_configs, 3)
             self.assertEqual(config.nvgemm_supplement_configs, False)
             self.assertEqual(config.nvgemm_swap_ab, False)
@@ -4581,6 +4596,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
             NVUniversalGemmCaller,
         )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            NVUniversalGemmKernelWrapper,
+        )
 
         axis, group, expect_swapped_2cta = case
         m, n, k = 64, 4096, 512
@@ -4609,6 +4627,12 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             )
             return 0.1 if is_target else 1.0
 
+        original_run = NVUniversalGemmKernelWrapper.run
+
+        def run(kernel, a, b, out, reduced, **kwargs):
+            reduced.fill_(float("nan"))
+            return original_run(kernel, a, b, out, reduced, **kwargs)
+
         torch._dynamo.reset()
         with (
             config.patch(
@@ -4632,6 +4656,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             mock.patch.object(
                 NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
             ),
+            mock.patch.object(NVUniversalGemmKernelWrapper, "run", new=run),
         ):
             result, code_list = run_and_get_code(torch.compile(fn), a, b)
 

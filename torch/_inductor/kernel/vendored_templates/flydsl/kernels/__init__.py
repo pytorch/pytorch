@@ -9,6 +9,7 @@ _EXPORT_MODULES = {
     "GEMM_DTYPE_FP16": "gemm_gfx950",
     "GEMM_DTYPE_MXFP4": "gemm_gfx950",
     "GEMM_DTYPE_MXFP8": "gemm_gfx950",
+    "build_flex_attn_fwd_module": "flex_attn_fwd_gfx950",
     "gemm_mxfp_gfx950": "gemm_gfx950",
     "infer_has_k_tail": "gemm_gfx950",
     "make_gemm_gfx950_param": "gemm_gfx950",
@@ -19,6 +20,8 @@ _EXPORT_MODULES = {
     "launch_mxfp8_grouped_gemm_gfx950": "mxfp8_grouped_gemm_gfx950",
     "make_mxfp8_grouped_gemm_param": "mxfp8_grouped_gemm_gfx950",
     "make_mxfp8_grouped_gemm_param_and_validate": "mxfp8_grouped_gemm_gfx950",
+    "launch_mxfp8_wgrad_gfx950": "mxfp8_wgrad_gfx950",
+    "make_mxfp8_wgrad_param": "mxfp8_wgrad_gfx950",
     "pick_mxfp8_grouped_gemm_tile": "mxfp8_grouped_gemm_gfx950",
 }
 __all__ = list(_EXPORT_MODULES)

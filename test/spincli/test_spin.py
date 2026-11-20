@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,12 +25,6 @@ from torch.testing._internal.common_utils import (
     subtest,
     TestCase,
 )
-
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
 
 
 PYTORCH_ROOT = Path(__file__).parent.parent.parent

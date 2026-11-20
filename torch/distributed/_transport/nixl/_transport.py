@@ -42,8 +42,8 @@ class NIXLTransport(Transport):
     """One-sided tensor transport backed by a NIXL plugin.
 
     Backend options accepted by :func:`new_transport` include ``plugin="UCX"``,
-    ``agent_name=None``, ``num_threads=0``, ``enable_prog_thread=True``,
-    ``capture_telemetry=False``, ``backend_options=None``, and ``timeout=30.0``.
+    ``agent_name=None``, ``num_threads=0``, ``capture_telemetry=False``,
+    ``backend_options=None``, and ``timeout=30.0``.
     ``backend_options`` maps plugin parameter names to strings and is forwarded
     to NIXL's ``create_backend``. NIXL is an optional dependency, imported only
     when selected. Transfers require registered views; raw tensors are rejected
@@ -57,7 +57,6 @@ class NIXLTransport(Transport):
         plugin: str = "UCX",
         agent_name: str | None = None,
         num_threads: int = 0,
-        enable_prog_thread: bool = True,
         capture_telemetry: bool = False,
         backend_options: dict[str, str] | None = None,
         timeout: float = 30.0,
@@ -84,7 +83,9 @@ class NIXLTransport(Transport):
         config = backend.nixl_agent_config(
             backends=[] if backend_options else [self._plugin],
             num_threads=num_threads,
-            enable_prog_thread=enable_prog_thread,
+            # Passive endpoints have no Work to poll, so the backend needs
+            # background progress to complete peers' one-sided transfers.
+            enable_prog_thread=True,
             capture_telemetry=capture_telemetry,
         )
         self._agent = backend.nixl_agent(
@@ -96,7 +97,7 @@ class NIXLTransport(Transport):
             raise RuntimeError(f"NIXL plugin {self._plugin!r} is unavailable")
         self._timeout = timeout
         self._default_timeout = timeout
-        self._peer_name: str | None = None
+        self._peers: set[str] = set()
         self._remote_agents: set[str] = set()
         self._registrations: dict[tuple[int, int, str], _Registration] = {}
         self._transfers: dict[int, Any] = {}
@@ -161,15 +162,13 @@ class NIXLTransport(Transport):
         return self._call(lambda: self._connect(peer_url), timeout)
 
     def _connect(self, peer_url: bytes) -> int:
-        if self._peer_name is not None:
-            raise RuntimeError("transport is already connected")
         name = _agent_name(self._ensure_open().add_remote_agent(peer_url))
-        self._peer_name = name
+        self._peers.add(name)
         self._remote_agents.add(name)
         return 0
 
     def connected(self) -> bool:
-        return self._peer_name is not None and not self._closed and not self._closing
+        return bool(self._peers) and not self._closed and not self._closing
 
     def register_memory(
         self, tensor: torch.Tensor, *, timeout: float | None = None
@@ -264,8 +263,8 @@ class NIXLTransport(Transport):
             raise TypeError("local_buffer was not registered by this transport")
         if not isinstance(remote_buffer, NIXLRemoteBuffer):
             raise TypeError("remote_buffer was not registered by a NIXL transport")
-        if self._peer_name != remote_buffer.agent_name:
-            raise ValueError("remote buffer does not belong to the connected peer")
+        if remote_buffer.agent_name not in self._peers:
+            raise ValueError("remote buffer does not belong to a connected peer")
         if local_buffer.size() > remote_buffer.length:
             raise ValueError("local view does not fit in the remote buffer")
         registration = local_buffer._memory._registration
@@ -297,16 +296,18 @@ class NIXLTransport(Transport):
             work._done = True
             return work
         loaded_name = _agent_name(agent.add_remote_agent(remote_buffer.metadata))
-        self._remote_agents.add(loaded_name)
         if loaded_name != remote_buffer.agent_name:
-            try:
-                agent.remove_remote_agent(loaded_name)
-            except Exception:
-                # Preserve the agent for retryable close, including failed cleanup.
-                self._closing = True
-                _live_transports.add(self)
-                raise
-            self._remote_agents.remove(loaded_name)
+            # Keep agents loaded by other peers; they may have transfers in flight.
+            if loaded_name not in self._remote_agents:
+                self._remote_agents.add(loaded_name)
+                try:
+                    agent.remove_remote_agent(loaded_name)
+                except Exception:
+                    # Preserve the agent for retryable close, including failed cleanup.
+                    self._closing = True
+                    _live_transports.add(self)
+                    raise
+                self._remote_agents.remove(loaded_name)
             raise ValueError("remote buffer metadata names a different agent")
         local_descs = agent.get_xfer_descs(
             [
@@ -511,7 +512,7 @@ class NIXLTransport(Transport):
         for name in list(self._remote_agents):
             agent.remove_remote_agent(name)
             self._remote_agents.remove(name)
-        self._peer_name = None
+        self._peers.clear()
         self._agent = None
         self._closed = True
         _live_transports.discard(self)

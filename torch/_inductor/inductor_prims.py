@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import torch
 from torch import _prims, Tensor
 from torch._utils import _get_device_index
+from torch.nn import functional as F
 
 
 if TYPE_CHECKING:
@@ -18,6 +19,27 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def _blackwell_decompose_k_partial_impl(
+    a: Tensor,
+    b: Tensor,
+    k_split: int,
+    config_index: int,
+    m_pad: int,
+    k_part: int,
+) -> Tensor:
+    """Reference for the internal aligned decompose-K partial operation."""
+    del config_index
+    m, k = a.shape
+    n = b.shape[1]
+    partials = []
+    for split in range(k_split):
+        start = split * k_part
+        end = min(start + k_part, k)
+        partial = torch.mm(a[:, start:end], b[start:end], out_dtype=torch.float32)
+        partials.append(F.pad(partial, [0, 0, 0, m_pad - m]))
+    return torch.stack(partials).view(k_split * m_pad, n)
+
+
 def make_prim(
     schema: str,
     impl_aten,
@@ -25,7 +47,9 @@ def make_prim(
     doc: str = "",
     tags: Sequence[torch.Tag] | None = None,
 ):
-    if isinstance(return_type, tuple):
+    if return_type is _prims.RETURN_TYPE.INPLACE:
+        meta = impl_aten
+    elif isinstance(return_type, tuple):
 
         def meta(*args, **kwargs):
             return tuple(_prims.TensorMeta(o) for o in impl_aten(*args, **kwargs))
@@ -98,6 +122,13 @@ randint = make_prim(
     doc="torch.randint() using backend-specific RNG that can be fused",
 )
 
+# Internal plan component for the Blackwell aligned decompose-K prototype.
+# Its lowering is a dedicated TMA template over the original rank-2 operands.
+blackwell_decompose_k_partial = make_prim(
+    "blackwell_decompose_k_partial(Tensor a, Tensor b, int k_split, int config_index, int m_pad, int k_part) -> Tensor",
+    _blackwell_decompose_k_partial_impl,
+)
+
 
 def _reserve_rng_state(device: torch.device, used_offset):
     """
@@ -130,6 +161,11 @@ def _reserve_rng_state(device: torch.device, used_offset):
     else:
         base = torch.div(off_t + intra_t, 4, rounding_mode="floor")
     return seed_t, base
+
+
+def rand_eager_vec(dtype: torch.dtype | None) -> int:
+    """Vector width of eager CUDA dropout (fused_dropout_kernel_vec) for an aligned tensor."""
+    return 8 if dtype in (torch.float16, torch.bfloat16) else 4
 
 
 def _rand_eager_offset_impl(offset, device: torch.device) -> Tensor:
@@ -202,6 +238,7 @@ _unsafe_index_put_ = make_prim(
     lambda self, indices, values, accumulate=False: torch.ops.aten.index_put_(
         self, indices, values, accumulate
     ),
+    return_type=_prims.RETURN_TYPE.INPLACE,
     doc="Unsafe index_put_ (doesn't issue device asserts)",
 )
 fma = make_prim(

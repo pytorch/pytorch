@@ -38,7 +38,7 @@ inline scalar_t* optional_data(const Tensor& source) {
   if constexpr (std::is_const_v<scalar_t>) {
     return source.defined() ? source.const_data_ptr<scalar_t>() : nullptr;
   } else {
-    return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
+    return source.defined() ? source.mutable_data_ptr<scalar_t>() : nullptr;
   }
 }
 
@@ -113,7 +113,7 @@ void nll_loss2d_forward_out_frame(
     int64_t ignore_index) {
   const int64_t n_classes = input.size(1);
 
-  scalar_t* total_weight_data = total_weight.data_ptr<scalar_t>();
+  scalar_t* total_weight_data = total_weight.mutable_data_ptr<scalar_t>();
   *total_weight_data = 0;
 
   auto weight_contiguous = optional_contiguous(weight);
@@ -223,7 +223,7 @@ void nll_loss2d_forward_out_frame(
       const int64_t linear_idx = b * map_size + elem;
       for (int64_t j = 0; j + 1 < cascade_sum_num_levels; ++j) {
         const auto mask = (level_mask << (j * level_power));
-        if (C10_LIKELY((linear_idx & mask) != 0)) {
+        if ((linear_idx & mask) != 0) [[likely]] {
           break;
         }
 
@@ -252,7 +252,7 @@ void nll_loss2d_forward_out_frame(
   }
 
   *total_weight_data = total_weight_val;
-  *output.data_ptr<scalar_t>() = output_val;
+  *output.mutable_data_ptr<scalar_t>() = output_val;
 }
 
 void nll_loss2d_forward_out_cpu_template(

@@ -23,8 +23,10 @@ if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *gcc* ]]; then
   export CC=gcc
   export CXX=g++
-  sudo update-alternatives --install /usr/bin/cc cc /usr/bin/gcc 100
-  sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++ 100
+  if sudo -n true 2>/dev/null; then
+    sudo update-alternatives --install /usr/bin/cc cc /usr/bin/gcc 100
+    sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++ 100
+  fi
 fi
 
 # Figure out which Python to use for ROCm
@@ -33,7 +35,3 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
   unset HIP_PLATFORM
   export PYTORCH_TEST_WITH_ROCM=1
 fi
-
-# TODO: Reenable libtorch testing for MacOS, see https://github.com/pytorch/pytorch/issues/62598
-# shellcheck disable=SC2034
-BUILD_TEST_LIBTORCH=0

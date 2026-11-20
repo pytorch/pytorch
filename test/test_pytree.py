@@ -37,6 +37,7 @@ pytree_modules = {
 }
 if not IS_FBCODE:
     import torch.utils._cxx_pytree as cxx_pytree
+    from torch._dynamo.polyfills import pytree as dynamo_pytree
 
     pytree_modules["cxx"] = cxx_pytree
 else:
@@ -1412,6 +1413,73 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
         register()
         python_pytree._deregister_pytree_node(MyDict)
 
+    def test_deregister_pytree_node_keeps_other_types(self):
+        # Removing a type must not remove the name of another type, whether the
+        # two were registered without a name or under the same name.
+        @dataclass(frozen=True)
+        class First:
+            pass
+
+        @dataclass(frozen=True)
+        class Second:
+            pass
+
+        def deregister(cls):
+            if cls in python_pytree.SUPPORTED_NODES:
+                python_pytree._deregister_pytree_node(cls)
+
+        for cls in (First, Second):
+            python_pytree.register_constant(cls)
+            self.addCleanup(deregister, cls)
+        # The name that stands for types without a name names none of them.
+        no_name = python_pytree.NO_SERIALIZED_TYPE_NAME_FOUND
+        self.assertNotIn(no_name, python_pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE)
+        python_pytree._deregister_pytree_node(First)
+        python_pytree._deregister_pytree_node(Second)
+        self.assertNotIn(Second, python_pytree.SUPPORTED_NODES)
+
+        name = "test_pytree.test_deregister_pytree_node_keeps_other_types"
+        for cls in (First, Second):
+            python_pytree.register_pytree_node(
+                cls,
+                lambda x: ([], None),
+                lambda children, context: None,
+                serialized_type_name=name,
+            )
+            self.addCleanup(deregister, cls)
+        python_pytree._deregister_pytree_node(First)
+        self.assertIs(python_pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE[name], Second)
+
+    def test_register_pytree_node_again_replaces_its_name(self):
+        # Registering a type again drops its old name, unless another type
+        # took that name in between.
+        class First:
+            pass
+
+        class Second:
+            pass
+
+        def register(cls, name):
+            python_pytree._private_register_pytree_node(
+                cls,
+                lambda x: ([], None),
+                lambda children, context: cls(),
+                serialized_type_name=f"test_pytree.register_again.{name}",
+            )
+
+        names = python_pytree.SERIALIZED_TYPE_TO_PYTHON_TYPE
+        register(First, "a")
+        self.addCleanup(python_pytree._deregister_pytree_node, First)
+        with self.assertWarnsRegex(UserWarning, "Overwriting"):
+            register(First, "b")
+        self.assertNotIn("test_pytree.register_again.a", names)
+
+        register(Second, "b")
+        self.addCleanup(python_pytree._deregister_pytree_node, Second)
+        with self.assertWarnsRegex(UserWarning, "Overwriting"):
+            register(First, "c")
+        self.assertIs(names["test_pytree.register_again.b"], Second)
+
     @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182645")
     def test_constant(self):
         # Either use `frozen=True` or `unsafe_hash=True` so we have a
@@ -1693,6 +1761,38 @@ class TestCxxPytree(TestCase):
 
         roundtrip_spec = cxx_pytree.treespec_loads(cxx_pytree.treespec_dumps(spec))
         self.assertEqual(roundtrip_spec.type._fields, spec.type._fields)
+
+    @unittest.skipIf(IS_FBCODE, "Optree is not available in fbcode")
+    @parametrize(
+        "tree",
+        [
+            GlobalDummyType([1, 2], {"a": 3}),
+            GlobalDummyType(GlobalDummyType(1, None), 2),
+            [GlobalDummyType(1, None)],
+            (GlobalDummyType(1, None),),
+            {"a'b\\c": GlobalDummyType(1, None)},
+            defaultdict(list, a=GlobalDummyType(1, None)),
+            deque([GlobalDummyType(1, None)]),
+            deque([GlobalDummyType(1, None)], maxlen=2),
+            GlobalPoint(GlobalDummyType(1, None), 2),
+            GlobalDummyType([GlobalDummyType(1, None)], {"a": GlobalDummyType(2, 3)}),
+        ],
+    )
+    def test_nested_custom_spec_polyfill(self, tree):
+        # Keep the reference out of Dynamo's polyfill substitution.
+        @torch.compiler.disable
+        def eager_reference(tree):
+            leaves, spec = cxx_pytree.tree_flatten(tree)
+            return leaves, repr(spec)
+
+        leaves, expected_repr = eager_reference(tree)
+        polyfill_flatten = dynamo_pytree.tree_flatten.__torch_dynamo_polyfill__
+        polyfill_leaves, polyfill_spec = polyfill_flatten(
+            tree, none_is_leaf=True, namespace="torch"
+        )
+        self.assertEqual(polyfill_leaves, leaves)
+        self.assertEqual(repr(polyfill_spec), expected_repr)
+        self.assertEqual(polyfill_spec.flatten_up_to(tree), leaves)
 
     def test_pytree_custom_type_serialize(self):
         spec = cxx_pytree.tree_structure(GlobalDummyType(0, 1))

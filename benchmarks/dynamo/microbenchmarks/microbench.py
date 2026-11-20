@@ -43,7 +43,9 @@ def microbenchmark(args, model, example_inputs):
     compiled_fn = compile_fx(torch.fx.symbolic_trace(model), example_inputs)
     cudagraphs_eager = cudagraphs_inner(model, example_inputs, copy_outputs=False)
     cudagraphs_jit = cudagraphs_inner(
-        torch.jit.trace(model, example_inputs), example_inputs, copy_outputs=False
+        torch.jit._trace.trace(model, example_inputs),
+        example_inputs,
+        copy_outputs=False,
     )
     return compute_speedups(
         args,

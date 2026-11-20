@@ -11,10 +11,10 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfMPS,
+    expectedFailureMPS,
     instantiate_device_type_tests,
     skipLazy,
     skipMeta,
-    skipMPS,
     skipXLA,
     skipXPUIf,
 )
@@ -594,7 +594,7 @@ class TestViewOps(TestCase):
 
     # TODO: opinfo this or move to unbind's test suite
     @skipLazy
-    @skipMPS  # MPS doesn't support float64
+    @expectedFailureMPS  # MPS doesn't support float64
     def test_unbind(self, device):
         stacked = torch.randn(3, 10, 10, device=device, requires_grad=True)
         x, y, z = stacked.unbind()
@@ -765,7 +765,7 @@ class TestViewOps(TestCase):
         self.assertEqual(t[1, 1], v[6])
 
     @skipLazy
-    @skipMPS  # MPS doesn't support float64
+    @expectedFailureMPS  # MPS doesn't support float64
     def test_as_strided_gradients(self, device):
         def test(x, prepro_fn, size, strides, offset=None):
             x = x.to(torch.double).detach().requires_grad_()
@@ -996,6 +996,16 @@ class TestViewOps(TestCase):
         self.assertEqual(t[2, 2], 0)
 
     @skipLazy
+    @dtypes(torch.half, torch.float, torch.long, torch.bool)
+    def test_resize_view_preserves_storage(self, device, dtype):
+        base = make_tensor((20,), device=device, dtype=dtype)
+        expected = base.clone()
+        view = base[5:15]
+        view.resize_(30)
+        self.assertEqual(view[:10], expected[5:15])
+        self.assertEqual(base, expected)
+
+    @skipLazy
     def test_chunk_view(self, device):
         t = torch.zeros(3, 3, device=device)
         l = torch.chunk(t, 3)
@@ -1171,6 +1181,7 @@ class TestOldViewOpsDeviceType(TestCase):
         True,
         "NotImplementedError with test_ravel, https://github.com/intel/torch-xpu-ops/issues/2358",
     )
+    @expectedFailureMPS
     def test_ravel(self, device):
         def _test_ravel(tensors, size, nc=False):
             for src in tensors:
@@ -1334,6 +1345,7 @@ class TestOldViewOpsDeviceType(TestCase):
         True,
         "NotImplementedError with test_flatten,https://github.com/intel/torch-xpu-ops/issues/2358",
     )
+    @expectedFailureMPS
     def test_flatten(self, device):
         # Test that flatten returns 1-dim tensor when given a 0-dim tensor
         zero_dim_tensor = torch.tensor(123, device=device)
@@ -1577,6 +1589,7 @@ class TestOldViewOpsDeviceType(TestCase):
                     if op == "adjoint":
                         t1 = t1()
 
+    @expectedFailureMPS
     def test_python_types(self, device):
         a1 = torch.randn((1, 2), device=device, dtype=torch.float64)
         a2 = torch.randn((1, 2), device=device, dtype=float)
@@ -1738,6 +1751,7 @@ class TestOldViewOpsDeviceType(TestCase):
         gradcheck(lambda s, w, x, y, z: torch_fn(s, w, x, y, z), input_tuple)
         gradgradcheck(lambda s, w, x, y, z: torch_fn(s, w, x, y, z), input_tuple)
 
+    @expectedFailureMPS
     def test_atleast_gradient(self, device):
         self._test_atleast(device, torch.atleast_1d)
         self._test_atleast(device, torch.atleast_2d)
@@ -2116,6 +2130,7 @@ class TestOldViewOpsDeviceType(TestCase):
         ):
             torch.tensor_split(torch.rand(S, device=device), torch.tensor(((1,),)), 0)
 
+    @expectedFailureMPS
     def test_resize_all_dtypes_and_devices(self, device):
         shape = (2, 2)
         for dt in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
@@ -2123,6 +2138,7 @@ class TestOldViewOpsDeviceType(TestCase):
             x.resize_(shape)
             self.assertEqual(shape, x.shape)
 
+    @expectedFailureMPS
     def test_resize_as_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
@@ -2130,6 +2146,7 @@ class TestOldViewOpsDeviceType(TestCase):
             x.resize_as_(y)
             self.assertEqual(y.shape, x.shape)
 
+    @expectedFailureMPS
     def test_resize_overflow(self, device):
         x = torch.empty((), dtype=torch.float64, device=device)
         with self.assertRaisesRegex(
@@ -2152,11 +2169,13 @@ class TestOldViewOpsDeviceType(TestCase):
         ):
             torch.as_strided(t, [1], [1], 2**61 - 1)
 
+    @expectedFailureMPS
     def test_view_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             self.assertEqual(x.view(6).shape, [6])
 
+    @expectedFailureMPS
     def test_crow_col_indices(self, device):
         crow_indices = (0, 1, 2)
         col_indices = (1, 0)
@@ -2174,7 +2193,9 @@ class TestOldViewOpsDeviceType(TestCase):
 instantiate_device_type_tests(
     TestViewOps, globals(), include_lazy=True, allow_mps=True, allow_xpu=True
 )
-instantiate_device_type_tests(TestOldViewOpsDeviceType, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestOldViewOpsDeviceType, globals(), allow_mps=True, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()

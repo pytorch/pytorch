@@ -656,7 +656,7 @@ static scalar_t dot_naive(
     Functor op) {
   using opmath_t = at::opmath_type<scalar_t>;
   opmath_t sum = 0;
-  for (int64_t i = 0; i < n; i++) {
+  for (const auto i : c10::irange(n)) {
     sum += op(static_cast<opmath_t>(x[i * incx]), static_cast<opmath_t>(y[i * incy]));
   }
   return static_cast<scalar_t>(sum);

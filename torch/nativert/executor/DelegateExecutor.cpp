@@ -39,7 +39,7 @@ std::string extractToTemporaryFolder(
   std::vector<std::string> allRecords = packageReader.getAllRecords();
 
   for (const auto& path : allRecords) {
-    if (!c10::starts_with(path, targetPath) || c10::ends_with(path, "/")) {
+    if (!path.starts_with(targetPath) || path.ends_with("/")) {
       continue;
     }
 

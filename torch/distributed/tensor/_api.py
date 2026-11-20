@@ -150,8 +150,8 @@ class _ToTorchTensor(torch.autograd.Function):
             if not (len(shape) == len(stride) == len(other)):
                 return False
             return check_contiguous_sizes_strides(
-                shape, stride, false_if_dde=True
-            ) and check_contiguous_sizes_strides(shape, other, false_if_dde=True)
+                shape, stride
+            ) and check_contiguous_sizes_strides(shape, other)
 
         def strides_may_match(shape, stride, other):
             return (

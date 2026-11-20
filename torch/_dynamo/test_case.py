@@ -150,8 +150,6 @@ class TestCase(TorchTestCase):
     def setUp(self) -> None:
         self._prior_is_grad_enabled = torch.is_grad_enabled()
         self._prior_autocast_state = _snapshot_autocast_state()
-        self._prior_nested_graph_breaks = config.nested_graph_breaks
-        config.nested_graph_breaks = True
         super().setUp()
         utils.counters.clear()
         self.handler = logging.NullHandler()
@@ -180,7 +178,6 @@ class TestCase(TorchTestCase):
             log.warning("Running test %s changed grad mode", self.id())
             torch.set_grad_enabled(self._prior_is_grad_enabled)
         self._restore_prior_autocast_state()
-        config.nested_graph_breaks = self._prior_nested_graph_breaks
 
     def tearDown(self) -> None:
         trace_log.removeHandler(self.handler)
@@ -254,8 +251,8 @@ class CPythonTestCase(TestCase):
     assertRegex = unittest.TestCase.assertRegex
     assertNotRegex = unittest.TestCase.assertNotRegex
     assertCountEqual = unittest.TestCase.assertCountEqual
-    assertMultiLineEqual = polyfills.assert_multi_line_equal
-    assertSequenceEqual = polyfills.assert_sequence_equal
+    assertMultiLineEqual = unittest.TestCase.assertMultiLineEqual
+    assertSequenceEqual = unittest.TestCase.assertSequenceEqual
     assertListEqual = unittest.TestCase.assertListEqual
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual

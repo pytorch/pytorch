@@ -8,9 +8,9 @@ template <typename T>
 inline void cross_product(
     device T* out,
     long os,
-    constant T* x,
+    device const T* x,
     long xs,
-    constant T* y,
+    device const T* y,
     long ys) {
   out[0] = mul(x[xs], y[2 * ys]) - mul(x[2 * xs], y[ys]);
   out[os] = mul(x[2 * xs], y[0]) - mul(x[0], y[2 * ys]);
@@ -24,11 +24,11 @@ inline void cross_product(
 template <typename T>
 kernel void cross_dense(
     device T* out [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant T* other [[buffer(2)]],
+    device const T* input [[buffer(1)]],
+    device const T* other [[buffer(2)]],
     constant uint& dim_stride [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  uint base = tid + 2 * (tid / dim_stride) * dim_stride;
+  const long base = tid + 2 * long(tid / dim_stride) * dim_stride;
   cross_product(
       out + base,
       long(dim_stride),
@@ -38,58 +38,51 @@ kernel void cross_dense(
       long(dim_stride));
 }
 
+// Iterates a TensorIterator whose cross dim is squashed to size 1: sizes and
+// byte strides locate each triplet's first element, dim_strides holds the
+// element strides along the cross dim of out, input and other.
 template <typename T>
 kernel void cross_strided(
-    device T* out [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant T* other [[buffer(2)]],
-    constant long* squashed_sizes [[buffer(3)]],
+    device void* out [[buffer(0)]],
+    device const char* input [[buffer(1)]],
+    device const char* other [[buffer(2)]],
+    constant DimDivider* sizes [[buffer(3)]],
     constant long* out_strides [[buffer(4)]],
     constant long* input_strides [[buffer(5)]],
     constant long* other_strides [[buffer(6)]],
     constant uint& ndim [[buffer(7)]],
-    constant uint& dim [[buffer(8)]],
+    constant long* dim_strides [[buffer(8)]],
     uint tid [[thread_position_in_grid]]) {
-  int pos[max_ndim];
-  pos_from_thread_index(int(tid), pos, squashed_sizes, ndim - 1);
-  long out_offs = 0, in_offs = 0, oth_offs = 0;
-  uint p = 0;
-  for (uint d = 0; d < ndim; d++) {
-    if (d == dim)
-      continue;
-    out_offs += pos[p] * out_strides[d];
-    in_offs += pos[p] * input_strides[d];
-    oth_offs += pos[p] * other_strides[d];
-    p++;
-  }
+  const auto offs = offsets_from_thread_index(
+      tid, sizes, ndim, out_strides, input_strides, other_strides);
   cross_product(
-      out + out_offs,
-      out_strides[dim],
-      input + in_offs,
-      input_strides[dim],
-      other + oth_offs,
-      other_strides[dim]);
+      &ref_at_offs<T>(out, offs[0]),
+      dim_strides[0],
+      reinterpret_cast<device const T*>(input + offs[1]),
+      dim_strides[1],
+      reinterpret_cast<device const T*>(other + offs[2]),
+      dim_strides[2]);
 }
 
 #define REGISTER_CROSS_OP(DTYPE)                              \
   template [[host_name("cross_dense_" #DTYPE)]] kernel void   \
   cross_dense<DTYPE>(                                         \
       device DTYPE * out [[buffer(0)]],                       \
-      constant DTYPE * input [[buffer(1)]],                   \
-      constant DTYPE * other [[buffer(2)]],                   \
-      constant uint & dim_stride [[buffer(3)]],               \
+      device const DTYPE* input [[buffer(1)]],                \
+      device const DTYPE* other [[buffer(2)]],                \
+      constant uint& dim_stride [[buffer(3)]],                \
       uint tid [[thread_position_in_grid]]);                  \
   template [[host_name("cross_strided_" #DTYPE)]] kernel void \
   cross_strided<DTYPE>(                                       \
-      device DTYPE * out [[buffer(0)]],                       \
-      constant DTYPE * input [[buffer(1)]],                   \
-      constant DTYPE * other [[buffer(2)]],                   \
-      constant long* squashed_sizes [[buffer(3)]],            \
+      device void* out [[buffer(0)]],                         \
+      device const char* input [[buffer(1)]],                 \
+      device const char* other [[buffer(2)]],                 \
+      constant DimDivider* sizes [[buffer(3)]],               \
       constant long* out_strides [[buffer(4)]],               \
       constant long* input_strides [[buffer(5)]],             \
       constant long* other_strides [[buffer(6)]],             \
       constant uint& ndim [[buffer(7)]],                      \
-      constant uint& dim [[buffer(8)]],                       \
+      constant long* dim_strides [[buffer(8)]],               \
       uint tid [[thread_position_in_grid]])
 
 REGISTER_CROSS_OP(float);

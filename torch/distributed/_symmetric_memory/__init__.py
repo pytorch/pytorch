@@ -2287,7 +2287,9 @@ def empty(  # type: ignore[misc]
         This is a host-synchronous allocation. Together with
         :func:`rendezvous`, it is intended as an initialization-time
         operation: allocate a symmetric memory tensor once and reuse it,
-        rather than allocating in hot code paths.
+        rather than allocating in hot code paths. It cannot be captured in a
+        CUDA graph; the CUDA backend raises an error if it is called while
+        the current stream is capturing. Allocate before capture instead.
 
     Args:
         size (int...): a sequence of integers defining the shape of the output tensor.
@@ -2349,9 +2351,15 @@ def rendezvous(
         This is a host-blocking initialization operation: the first rendezvous
         of a tensor performs handle exchange and mapping across processes, and
         synchronizes the host with the device. It cannot be ordered onto a
-        CUDA stream or captured in a CUDA graph. Rendezvous a buffer once and
-        reuse the returned handle rather than calling this in hot code paths;
-        subsequent calls on the same tensor return the cached handle.
+        CUDA stream or captured in a CUDA graph; the CUDA backend raises an
+        error if the first rendezvous of a tensor happens while the current
+        stream is capturing. Rendezvous a buffer once and reuse the returned
+        handle rather than calling this in hot code paths; subsequent calls on
+        the same tensor return the cached handle and are safe to capture.
+        Symmetric memory collectives on a rendezvoused buffer can be captured
+        after they have run once eagerly. Every rank must then replay the
+        captured graph the same number of times, because each replay performs
+        the peer synchronization for that rank.
 
     Args:
         tensor (:class:`torch.Tensor`): the local tensor used to establish the symmetric memory tensor.
@@ -2370,7 +2378,7 @@ def is_nvshmem_available() -> bool:
 
     Check if NVSHMEM (CUDA) or rocSHMEM (ROCm) is available in the current
     build and usable at runtime. On ROCm, rocSHMEM ``VERSION`` must be at
-    least 3.3.0 (see ``rocshmem/rocshmem.hpp``).
+    least 3.5.0 (see ``rocshmem/rocshmem.hpp``).
     """
     try:
         from torch._C._distributed_c10d import _is_nvshmem_available
@@ -2386,11 +2394,11 @@ def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
     r"""
     Set the backend for symmetric memory allocation. This is a global setting
     and affects all subsequent calls to
-    :func:`torch._distributed._symmetric_memory.empty()`.  Note that the backend
+    :func:`torch.distributed._symmetric_memory.empty()`.  Note that the backend
     cannot be changed once a symmetric memory tensor has been allocated.
 
     Args:
-        backend (str): the backend for symmetric memory allocation. Currently,
+        name (str): the backend for symmetric memory allocation. Currently,
             only `"NVSHMEM"`, `"CUDA"`, `"NCCL"` are supported.
     """
     _SymmetricMemory.set_backend(name)
@@ -2471,8 +2479,10 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool | torch.xpu.MemPool:
     Get the symmetric memory pool for a given device. If not found, create a new
     pool.
 
-    The tensor allocations with this pool must be symmetric across ranks.  The
-    allocated tensors can be used with symmetric operations, for example,
+    The tensor allocations with this pool must be symmetric across ranks.
+    Do not call :meth:`torch.Tensor.record_stream` on CUDA tensors allocated
+    from this pool, since stream-dependent reuse can break that symmetry.
+    The allocated tensors can be used with symmetric operations, for example,
     operations defined under `torch.ops.symm_mem`.
 
     Args:
