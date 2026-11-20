@@ -519,6 +519,16 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                 handler = self.python_key_table[type(curr_mode)]
                 with _pop_mode_temporarily(functionality_key) as mode:
                     return handler(mode, *args, **kwargs)
+            # No pre-dispatch mode is active (PreDispatch can be enabled for a
+            # native hook, see at::impl::set_pre_dispatch_hook): without a
+            # kernel of our own, continue at the next key like the C++
+            # PreDispatch fallback does.
+            if dispatch_key not in self.py_kernels:
+                key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
+                key_set = key_set & torch._C._dispatch_keyset_full_after(
+                    DispatchKey.PreDispatch
+                )
+                return self.dispatch(key_set.highestPriorityTypeId(), *args, **kwargs)
 
         final_key = resolve_key(self, dispatch_key)
 
