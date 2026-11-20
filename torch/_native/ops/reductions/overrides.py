@@ -122,15 +122,16 @@ def _out_ok(self: torch.Tensor, dtype: torch.dtype | None) -> bool:
 
 def _base_cond(self: torch.Tensor, dim: _Dim) -> bool:
     # A condition must decline unsupported calls without raising. Cheap metadata checks
-    # come first, so unserved GPUs decline right after the dtype. Only const_data_ptr
+    # come first, so unserved GPUs decline right after the dtype and is_traced, which
+    # keeps fake CUDA tensors from querying (and initializing) CUDA. Only const_data_ptr
     # needs real storage, but numel() also follows is_traced: on a symbolic-shape fake
     # tensor it would add a guard.
     return (
         self.dtype in _SUPPORTED_DTYPES
+        and not cap.is_traced(self)
         and cap.device_ok(self, _ARCH_MAJORS)
         and _dims_ok(dim, self.dim())
         and not self.is_neg()
-        and not cap.is_traced(self)
         and self.numel() != 0
         # Conservative: the kernels narrow their loads for lower alignment, but served
         # calls are measured and tested from 16-byte aligned bases only.
