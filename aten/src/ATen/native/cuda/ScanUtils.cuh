@@ -930,8 +930,8 @@ constexpr int64_t kMaxCubLine = int64_t{1} << 20;
 
 // On 1-D scans of a compute-bound op (logcumsumexp), to which chunking applies binary_op about twice
 // per element and hipCUB's single pass once, hipCUB is faster above a length that falls with the
-// cost of the op. On gfx1250 it is faster from shorter lengths up to a limit per dtype, past which
-// the chunked scan wins again.
+// cost of the op. On gfx1250 the chunked scan is faster up to a length per dtype and, except for
+// complex<float>, again past a limit per dtype.
 template <typename T>
 bool cub_faster_non_cheap(int64_t n, bool tdm) {
   if (!tdm) {
@@ -1876,7 +1876,8 @@ void scan_innermost_dim(const TensorBase& self, const TensorBase& result,
   int64_t num_rows = self.numel() / row_size;
 
 #if defined(USE_ROCM)
-  if (!inner_scan::stock_faster<scalar_t, BinaryFunction>(num_rows, row_size)) {
+  if (inner_scan::Traits<scalar_t, BinaryFunction>::kCheapOp ||
+      !inner_scan::stock_faster<scalar_t, BinaryFunction>(num_rows, row_size)) {
     check_fits_in_unsigned(num_rows, "Number of rows (self.numel()/self.size(self.dim()-1))");
     check_fits_in_unsigned(row_size, "row_size");
     inner_scan::launch<scalar_t>(
@@ -1924,12 +1925,14 @@ void scan_dim(const TensorBase& self, const TensorBase& result,
 
   if (self.numel() == self.size(dim)) {
 #if defined(USE_ROCM)
-    // Elsewhere the chunked row scan is faster than hipCUB, and deterministic.
+    // Elsewhere the chunked row scan is faster than hipCUB. It is also deterministic, so it takes
+    // every length under torch.use_deterministic_algorithms.
     const int64_t n = self.numel();
     const bool tdm = outer_scan::has_tdm();
-    const bool cub_faster = inner_scan::Traits<scalar_t, BinaryFunction>::kCheapOp
-        ? !tdm && n >= inner_scan::kMinCubLine && n < inner_scan::kMaxCubLine
-        : inner_scan::cub_faster_non_cheap<scalar_t>(n, tdm);
+    const bool cub_faster = !at::globalContext().deterministicAlgorithms() &&
+        (inner_scan::Traits<scalar_t, BinaryFunction>::kCheapOp
+             ? !tdm && n >= inner_scan::kMinCubLine && n < inner_scan::kMaxCubLine
+             : inner_scan::cub_faster_non_cheap<scalar_t>(n, tdm));
     if (!cub_faster && n <= std::numeric_limits<uint32_t>::max()) {
       inner_scan::launch<scalar_t>(
           result.mutable_data_ptr<scalar_t>(), self_->const_data_ptr<scalar_t>(),
