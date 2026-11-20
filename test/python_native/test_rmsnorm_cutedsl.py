@@ -38,6 +38,7 @@ class TestRmsNormCapability(TestCase):
     @parametrize("kind", ["meta", "fake", "functional_fake"])
     def test_traced_inputs_decline(self, kind: str) -> None:
         from torch._native.ops.norm.rmsnorm_impl import _is_supported
+        from torch._native.utils import capability as cap
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         if kind == "meta":
@@ -47,11 +48,15 @@ class TestRmsNormCapability(TestCase):
                 x = torch.empty(4, 128, device="cuda")
             if kind == "functional_fake":
                 x = torch._to_functional_tensor(x)
+        # _arch_ok swallows the query's AssertionError, so check the call count.
+        self.addCleanup(cap._arch_ok.cache_clear)
+        cap._arch_ok.cache_clear()
         with mock.patch(
             "torch.cuda.get_device_capability",
             side_effect=AssertionError("queried hardware for a traced tensor"),
-        ):
+        ) as query:
             self.assertFalse(_is_supported(x))
+        query.assert_not_called()
 
 
 @skipIfNoCuteDSL
@@ -213,8 +218,9 @@ class TestRmsNormJit(TestCase):
         actual_dx, actual_dw = quack_rmsnorm_bwd(dy, x, rstd, w, [n], compute_dw)
         xf = x.float().requires_grad_()
         wf = w.float().requires_grad_()
-        y = xf * (xf.square().mean(-1, keepdim=True) + 1e-5).rsqrt() * wf
-        dx, dw = torch.autograd.grad(y, (xf, wf), dy.float())
+        with torch.backends.python_native.cutedsl.disabled():
+            y = xf * (xf.square().mean(-1, keepdim=True) + 1e-5).rsqrt() * wf
+            dx, dw = torch.autograd.grad(y, (xf, wf), dy.float())
         tol = _TOLERANCES[dtype]
         self.assertEqual(actual_dx, dx.to(dtype), atol=tol, rtol=tol)
         self.assertEqual(
