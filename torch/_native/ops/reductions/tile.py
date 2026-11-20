@@ -320,7 +320,15 @@ def uniform_tree_ok(trait, count, threads_per_block, npairs_red):
 UNIFORM_COMBINE_MODES = ("off", "counts", "weights")
 
 
+def check_uniform_combine_mode(mode: str) -> None:
+    modes = UNIFORM_COMBINE_MODES
+    if mode not in modes:
+        raise ValueError(f"uniform_combine must be one of {modes}, got {mode!r}")
+
+
 def _uniform_combine_issue(trait, split, mode) -> str | None:
+    if mode not in UNIFORM_COMBINE_MODES[1:]:
+        return f"a mode in {UNIFORM_COMBINE_MODES[1:]}, got {mode!r}"
     issue = _flag_issue(trait, "has_combine_uniform", "combine_uniform")
     if issue is not None:
         return issue
@@ -344,7 +352,7 @@ def _uniform_combine_issue(trait, split, mode) -> str | None:
 def uniform_combine_ok(trait, split, mode):
     """Whether combine_uniform can fold a split plan's partials with derived counts.
 
-    Only mode "weights" adds a check (uniform_weight); callers validate the mode first.
+    Only "counts" and "weights" pass; "weights" also needs uniform_weight.
     """
     return _uniform_combine_issue(trait, split, mode) is None
 
@@ -1129,11 +1137,7 @@ class TileReduce:
                     f"stage_e={itree.stage_e}"
                 )
             mode = itree.uniform_combine
-            if mode not in UNIFORM_COMBINE_MODES:
-                raise ValueError(
-                    "uniform_combine must be 'off', 'counts' or 'weights', "
-                    f"got {mode!r}"
-                )
+            check_uniform_combine_mode(mode)
             uniform = mode != "off"
             # _uniform_combine_issue checks the split's length before it is unpacked.
             if uniform:

@@ -38,7 +38,6 @@ from .kernel_general import (
     _SM107_MID_SIZE,
     _SM107_MIN_SIZE,
     _SM107_ONE_FIELD,
-    _SM107_ONE_FIELD_NAMES,
     _sm107_outputs,
     ReduceBlock,
 )
@@ -488,17 +487,22 @@ def select_col_config(
     if welford and _sm107_welford_columns(dtype, rows, columns):
         inner = True
     if inner and ordered:
-        cfg = cfg._replace(rule=f"rubin_c{columns}_ordered", kernel_order="inner_tree")
+        rules = {
+            256: "rubin_c256_ordered",
+            1024: "rubin_c1024_ordered",
+            4096: "rubin_c4096_ordered",
+        }
+        cfg = cfg._replace(rule=rules[columns], kernel_order="inner_tree")
     if size not in _SM107_FULL_SIZES:
         return cfg
     # Measured anchors only: interpolate after crossover sweeps, not from byte size alone.
     large = size == _SM107_MAX_SIZE
-    # Inner-tree rule names end in _ordered.
-    sfx = "_ordered" if cfg.kernel_order == "inner_tree" else ""
-    rule = f"rubin_c{columns}{sfx}"
+    tree = cfg.kernel_order == "inner_tree"
     if columns == 256:
+        rule = "rubin_c256_ordered" if tree else "rubin_c256"
         return cfg._replace(rule=rule, threads_per_block=64, npar=4096, vec=4)
     if columns == 1024:
+        rule = "rubin_c1024_ordered" if tree else "rubin_c1024"
         return cfg._replace(
             rule=rule,
             threads_per_block=64,
@@ -508,8 +512,13 @@ def select_col_config(
     if columns != 4096:
         return cfg
     if one_field:
+        names: dict[type, str] = {
+            SumOps: "rubin_sum_c4096_tiled",
+            MeanOps: "rubin_mean_c4096_tiled",
+            AMaxOps: "rubin_amax_c4096_tiled",
+        }
         return cfg._replace(
-            rule=f"rubin_{_SM107_ONE_FIELD_NAMES[trait_type]}_c4096_tiled",
+            rule=names[trait_type],
             threads_per_block=64,
             npar=(2048 if bf16 else 1024) if large else 256,
             vec=4 if large and not bf16 else 8,
@@ -521,7 +530,7 @@ def select_col_config(
         # fp32 256 MiB views have 16384 rows, past reduce_ordered_col's unroll cap.
         tree = (bf16 or large) and ordered
         return cfg._replace(
-            rule=f"rubin_var_c4096{'_ordered' if tree else ''}",
+            rule="rubin_var_c4096_ordered" if tree else "rubin_var_c4096",
             threads_per_block=64,
             npar=(2048 if bf16 else 1024) if large else 256,
             vec=8,
@@ -529,7 +538,7 @@ def select_col_config(
         )
     tree = bf16 and large and ordered
     return cfg._replace(
-        rule=f"rubin_argmax_c4096_{'ordered' if tree else 'tiled'}",
+        rule="rubin_argmax_c4096_ordered" if tree else "rubin_argmax_c4096_tiled",
         threads_per_block=64,
         npar=(2048 if bf16 else 1024) if large else 512,
         vec=4,
