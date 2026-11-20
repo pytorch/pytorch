@@ -25,6 +25,8 @@ from torch._higher_order_ops.utils import (
     fill_none_with_masks,
     materialize_as_graph,
     reenter_make_fx,
+    restore_rng_state_from_forward,
+    save_rng_state_for_backward,
     save_values_for_backward,
     saved_values,
     unique_graph_id,
@@ -337,6 +339,7 @@ class CondAutogradOp(torch.autograd.Function):
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
         save_values_for_backward(ctx, operands)
+        save_rng_state_for_backward(ctx, operands)
 
         with torch._C._AutoDispatchBelowAutograd():
             return cond_op(pred, true_fn, false_fn, operands)
@@ -363,12 +366,13 @@ class CondAutogradOp(torch.autograd.Function):
             ctx._fw_exclude_key_set,
             force_enable_grad=True,
         )
-        grads = cond_op(
-            ctx._pred,
-            true_bw_gm,
-            false_bw_gm,
-            args,
-        )
+        with restore_rng_state_from_forward(ctx):
+            grads = cond_op(
+                ctx._pred,
+                true_bw_gm,
+                false_bw_gm,
+                args,
+            )
         return None, None, None, *fill_none_with_masks(grads, grads_tensor_masks)
 
 

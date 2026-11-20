@@ -1010,6 +1010,32 @@ def saved_values(ctx):
     return tuple(args)
 
 
+def save_rng_state_for_backward(ctx, args):
+    # The backward of cond/map/switch re-runs the forward subgraph, so random
+    # ops in it must see the same RNG state as in the forward.
+    from torch.utils.checkpoint import _infer_device_type, get_device_states
+
+    ctx._fw_cpu_rng_state = torch.get_rng_state()
+    ctx._fw_rng_device_type = _infer_device_type(*args)
+    ctx._fw_rng_devices, ctx._fw_rng_device_states = get_device_states(*args)
+
+
+@contextmanager
+def restore_rng_state_from_forward(ctx):
+    from torch.utils.checkpoint import set_device_states
+
+    with torch.random.fork_rng(
+        devices=ctx._fw_rng_devices, device_type=ctx._fw_rng_device_type
+    ):
+        torch.set_rng_state(ctx._fw_cpu_rng_state)
+        set_device_states(
+            ctx._fw_rng_devices,
+            ctx._fw_rng_device_states,
+            device_type=ctx._fw_rng_device_type,
+        )
+        yield
+
+
 def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[Any]:
     if sum(chunk_sizes) != len(iterable):
         raise AssertionError(

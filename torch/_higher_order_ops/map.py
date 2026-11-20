@@ -26,6 +26,8 @@ from torch._higher_order_ops.utils import (
     materialize_as_graph,
     reenter_make_fx,
     register_fake,
+    restore_rng_state_from_forward,
+    save_rng_state_for_backward,
     save_values_for_backward,
     saved_values,
     split_into_chunks,
@@ -203,6 +205,7 @@ class MapAutogradOp(torch.autograd.Function):
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
         save_values_for_backward(ctx, flat_args)
+        save_rng_state_for_backward(ctx, flat_args)
         with torch._C._AutoDispatchBelowAutograd():
             return (
                 *map_impl(f, flat_args[:num_mapped_args], flat_args[num_mapped_args:]),
@@ -279,7 +282,8 @@ class MapAutogradOp(torch.autograd.Function):
                 force_enable_grad=True,
             )
 
-        grads = map_impl(fn_bw_gm, fw_mapped_args + flat_grads, pos_args)
+        with restore_rng_state_from_forward(ctx):
+            grads = map_impl(fn_bw_gm, fw_mapped_args + flat_grads, pos_args)
 
         return None, None, *fill_none_with_masks(grads, grads_tensor_masks)
 
