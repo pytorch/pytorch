@@ -78,7 +78,6 @@ from ..utils import (
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
     is_gpu,
-    is_using_cudagraph_partition,
     LineContext,
     make_codegen_buffer,
     sanitize_constexpr_for_repr,
@@ -2994,7 +2993,7 @@ class PythonWrapperCodegen(CodeGen):
         self.prefix.writeline("args.clear()")
 
     def write_launcher_fn_call_get_indent(self) -> int:
-        if config.graph_partition:
+        if V.graph.partition_plan.uses_graph_partition:
             self.prefix.splice(
                 """
                 class Runner:
@@ -3047,7 +3046,7 @@ class PythonWrapperCodegen(CodeGen):
             # Under cudagraph partitioning, leave NaN/alignment checks to partitions
             # to avoid duplicates; call()-only inputs do not get these checks.
             if not (
-                is_using_cudagraph_partition()
+                V.graph.partition_plan.cudagraphs_per_partition
                 and not is_codegen_graph_partition_subgraph(self)
             ):
                 self.codegen_input_alignment_and_nan_asserts()
@@ -3461,7 +3460,7 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def generate_after_suffix(self, result: IndentedBuffer) -> None:
-        if config.graph_partition:
+        if V.graph.partition_plan.uses_graph_partition:
             all_partition_name_list = ", ".join(self.all_partition_names) + (
                 "," if len(self.all_partition_names) == 1 else ""
             )
@@ -3730,7 +3729,7 @@ class PythonWrapperCodegen(CodeGen):
             return self._generate(is_inference)
 
     def get_wrapper_call_indent(self) -> int:
-        if config.graph_partition:
+        if V.graph.partition_plan.uses_graph_partition:
             return 2
         else:
             return 1
@@ -4092,7 +4091,7 @@ class PythonWrapperCodegen(CodeGen):
         ):
             return
         else:
-            if torch._inductor.config.graph_partition:
+            if V.graph.partition_plan.uses_graph_partition:
                 pass
             else:
                 raise AssertionError(f"Unknown value type: {type(value)}")
@@ -6651,12 +6650,7 @@ class PythonWrapperCodegen(CodeGen):
                 if inductor_config_patches
                 else contextlib.nullcontext()
             )
-            # do not graph partition inside subgraph bodies
-            with (
-                ctx,
-                config.patch("graph_partition", False),
-                V.set_graph_handler(subgraph.graph),
-            ):
+            with ctx, V.set_graph_handler(subgraph.graph):
                 # Call the codegen of subgraph recursively
                 subgraph_code, _ = subgraph.graph.codegen()
             subgraph_name = subgraph.graph.name

@@ -10,7 +10,9 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._inductor.cudagraph_trees as cudagraph_trees
 from torch._dynamo.testing import same
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import TEST_CUDA_GRAPH
+from torch.testing._internal.logging_utils import logs_to_string
 
 
 def composed(*decs):
@@ -88,6 +90,27 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         x = torch.randn(3, device="cuda", requires_grad=True)
         y = torch.randn(3, device="cuda")
         fn(x, y)
+
+    @torch._inductor.config.patch({"graph_partition": True, "triton.cudagraphs": True})
+    def test_cpu_input_skips_despite_inductor_graph_partition(self):
+        # This backend never partitions, so Inductor's graph_partition must not
+        # make it tolerate a cpu input: the capture would fail.
+        def fn(x, y):
+            return x + 1, y + 2
+
+        compiled = torch.compile(fn, backend="cudagraphs")
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.cudagraph_utils", "cudagraphs"
+        )
+        with ctx():
+            for i in range(3):
+                x = torch.full((4,), float(i), device="cuda")
+                y = torch.full((4,), float(10 * i))
+                self.assertEqual(compiled(x, y), fn(x, y))
+        FileCheck().check("skipping cudagraphs due to cpu device (arg1_1)").run(
+            log_stream.getvalue()
+        )
+        self.assertEqual(torch._dynamo.utils.counters["inductor"]["cudagraph_skips"], 1)
 
     @patch_all()
     def test_htod(self):
