@@ -1005,6 +1005,18 @@ AOTI_TORCH_EXPORT bool torch_is_warn_always_enabled() {
   return c10::WarningUtils::get_warnAlways();
 }
 
+AOTI_TORCH_EXPORT int32_t torch_transpose_type_no_transpose() {
+  return static_cast<int32_t>(at::native::TransposeType::NoTranspose);
+}
+
+AOTI_TORCH_EXPORT int32_t torch_transpose_type_transpose() {
+  return static_cast<int32_t>(at::native::TransposeType::Transpose);
+}
+
+AOTI_TORCH_EXPORT int32_t torch_transpose_type_conj_transpose() {
+  return static_cast<int32_t>(at::native::TransposeType::ConjTranspose);
+}
+
 AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
     int64_t M,
     int64_t N,
@@ -1015,30 +1027,18 @@ AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
     int32_t dtype_a,
     int32_t dtype_b,
     int32_t dtype_c,
-    int32_t add_C,
+    bool add_C,
     const void* A,
     const void* B,
     void* C,
-    int32_t is_vnni) {
+    bool is_vnni) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     const auto a_type = static_cast<c10::ScalarType>(dtype_a);
     const auto b_type = static_cast<c10::ScalarType>(dtype_b);
     const auto c_type = static_cast<c10::ScalarType>(dtype_c);
-    const bool add_c_bool = static_cast<bool>(add_C);
-    const bool is_vnni_bool = static_cast<bool>(is_vnni);
     const auto call_brgemm = [&](auto* a_ptr, auto* b_ptr, auto* c_ptr) {
       at::native::cpublas::brgemm(
-          M,
-          N,
-          K,
-          ld_a,
-          ld_b,
-          ld_c,
-          add_c_bool,
-          a_ptr,
-          b_ptr,
-          c_ptr,
-          is_vnni_bool);
+          M, N, K, ld_a, ld_b, ld_c, add_C, a_ptr, b_ptr, c_ptr, is_vnni);
     };
 
     if (a_type == c10::ScalarType::Half && b_type == c10::ScalarType::Half &&
@@ -1112,13 +1112,12 @@ AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm_release(int32_t is_vnni) {
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm_release(bool is_vnni) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { at::native::cpublas::brgemm_release(static_cast<bool>(is_vnni)); });
+      { at::native::cpublas::brgemm_release(is_vnni); });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError
-torch_cpublas_gemm_no_downcast_alpha_beta_double(
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_float64(
     int32_t device_type,
     int32_t dtype,
     int32_t transa,

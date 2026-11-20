@@ -2,6 +2,7 @@
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/ops.h>
 #include <torch/csrc/stable/tensor.h>
+#include <torch/headeronly/util/Exception.h>
 
 namespace cpublas = torch::stable::cpublas;
 using torch::stable::Tensor;
@@ -11,7 +12,8 @@ Tensor my_cpublas_brgemm(
     const Tensor& a,
     const Tensor& b,
     Tensor c,
-    bool add_c) {
+    bool add_c,
+    bool is_vnni) {
   cpublas::brgemm(
       a.size(0),
       b.size(1),
@@ -23,8 +25,74 @@ Tensor my_cpublas_brgemm(
       a.const_data_ptr<AType>(),
       b.const_data_ptr<BType>(),
       c.mutable_data_ptr<CType>(),
-      false);
+      is_vnni);
   return c;
+}
+
+Tensor my_cpublas_brgemm_dispatch(
+    const Tensor& a,
+    const Tensor& b,
+    Tensor c,
+    bool add_c,
+    bool is_vnni) {
+  using S = torch::headeronly::ScalarType;
+
+  const auto dtype_a = a.scalar_type();
+  const auto dtype_b = b.scalar_type();
+  const auto dtype_c = c.scalar_type();
+  const auto matches = [&](S expected_a, S expected_b, S expected_c) {
+    return dtype_a == expected_a && dtype_b == expected_b &&
+        dtype_c == expected_c;
+  };
+
+  if (matches(S::Float, S::Float, S::Float)) {
+    return my_cpublas_brgemm<float, float, float>(a, b, c, add_c, is_vnni);
+  }
+  if (matches(S::Half, S::Half, S::Float)) {
+    return my_cpublas_brgemm<
+        torch::headeronly::Half,
+        torch::headeronly::Half,
+        float>(a, b, c, add_c, is_vnni);
+  }
+  if (matches(S::BFloat16, S::BFloat16, S::Float)) {
+    return my_cpublas_brgemm<
+        torch::headeronly::BFloat16,
+        torch::headeronly::BFloat16,
+        float>(a, b, c, add_c, is_vnni);
+  }
+  if (matches(S::Byte, S::Byte, S::Int)) {
+    return my_cpublas_brgemm<unsigned char, unsigned char, int32_t>(
+        a, b, c, add_c, is_vnni);
+  }
+  if (matches(S::Byte, S::Char, S::Int)) {
+    return my_cpublas_brgemm<unsigned char, signed char, int32_t>(
+        a, b, c, add_c, is_vnni);
+  }
+  if (matches(S::Char, S::Char, S::Int)) {
+    return my_cpublas_brgemm<signed char, signed char, int32_t>(
+        a, b, c, add_c, is_vnni);
+  }
+  if (matches(S::Float8_e4m3fn, S::Float8_e4m3fn, S::Float)) {
+    return my_cpublas_brgemm<
+        torch::headeronly::Float8_e4m3fn,
+        torch::headeronly::Float8_e4m3fn,
+        float>(a, b, c, add_c, is_vnni);
+  }
+  if (matches(S::Float8_e5m2, S::Float8_e5m2, S::Float)) {
+    return my_cpublas_brgemm<
+        torch::headeronly::Float8_e5m2,
+        torch::headeronly::Float8_e5m2,
+        float>(a, b, c, add_c, is_vnni);
+  }
+
+  STD_TORCH_CHECK(
+      false,
+      "Unsupported brgemm dtype combination: ",
+      dtype_a,
+      ", ",
+      dtype_b,
+      " -> ",
+      dtype_c);
 }
 
 Tensor my_cpublas_gemm_no_downcast_stub_cpu(
@@ -65,21 +133,7 @@ bool my_cpublas_brgemm_release() {
 
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def(
-      "my_cpublas_brgemm_f32(Tensor a, Tensor b, Tensor(a!) c, bool add_c) -> Tensor(a!)");
-  m.def(
-      "my_cpublas_brgemm_f16(Tensor a, Tensor b, Tensor(a!) c, bool add_c) -> Tensor(a!)");
-  m.def(
-      "my_cpublas_brgemm_bf16(Tensor a, Tensor b, Tensor(a!) c, bool add_c) -> Tensor(a!)");
-  m.def(
-      "my_cpublas_brgemm_u8_u8(Tensor a, Tensor b, Tensor(a!) c, bool add_c) -> Tensor(a!)");
-  m.def(
-      "my_cpublas_brgemm_u8_i8(Tensor a, Tensor b, Tensor(a!) c, bool add_c) -> Tensor(a!)");
-  m.def(
-      "my_cpublas_brgemm_i8_i8(Tensor a, Tensor b, Tensor(a!) c, bool add_c) -> Tensor(a!)");
-  m.def(
-      "my_cpublas_brgemm_f8e4m3(Tensor a, Tensor b, Tensor(a!) c, bool add_c) -> Tensor(a!)");
-  m.def(
-      "my_cpublas_brgemm_f8e5m2(Tensor a, Tensor b, Tensor(a!) c, bool add_c) -> Tensor(a!)");
+      "my_cpublas_brgemm_dispatch(Tensor a, Tensor b, Tensor(a!) c, bool add_c, bool is_vnni) -> Tensor(a!)");
   m.def(
       "my_cpublas_gemm_no_downcast_stub_cpu(Tensor a, Tensor b, Tensor(a!) c, float alpha, float beta) -> Tensor(a!)");
   m.def("my_cpublas_could_pack(Tensor input) -> bool");
@@ -87,42 +141,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
-  m.impl(
-      "my_cpublas_brgemm_f32",
-      TORCH_BOX((&my_cpublas_brgemm<float, float, float>)));
-  m.impl(
-      "my_cpublas_brgemm_f16",
-      TORCH_BOX((&my_cpublas_brgemm<
-                 torch::headeronly::Half,
-                 torch::headeronly::Half,
-                 float>)));
-  m.impl(
-      "my_cpublas_brgemm_bf16",
-      TORCH_BOX((&my_cpublas_brgemm<
-                 torch::headeronly::BFloat16,
-                 torch::headeronly::BFloat16,
-                 float>)));
-  m.impl(
-      "my_cpublas_brgemm_u8_u8",
-      TORCH_BOX((&my_cpublas_brgemm<unsigned char, unsigned char, int32_t>)));
-  m.impl(
-      "my_cpublas_brgemm_u8_i8",
-      TORCH_BOX((&my_cpublas_brgemm<unsigned char, signed char, int32_t>)));
-  m.impl(
-      "my_cpublas_brgemm_i8_i8",
-      TORCH_BOX((&my_cpublas_brgemm<signed char, signed char, int32_t>)));
-  m.impl(
-      "my_cpublas_brgemm_f8e4m3",
-      TORCH_BOX((&my_cpublas_brgemm<
-                 torch::headeronly::Float8_e4m3fn,
-                 torch::headeronly::Float8_e4m3fn,
-                 float>)));
-  m.impl(
-      "my_cpublas_brgemm_f8e5m2",
-      TORCH_BOX((&my_cpublas_brgemm<
-                 torch::headeronly::Float8_e5m2,
-                 torch::headeronly::Float8_e5m2,
-                 float>)));
+  m.impl("my_cpublas_brgemm_dispatch", TORCH_BOX(&my_cpublas_brgemm_dispatch));
   m.impl(
       "my_cpublas_gemm_no_downcast_stub_cpu",
       TORCH_BOX(&my_cpublas_gemm_no_downcast_stub_cpu));
