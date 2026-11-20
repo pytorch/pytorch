@@ -4,7 +4,6 @@ Utils for caching the outputs of AOTAutograd
 
 from __future__ import annotations
 
-import base64
 import collections
 import contextlib
 import dataclasses
@@ -47,7 +46,6 @@ from torch._inductor.codecache import (
     FxGraphCachePickler,
     FxGraphHashDetails,
     GuardedCache,
-    sha256_hash,
     write_atomic,
 )
 from torch._inductor.custom_graph_pass import (
@@ -1508,12 +1506,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     @staticmethod
     def _write_to_local_cache(key: str, content: bytes) -> None:
         """Write an entry to the local cache."""
-        subdir = AOTAutogradCache._get_tmp_dir_for_key(key)
-
-        # Use a hash of the serialized entry to get a unique file
-        # name. The specific name doesn't matter since a lookup involves
-        # iterating over all entries in the parent subdir.
-        path = os.path.join(subdir, sha256_hash(content))
+        path = AOTAutogradCache._local_entry_path(key, content)
         log.info("Writing AOTAutograd cache entry to %s", path)
         write_atomic(path, content, make_dirs=True)
 
@@ -1622,11 +1615,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 time_taken_ms = int(
                     (entry.forward_time_taken_ns + entry.backward_time_taken_ns) // 1e6
                 )
-                cache_data: JsonDataTy = {
-                    "data": base64.b64encode(content).decode("ascii"),
-                    "time_taken_ms": time_taken_ms,
-                }
-                remote_cache.put(key, cache_data)
+                AOTAutogradCache._put_remote(remote_cache, key, content, time_taken_ms)
 
     @staticmethod
     @functools.cache
