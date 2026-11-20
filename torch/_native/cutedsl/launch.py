@@ -15,6 +15,8 @@ import torch
 from torch._native.utils.tensor import const_data_ptr
 from torch.utils.dlpack import ReadOnlyTensorWrapper
 
+from .compile_lock import CUTEDSL_COMPILE_LOCK
+
 
 if TYPE_CHECKING:
     from tvm_ffi import Function  # pyrefly: ignore[missing-import]
@@ -72,7 +74,8 @@ def read_only(t: torch.Tensor | None) -> ReadOnlyTensorWrapper | None:
 
 def compile_kernel(op: Callable[..., Any], *args: Any, options: str = "") -> "Function":
     """Compile `op` against FAKE operands, for the fast tvm-ffi arg convention."""
-    return cute.compile(op, *args, options=f"--enable-tvm-ffi {options}".rstrip())
+    with CUTEDSL_COMPILE_LOCK:
+        return cute.compile(op, *args, options=f"--enable-tvm-ffi {options}".rstrip())
 
 
 def stream(device_index: int | None = None) -> cuda.CUstream:
