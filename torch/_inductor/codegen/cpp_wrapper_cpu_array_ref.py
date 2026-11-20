@@ -18,6 +18,7 @@ from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import (
     BufferLike,
+    codegen_reinterpret_view_layout_match,
     EnterKernelProfileScopeLine,
     EnterSubgraphLine,
     ExitKernelProfileScopeLine,
@@ -1027,14 +1028,29 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             )
             self.writeline(f"RAIIAtenTensorHandle {inner_input}({inner_input}_handle);")
 
+    def codegen_subgraph_suffix(self, subgraph, outer_inputs, outer_outputs):
+        for inner_output, outer_output in zip(
+            subgraph.graph.graph_outputs, outer_outputs
+        ):
+            src = inner_output.codegen_reference()
+            if isinstance(inner_output, ir.ShapeAsConstantBuffer):
+                self.writeline(f"{outer_output} = {src};")
+                continue
+            self.writeline(f"{outer_output}.reset();")
+            # A dtype-view handle can still borrow a stack-backed base.
+            self.writeline(
+                f"{outer_output} = [&](auto&& value, auto&& base) -> RAIIAtenTensorHandle {{ "
+                "if constexpr (is_arrayref_tensor_type_v<std::decay_t<decltype(base)>>) { "
+                "AtenTensorHandle copy; "
+                "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_clone("
+                "borrow_arrayref_tensor_as_tensor(value), &copy)); "
+                "return RAIIAtenTensorHandle(copy); "
+                "} else { return std::move(value); } "
+                f"}}({src}, {inner_output.get_name()});"
+            )
+
     def codegen_invoke_subgraph(self, invoke_subgraph):
-        # The region's outputs are pre-declared as RAIIAtenTensorHandle and
-        # codegen_subgraph_suffix std::moves the region's output buffer into
-        # them. A stack-allocated buffer is an ArrayRefTensor<T>, which has no
-        # conversion to RAIIAtenTensorHandle, so that assignment would not
-        # compile -- the same clash cond and while_loop hit. Turn stack
-        # allocation off for the graph, as the extern-kernel paths below do,
-        # rather than emitting C++ that fails to build.
+        # Region outputs can alias inputs; borrowed stack storage cannot escape.
         self.allow_stack_allocation = False
         return super().codegen_invoke_subgraph(invoke_subgraph)
 
@@ -1045,12 +1061,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             while_loop.cond_subgraph.graph.graph_outputs[0], ir.ShapeAsConstantBuffer
         )
         name = while_loop.get_name()
-        outer_carried_inputs = [
-            buf.codegen_reference() for buf in while_loop.carried_inputs
-        ]
-        outer_additional_inputs = [
-            buf.codegen_reference() for buf in while_loop.additional_inputs
-        ]
+        outer_carried_inputs, carried_input_owners = self._prepare_subgraph_inputs(
+            while_loop.carried_inputs
+        )
+        outer_additional_inputs, input_owners = self._prepare_subgraph_inputs(
+            while_loop.additional_inputs
+        )
         carried_output_names = self._get_while_loop_carried_output_names(while_loop)
         cond_result_name = f"{name}_cond_result"
         if is_bool_pred:
@@ -1058,16 +1074,33 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         else:
             self.writeline(f"RAIIAtenTensorHandle {cond_result_name};")
 
+        mutated_output_names = OrderedSet(
+            [output.get_name() for output in while_loop.mutation_outputs]
+        )
         cond_outer_inputs = []
-        for inp, out_name in zip(outer_carried_inputs, carried_output_names):
+        for inp, out_name, original in zip(
+            outer_carried_inputs, carried_output_names, while_loop.carried_inputs
+        ):
             self.writeline(f"AtenTensorHandle {out_name}_handle;")
+            # A local carried value can escape even if the body never executes.
+            copy_storage = str(
+                original.get_name() not in V.graph.graph_inputs
+                and out_name not in mutated_output_names
+            ).lower()
             self.writeline(
-                "AOTI_TORCH_ERROR_CODE_CHECK("
-                f"aoti_torch_assign_tensors_out(borrow_arrayref_tensor_as_tensor({inp}), "
-                f"&{out_name}_handle));"
+                f"[&](auto&& value, auto&& base) {{ "
+                f"if constexpr ({copy_storage} && "
+                "is_arrayref_tensor_type_v<std::decay_t<decltype(base)>>) { "
+                "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_clone("
+                f"borrow_arrayref_tensor_as_tensor(value), &{out_name}_handle)); "
+                "} else { "
+                "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors_out("
+                f"borrow_arrayref_tensor_as_tensor(value), &{out_name}_handle)); "
+                f"}} }}({inp}, {original.get_name()});"
             )
             self.writeline(f"RAIIAtenTensorHandle {out_name}({out_name}_handle);")
             cond_outer_inputs.append(out_name)
+        self._release_owned_tensor_handles(carried_input_owners)
 
         cond_outer_inputs.extend(outer_additional_inputs)
 
@@ -1095,6 +1128,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         )
         self.writeline(ExitSubgraphLine(self))
         self.writeline("}")
+        self._release_owned_tensor_handles(input_owners)
 
     def generate_c_shim_extern_kernel_call(
         self,
@@ -1241,6 +1275,24 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         reinterpreted tensor data.  Callers of this function are responsible for saving
         the handle if persistent access is needed."""
         dim = str(len(size))
+        same_layout, base_dtype = codegen_reinterpret_view_layout_match(
+            data, size, stride, offset
+        )
+        if dtype is not None and dtype != base_dtype:
+            view = (
+                data.get_name()
+                if same_layout
+                else self.codegen_reinterpret_view(
+                    data, size, stride, offset, writeline
+                )
+            )
+            tmp = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
+            writeline(f"AtenTensorHandle {tmp};")
+            writeline(
+                "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cpu_view_dtype("
+                f"borrow_arrayref_tensor_as_tensor({view}), {self.codegen_dtype(dtype)}, &{tmp}));"
+            )
+            return f"RAIIAtenTensorHandle({tmp})"
 
         def create_reinterpret_call() -> str:
             args = [
@@ -1272,7 +1324,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             tmp_AtenTensorHandle = f"tmp_{name}_{next(self.tmp_tensor_id)}"
             tmp_call_strs = [
                 f"AtenTensorHandle {tmp_AtenTensorHandle};",
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle({data.get_name()}, &{tmp_AtenTensorHandle}));",
+                "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_tensor_handle("
+                f"borrow_arrayref_tensor_as_tensor({data.get_name()}), &{tmp_AtenTensorHandle}));",
             ]
             return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
 
