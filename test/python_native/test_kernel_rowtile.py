@@ -878,9 +878,11 @@ class TestKernelRowTile(TestCase):
             rt.tile.TileReduce(trait, f16, "row", 0, ragged_vector=True)
 
     def test_one_thread_rows_reject_empty_rows(self):
-        trait, x = T.SumOps(acc=cutlass.Float32), torch.empty(4, 0, device="cuda")
-        with self.assertRaisesRegex(ValueError, "one-thread rows must be nonempty"):
-            rt.reduce_row_tile(trait, "empty", x, [torch.float32], threads_per_row=1)
+        """TMA's one-thread rows raise ValueError for an empty row, which has no box."""
+        trait, x = T.SumOps(acc=cutlass.Float32), torch.empty(1, 0, device="cuda")
+        kwargs = {"threads_per_row": 1, "use_tma": True}
+        with self.assertRaisesRegex(ValueError, "nonempty power-of-two row"):
+            rt.reduce_row_tile(trait, "empty", x, [torch.float32], **kwargs)
 
     def test_ragged_vector_pitched_rows(self):
         """Take each row's edges from its own start: pitched rows, and whole-vector rows
