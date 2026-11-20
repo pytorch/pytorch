@@ -1033,12 +1033,25 @@ void Unpickler::rebuildTensor(bool quantized, bool has_explicit_dtype) {
         static_cast<size_t>(storage_offset), itemsize, &offset_nbytes);
     size_t required_nbytes =
         at::detail::computeStorageNbytes(size, stride, itemsize);
-    // Exclude offset from division, it is used as whole bytes, so add
-    // afterwards
+    bool size_overflow = false;
     if (element_per_byte > 1) {
-      required_nbytes = at::ceil_div(required_nbytes, element_per_byte);
+      const size_t flat_nbytes =
+          at::ceil_div(required_nbytes, element_per_byte);
+      // Rows may be padded to whole bytes, see `get_sub_byte_tensor_size`
+      size_t padded_nbytes = itemsize;
+      if (!size.empty()) {
+        const int64_t bytes_per_row =
+            at::ceil_div(static_cast<size_t>(size.back()), dtype_itemsize);
+        padded_nbytes = bytes_per_row;
+        for (const auto s : IntArrayRef(size).slice(0, size.size() - 1)) {
+          size_overflow |= c10::mul_overflows(
+              padded_bytes, static_cast<size_t>(s), &padded_nbytes);
+        }
+      }
+      required_nbytes = std::max(padded_nbytes, flat_nbytes);
     }
-    const bool size_overflow =
+    // Offset is used as whole bytes, so add now
+    size_overflow |=
         c10::add_overflows(required_nbytes, offset_nbytes, &required_nbytes);
 
     TORCH_CHECK(
