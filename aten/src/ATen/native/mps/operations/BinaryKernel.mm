@@ -4,6 +4,7 @@
 #include <ATen/TensorIndexing.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/Copy.h>
 #include <ATen/native/Lerp.h>
 #include <ATen/native/Pow.h>
 #include <ATen/native/TensorFactories.h>
@@ -302,9 +303,12 @@ static void bitwise_right_shift_mps_kernel(TensorIteratorBase& iter) {
 // The ILP threshold matches the floating-point default (256K) -- benchmark
 // shows float inputs gain ~4x at 1M; int inputs are neutral.
 static constexpr uint32_t kCmpILPThreshold = 1u << 18;
-// float4_e2m1fn_x2 has no Metal type; like CPU, eq/ne compare its packed bytes.
+// float4_e2m1fn_x2 has no Metal type; like CPU, eq/ne compare its packed bytes. MPS inputs keep their own dtypes
+// rather than being promoted, so reject the casts CPU's promotion would.
 static void exec_equality_kernel(TensorIteratorBase& iter, const std::string& name) {
   if (iter.common_dtype() == kFloat4_e2m1fn_x2) {
+    check_shell_dtype_cast(iter.input_dtype(0), kFloat4_e2m1fn_x2);
+    check_shell_dtype_cast(iter.input_dtype(1), kFloat4_e2m1fn_x2);
     Tensor out = iter.output();
     auto byte_iter = TensorIterator::comparison_op(out, iter.input(0).view(kByte), iter.input(1).view(kByte));
     lib.exec_binary_kernel(byte_iter, name, std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
