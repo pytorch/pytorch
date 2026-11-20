@@ -1681,6 +1681,7 @@ constexpr size_t kMinStorageRangeSortSize = 9;
 
 bool has_plain_static_metadata(const Tensor& tensor) {
   const auto* impl = tensor.unsafeGetTensorImpl();
+  // Metadata access can dispatch to Python even with an exact TensorImpl.
   return typeid(*impl) == typeid(c10::TensorImpl) &&
       !impl->is_python_dispatch() && !impl->has_symbolic_sizes_strides();
 }
@@ -3220,17 +3221,19 @@ class STORAGE_OVERLAPPING : public RelationalGuard {
   std::shared_ptr<StorageOverlapChecker> _checker;
 };
 
-// The views share a storage and have plain, concrete metadata. Return true
-// only if their row bands and column ranges prove the tiles are disjoint.
+// The views share storage and have plain, concrete metadata. Return whether
+// they are disjoint, or std::nullopt if the row-band check is inconclusive.
 template <typename GetTensor>
-bool are_disjoint_row_tiles(size_t size, GetTensor get_tensor) {
+std::optional<bool> try_check_disjoint_row_tiles(
+    size_t size,
+    GetTensor get_tensor) {
   const auto& first = get_tensor(0);
   if (first.dim() != 2) {
-    return false;
+    return std::nullopt;
   }
   const auto row_stride = first.strides()[0];
   if (row_stride <= 0) {
-    return false;
+    return std::nullopt;
   }
   const auto dtype = first.dtype();
   struct Tile {
@@ -3243,25 +3246,25 @@ bool are_disjoint_row_tiles(size_t size, GetTensor get_tensor) {
   for (const auto i : c10::irange(size)) {
     const auto& tensor = get_tensor(i);
     if (tensor.dim() != 2 || tensor.dtype() != dtype) {
-      return false;
+      return std::nullopt;
     }
     const auto strides = tensor.strides();
     if (strides[0] != row_stride || strides[1] != 1) {
-      return false;
+      return std::nullopt;
     }
     const auto sizes = tensor.sizes();
     const auto offset = tensor.storage_offset();
     const auto height = sizes[0];
     const auto width = sizes[1];
     if (offset < 0 || height <= 0 || width <= 0) {
-      return false;
+      return std::nullopt;
     }
     const auto row = offset / row_stride;
     const auto col = offset % row_stride;
     const auto remaining = std::numeric_limits<int64_t>::max() - offset;
     if (width > row_stride - col || width - 1 > remaining ||
         height - 1 > (remaining - (width - 1)) / row_stride) {
-      return false;
+      return std::nullopt;
     }
     if (i == 0) {
       tiles.reserve(size);
@@ -3277,7 +3280,7 @@ bool are_disjoint_row_tiles(size_t size, GetTensor get_tensor) {
   for (const auto& tile : tiles) {
     if (tile.row != band_row) {
       if (tile.row <= last_row) {
-        return false;
+        return std::nullopt;
       }
       band_row = tile.row;
     } else if (tile.col < col_end) {
@@ -3379,7 +3382,7 @@ class StorageOverlapPartitionChecker {
     inputs.reserve(_inputs.size());
     for (const auto i : c10::irange(_inputs.size())) {
       const auto& tensor = THPVariable_Unpack(_inputs[i]);
-      auto* storage =
+      const auto* storage =
           tensor.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl();
       inputs.push_back({storage, i, &tensor});
     }
@@ -3414,7 +3417,10 @@ class StorageOverlapPartitionChecker {
           }
           continue;
         }
-        if (are_disjoint_row_tiles(size, get_tensor)) {
+        if (auto disjoint = try_check_disjoint_row_tiles(size, get_tensor)) {
+          if (!*disjoint) {
+            return false;
+          }
           continue;
         }
       }

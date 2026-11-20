@@ -1264,6 +1264,10 @@ user_stack=None)
         overlapping = tiles[:2] + (backing[:3, 1:3],) + tiles[3:]
         self.assertFalse(root.check({"x": overlapping}))
 
+        # Overlap across different starting rows needs the pairwise check.
+        crossing = tiles[:2] + (backing[2:4, 2:6],) + tiles[3:]
+        self.assertFalse(root.check({"x": crossing}))
+
         # This view starts in one storage row and overlaps the next.
         wrapped = backing.as_strided((1, 2), (16, 1), 15)
         wrapping = (wrapped, backing[1:2, :1], tiles[2][:1]) + tiles[3:]
