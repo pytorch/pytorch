@@ -1072,12 +1072,12 @@ static void upsample_bilinear2d_backward_out_cuda_template(
   }
 
   const auto memory_format = grad_output_.suggest_memory_format();
+  // Selects the channels_last kernels, the ROCm gather and the scatter below.
+  const bool use_nhwc = memory_format == at::MemoryFormat::ChannelsLast &&
+      channels >= 4 && grad_input.is_contiguous(memory_format);
 
 #ifdef USE_ROCM
-  // The memory-format condition must match the channels_last heuristic below.
-  if (grad_output_.sizes() != grad_input.sizes() &&
-      memory_format == at::MemoryFormat::ChannelsLast && channels >= 4 &&
-      grad_input.is_contiguous(memory_format) &&
+  if (use_nhwc && grad_output_.sizes() != grad_input.sizes() &&
       use_nhwc_gather(grad_output_, grad_input)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half, at::ScalarType::BFloat16,
@@ -1123,8 +1123,7 @@ static void upsample_bilinear2d_backward_out_cuda_template(
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       grad_output_.scalar_type(), "upsample_bilinear2d_backward_out_frame", [&] {
-    if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 4 && \
-          grad_input.is_contiguous(memory_format)) {
+    if (use_nhwc) {
       using accscalar_t = at::acc_type<scalar_t, true>;
 
       Tensor grad_output = grad_output_.contiguous(at::MemoryFormat::ChannelsLast);
