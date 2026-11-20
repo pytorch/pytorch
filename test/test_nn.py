@@ -9639,7 +9639,6 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     @toleranceOverride({
         torch.float: tol(atol=1e-5, rtol=1e-5),
-        torch.double: tol(atol=1e-7, rtol=1e-7),
         torch.half: tol(atol=1e-2, rtol=1e-2),
         torch.bfloat16: tol(atol=5e-2, rtol=5e-2),
     })
@@ -9655,8 +9654,10 @@ class TestNNDeviceType(NNTestCase):
         subtest(((24, 32), (12, 16), (None, None), 16), name="downsample"),  # ratio 1.0
         subtest(((13, 11), (7, 5), (None, None), 16), name="mild_downsample"),  # ratio 0.98
         subtest(((9, 10), (9, 31), (None, None), 16), name="anisotropic"),  # ratio 12.4
-        # scales are forward scale_factors; 2.0 matches the 8->16 size-based scale.
-        subtest(((8, 8), (16, 16), (2.0, 2.0), 16), name="explicit_scales"),  # ratio 16
+        # scales are forward scale_factors. 1.75 differs from the 17/10 = 1.7
+        # size-based scale, so a path that ignored them would not match the
+        # reference.
+        subtest(((10, 10), (17, 17), (1.75, 1.75), 16), name="explicit_scales"),  # ratio 11.6
         # C=6 is not a multiple of the fp16, bf16 or fp32 vector width, so where
         # the NHWC gather runs it uses vec_size 1 for those dtypes (double has
         # width 2 and stays vectorized).
@@ -9731,7 +9732,6 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     @toleranceOverride({
         torch.float: tol(atol=1e-5, rtol=1e-5),
-        torch.double: tol(atol=1e-7, rtol=1e-7),
         torch.half: tol(atol=1e-2, rtol=1e-2),
         torch.bfloat16: tol(atol=5e-2, rtol=5e-2),
     })
