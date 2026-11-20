@@ -115,7 +115,7 @@ def _storage_id(t: torch.Tensor) -> int:
 
 
 def _geometry(t: torch.Tensor) -> tuple[tuple[int, ...], tuple[int, ...], int]:
-    return tuple(t.shape), t.stride(), t.storage_offset()
+    return tuple(t.shape), t.stride(), int(t.storage_offset())
 
 
 def launch(fn: "Function", device: int, ins: Any, *args: Any) -> None:
@@ -219,15 +219,15 @@ class LaunchRecord:
 
     def finish(self, outs: Sequence[torch.Tensor]) -> "LaunchReplay | None":
         views = [self._view(out, written=False) for out in outs]
-        slots = [-1 if view is None else view.slot for view in views]
-        if not self._ok or not slots or min(slots) < 0 or len(set(slots)) < len(slots):
+        bufs = [view for view in views if view is not None and view.slot >= 0]
+        if not self._ok or not outs or len({view.slot for view in bufs}) < len(outs):
             return None
         devices = list(dict.fromkeys(device for _, device, _, _ in self._launches))
         launches = [
             _ReplayLaunch(fn, devices.index(device), *_compile_params([ins, *args]))
             for fn, device, ins, args in self._launches
         ]
-        return LaunchReplay(self._device, self._allocs, devices, launches, views)
+        return LaunchReplay(self._device, self._allocs, devices, launches, bufs)
 
 
 # (path of the list holding the slot, index in it, view, whether a COW input is wrapped)
