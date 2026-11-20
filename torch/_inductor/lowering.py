@@ -4103,6 +4103,7 @@ make_fallback(aten.histc)
 make_fallback(aten.histogram.bin_ct)
 make_fallback(aten._histogramdd_bin_edges.default)
 make_fallback(aten._histogramdd_from_bin_cts.default)
+make_fallback(aten._histogramdd_from_bin_tensors.default)
 
 # Need templated kernel
 make_fallback(aten.addbmm)
