@@ -1025,6 +1025,7 @@ class OutputGraph(OutputGraphCommon):
             ]
         ] = []
         self.random_values_var: Any = None
+        self.decimal_contexts: list[VariableTracker] = []
 
         # Bytecode to insert right before we call the graph
         self.pregraph_bytecode: list[Instruction] = []
