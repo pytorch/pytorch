@@ -14,7 +14,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
-    TEST_CUDA,
     TestCase,
 )
 
@@ -150,17 +149,6 @@ mock.assert_called()
         tensor = torch.empty(10, 4, device=device)
         self.mock.assert_called_once_with(tensor.data_ptr())
         other.assert_called_once_with(tensor.data_ptr())
-
-
-@unittest.skipUnless(TEST_CUDA, "CUDA required")
-@torch.testing._internal.common_utils.markDynamoStrictTest
-class TestGpuTraceCUDA(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
-    def setUp(self):
-        super().setUp()
-        torch._C._activate_gpu_trace()
-        self.mock = unittest.mock.MagicMock()
 
 
 instantiate_device_type_tests(
