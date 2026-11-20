@@ -144,6 +144,113 @@ TEST(TestDtype, TestComplexFloat) {
   EXPECT_EQ(a / b, div);
 }
 
+namespace {
+
+template <typename Actual, typename Expected, typename Tolerance>
+void expect_near(
+    const Actual& actual,
+    const Expected& expected,
+    Tolerance tolerance) {
+  EXPECT_NEAR(actual.real(), expected.real(), tolerance);
+  EXPECT_NEAR(actual.imag(), expected.imag(), tolerance);
+}
+
+} // namespace
+
+TEST(TestDtype, TestComplexTranscendentals) {
+  using ho_complex_f = torch::headeronly::complex<float>;
+  using ho_complex_d = torch::headeronly::complex<double>;
+  const ho_complex_f value_f(1.0f, 0.5f);
+  const ho_complex_d value_d(1.0, 0.5);
+  const std::complex<float> reference_f(1.0f, 0.5f);
+  const std::complex<double> reference_d(1.0, 0.5);
+
+  expect_near(torch::headeronly::acos(value_f), std::acos(reference_f), 1e-5f);
+  expect_near(
+      torch::headeronly::acosh(value_f), std::acosh(reference_f), 1e-5f);
+  expect_near(torch::headeronly::asin(value_f), std::asin(reference_f), 1e-5f);
+  expect_near(
+      torch::headeronly::asinh(value_f), std::asinh(reference_f), 1e-5f);
+  expect_near(torch::headeronly::atan(value_f), std::atan(reference_f), 1e-5f);
+  expect_near(
+      torch::headeronly::atanh(value_f), std::atanh(reference_f), 1e-5f);
+  expect_near(torch::headeronly::cos(value_f), std::cos(reference_f), 1e-5f);
+  expect_near(torch::headeronly::cosh(value_f), std::cosh(reference_f), 1e-5f);
+  expect_near(torch::headeronly::exp(value_f), std::exp(reference_f), 1e-5f);
+  expect_near(
+      torch::headeronly::expm1(value_f), std::exp(reference_f) - 1.0f, 1e-5f);
+  expect_near(torch::headeronly::log(value_f), std::log(reference_f), 1e-5f);
+  expect_near(
+      torch::headeronly::log10(value_f), std::log10(reference_f), 1e-5f);
+  expect_near(
+      torch::headeronly::log1p(value_f), std::log(1.0f + reference_f), 1e-5f);
+  expect_near(
+      torch::headeronly::log2(value_f),
+      std::log(reference_f) / std::log(2.0f),
+      1e-5f);
+  expect_near(
+      torch::headeronly::pow(value_f, value_f),
+      std::pow(reference_f, reference_f),
+      1e-5f);
+  expect_near(
+      torch::headeronly::pow(value_f, 2.0f),
+      std::pow(reference_f, 2.0f),
+      1e-5f);
+  expect_near(
+      torch::headeronly::pow(2.0f, value_f),
+      std::pow(2.0f, reference_f),
+      1e-5f);
+  expect_near(
+      torch::headeronly::pow(value_f, value_d),
+      std::pow(reference_f, reference_d),
+      1e-5);
+  expect_near(
+      torch::headeronly::pow(value_f, 2.0), std::pow(reference_f, 2.0), 1e-5);
+  expect_near(
+      torch::headeronly::pow(2.0, value_f), std::pow(2.0, reference_f), 1e-5);
+  expect_near(torch::headeronly::sin(value_f), std::sin(reference_f), 1e-5f);
+  expect_near(torch::headeronly::sinh(value_f), std::sinh(reference_f), 1e-5f);
+  expect_near(torch::headeronly::sqrt(value_f), std::sqrt(reference_f), 1e-5f);
+  expect_near(torch::headeronly::tan(value_f), std::tan(reference_f), 1e-5f);
+  expect_near(torch::headeronly::tanh(value_f), std::tanh(reference_f), 1e-5f);
+
+  expect_near(torch::headeronly::acos(value_d), std::acos(reference_d), 1e-12);
+  expect_near(
+      torch::headeronly::pow(value_d, value_d),
+      std::pow(reference_d, reference_d),
+      1e-12);
+  expect_near(torch::headeronly::sqrt(value_d), std::sqrt(reference_d), 1e-12);
+}
+
+TEST(TestDtype, TestComplexStdOverloads) {
+  const auto check = [](const auto& value, const auto& ref, auto tol) {
+    EXPECT_EQ(std::real(value), std::real(ref));
+    EXPECT_EQ(std::imag(value), std::imag(ref));
+    EXPECT_NEAR(std::abs(value), std::abs(ref), tol);
+    EXPECT_NEAR(std::arg(value), std::arg(ref), tol);
+    EXPECT_NEAR(std::norm(value), std::norm(ref), tol);
+
+    const auto conjugate = std::conj(value);
+    const auto expected_conjugate = std::conj(ref);
+    EXPECT_EQ(conjugate.real(), expected_conjugate.real());
+    EXPECT_EQ(conjugate.imag(), expected_conjugate.imag());
+
+    const auto exponent = static_cast<decltype(value.real())>(2);
+    expect_near(std::pow(value, value), std::pow(ref, ref), tol);
+    expect_near(std::pow(value, exponent), std::pow(ref, exponent), tol);
+    expect_near(std::pow(exponent, value), std::pow(exponent, ref), tol);
+  };
+
+  check(
+      torch::headeronly::complex<float>(1.0f, 0.5f),
+      std::complex<float>(1.0f, 0.5f),
+      1e-5f);
+  check(
+      torch::headeronly::complex<double>(1.0, 0.5),
+      std::complex<double>(1.0, 0.5),
+      1e-12);
+}
+
 TEST(TestDtype, TestIsComplex) {
   using torch::headeronly::is_complex;
   static_assert(is_complex<torch::headeronly::complex<float>>::value);

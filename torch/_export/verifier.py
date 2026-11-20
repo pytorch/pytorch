@@ -241,18 +241,7 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.amp.autocast_mode._enter_autocast,
                 torch.amp.autocast_mode._exit_autocast,
                 torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless,
-                torch._functorch.predispatch._add_batch_dim,
-                torch._functorch.predispatch._remove_batch_dim,
-                torch._functorch.predispatch._vmap_increment_nesting,
-                torch._functorch.predispatch._vmap_decrement_nesting,
-                torch._functorch.predispatch.lazy_load_decompositions,
-                torch._functorch.predispatch._make_dual,
-                torch._functorch.predispatch._unpack_dual,
-                torch._functorch.predispatch._jvp_increment_nesting,
-                torch._functorch.predispatch._jvp_decrement_nesting,
-                torch._functorch.predispatch._unwrap_for_grad,
-                torch._functorch.predispatch._enter_dual_level,
-                torch._functorch.predispatch._exit_dual_level,
+                *torch._functorch.predispatch._functorch_predispatch_functions,
             )
 
             if not isinstance(op, _allowed_op_types()):

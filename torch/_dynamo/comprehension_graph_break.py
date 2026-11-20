@@ -24,9 +24,12 @@ from .bytecode_transformation import (
     unique_id_unbound_in,
 )
 from .codegen import PyCodegen
-from .exc import unimplemented
+from .exc import format_frame_info, unimplemented
 from .graph_break_hints import DYNAMO_BUG
 from .output_graph import GraphCompileReason, StackLocalsMetadata
+from .variables.base import VariableTracker
+from .variables.ctx_manager import ContextWrappingVariable, WithExitFunctionVariable
+from .variables.functions import LocalGeneratorObjectVariable
 from .variables.misc import NullVariable, UnknownVariable
 
 
@@ -287,6 +290,65 @@ def _handle_comprehension_graph_break(
     reason = GraphCompileReason("comprehension_graph_break", [tx.frame_summary()])
     log.debug("comprehension triggered compile")
 
+    saved_values = tx.stack[-stack_pops:-1]
+
+    def check_context_value(value: VariableTracker) -> None:
+        if isinstance(value, (ContextWrappingVariable, LocalGeneratorObjectVariable)):
+            unimplemented(
+                gb_type="Unsafe value live across comprehension graph break",
+                context=f"{value}, frame skipped: {format_frame_info(tx.f_code)}",
+                explanation="A context manager or local generator cannot be "
+                "reconstructed safely after a comprehension graph break, so the "
+                "frame falls back to eager.",
+                hints=[
+                    "Close the generator first, or move the comprehension into a helper.",
+                ],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
+
+    # SWAP moves the last saved local below the earlier ones. Keep their original
+    # bindings in the frame metadata used by the post-comprehension continuation.
+    saved_names = analysis.iterator_vars[-1:] + analysis.iterator_vars[:-1]
+    for name, value in zip(saved_names, saved_values):
+        tx.symbolic_locals[name] = value
+
+    # Active with exits are reconstructed separately; ordinary context values
+    # can replay a state-changing constructor while restoring frame values.
+    # Reconstructing or closing a local generator can discover more values.
+    # Unstarted and finished generators cannot execute more bytecode on close.
+    values: list[Any] = [
+        [
+            gen
+            for gen in tx.output.local_generators
+            if not gen._frame_state_created() and not gen._frame_state_finished()
+        ],
+        [
+            value
+            for value in tx.output.side_effects.id_to_variable.values()
+            if tx.output.side_effects.is_modified(value)
+        ],
+        tx.output.side_effects.store_attr_mutations,
+        tx.output.side_effects.tensor_hooks,
+        tx.output.side_effects.save_for_backward,
+        tx.output.backward_state,
+    ]
+    cur_tx: InstructionTranslatorBase | None = tx
+    while cur_tx is not None:
+        cur_tx.prune_dead_locals()
+        values.extend(
+            [cur_tx.symbolic_locals, cur_tx.symbolic_cellvars, cur_tx.debug_locals]
+        )
+        values.extend(
+            value
+            for value in cur_tx.stack
+            if not isinstance(value, WithExitFunctionVariable)
+        )
+        cur_tx = cur_tx.parent
+    VariableTracker.visit(
+        check_context_value, values, side_effects=tx.output.side_effects
+    )
+
     # --- Step 1: Compile the graph up to the comprehension ---
 
     all_stack_locals_metadata = tx.output.compile_subgraph(
@@ -365,7 +427,12 @@ def _handle_comprehension_graph_break(
     # Stack: ..., *(non-popped), [cells[0]], [frame_values[0]]
 
     # --- Step 5: Call comprehension function via codegen_call_resume ---
+    from .symbolic_convert import _reconstruct_block_stack
+
+    cleanup: list[Instruction] = []
+    _reconstruct_block_stack(tx, cg, cleanup)
     tx.codegen_call_resume([new_code], [fn_name], cg)
+    cg.extend_output(cleanup)
 
     # Stack: ..., *(non-popped), comp_result
 
@@ -654,6 +721,19 @@ def maybe_setup_comprehension_speculation(
         and not tx.active_generic_context_managers
         and tx.output.current_tracer.parent is None
     )
+
+    if can_speculate:
+        if tx.instruction_pointer is None:
+            raise AssertionError("instruction_pointer must not be None")
+        # Mirror should_compile_partial_graph's exception-table check at the
+        # comprehension's first prefix instruction (BUILD_LIST and the body are
+        # covered by the comprehension's own cleanup handler).
+        prefix_len = len(_get_comprehension_bytecode_prefix())
+        entry = tx.instructions[tx.instruction_pointer - 1 - prefix_len].exn_tab_entry
+        if entry is not None and (
+            not tx.block_stack or entry.target is not tx.block_stack[-1].target
+        ):
+            can_speculate = False
 
     if can_speculate and tx.parent is not None:
         can_speculate = tx._can_speculate_comprehension_nested()

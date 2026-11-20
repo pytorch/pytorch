@@ -12,7 +12,7 @@ from collections.abc import Callable, Sequence
 from contextlib import nullcontext
 from functools import partial, wraps
 from typing import Any, overload, TYPE_CHECKING
-from typing_extensions import ParamSpec, TypeVar, TypeVarTuple, Unpack
+from typing_extensions import ParamSpec, TypeVar, TypeVarTuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -863,7 +863,7 @@ _Ts = TypeVarTuple("_Ts")
 
 
 def call_and_expect_output_descs(
-    fn: Callable[[*_Ts], tuple[Any, Any]], args: tuple[Unpack[_Ts]]
+    fn: Callable[[*_Ts], tuple[Any, Any]], args: tuple[*_Ts]
 ) -> tuple[Any, Any]:
     from .descriptors import AOTOutput
 

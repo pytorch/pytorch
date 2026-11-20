@@ -558,7 +558,7 @@ class FSDPState(_State):
         # the last module's (which no later module's rs_wait clears) and,
         # when set_reduce_scatter_max_input_buffers retains more than
         # one in flight, the rest. The compute stream (which reuses the
-        # memory) is ordered past each reduce-scatter first.
+        # memory) is ordered past each buffer's last use first.
         for rs_state in self._comm_ctx.reduce_scatter_states:
             if rs_state.event is not None:
                 rs_state.allocation_stream.wait_event(rs_state.event)

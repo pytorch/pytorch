@@ -20,16 +20,8 @@ MPSDevice::~MPSDevice() {
 
 MPSDevice::MPSDevice() : _mtl_device(nil) {
   NSArray* devices = [MTLCopyAllDevices() autorelease];
-  for (unsigned long i = 0; i < [devices count]; i++) {
-    id<MTLDevice> device = devices[i];
-    if (![device supportsFamily:MTLGPUFamilyApple7]) {
-      // Exclude devices that does not support Metal 2.0
-      // Virtualised MPS device on MacOS 12.6 should fail this check
-      TORCH_WARN("Skipping device ", [[device name] UTF8String], " that does not support Metal 2.0");
-      continue;
-    }
-    _mtl_device = [device retain];
-    break;
+  if ([devices count] > 0) {
+    _mtl_device = [devices[0] retain];
   }
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(_mtl_device);
 }

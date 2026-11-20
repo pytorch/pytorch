@@ -43,13 +43,12 @@ from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
-    skip_if_rocm_arch_multiprocess,
+    skip_if_rocm_ver_lessthan_multiprocess,
 )
 from torch.testing._internal.common_fsdp import FSDPTestContinuous, MLP, MLPStack
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
-    MI200_ARCH,
     parametrize,
     run_tests,
     TEST_WITH_ROCM,
@@ -129,7 +128,7 @@ class TestFullyShard2DTraining(FSDPTestContinuous):
             mesh_dim_names=("dp", "tp"),
         )
 
-    @skip_if_rocm_arch_multiprocess(MI200_ARCH)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(4)
     def test_train_parity_2d_mlp(self):
         global_mesh = self.init_global_mesh()
@@ -177,7 +176,7 @@ class TestFullyShard2DTraining(FSDPTestContinuous):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(4)
-    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1881
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5922
     def test_train_parity_2d_transformer(self):
         self.run_subtests(
             {"use_shard_placement_fn": [False, True]},
@@ -259,7 +258,6 @@ class TestFullyShard2DTraining(FSDPTestContinuous):
             self.assertEqual(full_param, ref_param)
 
     @skip_if_lt_x_gpu(4)
-    @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/156782
     def test_tp_with_fsdp_offloading(self):
         global_mesh = init_device_mesh(
             device_type, (1, self.world_size), mesh_dim_names=("dp", "tp")
@@ -318,7 +316,7 @@ class TestFullyShard2DTraining(FSDPTestContinuous):
         IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/125644"
     )
     @skip_if_lt_x_gpu(4)
-    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1881
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5922
     @with_temp_dir
     def test_train_parity_2d_transformer_checkpoint_resume(self):
         """

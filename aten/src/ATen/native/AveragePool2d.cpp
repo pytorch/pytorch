@@ -28,19 +28,22 @@ TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
     "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
-  const int kH = c10::safe_conv<int>(kernel_size[0], "kernel_size");
-  const int kW = kernel_size.size() == 1 ? kH : c10::safe_conv<int>(kernel_size[1], "kernel_size");
+  const int kH = c10::safe_conv<int>(kernel_size[0], "int");
+  const int kW =
+      kernel_size.size() == 1 ? kH : c10::safe_conv<int>(kernel_size[1], "int");
 
   TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
     "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
-  const int dH = stride.empty() ? kH : c10::safe_conv<int>(stride[0], "stride");
-  const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : c10::safe_conv<int>(stride[1], "stride");
+  const int dH = stride.empty() ? kH : c10::safe_conv<int>(stride[0], "int");
+  const int dW = stride.empty() ? kW
+      : stride.size() == 1      ? dH
+                                : c10::safe_conv<int>(stride[1], "int");
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
     "avg_pool2d: padding must either be a single int, or a tuple of two ints");
-  const int padH = c10::safe_conv<int>(padding[0], "padding");
-  const int padW = padding.size() == 1 ? padH : c10::safe_conv<int>(padding[1], "padding");
+  const int padH = c10::safe_conv<int>(padding[0], "int");
+  const int padW =
+      padding.size() == 1 ? padH : c10::safe_conv<int>(padding[1], "int");
 
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
     "divisor must be not zero");
@@ -109,23 +112,26 @@ TORCH_META_FUNC(avg_pool2d_backward) (
 ) {
   // safe_conv below only guards against int overflow; non-positive
   // kernel/stride and negative padding are caught downstream in
-  // pooling_output_shape / pool2d_backward_shape_check with more specific messages.
-  // #20866, #22032: Guarantee this for the official C++ API?
+  // pooling_output_shape / pool2d_backward_shape_check with more specific
+  // messages. #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
     "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
-  const int kH = c10::safe_conv<int>(kernel_size[0], "kernel_size");
-  const int kW = kernel_size.size() == 1 ? kH : c10::safe_conv<int>(kernel_size[1], "kernel_size");
+  const int kH = c10::safe_conv<int>(kernel_size[0], "int");
+  const int kW =
+      kernel_size.size() == 1 ? kH : c10::safe_conv<int>(kernel_size[1], "int");
 
   TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
     "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
-  const int dH = stride.empty() ? kH : c10::safe_conv<int>(stride[0], "stride");
-  const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : c10::safe_conv<int>(stride[1], "stride");
+  const int dH = stride.empty() ? kH : c10::safe_conv<int>(stride[0], "int");
+  const int dW = stride.empty() ? kW
+      : stride.size() == 1      ? dH
+                                : c10::safe_conv<int>(stride[1], "int");
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
     "avg_pool2d: padding must either be a single int, or a tuple of two ints");
-  const int padH = c10::safe_conv<int>(padding[0], "padding");
-  const int padW = padding.size() == 1 ? padH : c10::safe_conv<int>(padding[1], "padding");
+  const int padH = c10::safe_conv<int>(padding[0], "int");
+  const int padW =
+      padding.size() == 1 ? padH : c10::safe_conv<int>(padding[1], "int");
 
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0, "divisor must be not zero");
 
@@ -192,15 +198,18 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cpu) (
   std::optional<int64_t> divisor_override,
   const Tensor& gradInput
 ) {
-  const int kH = c10::safe_conv<int>(kernel_size[0], "kernel_size");
-  const int kW = kernel_size.size() == 1 ? kH : c10::safe_conv<int>(kernel_size[1], "kernel_size");
+  const int kH = c10::safe_conv<int>(kernel_size[0], "int");
+  const int kW =
+      kernel_size.size() == 1 ? kH : c10::safe_conv<int>(kernel_size[1], "int");
 
-  const int dH = stride.empty() ? kH : c10::safe_conv<int>(stride[0], "stride");
-  const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : c10::safe_conv<int>(stride[1], "stride");
+  const int dH = stride.empty() ? kH : c10::safe_conv<int>(stride[0], "int");
+  const int dW = stride.empty() ? kW
+      : stride.size() == 1      ? dH
+                                : c10::safe_conv<int>(stride[1], "int");
 
-  const int padH = c10::safe_conv<int>(padding[0], "padding");
-  const int padW = padding.size() == 1 ? padH : c10::safe_conv<int>(padding[1], "padding");
+  const int padH = c10::safe_conv<int>(padding[0], "int");
+  const int padW =
+      padding.size() == 1 ? padH : c10::safe_conv<int>(padding[1], "int");
 
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0, "divisor must be not zero");
 
