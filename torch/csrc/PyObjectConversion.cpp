@@ -39,6 +39,12 @@ struct NoopPyObjectConversion final : PyObjectConversionInterface {
   PyObject* device_to_pyobject(const at::Device& /*device*/) const override {
     TORCH_CHECK(false, kNoImplMsg);
   }
+  at::Layout layout_from_pyobject(PyObject* /*obj*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
+  PyObject* layout_to_pyobject(at::Layout /*layout*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
 };
 
 const NoopPyObjectConversion noop_impl;
