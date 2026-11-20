@@ -3,6 +3,7 @@
 
 use crate::bytecode::{self, OpcodeTable};
 use crate::capi::{self, TcfgApi, TCFG_API_VERSION};
+use crate::graph::Graphs;
 use crate::ir::*;
 use crate::pyffi::{Obj, PyObj};
 use crate::spec::{self, CalleeFact, CalleeKind, CfgPass, InstFacts, Kernels, PassCx, Pipeline, PyPass, Unit, ValueObs};
@@ -130,7 +131,7 @@ pub fn clear_shortcuts() {
 }
 
 #[pyfunction]
-#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, max_trip_count=8, callees=true, shortcuts=true, demote=true, workspace=None, hook=true))]
+#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, max_trip_count=8, callees=true, shortcuts=true, demote=true, workspace=None, hook=true, graphs=None))]
 pub fn compile(
     py: Python<'_>,
     func: &Bound<'_, PyAny>,
@@ -148,7 +149,10 @@ pub fn compile(
     demote: bool,
     workspace: Option<Bound<'_, PyAny>>,
     hook: bool,
+    graphs: Option<usize>,
 ) -> PyResult<CfgFunction> {
+    // What the pass "graphs" is made with: the least number of operations
+    // of a graph.
     // What `torch._C._cfg_workspace` made: the memory the function keeps
     // between its calls.
     let mut memory = 0usize;
@@ -182,6 +186,11 @@ pub fn compile(
     let mut pipeline: Vec<Box<dyn CfgPass>> = Vec::new();
     for pass in passes {
         if let Ok(name) = pass.extract::<String>() {
+            if name == "graphs" {
+                let min_ops = graphs.unwrap_or(Graphs::default().min_ops);
+                pipeline.push(Box::new(Graphs { min_ops }));
+                continue;
+            }
             match spec::builtin_pass(&name) {
                 Some(p) => pipeline.push(p),
                 None => {
@@ -470,6 +479,64 @@ impl CfgFunction {
             d.set_item("index", i)?;
             d.set_item("instruction", cf.func.op_repr(&cf.func.blocks[b].insts[i].op))?;
             out.append(d)?;
+        }
+        Ok(out.into_any().unbind())
+    }
+
+    /// The graphs of the function and of the functions it called, and what
+    /// was left out of them. One dict per graph of a specialized block, with
+    /// `where` (function, block, and the generic instructions from its first
+    /// operation to its last), `state` ("built": the VM runs it), `ops` and
+    /// `operators`, and `version` (of the block). And one per instruction or
+    /// run of instructions with tensor work that is in no graph, with `state`
+    /// "vm", the `reason`, and for one instruction its `text`.
+    fn graphs(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let out = PyList::empty(py);
+        let mut known: Vec<(String, String)> = Vec::new();
+        let mut functions = vec![self.inner.clone()];
+        functions.extend(self.inner.callees.compiled());
+        for cf in &functions {
+            let func = &cf.func;
+            let versions: Vec<(usize, Arc<BlockCode>)> = {
+                let state = cf.state.borrow();
+                let blocks = state.blocks.iter().enumerate();
+                blocks.flat_map(|(b, bs)| bs.versions.iter().map(move |version| (b, version.clone()))).collect()
+            };
+            for (b, version) in versions {
+                for site in &version.graphs {
+                    let Some(path) = site.path() else {
+                        continue;
+                    };
+                    let d = PyDict::new(py);
+                    d.set_item("where", site.name.clone())?;
+                    d.set_item("state", "built")?;
+                    d.set_item("ops", path.operators.len())?;
+                    d.set_item("operators", path.operators.clone())?;
+                    d.set_item("version", version.id)?;
+                    out.append(d)?;
+                }
+                for left in &version.left {
+                    let one = left.hi == left.lo + 1;
+                    let place = if one {
+                        format!("{} (block {})[{}]", func.qualname, b, left.lo)
+                    } else {
+                        format!("{} (block {})[{}:{}]", func.qualname, b, left.lo, left.hi)
+                    };
+                    let entry = (place, left.reason.clone());
+                    if known.contains(&entry) {
+                        continue;
+                    }
+                    let d = PyDict::new(py);
+                    d.set_item("where", entry.0.clone())?;
+                    d.set_item("state", "vm")?;
+                    d.set_item("reason", entry.1.clone())?;
+                    if let Some(inst) = func.blocks[b].insts.get(left.lo as usize).filter(|_| one) {
+                        d.set_item("text", func.op_repr(&inst.op))?;
+                    }
+                    known.push(entry);
+                    out.append(d)?;
+                }
+            }
         }
         Ok(out.into_any().unbind())
     }
