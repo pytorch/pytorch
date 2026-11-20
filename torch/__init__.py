@@ -326,6 +326,21 @@ if sys.platform == "win32":
                 err = ctypes.WinError(ctypes.get_last_error()).strerror
                 warnings.warn(f'Failed to preload "{dll}": {err}', stacklevel=2)
 
+        # The XPU runtime DLLs (SYCL, Unified Runtime, oneMKL) are installed in
+        # <prefix>\Library\bin and resolve some of their dependencies, such as
+        # libmmd.dll and mkl_core.3.dll, through the standard search order, which
+        # includes PATH but not os.add_dll_directory. Conda activation puts that
+        # directory on PATH; a venv does not, so add it here.
+        from torch.version import xpu as xpu_version
+
+        if xpu_version:
+            xpu_dll_paths = [
+                p for p in (py_dll_path, base_py_dll_path) if p and os.path.exists(p)
+            ]
+            os.environ["PATH"] = os.pathsep.join(
+                [*xpu_dll_paths, os.environ.get("PATH", "")]
+            )
+
         kernel32.SetErrorMode(prev_error_mode)
 
     _load_dll_libraries()
