@@ -30,6 +30,7 @@ on:
       - inductor-rocm-mi200
       - inductor-rocm-mi300
       - scheduled-rocm-mi300
+      - scheduled-rocm-mi200
       - inductor-rocm-mi350
       - inductor-perf-nightly-rocm-mi300
       - inductor-perf-nightly-rocm-mi350
