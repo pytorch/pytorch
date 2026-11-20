@@ -4,6 +4,7 @@ with test_functionalization_with_native_python_assertion)
 """
 
 # Owner(s): ["oncall: export"]
+import io
 import math
 import operator
 import unittest
@@ -21,6 +22,7 @@ from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.passes.replace_set_grad_with_hop_pass import (
     _is_set_grad_enabled_node,
     _is_set_grad_enabled_sub_mod,
+    replace_set_grad_with_hop_pass,
 )
 from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
     get_view_copy_of_view_op,
@@ -43,6 +45,7 @@ from torch.export._remove_auto_functionalized_pass import (
 from torch.export._remove_effect_tokens_pass import _remove_effect_tokens
 from torch.export.passes import move_to_device_pass
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
@@ -1005,6 +1008,217 @@ def forward(self, sin, cos):
     return (add_2, add_3)
     """,
         )
+
+    def _check_region_with_cond(self, m, x, region):
+        # The branches of a cond are read with get_attr at the start of the
+        # region, which must still be found.
+        ep = export(m, (x,))
+        target = getattr(torch.ops.higher_order, region)
+        self.assertEqual(nodes_count(ep.graph.nodes, lambda n: n.target is target), 1)
+        # The region body with its cond can be saved, loaded and decomposed.
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded = torch.export.load(buffer).module()
+        modules = (ep.module(), loaded, ep.run_decompositions().module())
+        # x and -x take different branches.
+        for inp in (x, -x):
+            for module in modules:
+                self.assertEqual(module(inp), m(inp))
+        return ep, loaded
+
+    def test_set_grad_region_with_cond(self):
+        class NoGrad(torch.nn.Module):
+            def forward(self, x):
+                with torch.no_grad():
+                    y = torch.cond(
+                        x.sum() > 0, lambda a: a.sin(), lambda a: a.cos(), (x,)
+                    )
+                return y + x
+
+        m, x = NoGrad(), torch.randn(4, requires_grad=True)
+        ep, loaded = self._check_region_with_cond(m, x, "wrap_with_set_grad_enabled")
+        # run_decompositions traces an inference graph, so it is left out here.
+        for inp in (x, -x):
+            for module in (ep.module(), loaded):
+                self.assertEqual(
+                    torch.autograd.grad(module(inp).sum(), inp),
+                    torch.autograd.grad(m(inp).sum(), inp),
+                )
+
+    def test_autocast_region_with_cond(self):
+        class Autocast(torch.nn.Module):
+            def forward(self, x):
+                with torch.autocast("cpu", dtype=torch.bfloat16):
+                    return torch.cond(
+                        x.sum() > 0, lambda a: a @ a.T, lambda a: a.T @ a, (x,)
+                    )
+
+        self._check_region_with_cond(
+            Autocast(), torch.randn(4, 4), "wrap_with_autocast"
+        )
+
+    def _check_region_with_flat_apply(self, ctx, region):
+        # Indexing inside vmap is traced as flat_apply calls, whose input specs
+        # are read with get_attr inside the region.
+        from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
+
+        class IndexInVmap(torch.nn.Module):
+            def forward(self, x, indices):
+                with ctx(), TransformGetItemToIndex():
+                    return torch.vmap(lambda i: x[i])(indices)
+
+        m, inp = IndexInVmap(), (torch.arange(4.0), torch.tensor([3, 1]))
+        ep = export(m, inp)
+        target = getattr(torch.ops.higher_order, region)
+        (region_node,) = ep.graph.find_nodes(op="call_function", target=target)
+        (body_node,) = (
+            a
+            for a in region_node.args
+            if isinstance(a, torch.fx.Node) and a.op == "get_attr"
+        )
+        body = torch.fx.graph_module._get_attr(ep.graph_module, body_node.target)
+        self.assertTrue(
+            body.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.flat_apply
+            )
+        )
+        specs = [
+            n
+            for n in body.graph.find_nodes(op="get_attr")
+            if isinstance(
+                torch.fx.graph_module._get_attr(body, n.target), pytree.TreeSpec
+            )
+        ]
+        self.assertTrue(specs)
+        self.assertEqual(ep.module()(*inp), m(*inp))
+        self.assertEqual(ep.run_decompositions().module()(*inp), m(*inp))
+
+    def test_set_grad_region_with_flat_apply(self):
+        self._check_region_with_flat_apply(torch.no_grad, "wrap_with_set_grad_enabled")
+
+    def test_autocast_region_with_flat_apply(self):
+        self._check_region_with_flat_apply(
+            lambda: torch.autocast("cpu", dtype=torch.bfloat16),
+            "wrap_with_autocast",
+        )
+
+    def test_set_grad_pass_reads_nested_spec(self):
+        # A pytree spec that lives on a submodule is read with a dotted
+        # get_attr, before, inside and after the region.
+        root = torch.nn.Module()
+        root.sub = torch.nn.Module()
+        root.sub.spec = pytree.tree_flatten((0, 0))[1]
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        before = graph.call_function(
+            pytree.tree_unflatten, ([x, x], graph.get_attr("sub.spec"))
+        )
+        graph.call_function(torch._C._set_grad_enabled, (False,))
+        inside = graph.call_function(
+            pytree.tree_unflatten, ([x, x], graph.get_attr("sub.spec"))
+        )
+        y = graph.call_function(torch.ops.aten.mul.Tensor, (x, 2))
+        graph.call_function(torch._C._set_grad_enabled, (True,))
+        after = graph.call_function(
+            pytree.tree_unflatten, ([y, y], graph.get_attr("sub.spec"))
+        )
+        graph.output((before, inside, after))
+        gm = torch.fx.GraphModule(root, graph)
+        with FakeTensorMode() as mode:
+            FakeTensorProp(gm, mode).propagate(mode.from_tensor(torch.ones(2)))
+        new_gm, _ = replace_set_grad_with_hop_pass(gm, None)
+        region = torch.ops.higher_order.wrap_with_set_grad_enabled
+        (region_node,) = new_gm.graph.find_nodes(op="call_function", target=region)
+        # The region gets only tensors, and its body reads the spec itself.
+        self.assertEqual([n.op for n in region_node.args[2:]], ["placeholder"])
+        body = torch.fx.graph_module._get_attr(new_gm, region_node.args[1].target)
+        self.assertEqual(
+            [n.target for n in body.graph.find_nodes(op="get_attr")], ["sub.spec"]
+        )
+        self.assertEqual(new_gm(torch.ones(2)), gm(torch.ones(2)))
+        # The parts outside the region are inlined back and read the one spec.
+        spec_targets = {
+            n.target
+            for n in new_gm.graph.find_nodes(op="get_attr")
+            if isinstance(
+                torch.fx.graph_module._get_attr(new_gm, n.target), pytree.TreeSpec
+            )
+        }
+        self.assertEqual(spec_targets, {"sub.spec"})
+
+    def test_set_grad_pass_converts_dotted_graph_module(self):
+        # A graph module read under a dotted name, here a cond branch on a
+        # submodule, gets its own regions converted and is written back there.
+        branch = torch.fx.Graph()
+        a = branch.placeholder("a")
+        branch.call_function(torch._C._set_grad_enabled, (False,))
+        b = branch.call_function(torch.ops.aten.sin.default, (a,))
+        branch.call_function(torch._C._set_grad_enabled, (True,))
+        branch.output((b,))
+        root = torch.nn.Module()
+        root.sub = torch.nn.Module()
+        root.sub.body = torch.fx.GraphModule(torch.nn.Module(), branch)
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        pred = graph.call_function(
+            torch.ops.aten.gt.Scalar,
+            (graph.call_function(torch.ops.aten.sum.default, (x,)), 0),
+        )
+        body = graph.get_attr("sub.body")
+        out = graph.call_function(torch.ops.higher_order.cond, (pred, body, body, (x,)))
+        graph.output((graph.call_function(operator.getitem, (out, 0)),))
+        gm = torch.fx.GraphModule(root, graph)
+        with FakeTensorMode() as mode:
+            fake_x = mode.from_tensor(torch.ones(2))
+            FakeTensorProp(gm.sub.body, mode).propagate(fake_x)
+            FakeTensorProp(gm, mode).propagate(fake_x)
+        new_gm, _ = replace_set_grad_with_hop_pass(gm, None)
+        new_body = torch.fx.graph_module._get_attr(new_gm, "sub.body")
+        region = torch.ops.higher_order.wrap_with_set_grad_enabled
+        self.assertTrue(new_body.graph.find_nodes(op="call_function", target=region))
+        self.assertEqual(new_gm(torch.ones(2)), (torch.ones(2).sin(),))
+
+    def test_node_inline_renames_colliding_attribute(self):
+        # The inlined graph reads an attribute under a name that the outer
+        # module uses for another object, so it is stored under a new name. A
+        # dotted name whose owner the outer module holds as None is added as it
+        # is, while an owner that is not a Module makes the name taken. Neither
+        # becomes a buffer.
+        for owner in (None, torch.tensor([5.0])):
+            with self.subTest(owner=owner):
+                inner_root = torch.nn.Module()
+                inner_root.c = torch.tensor([1.0])
+                inner_root.sub = torch.nn.Module()
+                inner_root.sub.d = torch.tensor([2.0])
+                inner_graph = torch.fx.Graph()
+                x = inner_graph.placeholder("x")
+                y = inner_graph.call_function(torch.add, (x, inner_graph.get_attr("c")))
+                inner_graph.output(
+                    inner_graph.call_function(
+                        torch.add, (y, inner_graph.get_attr("sub.d"))
+                    )
+                )
+                root = torch.nn.Module()
+                root.inner = torch.fx.GraphModule(inner_root, inner_graph)
+                root.c = torch.tensor([10.0])
+                graph = torch.fx.Graph()
+                x = graph.placeholder("x")
+                call = graph.call_module("inner", (x,))
+                graph.output(
+                    graph.call_function(torch.mul, (call, graph.get_attr("c")))
+                )
+                gm = torch.fx.GraphModule(root, graph)
+                gm.sub = owner
+                node_inline_(call)
+                gm.recompile()
+                targets = [n.target for n in gm.graph.find_nodes(op="get_attr")]
+                self.assertEqual(len(set(targets)), 3)
+                self.assertEqual("sub.d" in targets, owner is None)
+                self.assertFalse(hasattr(owner, "d"))
+                self.assertIs(gm.c, root.c)
+                self.assertEqual([name for name, _ in gm.named_buffers()], ["c"])
+                self.assertEqual(gm(torch.ones(1)), torch.tensor([40.0]))
 
     def test_predispatch_autocast_and_set_grad(self):
         mod_orig, mod, args = self.MIXED_AUTOCAST_SET_GRAD_TESTS["multi_ctx_manager"]

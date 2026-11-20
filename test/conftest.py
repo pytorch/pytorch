@@ -31,6 +31,17 @@ except ImportError:
         pass
 
 
+try:
+    from torch.testing._internal.common_utils import HW_CLASSIFICATION_EXCLUDE
+except ImportError:
+    # Same workaround as above, for nightlies without this setting.
+    HW_CLASSIFICATION_EXCLUDE = frozenset()
+    if os.environ.get("PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION"):
+        print(
+            "PYTORCH_TEST_EXCLUDE_HW_CLASSIFICATION is ignored: this torch predates it"
+        )
+
+
 if TYPE_CHECKING:
     from _pytest._code.code import ReprFileLocation
 
@@ -127,6 +138,15 @@ def pytest_addoption(parser: Parser) -> None:
         metavar="path",
         help="run only the tests whose node ids are listed, one per line, in this file",
     )
+    parser.addoption(
+        "--serial-report-file",
+        action="store",
+        default=None,
+        dest="serial_report_file",
+        metavar="path",
+        help="append the number of @serialTest tests that -m deselected from this "
+        "shard to this file",
+    )
     shard_addoptions(parser)
 
 
@@ -149,11 +169,38 @@ class NodeidFilePlugin:
         items[:] = selected
 
 
+class SerialReportPlugin:
+    """Counts the @serialTest tests of this shard that `-m "not serial"` left out
+    (see --serial-report-file). run_test.py runs a file's serial pass only when its
+    parallel pass reports some. Tests left out by other filters count too, which
+    can only add a serial pass that runs nothing."""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self.serial: list[Any] = []
+
+    def pytest_deselected(self, items: list[Any]) -> None:
+        self.serial += [item for item in items if item.get_closest_marker("serial")]
+
+    def pytest_collection_finish(self, session: pytest.Session) -> None:
+        config = session.config
+        serial = self.serial
+        # -m may deselect before PytestShardPlugin keeps this shard's tests.
+        if shard := config.pluginmanager.get_plugin("pytestshardplugin"):
+            shard_args = config.getoption("shard_id"), config.getoption("num_shards")
+            serial = shard.filter_items_by_shard(serial, *shard_args)
+        with open(self.path, "a") as f:
+            f.write(f"{len(serial)}\n")
+
+
 class HardwareClassificationPytestPlugin:
     """Pytest plugin to filter collected tests by hw_classification."""
 
-    def __init__(self, hw_classification):
+    def __init__(
+        self, hw_classification: list[str] | None, *, exclude: frozenset = frozenset()
+    ) -> None:
         self.hw_classification = self._resolve_hw_classification(hw_classification)
+        self.exclude = exclude
 
     @staticmethod
     def _resolve_hw_classification(hw_classification):
@@ -163,19 +210,25 @@ class HardwareClassificationPytestPlugin:
 
         return {HardwareClassification[name] for name in hw_classification}
 
-    def pytest_collection_modifyitems(self, items):
-        if self.hw_classification is None:
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+        if self.hw_classification is None and not self.exclude:
             return
         import torch.testing._internal.common_utils as _cu
 
-        filtered = []
+        selected = []
+        # Older nightlies (see the HW_CLASSIFICATION_EXCLUDE import fallback) lack `exclude`.
+        exclude_kwargs = {"exclude": self.exclude} if self.exclude else {}
         _cu.filter_by_hw_classification(
             items,
             self.hw_classification,
             get_class=lambda item: getattr(item, "cls", None),
-            on_match=filtered.append,
+            on_match=selected.append,
+            **exclude_kwargs,
         )
-        items[:] = filtered
+        if len(selected) < len(items):
+            kept = set(selected)
+            config.hook.pytest_deselected(items=[i for i in items if i not in kept])
+            items[:] = selected
 
 
 def pytest_configure(config: Config) -> None:
@@ -207,10 +260,17 @@ def pytest_configure(config: Config) -> None:
         config.pluginmanager.register(
             NodeidFilePlugin(config.getoption("nodeid_file")), "nodeid_file_plugin"
         )
-    if config.getoption("hw_classification"):
+    if config.getoption("hw_classification") or HW_CLASSIFICATION_EXCLUDE:
         config.pluginmanager.register(
-            HardwareClassificationPytestPlugin(config.getoption("hw_classification")),
+            HardwareClassificationPytestPlugin(
+                config.getoption("hw_classification"), exclude=HW_CLASSIFICATION_EXCLUDE
+            ),
             "hw_classification_plugin",
+        )
+    if config.getoption("serial_report_file"):
+        config.pluginmanager.register(
+            SerialReportPlugin(config.getoption("serial_report_file")),
+            "serial_report_plugin",
         )
     if config.getoption("multigpu_min_gpus"):
         config.pluginmanager.register(

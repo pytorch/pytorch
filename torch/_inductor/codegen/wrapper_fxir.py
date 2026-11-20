@@ -1188,7 +1188,14 @@ class FxConverter:
                 elif not hinted(arg):
                     can_tune = False
                     break
-            if can_tune:
+            if (line.inductor_meta or {}).get("asserts_need_real_inputs"):
+                # Tuning runs the kernel on zeros, which need not hold what its device
+                # asserts check, and a failed device assert leaves the device unusable.
+                log.info(
+                    "Skipping compile-time autotuning for kernel %s, which has device asserts.",
+                    kernel_name,
+                )
+            elif can_tune:
                 tune_kernel(tuner, call_args)
             else:
                 log.info(

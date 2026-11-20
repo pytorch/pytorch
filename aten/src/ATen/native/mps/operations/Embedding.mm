@@ -5,6 +5,7 @@
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/Embedding.h>
+#include <utility>
 
 #include <fmt/format.h>
 
@@ -63,9 +64,8 @@ Tensor embedding_dense_backward_mps(const Tensor& grad_,
               outer_ndim,
               " exceeds metal max_ndim ",
               c10::metal::max_ndim);
-  TORCH_CHECK(num_indices <= std::numeric_limits<int32_t>::max() &&
-                  num_indices * D <= std::numeric_limits<int32_t>::max() &&
-                  num_weights * D <= std::numeric_limits<int32_t>::max(),
+  TORCH_CHECK(std::in_range<int32_t>(num_indices) && std::in_range<int32_t>(num_indices * D) &&
+                  std::in_range<int32_t>(num_weights * D),
               "embedding_dense_backward_mps: tensor is larger than INT32_MAX");
 
   EmbeddingDenseBackwardParams<uint32_t> params{};

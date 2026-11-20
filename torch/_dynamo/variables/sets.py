@@ -102,6 +102,15 @@ class BaseSetVariable(VariableTracker):
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
     NOT_CONTAINS_GUARD = GuardBuilder.SET_NOT_CONTAINS
 
+    _nonvar_fields = {
+        # Same reason as ConstDictVariable.original_items: a construction-time
+        # snapshot read only for still-live keys, so traversing it would make
+        # removed elements look reachable.  Here the mismatch is even wider --
+        # reconstruct emits set_items and never consults original_items at all.
+        "original_items",
+        *VariableTracker._nonvar_fields,
+    }
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # set_repr: https://github.com/python/cpython/blob/3.13/Objects/setobject.c#L763-L822
         name = self.python_type_name()

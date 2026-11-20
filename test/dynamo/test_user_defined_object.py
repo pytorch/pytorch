@@ -1,17 +1,21 @@
 # Owner(s): ["module: dynamo"]
 
+import _json
 import copy
 import dataclasses
 import os
+import re
 import sys
 import types
 import unittest
+import warnings
 
 import torch
 import torch._dynamo.testing as dynamo_testing
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.utils import common_constant_types
+from torch._dynamo.utils import common_constant_types, counters
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -1782,6 +1786,7 @@ class TestSimpleNamespace(TestCase):
         self.assertEqual(vars(ns_eager), vars(ns_compiled))
 
 
+@instantiate_parametrized_tests
 class TestConstantTypeProperty(TestCase):
     """Attribute access on a type in common_constant_types.
 
@@ -1791,6 +1796,106 @@ class TestConstantTypeProperty(TestCase):
     """
 
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("obj, attr", ((str, "__name__"), (3, "real")))
+    def test_getattr_with_unused_default(self, obj, attr):
+        def fn(x, default):
+            value = getattr(obj, attr, default)
+            return x + 1, value
+
+        x = torch.randn(3)
+        default = {"unused": (i for i in range(4))}
+        counter = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x, default), fn(x, default))
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 1)
+
+    @parametrize("use_getattr", (False, True))
+    def test_c_property_on_constant_type(self, use_getattr):
+        class Encoded(str):
+            __slots__ = ()
+
+            encoded = property(_json.encode_basestring_ascii)
+
+        obj = Encoded('a string with "quotes"')
+        common_constant_types.add(Encoded)
+        self.addCleanup(common_constant_types.discard, Encoded)
+
+        def fn(x):
+            value = getattr(obj, "encoded", "missing") if use_getattr else obj.encoded
+            return x + len(value), value
+
+        x = torch.randn(3)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        expected = fn(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(type(actual[1]), type(expected[1]))
+        self.assertEqual(
+            [w for w in caught if "does not know how to trace" in str(w.message)], []
+        )
+        self.assertEqual(counters["unimplemented"], {})
+
+    @parametrize("use_getattr", (False, True))
+    def test_c_property_guarded_on_fget(self, use_getattr):
+        class Encoded(str):
+            __slots__ = ()
+
+            encoded = property(_json.encode_basestring_ascii)
+
+        holder = Encoded("abc")
+        common_constant_types.add(Encoded)
+        self.addCleanup(common_constant_types.discard, Encoded)
+        calls = []
+        field = "encoded"
+
+        def get_encoded(self):
+            calls.append("get")
+            return "replacement value"
+
+        def fn(x):
+            value = getattr(holder, field) if use_getattr else holder.encoded
+            return x + len(value), value
+
+        x = torch.randn(3)
+        expected = fn(x)
+        counter = dynamo_testing.CompileCounter()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            compiled = torch.compile(fn, backend=counter, fullgraph=True)
+            self.assertEqual(compiled(x), expected)
+            self.assertEqual(counter.frame_count, 1)
+            Encoded.encoded = property(get_encoded)
+            expected = x + len("replacement value"), "replacement value"
+            self.assertEqual(compiled(x), expected)
+            self.assertEqual(counter.frame_count, 2)
+            self.assertEqual(compiled(x), expected)
+        if use_getattr:
+            self.assertEqual(calls, ["get", "get"])
+        self.assertEqual(
+            [w for w in caught if "does not know how to trace" in str(w.message)], []
+        )
+        self.assertEqual(counters["unimplemented"], {})
+
+    def test_property_with_re_escape(self):
+        class Escaped(str):
+            __slots__ = ()
+
+            escaped = property(re.escape)
+
+        obj = Escaped("a string with [brackets]")
+        common_constant_types.add(Escaped)
+        self.addCleanup(common_constant_types.discard, Escaped)
+
+        def fn(x):
+            first, second = obj.escaped, obj.escaped
+            return x + len(first), first, second, first is second
+
+        x = torch.randn(3)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, fn(x))
 
     def test_property_on_constant_type(self):
         class Holder:
@@ -1944,21 +2049,29 @@ class TestConstantTypeProperty(TestCase):
             common_constant_types.discard(Holder)
 
 
-class TestConstantTypePropertyAccelerator(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+class TestDevicePropertyConstants(TestCase):
+    hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_property_on_cuda_device_properties(self):
-        # _CudaDeviceProperties is the constant type carrying properties that
-        # shows up in practice.
-        props = torch.cuda.get_device_properties(0)
+    @parametrize("capture_props", (False, True))
+    def test_property_on_cuda_device_properties(self, device, capture_props):
+        props = torch.cuda.get_device_properties(device)
 
         def fn(x):
-            return x + props.multi_processor_count
+            if capture_props:
+                return x + props.multi_processor_count
+            current_props = torch.cuda.get_device_properties(x.device)
+            return x + current_props.clock_rate + current_props.memory_clock_rate
 
-        x = torch.randn(3, device="cuda")
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(x), fn(x))
+        x = torch.randn(3, device=device)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, fn(x))
+        self.assertEqual(
+            [w for w in caught if "does not know how to trace" in str(w.message)], []
+        )
+        if not capture_props:
+            self.assertEqual(counters["unimplemented"], {})
 
 
 class _LenZeroDict(dict):
@@ -2067,6 +2180,7 @@ class TestConstantSubclassHash(TestCase):
 
 
 instantiate_parametrized_tests(TestObjectConstruction)
+instantiate_device_type_tests(TestDevicePropertyConstants, globals(), only_for="cuda")
 
 
 class _InitOnly:
