@@ -49,7 +49,10 @@ from torch.compiler.precompile import (
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     HardwareClassification,
@@ -61,7 +64,6 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
-    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_TRITON, IS_BIG_GPU
@@ -1148,34 +1150,6 @@ class TestPrecompile(TestCase):
         exec(compile(code, "<artifact>", "exec"), ns)
         self.assertEqual(ns["forward"](m, x), m(x))
 
-    @parametrize("device", ("cuda", "xpu"))
-    def test_artifact_with_module_level_kernels_runs_from_its_file(self, device):
-        if not HAS_TRITON:
-            self.skipTest("requires Triton")
-        if not {"cuda": TEST_CUDA, "xpu": TEST_XPU}[device]:
-            self.skipTest(f"requires {device.upper()}")
-
-        # A module-level Triton kernel reads its source back from the module's file,
-        # which both the header's runpy.run_path recipe and the inlined load provide.
-        m = (
-            torch.nn.Sequential(torch.nn.Linear(8, 4), torch.nn.ReLU())
-            .eval()
-            .to(device)
-        )
-        x = torch.randn(3, 8, device=device)
-        code, cache = _precompile_pair(lambda model, x: model(x), m, x)
-        self.assertRegex(code, r"(?m)^def triton_\w+\(")
-        self.assertIn(
-            '#     import runpy\n#     ns = runpy.run_path("this_file.py")', code
-        )
-        with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, "artifact.py")
-            with open(path, "w") as f:
-                f.write(code)
-            self.assertEqual(runpy.run_path(path)["forward"](m, x), m(x))
-        for _, f_c in _default_and_inlined_loaders(code, cache, "inductor"):
-            self.assertEqual(f_c(m, x), m(x))
-
     @unittest.skipUnless(
         torch.cuda.is_available(), "needs CUDA + Triton for the kernel cache"
     )
@@ -1209,31 +1183,6 @@ class TestPrecompile(TestCase):
             self.assertEqual(
                 counters["inductor"]["triton_bundler_load_static_autotuner"], 0
             )
-
-    @parametrize("device", ("cuda", "xpu"))
-    def test_cache_bundles_autotune_artifacts(self, device):
-        if not HAS_TRITON:
-            self.skipTest("requires Triton")
-        if not {"cuda": TEST_CUDA, "xpu": TEST_XPU}[device]:
-            self.skipTest(f"requires {device.upper()}")
-
-        from torch._inductor.utils import fresh_cache
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.l1 = torch.nn.Linear(512, 512)
-                self.l2 = torch.nn.Linear(512, 512)
-
-            def forward(self, x):
-                return torch.softmax(self.l2(torch.relu(self.l1(x))), dim=-1)
-
-        m = M().to(device).eval()
-        x = torch.randn(128, 512, device=device)
-        code, cache = _precompile_pair(lambda model, x: model(x), m, x)
-        with fresh_cache():
-            f_c = _load_pair(code, cache)
-            self.assertEqual(f_c(m, x), m(x))
 
     def test_dtensor_subclass(self):
         import torch.distributed as dist
@@ -2217,22 +2166,6 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "dtype"):
             f_c(m, x.double())
 
-    @parametrize("device", ("cuda", "xpu"))
-    @parametrize("path", ("cached", "inlined"))
-    def test_device_mismatch_rejected(self, device, path):
-        if not {"cuda": TEST_CUDA, "xpu": TEST_XPU}[device]:
-            self.skipTest(f"requires {device.upper()}")
-        # Each dense input's device is baked at capture (invariant 6); a cpu-traced
-        # artifact rejects an accelerator input up front on BOTH load paths.
-        m = torch.nn.Linear(4, 3).eval()
-        x = torch.randn(5, 4)  # cpu example
-        code, cache = _precompile_pair(lambda model, t: model(t), m, x)
-        if path == "inlined":
-            cache = _strip_artifact(cache)
-        f_c = _load_pair(code, cache)
-        with self.assertRaisesRegex(PrecompileError, "device"):
-            f_c(m, x.to(device))
-
     def test_mark_dynamic_backed_rejected(self):
         # Backed dynamic marks (mark_dynamic) have no analogue in the static/unbacked
         # capture path; precompile rejects them loudly rather than silently dropping
@@ -2604,20 +2537,6 @@ class TestPrecompile(TestCase):
         f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "dtype"):
             f_c(m, x.double())
-
-    @parametrize("device", ("cuda", "xpu"))
-    def test_eager_device_mismatch_rejected(self, device):
-        if not {"cuda": TEST_CUDA, "xpu": TEST_XPU}[device]:
-            self.skipTest(f"requires {device.upper()}")
-
-        # The eager driver bakes each input's device (invariant 6): a cpu-traced eager
-        # artifact rejects an accelerator input up front, like the inductor backend.
-        m = torch.nn.Linear(4, 3).eval()
-        x = torch.randn(5, 4)  # cpu example
-        code, cache = _precompile_pair(lambda mm, t: mm(t), m, x, backend="eager")
-        f_c = _load_pair(code, cache)
-        with self.assertRaisesRegex(PrecompileError, "device"):
-            f_c(m, x.to(device))
 
     def test_unserializable_in_spec_accepts_distinct_structures(self):
         # When IN_SPEC degrades to None (the input pytree spec was not serializable) the
@@ -4309,6 +4228,84 @@ class TestPrecompileNumerics(TestCase):
 
 instantiate_device_type_tests(TestPrecompileNumerics, globals(), allow_xpu=True)
 
+
+@skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
+class TestPrecompileDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @onlyAccelerator
+    def test_artifact_with_module_level_kernels_runs_from_its_file(self, device):
+        # A module-level Triton kernel reads its source back from the module's file,
+        # which both the header's runpy.run_path recipe and the inlined load provide.
+        m = (
+            torch.nn.Sequential(torch.nn.Linear(8, 4), torch.nn.ReLU())
+            .eval()
+            .to(device)
+        )
+        x = torch.randn(3, 8, device=device)
+        code, cache = _precompile_pair(lambda model, x: model(x), m, x)
+        self.assertRegex(code, r"(?m)^def triton_\w+\(")
+        self.assertIn(
+            '#     import runpy\n#     ns = runpy.run_path("this_file.py")', code
+        )
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "artifact.py")
+            with open(path, "w") as f:
+                f.write(code)
+            self.assertEqual(runpy.run_path(path)["forward"](m, x), m(x))
+        for _, f_c in _default_and_inlined_loaders(code, cache, "inductor"):
+            self.assertEqual(f_c(m, x), m(x))
+
+    @unittest.skipIf(not has_triton_package(), "requires Triton")
+    @onlyAccelerator
+    def test_cache_bundles_autotune_artifacts(self, device):
+        from torch._inductor.utils import fresh_cache
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(512, 512)
+                self.l2 = torch.nn.Linear(512, 512)
+
+            def forward(self, x):
+                return torch.softmax(self.l2(torch.relu(self.l1(x))), dim=-1)
+
+        m = M().to(device).eval()
+        x = torch.randn(128, 512, device=device)
+        code, cache = _precompile_pair(lambda model, x: model(x), m, x)
+        with fresh_cache():
+            f_c = _load_pair(code, cache)
+            self.assertEqual(f_c(m, x), m(x))
+
+    @onlyAccelerator
+    @parametrize("path", ("cached", "inlined"))
+    def test_device_mismatch_rejected(self, device, path):
+        # Each dense input's device is baked at capture (invariant 6); a cpu-traced
+        # artifact rejects an accelerator input up front on BOTH load paths.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)  # cpu example
+        code, cache = _precompile_pair(lambda model, t: model(t), m, x)
+        if path == "inlined":
+            cache = _strip_artifact(cache)
+        f_c = _load_pair(code, cache)
+        with self.assertRaisesRegex(PrecompileError, "device"):
+            f_c(m, x.to(device))
+
+    @onlyAccelerator
+    def test_eager_device_mismatch_rejected(self, device):
+        # The eager driver bakes each input's device (invariant 6): a cpu-traced
+        # eager artifact rejects an accelerator input up front, like the inductor
+        # backend.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        code, cache = _precompile_pair(lambda model, t: model(t), m, x, backend="eager")
+        f_c = _load_pair(code, cache)
+        with self.assertRaisesRegex(PrecompileError, "device"):
+            f_c(m, x.to(device))
+
+
+instantiate_device_type_tests(TestPrecompileDevice, globals(), allow_xpu=True)
 
 _FRESH_PROCESS_LOADER = """
 import sys
