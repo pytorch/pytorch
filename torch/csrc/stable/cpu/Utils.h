@@ -4,6 +4,7 @@
 #include <torch/csrc/stable/macros.h>
 #include <torch/csrc/stable/version.h>
 #include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/shim_utils.h>
 
 #include <cstdint>
 
