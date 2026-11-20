@@ -132,6 +132,7 @@ from torch.testing._internal.common_utils import (
     set_default_dtype_if_supported,
     set_rng_seed,
     skipIfTorchDynamo,
+    TEST_XPU,
     TestCase,
 )
 
@@ -2012,7 +2013,10 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertLess(dups_mult, 10)
 
     @skipMPS  # MPS limits sampling with replacement to 2^24 categories
-    @skipXPUIf(True, "XPU limits sampling with replacement to 2^24 categories")
+    @skipXPUIf(
+        TEST_XPU and not torch.xpu.get_device_properties().has_fp64,
+        "XPU needs fp64 to sample with replacement from more than 2^24 categories",
+    )
     @largeTensorTest("2GB")
     @dtypes(torch.float, torch.double)
     def test_multinomial_many_categories(self, device, dtype):
@@ -2042,7 +2046,6 @@ class TestDistributionsDevice(DistributionsTestCase):
         low_fraction = (samples < n // 10).float().mean().item()
         self.assertEqual(low_fraction, 0.1, atol=0.08, rtol=0)
 
-    @skipXPUIf(True, "XPU's ported kernel overflows its half CDF (old CUDA bug)")
     @dtypes(torch.half, torch.bfloat16)
     def test_multinomial_reduced_precision_with_replacement(self, device, dtype):
         # Half row sums overflow past 65504, and a bfloat16 CDF is too coarse: the old
