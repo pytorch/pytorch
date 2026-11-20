@@ -408,38 +408,6 @@ class OwnerChoice:
         return asdict(self)
 
 
-def classify_team_owners(
-    *,
-    team_owner_ids: tuple[str, ...],
-    rosters: dict[str, tuple[str, ...]],
-    codepath_handles: frozenset[str],
-    reviewers: ReviewerState,
-    author_handle: str,
-) -> tuple[dict[str, OwnerChoice], tuple[str, ...]]:
-    """Return owners an existing reviewer covers, and owners needing a new pick.
-
-    A roster member who is a codepath owner covers the team, because GitHub
-    requests codepath owners through CODEOWNERS.
-    """
-
-    choices: dict[str, OwnerChoice] = {}
-    needs_pick: list[str] = []
-    for owner_id in team_owner_ids:
-        members = {member.casefold(): member for member in rosters[owner_id]}
-        covered = (codepath_handles & set(members)) - {author_handle}
-        submitted = (set(members) & reviewers.submitted_reviewers) - {author_handle}
-        pending = (set(members) & reviewers.requested_reviewers) - {author_handle}
-        if covered:
-            choices[owner_id] = OwnerChoice(min(covered), "codepath_covered")
-        elif submitted:
-            choices[owner_id] = OwnerChoice(members[min(submitted)], "submitted")
-        elif pending:
-            choices[owner_id] = OwnerChoice(members[min(pending)], "pending")
-        else:
-            needs_pick.append(owner_id)
-    return choices, tuple(needs_pick)
-
-
 def pick_roster_member(
     *,
     repository: str,
@@ -461,6 +429,54 @@ def pick_roster_member(
     return eligible[int.from_bytes(seed[:8], "big") % len(eligible)]
 
 
+@dataclass(frozen=True)
+class OwnerGroup:
+    """Handles that can each cover one owner; any one of them is enough."""
+
+    owner: str
+    members: tuple[str, ...]
+
+
+def choose_owner_reviewers(
+    *,
+    identity: PullRequestIdentity,
+    groups: tuple[OwnerGroup, ...],
+    coverage: tuple[tuple[ChoiceState, frozenset[str]], ...],
+    author_handle: str,
+) -> dict[str, OwnerChoice]:
+    """Give each owner group a member who already covers it, or one new pick.
+
+    coverage lists casefolded handles already involved in the PR, one set per
+    state, highest precedence first; a group covered by several takes the first
+    state that covers it. A group nobody covers gets a member picked by
+    pick_roster_member. The author never covers or is picked, so a group whose
+    only member is the author is left out of the result.
+    """
+
+    choices: dict[str, OwnerChoice] = {}
+    for group in groups:
+        members = {
+            member.casefold(): member
+            for member in group.members
+            if member.casefold() != author_handle
+        }
+        for state, handles in coverage:
+            if covered := handles & members.keys():
+                choices[group.owner] = OwnerChoice(members[min(covered)], state)
+                break
+        else:
+            reviewer = pick_roster_member(
+                repository=identity.repository,
+                number=identity.number,
+                owner=group.owner,
+                members=group.members,
+                author_handle=author_handle,
+            )
+            if reviewer is not None:
+                choices[group.owner] = OwnerChoice(reviewer, "selected")
+    return choices
+
+
 def select_team_owner_reviewers(
     *,
     identity: PullRequestIdentity,
@@ -470,7 +486,11 @@ def select_team_owner_reviewers(
     author_handle: str,
     reviewers: ReviewerState,
 ) -> dict[str, OwnerChoice]:
-    """Select reviewers for team owner IDs from the snapshot alone."""
+    """Select reviewers for team owner IDs from the snapshot alone.
+
+    A roster member who is a codepath owner covers the team, because GitHub
+    requests codepath owners through CODEOWNERS.
+    """
 
     rosters = snapshot.rosters
     if rosters is None:
@@ -479,24 +499,16 @@ def select_team_owner_reviewers(
         )
     if not set(team_owner_ids) <= set(rosters):
         raise ValueError("owner is not configured")
-    choices, needs_pick = classify_team_owners(
-        team_owner_ids=team_owner_ids,
-        rosters=rosters,
-        codepath_handles=codepath_handles,
-        reviewers=reviewers,
+    return choose_owner_reviewers(
+        identity=identity,
+        groups=tuple(OwnerGroup(owner, rosters[owner]) for owner in team_owner_ids),
+        coverage=(
+            ("codepath_covered", codepath_handles),
+            ("submitted", reviewers.submitted_reviewers),
+            ("pending", reviewers.requested_reviewers),
+        ),
         author_handle=author_handle,
     )
-    for owner_id in needs_pick:
-        reviewer = pick_roster_member(
-            repository=identity.repository,
-            number=identity.number,
-            owner=owner_id,
-            members=rosters[owner_id],
-            author_handle=author_handle,
-        )
-        if reviewer is not None:
-            choices[owner_id] = OwnerChoice(reviewer, "selected")
-    return choices
 
 
 @dataclass(frozen=True)
