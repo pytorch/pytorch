@@ -38,13 +38,7 @@ from torch._C._dynamo import (
 
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
-from ..exc import (
-    ObservedAttributeError,
-    raise_attribute_error,
-    raise_type_error,
-    unimplemented,
-    Unsupported,
-)
+from ..exc import raise_attribute_error, raise_type_error, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
 from ..utils import format_source_range, istype
@@ -660,6 +654,17 @@ def _wrap_hashfunc(
     from .constant import ConstantVariable, FakeValueKind
 
     h, is_fake = func(self, tx)
+    if is_fake and self.source is not None:
+        # A folded identity hash has no guard, so comparing it could go stale.
+        unimplemented(
+            gb_type="Identity-based __hash__ escapes to user code",
+            context=f"{self}.__hash__()",
+            explanation="Dynamo cannot guard an identity-based hash, so its value could go stale.",
+            hints=[
+                "Use hash(x) if calling x's own hash implementation is intended.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
     if is_fake:
         return SourcelessBuilder.create_internal_fake_id(h, kind=FakeValueKind.HASH)
     return ConstantVariable.create(h)
@@ -1829,38 +1834,38 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             getter=lambda self, tx: VariableTracker.build(
                 tx,
                 self.python_type(),
-                AttrSource(self.source, "__class__") if self.source else None,
+                AttrSource(self.source, "__class__")
+                if self.source and self.source.subguards_allowed()
+                else None,
             ),
             setter=unmodeled_setter,
         ),
     }
     tp_members: dict[str, Member] = {}
 
-    def _lookup_tp_table(self, name: str, *table_attrs: str) -> Any:
+    @classmethod
+    def _lookup_tp_table(cls, name: str, *table_attrs: str) -> Any:
         """Resolve *name* in the given declarative tables across the class MRO.
 
         Mirrors CPython method/getset/member inheritance: each class contributes
         its own table entries into its own tp_dict, and lookup walks the MRO with
         the most-derived class winning. A subclass table therefore *adds* to
         (rather than replaces) the entries it inherits. Within a class the tables
-        are consulted in the order given. A table may be a property of the
-        instance, for a VT that wraps several Python types.
+        are consulted in the order given.
         """
-        for klass in type(self).__mro__:
+        for klass in cls.__mro__:
             d = klass.__dict__
             for attr in table_attrs:
                 table = d.get(attr)
-                if isinstance(table, property):
-                    table = table.__get__(self)
                 if table is not None and name in table:
                     return table[name]
         return None
 
     def lookup_tp_getset_member(self, name: str) -> GetSet | Member | None:
-        return self._lookup_tp_table(name, "tp_getset", "tp_members")
+        return type(self)._lookup_tp_table(name, "tp_getset", "tp_members")
 
     def lookup_tp_method(self, name: str) -> Method | None:
-        return self._lookup_tp_table(name, "tp_methods")
+        return type(self)._lookup_tp_table(name, "tp_methods")
 
     def lookup_slotdefs(self, name: str) -> SlotDef | None:
         return self._slotdefs.get(name)
@@ -2402,35 +2407,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
-        """Dynamo's hasattr(): try tp_getattro_impl, catch AttributeError.
-
-        Mirrors CPython's PyObject_HasAttr (via PyObject_GetOptionalAttr):
-        call tp_getattro, suppress AttributeError via PyErr_Clear, return
-        True/False.
-        https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1346
-        """
-        result = self._hasattr_check_side_effects(tx, name)
-        if result is not None:
-            return result
-
-        try:
-            self.tp_getattro_impl(tx, name)
-            return variables.ConstantVariable.create(True)
-        except ObservedAttributeError:
-            tx.exn_vt_stack.clear_current_exception()
-            return variables.ConstantVariable.create(False)
-        except (NotImplementedError, Unsupported):
-            pass
-
-        unimplemented(
-            gb_type="Unsupported hasattr call",
-            context=f"call_obj_hasattr {self} {name}",
-            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
-            hints=[
-                f"Avoid calling `hasattr({self.__class__.__name__}, {name})` in your code.",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
+        """VT-specific hasattr shortcut. generic_hasattr_str only calls an
+        override; the default raises so an override can defer via super()."""
+        # Do not overload this unless you really need it: e.g. non-trivial
+        # hasattr behavior which cannot be captured by the generic_hasattr function.
+        raise NotImplementedError
 
     def tp_iter_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """
@@ -3613,8 +3594,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> None:
         original_method = getattr(cls, method)
 
-        if original_method is getattr(VariableTracker, method) or hasattr(
-            original_method, "_call_once_guarded"
+        # A constant holds no other VTs, so it cannot be self-referential and
+        # skips the guard, which costs a contextvar lookup and a set update per
+        # call. ConstantVariable is not defined yet when its own class body is
+        # processed, hence the name check.
+        is_constant = (
+            cls.__name__ == "ConstantVariable"
+            and cls.__module__ == "torch._dynamo.variables.constant"
+        )
+        if (
+            is_constant
+            or original_method is getattr(VariableTracker, method)
+            or hasattr(original_method, "_call_once_guarded")
         ):
             return
 

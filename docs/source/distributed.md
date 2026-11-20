@@ -962,7 +962,20 @@ and {meth}`ProcessGroup.register_post_hook <torch.distributed.ProcessGroup.regis
 register hooks that run before and after each operation is issued, for every
 backend. A post-hook runs once the operation is issued, not when it completes.
 `op_id` pairs a pre-hook call with its post-hook call. Hooks run for the
-standard collective and point-to-point operations.
+standard collective and point-to-point operations, and with no tensors for
+{func}`torch.distributed.split_group` and the `ProcessGroup` methods
+`new_window` and `reconfigure` (op names `SPLIT`, `NEW_WINDOW` and
+`RECONFIGURE`). The `SPLIT` and `NEW_WINDOW` post-hooks get `work=None` and the
+new `group` or `window`. The `SPLIT` post-hook runs before
+{func}`torch.distributed.split_group` registers the group, so lookups such as
+`get_rank(group)` or `get_process_group_ranks` fail on it inside the hook.
+Other synchronous operations may also pass `work=None`, so hooks must not
+assume a `Work` or non-empty tensor lists. Calling the `Backend` methods
+`split`, `new_window` or `reconfigure` directly, or a Python subclass override
+of the `ProcessGroup` methods, bypasses hooks. Other group creation paths, such
+as `new_group` (including when it splits from an eagerly initialized default
+group), {func}`torch.distributed.distributed_c10d.shrink_group` and
+`ProcessGroup.merge_remote_group`, fire no hooks.
 
 The example below assumes the default process group is initialized.
 
@@ -1103,85 +1116,6 @@ moving tensors to CPU before passing them as inputs to an object collective.
 Besides the built-in backends listed under Backends, `torch.distributed` supports
 backends registered at run time, written in C++ or Python. See
 {doc}`distributed/custom_backends`.
-
-## TorchComms backend
-
-[TorchComms](https://github.com/meta-pytorch/torchcomms) is an optional
-communication backend for ``torch.distributed``. When enabled, it
-overrides the normal backend instantiation in {func}`init_process_group`
-so that all process groups are created through TorchComms instead of
-the built-in ``ProcessGroup`` implementations.
-
-:::{note}
-TorchComms is experimental and must be installed separately.
-The ``torchcomms`` package must be importable for the flags below to
-take effect.
-:::
-
-### Enabling TorchComms
-
-Set the ``TORCH_DISTRIBUTED_USE_TORCHCOMMS`` environment variable
-before calling {func}`init_process_group`:
-
-```bash
-export TORCH_DISTRIBUTED_USE_TORCHCOMMS=1
-```
-
-Or set the config flag programmatically:
-
-```python
-import torch.distributed.config as dist_config
-
-dist_config.use_torchcomms = True
-```
-
-The ``backend`` argument to {func}`init_process_group` (e.g. ``"nccl"``,
-``"gloo"``) is still respected -- it is forwarded to TorchComms, which
-selects the corresponding vendor plugin. No other application code
-changes are required; all ``torch.distributed`` collective APIs continue
-to work as before.
-
-### Behavior when enabled
-
-When TorchComms is enabled, {func}`init_process_group` changes its
-backend instantiation path for every device/backend pair in the process
-group (except the ``fake`` backend, which is always handled natively):
-
-1. A TorchComms communicator is created via ``torchcomms.new_comm()``
-   using the requested backend string and device.
-2. The communicator is wrapped in a ``_BackendWrapper`` that implements
-   the ``c10d::Backend`` C++ interface, making it a drop-in replacement
-   for the native ``ProcessGroup`` backends.
-3. A ``FlightRecorderHook`` is automatically registered on the
-   communicator. The hook respects the ``TORCH_FR_BUFFER_SIZE`` and
-   ``TORCH_NCCL_TRACE_BUFFER_SIZE`` environment variables for
-   configuring the trace buffer size.
-4. {func}`destroy_process_group` calls ``finalize()`` on TorchComms
-   communicators during cleanup.
-5. {func}`split_group` creates sub-communicators through TorchComms'
-   native splitting rather than constructing a new process group from
-   scratch.
-
-### Eager initialization
-
-TorchComms communicators are eagerly initialized during
-{func}`init_process_group` and only support a single backend device per
-group. The ``device_id`` argument must be specified at initialization
-time:
-
-```python
-dist.init_process_group(backend="nccl", device_id=torch.device("cuda", local_rank))
-```
-
-### Point-to-point operation concurrency
-
-Each TorchComms process group maps 1:1 to a single underlying
-communicator. Point-to-point operations (``send``/``recv``) issued on
-the same group and stream are **not guaranteed to run concurrently**.
-Code that relies on concurrent point-to-point operations must either:
-
-- Use the batched P2P APIs ({func}`batch_isend_irecv`), or
-- Issue the operations on separate groups or communicators.
 
 (distributed-launch)=
 
@@ -1678,14 +1612,6 @@ capability.
 **FlightRecorder NCCL JSON** ``/fr_trace_nccl_json``
   Same data as ``/fr_trace_nccl`` but rendered as raw formatted JSON per rank.
 
-**TorchComms FlightRecorder** ``/torchcomms_fr_trace``
-  Fetches TorchComms flight recorder data from ``torchcomms_fr_trace_json``
-  (with ``onlyactive=true``) on all workers. Renders the same structured tables
-  as the FlightRecorder views (Groups, Memberships, Collectives, NCCL Calls).
-
-**TorchComms FlightRecorder JSON** ``/torchcomms_fr_trace_json``
-  Same data as ``/torchcomms_fr_trace`` but rendered as raw formatted JSON.
-
 **c10d Health Check** ``/c10d_health_check``
   Fetches the c10d health state from every rank. When any rank reports an
   unhealthy backend, the server requests a Flight Recorder dump for that
@@ -1791,16 +1717,6 @@ curl -X POST \
   "http://worker-host:port/handler/dump_nccl_trace_pickle?onlyactive=true"  # @lint-ignore
 ```
 
-**``torchcomms_fr_trace_json``** — TorchComms flight-recorder trace
-(application/json). Similar to ``dump_nccl_trace_json`` but for the
-TorchComms communication layer. Accepts parameter ``onlyactive``
-(``true``/``false``, default ``false``).
-
-```bash
-curl -X POST \
-  "http://worker-host:port/handler/torchcomms_fr_trace_json?onlyactive=true"  # @lint-ignore
-```
-
 **``torch_profile``** — Chrome trace JSON (application/json). Runs
 ``torch.profiler.profile()`` for the specified duration and returns the
 Chrome trace format JSON. Requires parameter ``duration`` (seconds).
@@ -1848,8 +1764,6 @@ Handlers that support dumping:
 | ``PySpyHandler``                   | ``pyspy_dump``         | py-spy stack dumps (nonblocking) for all ranks.   |
 +------------------------------------+------------------------+---------------------------------------------------+
 | ``FlightRecorderHandler``          | ``fr_trace``           | CPU + NCCL flight-recorder tables.                |
-+------------------------------------+------------------------+---------------------------------------------------+
-| ``TorchCommsFlightRecorderHandler``| ``torchcomms_fr_trace``| TorchComms flight-recorder tables.                |
 +------------------------------------+------------------------+---------------------------------------------------+
 | ``C10dHealthCheckHandler``         | ``c10d_health_check``  | c10d health and backend Flight Recorder dumps.    |
 +------------------------------------+------------------------+---------------------------------------------------+

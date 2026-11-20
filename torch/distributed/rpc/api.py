@@ -636,24 +636,6 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
 
-        Below is an example of running a TorchScript function using RPC.
-
-        >>> # On both workers:
-        >>> @torch.jit.script
-        >>> def my_script_add(tensor: torch.Tensor, scalar: int):
-        >>>    return torch.add(tensor, scalar)
-
-        >>> # On worker 0:
-        >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> rref = rpc.remote("worker1", my_script_add, args=(torch.ones(2), 3))
-        >>> rref.to_here()
-        >>> rpc.shutdown()
-
-        >>> # On worker 1:
-        >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
-        >>> rpc.shutdown()
     """
     torch._C._log_api_usage_once("torch.distributed.rpc_remote")
     qualified_name = torch.jit._builtins._find_builtin(func)
@@ -818,24 +800,6 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout: float = UNSET_RPC_TIMEOU
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
 
-        Below is an example of running a TorchScript function using RPC.
-
-        >>> # On both workers:
-        >>> @torch.jit.script
-        >>> def my_script_add(tensor: torch.Tensor, scalar: int):
-        >>>    return torch.add(tensor, scalar)
-
-        >>> # On worker 0:
-        >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> ret = rpc.rpc_sync("worker1", my_script_add, args=(torch.ones(2), 3))
-        >>> rpc.shutdown()
-
-        >>> # On worker 1:
-        >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
-        >>> rpc.shutdown()
-
     """
     torch._C._log_api_usage_once("torch.distributed.rpc_sync")
     fut = _invoke_rpc(to, func, RPCExecMode.SYNC, args, kwargs, timeout)
@@ -912,24 +876,6 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
 
-        Below is an example of running a TorchScript function using RPC.
-
-        >>> # On both workers:
-        >>> @torch.jit.script
-        >>> def my_script_add(tensor: torch.Tensor, scalar: int):
-        >>>    return torch.add(tensor, scalar)
-
-        >>> # On worker 0:
-        >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker0", rank=0, world_size=2)
-        >>> fut = rpc.rpc_async("worker1", my_script_add, args=(torch.ones(2), 3))
-        >>> ret = fut.wait()
-        >>> rpc.shutdown()
-
-        >>> # On worker 1:
-        >>> import torch.distributed.rpc as rpc
-        >>> rpc.init_rpc("worker1", rank=1, world_size=2)
-        >>> rpc.shutdown()
     """
     torch._C._log_api_usage_once("torch.distributed.rpc_async")
     fut = _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs, timeout)
