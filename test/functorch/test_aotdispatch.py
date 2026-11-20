@@ -36,7 +36,6 @@ import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
-
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
     aot_function,
@@ -10239,6 +10238,27 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(metadata.output_info[1].output_type, OutputType.non_alias)
         self.assertEqual(metadata.num_intermediate_bases, 0)
 
+    def test_register_hook_in_checkpoint_accumulated_grad(self):
+        def body(y):
+            y.register_hook(lambda grad: grad * 0.5)
+            return y.clone()
+
+        def fn(x):
+            y = x * 2
+            z = torch.utils.checkpoint.checkpoint(body, y, use_reentrant=False)
+            return z + y
+
+        x = torch.randn(4, requires_grad=True)
+        out = fn(x)
+        out.sum().backward()
+        eager_grad = x.grad.clone()
+
+        x2 = x.detach().clone().requires_grad_(True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        out2 = opt_fn(x2)
+        out2.sum().backward()
+        self.assertEqual(x2.grad, eager_grad)
+
     def test_size_of_void_returning_nodes(self):
         # Void-returning ops have no `val` metadata. _size_of must return 0
         # for them instead of raising RuntimeError.
@@ -10623,31 +10643,6 @@ def forward(self, primals_1, tangents_1):
         )
         sg_ops = [n for n in sg_mod.graph.nodes if n.op == "call_function"]
         self.assertEqual(len(sg_ops), 1)
-
-
-class TestPartitioningCheckpointHooks(AOTTestCase):
-    hw_classification = HardwareClassification.GENERIC
-
-    def test_register_hook_in_checkpoint_accumulated_grad(self, device):
-        def body(y):
-            y.register_hook(lambda grad: grad * 0.5)
-            return y.clone()
-
-        def fn(x):
-            y = x * 2
-            z = torch.utils.checkpoint.checkpoint(body, y, use_reentrant=False)
-            return z + y
-
-        x = torch.randn(4, device=device, requires_grad=True)
-        out = fn(x)
-        out.sum().backward()
-        eager_grad = x.grad.clone()
-
-        x2 = x.detach().clone().requires_grad_(True)
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        out2 = opt_fn(x2)
-        out2.sum().backward()
-        self.assertEqual(x2.grad, eager_grad)
 
 
 class TestPartitioningDevice(AOTTestCase):
@@ -13840,9 +13835,6 @@ instantiate_device_type_tests(
 )
 
 instantiate_parametrized_tests(TestPartitioning)
-instantiate_device_type_tests(
-    TestPartitioningCheckpointHooks, globals(), allow_xpu=True
-)
 
 instantiate_device_type_tests(TestPartitioningDevice, globals(), allow_xpu=True)
 
