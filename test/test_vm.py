@@ -1424,8 +1424,9 @@ class TestVmPasses(TestCase):
             run.replay.name,
             "TestVmPasses.test_pass_replaces_a_run_by_a_call.<locals>.f (block 0)",
         )
-        # Four operators and the constant one of them takes.
-        self.assertEqual(len(run.replay.text(run.replay.start, run.replay.end)), 5)
+        # Four operators, the constant one of them takes, and the two
+        # variables they bind.
+        self.assertEqual(len(run.replay.text(run.replay.start, run.replay.end)), 7)
 
     def test_replayed_instructions_are_called_from_their_function(self):
         # What a pass put in the place of instructions runs them itself: what
@@ -2886,11 +2887,100 @@ def frame_case_name(f, args):
     return f"{f.__name__}_{args[-1] if type(args[-1]) in (bool, int) else ''}"
 
 
+def frame_variables():
+    """The variables of the function that called this one, as its frame has them."""
+    return dict(sys._getframe(1).f_locals)
+
+
+def frame_binds(a, b=2, *rest, flag=False, **more):
+    first = frame_variables()
+    c = a + b
+    second = frame_variables()
+    c = None  # noqa: F841
+    del a
+    return first, second, frame_variables()
+
+
+def frame_binds_in_a_loop(n):
+    seen = []
+    for i in range(n):
+        square = i * i  # noqa: F841
+        seen.append({k: v for k, v in frame_variables().items() if k != "seen"})
+    return seen
+
+
+def frame_binds_cells(a):
+    b = a * 2
+
+    def inner():
+        return a + b
+
+    return {k: v for k, v in frame_variables().items() if k != "inner"}, inner()
+
+
+def frame_binds_in_a_handler(a):
+    try:
+        b = a + 1  # noqa: F841
+        raise ValueError("x")
+    except ValueError:
+        c = 2  # noqa: F841
+        caught = sorted(frame_variables())
+    return caught, sorted(frame_variables())
+
+
+def frame_binds_in_a_comprehension(n):
+    return [sorted(frame_variables()) for i in range(n)], sorted(frame_variables())
+
+
+def frame_fails(a):
+    b = a + 1
+    c = [b]
+    del a
+    return c[5]
+
+
+def frame_calls_fails(a):
+    d = a * 2  # noqa: F841
+    return frame_fails(a)
+
+
+def frame_tensors(x):
+    y = x * 2
+    z = y + 1
+    return frame_variables(), z
+
+
+def frame_tensor_loop(x, n):
+    for _ in range(n):
+        x = x * 2 + 1
+    return x
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmFrames(TestCase):
-    """A compiled function runs under a frame of the interpreter, with its locals in registers."""
+    """A compiled function runs under a frame of the interpreter, which has its variables."""
 
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize(
+        "f,args",
+        (
+            (frame_binds, (1,)),
+            (frame_binds, (1, 5, 6, 7)),
+            (frame_binds_in_a_loop, (3,)),
+            (frame_binds_cells, (3,)),
+            (frame_binds_in_a_handler, (1,)),
+            (frame_binds_in_a_comprehension, (2,)),
+        ),
+        name_fn=lambda f, args: f"{f.__name__}_{len(args)}",
+    )
+    def test_frame_has_the_variables(self, f, args):
+        # What a callee finds in the frame of its caller.
+        compiled = torch.vm(f, fallback=False)
+        more = {"flag": True, "k": 1} if f is frame_binds else {}
+        for _ in range(4):
+            self.assertEqual(compiled(*args, **more), f(*args, **more))
+        self.assertIn("store_local", compiled.dump())
 
     def test_function_that_reads_its_frame_is_not_compiled(self):
         def uses_eval(a):
@@ -2909,6 +2999,50 @@ class TestVmFrames(TestCase):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 self.assertEqual(torch.vm(f)(*args), f(*args))
+
+    @parametrize("inline", (False, True))
+    def test_traceback_has_the_variables(self, inline):
+        def variables(fn):
+            try:
+                fn(1)
+            except IndexError as e:
+                tb = e.__traceback__.tb_next
+                return dict(tb.tb_frame.f_locals), dict(tb.tb_next.tb_frame.f_locals)
+
+        compiled = torch.vm(
+            frame_calls_fails,
+            passes=DEFAULT if inline else without(P.Inline),
+            fallback=False,
+        )
+        for _ in range(3):
+            self.assertEqual(variables(compiled), variables(frame_calls_fails))
+        self.assertEqual(variables(compiled), ({"a": 1, "d": 2}, {"b": 2, "c": [2]}))
+        self.assertEqual(compiled.stats()["inlined"], ["frame_fails"] if inline else [])
+
+    def test_tensor_variable_is_bound_when_something_is_called(self):
+        compiled = torch.vm(frame_tensors, fallback=False)
+        x = torch.ones(3)
+        for _ in range(8):
+            seen, z = compiled(x)
+            self.assertEqual(list(seen), ["x", "y", "z"])
+            self.assertIs(seen["x"], x)
+            self.assertIs(seen["z"], z)
+            self.assertEqual(seen["y"], x * 2)
+        # The kernels gave tensors without a Python object.
+        self.assertGreater(compiled.stats()["unboxed_results"], 0)
+
+    def test_binding_a_variable_does_not_give_a_tensor_its_object(self):
+        compiled = torch.vm(frame_tensor_loop, fallback=False, demote=False)
+        x = torch.ones(3)
+        for _ in range(6):
+            compiled(x, 40)
+        before = compiled.stats()
+        self.assertEqual(compiled(x, 40), frame_tensor_loop(x, 40))
+        after = compiled.stats()
+        self.assertGreaterEqual(
+            after["unboxed_results"] - before["unboxed_results"], 80
+        )
+        self.assertLessEqual(after["boxed_later"] - before["boxed_later"], 2)
 
     @parametrize(
         "f,args",

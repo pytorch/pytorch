@@ -69,6 +69,15 @@ pub enum Op {
     LoadSlot(V),
     /// Writes a frame slot; storing the undefined value empties it.
     StoreSlot(V, V),
+    /// Binds a variable of the interpreter frame the function runs under to
+    /// v, or unbinds it for the undefined value: the other half of what
+    /// STORE_FAST does, next to giving the value a register. The first
+    /// operand is the variable's index among those of the frame. Whatever
+    /// reads the frame (a traceback, a debugger, `eval`, `super()`) finds the
+    /// variables there, and the frame keeps what they are bound to alive.
+    /// Does nothing where compiled functions have no frame, or outside the
+    /// loop that runs a function (a replay).
+    StoreLocal(u32, V),
     /// The exception a handler block was entered with. First in its block.
     CaughtException,
     /// Which instruction of the function raised into a handler block, as the
@@ -298,6 +307,7 @@ impl Op {
             | Op::ImportFrom(a, _)
             | Op::StoreDeref(_, a)
             | Op::StoreSlot(_, a)
+            | Op::StoreLocal(_, a)
             | Op::PushExcInfo(a)
             | Op::PopExcInfo(a)
             | Op::LoadSpecial(a, _)
@@ -451,6 +461,7 @@ impl Op {
                 | Op::ToBool(_)
                 | Op::Format { .. }
                 | Op::Hold(_)
+                | Op::StoreLocal(..)
                 | Op::ListToTuple(_)
                 | Op::ListExtend(..)
                 | Op::ListAppend(..)
@@ -667,6 +678,7 @@ impl Function {
             Op::Hold(vs) => format!("hold {}", self.values(vs)),
             Op::LoadSlot(s) => format!("load_slot {}", n(s)),
             Op::StoreSlot(s, v) => format!("store_slot {} {}", n(s), n(v)),
+            Op::StoreLocal(slot, v) => format!("store_local {} {}", slot, n(v)),
             Op::CaughtException => "caught_exception".to_string(),
             Op::CaughtLasti => "caught_lasti".to_string(),
             Op::PushExcInfo(v) => format!("push_exc_info {}", n(v)),

@@ -366,6 +366,7 @@ impl<'a> Builder<'a> {
                     }
                     if matches!(ins.op, Bc::LoadFastAndClear | Bc::DeleteFast) {
                         effect!(off, Op::StoreSlot(slot, UNDEF));
+                        effect!(off, Op::StoreLocal(arg, UNDEF));
                     }
                     if ins.op != Bc::DeleteFast {
                         stack.push(v);
@@ -374,6 +375,7 @@ impl<'a> Builder<'a> {
                 Bc::StoreFast if self.slots.contains_key(&arg) => {
                     let v = pop_value!();
                     effect!(off, Op::StoreSlot(self.slots[&arg], v));
+                    effect!(off, Op::StoreLocal(arg, v));
                 }
                 Bc::LoadFast | Bc::LoadFastCheck => {
                     let v = self.read_var(arg, b);
@@ -387,6 +389,7 @@ impl<'a> Builder<'a> {
                     let v = self.read_var(arg, b);
                     stack.push(v);
                     self.write_var(arg, b, UNDEF);
+                    effect!(off, Op::StoreLocal(arg, UNDEF));
                 }
                 Bc::StoreFast => {
                     let v = pop!();
@@ -403,12 +406,14 @@ impl<'a> Builder<'a> {
                         effect!(off, Op::Hold(vec![old]));
                     }
                     self.write_var(arg, b, v);
+                    effect!(off, Op::StoreLocal(arg, v));
                 }
                 Bc::DeleteFast => {
                     let v = self.read_var(arg, b);
                     let name = self.varname_const(arg)?;
                     effect!(off, Op::CheckBound(v, name));
                     self.write_var(arg, b, UNDEF);
+                    effect!(off, Op::StoreLocal(arg, UNDEF));
                 }
                 Bc::LoadGlobal => {
                     if arg & 1 != 0 {
@@ -494,6 +499,7 @@ impl<'a> Builder<'a> {
                     let v = self.read_var(arg, b);
                     let cell = emit!(off, Op::MakeCell(v));
                     self.write_var(arg, b, cell);
+                    effect!(off, Op::StoreLocal(arg, cell));
                 }
                 Bc::LoadDeref => {
                     let v = if arg < self.nfree_base {
@@ -1548,6 +1554,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::ImportFrom(a, _)
         | Op::StoreDeref(_, a)
         | Op::StoreSlot(_, a)
+        | Op::StoreLocal(_, a)
         | Op::PushExcInfo(a)
         | Op::PopExcInfo(a)
         | Op::LoadSpecial(a, _)
