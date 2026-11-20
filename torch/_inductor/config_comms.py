@@ -27,6 +27,7 @@ sink_waits_iterative_debug_limit_to_sink: int | None = (
 # Should be used with config.runtime_estimations_mms_benchmark = True
 reorder_iterative_use_runtime_estimations: bool = False
 sink_iterative_use_runtime_estimations: bool = False
+# Runtime-based scheduling includes per-process-group queues and wait stalls.
 
 # Broadcast runtime estimations doing real Collective operation between all ranks.
 # If non-deterministic runtime estimations are used this must be used to make
