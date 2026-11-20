@@ -129,6 +129,17 @@ def fetch_user_has_triage_permission(
 ) -> bool:
     """Return whether GitHub grants one user triage-or-higher repository access."""
 
+    return any(fetch_user_permissions(github=github, repo=repo, login=login).values())
+
+
+def fetch_user_permissions(
+    *,
+    github: GitHubClient,
+    repo: str,
+    login: str,
+) -> dict[str, bool]:
+    """Return one user's triage, push, maintain, and admin repository access."""
+
     encoded_login = quote(login, safe="")
     response = github.json(f"repos/{repo}/collaborators/{encoded_login}/permission")
     if not isinstance(response, dict):
@@ -148,7 +159,7 @@ def fetch_user_has_triage_permission(
         or not all(isinstance(value, bool) for value in access.values())
     ):
         raise RuntimeError("collaborator permission response is inconsistent")
-    return any(access.values())
+    return access
 
 
 def _human_login(
