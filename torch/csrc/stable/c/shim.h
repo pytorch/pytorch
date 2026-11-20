@@ -399,6 +399,102 @@ torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
 
+// More Python interop shims; see the Python interop section above for the
+// libtorch_python / GIL contract.
+
+// Read the layout out of a Python torch.layout object. The returned code uses
+// the same encoding as aoti_torch_layout_*().
+AOTI_TORCH_EXPORT AOTITorchError
+torch_layout_from_pyobject(void* py_obj, int32_t* ret_layout);
+
+// Wrap a layout code (aoti_torch_layout_*() encoding) as a Python torch.layout.
+AOTI_TORCH_EXPORT AOTITorchError torch_layout_to_pyobject(
+    int32_t layout,
+    void** ret); // returns new reference
+
+// Read the memory format out of a Python torch.memory_format object. The
+// returned code uses the same encoding as aoti_torch_memory_format_*().
+AOTI_TORCH_EXPORT AOTITorchError
+torch_memory_format_from_pyobject(void* py_obj, int32_t* ret_memory_format);
+
+// Wrap a memory format code (aoti_torch_memory_format_*() encoding) as a Python
+// torch.memory_format.
+AOTI_TORCH_EXPORT AOTITorchError torch_memory_format_to_pyobject(
+    int32_t memory_format,
+    void** ret); // returns new reference
+
+// Read a Python bool. Only True and False are accepted.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_bool_from_pyobject(void* py_obj, bool* ret);
+
+// Wrap a bool as a Python bool.
+AOTI_TORCH_EXPORT AOTITorchError torch_bool_to_pyobject(
+    bool value,
+    void** ret); // returns new reference
+
+// Read a Python int (not bool) as an int64_t; errors if it is out of range.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_int64_from_pyobject(void* py_obj, int64_t* ret);
+
+// Wrap an int64_t as a Python int.
+AOTI_TORCH_EXPORT AOTITorchError torch_int64_to_pyobject(
+    int64_t value,
+    void** ret); // returns new reference
+
+// Read a Python float or int as a double.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_double_from_pyobject(void* py_obj, double* ret);
+
+// Wrap a double as a Python float.
+AOTI_TORCH_EXPORT AOTITorchError torch_double_to_pyobject(
+    double value,
+    void** ret); // returns new reference
+
+// Copy a Python str (encoded as UTF-8) or bytes (as is) into a new
+// StringHandle, which the caller frees with torch_delete_string. Embedded NUL
+// bytes are preserved.
+AOTI_TORCH_EXPORT AOTITorchError torch_string_from_pyobject(
+    void* py_obj,
+    StringHandle* ret); // returns new reference
+
+// Decode data[0, length) as UTF-8 into a Python str. data is borrowed and only
+// needs to stay alive for the call; invalid UTF-8 errors.
+AOTI_TORCH_EXPORT AOTITorchError torch_string_to_pyobject(
+    const char* data,
+    size_t length,
+    void** ret); // returns new reference
+
+// Whether py_obj is Python None. A null py_obj is an error, not None.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_none_pyobject(void* py_obj, bool* ret);
+
+// Return Python None.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_none_pyobject(void** ret); // returns new reference
+
+// Release one reference to py_obj, such as a new reference returned by another
+// *_pyobject shim.
+AOTI_TORCH_EXPORT AOTITorchError torch_decref_pyobject(void* py_obj);
+
+// Read the length of a Python list or tuple (subclasses included). Other
+// objects error.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_sequence_size_pyobject(void* py_obj, size_t* ret_size);
+
+// Return the item at index of a Python list or tuple. Errors if index is out of
+// range, which can happen if a list shrank after its length was read.
+AOTI_TORCH_EXPORT AOTITorchError torch_sequence_get_item_pyobject(
+    void* py_obj,
+    size_t index,
+    void** ret); // returns new reference
+
+// Build a Python list of items[0, length). The items are borrowed: the list
+// takes its own references, so the caller still owns and releases them.
+AOTI_TORCH_EXPORT AOTITorchError torch_new_list_pyobject(
+    void* const* items,
+    size_t length,
+    void** ret); // returns new reference
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #ifdef __cplusplus

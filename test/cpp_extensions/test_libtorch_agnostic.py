@@ -5,6 +5,7 @@ import math
 import sysconfig
 import unittest
 import warnings
+import weakref
 from pathlib import Path
 
 import torch
@@ -697,6 +698,265 @@ class TestLibtorchAgnostic(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Not yet supported DeviceType"):
             libtorch_agnostic._interop.device_roundtrip(torch.device("xla"))
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    @parametrize(
+        "layout",
+        [
+            torch.strided,
+            torch.sparse_coo,
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+            torch._mkldnn,
+            torch.jagged,
+        ],
+    )
+    def test_pyobject_layout_roundtrip(self, device, layout):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        # torch.layout objects are singletons.
+        self.assertIs(libtorch_agnostic._interop.layout_roundtrip(layout), layout)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_non_layout_raises(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with self.assertRaisesRegex(RuntimeError, "expected torch.layout"):
+            libtorch_agnostic._interop.layout_roundtrip(torch.float32)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    @parametrize(
+        "memory_format",
+        [
+            torch.contiguous_format,
+            torch.preserve_format,
+            torch.channels_last,
+            torch.channels_last_3d,
+        ],
+    )
+    def test_pyobject_memory_format_roundtrip(self, device, memory_format):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        out = libtorch_agnostic._interop.memory_format_roundtrip(memory_format)
+        # torch.memory_format objects are singletons.
+        self.assertIs(out, memory_format)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_non_memory_format_raises(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with self.assertRaisesRegex(RuntimeError, "expected torch.memory_format"):
+            libtorch_agnostic._interop.memory_format_roundtrip(torch.strided)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_bool_roundtrip(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.bool_roundtrip
+        self.assertIs(roundtrip(True), True)
+        self.assertIs(roundtrip(False), False)
+        # No truthiness: only the bool singletons are accepted.
+        for value in (1, 0, None, "True"):
+            with self.assertRaisesRegex(RuntimeError, "expected bool"):
+                roundtrip(value)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    @parametrize("value", [0, -1, 2**63 - 1, -(2**63)])
+    def test_pyobject_int64_roundtrip(self, device, value):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        out = libtorch_agnostic._interop.int64_roundtrip(value)
+        self.assertIs(type(out), int)
+        self.assertEqual(out, value)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_int64_rejects(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.int64_roundtrip
+        # bool is an int subclass but is rejected; floats are not truncated.
+        for value in (True, 1.0):
+            with self.assertRaisesRegex(RuntimeError, "expected int"):
+                roundtrip(value)
+        for value in (2**63, -(2**63) - 1):
+            with self.assertRaisesRegex(RuntimeError, "Overflow"):
+                roundtrip(value)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    @parametrize("value", [1.5, -0.0, math.inf, -math.inf, math.nan, 3])
+    def test_pyobject_double_roundtrip(self, device, value):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        out = libtorch_agnostic._interop.double_roundtrip(value)
+        self.assertIs(type(out), float)
+        self.assertEqual(out, float(value))
+        self.assertEqual(math.copysign(1.0, out), math.copysign(1.0, value))
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_double_rejects(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.double_roundtrip
+        with self.assertRaisesRegex(RuntimeError, "expected float"):
+            roundtrip("1.0")
+        # CPython raises here; its exception is left set and propagates as is.
+        with self.assertRaisesRegex(OverflowError, "int too large to convert to float"):
+            roundtrip(10**400)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_string_roundtrip(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.string_roundtrip
+        for value in ("", "h\u00e9llo \u4e16\u754c", "a\x00b"):
+            self.assertEqual(roundtrip(value), value)
+        # bytes are read as is and come back as a UTF-8 decoded str.
+        self.assertEqual(roundtrip(b"a\x00\xc3\xa9"), "a\x00\u00e9")
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_string_rejects(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.string_roundtrip
+        for value in (1, bytearray(b"a"), None):
+            with self.assertRaisesRegex(RuntimeError, "expected str or bytes"):
+                roundtrip(value)
+        # A lone surrogate cannot be encoded as UTF-8 ...
+        with self.assertRaisesRegex(UnicodeEncodeError, "surrogates not allowed"):
+            roundtrip("\ud800")
+        # ... and invalid UTF-8 bytes cannot be decoded back into a str.
+        with self.assertRaisesRegex(UnicodeDecodeError, "invalid start byte"):
+            roundtrip(b"\xff")
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    @parametrize(
+        "kind,value",
+        [
+            # Falsy values are engaged, not None.
+            ("bool", False),
+            ("int64", 0),
+            ("string", ""),
+            ("device", torch.device("cuda:1")),
+        ],
+    )
+    def test_pyobject_optional_roundtrip(self, device, kind, value):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = getattr(libtorch_agnostic._interop, f"optional_{kind}_roundtrip")
+        self.assertIsNone(roundtrip(None))
+        out = roundtrip(value)
+        self.assertIs(type(out), type(value))
+        self.assertEqual(out, value)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_optional_tensor(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.optional_tensor_roundtrip
+        self.assertIsNone(roundtrip(None))
+        x = torch.randn(2, device=device)
+        self.assertEqual(roundtrip(x).data_ptr(), x.data_ptr())
+        # An engaged value goes through the leaf conversion and its checks.
+        with self.assertRaisesRegex(RuntimeError, "expected torch.Tensor"):
+            roundtrip(1)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_list_roundtrip(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        interop = libtorch_agnostic._interop
+        # Lists and tuples are read; a list is always returned.
+        for values in ([], [1.5, 2], (1.5, -0.0)):
+            out = interop.double_list_roundtrip(values)
+            self.assertIs(type(out), list)
+            self.assertEqual(out, [float(v) for v in values])
+        self.assertEqual(interop.int64_arrayref_roundtrip((3, -1)), [3, -1])
+        bools = [True, False, True]
+        self.assertEqual(interop.bool_list_roundtrip(bools), bools)
+        nested = [["a"], [], ("b", "c")]
+        self.assertEqual(
+            interop.string_list_list_roundtrip(nested), [["a"], [], ["b", "c"]]
+        )
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_list_rejects(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.double_list_roundtrip
+        # No other iterables, and no broadcasting of a single value.
+        for value in ("ab", iter([1.0]), 1.0, None):
+            with self.assertRaisesRegex(RuntimeError, "expected list or tuple"):
+                roundtrip(value)
+        # Each element is converted with the leaf contract.
+        with self.assertRaisesRegex(RuntimeError, "expected float"):
+            roundtrip([1.0, "2"])
+        # Writing fails in the second inner list, after the first was built.
+        with self.assertRaisesRegex(UnicodeDecodeError, "invalid start byte"):
+            libtorch_agnostic._interop.string_list_list_roundtrip([["ok"], [b"\xff"]])
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_optional_tensor_list(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.optional_tensor_list_roundtrip
+        self.assertIsNone(roundtrip(None))
+        x = torch.randn(2, device=device)
+        out = roundtrip([x, None])
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0].data_ptr(), x.data_ptr())
+        self.assertIsNone(out[1])
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_list_failure_releases_elements(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.optional_tensor_list_roundtrip
+        x = torch.randn(2, device=device)
+        x_ref = weakref.ref(x)
+        values = [x, "not a tensor"]
+        with self.assertRaisesRegex(RuntimeError, "expected torch.Tensor"):
+            roundtrip(values)
+        # The Tensor converted before the failure, and the reference to it
+        # taken from the list, must have been released.
+        del x, values
+        gc.collect()
+        self.assertIsNone(x_ref())
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_list_mutated_during_conversion(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        values = []
+
+        class ClearingInt(int):
+            def __float__(self):
+                values.clear()
+                return 1.0
+
+        values.extend([ClearingInt(1), 2.0])
+        # The item being converted stays alive, and the shrunk list is caught.
+        with self.assertRaisesRegex(RuntimeError, "out of range"):
+            libtorch_agnostic._interop.double_list_roundtrip(values)
 
     @skipIfTorchVersionLessThan(2, 16)
     @skipIfTorchDynamo("Dynamo failed to run FX node with fake tensors")
