@@ -840,6 +840,40 @@ class TestLibtorchAgnostic(TestCase):
         with self.assertRaisesRegex(UnicodeDecodeError, "invalid start byte"):
             roundtrip(b"\xff")
 
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    @parametrize(
+        "kind,value",
+        [
+            # Falsy values are engaged, not None.
+            ("bool", False),
+            ("int64", 0),
+            ("string", ""),
+            ("device", torch.device("cuda:1")),
+        ],
+    )
+    def test_pyobject_optional_roundtrip(self, device, kind, value):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = getattr(libtorch_agnostic._interop, f"optional_{kind}_roundtrip")
+        self.assertIsNone(roundtrip(None))
+        out = roundtrip(value)
+        self.assertIs(type(out), type(value))
+        self.assertEqual(out, value)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_pyobject_optional_tensor(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        roundtrip = libtorch_agnostic._interop.optional_tensor_roundtrip
+        self.assertIsNone(roundtrip(None))
+        x = torch.randn(2, device=device)
+        self.assertEqual(roundtrip(x).data_ptr(), x.data_ptr())
+        # An engaged value goes through the leaf conversion and its checks.
+        with self.assertRaisesRegex(RuntimeError, "expected torch.Tensor"):
+            roundtrip(1)
+
     @skipIfTorchVersionLessThan(2, 16)
     @skipIfTorchDynamo("Dynamo failed to run FX node with fake tensors")
     def test_my_add(self, device):

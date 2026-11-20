@@ -77,6 +77,12 @@ struct NoopPyObjectConversion final : PyObjectConversionInterface {
   PyObject* string_to_pyobject(std::string_view /*str*/) const override {
     TORCH_CHECK(false, kNoImplMsg);
   }
+  bool is_none_pyobject(PyObject* /*obj*/) const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
+  PyObject* new_none_pyobject() const override {
+    TORCH_CHECK(false, kNoImplMsg);
+  }
 };
 
 const NoopPyObjectConversion noop_impl;

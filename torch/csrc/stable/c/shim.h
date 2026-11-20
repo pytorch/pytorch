@@ -464,6 +464,14 @@ AOTI_TORCH_EXPORT AOTITorchError torch_string_to_pyobject(
     size_t length,
     void** ret); // returns new reference
 
+// Whether py_obj is Python None. A null py_obj is an error, not None.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_none_pyobject(void* py_obj, bool* ret);
+
+// Return Python None.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_none_pyobject(void** ret); // returns new reference
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #ifdef __cplusplus
