@@ -2667,24 +2667,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 return None
 
-        @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)  # type: ignore[deprecated]
-        def handle_guard_size_oblivious(
-            self, tx: "InstructionTranslatorBase", expr: VariableTracker
-        ) -> VariableTracker | None:
-            if isinstance(expr, SymNodeVariable):
-                # TODO: this probably should be folded somewhere else but I'm not sure where
-                # TODO: some of the other symbolic_shapes special tools can also get this treatment too
-                return VariableTracker.build(
-                    tx,
-                    torch.fx.experimental.symbolic_shapes.guard_size_oblivious(  # type: ignore[deprecated]
-                        expr.sym_num
-                    ),
-                )
-            elif expr.is_python_constant():
-                return expr
-            else:
-                return None
-
         @register(torch.fx.experimental.symbolic_shapes.guard_or_true)
         def handle_guard_or_true(
             self, tx: "InstructionTranslatorBase", expr: VariableTracker
@@ -2767,8 +2749,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return VariableTracker.build(
                 tx,
                 # pyrefly: ignore [bad-argument-type, unbound-name]
-                torch.fx.experimental.symbolic_shapes.guard_scalar(val),
+                self.value(val),
             )
+
+        # Internal import compatibility uses ordinary guarding, without restoring
+        # the removed size-oblivious assumptions.
+        compat_guard = getattr(
+            torch._utils_internal, "_guard_size_oblivious_compat", None
+        )
+        if compat_guard is not None:
+            handlers[compat_guard] = guard_scalar
 
         @register(torch.fx.experimental.symbolic_shapes.statically_known_true)
         def handle_statically_known_true(

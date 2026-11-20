@@ -405,7 +405,6 @@ manual_torch_name_rule_map: dict[
     "torch._dynamo.disable_nested_graph_breaks": UserFunctionVariable,
     "torch._dynamo.error_on_graph_break": UserFunctionVariable,
     "torch._dynamo.override_cudagraphs": UserFunctionVariable,
-    "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.is_nested_int": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.optimization_hint": TorchInGraphFunctionVariable,
@@ -444,6 +443,7 @@ manual_torch_name_rule_map: dict[
     # in variables/torch.py fires instead of graph-breaking on _len_torch_dispatch_stack.
     "torch.utils._python_dispatch._get_current_dispatch_mode_stack": TorchInGraphFunctionVariable,
     "torch._utils_internal.justknobs_check": UserFunctionVariable,
+    "torch._utils_internal._guard_size_oblivious_compat": TorchInGraphFunctionVariable,
     "inspect.signature": InspectSignatureVariable,
 }
 
