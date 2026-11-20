@@ -154,6 +154,57 @@ kernel void bce_loss_forward_reduce(
   }
 }
 
+// Same as bce_loss_forward_reduce for the pointwise losses below, whose
+// functor F computes the loss in float from input, target and params.alpha.
+template <typename T, typename F>
+kernel void loss_forward_reduce(
+    device const T* input [[buffer(0)]],
+    device const T* target [[buffer(1)]],
+    device float* partials [[buffer(2)]],
+    constant LossReduceParams& params [[buffer(3)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]]) {
+  const uint begin = tgid * params.slice_len;
+  const float val = thread_reduce_flat<SUM_NCHAINS>(
+      [&](uint i) {
+        return F()(
+            static_cast<float>(input[begin + i]),
+            static_cast<float>(target[begin + i]),
+            params.alpha);
+      },
+      [](float a, float b) { return a + b; },
+      0.0f,
+      min(params.slice_len, params.numel - begin),
+      tid,
+      tptg);
+  threadgroup float shared[MAX_THREADGROUP_SIZE / simdgroup_size];
+  const float sum = threadgroup_sum(shared, val, tid, tptg);
+  if (tid == 0) {
+    partials[tgid] = sum * params.scale;
+  }
+}
+
+// Pass 2, one threadgroup: adds the partials in float and rounds once to the
+// loss dtype (at::sum_out would round each partial to half or bfloat first).
+template <typename T>
+kernel void loss_forward_reduce_finalize(
+    device const float* partials [[buffer(0)]],
+    device T* loss [[buffer(1)]],
+    constant uint& num_partials [[buffer(2)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]]) {
+  float val = 0;
+  for (uint i = tid; i < num_partials; i += tptg) {
+    val += partials[i];
+  }
+  threadgroup float shared[MAX_THREADGROUP_SIZE / simdgroup_size];
+  const float sum = threadgroup_sum(shared, val, tid, tptg);
+  if (tid == 0) {
+    loss[0] = static_cast<T>(sum);
+  }
+}
+
 // Augmented target lookup: l'[idx] is BLANK for even idx, l[idx/2] for odd.
 template <typename T_target, typename T_index>
 inline T_index get_target_prime(
@@ -497,6 +548,10 @@ struct mse_functor {
     const T diff = a - b;
     return diff * diff;
   }
+  // loss_forward_reduce passes an alpha to every loss
+  inline float operator()(const float a, const float b, const float) {
+    return (*this)(a, b);
+  }
 };
 
 struct mse_backward_functor {
@@ -723,6 +778,36 @@ INSTANTIATE_BCE_LOSS_FORWARD(half);
 INSTANTIATE_BCE_LOSS_FORWARD_REDUCE(float);
 INSTANTIATE_BCE_LOSS_FORWARD_REDUCE(bfloat);
 INSTANTIATE_BCE_LOSS_FORWARD_REDUCE(half);
+
+#define INSTANTIATE_LOSS_FORWARD_REDUCE(NAME, T)                       \
+  template [[host_name(#NAME "_loss_forward_reduce_" #T)]] kernel void \
+  loss_forward_reduce<T, NAME##_functor>(                              \
+      device const T*,                                                 \
+      device const T*,                                                 \
+      device float*,                                                   \
+      constant LossReduceParams&,                                      \
+      uint,                                                            \
+      uint,                                                            \
+      uint);
+
+INSTANTIATE_LOSS_FORWARD_REDUCE(mse, float);
+INSTANTIATE_LOSS_FORWARD_REDUCE(mse, bfloat);
+INSTANTIATE_LOSS_FORWARD_REDUCE(mse, half);
+INSTANTIATE_LOSS_FORWARD_REDUCE(smooth_l1, float);
+INSTANTIATE_LOSS_FORWARD_REDUCE(smooth_l1, bfloat);
+INSTANTIATE_LOSS_FORWARD_REDUCE(smooth_l1, half);
+INSTANTIATE_LOSS_FORWARD_REDUCE(huber, float);
+INSTANTIATE_LOSS_FORWARD_REDUCE(huber, bfloat);
+INSTANTIATE_LOSS_FORWARD_REDUCE(huber, half);
+
+#define INSTANTIATE_LOSS_FORWARD_REDUCE_FINALIZE(T)                      \
+  template [[host_name("loss_forward_reduce_finalize_" #T)]] kernel void \
+  loss_forward_reduce_finalize<T>(                                       \
+      device const float*, device T*, constant uint&, uint, uint);
+
+INSTANTIATE_LOSS_FORWARD_REDUCE_FINALIZE(float);
+INSTANTIATE_LOSS_FORWARD_REDUCE_FINALIZE(bfloat);
+INSTANTIATE_LOSS_FORWARD_REDUCE_FINALIZE(half);
 
 REGISTER_TERNARY_ALPHA_OP(mse_backward, float, float, float);
 REGISTER_TERNARY_ALPHA_OP(mse_backward, half, half, half);

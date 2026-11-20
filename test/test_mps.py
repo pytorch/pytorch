@@ -5548,6 +5548,23 @@ class TestMPS(TestCaseMPS):
                 return x.grad
             self.assertEqual(grad_of("mps"), grad_of("cpu"), f"{fn.__name__} grad")
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_loss_fused_reduction_multi_threadgroup(self, dtype):
+        # mse, smooth_l1 and huber reduce one slice of at most 8192 elements per threadgroup; these sizes
+        # leave a short last slice, which holds a spike
+        for shape in ((3, 2731), (47, 523), (7, 149797)):
+            for transpose in (False, True):
+                x = torch.randn(shape[::-1] if transpose else shape) * 0.1
+                t = torch.randn_like(x) * 0.1
+                x.view(-1)[-1] = 10
+                x, t = (x.t(), t.t()) if transpose else (x, t)
+                x, t = x.to(dtype), t.to(dtype)
+                for fn in (F.mse_loss, F.smooth_l1_loss, F.huber_loss):
+                    for reduction in ("mean", "sum"):
+                        ref = fn(x.double(), t.double(), reduction=reduction).to(dtype)
+                        res = fn(x.to("mps"), t.to("mps"), reduction=reduction)
+                        self.assertEqual(res.cpu(), ref, msg=f"{fn.__name__} {reduction} {shape} {transpose}")
+
     @parametrize("dtypes", MIXED_DTYPES)
     def test_addr_mixed_dtype(self, dtypes):
         # addr also took its result dtype from `self` instead of the promoted type

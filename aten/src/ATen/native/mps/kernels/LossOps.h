@@ -26,6 +26,13 @@ struct BCELossReduceParams {
   bool has_weight;
 };
 
+struct LossReduceParams {
+  uint32_t numel;
+  uint32_t slice_len;
+  float scale;
+  float alpha;
+};
+
 template <typename index_t>
 struct CTCLossParams {
   index_t BLANK;
