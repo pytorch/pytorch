@@ -939,6 +939,9 @@ def reduce_row_tile(
     if ragged_vector:
         vec = tile.ragged_vector_width(N, x.element_size(), order, bool(use_tma))
         ragged_vector = N % vec != 0 or (M > 1 and x.stride(0) % vec != 0)
+    if threads_per_row == 1 and N < 1:
+        # fold_linear_rolled's tail loads vector 0 for masked lanes.
+        raise ValueError(f"one-thread rows must be nonempty, got {N=}")
     itree = None
     if order == "inner_tree" and final and threads_per_row is None:
         itree = trait_itree_plan(trait, N, M, x.element_size(), device=x.device)
