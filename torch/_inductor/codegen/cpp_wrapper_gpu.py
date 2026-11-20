@@ -50,6 +50,7 @@ from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, TritonScratchWorkspace
 from .cpp_utils import cexpr, device_to_aten
 from .cpp_wrapper_cpu import CppWrapperCpu
+from .debug_utils import IntermediateValueDebuggingLevel
 from .multi_kernel import MultiKernelCall
 from .triton_utils import should_unwrap_unspec_arg
 from .wrapper import (
@@ -2098,9 +2099,17 @@ static inline void ensure_triton_kernel_compiles_started() {{
                 "this->device_idx_" if V.graph.aot_mode else str(device.index)
             )
             jit_device_idx = str(device.index)
+            debug_printer_manager = V.graph.wrapper_code.debug_printer
+            input_owners = []
+            if debug_printer_manager.debug_printer_level in (
+                IntermediateValueDebuggingLevel.SAVE_ONLY,
+                IntermediateValueDebuggingLevel.PRINT_ONLY,
+            ):
+                call_args, input_owners = self._prepare_temporary_tensor_handles(
+                    call_args
+                )
             jit_call_args = [*call_args, jit_device_idx, stream]
             aot_call_args = [*call_args, aoti_device_idx, "stream"]
-            debug_printer_manager = V.graph.wrapper_code.debug_printer
             debug_printer_manager.set_printer_args(
                 jit_call_args[: len(arg_types)], kernel_name, arg_types, None
             )
@@ -2118,6 +2127,7 @@ static inline void ensure_triton_kernel_compiles_started() {{
                         f"{wrapper_name}({', '.join(aot_call_args)}, "
                         f"kernels, this->cubin_dir_);"
                     )
+            self._release_owned_tensor_handles(input_owners)
         else:
             casted = []
             # pyrefly: ignore [bad-argument-type, no-matching-overload]
