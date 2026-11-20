@@ -590,8 +590,20 @@ use_torch_profiler_benchmarker: bool = Config(
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
-# enable slow autotuning passes to select pointwise/reductions algorithms
+# enable slow autotuning passes to select pointwise algorithms. Until
+# max_autotune_reduction stops defaulting to None, this also covers reductions.
 max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") == "1"
+
+# Widen the configs tried for reduction, persistent reduction and split
+# reduction kernels. None follows max_autotune_pointwise. max_autotune=True
+# enables both regardless.
+# TODO: once no callers rely on max_autotune_pointwise also covering reductions
+# (they set max_autotune_reduction=True instead), default this to False and
+# remove the None fallback, so that max_autotune_pointwise covers only pointwise
+# kernels.
+max_autotune_reduction: bool | None = get_tristate_env(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_REDUCTION"
+)
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
@@ -887,6 +899,26 @@ max_autotune_subproc_terminate_timeout_seconds = 0.0
 
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
+
+# should_reinplace_scatter() controls whether a chain of scatter ops in the fxgraph is
+# functionalized (scatter chain) or mutate in-place (mutation).
+# Functionalized scatter usually can be fused into a single kernel, but each threadblock
+# must bear of cost of wastefully loading all the input pointers for each scatter dim, while
+# mutate in-place usually results in many smaller inductor kernels, but does not have the
+# loading issue.
+# Therefore, when you have a long chain of scatter ops, it is usually beneficial to use the
+# mutate in-place form as the increased kernel launch cost is lower than wasted memory load
+# cost. When you have a short chain of scatter ops, it is usually beneficial to use the
+# functionalized form.
+#
+# This configuration value changes the chain length threshold. At a scatter chain length larger
+# than TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD, inductor will actively switches to
+# mutate in-place (non-fused) form to avoid wastefully loading kernel inputs.
+# At a scatter chain length lower than TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD or when
+# TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD < 0, the original form is used.
+reinplace_scatter_chain_threshold = int(
+    os.environ.get("TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD", "-1")
+)
 
 # Number of benchmark runs for collective operations
 collective_benchmark_nruns = int(
@@ -2079,6 +2111,17 @@ class cpp:
     # Target CPU architecture for C++ wrapper compilation. When unset, Inductor
     # uses the platform default. Set to "" to suppress the architecture flag.
     march: str | None = os.environ.get("TORCHINDUCTOR_CPP_MARCH")
+
+    # Linux only, ignored on other platforms: extra flags passed verbatim to
+    # every C++ compiler command, e.g. ["-mllvm", "-enable-misched=false"].
+    extra_cflags: list[str] = []
+
+    # Linux only, ignored on other platforms: extra flags passed verbatim to the
+    # C++ compiler commands that link. These go to the compiler, which runs the
+    # linker, so linker options need the -Wl, prefix. With
+    # aot_inductor.enable_lto, machine code is generated at link time, so code
+    # generation flags go here, e.g. ["-Wl,-mllvm,-enable-misched=false"].
+    extra_ldflags: list[str] = []
 
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
