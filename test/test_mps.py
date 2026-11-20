@@ -5871,14 +5871,21 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(cpu_x.grad, mps_x.grad.to('cpu'))
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-    @parametrize("shape,dim", [((3, 8192), -1), ((4100, 7), 0), ((600, 3000), -1)])
+    @parametrize("shape,dim", [((3, 8192), -1), ((4100, 7), 0), ((600, 3000), -1), ((5, 2048), -1),
+                               ((257, 16384), -1), ((300, 16400), -1)])
     def test_log_softmax_metal_paths(self, dtype, shape, dim):
         # Shapes pin the non-row Metal kernels: the split partial/finalize pair
-        # (dim > 2048, few rows), the 2D kernel (dim not innermost), and the 2D
-        # fallback for long rows (num_rows > 256 disables the split).
+        # (dim > 2048, few rows), the strided split (dim not innermost), the
+        # block kernel for rows neither softmax_row nor the split path take
+        # (many long rows, few rows up to 2048 wide, 1024 threads at 16384),
+        # and the 2D fallback for rows too long for the block kernel. The 100s
+        # put row maxima in the block kernel's first and last chunk, so a max
+        # that skips either overflows exp.
         cpu_x = torch.randn(shape, dtype=dtype)
-        mps_out = F.log_softmax(cpu_x.to('mps'), dim=dim)
-        self.assertEqual(mps_out.cpu(), F.log_softmax(cpu_x, dim=dim))
+        cpu_x[0, -1] = cpu_x[-1, 0] = 100
+        mps_x = cpu_x.to('mps')
+        self.assertEqual(F.log_softmax(mps_x, dim=dim).cpu(), F.log_softmax(cpu_x, dim=dim))
+        self.assertEqual(F.softmax(mps_x, dim=dim).cpu(), F.softmax(cpu_x, dim=dim))
 
     def test_log_softmax_split_inf_chunk(self):
         # A 2048-wide all -inf chunk must not poison the split-path logsumexp;

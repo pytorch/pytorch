@@ -142,6 +142,50 @@ softmax_row(
   }
 }
 
+// Forward softmax for contiguous rows that neither softmax_row nor the split
+// path take: one threadgroup per row keeps up to kSoftmaxBlockElems values per
+// thread in registers, so the row is read once and exp is evaluated once.
+template <typename T, typename idx_t, bool log_softmax>
+[[max_total_threads_per_threadgroup(kSoftmaxMaxThreads)]] [[kernel]] void
+softmax_block(
+    device const T* input,
+    device const T*,
+    device T* output,
+    constant SoftmaxParams<idx_t>& params,
+    uint tgid [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]]) {
+  threadgroup float shared_max[simdgroup_size];
+  threadgroup float shared_sum[simdgroup_size];
+  const auto dim_size = params.dim_size;
+  const idx_t in_base = idx_t(tgid) * dim_size;
+  float vals[kSoftmaxBlockElems];
+  float max_val = -INFINITY;
+  for (uint i = 0; i < kSoftmaxBlockElems; ++i) {
+    const idx_t col = tid + i * tptg;
+    vals[i] = col < dim_size ? float(input[in_base + col]) : -INFINITY;
+    // a NaN dropped here still reaches every output through the sum, and
+    // c10::metal::max makes the kernel up to 2x slower for half
+    max_val = metal::max(max_val, vals[i]);
+  }
+  max_val = c10::metal::threadgroup_max(shared_max, max_val, tid, tptg);
+  float sum = 0;
+  for (uint i = 0; i < kSoftmaxBlockElems; ++i) {
+    const float e = precise::exp(vals[i] - max_val);
+    sum += e;
+    vals[i] = log_softmax ? vals[i] - max_val : e;
+  }
+  const SoftmaxOp<log_softmax> op(
+      max_val, c10::metal::threadgroup_sum(shared_sum, sum, tid, tptg));
+  for (uint i = 0; i < kSoftmaxBlockElems; ++i) {
+    const idx_t col = tid + i * tptg;
+    if (col < dim_size) {
+      output[in_base + col] = static_cast<T>(
+          log_softmax ? vals[i] - op.normalizer : vals[i] * op.normalizer);
+    }
+  }
+}
+
 // First pass of the split path for long contiguous rows. Used when the
 // reduction width exceeds 2048 and there are at most 256 logical rows
 // and the input consists of contiguous rows.
@@ -498,9 +542,22 @@ softmax_serial(
       uint tid [[thread_position_in_threadgroup]],                            \
       uint tptg [[threads_per_threadgroup]]);
 
+#define REGISTER_SOFTMAX_BLOCK(DTYPE, IDX_T, SUFFIX, NAME, LOG_SOFTMAX)      \
+  template [[host_name(#NAME "_block_" #DTYPE "_" #SUFFIX)]] [[kernel]] void \
+  softmax_block<DTYPE, IDX_T, LOG_SOFTMAX>(                                  \
+      device const DTYPE* input,                                             \
+      device const DTYPE* aux,                                               \
+      device DTYPE* output,                                                  \
+      constant SoftmaxParams<IDX_T>& params,                                 \
+      uint tgid [[threadgroup_position_in_grid]],                            \
+      uint tid [[thread_position_in_threadgroup]],                           \
+      uint tptg [[threads_per_threadgroup]]);
+
 #define REGISTER_SOFTMAX_IDX(DTYPE, IDX_T, SUFFIX)                        \
   REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, softmax, SoftmaxOp<false>)    \
   REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, log_softmax, SoftmaxOp<true>) \
+  REGISTER_SOFTMAX_BLOCK(DTYPE, IDX_T, SUFFIX, softmax, false)            \
+  REGISTER_SOFTMAX_BLOCK(DTYPE, IDX_T, SUFFIX, log_softmax, true)         \
   REGISTER_SOFTMAX_OP(                                                    \
       DTYPE, IDX_T, SUFFIX, log_softmax_backward, LogSoftmaxBackwardOp)   \
   REGISTER_SOFTMAX_OP(                                                    \

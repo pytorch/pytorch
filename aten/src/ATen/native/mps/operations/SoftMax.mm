@@ -98,6 +98,9 @@ static void softmax_mps_impl(const std::string& kernel,
   const auto n_chunks = std::clamp(split_target_groups / num_rows, uint64_t(1), ceil_div(dim_size, split_min_chunk));
   const auto chunk_size = ceil_div(dim_size, n_chunks);
   const bool use_split = contiguous_rows && !use_row_kernel && n_chunks > 1;
+  // the block kernel only implements the forward ops, which have no aux input
+  const bool use_block_kernel = contiguous_rows && !use_row_kernel && !use_split && !aux &&
+      dim_size <= uint64_t(kSoftmaxBlockElems) * kSoftmaxMaxThreads;
   // double the width for 2-byte dtypes so a threadgroup row spans a full 128-byte cache line
   const auto max_tg_x = uint64_t((self.element_size() == 2 ? 2u : 1u) * c10::metal::simdgroup_size);
   const auto tg_x = std::min(inner_size, max_tg_x);
@@ -145,6 +148,11 @@ static void softmax_mps_impl(const std::string& kernel,
         const auto group = MTLSizeMake(kSoftmaxThreads, 1, 1);
         run_softmax(stream, kernel + "_partial", use_u32, grid, group, params, self_, aux, partials);
         run_softmax(stream, kernel + "_finalize", use_u32, grid, group, params, self_, aux, output, partials);
+      } else if (use_block_kernel) {
+        constexpr auto simd = uint64_t(c10::metal::simdgroup_size);
+        const auto grid = MTLSizeMake(num_rows, 1, 1);
+        const auto group = MTLSizeMake(ceil_div(dim_size, kSoftmaxBlockElems * simd) * simd, 1, 1);
+        run_softmax(stream, kernel + "_block", use_u32, grid, group, params, self_, aux, output);
       } else if (use_strided_split) {
         const auto grid = MTLSizeMake(ceil_div(inner_size, tg_x), num_rows / inner_size, strided_chunks);
         const auto group = MTLSizeMake(tg_x, tg_y, 1);
