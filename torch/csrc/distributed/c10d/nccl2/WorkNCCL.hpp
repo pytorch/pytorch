@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -158,8 +159,9 @@ class WorkNCCL : public c10d::Work {
 
     WorkStatus status() const;
     std::exception_ptr exception() const;
-    // cancelled: by reconfigure(); recorded in cancelledByReconfigure.
-    bool setTerminalStatus(WorkStatus status, bool cancelled = false);
+    bool setTerminalStatus(
+        WorkStatus status,
+        const std::optional<std::string>& message = std::nullopt);
     // Returns ownedEphemeralTimeout to the comm, at most once.
     void releaseEphemeralTimeout();
     WorkStatus checkStatus(
@@ -189,8 +191,7 @@ class WorkNCCL : public c10d::Work {
     c10::intrusive_ptr<c10::ivalue::Future> futureWorkResult;
     std::atomic<bool> resultPublished{false};
     bool hostBlocking{false};
-    // reconfigure() cancelled the work; set before workStatus is published.
-    bool cancelledByReconfigure{false};
+    std::atomic<bool> cancelledByReconfigure{false};
   };
   struct TrackedWork {
     std::shared_ptr<State> state;

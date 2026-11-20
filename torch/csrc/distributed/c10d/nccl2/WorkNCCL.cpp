@@ -186,7 +186,7 @@ void WorkNCCL::recordEnd() {
 
 bool WorkNCCL::State::setTerminalStatus(
     WorkStatus terminal_status,
-    bool cancelled) {
+    const std::optional<std::string>& message) {
   TORCH_INTERNAL_ASSERT(
       terminal_status == WorkStatus::COMPLETED ||
       terminal_status == WorkStatus::TIMEDOUT ||
@@ -206,10 +206,7 @@ bool WorkNCCL::State::setTerminalStatus(
         "timed out"));
   } else if (terminal_status == WorkStatus::ERROR) {
     workException = std::make_exception_ptr(C10_BUILD_ERROR(
-        DistBackendError,
-        cancelled ? "NCCL operation was cancelled by reconfigure()"
-                  : "NCCL operation failed"));
-    cancelledByReconfigure = cancelled;
+        DistBackendError, message.value_or("NCCL operation failed")));
   }
   workStatus.store(terminal_status, std::memory_order_release);
   return true;

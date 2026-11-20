@@ -137,9 +137,12 @@ void WorkNCCLQueue::cancelPending() {
     for (auto work_queue = queued_works; !work_queue.empty();
          work_queue.pop()) {
       const auto& state = work_queue.front().state;
+      state->cancelledByReconfigure = true;
       // Work whose kernel has already finished still completes successfully.
       state->checkStatus();
-      state->setTerminalStatus(WorkNCCL::WorkStatus::ERROR, /*cancelled=*/true);
+      state->setTerminalStatus(
+          WorkNCCL::WorkStatus::ERROR,
+          "NCCL operation was cancelled by reconfigure()");
     }
   }
 }
