@@ -527,6 +527,7 @@ def require_runtimes() -> None:
         dists = sorted(
             {d for k in gaps for d in toolchains.get_toolchain(k).RUNTIME_DISTS}
         )
+        dists = [d + ">=13.2,<14" if d == "cuda-bindings" else d for d in dists]
         detail = "; ".join(
             f"{k} needs {', '.join(ms)}" for k, ms in sorted(gaps.items())
         )
