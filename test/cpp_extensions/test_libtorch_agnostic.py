@@ -1175,6 +1175,18 @@ class TestLibtorchAgnostic(TestCase):
         ):
             libtorch_agnostic.ops.test_device_set_index(cuda_device, 129)
 
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @parametrize("mtia_device", ["mtia", "mtia:1"])
+    def test_mtia_device_conversion(self, device, mtia_device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        expected = torch.device(mtia_device)
+        index = -1 if expected.index is None else expected.index
+        self.assertEqual(
+            libtorch_agnostic.ops.test_device_set_index(expected, index), expected
+        )
+
     @skipIfTorchVersionLessThan(2, 10)
     @onlyCUDA
     @deviceCountAtLeast(2)
