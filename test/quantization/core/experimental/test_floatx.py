@@ -218,22 +218,21 @@ def simulate_fp8_precision(input, variant):
     return vals * signs
 
 
-def _round_e8m0_rne(biased_exponent, lsb, g, r, s):
-    round_up = False
-
-    # apply g,r,s rounding rules for RNE rounding
-    if g == 1:
-        if (r == 1) or (s == 1):
-            round_up = True
-        else:
-            if lsb:
-                round_up = True
-
-    # round up if necessary
-    if round_up:
-        biased_exponent += 1
-
-    return biased_exponent
+def _round_e8m0(x):
+    """The power of two nearest to x >= 0, with ties going up (e8m0 has no
+    mantissa bits to be even), or NaN beyond e8m0's range. e8m0 has no zero, so
+    values below 2**-127 become 2**-127."""
+    if not math.isfinite(x):
+        return math.nan
+    if x == 0:
+        return 2.0**-127
+    m, e = math.frexp(x)  # x = m * 2**e with 0.5 <= m < 1
+    rounded = 2.0**e if m >= 0.75 else 2.0 ** (e - 1)
+    if rounded > 2.0**127:
+        return math.nan
+    if rounded < 2.0**-127:
+        return 2.0**-127
+    return rounded
 
 
 ROUND_TRIP_TEST_CASES = (
@@ -306,11 +305,11 @@ class TestFloat8Dtype(TestCase):
         self.assertEqual(x8_simulated, x8.float())
 
     @skipMPS
-    def test_float8_e8m0fnu_rne_rounding(self, device):
+    def test_float8_e8m0fnu_rounding(self, device):
         """
         For every possible e8m0 exponent (256 options) and for every possible
-        g, r, s bits of the float32 mantissa, verify that RNE rounding is
-        correctly applied when casting from float32 to e8m0
+        g, r, s bits of the float32 mantissa, verify that casting from float32
+        to e8m0 rounds to nearest, with ties going up.
 
         Note: this code is morally similar to `test_cast_round_trip`, but
         IMO simpler to special case e8m0 here.
@@ -325,41 +324,18 @@ class TestFloat8Dtype(TestCase):
                 uint32_t_start = (biased_exponent << 23) + (grs << 20)
                 fp32_start = _int_bits_to_float(uint32_t_start)
 
-                # create an RNE rounded version of the exponent
-                if biased_exponent == 255:
-                    new_biased_exponent = biased_exponent
-                else:
-                    lsb = biased_exponent > 0
-                    g = grs >> 2
-                    r = (grs >> 1) & 0b1
-                    s = grs & 0b1
-                    new_biased_exponent = _round_e8m0_rne(biased_exponent, lsb, g, r, s)
-
-                # create an RNE rounded version of the float
-                fp32_e8m0_fp32_emulated = _int_bits_to_float(new_biased_exponent << 23)
-
-                # now, do the same in PyTorch and see if results match
+                expected = _round_e8m0(fp32_start)
                 fp32_pt_start = torch.full(
                     (1,), fp32_start, device=device, dtype=torch.float
                 )
-                fp32_pt_e8m0 = fp32_pt_start.to(torch.float8_e8m0fnu)
-                fp32_pt_e8m0_fp32 = fp32_pt_e8m0.to(torch.float)
-
-                expected = fp32_e8m0_fp32_emulated
-                if biased_exponent == 254 and grs >= 4:
-                    # special case rounding up from the largest representable float32 exponent, which
-                    # saturates to nan
-                    expected = float("nan")
-                elif biased_exponent == 255:
-                    # special case inf and nan, which becomes nan
-                    expected = float("nan")
-
-                actual = fp32_pt_e8m0_fp32.item()
+                actual = fp32_pt_start.to(torch.float8_e8m0fnu).float().item()
 
                 self.assertEqual(
                     expected,
                     actual,
                     lambda msg: f"{msg}\nexpected: {expected}, actual: {actual}",
+                    atol=0,
+                    rtol=0,
                 )
 
     @dtypes(*FLOAT8_DTYPES)

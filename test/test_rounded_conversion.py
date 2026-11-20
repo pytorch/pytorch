@@ -18,9 +18,11 @@ from torch.testing._internal.common_utils import (
 )
 
 
-FLOAT8_DTYPES = tuple(float8_types_and(torch.float8_e5m3fnu))
+FLOAT8_DTYPES = tuple(float8_types_and(torch.float8_e8m0fnu, torch.float8_e5m3fnu))
 # These only represent magnitudes: the conversions round |x|.
-UNSIGNED_DTYPES = (torch.float8_e5m3fnu,)
+UNSIGNED_DTYPES = (torch.float8_e8m0fnu, torch.float8_e5m3fnu)
+# Powers of two only: ties round up, as there are no mantissa bits to be even.
+NO_MANTISSA_DTYPES = (torch.float8_e8m0fnu,)
 NARROWING = {
     torch.float64: (torch.float32, torch.float16, torch.bfloat16, *FLOAT8_DTYPES),
     torch.float32: (torch.float16, torch.bfloat16, *FLOAT8_DTYPES),
@@ -56,28 +58,40 @@ def _overflow_value(dtype):
     """The default conversion's result past the largest finite magnitude."""
     if dtype in (torch.float8_e4m3fn, torch.float8_e5m3fnu):
         return torch.finfo(dtype).max
-    if dtype in (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz):
+    if dtype in (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz, torch.float8_e8m0fnu):
         return math.nan
     return math.inf
 
 
+def _virtual_next(mags, dst):
+    """The value after the largest magnitude mags[-1], were the exponent range
+    wider."""
+    if dst in NO_MANTISSA_DTYPES:
+        return mags[-1] * 2
+    return 2 * mags[-1] - mags[-2]
+
+
 def _expected_narrow(x, dst):
-    """Reference rounding to nearest even of the float64 values x (exact source
-    values) to dst, computed from a table of all of dst's finite values."""
+    """Reference rounding to nearest of the float64 values x (exact source
+    values) to dst, with ties to even (or up, for dtypes without mantissa),
+    computed from a table of all of dst's finite values."""
     mags = _finite_magnitudes(dst)
     n = len(mags)
     signed = dst not in UNSIGNED_DTYPES
     has_neg_zero = signed and dst not in (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
+    no_mantissa = dst in NO_MANTISSA_DTYPES
     overflow_value = _overflow_value(dst)
-    virtual_next = 2 * mags[-1] - mags[-2]
+    virtual_next = _virtual_next(mags, dst)
 
     neg = torch.signbit(x) & signed
     a = torch.where(x.isfinite(), x.abs(), torch.zeros_like(x))
     down = torch.searchsorted(mags, a, right=True) - 1
-    up = torch.where(mags[down] == a, down, down + 1)
+    below = down < 0  # only for dtypes without zero
+    down = down.clamp(min=0)
+    up = torch.where((mags[down] == a) | below, down, down + 1)
     up_value = torch.where(up < n, mags[up.clamp(max=n - 1)], virtual_next)
     mid = (mags[down] + up_value) / 2
-    tie = torch.where(down % 2 == 0, down, up)
+    tie = up if no_mantissa else torch.where(down % 2 == 0, down, up)
     r = torch.where(a < mid, down, torch.where(a > mid, up, tie))
 
     value = mags[r.clamp(max=n - 1)]
@@ -113,7 +127,7 @@ def _boundary_inputs(src, dst):
         mags = torch.cat([mags, next_mags]).sort().values
     else:
         mags = _finite_magnitudes(dst)
-        top = torch.stack([mags[-1], 2 * mags[-1] - mags[-2]])
+        top = torch.stack([mags[-1], _virtual_next(mags, dst)])
     # Includes the midpoint between the largest value and the next one, were
     # the exponent range wider.
     centers = torch.cat(
