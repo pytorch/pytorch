@@ -18,11 +18,10 @@ extern "C" {
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
-// Has the same semantic as aoti_torch_call_dispatcher, but takes an
-// additional argument for the extension build version. This is
-// needed for backward compatibility when calling native functions via
-// the dispatcher. The caller should pass in the libtorch version the
-// extension is building with (NOT target version).
+// Legacy build-only variant of torch_call_dispatcher_v2. See v2 for the
+// boxed-stack and ownership contract. Pass TORCH_ABI_VERSION for the extension
+// build version (NOT its target version). This entrypoint retains the original
+// conversion contract; prefer v2 when it is available.
 AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(
     const char* opName,
     const char* overloadName,
@@ -399,8 +398,19 @@ torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
 
-// Same as torch_call_dispatcher EXCEPT we also require passing the extension's
-// target version (on top of build version).
+// Calls the operator overload identified by opName and overloadName using
+// boxed StableIValue arguments in schema order. The caller provides stack
+// capacity for max(number of arguments, number of returns).
+// Consumes ownership of owning argument values in stack and replaces them
+// with owning return values: ret0 at index 0, ret1 at index 1, and so on.
+// The stack allocation remains the caller's; do not unbox or reuse consumed
+// input values. On failure, inputs may already have been consumed.
+// Pass TORCH_ABI_VERSION for build, and TORCH_TARGET_VERSION for target when
+// defined (otherwise TORCH_ABI_VERSION). Target must be nonzero and <= build.
+// Older nonzero targets are valid when this entrypoint is available at runtime.
+// Build selects schema adapters; target is forwarded to value conversions.
+// Returns AOTITorchError; C++ callers should use
+// torch::stable::call_dispatcher.
 AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher_v2(
     const char* opName,
     const char* overloadName,
@@ -408,10 +418,12 @@ AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher_v2(
     uint64_t extension_build_version,
     uint64_t extension_target_version);
 
-// Like torch_library_impl, but also records the target version for
-// StableIValue conversions (target <= build). The library borrows fn for the
-// registration lifetime. Its uint64_t arguments remain input/output counts;
-// build and target versions are stored in the native registration.
+// Registers fn for name, recording build and target for StableIValue
+// conversions. Target must be nonzero and <= build. The self handle is
+// borrowed; the callback function must remain callable for the registration
+// lifetime. The callback receives stack, input count, and output count (not
+// versions). It consumes owning input values and writes owning returns in the
+// same stack buffer; that buffer belongs to libtorch, not the callback.
 AOTI_TORCH_EXPORT AOTITorchError torch_library_impl_v2(
     TorchLibraryHandle self,
     const char* name,
