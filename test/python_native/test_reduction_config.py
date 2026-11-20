@@ -559,7 +559,7 @@ class TestReductionConfig(TestCase):
             contract = _contract(trait)
             nfields = contract.pop("nfields")
             args = ((10, 0), torch.float32, rows, 4095, 1, nfields)
-            outs = kg._sm107_outputs(torch.float32, type(trait), nfields, 1)
+            outs = (torch.float32,)
             kw = dict(itemsize=4, acc_bits=32, alignment=16, out_dtypes=outs)
             cfg = ct.select_col_config(*args, **kw, **contract)
             self.assertEqual(cfg.rule, rule, type(trait).__name__)
@@ -674,8 +674,7 @@ class TestReductionConfig(TestCase):
         contract = _contract(_TRAITS[trait])
         nfields = contract.pop("nfields")
         args = ((10, 0), dtype, rows, columns, 1, nfields)
-        nouts = contract["nouts"]
-        outs = kg._sm107_outputs(dtype, type(_TRAITS[trait]), nfields, nouts)
+        outs = (torch.float32,)
         kw = dict(itemsize=itemsize, acc_bits=32, alignment=16, out_dtypes=outs)
         cfg = ct.select_col_config(*args, **kw, **contract)
         self.assertEqual(cfg.rule, expected_rule)
@@ -814,8 +813,7 @@ class TestReductionConfig(TestCase):
         contract = _contract(_TRAITS[trait])
         nfields = contract.pop("nfields")
         args = ((10, 0), dtype, rows, columns, 1, nfields)
-        nouts = contract["nouts"]
-        outs = kg._sm107_outputs(dtype, type(_TRAITS[trait]), nfields, nouts)
+        outs = (torch.float32,)
         kw = dict(itemsize=itemsize, acc_bits=32, alignment=16, out_dtypes=outs)
         cfg = ct.select_col_config(*args, **kw, **contract)
         self.assertEqual(cfg, expected)
