@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     MI300_ARCH,
     skipIfRocmArch,
     TEST_XPU,
+    xfailIf,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -185,6 +186,8 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
         self.assertEqual(len({eager, automatic, required, differently_unrolled}), 4)
         self.assertEqual(cpu, eager)
 
+    # cudagraph benchmarking policy is CUDA-only (autotune_process.py)
+    @xfailIf(TEST_XPU)
     def test_benchmark_request_restores_serialized_cudagraph_policy(self):
         import pickle
 
@@ -235,6 +238,8 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
 
         self.assertTrue(request.config_cudagraph_benchmarking)
 
+    # cudagraph benchmarking policy is CUDA-only (autotune_process.py)
+    @xfailIf(TEST_XPU)
     def test_benchmark_request_uses_automatic_cudagraph_policy(self):
         class FakeBenchmarkRequest(BenchmarkRequest):
             def do_bench(self, fn, *input_tensors, out=None):
