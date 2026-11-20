@@ -707,13 +707,8 @@ def flex_gemm_proxy_torch_dispatch_mode(
     if proxy_mode.enable_tracing:
         flat_args = tuple(args)
 
-        # Dynamo traces the body to a tuple and indexes the HOP output, and the
-        # QUACK lowering returns a tuple. Trace a bare-tensor body as a 1-tuple
-        # so make_fx tracing without Dynamo produces the graph the lowering
-        # expects. Other body outputs keep their structure.
         def tracing_body_fn(*flat_body_args):
-            out = body_fn(*flat_body_args)
-            return (out,) if isinstance(out, torch.Tensor) else out
+            return body_fn(*flat_body_args)
 
         body_graph = reenter_make_fx(
             tracing_body_fn,
@@ -738,13 +733,10 @@ def flex_gemm_proxy_torch_dispatch_mode(
             {},
             name="flex_gemm",
         )
-        example_out = body_fn(*flat_args)
-        is_tensor = isinstance(example_out, torch.Tensor)
-        out = track_tensor_tree(
-            (example_out,) if is_tensor else example_out,
+        return track_tensor_tree(
+            body_fn(*flat_args),
             out_proxy,
             constant=None,
             tracer=proxy_mode.tracer,
         )
-        return out[0] if is_tensor else out
     return flex_gemm_hop(gemm_op, body_fn, args, kwargs, kernel_options)
