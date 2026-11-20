@@ -769,42 +769,6 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         self.assertTrue(is_called)
         out.sum().backward()
 
-    def test_dict_order_canonical_graph_aot_eager(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.proj_a = torch.nn.Linear(8, 16)
-                self.proj_b = torch.nn.Linear(8, 16)
-
-            def forward(self, d):
-                results = []
-                for key, val in d.items():
-                    if key == "a":
-                        results.append(self.proj_a(val))
-                    else:
-                        results.append(self.proj_b(val))
-                return torch.cat(results, dim=-1).sum()
-
-        model = Model()
-        d1 = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
-        d2 = {"b": d1["b"], "a": d1["a"]}
-
-        backend1 = torch._dynamo.testing.AotEagerAndRecordGraphs()
-        loss1 = torch.compile(model, backend=backend1)(d1)
-        loss1.backward()
-        grads1 = [parameter.grad.clone() for parameter in model.parameters()]
-
-        torch._dynamo.reset()
-        model.zero_grad()
-
-        backend2 = torch._dynamo.testing.AotEagerAndRecordGraphs()
-        loss2 = torch.compile(model, backend=backend2)(d2)
-        loss2.backward()
-        grads2 = [parameter.grad.clone() for parameter in model.parameters()]
-
-        self.assertEqual(loss1, loss2)
-        self.assertEqual(grads1, grads2)
-
     def test_aot_joint_graph_canonicalized_before_partitioner(self):
         from torch._dynamo.backends.common import aot_autograd
         from torch._dynamo.backends.debugging import boxed_nop

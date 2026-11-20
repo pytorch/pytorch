@@ -104,13 +104,13 @@ def ts_compile(fx_g: fx.GraphModule, inps: Sequence[Any]) -> torch.jit.ScriptMod
 
         fx_g.recompile()
 
-        f = torch.jit.script(fx_g)
+        f = torch.jit._script.script(fx_g)
 
         # pyrefly: ignore [missing-attribute]
         torch._C._jit_pass_remove_mutation(f.graph)
 
-        f = torch.jit.freeze(f.eval())
-        f = torch.jit.optimize_for_inference(f)
+        f = torch.jit._freeze.freeze(f.eval())
+        f = torch.jit._freeze.optimize_for_inference(f)
         if not any(torch._subclasses.fake_tensor.is_fake_tensor(t) for t in inps):
             f(*inps)
     return f
@@ -230,8 +230,8 @@ def debug_nop(
 @make_boxed_compiler
 def simple_ts_compile(fx_g: fx.GraphModule, _: Any) -> torch.jit.ScriptModule:
     strip_overloads(fx_g)
-    f = torch.jit.script(fx_g)
-    f = torch.jit.freeze(f.eval())
+    f = torch.jit._script.script(fx_g)
+    f = torch.jit._freeze.freeze(f.eval())
     return f
 
 

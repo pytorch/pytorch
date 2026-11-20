@@ -451,12 +451,6 @@ class TestTorchLibrary(common.TestCase):
         self.assertFalse(f(True, False))
         self.assertFalse(f(False, True))
         self.assertFalse(f(False, False))
-        s = torch.jit.script(f)
-        self.assertTrue(s(True, True))
-        self.assertFalse(s(True, False))
-        self.assertFalse(s(False, True))
-        self.assertFalse(s(False, False))
-        self.assertIn("torch_library::logical_and", str(s.graph))
 
 
 instantiate_device_type_tests(

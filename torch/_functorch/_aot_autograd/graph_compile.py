@@ -2119,13 +2119,14 @@ def _canonicalize_joint_graph(fx_g: torch.fx.GraphModule) -> None:
     placeholder_ordinals = {
         node: ordinal for ordinal, node in enumerate(graph.find_nodes(op="placeholder"))
     }
+    subgraph_purity: dict[torch.fx.GraphModule, bool] = {}
     barrier_ordinals = {
         node: ordinal
         for ordinal, node in enumerate(
             node
             for node in graph.nodes
             if node.op not in {"placeholder", "get_attr", "output"}
-            and not _is_safe_to_reorder(node)
+            and not _is_safe_to_reorder(node, subgraph_purity=subgraph_purity)
         )
     }
 

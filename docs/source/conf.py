@@ -266,6 +266,8 @@ autosummary_filename_map = {
     "torch.cpu.Stream": "torch.cpu.Stream_class",
     "torch.cuda.stream": "torch.cuda.stream_function",
     "torch.cuda.Stream": "torch.cuda.Stream_class",
+    "torch.mps.stream": "torch.mps.stream_function",
+    "torch.mps.Stream": "torch.mps.Stream_class",
     "torch.xpu.stream": "torch.xpu.stream_function",
     "torch.xpu.Stream": "torch.xpu.Stream_class",
 }

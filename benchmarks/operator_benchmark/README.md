@@ -10,7 +10,7 @@ Key Features:
 
 2\. Supported Frameworks: PyTorch
 
-3\. Supported PyTorch mode: eager and JIT
+3\. Supported PyTorch mode: eager and torch.compile
 
 4\. Input shapes: user-defined shapes, randomly generated shapes
 

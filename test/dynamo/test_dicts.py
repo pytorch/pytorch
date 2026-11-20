@@ -18,6 +18,7 @@ import torch
 import torch._dynamo.side_effects
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch._functorch.config
 import torch.fx as fx
 import torch.nn
 import torch.utils.checkpoint
@@ -2935,6 +2936,210 @@ class DictTests(torch._dynamo.test_case.TestCase):
             "not CustomBoolDict(False) should evaluate to True in boolean context",
         )
 
+    def _get_fw_graphs_for_dict_orders(self):
+        """Compile a model with two different dict key orders, return both
+        forward graphs from AOTAutograd (the level where has_same_nodes operates).
+
+        Uses asymmetric paths (deep vs shallow) so that different dict iteration
+        orders produce different op orderings in the graph.
+        """
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.deep = torch.nn.Sequential(
+                    torch.nn.Linear(8, 16),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(16, 16),
+                )
+                self.shallow = torch.nn.Linear(8, 16)
+
+            def forward(self, d):
+                results = []
+                for key, val in d.items():
+                    if key == "a":
+                        results.append(self.deep(val))
+                    else:
+                        results.append(self.shallow(val))
+                return torch.cat(results, dim=-1).sum()
+
+        model = Model()
+        d1 = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
+        d2 = {"b": d1["b"], "a": d1["a"]}
+
+        backend1 = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        torch.compile(model, backend=backend1)(d1).backward()
+        torch._dynamo.reset()
+        model.zero_grad()
+        backend2 = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        torch.compile(model, backend=backend2)(d2).backward()
+
+        return backend1.fw_graphs[0].graph, backend2.fw_graphs[0].graph
+
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
+    def test_name_based_hash_diverges_on_dict_order(self):
+        # Demonstrates the original bug: the name-based hash used in
+        # has_same_nodes diverges when different ranks trace with different
+        # dict iteration orders, producing different node orderings.
+        import hashlib
+
+        graph1, graph2 = self._get_fw_graphs_for_dict_orders()
+
+        def name_based_hash(graph):
+            node_str = "/".join(x.name for x in graph.nodes)
+            return hashlib.sha256(node_str.encode("utf-8")).hexdigest()
+
+        self.assertNotEqual(name_based_hash(graph1), name_based_hash(graph2))
+
+    def test_canonical_names_invariant_to_dict_order(self):
+        # The canonical naming produces identical mappings for structurally
+        # equivalent graphs traced with different dict iteration orders.
+        from torch._functorch.partitioners import _canonical_node_names
+
+        graph1, graph2 = self._get_fw_graphs_for_dict_orders()
+
+        canonical1 = _canonical_node_names(graph1)
+        canonical2 = _canonical_node_names(graph2)
+
+        # Build {canonical_name: (op, target)} for each graph.
+        # For placeholders, exclude target (it's the rank-local name like
+        # primals_N which differs across ranks).
+        def structure(graph, canonical):
+            return {
+                canonical[n]: (n.op, str(n.target) if n.op != "placeholder" else "")
+                for n in graph.nodes
+            }
+
+        self.assertEqual(structure(graph1, canonical1), structure(graph2, canonical2))
+
+    def test_canonical_names_different_models(self):
+        from torch._functorch.partitioners import _canonical_node_names
+
+        class ModelA(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 16)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class ModelB(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 16)
+
+            def forward(self, x):
+                return self.linear(x).relu()
+
+        inp = torch.randn(4, 8)
+        backend1 = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(ModelA(), backend=backend1)(inp)
+        torch._dynamo.reset()
+        backend2 = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(ModelB(), backend=backend2)(inp)
+
+        c1 = _canonical_node_names(backend1.graphs[0].graph)
+        c2 = _canonical_node_names(backend2.graphs[0].graph)
+        structure1 = {
+            c1[n]: (n.op, str(n.target)) for n in backend1.graphs[0].graph.nodes
+        }
+        structure2 = {
+            c2[n]: (n.op, str(n.target)) for n in backend2.graphs[0].graph.nodes
+        }
+        self.assertNotEqual(structure1, structure2)
+
+    def test_stable_target_str(self):
+        # A call_function whose target is a plain Python function (e.g.
+        # torch.sym_not) must stringify to its qualified name, not its repr,
+        # which bakes in the per-process memory address and so differs across
+        # ranks (poisoning the cross-rank node_str hash).
+        from torch._functorch.partitioners import _stable_target_str
+
+        # Plain Python function: qualified name, no memory address.
+        self.assertEqual(_stable_target_str(torch.sym_not), "torch.sym_not")
+        self.assertNotIn("0x", _stable_target_str(torch.sym_not))
+        self.assertIn("0x", str(torch.sym_not))  # the behavior being fixed
+
+        # OpOverload targets: stable qualified name (matches the FX printer),
+        # never an address.
+        from torch.fx.node import _get_qualified_name
+
+        add = torch.ops.aten.add.Tensor
+        self.assertEqual(_stable_target_str(add), _get_qualified_name(add))
+        self.assertNotIn("0x", _stable_target_str(add))
+
+        # Non-callable targets (e.g. get_attr names) fall through to str().
+        self.assertEqual(_stable_target_str("_param_constant0"), "_param_constant0")
+
+        # Callables _get_qualified_name cannot resolve fall back to str().
+        class NoName:
+            def __call__(self):
+                return None
+
+        obj = NoName()
+        self.assertEqual(_stable_target_str(obj), str(obj))
+
+    def test_canonical_node_str_invariant_to_function_target_address(self):
+        # Regression test: two ranks tracing the same graph reference the same
+        # torch.sym_not function, but the function object lives at a different
+        # memory address in each process. The old code stringified the target
+        # with str(), baking that address into the cross-rank hash, so
+        # structurally identical graphs looked different and the sync was
+        # skipped. Simulate two ranks with two distinct function objects that
+        # share a qualified name but differ in repr (address).
+        import hashlib
+
+        from torch._functorch.partitioners import (
+            _canonical_node_names,
+            _stable_target_str,
+        )
+
+        def _make_sym_not():
+            def sym_not(x):
+                return not x
+
+            return sym_not
+
+        fn_rank0 = _make_sym_not()
+        fn_rank1 = _make_sym_not()
+        # Same qualified name, different repr (mimics differing addresses).
+        self.assertNotEqual(str(fn_rank0), str(fn_rank1))
+        self.assertEqual(_stable_target_str(fn_rank0), _stable_target_str(fn_rank1))
+
+        def build_graph(fn):
+            g = torch.fx.Graph()
+            p = g.placeholder("x")
+            p.meta["val"] = torch.tensor(True)
+            n = g.create_node("call_function", fn, (p,))
+            n.meta["val"] = torch.tensor(False)
+            g.output((n,))
+            return g
+
+        graph0 = build_graph(fn_rank0)
+        graph1 = build_graph(fn_rank1)
+
+        # Reconstruct the node_str hash the way _sync_decision_cross_ranks does.
+        def node_str(graph, stringify):
+            canonical = _canonical_node_names(graph)
+
+            def hash_str(n):
+                if n.op == "placeholder":
+                    return f"{canonical[n]}:{n.op}"
+                return f"{canonical[n]}:{n.op}:{stringify(n.target)}"
+
+            joined = "/".join(
+                hash_str(n) for n in sorted(graph.nodes, key=lambda n: canonical[n])
+            )
+            return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+        # Old behavior: str(target) bakes in the address -> hashes diverge.
+        self.assertNotEqual(node_str(graph0, str), node_str(graph1, str))
+        # Fixed behavior: _stable_target_str -> identical hashes.
+        self.assertEqual(
+            node_str(graph0, _stable_target_str),
+            node_str(graph1, _stable_target_str),
+        )
+
     def _get_graph_node_names(self, model, inp):
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
         torch.compile(model, backend=backend)(inp)
@@ -3054,6 +3259,47 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(eager_result, compiled_result1)
         self.assertEqual(eager_result, compiled_result2)
+
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_dict_order_canonical_graph_aot_eager(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj_a = torch.nn.Linear(8, 16)
+                self.proj_b = torch.nn.Linear(8, 16)
+
+            def forward(self, d):
+                results = []
+                for key, val in d.items():
+                    if key == "a":
+                        results.append(self.proj_a(val))
+                    else:
+                        results.append(self.proj_b(val))
+                return torch.cat(results, dim=-1).sum()
+
+        model = Model()
+        d1 = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
+        d2 = {"b": d1["b"], "a": d1["a"]}
+
+        backend1 = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        loss1 = torch.compile(model, backend=backend1)(d1)
+        loss1.backward()
+
+        torch._dynamo.reset()
+        model.zero_grad()
+
+        backend2 = torch._dynamo.testing.AotEagerAndRecordGraphs()
+        loss2 = torch.compile(model, backend=backend2)(d2)
+        loss2.backward()
+
+        self.assertEqual(loss1, loss2)
+
+        fw_names1 = [n.name for n in backend1.fw_graphs[0].graph.nodes]
+        fw_names2 = [n.name for n in backend2.fw_graphs[0].graph.nodes]
+        self.assertEqual(fw_names1, fw_names2)
+        bw_names1 = [n.name for n in backend1.bw_graphs[0].graph.nodes]
+        bw_names2 = [n.name for n in backend2.bw_graphs[0].graph.nodes]
+        self.assertEqual(bw_names1, bw_names2)
 
     @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_dict_order_canonical_graph_idempotent(self):
@@ -3299,6 +3545,56 @@ class DictTests(torch._dynamo.test_case.TestCase):
         cond_node = graph.call_function(torch.ops.higher_order.cond, (x, x, x, ()))
         self.assertFalse(_is_safe_to_reorder(cond_node))
 
+    @parametrize("activation", ["relu", "dropout"])
+    @parametrize(
+        "positional,inplace",
+        [(False, None), (False, False), (False, True), (True, False), (True, True)],
+    )
+    def test_canonical_graph_functional_inplace(self, activation, positional, inplace):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        args, kwargs = (x,), {}
+        if inplace is not None:
+            if positional:
+                args += (inplace,) if activation == "relu" else (1.0, True, inplace)
+            else:
+                kwargs["inplace"] = inplace
+        target = getattr(torch.nn.functional, activation)
+        node = graph.call_function(target, args, kwargs)
+        node.meta["example_value"] = torch.empty(0)
+        self.assertEqual(_is_safe_to_reorder(node), inplace is not True)
+
+    @parametrize("nested", [False, True])
+    @parametrize("activation", ["relu", "dropout"])
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_canonical_graph_functional_mutation_order(self, nested, activation):
+        module = (
+            torch.nn.ReLU(inplace=True)
+            if activation == "relu"
+            else torch.nn.Dropout(p=1.0, inplace=True)
+        )
+
+        def fn(pred, x):
+            def branch(y):
+                module(y)
+                return y + 1
+
+            x = x.clone()
+            if nested:
+                out = torch.cond(pred, branch, branch, (x,))
+                return x.abs() + out
+            module(x)
+            return x.abs()
+
+        pred, x = torch.tensor(True), -torch.ones(3, dtype=torch.float64)
+        expected = torch.ones_like(x) if nested else torch.zeros_like(x)
+        with torch.no_grad():
+            self.assertEqual(fn(pred, x), expected)
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(pred, x)
+        self.assertEqual(actual, expected)
+
     def test_canonical_graph_allow_in_graph_mutation_is_not_reordered(self):
         @torch.compiler.allow_in_graph
         def mutate(x):
@@ -3478,25 +3774,30 @@ class DictTests(torch._dynamo.test_case.TestCase):
             lambda sub, s: sub.call_function(torch.ops.aten.sin.default, (s,)),
             torch.ops.higher_order.tag_activation_checkpoint,
         )
-        self.assertTrue(_is_safe_to_reorder(checkpoint))
+        cache: dict[fx.GraphModule, bool] = {}
+        self.assertTrue(_is_safe_to_reorder(checkpoint, subgraph_purity=cache))
         owning_module = checkpoint.graph.owning_module
         if owning_module is None:
             raise AssertionError("checkpoint graph must have an owning module")
         checkpoint_body = owning_module.get_submodule("branch")
         checkpoint_body.meta["_checkpoint_context_fn"] = lambda: None
-        self.assertFalse(_is_safe_to_reorder(checkpoint))
+        self.assertFalse(_is_safe_to_reorder(checkpoint, subgraph_purity=cache))
+        cond = checkpoint.graph.call_function(
+            torch.ops.higher_order.cond, checkpoint.args
+        )
+        self.assertTrue(_is_safe_to_reorder(cond, subgraph_purity=cache))
 
         wrap_checkpoint = make(
             lambda sub, s: sub.call_function(torch.ops.aten.sin.default, (s,)),
             torch.ops.higher_order.wrap_activation_checkpoint,
         )
-        self.assertTrue(_is_safe_to_reorder(wrap_checkpoint))
+        self.assertTrue(_is_safe_to_reorder(wrap_checkpoint, subgraph_purity=cache))
         owning_module = wrap_checkpoint.graph.owning_module
         if owning_module is None:
             raise AssertionError("checkpoint graph must have an owning module")
         checkpoint_body = owning_module.get_submodule("branch")
         checkpoint_body.meta["_checkpoint_context_fn"] = lambda: None
-        self.assertFalse(_is_safe_to_reorder(wrap_checkpoint))
+        self.assertFalse(_is_safe_to_reorder(wrap_checkpoint, subgraph_purity=cache))
 
         # Effects that do not live in a subgraph keep the HOP pinned even when
         # every subgraph it does carry is pure.
@@ -3505,6 +3806,64 @@ class DictTests(torch._dynamo.test_case.TestCase):
         )
         not_allowlisted.target = torch.ops.higher_order.auto_functionalized_v2
         self.assertFalse(_is_safe_to_reorder(not_allowlisted))
+
+    @parametrize("consumer", ["dynamo", "export"])
+    def test_canonical_graph_hop_purity_cache(self, consumer):
+        from torch._dynamo.output_graph import _canonicalize_graph
+        from torch.export._trace import _ExportSafeToReorder
+        from torch.fx.passes import canonicalize
+
+        def make_hops(body):
+            root = torch.nn.Module()
+            root.body = body
+            graph = fx.Graph()
+            x = graph.placeholder("x")
+            attr = graph.get_attr("body")
+            hops = [
+                graph.call_function(torch.ops.higher_order.cond, (x, attr, attr, (x,)))
+                for _ in range(2)
+            ]
+            graph.output(tuple(hops))
+            return fx.GraphModule(root, graph), hops
+
+        leaf_graph = fx.Graph()
+        x = leaf_graph.placeholder("x")
+        leaf_node = leaf_graph.call_function(torch.ops.aten.sin.default, (x,))
+        output = leaf_graph.output((leaf_node,))
+        leaf = fx.GraphModule(torch.nn.Module(), leaf_graph)
+        inner, inner_hops = make_hops(leaf)
+        gm, outer_hops = make_hops(inner)
+        visits = defaultdict(int)
+        verdicts = {}
+        safe_to_reorder = canonicalize._is_safe_to_reorder
+
+        def counted(node, **kwargs):
+            visits[node] += 1
+            verdicts[node] = safe_to_reorder(node, **kwargs)
+            return verdicts[node]
+
+        def run_pass():
+            with patch.object(canonicalize, "_is_safe_to_reorder", counted):
+                if consumer == "dynamo":
+                    _canonicalize_graph(gm.graph)
+                else:
+                    predicate = _ExportSafeToReorder()
+                    for node in gm.graph.nodes:
+                        predicate(node)
+
+        run_pass()
+        self.assertEqual([verdicts[node] for node in outer_hops], [True, True])
+        self.assertEqual([visits[node] for node in inner_hops], [1, 1])
+        self.assertEqual(visits[leaf_node], 1)
+
+        with leaf_graph.inserting_before(output):
+            mutation = leaf_graph.call_method("add_", (x, 1))
+        visits.clear()
+        verdicts.clear()
+        run_pass()
+        self.assertEqual([verdicts[node] for node in outer_hops], [False, False])
+        self.assertEqual(visits[leaf_node], 1)
+        self.assertEqual(visits[mutation], 1)
 
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_canonical_graph_collectives_are_barriers(self):

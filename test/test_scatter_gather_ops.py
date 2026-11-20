@@ -1,5 +1,6 @@
 # Owner(s): ["module: scatter & gather ops"]
 
+import itertools
 import random
 import unittest
 from typing import NamedTuple
@@ -155,6 +156,58 @@ class TestScatterGather(TestCase):
         helper([50, 8, 7], 100)
         helper([50, 3, 4, 5], 100)
 
+    def test_scatter_out_variant_dynamic_shapes(self):
+        device = "cpu"
+        dtype = torch.float32
+        # Regression test for https://github.com/pytorch/pytorch/issues/194103
+
+        def scatter_src(x, index, src, out):
+            return torch.scatter(x, 1, index, src, out=out)
+
+        def scatter_add(x, index, src, out):
+            return torch.scatter_add(x, 1, index, src, out=out)
+
+        def scatter_value(x, index, out):
+            return torch.scatter(x, 1, index, 1.0, out=out)
+
+        for fn, needs_src in (
+            (scatter_src, True),
+            (scatter_add, True),
+            (scatter_value, False),
+        ):
+            compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+            for width in (2, 3, 5):
+                x = torch.zeros(1, width, device=device, dtype=dtype)
+                index = torch.arange(width, device=device).unsqueeze(0)
+                src = torch.ones(1, width, device=device, dtype=dtype)
+                eager_out = torch.empty_like(x)
+                compiled_out = torch.empty_like(x)
+                args = (x, index, src, eager_out) if needs_src else (x, index, eager_out)
+                compiled_args = (
+                    (x, index, src, compiled_out) if needs_src else (x, index, compiled_out)
+                )
+                fn(*args)
+                compiled(*compiled_args)
+                self.assertEqual(eager_out, compiled_out)
+
+    def test_scatter_add_out_dynamic_shapes_empty_index(self):
+        device = "cpu"
+        dtype = torch.float32
+        # Regression test for https://github.com/pytorch/pytorch/issues/194103.
+
+        def scatter_add(x, index, src, out):
+            return torch.scatter_add(x, 1, index, src, out=out)
+
+        compiled = torch.compile(scatter_add, backend="eager", fullgraph=True, dynamic=True)
+        for width in (2, 3, 0, 5):
+            x = torch.zeros(1, width, device=device, dtype=dtype)
+            index = torch.arange(width, device=device).unsqueeze(0)
+            src = torch.ones(1, width, device=device, dtype=dtype)
+            eager_out = torch.empty_like(x)
+            compiled_out = torch.empty_like(x)
+            scatter_add(x, index, src, eager_out)
+            compiled(x, index, src, compiled_out)
+            self.assertEqual(eager_out, compiled_out)
 
 class TestScatterGatherDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -210,11 +263,18 @@ class TestScatterGatherDevice(TestCase):
     @serialTest()
     @dtypes(torch.int8, torch.bfloat16)
     def test_gather_large(self, device, dtype):
-        # test larger shapes to check vectorized implementation
-        # (4096, 3072, 16), (4096, 3072, 32) and (4096, 1024, 8) cover
-        # 16/32-byte rows that must skip the vectorized kernel
+        many_rows = 1031
+        if device.startswith("cuda"):
+            properties = torch.cuda.get_device_properties(device)
+            # Match max_num_threads=256 and max_block_waves=32 in IndexKernelUtils.cu.
+            # Use multiple passes plus a partial tail, rather than one row past the cap.
+            many_rows = 2 * properties.multi_processor_count * (properties.max_threads_per_multi_processor // 256) * 32 + 1031
         for (m, n, k) in ((4096, 3072, 4096), (4096, 3072, 4100), (4, 4, 16384 * 8192),
-                          (4096, 3072, 16), (4096, 3072, 32), (4096, 1024, 8)):
+                          (4096, 3072, 16), (4096, 3072, 32), (4096, 1024, 8),
+                          # Non-power-of-two packing, partial row blocks, and the 32/33-vector boundary.
+                          (4096, 1031, 48), (4096, 1031, 160), (4096, 1031, 512), (4096, 1031, 528),
+                          # Force row-loop iterations on this GPU without multi-GB outputs.
+                          (64, many_rows, 4096), (64, many_rows * 64, 64)):
             if torch.accelerator.is_available():
                 torch.accelerator.empty_cache()
             src = make_tensor((m, k), device=device, dtype=dtype)
@@ -225,10 +285,12 @@ class TestScatterGatherDevice(TestCase):
             alloc2 = torch.empty(m, k + 4, device=device, dtype=dtype)
             misaligned1 = alloc2[:, :-4].copy_(src)
             num_ind = n
-            for dim in (0, 1):
+            index_dtypes = (torch.int64, torch.int32) if device.startswith("cuda") and k == 48 else (torch.int64,)
+            dims = (0,) if m == 64 and n in (many_rows, many_rows * 64) else (0, 1)
+            for dim, index_dtype in itertools.product(dims, index_dtypes):
                 max_ind = src.shape[dim]
-                ind0 = torch.randint(max_ind, (num_ind,), device=device)
-                ind_discontig0 = torch.empty(num_ind * 2, device=device, dtype=torch.int64)[::2].copy_(ind0)
+                ind0 = torch.randint(max_ind, (num_ind,), device=device, dtype=index_dtype)
+                ind_discontig0 = torch.empty(num_ind * 2, device=device, dtype=index_dtype)[::2].copy_(ind0)
                 shape_ind = [1] * src.ndim
                 shape_ind[dim] = ind0.shape[0]
                 shape_out = list(src.shape)
@@ -839,6 +901,7 @@ class TestScatterGatherDevice(TestCase):
             with DeterministicGuard(True):
                 res = inp.clone().scatter_add_(d, idx, src)
             self.assertEqual(res, ref)
+
 
 
 # ---------------------------------------------------------------------------

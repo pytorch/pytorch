@@ -30,6 +30,7 @@ from torch._inductor.compile_worker.subproc_pool import (
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
@@ -40,6 +41,8 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
 
 
 class TestCompileWorker(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def make_pool(self, size):
         return SubprocPool(size)
 
@@ -345,6 +348,8 @@ class TestCompileWorkerWithTimer(TestCompileWorker):
 
 
 class TestSubprocPoolCallbackSafety(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_done_callback_can_submit_job(self):
         code = textwrap.dedent(
@@ -554,6 +559,8 @@ def _run_callback(future, job_id, pickler):
 
 @instantiate_parametrized_tests
 class TestSubprocMainResultDelivery(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Drive SubprocMain's result callback in-process against a fake pool, so the
     # two escapes in the pre-send work can be reproduced directly. Running the
     # callback here rather than through a real sidecar is what lets these tests
@@ -671,6 +678,8 @@ class TestSubprocMainResultDelivery(TestCase):
 
 
 class TestSubprocPoolResultHandling(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # The job submitted in these tests is one that never finishes, so the
     # sidecar has no real reply to race the payload injected for it. That lets
     # the read thread keep running, so the follow-up jobs below are ordinary
@@ -786,6 +795,8 @@ class TestSubprocPoolResultHandling(TestCase):
 
 
 class TestCompileWorkerWatchdog(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # The sidecar runs a watchdog that, every interval (shortened to 1s here via
     # env), reports jobs still running past that interval to the parent, which
     # turns them into a "compile_worker_status" structured-trace artifact -- so a
@@ -982,6 +993,8 @@ class TestCompileWorkerWatchdog(TestCase):
 
 
 class TestTimer(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basics(self):
         done = Event()
 
