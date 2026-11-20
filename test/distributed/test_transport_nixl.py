@@ -4,6 +4,7 @@ import asyncio
 import gc
 import json
 import threading
+import unittest
 import weakref
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
@@ -103,7 +104,7 @@ class _Agent:
     def register_memory(self, tensor, *, backends):
         if backends != list(self.backends):
             raise AssertionError("unexpected registration backend")
-        memory_type = "VRAM" if tensor.is_cuda else "DRAM"
+        memory_type = "DRAM" if tensor.device.type == "cpu" else "VRAM"
         descs = _RegistrationDescriptors(tensor, memory_type)
         self.registrations.append(descs)
         return descs
@@ -189,6 +190,35 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         source = first.register_memory(tensor)
         target = second.register_memory(torch.zeros_like(tensor))
         return first, second, source, target.to_remote_buffer()
+
+    def test_device_restriction_follows_the_accelerator(self):
+        with (
+            patch.object(_nixl, "_load_backend", return_value=self.backend()),
+            patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                return_value=torch.device("xpu"),
+            ),
+        ):
+            transport = new_transport("nixl", "xpu", plugin=self.plugin)
+            self.addCleanup(transport.close)
+            self.assertEqual(transport.device, torch.device("xpu"))
+            with self.assertRaisesRegex(RuntimeError, "failed to create transport"):
+                new_transport("nixl", "meta", plugin=self.plugin)
+
+    def test_device_restriction_without_an_accelerator(self):
+        with (
+            patch.object(_nixl, "_load_backend", return_value=self.backend()),
+            patch.object(torch.accelerator, "current_accelerator", return_value=None),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "failed to create transport"):
+                new_transport("nixl", "xpu", plugin=self.plugin)
+
+    @unittest.skipUnless(torch.xpu.is_available(), "requires an XPU")
+    def test_xpu_memory_is_registered_as_vram(self):
+        first, _, source, _ = self.registered_pair(torch.ones(8, device="xpu"))
+        self.assertEqual(source._registration.memory_type, "VRAM")
+        self.assertEqual(first._agent.registrations[0].memory_type, "VRAM")
 
     def test_unregister_invalidates_aliases_and_views(self):
         tensor = torch.ones(8)
