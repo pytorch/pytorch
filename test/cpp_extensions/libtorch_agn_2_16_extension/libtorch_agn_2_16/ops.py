@@ -39,44 +39,11 @@ def my_is_warn_always_enabled() -> bool:
     return torch.ops.libtorch_agn_2_16.my_is_warn_always_enabled.default()
 
 
-def my_cpublas_brgemm_f32(a, b, c, add_c=False) -> torch.Tensor:
-    """Write float32 x float32 brgemm into float32 c (2.16+)."""
-    return torch.ops.libtorch_agn_2_16.my_cpublas_brgemm_f32.default(a, b, c, add_c)
-
-
-def my_cpublas_brgemm_f16(a, b, c, add_c=False) -> torch.Tensor:
-    """Write float16 x float16 brgemm into float32 c (2.16+)."""
-    return torch.ops.libtorch_agn_2_16.my_cpublas_brgemm_f16.default(a, b, c, add_c)
-
-
-def my_cpublas_brgemm_bf16(a, b, c, add_c=False) -> torch.Tensor:
-    """Write bfloat16 x bfloat16 brgemm into float32 c (2.16+)."""
-    return torch.ops.libtorch_agn_2_16.my_cpublas_brgemm_bf16.default(a, b, c, add_c)
-
-
-def my_cpublas_brgemm_u8_u8(a, b, c, add_c=False) -> torch.Tensor:
-    """Write uint8 x uint8 brgemm into int32 c (2.16+)."""
-    return torch.ops.libtorch_agn_2_16.my_cpublas_brgemm_u8_u8.default(a, b, c, add_c)
-
-
-def my_cpublas_brgemm_u8_i8(a, b, c, add_c=False) -> torch.Tensor:
-    """Write uint8 x int8 brgemm into int32 c (2.16+)."""
-    return torch.ops.libtorch_agn_2_16.my_cpublas_brgemm_u8_i8.default(a, b, c, add_c)
-
-
-def my_cpublas_brgemm_i8_i8(a, b, c, add_c=False) -> torch.Tensor:
-    """Write int8 x int8 brgemm into int32 c (2.16+)."""
-    return torch.ops.libtorch_agn_2_16.my_cpublas_brgemm_i8_i8.default(a, b, c, add_c)
-
-
-def my_cpublas_brgemm_f8e4m3(a, b, c, add_c=False) -> torch.Tensor:
-    """Write float8_e4m3fn x float8_e4m3fn into float32 c (2.16+)."""
-    return torch.ops.libtorch_agn_2_16.my_cpublas_brgemm_f8e4m3.default(a, b, c, add_c)
-
-
-def my_cpublas_brgemm_f8e5m2(a, b, c, add_c=False) -> torch.Tensor:
-    """Write float8_e5m2 x float8_e5m2 into float32 c (2.16+)."""
-    return torch.ops.libtorch_agn_2_16.my_cpublas_brgemm_f8e5m2.default(a, b, c, add_c)
+def my_cpublas_brgemm_dispatch(a, b, c, add_c=False, is_vnni=False) -> torch.Tensor:
+    """Write a supported brgemm dtype combination into c (2.16+)."""
+    return torch.ops.libtorch_agn_2_16.my_cpublas_brgemm_dispatch.default(
+        a, b, c, add_c, is_vnni
+    )
 
 
 def my_cpublas_gemm_no_downcast_stub_cpu(a, b, c, alpha=1.0, beta=0.0) -> torch.Tensor:
