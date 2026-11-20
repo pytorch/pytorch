@@ -208,12 +208,12 @@ static void upsample_plane_grid_out_template(const Tensor& input,
                                              std::initializer_list<std::optional<double>> scales,
                                              const std::string& name,
                                              std::string_view op_name) {
-  // Matches the kernel instantiations: bilinear is float and uint8; nearest adds bool and signed ints.
+  // Matches the kernel instantiations: all are float, bilinear2d adds uint8 and nearest adds bool and signed ints.
   const auto dtype = input.scalar_type();
   const bool float_type = dtype == kFloat || dtype == kHalf || dtype == kBFloat16;
-  const bool supported = name == "bilinear2d"
-      ? float_type || dtype == kByte
-      : float_type || (isIntegralType(dtype, /*includeBool=*/true) && !isBarebonesUnsignedType(dtype));
+  const bool supported = name.starts_with("nearest")
+      ? float_type || (isIntegralType(dtype, /*includeBool=*/true) && !isBarebonesUnsignedType(dtype))
+      : float_type || (name == "bilinear2d" && dtype == kByte);
   TORCH_CHECK_NOT_IMPLEMENTED(supported, op_name, " not implemented for ", dtype, " on MPS");
   if (output.numel() == 0) {
     return;
@@ -325,7 +325,8 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact2d_backward_out_mps)
 
 TORCH_IMPL_FUNC(upsample_linear1d_out_mps)
 (const Tensor& input, IntArrayRef output_size, bool align_corners, std::optional<double> scale, const Tensor& output) {
-  upsample_kernel_out_template<3>(input, output_size, align_corners, {scale}, output, "linear1d");
+  upsample_plane_grid_out_template(
+      input.unsqueeze(2), output.unsqueeze(2), align_corners, {scale, std::nullopt}, "linear1d", "upsample_linear1d");
 }
 
 TORCH_IMPL_FUNC(upsample_linear1d_backward_out_mps)
@@ -368,7 +369,8 @@ TORCH_IMPL_FUNC(upsample_bicubic2d_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
-  upsample_kernel_out_template<4>(input, output_size, align_corners, {scales_w, scales_h}, output, "bicubic2d");
+  upsample_plane_grid_out_template(
+      input, output, align_corners, {scales_w, scales_h}, "bicubic2d", "upsample_bicubic2d");
 }
 
 TORCH_IMPL_FUNC(upsample_bicubic2d_backward_out_mps)
@@ -390,9 +392,8 @@ TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
-  TORCH_CHECK(at::isFloatingType(input.scalar_type()),
-              "_upsample_bilineard2d_aa_out_mps only supports floating-point dtypes");
-  upsample_kernel_out_template<4>(input, output_size, align_corners, {scales_w, scales_h}, output, "bilinear2d_aa");
+  upsample_plane_grid_out_template(
+      input, output, align_corners, {scales_w, scales_h}, "bilinear2d_aa", "_upsample_bilinear2d_aa");
 }
 
 TORCH_IMPL_FUNC(_upsample_bilinear2d_aa_backward_out_mps)
@@ -426,9 +427,8 @@ TORCH_IMPL_FUNC(_upsample_bicubic2d_aa_out_mps)
  std::optional<double> scales_h,
  std::optional<double> scales_w,
  const Tensor& output) {
-  TORCH_CHECK(at::isFloatingType(input.scalar_type()),
-              "_upsample_bicubic2d_aa_out_mps only supports floating-point dtypes");
-  upsample_kernel_out_template<4>(input, output_size, align_corners, {scales_w, scales_h}, output, "bicubic2d_aa");
+  upsample_plane_grid_out_template(
+      input, output, align_corners, {scales_w, scales_h}, "bicubic2d_aa", "_upsample_bicubic2d_aa");
 }
 
 TORCH_IMPL_FUNC(upsample_nearest3d_out_mps)(const Tensor& input,
