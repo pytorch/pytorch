@@ -216,7 +216,7 @@ def select_ordered_col_config(
     32 otherwise. Other mapped views with full_tiles get 16-column full tiles at
     65536 x 1024 unless nfields == 2, full tiles at column anchors, and, replacing the
     mapping, 16-column full tiles at 256 columns and 32768-131072 rows.
-    B200's 16-column narrowing overrides table entries too.
+    B200's 16-column rule replaces table entries' tile_columns too.
     Views filling fewer than the mapping's min_blocks useful 32-column blocks get None.
     """
     # In-tree routing reaches SM107 entries only through select_col_config's hand-offs.
@@ -232,7 +232,7 @@ def select_ordered_col_config(
     if (
         cfg is None
         and cc in kg._B200_CCS
-        and dtype in kg._ORDERED_COL_DTYPES
+        and dtype in kg._B200_DTYPES
         and partials > 1
         and nfields == 1
     ):
@@ -339,8 +339,10 @@ def select_col_config(
     threads_per_block, npar or vec overrides the geometry and disables the policy rules.
     welford_outs is traits.welford_outputs(trait). itree=False skips B200's C = 4095
     hand-off (b200_ragged_c4095_ordered), for views the ordered kernel declined.
-    SM107 hands views to the ordered kernel only for the outputs its mappings were
-    measured with (_sm107_outputs).
+    SM107 hands views to the ordered kernel only when out_dtypes, the projected output
+    dtypes, are those its mappings were measured with (_sm107_outputs). An `alignment`
+    (the view's supported byte alignment) below tile.TRANSFER_ALIGNMENT disables the
+    SM107 rules.
 
     Whether a view reaches the column kernel at all is `kernel_general._col_route_ok`'s call.
     """
