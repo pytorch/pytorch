@@ -24,13 +24,13 @@ on:
       - rocm-mi350
       - rocm-rx7900
       - rocm-preview
+      - scheduled-rocm-mi200
+      - scheduled-rocm-mi300
       - inductor-micro-benchmark
       - inductor-micro-benchmark-x86
       - inductor-cu124
       - inductor-rocm-mi200
       - inductor-rocm-mi300
-      - scheduled-rocm-mi200
-      - scheduled-rocm-mi300
       - inductor-rocm-mi350
       - inductor-perf-nightly-rocm-mi300
       - inductor-perf-nightly-rocm-mi350

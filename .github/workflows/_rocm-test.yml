@@ -74,7 +74,7 @@ on:
         type: string
         default: ""
         description: |
-          The artifact-suffix passed to this run's target_determination.yml call.
+          The artifact-suffix the calling workflow passes to its own target_determination.yml job.
           TD download is best-effort, so a mismatch silently runs without TD.
     secrets:
       HUGGING_FACE_HUB_TOKEN:
