@@ -92,6 +92,7 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    AttributeMutationNew,
     GetSet,
     Member,
     Method,
@@ -907,7 +908,6 @@ class BuiltinVariable(TypeVariable):
             str,
             str.format,
             sum,
-            type,
             operator.abs,
             operator.pos,
             operator.neg,
@@ -2091,15 +2091,18 @@ class BuiltinVariable(TypeVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if self.fn is type and len(args) == 3:
-            unimplemented(
-                gb_type="Dynamic class creation with type",
-                context="type(name, bases, namespace)",
-                explanation="Dynamo does not support tracing class creation with type().",
-                hints=[*graph_break_hints.SUPPORTABLE],
-                skip_frame=True,
-                preserve_skip_frame_after_inline=True,
-            )
+        if self.fn is type:
+            if kwargs:
+                unimplemented(
+                    gb_type="Dynamic class creation with type",
+                    context="type(name, bases, namespace, **kwargs)",
+                    explanation="Dynamo does not support keyword arguments when creating a class with type().",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
+                )
+            if len(args) not in (1, 3):
+                raise_type_error(tx, "type() takes 1 or 3 arguments")
 
         if self.fn is object and not args and not kwargs:
             # object() -> a fresh opaque instance. Falling through to the
@@ -2763,6 +2766,13 @@ class BuiltinVariable(TypeVariable):
     def call_dir(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
+        if isinstance(arg, variables.user_defined.NewClassVariable):
+            unimplemented(
+                gb_type="Introspection on a class created in the same frame",
+                context=f"dir({arg.value})",
+                explanation="Dynamo cannot safely inspect this class while it has deferred mutations.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         if isinstance(arg, variables.UserDefinedClassVariable):
             return VariableTracker.build(tx, dir(arg.value))
         if isinstance(arg, BuiltinVariable):
@@ -3291,8 +3301,66 @@ class BuiltinVariable(TypeVariable):
         return obj.call_method(tx, "__delattr__", [name_var], {})
 
     def call_type(
-        self, tx: "InstructionTranslatorBase", obj: VariableTracker
-    ) -> VariableTracker:
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        *args: VariableTracker,
+    ) -> VariableTracker | None:
+        if args:
+            if len(args) != 2:
+                raise AssertionError(
+                    "type() argument count was validated by call_function"
+                )
+            if not all(v.is_python_constant() for v in (obj, *args)):
+                unimplemented(
+                    gb_type="type() with non-constant class arguments",
+                    context=f"type({obj}, {args[0]}, {args[1]})",
+                    explanation="Dynamo can only reconstruct classes created from constant arguments.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
+                )
+            name, bases, namespace = [v.as_python_constant() for v in (obj, *args)]
+            if not isinstance(name, str):
+                raise_type_error(
+                    tx,
+                    f"type.__new__() argument 1 must be str, not {type(name).__name__}",
+                )
+            # Avoid running user hooks, or copying mutable namespace values.
+            if (
+                type(name) is not str
+                or type(bases) is not tuple
+                or any(base is not object for base in bases)
+                or type(namespace) is not dict
+                or not all(
+                    ConstantVariable.is_base_literal(v) for v in namespace.values()
+                )
+            ):
+                unimplemented(
+                    gb_type="type() with unsupported class arguments",
+                    context=f"type({name!r}, {bases!r}, {namespace!r})",
+                    explanation="Dynamo only reconstructs plain classes with literal namespaces.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
+                )
+            namespace = namespace.copy()
+            if "__module__" not in namespace and "__name__" in tx.f_globals:
+                namespace["__module__"] = tx.f_globals["__name__"]
+            try:
+                cls = type(name, bases, namespace)
+            except Exception as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+            constructor_args = [
+                obj,
+                args[0],
+                VariableTracker.build(tx, namespace),
+            ]
+            result = variables.user_defined.NewClassVariable(cls, constructor_args)
+            return tx.output.side_effects.track_mutable(
+                cls, result, AttributeMutationNew
+            )
+
         try:
             py_type = obj.python_type()
         except NotImplementedError as error:
@@ -4044,6 +4112,7 @@ class SetAttrBuiltinVariable(BuiltinVariable):
                 variables.ExceptionVariable,
                 variables.TracebackVariable,
                 variables.DequeVariable,
+                variables.user_defined.NewClassVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})

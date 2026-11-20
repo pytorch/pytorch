@@ -9407,10 +9407,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             cls = type("Generated", (), {"value": 1})
             return x + 1, cls
 
-        def fullgraph_fn(x):
-            cls = type("Generated", (), {"value": 1})
-            return x + 1, cls
-
         def invalid_fn(x):
             try:
                 type(comptime, (), {})
@@ -9418,7 +9414,9 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 return x + 1
 
         x = torch.ones(1)
-        with self.assertRaisesRegex(Unsupported, "Dynamic class creation with type"):
+        with self.assertRaisesRegex(
+            Unsupported, "type\\(\\) with non-constant class arguments"
+        ):
             torch.compile(invalid_fn, backend="eager", fullgraph=True)(x)
 
         invalid_counter = torch._dynamo.testing.CompileCounter()
@@ -9428,17 +9426,14 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(invalid_counter.frame_count, 0)
 
-        with self.assertRaisesRegex(Unsupported, "Dynamic class creation with type"):
-            torch.compile(fullgraph_fn, backend="eager", fullgraph=True)(x)
-
         eager_cls = fn(x)[1]
         counter = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=counter)
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
         num_calls = torch._dynamo.config.recompile_limit + 1
         classes = [opt_fn(x)[1] for _ in range(num_calls)]
 
         self.assertEqual(len(set(classes)), num_calls)
-        self.assertEqual(counter.frame_count, 0)
+        self.assertEqual(counter.frame_count, 1)
         self.assertEqual(classes[0].__module__, eager_cls.__module__)
         self.assertEqual(classes[0].__qualname__, eager_cls.__qualname__)
 
@@ -9472,7 +9467,12 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             return x + 1, type(name, bases, namespace, **kwargs)
 
         x = torch.ones(1)
-        with self.assertRaisesRegex(Unsupported, "Dynamic class creation with type"):
+        error = (
+            "Dynamic class creation with type"
+            if variant == "keyword"
+            else "type\\(\\) with unsupported class arguments"
+        )
+        with self.assertRaisesRegex(Unsupported, error):
             torch.compile(fullgraph_fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(calls, [])
 
