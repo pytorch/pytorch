@@ -6461,6 +6461,11 @@ class TemplateBuffer(OperationBuffer):
         self.load_input_fusion_allowed_inputs: OrderedSet[str] = (
             load_input_fusion_allowed_inputs or OrderedSet()
         )
+        # Per input read through TMA descriptors when prologue-fused, see
+        # TritonTemplateKernel.load_input_reuse.
+        self.load_input_reuse: dict[str, Any] = {}
+        # Shared memory of the compiled (unfused) kernel, when known.
+        self.n_shared: int | None = None
         self.store_output_fusion_allowed_inputs: OrderedSet[str] = (
             store_output_fusion_allowed_inputs or OrderedSet()
         )

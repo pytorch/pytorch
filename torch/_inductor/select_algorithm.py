@@ -725,6 +725,9 @@ class TritonTemplateKernel(TritonKernel):
         # Load-input fused inputs whose producers preserve a zero mask.
         self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
         self.prologue_descriptor_vars: dict[Any, str] = {}
+        # Per load_input-fusable input read through TMA descriptors when
+        # fused; used by the scheduler's prologue fusion cost model.
+        self.load_input_reuse: dict[str, PrologueReuse] = {}
 
         # The following attributes are all used for triton kernel codegen.
         # They are swapped onto the TritonTemplateKernel object by
@@ -1509,6 +1512,7 @@ class TritonTemplateKernel(TritonKernel):
         prologue_descriptor_offsets: tuple[str, ...] | None = None,
         prologue_descriptor_block_shape: tuple[str, ...] | None = None,
         prologue_descriptor_cat2: bool = False,
+        prologue_reuse: tuple[int, str, int, str] | None = None,
     ):
         """Loads an input and applies any necessary preprocessing or masking.
 
@@ -1525,6 +1529,11 @@ class TritonTemplateKernel(TritonKernel):
                 loads in a fused prologue.
             prologue_descriptor_cat2: Generate two half-width descriptor loads
                 for an exact contiguous cat/cast producer when possible.
+            prologue_reuse: (reuse_dim, reuse_block, tile_dim, tile_block) over
+                the output's dims: each operand tile is read by
+                cdiv(out[reuse_dim], reuse_block) output tiles, and the operand
+                has cdiv(out[tile_dim], tile_block) tiles per batch. Recorded
+                for the prologue fusion cost model.
         """
 
         if (prologue_descriptor_offsets is None) != (
@@ -1554,6 +1563,27 @@ class TritonTemplateKernel(TritonKernel):
                 input_name
             )
             self._producer_fusion_allowed_input_indices.add(named_input_index)
+        if prologue_reuse is not None and prologue_descriptor_offsets is not None:
+            reuse_dim, reuse_block, tile_dim, tile_block = prologue_reuse
+            out_size = [
+                V.graph.sizevars.optimization_hint(s, fallback=1)
+                for s in self.output_node.get_size()
+            ]
+            batch = math.prod(out_size[: len(out_size) - 2])
+            input_numel = V.graph.sizevars.optimization_hint(
+                sympy_product(input_node.get_size()), fallback=1
+            )
+            self.load_input_reuse[input_node.get_name()] = PrologueReuse(
+                reuse=math.ceil(out_size[reuse_dim] / int(self.meta[reuse_block])),
+                tiles=batch
+                * math.ceil(out_size[tile_dim] / int(self.meta[tile_block])),
+                tile_elems=math.prod(
+                    int(self.meta.get(b, b)) for b in prologue_descriptor_block_shape
+                ),
+                num_stages=self.num_stages,
+                # Contraction length: the operand's elements per output row/col.
+                k=input_numel * out_size[reuse_dim] // max(math.prod(out_size), 1),
+            )
 
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
         groups = {
@@ -3144,6 +3174,21 @@ def _jinja2_env():
         return None
 
 
+class PrologueReuse(NamedTuple):
+    """How a template reads an input it loads through TMA descriptors when a
+    producer is fused into it (see TritonTemplateKernel.load_input)."""
+
+    # Output tiles that read each operand tile.
+    reuse: int
+    # Distinct operand tiles.
+    tiles: int
+    # Elements per operand tile.
+    tile_elems: int
+    num_stages: int
+    # Contraction length.
+    k: int
+
+
 class GenerateAndLoadResult(NamedTuple):
     """
     Return type of TritonTemplate.generate_and_load.
@@ -3156,6 +3201,7 @@ class GenerateAndLoadResult(NamedTuple):
     store_output_fusion_allowed_inputs: OrderedSet[str]
     kernel_args_sizevars_keys: tuple[sympy.Expr, ...]
     kernel_options: dict[str, Any]
+    load_input_reuse: dict[str, PrologueReuse]
 
 
 class GeneratedCodeCacheEntry(NamedTuple):
@@ -3583,6 +3629,7 @@ class TritonTemplate(KernelTemplate):
                         == kernel_test.load_input_fusion_allowed_inputs
                         and kernel.store_output_fusion_allowed_inputs
                         == kernel_test.store_output_fusion_allowed_inputs
+                        and kernel.load_input_reuse == kernel_test.load_input_reuse
                         and kernel.args.sizevars == kernel_test.args.sizevars
                     ):
                         raise AssertionError(
@@ -3639,6 +3686,7 @@ class TritonTemplate(KernelTemplate):
             store_output_fusion_allowed_inputs,
             kernel_args_sizevars_keys,
             kernel_options,
+            dict(kernel.load_input_reuse),
         )
 
     def generate(  # type: ignore[override]
@@ -3901,6 +3949,7 @@ class TritonTemplate(KernelTemplate):
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
             load_input_fusion_allowed_inputs=result.load_input_fusion_allowed_inputs,
+            load_input_reuse=result.load_input_reuse,
             store_output_fusion_allowed_inputs=(
                 result.store_output_fusion_allowed_inputs
             ),
@@ -4050,8 +4099,10 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
         store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
         hint_override: int | None = None,
+        load_input_reuse: dict[str, PrologueReuse] | None = None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
+        self.load_input_reuse = load_input_reuse or {}
         self.make_kernel_render = make_kernel_render
         self.bmreq: TritonBenchmarkRequest = bmreq
         if log_info is None:
@@ -4079,6 +4130,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         self.hint_override = hint_override
 
         self.n_regs = None
+        self.n_shared: int | None = None
 
     def benchmark(self, *args, out):
         if self.bmreq is None:
@@ -4099,6 +4151,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         self.bmreq.precompile()
 
         self.n_regs = self.bmreq.n_regs
+        self.n_shared = getattr(self.bmreq, "n_shared", None)
 
     def __str__(self) -> str:
         return f"TritonTemplateCaller({self.bmreq.module_path}, {self.description})"
@@ -4125,6 +4178,8 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 self.store_output_fusion_allowed_inputs
             ),
         )
+        buffer.load_input_reuse = self.load_input_reuse
+        buffer.n_shared = self.n_shared
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
             buffer.annotations["ktc"] = self.annotations["ktc"]
@@ -4949,6 +5004,9 @@ class AlgorithmSelectorCache(PersistentCache):
             # choices that support every input produced by the fused producers.
             load_input_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
             store_output_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
+            # The least reuse over choices: the most favorable case for the
+            # prologue cost model, since benchmark fusion picks the choice.
+            load_input_reuse: dict[str, PrologueReuse] = {}
             for c in choices:
                 if isinstance(c, TritonTemplateCaller):
                     load_input_fusion_allowed_inputs |= (
@@ -4957,21 +5015,22 @@ class AlgorithmSelectorCache(PersistentCache):
                     store_output_fusion_allowed_inputs |= (
                         c.store_output_fusion_allowed_inputs
                     )
+                    for input_name, reuse in c.load_input_reuse.items():
+                        prev = load_input_reuse.get(input_name)
+                        if prev is None or reuse.reuse < prev.reuse:
+                            load_input_reuse[input_name] = reuse
 
-            # No single winning choice yet; selection is deferred to benchmark fusion
-            return (
-                torch._inductor.ir.TensorBox.create(
-                    torch._inductor.ir.MultiTemplateBuffer(
-                        layout,
-                        input_nodes,
-                        get_timings,
-                        choices,
-                        load_input_fusion_allowed_inputs,
-                        store_output_fusion_allowed_inputs,
-                    )
-                ),
-                None,
+            multi_buffer = torch._inductor.ir.MultiTemplateBuffer(
+                layout,
+                input_nodes,
+                get_timings,
+                choices,
+                load_input_fusion_allowed_inputs,
+                store_output_fusion_allowed_inputs,
             )
+            multi_buffer.load_input_reuse = load_input_reuse
+            # No single winning choice yet; selection is deferred to benchmark fusion
+            return torch._inductor.ir.TensorBox.create(multi_buffer), None
 
         timings = self.do_autotuning(
             name,
