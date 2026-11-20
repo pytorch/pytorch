@@ -5,6 +5,7 @@
 #include <exception>
 #include <optional>
 #include <string>
+#include <vector>
 
 // Importable (abi3) module functions that exercise the 2.16 Python interop
 // stable shims: a raw PyObject arrives straight from Python (no dispatcher
@@ -78,6 +79,16 @@ PyObject* roundtrip(PyObject* /*self*/, PyObject* obj) {
   });
 }
 
+// Python sequence -> std::vector<int64_t> -> HeaderOnlyArrayRef<int64_t> ->
+// Python list.
+PyObject* int64_arrayref_roundtrip(PyObject* /*self*/, PyObject* obj) {
+  return call([&] {
+    const auto values = torch::stable::from_pyobject<std::vector<int64_t>>(obj);
+    return torch::stable::to_pyobject(
+        torch::headeronly::HeaderOnlyArrayRef<int64_t>(values));
+  });
+}
+
 PyMethodDef methods[] = {
     {"layout_roundtrip", layout_roundtrip, METH_O, nullptr},
     {"memory_format_roundtrip", memory_format_roundtrip, METH_O, nullptr},
@@ -105,6 +116,21 @@ PyMethodDef methods[] = {
      roundtrip<std::optional<torch::stable::Device>>,
      METH_O,
      nullptr},
+    {"double_list_roundtrip",
+     roundtrip<std::vector<double>>,
+     METH_O,
+     nullptr},
+    {"bool_list_roundtrip", roundtrip<std::vector<bool>>, METH_O, nullptr},
+    {"string_list_list_roundtrip",
+     roundtrip<std::vector<std::vector<std::string>>>,
+     METH_O,
+     nullptr},
+    {"optional_tensor_list_roundtrip",
+     roundtrip<
+         std::optional<std::vector<std::optional<torch::stable::Tensor>>>>,
+     METH_O,
+     nullptr},
+    {"int64_arrayref_roundtrip", int64_arrayref_roundtrip, METH_O, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyModuleDef moduledef = {

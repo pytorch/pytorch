@@ -965,6 +965,48 @@ AOTI_TORCH_EXPORT AOTITorchError torch_new_none_pyobject(void** ret) {
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError torch_decref_pyobject(void* py_obj) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    torch::detail::getPyObjectConversionImpl().decref_pyobject(
+        static_cast<PyObject*>(py_obj));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_sequence_size_pyobject(void* py_obj, size_t* ret_size) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret_size != nullptr, "ret_size must not be null");
+    *ret_size =
+        torch::detail::getPyObjectConversionImpl().sequence_size_pyobject(
+            static_cast<PyObject*>(py_obj));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_sequence_get_item_pyobject(void* py_obj, size_t index, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret =
+        torch::detail::getPyObjectConversionImpl().sequence_get_item_pyobject(
+            static_cast<PyObject*>(py_obj), index);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_list_pyobject(void* const* items, size_t length, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(
+        items != nullptr || length == 0,
+        "items must not be null unless length is 0");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().new_list_pyobject(
+        reinterpret_cast<PyObject* const*>(items), length);
+  });
+}
+
 // Most other dtypes defined in torch/csrc/inductor/aoti_torch/shim_common.cpp
 #define TORCH_DTYPE_IMPL(dtype, stype)                    \
   AOTI_TORCH_EXPORT int32_t torch_dtype_##dtype() {       \

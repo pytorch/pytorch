@@ -83,7 +83,11 @@ support and on the corresponding unpack operation succeeding.
 `from_pyobject<T>` / `to_pyobject` (2.16+) are generic forms of the
 conversions above, for any `T` they support, and compose them:
 `std::optional<T>` maps Python `None` to `std::nullopt` and converts any other
-object as `T`. A null `PyObject*` is an error, not `None`.
+object as `T`. A null `PyObject*` is an error, not `None`. `std::vector<T>` is
+read from a Python `list` or `tuple`, converting each element as `T` (other
+iterables and single values are rejected), and `std::vector<T>` or
+`torch::headeronly::HeaderOnlyArrayRef<T>` is written as a Python `list`. These
+nest, for example `std::optional<std::vector<std::optional<torch::stable::Tensor>>>`.
 
 The dtype, device, layout and memory format helpers translate through the
 stable enum mappings, which cover a subset of all dtypes and device types;

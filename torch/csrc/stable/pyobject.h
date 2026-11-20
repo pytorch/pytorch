@@ -10,6 +10,7 @@
 #include <torch/headeronly/core/MemoryFormat.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/HeaderOnlyArrayRef.h>
 #include <torch/headeronly/util/shim_utils.h>
 
 #include <memory>
@@ -17,6 +18,8 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 // Header-only helpers converting between Python objects (passed as raw
 // PyObject* / void*) and their torch::stable equivalents. These are
@@ -356,20 +359,99 @@ struct PyObjectConverter<std::optional<T>> {
   }
 };
 
+// Owns one reference to a PyObject* (passed as void*) and releases it on
+// destruction, which must happen with the GIL held.
+class PyObjectRef {
+ public:
+  explicit PyObjectRef(void* py_obj) : py_obj_(py_obj) {}
+  PyObjectRef(PyObjectRef&& other) noexcept
+      : py_obj_(std::exchange(other.py_obj_, nullptr)) {}
+  PyObjectRef(const PyObjectRef&) = delete;
+  PyObjectRef& operator=(const PyObjectRef&) = delete;
+  PyObjectRef& operator=(PyObjectRef&&) = delete;
+  ~PyObjectRef() {
+    if (py_obj_ != nullptr) {
+      // Destructors must not throw; a failure here can only leak the reference.
+      torch_decref_pyobject(py_obj_);
+    }
+  }
+  void* get() const {
+    return py_obj_;
+  }
+
+ private:
+  void* py_obj_;
+};
+
+// Converts each element of values as T into a new-reference Python list. If an
+// element fails, the elements converted so far are released.
+template <typename T, typename Values>
+void* sequence_to_pyobject(const Values& values) {
+  std::vector<PyObjectRef> items;
+  items.reserve(values.size());
+  for (const auto& value : values) {
+    PyObjectRef item(PyObjectConverter<T>::to(value));
+    items.push_back(std::move(item));
+  }
+  std::vector<void*> raw_items;
+  raw_items.reserve(items.size());
+  for (const auto& item : items) {
+    raw_items.push_back(item.get());
+  }
+  void* raw = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_new_list_pyobject(raw_items.data(), raw_items.size(), &raw));
+  return raw;
+}
+
+template <typename T>
+struct PyObjectConverter<std::vector<T>> {
+  static std::vector<T> from(void* py_obj) {
+    size_t size = 0;
+    STABLE_TORCH_ERROR_CODE_CHECK(torch_sequence_size_pyobject(py_obj, &size));
+    std::vector<T> values;
+    values.reserve(size);
+    for (size_t i = 0; i < size; ++i) {
+      void* raw = nullptr;
+      STABLE_TORCH_ERROR_CODE_CHECK(
+          torch_sequence_get_item_pyobject(py_obj, i, &raw));
+      // Own the item while converting it: the conversion may run Python code
+      // (e.g. __float__) that removes it from the sequence.
+      PyObjectRef item(raw);
+      values.push_back(PyObjectConverter<T>::from(item.get()));
+    }
+    return values;
+  }
+
+  static void* to(const std::vector<T>& values) {
+    return sequence_to_pyobject<T>(values);
+  }
+};
+
+// C++ -> Python only: a view cannot own what it reads from Python.
+template <typename T>
+struct PyObjectConverter<torch::headeronly::HeaderOnlyArrayRef<T>> {
+  static void* to(torch::headeronly::HeaderOnlyArrayRef<T> values) {
+    return sequence_to_pyobject<T>(values);
+  }
+};
+
 } // namespace detail
 
 // Convert a Python object (borrowed PyObject* passed as void*) to T. T is any
 // type with a *_from_pyobject helper above, or std::optional<T>, which maps
-// None to std::nullopt and otherwise converts the object as T. A null py_obj
-// is an error, not None.
+// None to std::nullopt and otherwise converts the object as T, or
+// std::vector<T>, which reads a Python list or tuple and converts each element
+// as T. A null py_obj is an error, not None.
 template <typename T>
 T from_pyobject(void* py_obj) {
   return detail::PyObjectConverter<T>::from(py_obj);
 }
 
 // Convert value to a new-reference Python object. T is any type with a
-// *_to_pyobject helper above (std::string_view included), or std::optional<T>,
-// which maps std::nullopt to None.
+// *_to_pyobject helper above (std::string_view included), std::optional<T>,
+// which maps std::nullopt to None, or std::vector<T> or HeaderOnlyArrayRef<T>,
+// which become a Python list.
 template <typename T>
 void* to_pyobject(const T& value) {
   return detail::PyObjectConverter<T>::to(value);
