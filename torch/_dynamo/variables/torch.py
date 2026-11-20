@@ -757,40 +757,21 @@ class BaseTorchVariable(VariableTracker):
 class TorchCtxManagerClassVariable(BaseTorchVariable):
     """Points to a context manager class in torch.* that dynamo has implementations"""
 
-    _nonvar_fields = {
-        "is_privateuse1_autocast",
-        *BaseTorchVariable._nonvar_fields,
-    }
-
-    def __init__(
-        self, value: Any, *, is_privateuse1_autocast: bool = False, **kwargs: Any
-    ) -> None:
-        super().__init__(value, **kwargs)
-        self.is_privateuse1_autocast = is_privateuse1_autocast
-
     def __repr__(self) -> str:
         return f"TorchCtxManagerClassVariable({self.value})"
 
     @staticmethod
-    def matching_cls_kind(value: Any) -> str | None:
-        # Check the registered entrypoint before unwrapping it.  Some backend
-        # classes look like Dynamo wrappers to is_function().
-        if _is_privateuse1_autocast(value):
-            return "privateuse1_autocast"
+    def is_matching_cls(value: Any) -> bool:
         # Unwrap if it's a functools.lru_cache wrapper
         value = unwrap_if_wrapper(value)
         # We can't do isinstance(value, type) check because some ctx managers
         # are implemented as a function decorated by contextlib.contextmanager,
         # E.g., torch._functorch.vmap.vmap_increment_nesting.
-        if not callable(value) or not hashable(value):
-            return None
-        if value in supported_ctx_manager_classes:
-            return "supported"
-        return None
-
-    @staticmethod
-    def is_matching_cls(value: Any) -> bool:
-        return TorchCtxManagerClassVariable.matching_cls_kind(value) is not None
+        return (
+            callable(value)
+            and hashable(value)
+            and value in supported_ctx_manager_classes
+        )
 
     def call_function(
         self,
@@ -968,14 +949,10 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                     {},
                 ),
             )
-        elif (
-            self.value
-            in (
-                torch.amp.autocast_mode.autocast,
-                torch.cuda.amp.autocast,
-                torch.cpu.amp.autocast,
-            )
-            or self.is_privateuse1_autocast
+        elif self.value in (
+            torch.amp.autocast_mode.autocast,
+            torch.cuda.amp.autocast,
+            torch.cpu.amp.autocast,
         ):
             # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(tx, self.value, args, kwargs)
