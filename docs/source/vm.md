@@ -15,6 +15,10 @@
 ```
 
 ```{eval-rst}
+.. autofunction:: torch.vm.is_exact
+```
+
+```{eval-rst}
 .. autofunction:: torch.vm.swap
 ```
 

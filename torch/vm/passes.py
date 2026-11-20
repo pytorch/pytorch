@@ -33,6 +33,8 @@ class BuiltinPass:
     # What it is over: the control-flow graph of the function, once, or one
     # basic block after it was profiled.
     kind: ClassVar[str] = "block"
+    # A pass of the engine leaves every result what the interpreter computes.
+    exact: ClassVar[bool] = True
 
     def __repr__(self) -> str:
         fields = dataclasses.fields(self)  # type: ignore[arg-type]
