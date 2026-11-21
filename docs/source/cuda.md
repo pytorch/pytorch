@@ -148,6 +148,18 @@ including graphs the consumer did not build. Registering a hook is the opt-in an
 API -- the graph fires them; with none registered they are no-ops. Each has a per-graph
 counterpart on {class}`torch.cuda.CUDAGraph`. Live in `torch.cuda.graphs`.
 
+PyTorch registers one capture-end hook itself. On CUDA builds with `cuda-bindings` >= 13.2
+installed and a CUDA 13.2+ driver, every capture that ends through {meth}`torch.cuda.CUDAGraph.capture_end`
+({class}`torch.cuda.graph`, {func}`torch.cuda.make_graphed_callables`, Inductor CUDA graph
+trees) has its memset nodes of at most 8 KiB -- what `zero_()` on a small dense tensor
+records -- replaced by fill-kernel nodes, which replay faster than small memset nodes. The
+replayed result is unchanged. What changes is what graph inspection reports: node types,
+counts and handles from {meth}`torch.cuda.CUDAGraph.raw_cuda_graph`, the output of
+`get_graph_data`, `debug_dump` and `export_dot`, and profiler traces, where those
+`Memset` events become fill kernels. Capture-end hooks observe the graph after the
+rewrite. Without `cuda-bindings` >= 13.2, on an older driver, and on ROCm, graphs are left
+as captured.
+
 ```{eval-rst}
 .. currentmodule:: torch.cuda.graphs
 .. autosummary::
