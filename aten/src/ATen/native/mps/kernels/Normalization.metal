@@ -8,6 +8,11 @@ using namespace c10::metal;
 
 #include <ATen/native/mps/kernels/NormBackward.h>
 
+template <typename T>
+inline float4 load_float4(device T* p) {
+  return float4(p[0], p[1], p[2], p[3]);
+}
+
 template <typename T, typename idx_t>
 kernel void layer_norm_single_row(
     device T* input [[buffer(0)]],
@@ -33,10 +38,14 @@ kernel void layer_norm_single_row(
 
   uint base_lane = tid * N_READS;
   int count = min((int)N_READS, max(0, (int)axis_size - (int)base_lane));
-  float vals[N_READS];
+  float4 vals;
+  if (count == N_READS) {
+    vals = load_float4(x);
+  } else {
 #pragma unroll
-  for (int i = 0; i < N_READS; i++) {
-    vals[i] = (i < count) ? float(x[i]) : 0.0f;
+    for (int i = 0; i < N_READS; i++) {
+      vals[i] = (i < count) ? float(x[i]) : 0.0f;
+    }
   }
 
   threadgroup float local_sum[simdgroup_size];
@@ -62,16 +71,30 @@ kernel void layer_norm_single_row(
       float(axis_size);
   float inv_std = metal::precise::rsqrt(var + epsilon);
 
+  if (count == N_READS) {
+    // Checking weight and bias once per slice rather than per element keeps
+    // the loads and stores unpredicated
+    float4 norm = (vals - mean) * inv_std;
+    if (weight != nullptr)
+      norm *= load_float4(weight + base_lane);
+    if (bias != nullptr)
+      norm += load_float4(bias + base_lane);
 #pragma unroll
-  for (int i = 0; i < N_READS; i++) {
-    if (i < count) {
-      float norm = (vals[i] - mean) * inv_std;
-      uint lane_idx = base_lane + i;
-      if (weight != nullptr)
-        norm *= float(weight[lane_idx]);
-      if (bias != nullptr)
-        norm += float(bias[lane_idx]);
-      out[i] = static_cast<T>(norm);
+    for (int i = 0; i < N_READS; i++) {
+      out[i] = static_cast<T>(norm[i]);
+    }
+  } else {
+#pragma unroll
+    for (int i = 0; i < N_READS; i++) {
+      if (i < count) {
+        float norm = (vals[i] - mean) * inv_std;
+        uint lane_idx = base_lane + i;
+        if (weight != nullptr)
+          norm *= float(weight[lane_idx]);
+        if (bias != nullptr)
+          norm += float(bias[lane_idx]);
+        out[i] = static_cast<T>(norm);
+      }
     }
   }
 
@@ -148,15 +171,14 @@ kernel void layer_norm_looped(
   for (idx_t r = 0; r < axis_size; r += lsize * N_READS) {
     idx_t base = r + tid * N_READS;
     if (base + N_READS <= axis_size) {
+      float4 norm = (load_float4(x + base) - mean) * inv_std;
+      if (weight != nullptr)
+        norm *= load_float4(weight + base);
+      if (bias != nullptr)
+        norm += load_float4(bias + base);
 #pragma unroll
       for (int i = 0; i < N_READS; i++) {
-        float xi = float(x[base + i]);
-        float norm = (xi - mean) * inv_std;
-        if (weight != nullptr)
-          norm *= float(weight[base + i]);
-        if (bias != nullptr)
-          norm += float(bias[base + i]);
-        out[base + i] = T(norm);
+        out[base + i] = T(norm[i]);
       }
     } else {
 #pragma unroll
