@@ -77,6 +77,8 @@ class TORCH_API MPSStream {
   dispatch_queue_t queue() const {
     return _serialQueue;
   }
+  // True when called from a block running on queue()
+  bool isOnQueue() const;
 
   // NOTE: After encoding work onto the command buffer, call `markWorkEncoded`.
   MPSCommandBuffer_t commandBuffer();
