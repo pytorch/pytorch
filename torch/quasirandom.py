@@ -96,7 +96,9 @@ class SobolEngine:
         if dtype is None:
             dtype = torch.get_default_dtype()
 
-        if self.num_generated == 0:
+        if n == 0:
+            result = self._first_point.new_empty((0, self.dimension), dtype=dtype)
+        elif self.num_generated == 0:
             if n == 1:
                 result = self._first_point.to(dtype)
             else:
