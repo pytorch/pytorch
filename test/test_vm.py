@@ -6523,6 +6523,18 @@ def graph_saves(x):
     return (y * 2).sin().cos().sum()
 
 
+def graph_several(x):
+    y = (x.sin() * 2 + 1).cos()
+    a, b = y.chunk(2, 1)
+    top, where = torch.max(a, 1)
+    lowest = torch.min(b, 1)
+    parts = y.split(3, 1)
+    first, second, third = (a + lowest.values.unsqueeze(1)).unbind(1)
+    best = torch.topk(b, 2, 1)
+    out = (a * b).exp() + top.unsqueeze(1) + first.unsqueeze(1) + third.unsqueeze(1)
+    return out + parts[1] + torch.sort(b, 1).values + best.values.sum()
+
+
 def graph_rated(x, rate):
     return ((x.sin() * rate).cos() + rate).tanh().exp()
 
@@ -6690,6 +6702,18 @@ class GraphMidwaySized:
         return self.count
 
 
+class GraphMidwayAsked(type):
+    answer = True
+
+    def __instancecheck__(cls, obj):
+        id(cls)
+        return GraphMidwayAsked.answer
+
+
+class GraphMidwayKind(metaclass=GraphMidwayAsked):
+    pass
+
+
 class GraphMidwaySteps:
     """An iterator that cannot be asked for an iterator."""
 
@@ -6764,6 +6788,13 @@ def graph_counts_midway(x, sized):
     y = (x.sin() + 1).cos()
     count = len(sized)
     return (y * 2).tanh().exp() + count, count, type(count).__name__
+
+
+def graph_is_of_a_midway_kind(x):
+    y = (x.sin() + 1).cos()
+    if isinstance(3, GraphMidwayKind):
+        y = y + 1
+    return (y * 2).tanh().exp(), isinstance(3, GraphMidwayKind)
 
 
 def graph_goes_over_midway(x, over, how):
@@ -6904,11 +6935,41 @@ def graph_asks_for_operators(x, a, b):
     return (y * total).tanh().exp(), a == 3, 1.0 in a, list(range(a)), not a
 
 
+def graph_parts(x, k):
+    a = (x.sin() + 1).cos().tanh().exp()
+    # Two tensors, or none: an operation of a graph only where it gives
+    # some.
+    cols = a[:, :k].unbind(1)
+    b = a * 2
+    if cols:
+        b = b + cols[0].unsqueeze(1)
+    return b.sin().cos().tanh()
+
+
 def graph_asks(x, y):
     a = (x.sin() + y).cos().tanh().exp()
     same = a.equal(y)
     b = (a * 2).sin().cos().tanh()
     return b + 1 if same else b - 1
+
+
+def graph_tops(x):
+    a = (x.sin() + 1).cos().tanh().exp()
+    top = a.max().item()
+    return (a * top).sin().cos().tanh().exp()
+
+
+def graph_halves(x):
+    a = (x.sin() + 1).cos().tanh().exp()
+    return a.chunk(2)
+
+
+def graph_rows(x):
+    a = (x.sin() + 1).cos().tanh().exp()
+    total = a.sum()
+    for row in a.unbind(0):
+        total = total + row.mean()
+    return total
 
 
 def graph_gathers(x):
@@ -8911,6 +8972,19 @@ print(json.dumps(found))
             ran = [g["ops"] for g in self.graphs(compiled) if g["hits"]]
             self.assertIn(6, ran)
 
+    def test_operations_with_several_results_are_operations_of_a_graph(self):
+        torch.manual_seed(0)
+        x = torch.randn(4, 6)
+        compiled, graph, kept = self.whole(graph_several, (x,), 25)
+        self.assertEqual(graph["why"], "the function returns")
+        for behind in (P.AOTAutograd(), P.Inductor()):
+            passes = (*DEFAULT, P.Graphs(), behind)
+            compiled = torch.vm(graph_several, passes=passes, fallback=False)
+            for _ in range(6):
+                self.assertEqual(compiled(x), graph_several(x), rtol=1e-5, atol=1e-6)
+            (graph,) = [g for g in self.graphs(compiled) if g["hits"]]
+            self.assertEqual(graph["exports"], 1)
+
     def test_a_training_step_is_a_graph(self):
         def keep(gm, input_types):
             return gm
@@ -9126,6 +9200,46 @@ print(json.dumps(found))
         (graph,) = self.graphs(compiled)
         self.assertEqual(len(exports), made + 1)
         self.assertGreaterEqual(graph["hits"], hits + 20)
+
+    def test_what_an_operation_gives_shows_when_it_has_run(self):
+        def keep(gm, input_types):
+            return gm
+
+        def run(fn, *args, passes=(keep,)):
+            listed = (*DEFAULT, P.Graphs(), *passes)
+            compiled = torch.vm(fn, passes=listed, fallback=False)
+            for _ in range(8):
+                self.assertEqual(compiled(*args), fn(*args), atol=0, rtol=0)
+            ran = [g for g in self.graphs(compiled, "compiled") if g["hits"]]
+            return [(g["ops"], g["why"]) for g in ran]
+
+        x = torch.randn(4, 4)
+        returns, number = "the function returns", "gives a number read from a tensor"
+        for passes in ((keep,), (P.AOTAutograd(),)):
+            # Two tensors: an operation of the graph, with the item that
+            # is taken of them.
+            found = run(graph_parts, x, 2, passes=passes)
+            self.assertEqual(found, [(13, returns)])
+            # None (an empty tuple): the path ends in front of it, and
+            # the next graph starts behind it.
+            ops = [ops for ops, _ in run(graph_parts, x, 0, passes=passes)]
+            self.assertEqual(ops, [6, 4])
+            # A bool, and a number: no operations of a graph either.
+            found = run(graph_asks, x, torch.randn(4, 4), passes=passes)
+            self.assertEqual(found, [(5, f"aten::equal {number}"), (5, returns)])
+            found = run(graph_tops, x, passes=passes)
+            self.assertEqual(found, [(6, f"aten::item {number}"), (5, returns)])
+            # Several tensors that are needed whole, by the caller or by a
+            # loop: a graph gives back tensors, so the path ends in front
+            # of the operation.
+            whole = "what an operation with several results gives is used whole"
+            self.assertEqual(run(graph_halves, x, passes=passes), [(5, whole)])
+            self.assertEqual(run(graph_rows, x, passes=passes), [(6, whole)])
+        # One function, both ways and back.
+        passes = (*DEFAULT, P.Graphs(), keep)
+        compiled = torch.vm(graph_parts, passes=passes, fallback=False)
+        for k in (2, 2, 2, 0, 0, 0, 2, 0, 1, 1, 2, 0):
+            self.assertEqual(compiled(x, k), graph_parts(x, k), atol=0, rtol=0)
 
     def test_a_tensor_made_behind_a_graph_is_no_constant_of_it(self):
         def keep(gm, input_types):
@@ -9814,6 +9928,13 @@ class TestVmGraphResults(TestCase):
         # one and what is no number raise, as `len` raises.
         for count in (True, GraphMidwayIndex(), 3, -1, "a", -(2**70), 2**70):
             same(graph_counts_midway, lambda: (x, GraphMidwaySized(count)))
+
+    def test_isinstance_is_whether_what_was_returned_is_true(self, device):
+        x = torch.randn(3, 4, device=device)
+        for answer in ("yes", [], 1, 0, None):
+            GraphMidwayAsked.answer = answer
+            self.same_as_eager(graph_is_of_a_midway_kind, lambda: (x,))
+        GraphMidwayAsked.answer = True
 
     def test_what_an_iter_gives_is_asked_as_the_interpreter_asks_it(self, device):
         x, same = torch.randn(3, 4, device=device), self.same_as_eager
