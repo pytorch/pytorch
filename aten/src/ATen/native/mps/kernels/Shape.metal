@@ -86,3 +86,5 @@ REGISTER_CAT_FOR_INDEX_TYPE(int32_t);
 
 REGISTER_CAT_OP(int64_t, float8_e4m3fn, float8_e4m3fn);
 REGISTER_CAT_OP(int32_t, float8_e4m3fn, float8_e4m3fn);
+REGISTER_CAT_OP(int64_t, float8_e8m0fnu, float8_e8m0fnu);
+REGISTER_CAT_OP(int32_t, float8_e8m0fnu, float8_e8m0fnu);
