@@ -361,6 +361,12 @@ class TestPrimsBasic(TestCase):
 $0: f32[2] = input('input')
 $1: f32[2] = torch._ops.prims.sin.default($0)""")
 
+    def test_var_omitted_correction(self):
+        # `correction` defaults to 1 in the prim schema, so the meta
+        # implementation must accept a call that omits it.
+        a = make_tensor((5, 5), device='cpu', dtype=torch.float)
+        self.assertEqual(prims.var(a, [0, 1]), torch.var(a, [0, 1], correction=1))
+
     def test_mul_complex(self):
         prims.mul(torch.randn(2), 1 + 1j)
 

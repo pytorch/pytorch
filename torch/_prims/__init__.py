@@ -2300,7 +2300,7 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
     )
 
 
-def _var_reduction_meta(inp, dims, correction):
+def _var_reduction_meta(inp, dims, correction=None):
     if utils.is_complex_dtype(inp.dtype):
         output_dtype = utils.corresponding_real_dtype(inp.dtype)
     else:
