@@ -37,12 +37,17 @@ namespace at::native { namespace {
 #if defined(__GNUC__) && !defined(__clang__) && __GNUC__ < 14 && \
     (defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE128))
 template <typename scalar_t>
-constexpr bool use_vectorized_clamp =
-    !isBarebonesUnsignedType(c10::CppTypeToScalarType<scalar_t>::value);
+constexpr bool sve_gcc13_ice_workaround =
+    isBarebonesUnsignedType(c10::CppTypeToScalarType<scalar_t>::value);
 #else
 template <typename scalar_t>
-constexpr bool use_vectorized_clamp = true;
+constexpr bool sve_gcc13_ice_workaround = false;
 #endif
+
+// Like the other bool kernels (e.g. lt, maximum), bool takes the scalar path.
+template <typename scalar_t>
+constexpr bool use_vectorized_clamp =
+    !std::is_same_v<scalar_t, bool> && !sve_gcc13_ice_workaround<scalar_t>;
 
 // std::min and std::max return their first argument when the two compare equal,
 // so they keep the sign of a zero; a hardware min/max does not. Restore `a`
@@ -386,7 +391,7 @@ void clamp_kernel_impl(TensorIteratorBase& iter) {
     } else {
       cpu_kernel(iter, clamp_op);
     }
-  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf);
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf, kBool);
 }
 
 void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, const Scalar& max_) {
@@ -408,7 +413,7 @@ void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, cons
     } else {
       cpu_kernel(iter, clamp_op);
     }
-  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf);
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf, kBool);
 }
 
 void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) {
@@ -427,7 +432,7 @@ void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) {
     } else {
       cpu_kernel(iter, clamp_max_op);
     }
-  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf);
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf, kBool);
 }
 
 void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) {
@@ -446,7 +451,7 @@ void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) {
     } else {
       cpu_kernel(iter, clamp_min_op);
     }
-  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf);
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf, kBool);
 }
 
 } // anonymous namespace
