@@ -538,11 +538,68 @@ struct Frame {
     ptr: *mut std::ffi::c_void,
     instr: *mut *mut u16,
     code: *mut u16,
-    /// The variables of the frame: an owned reference or null each.
+    /// The variables of the frame: an owned reference or null each, the
+    /// way the interpreter keeps one (see `frame_ref`).
     locals: *mut Obj,
     /// Where the frame has its frame object: null until something looks at
     /// the frame (a traceback, a debugger).
     object: *mut Obj,
+}
+
+/// What a variable of an interpreter frame holds for an owned reference, or
+/// for null: in 3.12 just that.
+#[cfg(not(all(Py_3_14, not(Py_GIL_DISABLED), target_pointer_width = "64")))]
+#[inline(always)]
+unsafe fn frame_ref(owned: Obj) -> Obj {
+    owned
+}
+
+/// What is to be released of what a variable of a frame held.
+#[cfg(not(all(Py_3_14, not(Py_GIL_DISABLED), target_pointer_width = "64")))]
+#[inline(always)]
+unsafe fn frame_owned(held: Obj) -> Obj {
+    held
+}
+
+/// The object a variable of a frame holds, borrowed, or null.
+#[cfg(not(all(Py_3_14, not(Py_GIL_DISABLED), target_pointer_width = "64")))]
+#[inline(always)]
+unsafe fn frame_value(held: Obj) -> Obj {
+    held
+}
+
+/// What a variable of an interpreter frame holds for an owned reference, or
+/// for null. In 3.14 it is a stack reference: the pointer, with its lowest
+/// bit set if the reference is not the variable's to release. That bit alone
+/// is NULL, and a reference to an immortal object always has it, as
+/// PyStackRef_FromPyObjectSteal makes them in the default build, the only
+/// one frames are pushed in (see cfg.cpp).
+#[cfg(all(Py_3_14, not(Py_GIL_DISABLED), target_pointer_width = "64"))]
+#[inline(always)]
+unsafe fn frame_ref(owned: Obj) -> Obj {
+    if owned.is_null() {
+        return 1 as Obj;
+    }
+    (owned as usize | ((*owned).ob_refcnt.refcnt_and_flags.ob_flags & 1) as usize) as Obj
+}
+
+/// What is to be released of what a variable of a frame held.
+#[cfg(all(Py_3_14, not(Py_GIL_DISABLED), target_pointer_width = "64"))]
+#[inline(always)]
+unsafe fn frame_owned(held: Obj) -> Obj {
+    if held as usize & 1 == 0 {
+        held
+    } else {
+        null_mut()
+    }
+}
+
+/// The object a variable of a frame holds, borrowed, or null: what the
+/// interpreter bound an argument to, in a frame it made.
+#[cfg(all(Py_3_14, not(Py_GIL_DISABLED), target_pointer_width = "64"))]
+#[inline(always)]
+unsafe fn frame_value(held: Obj) -> Obj {
+    (held as usize & !1) as Obj
 }
 
 impl Frame {
@@ -1308,7 +1365,7 @@ impl Compiled {
             o
         };
         // The slot first: letting go of what it held can run a finalizer.
-        xdecref(std::mem::replace(&mut *place, bound));
+        xdecref(frame_owned(std::mem::replace(&mut *place, frame_ref(bound))));
     }
 
     #[inline(never)]
@@ -1332,7 +1389,7 @@ impl Compiled {
             if boxed.is_null() {
                 ffi::PyErr_Clear();
             } else {
-                xdecref(std::mem::replace(&mut *place, boxed));
+                xdecref(frame_owned(std::mem::replace(&mut *place, frame_ref(boxed))));
             }
         }
         if !raised.is_null() {
@@ -1705,7 +1762,7 @@ impl Compiled {
                         for (slot, v) in self.func.params.iter().enumerate() {
                             let o = reg(&regs, *v);
                             if !o.is_null() {
-                                *frame.locals.add(slot) = new_ref(o);
+                                *frame.locals.add(slot) = frame_ref(new_ref(o));
                             }
                         }
                     }
@@ -1791,7 +1848,7 @@ impl Compiled {
         let mut regs = self.frames.borrow_mut().pop().unwrap_or_else(|| vec![null_mut(); nregs]);
         regs[nregs - 1] = new_ref(function);
         for (slot, v) in self.func.params.iter().enumerate() {
-            let o = *frame.locals.add(slot);
+            let o = frame_value(*frame.locals.add(slot));
             if !o.is_null() {
                 regs[*v as usize] = new_ref(o);
             }

@@ -41,7 +41,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 UNDISTURBED = not (TEST_WITH_CROSSREF or TEST_WITH_TORCHDYNAMO)
 
 # The Rust runtime is only in builds made with USE_TORCH_VM=1, and only
-# understands CPython 3.12 bytecode.
+# understands the bytecode of CPython 3.12 and 3.14.
 try:
     cfg_rs = importlib.import_module("torch._cfg_rs")
 except ImportError:
@@ -50,7 +50,9 @@ except ImportError:
 # faster there, unless a test asks for it.
 os.environ["TORCH_VM_DEMOTE"] = "0"
 
-HAS_RUNTIME = UNDISTURBED and cfg_rs is not None and sys.version_info[:2] == (3, 12)
+HAS_RUNTIME = (
+    UNDISTURBED and cfg_rs is not None and sys.version_info[:2] in ((3, 12), (3, 14))
+)
 P = torch.vm.passes
 DEFAULT = torch.vm.DEFAULT_PASSES
 # The default passes over the control-flow graph, which the tests of one pass over a block keep.
@@ -2888,8 +2890,11 @@ class TestVmWith(TestCase):
         compiled = torch.vm(f, fallback=False)
         for manager in (NoExit(), NoEnter(), 3):
             self.assertEqual(call_outcome(compiled, manager), call_outcome(f, manager))
-        missed = "'NoExit' object does not support the context manager protocol (missed __exit__ method)"
-        self.assertEqual(call_outcome(compiled, NoExit()), (TypeError, missed))
+        # 3.14 names the class in full, with what it is defined in.
+        missed = r"^'(.+\.)?NoExit' object does not support the context manager protocol \(missed __exit__ method\)$"
+        kind, message = call_outcome(compiled, NoExit())
+        self.assertIs(kind, TypeError)
+        self.assertRegex(message, missed)
 
     def test_no_grad_block(self):
         def f(x):
@@ -3383,7 +3388,8 @@ def frame_execs(a):
     scope = {}
     exec("c = a * 3", {"a": a}, scope)
     exec("d = a + 1")
-    return scope, locals()["d"]
+    # From 3.13 on what exec binds is not in what locals() returns (PEP 667).
+    return scope, locals().get("d")
 
 
 def frame_reads_through_another_name(a, b):
