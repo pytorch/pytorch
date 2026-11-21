@@ -27,7 +27,11 @@ from torch.distributed.debug._frontend import (
     Response,
     Route,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 try:
@@ -53,6 +57,8 @@ def _reset_debug_server_state() -> None:
 
 
 class TestDebug(TestCase):
+
+    hw_classification = HardwareClassification.GENERIC
     def setUp(self) -> None:
         super().setUp()
         _reset_debug_server_state()
@@ -101,9 +107,6 @@ class TestDebug(TestCase):
             self.assertIn("Memberships", fetch("/fr_trace"))
             self.assertIn("pg_status", fetch("/fr_trace_json"))
 
-            if torch.cuda.is_available():
-                self.assertIn("Memberships", fetch("/fr_trace_nccl"))
-                self.assertIn("pg_status", fetch("/fr_trace_nccl_json"))
 
         with self.subTest("error codes"):
             resp = session.get(f"http://localhost:{port}/blah")
@@ -197,6 +200,8 @@ class _ErrorHandler(DebugHandler):
 
 
 class TestPeriodicDumper(TestCase):
+
+    hw_classification = HardwareClassification.GENERIC
     def test_writes_dump_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             h = _StubHandler("mystub", "hello world")
@@ -276,6 +281,8 @@ class TestPeriodicDumper(TestCase):
 
 
 class TestFetchUnavailableWorkers(TestCase):
+
+    hw_classification = HardwareClassification.GENERIC
     @staticmethod
     def _get_refused_port() -> int:
         """Return a port that will refuse connections."""
@@ -366,6 +373,8 @@ class TestFetchUnavailableWorkers(TestCase):
 
 
 class TestFormatFetchSummary(TestCase):
+
+    hw_classification = HardwareClassification.GENERIC
     def test_all_success_returns_none(self) -> None:
         addrs = ["http://host0:1", "http://host1:1"]  # @lint-ignore
         resps = [Response(200, "ok"), Response(200, "ok")]
@@ -399,6 +408,8 @@ class TestFormatFetchSummary(TestCase):
 
 
 class TestFetchTimeout(TestCase):
+
+    hw_classification = HardwareClassification.GENERIC
     def test_handler_default_fetch_timeout(self) -> None:
         from torch.distributed.debug._frontend import _DEFAULT_FETCH_TIMEOUT
 
@@ -419,6 +430,8 @@ class TestFetchTimeout(TestCase):
 
 
 class TestHandlerPartialDumps(TestCase):
+
+    hw_classification = HardwareClassification.GENERIC
     import torch.distributed.debug._debug_handlers
 
     @patch("torch.distributed.debug._debug_handlers.fetch_all")
@@ -480,6 +493,8 @@ class TestHandlerPartialDumps(TestCase):
 
 
 class TestTorchCommsHealthCheckHandler(TestCase):
+
+    hw_classification = HardwareClassification.GENERIC
     def setUp(self) -> None:
         super().setUp()
         from torch.distributed.debug._debug_handlers import TorchCommsHealthCheckHandler
@@ -641,6 +656,8 @@ class TestTorchCommsHealthCheckHandler(TestCase):
 
 
 class TestC10dHealthCheckHandler(TestCase):
+
+    hw_classification = HardwareClassification.GENERIC
     def setUp(self) -> None:
         super().setUp()
         from torch.distributed.debug._debug_handlers import C10dHealthCheckHandler
@@ -701,5 +718,43 @@ class TestC10dHealthCheckHandler(TestCase):
         self.assertEqual(calls[2].args[:2], ("fr_dump_file", "backend=nccl2"))
 
 
+class TestDebugNcclTrace(TestCase):
+    """CUDA-specific coverage for the NCCL flight-recorder endpoints.
+
+    The /fr_trace_nccl endpoints are only populated when an NCCL-enabled
+    accelerator is present. Kept out of the device-independent TestDebug
+    class per test/REVIEW.md (Rules 1 and 3: no accelerator APIs in
+    GENERIC classes).
+    """
+
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self) -> None:
+        super().setUp()
+        _reset_debug_server_state()
+
+    def test_fr_trace_nccl(self) -> None:
+        if not torch.cuda.is_available():
+            self.skipTest("requires CUDA with NCCL")
+        store = dist.TCPStore("localhost", 0, 1, is_master=True, wait_for_workers=False)
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(store.port)
+        os.environ["RANK"] = "0"
+        os.environ["WORLD_SIZE"] = "1"
+
+        port = 25998
+
+        def fetch(path: str) -> str:
+            resp = session.get(f"http://localhost:{port}{path}")
+            resp.raise_for_status()
+            return resp.text
+
+        start_debug_server(port=port)
+        self.addCleanup(stop_debug_server)
+        self.assertIn("Memberships", fetch("/fr_trace_nccl"))
+        self.assertIn("pg_status", fetch("/fr_trace_nccl_json"))
+
+
 if __name__ == "__main__":
     run_tests()
+
