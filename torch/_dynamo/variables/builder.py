@@ -17,6 +17,7 @@ The builders in this module handle converting Python values into appropriate
 VariableTracker instances based on their type and usage context.
 """
 
+import _string  # pyrefly: ignore [missing-import]
 import abc
 import builtins
 import collections
@@ -295,7 +296,7 @@ from .higher_order_ops import (
     LocalMapWrappedHigherOrderVariable,
     TorchHigherOrderOperatorVariable,
 )
-from .iter import CountIteratorVariable, ItertoolsVariable
+from .iter import CountIteratorVariable, FormatIteratorVariable, ItertoolsVariable
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
@@ -1342,6 +1343,9 @@ class VariableBuilder:
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
             CustomClassObjectVariable,
+            UserFunctionVariable,
+            SkipFunctionVariable,
+            PolyfilledFunctionVariable,
         }
 
     def get_source(self) -> Source:
@@ -1685,6 +1689,21 @@ class VariableBuilder:
                 # values. Indices are cheap to save.
                 self.tx.output.guard_on_key_order.add(self.source)
 
+            hook_source = None
+            if (
+                value is hook_api._global_forward_hooks
+                or value is hook_api._global_forward_pre_hooks
+            ):
+                hook_source = self.get_source()
+                # Direct capture of Module._call_impl reads its globals without an AttrSource.
+                if isinstance(
+                    hook_source, GlobalSource
+                ) and self.tx.output.root_tx.f_globals is vars(hook_api):
+                    hook_source = AttrSource(
+                        self.tx.import_source(hook_api.__name__),
+                        hook_source.global_name,
+                    )
+
             # We need all the keys to be hashable. We do this within the
             # HashableTracker class in hashable.py
             def build_key_value(
@@ -1700,6 +1719,8 @@ class VariableBuilder:
                         if istype(value, collections.OrderedDict)
                         else None
                     )
+                    if hook_source is not None and type(k) is int:
+                        key_source = ConstDictKeySource(hook_source, i)
                     key = ConstantVariable.create(k, source=key_source)
                     source_key = k
                 else:
@@ -2965,7 +2986,8 @@ class VariableBuilder:
             and type(value) not in common_constant_types
         ):
             self.install_guards(GuardBuilder.CONSTANT_SUBCLASS_MATCH)
-            result = UserDefinedConstantVariable(value, source=self.source)
+            vt_cls = UserDefinedConstantVariable.cls_for(type(value))
+            result = vt_cls(value, source=self.source)
         elif is_generic_ctx_manager_cls(type(value)):
             # A generic context manager built inside the compiled region (via
             # SideEffects.get_variable_cls) must wrap the same way when it is
@@ -4865,7 +4887,7 @@ def handle_traced_output(
         return EventVariable(proxy, example_value, None, **options)
     elif proxy.node.target == "query" and proxy.node.op == "call_method":
         set_example_value(proxy.node, example_value)
-        return ConstantVariable(example_value, **options)
+        return ConstantVariable.create(example_value, **options)
     elif (
         example_value is not None
         and isinstance(example_value, torch.Event)
@@ -6242,8 +6264,13 @@ class SourcelessBuilder:
         handlers: dict[
             type, Callable[[InstructionTranslatorBase, Any], VariableTracker]
         ] = {}
+        for iterator in (
+            _string.formatter_parser(""),
+            _string.formatter_field_name_split("")[1],
+        ):
+            handlers[type(iterator)] = lambda tx, value: FormatIteratorVariable(value)
         for t in common_constant_types:
-            handlers[t] = lambda tx, value: ConstantVariable(value)
+            handlers[t] = lambda tx, value: ConstantVariable.create(value)
         handlers[set] = lambda tx, value: SetVariable(
             [create(tx, x) for x in value], mutation_type=ValueMutationNew()
         )

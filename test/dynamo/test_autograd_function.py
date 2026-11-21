@@ -464,11 +464,11 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                 return grad_output
 
         class Holder:  # spoofed metadata must not override the actual type
-            __class__, __name__ = types.BuiltinMethodType, "apply"
+            __class__, __name__, __self__ = types.BuiltinMethodType, "apply", Function
             __eq__ = staticmethod(bool)
 
         holder = Holder()
-        holder.__self__, holder.target = Function, Function.apply
+        holder.target = Function.apply
 
         def fn(x, other=None):
             if other is not None:
