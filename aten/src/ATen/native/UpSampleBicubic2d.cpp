@@ -196,7 +196,7 @@ void upsample_bicubic2d_backward_kernel(
 
   auto grad_output = grad_output_.contiguous();
   // Special case: input/output same size, just copy
-  if (input_height == output_height && input_width == output_width) {
+  if (input_height == output_height && input_width == output_width && (!scales_h.has_value() || scales_h.value() == 1.0) && (!scales_w.has_value() || scales_w.value() == 1.0)) {
     grad_input.copy_(grad_output);
     return;
   }

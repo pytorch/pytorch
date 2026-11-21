@@ -46,7 +46,7 @@ __global__ void upsample_bicubic2d_out_frame(
   const int output_x = index % output_width;
   const int output_y = index / output_width;
 
-  if (input_height == output_height && input_width == output_width) {
+  if (input_height == output_height && input_width == output_width && height_scale == static_cast<accscalar_t>(1) && width_scale == static_cast<accscalar_t>(1)) {
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; c++) {
         const scalar_t val = idata[n][c][output_y][output_x];
@@ -122,7 +122,7 @@ __global__ void upsample_bicubic2d_out_frame_parallel(
   const int output_x = index % output_width;
   const int output_y = index / output_width;
 
-  if (input_height == output_height && input_width == output_width) {
+  if (input_height == output_height && input_width == output_width && height_scale == static_cast<accscalar_t>(1) && width_scale == static_cast<accscalar_t>(1)) {
     for (int i = blockIdx.z; i < batchsize * channels; i += gridDim.z) {
       int n = i / channels;
       int c = i % channels;
@@ -195,7 +195,7 @@ __global__ void upsample_bicubic2d_backward_out_frame(
   const int output_x = index % output_width;
   const int output_y = index / output_width;
   // special case: output_xust copy
-  if (input_height == output_height && input_width == output_width) {
+  if (input_height == output_height && input_width == output_width && height_scale == static_cast<accscalar_t>(1) && width_scale == static_cast<accscalar_t>(1)) {
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; ++c) {
         const scalar_t val = odata[n][c][output_y][output_x];
