@@ -1308,8 +1308,10 @@ def check_input_alias_and_mutation_return_outputs(
         if node.op == "call_function" and isinstance(
             node.target, torch._ops.OpOverload
         ):
-            for arg_node, arg_schema in zip(node.args, node.target._schema.arguments):
-                if arg_schema.is_write:
+            for arg, arg_schema in zip(node.args, node.target._schema.arguments):
+                if not arg_schema.is_write:
+                    continue
+                for arg_node in pytree.tree_leaves(arg):
                     arg_val = _get_example_value(arg_node)
                     if not isinstance(arg_val, torch.Tensor):
                         raise AssertionError(
