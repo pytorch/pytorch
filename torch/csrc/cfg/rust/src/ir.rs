@@ -242,6 +242,14 @@ pub enum Part {
     /// a call hands on with `*` and `**`.
     Index(u32),
     Entry(PyObj),
+    /// What a class has under a name, as it is there: the object is the
+    /// class.
+    Member(PyObj),
+    /// A new, empty object of the class that the object is, as the
+    /// `__new__` that C code has for the class makes it
+    /// (`graph::fresh_new`): what calling the class makes before its
+    /// `__init__` runs.
+    Instance,
 }
 
 /// A call of a post-dispatch kernel. `operands` feed the prepared call sites

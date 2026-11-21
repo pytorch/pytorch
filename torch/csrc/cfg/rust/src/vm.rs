@@ -1314,6 +1314,10 @@ enum Form<'a> {
     /// `hasattr(object, key)`, of an object whose class has a
     /// `__getattribute__` written in Python: that function.
     Asks(V, V),
+    /// A class that is called: the `__init__` it has, a Python function,
+    /// with the object that the path made of the class (the value of the
+    /// path and the object itself) and the arguments of the call.
+    Init { class: V, object: PathValue, held: Obj, init: Obj, args: &'a [V], kwnames: u32 },
 }
 
 impl Form<'_> {
@@ -1328,6 +1332,7 @@ impl Form<'_> {
             Form::Getattribute(..) => "a __getattribute__",
             Form::Reads { .. } => "a property behind object.__getattribute__",
             Form::Asks(..) => "a __getattribute__ behind getattr",
+            Form::Init { .. } => "the __init__ of a class that is called",
         }
     }
 }
@@ -3835,6 +3840,15 @@ impl Compiled {
                         ffi::Py_XINCREF(found);
                         found
                     }
+                    Part::Member(name) if ffi::PyType_Check(held) != 0 => {
+                        let found = pyffi::_PyType_Lookup(held as *mut ffi::PyTypeObject, name.as_ptr());
+                        ffi::Py_XINCREF(found);
+                        found
+                    }
+                    Part::Instance => {
+                        let new = graph::fresh_new(held);
+                        if new.is_null() { null_mut() } else { ffi::PyObject_CallOneArg(new, held) }
+                    }
                     _ => null_mut(),
                 };
                 if found.is_null() && ffi::PyErr_Occurred().is_null() {
@@ -5017,6 +5031,12 @@ impl Compiled {
             }
             Op::BuildMap(vs) => vs.iter().step_by(2).all(|k| !at(*k).is_null() && graph::is_plain_key(at(*k))),
             Op::MapAdd(_, k, _) => !at(*k).is_null() && graph::is_plain_key(at(*k)),
+            // Into an object the path made: `record` takes down no other.
+            Op::StoreAttr { obj, name, val } => {
+                let held = at(*obj);
+                let plain = !held.is_null() && !capi::is_unboxed(held) && *val != UNDEF && !at(*val).is_null();
+                plain && graph::stores_plainly(ffi::Py_TYPE(held) as Obj, self.func.consts[*name as usize].as_ptr())
+            }
             Op::GetIter(v) => !at(*v).is_null() && graph::quiet_iter(at(*v)).is_some(),
             Op::Binary(kind, a, b) => graph::quiet_binary(*kind, at(*a), at(*b)),
             Op::Unary(UnaryKind::Not, a) | Op::ToBool(a) => !at(*a).is_null() && graph::quiet_truth(at(*a)),
@@ -5088,6 +5108,7 @@ impl Compiled {
                     Assert::Apart(read, attributes, target, keeps) => {
                         graph::apart(reg(own, *read), *attributes, reg(own, *target), *keeps)
                     }
+                    Assert::Plain(class, name) => graph::stores_plainly(reg(own, *class), name.as_ptr()),
                     Assert::Keys(v, names) => {
                         let held = reg(own, *v);
                         let dict = !held.is_null() && !capi::is_unboxed(held) && ffi::PyDict_CheckExact(held) != 0;
@@ -5114,6 +5135,7 @@ impl Compiled {
                             Assert::Equals(..) => "the place of an item",
                             Assert::Is(..) => "an object that is computed with behind the callable",
                             Assert::Same(..) | Assert::Apart(..) => "which object a store of the path was into",
+                            Assert::Plain(..) => "how a class keeps what is stored into its objects",
                         };
                         let made = path.body.iter().find(|other| other.dst == assert.value() && other.dst != NONE);
                         let from = made.map_or(String::new(), |made| (&*path.owners[made.owner as usize]).func.op_repr(&made.op));
@@ -5307,7 +5329,7 @@ impl Compiled {
             }
         }
         let mut handed: Option<Vec<PathValue>> = None;
-        let mut given: Option<Vec<Obj>> = None;
+        let mut given: Option<(Vec<Obj>, Vec<Obj>)> = None;
         for (at, o) in gone.iter().enumerate() {
             if gone[..at].contains(o) || graph::dies_quietly(*o) || self.kept(path, *o, regs, frame) {
                 continue;
@@ -5328,9 +5350,14 @@ impl Compiled {
             if path.inputs.iter().any(|(v, made)| reg(regs, *v) == *o && handed.contains(made)) {
                 continue;
             }
-            let given = given.get_or_insert_with(|| path.inputs.iter().map(|(_, made)| reg(own, *made)).collect::<Vec<Obj>>());
+            let (given, made) = given.get_or_insert_with(|| {
+                let given: Vec<Obj> = path.inputs.iter().map(|(_, made)| reg(own, *made)).collect();
+                let instance = |inst: &&graph::PathInst| matches!(&inst.op, Op::Part(Part::Instance, _)) && inst.dst != NONE;
+                let made: Vec<Obj> = path.body.iter().filter(instance).map(|inst| reg(own, inst.dst)).collect();
+                (given, made)
+            });
             let dropped = gone.iter().filter(|other| *other == o).count() as isize;
-            if graph::outlives(*o, own, given, dropped) {
+            if graph::outlives(*o, own, given, made, dropped) {
                 continue;
             }
             if graph::debug() {
@@ -6138,6 +6165,31 @@ impl Compiled {
             capi::release(std::mem::replace(&mut regs[inst.dst as usize], nothing));
             kill(t, regs);
             return Taken::Went;
+        }
+        if let Op::StoreAttr { obj, name, val } = &inst.op {
+            // A store into an object the path made by calling its class,
+            // where the class keeps it as `object` does: it is done here
+            // and wherever the path runs, and what was stored is what a
+            // read of the attribute of that object gives.
+            let name_of = self.func.consts[*name as usize].clone();
+            let class = if *val != UNDEF && made(t, *obj) { t.class_of(t.mapped(*obj)) } else { None };
+            let held = reg(regs, *obj);
+            if let Some(class) = class.filter(|_| graph::stores_plainly(ffi::Py_TYPE(held) as Obj, name_of.as_ptr())) {
+                let (target, value) = (t.mapped(*obj), self.path_value(t, regs, *val));
+                frames.top().at(inst.bc & OFFSET_MASK);
+                let Ok(nothing) = self.exec_op(regs, &inst.op) else {
+                    return Taken::Raised;
+                };
+                capi::release(nothing);
+                t.check(Assert::Plain(class, name_of.clone()), inst.bc);
+                // What is read of an object that holds what an operation
+                // gave is read behind the graph.
+                t.defs[target as usize].late |= t.defs[value as usize].late;
+                t.push(Op::StoreAttr { obj: target, name: *name, val: value }, NONE, Kind::Residual, inst.bc);
+                t.stores.push(graph::Stored { object: held, keeps: graph::Keeps::Attributes, key: Some(name_of), attribute: true, target, value, own: true });
+                kill(t, regs);
+                return Taken::Went;
+            }
         }
         if let Some(taken) = self.record_effect(t, inst, regs, frames, api) {
             return taken;
@@ -7002,6 +7054,13 @@ impl Compiled {
             _ => return None,
         };
         let object = if bound_to.is_null() { reg(regs, target) } else { bound_to };
+        // A store into an object the path made is done where it stands,
+        // and one that waits for the path to land would come behind those:
+        // what is stored into here is none of those objects, in this run
+        // and, by a check, in every other.
+        if t.classes.iter().any(|(made, _)| t.rec.values[*made as usize] == object) {
+            return Some(Taken::Ends("stores into an object the path made, by another way".to_string()));
+        }
         // That it can be done is shown behind the callable where what it
         // stores into is given by the graph: something that can fail
         // there, which a path that wrote to a tensor from outside cannot
@@ -7020,10 +7079,19 @@ impl Compiled {
         if late {
             t.fails_late();
         }
+        if matches!(inst.op, Op::StoreAttr { .. }) {
+            let made: Vec<PathValue> = t.classes.iter().map(|(made, _)| *made).collect();
+            for made in made {
+                if !t.apart.contains(&(into, true, made, graph::Keeps::Attributes)) {
+                    t.apart.push((into, true, made, graph::Keeps::Attributes));
+                    t.check(Assert::Apart(into, true, made, graph::Keeps::Attributes), inst.bc);
+                }
+            }
+        }
         t.push(renamed, NONE, Kind::Effect, inst.bc);
         let attribute = matches!(inst.op, Op::StoreAttr { .. });
         let key = key.map(|key| PyObj::from_borrowed(key));
-        t.stores.push(graph::Stored { object, keeps, key, attribute, target: into, value });
+        t.stores.push(graph::Stored { object, keeps, key, attribute, target: into, value, own: false });
         if call && inst.dst != NONE {
             ffi::Py_XINCREF(nothing);
             let dst = t.define(inst.dst, Def::default(), nothing);
@@ -7167,7 +7235,7 @@ impl Compiled {
             // read from.
             Op::LoadGlobal(name) => {
                 let name = f.consts[*name as usize].as_ptr();
-                let named = |store: &graph::Stored| store.key.as_ref().is_some_and(|key| graph::same_value(key.as_ptr(), name));
+                let named = |store: &graph::Stored| !store.own && store.key.as_ref().is_some_and(|key| graph::same_value(key.as_ptr(), name));
                 return if t.stores.iter().any(named) { ends() } else { None };
             }
             _ => {}
@@ -7197,7 +7265,7 @@ impl Compiled {
             let stores: Vec<(Obj, PathValue, graph::Keeps)> = t
                 .stores
                 .iter()
-                .filter(|store| (store.key.is_none() && !store.attribute) == list)
+                .filter(|store| !store.own && (store.key.is_none() && !store.attribute) == list)
                 .map(|store| (store.object, store.target, store.keeps))
                 .collect();
             for (object, target, keeps) in stores {
@@ -7309,7 +7377,12 @@ impl Compiled {
             }
             given = Some(value);
         }
+        // A store into what the path made is done by then: a read of
+        // anything else finds what is there.
         for at in alike.into_iter().filter(|at| last.is_none_or(|last| *at > last)) {
+            if t.stores[at].own {
+                continue;
+            }
             let (target, keeps) = (t.stores[at].target, t.stores[at].keeps);
             if !t.apart.contains(&(by, attribute, target, keeps)) {
                 t.apart.push((by, attribute, target, keeps));
@@ -7340,6 +7413,9 @@ impl Compiled {
         let f = &self.func;
         let special = |v: V, name: &PyObj| !graph::special(reg(regs, v), name).is_null();
         let form = match &inst.op {
+            Op::Call { callee, args, kwnames } if !graph::fresh_new(reg(regs, *callee)).is_null() => {
+                return self.record_makes(t, site, at, *callee, args, *kwnames, regs, frames, api);
+            }
             Op::Call { callee, args, kwnames } => {
                 let held = reg(regs, *callee);
                 let plain = *kwnames == NONE && !held.is_null() && !capi::is_unboxed(held);
@@ -7495,6 +7571,116 @@ impl Compiled {
         } else {
             capi::release(std::mem::replace(&mut regs[inst.dst as usize], result));
             t.rename(inst.dst, value);
+        }
+        for v in &inst.kills {
+            capi::release(take(regs, *v));
+            t.kill(*v);
+        }
+        Some(Taken::Went)
+    }
+
+    /// A class that is called, where that comes down to an object of the
+    /// class made by C code (`graph::fresh_new`) and the `__init__` of the
+    /// class: the object is the path's own, made at every call where the
+    /// path runs, and the path goes into the `__init__`, a Python function,
+    /// with the object and the arguments of the call. What that returns
+    /// must be None, which the path checks. A class without an `__init__`
+    /// of its own, called without arguments, is the object alone. Where
+    /// the path does not go on in the `__init__`, the call has run as the
+    /// interpreter runs it and the path ends in front of it. None, with
+    /// nothing done, for a call this does not take.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn record_makes(
+        &self,
+        t: &mut Trace,
+        site: &Arc<GraphSite>,
+        at: (usize, *const BlockCode, usize),
+        callee: V,
+        args: &[V],
+        kwnames: u32,
+        regs: &mut [Obj],
+        frames: &mut Frames,
+        api: &TcfgApi,
+    ) -> Option<Taken> {
+        let inst = &(&(*at.1).insts)[at.2];
+        let names = graph::specials();
+        let class = reg(regs, callee);
+        let ty = class as *mut ffi::PyTypeObject;
+        let init = pyffi::_PyType_Lookup(ty, names.init.as_ptr());
+        let bare = init == pyffi::_PyType_Lookup(std::ptr::addr_of_mut!(ffi::PyBaseObject_Type), names.init.as_ptr());
+        let python = !init.is_null() && ffi::PyFunction_Check(init) != 0;
+        if !(python || (bare && args.is_empty())) || capi::traced() || !capi::has_frames() || t.acts.len() >= MAX_PATH_DEPTH {
+            return None;
+        }
+        if python && self.follows(init).is_none() {
+            return None;
+        }
+        if t.outermost() && t.mark.is_none() {
+            t.mark(at, 0);
+        }
+        frames.top().at(inst.bc & OFFSET_MASK);
+        let object = ffi::PyObject_CallOneArg(graph::fresh_new(class), class);
+        if object.is_null() {
+            return Some(Taken::Raised);
+        }
+        let class_of = self.path_value(t, regs, callee);
+        let made = t.derive(Op::Part(Part::Instance, class_of), Kind::Pure, true, new_ref(object), inst.bc);
+        t.classes.push((made, class_of));
+        // What `__init__` gave, as the interpreter takes it: nothing but
+        // None. Takes the reference; false with the error set.
+        let nothing = |result: Obj| {
+            if result.is_null() {
+                return false;
+            }
+            let fine = result == ffi::Py_None();
+            if !fine {
+                set_error(ffi::PyExc_TypeError, format!("__init__() should return None, not '{}'", pyffi::type_name(result)));
+            }
+            ffi::Py_DECREF(result);
+            fine
+        };
+        if python {
+            let form = Form::Init { class: callee, object: made, held: object, init, args, kwnames };
+            match self.follow(t, site, at, regs, frames, api, &form) {
+                Followed::Returned(result, value) => {
+                    if !nothing(result) {
+                        ffi::Py_DECREF(object);
+                        return Some(Taken::Raised);
+                    }
+                    t.check(Assert::Is(value, PyObj::from_borrowed(ffi::Py_None())), inst.bc);
+                }
+                Followed::Raised => {
+                    ffi::Py_DECREF(object);
+                    return Some(Taken::Raised);
+                }
+                Followed::Left(result, reason) => {
+                    let done = nothing(result);
+                    if !done {
+                        ffi::Py_DECREF(object);
+                    }
+                    return Some(Taken::Cut(if done { object } else { null_mut() }, reason));
+                }
+                // Nothing of it has run: the interpreter runs it.
+                Followed::Not => {
+                    let mut given: Vec<Obj> = vec![object];
+                    given.extend(args.iter().map(|v| self.obj(regs, *v)));
+                    let keys = if kwnames == NONE { null_mut() } else { self.func.consts[kwnames as usize].as_ptr() };
+                    let named = if keys.is_null() { 0 } else { ffi::PyTuple_GET_SIZE(keys) as usize };
+                    let done = nothing(ffi::PyObject_Vectorcall(init, given.as_ptr(), given.len() - named, keys));
+                    if !done {
+                        ffi::Py_DECREF(object);
+                    }
+                    let reason = "the __init__ of a class that is called is not gone into".to_string();
+                    return Some(Taken::Cut(if done { object } else { null_mut() }, reason));
+                }
+            }
+        }
+        t.unmark();
+        if inst.dst == NONE {
+            capi::release(object);
+        } else {
+            capi::release(std::mem::replace(&mut regs[inst.dst as usize], object));
+            t.rename(inst.dst, made);
         }
         for v in &inst.kills {
             capi::release(take(regs, *v));
@@ -7847,6 +8033,19 @@ impl Compiled {
                 items.extend([reg(regs, *v), reg(regs, *key)]);
                 graph::special(items[0], &names.getattribute)
             }
+            Form::Init { held, init, args, kwnames: kw, .. } => {
+                called = *init;
+                receiver = *held;
+                items.push(receiver);
+                for v in args.iter() {
+                    items.push(self.obj(regs, *v));
+                }
+                if *kw != NONE {
+                    let names = f.consts[*kw as usize].as_ptr();
+                    keys.extend((0..ffi::PyTuple_GET_SIZE(names)).map(|k| ffi::PyTuple_GET_ITEM(names, k)));
+                }
+                *init
+            }
             Form::Reads { callee, name, key } => {
                 let wrapper = match name {
                     None => new_ref(reg(regs, *callee)),
@@ -7928,7 +8127,34 @@ impl Compiled {
             t.mark(at, 0);
         }
         let mut given: Vec<PathValue> = Vec::new();
+        // What the class of an object the path made has for the object is
+        // read of the class, which is there in front of the graph: the
+        // function a method of that name is, for one.
+        let member = match form {
+            Form::Method { recv, name, .. } if matches!(behind, Behind::Clear) && receiver == reg(regs, *recv) => {
+                let name = &f.consts[*name as usize];
+                let own = pyffi::_PyType_Lookup(ffi::Py_TYPE(receiver), name.as_ptr()) == func;
+                t.class_of(t.mapped(*recv)).filter(|_| own).map(|class| (class, name.clone()))
+            }
+            _ => None,
+        };
         let function = match form {
+            Form::Method { recv, args, .. } if member.is_some() => {
+                let (class, name) = member.clone().expect("just asked");
+                given.push(t.mapped(*recv));
+                for v in args.iter() {
+                    given.push(self.path_value(t, regs, *v));
+                }
+                t.derive(Op::Part(Part::Member(name), class), Kind::Read, false, new_ref(func), bc)
+            }
+            Form::Init { class, object, args, .. } => {
+                let class = self.path_value(t, regs, *class);
+                given.push(*object);
+                for v in args.iter() {
+                    given.push(self.path_value(t, regs, *v));
+                }
+                t.derive(Op::Part(Part::Member(names.init.clone()), class), Kind::Read, false, new_ref(func), bc)
+            }
             Form::Call { callee, args, .. } | Form::Method { recv: callee, args, .. } => {
                 let mut value = self.path_value(t, regs, *callee);
                 // A method of a tensor the graph gives is the same in every
@@ -8021,12 +8247,19 @@ impl Compiled {
                 if let Some(key) = key {
                     given.push(self.path_value(t, regs, *key));
                 }
-                t.derive(Op::Part(Part::OfType((*name).clone()), given[0]), Kind::Read, false, new_ref(func), bc)
+                let part = match t.class_of(given[0]) {
+                    Some(class) => Op::Part(Part::Member((*name).clone()), class),
+                    None => Op::Part(Part::OfType((*name).clone()), given[0]),
+                };
+                t.derive(part, Kind::Read, false, new_ref(func), bc)
             }
             Form::Property(v, name) | Form::Descriptor(v, name) => {
                 let value = self.path_value(t, regs, *v);
-                let part = Part::Descriptor(f.consts[*name as usize].clone());
-                let found = t.derive(Op::Part(part, value), Kind::Read, false, new_ref(descr), bc);
+                let part = match t.class_of(value) {
+                    Some(class) => Op::Part(Part::Member(f.consts[*name as usize].clone()), class),
+                    None => Op::Part(Part::Descriptor(f.consts[*name as usize].clone()), value),
+                };
+                let found = t.derive(part, Kind::Read, false, new_ref(descr), bc);
                 if let Form::Property(..) = form {
                     given.push(value);
                     t.derive(Op::Part(Part::Getter, found), Kind::Read, false, new_ref(func), bc)
