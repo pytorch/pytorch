@@ -334,6 +334,21 @@ class TestAOTCompileToPython(TestCase):
             out.untyped_storage().data_ptr(), xc.untyped_storage().data_ptr()
         )
 
+    def test_output_input_view_created_under_no_grad(self):
+        def f(x):
+            with torch.no_grad():
+                view = x[1:]
+            return view, x * 2
+
+        x = torch.arange(4.0, requires_grad=True)
+        src, cache = compile_to_python(make_fx(f)(x), [x])
+        with torch.no_grad():
+            view, y = load_from_python(src, cache)([x])
+        self.assertEqual((view, y), f(x))
+        self.assertIs(view._base, x)
+        self.assertTrue(view.requires_grad)
+        self.assertIsNone(view.grad_fn)
+
     def test_dedup_mutated_duplicate_input_runs_like_eager(self):
         # A mutated DUPLICATE input drives AOTDedupeWrapper -- a CompilerWrapper applied
         # AROUND the orchestration (graph_compile._aot_stage2c_make_inference_function),
