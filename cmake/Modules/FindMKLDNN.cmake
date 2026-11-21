@@ -26,6 +26,14 @@ IF(NOT MKLDNN_FOUND)
       set(DNNL_C_COMPILER "icx")
       set(SYCL_CXX_DRIVER "icx")
       set(DNNL_LIB_NAME "dnnl.lib")
+      # on Windows debug builds, oneDNN should use RelWithMdd build type so
+      # that dnnl.lib links against the debug CRT (/MDd), matching the rest of
+      # PyTorch
+      if(CMAKE_BUILD_TYPE STREQUAL Debug)
+        set(DNNL_BUILD_TYPE "RelWithMdd")
+      else()
+        set(DNNL_BUILD_TYPE "${CMAKE_BUILD_TYPE}")
+      endif()
     elseif(LINUX)
       # Linux
       # g++ is soft linked to /usr/bin/cxx, oneDNN would not treat it as an absolute path
@@ -54,7 +62,25 @@ IF(NOT MKLDNN_FOUND)
     set(_xpu_mkldnn_build_dir "${_xpu_mkldnn_prefix}/src/xpu_mkldnn_proj-build")
     set(_xpu_mkldnn_lib "${_xpu_mkldnn_build_dir}/src/${DNNL_LIB_NAME}")
 
-    if(EXISTS "${_xpu_mkldnn_lib}"
+    # Only reuse an existing oneDNN build if it was configured with the build
+    # type requested now. On Windows the build type selects the CRT (/MD vs
+    # /MDd via RelWithMdd), so reusing e.g. a Release dnnl.lib in a Debug
+    # build would fail to link with LNK2038 (RuntimeLibrary mismatch).
+    set(_xpu_mkldnn_build_type_matches TRUE)
+    if(WIN32 AND EXISTS "${_xpu_mkldnn_build_dir}/CMakeCache.txt")
+      file(STRINGS "${_xpu_mkldnn_build_dir}/CMakeCache.txt" _xpu_mkldnn_cached_build_type
+        REGEX "^CMAKE_BUILD_TYPE:[A-Z]+=")
+      string(REGEX REPLACE "^CMAKE_BUILD_TYPE:[A-Z]+=" ""
+        _xpu_mkldnn_cached_build_type "${_xpu_mkldnn_cached_build_type}")
+      if(NOT "${_xpu_mkldnn_cached_build_type}" STREQUAL "${DNNL_BUILD_TYPE}")
+        message(STATUS "Existing oneDNN XPU build type '${_xpu_mkldnn_cached_build_type}' "
+                       "differs from requested '${DNNL_BUILD_TYPE}', rebuilding")
+        set(_xpu_mkldnn_build_type_matches FALSE)
+      endif()
+    endif()
+
+    if(_xpu_mkldnn_build_type_matches
+        AND EXISTS "${_xpu_mkldnn_lib}"
         AND IS_DIRECTORY "${_xpu_mkldnn_src_dir}/include"
         AND IS_DIRECTORY "${_xpu_mkldnn_build_dir}/include")
       message(STATUS "Reusing existing oneDNN XPU build: ${_xpu_mkldnn_lib}")
@@ -63,6 +89,11 @@ IF(NOT MKLDNN_FOUND)
       set(XPU_MKLDNN_INCLUDE "${_xpu_mkldnn_src_dir}/include" "${_xpu_mkldnn_build_dir}/include")
     else()
       set(DNNL_MAKE_COMMAND "cmake" "--build" ".")
+      set(_xpu_mkldnn_extra_cmake_args)
+      if(WIN32)
+        list(APPEND DNNL_MAKE_COMMAND "--config" "${DNNL_BUILD_TYPE}")
+        list(APPEND _xpu_mkldnn_extra_cmake_args -DCMAKE_BUILD_TYPE=${DNNL_BUILD_TYPE})
+      endif()
       include(ProcessorCount)
       ProcessorCount(proc_cnt)
       if((DEFINED ENV{MAX_JOBS}) AND ("$ENV{MAX_JOBS}" LESS_EQUAL ${proc_cnt}))
@@ -86,6 +117,7 @@ IF(NOT MKLDNN_FOUND)
         -DDNNL_LIBRARY_TYPE=STATIC
         -DONEDNN_EXPERIMENTAL_GROUPED_MEMORY=ON
         -DDNNL_DPCPP_HOST_COMPILER=${DNNL_HOST_COMPILER}
+        ${_xpu_mkldnn_extra_cmake_args}
         -G ${CMAKE_GENERATOR}
         BUILD_COMMAND ${DNNL_MAKE_COMMAND}
         BUILD_BYPRODUCTS "${_xpu_mkldnn_build_dir}/src/${DNNL_LIB_NAME}"
