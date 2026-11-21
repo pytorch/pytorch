@@ -78,7 +78,12 @@ from .dicts import (
     DictViewVariable,
     DunderDictVariable,
     MappingProxyVariable,
+    NNModuleGlobalHooksDictVariable,
+    NNModuleGlobalHooksOrderedDictVariable,
+    NNModuleHookFlagsDictVariable,
+    NNModuleHookFlagsOrderedDictVariable,
     NNModuleHooksDictVariable,
+    NNModuleHooksOrderedDictVariable,
     OrderedDictVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable

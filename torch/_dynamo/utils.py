@@ -1389,7 +1389,12 @@ def _unpack_fast_types() -> tuple[type, ...]:
         variables.ListReverseIteratorVariable,
         variables.ListVariable,
         variables.MappingProxyVariable,
+        variables.NNModuleGlobalHooksDictVariable,
+        variables.NNModuleGlobalHooksOrderedDictVariable,
+        variables.NNModuleHookFlagsDictVariable,
+        variables.NNModuleHookFlagsOrderedDictVariable,
         variables.NNModuleHooksDictVariable,
+        variables.NNModuleHooksOrderedDictVariable,
         variables.NumpyNdarrayVariable,
         variables.OrderedDictVariable,
         variables.OrderedSetVariable,
@@ -4948,6 +4953,8 @@ forward_hook_names = [
     "_forward_hooks",
 ]
 backward_hook_names = ["_backward_pre_hooks", "_backward_hooks"]
+forward_hook_attrs = frozenset(forward_hook_names + ["_forward_hooks_always_called"])
+module_hook_attrs = forward_hook_attrs.union(backward_hook_names)
 state_dict_hook_names = [
     "_state_dict_pre_hooks",
     "_state_dict_hooks",
