@@ -433,13 +433,8 @@ def _str_intern(inp, *, tensor_contents=None):
     # torch._C._get_default_device() only returns either cpu or cuda.
     # In other cases, we don't have a way to set them as default yet,
     # and we should always print out device for them.
-    if (
-        self.device.type != torch._C._get_default_device()
-        or (
-            self.device.type == "cuda"
-            and torch.cuda.current_device() != self.device.index
-        )
-        or (self.device.type == "mps")
+    if self.device.type != torch._C._get_default_device() or (
+        self.device.type == "cuda" and torch.cuda.current_device() != self.device.index
     ):
         suffixes.append("device='" + str(self.device) + "'")
 
