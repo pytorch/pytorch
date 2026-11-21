@@ -38,6 +38,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     GuardOnDataDependentSymNode,
+    statically_known_true,
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.reinplace import _is_view_op
@@ -747,7 +748,7 @@ def reinplace_inplaceable_ops_core(
             for written in get_mutated_input_nodes(node)
         )
 
-    def can_inplace(node, mutated_arg):
+    def can_inplace(node, mutated_arg, *, result_nodes=None):
         # ls should be a list of tensors that all shares the same storage.
         def _overlap(ls) -> bool:
             try:
@@ -764,7 +765,23 @@ def reinplace_inplaceable_ops_core(
                 # We can probably do better (that is, reinplace one of them and clone the other)
                 # but that requires more work and mutable List[Tensor] are not that common.
                 return False
-            return all(can_inplace(node, arg) for arg in mutated_arg)
+            if node.target in inplaceable_foreach_ops:
+                foreach_results = {
+                    user.args[1]: user
+                    for user in node.users
+                    if user.target is operator.getitem and isinstance(user.args[1], int)
+                }
+                return all(
+                    can_inplace(
+                        node,
+                        arg,
+                        result_nodes=(
+                            [foreach_results[index]] if index in foreach_results else []
+                        ),
+                    )
+                    for index, arg in enumerate(mutated_arg)
+                )
+            return all(can_inplace(node, arg, result_nodes=[]) for arg in mutated_arg)
 
         if get_node_storage(mutated_arg) is None:
             return False
@@ -835,54 +852,79 @@ def reinplace_inplaceable_ops_core(
                 ):
                     return False
 
-        if mutated_arg.op in ("placeholder", "get_attr"):
+        copy_node = None
+        mutated_arg_base = mutated_arg
+        if any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
+            mutated_arg_base = _get_view_base(mutated_arg)
             # Use the next input overwrite for permission and liveness checks.
             copy_node = min(
-                get_input_copybacks_after_candidate(node, mutated_arg),
+                get_input_copybacks_after_candidate(node, mutated_arg_base),
                 key=node_order.__getitem__,
                 default=None,
             )
-            if copy_node is None:
-                # There is no copy_ back to the candidate mutated_arg (which is a graph input).
-                # Therefore the semantics of the program are that it does not mutate
-                # mutated_arg, so we cannot re-inplace it.
+            if copy_node is None or node_order[copy_node] <= node_order[node]:
                 return False
-            if any_use_of_views_after_node(
-                node, shared_view_nodes, copy_node=copy_node, mutated_arg=mutated_arg
+            if mutated_arg.op in ("placeholder", "get_attr") or (
+                copy_node is copy_node_for_reinplaced_arg(node, mutated_arg)
             ):
-                return False
-
-            return True
-        elif any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
-            # If mutated_arg is a view of a graph input, we can only reinplace
-            # when a later copy_ writes this op's result back to that input.
-            copy_node = copy_node_for_reinplaced_arg(node, mutated_arg)
-            if copy_node is None:
-                return False
-
-            mutated_arg_base = copy_node.args[0]
-            copy_src = copy_node.args[1]
+                return not any_use_of_views_after_node(
+                    node,
+                    shared_view_nodes,
+                    copy_node=copy_node,
+                    mutated_arg=mutated_arg_base,
+                )
+            base_val = mutated_arg_base.meta["val"]
             if not (
-                isinstance(mutated_arg_base, torch.fx.Node)
-                and isinstance(copy_src, torch.fx.Node)
-                and _is_layout_preserving_view_copy_back(
-                    mutated_arg_base, copy_src, mutated_arg, node
+                base_val.is_contiguous()
+                and statically_known_true(base_val.storage_offset() == 0)
+                and statically_known_true(
+                    base_val.numel() * base_val.element_size()
+                    == base_val.untyped_storage().nbytes()
                 )
             ):
                 return False
 
-            if any_use_of_views_after_node(
-                node,
-                shared_view_nodes,
-                copy_node=copy_node,
-                mutated_arg=mutated_arg_base,
+            if result_nodes is None:
+                result_nodes = (
+                    [node]
+                    if isinstance(node.meta.get("val"), torch.Tensor)
+                    else [
+                        user
+                        for user in node.users
+                        if isinstance(user.meta.get("val"), torch.Tensor)
+                    ]
+                )
+            source_storage = get_node_storage(copy_node.args[1])
+            if source_storage is None or source_storage == mutated_storage:
+                return False
+            output_storages = FakeTensorUpdater._storage_ids(node.meta["val"])
+            tracked_storages = OrderedSet(
+                get_node_storage(result) for result in result_nodes
+            )
+            if output_storages is None or any(
+                storage not in tracked_storages for storage in output_storages
             ):
                 return False
-            return True
-        else:
-            return not any_use_of_views_after_node(
-                node, shared_view_nodes, copy_node=None, mutated_arg=mutated_arg
-            )
+            for result in result_nodes:
+                if get_node_storage(copy_node.args[1]) == get_node_storage(result):
+                    if not _is_layout_preserving_view_copy_back(
+                        mutated_arg_base, copy_node.args[1], mutated_arg, result
+                    ):
+                        return False
+                elif any_use_of_views_after_node(
+                    copy_node,
+                    storage_to_nodes[get_node_storage(result)],
+                    copy_node=None,
+                    mutated_arg=result,
+                ):
+                    return False
+
+        return not any_use_of_views_after_node(
+            node,
+            shared_view_nodes,
+            copy_node=copy_node,
+            mutated_arg=mutated_arg_base,
+        )
 
     def copy_node_for_reinplaced_arg(node, mutated_arg):
         copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
