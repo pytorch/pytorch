@@ -331,7 +331,7 @@ class BaseSetVariable(VariableTracker):
         # is no C fast path to mirror.
         if (
             not any(isinstance(a, (BaseSetVariable, ConstDictVariable)) for a in args)
-            and check_constant_args(args, kwargs)
+            and check_constant_args([self, *args], kwargs)
             and self.python_type() in (set, frozenset)
         ):
             py_type = self.python_type()
@@ -362,9 +362,18 @@ class BaseSetVariable(VariableTracker):
         if fast is not None:
             return fast
         out_items = dict(self.items)
+        value = self._default_value()
         for other in args:
-            other_keys = set(self._operand_keys(tx, other))
-            out_items = {k: v for k, v in out_items.items() if k in other_keys}
+            other_keys = self._operand_keys(tx, other)
+            # CPython uses the smaller set (ties: other); OrderedSet keeps self order.
+            if not pyanyset_check(self) or (
+                pyanyset_check(other) and len(other_keys) > len(out_items)
+            ):
+                other_keys, out_items = (
+                    list(out_items),
+                    dict.fromkeys(other_keys, value),
+                )
+            out_items = dict.fromkeys((k for k in other_keys if k in out_items), value)
         return self._new_set(out_items)
 
     def union(
@@ -1224,13 +1233,7 @@ class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
         )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(
-            lambda: codegen.extend_output(
-                [
-                    codegen.create_load_global("frozenset"),
-                ]
-            )
-        )
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "frozenset"))
         codegen.foreach([x.vt for x in self.set_items])
         codegen.extend_output(
             [

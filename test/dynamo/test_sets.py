@@ -271,6 +271,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 class DictSetOperandTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("first", [1.0, True])
+    @parametrize("operand", [[1], (1,), {1}, range(1, 2)])
+    def test_iterable_set_operations_preserve_keys(self, first, operand):
+        def fn(x):
+            union = {x}.union(operand)
+            common = {first}.intersection(operand)
+            return x + len(union), any(k is x for k in union), tuple(map(type, common))
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), (x + 2, True, (int,)))
+
     @parametrize("mapping_type", (dict, OrderedDict))
     @parametrize(
         "operation",
