@@ -4790,6 +4790,7 @@ impl Compiled {
                             && ffi::Py_TYPE(held) as usize == *class
                             && ffi::PyObject_Size(held) as usize == *count
                     }
+                    Assert::Equals(v, number) => !reg(own, *v).is_null() && graph::same_value(reg(own, *v), number.as_ptr()),
                     Assert::Keys(v, names) => {
                         let held = reg(own, *v);
                         let dict = !held.is_null() && !capi::is_unboxed(held) && ffi::PyDict_CheckExact(held) != 0;
@@ -5414,6 +5415,29 @@ impl Compiled {
             capi::release(std::mem::replace(&mut regs[inst.dst as usize], nothing));
             kill(t, regs);
             return Taken::Went;
+        }
+        if let Op::GetItem(list, at) = &inst.op {
+            // An item of a list the path filled is the value that was put
+            // there, for as long as the place is the same number.
+            let place = reg(regs, *at);
+            let items = if made(t, *list) { self.built(t, t.mapped(*list)) } else { None };
+            let plain = !place.is_null() && !capi::is_unboxed(place) && ffi::PyLong_CheckExact(place) != 0;
+            if let (Some(items), true) = (items, plain && ffi::PyList_CheckExact(reg(regs, *list)) != 0) {
+                let count = items.len() as isize;
+                let asked = ffi::PyLong_AsSsize_t(place);
+                let found = if asked < 0 { asked + count } else { asked };
+                if (0..count).contains(&found) && count == ffi::PyList_GET_SIZE(reg(regs, *list)) {
+                    let Ok(item) = self.exec_op(regs, &inst.op) else {
+                        return Taken::Raised;
+                    };
+                    let number = self.path_value(t, regs, *at);
+                    t.check(Assert::Equals(number, PyObj::from_borrowed(place)), inst.bc);
+                    capi::release(std::mem::replace(&mut regs[inst.dst as usize], item));
+                    t.rename(inst.dst, items[found as usize]);
+                    kill(t, regs);
+                    return Taken::Went;
+                }
+            }
         }
         let operators = self.operation(block, origin, inst, regs, api);
         if operators.is_none() {
