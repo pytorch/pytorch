@@ -87,6 +87,9 @@ pub enum Assert {
     /// The object has no attribute of the name (`absent`): reading it
     /// comes down to the `__getattr__` of its class.
     Absent(PathValue, PyObj),
+    /// The class of the object has nothing under the name: no
+    /// `__getattr__` behind a `__getattribute__` that the path went into.
+    Lacks(PathValue, PyObj),
     /// What a call hands on with `*`: exactly of this class, a tuple or a
     /// list, with this many items. With `**`: an exact dict with these
     /// names, in this order.
@@ -121,6 +124,7 @@ impl Assert {
             | Assert::Iterator(v)
             | Assert::Count(v)
             | Assert::Absent(v, _)
+            | Assert::Lacks(v, _)
             | Assert::Sequence(v, ..)
             | Assert::Keys(v, _)
             | Assert::Equals(v, _)
@@ -162,6 +166,9 @@ pub struct PathInst {
     /// Which function it is an instruction of (`Path::owners`): the one
     /// whose constants and names it refers to.
     pub owner: u32,
+    /// For an operation that was handed a dict with `**`: the names, a
+    /// tuple, of its last operands, which no constant of the function is.
+    pub named: Option<PyObj>,
 }
 
 /// What a check looks at and a callable is handed: a value, or one of the
@@ -902,15 +909,62 @@ pub unsafe fn same_value(a: Obj, b: Obj) -> bool {
     if is_token(a) {
         return ffi::PyObject_RichCompareBool(a, b, ffi::Py_EQ) == 1;
     }
-    let sequence = ffi::PyTuple_CheckExact(a) != 0 || ffi::PyList_CheckExact(a) != 0;
-    if !sequence || ffi::PyObject_Size(a) != ffi::PyObject_Size(b) {
+    if !is_row(a) || ffi::PyObject_Size(a) != ffi::PyObject_Size(b) {
         return false;
     }
     (0..ffi::PyObject_Size(a)).all(|i| same_value(sequence_item(a, i), sequence_item(b, i)))
 }
 
+/// A list or a tuple, or a tuple of a class that is defined in C and
+/// compares as a tuple does (a `torch.Size`): what holds its items as a
+/// tuple or a list does, and runs no Python code to give them out.
+pub unsafe fn is_row(o: Obj) -> bool {
+    if capi::is_unboxed(o) {
+        return false;
+    }
+    if ffi::PyTuple_CheckExact(o) != 0 || ffi::PyList_CheckExact(o) != 0 {
+        return true;
+    }
+    let (ty, tuple) = (ffi::Py_TYPE(o), std::ptr::addr_of!(ffi::PyTuple_Type));
+    ffi::PyTuple_Check(o) != 0
+        && is_static(ty)
+        && (*ty).tp_richcompare.map(|f| f as usize) == (*tuple).tp_richcompare.map(|f| f as usize)
+}
+
+/// Whether a value is turned into text by C code alone (`str`, `repr`,
+/// `format`): a number, a text, None, a dtype or a device, and a list or
+/// tuple of such.
+pub unsafe fn quiet_text(o: Obj) -> bool {
+    if o.is_null() || capi::is_unboxed(o) {
+        return false;
+    }
+    is_plain(o) || is_token(o) || (is_row(o) && (0..ffi::PyObject_Size(o)).all(|i| quiet_text(sequence_item(o, i))))
+}
+
+/// Whether `a op b` runs no Python code: on numbers; on two texts; on two
+/// lists or two tuples (one after the other); on a list, a tuple or a text
+/// and a whole number (so many times); on a text and what it formats
+/// (`"%d" % n`). Not `a op= b` on a list, which changes the list.
+pub unsafe fn quiet_binary(kind: u8, a: Obj, b: Obj) -> bool {
+    // The kinds of `op=`, as the interpreter numbers them.
+    const IN_PLACE: u8 = 13;
+    if a.is_null() || b.is_null() || capi::is_unboxed(a) || capi::is_unboxed(b) {
+        return false;
+    }
+    if kind >= IN_PLACE && ffi::PyList_Check(a) != 0 {
+        return false;
+    }
+    let text = |o: Obj| ffi::PyUnicode_CheckExact(o) != 0;
+    let whole = |o: Obj| ffi::PyLong_CheckExact(o) != 0;
+    (is_number(a) && is_number(b))
+        || (text(a) && (text(b) || quiet_text(b)))
+        || (is_row(a) && is_row(b) && (ffi::PyList_Check(a) != 0) == (ffi::PyList_Check(b) != 0))
+        || ((is_row(a) || text(a)) && whole(b))
+        || (whole(a) && (is_row(b) || text(b)))
+}
+
 pub unsafe fn sequence_item(s: Obj, i: isize) -> Obj {
-    if ffi::PyTuple_CheckExact(s) != 0 {
+    if ffi::PyTuple_Check(s) != 0 {
         ffi::PyTuple_GET_ITEM(s, i)
     } else {
         ffi::PyList_GET_ITEM(s, i)
@@ -947,8 +1001,7 @@ pub unsafe fn checkable(o: Obj) -> bool {
             fine
         });
     }
-    let sequence = ffi::PyTuple_CheckExact(o) != 0 || ffi::PyList_CheckExact(o) != 0;
-    sequence && (0..ffi::PyObject_Size(o)).all(|i| checkable(sequence_item(o, i)))
+    is_row(o) && (0..ffi::PyObject_Size(o)).all(|i| checkable(sequence_item(o, i)))
 }
 
 /// What `len` may be given by a `__len__`: an exact int that is not
@@ -1014,9 +1067,56 @@ unsafe fn is_plain_container(o: Obj) -> bool {
             || (ffi::PyTuple_Check(o) != 0 && is_static(ffi::Py_TYPE(o))))
 }
 
+/// Whether a plain key is looked up in a dict, or put into it, without a
+/// key of the dict being compared with it in Python code (a key of a class
+/// with an `__eq__`, whose hash is that of the plain one): every key the
+/// dict has is plain. A dict that has taken nothing but texts says so
+/// itself (`pyffi::text_keys`); any other is gone through, if it is small.
+pub unsafe fn quiet_keys(dict: Obj) -> bool {
+    const SCANNED: isize = 32;
+    if pyffi::text_keys(dict) {
+        return true;
+    }
+    if ffi::PyDict_Size(dict) > SCANNED {
+        return false;
+    }
+    let (mut at, mut key, mut value) = (0, null_mut(), null_mut());
+    while ffi::PyDict_Next(dict, &mut at, &mut key, &mut value) != 0 {
+        if !is_plain_key(key) {
+            return false;
+        }
+    }
+    true
+}
+
+/// The same for a set: a small one that holds nothing but plain values.
+unsafe fn quiet_members(set: Obj) -> bool {
+    const SCANNED: isize = 32;
+    if ffi::PySet_Size(set) > SCANNED {
+        return false;
+    }
+    let members = ffi::PyObject_GetIter(set);
+    if members.is_null() {
+        ffi::PyErr_Clear();
+        return false;
+    }
+    let mut plain = true;
+    loop {
+        let member = ffi::PyIter_Next(members);
+        if member.is_null() {
+            break;
+        }
+        plain &= is_plain_key(member);
+        ffi::Py_DECREF(member);
+    }
+    ffi::PyErr_Clear();
+    ffi::Py_DECREF(members);
+    plain
+}
+
 /// Whether `container[key]` runs no Python code.
 pub unsafe fn quiet_item(container: Obj, key: Obj) -> bool {
-    is_plain_container(container) && is_plain_key(key)
+    is_plain_container(container) && is_plain_key(key) && (ffi::PyDict_Check(container) == 0 || quiet_keys(container))
 }
 
 /// Whether the entries of one dict go into another without Python code
@@ -1078,8 +1178,11 @@ pub unsafe fn quiet_contains(item: Obj, container: Obj) -> bool {
     if capi::is_unboxed(item) || capi::is_unboxed(container) || !is_plain(item) {
         return false;
     }
-    if is_plain_dict(container) || ffi::PyAnySet_CheckExact(container) != 0 {
-        return true;
+    if is_plain_dict(container) {
+        return quiet_keys(container);
+    }
+    if ffi::PyAnySet_CheckExact(container) != 0 {
+        return quiet_members(container);
     }
     if ffi::PyUnicode_CheckExact(container) != 0 {
         return ffi::PyUnicode_CheckExact(item) != 0;
@@ -1281,16 +1384,59 @@ pub unsafe fn reads_attribute(callee: Obj) -> bool {
     builtin_named(Builtin::GetAttr) == callee as usize || builtin_named(Builtin::HasAttr) == callee as usize
 }
 
+/// Whether a callee is the builtin `hasattr`.
+pub unsafe fn is_hasattr(callee: Obj) -> bool {
+    builtin_named(Builtin::HasAttr) == callee as usize
+}
+
 /// Whether a callee is the builtin `len`.
 pub unsafe fn is_len(callee: Obj) -> bool {
     builtin_named(Builtin::Len) == callee as usize
 }
 
-/// Whether a callee is a builtin that goes over its arguments: what it
-/// does with an object is what it does with an iterator over the object.
-pub unsafe fn goes_over(callee: Obj) -> bool {
+/// For a call of a builtin that asks its arguments for an iterator and for
+/// nothing else, in their order, before it does anything with them: how
+/// many of the arguments it asks, from the first on; 0 for any other call.
+/// `iter(x)` (not `iter(x, sentinel)`, which calls `x`), `enumerate(x)` and
+/// `enumerate(x, n)` with an int (which is asked for its index first),
+/// `zip(...)`, and `list(x)` and `tuple(x)` of an object whose class has
+/// neither `__len__` nor `__length_hint__`, which those ask of the object
+/// itself.
+pub unsafe fn goes_over(callee: Obj, args: &[Obj]) -> usize {
     const TAKE: [Builtin; 5] = [Builtin::Enumerate, Builtin::Zip, Builtin::Iter, Builtin::List, Builtin::Tuple];
-    TAKE.iter().any(|which| builtin_named(*which) == callee as usize)
+    static HINT: std::sync::OnceLock<PyObj> = std::sync::OnceLock::new();
+    let Some(which) = TAKE.iter().copied().find(|which| builtin_named(*which) == callee as usize) else {
+        return 0;
+    };
+    if args.is_empty() || args.iter().any(|o| o.is_null()) {
+        return 0;
+    }
+    let one = args.len() == 1;
+    let plain = |o: Obj| {
+        let hint = HINT.get_or_init(|| PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__length_hint__".as_ptr())));
+        let ty = ffi::Py_TYPE(o);
+        !capi::is_unboxed(o)
+            && pyffi::_PyType_Lookup(ty, specials().len.as_ptr()).is_null()
+            && pyffi::_PyType_Lookup(ty, hint.as_ptr()).is_null()
+    };
+    match which {
+        Builtin::Iter => one as usize,
+        Builtin::Enumerate => {
+            (one || (args.len() == 2 && !capi::is_unboxed(args[1]) && ffi::PyLong_CheckExact(args[1]) != 0)) as usize
+        }
+        Builtin::List | Builtin::Tuple => (one && plain(args[0])) as usize,
+        _ => args.len(),
+    }
+}
+
+/// The name `__length_hint__`, for a check that a class has none.
+pub unsafe fn length_hint() -> PyObj {
+    PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__length_hint__".as_ptr()))
+}
+
+/// Whether a callee is the builtin `list` or `tuple`.
+pub unsafe fn makes_sequence(callee: Obj) -> bool {
+    builtin_named(Builtin::List) == callee as usize || builtin_named(Builtin::Tuple) == callee as usize
 }
 
 /// The modules whose functions a path may call on any arguments (`torch._C`:
@@ -1320,13 +1466,38 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
     if callee.is_null() || capi::is_unboxed(callee) || args.iter().any(|o| o.is_null()) {
         return None;
     }
+    // What `object` reads of the object it is bound to, where that runs
+    // no Python code. Of a tensor nothing is read this way.
+    let reader = generic_reader(callee);
+    if !reader.is_null() {
+        let mut info = TcfgTensorInfo::empty();
+        let named = args.len() == 1 && !capi::is_unboxed(args[0]) && ffi::PyUnicode_CheckExact(args[0]) != 0;
+        let fine = named && (api.tensor_info)(reader, &mut info) == 0 && quiet_generic(reader, args[0]);
+        xdecref(reader);
+        return fine.then_some(false);
+    }
     if ffi::PyCFunction_Check(callee) != 0 {
         let function = callee as *mut ffi::PyCFunctionObject;
         let (state, math, operator) = quiet_modules();
         let of = (*function).m_self as usize;
+        let name = std::ffi::CStr::from_ptr((*(*function).m_ml).ml_name);
+        // One that `torch._C` has under its name, however it is bound.
+        let asks = ASKS.iter().any(|asks| name.to_bytes().starts_with(asks));
+        if asks && of != state && state != 0 {
+            let found = ffi::PyObject_GetAttrString(state as Obj, name.as_ptr());
+            ffi::PyErr_Clear();
+            xdecref(found);
+            if found == callee {
+                return Some(false);
+            }
+        }
         if of != 0 && of == state {
-            let name = std::ffi::CStr::from_ptr((*(*function).m_ml).ml_name).to_bytes();
-            return ASKS.iter().any(|asks| name.starts_with(asks)).then_some(false);
+            return asks.then_some(false);
+        }
+        // A method of a number, a text or a tuple of such, on such values:
+        // they cannot change, and what their classes do is written in C.
+        if of != 0 && unchanging(of as Obj) {
+            return args.iter().all(|o| quiet_text(*o)).then_some(false);
         }
         if of != 0 && of == math {
             return args.iter().all(|o| is_number(*o)).then_some(false);
@@ -1363,10 +1534,11 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
         Builtin::Type | Builtin::Callable => args.len() == 1,
         Builtin::GetAttr | Builtin::HasAttr => {
             let found = which == Builtin::GetAttr && args.len() == 3;
-            (args.len() == 2 || found)
-                && !capi::is_unboxed(args[1])
-                && ffi::PyUnicode_CheckExact(args[1]) != 0
-                && quiet_attr(args[0], args[1], api)
+            let named = (args.len() == 2 || found) && !capi::is_unboxed(args[1]) && ffi::PyUnicode_CheckExact(args[1]) != 0;
+            // What is not there is answered too where nothing is raised
+            // out of the call.
+            let caught = which == Builtin::HasAttr || found;
+            named && (quiet_attr(args[0], args[1], api) || (caught && quiet_absent(args[0], args[1])))
         }
         Builtin::IsInstance => {
             static CLASS: std::sync::OnceLock<PyObj> = std::sync::OnceLock::new();
@@ -1397,9 +1569,20 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
     ))
 }
 
+/// A number, a text, bytes, or a tuple of numbers and texts: a value that
+/// cannot change, whose methods are written in C.
+unsafe fn unchanging(o: Obj) -> bool {
+    !capi::is_unboxed(o)
+        && (is_number(o)
+            || ffi::PyUnicode_CheckExact(o) != 0
+            || ffi::PyBytes_CheckExact(o) != 0
+            || (ffi::PyTuple_CheckExact(o) != 0 && quiet_text(o)))
+}
+
 /// Whether a call of a method runs no Python code, no kernel, and changes
 /// nothing: what a dict has, as a view or under a key; what a tensor says
-/// of itself.
+/// of itself; any method of a number, a text or a tuple of such on such
+/// values (`unchanging`).
 pub unsafe fn pure_method(recv: Obj, name: Obj, args: &[Obj], api: &TcfgApi) -> bool {
     const SAYS: [&str; 8] =
         ["size", "dim", "ndimension", "numel", "nelement", "is_floating_point", "is_complex", "element_size"];
@@ -1412,12 +1595,18 @@ pub unsafe fn pure_method(recv: Obj, name: Obj, args: &[Obj], api: &TcfgApi) -> 
         let ints = args.iter().all(|o| !capi::is_unboxed(*o) && ffi::PyLong_CheckExact(*o) != 0);
         return SAYS.contains(&name.as_str()) && args.len() <= 1 && ints;
     }
-    if capi::is_unboxed(recv) || !is_plain_dict(recv) {
+    if capi::is_unboxed(recv) {
+        return false;
+    }
+    if unchanging(recv) {
+        return args.iter().all(|o| quiet_text(*o));
+    }
+    if !is_plain_dict(recv) {
         return false;
     }
     match name.as_str() {
         "keys" | "values" | "items" => args.is_empty(),
-        "get" => (1..=2).contains(&args.len()) && is_plain_key(args[0]),
+        "get" => (1..=2).contains(&args.len()) && is_plain_key(args[0]) && quiet_keys(recv),
         _ => false,
     }
 }
@@ -1432,7 +1621,8 @@ pub struct Specials {
     pub getattr: PyObj,
     pub setattr: PyObj,
     pub instancecheck: PyObj,
-    getattribute: PyObj,
+    pub getattribute: PyObj,
+    pub contains: PyObj,
 }
 
 pub unsafe fn specials() -> &'static Specials {
@@ -1447,6 +1637,7 @@ pub unsafe fn specials() -> &'static Specials {
         setattr: name(c"__setattr__"),
         instancecheck: name(c"__instancecheck__"),
         getattribute: name(c"__getattribute__"),
+        contains: name(c"__contains__"),
     })
 }
 
@@ -1522,6 +1713,121 @@ pub unsafe fn absent(o: Obj, name: Obj) -> bool {
     !has(name) && !(ffi::PyModule_Check(o) != 0 && has(specials().getattr.as_ptr()))
 }
 
+/// Whether an object has no attribute of a name and says so without
+/// changing anything: neither its class nor the object has it, and the
+/// `__getattr__` of the class is one with a shortcut (that of `nn.Module`)
+/// none of whose dicts has it, which then raises AttributeError and does
+/// nothing else. `hasattr` is False then, and `getattr` gives its default;
+/// both call the function, at every call.
+pub unsafe fn quiet_absent(obj: Obj, name: Obj) -> bool {
+    absent(obj, name)
+        && ffi::PyModule_Check(obj) == 0
+        && crate::shortcuts::has_getattr(ffi::Py_TYPE(obj))
+        && !crate::shortcuts::finds(obj, name)
+}
+
+/// For what `object.__getattribute__` is when it is bound to an object
+/// (what `super().__getattribute__(name)` comes down to in a class that
+/// reads its attributes in a function of its own): the object. Owned;
+/// null for anything else.
+pub unsafe fn generic_reader(callee: Obj) -> Obj {
+    static WRAPPER: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    if callee.is_null() || capi::is_unboxed(callee) {
+        return null_mut();
+    }
+    let names = specials();
+    let wrapper = *WRAPPER.get_or_init(|| {
+        let bound = ffi::PyObject_GetAttr(ffi::Py_None(), names.getattribute.as_ptr());
+        ffi::PyErr_Clear();
+        let class = if bound.is_null() { 0 } else { ffi::Py_TYPE(bound) as usize };
+        xdecref(bound);
+        class
+    });
+    if wrapper == 0 || ffi::Py_TYPE(callee) as usize != wrapper {
+        return null_mut();
+    }
+    let class = ffi::PyObject_GetAttrString(callee, c"__objclass__".as_ptr());
+    let name = ffi::PyObject_GetAttrString(callee, c"__name__".as_ptr());
+    let lookup = class == std::ptr::addr_of_mut!(ffi::PyBaseObject_Type) as Obj
+        && !name.is_null()
+        && ffi::PyUnicode_Check(name) != 0
+        && ffi::PyUnicode_Compare(name, names.getattribute.as_ptr()) == 0;
+    ffi::PyErr_Clear();
+    xdecref(class);
+    xdecref(name);
+    if !lookup {
+        return null_mut();
+    }
+    let bound = ffi::PyObject_GetAttrString(callee, c"__self__".as_ptr());
+    ffi::PyErr_Clear();
+    bound
+}
+
+/// Whether the lookup of `object` finds an attribute of an object without
+/// running Python code, whatever the class of the object does when an
+/// attribute is read: what `object.__getattribute__(obj, name)` does.
+/// False for a name that is not there.
+pub unsafe fn quiet_generic(obj: Obj, name: Obj) -> bool {
+    if obj.is_null() || capi::is_unboxed(obj) || ffi::PyType_Check(obj) != 0 {
+        return false;
+    }
+    let descr = pyffi::_PyType_Lookup(ffi::Py_TYPE(obj), name);
+    let python = !descr.is_null() && python_descriptor(descr);
+    let data = !descr.is_null() && (*ffi::Py_TYPE(descr)).tp_descr_set.is_some();
+    if data {
+        return !python;
+    }
+    let slot = pyffi::_PyObject_GetDictPtr(obj);
+    let own = !slot.is_null() && !(*slot).is_null() && !ffi::PyDict_GetItemWithError(*slot, name).is_null();
+    own || (!descr.is_null() && !python)
+}
+
+/// The property that the lookup of `object` comes down to for a name of
+/// an object, whatever the object holds itself. Null for anything else.
+/// Borrowed.
+pub unsafe fn generic_property(obj: Obj, name: Obj) -> Obj {
+    if obj.is_null() || capi::is_unboxed(obj) || ffi::PyType_Check(obj) != 0 {
+        return null_mut();
+    }
+    let descr = pyffi::_PyType_Lookup(ffi::Py_TYPE(obj), name);
+    let property = !descr.is_null() && ffi::Py_TYPE(descr) == std::ptr::addr_of_mut!(ffi::PyProperty_Type);
+    if property { descr } else { null_mut() }
+}
+
+/// Whether reading an attribute of what `super(class, obj)` gave runs no
+/// Python code: the classes behind `class`, in the order of the class of
+/// `obj`, are gone through for the name, and what the first that has it
+/// holds is bound by C code (a function, a method of a class written in
+/// C) or is no descriptor. False for a name none of them has.
+unsafe fn quiet_super(bound: Obj, name: Obj) -> bool {
+    if pyffi::str_to_string(name) == "__class__" {
+        return false;
+    }
+    let this = ffi::PyObject_GetAttrString(bound, c"__thisclass__".as_ptr());
+    let class = ffi::PyObject_GetAttrString(bound, c"__self_class__".as_ptr());
+    ffi::PyErr_Clear();
+    let mut quiet = false;
+    if !this.is_null() && !class.is_null() && ffi::PyType_Check(class) != 0 {
+        let order = (*(class as *mut ffi::PyTypeObject)).tp_mro;
+        let count = if order.is_null() { 0 } else { ffi::PyTuple_GET_SIZE(order) };
+        if let Some(start) = (0..count).find(|i| ffi::PyTuple_GET_ITEM(order, *i) == this) {
+            for i in start + 1..count {
+                let dict = pyffi::PyType_GetDict(ffi::PyTuple_GET_ITEM(order, i) as *mut ffi::PyTypeObject);
+                let found = if dict.is_null() { null_mut() } else { ffi::PyDict_GetItemWithError(dict, name) };
+                xdecref(dict);
+                if !found.is_null() {
+                    quiet = !python_descriptor(found);
+                    break;
+                }
+            }
+        }
+    }
+    ffi::PyErr_Clear();
+    xdecref(this);
+    xdecref(class);
+    quiet
+}
+
 /// Whether what a type has under a name is given out by Python code: a
 /// property whose getter is a Python function, or a descriptor of a class
 /// that is defined in Python.
@@ -1554,6 +1860,9 @@ pub unsafe fn quiet_attr(obj: Obj, name: Obj, api: &TcfgApi) -> bool {
     if ffi::PyModule_CheckExact(obj) != 0 {
         let dict = ffi::PyModule_GetDict(obj);
         return !dict.is_null() && !ffi::PyDict_GetItemWithError(dict, name).is_null();
+    }
+    if ty == std::ptr::addr_of_mut!(ffi::PySuper_Type) {
+        return quiet_super(obj, name);
     }
     if ffi::PyType_Check(obj) != 0 {
         // A class: what it has itself, or else what `type` has for it.
@@ -1759,6 +2068,46 @@ pub fn shaped_operator(name: &str) -> bool {
     unsafe { ffi::PyErr_Clear() };
     known.borrow_mut().insert(name.to_string(), shaped);
     shaped
+}
+
+/// The operators that drop elements at random where they are told to, and
+/// give back what they were handed where they are not (their last
+/// argument).
+pub const DROPOUTS: [&str; 4] = ["aten::dropout", "aten::feature_dropout", "aten::alpha_dropout", "aten::feature_alpha_dropout"];
+
+/// The operators that draw random numbers only where an argument is not
+/// zero, which is what it is where it is not given: the argument, by
+/// place and by name.
+pub const DRAWS_AT_A_RATE: [(&str, usize, &std::ffi::CStr); 1] = [("aten::scaled_dot_product_attention", 4, c"dropout_p")];
+
+/// Whether all that keeps an operator from being a function of its
+/// arguments is that it draws random numbers: it writes to none of them,
+/// and its tags say that it draws from the generator.
+pub fn seeded_operator(name: &str) -> bool {
+    static KNOWN: std::sync::OnceLock<Shared<HashMap<String, bool>>> = std::sync::OnceLock::new();
+    let known = KNOWN.get_or_init(|| Shared::new(HashMap::new()));
+    if let Some(seeded) = known.borrow().get(name) {
+        return *seeded;
+    }
+    let (qualified, overload) = overload_of(name);
+    let asked = |py: Python<'_>| -> PyResult<bool> {
+        let binding = py.import("torch._C")?;
+        let schema = binding.call_method1("_get_schema", (qualified, overload))?;
+        if schema.getattr("is_mutable")?.is_truthy()? {
+            return Ok(false);
+        }
+        let found = binding.call_method1("_get_operation_overload", (qualified, overload))?;
+        if found.is_none() {
+            return Ok(false);
+        }
+        let seeded = py.import("torch")?.getattr("Tag")?.getattr("nondeterministic_seeded")?;
+        found.get_item(2)?.contains(seeded)
+    };
+    let quiet = !UPDATES_STATISTICS.iter().any(|(op, _)| *op == qualified);
+    let seeded = quiet && unsafe { asked(Python::assume_attached()).unwrap_or(false) };
+    unsafe { ffi::PyErr_Clear() };
+    known.borrow_mut().insert(name.to_string(), seeded);
+    seeded
 }
 
 /// Whether an operator has no kernel of its own and is made of other
@@ -2439,12 +2788,10 @@ impl Path {
                 }
                 op if inst.kind == Kind::Node => {
                     let (_, meta) = recorded.next().ok_or_else(did_not_run)?;
-                    let names = |kwnames: u32| {
-                        if kwnames == NONE {
-                            none()
-                        } else {
-                            new_ref(func.consts[kwnames as usize].as_ptr())
-                        }
+                    let names = |kwnames: u32| match &inst.named {
+                        Some(named) => new_ref(named.as_ptr()),
+                        None if kwnames == NONE => none(),
+                        None => new_ref(func.consts[kwnames as usize].as_ptr()),
                     };
                     let (kind, head, taken, keywords) = match op {
                         Op::Call { callee, args, kwnames } => {
@@ -2916,8 +3263,20 @@ fn role(unit: &Unit, cx: &PassCx, i: usize) -> Role {
     let quiet = facts(cx, unit, i).is_some_and(|f| f.quiet());
     let wrote = facts(cx, unit, i).is_some_and(|f| f.wrote);
     let numbers = |vs: &[V]| vs.iter().all(|v| number(cx, unit, *v));
+    // A dropout that was told not to drop anything whenever it was looked
+    // at (a model that is not training) draws nothing.
+    let idle = |d: &DispatchOp| {
+        let dropout = unsafe { d.slot.operator() }.is_some_and(|name| DROPOUTS.contains(&name.as_str()));
+        let off = d.operands.last().is_some_and(|train| {
+            let never = matches!(cx.obs.get(*train as usize), Some(crate::spec::ValueObs::Bool { seen_true: 0, .. }));
+            let no = matches!(unit.def_op(*train), Some(Op::Const(c)) if cx.func().consts[*c as usize].as_ptr() == unsafe { ffi::Py_False() });
+            never || no
+        });
+        dropout && off
+    };
     let kind = match &unit.insts[i].inst.op {
         Op::Dispatch(d) if d.slot.traits() == 0 && d.slot.len() > 0 && !wrote => Some(Kind::Node),
+        Op::Dispatch(d) if d.slot.traits() == capi::SITE_RANDOM && d.slot.len() > 0 && idle(d) => Some(Kind::Node),
         Op::Call { .. } | Op::CallMethod { .. } | Op::GetItem(..) if generic(unit, cx, i) => Some(Kind::Node),
         Op::Const(_)
         | Op::TensorSize { .. }
@@ -2987,6 +3346,8 @@ pub fn infallible(op: &Op) -> bool {
             | Op::BuildList(_)
             | Op::BuildSlice(..)
             | Op::ListAppend(..)
+            | Op::MakeCell(_)
+            | Op::CellSet(..)
             | Op::TupleGet(..)
             | Op::IsNone(..)
             | Op::Is(..)
@@ -2996,7 +3357,7 @@ pub fn infallible(op: &Op) -> bool {
 }
 
 /// A list, a tuple or a slice that the instructions make.
-fn container(op: &Op) -> bool {
+pub fn container(op: &Op) -> bool {
     matches!(op, Op::BuildTuple(_) | Op::BuildList(_) | Op::BuildSlice(..))
 }
 
@@ -3192,6 +3553,7 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
             in_graph: false,
             assert: None,
             owner: 0,
+            named: None,
         });
     }
     let late = |inst: &PathInst| {
@@ -3771,7 +4133,7 @@ impl Trace {
 
     pub fn push(&mut self, op: Op, dst: PathValue, kind: Kind, bc: u32) {
         let owner = self.owner();
-        self.body.push(PathInst { op, dst, kind, bc, stage: Stage::Before, in_graph: false, assert: None, owner });
+        self.body.push(PathInst { op, dst, kind, bc, stage: Stage::Before, in_graph: false, assert: None, owner, named: None });
     }
 
     pub fn check(&mut self, assert: Assert, bc: u32) {
@@ -3952,6 +4314,8 @@ pub fn renamed(op: &Op, f: &mut impl FnMut(V) -> V) -> Option<Op> {
             Op::BuildSlice(parts[0], parts[1], if *c == NONE { NONE } else { all(&[*c])[0] })
         }
         Op::CellGet(a, n) => Op::CellGet(f(*a), *n),
+        Op::MakeCell(a) => Op::MakeCell(if *a == UNDEF { UNDEF } else { f(*a) }),
+        Op::CellSet(a, b) if *b != UNDEF => Op::CellSet(f(*a), f(*b)),
         Op::LoadAttr(a, n) => Op::LoadAttr(f(*a), *n),
         Op::Binary(k, a, b) => Op::Binary(*k, f(*a), f(*b)),
         Op::Unary(k, a) => Op::Unary(*k, f(*a)),
@@ -3971,6 +4335,11 @@ pub fn renamed(op: &Op, f: &mut impl FnMut(V) -> V) -> Option<Op> {
         Op::DictMerge(a, b, c) => Op::DictMerge(f(*a), f(*b), f(*c)),
         Op::MapAdd(a, b, c) => Op::MapAdd(f(*a), f(*b), f(*c)),
         Op::ListToTuple(a) => Op::ListToTuple(f(*a)),
+        Op::SuperObject { global_super, class, this, explicit } => {
+            Op::SuperObject { global_super: f(*global_super), class: f(*class), this: f(*this), explicit: *explicit }
+        }
+        Op::Format { val, conv, spec } => Op::Format { val: f(*val), conv: *conv, spec: if *spec == NONE { NONE } else { f(*spec) } },
+        Op::BuildString(vs) => Op::BuildString(all(vs)),
         Op::Unpack(a, n) => Op::Unpack(f(*a), *n),
         Op::TupleGet(a, i) => Op::TupleGet(f(*a), *i),
         Op::GetLen(a) => Op::GetLen(f(*a)),
