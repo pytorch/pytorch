@@ -903,8 +903,9 @@ REGISTER_SCALED_MM_NATIVE_WITH_OUT_T(float8_e4m3fn);
 // MXFP8 on Metal 4.1: MPP applies the ue8m0 block scales itself, taking each
 // operand's scales as a [rows, K / 32] plane alongside its fp8 data. MPP
 // derives the plane's row pitch from the data's, so the host only routes dense
-// operands (leading stride == K) here. MPP rejects const-qualified element
-// types, hence the non-const pointers.
+// operands (leading stride == K) here. MPP decodes the e8m0 NaN code 0xff as
+// 2^128, so rows of A and columns of B with a NaN scale are made NaN here. MPP
+// rejects const-qualified element types, hence the non-const pointers.
 template <typename T>
 [[max_total_threads_per_threadgroup(scaled_mm_threads)]]
 kernel void scaled_mm_native_mxfp8(
@@ -917,7 +918,8 @@ kernel void scaled_mm_native_mxfp8(
     device const float* tensor_scale_b [[buffer(6)]],
     device const uchar* bias [[buffer(7)]],
     constant ScaledMMParams<>& p [[buffer(8)]],
-    uint2 group [[threadgroup_position_in_grid]]) {
+    uint2 group [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]]) {
   constexpr auto tile = scaled_mm_native_tile;
   using scales_t = tensor_blockwise<
       tensor_plane_scales,
@@ -956,7 +958,35 @@ kernel void scaled_mm_native_mxfp8(
       decltype(a_tile),
       decltype(b_tile),
       float>();
+  // The tile's scales are contiguous [rows, k_blocks] blocks; flag the rows of
+  // A (first tile entries) and columns of B with a NaN scale. The host routes
+  // only K % 128 == 0 here, so a row holds whole groups of 4 scales.
+  threadgroup bool has_nan[2 * tile];
+  for (uint i = tid; i < 2 * tile; i += scaled_mm_threads) {
+    has_nan[i] = false;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (uint side = 0; side < 2; ++side) {
+    const uint start = side ? col_start : row_start;
+    const uint rows = min(tile, (side ? p.n : p.m) - start);
+    const auto scales = reinterpret_cast<device const packed_uchar4*>(
+        (side ? scale_b : scale_a) + ulong(start) * k_blocks);
+    for (uint i = tid; i < rows * k_blocks / 4; i += scaled_mm_threads) {
+      if (any(uchar4(scales[i]) == 0xff)) {
+        has_nan[side * tile + 4 * i / k_blocks] = true;
+      }
+    }
+  }
   op.run(a_tile, b_tile, accum);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (uint16_t i = 0; i < accum.get_capacity(); ++i) {
+    if (accum.is_valid_element(i)) {
+      const auto coord = accum.get_multidimensional_index(i);
+      if (has_nan[coord[1]] || has_nan[tile + coord[0]]) {
+        accum[i] = NAN;
+      }
+    }
+  }
   const ScaledMMArgs<T> args{
       nullptr, nullptr, out, tensor_scale_a, tensor_scale_b, bias, {}, {}};
   scaled_mm_store_accum(accum, row_start, col_start, args, p);
@@ -974,7 +1004,8 @@ kernel void scaled_mm_native_mxfp8(
       device const float*,                                         \
       device const uchar*,                                         \
       constant ScaledMMParams<>&,                                  \
-      uint2);
+      uint2,                                                       \
+      uint);
 
 REGISTER_SCALED_MM_NATIVE_MXFP8_WITH_OUT_T(float);
 REGISTER_SCALED_MM_NATIVE_MXFP8_WITH_OUT_T(half);

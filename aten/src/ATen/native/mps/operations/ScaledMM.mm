@@ -77,10 +77,12 @@ void scaled_mm_blockwise_out(const Tensor& mat_a,
       .has_bias = bias.has_value(),
       .bias_bfloat16 = bias.has_value() && bias->scalar_type() == kBFloat16,
   };
-  // Metal 4.1 MPP applies MX block scales natively. It needs whole blocks along K and dense operands, since it derives
-  // the scale plane's row pitch from the data's, and indexes each tile in int32.
-  const bool native = !nvfp4 && has_metal_4_1() && k % scaled_mm_mx_block == 0 && mat_a.stride(0) == k &&
-      mat_b.stride(1) == k && std::in_range<int32_t>(scaled_mm_native_tile * k);
+  // Metal 4.1 MPP applies MX block scales natively. It needs dense operands, since it derives the scale plane's row
+  // pitch from the data's, fp8 tensors whose base and row stride are aligned per the MSL spec, and indexes each tile in
+  // int32.
+  const bool native = !nvfp4 && has_metal_4_1() && mat_a.stride(0) == k && mat_b.stride(1) == k &&
+      is_aligned(mat_a, k, scaled_mm_native_fp8_alignment) && is_aligned(mat_b, k, scaled_mm_native_fp8_alignment) &&
+      std::in_range<int32_t>(scaled_mm_native_tile * k);
   // The few rows kernel reads whole chunks of K with vector loads
   const bool few_rows = params.m <= scaled_mm_few_rows_max && k % scaled_mm_blockwise_chunk == 0 &&
       is_aligned(mat_a, mat_a.stride(0), scaled_mm_few_rows_load_bytes) &&

@@ -9,6 +9,8 @@ C10_METAL_CONSTEXPR uint32_t scaled_mm_threads =
 C10_METAL_CONSTEXPR uint32_t scaled_mm_alignment = 16;
 // Output tile of the Metal 4.1 kernel, which reads fp8 operands natively
 C10_METAL_CONSTEXPR uint32_t scaled_mm_native_tile = 64;
+// MSL 4.1 requires fp8 tensors' base and row stride to be 128-byte aligned
+C10_METAL_CONSTEXPR uint32_t scaled_mm_native_fp8_alignment = 128;
 // Matrix A's max number of rows on which we dispatch few rows kernel
 // Higher values per-row ALU work outweighs streaming matrix B once.
 C10_METAL_CONSTEXPR uint32_t scaled_mm_few_rows_max = 4;

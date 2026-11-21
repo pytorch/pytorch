@@ -3023,6 +3023,33 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             if sqnr.item() <= approx_match_sqnr_target:
                 raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
+    @onlyAccelerator
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @parametrize("M", [2, 31, 128])
+    def test_blockwise_mxfp8_special_scales(self, M, device) -> None:
+        # e8m0 scales of 2^120 and 2^-120 multiply to 1 without overflowing their product, and the NaN
+        # code 0xff makes its row of A or column of B NaN
+        K, N = 128, 128
+        a = torch.ones(M, K, device=device).to(torch.float8_e4m3fn)
+        b = torch.ones(N, K, device=device).to(torch.float8_e4m3fn)
+        sa = torch.full((M, K // 32), 127 + 120, dtype=torch.uint8, device=device)
+        sb = torch.full((N, K // 32), 127 - 120, dtype=torch.uint8, device=device)
+        sa[0, 1] = sb[1, 2] = 0xFF
+        swizzle = mx_swizzle_for(device, a.dtype)
+
+        def scales(s):
+            s = s.view(torch.float8_e8m0fnu)
+            return s if swizzle == SwizzleType.NO_SWIZZLE else mx_scale_swizzle(s, a.dtype)
+
+        out = scaled_mm_wrap(
+            a, b.t(), scales(sa), scales(sb),
+            scale_recipe_a=ScalingType.BlockWise1x32, scale_recipe_b=ScalingType.BlockWise1x32,
+            swizzle_a=swizzle, swizzle_b=swizzle, out_dtype=torch.bfloat16,
+        )
+        expected = torch.full_like(out, K)
+        expected[0, :] = expected[:, 1] = float("nan")
+        self.assertEqual(out, expected, equal_nan=True)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
     @decorateIf(
@@ -5493,7 +5520,7 @@ class TestFP8MatmulMpsOnly(TestCase):
     @parametrize("layout", ["dense", "padded", "unaligned"])
     @parametrize("mnk", [(1, 7, 2048), (3, 130, 1024), (4, 64, 512), (8, 100, 256), (64, 96, 2048)],
                  name_fn=lambda mnk: f"{mnk[0]}_{mnk[1]}_{mnk[2]}")
-    def test_blockwise_mps_layouts(self, recipe, layout, mnk, device) -> None:
+    def test_blockwise_layouts(self, recipe, layout, mnk, device) -> None:
         # MPS picks a decode kernel for M <= 4, MPP or tiles otherwise, and the native
         # Metal 4.1 kernel for dense MXFP8; padded and unaligned operands must take or
         # fall back to a kernel that handles them.
@@ -5544,19 +5571,6 @@ class TestFP8MatmulMpsOnly(TestCase):
         # float32 accumulation over K: measure the error against the output's magnitude
         err = ((out.cpu().double() - ref).abs() / (ref.abs() + ref.abs().mean())).max().item()
         self.assertLess(err, 1e-5)
-
-    def test_blockwise_mxfp8_extreme_scales_mps(self, device) -> None:
-        # A large and a small e8m0 scale whose product is 1 must not overflow, whichever kernel M selects
-        for M in (1, 8):
-            a = torch.ones(M, 32, device=device).to(torch.float8_e4m3fn)
-            b = torch.ones(16, 32, device=device).to(torch.float8_e4m3fn)
-            sa = torch.full((M, 1), 127 + 120, dtype=torch.uint8, device=device).view(torch.float8_e8m0fnu)
-            sb = torch.full((16, 1), 127 - 120, dtype=torch.uint8, device=device).view(torch.float8_e8m0fnu)
-            out = torch._scaled_mm_v2(
-                a, b.t(), [sa], [ScalingType.BlockWise1x32], [SwizzleType.NO_SWIZZLE],
-                [sb], [ScalingType.BlockWise1x32], [SwizzleType.NO_SWIZZLE], None, torch.float32,
-            )
-            self.assertEqual(out, torch.full_like(out, 32.0))
 
 
 instantiate_device_type_tests(TestFP8MatmulDevice, globals(), allow_xpu=True, allow_mps=True)
