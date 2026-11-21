@@ -2146,6 +2146,32 @@ class TestVmapOperators(Namespace.TestVmapBase):
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(functools.partial(op, memory_format=torch.channels_last_3d))(tensor)
 
+    def test_to_memory_format(self):
+        # is_contiguous(memory_format) is NYI inside of vmap for channels-last formats
+        B0 = 3
+        x = torch.randn(B0, 2, 4, 5, 6).permute(0, 1, 4, 2, 3)
+        result = vmap(lambda t: t.to(memory_format=torch.channels_last))(x)
+        self.assertIs(result, x)
+
+        x = torch.randn(B0, 4, 5)
+        result = vmap(lambda t: t.t().to(memory_format=torch.contiguous_format))(x)
+        self.assertTrue(result.is_contiguous())
+        self.assertEqual(result, x.transpose(1, 2))
+
+    @skipIfTorchDynamo(
+        "Dynamo queries is_contiguous(channels_last) on a wrapped tensor"
+    )
+    def test_to_memory_format_composed(self):
+        # Under vmap, channels-last formats must keep returning self even when
+        # the batched tensor is wrapped by another transform.
+        x = torch.randn(3, 2, 5, 12, 4).permute(0, 1, 4, 2, 3)[..., ::2]
+
+        def to_cl(t):
+            return t.to(memory_format=torch.channels_last)
+
+        self.assertEqual(vmap(torch.func.functionalize(to_cl))(x), x)
+        self.assertEqual(vmap(grad(lambda t: to_cl(t).sum()))(x), torch.ones_like(x))
+
     def test_stride(self):
         B0 = 3
 

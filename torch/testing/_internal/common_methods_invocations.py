@@ -25732,26 +25732,14 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.bfloat16",
         torch_opinfo_name="bfloat16",
-        # TODO: If self already has the correct dtype and device, then self is
-        # returned ignoring memory_format.
-        # https://github.com/pytorch/pytorch/issues/86558
-        validate_view_consistency=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.bool",
         torch_opinfo_name="bool",
-        # TODO: If self already has the correct dtype and device, then self is
-        # returned ignoring memory_format.
-        # https://github.com/pytorch/pytorch/issues/86558
-        validate_view_consistency=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.byte",
         torch_opinfo_name="byte",
-        # TODO: If self already has the correct dtype and device, then self is
-        # returned ignoring memory_format.
-        # https://github.com/pytorch/pytorch/issues/86558
-        validate_view_consistency=False,
         skips=(
             DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
         )
@@ -25759,10 +25747,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.char",
         torch_opinfo_name="char",
-        # TODO: If self already has the correct dtype and device, then self is
-        # returned ignoring memory_format.
-        # https://github.com/pytorch/pytorch/issues/86558
-        validate_view_consistency=False,
         skips=(
             DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
         )
@@ -25801,10 +25785,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.double",
         torch_opinfo_name="double",
-        # TODO: If self already has the correct dtype and device, then self is
-        # returned ignoring memory_format.
-        # https://github.com/pytorch/pytorch/issues/86558
-        validate_view_consistency=False,
         skips=(
             # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
             DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
@@ -25813,26 +25793,14 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.float",
         torch_opinfo_name="float",
-        # TODO: If self already has the correct dtype and device, then self is
-        # returned ignoring memory_format.
-        # https://github.com/pytorch/pytorch/issues/86558
-        validate_view_consistency=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.half",
         torch_opinfo_name="half",
-        # TODO: If self already has the correct dtype and device, then self is
-        # returned ignoring memory_format.
-        # https://github.com/pytorch/pytorch/issues/86558
-        validate_view_consistency=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.int",
         torch_opinfo_name="int",
-        # TODO: If self already has the correct dtype and device, then self is
-        # returned ignoring memory_format.
-        # https://github.com/pytorch/pytorch/issues/86558
-        validate_view_consistency=False,
         skips=(
             DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
         )
@@ -25840,10 +25808,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.long",
         torch_opinfo_name="long",
-        # TODO: If self already has the correct dtype and device, then self is
-        # returned ignoring memory_format.
-        # https://github.com/pytorch/pytorch/issues/86558
-        validate_view_consistency=False,
         skips=(
             DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
         )
@@ -25851,10 +25815,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.short",
         torch_opinfo_name="short",
-        # TODO: If self already has the correct dtype and device, then self is
-        # returned ignoring memory_format.
-        # https://github.com/pytorch/pytorch/issues/86558
-        validate_view_consistency=False,
         skips=(
             DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
         )
@@ -25862,26 +25822,14 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.chalf",
         torch_opinfo_name="chalf",
-        # TODO: If self already has the correct dtype and device, then self is
-        # returned ignoring memory_format.
-        # https://github.com/pytorch/pytorch/issues/86558
-        validate_view_consistency=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.cfloat",
         torch_opinfo_name="cfloat",
-        # TODO: If self already has the correct dtype and device, then self is
-        # returned ignoring memory_format.
-        # https://github.com/pytorch/pytorch/issues/86558
-        validate_view_consistency=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.cdouble",
         torch_opinfo_name="cdouble",
-        # TODO: If self already has the correct dtype and device, then self is
-        # returned ignoring memory_format.
-        # https://github.com/pytorch/pytorch/issues/86558
-        validate_view_consistency=False,
         skips=(
             # TypeError: Trying to convert ComplexDouble to the MPS backend but it does not have support for that dtype
             DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
