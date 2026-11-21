@@ -27,7 +27,7 @@ pub const TCFG_ALLOW_SKIP_AUTOGRAD: u32 = 1;
 
 pub const TCFG_UNBOXED_RESULT: u32 = 1;
 
-pub const TCFG_API_VERSION: u32 = 9;
+pub const TCFG_API_VERSION: u32 = 10;
 
 #[repr(C)]
 pub struct TcfgPyOp {
@@ -109,6 +109,7 @@ pub struct TcfgApi {
     pub frame_pop: Option<unsafe extern "C" fn(*mut std::ffi::c_void)>,
     pub frame_held: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> i32>,
     pub frame_swap: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void>,
+    pub frame_traced: Option<unsafe extern "C" fn() -> i32>,
     pub is_tracing: unsafe extern "C" fn() -> i32,
     pub workspace_enter: unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void,
     pub workspace_leave: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void),
@@ -117,6 +118,13 @@ pub struct TcfgApi {
 /// Whether compiled functions run under an interpreter frame of their own.
 pub fn has_frames() -> bool {
     api().is_some_and(|api| api.frame_push.is_some() && api.frame_pop.is_some())
+}
+
+/// Whether the thread has a trace function (`sys.settrace`), which is told
+/// about the frames the interpreter enters and the lines it runs in them.
+#[inline(always)]
+pub unsafe fn traced() -> bool {
+    api().and_then(|api| api.frame_traced).is_some_and(|traced| traced() != 0)
 }
 
 static API: AtomicPtr<TcfgApi> = AtomicPtr::new(std::ptr::null_mut());

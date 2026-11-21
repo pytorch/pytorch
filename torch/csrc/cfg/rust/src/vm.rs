@@ -1459,6 +1459,19 @@ impl Compiled {
 
     /// `call` with the positional arguments wherever the caller has them.
     unsafe fn enter(&self, function: Obj, args: Args, kwargs: Obj) -> Obj {
+        // A trace function (a debugger, a coverage tool) is told about the
+        // frames that are entered from now on and the lines that run in
+        // them: the interpreter runs those. A profile function is not
+        // looked at: what it would time is the interpreter then.
+        if capi::traced() {
+            let all = args.slice(0);
+            if all.is_null() {
+                return null_mut();
+            }
+            let result = ffi::PyObject_Call(function, all, kwargs);
+            ffi::Py_DECREF(all);
+            return result;
+        }
         // Unlike a call the interpreter makes, this one uses native stack,
         // about 2 kB a level, so the stack itself is checked. Where compiled
         // functions have frames, pushing one counts the call against the
@@ -3002,10 +3015,12 @@ impl Compiled {
             }
             Op::IsFunction { v, func, code } => {
                 let o = self.obj(regs, *v);
+                // An inlined function is not one the interpreter enters.
                 Ok(py_bool(
                     o == f.consts.get_unchecked(*func as usize).as_ptr()
                         && ffi::PyFunction_GetCode(o)
-                            == f.consts.get_unchecked(*code as usize).as_ptr(),
+                            == f.consts.get_unchecked(*code as usize).as_ptr()
+                        && !capi::traced(),
                 ))
             }
             Op::CheckBound(v, name) => {
