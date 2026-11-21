@@ -603,8 +603,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if tx.output.side_effects.is_modified(self):
             return
 
+        # Reuse a previous lookup result to avoid repeating key comparisons.
+        # None means the caller has not looked up the key yet.
         arg = key.vt
-        # Reuse a previous lookup result without repeating key comparisons.
         if key_present is None:
             value = self.items.get(key)
             key_present = (
@@ -1558,12 +1559,16 @@ class NNModuleHookFlagsDictVariable(NNModuleHooksDictVariable):
         if (
             isinstance(source, ConstDictKeySource)
             and isinstance(source.base, AttrSource)
-            and source.base.member in ("_forward_hooks", "_forward_pre_hooks")
             and self.source is not None
             and (
-                self.GLOBAL_FLAGS
-                or isinstance(self.source, AttrSource)
-                and source.base.base == self.source.base
+                source.base.member
+                in ("_global_forward_hooks", "_global_forward_pre_hooks")
+                or source.base.member in ("_forward_hooks", "_forward_pre_hooks")
+                and (
+                    self.GLOBAL_FLAGS
+                    or isinstance(self.source, AttrSource)
+                    and source.base.base == self.source.base
+                )
             )
             and not tx.output.side_effects.is_modified(self)
         ):
@@ -1715,6 +1720,18 @@ class DictViewVariable(VariableTracker):
             mutation_type=ValueMutationNew(),
         )
 
+    def isdisjoint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        return SourcelessBuilder.create(
+            tx, polyfills.dictview_isdisjoint
+        ).call_function(tx, [self, *args], kwargs)
+
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L6992-L6998
     tp_methods = {
         "__reversed__": Method(dict_view_reversed),
@@ -1814,20 +1831,8 @@ class DictKeysVariable(DictViewVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5998-L6005
         return ConstDictVariable.sq_contains_impl(self.dv_dict, tx, item)
 
-    def isdisjoint(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
-        return SourcelessBuilder.create(
-            tx, polyfills.dictview_isdisjoint
-        ).call_function(tx, [self, *args], kwargs)
-
     tp_methods = {
-        "isdisjoint": Method(isdisjoint),
+        "isdisjoint": Method(DictViewVariable.isdisjoint),
     }
 
     def tp_richcompare_impl(
@@ -1993,6 +1998,10 @@ class DictItemsVariable(DictViewVariable):
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictItemsIterator.create(self.dv_dict.items)
+
+    tp_methods = {
+        "isdisjoint": Method(DictViewVariable.isdisjoint),
+    }
 
 
 kV = HashableTracker | str
