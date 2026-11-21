@@ -389,6 +389,14 @@ pub fn debug() -> bool {
     *ASKED.get_or_init(|| std::env::var_os("TORCH_VM_GRAPH_DEBUG").is_some_and(|v| v != "0"))
 }
 
+/// Whether `TORCH_VM_GRAPH_TIMES` asks for the time of the calls that run
+/// an exported form to be taken: what runs in front of the callable, the
+/// callable, and what runs behind it (`GraphSite::times`).
+pub fn timed() -> bool {
+    static ASKED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ASKED.get_or_init(|| std::env::var_os("TORCH_VM_GRAPH_TIMES").is_some_and(|v| v != "0"))
+}
+
 /// How many times a graph is taken down again because its path ended at a
 /// block that had not been profiled.
 const MAX_PROVISIONAL: u32 = 3;
@@ -429,6 +437,10 @@ pub struct GraphSite {
     /// The call of the function that last came here and ran the
     /// instructions: it does not try again.
     pub missed: AtomicU64,
+    /// With `TORCH_VM_GRAPH_TIMES`: the nanoseconds the calls that ran an
+    /// exported form spent in front of its callable, in it and behind it,
+    /// and how many such calls there were.
+    pub times: [AtomicU64; 4],
     /// Where graphs are not exported: a graph that starts further on has
     /// asked for another path of this one (`asked`), and how many times.
     again: AtomicBool,
@@ -457,6 +469,7 @@ impl GraphSite {
             misses: AtomicU64::new(0),
             within: Shared::new(std::sync::Weak::new()),
             missed: AtomicU64::new(u64::MAX),
+            times: Default::default(),
         }
     }
 
