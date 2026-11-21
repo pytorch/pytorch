@@ -2067,11 +2067,11 @@ The gradients are eager's bit for bit, whichever results come with a
 gradient: the kernels are eager's, in eager's order, and `torch.vm.is_exact`
 stays true for such a list. A second backward of one call raises what eager
 raises, and so does a backward behind a write in place to a tensor it needs
-(an input, a result, what a result is a view of), with eager's text. Hooks
-on results and on inputs run as they do for eager. A result that is a view
-is eager's view, made on the tape behind the node. A graph that reads a
-view which it also gives as a result is cut in two in front of that read,
-each part with a node of its own.
+(an input, a result, what a result is a view of), with eager's text but for
+one name in it ("Limits"). Hooks on results and on inputs run as they do
+for eager. A result that is a view is eager's view, made on the tape behind
+the node. A graph that reads a view which it also gives as a result is cut
+in two in front of that read, each part with a node of its own.
 
 `regions()` says for every form of a graph whose tensors need a gradient
 what derives its backward, as `backward`: `"being taken down"`, `"the
@@ -2113,9 +2113,14 @@ is to be differentiated again (`create_graph=True`), and one for some of
 the results of a node of eager's that was handed gradients for all of them
 when the graph was taken down (the two halves of a `chunk`). For these the
 node runs the graph once more, on the tape, from its inputs, and calls
-eager's nodes for it, so a double backward is eager's. A graph that draws
-random numbers or writes to a tensor from outside cannot run once more: it
-raises there and says which of the two it was asked for.
+eager's nodes for it. The gradient that a backward with `create_graph=True`
+gives is eager's bit for bit. A second backward through that gradient goes
+through this copy of the forward where eager's goes through the forward
+itself, and the gradients that meet there are not always added in eager's
+order: what it leaves is eager's value, and not always its last bit (the
+tests hold it to 1e-5). A graph that draws random numbers or writes to a
+tensor from outside cannot run once more: it raises there and says which of
+the two it was asked for.
 
 A pass over graphs behind `Graphs(backward=True)` is handed two plain
 graphs for such a form, once it has the engine's backward: the forward,
@@ -2348,7 +2353,10 @@ What graphs do not do at this stage:
   was written to in place, and has by then added up the gradient of every
   leaf whose nodes all ran before that one; the node of a graph raises
   before it gives anything, so no input of the graph has a gradient of that
-  backward. The error and its text are eager's.
+  backward. The error is eager's, and so is its text but for one name:
+  where the write itself was recorded (`h.mul_(2)` on a result that needs a
+  gradient), eager's text names the node of the write (`output 0 of Mul`)
+  and the graph's the node that made the tensor (`output 0 of Tanh`).
 - A backward that is to be differentiated again, or one for some results of
   a node of eager's with several, runs the graph once more on the tape: a
   graph that draws random numbers or writes to a tensor from outside raises

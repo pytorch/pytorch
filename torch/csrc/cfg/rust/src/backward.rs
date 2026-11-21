@@ -955,7 +955,12 @@ impl<'py> Nodes<'py> {
                 Some(joint) => {
                     joint_says(py, joint.node(number as u32, handed.iter().flatten().cloned().collect()))?;
                     let tape = Tape::begin()?;
-                    let outs = node.call(&handed, twice)?;
+                    // What a node raises when it is called behind the
+                    // forward is for the backward to raise, if one comes.
+                    let outs = match node.call(&handed, twice) {
+                        Ok(outs) => outs,
+                        Err(error) => return refused(format!("{} raised when it was called behind the forward: {}", node.name, error.value(py))),
+                    };
                     taken_down(joint, tape.end(py)?)?;
                     outs
                 }
