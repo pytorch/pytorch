@@ -6016,6 +6016,10 @@ def forward(self, arg0_1):
                 ("_exit_autocast_1", "function._exit_autocast"),
             ],
         )
+        (mm,) = gm.true_graph_0.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.mm.default
+        )
+        self.assertEqual(mm.meta["val"].dtype, torch.bfloat16)
 
     @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
     @unittest.skipIf(
