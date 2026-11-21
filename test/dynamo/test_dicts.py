@@ -1327,18 +1327,14 @@ class DictTests(torch._dynamo.test_case.TestCase):
         reference = OrderedDict(a=1, b=2)
 
         def fn(x, obj):
-            descriptor = getattr(owner, method)
+            desc = getattr(owner, method)
             if method in ("__eq__", "__ne__"):
-                return x + 1, descriptor(reference, obj)
+                return x + 1, desc(reference, obj)
             view = obj
-            if binding == "bound":
-                view = descriptor.__get__(obj)()
-            elif binding == "unbound":
-                view = descriptor(obj)
-            if method == "__iter__":
-                return x + 1, list(view), type(view)
-            if method == "__reversed__":
-                return x + 1, list(view)
+            if binding != "input":
+                view = desc.__get__(obj)() if binding == "bound" else desc(obj)
+            if method in ("__iter__", "__reversed__"):
+                return x + 1, list(view), type(view) if method == "__iter__" else None
             contents = list(view), list(type(view).__reversed__(view))
             return x + 1, contents, type(view), isinstance(view, keys_type), repr(view)
 
@@ -1771,11 +1767,12 @@ class DictTests(torch._dynamo.test_case.TestCase):
             variables.dicts, "_is_fast_dict_key", wraps=classify_key
         ) as classify:
             length, updated = fn(x, source, destination)
-        self.assertEqual(length, x + len(destination))
+        self.assertEqual(length, x + len(entries) + 2)
         self.assertIs(updated, destination)
         self.assertEqual(list(destination.items()), [*entries, ("a", 2), ("tail", x)])
-        if kind is OrderedDict:
-            self.assertEqual(classify.call_count, len(source))
+        # Plain dict can unpack an immutable tuple without classifying its keys.
+        expected_checks = 0 if kind is dict and source_type is tuple else len(source)
+        self.assertEqual(classify.call_count, expected_checks)
         source_guards = [g.create_fn_name() for g in guards if g.name == "L['source']"]
         self.assertNotIn("HASATTR", source_guards)
 
@@ -3992,8 +3989,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(f(), opt_f())
 
     @parametrize("op", ["update", "__init__", "__ior__", "__setitem__", "setdefault"])
-    @parametrize("subclass", [False, True])
-    def test_dict_storage_mutation_on_ordered_dict_fallback(self, op, subclass):
+    @parametrize("receiver", ["ordered", "subclass", "super"])
+    def test_dict_storage_mutation_on_ordered_dict_fallback(self, op, receiver):
         class Mapping(OrderedDict):
             def __setitem__(self, key, value):
                 raise AssertionError("setitem override called")
@@ -4002,11 +3999,14 @@ class DictTests(torch._dynamo.test_case.TestCase):
         args = ("b", 3) if single else ({"a": 2, "b": 3},)
 
         def fn(x, mapping):
-            getattr(dict, op)(mapping, *args)
+            if receiver == "super" and isinstance(mapping, Mapping):
+                getattr(super(OrderedDict, mapping), op)(*args)
+            else:
+                getattr(dict, op)(mapping, *args)
             return x + mapping["a"], list(dict.items(mapping)), list(mapping)
 
         x = torch.ones(1)
-        mapping = Mapping() if subclass else OrderedDict()
+        mapping = OrderedDict() if receiver == "ordered" else Mapping()
         OrderedDict.__setitem__(mapping, "a", 1)
         run = Mock()
 
@@ -4022,12 +4022,10 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled(x, {"a": 1}), expected)
         self.assertEqual(run.call_count, 2)
         torch._dynamo.reset()
-        mapping = type(mapping)()
-        OrderedDict.__setitem__(mapping, "a", 1)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported, "dict storage mutation on OrderedDict"
         ):
-            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
+            torch.compile(fn, backend="eager", fullgraph=True)(x, type(mapping)())
 
     def test_defaultdict_inplace_union_preserves_factory(self):
         def f():
