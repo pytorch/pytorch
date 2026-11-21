@@ -6942,7 +6942,9 @@ class TestPartitioning(AOTTestCase):
 
         self.assertEqual(make_graph(False), make_graph(True))
 
-    def test_sync_recanonicalizes_after_late_joint_pass(self):
+    @parametrize("canonicalize_names", (False, True))
+    @torch._functorch.config.patch(_sync_decision_cross_ranks=True)
+    def test_sync_recanonicalizes_after_late_joint_pass(self, canonicalize_names):
         from torch._functorch._aot_autograd.graph_compile import (
             _canonicalize_joint_graph,
             _enable_joint_graph_name_canonicalization,
@@ -6966,12 +6968,64 @@ class TestPartitioning(AOTTestCase):
                 if node.op != "placeholder":
                     node.name = f"late_joint_pass_{ordinal}"
             physical_order = list(graph.nodes)
-            with _enable_joint_graph_name_canonicalization(True):
+            with _enable_joint_graph_name_canonicalization(canonicalize_names):
                 _sync_decision_cross_ranks(graph, [])
             self.assertEqual(list(graph.nodes), physical_order)
             return relu.name, neg.name
 
         self.assertEqual(make_graph(True), make_graph(False))
+
+    @parametrize("has_owner", (False, True))
+    @torchdynamo.config.patch(canonicalize_output_graph_node_order=False)
+    @torch._functorch.config.patch(_sync_decision_cross_ranks=True)
+    def test_sync_only_names_preserve_positional_inputs(self, has_owner):
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        def make_graph(independent_first):
+            graph = torch.fx.Graph()
+            p1 = graph.placeholder("primals_1")
+            p2 = graph.placeholder("primals_2")
+            if independent_first:
+                independent = graph.call_function(torch.ops.aten.relu.default, (p2,))
+            barrier = graph.call_function(torch.ops.aten.copy_.default, (p1, p1))
+            dependent = graph.call_function(torch.ops.aten.relu.default, (barrier,))
+            if not independent_first:
+                independent = graph.call_function(torch.ops.aten.relu.default, (p2,))
+            graph.output((barrier, dependent, independent))
+            if has_owner:
+                torch.fx.GraphModule({}, graph)
+            physical_order = list(graph.nodes)
+            _sync_decision_cross_ranks(graph, [])
+            self.assertEqual(list(graph.nodes), physical_order)
+            self.assertEqual(graph.find_nodes(op="placeholder"), [p1, p2])
+            self.assertEqual([p1.name, p2.name], ["primals_1", "primals_2"])
+            graph.lint()
+            return dependent.name, independent.name
+
+        self.assertEqual(make_graph(True), make_graph(False))
+
+    @parametrize("exporting,compiled_autograd", ((True, False), (False, True)))
+    @torch._functorch.config.patch(_sync_decision_cross_ranks=True)
+    def test_sync_only_keeps_excluded_graph_names(self, exporting, compiled_autograd):
+        from torch._dynamo import compiled_autograd as compiled_autograd_module
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        graph = torch.fx.Graph()
+        primal = graph.placeholder("primals_1")
+        relu = graph.call_function(torch.ops.aten.relu.default, (primal,))
+        relu.name = "original_relu"
+        graph.output(relu)
+        torch.fx.GraphModule({}, graph)
+        with (
+            patch.object(torch.compiler, "is_exporting", return_value=exporting),
+            patch.object(
+                compiled_autograd_module,
+                "in_compiled_autograd_region",
+                compiled_autograd,
+            ),
+        ):
+            _sync_decision_cross_ranks(graph, [])
+        self.assertEqual(relu.name, "original_relu")
 
     def test_canonical_signature_keys(self):
         from torch.fx.passes.canonicalize import (
@@ -7062,7 +7116,7 @@ class TestPartitioning(AOTTestCase):
             (("user_a", None), 0, True, True, False, False, False),
             (("user_a",), -1, True, True, False, False, False),
             (("user_a",), 2, True, True, False, False, False),
-            (("user_a",), 0, False, True, False, False, False),
+            (("user_a",), 0, False, True, False, False, True),
             (("user_a",), 0, True, False, False, False, False),
             (("user_a",), 0, True, True, True, False, False),
             (("user_a",), 0, True, True, False, True, False),
