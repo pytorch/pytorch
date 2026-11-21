@@ -10931,13 +10931,56 @@ def back_convolves(x, w0, w1, w2, w3):
     return h.mean(), h.tanh().mean()
 
 
+BACK_SCALES = [0.5, 2.0, 1.0, 3.0]
 BACK_KEPT = {"dims": [1, 0], "pads": [1, 1], "factor": [2.0, 2.0], "shape": [4, 3]}
 BACK_HELD = ([1.0, 2.0, 3.0, 4.0], BACK_KEPT)
+
+
+def back_holds_a_list(x, w, b):
+    scales = torch.tensor(BACK_SCALES, device=x.device, dtype=x.dtype)
+    h = (x @ w + b).tanh() * scales
+    return h.sum(), h.exp().mean()
+
+
+def back_holds_a_default(x, w, b, scales=BACK_SCALES):
+    h = (x @ w + b).tanh() * torch.as_tensor(scales, device=x.device)
+    return h.sum(), h.exp().mean()
+
+
+def back_holds_a_list_in_a_tuple(x, w, b):
+    h = (x @ w + b).tanh() * torch.tensor(BACK_HELD[0], device=x.device)
+    return h.sum(), h.exp().mean()
+
+
+def back_holds_dims(x, w, b):
+    h = (x @ w + b).tanh().permute(BACK_HELD[1]["dims"])
+    return h[0].exp().sum(), h.exp().mean()
+
+
+def back_holds_pads(x, w, b):
+    h = torch.nn.functional.pad((x @ w + b).tanh(), BACK_HELD[1]["pads"])
+    return h[:, 0].exp().sum(), h.exp().mean()
+
+
+def back_holds_a_factor(x, w, b):
+    h = (x @ w + b).tanh()[None, None]
+    h = torch.nn.functional.interpolate(h, scale_factor=BACK_HELD[1]["factor"])
+    return h.sum(), h.exp().mean()
 
 
 def back_holds_a_shape(x, w, b):
     h = (x @ w + b).tanh().view(*BACK_HELD[1]["shape"])
     return h.sum(0).exp().sum(), h.exp().mean()
+
+
+class BackHolds(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.scales = [0.5, 2.0, 1.0, 3.0]
+
+    def forward(self, x, w, b):
+        h = (x @ w + b).tanh() * torch.tensor(self.scales, device=x.device)
+        return h.sum(), h.exp().mean()
 
 
 def back_squeezes(x, w, b):
@@ -11112,7 +11155,11 @@ class TestVmGraphBackward(TestCase):
 
     def test_a_training_graph_has_eagers_gradients_bit_for_bit(self, device):
         self.assertTrue(torch.vm.is_exact((*DEFAULT, P.Graphs(backward=True))))
-        for passes in ((),):
+
+        def keep(gm, input_types):
+            return gm
+
+        for passes in ((), (keep,)):
             torch.manual_seed(0)
             model, reference = BackConvNet().to(device), BackConvNet().to(device)
             reference.load_state_dict(model.state_dict())
@@ -11395,6 +11442,60 @@ class TestVmGraphBackward(TestCase):
                 self.assertEqual((cudnn.benchmark, cudnn.deterministic), (True, False))
         self.assertEqual(self.states(), ["the engine's backward"])
 
+    def test_what_is_taken_out_of_a_list_is_what_is_in_it_at_the_call(self, device):
+        # A list that lives outside the function is the same object at
+        # every call, whatever is in it: what a form has of it as a
+        # constant is checked by what is in it, against a copy.
+        module = BackHolds()
+        kinds = (
+            (back_holds_a_list, BACK_SCALES, 0, 5.0),
+            (back_holds_a_default, BACK_SCALES, 3, -1.0),
+            (back_holds_a_list_in_a_tuple, BACK_HELD[0], 1, 7.0),
+            (lambda x, w, b: module(x, w, b), module.scales, 2, 0.25),
+            (back_holds_dims, BACK_HELD[1]["dims"], slice(None), [0, 1]),
+            (back_holds_pads, BACK_HELD[1]["pads"], 0, 3),
+            (back_holds_a_factor, BACK_HELD[1]["factor"], 1, 1.0),
+            (back_holds_a_shape, BACK_HELD[1]["shape"], slice(None), [2, 6]),
+        )
+
+        def keep(gm, input_types):
+            return gm
+
+        def step(fn, x, w, b):
+            w.grad = b.grad = None
+            first, second = fn(x, w, b)
+            (first + second).backward()
+            return first, second, w.grad.clone(), b.grad.clone()
+
+        lists = [((), True), ((keep,), True)]
+        for at, (fn, held, key, value) in enumerate(kinds):
+            # A compiler has the numbers as constants: two kinds with it.
+            compiler = [((P.Inductor(),), False)] * (at in (0, 5))
+            for passes, exact in lists + compiler:
+                compiled = self.staged(fn, passes)
+                torch.manual_seed(0)
+                w = torch.randn(4, 4, device=device, requires_grad=True)
+                b = torch.randn(4, device=device, requires_grad=True)
+                before = held[key]
+                before = list(before) if isinstance(before, list) else before
+                try:
+                    for call in range(18):
+                        # Changed in place, and changed back.
+                        if call in (6, 12):
+                            held[key] = value if call == 6 else before
+                        x = torch.randn(3, 4, device=device)
+                        got, expected = step(compiled, x, w, b), step(fn, x, w, b)
+                        if exact:
+                            self.alike(got, expected)
+                        else:
+                            self.assertEqual(got, expected, rtol=1e-4, atol=1e-5)
+                finally:
+                    held[key] = before
+                graphs = torch.vm.regions(compiled)
+                forms = [form for graph in graphs for form in graph.get("forms", ())]
+                derived = [form.get("backward") for form in forms]
+                self.assertEqual(derived, ["the engine's backward"] * 2)
+
     def test_an_input_that_was_detached_in_place_raises_what_eager_raises(self, device):
         def raised(fn, at):
             torch.manual_seed(at)
@@ -11511,6 +11612,9 @@ class TestVmGraphBackward(TestCase):
         # eager mode the gradient of that goes through the tensor: whoever
         # holds it can ask for the gradient at it, keep it, and hook it,
         # and what a hook returns is what goes on to the inputs.
+        def keep(gm, input_types):
+            return gm
+
         def asked(h, loss, w):
             return torch.autograd.grad(loss, [h], allow_unused=True)
 
@@ -11579,7 +11683,7 @@ class TestVmGraphBackward(TestCase):
         )
         for fn, pick, states, chosen in cases:
             for use in chosen:
-                for behind in ((),):
+                for behind in ((), (keep,)):
                     compiled = self.staged(fn, behind)
                     for at in range(10):
                         found = []
@@ -11945,6 +12049,35 @@ class TestVmGraphBackward(TestCase):
         self.assertIn(text, expected[0][0])
         self.assertEqual(expected[0][1], True)
         self.alike(got, expected)
+
+    def test_a_pass_compiles_two_plain_graphs_and_derives_nothing(self, device):
+        net, other = BackConvNet().to(device), BackConvNet().to(device)
+        other.load_state_dict(net.state_dict())
+        # What a compiler makes of a dropout draws other elements than eager
+        # does: the gradients are compared without the draws.
+        net.drop.p = other.drop.p = 0.0
+        compiled = self.staged(lambda x, y: net(x, y), (P.Inductor(),))
+        for step in range(6):
+            x = torch.randn(4, 3, 8, 8, device=device)
+            y = torch.randint(0, 5, (4,), device=device)
+            net.zero_grad()
+            other.zero_grad()
+            torch.manual_seed(step)
+            loss = compiled(x, y)
+            loss.backward()
+            torch.manual_seed(step)
+            other(x, y).backward()
+            for ours, eagers in zip(net.parameters(), other.parameters()):
+                self.assertEqual(ours.grad, eagers.grad)
+            for ours, eagers in zip(net.buffers(), other.buffers()):
+                self.assertEqual(ours, eagers)
+        self.assertEqual(self.states(), ["the engine's backward"])
+        names = []
+        node = loss.grad_fn
+        while node is not None and len(names) < 3:
+            names.append(node.name())
+            node = node.next_functions[0][0]
+        self.assertEqual(names[-1], "GraphBackward")
 
     def test_the_forward_keeps_fewer_bytes_than_the_backward_reads(self, device):
         runtime = torch.vm._load_runtime()
