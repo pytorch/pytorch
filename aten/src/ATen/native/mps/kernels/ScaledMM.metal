@@ -260,8 +260,10 @@ struct nvfp4_format {
 };
 
 struct mxfp8_format {
-  // e8m0 scales span 2^-127..2^127, beyond half's range
-  using stage_t = float;
+  // e8m0 scales span 2^-127..2^127, beyond half's range; bfloat has float's
+  // exponent range and the e4m3 mantissa fits, so it only loses products below
+  // its subnormals
+  using stage_t = bfloat;
   static constexpr constant uint block = scaled_mm_mx_block;
   static constexpr constant uint values_per_byte = 1;
   static float element(device const uchar* data, uint k) {
@@ -286,9 +288,10 @@ struct mxfp8_format {
       }
     }
   }
-  // e8m0 biases its exponent by 127, and 2^8 undoes the decode's 1/256
+  // Times 256 undoes the decode's 1/256 exactly, so a scale up to 2^127 (and
+  // NaN for 0xff) applies without overflowing early
   static float scaled(float value, uchar s) {
-    return s == 0xff ? NAN : ldexp(value, int(s) - 127 + 8);
+    return value * scaled_mm_decode_scale * scale(s);
   }
   // Adds the scale exponents rather than multiplying the scales, which would
   // overflow for a large and a small scale whose product is representable.
@@ -722,7 +725,7 @@ struct ScaledMMBlockwiseRowLoader {
   device const uchar* scales;
   bool valid;
   uint k_size;
-  uint4 raw[scaled_mm_blockwise_step_bytes / 16];
+  uint4 raw[step / F::values_per_byte / 16];
   uchar s[step / F::block];
 
   bool whole(uint k) const thread {
@@ -737,7 +740,7 @@ struct ScaledMMBlockwiseRowLoader {
     const auto src =
         reinterpret_cast<device const uint4*>(data + k / F::values_per_byte);
 #pragma unroll
-    for (uint i = 0; i < scaled_mm_blockwise_step_bytes / 16; ++i) {
+    for (uint i = 0; i < step / F::values_per_byte / 16; ++i) {
       raw[i] = src[i];
     }
 #pragma unroll
@@ -792,7 +795,7 @@ kernel void scaled_mm_blockwise_mpp(
     uint2 group [[threadgroup_position_in_grid]],
     uint tid [[thread_index_in_threadgroup]]) {
   constexpr auto tile = scaled_mm_blockwise_tile;
-  constexpr uint step = scaled_mm_blockwise_step_bytes * F::values_per_byte;
+  constexpr uint step = scaled_mm_blockwise_step;
   using S = typename F::stage_t;
   // 16 bytes of padding per row spread the threads' row stores over the banks
   constexpr int pitch = step + 16 / sizeof(S);
