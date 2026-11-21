@@ -6,6 +6,7 @@
 #if AT_MKLDNN_ENABLED()
 
 #include <ideep/tensor.hpp>
+#include <ATen/native/mkldnn/detail/Attr.h>
 #include <utility>
 
 namespace at::native::mkldnn {
@@ -17,7 +18,7 @@ struct ContextConv final {
   std::vector<int64_t> stride_;
   std::vector<int64_t> dilation_;
   int64_t groups_;
-  ideep::attr_t attr_;
+  Attr attr_;
 
   ContextConv() = delete;
 
@@ -28,7 +29,7 @@ struct ContextConv final {
       std::vector<int64_t> stride,
       std::vector<int64_t> dilation,
       int64_t groups,
-      ideep::attr_t attr)
+      Attr attr)
       : weight_packed_(std::move(weight_packed)),
         at_bias_(std::move(at_bias)),
         padding_(std::move(padding)),

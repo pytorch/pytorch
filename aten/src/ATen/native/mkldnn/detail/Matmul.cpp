@@ -1,5 +1,6 @@
 #include <ATen/native/mkldnn/detail/Matmul.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/PrimitiveCache.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -23,7 +24,7 @@ void do_prepare(
     ideep::tensor& dst,
     const float dst_coeff = 1.0f,
     const float sum_coeff = 1.0f, // for post-op sum
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     const dnnl::memory::data_type dst_type = dnnl::memory::data_type::f32) {
 #ifndef NDEBUG
   dnnl::error::wrap_c_api(
@@ -32,7 +33,7 @@ void do_prepare(
 #endif
 
   ideep::tensor::desc src_desc, weights_desc, bias_desc;
-  ideep::attr_t& op_attr = param.op_attr;
+  Attr& op_attr = param.op_attr;
   op_attr = attr;
   auto dst_data_type = dnnl::memory::data_type::f32;
   auto wei_data_type = dnnl::memory::data_type::f32;
@@ -153,8 +154,7 @@ void do_prepare(
   }
   param.primitive = dnnl::matmul(param.pd);
 #else
-  // Shares ideep's primitive cache with ideep's own matmul_forward.
-  auto key = ideep::utils::create_key(
+  auto key = utils::create_key(
       src_desc,
       weights_desc,
       bias_desc,
@@ -163,7 +163,7 @@ void do_prepare(
       with_bias,
       omp_get_max_threads());
   param.pd =
-      ideep::utils::computation_cache<dnnl::matmul::primitive_desc>::
+      utils::computation_cache<dnnl::matmul::primitive_desc>::
           fetch_or_create(key, [&]() {
             if (with_bias) {
               return dnnl::matmul::primitive_desc(
@@ -204,7 +204,7 @@ void do_prepare_static_quant(
     const std::vector<int32_t>& dst_zero_points,
     const float dst_coeff = 1.0f,
     const float sum_coeff = 1.0f, // for post-op sum
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     const dnnl::memory::data_type dst_type = dnnl::memory::data_type::u8,
     const ideep::lowp_kind alowp_kind = ideep::u8s8) {
 #ifndef NDEBUG
@@ -214,9 +214,9 @@ void do_prepare_static_quant(
 #endif
 
   ideep::tensor::desc src_desc, weights_desc, bias_desc;
-  ideep::attr_t& op_attr = param.op_attr;
-  ideep::attr_t& src_attr = param.src_attr;
-  ideep::attr_t& weights_attr = param.weights_attr;
+  Attr& op_attr = param.op_attr;
+  Attr& src_attr = param.src_attr;
+  Attr& weights_attr = param.weights_attr;
   op_attr.set_post_ops(attr.get_post_ops());
   std::vector<float> dst_scales_in;
   auto dst_data_type = dnnl::memory::data_type::u8;
@@ -295,7 +295,7 @@ void do_prepare_static_quant(
   if (attr.has_op_kind(dnnl::primitive::kind::sum)) {
     float sum_scale =
         sum_coeff / (dst.has_scale() ? dst.get_scale()[0] : 1.0f);
-    op_attr = ideep::attr_t::fuse_sum(sum_scale);
+    op_attr = Attr::fuse_sum(sum_scale);
   }
 
   if (src_scales_in[0] != 1.0f) {
@@ -377,7 +377,7 @@ void do_prepare_static_quant(
   }
   param.primitive = dnnl::matmul(param.pd);
 #else
-  auto key = ideep::utils::create_key(
+  auto key = utils::create_key(
       src_desc,
       weights_desc,
       bias_desc,
@@ -386,7 +386,7 @@ void do_prepare_static_quant(
       with_bias,
       omp_get_max_threads());
   param.pd =
-      ideep::utils::computation_cache<dnnl::matmul::primitive_desc>::
+      utils::computation_cache<dnnl::matmul::primitive_desc>::
           fetch_or_create(key, [&]() {
             if (with_bias) {
               return dnnl::matmul::primitive_desc(
@@ -433,7 +433,7 @@ void do_prepare_dynamic_quant(
     ideep::tensor& dst,
     const std::vector<float>& weights_scales,
     const float sum_coeff = 1.0f, // for post-op sum
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     const dnnl::memory::data_type dst_type = dnnl::memory::data_type::f32,
     const ideep::lowp_kind alowp_kind = ideep::u8s8) {
   /* This function does the following things:
@@ -458,8 +458,8 @@ void do_prepare_dynamic_quant(
 #endif
 
   ideep::tensor::desc& src_desc = param.dq_param_ptr->src_desc;
-  ideep::attr_t& op_attr = param.op_attr;
-  ideep::attr_t src_attr;
+  Attr& op_attr = param.op_attr;
+  Attr src_attr;
 
   dnnl::memory::dims src_dims = src.get_dims();
   dnnl::memory::dims dst_dims = {src_dims[0], weights.get_dim(1)};
@@ -546,7 +546,7 @@ void do_prepare_dynamic_quant(
   }
   param.primitive = dnnl::matmul(param.pd);
 #else
-  auto key = ideep::utils::create_key(
+  auto key = utils::create_key(
       src_desc,
       weights.get_desc(),
       bias_desc,
@@ -555,7 +555,7 @@ void do_prepare_dynamic_quant(
       with_bias,
       omp_get_max_threads());
   param.pd =
-      ideep::utils::computation_cache<dnnl::matmul::primitive_desc>::
+      utils::computation_cache<dnnl::matmul::primitive_desc>::
           fetch_or_create(key, [&]() {
             if (with_bias) {
               return dnnl::matmul::primitive_desc(
@@ -806,7 +806,7 @@ void compute_impl(
     const std::vector<int32_t>& dst_zero_points = std::vector<int32_t>(),
     const float dst_coeff = 1.0f,
     const float sum_coeff = 1.0f,
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     const dnnl::memory::data_type dst_type = dnnl::memory::data_type::undef,
     const ideep::lowp_kind alowp_kind = ideep::u8s8) {
   matmul_forward_params param;
@@ -877,7 +877,7 @@ void matmul_forward_compute(
     const std::vector<int32_t>& dst_zero_points,
     const float dst_coeff,
     const float sum_coeff,
-    const ideep::attr_t& attr,
+    const Attr& attr,
     const dnnl::memory::data_type dst_type,
     const ideep::lowp_kind alowp_kind) {
   if (bias.is_empty()) {
@@ -929,7 +929,7 @@ void matmul_forward_prepare(
     const std::vector<int32_t>& dst_zero_points,
     const float dst_coeff,
     const float sum_coeff,
-    const ideep::attr_t& attr,
+    const Attr& attr,
     const dnnl::memory::data_type dst_type,
     const ideep::lowp_kind alowp_kind) {
   if (is_dynamic) {
@@ -1038,7 +1038,7 @@ void matmul_forward(
     ideep::tensor& dst,
     const float dst_coeff,
     const float sum_coeff,
-    const ideep::attr_t& attr) {
+    const Attr& attr) {
   // Consider fp32 only for IPEX
   static ideep::tensor dummy_bias;
   static ideep::lowp_kind dummy_lowp_kind = ideep::u8s8;
@@ -1065,7 +1065,7 @@ ideep::tensor::desc matmul_forward_expected_weights_desc(
     dnnl::memory::data_type dtype,
     dnnl::memory::data_type x_dtype,
     dnnl::memory::data_type y_dtype,
-    const ideep::attr_t& attr) {
+    const Attr& attr) {
   auto ndims = weights_dims.size();
   auto x_dims = weights_dims;
   x_dims[ndims - 2] = src_dims.size() > 0 && src_dims.size() == ndims
@@ -1104,7 +1104,7 @@ ideep::tensor::desc matmul_forward_expected_weights_desc(
     const dnnl::memory::dims& src_dims,
     dnnl::memory::data_type dtype,
     dnnl::memory::data_type x_dtype,
-    const ideep::attr_t& attr) {
+    const Attr& attr) {
   auto y_dtype = (dtype != dnnl::memory::data_type::s8)
       ? dtype
       : dnnl::memory::data_type::s32;
@@ -1125,7 +1125,7 @@ template void matmul_forward_compute<true, true>(
     const std::vector<int32_t>&,
     const float,
     const float,
-    const ideep::attr_t&,
+    const Attr&,
     const dnnl::memory::data_type,
     const ideep::lowp_kind);
 
@@ -1142,7 +1142,7 @@ template void matmul_forward_prepare<false>(
     const std::vector<int32_t>&,
     const float,
     const float,
-    const ideep::attr_t&,
+    const Attr&,
     const dnnl::memory::data_type,
     const ideep::lowp_kind);
 
@@ -1159,7 +1159,7 @@ template void matmul_forward_prepare<true>(
     const std::vector<int32_t>&,
     const float,
     const float,
-    const ideep::attr_t&,
+    const Attr&,
     const dnnl::memory::data_type,
     const ideep::lowp_kind);
 
