@@ -8,17 +8,19 @@ import torch
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_devtype
+from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
-
-device_type = torch.device(get_devtype())
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -101,6 +103,9 @@ class Model(torch.nn.Module):
 
 
 class TestFSDPExecOrder(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "sharding_strategy",
@@ -116,15 +121,16 @@ class TestFSDPExecOrder(FSDPTestContinuous):
         # Rank 0 runs the forward pass in one order and all other ranks run in
         # different order
         dist.set_debug_level(dist.DebugLevel.DETAIL)
-        fsdp_model = Model.wrap(sharding_strategy, device_type)
+        fsdp_model = Model.wrap(sharding_strategy, self.device_type)
         if self.rank != 0:
             fsdp_model.flip_path()
-        inp = fsdp_model.module.get_input(device_type)
+        inp = fsdp_model.module.get_input(self.device_type)
         # Match the error message with the following prefix
         error_regex = "^(Forward order differs across ranks)"
         with self.assertRaisesRegex(RuntimeError, error_regex):
             fsdp_model(*inp)
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "sharding_strategy",
@@ -142,11 +148,11 @@ class TestFSDPExecOrder(FSDPTestContinuous):
         dist.set_debug_level(dist.DebugLevel.DETAIL)
         # On the first iteration, all ranks run the same order, and on the next
         # iteration, all but rank 0 run in a different order
-        fsdp_model = Model.wrap(sharding_strategy, device_type)
+        fsdp_model = Model.wrap(sharding_strategy, self.device_type)
         for _ in range(iters_before_path_change):
-            inp = fsdp_model.module.get_input(device_type)
+            inp = fsdp_model.module.get_input(self.device_type)
             output = fsdp_model(*inp)
-            loss = fsdp_model.module.get_loss(inp, output).to(device_type)
+            loss = fsdp_model.module.get_loss(inp, output).to(self.device_type)
             fsdp_model.module.run_backward(loss)
         # Match the warning message with the following prefix
         regex = (
@@ -164,18 +170,19 @@ class TestFSDPExecOrder(FSDPTestContinuous):
         )
         if self.rank != 0:
             fsdp_model.flip_path()
-        inp = fsdp_model.module.get_input(device_type)
+        inp = fsdp_model.module.get_input(self.device_type)
         # Expect a warning for the forward pass all-gather
         with context:  # warning for forward pass all-gather
             output = fsdp_model(*inp)
-        loss = fsdp_model.module.get_loss(inp, output).to(device_type)
+        loss = fsdp_model.module.get_loss(inp, output).to(self.device_type)
         fsdp_model.module.run_backward(loss)
         # Run an additional iteration to check that there are no more warnings
-        inp = fsdp_model.module.get_input(device_type)
+        inp = fsdp_model.module.get_input(self.device_type)
         output = fsdp_model(*inp)
-        loss = fsdp_model.module.get_loss(inp, output).to(device_type)
+        loss = fsdp_model.module.get_loss(inp, output).to(self.device_type)
         fsdp_model.module.run_backward(loss)
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "sharding_strategy",
@@ -183,22 +190,22 @@ class TestFSDPExecOrder(FSDPTestContinuous):
     )
     def test_train_eval(self, device, sharding_strategy: ShardingStrategy):
         dist.set_debug_level(dist.DebugLevel.DETAIL)
-        fsdp_model = Model.wrap(sharding_strategy, device_type)
+        fsdp_model = Model.wrap(sharding_strategy, self.device_type)
         NUM_ITERS = 3
         NUM_EPOCHS = 2
         with warnings.catch_warnings(record=True) as w:  # records warnings to `w`
             for _ in range(NUM_EPOCHS):
                 fsdp_model.train()
                 for _ in range(NUM_ITERS):
-                    inp = fsdp_model.module.get_input(device_type)
+                    inp = fsdp_model.module.get_input(self.device_type)
                     output = fsdp_model(*inp)
-                    loss = fsdp_model.module.get_loss(inp, output).to(device_type)
+                    loss = fsdp_model.module.get_loss(inp, output).to(self.device_type)
                     fsdp_model.module.run_backward(loss)
                 fsdp_model.eval()
                 for _ in range(NUM_ITERS):
-                    inp = fsdp_model.module.get_input(device_type)
+                    inp = fsdp_model.module.get_input(self.device_type)
                     output = fsdp_model(*inp)
-                    fsdp_model.module.get_loss(inp, output).to(device_type)
+                    fsdp_model.module.get_loss(inp, output).to(self.device_type)
         # Check that the order validation warning was not issued (errors do not
         # need to be checked since they will be directly reported)
         warning_prefix = "Forward order differs"
@@ -211,9 +218,6 @@ class TestFSDPExecOrder(FSDPTestContinuous):
         # an `AssertionError` will be raised above for both sharding strategies
 
 
-devices = ("cuda", "hpu", "xpu")
-instantiate_device_type_tests(
-    TestFSDPExecOrder, globals(), only_for=devices, allow_xpu=True
-)
+instantiate_device_type_tests(TestFSDPExecOrder, globals(), allow_xpu=True)
 if __name__ == "__main__":
     run_tests()
