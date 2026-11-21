@@ -1464,6 +1464,13 @@ def _extract_fwd_bwd_modules(
     # Now go through all of the prospective backward inputs and track any
     # other symbols we need to bind
     symbol_bindings = find_symbol_binding_fx_nodes(joint_module.graph)
+    # A primal whose symbol was replaced by another symbol (e.g. s1 -> s0 after
+    # a guard Eq(s1, s0)) also binds that symbol: a DDPOptimizer submodule can
+    # have such a primal as its only binding for s0.
+    for node in primal_inputs:
+        val = node.meta.get("val")
+        if isinstance(val, torch.SymInt) and isinstance(val.node.expr, sympy.Symbol):
+            symbol_bindings.setdefault(val.node.expr, node)
     for node in itertools.chain(saved_sym_nodes_derived, saved_values, tangent_inputs):
         if "val" not in node.meta:
             continue
@@ -1485,7 +1492,9 @@ def _extract_fwd_bwd_modules(
             # make_fx usages, so don't choke in this case
             if s not in symbol_bindings:
                 continue
-            saved_sym_nodes_binding.append(symbol_bindings[s])
+            # A primal can bind two symbols (see above), so add it only once
+            if symbol_bindings[s] not in saved_sym_nodes_binding:
+                saved_sym_nodes_binding.append(symbol_bindings[s])
         saved_symbols |= new_symbols
 
     # Update saved_sym_nodes that are now reordered to have all bindings at
