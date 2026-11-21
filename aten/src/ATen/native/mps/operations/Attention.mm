@@ -495,8 +495,8 @@ int64_t _fused_sdp_choice_mps(const Tensor& query,
     reason = "it only supports floating point inputs";
   } else if (query.dim() < 3 || key.dim() < 3 || value.dim() < 3) {
     reason = "it requires inputs with a heads dimension";
-  } else if (!enable_gqa && query.sym_size(-3) != key.sym_size(-3)) {
-    // The kernels would broadcast K/V heads, while math rejects the mismatch
+  } else if (!enable_gqa && key.sym_size(-3) != 1 && query.sym_size(-3) != key.sym_size(-3)) {
+    // The kernels would broadcast K/V heads, while math only broadcasts a single one
     reason = "query and key have different numbers of heads and enable_gqa is not set";
   } else {
     return static_cast<int64_t>(sdp::SDPBackend::flash_attention);

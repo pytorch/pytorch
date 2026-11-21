@@ -12753,6 +12753,8 @@ class TestSDPA(TestCaseMPS):
         q, kv = torch.randn(1, 4, 8, 16, device="mps"), torch.randn(1, 2, 8, 16, device="mps")
         self.assertEqual(torch._fused_sdp_choice(q, kv, kv), SDPBackend.MATH.value)
         self.assertEqual(torch._fused_sdp_choice(q, kv, kv, enable_gqa=True), SDPBackend.FLASH_ATTENTION.value)
+        kv1 = torch.randn(1, 1, 8, 16, device="mps")
+        self.assertEqual(torch._fused_sdp_choice(q, kv1, kv1), SDPBackend.FLASH_ATTENTION.value)
         with self.assertRaisesRegex(RuntimeError, "must match the size"):
             F.scaled_dot_product_attention(q, kv, kv)
         with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
