@@ -6512,6 +6512,44 @@ print(json.dumps(found))
         self.assertRegex(graph["reason"], rf"^{raised} \(in helper, test_vm.py:\d+\)$")
 
 
+GRAPH_END_STATE = [0.5]
+GRAPH_END_LOG = []
+
+
+class GraphEnds:
+    # Its end changes what the functions below read.
+    def __del__(self):
+        if GRAPH_END_LOG is None:
+            return
+        GRAPH_END_LOG.append("the end of an object")
+        GRAPH_END_STATE[0] += 1.0
+
+
+class GraphEndWatched:
+    pass
+
+
+def graph_end_callback(reference):
+    GRAPH_END_LOG.append("a weak reference is told")
+    GRAPH_END_STATE[0] += 1.0
+
+
+GRAPH_END_HELD = [None]
+GRAPH_END_REFS = []
+GRAPH_END_WEAK = weakref.WeakKeyDictionary()
+
+
+def graph_end_variable(x, keep=None):
+    # The variable holds the last reference to what `pop` gave, from in
+    # front of the first operation on.
+    held = GRAPH_END_HELD.pop()
+    h = torch.relu(x) + 1
+    h = h * GRAPH_END_STATE[0]
+    held = None
+    h = h + GRAPH_END_STATE[0]
+    return (torch.tanh(h) * 2 - 1).sum() + GRAPH_END_STATE[0], held
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -6637,6 +6675,62 @@ class TestVmGraphResults(TestCase):
             expected = fn(other, {theirs: 1.0, "a": 2.0}, {theirs, "a"})
             self.assertEqual(got, expected[0], atol=0, rtol=0)
             self.assertEqual((there, mine.log), (expected[1], theirs.log))
+
+    def test_what_a_path_lets_go_of_ends_where_the_instructions_end_it(self, device):
+        # A variable that is bound anew lets go of what it held: where
+        # that was the last reference to an object whose end runs Python
+        # code (a `__del__`, a callback of a weak reference), the code runs
+        # where the instruction is, and what the function reads behind it
+        # is what that code left. What was made of a path binds the
+        # variable behind everything the path read: it is not for such a
+        # call.
+        def keep(gm, input_types):
+            return gm
+
+        def plant(what):
+            made = GraphEndWatched() if what in ("watched", "keyed") else GraphEnds()
+            if what == "watched":
+                GRAPH_END_REFS.append(weakref.ref(made, graph_end_callback))
+            if what == "keyed":
+                GRAPH_END_WEAK[made] = GraphEnds()
+            return [made] if what == "inside" else made
+
+        def empty():
+            del GRAPH_END_HELD[:], GRAPH_END_REFS[:], GRAPH_END_LOG[:]
+
+        def calls(run, what, graded):
+            empty()
+            GRAPH_END_STATE[0] = 0.5
+            found = []
+            for at in range(12):
+                planted = at in (7, 10)
+                kept = plant(what) if planted and what == "kept" else None
+                GRAPH_END_HELD.append(plant(what) if planted and what != "kept" else 0)
+                torch.manual_seed(at)
+                x = torch.randn(3, 4, device=device, requires_grad=graded)
+                out = run(x, kept)
+                out = out[0] if isinstance(out, tuple) else out
+                if graded:
+                    out.backward()
+                found.append((out.item(), len(GRAPH_END_LOG), GRAPH_END_STATE[0]))
+                del kept
+            return found
+
+        fn = graph_end_variable
+        # An object with a `__del__`; one inside a list that goes with it;
+        # one with a weak reference that is told of its end; one that is a
+        # key of a weak dictionary whose value has a `__del__`; and a call
+        # in which the variable holds a number (a path is for that call:
+        # nothing ends).
+        for what in ("ends", "inside", "watched", "keyed", "kept"):
+            for behind, graded in (((), False), ((keep,), False), ((), True)):
+                passes = (*DEFAULT, P.Graphs(), *behind)
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                got = calls(compiled, what, graded)
+                expected = calls(fn, what, graded)
+                name = f"{fn.__name__} {what} {behind} {graded}"
+                self.assertEqual(got, expected, msg=name)
+        empty()
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
