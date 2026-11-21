@@ -1234,6 +1234,20 @@ Example:
       ::c10d::nvshmem_extension::nvshmemx_cumodule_init,
       py::arg("module"));
 
+  const auto shmem_ops = ::c10d::nvshmem_extension::shmem_ops();
+  py::enum_<::c10d::nvshmem_extension::ShmemSignalOp>(module, "_ShmemSignalOp")
+      .value("SET", shmem_ops.signal_set)
+      .value("ADD", shmem_ops.signal_add);
+
+  py::enum_<::c10d::nvshmem_extension::ShmemCompareOp>(
+      module, "_ShmemCompareOp")
+      .value("EQ", shmem_ops.cmp_eq)
+      .value("NE", shmem_ops.cmp_ne)
+      .value("GT", shmem_ops.cmp_gt)
+      .value("GE", shmem_ops.cmp_ge)
+      .value("LT", shmem_ops.cmp_lt)
+      .value("LE", shmem_ops.cmp_le);
+
   // Check if NVSHMEM is available on current system.
   module.def(
       "_is_nvshmem_available", ::c10d::nvshmem_extension::is_nvshmem_available);
@@ -2581,9 +2595,15 @@ Example::
     py::options options;
     options.disable_function_signatures();
     tcpStore.attr("__init__") = py::cpp_function(
-        [init](py::args args, py::kwargs kwargs) {
+        [init](
+            py::detail::value_and_holder& v_h,
+            const py::args& args,
+            const py::kwargs& kwargs) {
           try {
-            init(*args, **kwargs);
+            init(
+                py::handle(reinterpret_cast<PyObject*>(v_h.inst)),
+                *args,
+                **kwargs);
           } catch (const py::error_already_set& error) {
             if (error.matches(PyExc_TypeError)) {
               // @allow-raw-throw: Preserve TypeError without secret context.
@@ -2594,6 +2614,7 @@ Example::
           }
         },
         py::is_method(tcpStore),
+        py::detail::is_new_style_constructor(),
         py::name("__init__"),
         doc.c_str());
   }
