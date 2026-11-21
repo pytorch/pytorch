@@ -986,6 +986,15 @@ class TestInductorDynamic(DynamicShapesTestCase):
         x = torch.randn(576, 512, device=device)
         self.assertEqual(cfn(x, 128), fn(x, 128))
 
+    def test_truncdiv_of_sizes(self, device):
+        def fn(x, y):
+            n = torch.div(x.shape[1], y.shape[1], rounding_mode="trunc")
+            return x.new_zeros(()) + n
+
+        x = torch.randn(2, 512, device=device)
+        y = torch.randn(2, 64, device=device)
+        self.assertEqual(torch.compile(fn, dynamic=True)(x, y), fn(x, y))
+
     def test_slice_scatter(self, device):
         def fn(i):
             s3 = i.size(0)
