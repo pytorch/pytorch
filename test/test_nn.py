@@ -28,6 +28,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils.rnn as rnn_utils
+import torch.utils.checkpoint
 from torch.nn.utils import clip_grad_norm_, clip_grad_value_, clip_grads_with_norm_, get_total_norm
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.nn.utils.fusion import fuse_conv_bn_weights
@@ -13327,6 +13328,68 @@ class TestNNDeviceType(NNTestCase):
         out = torch.empty(64, device=device)
         torch._C._nn.rrelu_with_noise(x, noise, 0.1, 0.3, True, None, out=out)
         self.assertEqual(out, x * noise)
+
+    # aten::rrelu_with_noise fills its `noise` argument with the sampled slopes and
+    # backward scales the incoming gradient with them, so `noise` has to be saved after
+    # the kernel ran. Saving it before only works while the SavedVariable aliases the
+    # buffer: a pack hook that copies the tensor, or a checkpoint replay that stops
+    # early at that pack, captures the pre-call contents instead. F.rrelu passes an
+    # empty_like buffer, so a stale read is uninitialized memory and may happen to look
+    # correct; these tests pass a sentinel to make it deterministic.
+    RRELU_NOISE_SENTINEL = 7.0
+
+    def _rrelu_with_noise(self, x, inplace=False):
+        noise = torch.full_like(x, self.RRELU_NOISE_SENTINEL)
+        if inplace:
+            return torch.ops.aten.rrelu_with_noise_(x.clone(), noise, 0.1, 0.9, True)
+        return torch.ops.aten.rrelu_with_noise(x, noise, 0.1, 0.9, True)
+
+    def _rrelu_input_grad(self, device, fn, ctx=None):
+        torch.manual_seed(0)
+        x = torch.randn(1024, device=device, requires_grad=True)
+        with ctx or contextlib.nullcontext():
+            fn(x).sum().backward()
+        return x.grad
+
+    @expectedFailureMPS  # NotImplementedError: aten::rrelu_with_noise https://github.com/pytorch/pytorch/issues/77764
+    @parametrize_test("inplace", [False, True])
+    def test_rrelu_saved_noise_hooks(self, device, inplace):
+        def rrelu(x):
+            return self._rrelu_with_noise(x, inplace)
+
+        clone_hooks = torch.autograd.graph.saved_tensors_hooks(lambda t: t.clone(), lambda t: t)
+        self.assertEqual(
+            self._rrelu_input_grad(device, rrelu, clone_hooks),
+            self._rrelu_input_grad(device, rrelu),
+        )
+
+    # early_stop=False replays the whole region, so the kernel refills `noise` before
+    # backward reads it: a control that passes with or without the fix.
+    @expectedFailureMPS  # NotImplementedError: aten::rrelu_with_noise https://github.com/pytorch/pytorch/issues/77764
+    @parametrize_test("early_stop", [True, False])
+    def test_rrelu_saved_noise_non_reentrant_checkpoint(self, device, early_stop):
+        def checkpointed(x):
+            return torch.utils.checkpoint.checkpoint(self._rrelu_with_noise, x, use_reentrant=False)
+
+        self.assertEqual(
+            self._rrelu_input_grad(
+                device, checkpointed, torch.utils.checkpoint.set_checkpoint_early_stop(early_stop)
+            ),
+            self._rrelu_input_grad(device, self._rrelu_with_noise),
+        )
+
+    @expectedFailureMPS  # NotImplementedError: aten::rrelu_with_noise https://github.com/pytorch/pytorch/issues/77764
+    def test_rrelu_with_noise_functional_backward(self, device):
+        # The sampled slopes are returned as `noise_out`; the `noise` argument is
+        # left untouched, so backward has to use the former.
+        def functional(x):
+            noise = torch.full_like(x, self.RRELU_NOISE_SENTINEL)
+            return torch.ops.aten.rrelu_with_noise_functional(x, noise, 0.1, 0.9, True)[0]
+
+        self.assertEqual(
+            self._rrelu_input_grad(device, functional),
+            self._rrelu_input_grad(device, self._rrelu_with_noise),
+        )
 
     @onlyCPU
     def test_softshrink(self, device):

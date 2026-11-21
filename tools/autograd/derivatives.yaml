@@ -86,6 +86,9 @@
 #
 #   - Any of the input arguments, tensor or non-tensor, including
 #     argument names that only appear in Declarations.yaml, e.g. 'output'.
+#     A mutable argument other than self (e.g. 'noise' in rrelu_with_noise)
+#     refers to its value after the forward kernel ran, see
+#     Note [Saving inputs that the operator mutates] in gen_variable_type.py.
 #
 #   - 'result', representing the result of evaluating the forward
 #     expression for ATen native function declarations. If the forward
@@ -2250,7 +2253,8 @@
 
 - name: rrelu_with_noise_functional(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> (Tensor, Tensor noise_out)
   noise: non_differentiable
-  self: rrelu_with_noise_backward(grad, self, noise, lower, upper, training, false)
+  # The sampled slopes land in the noise_out return; the noise argument is left untouched.
+  self: rrelu_with_noise_backward(grad, self, noise_out, lower, upper, training, false)
 
 - name: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _softmax_backward_data(grad, result, dim, self.scalar_type())
