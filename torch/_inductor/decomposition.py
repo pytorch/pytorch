@@ -933,10 +933,13 @@ def normal(
 @register_decomposition(aten.amax)
 def amax(
     self: torch.Tensor,
-    dim: int | None = None,
+    dim: DimsType | None = None,
     keepdim: bool = False,
 ) -> torch.Tensor:
     if self.dtype == torch.bool:
+        # amax/amin treat empty dim as reduce-all, unlike any/all
+        if isinstance(dim, (list, tuple)) and len(dim) == 0:
+            dim = None
         return torch.any(self, dim=dim, keepdim=keepdim)
     return NotImplemented
 
@@ -944,10 +947,13 @@ def amax(
 @register_decomposition(aten.amin)
 def amin(
     self: torch.Tensor,
-    dim: int | None = None,
+    dim: DimsType | None = None,
     keepdim: bool = False,
 ) -> torch.Tensor:
     if self.dtype == torch.bool:
+        # amax/amin treat empty dim as reduce-all, unlike any/all
+        if isinstance(dim, (list, tuple)) and len(dim) == 0:
+            dim = None
         return torch.all(self, dim=dim, keepdim=keepdim)
     return NotImplemented
 
