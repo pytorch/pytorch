@@ -18,6 +18,8 @@ extern "C" {
     // value may be null, for an empty cell.
     pub fn PyCell_New(value: Obj) -> Obj;
     pub fn PyCell_Set(cell: Obj, value: Obj) -> std::os::raw::c_int;
+    // New reference to sys.modules[name], or null (with or without an error).
+    pub fn PyImport_GetModule(name: Obj) -> Obj;
     // The exception being handled: a new reference, or null.
     pub fn PyErr_GetHandledException() -> Obj;
     pub fn PyErr_SetHandledException(exc: Obj);

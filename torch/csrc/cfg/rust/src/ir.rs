@@ -53,6 +53,10 @@ pub enum Op {
     CellSet(V, V),
     /// Any operand but the code object can be NONE.
     MakeFunction { code: V, defaults: V, kwdefaults: V, annotations: V, closure: V },
+    /// `import name`, with the from-list and level the bytecode supplies.
+    ImportName { name: u32, fromlist: V, level: V },
+    /// The attribute of a module named in `from module import name`.
+    ImportFrom(V, u32),
     /// Reads a frame slot: a register that holds a local variable outside of
     /// SSA form, because an exception handler has to find its current value.
     /// The result is undefined if the slot is empty.
@@ -107,6 +111,9 @@ pub enum Op {
     ListToTuple(V),
     /// Unpacks an iterable of exactly n items into a tuple.
     Unpack(V, u32),
+    /// Unpacks an iterable into a tuple of `before` items, a list of what is
+    /// in between, and `after` items.
+    UnpackEx(V, u32, u32),
     TupleGet(V, u32),
     Call { callee: V, args: Vec<V>, kwnames: u32 },
     /// getattr followed by a call. Only appears as the fallback of a lowered
@@ -225,7 +232,12 @@ impl Op {
                     opt(*v, &mut f)
                 }
             }
+            Op::ImportName { fromlist, level, .. } => {
+                f(*fromlist);
+                f(*level)
+            }
             Op::LoadAttr(a, _)
+            | Op::ImportFrom(a, _)
             | Op::StoreDeref(_, a)
             | Op::StoreSlot(_, a)
             | Op::PushExcInfo(a)
@@ -239,6 +251,7 @@ impl Op {
             | Op::IsNone(a, _)
             | Op::ListToTuple(a)
             | Op::Unpack(a, _)
+            | Op::UnpackEx(a, _, _)
             | Op::TupleGet(a, _)
             | Op::GetIter(a)
             | Op::IterNext(a)
@@ -509,6 +522,10 @@ impl Function {
             Op::StoreDeref(i, v) => format!("store_deref {} {}", i, n(v)),
             Op::LoadClosure(i) => format!("load_closure {}", i),
             Op::MakeCell(v) => format!("make_cell {}", n(v)),
+            Op::ImportName { name, fromlist, level } => {
+                format!("import_name '{}' {} {}", self.name_str(*name), n(fromlist), n(level))
+            }
+            Op::ImportFrom(m, name) => format!("import_from {} '{}'", n(m), self.name_str(*name)),
             Op::LoadSlot(s) => format!("load_slot {}", n(s)),
             Op::StoreSlot(s, v) => format!("store_slot {} {}", n(s), n(v)),
             Op::CaughtException => "caught_exception".to_string(),
@@ -571,6 +588,7 @@ impl Function {
             Op::DictMerge(a, b) => format!("dict_merge {} {}", n(a), n(b)),
             Op::ListToTuple(a) => format!("list_to_tuple {}", n(a)),
             Op::Unpack(a, k) => format!("unpack {} {}", n(a), k),
+            Op::UnpackEx(a, before, after) => format!("unpack_ex {} {} {}", n(a), before, after),
             Op::TupleGet(a, i) => format!("tuple_get {} {}", n(a), i),
             Op::Call { callee, args, kwnames } => {
                 format!("call {}({})", n(callee), self.call_args(args, *kwnames))
