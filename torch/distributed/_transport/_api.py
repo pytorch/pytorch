@@ -18,7 +18,7 @@ from ._work import _validate_timeout, wait_all
 
 
 if TYPE_CHECKING:
-    from ._cuda_stream import _CudaStreamOrdering
+    from ._stream import _StreamOrdering
 
 
 # TCPStore polls with an int millisecond timeout.
@@ -164,18 +164,19 @@ class Transport(ABC):
     unregistering memory or closing; local completion does not establish that a peer has stopped accessing
     this endpoint. Descriptors are invalid after unregistration or their owner closes.
 
-    ``read_stream`` and ``write_stream`` order transfers on the current CUDA
-    stream: the transfer starts after prior work on the stream, and later work
-    waits for it to complete. They return after enqueueing, without holding SMs
-    while the transfer is in flight, and can be captured in CUDA graphs.
+    ``read_stream`` and ``write_stream`` order transfers on the current accelerator
+    stream (currently CUDA only): the transfer starts after prior work on the
+    stream, and later work waits for it to complete. They return after
+    enqueueing, without holding SMs while the transfer is in flight, and can be
+    captured in CUDA graphs.
     Transfer failures terminate the process, since consumers may already be
-    enqueued. Ordinary ``read`` and ``write`` do not interact with CUDA streams.
+    enqueued. Ordinary ``read`` and ``write`` do not interact with streams.
     """
 
     def __init__(self, device: torch.device | str | None = None) -> None:
         self.device = torch.device(device) if device is not None else None
         self._default_timeout: float | None = None
-        self._cuda_streams: dict[tuple[int, int], _CudaStreamOrdering] = {}
+        self._streams: dict[tuple[int, int], _StreamOrdering] = {}
 
     def _check_device(self, device: torch.device) -> None:
         if self.device is not None and (
@@ -376,7 +377,7 @@ class Transport(ABC):
         local_buffer: MemoryView,
         remote_buffer: RemoteBuffer,
         *,
-        stream: torch.cuda.Stream | None = None,
+        stream: torch.Stream | None = None,
         timeout: float | None = None,
     ) -> None:
         """Write a local view in order on ``stream`` (default: current).
@@ -388,7 +389,7 @@ class Transport(ABC):
             raise ValueError("stream transfers require a positive timeout")
         self._check_transfer(local_buffer, remote_buffer, mutable=False)
         submit = partial(self.write_async, local_buffer, remote_buffer, timeout=timeout)
-        self._cuda_stream(stream or torch.cuda.current_stream()).enqueue(
+        self._stream_ordering(stream or torch.accelerator.current_stream()).enqueue(
             submit, local_buffer
         )
 
@@ -397,7 +398,7 @@ class Transport(ABC):
         local_buffer: MutableMemoryView,
         remote_buffer: RemoteBuffer,
         *,
-        stream: torch.cuda.Stream | None = None,
+        stream: torch.Stream | None = None,
         timeout: float | None = None,
     ) -> None:
         """Read into a local view in order on ``stream`` (default: current)."""
@@ -406,35 +407,40 @@ class Transport(ABC):
             raise ValueError("stream transfers require a positive timeout")
         self._check_transfer(local_buffer, remote_buffer, mutable=True)
         submit = partial(self.read_async, local_buffer, remote_buffer, timeout=timeout)
-        self._cuda_stream(stream or torch.cuda.current_stream()).enqueue(
+        self._stream_ordering(stream or torch.accelerator.current_stream()).enqueue(
             submit, local_buffer
         )
 
     def _check_transfer(  # noqa: B027
         self, local_buffer: MemoryView, remote_buffer: RemoteBuffer, *, mutable: bool
     ) -> None:
-        """Validate a transfer before it is enqueued on a CUDA stream."""
+        """Validate a transfer before it is enqueued on a stream."""
 
-    def _cuda_stream(self, stream: torch.cuda.Stream) -> _CudaStreamOrdering:
-        from ._cuda_stream import _CudaStreamOrdering
+    def _stream_ordering(self, stream: torch.Stream) -> _StreamOrdering:
+        from ._stream import _StreamOrdering
 
-        key = (stream.device.index, stream.cuda_stream)
-        if key not in self._cuda_streams:
-            self._cuda_streams[key] = _CudaStreamOrdering(stream)
-        return self._cuda_streams[key]
+        device = stream.device
+        if device.type != "cuda":
+            raise RuntimeError(
+                f"stream transfers require a CUDA stream, got {device.type}"
+            )
+        key = (device.index, stream.native_handle)
+        if key not in self._streams:
+            self._streams[key] = _StreamOrdering(stream)
+        return self._streams[key]
 
-    def _cuda_stream_views(self) -> list[MemoryView]:
+    def _stream_views(self) -> list[MemoryView]:
         """Return views retained by enqueued or captured stream transfers."""
         return [
             view
-            for ordering in self._cuda_streams.values()
+            for ordering in self._streams.values()
             for view in ordering.retained_views()
         ]
 
-    def _close_cuda_streams(self) -> None:
-        for ordering in self._cuda_streams.values():
+    def _close_streams(self) -> None:
+        for ordering in self._streams.values():
             ordering.close()
-        self._cuda_streams.clear()
+        self._streams.clear()
 
     async def write_async(
         self,

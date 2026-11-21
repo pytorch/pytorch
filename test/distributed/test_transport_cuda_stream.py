@@ -16,9 +16,9 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 def _worker(rank, pipe, capture=False):
-    torch.cuda.set_device(rank)
+    torch.accelerator.set_device_index(rank)
     transport = NIXLTransport()
-    stream = torch.cuda.Stream()
+    stream = torch.Stream("cuda")
     source = torch.empty(1024, device="cuda")
     destination = torch.zeros(1024, device="cuda")
     producer = torch.full((1024,), rank + 1.0, device="cuda")
@@ -38,13 +38,13 @@ def _worker(rank, pipe, capture=False):
     remote_destination = NIXLRemoteBuffer.deserialize(pipe.recv_bytes())
     if capture:
         # Initialize native UCX CUDA resources outside graph execution.
-        with torch.cuda.stream(stream):
+        with stream:
             transport.write_stream(local_source.to_view(), remote_destination)
         stream.synchronize()
         pipe.send_bytes(b"warm")
         if pipe.recv_bytes() != b"warm":
             raise AssertionError("warmup rendezvous")
-        with torch.cuda.stream(stream):
+        with stream:
             transport.read_stream(local_destination.to_mutable_view(), remote_source)
         stream.synchronize()
         write_graph, read_graph = torch.cuda.CUDAGraph(), torch.cuda.CUDAGraph()
@@ -86,7 +86,7 @@ def _worker(rank, pipe, capture=False):
             if not (pipe.recv_bytes() == b"iteration"):
                 raise AssertionError("unexpected capture result or peer message")
     else:
-        with torch.cuda.stream(stream):
+        with stream:
             source.copy_(producer, non_blocking=True)
             transport.write_stream(local_source.to_view(), remote_destination)
         stream.synchronize()
@@ -99,7 +99,7 @@ def _worker(rank, pipe, capture=False):
         transport.read_stream(
             local_destination.to_mutable_view(), remote_source, stream=stream
         )
-        with torch.cuda.stream(stream):
+        with stream:
             consumer.copy_(destination, non_blocking=True)
         stream.synchronize()  # Verify results only; no synchronization in enqueue.
         torch.testing.assert_close(consumer, torch.full_like(consumer, 2 - rank))
@@ -111,7 +111,7 @@ def _worker(rank, pipe, capture=False):
     # Stop peer accesses before closing local registrations.
     pipe.send_bytes(b"finished")
     pipe.recv_bytes()
-    orderings = list(transport._cuda_streams.values())
+    orderings = list(transport._streams.values())
     transport.close()
     if any(o._retained for o in orderings):
         raise AssertionError("graph resources retained after close")
@@ -131,7 +131,7 @@ def _callback_worker(fail, capture=False):
             patch.object(transport, "_submit", return_value=native_work),
             patch.object(
                 transport,
-                "_cuda_stream",
+                "_stream_ordering",
                 side_effect=AssertionError("ordinary API used stream ordering"),
             ),
         ):
@@ -169,7 +169,9 @@ def _callback_worker(fail, capture=False):
         else:
             # The second transfer must wait for the first on the stream.
             transport.write_stream(memory.to_view(), remote)
-            transport.write_stream(memory.to_view(), remote)
+            transport.write_stream(memory.to_view(), remote, stream=stream)
+            if len(transport._streams) != 1:
+                raise AssertionError("torch.cuda.Stream mapped to a new ordering")
         done = torch.cuda.Event()
         done.record()
         if fail:

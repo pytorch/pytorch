@@ -227,10 +227,10 @@ class MooncakeTransport(Transport):
                 return
             if any(
                 cast(MooncakeMemoryView, view)._memory._registration is registration
-                for view in self._cuda_stream_views()
+                for view in self._stream_views()
             ):
                 raise RuntimeError(
-                    "memory is retained by CUDA stream transfers or graphs"
+                    "memory is retained by stream transfers or CUDA graphs"
                 )
             if any(
                 work._buffers[0]._memory._registration is registration
@@ -502,7 +502,7 @@ class MooncakeTransport(Transport):
     def close(self, *, timeout: float | None = None) -> None:
         if self._closed:
             return
-        self._close_cuda_streams()
+        self._close_streams()
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
@@ -533,7 +533,7 @@ class MooncakeTransport(Transport):
         """
         if self._closed:
             return
-        self._close_cuda_streams()
+        self._close_streams()
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
