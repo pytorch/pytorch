@@ -10840,5 +10840,123 @@ class TestVmApi(TestCase):
         self.assertEqual(seen.count("before"), 8)
 
 
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmJoint(TestCase):
+    """The joint graph of the engine (`torch._cfg_rs.Joint`), by itself."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def joint(self, scale):
+        runtime = torch.vm._load_runtime()
+        aten = torch.ops.aten
+        x = torch.arange(6.0).reshape(2, 3)
+        joint = runtime.Joint([x])
+        y = aten.mul.Scalar(x, scale)
+        joint.forward(aten.mul.Scalar, "aten::mul.Scalar", (x, scale), {}, y, [], False)
+        z = aten.tanh.default(y)
+        joint.forward(aten.tanh.default, "aten::tanh.default", (y,), {}, z, [], False)
+        joint.results([z], [True])
+        seed = torch.ones_like(z)
+        joint.begin([True], [seed])
+        # What autograd saved of `z` is wrapped anew: found by where it is.
+        back, again = aten.tanh_backward.default, z.view_as(z)
+        g = back(seed, again)
+        joint.backward(back, "aten::tanh_backward.default", (seed, again), {}, g)
+        out = aten.mul.Scalar(g, scale)
+        joint.backward(aten.mul.Scalar, "aten::mul.Scalar", (g, scale), {}, out)
+        joint.give(0, out)
+        joint.end()
+        return joint, x
+
+    def test_two_runs_are_the_same_graph_or_it_says_what_is_not(self):
+        first, second, third = (self.joint(scale)[0] for scale in (2.0, 2.0, 3.0))
+        self.assertIsNone(first.differs(second))
+        self.assertIn("is not the same in two runs", first.differs(third))
+        self.assertEqual(first.counts(), (2, [2]))
+
+    def test_what_looks_at_a_tensor_and_what_is_no_value_are_refused(self):
+        joint, x = self.joint(2.0)
+        aten = torch.ops.aten
+
+        def takes(op, name, tensor, gives):
+            joint.forward(op, name, (tensor,), {}, gives, [], False)
+
+        with self.assertRaisesRegex(ValueError, "looks at what a tensor holds"):
+            takes(aten.item.default, "aten::item.default", x, 1.0)
+        other = torch.ones(2, 3)
+        with self.assertRaisesRegex(ValueError, "is no value of the graph"):
+            takes(aten.neg.default, "aten::neg.default", other, -other)
+
+    def test_a_backward_for_some_results_is_made_of_the_one_for_all(self):
+        runtime = torch.vm._load_runtime()
+        aten = torch.ops.aten
+        x = torch.arange(6.0).reshape(2, 3)
+
+        def taken(together):
+            # y = exp(x) and z = sin(x); eager's node of z runs first. With
+            # `together` one node is handed both gradients.
+            joint = runtime.Joint([x])
+            y = aten.exp.default(x)
+            joint.forward(aten.exp.default, "aten::exp.default", (x,), {}, y, [], False)
+            z = aten.sin.default(x)
+            joint.forward(aten.sin.default, "aten::sin.default", (x,), {}, z, [], False)
+            joint.results([y, z], [True, True])
+            gy, gz = torch.ones_like(y), torch.full_like(z, 2.0)
+            joint.begin([True, True], [gy, gz])
+            joint.node(0, [gy, gz] if together else [gz])
+            cos = aten.cos.default(x)
+            joint.backward(aten.cos.default, "aten::cos.default", (x,), {}, cos)
+            first = aten.mul.Tensor(gz, cos)
+            joint.backward(aten.mul.Tensor, "aten::mul.Tensor", (gz, cos), {}, first)
+            joint.node(0 if together else 1, [gy, gz] if together else [gy])
+            second = aten.mul.Tensor(gy, y)
+            joint.backward(aten.mul.Tensor, "aten::mul.Tensor", (gy, y), {}, second)
+            joint.adds(True)
+            summed = (first, second)
+            both = aten.add.Tensor(*summed)
+            joint.backward(aten.add.Tensor, "aten::add.Tensor", summed, {}, both)
+            joint.adds(False)
+            joint.give(0, both)
+            joint.end()
+            joint.cut(False)
+            return joint, [joint.value(tensor) for tensor in (first, second, both)]
+
+        def names(back):
+            return [op[0]._schema.name for op in back[2]]
+
+        def said(back):
+            return names(back), back[3], len(back[1])
+
+        joint, (first, second, both) = taken(False)
+        whole = joint.backward_for([True, True])
+        expected = ["aten::cos", "aten::mul", "aten::mul", "aten::add"]
+        self.assertEqual(names(whole), expected)
+        self.assertEqual(whole[3], [(0, both)])
+        # For one result alone the node of the other does not run, and the
+        # sum is what the one node gave.
+        alone = joint.backward_for([True, False])
+        self.assertEqual(said(alone), (["aten::mul"], [(0, second)], 1))
+        alone = joint.backward_for([False, True])
+        self.assertEqual(said(alone), (["aten::cos", "aten::mul"], [(0, first)], 1))
+        # A node that was handed both was not taken down with one of them.
+        joint, _ = taken(True)
+        self.assertEqual(len(joint.backward_for([True, True])[2]), 4)
+        with self.assertRaisesRegex(ValueError, "some of its gradients and not others"):
+            joint.backward_for([True, False])
+
+    def test_the_cut_keeps_what_the_backward_cannot_compute_again(self):
+        joint, _ = self.joint(2.0)
+        read, kept = joint.cut(False)
+        self.assertEqual((read, kept), (24, 24))
+        described = joint.describe()
+        # The backward reads the result, which the caller can get at: it is
+        # kept as eager keeps it, with the smallest cut too.
+        self.assertEqual(described["saved"], [2])
+        self.assertEqual(joint.cut(True), (24, 24))
+        self.assertEqual(joint.describe()["saved"], [2])
+        (pattern, incoming, ops, gives) = described["backs"][0]
+        self.assertEqual((pattern, incoming, gives), ([True], [3], [(0, 5)]))
+
+
 if __name__ == "__main__":
     run_tests()
