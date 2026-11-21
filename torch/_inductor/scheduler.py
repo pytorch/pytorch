@@ -6565,12 +6565,20 @@ class Scheduler:
         Reads the stream_idx field set on IR nodes during lowering to determine
         which stream each scheduler node should run on. This field is propagated
         from 'custom.stream' FX node metadata via IRNode.current_stream_idx().
-        Group nodes that already exist here (e.g. foreach) have no IR node of
-        their own; they take the stream of their members.
+        Group nodes that already exist here (e.g. foreach, possibly nested in a
+        GroupedSchedulerNode) have no IR node of their own; they take the
+        stream of their members.
         """
         from .stream_constants import DEFAULT_STREAM_IDX
 
-        for node in itertools.chain.from_iterable(n.get_nodes() for n in self.nodes):
+        def leaf_nodes(node: BaseSchedulerNode) -> Iterator[BaseSchedulerNode]:
+            subnodes = [n for n in node.get_nodes() if n is not node]
+            if not subnodes:
+                yield node
+            for subnode in subnodes:
+                yield from leaf_nodes(subnode)
+
+        for node in itertools.chain.from_iterable(leaf_nodes(n) for n in self.nodes):
             stream_idx = DEFAULT_STREAM_IDX
 
             if node.node is not None:
@@ -6587,8 +6595,10 @@ class Scheduler:
             for buf in node.get_buffer_names():
                 self.buff_to_stream[buf] = stream_idx
 
+        # GroupedSchedulerNodes may mix streams; they are unpacked before codegen.
         for node in self.nodes:
-            self.get_node_stream(node)
+            if not isinstance(node, GroupedSchedulerNode):
+                self.get_node_stream(node)
 
         # Propagate a device to device-less nodes (e.g. record_event,
         # wait_event) so they naturally enter the device guard in the
@@ -13229,7 +13239,7 @@ class Scheduler:
             if pending:
                 input_streams: dict[str, OrderedSet[int]] = {}
                 for n in nodes:
-                    s = self.node_to_stream.get(n, 0)
+                    s = self.get_node_stream(n)
                     for name in _real_dep_names(n.read_writes.reads):
                         if name in pending:
                             input_streams.setdefault(name, OrderedSet()).add(s)

@@ -125,6 +125,19 @@ def _count_generated_stream_contexts(code):
     return len(re.findall(r"(?m)^\s*with (?:default_stream|stream\d+):", code))
 
 
+def _kernel_stream_contexts(code, kernel_name):
+    """Enclosing `with <stream>:` line (or None) of each launch of kernel_name in call()."""
+    ctx = None
+    contexts = []
+    for line in code[code.find("def call(") :].split("\n"):
+        match = re.match(r"\s*(with (?:default_stream|stream\d+)):", line)
+        if match:
+            ctx = match.group(1)
+        if kernel_name in line and ".run(" in line:
+            contexts.append(ctx)
+    return contexts
+
+
 class TestStreamUtils(InductorTestCase):
     """Tests for stream_utils module."""
 
@@ -2129,20 +2142,14 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(actual, expected)
 
         # Small inputs rarely expose the race in the output, so check where the
-        # foreach kernel is emitted: under the side stream, not default_stream.
-        ctx = None
-        foreach_ctx = None
-        for line in code[code.find("def call(") :].split("\n"):
-            stripped = line.strip()
-            if stripped.startswith(("with stream", "with default_stream")):
-                ctx = stripped
-            if "triton_for_fused" in line and ".run(" in line:
-                foreach_ctx = ctx
-        self.assertIsNotNone(foreach_ctx, "foreach kernel not found")
-        self.assertTrue(
-            foreach_ctx.startswith("with stream"),
-            f"foreach kernel must run on the side stream, got: {foreach_ctx}",
-        )
+        # foreach kernels are emitted: under the side stream, not default_stream.
+        contexts = _kernel_stream_contexts(code, "triton_for_fused")
+        self.assertTrue(contexts, "no foreach kernel launch found")
+        for ctx in contexts:
+            self.assertTrue(
+                ctx is not None and ctx.startswith("with stream"),
+                f"foreach kernel must run on the side stream, got: {ctx}",
+            )
 
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
