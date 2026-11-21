@@ -2345,6 +2345,30 @@ class TestMetaKernelConv(TestCase):
 class TestMetaKernelRegistrations(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("fake", [False, True])
+    @parametrize("op", ["select", "slice", "diagonal"])
+    @parametrize("src_shape", [(3,), (1, 3)])
+    def test_scatter_invalid_src_shape(self, fake, op, src_shape):
+        from contextlib import nullcontext
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        mode = FakeTensorMode(allow_fallback_kernels=False) if fake else nullcontext()
+        with mode:
+            device = "cpu" if fake else "meta"
+            x = torch.zeros(3, 3, 3, device=device)
+            src = torch.ones(src_shape, device=device)
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "expected src to have a size equal to the slice of self",
+            ):
+                if op == "select":
+                    torch.select_scatter(x, src, dim=0, index=0)
+                elif op == "slice":
+                    torch.slice_scatter(x, src, dim=0, start=0, end=1)
+                else:
+                    torch.diagonal_scatter(x, src, dim1=0, dim2=1)
+
     @parametrize("tensor_lr", [False, True])
     @parametrize("amsgrad", [False, True])
     @parametrize("fake", [False, True])
