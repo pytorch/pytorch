@@ -361,7 +361,15 @@ def _reduction_single_dim_strategy(
     # Partial propagation: Partial(reduction_op) input -> Partial(reduction_op) output.
     # Skip for NormReduction: the old OpStrategy path did not propagate
     # _NormPartial through, so keep that behavior.
-    if reduction_linear and not isinstance(reduction_op, NormReduction):
+    # Skip for max/min: NCCL's all_reduce MAX/MIN ignores NaN, so a NaN in one
+    # rank's local values would hide that rank's other values. E.g. P(max) with
+    # local values [nan, 9] and [1, 2]: on NCCL the input is [1, 9] and amax is 9,
+    # but max(amax([nan, 9]), amax([1, 2])) = max(nan, 2) = 2.
+    if (
+        reduction_linear
+        and not isinstance(reduction_op, NormReduction)
+        and reduction_op not in ("max", "min")
+    ):
         partial_placement = get_placement_from_reduction_op(reduction_op)
         strategies.append([partial_placement, partial_placement])
 
@@ -468,13 +476,20 @@ def linear_reduction_single_dim_strategy(
         if op in FOREACH_LINEAR_REDUCTION_OP_MAP
         else LINEAR_REDUCTION_OP_MAP[op]
     )
-    return _reduction_single_dim_strategy(
+    strategies = _reduction_single_dim_strategy(
         args_schema,
         reduction_dims=dims,
         keep_dim=keep_dim,
         reduction_linear=True,
         reduction_op=reduction_op,
     )
+    if op == aten.nansum.default:
+        # No P(sum) -> P(sum): nansum drops a NaN held by one rank, but the
+        # reduced input is NaN there. E.g. P(sum) with local values [nan, 1] and
+        # [2, 3]: the input is [nan, 4] and its nansum is 4, but
+        # nansum([nan, 1]) + nansum([2, 3]) = 6.
+        strategies.remove([Partial("sum"), Partial("sum")])
+    return strategies
 
 
 def _is_spec_evenly_sharded_on_dim(spec: DTensorSpec, dim: int) -> bool:

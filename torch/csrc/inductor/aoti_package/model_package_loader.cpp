@@ -967,6 +967,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 AOTIModelPackageLoader::~AOTIModelPackageLoader() {
   // Clean up the temporary directory
   if (!temp_dir_.empty() && !is_directory_) {
+    // Windows cannot delete a loaded DLL, so unload the model library first.
+    runner_.reset();
     std::error_code remove_ec;
     fs::remove_all(temp_dir_, remove_ec);
     if (remove_ec) {
