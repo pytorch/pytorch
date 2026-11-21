@@ -19,7 +19,7 @@ import tempfile
 import types
 import unittest
 import zipfile
-from collections import namedtuple
+from collections import deque, namedtuple
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -3174,12 +3174,15 @@ class TestPredispatchSerialization(TestCase):
 
         with self.subTest("dict key that JSON cannot store"):
             # A tuple key would load back as a list, a float enum key as a float,
-            # and an int or str subclass key as a plain int or str.
+            # and an int or str subclass key as a plain int or str. Every NaN
+            # loads back as one shared object, which the function's own NaN key
+            # does not find.
             for key in (
                 (0, 1),
                 enum.Enum("FloatKey", {"A": 0.5}, type=float).A,
                 type("IntKey", (int,), {})(1),
                 type("StrKey", (str,), {})("k"),
+                math.nan,
             ):
                 with (
                     self.subTest(key=type(key).__name__),
@@ -3187,57 +3190,7 @@ class TestPredispatchSerialization(TestCase):
                 ):
                     torch.export.save(keyed(key), io.BytesIO())
 
-        with self.subTest("str enum in the context of a registered type"):
-            # It would load back as a plain str, which compares equal to it. With
-            # its own context encoder, a type keeps the enum, so it saves.
-            mode = enum.Enum("Mode", {"FAST": "fast"}, type=str).FAST
-            coded = dict(
-                to_dumpable_context=str, from_dumpable_context=lambda _: [mode]
-            )
-            for encoder in ({}, coded):
-
-                class Box:
-                    def __init__(self, x):
-                        self.x = x
-
-                pytree.register_pytree_node(
-                    Box,
-                    lambda box: ([box.x], [mode]),
-                    lambda xs, context: Box(xs[0]),
-                    serialized_type_name=f"flat_apply_test.Box{len(encoder)}",
-                    **encoder,
-                )
-                self.addCleanup(pytree._deregister_pytree_node, Box)
-                ep, buffer = wrapped(Box, lambda box: box.x), io.BytesIO()
-                if not encoder:
-                    with self.assertRaisesRegex(SerializeError, "load back"):
-                        torch.export.save(ep, buffer)
-                    continue
-                torch.export.save(ep, buffer)
-                buffer.seek(0)
-                x = torch.randn(4)
-                self.assertEqual(torch.export.load(buffer).module()(x), x * 2)
-
-        with self.subTest("int enum in a dict context of a registered type"):
-            # It would load back as a plain int inside the dict.
-            flag = enum.IntEnum("Flag", {"A": 1}).A
-
-            class Holder:
-                def __init__(self, x):
-                    self.x = x
-
-            pytree.register_pytree_node(
-                Holder,
-                lambda holder: ([holder.x], {"k": flag}),
-                lambda xs, context: Holder(xs[0]),
-                serialized_type_name="flat_apply_test.Holder",
-            )
-            self.addCleanup(pytree._deregister_pytree_node, Holder)
-            ep = wrapped(Holder, lambda holder: holder.x)
-            with self.assertRaisesRegex(SerializeError, "load back different"):
-                torch.export.save(ep, io.BytesIO())
-
-        def register(name, context):
+        def register(name, context, **encoder):
             class Box:
                 def __init__(self, x):
                     self.x = x
@@ -3247,22 +3200,64 @@ class TestPredispatchSerialization(TestCase):
                 lambda box: ([box.x], context),
                 lambda xs, context: Box(xs[0]),
                 serialized_type_name=name,
+                **encoder,
             )
             self.addCleanup(pytree._deregister_pytree_node, Box)
             return Box
 
-        with self.subTest("int key in a dict context of a registered type"):
-            # JSON stores dict keys as strings, so it would load back as "1".
-            ep = wrapped(register("flat_apply_test.IntKey", {1: "a"}), lambda b: b.x)
-            with self.assertRaisesRegex(SerializeError, "load back different"):
-                torch.export.save(ep, io.BytesIO())
+        mode = enum.Enum("Mode", {"FAST": "fast"}, type=str).FAST
+        with self.subTest("context of a registered type that JSON cannot store"):
+            # An int or str enum would load back as a plain int or str, which
+            # compares equal to it, and a dict key 1 as "1". Every NaN loads back
+            # as one shared object without its sign, which changes the dict keys
+            # and set members that it matches.
+            flag = enum.IntEnum("Flag", {"A": 1}).A
+            contexts = (
+                [mode],
+                {"k": flag},
+                {1: "a"},
+                {flag},
+                frozenset({flag}),
+                deque([flag]),
+                math.nan,
+                {math.nan},
+            )
+            for i, context in enumerate(contexts):
+                kind = type(context)
+                # JSON cannot store these kinds, so they get an encoder to a list.
+                encoder = (
+                    dict(to_dumpable_context=list, from_dumpable_context=kind)
+                    if kind in (set, frozenset, deque)
+                    else {}
+                )
+                box = register(f"flat_apply_test.Context{i}", context, **encoder)
+                ep = wrapped(box, lambda b: b.x)
+                with (
+                    self.subTest(context=context),
+                    self.assertRaisesRegex(SerializeError, "load back"),
+                ):
+                    torch.export.save(ep, io.BytesIO())
+
+        with self.subTest("str enum in a context with its own encoder"):
+            # The encoder keeps the enum, so it saves.
+            coded = dict(
+                to_dumpable_context=str, from_dumpable_context=lambda _: [mode]
+            )
+            ep = wrapped(
+                register("flat_apply_test.Coded", [mode], **coded), lambda b: b.x
+            )
+            buffer = io.BytesIO()
+            torch.export.save(ep, buffer)
+            buffer.seek(0)
+            x = torch.randn(4)
+            self.assertEqual(torch.export.load(buffer).module()(x), x * 2)
 
         with self.subTest("type whose serialized name a later type took"):
             # Load would build the later type.
             first = register("flat_apply_test.Shared", None)
             register("flat_apply_test.Shared", None)
             ep = wrapped(first, lambda b: b.x)
-            with self.assertRaisesRegex(SerializeError, "load back different"):
+            with self.assertRaisesRegex(SerializeError, "load back"):
                 torch.export.save(ep, io.BytesIO())
 
     def test_predispatch_flat_apply_save_load_by_name(self):
@@ -3342,8 +3337,12 @@ class TestPredispatchSerialization(TestCase):
         for qualname, function in functions.items():
             function.__module__, function.__qualname__ = module.__name__, qualname
         x = torch.randn(4)
-        programs = ((Bar(), x * 2 + 1, 1), (Qux(), x * 4, 1), (Baz(), x * 2 + 1, 1))
-        for m, expected, calls in (*programs, (Results(), x * 2, 2)):
+        for m, expected, calls in (
+            (Bar(), x * 2 + 1, 1),
+            (Qux(), x * 4, 1),
+            (Baz(), x * 2 + 1, 1),
+            (Results(), x * 2, 2),
+        ):
             with self.subTest(module=type(m).__name__):
                 ep, buffer = export(m, (x,), strict=False), io.BytesIO()
                 torch.export.save(ep, buffer)
@@ -3567,17 +3566,6 @@ class TestPredispatchSerialization(TestCase):
             _set_escaped_enum_in_spec,
             "Cannot load the input spec.*module of an enum",
         ),
-        # FX writes attribute names into the code it generates.
-        "name_not_identifier": (
-            lambda node: node.update(name='x")\nimport os  # '),
-            "is not an ASCII identifier",
-        ),
-        # Python reads the ligature \ufb01 as "fi", so the generated code would
-        # read the specs of a node named fi.
-        "name_not_ascii": (
-            lambda node: node.update(name="\ufb01"),
-            "is not an ASCII identifier",
-        ),
         "no_function": (
             lambda node: node["inputs"].pop(0),
             "does not start with its function",
@@ -3618,6 +3606,11 @@ class TestPredispatchSerialization(TestCase):
         "dict": (_set_last_input(arg=_DICT_WITH_OP), "of kind as_string_to_argument"),
         # Export passes an enum value as a custom object.
         "custom_obj": (_set_last_input(arg=_CUSTOM_OBJ), "enum values and other"),
+        # The helper gets its autograd class by name, as its first flat input.
+        "class_name_not_str": (
+            lambda node: node["inputs"][2].update(arg={"as_int": 5}),
+            "5 is not a torch.autograd.Function",
+        ),
         "keyword": (
             _set_last_input(arg={"as_int": 0}, kind=ArgumentKind.KEYWORD),
             "keyword input",
@@ -3632,19 +3625,90 @@ class TestPredispatchSerialization(TestCase):
         with self.assertRaisesRegex(SerializeError, reason):
             self._load_changed(self._index_in_vmap_artifact(), change)
 
-    def test_predispatch_flat_apply_load_rejects_repeated_name(self):
-        # The copy gets its own output, so only its repeated name is wrong. Its
-        # specs would replace those of the first node, which were checked.
-        artifact = self._index_in_vmap_artifact()
-        program = json.loads(artifact.exported_program)
-        graph = program["graph_module"]["graph"]
-        node = copy.deepcopy(self._flat_apply_node(program))
-        output = node["outputs"][0]["as_tensor"]
-        graph["tensor_values"]["copy"] = graph["tensor_values"][output["name"]]
-        output["name"] = "copy"
-        graph["nodes"].append(node)
-        with self.assertRaisesRegex(SerializeError, "which another node already uses"):
-            self._load_exported_program(artifact, json.dumps(program).encode())
+    def test_predispatch_flat_apply_load_keeps_node_name_out_of_code(self):
+        # The spec names do not come from the file, so a saved node name that is
+        # not an identifier does not reach the code that FX generates.
+        name = 'x")\nimport os  # '
+        loaded = self._load_changed(
+            self._index_in_vmap_artifact(), lambda node: node.update(name=name)
+        )
+        self.assertNotIn("import os", loaded.graph_module.code)
+        x, indices = torch.arange(4), torch.tensor([3, 1])
+        self.assertEqual(loaded.module()(x, indices), x[indices])
+
+    def test_predispatch_flat_apply_spec_names_avoid_state(self):
+        # module() adds parameters, buffers and constants as attributes after
+        # load, so the specs must not take the names they will have.
+        Scale = self._scale_function()
+        module = self._import_test_module(Scale=Scale)
+        Scale.__module__, Scale.__qualname__ = module.__name__, "Scale"
+
+        class Clash(torch.nn.Module):
+            def __init__(self, make):
+                super().__init__()
+                self.flat_apply_func_spec = make(torch.ones(4))
+                self.flat_apply_in_spec = make(torch.ones(4))
+
+            def forward(self, x):
+                return (
+                    Scale.apply(x) + self.flat_apply_func_spec + self.flat_apply_in_spec
+                )
+
+        x = torch.randn(4)
+        for make in (torch.nn.Buffer, torch.nn.Parameter, torch.clone):
+            with self.subTest(state=make.__name__):
+                ep, buffer = export(Clash(make), (x,), strict=False), io.BytesIO()
+                torch.export.save(ep, buffer)
+                buffer.seek(0)
+                self.assertEqual(torch.export.load(buffer).module()(x), x * 2 + 2)
+
+    def test_predispatch_flat_apply_spec_names_avoid_later_nodes(self):
+        # A value or a subgraph defined after the flat_apply call keeps its
+        # saved name on load, so the specs must not take it.
+        Scale = self._scale_function()
+        module = self._import_test_module(Scale=Scale)
+        Scale.__module__, Scale.__qualname__ = module.__name__, "Scale"
+        x = torch.randn(4)
+        with torch.library._scoped_library("flat_apply_test", "FRAGMENT") as lib:
+            for name in ("flat_apply_func_spec", "flat_apply_in_spec"):
+                op = f"flat_apply_test::{name}"
+                torch.library.define(op, "(Tensor x) -> Tensor", lib=lib)
+
+                @torch.library.impl(op, "cpu", lib=lib)
+                @torch.library.register_fake(op, lib=lib)
+                def add_one(x):
+                    return x + 1
+
+                class Then(torch.nn.Module):
+                    def forward(self, x):
+                        return getattr(torch.ops.flat_apply_test, name)(Scale.apply(x))
+
+                with self.subTest(op=name):
+                    ep, buffer = export(Then(), (x,), strict=False), io.BytesIO()
+                    self.assertLessEqual(
+                        {"flat_apply", name}, {n.name for n in ep.graph.nodes}
+                    )
+                    torch.export.save(ep, buffer)
+                    buffer.seek(0)
+                    self.assertEqual(torch.export.load(buffer).module()(x), x * 2 + 1)
+
+        class Cond(torch.nn.Module):
+            def forward(self, x):
+                return torch.cond(x.sum() > 0, torch.neg, torch.sin, (Scale.apply(x),))
+
+        with self.subTest(subgraph="flat_apply_func_spec"):
+            ep, buffer = export(Cond(), (x,), strict=False), io.BytesIO()
+            (cond,) = ep.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.cond
+            )
+            branch = cond.args[1]
+            ep.graph_module.flat_apply_func_spec = getattr(
+                ep.graph_module, branch.target
+            )
+            branch.target = "flat_apply_func_spec"
+            torch.export.save(ep, buffer)
+            buffer.seek(0)
+            self.assertEqual(torch.export.load(buffer).module()(x), Cond()(x))
 
     _OTHER_INPUTS_IN_GRAPH = {
         "keyword": (

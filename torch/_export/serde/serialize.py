@@ -16,7 +16,7 @@ import sys
 import traceback
 import types
 import typing
-from collections import namedtuple, OrderedDict
+from collections import deque, namedtuple, OrderedDict
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -31,6 +31,7 @@ import torch
 # imported module.
 import torch._dynamo._trace_wrapped_higher_order_op
 import torch.export.exported_program as ep
+from torch._dynamo.utils import get_unique_name_wrt
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
 from torch._export.wrappers import _is_allowed_in_pre_dispatch_graph
@@ -863,9 +864,18 @@ def _same_value(a: Any, b: Any) -> bool:
             _same_value(ka, kb) and _same_value(va, vb)
             for (ka, va), (kb, vb) in zip(a.items(), b.items())
         )
-    if isinstance(a, (list, tuple)):
+    if isinstance(a, (list, tuple, deque)):
         return len(a) == len(b) and all(map(_same_value, a, b))
+    if isinstance(a, (set, frozenset)):
+        return len(a) == len(b) and all(any(_same_value(x, y) for y in b) for x in a)
+    # A NaN does not equal itself, so it is refused. JSON loads every NaN as
+    # one shared object without its sign, which changes the dict keys and set
+    # members that it matches.
     return a == b
+
+
+def _same_spec_node(t1: Any, c1: Any, t2: Any, c2: Any) -> bool:
+    return t1 is t2 and _same_value(c1, c2)
 
 
 def _find_flat_apply_func(
@@ -1558,15 +1568,12 @@ class GraphModuleSerializer(metaclass=Final):
                 f"Cannot serialize flat_apply node {node.name}: its input spec "
                 f"cannot be saved: {e}"
             ) from e
-        if not is_equivalent(
-            loaded_spec,
-            in_spec_value,
-            lambda t1, c1, t2, c2: t1 is t2 and _same_value(c1, c2),
-        ):
+        if not is_equivalent(loaded_spec, in_spec_value, _same_spec_node):
             raise SerializeError(
                 f"Cannot serialize flat_apply node {node.name}: its input spec "
-                "would load back different, because JSON cannot store a part of "
-                "it, such as a tuple or an int subclass used as a dict key"
+                "would load back different, for example because JSON cannot store "
+                "a tuple, an int subclass or a NaN in it, or because another type "
+                "took the serialized name of one of its types"
             )
         try:
             constant_func = pytree._retrieve_constant(func_spec).func
@@ -2675,6 +2682,7 @@ class GraphModuleDeserializer(metaclass=Final):
         self.serialized_name_to_meta: LazyMap = LazyMap()  # str -> MetaType
         self.graph = torch.fx.Graph()
         self.module = torch.nn.Module()
+        self.subgraph_names: set[str] = set()
 
     @contextmanager
     def save_graph_module(self) -> Iterator[None]:
@@ -2684,6 +2692,7 @@ class GraphModuleDeserializer(metaclass=Final):
             self.serialized_name_to_node,
             self.serialized_name_to_meta,
             self.unbacked_symbols,
+            self.subgraph_names,
         )
         self.graph = torch.fx.Graph()
         self.module = torch.nn.Module()
@@ -2699,6 +2708,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 self.serialized_name_to_node,
                 self.serialized_name_to_meta,
                 self.unbacked_symbols,
+                self.subgraph_names,
             ) = saved
 
     def deserialize_extension_operator(self, serialized_target: str):
@@ -2950,6 +2960,13 @@ class GraphModuleDeserializer(metaclass=Final):
                 placeholder_node.meta["val"] = self.deserialize_input(input_)
             else:
                 raise SerializeError(f"Invalid input type {input_}")
+
+        self.subgraph_names = {
+            input_.arg.as_graph.name
+            for serialized_node in serialized_graph.nodes
+            for input_ in serialized_node.inputs
+            if input_.arg.type == "as_graph"
+        }
 
         # Nodes: convert to call_function nodes.
         for serialized_node in serialized_graph.nodes:
@@ -3475,19 +3492,6 @@ class GraphModuleDeserializer(metaclass=Final):
         the input spec, and add both back to the graph as TreeSpec attributes.
         """
         inputs = serialized_node.inputs
-        # The node name becomes part of attribute names, which FX writes into
-        # the code it generates, so it must be an identifier. It must be ASCII
-        # too: Python normalizes other identifiers, so the generated code could
-        # read another node's attribute.
-        if not (
-            isinstance(serialized_node.name, str)
-            and serialized_node.name.isascii()
-            and serialized_node.name.isidentifier()
-        ):
-            raise SerializeError(
-                f"flat_apply node name {serialized_node.name!r} is not an "
-                "ASCII identifier"
-            )
         if (
             len(inputs) < 2
             or inputs[0].arg.type != "as_operator"
@@ -3515,16 +3519,24 @@ class GraphModuleDeserializer(metaclass=Final):
         _check_operator_inputs(where, flat_inputs, args)
         func = _find_flat_apply_func(func_name, in_spec, args)
         specs = {"func_spec": func_to_graphable(func)[1], "in_spec": in_spec}
+        # module() adds parameters, buffers and constants as attributes after
+        # load, under the first part of their names.
+        state_names = {
+            input_spec.target.split(".")[0]
+            for input_spec in self.signature.input_specs
+            if input_spec.target is not None
+        }
         spec_nodes = []
         for suffix, spec in specs.items():
-            attr_name = f"{serialized_node.name}_{suffix}"
-            # A repeated name would let a later node replace specs that were
-            # already checked.
-            if hasattr(self.module, attr_name):
-                raise SerializeError(
-                    f"{where} needs the attribute name {attr_name}, which another "
-                    "node already uses"
-                )
+            # Values and subgraphs keep their saved names on load, so the specs
+            # avoid them.
+            attr_name = get_unique_name_wrt(
+                f"flat_apply_{suffix}",
+                set(dir(self.module)),
+                state_names,
+                self.serialized_name_to_meta.map,
+                self.subgraph_names,
+            )
             setattr(self.module, attr_name, spec)
             spec_nodes.append(
                 self.graph.create_node("get_attr", attr_name, name=attr_name)
