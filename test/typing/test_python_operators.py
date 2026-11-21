@@ -6,6 +6,7 @@ from pathlib import Path
 
 import torch
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -43,6 +44,8 @@ TYPE_TEST_FILE = Path(__file__).parent / "pass/arithmetic_ops.py"
 
 
 class TestPythonOperators(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Prove that UNARY_OPS, BINARY_OPS, and OPERATORS are correct and complete
     def test_operators_are_correct_and_complete(self):
         self.assertFalse(set(OPERATORS).difference(token.EXACT_TOKEN_TYPES))
