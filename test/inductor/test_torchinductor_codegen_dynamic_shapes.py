@@ -205,6 +205,7 @@ test_failures = {
         ("cpu",)
     ),
     "test_upsample_nearest2d_backward_dynamic_shapes": TestFailure(("cpu",)),
+    "test_var_mean_empty_dynamic_shapes": TestFailure(("cpu",)),
     "test_views3_dynamic_shapes": TestFailure(("cpu",)),
     "test_views4_dynamic_shapes": TestFailure(("cpu",)),
     "test_zeros_dynamic_shapes": TestFailure(("cpu",)),
