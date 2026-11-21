@@ -604,6 +604,7 @@ impl CfgFunction {
                         .collect();
                     let closed = forms.iter().find_map(|(_, form)| form.closed.clone());
                     let (state, reason) = match &*site.state.borrow() {
+                        _ if site.gave_way() => ("vm", Some(crate::graph::GAVE_WAY_REASON.to_string())),
                         GraphState::GivenUp(reason) if compiled > 0 => ("compiled", Some(reason.clone())),
                         GraphState::GivenUp(reason) => ("vm", Some(reason.clone())),
                         GraphState::Waiting if compiled > 0 => ("compiled", None),
