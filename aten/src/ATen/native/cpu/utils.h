@@ -4,6 +4,7 @@
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/cpu/vec/vec.h>
 #include <bit>
+#include <c10/util/irange.h>
 
 #ifdef USE_FBGEMM
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
@@ -147,8 +148,8 @@ T CeilLog2(const T& x) {
 //   dst has shape of N by M, with leading dimension of ld_dst
 template <typename T>
 inline void transpose(int64_t M, int64_t N, const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
-  for (int64_t j = 0; j < N; j++) {
-    for (int64_t i = 0; i < M; i++) {
+  for (const auto j : c10::irange(N)) {
+    for (const auto i : c10::irange(M)) {
       dst[j * ld_dst + i] = c10::load(&(src[i * ld_src + j]));
     }
   }
