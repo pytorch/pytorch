@@ -874,16 +874,11 @@ def list_gpu_processes(device: "Device" = None) -> str:
             if :attr:`device` is ``None`` (default).
     """
     if not torch.version.hip:
-        try:
-            import pynvml  # type: ignore[import]
-        except ModuleNotFoundError:
-            return "pynvml module not found, please install nvidia-ml-py"
-        # pyrefly: ignore [import-error, missing-import, missing-module-attribute]
-        from pynvml import NVMLError_DriverNotLoaded
+        from torch.cuda import _nvml as pynvml
 
         try:
             pynvml.nvmlInit()
-        except NVMLError_DriverNotLoaded:
+        except pynvml.NVMLError_DriverNotLoaded:
             return "cuda driver can't be loaded, is cuda enabled?"
 
         device = _get_nvml_device_index(device)
