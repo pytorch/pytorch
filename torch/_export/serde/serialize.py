@@ -736,6 +736,11 @@ def _find_imported(name: str) -> Any:
             f"{name} is in a __main__ module, which can differ between "
             "processes. Define it in another module."
         )
+    # Reading an attribute can run code: getattr calls a module __getattr__,
+    # and any attribute read on a lazily loaded module loads it. isinstance
+    # can read __class__ too. So lookups are static, types are checked with
+    # issubclass(type(obj), ...), and only classes and functions are read
+    # further.
     module = sys.modules.get(module_name)
     if module is None:
         # A local or nested class has a qualified name that is not a module
@@ -743,7 +748,7 @@ def _find_imported(name: str) -> Any:
         parts = module_name.split(".")
         owners = [sys.modules.get(".".join(parts[:i])) for i in range(1, len(parts))]
         if "<locals>" in parts or any(
-            isinstance(inspect.getattr_static(owner, part, None), type)
+            issubclass(type(inspect.getattr_static(owner, part, None)), type)
             for owner, part in zip(owners, parts[1:])
             if owner is not None
         ):
@@ -758,9 +763,6 @@ def _find_imported(name: str) -> Any:
             "exists, import it first. If the name moved, keep a module at the old "
             "path that imports it, and import that module first."
         )
-    # Reading an attribute can run code: getattr calls a module __getattr__,
-    # and any attribute read on a lazily loaded module loads it. So the lookup
-    # is static, and only classes and functions are read further.
     obj = inspect.getattr_static(module, attr, None)
     if obj is None:
         raise SerializeError(

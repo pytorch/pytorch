@@ -3182,7 +3182,10 @@ class TestPredispatchSerialization(TestCase):
                 type("IntKey", (int,), {})(1),
                 type("StrKey", (str,), {})("k"),
             ):
-                with self.assertRaisesRegex(SerializeError, "load back different"):
+                with (
+                    self.subTest(key=type(key).__name__),
+                    self.assertRaisesRegex(SerializeError, "load back different"),
+                ):
                     torch.export.save(keyed(key), io.BytesIO())
 
         with self.subTest("str enum in the context of a registered type"):
@@ -3293,13 +3296,19 @@ class TestPredispatchSerialization(TestCase):
         for qualname, function in functions.items():
             function.__module__, function.__qualname__ = module.__name__, qualname
         x = torch.randn(4)
-        programs = ((Bar(), x * 2 + 1), (Qux(), x * 4), (Baz(), x * 2 + 1))
-        for m, expected in (*programs, (Results(), x * 2)):
+        programs = ((Bar(), x * 2 + 1, 1), (Qux(), x * 4, 1), (Baz(), x * 2 + 1, 1))
+        for m, expected, calls in (*programs, (Results(), x * 2, 2)):
             with self.subTest(module=type(m).__name__):
-                buffer = io.BytesIO()
-                torch.export.save(export(m, (x,), strict=False), buffer)
+                ep, buffer = export(m, (x,), strict=False), io.BytesIO()
+                torch.export.save(ep, buffer)
                 buffer.seek(0)
-                self.assertEqual(torch.export.load(buffer).module()(x), expected)
+                loaded = torch.export.load(buffer)
+                for program in (ep, loaded):
+                    nodes = program.graph.find_nodes(
+                        op="call_function", target=torch.ops.higher_order.flat_apply
+                    )
+                    self.assertEqual(len(nodes), calls)
+                self.assertEqual(loaded.module()(x), expected)
 
         # A function that moved still loads while its old module imports it.
         buffer = io.BytesIO()
@@ -3463,6 +3472,11 @@ class TestPredispatchSerialization(TestCase):
             subtest(
                 ("function", "flat_apply_holder.lazy", "not a class or function"),
                 name="lazy",
+            ),
+            # Checking whether flat_apply_holder.lazy is a class must not load it.
+            subtest(
+                ("function", "flat_apply_holder.lazy.F", "is not imported"),
+                name="lazy_nested",
             ),
             subtest(
                 ("function", "flat_apply_holder.F", "has no attribute F"),
