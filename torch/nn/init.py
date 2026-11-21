@@ -746,6 +746,9 @@ def sparse_(
     if tensor.ndimension() != 2:
         raise ValueError("Only tensors with 2 dimensions are supported")
 
+    if not 0.0 <= sparsity <= 1.0:
+        raise ValueError(f"sparsity must be in the range [0, 1], got {sparsity}")
+
     if tensor.is_meta:
         return tensor
 
