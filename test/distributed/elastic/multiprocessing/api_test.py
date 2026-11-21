@@ -22,15 +22,22 @@ from unittest import mock
 
 import torch
 import torch.multiprocessing as mp
-from torch.distributed.elastic.multiprocessing import ProcessFailure, start_processes
+from torch.distributed.elastic.multiprocessing import (
+    ProcessFailure,
+    SHUTDOWN_TIMEOUT_ENV_VAR,
+    start_processes,
+)
 from torch.distributed.elastic.multiprocessing.api import (
     _validate_full_rank,
     _wrap,
+    DEFAULT_SHUTDOWN_TIMEOUT,
     DefaultLogsSpecs,
     MultiprocessContext,
+    resolve_shutdown_timeout,
     RunProcsResult,
     SignalException,
     Std,
+    SubprocessContext,
     to_map,
 )
 from torch.distributed.elastic.multiprocessing.errors import ErrorHandler
@@ -1127,6 +1134,267 @@ class BoundedCloseTest(TestCase):
             if t is None:  # for type narrowing
                 raise AssertionError("expected t to be not None")
             self.assertGreater(t, 0)
+
+
+class ShutdownTimeoutConfigTest(TestCase):
+    """Tests for the configurable SIGTERM -> SIGKILL shutdown timeout on
+    PContext (MultiprocessContext / SubprocessContext) and start_processes.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+        self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
+        self.addCleanup(shutil.rmtree, self.test_dir, ignore_errors=True)
+        # Isolate tests from any TORCH_ELASTIC_SHUTDOWN_TIMEOUT set in the
+        # ambient environment; patch.dict restores it on cleanup.
+        env_patcher = mock.patch.dict(os.environ)
+        env_patcher.start()
+        self.addCleanup(env_patcher.stop)
+        os.environ.pop(SHUTDOWN_TIMEOUT_ENV_VAR, None)
+
+    def _make_subprocess_context(self, shutdown_timeout=None) -> SubprocessContext:
+        return SubprocessContext(
+            name="test",
+            entrypoint="/bin/true",
+            args={0: ()},
+            envs={0: {}},
+            logs_specs=DefaultLogsSpecs(log_dir=tempfile.mkdtemp(dir=self.test_dir)),
+            shutdown_timeout=shutdown_timeout,
+        )
+
+    def _make_multiprocess_context(self, shutdown_timeout=None) -> MultiprocessContext:
+        return MultiprocessContext(
+            name="test",
+            entrypoint=time.sleep,
+            args={0: (0,)},
+            envs={0: {}},
+            start_method="spawn",
+            logs_specs=DefaultLogsSpecs(log_dir=tempfile.mkdtemp(dir=self.test_dir)),
+            shutdown_timeout=shutdown_timeout,
+        )
+
+    def test_default_shutdown_timeout_is_30(self):
+        self.assertEqual(DEFAULT_SHUTDOWN_TIMEOUT, 30)
+        self.assertEqual(self._make_subprocess_context()._shutdown_timeout, 30)
+        self.assertEqual(self._make_multiprocess_context()._shutdown_timeout, 30)
+        self.assertEqual(resolve_shutdown_timeout(None), 30)
+
+    def test_env_var_shutdown_timeout(self):
+        with mock.patch.dict(os.environ, {SHUTDOWN_TIMEOUT_ENV_VAR: "2.5"}):
+            self.assertEqual(resolve_shutdown_timeout(None), 2.5)
+            self.assertEqual(self._make_subprocess_context()._shutdown_timeout, 2.5)
+            self.assertEqual(self._make_multiprocess_context()._shutdown_timeout, 2.5)
+
+    def test_explicit_param_shutdown_timeout(self):
+        self.assertEqual(resolve_shutdown_timeout(12.5), 12.5)
+        self.assertEqual(
+            self._make_subprocess_context(shutdown_timeout=12.5)._shutdown_timeout, 12.5
+        )
+        self.assertEqual(
+            self._make_multiprocess_context(shutdown_timeout=7)._shutdown_timeout, 7
+        )
+
+    def test_explicit_param_overrides_env_var(self):
+        with mock.patch.dict(os.environ, {SHUTDOWN_TIMEOUT_ENV_VAR: "600"}):
+            self.assertEqual(resolve_shutdown_timeout(7), 7)
+            self.assertEqual(
+                self._make_subprocess_context(shutdown_timeout=7)._shutdown_timeout, 7
+            )
+
+    def test_negative_shutdown_timeout_raises(self):
+        with self.assertRaises(ValueError):
+            resolve_shutdown_timeout(-1)
+        with self.assertRaises(ValueError):
+            self._make_subprocess_context(shutdown_timeout=-1)
+        with mock.patch.dict(os.environ, {SHUTDOWN_TIMEOUT_ENV_VAR: "-3"}):
+            with self.assertRaises(ValueError):
+                resolve_shutdown_timeout(None)
+            with self.assertRaises(ValueError):
+                self._make_multiprocess_context()
+
+    def test_unparsable_env_var_raises(self):
+        with mock.patch.dict(os.environ, {SHUTDOWN_TIMEOUT_ENV_VAR: "not_a_number"}):
+            with self.assertRaises(ValueError):
+                resolve_shutdown_timeout(None)
+
+    def test_start_processes_forwards_shutdown_timeout_to_subprocess_context(self):
+        with mock.patch(
+            "torch.distributed.elastic.multiprocessing.SubprocessContext"
+        ) as mock_ctx_cls:
+            mock_ctx = mock_ctx_cls.return_value
+            start_processes(
+                name="test",
+                entrypoint="/bin/true",
+                args={0: ()},
+                envs={0: {}},
+                logs_specs=DefaultLogsSpecs(
+                    log_dir=tempfile.mkdtemp(dir=self.test_dir)
+                ),
+                shutdown_timeout=5,
+            )
+            mock_ctx_cls.assert_called_once()
+            self.assertEqual(mock_ctx_cls.call_args.kwargs["shutdown_timeout"], 5)
+            mock_ctx.start.assert_called_once()
+
+    def test_start_processes_forwards_shutdown_timeout_to_multiprocess_context(self):
+        with mock.patch(
+            "torch.distributed.elastic.multiprocessing.MultiprocessContext"
+        ) as mock_ctx_cls:
+            mock_ctx = mock_ctx_cls.return_value
+            start_processes(
+                name="test",
+                entrypoint=time.sleep,
+                args={0: (1,)},
+                envs={0: {}},
+                logs_specs=DefaultLogsSpecs(
+                    log_dir=tempfile.mkdtemp(dir=self.test_dir)
+                ),
+                shutdown_timeout=9.5,
+            )
+            mock_ctx_cls.assert_called_once()
+            self.assertEqual(mock_ctx_cls.call_args.kwargs["shutdown_timeout"], 9.5)
+            mock_ctx.start.assert_called_once()
+
+    def test_start_processes_default_shutdown_timeout_when_unset(self):
+        with mock.patch(
+            "torch.distributed.elastic.multiprocessing.SubprocessContext"
+        ) as mock_ctx_cls:
+            start_processes(
+                name="test",
+                entrypoint="/bin/true",
+                args={0: ()},
+                envs={0: {}},
+                logs_specs=DefaultLogsSpecs(
+                    log_dir=tempfile.mkdtemp(dir=self.test_dir)
+                ),
+            )
+            # None is forwarded; the context resolves it (env var / 30s default)
+            self.assertIsNone(mock_ctx_cls.call_args.kwargs["shutdown_timeout"])
+
+    def test_subprocess_context_poll_uses_configured_timeout_on_failure(self):
+        ctx = self._make_subprocess_context(shutdown_timeout=5)
+        failing_handler = mock.Mock()
+        failing_handler.proc.poll.return_value = 1  # exited with failure
+        alive_handler = mock.Mock()
+        alive_handler.proc.poll.return_value = None  # still running
+        ctx.subprocess_handlers = {0: failing_handler, 1: alive_handler}
+        ctx.close = mock.Mock()
+
+        result = ctx._poll()
+
+        # the surviving worker must be terminated using the configured
+        # shutdown timeout, not the hardcoded 30s default
+        ctx.close.assert_called_once_with(timeout=5)
+        self.assertTrue(result is not None and result.is_failed())
+        self.assertEqual(1, len(result.failures))
+
+    def test_multiprocess_context_poll_uses_configured_timeout_on_success(self):
+        ctx = self._make_multiprocess_context(shutdown_timeout=5)
+        ctx._pc = mock.Mock()
+        ret_queue = mock.Mock()
+        ret_queue.empty.return_value = False
+        ret_queue.get.return_value = "ret"
+        ctx._ret_vals = {0: ret_queue}
+        ctx.close = mock.Mock()
+
+        result = ctx._poll()
+
+        ctx.close.assert_called_once_with(timeout=5)
+        self.assertIsNotNone(result)
+        self.assertFalse(result.is_failed())
+        self.assertEqual(result.return_values[0], "ret")
+
+    def test_multiprocess_context_poll_uses_configured_timeout_on_failure(self):
+        ctx = self._make_multiprocess_context(shutdown_timeout=5)
+        failed_proc = mock.Mock()
+        failed_proc.exitcode = 1
+        failed_proc.pid = 99999
+        ctx._pc = mock.Mock()
+        ctx._pc.processes = [failed_proc]
+        ctx._pc.join.side_effect = mp.ProcessExitedException(
+            msg="failed", error_index=0, error_pid=99999, exit_code=1
+        )
+        ctx.close = mock.Mock()
+
+        result = ctx._poll()
+
+        ctx.close.assert_called_once_with(timeout=5)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.is_failed())
+        self.assertIn(0, result.failures)
+
+
+@unittest.skipIf(IS_WINDOWS, "SIGTERM/SIGKILL semantics are unix-specific")
+class ShutdownTimeoutIntegrationTest(TestCase):
+    """End-to-end: when one worker fails, the surviving worker that ignores
+    SIGTERM must be SIGKILLed after the *configured* shutdown timeout, not
+    after the hardcoded 30s default.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+        self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
+        self.addCleanup(shutil.rmtree, self.test_dir, ignore_errors=True)
+        env_patcher = mock.patch.dict(os.environ)
+        env_patcher.start()
+        self.addCleanup(env_patcher.stop)
+        os.environ.pop(SHUTDOWN_TIMEOUT_ENV_VAR, None)
+
+    def test_worker_failure_uses_configured_shutdown_timeout(self):
+        shutdown_timeout = 3
+        pc = start_processes(
+            name="shutdown_timeout",
+            entrypoint=bin("shutdown_timeout_test.py"),
+            args={0: ("--fail",), 1: ()},
+            envs={0: {}, 1: {}},
+            logs_specs=DefaultLogsSpecs(log_dir=tempfile.mkdtemp(dir=self.test_dir)),
+            shutdown_timeout=shutdown_timeout,
+        )
+        self.assertEqual(pc._shutdown_timeout, shutdown_timeout)
+
+        pids = pc.pids()
+        start = time.monotonic()
+        result = pc.wait(period=0.1)
+        elapsed = time.monotonic() - start
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.is_failed())
+        # rank 0 failed with exit code 1; the surviving rank 1 (which ignores
+        # SIGTERM) must have been SIGKILLed (exit code -SIGKILL) during
+        # teardown after the configured shutdown timeout elapsed.
+        self.assertIn(0, result.failures)
+        self.assertEqual(1, result.failures[0].exitcode)
+        self.assertIn(1, result.failures)
+        self.assertEqual(-signal.SIGKILL, result.failures[1].exitcode)
+        # The surviving worker ignores SIGTERM, so SIGKILL must arrive only
+        # after ~shutdown_timeout seconds (3s), well below the 30s default.
+        self.assertGreaterEqual(elapsed, shutdown_timeout - 0.5)
+        self.assertLess(elapsed, 20)
+        self.assert_pids_noexist(pids)
+
+    def test_default_shutdown_timeout_remains_30(self):
+        pc = start_processes(
+            name="sleep",
+            entrypoint=time.sleep,
+            args={0: (60,)},
+            envs={0: {}},
+            logs_specs=DefaultLogsSpecs(log_dir=tempfile.mkdtemp(dir=self.test_dir)),
+        )
+        try:
+            self.assertEqual(pc._shutdown_timeout, 30)
+        finally:
+            pc.close()
+
+    def assert_pids_noexist(self, pids: dict[int, int]):
+        for local_rank, pid in pids.items():
+            with self.assertRaises(
+                OSError, msg=f"local_rank: {local_rank} pid: {pid} should not exist"
+            ):
+                os.kill(pid, 0)
 
 
 if __name__ == "__main__":

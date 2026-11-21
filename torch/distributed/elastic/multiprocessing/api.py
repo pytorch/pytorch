@@ -44,10 +44,24 @@ from torch.numa.binding import _maybe_wrap_with_numa_binding, NumaOptions
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 
+# Default time (in seconds) to wait for a worker process to exit gracefully
+# after it has been sent a termination signal (e.g. SIGTERM) before it is
+# forcefully killed (e.g. via SIGKILL).
+DEFAULT_SHUTDOWN_TIMEOUT: float = 30.0
+
+# Environment variable that can be used to configure the time (in seconds)
+# to wait for a worker process to exit gracefully after a termination signal
+# before it is forcefully killed. Used when no explicit ``shutdown_timeout``
+# is passed to the process context or the elastic agent.
+SHUTDOWN_TIMEOUT_ENV_VAR = "TORCH_ELASTIC_SHUTDOWN_TIMEOUT"
+
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "DEFAULT_SHUTDOWN_TIMEOUT",
+    "SHUTDOWN_TIMEOUT_ENV_VAR",
+    "resolve_shutdown_timeout",
     "DefaultLogsSpecs",
     "SignalException",
     "Std",
@@ -60,6 +74,53 @@ __all__ = [
     "LogsDest",
     "LogsSpecs",
 ]
+
+
+def resolve_shutdown_timeout(shutdown_timeout: float | None) -> float:
+    """
+    Resolve the shutdown timeout (time in seconds to wait for a worker process
+    to exit gracefully after a termination signal before forcefully killing it).
+
+    Resolution order:
+
+    #. the explicit ``shutdown_timeout`` argument, if not ``None``;
+    #. the ``TORCH_ELASTIC_SHUTDOWN_TIMEOUT`` environment variable, if set;
+    #. the default of :data:`DEFAULT_SHUTDOWN_TIMEOUT` (30 seconds).
+
+    Args:
+        shutdown_timeout: explicitly configured timeout in seconds, or ``None``
+            to fall back to the environment variable / default.
+
+    Returns:
+        The resolved timeout in seconds (as a float).
+
+    Raises:
+        ValueError: if the resolved timeout is negative or cannot be parsed
+            as a number.
+    """
+    if shutdown_timeout is not None:
+        timeout = float(shutdown_timeout)
+        if timeout < 0:
+            raise ValueError(
+                f"shutdown_timeout must be non-negative, got {shutdown_timeout}"
+            )
+        return timeout
+    env_value = os.environ.get(SHUTDOWN_TIMEOUT_ENV_VAR)
+    if env_value is not None:
+        try:
+            timeout = float(env_value)
+        except ValueError:
+            raise ValueError(
+                f"Invalid value for environment variable {SHUTDOWN_TIMEOUT_ENV_VAR}: "
+                f"{env_value!r}, must be a non-negative number of seconds"
+            ) from None
+        if timeout < 0:
+            raise ValueError(
+                f"Environment variable {SHUTDOWN_TIMEOUT_ENV_VAR} must be "
+                f"non-negative, got {env_value}"
+            )
+        return timeout
+    return DEFAULT_SHUTDOWN_TIMEOUT
 
 
 class SignalException(Exception):
@@ -465,6 +526,15 @@ class PContext(abc.ABC):
             If non-empty, duplicates stderrs specified in ``logs_specs``'s ``tee``
             to a file containing only lines that match _any_ of the filter strings.
             The log file is aggregated across all ranks selected by ``tee``.
+        shutdown_timeout:
+            Time in seconds to wait for worker processes to exit gracefully
+            after they have been sent a termination signal (e.g. SIGTERM)
+            before they are forcefully killed (e.g. via SIGKILL). This is
+            applied both when :meth:`close` is called explicitly and when
+            processes are terminated internally (e.g. when another worker
+            fails, from :meth:`_poll`). If ``None``, the value is read from
+            the ``TORCH_ELASTIC_SHUTDOWN_TIMEOUT`` environment variable,
+            falling back to :data:`DEFAULT_SHUTDOWN_TIMEOUT` (30 seconds).
     """
 
     def __init__(
@@ -477,8 +547,10 @@ class PContext(abc.ABC):
         log_line_prefixes: dict[int, str] | None = None,
         duplicate_stdout_filters: list[str] | None = None,
         duplicate_stderr_filters: list[str] | None = None,
+        shutdown_timeout: float | None = None,
     ):
         self.name = name
+        self._shutdown_timeout: float = resolve_shutdown_timeout(shutdown_timeout)
         # validate that all mappings have the same number of keys and
         # all local ranks are accounted for
         nprocs = len(args)
@@ -644,14 +716,20 @@ class PContext(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
+    def _close(
+        self, death_sig: signal.Signals, timeout: float = DEFAULT_SHUTDOWN_TIMEOUT
+    ) -> None:
         r"""
         Terminates all processes managed by this context and cleans up any
         meta resources (e.g. redirect, error_file files).
         """
         raise NotImplementedError
 
-    def close(self, death_sig: signal.Signals | None = None, timeout: int = 30) -> None:
+    def close(
+        self,
+        death_sig: signal.Signals | None = None,
+        timeout: float = DEFAULT_SHUTDOWN_TIMEOUT,
+    ) -> None:
         r"""
         Terminates all processes managed by this context and cleans up any
         meta resources (e.g. redirect, error_file files).
@@ -728,6 +806,7 @@ class MultiprocessContext(PContext):
         numa_options: NumaOptions | None = None,
         duplicate_stdout_filters: list[str] | None = None,
         duplicate_stderr_filters: list[str] | None = None,
+        shutdown_timeout: float | None = None,
     ):
         super().__init__(
             name,
@@ -738,6 +817,7 @@ class MultiprocessContext(PContext):
             log_line_prefixes,
             duplicate_stdout_filters,
             duplicate_stderr_filters,
+            shutdown_timeout,
         )
 
         self.start_method = start_method
@@ -822,7 +902,7 @@ class MultiprocessContext(PContext):
                 _validate_full_rank(
                     self._return_values, self.nprocs, "return_value queue"
                 )
-                self.close()
+                self.close(timeout=self._shutdown_timeout)
                 return RunProcsResult(
                     return_values=self._return_values,
                     stdouts=self.stdouts,
@@ -849,7 +929,7 @@ class MultiprocessContext(PContext):
                 self.start_method,
             )
 
-            self.close()
+            self.close(timeout=self._shutdown_timeout)
             return RunProcsResult(
                 failures={
                     failed_local_rank: ProcessFailure(
@@ -868,7 +948,9 @@ class MultiprocessContext(PContext):
             raise AssertionError  # assertion for mypy type checking
         return dict(enumerate(self._pc.pids()))
 
-    def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
+    def _close(
+        self, death_sig: signal.Signals, timeout: float = DEFAULT_SHUTDOWN_TIMEOUT
+    ) -> None:
         if not self._pc:
             return
         for proc in self._pc.processes:
@@ -933,6 +1015,7 @@ class SubprocessContext(PContext):
         numa_options: NumaOptions | None = None,
         duplicate_stdout_filters: list[str] | None = None,
         duplicate_stderr_filters: list[str] | None = None,
+        shutdown_timeout: float | None = None,
     ):
         super().__init__(
             name,
@@ -943,6 +1026,7 @@ class SubprocessContext(PContext):
             log_line_prefixes,
             duplicate_stdout_filters,
             duplicate_stderr_filters,
+            shutdown_timeout,
         )
 
         # state vector; _vdone[local_rank] -> is local_rank finished or not
@@ -992,7 +1076,7 @@ class SubprocessContext(PContext):
 
         # if ALL procs are finished or ANY have failed
         if not self._running_local_ranks or self._failures:
-            self.close()  # terminate all running procs
+            self.close(timeout=self._shutdown_timeout)  # terminate all running procs
             self._capture_process_failures(
                 done_local_ranks
             )  # log sigterms and sigkill exit codes in the self._failures for bookkeeping purposes
@@ -1025,7 +1109,9 @@ class SubprocessContext(PContext):
             for local_rank, sh in self.subprocess_handlers.items()
         }
 
-    def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
+    def _close(
+        self, death_sig: signal.Signals, timeout: float = DEFAULT_SHUTDOWN_TIMEOUT
+    ) -> None:
         if not self.subprocess_handlers:
             return
         for handler in self.subprocess_handlers.values():

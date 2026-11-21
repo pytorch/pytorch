@@ -30,6 +30,7 @@ from torch.distributed.elastic.agent.server.local_elastic_agent import (
 from torch.distributed.elastic.multiprocessing import (
     DefaultLogsSpecs,
     LogsSpecs,
+    resolve_shutdown_timeout,
     SignalException,
 )
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
@@ -88,8 +89,11 @@ class LaunchConfig:
                            CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its
                            assigned GPU at device index 0.
         shutdown_timeout: Time in seconds to wait for graceful shutdown of workers before
-                        sending SIGKILL. Can also be set via TORCH_ELASTIC_SHUTDOWN_TIMEOUT
-                        environment variable. Defaults to 30 seconds.
+                        sending SIGKILL. Applies both when the agent receives a termination
+                        signal and when workers are shut down because another worker failed
+                        (e.g. on restarts). Can also be set via the
+                        TORCH_ELASTIC_SHUTDOWN_TIMEOUT environment variable.
+                        Defaults to 30 seconds.
         exit_barrier_timeout: Time in seconds to wait for all agents to finish before
                         the exit barrier is released. Can also be set via
                         TORCH_ELASTIC_EXIT_BARRIER_TIMEOUT environment variable.
@@ -124,7 +128,7 @@ class LaunchConfig:
     duplicate_stdout_filters: list[str] | None = None
     duplicate_stderr_filters: list[str] | None = None
     virtual_local_rank: bool = False
-    shutdown_timeout: int | None = None
+    shutdown_timeout: float | None = None
     exit_barrier_timeout: float | None = None
 
     def __post_init__(self):
@@ -150,15 +154,11 @@ class LaunchConfig:
                 self.numa_options = get_default_numa_options()
                 logger.info("Using default numa options = %r", self.numa_options)
 
-        # Set shutdown_timeout from environment variable if not explicitly set
-        if self.shutdown_timeout is None:
-            self.shutdown_timeout = int(
-                os.environ.get("TORCH_ELASTIC_SHUTDOWN_TIMEOUT", "30")
-            )
-        elif self.shutdown_timeout < 0:
-            raise ValueError(
-                f"shutdown_timeout must be non-negative, got {self.shutdown_timeout}"
-            )
+        # Resolve shutdown_timeout: the explicit value wins, then the
+        # TORCH_ELASTIC_SHUTDOWN_TIMEOUT environment variable, then the
+        # default of 30 seconds. Raises ValueError if the resolved value
+        # is negative or cannot be parsed as a number.
+        self.shutdown_timeout = resolve_shutdown_timeout(self.shutdown_timeout)
 
         # Set exit_barrier_timeout from environment variable if not explicitly set
         if self.exit_barrier_timeout is None:
@@ -377,7 +377,7 @@ def launch_agent(
         start_method=config.start_method,
         log_line_prefix_template=config.log_line_prefix_template,
         exit_barrier_timeout=config.exit_barrier_timeout,  # type: ignore[arg-type]
-        shutdown_timeout=config.shutdown_timeout,  # type: ignore[arg-type]
+        shutdown_timeout=config.shutdown_timeout,
         health_check_server=health_check_server,
     )
 

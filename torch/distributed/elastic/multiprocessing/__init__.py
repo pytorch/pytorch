@@ -74,13 +74,16 @@ from typing import Optional, Union
 
 from torch.distributed.elastic.multiprocessing.api import (
     _validate_full_rank,
+    DEFAULT_SHUTDOWN_TIMEOUT,
     DefaultLogsSpecs,
     LogsDest,
     LogsSpecs,
     MultiprocessContext,
     PContext,
     ProcessFailure,
+    resolve_shutdown_timeout,
     RunProcsResult,
+    SHUTDOWN_TIMEOUT_ENV_VAR,
     SignalException,
     Std,
     SubprocessContext,
@@ -92,6 +95,9 @@ from torch.numa.binding import NumaOptions
 
 __all__ = [
     "start_processes",
+    "DEFAULT_SHUTDOWN_TIMEOUT",
+    "SHUTDOWN_TIMEOUT_ENV_VAR",
+    "resolve_shutdown_timeout",
     "MultiprocessContext",
     "PContext",
     "ProcessFailure",
@@ -117,6 +123,7 @@ def start_processes(
     numa_options: NumaOptions | None = None,
     duplicate_stdout_filters: list[str] | None = None,
     duplicate_stderr_filters: list[str] | None = None,
+    shutdown_timeout: float | None = None,
 ) -> PContext:
     """
     Start ``n`` copies of ``entrypoint`` processes with the provided options.
@@ -220,6 +227,13 @@ def start_processes(
         numa_options: NUMA binding options for the processes
         duplicate_stdout_filters: filters for the duplicated stdout logs
         duplicate_stderr_filters: filters for the duplicated stderr logs
+        shutdown_timeout: time in seconds to wait for worker processes to exit
+            gracefully after they have been sent a termination signal (e.g.
+            SIGTERM) before they are forcefully killed (e.g. via SIGKILL),
+            both on explicit ``close()`` calls and when processes are
+            terminated internally (e.g. when another worker fails). If
+            ``None``, the value is read from the ``TORCH_ELASTIC_SHUTDOWN_TIMEOUT``
+            environment variable, falling back to 30 seconds.
 
     """
 
@@ -239,6 +253,7 @@ def start_processes(
             logs_specs=logs_specs,
             log_line_prefixes=log_line_prefixes,
             numa_options=numa_options,
+            shutdown_timeout=shutdown_timeout,
         )
     else:
         context = MultiprocessContext(
@@ -252,11 +267,12 @@ def start_processes(
             start_method=start_method,
             logs_specs=logs_specs,
             numa_options=numa_options,
+            shutdown_timeout=shutdown_timeout,
         )
 
     try:
         context.start()
         return context
     except Exception:
-        context.close()
+        context.close(timeout=context._shutdown_timeout)
         raise

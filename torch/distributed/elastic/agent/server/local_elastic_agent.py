@@ -35,6 +35,7 @@ from torch.distributed.elastic.agent.server.health_check_server import (
 )
 from torch.distributed.elastic.metrics.api import prof
 from torch.distributed.elastic.multiprocessing import (
+    DEFAULT_SHUTDOWN_TIMEOUT,
     LogsSpecs,
     PContext,
     start_processes,
@@ -141,6 +142,13 @@ class LocalElasticAgent(SimpleElasticAgent):
     300 seconds can be overridden via the ``TORCH_ELASTIC_EXIT_BARRIER_TIMEOUT``
     environment variable or by passing ``exit_barrier_timeout`` explicitly.
 
+    The ``shutdown_timeout`` specifies the amount of time (in seconds) to wait
+    for worker processes to exit gracefully after they have been sent a
+    termination signal (e.g. SIGTERM, or when another worker fails) before
+    they are forcefully killed (e.g. via SIGKILL). The default value of 30
+    seconds can be overridden via the ``TORCH_ELASTIC_SHUTDOWN_TIMEOUT``
+    environment variable or by passing ``shutdown_timeout`` explicitly.
+
     A named pipe based watchdog can be enabled in ```LocalElasticAgent``` if an
     environment variable ``TORCHELASTIC_ENABLE_FILE_TIMER`` with value 1 has
     been defined in the ```LocalElasticAgent``` process.
@@ -227,7 +235,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         start_method="spawn",
         exit_barrier_timeout: float | None = None,
         log_line_prefix_template: str | None = None,
-        shutdown_timeout: int = 30,
+        shutdown_timeout: float | None = None,
         health_check_server: HealthCheckServer | None = None,
         uninterruptible_state_timeout: float | None = None,
     ):
@@ -491,6 +499,7 @@ class LocalElasticAgent(SimpleElasticAgent):
             numa_options=spec.numa_options,
             duplicate_stdout_filters=spec.duplicate_stdout_filters,
             duplicate_stderr_filters=spec.duplicate_stderr_filters,
+            shutdown_timeout=self._shutdown_timeout,
         )
 
         return self._pcontext.pids()
@@ -540,7 +549,9 @@ class LocalElasticAgent(SimpleElasticAgent):
             worker_env["CUDA_VISIBLE_DEVICES"] = os.environ["CUDA_VISIBLE_DEVICES"]
 
     def _shutdown(
-        self, death_sig: signal.Signals = signal.SIGTERM, timeout: int = 30
+        self,
+        death_sig: signal.Signals = signal.SIGTERM,
+        timeout: float = DEFAULT_SHUTDOWN_TIMEOUT,
     ) -> None:
         if self._worker_watchdog is not None:
             self._worker_watchdog.stop()

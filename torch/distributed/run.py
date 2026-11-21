@@ -764,11 +764,13 @@ def get_args_parser() -> ArgumentParser:
         "--shutdown-timeout",
         "--shutdown_timeout",
         action=env,
-        type=int,
+        type=float,
         default=None,
         help="Time in seconds to wait for graceful shutdown of worker processes before "
-        "sending SIGKILL. If not specified, uses TORCH_ELASTIC_SHUTDOWN_TIMEOUT environment "
-        "variable or defaults to 30 seconds.",
+        "sending SIGKILL. Applies both when the launcher receives a termination signal "
+        "and when workers are shut down because another worker failed. If not specified, "
+        "uses TORCH_ELASTIC_SHUTDOWN_TIMEOUT environment variable or defaults to 30 "
+        "seconds.",
     )
 
     parser.add_argument(
