@@ -2116,6 +2116,12 @@ class TestConvolutionNNDevice(NNTestCase):
         self.assertEqual(gx_expect, gx_actual)
         self.assertEqual(gy_expect, gy_actual)
 
+    @parametrize_test("fn", ["conv2d", "conv_transpose2d"])
+    def test_conv2d_batch_above_uint16(self, device, fn):
+        x = torch.randint(-2, 3, (2**16 + 1, 16, 3, 3), device=device).float()
+        w = torch.randint(-2, 3, (16, 16, 3, 3), device=device).float()
+        self.assertEqual(getattr(F, fn)(x, w), getattr(F, fn)(x.cpu(), w.cpu()))
+
     @dtypes(torch.float, torch.half, torch.bfloat16)
     @parametrize_test(
         "stride,dilation,groups", [(1, 3, 2), (2, 1, 1), (3, 2, 2), (1, 2, 16)]
