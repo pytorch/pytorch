@@ -622,12 +622,47 @@ class TestRecordHistogramObserver(QuantizationTestCase):
 
 class TestHistogramObserver(QuantizationTestCase):
 
+    @given(custom_qrange=st.booleans(), consider_full_range=st.booleans())
+    def test_histogram_observer_rejects_symmetric_reduce_range(self, custom_qrange, consider_full_range):
+        kwargs = dict(dtype=torch.quint8, qscheme=torch.per_tensor_symmetric,
+                      reduce_range=True, consider_full_range=consider_full_range)
+        if custom_qrange:
+            kwargs.update(quant_min=0, quant_max=255)
+        message = "Cannot reduce range for symmetric"
+        with self.assertRaisesRegex(NotImplementedError, message):
+            HistogramObserver(**kwargs)
+        with self.assertRaisesRegex(NotImplementedError, message):
+            HistogramObserver.with_args(**kwargs)()
+        with self.assertRaisesRegex(NotImplementedError, message):
+            FakeQuantize(observer=HistogramObserver, **kwargs)
+
+    @given(config=st.sampled_from([
+        (torch.quint8, torch.per_tensor_affine, False),
+        (torch.quint8, torch.per_tensor_affine, True),
+        (torch.quint8, torch.per_tensor_symmetric, False),
+        (torch.qint8, torch.per_tensor_affine, False),
+        (torch.qint8, torch.per_tensor_affine, True),
+        (torch.qint8, torch.per_tensor_symmetric, False),
+        (torch.qint8, torch.per_tensor_symmetric, True),
+    ]), consider_full_range=st.booleans())
+    def test_histogram_fake_quant_supported_ranges(self, config, consider_full_range):
+        dtype, qscheme, reduce_range = config
+        fq = FakeQuantize(observer=HistogramObserver, dtype=dtype, qscheme=qscheme,
+                          reduce_range=reduce_range, consider_full_range=consider_full_range)
+        output = fq(torch.tensor([-1., 1.]))
+        self.assertGreaterEqual(fq.zero_point.item(), fq.quant_min)
+        self.assertLessEqual(fq.zero_point.item(), fq.quant_max)
+        self.assertLess(output[0].item(), 0)
+        self.assertGreater(output[1].item(), 0)
+
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans(),
            consider_full_range=st.booleans())
     @settings(max_examples=10)
     def test_histogram_observer(self, qdtype, qscheme, reduce_range, consider_full_range):
+        if qdtype == torch.quint8 and qscheme == torch.per_tensor_symmetric:
+            reduce_range = False
         flag_kwargs = {"consider_full_range": True} if consider_full_range else {}
         myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range, **flag_kwargs)
         # Calculate qparams should work for empty observers
@@ -715,7 +750,8 @@ class TestHistogramObserver(QuantizationTestCase):
            reduce_range=st.booleans(),
            consider_full_range=st.booleans())
     def test_histogram_observer_against_reference(self, N, bins, dtype, qscheme, reduce_range, consider_full_range):
-
+        if dtype == torch.quint8 and qscheme == torch.per_tensor_symmetric:
+            reduce_range = False
         ref_obs = _ReferenceHistogramObserver(
             bins=bins, dtype=dtype, qscheme=qscheme, reduce_range=reduce_range, consider_full_range=consider_full_range
         )
