@@ -3783,6 +3783,47 @@ class TestBinaryUfuncsDevice(TestCase):
         )
         self.assertEqual(torch.ldexp(mantissas, exponents), expected)
 
+    def test_ldexp_out_dtype_differs_from_input(self, device):
+        # 2**20 and 2**-25 are out of half range, but the results are not.
+        mantissas = torch.tensor([2**-10, -2.0], device=device, dtype=torch.half)
+        exponents = torch.tensor([20, -25], device=device)
+        out = torch.empty(2, device=device, dtype=torch.float32)
+        torch.ldexp(mantissas, exponents, out=out)
+        self.assertEqual(
+            out, torch.tensor([2.0**10, -(2.0**-24)], device=device), atol=0, rtol=0
+        )
+
+    def test_ldexp_out_dtype_differs_keeps_layout(self, device):
+        mantissas = torch.randn(2, 3, 4, 5, device=device, dtype=torch.half).to(
+            memory_format=torch.channels_last
+        )
+        exponents = torch.randint(-3, 3, (2, 3, 4, 5), device=device)
+        out = torch.empty(0, device=device, dtype=torch.float32)
+        torch.ldexp(mantissas, exponents, out=out)
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(out, torch.ldexp(mantissas, exponents).float(), atol=0, rtol=0)
+
+    @onlyAccelerator
+    def test_ldexp_out_dtype_differs_cpu_scalar(self, device):
+        out = torch.empty(1, device=device, dtype=torch.float32)
+        torch.ldexp(
+            torch.tensor(1.0, dtype=torch.half),
+            torch.tensor([3], device=device),
+            out=out,
+        )
+        self.assertEqual(out, torch.tensor([8.0], device=device))
+        torch.ldexp(
+            torch.ones(1, device=device, dtype=torch.half), torch.tensor(3), out=out
+        )
+        self.assertEqual(out, torch.tensor([8.0], device=device))
+
+    def test_ldexp_broadcast_exponent_no_resize_warning(self, device):
+        mantissas = torch.ones(1, device=device)
+        exponents = torch.tensor([1, 2, 3], device=device)
+        expected = torch.tensor([2.0, 4.0, 8.0], device=device)
+        self.assertNotWarn(lambda: torch.ldexp(mantissas, exponents))
+        self.assertEqual(torch.ldexp(mantissas, exponents), expected)
+
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_lerp(self, device, dtype):
         start_end_weight_shapes = [(), (5,), (5, 5)]
