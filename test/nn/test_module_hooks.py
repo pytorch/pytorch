@@ -10,6 +10,7 @@ from copy import deepcopy
 from functools import partial
 from tempfile import NamedTemporaryFile
 from typing import Any
+from unittest.mock import patch
 
 import torch
 import torch.nn as nn
@@ -372,6 +373,138 @@ class TestModuleHooks(TestCase):
         # So, out = x + bias * 2
         out = model(x, bias=bias)
         self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
+
+    @parametrize_test("all_kwargs", (False, True))
+    @parametrize_test("replace_grads", (False, True))
+    def test_full_backward_hook_with_kwargs(self, all_kwargs, replace_grads):
+        class Model(nn.Module):
+            def forward(self, x, *, bias, scale):
+                return scale * (x + bias)
+
+        model = Model()
+        x = torch.ones(2, requires_grad=True)
+        bias = torch.ones(2, requires_grad=True)
+        calls = []
+
+        def hook(module, grad_input, grad_kwargs, grad_output):
+            calls.append(module)
+            expected = torch.full_like(x, 2)
+            self.assertEqual(grad_input, () if all_kwargs else (expected,))
+            self.assertEqual(
+                grad_kwargs,
+                {"x": expected, "bias": expected, "scale": None}
+                if all_kwargs
+                else {"bias": expected, "scale": None},
+            )
+            self.assertEqual(grad_output, (torch.ones_like(x),))
+            if replace_grads:
+                return (
+                    tuple(grad * 2 for grad in grad_input),
+                    {
+                        name: grad * 3 if grad is not None else None
+                        for name, grad in grad_kwargs.items()
+                    },
+                )
+
+        model.register_full_backward_hook(hook, with_kwargs=True)
+        args = () if all_kwargs else (x,)
+        kwargs = {"x": x} if all_kwargs else {}
+        model(*args, **kwargs, bias=bias, scale=2).sum().backward()
+        self.assertEqual(calls, [model])
+        self.assertEqual(
+            x.grad, torch.full_like(x, (6 if all_kwargs else 4) if replace_grads else 2)
+        )
+        self.assertEqual(bias.grad, torch.full_like(bias, 6 if replace_grads else 2))
+
+    def test_full_backward_hook_with_kwargs_order_and_removal(self):
+        model = nn.Identity()
+        x = torch.ones(2, requires_grad=True)
+        calls = []
+
+        def legacy_hook(module, grad_input, grad_output):
+            calls.append("legacy")
+            self.assertEqual(grad_input, ())
+            return grad_input
+
+        def kwargs_hook(module, grad_input, grad_kwargs, grad_output):
+            calls.append("kwargs")
+            self.assertEqual(grad_input, ())
+            return grad_input, {"input": grad_kwargs["input"] * 2}
+
+        def global_hook(module, grad_input, grad_output):
+            calls.append("global")
+            self.assertEqual(grad_input, ())
+
+        legacy_handle = model.register_full_backward_hook(legacy_hook)
+        handle = model.register_full_backward_hook(
+            kwargs_hook, prepend=True, with_kwargs=True
+        )
+        with (
+            patch.object(nn.modules.module, "_global_is_full_backward_hook", None),
+            nn.modules.module.register_module_full_backward_hook(global_hook),
+        ):
+            model(input=x).sum().backward()
+        self.assertEqual(calls, ["global", "kwargs", "legacy"])
+        self.assertEqual(x.grad, torch.full_like(x, 2))
+
+        calls.clear()
+        x.grad = None
+        handle.remove()
+        self.assertNotIn(handle.id, model._backward_hooks_with_kwargs)
+        with self.assertWarnsRegex(UserWarning, "no inputs require gradients"):
+            model(input=x).sum().backward()
+        self.assertEqual(calls, ["legacy"])
+        self.assertEqual(x.grad, torch.ones_like(x))
+        legacy_handle.remove()
+
+    @parametrize_test("return_grads", (False, True))
+    def test_full_backward_hook_with_kwargs_no_input_grad(self, return_grads):
+        model = nn.Linear(2, 2)
+        calls = []
+
+        def hook(module, grad_input, grad_kwargs, grad_output):
+            calls.append(module)
+            self.assertEqual(grad_input, ())
+            self.assertEqual(grad_kwargs, {"input": None})
+            if return_grads:
+                return grad_input, grad_kwargs
+
+        model.register_full_backward_hook(hook, with_kwargs=True)
+        with self.assertWarnsRegex(UserWarning, "no inputs require gradients"):
+            model(input=torch.ones(2)).sum().backward()
+        self.assertEqual(calls, [model])
+
+    @parametrize_test("invalid", ("structure", "args", "keys", "no_input_grad"))
+    def test_full_backward_hook_with_kwargs_invalid_return(self, invalid):
+        model = nn.Linear(2, 2)
+        x = torch.ones(2, requires_grad=invalid != "no_input_grad")
+        result, message = {
+            "structure": ({}, "must return None or a tuple"),
+            "args": (((x,), {"input": x}), "got 1, but expected 0"),
+            "keys": (((), {"other": x}), "invalid set of grad_kwargs keys"),
+            "no_input_grad": (((), {"input": x}), "where no input requires gradient"),
+        }[invalid]
+        model.register_full_backward_hook(lambda *args: result, with_kwargs=True)
+        with self.assertRaisesRegex(RuntimeError, message):
+            model(input=x).sum().backward()
+
+    def test_full_backward_hook_with_kwargs_forward_pre_hook(self):
+        model = nn.Identity()
+        x = torch.ones(2, requires_grad=True)
+        calls = []
+        model.register_forward_pre_hook(
+            lambda module, args, kwargs: ((), {"input": args[0] * 2}), with_kwargs=True
+        )
+
+        def hook(module, grad_input, grad_kwargs, grad_output):
+            calls.append(module)
+            self.assertEqual(grad_input, ())
+            self.assertEqual(grad_kwargs, {"input": torch.ones_like(x)})
+
+        model.register_full_backward_hook(hook, with_kwargs=True)
+        model(x).sum().backward()
+        self.assertEqual(calls, [model])
+        self.assertEqual(x.grad, torch.full_like(x, 2))
 
     def test_remove_kwarg_hooks(self):
         # test forward pre and forward hooks
