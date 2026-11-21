@@ -385,11 +385,49 @@ class _UnmanagedAutocast(autocast):
     pass
 
 
+def _top_pre_dispatch_mode():
+    # Act only when the pre-dispatch mode is on top. Modes pushed after it, such
+    # as the one that records torch_fn metadata, see the call first and call it
+    # again with themselves popped.
+    if not torch._C._is_torch_function_mode_enabled():
+        return None
+    mode = torch.overrides._get_current_function_mode()
+    if isinstance(
+        mode, torch.fx.experimental.proxy_tensor.PreDispatchTorchFunctionMode
+    ):
+        return mode
+    return None
+
+
 # These functions aren't meant for public usage.
 # They are what we trace into a graph during pre_dispatch tracing
 # when we encounter an autocast context manager.
 def _enter_autocast(*vals):
-    # For pre-dispatch tracing, if a TorchFunction mode is active, we'll want to trace this into a graph.
+    # A graph traced in pre-dispatch mode, such as a Dynamo graph in strict
+    # export or in a control flow branch, replays these calls. Enter the
+    # autocast as well, like autocast.__enter__ does, so that the traced ops
+    # see it.
+    pre_dispatch_mode = _top_pre_dispatch_mode()
+    if pre_dispatch_mode is not None:
+        # Dynamo already showed these warnings when it traced the block. This
+        # also hides them from other callers, such as a re-trace of a graph.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                category=UserWarning,
+                message=".*Disabling autocast",
+                module=__name__,
+            )
+            # Always trace with the cast cache off: a cast cached while tracing
+            # would be reused as a constant by a later trace.
+            mode = _UnmanagedAutocast(*vals[:3], cache_enabled=False)
+        # Enter without recording: __enter__ would record a second node with the
+        # resolved arguments. The node is recorded below with the original ones.
+        with torch._C.DisableTorchFunction():
+            mode.__enter__()
+        pre_dispatch_mode.entered_autocasts.append(mode)
+        pre_dispatch_mode.__torch_function__(torch.amp._enter_autocast, (), vals)
+        return mode
     if torch._C._is_torch_function_mode_enabled():
         return torch.overrides.handle_torch_function(
             torch.amp._enter_autocast, [], *vals
@@ -400,9 +438,26 @@ def _enter_autocast(*vals):
 
 
 def _exit_autocast(mode):
+    pre_dispatch_mode = _top_pre_dispatch_mode()
+    if pre_dispatch_mode is not None:
+        entered = pre_dispatch_mode.entered_autocasts
+        if not entered or entered[-1] is not mode:
+            raise AssertionError("_exit_autocast must exit the latest _enter_autocast")
+        entered.pop()
+        with torch._C.DisableTorchFunction():
+            mode.__exit__(None, None, None)
+        pre_dispatch_mode.__torch_function__(torch.amp._exit_autocast, (), ())
+        return
     if torch._C._is_torch_function_mode_enabled():
         return torch.overrides.handle_torch_function(torch.amp._exit_autocast, [], mode)
     mode.__exit__(None, None, None)
+
+
+def _autocast_state() -> tuple[tuple[bool, _dtype], ...]:
+    return tuple(
+        (torch.is_autocast_enabled(device), torch.get_autocast_dtype(device))
+        for device in torch._C._autocast_supported_devices()
+    )
 
 
 # Casts Tensors and containers of Tensors.  Special-cases passthroughs for strings and np.ndarrays, which

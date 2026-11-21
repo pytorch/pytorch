@@ -2147,6 +2147,33 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         # enter_autocast node. So we have to save the enter autocast node here, and assign it
         # to the exit_autocast call_function node.
         self.enter_autocast_nodes: list[torch.fx.Node] = []
+        # Autocasts that torch.amp.autocast_mode._enter_autocast entered during
+        # pre-dispatch tracing. Each _exit_autocast must exit the latest one.
+        # Whoever traces with this mode must call exit_entered_autocasts when
+        # tracing ends and restore the autocast cache flag, as
+        # _MakefxTracer._trace_inner does with disable_autocast_cache.
+        self.entered_autocasts: list[torch.amp.autocast_mode.autocast] = []
+
+    def exit_entered_autocasts(
+        self, start_state: tuple[tuple[bool, torch.dtype], ...]
+    ) -> None:
+        # A Dynamo graph has no finally block, so an error inside an autocast
+        # block would otherwise leave the autocast state changed. Restore the
+        # enabled flags and dtypes from the start of tracing instead of calling
+        # __exit__: the state these autocasts saved is stale if a torch.autocast
+        # block around them has already exited. The cache flag is left to the
+        # caller.
+        if not self.entered_autocasts:
+            return
+        for _ in self.entered_autocasts:
+            if torch.autocast_decrement_nesting() == 0:
+                torch.clear_autocast_cache()
+        self.entered_autocasts.clear()
+        for device, (enabled, dtype) in zip(
+            torch._C._autocast_supported_devices(), start_state
+        ):
+            torch.set_autocast_enabled(device, enabled)
+            torch.set_autocast_dtype(device, dtype)
 
     def __torch_function__(
         self,
@@ -3385,6 +3412,11 @@ class _MakefxTracer:
             stack.enter_context(self.torch_fn_metadata_mode)
             stack.enter_context(proxy_mode)
             stack.enter_context(disable_autocast_cache())
+            if isinstance(self.proxy_function_mode, PreDispatchTorchFunctionMode):
+                stack.callback(
+                    self.proxy_function_mode.exit_entered_autocasts,
+                    torch.amp.autocast_mode._autocast_state(),
+                )
             stack.enter_context(_set_make_fx_tracer(self))
 
             # Under compile-on-one-rank, redirect legacy in-place c10d
