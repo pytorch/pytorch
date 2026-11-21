@@ -15,7 +15,7 @@ from torch._native.cutedsl.hw_caps import caps
 from torch._native.utils.lazy import LazyModule
 from torch._native.utils.tensor import reshape_contiguous, row_alignment
 
-from .rmsnorm_launch import backward_launch, NORMALIZED_SIZES
+from .rmsnorm_launch import backward_launch, NORMALIZED_SIZES, TUNED_ARCHS
 
 
 if TYPE_CHECKING:
@@ -91,7 +91,7 @@ def quack_rmsnorm_bwd(
     compute_dw = weight is not None and dw_mask
     hw = caps(x.device.index)
     arch = hw.cc
-    if N in NORMALIZED_SIZES and arch in ((9, 0), (10, 0)) and dout.dtype == x.dtype:
+    if N in NORMALIZED_SIZES and arch in TUNED_ARCHS and dout.dtype == x.dtype:
         blocks = backward_launch(N, compute_dw, x.element_size()).blocks(M, hw.sm_count)
     else:
         from torch._vendor.quack.rmsnorm_config import get_sm_count
