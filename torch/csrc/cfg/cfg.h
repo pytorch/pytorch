@@ -348,11 +348,13 @@ struct TcfgApi {
   // is brought to the sizes, dtype and device of where each edge leads
   // (validate_outputs). New reference to a tuple with one entry per edge,
   // None where the node gave nothing. The node runs on the stream its
-  // forward ran on, as in the autograd engine. Where a backward is running
-  // on the calling thread, the node is called on a thread of the engine's
-  // own with the thread-local state of the caller: a node asks the backward
-  // that runs on its thread which gradients are wanted. A tape that is
-  // being taken down on the calling thread sees the kernels either way.
+  // forward ran on, as in the autograd engine. Where a backward for some
+  // inputs only is running on the calling thread, the node is called on a
+  // thread of the engine's own with the thread-local state of the caller,
+  // and the nodes it makes are numbered on with the caller's: a node asks
+  // the backward that runs on its thread which gradients are wanted. A
+  // tape that is being taken down on the calling thread sees the kernels
+  // either way.
   PyObject* (*node_call)(PyObject* node, PyObject* grads, uint32_t flags);
 
   // An operator by its name and overload name: a new reference to what
