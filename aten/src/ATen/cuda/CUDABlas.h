@@ -17,6 +17,7 @@
 #include <ATen/BlasBackend.h>
 #include <ATen/Context.h>
 #include <ATen/OpMathType.h>
+#include <optional>
 
 namespace at::cuda::blas {
 
@@ -195,6 +196,32 @@ void scaled_gemm(
     float alpha_multiplier = 1.0f,
     const Tensor* device_beta = nullptr);
 
+enum class CublasGroupedScaleLayout : uint8_t {
+  Scalar,
+  PerBatchScalar,
+  Vec128F32,
+  Block128x128F32,
+  Vec32MnK4UE8M0,
+  Vec128MnK4UE8M0,
+};
+
+inline bool cublaslt_grouped_gemm_arch_supported() {
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
+  const auto major = at::cuda::getCurrentDeviceProperties()->major;
+  return major >= 9 && major <= 11;
+#else
+  return false;
+#endif
+}
+
+struct GroupedGemmScaleOptions {
+  const void* A_scale_ptr = nullptr;
+  const void* B_scale_ptr = nullptr;
+  bool use_fast_accum = false;
+  CublasGroupedScaleLayout A_layout = CublasGroupedScaleLayout::Scalar;
+  CublasGroupedScaleLayout B_layout = CublasGroupedScaleLayout::Scalar;
+};
+
 void grouped_gemm(
       char transa,
       char transb,
@@ -206,9 +233,10 @@ void grouped_gemm(
       int64_t avgK,
       const int64_t* alphaArrayDev,
       const float* alphaScalar,
-      ScalarType input_dtype,
+      ScalarType A_dtype,
       const int64_t* APtrArrayDev,
       const void* ldaArrayDev,
+      ScalarType B_dtype,
       const int64_t* BPtrArrayDev,
       const void* ldbArrayDev,
       const int64_t* betaArrayDev,
@@ -219,7 +247,8 @@ void grouped_gemm(
       int64_t* DPtrArrayDev,
       const void* lddArrayDev,
       int batchCount,
-      bool use_int64_dims);
+      bool use_int64_dims,
+      const std::optional<GroupedGemmScaleOptions>& scales = std::nullopt);
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)  CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, Dtype)
 

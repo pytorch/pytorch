@@ -24,7 +24,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.variables.base import VariableTracker
-from torch._dynamo.variables.constant import ConstantVariable
+from torch._dynamo.variables.constant import BytesConstantVariable, StrConstantVariable
 from torch._dynamo.variables.lists import BaseListVariable, DequeVariable, RangeVariable
 from torch._library.opaque_object import (
     CustomClassBase,
@@ -1301,7 +1301,13 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
     def test_sq_item_impl_overrides(self):
         """All sequence types override sq_item_impl from the base class."""
         base = VariableTracker.sq_item_impl
-        for cls in (BaseListVariable, RangeVariable, ConstantVariable, DequeVariable):
+        for cls in (
+            BaseListVariable,
+            RangeVariable,
+            StrConstantVariable,
+            BytesConstantVariable,
+            DequeVariable,
+        ):
             self.assertIsNot(
                 cls.sq_item_impl,
                 base,
@@ -1443,6 +1449,32 @@ class SetDelItemTests(torch._dynamo.test_case.TestCase):
             a[0] = [3, 4]  # list RHS
             operator.setitem(a, 1, (5, 6))  # operator.setitem, tuple RHS
             return a, x + 1
+
+        self.assertEqual(self._compile(fn, torch.zeros(1)), fn(torch.zeros(1)))
+
+    def test_missing_half_of_mp_ass_subscript(self):
+        # __setitem__ and __delitem__ share mp_ass_subscript, so a type that
+        # implements only one still reaches slot_mp_ass_subscript for the other.
+        # vectorcall_method then fails the lookup with a bare AttributeError.
+        class SetItemOnly:
+            def __setitem__(self, k, v):
+                pass
+
+        class DelItemOnly:
+            def __delitem__(self, k):
+                pass
+
+        def fn(x):
+            out = []
+            try:
+                del SetItemOnly()[1]
+            except AttributeError as e:
+                out.append(str(e))
+            try:
+                DelItemOnly()[1] = 2
+            except AttributeError as e:
+                out.append(str(e))
+            return out
 
         self.assertEqual(self._compile(fn, torch.zeros(1)), fn(torch.zeros(1)))
 

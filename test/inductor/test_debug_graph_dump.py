@@ -10,6 +10,7 @@ from torch._functorch import partitioners
 from torch._inductor import config as inductor_config, debug as inductor_debug
 from torch._inductor.debug import DebugFormatter
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def _make_graph_module() -> torch.fx.GraphModule:
@@ -35,6 +36,8 @@ class _FakeDebugHandler:
 
 
 class TestDebugGraphDump(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_fx_graph_preserves_is_inference(self) -> None:
         gm = _make_graph_module()
 

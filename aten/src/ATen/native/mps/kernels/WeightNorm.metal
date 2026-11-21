@@ -20,13 +20,11 @@ struct WeightNormOp {
   opmath dir(opmath x) const {
     return x;
   }
-  METAL_FUNC NormBackwardCoeffs<T> coeffs(
-      thread const NormBackwardRow<T>& row) const {
+  NormBackwardCoeffs<T> finish(opmath, opmath dot, uint, uint row, bool leader)
+      const {
     const opmath rnorm = 1 / norm;
-    const opmath dot =
-        threadgroup_sum(row.tg_b, row.sum_prod, row.tid, row.lsize);
-    if (row.tid == 0) {
-      grad_g[row.index] = static_cast<T>(dot * rnorm);
+    if (leader) {
+      grad_g[row] = static_cast<T>(dot * rnorm);
     }
     return {g * rnorm, 0, dot * rnorm * rnorm};
   }
@@ -86,15 +84,10 @@ kernel void weight_norm_backward_cols(
 }
 
 #define REGISTER_WEIGHT_NORM_BACKWARD(T)                                    \
-  template [[host_name("weight_norm_backward_single_row_" #T)]] [[kernel]]  \
-  decltype(norm_backward_single_row<T, WeightNormOp<T>>)                    \
-      norm_backward_single_row<T, WeightNormOp<T>>;                         \
-  template [[host_name("weight_norm_backward_looped_" #T)]] [[kernel]]      \
-  decltype(norm_backward_looped<T, WeightNormOp<T>>)                        \
-      norm_backward_looped<T, WeightNormOp<T>>;                             \
+  REGISTER_NORM_BACKWARD_ROWS("weight_norm_backward", T, WeightNormOp);     \
   template [[host_name("weight_norm_backward_cols_dot_" #T)]] [[kernel]]    \
-  decltype(norm_backward_column_partials<T, WeightNormOp<T>>)               \
-      norm_backward_column_partials<T, WeightNormOp<T>>;                    \
+  decltype(norm_backward_column_tiled<T, WeightNormOp<T>, T>)               \
+      norm_backward_column_tiled<T, WeightNormOp<T>, T>;                    \
   template [[host_name("weight_norm_backward_cols_" #T "_u32")]] [[kernel]] \
   decltype(weight_norm_backward_cols<T, uint>)                              \
       weight_norm_backward_cols<T, uint>;                                   \
