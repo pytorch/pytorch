@@ -362,7 +362,6 @@ class TestLayoutOptim(TestCase):
         self.assertTrue(torch.allclose(ref, loss))
 
 
-# XPU stays excluded (allow_xpu=True not passed): ccl doesn't currently work on the XPU stack.
 instantiate_device_type_tests(TestLayoutOptim, globals(), except_for="cpu")
 
 
