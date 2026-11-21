@@ -7,10 +7,17 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 class TestTensorPreparation(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @dtypes(torch.float32, torch.complex64)
     @parametrize(
         "layout",
@@ -52,9 +59,7 @@ class TestTensorPreparation(TestCase):
         self.assertTrue(torch._C._is_cow_tensor(y))
 
 
-instantiate_device_type_tests(
-    TestTensorPreparation, globals(), only_for=("cpu", "cuda")
-)
+instantiate_device_type_tests(TestTensorPreparation, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
