@@ -1193,6 +1193,12 @@ unsafe fn flattened(values: &[Obj]) -> Vec<Obj> {
             all.extend((0..ffi::PyList_GET_SIZE(*o)).map(|i| ffi::PyList_GET_ITEM(*o, i)));
         } else if ffi::PyTuple_CheckExact(*o) != 0 {
             all.extend((0..ffi::PyTuple_GET_SIZE(*o)).map(|i| ffi::PyTuple_GET_ITEM(*o, i)));
+        } else if ffi::PyDict_CheckExact(*o) != 0 {
+            // What a call is handed with `**`.
+            let (mut at, mut key, mut value) = (0, null_mut(), null_mut());
+            while ffi::PyDict_Next(*o, &mut at, &mut key, &mut value) != 0 {
+                all.push(value);
+            }
         }
     }
     all
@@ -4806,6 +4812,8 @@ impl Compiled {
         let f = &self.func;
         let none = || new_ref(ffi::Py_None());
         let names_of = |kwnames: u32| if kwnames == NONE { none() } else { new_ref(f.consts[kwnames as usize].as_ptr()) };
+        // What a call spreads: the items and the values, borrowed.
+        let mut spread: Vec<Obj> = Vec::new();
         let (kind, head, taken, kwnames): (&std::ffi::CStr, Obj, Vec<V>, Obj) = match &inst.op {
             Op::Dispatch(d) if !picked.is_null() => {
                 let exported = (api.site_export)(picked);
@@ -4815,9 +4823,35 @@ impl Compiled {
                 }
                 (c"site", exported, d.operands.to_vec(), none())
             }
-            // Not the method of the tensor itself, which would run on it.
-            Op::Call { callee, .. } if self.bound_tensor(regs, *callee, api).is_some() => return false,
+            // A method that was bound to a tensor: the method of that name
+            // of the tensor, not the bound one, which would run on it.
+            Op::Call { callee, args, kwnames } if self.bound_tensor(regs, *callee, api).is_some() => {
+                let (_, recv, name) = self.bound_tensor(regs, *callee, api).expect("just asked");
+                let mut taken = vec![recv];
+                taken.extend(args.iter().copied());
+                (c"method", new_ref(f.consts[name as usize].as_ptr()), taken, names_of(*kwnames))
+            }
             Op::Call { callee, args, kwnames } => (c"call", new_ref(self.obj(regs, *callee)), args.to_vec(), names_of(*kwnames)),
+            Op::CallEx { callee, args, kwargs } => {
+                let (row, dict) = (reg(regs, *args), if *kwargs == NONE { null_mut() } else { reg(regs, *kwargs) });
+                if row.is_null() || !graph::is_row(row) || (!dict.is_null() && ffi::PyDict_CheckExact(dict) == 0) {
+                    return false;
+                }
+                spread.extend((0..ffi::PyObject_Size(row)).map(|i| graph::sequence_item(row, i)));
+                let names = if dict.is_null() { none() } else { ffi::PyTuple_New(ffi::PyDict_Size(dict)) };
+                if !dict.is_null() {
+                    let (mut at, mut key, mut value, mut k) = (0, null_mut(), null_mut(), 0);
+                    while ffi::PyDict_Next(dict, &mut at, &mut key, &mut value) != 0 {
+                        ffi::PyTuple_SET_ITEM(names, k, new_ref(key));
+                        spread.push(value);
+                        k += 1;
+                    }
+                }
+                match self.bound_tensor(regs, *callee, api) {
+                    Some((_, recv, name)) => (c"method", new_ref(f.consts[name as usize].as_ptr()), vec![recv], names),
+                    None => (c"call", new_ref(self.obj(regs, *callee)), Vec::new(), names),
+                }
+            }
             Op::CallMethod { recv, name, args, kwnames } => {
                 let mut taken = vec![*recv];
                 taken.extend(args.iter().copied());
@@ -4830,6 +4864,9 @@ impl Compiled {
         for v in taken {
             let held = if reg(regs, v).is_null() { ffi::Py_None() } else { self.obj(regs, v) };
             ffi::PyList_Append(operands, held);
+        }
+        for held in spread {
+            ffi::PyList_Append(operands, if held.is_null() { ffi::Py_None() } else { held });
         }
         let _nobody = Hooked::nobody();
         let module = ffi::PyImport_ImportModule(c"torch.vm._export".as_ptr());
@@ -5768,6 +5805,7 @@ impl Compiled {
         api: &TcfgApi,
         own: &dyn Fn(V) -> bool,
         outside: Option<&std::cell::Cell<bool>>,
+        draws: bool,
     ) -> Option<String> {
         let mut info = TcfgTensorInfo::empty();
         let mut tensor = |v: V| !reg(regs, v).is_null() && (api.tensor_info)(reg(regs, v), &mut info) != 0;
@@ -5826,13 +5864,50 @@ impl Compiled {
         }
         let st = self.state.borrow();
         let found = st.blocks[block].facts.get(origin as usize)?;
+        // `contiguous` of a tensor that is contiguous gives the tensor back
+        // without a call of the dispatcher: the operation all the same,
+        // which copies where the tensor of another call is not.
+        let method = match &inst.op {
+            Op::CallMethod { recv, name, .. } => {
+                let mut other = TcfgTensorInfo::empty();
+                (!reg(regs, *recv).is_null() && (api.tensor_info)(reg(regs, *recv), &mut other) != 0).then_some(*name)
+            }
+            _ => bound.map(|(.., name)| name),
+        };
+        let contiguous = method.is_some_and(|name| pyffi::str_to_string(self.func.consts[name as usize].as_ptr()) == "contiguous");
+        let idle = found.runs > 0
+            && found.kernels == Kernels::None
+            && !(found.frames || found.raised)
+            && matches!(found.callee, spec::CalleeFact::Unseen);
+        if contiguous && idle && inst.dst != NONE && !matches!(inst.op, Op::CallEx { .. }) {
+            return Some("aten::contiguous".to_string());
+        }
         let known = found.runs > 0
             && matches!(found.kernels, Kernels::One | Kernels::Many)
             && !(found.frames || found.raised)
             && matches!(found.callee, spec::CalleeFact::Unseen)
             && !found.operators.is_empty();
         let gives = inst.dst != NONE && matches!(st.obs.get(inst.dst as usize), Some(ValueObs::Tensor { .. }));
-        let pure = found.operators.iter().all(|name| graph::pure_operator(name));
+        // One that draws at a rate draws nothing at a rate of zero.
+        let rests = |name: &String| {
+            graph::DRAWS_AT_A_RATE.iter().find(|(operator, ..)| *operator == name.as_str()).is_some_and(|(_, place, keyword)| {
+                let rate = self.argument(inst, regs, *place, keyword);
+                rate.is_some_and(|rate| rate.is_null() || (!capi::is_unboxed(rate) && graph::is_number(rate) && ffi::PyObject_IsTrue(rate) == 0))
+            })
+        };
+        let pure = found.operators.iter().all(|name| graph::pure_operator(name) || rests(name));
+        // One that draws is an operation where the graph is made something
+        // of, and like a write to a tensor from outside it cannot be taken
+        // back (see the call sites that draw in `record_inst`).
+        let seeded = !pure && draws && found.operators.iter().all(|name| graph::pure_operator(name) || graph::seeded_operator(name));
+        if seeded {
+            let said = outside?;
+            let fine = known && inst.dst != NONE && !found.wrote;
+            if fine {
+                said.set(true);
+            }
+            return fine.then(|| found.operators.join("+"));
+        }
         // What writes, writes to its first tensor and to nothing else, and
         // that is the path's own; or it is handed no tensor, and writes to
         // what it makes.
@@ -5842,6 +5917,38 @@ impl Compiled {
         let spread = matches!(inst.op, Op::CallEx { .. });
         let fine = if writes { !spread && (gives || inst.dst == NONE) } else { pure && inst.dst != NONE && !found.wrote };
         (known && fine).then(|| found.operators.join("+"))
+    }
+
+    /// What a call of a C function is handed for an argument, by the place
+    /// and the name of the argument: Some(null) where it is not handed
+    /// one, None where that cannot be told. Borrowed.
+    unsafe fn argument(&self, inst: &Inst, regs: &[Obj], place: usize, keyword: &std::ffi::CStr) -> Option<Obj> {
+        match &inst.op {
+            Op::Call { args, kwnames, .. } => {
+                let names = if *kwnames == NONE { null_mut() } else { self.func.consts[*kwnames as usize].as_ptr() };
+                let named = if names.is_null() { 0 } else { ffi::PyTuple_GET_SIZE(names) as usize };
+                let first = args.len() - named;
+                for k in 0..named {
+                    if ffi::PyUnicode_CompareWithASCIIString(ffi::PyTuple_GET_ITEM(names, k as isize), keyword.as_ptr()) == 0 {
+                        return Some(reg(regs, args[first + k]));
+                    }
+                }
+                Some(if place < first { reg(regs, args[place]) } else { null_mut() })
+            }
+            Op::CallEx { args, kwargs, .. } => {
+                let (row, dict) = (reg(regs, *args), if *kwargs == NONE { null_mut() } else { reg(regs, *kwargs) });
+                if row.is_null() || !graph::is_row(row) || (!dict.is_null() && ffi::PyDict_CheckExact(dict) == 0) {
+                    return None;
+                }
+                let found = if dict.is_null() { null_mut() } else { ffi::PyDict_GetItemString(dict, keyword.as_ptr()) };
+                if !found.is_null() {
+                    return Some(found);
+                }
+                let there = (place as isize) < ffi::PyObject_Size(row);
+                Some(if there { graph::sequence_item(row, place as isize) } else { null_mut() })
+            }
+            _ => None,
+        }
     }
 
     /// Takes down one instruction of a path: decides whether it can be part
@@ -6035,12 +6142,32 @@ impl Compiled {
                 }
             }
         }
+        if let Op::TupleGet(unpacked, at) = &inst.op {
+            // What is unpacked of a tuple or a list the path built is what
+            // it was built of.
+            let whole = t.mapped(*unpacked);
+            let from = t.body.iter().find(|other| other.dst == whole && whole != NONE).and_then(|other| match &other.op {
+                Op::Unpack(sequence, count) => Some((*sequence, *count)),
+                _ => None,
+            });
+            let items = from.and_then(|(sequence, count)| self.built(t, sequence).filter(|items| items.len() == count as usize));
+            if let Some(items) = items.filter(|items| (*at as usize) < items.len()) {
+                let Ok(item) = self.exec_op(regs, &inst.op) else {
+                    return Taken::Raised;
+                };
+                capi::release(std::mem::replace(&mut regs[inst.dst as usize], item));
+                t.rename(inst.dst, items[*at as usize]);
+                kill(t, regs);
+                return Taken::Went;
+            }
+        }
         let owned = |t: &Trace, v: V| t.mapped(v) != NONE && t.defs[t.mapped(v) as usize].own;
         // A write to a tensor from outside the path is an operation of
         // the graph for as long as nothing that can fail behind the
         // callable has been taken down: it cannot be taken back.
         let outside = std::cell::Cell::new(false);
-        let operators = self.operation(block, origin, inst, regs, api, &|v| owned(t, v), (!t.fallible).then_some(&outside));
+        let draws = site.exporter.is_some() && !t.fallible;
+        let operators = self.operation(block, origin, inst, regs, api, &|v| owned(t, v), (!t.fallible).then_some(&outside), draws);
         if operators.is_none() {
             if let Some(taken) = self.record_call(t, site, (block, code as *const BlockCode, pc), regs, frames, api) {
                 return taken;
@@ -6112,9 +6239,15 @@ impl Compiled {
                 let held = reg(regs, *args);
                 let row = !held.is_null() && graph::is_row(held);
                 let known = row || (t.mapped(*args) != NONE && self.built(t, t.mapped(*args)).is_some());
-                let bare = *kwargs == NONE
-                    || (t.mapped(*kwargs) != NONE && self.entries(t, t.mapped(*kwargs)).is_some_and(|named| named.is_empty()));
-                (known && bare).then_some(Kind::Node)
+                // With `**`, a dict the path built under names: the call
+                // with those names. One that gives nothing is not followed.
+                let text = |key: Obj| !key.is_null() && !capi::is_unboxed(key) && ffi::PyUnicode_CheckExact(key) != 0;
+                let named = *kwargs == NONE
+                    || (t.mapped(*kwargs) != NONE
+                        && self.entries(t, t.mapped(*kwargs)).is_some_and(|named| {
+                            named.is_empty() || (inst.dst != NONE && named.iter().all(|(key, _)| text(*key)))
+                        }));
+                (known && named).then_some(Kind::Node)
             }
             // An operator that writes to its first tensor and to nothing
             // else, where that tensor is the path's own.
@@ -6191,10 +6324,24 @@ impl Compiled {
         if receiver.is_some_and(|(recv, _)| recv == NONE) {
             return ends();
         }
+        let mut names: Option<PyObj> = None;
         let spread = match (&inst.op, kind) {
-            (Op::CallEx { callee, args, .. }, Kind::Node) => {
+            (Op::CallEx { callee, args, kwargs }, Kind::Node) => {
                 let sequence = self.path_value(t, regs, *args);
-                let items = if sequence == UNDEF { None } else { self.spread(t, sequence, inst.bc) };
+                let mut items = if sequence == UNDEF { None } else { self.spread(t, sequence, inst.bc) };
+                let entries = if *kwargs == NONE { Some(Vec::new()) } else { self.entries(t, t.mapped(*kwargs)) };
+                match (&mut items, entries) {
+                    (Some(items), Some(entries)) if !entries.is_empty() => {
+                        let keys = ffi::PyTuple_New(entries.len() as isize);
+                        for (i, (key, value)) in entries.iter().enumerate() {
+                            ffi::PyTuple_SET_ITEM(keys, i as isize, new_ref(*key));
+                            items.push(*value);
+                        }
+                        names = Some(PyObj::from_owned(keys));
+                    }
+                    (_, None) => items = None,
+                    _ => {}
+                }
                 match receiver {
                     Some((recv, name)) => items.map(|args| Op::CallMethod { recv, name, args, kwnames: NONE }),
                     None => {
@@ -6213,6 +6360,30 @@ impl Compiled {
         let Some(mut renamed) = spread.or_else(|| graph::renamed(&inst.op, &mut |v| self.path_value(t, regs, v))) else {
             return ends();
         };
+        if let (Kind::Node, Some(called), Op::Call { args, kwnames, .. }) = (kind, &operators, &renamed) {
+            // The rate of an operator that draws at one is the rate of
+            // this run at every call: zero, or not.
+            let rated = |name: &str| graph::DRAWS_AT_A_RATE.iter().find(|(operator, ..)| *operator == name);
+            for (_, place, keyword) in called.split('+').filter_map(rated) {
+                let keys = match &names {
+                    Some(names) => names.as_ptr(),
+                    None if *kwnames != NONE => self.func.consts[*kwnames as usize].as_ptr(),
+                    None => null_mut(),
+                };
+                let named = if keys.is_null() { 0 } else { ffi::PyTuple_GET_SIZE(keys) as usize };
+                let first = args.len() - named;
+                let mut rate = (*place < first).then(|| args[*place]);
+                for k in 0..named {
+                    if ffi::PyUnicode_CompareWithASCIIString(ffi::PyTuple_GET_ITEM(keys, k as isize), keyword.as_ptr()) == 0 {
+                        rate = Some(args[first + k]);
+                    }
+                }
+                let held = rate.map_or(null_mut(), |v| t.rec.values[v as usize]);
+                if let (Some(v), false) = (rate, held.is_null()) {
+                    t.check(Assert::Equals(v, graph::frozen(held)), inst.bc);
+                }
+            }
+        }
         if let (Op::LoadDeref(cell), false) = (&inst.op, t.outermost()) {
             // The closure of a called function is that of the function the
             // call was found to enter.
@@ -6266,6 +6437,17 @@ impl Compiled {
                 let (taken, held) = (t.defs[v as usize], t.rec.values[v as usize]);
                 taken.fixed && !held.is_null() && graph::checkable(held)
             };
+            // A list or a tuple the path put together of such values and
+            // of numbers from in front of the callable is one where the
+            // path checks those numbers at every call.
+            let mut taken: Vec<PathValue> = Vec::new();
+            graph::reads(&renamed, |v| taken.push(v));
+            for v in taken {
+                let of = t.defs[v as usize];
+                if of.late && !(of.node || of.graph || constant(t, v)) && self.settles(t, v, inst.bc, false, 0) {
+                    self.settles(t, v, inst.bc, true, 0);
+                }
+            }
             let mut fits = true;
             graph::reads(&renamed, |v| {
                 let taken = t.defs[v as usize];
@@ -6636,6 +6818,9 @@ impl Compiled {
             t.defs[*into as usize].fixed &= fixed;
         }
         t.push(renamed, dst, kind, inst.bc);
+        if let (Some(names), Some(last)) = (names, t.body.last_mut()) {
+            last.named = Some(names);
+        }
         kill(t, regs);
         Taken::Went
     }
@@ -7467,9 +7652,25 @@ impl Compiled {
                         _ => t.derive_fixed(Op::LoadAttr(value, *name), Kind::Read, false, new_ref(called), bc, sure),
                     };
                 }
-                let method = matches!(form, Form::Method { .. });
+                let mut method = matches!(form, Form::Method { .. });
+                // A method that was read off a tensor the graph gives
+                // earlier is bound to that tensor in every call too.
+                let mut read_off = NONE;
+                if let (false, Some(graph::PathInst { op: Op::LoadAttr(of, name), .. })) = (method, t.body.iter().find(|other| other.dst == value)) {
+                    let (of, name) = (*of, *name);
+                    let held = t.rec.values[of as usize];
+                    let bound = !receiver.is_null() && held == receiver && t.defs[of as usize].fixed && t.defs[of as usize].node;
+                    if bound && (api.tensor_info)(held, &mut info) != 0 {
+                        value = t.derive_fixed(Op::LoadAttr(of, name), Kind::Read, false, new_ref(called), bc, true);
+                        read_off = of;
+                        method = true;
+                    }
+                }
+                let sure = sure || read_off != NONE;
                 let function = t.derive_fixed(Op::Part(Part::Target, value), Kind::Read, false, new_ref(func), bc, sure && method);
-                if receiver == called {
+                if read_off != NONE {
+                    given.push(read_off);
+                } else if receiver == called {
                     given.push(value);
                 } else if method && receiver == reg(regs, *callee) {
                     given.push(object);
@@ -7721,6 +7922,59 @@ impl Compiled {
             t.derive_fixed(Op::Part(Part::Index(i as u32), sequence), Kind::Pure, false, kept, bc, fixed)
         };
         Some((0..count).map(|i| item(t, i)).collect())
+    }
+
+    /// Whether a value can be made the same in every call a form is for,
+    /// and with `apply`, makes it so: one that is; a number or a text (or
+    /// a tuple of such) from in front of the callable, which the path then
+    /// checks at every call; a list or a tuple the path built of nothing
+    /// but such values.
+    unsafe fn settles(&self, t: &mut Trace, v: PathValue, bc: u32, apply: bool, depth: usize) -> bool {
+        let of = t.defs[v as usize];
+        if of.fixed {
+            return true;
+        }
+        let held = t.rec.values[v as usize];
+        if held.is_null() || depth > 4 {
+            return false;
+        }
+        if !of.late {
+            if !graph::checkable(held) {
+                return false;
+            }
+            if apply {
+                t.check(Assert::Equals(v, graph::frozen(held)), bc);
+                t.defs[v as usize].fixed = true;
+            }
+            return true;
+        }
+        let steps: Vec<Op> = t
+            .body
+            .iter()
+            .filter(|inst| match &inst.op {
+                Op::BuildTuple(_) | Op::BuildList(_) | Op::ListToTuple(_) => inst.dst == v,
+                Op::ListAppend(target, _) | Op::ListExtend(target, _) => *target == v,
+                _ => false,
+            })
+            .map(|inst| inst.op.clone())
+            .collect();
+        if steps.is_empty() || !graph::checkable(held) && ffi::PyList_CheckExact(held) == 0 {
+            return false;
+        }
+        let mut all = true;
+        for step in steps {
+            match step {
+                Op::BuildTuple(vs) | Op::BuildList(vs) => all = all && vs.iter().all(|item| self.settles(t, *item, bc, apply, depth + 1)),
+                Op::ListToTuple(other) | Op::ListAppend(_, other) | Op::ListExtend(_, other) => {
+                    all = all && self.settles(t, other, bc, apply, depth + 1)
+                }
+                _ => {}
+            }
+        }
+        if all && apply {
+            t.defs[v as usize].fixed = true;
+        }
+        all
     }
 
     /// For a tuple or a list that a path built: the values it holds where

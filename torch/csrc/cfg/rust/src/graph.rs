@@ -166,6 +166,9 @@ pub struct PathInst {
     /// Which function it is an instruction of (`Path::owners`): the one
     /// whose constants and names it refers to.
     pub owner: u32,
+    /// For an operation that was handed a dict with `**`: the names, a
+    /// tuple, of its last operands, which no constant of the function is.
+    pub named: Option<PyObj>,
 }
 
 /// What a check looks at and a callable is handed: a value, or one of the
@@ -2251,6 +2254,41 @@ pub fn shaped_operator(name: &str) -> bool {
 /// argument).
 pub const DROPOUTS: [&str; 4] = ["aten::dropout", "aten::feature_dropout", "aten::alpha_dropout", "aten::feature_alpha_dropout"];
 
+/// The operators that draw random numbers only where an argument is not
+/// zero, which is what it is where it is not given: the argument, by
+/// place and by name.
+pub const DRAWS_AT_A_RATE: [(&str, usize, &std::ffi::CStr); 1] = [("aten::scaled_dot_product_attention", 4, c"dropout_p")];
+
+/// Whether all that keeps an operator from being a function of its
+/// arguments is that it draws random numbers: it writes to none of them,
+/// and its tags say that it draws from the generator.
+pub fn seeded_operator(name: &str) -> bool {
+    static KNOWN: std::sync::OnceLock<Shared<HashMap<String, bool>>> = std::sync::OnceLock::new();
+    let known = KNOWN.get_or_init(|| Shared::new(HashMap::new()));
+    if let Some(seeded) = known.borrow().get(name) {
+        return *seeded;
+    }
+    let (qualified, overload) = overload_of(name);
+    let asked = |py: Python<'_>| -> PyResult<bool> {
+        let binding = py.import("torch._C")?;
+        let schema = binding.call_method1("_get_schema", (qualified, overload))?;
+        if schema.getattr("is_mutable")?.is_truthy()? {
+            return Ok(false);
+        }
+        let found = binding.call_method1("_get_operation_overload", (qualified, overload))?;
+        if found.is_none() {
+            return Ok(false);
+        }
+        let seeded = py.import("torch")?.getattr("Tag")?.getattr("nondeterministic_seeded")?;
+        found.get_item(2)?.contains(seeded)
+    };
+    let quiet = !UPDATES_STATISTICS.iter().any(|(op, _)| *op == qualified);
+    let seeded = quiet && unsafe { asked(Python::assume_attached()).unwrap_or(false) };
+    unsafe { ffi::PyErr_Clear() };
+    known.borrow_mut().insert(name.to_string(), seeded);
+    seeded
+}
+
 /// Whether an operator has no kernel of its own and is made of other
 /// operators (`aten::conv2d`; `aten::argwhere`, which is `aten::nonzero`):
 /// its tags do not say what those do. What cannot be asked is taken to be
@@ -2936,12 +2974,10 @@ impl Path {
                 }
                 op if inst.kind == Kind::Node => {
                     let (_, meta) = recorded.next().ok_or_else(did_not_run)?;
-                    let names = |kwnames: u32| {
-                        if kwnames == NONE {
-                            none()
-                        } else {
-                            new_ref(func.consts[kwnames as usize].as_ptr())
-                        }
+                    let names = |kwnames: u32| match &inst.named {
+                        Some(named) => new_ref(named.as_ptr()),
+                        None if kwnames == NONE => none(),
+                        None => new_ref(func.consts[kwnames as usize].as_ptr()),
                     };
                     let (kind, head, taken, keywords) = match op {
                         Op::Call { callee, args, kwnames } => {
@@ -3701,6 +3737,7 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
             in_graph: false,
             assert: None,
             owner: 0,
+            named: None,
         });
     }
     let late = |inst: &PathInst| {
@@ -4280,7 +4317,7 @@ impl Trace {
 
     pub fn push(&mut self, op: Op, dst: PathValue, kind: Kind, bc: u32) {
         let owner = self.owner();
-        self.body.push(PathInst { op, dst, kind, bc, stage: Stage::Before, in_graph: false, assert: None, owner });
+        self.body.push(PathInst { op, dst, kind, bc, stage: Stage::Before, in_graph: false, assert: None, owner, named: None });
     }
 
     pub fn check(&mut self, assert: Assert, bc: u32) {

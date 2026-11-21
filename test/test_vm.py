@@ -6748,10 +6748,40 @@ def graph_reads_what_it_stored(x, doubles):
     return (y * doubles.scale).tanh().exp()
 
 
+def graph_attends(q, mask, rate, **kwargs):
+    y = (q.sin() + 1).cos()
+    named = {}
+    functional = torch.nn.functional
+    attend, causal = functional.scaled_dot_product_attention, mask is None
+    out = attend(y, y, y, attn_mask=mask, dropout_p=rate, is_causal=causal, **named)
+    out = functional.linear(*(out, kwargs["weight"]), **{"bias": None})  # noqa: PIE804
+    return (out * 2).tanh().exp()
+
+
+def graph_gives_two(y, **kwargs):
+    left, right = y.split(2, dim=-1)
+    out = (left * right).transpose(0, 1).contiguous()
+    return out, None
+
+
+def graph_takes_two(x):
+    y = (x.sin() + 1).cos()
+    out, nothing = graph_gives_two(y, scale=None)
+    out = out.reshape(*out.shape[:-1], -1).contiguous()
+    return (out * 2).tanh().exp()
+
+
 def graph_grows_a_list(x, shape):
     y = (x.sin() + 1).cos()
     shape += [2]
     return (y.view(shape) * 2).tanh().exp() + len(shape)
+
+
+def graph_keeps_or_copies(x):
+    y = (x.sin() + 1).cos()
+    z = y.contiguous()
+    z.add_(1)
+    return (z * y).tanh().exp()
 
 
 class GraphMidwayIndex:
@@ -10047,7 +10077,8 @@ class TestVmGraphResults(TestCase):
     def whole_graph(self, fn, args, ops, behind=None):
         """`fn` under torch.vm with a pass that returns the graph (or
         `behind`): its results against eager, and that one graph of `ops`
-        operations runs up to where the function returns."""
+        operations runs up to where the function returns (with None for
+        `ops`, only the results)."""
 
         def keep(gm, input_types):
             return gm
@@ -10059,7 +10090,8 @@ class TestVmGraphResults(TestCase):
             self.assertEqual(compiled(*args), fn(*args), **exact)
         found = [g for g in torch.vm.regions(compiled) if "ops" in g]
         ran = [(g["ops"], g["why"]) for g in found if "within" not in g and g["hits"]]
-        self.assertEqual(ran, [(ops, "the function returns")])
+        if ops is not None:
+            self.assertEqual(ran, [(ops, "the function returns")])
         return compiled
 
     def test_text_made_of_plain_values_is_part_of_a_path(self, device):
@@ -10113,6 +10145,40 @@ class TestVmGraphResults(TestCase):
             self.assertEqual(compiled(*args), graph_hands_on(*args), atol=0, rtol=0)
         self.whole_graph(graph_hands_on, first, 12, P.Inductor())
 
+    def test_what_a_call_names_with_a_dict_is_handed_over_by_name(self, device):
+        q, w = torch.randn(2, 2, 5, 4, device=device), torch.randn(4, 4, device=device)
+        mask = torch.ones(5, 5, dtype=torch.bool, device=device).tril()
+
+        # An attention that drops nothing is an operation like any other.
+        # On a GPU it can come down to `bmm`, whose kernel there is entered
+        # through a Python function: a call with `**` that enters Python
+        # code is no operation, so only what the function gives is looked
+        # at there.
+        def attends(q, mask, rate):
+            return graph_attends(q, mask, rate, weight=w)
+
+        ops = 8 if torch.device(device).type == "cpu" else None
+        compiled = self.whole_graph(attends, (q, None, 0.0), ops)
+        self.assertEqual(compiled(q, mask, 0.0), attends(q, mask, 0.0), atol=0, rtol=0)
+        self.whole_graph(attends, (q, mask, 0.0), ops, P.Inductor())
+        # One that drops draws eager's numbers where the graph is run as
+        # it is.
+        for _ in range(3):
+            torch.manual_seed(3)
+            expected = attends(q, mask, 0.5)
+            torch.manual_seed(3)
+            self.assertEqual(compiled(q, mask, 0.5), expected, atol=0, rtol=0)
+
+    def test_what_a_function_gives_back_in_a_tuple_is_what_the_graph_gave(self, device):
+        x = torch.randn(3, 4, device=device)
+        # A method of a tensor that is written in Python (`split`), read
+        # off the tensor and called with a name; a tuple that is unpacked;
+        # `contiguous` of what is contiguous, which runs no kernel.
+        compiled = self.whole_graph(graph_takes_two, (x,), 12)
+        other = torch.randn(5, 4, device=device)
+        self.assertEqual(compiled(other), graph_takes_two(other), atol=0, rtol=0)
+        self.whole_graph(graph_takes_two, (x,), 12, P.Inductor())
+
     def test_a_list_that_is_added_to_in_place_is_changed_once(self, device):
         def keep(gm, input_types):
             return gm
@@ -10127,6 +10193,18 @@ class TestVmGraphResults(TestCase):
             expected = graph_grows_a_list(x, list(given))
             self.assertEqual(compiled(x, mine), expected, atol=0, rtol=0)
             self.assertEqual(mine, [*given, 2])
+
+    def test_contiguous_copies_where_a_tensor_is_not(self, device):
+        base = torch.randn(4, 4, device=device)
+        compiled = self.whole_graph(graph_keeps_or_copies, (base,), 8)
+        # The same sizes, laid out otherwise: `contiguous` copies, and the
+        # write is to the copy.
+        for x in (base.t(), base, base.t()):
+            self.assertEqual(compiled(x), graph_keeps_or_copies(x), atol=0, rtol=0)
+        passes = (*DEFAULT, P.Graphs(), P.Inductor())
+        behind = torch.vm(graph_keeps_or_copies, passes=passes, fallback=False)
+        for x in (base, base, base, base.t(), base, base.t()):
+            self.assertEqual(behind(x), graph_keeps_or_copies(x), rtol=1e-4, atol=1e-5)
 
     def same_as_eager(self, fn, make, calls=4):
         """`fn` under torch.vm, with `Graphs()` alone and with a pass that
