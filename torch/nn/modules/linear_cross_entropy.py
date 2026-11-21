@@ -105,6 +105,7 @@ def _linear_cross_entropy_batch_chunked_setup_context(ctx, inputs, output):
         compute_input_grad,
         compute_linear_weight_grad,
         compute_linear_bias_grad,
+        _logit_softcap,
     ) = inputs
     # Without this, backward through the loss materializes zero-filled
     # gradients for the three unused grad outputs -- (N, F) + (C, F) + (C,)
@@ -163,6 +164,11 @@ class _ChunkViews:
             g = ctx.loss_grad_output.narrow(0, self.bchunk_start, self.bchunk_size)
             out.mul_(g.unsqueeze(1))
         return out
+
+    @cached_property
+    def softcap_grad(self) -> torch.Tensor:
+        # (B, V) ``1 - tanh(z / c)**2``, written by ``_ChunkContext.softcap_``.
+        return self.ctx.softcap_grad_buf.narrow(0, 0, self.bchunk_size)
 
     @property
     def weight_chunk(self) -> torch.Tensor:
@@ -287,6 +293,9 @@ class _ChunkContext:
     # divisor is the row count, not the weight mass -- and 1 for "sum").
     is_prob_target: bool
     loss_scale: float
+    # ``c`` in ``logits = c * tanh(logits / c)``, applied before the softmax;
+    # None disables softcapping.
+    logit_softcap: float | None
     linear_weight: torch.Tensor
     linear_bias: torch.Tensor | None
     # reduction='none' backward only: per-sample upstream grad (N,). When
@@ -305,6 +314,7 @@ class _ChunkContext:
     compute_linear_weight_grad: bool
     compute_linear_bias_grad: bool
     alloc_prob_target_buf: bool
+    alloc_softcap_grad_buf: bool
     alloc_weight_grad_chunk: bool
     alloc_linear_bias_grad_chunk: bool
     alloc_input_grad_acc_buf: bool
@@ -366,6 +376,18 @@ class _ChunkContext:
             self.logits_buf.dtype,
             self.input.device,
             when=self.alloc_prob_target_buf,
+        )
+
+    @cached_property
+    def softcap_grad_buf(self) -> torch.Tensor:
+        # (B, V) scratch at the logits dtype for the softcap derivative. The
+        # logits buffer is overwritten by ``exp_`` before the gradients are
+        # formed, so the derivative needs its own storage.
+        return _make_empty(
+            self.logits_buf.shape,
+            self.logits_buf.dtype,
+            self.input.device,
+            when=self.alloc_softcap_grad_buf,
         )
 
     @cached_property
@@ -486,6 +508,7 @@ class _ChunkContext:
         compute_linear_weight_grad: bool,
         compute_linear_bias_grad: bool,
         loss_grad_output: torch.Tensor | None = None,
+        logit_softcap: float | None = None,
     ) -> "_ChunkContext":
         # ===== Validation =====
         is_prob_target = target.dtype.is_floating_point
@@ -608,6 +631,9 @@ class _ChunkContext:
             # which must be a writable scratch (not the target view).
             or (reduction == "none" and loss_grad_output is not None)
         )
+        alloc_softcap_grad_buf = logit_softcap is not None and (
+            compute_input_grad or compute_linear_weight_grad or compute_linear_bias_grad
+        )
         if is_prob_target and reduction == "mean":
             loss_scale = 1.0 / num_batches if num_batches else float("nan")
         else:
@@ -631,6 +657,7 @@ class _ChunkContext:
             reduction=reduction,
             is_prob_target=is_prob_target,
             loss_scale=loss_scale,
+            logit_softcap=logit_softcap,
             linear_weight=linear_weight,
             linear_bias=linear_bias,
             loss_grad_output=loss_grad_output,
@@ -651,6 +678,7 @@ class _ChunkContext:
             compute_linear_weight_grad=compute_linear_weight_grad,
             compute_linear_bias_grad=compute_linear_bias_grad,
             alloc_prob_target_buf=alloc_prob_target_buf,
+            alloc_softcap_grad_buf=alloc_softcap_grad_buf,
             alloc_weight_grad_chunk=alloc_weight_grad_chunk,
             alloc_linear_bias_grad_chunk=alloc_linear_bias_grad_chunk,
             alloc_input_grad_acc_buf=alloc_input_grad_acc_buf,
@@ -724,11 +752,47 @@ class _ChunkContext:
         self.mm(chunk.input, chunk.linear_weight.T, out=logits)
         if self.linear_bias_cast is not None:
             logits.add_(self.linear_bias_cast)
+        if self.logit_softcap is not None:
+            self.softcap_(chunk, self.logit_softcap)
         # Subtract the per-row max in place; ``self.tmp`` is reused scratch.
         row_max = self.tmp.narrow(0, 0, logits.shape[0]).unsqueeze(1)
         torch.amax(logits, dim=1, keepdim=True, out=row_max)
         logits.sub_(row_max)
         return logits
+
+    def softcap_(self, chunk: _ChunkViews, c: float) -> None:
+        # logits = c * tanh(logits / c). The chain rule multiplies every
+        # gradient of the capped logits by ``1 - tanh**2``, kept in
+        # ``chunk.softcap_grad`` when gradients are computed. out= forms, as
+        # MPS does not propagate in-place mul_ on a narrow view of logits_buf.
+        logits = chunk.logits
+        torch.div(logits, c, out=logits)
+        torch.tanh(logits, out=logits)
+        if self.alloc_softcap_grad_buf:
+            softcap_grad = chunk.softcap_grad
+            torch.mul(logits, logits, out=softcap_grad)
+            torch.neg(softcap_grad, out=softcap_grad)
+            torch.add(softcap_grad, 1, out=softcap_grad)
+        torch.mul(logits, c, out=logits)
+
+    def softcap_grad_logits_(
+        self, chunk: _ChunkViews, grad_logits: torch.Tensor
+    ) -> None:
+        # Gradient w.r.t. the capped logits -> gradient w.r.t. the raw logits.
+        if self.logit_softcap is not None:
+            torch.mul(grad_logits, chunk.softcap_grad, out=grad_logits)
+
+    def softcap_target_weight(
+        self, chunk: _ChunkViews, weight_chunk: torch.Tensor
+    ) -> torch.Tensor:
+        # The index loop applies the one-hot part of the gradient as a scatter
+        # at the target column, scaled by ``weight_chunk``; under softcap that
+        # column's gradient also carries ``1 - tanh**2``. Not in place:
+        # ``weight_chunk`` is a view of ``neg_weight_target``.
+        if self.logit_softcap is None:
+            return weight_chunk
+        target_grad = chunk.softcap_grad.gather(1, chunk.target_chunk.unsqueeze(1))
+        return weight_chunk * target_grad.squeeze(1)
 
     def dotgather(
         self, weight: torch.Tensor, x: torch.Tensor, indices: torch.Tensor
@@ -811,6 +875,7 @@ def _linear_cross_entropy_batch_chunked_accumulator(
     compute_linear_weight_grad: bool,
     compute_linear_bias_grad: bool,
     loss_grad_output: torch.Tensor | None = None,
+    logit_softcap: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Chunked loop shared by all three custom-op entry points; returns
     ``(loss, grad_input, grad_linear_weight, grad_linear_bias)``.
@@ -880,6 +945,7 @@ def _linear_cross_entropy_batch_chunked_accumulator(
         compute_linear_weight_grad,
         compute_linear_bias_grad,
         loss_grad_output=loss_grad_output,
+        logit_softcap=logit_softcap,
     )
     dtype = ctx.dtype
     # reduction='none' forward (no upstream grad yet): per-sample loss into
@@ -997,6 +1063,7 @@ def _linear_cross_entropy_batch_chunked_accumulator(
                 # grad_logits = loss_scale * (softmax*s_n - w*t); from
                 # here every gradient is a single dense op.
                 logits.sub_(wt, alpha=loss_scale)
+                ctx.softcap_grad_logits_(chunk, logits)
                 if compute_linear_bias_grad:
                     chunk.bias_grad_acc.add_(ctx.sum(logits, dim=0))
                 if compute_input_grad:
@@ -1042,12 +1109,15 @@ def _linear_cross_entropy_batch_chunked_accumulator(
                 ctx.div(weight_chunk, softmax_denom).unsqueeze(1),
                 out=logits,
             )
+            ctx.softcap_grad_logits_(chunk, logits)
         # output -= <weight_chunk, log(softmax_denom)>
         # softmax_denom is in acc_dtype (see ``sumexp_``); promote weight_chunk
         # for the dot rather than rounding the wider denominator down.
         output.sub_(weight_chunk.to(softmax_denom.dtype).dot(softmax_denom.log_()))
 
         if compute_grads:
+            # weight_chunk, scaled for the one-hot correction terms below.
+            target_weight = ctx.softcap_target_weight(chunk, weight_chunk)
             if compute_linear_bias_grad:
                 # Must run BEFORE the linear-weight-grad branch below.
                 # The ordering invariant is defensive across all
@@ -1071,16 +1141,16 @@ def _linear_cross_entropy_batch_chunked_accumulator(
                 # ``linear_weight``), so no extra scaling is needed.
                 bias_grad_acc = chunk.bias_grad_acc
                 bias_grad_acc.sub_(ctx.sum(logits, dim=0))
-                bias_grad_acc.index_add_(0, target_chunk, weight_chunk)
+                bias_grad_acc.index_add_(0, target_chunk, target_weight)
             if compute_input_grad:
                 grad_input_chunk = chunk.grad_input_chunk
                 input_grad_logits = chunk.input_grad_logits
                 input_grad_linear_weight = chunk.input_grad_linear_weight
 
-                # grad_input_chunk = linear_weight_cast[target_chunk] * weight_chunk
+                # grad_input_chunk = linear_weight_cast[target_chunk] * target_weight
                 torch.mul(
                     torch.index_select(linear_weight_cast, 0, target_chunk),
-                    weight_chunk.to(grad_input_chunk.dtype).unsqueeze(1),
+                    target_weight.to(grad_input_chunk.dtype).unsqueeze(1),
                     out=grad_input_chunk,
                 )
                 # grad_input_chunk -= input_grad_logits @ input_grad_linear_weight
@@ -1106,7 +1176,7 @@ def _linear_cross_entropy_batch_chunked_accumulator(
                         weight_grad_input,
                         out=weight_grad_chunk,
                     )
-                    temp = ctx.mul(input_chunk_acc, weight_chunk)
+                    temp = ctx.mul(input_chunk_acc, target_weight)
                     weight_grad_chunk.index_add_(0, target_chunk, temp, alpha=-1)
                     grad_linear_weight.sub_(weight_grad_chunk)
                 else:
@@ -1116,7 +1186,7 @@ def _linear_cross_entropy_batch_chunked_accumulator(
                         chunk.logits_downcast.T, chunk.input_chunk, alpha=-1
                     )
                     temp = ctx.to(
-                        ctx.mul(input_chunk_acc, weight_chunk),
+                        ctx.mul(input_chunk_acc, target_weight),
                         dtype=grad_linear_weight.dtype,
                     )
                     grad_linear_weight.index_add_(0, target_chunk, temp, alpha=1)
@@ -1250,6 +1320,7 @@ def _linear_cross_entropy_batch_chunked(
     compute_input_grad: bool,
     compute_linear_weight_grad: bool,
     compute_linear_bias_grad: bool,
+    logit_softcap: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Scalar-reduction (mean/sum) chunked op: precomputes the loss and
     gradients in forward, backward scales by the upstream gradient. The
@@ -1279,13 +1350,14 @@ def _linear_cross_entropy_batch_chunked(
         compute_input_grad,
         compute_linear_weight_grad,
         compute_linear_bias_grad,
+        logit_softcap=logit_softcap,
     )
 
 
 # Op arg count; backward returns this many slots. Hand-maintained
 # because CustomOpDef has no public arg-introspection. Update on
 # signature change.
-_NUM_OP_INPUTS = 15
+_NUM_OP_INPUTS = 16
 
 
 @_linear_cross_entropy_batch_chunked.register_fake
@@ -1305,6 +1377,7 @@ def _(
     compute_input_grad,
     compute_linear_weight_grad,
     compute_linear_bias_grad,
+    logit_softcap=None,
 ):
     if reduction in {"mean", "sum"}:
         result = torch.empty((), dtype=input.dtype, device=input.device)
@@ -1456,6 +1529,7 @@ def _linear_cross_entropy_batch_chunked_no_reduction(
     batch_chunk_size: int,
     acc_policy: str,
     acc_dtype: torch.dtype,
+    logit_softcap: float | None = None,
 ) -> torch.Tensor:
     """reduction='none' chunked forward: returns per-sample loss ``(N,)``.
 
@@ -1481,6 +1555,7 @@ def _linear_cross_entropy_batch_chunked_no_reduction(
         compute_input_grad=False,
         compute_linear_weight_grad=False,
         compute_linear_bias_grad=False,
+        logit_softcap=logit_softcap,
     )[0]
 
 
@@ -1495,6 +1570,7 @@ def _linear_cross_entropy_batch_chunked_no_reduction_setup_context(ctx, inputs, 
         batch_chunk_size,
         acc_policy,
         acc_dtype,
+        logit_softcap,
     ) = inputs
     # Detach before saving: the backward recomputes the grads analytically
     # from these values (it does not differentiate through them), and saving
@@ -1514,6 +1590,7 @@ def _linear_cross_entropy_batch_chunked_no_reduction_setup_context(ctx, inputs, 
     ctx._batch_chunk_size = batch_chunk_size
     ctx._acc_policy = acc_policy
     ctx._acc_dtype = acc_dtype
+    ctx._logit_softcap = logit_softcap
 
 
 @_linear_cross_entropy_batch_chunked_no_reduction.register_fake
@@ -1527,6 +1604,7 @@ def _(
     batch_chunk_size,
     acc_policy: str,
     acc_dtype,
+    logit_softcap=None,
 ):
     return torch.empty(
         input.shape[:1], dtype=input.dtype, device=input.device, requires_grad=False
@@ -1560,7 +1638,7 @@ def _vmap_no_reduction(info, in_dims, *args):
 def _linear_cross_entropy_batch_chunked_no_reduction_backward(ctx, grad_output):
     # grad_output is the per-sample upstream grad (N,). Forward arg order:
     # (input, linear_weight, target, linear_bias, weight, ignore_index,
-    #  batch_chunk_size, acc_policy, acc_dtype).
+    #  batch_chunk_size, acc_policy, acc_dtype, logit_softcap).
     input, linear_weight, target, linear_bias, weight = ctx.saved_tensors
     needs = ctx.needs_input_grad
     if needs[2]:
@@ -1577,7 +1655,7 @@ def _linear_cross_entropy_batch_chunked_no_reduction_backward(ctx, grad_output):
     compute_input_grad = needs[0]
     compute_linear_weight_grad = needs[1]
     compute_linear_bias_grad = linear_bias is not None and needs[3]
-    result: list[torch.Tensor | None] = [None] * 9
+    result: list[torch.Tensor | None] = [None] * 10
     if not (
         compute_input_grad or compute_linear_weight_grad or compute_linear_bias_grad
     ):
@@ -1603,6 +1681,7 @@ def _linear_cross_entropy_batch_chunked_no_reduction_backward(ctx, grad_output):
             compute_linear_weight_grad,
             compute_linear_bias_grad,
             loss_grad_output=grad_output,
+            logit_softcap=ctx._logit_softcap,
         )
     )
     if compute_input_grad:
