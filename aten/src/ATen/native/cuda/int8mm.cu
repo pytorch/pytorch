@@ -77,8 +77,11 @@ at::Tensor _weight_int8pack_mm_cuda(
   auto B = x.size(0); // batch size
   auto N = w_int8.size(0); // output dim
 
-  // Ensure inputs are in the correct types for the kernel
-  auto x_f32 = x.to(at::kFloat);
+  // Ensure inputs are in the correct types for the kernel.
+  // The kernel indexes x as x[b*K + k] with no stride parameter, so the
+  // activation must be contiguous. .to() preserves strides on a same-layout
+  // copy, so an explicit .contiguous() is required after the dtype cast.
+  auto x_f32 = x.to(at::kFloat).contiguous();
   auto w_int8_contiguous = w_int8.contiguous();
   auto scale_f32 = scale.to(at::kFloat);
 
