@@ -60,6 +60,7 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import BoxedBool, should_use_remote_fx_graph_cache
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import LazyString
+from torch._subclasses.meta_utils import safe_is_leaf
 from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import (
     CacheArtifact,
@@ -812,15 +813,17 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
         if hasattr(tensor, "_stable_hash_for_caching"):
-            return (_ident, (tensor._stable_hash_for_caching(),))
-        if is_traceable_wrapper_subclass(tensor):
+            stable_hash = tensor._stable_hash_for_caching()
+        elif is_traceable_wrapper_subclass(tensor):
             warn_once(
                 f"{type(tensor).__name__} does not implement _stable_hash_for_caching. "
                 "For PT2-compatible tensor subclasses, it is recommended to implement "
                 "_stable_hash_for_caching(self) -> str for stable AOT autograd caching."
             )
-            return (_ident, (self._default_stable_hash_for_caching(tensor),))
-        return self._reduce_tensor(tensor)
+            stable_hash = self._default_stable_hash_for_caching(tensor)
+        else:
+            return self._reduce_tensor(tensor)
+        return (_ident, ((stable_hash, _receiving_grad_dtype(tensor)),))
 
     def _collect_inner_tensor_hashes(
         self, tensor: torch.Tensor, inner_tensor_names: Sequence[str]
@@ -907,7 +910,13 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         Reduce the tensor to a stable key for caching.
         """
         metadata = extract_tensor_metadata_for_cache_key(t)
-        return (_ident, (metadata,))
+        return (_ident, ((metadata, _receiving_grad_dtype(t)),))
+
+
+def _receiving_grad_dtype(t: torch.Tensor) -> torch.dtype | None:
+    # The traced backward casts to this, so it is part of the key; matches
+    # the TENSOR_MATCH guard, where only a leaf carries a grad_dtype policy.
+    return t.grad_dtype if t.requires_grad and safe_is_leaf(t) else t.dtype
 
 
 @contextlib.contextmanager
