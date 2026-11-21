@@ -197,7 +197,8 @@ What ends a path:
 - behind an operation that writes to a tensor from outside the path or draws
   random numbers: whatever a form would have to check behind what was made
   of the graph, and such an operation behind a check of that kind ("Writes"
-  below); with `Graphs()` alone, an operation that draws random numbers;
+  below); with `Graphs()` alone, an operation that draws random numbers (a
+  dropout that is told not to drop draws none);
 - a store into an object that would run Python code, and a read of a list
   or a dict that a store of the path changed ("Stores into objects");
 - a number read from a tensor (`x.item()`, `float(x)`), and with it a branch
@@ -1814,6 +1815,59 @@ with torch.no_grad():
 (found,) = [found for found in torch.vm.regions(g) if "ops" in found]
 same, found["ops"], found["why"]  # (True, 8, 'the function returns')
 ```
+
+### Texts and sequences on a path
+
+What a function computes with its plain values is part of a path too, where
+C code alone does it. Turning a value into text is: an f-string, `format`
+and `%` on a number, a text, `None`, a dtype or a device, and on a list or a
+tuple of those, the sizes of a tensor among them; so are the methods of a
+number, a text or a tuple of such on such values (`note.startswith("torch")`).
+What a tensor holds is not text a path makes (`f"{y.sum()}"` ends it).
+Putting sequences together is on a path as well: `+` on two texts, two lists
+or two tuples, `*` with a whole number, and a list that is extended by a list
+or a tuple (`(*y.shape[:-1], 2, -1)`, `y.shape[:-1] + (h, w)`, `[1] * n`). A
+list, a tuple or a slice made of nothing but sizes of what the graph computes
+and of constants is the same in every call that a form is for, as a single
+size is, so an operation takes it as a constant of the graph. `a += b` on a
+list is no instruction of a path: it changes the list, which may be the
+caller's. A layer that checks what it is given with a message, as the norm
+layers of vision libraries do, is one graph:
+
+```python
+class Guarded(torch.nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(channels, channels, 3, padding=1, bias=False)
+        self.bn = torch.nn.BatchNorm2d(channels)
+        self.drop = torch.nn.Dropout(0.2)
+
+    def forward(self, x):
+        y = self.conv(x)
+        torch._assert(y.ndim == 4, f"expected 4D input (got {y.ndim}D input)")
+        y = self.drop(torch.relu(self.bn(y)))
+        return y.view((*y.shape[:-1], 2, -1)).sum(-1)
+
+
+model = Guarded(4).eval()
+g = torch.vm(model, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs()))
+images = torch.randn(2, 4, 8, 8)
+with torch.no_grad():
+    for _ in range(4):
+        same = torch.equal(g(images), model(images))
+same, [(found["ops"], found.get("why"), found.get("reason")) for found in torch.vm.regions(g)]
+# (True, [(6, 'the function returns', None)])
+try:
+    g(torch.randn(4, 8, 8))
+except AssertionError as error:
+    said = str(error)
+said  # 'expected 4D input (got 3D input)'
+```
+
+The dropout of the layer is among the six operations: a dropout of a model
+that is not training drops nothing and draws nothing, and is an operation
+like any other, with `Graphs()` alone as well ("Writes" has what one that
+drops is).
 
 ### The order of the list
 

@@ -883,7 +883,7 @@ pub unsafe fn same_value(a: Obj, b: Obj) -> bool {
     if ffi::PyFloat_CheckExact(a) != 0 {
         return ffi::PyFloat_AS_DOUBLE(a).to_bits() == ffi::PyFloat_AS_DOUBLE(b).to_bits();
     }
-    if a == b && ffi::PyTuple_CheckExact(a) == 0 && ffi::PyList_CheckExact(a) == 0 && ffi::PySlice_Check(a) == 0 {
+    if a == b && !is_row(a) && ffi::PySlice_Check(a) == 0 {
         return true;
     }
     if ffi::PyLong_CheckExact(a) != 0 {
@@ -908,8 +908,7 @@ pub unsafe fn same_value(a: Obj, b: Obj) -> bool {
     if is_token(a) {
         return ffi::PyObject_RichCompareBool(a, b, ffi::Py_EQ) == 1;
     }
-    let sequence = ffi::PyTuple_CheckExact(a) != 0 || ffi::PyList_CheckExact(a) != 0;
-    if !sequence || ffi::PyObject_Size(a) != ffi::PyObject_Size(b) {
+    if !is_row(a) || ffi::PyObject_Size(a) != ffi::PyObject_Size(b) {
         return false;
     }
     (0..ffi::PyObject_Size(a)).all(|i| same_value(sequence_item(a, i), sequence_item(b, i)))
@@ -936,7 +935,7 @@ pub unsafe fn frozen(o: Obj) -> PyObj {
         }
         return PyObj::from_owned(ffi::PySlice_New(kept[0].as_ptr(), kept[1].as_ptr(), kept[2].as_ptr()));
     }
-    if ffi::PyTuple_CheckExact(o) == 0 && ffi::PyList_CheckExact(o) == 0 {
+    if !is_row(o) {
         return PyObj::from_borrowed(o);
     }
     let count = ffi::PyObject_Size(o);
@@ -956,8 +955,56 @@ pub unsafe fn frozen(o: Obj) -> PyObj {
     PyObj::from_owned(copy)
 }
 
+/// A list or a tuple, or a tuple of a class that is defined in C and
+/// compares as a tuple does (a `torch.Size`): what holds its items as a
+/// tuple or a list does, and runs no Python code to give them out.
+pub unsafe fn is_row(o: Obj) -> bool {
+    if capi::is_unboxed(o) {
+        return false;
+    }
+    if ffi::PyTuple_CheckExact(o) != 0 || ffi::PyList_CheckExact(o) != 0 {
+        return true;
+    }
+    let (ty, tuple) = (ffi::Py_TYPE(o), std::ptr::addr_of!(ffi::PyTuple_Type));
+    ffi::PyTuple_Check(o) != 0
+        && is_static(ty)
+        && (*ty).tp_richcompare.map(|f| f as usize) == (*tuple).tp_richcompare.map(|f| f as usize)
+}
+
+/// Whether a value is turned into text by C code alone (`str`, `repr`,
+/// `format`): a number, a text, None, a dtype or a device, and a list or
+/// tuple of such.
+pub unsafe fn quiet_text(o: Obj) -> bool {
+    if o.is_null() || capi::is_unboxed(o) {
+        return false;
+    }
+    is_plain(o) || is_token(o) || (is_row(o) && (0..ffi::PyObject_Size(o)).all(|i| quiet_text(sequence_item(o, i))))
+}
+
+/// Whether `a op b` runs no Python code: on numbers; on two texts; on two
+/// lists or two tuples (one after the other); on a list, a tuple or a text
+/// and a whole number (so many times); on a text and what it formats
+/// (`"%d" % n`). Not `a op= b` on a list, which changes the list.
+pub unsafe fn quiet_binary(kind: u8, a: Obj, b: Obj) -> bool {
+    // The kinds of `op=`, as the interpreter numbers them.
+    const IN_PLACE: u8 = 13;
+    if a.is_null() || b.is_null() || capi::is_unboxed(a) || capi::is_unboxed(b) {
+        return false;
+    }
+    if kind >= IN_PLACE && ffi::PyList_Check(a) != 0 {
+        return false;
+    }
+    let text = |o: Obj| ffi::PyUnicode_CheckExact(o) != 0;
+    let whole = |o: Obj| ffi::PyLong_CheckExact(o) != 0;
+    (is_number(a) && is_number(b))
+        || (text(a) && (text(b) || quiet_text(b)))
+        || (is_row(a) && is_row(b) && (ffi::PyList_Check(a) != 0) == (ffi::PyList_Check(b) != 0))
+        || ((is_row(a) || text(a)) && whole(b))
+        || (whole(a) && (is_row(b) || text(b)))
+}
+
 pub unsafe fn sequence_item(s: Obj, i: isize) -> Obj {
-    if ffi::PyTuple_CheckExact(s) != 0 {
+    if ffi::PyTuple_Check(s) != 0 {
         ffi::PyTuple_GET_ITEM(s, i)
     } else {
         ffi::PyList_GET_ITEM(s, i)
@@ -994,8 +1041,7 @@ pub unsafe fn checkable(o: Obj) -> bool {
             fine
         });
     }
-    let sequence = ffi::PyTuple_CheckExact(o) != 0 || ffi::PyList_CheckExact(o) != 0;
-    sequence && (0..ffi::PyObject_Size(o)).all(|i| checkable(sequence_item(o, i)))
+    is_row(o) && (0..ffi::PyObject_Size(o)).all(|i| checkable(sequence_item(o, i)))
 }
 
 /// What `len` may be given by a `__len__`: an exact int that is not
@@ -1731,9 +1777,24 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
         let function = callee as *mut ffi::PyCFunctionObject;
         let (state, math, operator) = quiet_modules();
         let of = (*function).m_self as usize;
+        let name = std::ffi::CStr::from_ptr((*(*function).m_ml).ml_name);
+        // One that `torch._C` has under its name, however it is bound.
+        let asks = ASKS.iter().any(|asks| name.to_bytes().starts_with(asks));
+        if asks && of != state && state != 0 {
+            let found = ffi::PyObject_GetAttrString(state as Obj, name.as_ptr());
+            ffi::PyErr_Clear();
+            xdecref(found);
+            if found == callee {
+                return Some(false);
+            }
+        }
         if of != 0 && of == state {
-            let name = std::ffi::CStr::from_ptr((*(*function).m_ml).ml_name).to_bytes();
-            return ASKS.iter().any(|asks| name.starts_with(asks)).then_some(false);
+            return asks.then_some(false);
+        }
+        // A method of a number, a text or a tuple of such, on such values:
+        // they cannot change, and what their classes do is written in C.
+        if of != 0 && unchanging(of as Obj) {
+            return args.iter().all(|o| quiet_text(*o)).then_some(false);
         }
         if of != 0 && of == math {
             return args.iter().all(|o| is_number(*o)).then_some(false);
@@ -1804,9 +1865,20 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
     ))
 }
 
+/// A number, a text, bytes, or a tuple of numbers and texts: a value that
+/// cannot change, whose methods are written in C.
+unsafe fn unchanging(o: Obj) -> bool {
+    !capi::is_unboxed(o)
+        && (is_number(o)
+            || ffi::PyUnicode_CheckExact(o) != 0
+            || ffi::PyBytes_CheckExact(o) != 0
+            || (ffi::PyTuple_CheckExact(o) != 0 && quiet_text(o)))
+}
+
 /// Whether a call of a method runs no Python code, no kernel, and changes
 /// nothing: what a dict has, as a view or under a key; what a tensor says
-/// of itself.
+/// of itself; any method of a number, a text or a tuple of such on such
+/// values (`unchanging`).
 pub unsafe fn pure_method(recv: Obj, name: Obj, args: &[Obj], api: &TcfgApi) -> bool {
     const SAYS: [&str; 8] =
         ["size", "dim", "ndimension", "numel", "nelement", "is_floating_point", "is_complex", "element_size"];
@@ -1819,7 +1891,13 @@ pub unsafe fn pure_method(recv: Obj, name: Obj, args: &[Obj], api: &TcfgApi) -> 
         let ints = args.iter().all(|o| !capi::is_unboxed(*o) && ffi::PyLong_CheckExact(*o) != 0);
         return SAYS.contains(&name.as_str()) && args.len() <= 1 && ints;
     }
-    if capi::is_unboxed(recv) || !is_plain_dict(recv) {
+    if capi::is_unboxed(recv) {
+        return false;
+    }
+    if unchanging(recv) {
+        return args.iter().all(|o| quiet_text(*o));
+    }
+    if !is_plain_dict(recv) {
         return false;
     }
     match name.as_str() {
@@ -2167,6 +2245,11 @@ pub fn shaped_operator(name: &str) -> bool {
     known.borrow_mut().insert(name.to_string(), shaped);
     shaped
 }
+
+/// The operators that drop elements at random where they are told to, and
+/// give back what they were handed where they are not (their last
+/// argument).
+pub const DROPOUTS: [&str; 4] = ["aten::dropout", "aten::feature_dropout", "aten::alpha_dropout", "aten::feature_alpha_dropout"];
 
 /// Whether an operator has no kernel of its own and is made of other
 /// operators (`aten::conv2d`; `aten::argwhere`, which is `aten::nonzero`):
@@ -3330,8 +3413,20 @@ fn role(unit: &Unit, cx: &PassCx, i: usize) -> Role {
     let quiet = facts(cx, unit, i).is_some_and(|f| f.quiet());
     let wrote = facts(cx, unit, i).is_some_and(|f| f.wrote);
     let numbers = |vs: &[V]| vs.iter().all(|v| number(cx, unit, *v));
+    // A dropout that was told not to drop anything whenever it was looked
+    // at (a model that is not training) draws nothing.
+    let idle = |d: &DispatchOp| {
+        let dropout = unsafe { d.slot.operator() }.is_some_and(|name| DROPOUTS.contains(&name.as_str()));
+        let off = d.operands.last().is_some_and(|train| {
+            let never = matches!(cx.obs.get(*train as usize), Some(crate::spec::ValueObs::Bool { seen_true: 0, .. }));
+            let no = matches!(unit.def_op(*train), Some(Op::Const(c)) if cx.func().consts[*c as usize].as_ptr() == unsafe { ffi::Py_False() });
+            never || no
+        });
+        dropout && off
+    };
     let kind = match &unit.insts[i].inst.op {
         Op::Dispatch(d) if d.slot.traits() == 0 && d.slot.len() > 0 && !wrote => Some(Kind::Node),
+        Op::Dispatch(d) if d.slot.traits() == capi::SITE_RANDOM && d.slot.len() > 0 && idle(d) => Some(Kind::Node),
         Op::Call { .. } | Op::CallMethod { .. } | Op::GetItem(..) if generic(unit, cx, i) => Some(Kind::Node),
         Op::Const(_)
         | Op::TensorSize { .. }
@@ -3410,7 +3505,7 @@ pub fn infallible(op: &Op) -> bool {
 }
 
 /// A list, a tuple or a slice that the instructions make.
-fn container(op: &Op) -> bool {
+pub fn container(op: &Op) -> bool {
     matches!(op, Op::BuildTuple(_) | Op::BuildList(_) | Op::BuildSlice(..))
 }
 
@@ -4385,6 +4480,8 @@ pub fn renamed(op: &Op, f: &mut impl FnMut(V) -> V) -> Option<Op> {
         Op::DictMerge(a, b, c) => Op::DictMerge(f(*a), f(*b), f(*c)),
         Op::MapAdd(a, b, c) => Op::MapAdd(f(*a), f(*b), f(*c)),
         Op::ListToTuple(a) => Op::ListToTuple(f(*a)),
+        Op::Format { val, conv, spec } => Op::Format { val: f(*val), conv: *conv, spec: if *spec == NONE { NONE } else { f(*spec) } },
+        Op::BuildString(vs) => Op::BuildString(all(vs)),
         Op::Unpack(a, n) => Op::Unpack(f(*a), *n),
         Op::TupleGet(a, i) => Op::TupleGet(f(*a), *i),
         Op::GetLen(a) => Op::GetLen(f(*a)),
