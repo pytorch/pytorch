@@ -96,6 +96,7 @@ pub enum Cond {
 
 /// What a callable made for a tensor depends on, but for its sizes and
 /// strides: those are numbers of the form (`Exported::sizes`).
+#[derive(PartialEq)]
 pub struct Row {
     /// The type of its Python object, and that type's version.
     pub ty: usize,
@@ -133,6 +134,12 @@ pub struct Exported {
     /// exported, for the reason `closed` gives: such a call runs the
     /// instructions, and is not recorded again.
     pub callable: Option<PyObj>,
+    /// For a form that was closed because numbers were new at every call
+    /// (`GraphSite::ever_new`): where those numbers are, what they were at
+    /// the last call of the kind, and how many calls in a row had them.
+    pub varying: Vec<PathValue>,
+    pub last: Shared<Vec<PyObj>>,
+    pub repeats: AtomicU32,
     pub closed: Option<String>,
     /// It has returned once. Until then, a call of it that raises is taken
     /// back: the instructions run instead.
@@ -216,6 +223,18 @@ pub struct Left {
 /// the VM.
 const MAX_UNSURE: u32 = 3;
 
+/// How many exported forms that differ in nothing but numbers, and of
+/// which none ever ran again, say that the numbers are new on every call.
+/// Three: the layers of a model that call one function with two or three
+/// settings each keep their forms.
+const EVER_NEW: usize = 3;
+
+pub const EVER_NEW_REASON: &str = "its inputs take ever new values";
+
+/// How many calls in a row with the same numbers reopen a kind of call that
+/// was closed for numbers that are new every time.
+pub const SETTLED: u32 = 3;
+
 /// A graph of one version of a block.
 pub struct GraphSite {
     /// The function, the block, and the generic instructions from the first
@@ -285,6 +304,42 @@ impl GraphSite {
 
     pub fn sure(&self) {
         self.unsure.store(0, Ordering::Relaxed);
+    }
+
+    /// Whether a run that is about to be exported is one more of a kind of
+    /// call whose numbers are new every time: `EVER_NEW` forms differ from
+    /// it in nothing but numbers, and none of them ever ran again. Those
+    /// forms are then dropped, and the checks that had the numbers are
+    /// returned: the form made of the others has every call of the kind
+    /// run the instructions.
+    pub unsafe fn ever_new(
+        &self,
+        path: &Path,
+        world: (u64, u64, u64, u64),
+        checks: &[Check],
+        sizes: &[i64],
+    ) -> Option<Vec<usize>> {
+        let mut forms = path.exported.borrow_mut();
+        let alike: Vec<(usize, Vec<usize>)> = forms
+            .iter()
+            .enumerate()
+            .filter(|(_, form)| form.callable.is_some())
+            .filter_map(|(k, form)| Some((k, form.other_numbers(world, checks, sizes)?)))
+            .filter(|(_, numbers)| !numbers.is_empty())
+            .collect();
+        let ran = alike.iter().any(|(k, _)| forms[*k].hits.load(Ordering::Relaxed) > 0);
+        if alike.len() < EVER_NEW || ran {
+            return None;
+        }
+        let mut varying: Vec<usize> = alike.iter().flat_map(|(_, numbers)| numbers.iter().copied()).collect();
+        varying.sort_unstable();
+        varying.dedup();
+        let mut at = 0;
+        forms.retain(|_| {
+            at += 1;
+            !alike.iter().any(|(k, _)| *k == at - 1)
+        });
+        Some(varying)
     }
 
     /// Hands a description to the exporter. It returns the callable and the
@@ -1472,6 +1527,36 @@ impl Path {
 }
 
 impl Exported {
+    /// For a form of the same kind of call as these checks describe that
+    /// differs from them in nothing but numbers: which of the checks have
+    /// another number. None for a form of another kind.
+    unsafe fn other_numbers(&self, world: (u64, u64, u64, u64), checks: &[Check], sizes: &[i64]) -> Option<Vec<usize>> {
+        let same = (self.modes, self.included, self.excluded, self.state) == world && self.sizes.holds_numbers(sizes);
+        if !same || self.checks.len() != checks.len() {
+            return None;
+        }
+        let number = |o: Obj| ffi::PyFloat_CheckExact(o) != 0 || ffi::PyLong_CheckExact(o) != 0;
+        let mut others = Vec::new();
+        for (i, (mine, theirs)) in self.checks.iter().zip(checks).enumerate() {
+            if mine.target != theirs.target {
+                return None;
+            }
+            match (&mine.cond, &theirs.cond) {
+                (Cond::Is(a), Cond::Is(b)) if a.as_ptr() == b.as_ptr() => {}
+                (Cond::Type(a), Cond::Type(b)) if a.as_ptr() == b.as_ptr() => {}
+                (Cond::Tensor(a), Cond::Tensor(b)) if a == b => {}
+                (Cond::ValueEq(a), Cond::ValueEq(b)) if same_value(a.as_ptr(), b.as_ptr()) => {}
+                (Cond::ValueEq(a), Cond::ValueEq(b))
+                    if number(a.as_ptr()) && ffi::Py_TYPE(a.as_ptr()) == ffi::Py_TYPE(b.as_ptr()) =>
+                {
+                    others.push(i)
+                }
+                _ => return None,
+            }
+        }
+        Some(others)
+    }
+
     /// What its checks ask of a call, as text.
     pub unsafe fn conditions(&self, func: &Function) -> Vec<String> {
         const DTYPES: [&str; 12] = [

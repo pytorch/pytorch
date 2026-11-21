@@ -132,7 +132,9 @@ class Graphs(BuiltinPass):
     What an operation takes of the values the function reads (a number kept
     by a module, a global, a variable of an enclosing function) is checked
     on every call, where the graph takes it: a call that finds another
-    value is not run by what was exported for the old one. What the
+    value is not run by what was exported for the old one. A number that is
+    another on every call (a rate on a schedule) is exported three times and
+    no more: the calls of that kind then run the operations as they are. What the
     function does between its operations runs in front of what was exported
     or behind it only where that runs no Python code; a read that would call
     a property or a ``__getattr__`` leaves the graph to the engine.
