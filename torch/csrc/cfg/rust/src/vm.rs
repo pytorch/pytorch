@@ -134,6 +134,11 @@ struct SettledBlocks {
     blocks: Vec<std::cell::Cell<Settled>>,
     calls: std::cell::Cell<u64>,
     trial: std::cell::Cell<Trial>,
+    /// For the function that was handed to torch.vm: whether calls
+    /// below its last call were part of a measurement (`watched`), and
+    /// whether they took a noticeable part of it (`below`).
+    watched: std::cell::Cell<bool>,
+    below: std::cell::Cell<bool>,
 }
 
 /// Whether a callee is worth running compiled is measured, not assumed: the
@@ -238,6 +243,14 @@ static PLAN_EPOCH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::
 /// Counts the calls that are part of a measurement: a sample during which
 /// it did not move had nothing below it that was still being measured.
 static TRIAL_EVENTS: AtomicU64 = AtomicU64::new(0);
+/// How many of them are under way, one inside the other, and the time the
+/// outermost ones have taken.
+static TRIAL_DEPTH: AtomicU64 = AtomicU64::new(0);
+static TRIAL_TIME: AtomicU64 = AtomicU64::new(0);
+/// Measurements below a function are worth mentioning when the calls they
+/// are made of take more than 1/64 of a call of it: what they decide cannot
+/// change its time by much more than that.
+const TRIAL_NOTICEABLE_SHIFT: u32 = 6;
 
 pub fn plan_changed() {
     PLAN_EPOCH.fetch_add(1, Ordering::Relaxed);
@@ -1133,6 +1146,8 @@ impl Compiled {
                 blocks: (0..generic.len()).map(|_| std::cell::Cell::new(Settled { code: std::ptr::null(), specialized: false, entries: 0 })).collect(),
                 calls: std::cell::Cell::new(0),
                 trial: std::cell::Cell::new(Trial::start(PLAN_EPOCH.load(Ordering::Relaxed))),
+                watched: std::cell::Cell::new(false),
+                below: std::cell::Cell::new(false),
             },
             generic,
             state: Shared::new(state),
@@ -1769,13 +1784,35 @@ impl Compiled {
     /// `call` for the function that was handed to torch.vm, which
     /// is measured against the interpreter as its callees are.
     pub unsafe fn call_measured(&self, function: Obj, args: Obj, kwargs: Obj) -> Obj {
-        let phase = self.settled.trial.get().phase;
-        if phase == TRIAL_COMPILED || !self.options.demote {
+        if !self.options.demote {
             return self.call(function, args, kwargs);
         }
+        let phase = self.settled.trial.get().phase;
+        if phase == TRIAL_COMPILED {
+            // The clock is read for a call only if something below the one
+            // before it was being measured.
+            let start = self.settled.watched.get().then(std::time::Instant::now);
+            let events = TRIAL_EVENTS.load(Ordering::Relaxed);
+            let measured = TRIAL_TIME.load(Ordering::Relaxed);
+            let result = self.call(function, args, kwargs);
+            let watched = TRIAL_EVENTS.load(Ordering::Relaxed) != events;
+            // Without the clock, it is not known how much of the call it was.
+            let below = watched
+                && start.is_none_or(|start| {
+                    let measured = TRIAL_TIME.load(Ordering::Relaxed) - measured;
+                    measured > start.elapsed().as_nanos() as u64 >> TRIAL_NOTICEABLE_SHIFT
+                });
+            self.settled.watched.set(watched);
+            self.settled.below.set(below);
+            return result;
+        }
         if phase == TRIAL_DEMOTED {
+            self.settled.below.set(false);
             return ffi::PyObject_Call(function, args, kwargs);
         }
+        // Not known before a call that is not itself part of a measurement.
+        self.settled.watched.set(true);
+        self.settled.below.set(true);
         self.trial_call(
             self,
             null_mut(),
@@ -1784,10 +1821,13 @@ impl Compiled {
         )
     }
 
-    /// Whether it is still open which of the two this function is run as.
+    /// Whether it is still open which of the two this function is run as,
+    /// or was, during its last call, for calls below it that took a
+    /// noticeable part of it: its calls are not yet as fast as they will be.
     pub fn is_measuring(&self) -> bool {
         let phase = self.settled.trial.get().phase;
-        self.options.demote && (phase == TRIAL_WARMUP || phase == TRIAL_SAMPLING)
+        let open = phase == TRIAL_WARMUP || phase == TRIAL_SAMPLING;
+        self.options.demote && (open || self.settled.below.get())
     }
 
     /// Whether this function was measured to run faster in the interpreter
@@ -1816,6 +1856,27 @@ impl Compiled {
 
     #[inline(never)]
     unsafe fn trial_call(
+        &self,
+        compiled: *const Compiled,
+        func: Obj,
+        run_compiled: impl FnOnce() -> Obj,
+        run_interpreted: impl FnOnce() -> Obj,
+    ) -> Obj {
+        if (*compiled).settled.trial.get().phase == TRIAL_DEMOTED {
+            return run_interpreted();
+        }
+        // What is measured inside a call that is measured is part of it.
+        let outermost = TRIAL_DEPTH.fetch_add(1, Ordering::Relaxed) == 0;
+        let start = std::time::Instant::now();
+        let result = self.trial_sample(compiled, func, run_compiled, run_interpreted);
+        TRIAL_DEPTH.fetch_sub(1, Ordering::Relaxed);
+        if outermost {
+            TRIAL_TIME.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+        result
+    }
+
+    unsafe fn trial_sample(
         &self,
         compiled: *const Compiled,
         func: Obj,
