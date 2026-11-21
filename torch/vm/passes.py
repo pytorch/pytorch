@@ -17,6 +17,7 @@ __all__ = [
     "Fold",
     "Inline",
     "MethodCalls",
+    "ModuleShortcuts",
     "NarrowDims",
     "ResolveDispatch",
     "TensorAccessors",
@@ -55,6 +56,19 @@ class Unroll(BuiltinPass):
     :class:`Inline`."""
 
     engine: ClassVar[str] = "unroll"
+    kind: ClassVar[str] = "cfg"
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class ModuleShortcuts(BuiltinPass):
+    """The code of ``nn.Module`` in front of every call of a module and every read
+    of a parameter, buffer or submodule is skipped whenever a few checks show
+    what it would do: a call of a module without hooks goes straight to its
+    ``forward``, and the three dicts are looked at without calling
+    ``Module.__getattr__``. ``Module.__call__`` then does not appear on the
+    stack."""
+
+    engine: ClassVar[str] = "shortcuts"
     kind: ClassVar[str] = "cfg"
 
 
