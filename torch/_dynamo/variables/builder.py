@@ -130,6 +130,7 @@ from ..guards import (
     install_builtin_method_guard,
     install_guard,
     make_dupe_guard,
+    record_lexical_alias,
 )
 from ..pgo import (
     auto_dynamic,
@@ -1274,6 +1275,9 @@ class VariableBuilder:
             return None
 
         if self.source != result.source:
+            tracer = self.tx.output.current_tracer
+            if tracer.in_nested_compile_region:
+                record_lexical_alias(tracer.lexical_sources, self.source, result.source)
             dup_guard = make_dupe_guard(self.source, result.source)
             if dup_guard is not None:
                 self.install_guards(dup_guard)

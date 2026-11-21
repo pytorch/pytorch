@@ -106,6 +106,7 @@ from torch._dynamo.source import (
     is_from_local_source,
     is_from_optimizer_source,
     is_from_skip_guard_source,
+    is_from_source,
     is_from_unspecialized_builtin_nn_module_source,
     TensorProperty,
     TensorPropertySource,
@@ -1727,6 +1728,7 @@ class GuardBuilder(GuardBuilderBase):
         self.no_tensor_aliasing_names: list[str] = []
         self.no_tensor_aliasing_sources: list[Source] = []
         self.no_tensor_aliasing_guard_managers: list[GuardManager] = []
+        self.has_metadata_only_tensor = False
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
@@ -1758,6 +1760,7 @@ class GuardBuilder(GuardBuilderBase):
         # Save the guard managers to avoid repeatedly traversing sources.
         self._cached_guard_managers: dict[str, GuardManager] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
+        self._cached_distinct_inputs: set[frozenset[Source]] = set()
         self.object_aliasing_guard_codes: list[tuple[str, str]] = []
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
@@ -2590,13 +2593,13 @@ class GuardBuilder(GuardBuilderBase):
         # code_parts in a function object which is then passed on to the leaf
         # guard.
         make_guard_fn_args = ", ".join(closure_vars.keys())
-        _guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
+        pycode, code = _compile_guard(tuple(code_parts), make_guard_fn_args)
         out: dict[str, Any] = {}
         # The dict the C++ globals tree is rooted at, so a G['NAME'] in a lambda
         # guard and in an accessor guard read the same scope on a loaded artifact.
         globals_for_guard_fn = {"G": self.runtime_global_scope}
         guards_log.debug("Python shape guard function:\n%s", pycode)
-        exec(pycode, globals_for_guard_fn, out)
+        exec(code, globals_for_guard_fn, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         if is_epilogue:
             # Epilogue guards are run after all the other guards have finished.
@@ -3867,7 +3870,8 @@ class GuardBuilder(GuardBuilderBase):
                     self.check_fn_manager.additional_used_global_vars.add(name)
         refs = ", ".join(self.arg_ref(source.name) for source in sources)
         code = [f"___receiver_alias_pattern(({refs},)) == {aliases!r}"]
-        self._set_guard_export_info(guard, code)
+        name = guard.create_fn_name()
+        self._set_guard_export_info(guard, code, provided_func_name=name)
         install_object_alias_pattern_guard(
             [self.get_guard_manager_from_source(source) for source in sources],
             aliases,
@@ -3878,7 +3882,21 @@ class GuardBuilder(GuardBuilderBase):
     # Multi-source guard (two inputs aliasing) — not expressible as a
     # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
-    @skip_guard_check_spec
+    _identity_check_spec = register_guard_check_spec(
+        get_metadata_fn=lambda guard, values: values[0] is values[1],
+        eval_fn=lambda values, expected: (values[0] is values[1]) == expected,
+        get_extra_sources_fn=lambda g: (_guard_create_fn_keyword(g, "source_b"),),
+    )
+
+    @_identity_check_spec
+    def NOT_DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
+        pair = (guard.originating_source, source_b)
+        key = frozenset(pair)
+        if key not in self._cached_distinct_inputs:
+            self._cached_distinct_inputs.add(key)
+            self.BUILTIN_METHOD_RECEIVER_ALIAS(guard, pair, (0, 1))
+
+    @_identity_check_spec
     def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
         if is_from_skip_guard_source(
             guard.originating_source
@@ -4519,6 +4537,9 @@ class GuardBuilder(GuardBuilderBase):
                 metadata = output_graph.input_source_to_sizes_strides[
                     guard.originating_source
                 ]
+                self.has_metadata_only_tensor |= metadata.get(
+                    "needs_alias_check", False
+                )
                 size = convert_to_concrete_values(metadata["size"])
                 stride = convert_to_concrete_values(metadata["stride"])
                 device_index_is_current = _guard_device_index_is_current(
@@ -6842,7 +6863,19 @@ class CheckFunctionManager:
         check_tensors_fn = None
         check_tensors_verbose_fn = None
 
-        if len(no_tensor_aliasing_names) > 1:
+        aliases = ()
+        if builder.has_metadata_only_tensor:
+            # A metadata-only source can share an input without VariableBuilder deduplication.
+            tensors = map(builder.get, builder.no_tensor_aliasing_sources)
+            aliases = _receiver_alias_pattern(tuple(tensors))
+        if aliases and len(set(aliases)) != len(aliases):
+            code = (
+                f"check tensor alias pattern {aliases} for {no_tensor_aliasing_names}"
+            )
+            install_object_alias_pattern_guard(
+                builder.no_tensor_aliasing_guard_managers, aliases, [code], None
+            )
+        elif len(no_tensor_aliasing_names) > 1:
             # Install tensor aliasing guard. TENSOR_MATCH guards are already
             # installed for cpp guard manager.
             install_no_tensor_aliasing_guard(
@@ -7059,6 +7092,12 @@ def build_guard_function(code_parts: list[str], closure_args: str) -> tuple[str,
         make_guard_fn.writeline("return guard")
 
     return guard_body.getvalue(), make_guard_fn.getvalue()
+
+
+@functools.lru_cache(32)
+def _compile_guard(parts: tuple[str, ...], args: str) -> tuple[str, types.CodeType]:
+    _, source = build_guard_function(list(parts), args)
+    return source, compile(source, "<string>", "exec")
 
 
 def is_recompiles_enabled() -> bool:
@@ -7600,6 +7639,27 @@ def unique(seq: Sequence[T]) -> Generator[T, None, None]:
         if x not in seen:
             yield x
             seen.add(x)
+
+
+def guard_mixed_scope_alias(left: Source, right: Source) -> None:
+    # make_dupe_guard cannot relate a local argument to a preloaded global.
+    if is_from_local_source(left) != is_from_local_source(right):
+        install_guard(
+            left.make_guard(
+                functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=right)
+            )
+        )
+
+
+def record_lexical_alias(
+    reads: set[tuple[Source, int]], source: Source | None, canonical: Source | None
+) -> None:
+    if source is None or canonical is None or source == canonical:
+        return
+    guard_mixed_scope_alias(source, canonical)
+    for read, scope in reads.copy():
+        if is_from_source(source, read) or is_from_source(canonical, read):
+            reads.update(((source, scope), (canonical, scope)))
 
 
 def make_dupe_guard(

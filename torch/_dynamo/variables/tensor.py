@@ -1387,6 +1387,8 @@ class TensorVariable(VariableTracker):
 
         source = TensorPropertySource(self.source, TensorProperty.STORAGE_OFFSET)
         install_guard(source.make_guard(GuardBuilder.EQUALS_MATCH))
+        # ConstantVariable bypasses VariableBuilder's traced-source registration.
+        tx.output.current_tracer.traced_sources.add(source)
         # The guard pins the entry value, even if the graph later mutates the tensor.
         return ConstantVariable.create(storage_offset)
 

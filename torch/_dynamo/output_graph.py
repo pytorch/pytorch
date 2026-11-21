@@ -227,6 +227,7 @@ OutputReturnKind = Literal["graph_out", "input", "constant"]
 class SizesStridesInfo(TypedDict):
     size: TensorMetadataSequence
     stride: TensorMetadataSequence
+    needs_alias_check: NotRequired[bool]
     values_size: NotRequired[TensorMetadataSequence]
     values_stride: NotRequired[TensorMetadataSequence]
 
@@ -1748,6 +1749,15 @@ class OutputGraph(OutputGraphCommon):
             )
             self.tracers.append(tracer)
             yield tracer
+            # Successful ordinary HOP traces contribute to enclosing reuse conditions.
+            if tracer.parent is not None and tracer.parent.tracks_lexical_sources:
+                tracer.parent.has_container_identity |= tracer.has_container_identity
+                tracer.parent.traced_sources.update(tracer.traced_sources)
+                tracer.parent.lexical_sources.update(
+                    item
+                    for item in tracer.lexical_sources
+                    if item[1] <= tracer.parent.debug_level
+                )
         finally:
             new_scope_ctx.__exit__(None, None, None)
             self.tracers.pop()
@@ -4264,6 +4274,7 @@ class SubgraphTracer(fx.Tracer):
         # map's keys give all current placeholder node names and can be used to
         # create unique node names
         self.input_name_to_proxy: dict[str, fx.Proxy] = {}
+        self.reused_subgraph_proxies: dict[str, fx.Proxy] = {}
         # Node => computed real value (see utils.get_real_value)
         self.real_value_cache: dict[fx.Node, torch.Tensor] = {}
         # [device-as-parameter] the single coor::current_device_index observation
@@ -4322,6 +4333,15 @@ class SubgraphTracer(fx.Tracer):
         # this subtracer's trace. Used by invoke_subgraph reuse to collect
         # guards and detect mutations on captured variables.
         self.traced_sources: OrderedSet[Source] = OrderedSet()
+        self.in_nested_compile_region = (
+            source_target is torch._higher_order_ops.invoke_subgraph
+            or (parent is not None and parent.in_nested_compile_region)
+        )
+        self.tracks_lexical_sources = (
+            parent is not None and parent.tracks_lexical_sources
+        )
+        self.lexical_sources: set[tuple[Source, int]] = set()
+        self.has_container_identity = False
         self.has_builtin_method_identity = False
 
         # True if this tracer is currently tracing (reconstructing) into a Python generator
