@@ -2099,7 +2099,6 @@ class AsyncTPTest(MultiProcContinuousTest):
             gather_dim=gather_dim,
             group_name=group.group_name,
             biases=[None] * len(Bs),
-            result_scales=[None] * len(Bs),
             out_dtypes=out_dtypes,
             use_fast_accum=[None] * len(Bs),
         )
@@ -2111,7 +2110,6 @@ class AsyncTPTest(MultiProcContinuousTest):
             gather_dim=gather_dim,
             group_name=group.group_name,
             biases=[None] * len(Bs),
-            result_scales=[None] * len(Bs),
             out_dtypes=out_dtypes,
             use_fast_accum=[None] * len(Bs),
         )
