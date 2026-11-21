@@ -34,10 +34,10 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_LINUX,
     IS_REMOTE_GPU,
-    IS_SANDCASTLE,
     run_tests,
     serialTest,
     skipCUDANonDefaultStreamIf,
+    skipIfSandcastle,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
     TEST_MULTIACCELERATOR,
@@ -764,7 +764,8 @@ class TestMultiGPUDevice(TestCase):
         self.assertTrue(b.grad.sum().item() == 4 * size)
 
     @deviceCountAtLeast(2)
-    @unittest.skipIf(IS_SANDCASTLE or IS_REMOTE_GPU, "Does not work on Sandcastle")
+    @skipIfSandcastle("Does not work on sandcastle")
+    @unittest.skipIf(IS_REMOTE_GPU, "Does not work with remote GPU")
     def test_accelerator_init_race(self, devices):
         device_type = torch.device(devices[0]).type
         # See https://github.com/pytorch/pytorch/issues/16559
