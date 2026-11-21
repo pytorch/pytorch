@@ -2097,11 +2097,19 @@ graphs. A second backward of one call raises what eager raises, and so
 does a backward behind a write in place to a tensor it needs (an input, a
 result, what a result is a view of), with eager's text: the tensor it names
 is the first one that eager's nodes would find changed, and the node it
-names is the one eager names ("Limits" has the exceptions). Hooks on
-results and on inputs run as they do for eager. A result that is a view is
-eager's view, made on the tape behind the node. A graph that reads a view
-which it also gives as a result is cut in two in front of that read, each
-part with a node of its own.
+names is the one eager names. Hooks on
+results and on inputs run as they do for eager, but for a result that
+another result of the graph is computed of ("Limits"). A result that is a
+view is eager's view, made on the tape behind the node. A graph that reads
+a view which it also gives as a result is cut in two in front of that read,
+each part with a node of its own.
+
+What a graph gives is at the version eager's is at (`_version`), the
+statistics of a batch norm included. A backward for some of the inputs
+(`torch.autograd.grad(loss, [w])`, `backward(inputs=[w])`) runs the nodes
+of eager's that lead to those inputs and no others, as the autograd engine
+runs them: the gradients are the same bits, the work for the other inputs
+is not done, and a tensor that only the other nodes kept is not looked at.
 
 With `torch.backends.cudnn.benchmark` on, cuDNN picks the algorithm of a
 convolution by what it measured and remembers what it picked per thread, so
@@ -2524,15 +2532,7 @@ What graphs do not do at this stage:
   was written to in place, and has by then added up the gradient of every
   leaf whose nodes all ran before that one; the node of a graph raises
   before it gives anything, so no input of the graph has a gradient of that
-  backward. The error and its text are eager's, with two exceptions. An
-  operation whose kernel writes to its own result (`aminmax` on the CPU)
-  leaves that result at another version than eager does, and the text has
-  those versions (`is at version 3; expected version 2` where eager says 1
-  and 0). And a backward that is asked for some inputs only
-  (`torch.autograd.grad(loss, [w])`, `backward(inputs=...)`) runs the whole
-  backward of a graph, where eager runs the nodes on the way to those
-  inputs: the gradients are the same, but a tensor that only the other
-  nodes kept and that was written to in place raises here and not in eager.
+  backward. The error and its text are eager's.
 - A backward that is to be differentiated again, or one for some results of
   a node of eager's with several, runs the graph once more on the tape: a
   graph that draws random numbers or writes to a tensor from outside raises
@@ -2543,6 +2543,25 @@ What graphs do not do at this stage:
   is on. The two settings are the process's: a convolution that another
   thread runs in that time runs that way too. They are as the caller set
   them again when the call returns.
+- With the engine's backward the results of a graph share one node, so the
+  gradient at a result that another result of the graph is computed of (a
+  function that returns its logits and the loss it computed of them) is not
+  eager's: what arrives at such a result is what its uses behind the call
+  give, without what the other result gives through it.
+  `torch.autograd.grad(loss, [logits])` raises for a tensor that was not
+  used, `logits.retain_grad()` leaves `logits.grad` at None, and a hook on
+  `logits` is called with None, or with the gradient of the uses behind the
+  call alone; a hook there that changes the gradient does not change what
+  the inputs get. The gradients of the inputs are eager's otherwise, and on
+  eager's tape (`Graphs(backward=False)`) all of it is.
+- A warning that a kernel gives is given at every call, as in eager. One
+  that the Python side of an operation gives (`x.T` of a tensor with three
+  dimensions, `torch.tensor` of a tensor), or an operator that is made of
+  other operators (an attention on a GPU, where torch is built without the
+  fused attention kernels), is given by the calls that run the function's
+  instructions: a call that the programs of the engine's backward or the
+  callable of a pass run gives none, and the call in which a graph is taken
+  down a second time or exported gives the first kind twice.
 - A loss behind a write is no part of the graph with the engine's backward
   either: a training graph still ends in front of a loss that can fail
   behind a batch norm's write to its statistics ("Writes"), and the nodes of
