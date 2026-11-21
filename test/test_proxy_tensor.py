@@ -10,6 +10,7 @@ from torch.testing._internal.common_utils import (
 )
 import torch
 import torch._dynamo
+from torch._dynamo.test_case import _restore_autocast_state, _snapshot_autocast_state
 import unittest
 import warnings
 import operator
@@ -217,6 +218,65 @@ def forward(self, a_1):
         out1.sum().backward()
         out2.sum().backward()
         self.assertEqual(a1.grad, a2.grad)
+
+    def test_pre_dispatch_autocast_restored_after_error(self):
+        # Strict export traces _enter_autocast from a Dynamo graph, which has no
+        # finally block to exit it when the traced code raises.
+        def raise_in_open_autocast():
+            torch.amp.autocast_mode._enter_autocast("cpu", torch.float16, True, None)
+            raise RuntimeError("error inside autocast")
+
+        def alone(x):
+            raise_in_open_autocast()
+
+        def inside_with(x):
+            with torch.autocast("cpu", dtype=torch.float16):
+                raise_in_open_autocast()
+
+        def two_open(x):
+            torch.amp.autocast_mode._enter_autocast("cpu", torch.bfloat16, True, None)
+            raise_in_open_autocast()
+
+        def exit_out_of_order(x):
+            outer = torch.amp.autocast_mode._enter_autocast("cpu", torch.bfloat16, True, None)
+            torch.amp.autocast_mode._enter_autocast("cpu", torch.float16, True, None)
+            torch.amp.autocast_mode._exit_autocast(outer)
+
+        # A leaked state would become the starting state of later tests.
+        before = _snapshot_autocast_state()
+        self.addCleanup(_restore_autocast_state, before)
+
+        for f, error, message in (
+            (alone, RuntimeError, "error inside autocast"),
+            (inside_with, RuntimeError, "error inside autocast"),
+            (two_open, RuntimeError, "error inside autocast"),
+            (exit_out_of_order, AssertionError, "must exit the latest"),
+        ):
+            with self.subTest(f.__name__):
+                with self.assertRaisesRegex(error, message):
+                    make_fx(f, pre_dispatch=True, tracing_mode=self.tracing_mode)(
+                        torch.randn(2)
+                    )
+                self.assertEqual(_snapshot_autocast_state(), before)
+
+    @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
+    def test_pre_dispatch_autocast_across_cond(self):
+        def f(x, w):
+            ctx = torch.amp.autocast_mode._enter_autocast("cpu", torch.bfloat16, True, None)
+            y = torch.cond(x.sum() > 0, lambda x: x.mm(x), lambda x: x.mm(x).neg(), (x,))
+            out = torch.mm(y.float(), w)
+            torch.amp.autocast_mode._exit_autocast(ctx)
+            return out
+
+        before = _snapshot_autocast_state()
+        self.addCleanup(_restore_autocast_state, before)
+        gm = make_fx(f, pre_dispatch=True, tracing_mode=self.tracing_mode)(
+            torch.randn(2, 2), torch.randn(2, 2)
+        )
+        self.assertEqual(_snapshot_autocast_state(), before)
+        for graph in (gm.true_graph_0.graph, gm.false_graph_0.graph, gm.graph):
+            (mm,) = graph.find_nodes(op="call_function", target=torch.ops.aten.mm.default)
+            self.assertEqual(mm.meta["val"].dtype, torch.bfloat16)
 
     def test_make_fx_simple(self):
         def f(x):
