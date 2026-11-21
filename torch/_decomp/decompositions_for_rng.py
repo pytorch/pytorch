@@ -7,6 +7,7 @@ from collections.abc import Callable
 import torch
 import torch._decomp as decomp
 from torch._decomp import get_decompositions
+from torch._decomp.decompositions import _check_bernoulli_p
 from torch._ops import OpOverload
 
 
@@ -258,6 +259,7 @@ register_extra_random_decomp = functools.partial(
 def bernoulli_(self, p=0.5):
     if self.device == torch.device("cpu"):
         return NotImplemented
+    _check_bernoulli_p(p)
     return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
 
 
@@ -267,6 +269,7 @@ def bernoulli_p(self, p=0.5, *, generator=None):
         return NotImplemented
     if generator is not None:
         raise AssertionError(f"generator must be None, got {generator}")
+    _check_bernoulli_p(p)
     return torch.rand_like(self, dtype=torch.float32) < p
 
 

@@ -539,6 +539,7 @@ class BackendFeature(Enum):
     TRITON_TEMPLATES = auto()
     REDUCE_TO_SINGLE_ELEMENT = auto()
     INDIRECT_INDEXING = auto()
+    DEVICE_ASSERT_ASYNC = auto()
 
 
 def get_backend_features(
