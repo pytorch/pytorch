@@ -544,6 +544,7 @@ aten::_scaled_addmm
 aten::_scaled_addmm.out
 aten::_scaled_addmm_
 aten::_scaled_dot_product_attention_math_for_mps
+aten::_scaled_dot_product_attention_math_for_mps_backward
 aten::_scaled_dot_product_cudnn_attention
 aten::_scaled_dot_product_cudnn_attention_backward
 aten::_scaled_dot_product_efficient_attention
