@@ -8,37 +8,37 @@ on:
     inputs:
       package_name:
         description: 'Name of the package to build and upload'
-        required: true
+        required: false
         type: string
         default: torch
       framework:
         description: 'Name of the dependent framework, e.g. torch'
-        required: true
+        required: false
         type: string
         default: ''
       python_versions:
         description: 'JSON array; allowed values: 38, 310, 312'
-        required: true
+        required: false
         type: string
         default: '["312"]'
       os_versions:
         description: 'JSON array; allowed values: ubuntu2004, ubuntu2204, ubuntu2404, alios7u2'
-        required: true
+        required: false
         type: string
         default: '["ubuntu2404"]'
       runtime_versions:
         description: 'JSON array; allowed HGGCRT versions: 13.0.0'
-        required: true
+        required: false
         type: string
         default: '["13.0.0"]'
       torch_versions:
         description: 'JSON array; allowed values: 2.10.0, 2.13.0; [""] skips Torch installation'
-        required: true
+        required: false
         type: string
         default: '[""]'
       sdk_versions:
         description: 'JSON array; allowed values: 2.1.1, 2.2.0'
-        required: true
+        required: false
         type: string
         default: '["2.2.0"]'
       branch:
@@ -47,12 +47,12 @@ on:
         type: string
       package_version:
         description: 'Artifactory package version and automatic upload directory prefix; does not override the wheel version'
-        required: true
+        required: false
         type: string
         default: '2.12.0'
       package_edition:
         description: 'Artifactory package edition; defaults to oe, matching the release workflow'
-        required: true
+        required: false
         type: string
         default: oe
       package_type:
@@ -62,7 +62,7 @@ on:
         default: pypi
       runs_on:
         description: 'Runner for all template jobs; a single label, or a JSON array such as ["self-hosted","x86-ubuntu2404-8-32"]'
-        required: true
+        required: false
         type: string
         default: x86-ubuntu2404-8-32
       build_command:
