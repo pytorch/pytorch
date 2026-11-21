@@ -9163,6 +9163,16 @@ class TestMPS(TestCaseMPS):
         print(f"Recommended Max Memory : {max_memory / 1024 ** 3} GB")
         self.assertGreater(max_memory, 0)
 
+    def test_empty_cache_clears_kernel_cache(self):
+        # Contiguous F.linear runs an MPSNDArray kernel served from MPSKernelCache
+        x = torch.randn(64, 32, device="mps")
+        w = torch.randn(16, 32, device="mps")
+        b = torch.randn(16, device="mps")
+        expected = torch.nn.functional.linear(x.cpu(), w.cpu(), b.cpu())
+        self.assertEqual(torch.nn.functional.linear(x, w, b), expected)
+        torch.mps.empty_cache()
+        self.assertEqual(torch.nn.functional.linear(x, w, b), expected)
+
     def test_host_alias_storage(self):
         n = 1024
         dtype = torch.float32
