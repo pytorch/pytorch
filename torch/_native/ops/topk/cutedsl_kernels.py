@@ -45,6 +45,7 @@ from cutlass._mlir.dialects import llvm
 from cutlass.cutlass_dsl import BaseDSL, dsl_user_op, T
 
 import torch
+from torch._native.cutedsl.scan import block_exclusive_prefix
 from torch._native.instrumentation import instrumented_cutedsl_cache
 
 from .aot import _ARCH_TAIL_ITERS, _MAX_TAIL_ITERS
@@ -124,64 +125,6 @@ def _load_vec(
     rvals = cute.make_rmem_tensor(vec_elems, dtype)
     cute.autovec_copy(gsrc, rvals)
     return rvals
-
-
-@cute.jit
-def _warp_inclusive_prefix(val: Int32, lane: Int32) -> Int32:
-    """Inclusive Hillis-Steele prefix sum across a single warp."""
-    for i in cutlass.range_constexpr(int(math.log2(cute.arch.WARP_SIZE))):
-        offset = 1 << i
-        # mask_and_clamp=0 so lanes < offset get 0 (no contribution).
-        partial = cute.arch.shuffle_sync_up(val, offset=offset, mask_and_clamp=0)
-        if lane >= Int32(offset):
-            val = val + partial
-    return val
-
-
-@cute.jit
-def _block_excl_prefix_i32(
-    val: Int32,
-    scratch: cute.Tensor,
-    lane: Int32,
-    warp: Int32,
-    num_warps: cutlass.Constexpr,
-) -> tuple[Int32, Int32]:
-    """Block-wide exclusive prefix sum over per-thread ``val``.
-
-    Returns ``(excl_pfx, total)``: ``excl_pfx`` is this thread's
-    exclusive prefix; ``total`` is the sum across all threads in the
-    block. ``scratch`` must have at least ``num_warps + 1`` Int32 slots
-    and is clobbered.
-
-    Implementation: warp-level Hillis-Steele scan, then warp 0 scans
-    the per-warp totals to produce per-warp offsets, then add.
-    """
-    WARP_SIZE = const_expr(cute.arch.WARP_SIZE)
-    # Step 1: per-warp inclusive scan.
-    incl = _warp_inclusive_prefix(val, lane)
-    excl_intra = incl - val
-    # Step 2: last lane in each warp publishes warp's inclusive total.
-    if lane == Int32(WARP_SIZE - 1):
-        scratch[warp] = incl
-    cute.arch.barrier()
-    # Step 3: warp 0 prefix-sums the per-warp totals.
-    if warp == Int32(0):
-        warp_val = Int32(0)
-        if lane < Int32(num_warps):
-            warp_val = scratch[lane]
-        warp_incl = _warp_inclusive_prefix(warp_val, lane)
-        warp_excl = warp_incl - warp_val
-        if lane < Int32(num_warps):
-            scratch[lane] = warp_excl
-        # Stash the block total in a slot beyond the per-warp set so
-        # other warps can read it without a second reduction.
-        if lane == Int32(num_warps - 1):
-            scratch[num_warps] = warp_incl
-    cute.arch.barrier()
-    excl_pfx = scratch[warp] + excl_intra
-    total = scratch[num_warps]
-    cute.arch.barrier()  # let everyone consume scratch before next call
-    return excl_pfx, total
 
 
 class _RadixSelectTopK:
@@ -469,7 +412,7 @@ class _RadixSelectTopK:
 
                     # Block-wide exclusive prefix sum. ``s_hist`` is reused as
                     # scratch for the warp-total scan (Phase 1 is done with it).
-                    packed_pfx, packed_step_total = _block_excl_prefix_i32(
+                    packed_pfx, packed_step_total = block_exclusive_prefix(
                         packed_local, s_hist, lane_idx, warp_idx, NUM_WARPS
                     )
                     above_pfx = packed_pfx >> Int32(16)
@@ -516,7 +459,7 @@ class _RadixSelectTopK:
                         elif ords == threshold:
                             packed_local = Int32(1)
 
-                    packed_pfx, packed_step_total = _block_excl_prefix_i32(
+                    packed_pfx, packed_step_total = block_exclusive_prefix(
                         packed_local, s_hist, lane_idx, warp_idx, NUM_WARPS
                     )
                     above_pfx = packed_pfx >> Int32(16)
@@ -543,7 +486,7 @@ class _RadixSelectTopK:
 
             # The eq-merge below has each thread read s_eq_vals[tidx - n_above],
             # i.e. a slot written by some other thread during the gather above.
-            # The last barrier inside _block_excl_prefix_i32 fires *before* the
+            # The last barrier inside block_exclusive_prefix fires *before* the
             # final per-step writes to s_eq_vals, so cross-thread visibility of
             # those writes isn't guaranteed without a fresh barrier here.
             cute.arch.barrier()
