@@ -172,11 +172,10 @@ inline bool check_flash_attention_deterministic(
 
 bool can_use_flash_attention(sdp_params const& params, bool debug) {
   constexpr auto constraints =
-      std::array<bool (*)(sdp_params const&, bool), 14>{
+      std::array<bool (*)(sdp_params const&, bool), 13>{
           is_flash_attention_available,
           check_flash_attention_hardware_support,
           check_for_attn_mask,
-          check_for_dropout,
           check_nested_tensor,
           check_tensor_shapes,
           check_batch_size_and_num_heads_dense<true /*supports GQA*/>,
