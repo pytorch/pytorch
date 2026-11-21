@@ -5494,7 +5494,7 @@ class TestFP8MatmulMpsOnly(TestCase):
     @parametrize("layout", ["dense", "padded", "unaligned"])
     @parametrize("mnk", [(1, 7, 2048), (3, 130, 1024), (4, 64, 512), (8, 100, 256), (64, 96, 2048)],
                  name_fn=lambda mnk: f"{mnk[0]}_{mnk[1]}_{mnk[2]}")
-    def test_blockwise_mps_layouts(self, recipe, layout, mnk, device) -> None:
+    def test_blockwise_layouts(self, recipe, layout, mnk, device) -> None:
         # MPS reads A row-major and B column-major with unswizzled scales; the leading
         # strides may be padded or the data unaligned.
         M, N, K = mnk
