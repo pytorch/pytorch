@@ -369,8 +369,16 @@ class GenericAttrSource(ChainedSource):
             )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Match the generic lookup used by tracing and guards, bypassing an
+        # overridden __getattribute__ when rebuilding graph inputs or outputs.
+        def load_getattribute() -> None:
+            codegen.load_import_from("builtins", "object")
+            codegen.extend_output(codegen.create_load_attrs("__getattribute__"))
+
+        codegen.add_push_null(load_getattribute)
         codegen(self.base)
-        codegen.extend_output(codegen.create_load_attrs(self.member))
+        codegen.append_output(codegen.create_load_const(self.member))
+        codegen.extend_output(create_call_function(2, False))
 
     @functools.cached_property
     def _name_template(self) -> str:

@@ -3944,7 +3944,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     }
 
     def generic_getattr(
-        self, tx: "InstructionTranslatorBase", name: str
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        *,
+        source: Source | None = None,
     ) -> VariableTracker:
         """Dynamo implementation of CPython's PyObject_GenericGetAttr.
 
@@ -3957,7 +3961,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         non-data descriptor / plain class attr → dynamic fallback →
         __getattr__ → AttributeError.
         """
-        source: Source | None = AttrSource(self.source, name) if self.source else None
+        if source is None:
+            source = AttrSource(self.source, name) if self.source else None
 
         if name == "__dict__" and self._dict_is_c_descriptor():
             if not hasattr(self.value, "__dict__"):
@@ -3998,7 +4003,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.resolve_data_descriptor(tx, name, type_attr, source)
 
         # Step 3: Instance __dict__ — return as-is, no descriptor invocation.
-        result = self.lookup_instance_dict(tx, name)
+        result = self.lookup_instance_dict(tx, name, source=source)
         if result is not None:
             return result
 
@@ -4369,9 +4374,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ).call_function(tx, [self, owner_var], {})
 
     def lookup_instance_dict(
-        self, tx: "InstructionTranslatorBase", name: str
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        *,
+        source: Source | None = None,
     ) -> VariableTracker | None:
-        source: Source | None = AttrSource(self.source, name) if self.source else None
+        if source is None:
+            source = AttrSource(self.source, name) if self.source else None
 
         if tx.output.side_effects.has_pending_mutation_of_attr(
             self,
