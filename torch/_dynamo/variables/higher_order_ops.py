@@ -1598,7 +1598,12 @@ def trace_hop_function(
         else contextlib.nullcontext()
     )
 
-    with autograd_ctx, side_effects_ctx, deferred_ctx:
+    with (
+        autograd_ctx,
+        side_effects_ctx,
+        deferred_ctx,
+        tx.output.scoped_local_generators(tx),
+    ):
         output = f.call_function(tx, args, sub_kwargs)
 
     if restore_side_effects:
@@ -1640,7 +1645,12 @@ def trace_hop_function_with_auto_output_flattening(
         else contextlib.nullcontext()
     )
 
-    with autograd_ctx, side_effects_ctx, deferred_ctx:
+    with (
+        autograd_ctx,
+        side_effects_ctx,
+        deferred_ctx,
+        tx.output.scoped_local_generators(tx),
+    ):
         output = f.call_function(tx, args, sub_kwargs)
 
     return output
