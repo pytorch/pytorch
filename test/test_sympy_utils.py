@@ -599,6 +599,15 @@ class TestValueRanges(TestCase):
                 r = ValueRangeAnalysis.python_mod(ValueRanges(x, x), y_range)
                 self.assertIn(result, r, lambda msg: f"{msg}\nx={x}, y={y}, result={result}, range={r}")
 
+    def test_truncdiv(self):
+        V = ValueRanges
+        truncdiv = ValueRangeAnalysis.truncdiv
+        self.assertEqual(ValueRangeAnalysis.truncdiv(V(2, int_oo), V(1, int_oo)), V(0, int_oo))
+        self.assertEqual(ValueRangeAnalysis.truncdiv(V(-int_oo, -2), V(1, int_oo)), V(-int_oo, 0))
+        self.assertEqual(ValueRangeAnalysis.truncdiv(V(2, int_oo), V(-int_oo, -1)), V(-int_oo, 0))
+        self.assertEqual(ValueRangeAnalysis.truncdiv(V(-int_oo, int_oo), V(1, int_oo)), V(-int_oo, int_oo))
+        self.assertEqual(ValueRangeAnalysis.truncdiv(V(5, 9), V(0, int_oo)), V(0, int_oo))
+
     def test_bound_sympy_mod_subtraction(self):
         s0 = sympy.Symbol("s0", integer=True)
         s1 = sympy.Symbol("s1", integer=True)
