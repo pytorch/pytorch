@@ -91,6 +91,22 @@ cxx_pytree.register_pytree_node(
 )
 
 
+GlobalNamedPair = namedtuple("GlobalNamedPair", ["x", "y"])
+
+
+class GlobalBox:  # a pytree node with a dict context
+    def __init__(self, x):
+        self.x = x
+
+
+class GlobalCodedBox(GlobalBox):  # same, with its own context codec
+    pass
+
+
+class GlobalDefaultDict(defaultdict):  # uses the defaultdict context codec
+    pass
+
+
 class TestEnum(enum.Enum):
     A = auto()
 
@@ -1265,6 +1281,85 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
             NotImplementedError, "No registered serialization name"
         ):
             python_pytree.treespec_dumps(spec)
+
+    @parametrize(
+        "value,reason",
+        [
+            subtest(
+                (
+                    (
+                        [1],
+                        {"a": deque([2])},
+                        OrderedDict(b=3),
+                        GlobalNamedPair(4, 5),
+                        GlobalBox(6),
+                        GlobalCodedBox(7),
+                    ),
+                    None,
+                ),
+                name="plain",
+            ),
+            subtest(
+                ((0, {TestEnum.A: 0}), "module of an enum, .*TestEnum"), name="enum"
+            ),
+            subtest(
+                ((0, defaultdict(list, a=[0])), "defaultdict node would import"),
+                name="defaultdict",
+            ),
+            subtest(
+                (
+                    (0, GlobalDefaultDict(list, a=[0])),
+                    "GlobalDefaultDict node would import",
+                ),
+                name="defaultdict_subclass",
+            ),
+        ],
+    )
+    def test_pytree_loads_without_imports(self, value, reason):
+        from unittest import mock
+
+        python_pytree._register_namedtuple(
+            GlobalNamedPair, serialized_type_name="test_pytree.GlobalNamedPair"
+        )
+        self.addCleanup(python_pytree._deregister_pytree_node, GlobalNamedPair)
+        codecs = (
+            (GlobalBox, None, None),
+            (GlobalCodedBox, lambda c: c["label"], lambda label: {"label": label}),
+        )
+        for cls, to_context, from_context in codecs:
+            python_pytree.register_pytree_node(
+                cls,
+                lambda box: ([box.x], {"label": "box"}),
+                lambda values, _: GlobalBox(*values),
+                serialized_type_name=f"test_pytree.{cls.__name__}",
+                to_dumpable_context=to_context,
+                from_dumpable_context=from_context,
+            )
+            self.addCleanup(python_pytree._deregister_pytree_node, cls)
+        python_pytree.register_pytree_node(
+            GlobalDefaultDict,
+            python_pytree._defaultdict_flatten,
+            python_pytree._defaultdict_unflatten,
+            serialized_type_name="test_pytree.GlobalDefaultDict",
+            to_dumpable_context=python_pytree._defaultdict_serialize,
+            from_dumpable_context=python_pytree._defaultdict_deserialize,
+        )
+        self.addCleanup(python_pytree._deregister_pytree_node, GlobalDefaultDict)
+        serialized = python_pytree.treespec_dumps(python_pytree.tree_structure(value))
+        spec = python_pytree.treespec_loads(serialized)
+        self.assertEqual(spec, python_pytree.tree_structure(value))
+        with mock.patch("importlib.import_module") as import_module:
+            if reason is None:
+                loaded = python_pytree._treespec_loads_without_imports(serialized)
+                self.assertEqual(loaded, spec)
+            else:
+                with self.assertRaisesRegex(NotImplementedError, reason):
+                    python_pytree._treespec_loads_without_imports(serialized)
+        import_module.assert_not_called()
+
+    def test_pytree_loads_without_imports_unknown_protocol(self):
+        with self.assertRaisesRegex(ValueError, "Unknown protocol 2"):
+            python_pytree._treespec_loads_without_imports("[2, null]")
 
     def test_pytree_custom_type_serialize(self):
         class DummyType:
