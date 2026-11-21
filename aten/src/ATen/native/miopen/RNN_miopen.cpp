@@ -679,6 +679,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
     }
 
     auto y = output;
+    // See Note [MIOpen calls during HIP graph capture]
+    c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{hipStreamCaptureModeRelaxed};
     auto handle = getMiopenHandle();
     miopenRNNAlgo_t algo = miopenRNNdefault;
     fn.rnn.set_algo(algo);
@@ -798,6 +800,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
     fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, datatype, miopenRNNwithBias);
     fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
+    // See Note [MIOpen calls during HIP graph capture]
+    c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{hipStreamCaptureModeRelaxed};
     auto handle = getMiopenHandle();
 
     if(fn.rnn.rnn_mode != miopenLSTM) {
@@ -923,6 +927,8 @@ std::vector<Tensor> miopen_rnn_backward_weight(
     fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, datatype, bias_mode);
     fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
+    // See Note [MIOpen calls during HIP graph capture]
+    c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{hipStreamCaptureModeRelaxed};
     auto handle = getMiopenHandle();
 
     if (fn.rnn.rnn_mode != miopenLSTM) {
