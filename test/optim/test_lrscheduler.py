@@ -7,7 +7,7 @@ import tempfile
 import types
 import warnings
 from functools import partial
-from unittest import expectedFailure
+from unittest import expectedFailure, skipIf
 
 import torch
 import torch.nn.functional as F
@@ -723,6 +723,103 @@ class TestLRScheduler(TestCase):
         scheduler.step(2.0)  # Triggers scheduler._reduce_lr
         for group, type_ in zip(self.opt.param_groups, types):
             self.assertEqual(type(group["lr"]), type_)
+
+    def _scheduler(self, name, opt):
+        return {
+            "step": lambda: StepLR(opt, step_size=2, gamma=0.5),
+            "exponential": lambda: ExponentialLR(opt, gamma=0.9),
+            "cosine": lambda: CosineAnnealingLR(opt, T_max=5),
+            "linear": lambda: LinearLR(opt, start_factor=0.5, total_iters=4),
+            "polynomial": lambda: PolynomialLR(opt, total_iters=4, power=2),
+            "constant": lambda: ConstantLR(opt, factor=0.3, total_iters=2),
+        }[name]()
+
+    @parametrize(
+        "scheduler_name",
+        ["step", "exponential", "cosine", "linear", "polynomial", "constant"],
+    )
+    def test_tensor_lr_schedule_leaves_the_caller_tensor(self, scheduler_name):
+        weight = torch.nn.Parameter(torch.zeros(1))
+        given = torch.tensor([0.1])
+        tensor_opt = SGD([weight], lr=given)
+        float_opt = SGD([torch.nn.Parameter(torch.zeros(1))], lr=0.1)
+        owned = tensor_opt.param_groups[0]["lr"]
+        self.assertEqual(given, torch.tensor([0.1]))
+        self.assertEqual(owned.shape, given.shape)
+        tensor_sched = self._scheduler(scheduler_name, tensor_opt)
+        float_sched = self._scheduler(scheduler_name, float_opt)
+        for _ in range(6):
+            self.assertEqual(owned.data_ptr(), tensor_opt.param_groups[0]["lr"].data_ptr())
+            self.assertEqual(tensor_opt.param_groups[0]["lr"].shape, given.shape)
+            self.assertEqual(
+                tensor_opt.param_groups[0]["lr"].item(),
+                float_opt.param_groups[0]["lr"],
+                atol=1e-5,
+                rtol=0,
+            )
+            self.assertIsInstance(tensor_opt.param_groups[0]["lr"], torch.Tensor)
+            self.assertNotIsInstance(float_opt.param_groups[0]["lr"], torch.Tensor)
+            tensor_opt.step()
+            float_opt.step()
+            tensor_sched.step()
+            float_sched.step()
+        self.assertEqual(given, torch.tensor([0.1]))
+        self.assertEqual(owned.data_ptr(), tensor_opt.param_groups[0]["lr"].data_ptr())
+
+    def test_plateau_tensor_lr_leaves_the_caller_tensor(self):
+        weight = torch.nn.Parameter(torch.zeros(1))
+        given = torch.tensor(0.1)
+        opt = SGD([weight], lr=given)
+        owned = opt.param_groups[0]["lr"]
+        scheduler = ReduceLROnPlateau(opt, mode="min", patience=0, factor=0.1)
+        scheduler.step(1.0)
+        scheduler.step(2.0)
+        self.assertEqual(given, torch.tensor(0.1))
+        self.assertEqual(owned.data_ptr(), opt.param_groups[0]["lr"].data_ptr())
+        self.assertEqual(opt.param_groups[0]["lr"].item(), 0.01)
+
+    @skipIf(not torch.cuda.is_available(), "CUDA graph capture needs CUDA")
+    def test_scheduler_fill_is_visible_to_a_captured_adam_step(self):
+        torch.manual_seed(0)
+        weight = torch.nn.Parameter(torch.ones(4, device="cuda"))
+        other = torch.nn.Parameter(weight.detach().clone())
+        grad = torch.randn_like(weight)
+        given = torch.tensor(0.1, device="cuda")
+        opt = Adam([weight], lr=given, capturable=True)
+        eager = Adam([other], lr=0.1, capturable=True)
+        sched = StepLR(opt, step_size=1, gamma=0.5)
+        eager_sched = StepLR(eager, step_size=1, gamma=0.5)
+        static_grad = grad.clone()
+
+        def capture_step():
+            weight.grad = static_grad
+            opt.step()
+
+        def eager_step():
+            other.grad = static_grad.detach().clone()
+            eager.step()
+
+        # Warm up both optimizers, then record one step and match it eagerly
+        # before the schedule moves. Replay after the schedule must read the
+        # same storage the recording read.
+        capture_step()
+        eager_step()
+        graph = torch.cuda.CUDAGraph()
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream):
+            graph.capture_begin()
+            capture_step()
+            graph.capture_end()
+        torch.cuda.current_stream().wait_stream(stream)
+        eager_step()
+        sched.step()
+        eager_sched.step()
+        graph.replay()
+        eager_step()
+        torch.cuda.synchronize()
+        self.assertEqual(given, torch.tensor(0.1, device="cuda"))
+        self.assertEqual(weight, other)
 
     def test_sequentiallr1(self):
         epochs = 19
