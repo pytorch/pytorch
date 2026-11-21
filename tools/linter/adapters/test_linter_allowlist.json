@@ -304,7 +304,6 @@
   "test/fx/test_common_passes.py",
   "test/fx/test_graph_pickler.py",
   "test/higher_order_ops/test_inline_asm_elementwise.py",
-  "test/higher_order_ops/test_invoke_quant.py",
   "test/higher_order_ops/test_invoke_subgraph.py",
   "test/higher_order_ops/test_with_effects.py",
   "test/inductor/test_alignment.py",
