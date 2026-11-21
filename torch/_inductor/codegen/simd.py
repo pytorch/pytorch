@@ -5489,17 +5489,24 @@ class SIMDScheduling(BaseScheduling):
         return kernel
 
     @staticmethod
+    def _combo_launch_key(winner: Any) -> tuple[Any, ...]:
+        """A winner config's kernel-level launch settings: non-block kwargs, num_warps,
+        num_stages."""
+        nb = {k: int(v) for k, v in winner.kwargs.items() if not k.endswith("BLOCK")}
+        return (
+            tuple(sorted(nb.items())),
+            int(winner.num_warps),
+            int(winner.num_stages),
+        )
+
+    @staticmethod
     def _combo_launch_candidates(winners: list[Any]) -> list[Any]:
-        """Deduplicate the subkernels' winner launch configs (non-block kwargs + num_warps +
-        num_stages) into the candidate set for the combo's kernel-level autotune."""
+        """Deduplicate the subkernels' winner launch configs into the candidate set for
+        the combo's kernel-level autotune."""
         from .triton_combo_kernel import ComboLaunchConfig
 
-        seen: dict[Any, Any] = {}
-        for w in winners:
-            nb = {k: int(v) for k, v in w.kwargs.items() if not k.endswith("BLOCK")}
-            key = (tuple(sorted(nb.items())), int(w.num_warps), int(w.num_stages))
-            seen[key] = ComboLaunchConfig(nb, int(w.num_warps), int(w.num_stages))
-        return [seen[k] for k in sorted(seen)]
+        keys = sorted(OrderedSet(SIMDScheduling._combo_launch_key(w) for w in winners))
+        return [ComboLaunchConfig(dict(kw), nw, ns) for kw, nw, ns in keys]
 
     def generate_combo_kernel_code(
         self,
@@ -5639,9 +5646,27 @@ class SIMDScheduling(BaseScheduling):
                     # run standalone rather than stitch a bogus config or fail compile.
                     fusable = [(pn, w) for pn, w in zip(group, tuned) if w is not None]
                     carve_out = [pn for pn, w in zip(group, tuned) if w is None]
-                    if len(fusable) >= 2:
-                        fusable_pns = [pn for pn, _ in fusable]
-                        winners = [w for _, w in fusable]
+                    # Launch settings can change a reduction's summation order.
+                    if any(
+                        node_schedule_map[pn].features.is_reduction()
+                        for pn, _ in fusable
+                    ):
+                        launch_groups: dict[Any, list[Any]] = collections.defaultdict(
+                            list
+                        )
+                        for pn, winner in fusable:
+                            launch_groups[self._combo_launch_key(winner)].append(
+                                (pn, winner)
+                            )
+                        compatible_groups = list(launch_groups.values())
+                    else:
+                        compatible_groups = [fusable]
+                    for compatible in compatible_groups:
+                        if len(compatible) < 2:
+                            carve_out.extend(pn for pn, _ in compatible)
+                            continue
+                        fusable_pns = [pn for pn, _ in compatible]
+                        winners = [w for _, w in compatible]
                         kernel = self._build_combo_kernel(
                             fusable_pns,
                             node_schedule_map,
@@ -5663,9 +5688,6 @@ class SIMDScheduling(BaseScheduling):
                         src_code = kernel.codegen_kernel()
                         # pyrefly: ignore [bad-argument-type]
                         kernel_code_list.append((src_code, kernel, fusable_pns))
-                    else:
-                        # Fewer than two tunable sub-kernels: emit them all standalone.
-                        carve_out = list(group)
                     for pn in carve_out:
                         co_src, co_kernel = self._codegen_standalone_kernel(
                             node_schedule_map[pn],
