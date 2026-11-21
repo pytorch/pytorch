@@ -54,7 +54,7 @@ torch.vm.regions(g)
 #   'operators': ['aten::matmul', 'aten::tanh', 'aten::sum',
 #   'aten::mul.Tensor', 'aten::mean', 'aten::add.Tensor'], 'inputs': 2,
 #   'outputs': 1, 'branches': 0, 'calls': 0, 'paths': 1, 'ends': [(0, 12)],
-#   'why': 'the function returns', 'variants': 0, 'hits': 0, 'misses': 1,
+#   'why': 'the function returns', 'variants': 0, 'hits': 0, 'misses': 2,
 #   'exports': 0, 'version': 1, 'forms': []}]
 ```
 
@@ -2089,11 +2089,13 @@ gradient that was made with `create_graph=True` leaves, and the gradients
 that a compiler's kernels compute where `Inductor()` compiled the two
 graphs. A second backward of one call raises what eager raises, and so
 does a backward behind a write in place to a tensor it needs (an input, a
-result, what a result is a view of), with eager's text but for one name in
-it ("Limits"). Hooks on results and on inputs run as they do for eager. A
-result that is a view is eager's view, made on the tape behind the node. A
-graph that reads a view which it also gives as a result is cut in two in
-front of that read, each part with a node of its own.
+result, what a result is a view of), with eager's text: the tensor it names
+is the first one that eager's nodes would find changed, and the node it
+names is the one eager names ("Limits" has the exceptions). Hooks on
+results and on inputs run as they do for eager. A result that is a view is
+eager's view, made on the tape behind the node. A graph that reads a view
+which it also gives as a result is cut in two in front of that read, each
+part with a node of its own.
 
 With no pass over graphs in the list no graph leaves the engine for this:
 the engine hands such a graph to itself. A graph starts as one that the
@@ -2102,9 +2104,32 @@ gradients enabled and a tensor that needs one makes it a graph that is
 taken down for its backward: its path is taken down again at the next call
 (a path that something stands for goes further than one that is only
 reported: through an operation that draws random numbers, say), and from
-then on it is `"compiled"`, with a form per kind of call. A call of such a
-graph whose tensors need no gradient has nothing to derive, and its form
-says so:
+then on it is `"compiled"`, with a form per kind of call.
+
+What the calls before were does not matter. A graph that has its path from
+calls without gradients (a model that is evaluated under `torch.no_grad()`
+before it is trained) waits: the first call with gradients enabled takes it
+down again, and it is handed over from the next call on if a tensor of that
+call needs a gradient. A call with gradients enabled whose tensors need
+none cannot be told from one that needs a gradient without taking the graph
+down, so behind such calls the graph is taken down again at the second, the
+fourth, the eighth such call and so on, and then at every 4096th: a graph
+that needed no gradient for n calls with gradients enabled is handed over
+at most n calls, and at most 4096, behind the first call that needs one.
+
+```python
+late = torch.vm(two, passes=derives)
+with torch.no_grad():
+    for _ in range(3):
+        first, second = late(x, w, b)
+torch.vm.regions(late)[0]["state"]  # 'built'
+for _ in range(8):
+    first, second = late(x, w, b)
+type(first.grad_fn).__name__, torch.vm.regions(late)[0]["state"]  # ('GraphBackward', 'compiled')
+```
+
+A call of a graph that is taken down for its backward whose tensors need
+no gradient has nothing to derive, and its form says so:
 
 ```python
 with torch.no_grad():
@@ -2173,8 +2198,9 @@ through this copy of the forward where eager's goes through the forward
 itself, and the gradients that meet there are not always added in eager's
 order: what it leaves is eager's value, and not always its last bit (the
 tests hold it to 1e-5). A graph that draws random numbers or writes to a
-tensor from outside cannot run once more: it raises there and says which of
-the two it was asked for.
+tensor from outside cannot run once more, and neither can one an input of
+which was written to in place since the call: it raises there and says
+which of the two backwards it was asked for.
 
 A backward runs under the autocast of the thread that asks for it: none
 where it is asked for behind the `with torch.autocast(...)` block that the
@@ -2445,6 +2471,13 @@ What graphs do not do at this stage:
   computes are computed in it (`torch.ops.aten.sym_size.int`), but its
   inputs have the sizes of the call it was exported from. With `Inductor()`
   every export is a compilation.
+- An object that an operation of a graph takes from outside the function is
+  checked by which object it is, not by what it holds. A list whose numbers
+  change in place (`torch.tensor(SCALES)` of a global list, of an attribute
+  of a module, of a default argument) is taken with the numbers it had when
+  the graph was handed over: where something stands for the graph (a pass
+  over graphs, the engine's backward) a later change of the list is not
+  seen, and the result is not eager's.
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported.
@@ -2453,20 +2486,23 @@ What graphs do not do at this stage:
   was written to in place, and has by then added up the gradient of every
   leaf whose nodes all ran before that one; the node of a graph raises
   before it gives anything, so no input of the graph has a gradient of that
-  backward. The error is eager's, and so is its text but for one name:
-  where the write itself was recorded (`h.mul_(2)` on a result that needs a
-  gradient), eager's text names the node of the write (`output 0 of Mul`)
-  and the graph's the node that made the tensor (`output 0 of Tanh`).
+  backward. The error and its text are eager's, with three exceptions. An
+  operation whose kernel writes to its own result (`aminmax` on the CPU)
+  leaves that result at another version than eager does, and the text has
+  those versions (`is at version 3; expected version 2` where eager says 1
+  and 0). A backward that is asked for some inputs only
+  (`torch.autograd.grad(loss, [w])`, `backward(inputs=...)`) runs the whole
+  backward of a graph, where eager runs the nodes on the way to those
+  inputs: the gradients are the same, but a tensor that only the other
+  nodes kept and that was written to in place raises here and not in eager.
+  And an input of the graph that another operation made and that is
+  detached in place (`detach_()`) behind the call is not noticed: the
+  backward computes its gradients, where eager raises.
 - A backward that is to be differentiated again, or one for some results of
   a node of eager's with several, runs the graph once more on the tape: a
   graph that draws random numbers or writes to a tensor from outside raises
-  for it, where eager computes it.
-- With no pass over graphs in the list, a graph whose path was taken down
-  by calls without gradients keeps being one that the engine only runs: a
-  function that is called twice or more under `torch.no_grad()` before its
-  tensors need a gradient runs on eager's tape from then on as well, and no
-  backward is derived for it. The results and the gradients are eager's
-  either way.
+  for it, where eager computes it, and so does one an input of which was
+  written to in place since the call (eager kept what it needs of it).
 - A loss behind a write is no part of the graph with the engine's backward
   either: a training graph still ends in front of a loss that can fail
   behind a batch norm's write to its statistics ("Writes"), and the nodes of
