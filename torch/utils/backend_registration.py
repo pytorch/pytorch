@@ -95,6 +95,10 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     (1) ``get_amp_supported_dtype() -> List[torch.dtype]``
         get the supported dtypes on your "foo" device in AMP, maybe the "foo" device supports one more dtype.
 
+    To opt into Dynamo's specialized autocast tracing, the registered ``autocast`` class must declare
+    ``_dynamo_autocast_passthrough = True`` directly and expose exactly ``dtype``, ``enabled``, and
+    ``cache_enabled`` parameters that it forwards unchanged.
+
     Note(random): If you want to support to set seed for your device, BackendModule needs to have the following API's:
 
     (1) ``_is_in_bad_fork() -> bool``
