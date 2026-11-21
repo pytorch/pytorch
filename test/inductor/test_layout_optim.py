@@ -12,20 +12,10 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification
-from torch.testing._internal.inductor_utils import (
-    HAS_CUDA_AND_TRITON,
-    HAS_MTIA_AND_TRITON,
-    HAS_XPU_AND_TRITON,
-)
+from torch.utils._triton import has_triton_for_device
 
 
 USE_DDP_WRAPPER = os.environ.get("USE_DDP_WRAPPER", "1") == "1"
-
-_HAS_TRITON_BY_DEVICE = {
-    "cuda": HAS_CUDA_AND_TRITON,
-    "xpu": HAS_XPU_AND_TRITON,
-    "mtia": HAS_MTIA_AND_TRITON,
-}
 
 
 class Model2Conv(nn.Module):
@@ -55,8 +45,9 @@ class TestLayoutOptim(TestCase):
 
         import torch.distributed as dist
 
-        has_triton = _HAS_TRITON_BY_DEVICE.get(cls.device_type)
-        if not has_triton:
+        # Query the interface registered for cls.device_type so HPU and
+        # privateuse1 variants are covered, not just cuda/xpu/mtia.
+        if not has_triton_for_device(cls.device_type):
             raise unittest.SkipTest(
                 f"triton is not available for {cls.device_type} on this host"
             )
