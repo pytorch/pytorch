@@ -635,7 +635,9 @@ on or off, inference mode, autocast on or off and the dtype it casts to, the
 default dtype, whether algorithms have to be deterministic, the dispatch
 keys it adds); and the same
 numbers and objects where an operation takes one from outside the graph (the
-function a global names, a float). A call of another kind runs the
+function a global names, a float; a list or a tuple of numbers by what is in
+it at the call, to any depth, not by which list it is: one that was changed
+in place since is another value). A call of another kind runs the
 operations and is exported in its turn. What was made for a kind of call is
 a form of the graph, and a graph has `max_variants` of them at most (8
 unless `Graphs` is made with another number); calls of further kinds then
@@ -1240,8 +1242,9 @@ of other operators (`torch.argwhere`, `torch.where` with one argument,
 graphs are exported, such an operator is run once more when its call is
 taken down, on tensors of the same sizes and dtypes that hold nothing, and
 its sizes are taken to follow from those of what it is given only if it
-runs there and gives the same sizes. A branch on a size that does not is a
-check of every call:
+runs there and gives the same sizes (and the same dtypes, unless the call
+is under autocast, which does not cast tensors that hold nothing). A branch
+on a size that does not is a check of every call:
 
 ```python
 def weighs(x):
@@ -2097,6 +2100,16 @@ eager's view, made on the tape behind the node. A graph that reads a view
 which it also gives as a result is cut in two in front of that read, each
 part with a node of its own.
 
+With `torch.backends.cudnn.benchmark` on, cuDNN picks the algorithm of a
+convolution by what it measured and remembers what it picked per thread, so
+eager's own bits depend on the thread a node runs on and on what was
+measured there. "Bit for bit" then means the same kernels with the same
+arguments in the same order: the backward of a graph runs on the autograd
+engine's thread, where eager's nodes would, and chooses as the caller set
+it. While a graph is taken down and what its nodes gave is compared with
+the autograd engine, both sides choose one way: benchmark mode is off and
+deterministic mode is on for that long ("Limits").
+
 With no pass over graphs in the list no graph leaves the engine for this:
 the engine hands such a graph to itself. A graph starts as one that the
 engine only runs (`"built"`). The first call that comes to it with
@@ -2190,7 +2203,10 @@ call only; so does one under `torch.no_grad()`, which needs no backward.
 Two backwards are not served by the backward that was taken down: one that
 is to be differentiated again (`create_graph=True`), and one for some of
 the results of a node of eager's that was handed gradients for all of them
-when the graph was taken down (the two halves of a `chunk`). For these the
+when the graph was taken down (the two halves of a `chunk`), or whose
+kernels, which are those of the backward for all the results, do not fit
+the gradients that come for those results alone (a `view` in front of which
+the gradients of two results meet). For these the
 node runs the graph once more, on the tape, from its inputs, and calls
 eager's nodes for it. The gradient that a backward with `create_graph=True`
 gives is eager's bit for bit. A second backward through that gradient goes
@@ -2471,13 +2487,6 @@ What graphs do not do at this stage:
   computes are computed in it (`torch.ops.aten.sym_size.int`), but its
   inputs have the sizes of the call it was exported from. With `Inductor()`
   every export is a compilation.
-- An object that an operation of a graph takes from outside the function is
-  checked by which object it is, not by what it holds. A list whose numbers
-  change in place (`torch.tensor(SCALES)` of a global list, of an attribute
-  of a module, of a default argument) is taken with the numbers it had when
-  the graph was handed over: where something stands for the graph (a pass
-  over graphs, the engine's backward) a later change of the list is not
-  seen, and the result is not eager's.
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported.
@@ -2486,23 +2495,25 @@ What graphs do not do at this stage:
   was written to in place, and has by then added up the gradient of every
   leaf whose nodes all ran before that one; the node of a graph raises
   before it gives anything, so no input of the graph has a gradient of that
-  backward. The error and its text are eager's, with three exceptions. An
+  backward. The error and its text are eager's, with two exceptions. An
   operation whose kernel writes to its own result (`aminmax` on the CPU)
   leaves that result at another version than eager does, and the text has
   those versions (`is at version 3; expected version 2` where eager says 1
-  and 0). A backward that is asked for some inputs only
+  and 0). And a backward that is asked for some inputs only
   (`torch.autograd.grad(loss, [w])`, `backward(inputs=...)`) runs the whole
   backward of a graph, where eager runs the nodes on the way to those
   inputs: the gradients are the same, but a tensor that only the other
   nodes kept and that was written to in place raises here and not in eager.
-  And an input of the graph that another operation made and that is
-  detached in place (`detach_()`) behind the call is not noticed: the
-  backward computes its gradients, where eager raises.
 - A backward that is to be differentiated again, or one for some results of
   a node of eager's with several, runs the graph once more on the tape: a
   graph that draws random numbers or writes to a tensor from outside raises
   for it, where eager computes it, and so does one an input of which was
   written to in place since the call (eager kept what it needs of it).
+- While the backward of a graph is taken down and compared with the
+  autograd engine, cuDNN's benchmark mode is off and its deterministic mode
+  is on. The two settings are the process's: a convolution that another
+  thread runs in that time runs that way too. They are as the caller set
+  them again when the call returns.
 - A loss behind a write is no part of the graph with the engine's backward
   either: a training graph still ends in front of a loss that can fail
   behind a batch norm's write to its statistics ("Writes"), and the nodes of
