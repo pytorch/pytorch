@@ -34,21 +34,21 @@ namespace at::native {
 at::Tensor miopen_convolution(
     const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt /* optional */,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic) {
+    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32) {
   TORCH_CHECK(false, "miopen_convolution: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_backward_input(
     IntArrayRef input_size, const at::Tensor& grad_output, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
+    bool benchmark, bool deterministic, bool allow_tf32) {
   TORCH_CHECK(false, "miopen_convolution_backward_input: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_backward_weight(
     IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
+    bool benchmark, bool deterministic, bool allow_tf32) {
   TORCH_CHECK(false, "miopen_convolution_backward_weight: ATen not compiled with MIOpen support");
 }
 
@@ -60,63 +60,63 @@ at::Tensor miopen_convolution_backward_bias(
 std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
+    bool benchmark, bool deterministic, bool allow_tf32, std::array<bool,3> output_mask) {
   TORCH_CHECK(false, "miopen_convolution_backward: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_transpose(
     const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt /* optional */,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic) {
+    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32) {
   TORCH_CHECK(false, "miopen_convolution_transpose: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_transpose_backward_input(
     const at::Tensor& grad_output, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic) {
+    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32) {
   TORCH_CHECK(false, "miopen_convolution_transpose_backward: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_transpose_backward_weight(
     IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
+    bool benchmark, bool deterministic, bool allow_tf32) {
   TORCH_CHECK(false, "miopen_convolution_transpose_backward_weight: ATen not compiled with MIOpen support");
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
+    bool benchmark, bool deterministic, bool allow_tf32, std::array<bool,3> output_mask) {
   TORCH_CHECK(false, "miopen_convolution_transpose_backward: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_depthwise_convolution(
     const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt /* optional */,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic) {
+    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32) {
   TORCH_CHECK(false, "miopen_depthwise_convolution: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_depthwise_convolution_backward_input(
     IntArrayRef input_size, const at::Tensor& grad_output, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
+    bool benchmark, bool deterministic, bool allow_tf32) {
   TORCH_CHECK(false, "miopen_depthwise_convolution_backward_input: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_depthwise_convolution_backward_weight(
     IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic) {
+    bool benchmark, bool deterministic, bool allow_tf32) {
   TORCH_CHECK(false, "miopen_depthwise_convolution_backward_weight: ATen not compiled with MIOpen support");
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
+    bool benchmark, bool deterministic, bool allow_tf32, std::array<bool,3> output_mask) {
   TORCH_CHECK(false, "miopen_depthwise_convolution_backward: ATen not compiled with MIOpen support");
 }
 
@@ -166,6 +166,10 @@ namespace at { namespace native {
 
 // See NOTE [ Convolution design ] in aten/src/ATen/native/cudnn/ConvShared.cpp
 
+static bool allowMiopenTF32() {
+  return at::globalContext().allowTF32CuDNN(at::Float32Op::CONV);
+}
+
 // ---------------------------------------------------------------------
 //
 // Helper classes
@@ -188,6 +192,7 @@ struct ConvolutionParams
   int dilation[max_dim];
   int64_t groups;
   bool deterministic;
+  bool allow_tf32;
   c10::DeviceIndex device_id; //This is needed to distinguish between miopen handles of multiple gpus.
   // NB: transposed purposely omitted: transposed just swaps
   // forward and backward, so you can reuse the benchmark entry,
@@ -203,6 +208,7 @@ void setConvolutionParams(
     IntArrayRef dilation,
     int64_t groups,
     bool deterministic,
+    bool allow_tf32,
     at::MemoryFormat memory_format) {
   miopenDataType_t dataType = getMiopenDataType(input);
   memset(params, 0, sizeof(ConvolutionParams));
@@ -225,6 +231,7 @@ void setConvolutionParams(
   }
   params->groups = groups;
   params->deterministic = deterministic;
+  params->allow_tf32 = allow_tf32;
   params->device_id = at::cuda::current_device();
 }
 
@@ -690,6 +697,7 @@ static inline void split_batch_dim_to_32bit_out(
     int64_t groups,
     bool benchmark,
     bool deterministic,
+    bool allow_tf32,
     bool depthwise,
     int64_t max_worksize,
     func_t func_indexing) {
@@ -709,6 +717,7 @@ static inline void split_batch_dim_to_32bit_out(
         groups,
         benchmark,
         deterministic,
+        allow_tf32,
         depthwise);
     return;
   }
@@ -738,6 +747,7 @@ static inline void split_batch_dim_to_32bit_out(
           groups,
           benchmark,
           deterministic,
+          allow_tf32,
           depthwise);
     }
     return;
@@ -753,6 +763,7 @@ static inline void split_batch_dim_to_32bit_out(
       groups,
       benchmark,
       deterministic,
+      allow_tf32,
       depthwise);
 }
 
@@ -855,10 +866,10 @@ void raw_miopen_convolution_forward_out_32bit(
     int64_t groups,
     bool benchmark,
     bool deterministic,
+    bool allow_tf32,
     bool depthwise=false) {
   auto dataType = getMiopenDataType(input);
   miopenConvolutionMode_t c_mode = depthwise ? miopenDepthwise : miopenConvolution;
-
   ConvolutionArgs args{input, output, weight};
   args.handle = getMiopenHandle();
   at::MemoryFormat memory_format = miopen_conv_suggest_memory_format(input, weight);
@@ -872,6 +883,7 @@ void raw_miopen_convolution_forward_out_32bit(
       dilation,
       groups,
       deterministic,
+      allow_tf32,
       memory_format);
   args.idesc.set(input, memory_format);
   args.wdesc.set(weight, memory_format, 0);
@@ -885,7 +897,8 @@ void raw_miopen_convolution_forward_out_32bit(
       args.params.dilation,
       args.params.groups,
       benchmark,
-      deterministic);
+      deterministic,
+      allow_tf32);
 
   if (useImmediateMode<miopenConvFwdAlgorithm_t>(args)) {
       uint64_t solution_id;
@@ -938,6 +951,7 @@ void raw_miopen_convolution_forward_out(
     int64_t groups,
     bool benchmark,
     bool deterministic,
+    bool allow_tf32,
     bool depthwise=false) {
   split_batch_dim_to_32bit_out(
       output,
@@ -949,6 +963,7 @@ void raw_miopen_convolution_forward_out(
       groups,
       benchmark,
       deterministic,
+      allow_tf32,
       depthwise,
       1024 * 1024 * 256,
       raw_miopen_convolution_forward_out_32bit);
@@ -965,6 +980,7 @@ void miopen_convolution_forward_out(
     int64_t groups,
     bool benchmark,
     bool deterministic,
+    bool allow_tf32,
     bool depthwise=false) {
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
@@ -986,6 +1002,7 @@ void miopen_convolution_forward_out(
       groups,
       benchmark,
       deterministic,
+      allow_tf32,
       depthwise);
 }
 
@@ -998,7 +1015,8 @@ Tensor miopen_convolution(
     IntArrayRef dilation,
     int64_t groups,
     bool benchmark,
-    bool deterministic) {
+    bool deterministic,
+    bool allow_tf32) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_t_maybe_owned = at::borrow_from_optional_tensor(bias_t_opt);
   const Tensor& bias_t = *bias_t_maybe_owned;
@@ -1025,7 +1043,8 @@ Tensor miopen_convolution(
       dilation,
       groups,
       benchmark,
-      deterministic);
+      deterministic,
+      allow_tf32);
   if (bias->defined()) {
     miopen_convolution_add_bias_(c, output, bias);
   }
@@ -1040,7 +1059,8 @@ Tensor miopen_convolution_transpose_backward_input(
     IntArrayRef dilation,
     int64_t groups,
     bool benchmark,
-    bool deterministic) {
+    bool deterministic,
+    bool allow_tf32) {
   TensorArg grad_output{ grad_output_t,  "grad_output", 1 }, weight{weight_t, "weight", 2};
   auto memory_format =
     miopen_conv_suggest_memory_format(grad_output_t, weight_t);
@@ -1063,7 +1083,8 @@ Tensor miopen_convolution_transpose_backward_input(
       dilation,
       groups,
       benchmark,
-      deterministic);
+      deterministic,
+      allow_tf32);
   return *output;
 }
 
@@ -1078,7 +1099,8 @@ Tensor miopen_convolution_transpose_backward_weight(
     IntArrayRef dilation,
     int64_t groups,
     bool benchmark,
-    bool deterministic);
+    bool deterministic,
+    bool allow_tf32);
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_transpose_backward(
     const at::Tensor& input,
@@ -1091,6 +1113,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_transpose_back
     int64_t groups,
     bool benchmark,
     bool deterministic,
+    bool allow_tf32,
     std::array<bool,3> output_mask) {
   Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
 
@@ -1115,7 +1138,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_transpose_back
           dilation,
           groups,
           benchmark,
-          deterministic);
+          deterministic,
+          allow_tf32);
     }
     if (output_mask[1]) {
       grad_weight = miopen_convolution_transpose_backward_weight(
@@ -1127,7 +1151,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_transpose_back
           dilation,
           groups,
           benchmark,
-          deterministic);
+          deterministic,
+          allow_tf32);
     }
     if (output_mask[2]) {
       grad_bias = miopen_convolution_backward_bias(grad_output);
@@ -1155,10 +1180,10 @@ void raw_miopen_convolution_backward_input_out_32bit(
     int64_t groups,
     bool benchmark,
     bool deterministic,
+    bool allow_tf32,
     bool depthwise=false) {
   auto dataType = getMiopenDataType(grad_output);
   miopenConvolutionMode_t c_mode = depthwise ? miopenDepthwise : miopenConvolution;
-
   ConvolutionArgs args{grad_input, grad_output, weight};
   args.handle = getMiopenHandle();
   at::MemoryFormat memory_format =
@@ -1173,6 +1198,7 @@ void raw_miopen_convolution_backward_input_out_32bit(
       dilation,
       groups,
       deterministic,
+      allow_tf32,
       memory_format);
   args.idesc.set(grad_input, memory_format);
   args.wdesc.set(weight, memory_format, 0);
@@ -1186,7 +1212,8 @@ void raw_miopen_convolution_backward_input_out_32bit(
       args.params.dilation,
       args.params.groups,
       benchmark,
-      deterministic);
+      deterministic,
+      allow_tf32);
 
   if (useImmediateMode<miopenConvBwdDataAlgorithm_t>(args)) {
       uint64_t solution_id;
@@ -1233,6 +1260,7 @@ void raw_miopen_convolution_backward_input_out(
     int64_t groups,
     bool benchmark,
     bool deterministic,
+    bool allow_tf32,
     bool depthwise=false) {
   split_batch_dim_to_32bit_out(
       grad_input,
@@ -1244,6 +1272,7 @@ void raw_miopen_convolution_backward_input_out(
       groups,
       benchmark,
       deterministic,
+      allow_tf32,
       depthwise,
       1024 * 1024 * 128,
       raw_miopen_convolution_backward_input_out_32bit);
@@ -1260,6 +1289,7 @@ Tensor miopen_convolution_backward_input(
     int64_t groups,
     bool benchmark,
     bool deterministic,
+    bool allow_tf32,
     bool depthwise=false) {
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
@@ -1289,6 +1319,7 @@ Tensor miopen_convolution_backward_input(
       groups,
       benchmark,
       deterministic,
+      allow_tf32,
       depthwise);
 
   return *grad_input;
@@ -1305,6 +1336,7 @@ Tensor miopen_convolution_backward_input(
     int64_t groups,
     bool benchmark,
     bool deterministic,
+    bool allow_tf32,
     bool depthwise=false) {
   TensorArg grad_output{grad_output_t, "grad_output", 1},
       weight{weight_t, "weight", 2};
@@ -1319,6 +1351,7 @@ Tensor miopen_convolution_backward_input(
       groups,
       benchmark,
       deterministic,
+      allow_tf32,
       depthwise);
 }
 
@@ -1332,10 +1365,10 @@ void raw_miopen_convolution_backward_weight_out_32bit(
     int64_t groups,
     bool benchmark,
     bool deterministic,
+    bool allow_tf32,
     bool depthwise=false) {
   auto dataType = getMiopenDataType(input);
   miopenConvolutionMode_t c_mode = depthwise ? miopenDepthwise : miopenConvolution;
-
   ConvolutionArgs args{input, grad_output, grad_weight};
   args.handle = getMiopenHandle();
   at::MemoryFormat memory_format =
@@ -1350,6 +1383,7 @@ void raw_miopen_convolution_backward_weight_out_32bit(
       dilation,
       groups,
       deterministic,
+      allow_tf32,
       memory_format);
   args.idesc.set(input, memory_format);
   args.wdesc.set(grad_weight, memory_format, 0);
@@ -1363,7 +1397,8 @@ void raw_miopen_convolution_backward_weight_out_32bit(
       args.params.dilation,
       args.params.groups,
       benchmark,
-      deterministic);
+      deterministic,
+      allow_tf32);
 
   if (useImmediateMode<miopenConvBwdWeightsAlgorithm_t>(args)) {
       uint64_t solution_id;
@@ -1410,6 +1445,7 @@ void raw_miopen_convolution_backward_weight_out(
     int64_t groups,
     bool benchmark,
     bool deterministic,
+    bool allow_tf32,
     bool depthwise=false) {
   constexpr int64_t int_max = std::numeric_limits<int>::max();
   const int64_t ni = input.numel();
@@ -1427,6 +1463,7 @@ void raw_miopen_convolution_backward_weight_out(
         groups,
         benchmark,
         deterministic,
+        allow_tf32,
         depthwise);
     return;
   }
@@ -1464,6 +1501,7 @@ void raw_miopen_convolution_backward_weight_out(
           groups,
           benchmark,
           deterministic,
+          allow_tf32,
           depthwise);
       grad_weight_accumulator.add_(grad_weight_);
     }
@@ -1498,6 +1536,7 @@ Tensor miopen_convolution_backward_weight(
     int64_t groups,
     bool benchmark,
     bool deterministic,
+    bool allow_tf32,
     bool depthwise=false) {
   auto memory_format = miopen_conv_suggest_memory_format(input_t, grad_output_t);
 
@@ -1536,6 +1575,7 @@ Tensor miopen_convolution_backward_weight(
       groups,
       benchmark,
       deterministic,
+      allow_tf32,
       depthwise);
 
   return grad_weight_t;
@@ -1552,6 +1592,7 @@ Tensor miopen_convolution_backward_weight(
     int64_t groups,
     bool benchmark,
     bool deterministic,
+    bool allow_tf32,
     bool depthwise=false) {
   return miopen_convolution_backward_weight(
       "miopen_convolution_backward_weight",
@@ -1564,6 +1605,7 @@ Tensor miopen_convolution_backward_weight(
       groups,
       benchmark,
       deterministic,
+      allow_tf32,
       depthwise);
 }
 
@@ -1577,6 +1619,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_backward(
     int64_t groups,
     bool benchmark,
     bool deterministic,
+    bool allow_tf32,
     std::array<bool,3> output_mask) {
   Tensor grad_output = grad_output_t.to(input.suggest_memory_format());
 
@@ -1602,7 +1645,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_backward(
           dilation,
           groups,
           benchmark,
-          deterministic);
+          deterministic,
+          allow_tf32);
     }
     if (output_mask[1]) {
       grad_weight = miopen_convolution_backward_weight(
@@ -1614,7 +1658,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_convolution_backward(
           dilation,
           groups,
           benchmark,
-          deterministic);
+          deterministic,
+          allow_tf32);
     }
     if (output_mask[2]) {
       grad_bias = miopen_convolution_backward_bias(grad_output);
@@ -1634,7 +1679,8 @@ Tensor miopen_convolution_transpose_forward(
     IntArrayRef dilation,
     int64_t groups,
     bool benchmark,
-    bool deterministic) {
+    bool deterministic,
+    bool allow_tf32) {
   auto input_size = conv_input_size(
       grad_output->sizes(),
       weight->sizes(),
@@ -1653,7 +1699,8 @@ Tensor miopen_convolution_transpose_forward(
       dilation,
       groups,
       benchmark,
-      deterministic);
+      deterministic,
+      allow_tf32);
 }
 
 Tensor miopen_convolution_transpose_backward_weight(
@@ -1665,7 +1712,8 @@ Tensor miopen_convolution_transpose_backward_weight(
     IntArrayRef dilation,
     int64_t groups,
     bool benchmark,
-    bool deterministic) {
+    bool deterministic,
+    bool allow_tf32) {
   return miopen_convolution_backward_weight(
       "miopen_convolution_backward_weight",
       weight_size,
@@ -1676,7 +1724,8 @@ Tensor miopen_convolution_transpose_backward_weight(
       dilation,
       groups,
       benchmark,
-      deterministic);
+      deterministic,
+      allow_tf32);
 }
 
 Tensor miopen_convolution_transpose(
@@ -1689,7 +1738,8 @@ Tensor miopen_convolution_transpose(
     IntArrayRef dilation,
     int64_t groups,
     bool benchmark,
-    bool deterministic) {
+    bool deterministic,
+    bool allow_tf32) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_t_maybe_owned = at::borrow_from_optional_tensor(bias_t_opt);
   const Tensor& bias_t = *bias_t_maybe_owned;
@@ -1706,7 +1756,8 @@ Tensor miopen_convolution_transpose(
       dilation,
       groups,
       benchmark,
-      deterministic);
+      deterministic,
+      allow_tf32);
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -1731,7 +1782,8 @@ Tensor miopen_depthwise_convolution(
     IntArrayRef dilation,
     int64_t groups,
     bool benchmark,
-    bool deterministic)
+    bool deterministic,
+    bool allow_tf32)
 {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_t_maybe_owned = at::borrow_from_optional_tensor(bias_t_opt);
@@ -1762,6 +1814,7 @@ Tensor miopen_depthwise_convolution(
       groups,
       benchmark,
       deterministic,
+      allow_tf32,
       true);
   if (bias->defined()) {
     miopen_convolution_add_bias_(c, output, bias);
@@ -1779,6 +1832,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_depthwise_convolution_back
     int64_t groups,
     bool benchmark,
     bool deterministic,
+    bool allow_tf32,
     std::array<bool,3> output_mask) {
   Tensor grad_output = grad_output_t.to(input.suggest_memory_format());
 
@@ -1794,6 +1848,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_depthwise_convolution_back
         groups,
         benchmark,
         deterministic,
+        allow_tf32,
         true);
   }
   if (output_mask[1]) {
@@ -1807,6 +1862,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_depthwise_convolution_back
         groups,
         benchmark,
         deterministic,
+        allow_tf32,
         true);
   }
   if (output_mask[2]) {
@@ -1832,7 +1888,8 @@ void raw_miopen_convolution_add_relu_out(
     IntArrayRef dilation,
     int64_t groups,
     bool benchmark,
-    bool deterministic) {
+    bool deterministic,
+    bool allow_tf32) {
   raw_miopen_convolution_forward_out(
       output,
       input,
@@ -1842,7 +1899,8 @@ void raw_miopen_convolution_add_relu_out(
       dilation,
       groups,
       benchmark,
-      deterministic);
+      deterministic,
+      allow_tf32);
   at::Tensor alpha_mul_z_add_bias =
       at::native::reshape_bias(input.dim(), bias).add(z, alpha);
   output.add_(alpha_mul_z_add_bias);
@@ -1908,7 +1966,8 @@ Tensor miopen_convolution_add_relu(
       dilation,
       groups,
       benchmark,
-      true); // deterministic
+      true, // deterministic
+      allowMiopenTF32());
 
   return output_t;
 }
@@ -1957,7 +2016,8 @@ Tensor miopen_convolution_relu(
       dilation,
       groups,
       benchmark, // benchmark
-      true); // deterministic
+      true, // deterministic
+      allowMiopenTF32());
 
   return output_t;
 }
