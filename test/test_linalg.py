@@ -495,6 +495,8 @@ class TestLinalg(TestCase):
 
         test(-1, [0, 1], False, True)
         test(-1, [0, 0], False, True)
+        test(-1, [-3], False, True)
+        test(-1, [-1], False, False)
 
     def test_permute_matmul(self):
         a = torch.ones([2, 5, 24, 24])
@@ -1912,6 +1914,41 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                             dim,
                             keepdim,
                             norm_dtype)
+
+    @parametrize("ord_val", (float("inf"), float("-inf"), -1, -2.0))
+    def test_vector_norm_compile_empty_batch_negative_dim(self, device, ord_val):
+        def eager_fn(t, dim, keepdim):
+            return torch.linalg.vector_norm(t, ord=ord_val, dim=dim, keepdim=keepdim)
+        compiled_fn = torch.compile(
+            eager_fn,
+            backend="eager",
+            fullgraph=True,
+        )
+
+        x = torch.empty(0, 5, device=device)
+        self.assertEqual(compiled_fn(x, -1, False), eager_fn(x, -1, False))
+
+        x_3d = torch.empty(0, 5, 3, device=device)
+        self.assertEqual(compiled_fn(x_3d, (-1,), True), eager_fn(x_3d, (-1,), True))
+
+        error_cases = [
+            (
+                (0, 5),
+                (-1, 0),
+                RuntimeError,
+                r"cannot compute the .* norm on the dimension 0",
+            ),
+            ((3, 0), -3, IndexError, r"Dimension out of range"),
+        ]
+        for shape, dim, exc_type, regex in error_cases:
+            x = torch.empty(*shape, device=device)
+            compiled_fn = torch.compile(
+                lambda t: torch.linalg.vector_norm(t, ord=ord_val, dim=dim),
+                backend="eager",
+                fullgraph=True,
+            )
+            with self.assertRaisesRegex(exc_type, regex):
+                compiled_fn(x)
 
     def test_vector_norm_dim_tuple_arg(self, device):
         test_cases = [
