@@ -66,6 +66,38 @@ def _to_fake_cute_tensor(t, assumed_align=16):
     )
 
 
+def _to_fake_gemm_tensor(t, assumed_align=16):
+    """Build a symbolic layout for a descriptor-seed GEMM operand.
+
+    The grouped kernel rewrites the TMA descriptors for each group at runtime.
+    Keep the seed independent of the packed M dimension while preserving the
+    operand's post-transpose major order and aligned leading stride.
+    """
+    shape = tuple(1 if int(size) == 1 else cute.sym_int64() for size in t.shape)
+    non_singleton = [int(size) != 1 for size in t.shape]
+    leading_dim = next(
+        (
+            dim
+            for dim, (size, stride) in enumerate(zip(non_singleton, t.stride()))
+            if size and int(stride) == 1
+        ),
+        None,
+    )
+    stride_divisibility = max(assumed_align // int(t.element_size()), 1)
+    stride = tuple(
+        1
+        if dim == leading_dim
+        else cute.sym_int64(divisibility=stride_divisibility)
+        for dim in range(t.ndim)
+    )
+    return cute.runtime.make_fake_tensor(
+        _TORCH_TO_CUTLASS_DTYPE[t.dtype],
+        shape,
+        stride=stride,
+        assumed_align=assumed_align,
+    )
+
+
 @functools.lru_cache
 def get_hardware_info():
     hw = cutlass.utils.HardwareInfo()
@@ -310,9 +342,9 @@ def launch_build_group_ptrs_from_bases(
         c_unsq = {{get_output()}}.unsqueeze(-1)
         gemm_executor = cute.compile(
             grouped_gemm,
-            _to_fake_cute_tensor(a_unsq),
-            _to_fake_cute_tensor(b_unsq),
-            _to_fake_cute_tensor(c_unsq),
+            _to_fake_gemm_tensor(a_unsq),
+            _to_fake_gemm_tensor(b_unsq),
+            _to_fake_gemm_tensor(c_unsq),
             G,
             _to_fake_cute_tensor(probs_t, assumed_align=4),
             _to_fake_cute_tensor(strides_t, assumed_align=4),
@@ -484,9 +516,9 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
 
     gemm_executor = cute.compile(
         grouped_gemm,
-        _to_fake_cute_tensor(proxy_a),
-        _to_fake_cute_tensor(proxy_b_unsq),
-        _to_fake_cute_tensor(proxy_out),
+        _to_fake_gemm_tensor(proxy_a),
+        _to_fake_gemm_tensor(proxy_b_unsq),
+        _to_fake_gemm_tensor(proxy_out),
         G,
         _to_fake_cute_tensor(proxy_probs, assumed_align=4),
         _to_fake_cute_tensor(proxy_strides, assumed_align=4),
