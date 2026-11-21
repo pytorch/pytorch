@@ -20,7 +20,10 @@ from torch.testing._internal.common_utils import (
     TEST_MKL,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import has_cpp_wrapper_for_device, HAS_CPU
+from torch.testing._internal.inductor_utils import (
+    has_cpp_wrapper_for_device,
+    RequiresCPUInductor,
+)
 
 
 try:
@@ -45,11 +48,12 @@ except unittest.SkipTest:
 
 
 _desired_test_bases = get_desired_device_type_test_bases()
-# Unlike inductor_utils.RUN_CPU, this ignores PYTORCH_TEST_INDUCTOR_RUN_CPU to
-# keep this suite's cost out of the nogpu_NO_AVX2 CI job.
-RUN_CPU = (
-    HAS_CPU
-    and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
+# Unlike inductor_utils.CPU_TESTS_REQUESTED, this ignores
+# PYTORCH_TEST_INDUCTOR_RUN_CPU to keep this suite's cost out of the
+# nogpu_NO_AVX2 CI job. Keep selection separate from HAS_CPU so a failed
+# capability probe still surfaces when these tests are requested.
+CPU_CPP_WRAPPER_TESTS_REQUESTED = (
+    any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
     and not IS_MACOS
     and has_cpp_wrapper_for_device("cpu")
 )
@@ -59,7 +63,10 @@ class CppWrapperTemplate:
     pass
 
 
-class TestCppWrapper(InductorTestCase):
+@unittest.skipIf(
+    not CPU_CPP_WRAPPER_TESTS_REQUESTED, "requires the CPU cpp_wrapper backend"
+)
+class TestCppWrapper(RequiresCPUInductor, InductorTestCase):
     hw_classification = HardwareClassification.CPU
     device = "cpu"
 
@@ -76,7 +83,6 @@ class TestCppWrapper(InductorTestCase):
                 check = check.check(calls[i + 1][0])
             check.run(code)
 
-    @unittest.skipIf(not RUN_CPU, "requires the CPU cpp_wrapper backend")
     @config.patch(cpp_wrapper=True)
     def test_unused_fallback_outputs_freed(self):
         # Each layer uses only the first output of two multi-output fallbacks:
@@ -122,7 +128,6 @@ class TestCppWrapper(InductorTestCase):
         self.assertEqual(len(calls), 2 * n_layers)
         self._check_freed_before_next_call(code, calls)
 
-    @unittest.skipIf(not RUN_CPU, "requires the CPU cpp_wrapper backend")
     @unittest.skipIf(
         not torch.backends.mkldnn.is_available() or IS_WINDOWS,
         "requires mkldnn, not on Windows",
@@ -155,7 +160,10 @@ class TestCppWrapper(InductorTestCase):
         self._check_freed_before_next_call(code, calls)
 
 
-class DynamicShapesCppWrapperCpuTests(InductorTestCase):
+@unittest.skipIf(
+    not CPU_CPP_WRAPPER_TESTS_REQUESTED, "requires the CPU cpp_wrapper backend"
+)
+class DynamicShapesCppWrapperCpuTests(RequiresCPUInductor, InductorTestCase):
     hw_classification = HardwareClassification.CPU
     device = "cpu"
 
@@ -254,7 +262,7 @@ def make_test_case(
         )
 
 
-if RUN_CPU:
+if CPU_CPP_WRAPPER_TESTS_REQUESTED:
 
     class BaseTest(NamedTuple):
         name: str
@@ -440,5 +448,5 @@ if RUN_CPU:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if RUN_CPU:
+    if CPU_CPP_WRAPPER_TESTS_REQUESTED:
         run_tests(needs="filelock")

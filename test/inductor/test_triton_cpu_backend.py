@@ -38,8 +38,8 @@ if HAS_CPU and TRITON_HAS_CPU:
         "(missing libdevice lowering and tensor descriptor support)"
     )
 
-    # SweepInputsCpuTest is only defined when CPU tests are enabled
-    # (RUN_CPU); otherwise there is nothing to subclass.
+    # SweepInputsCpuTest is only defined when CPU tests are requested
+    # (CPU_TESTS_REQUESTED); otherwise there is nothing to subclass.
     if hasattr(test_torchinductor, "SweepInputsCpuTest"):
 
         @unittest.skip(_CPU_TRITON_SKIP_REASON)
