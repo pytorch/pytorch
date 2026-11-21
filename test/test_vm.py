@@ -1427,6 +1427,49 @@ class TestVmPasses(TestCase):
         # Four operators and the constant one of them takes.
         self.assertEqual(len(run.replay.text(run.replay.start, run.replay.end)), 5)
 
+    def test_replayed_instructions_are_called_from_their_function(self):
+        # What a pass put in the place of instructions runs them itself: what
+        # they call finds the function as its caller, at their line, and not
+        # the frames of what replays them.
+        class Asker:
+            def __add__(self, other):
+                frame = sys._getframe(1)
+                return frame.f_code.co_name, frame.f_lineno
+
+        class Run:
+            def __init__(self, replay):
+                self.replay = replay
+                self.inputs, self.outputs = replay.io(replay.start, replay.end)
+                self.calls = 0
+
+            def __call__(self, *args):
+                self.calls += 1
+                env = dict(zip(self.inputs, args))
+                self.replay.run(self.replay.start, self.replay.end, env)
+                return tuple(env[value] for value in self.outputs)
+
+        made = []
+
+        def replace(region):
+            insts = region.instructions()
+            if any(inst["op"] == "call_object" for inst in insts):
+                return False
+            (add,) = [i for i, inst in enumerate(insts) if inst["op"] == "binary"]
+            made.append(Run(region.replayer(add, add + 1)))
+            return region.fuse(add, add + 1, made[-1])
+
+        def f(asker, k):
+            found = asker + k
+            return found
+
+        line = f.__code__.co_firstlineno + 1
+        compiled = torch.vm(f, passes=[*CFG, replace], fallback=False)
+        for _ in range(4):
+            self.assertEqual(compiled(Asker(), 1), ("f", line))
+        (run,) = made
+        # The first call profiled the block; the others went through `run`.
+        self.assertEqual(run.calls, 3)
+
     def test_replayed_error_names_its_instruction(self):
         handles = []
 
