@@ -92,6 +92,8 @@ from ..utils import (
     float_methods,
     frozenset_methods,
     get_custom_getattr,
+    get_type_mro_no_user_code,
+    has_custom_metaclass_accessor,
     has_torch_function,
     int_methods,
     is_lru_cache_wrapped_function,
@@ -674,6 +676,40 @@ class UserDefinedClassVariable(UserDefinedVariable):
         """Walk type(cls).__mro__ (the metaclass chain) to find *name*."""
         return mro_lookup(type(self.value), name)
 
+    def type_mro_index(self) -> int | None:
+        """Index of ``type`` in the metaclass MRO if ``cls.mro()`` would run
+        ``type.mro`` and return ``cls.__mro__`` as a list, else None. The caller
+        checks that no class in the class MRO defines ``mro``.
+
+        No class before ``type`` in the metaclass MRO may define ``mro``, and the
+        metaclass may not replace the ``__mro__`` accessor, through which the
+        result is rebuilt. CPython recomputes ``__mro__`` with ``type(cls).mro``
+        whenever ``__bases__`` of ``cls`` or of a base changes, so a metaclass
+        ``mro`` in place at the last such change leaves it stale. That is checked
+        when tracing only, not guarded.
+        https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L2935-L2945
+        https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L3001-L3014
+        """
+        if has_custom_metaclass_accessor(self.value, "__mro__"):
+            return None
+        meta_dicts = iter_mro_static_dicts(type(self.value))
+        for idx, (klass, namespace) in enumerate(meta_dicts):
+            if klass is type:
+                break
+            if "mro" in namespace:
+                return None
+        else:
+            return None
+        try:
+            # A metaclass mro that is gone now may have allowed bases C3 rejects.
+            c3 = type.mro(self.value)
+        except TypeError:
+            return None
+        cls_mro = get_type_mro_no_user_code(self.value)
+        if len(c3) != len(cls_mro) or any(a is not b for a, b in zip(c3, cls_mro)):
+            return None
+        return idx
+
     def nb_bool_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -759,6 +795,36 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return None
         return None
 
+    def pending_metaclass_setattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> type | None:
+        """The metaclass, up to the first in the metaclass MRO that defines
+        *name*, with a store or delete of *name* pending in this frame that a
+        lookup through the class can see, or None.
+
+        Lookups through the class read the metaclass dicts, which do not have the
+        pending change yet. A class in the class MRO that defines *name* hides
+        it, unless the old or the new metaclass value is a data descriptor.
+        """
+        if type(self.value) is type:
+            return None
+        se = tx.output.side_effects
+        for klass, namespace in iter_mro_static_dicts(type(self.value)):
+            if klass in se and se.has_pending_mutation_of_attr(se[klass], name):
+                if self.lookup_cls_mro_attr(name) is NO_SUCH_SUBOBJ:
+                    return klass
+                new_value = se.load_attr(se[klass], name, deleted_ok=True)
+                if (
+                    not new_value.is_python_constant()
+                    or is_data_descriptor(new_value.as_python_constant())
+                    or is_data_descriptor(self.lookup_metaclass_attr(name))
+                ):
+                    return klass
+                return None
+            if name in namespace:
+                return None
+        return None
+
     def getattr_needs_tracing(self, tx: "InstructionTranslatorBase", name: str) -> bool:
         """Whether a real ``getattr`` cannot stand in for tracing the lookup.
 
@@ -768,6 +834,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         cls_attr = self.lookup_cls_mro_attr(name)
         descr_get = inspect.getattr_static(type(cls_attr), "__get__", None)
         if isinstance(descr_get, types.FunctionType):
+            return True
+        if self.pending_metaclass_setattr(tx, name) is not None:
             return True
         return self.pending_setattr_owner(tx, name) is not None
 
@@ -790,6 +858,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 explanation="Dynamo does not trace attribute access on classes whose "
                 "metaclass overrides __getattribute__",
                 hints=graph_break_hints.SUPPORTABLE,
+            )
+        if (owner := self.pending_metaclass_setattr(tx, name)) is not None:
+            unimplemented(
+                gb_type="Class attribute changed on its metaclass in this frame",
+                context=f"{self.value.__qualname__}.{name}, changed on {owner.__qualname__}",
+                explanation="Dynamo reads class attributes from the metaclass dicts, "
+                "which do not have a store or delete made earlier in this frame yet.",
+                hints=[
+                    "Set or delete the metaclass attribute outside the compiled function.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         # ---- CPython type_getattro algorithm ----
@@ -1460,21 +1539,25 @@ class UserDefinedClassVariable(UserDefinedVariable):
             name == "mro"
             and len(args) == 0
             and not kwargs
-            and type(self.value) is type
             and self.lookup_cls_mro_attr("mro") is NO_SUCH_SUBOBJ
+            and (type_idx := self.type_mro_index()) is not None
         ):
-            # type.mro() returns a new list. With metaclass type, CPython
-            # recomputes __mro__ with the same C3 whenever a base changes, so
-            # the two always match. A custom metaclass can leave __mro__ stale.
-            # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L2935-L2945
-            # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L3001-L3014
+            # type.mro() returns a new list.
+            cls_mro = get_type_mro_no_user_code(self.value)
             if self.source is not None:
-                # cls.mro is type.mro while no class in the MRO defines mro.
-                guard_mro_absent(
-                    tx, self.value, self.source, "mro", len(self.value.__mro__)
-                )
+                # cls.mro is type.mro while no class in the MRO, and no class
+                # before type in the metaclass MRO, defines mro.
+                guard_mro_absent(tx, self.value, self.source, "mro", len(cls_mro))
+                if type(self.value) is not type:
+                    # Pin the metaclass and the place of type in its MRO, as
+                    # cls.__class__ and the metaclass __bases__ can be reassigned.
+                    install_guard(self.source.make_guard(GuardBuilder.TYPE_MATCH))
+                    meta_source = TypeSource(self.source)
+                    guard_mro_absent(tx, type(self.value), meta_source, "mro", type_idx)
+                    type_entry = GetItemSource(TypeMROSource(meta_source), type_idx)
+                    install_guard(type_entry.make_guard(GuardBuilder.CLASS_MATCH))
             mro_source = self.source and TypeMROSource(self.source)
-            mro = VariableTracker.build(tx, self.value.__mro__, mro_source)
+            mro = VariableTracker.build(tx, cls_mro, mro_source)
             items = mro.unpack_var_sequence(tx)
             return variables.ListVariable(items, mutation_type=ValueMutationNew())
         elif name == "fromkeys" and issubclass(self.value, dict):
