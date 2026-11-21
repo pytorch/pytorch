@@ -604,6 +604,43 @@ class MixOrderReduction:
 # codegen cannot decline the fusion and treats a missing final plan as a compiler
 # error.
 class NestedReduction:
+    @staticmethod
+    def _cached(
+        kind: str, key: Callable[[], tuple[Any, ...]], compute: Callable[[], Any]
+    ) -> Any:
+        """Memoize a planning result on the current scheduler.
+
+        The fusion pair search re-plans the same node groups many times. Each
+        plan is a function of its nodes' loop state, which _loop_state_gen
+        identifies, so callers put (node, generation) pairs in the key: a loop
+        mutation, or a rollback of one, changes the key rather than leaving a
+        stale entry behind.
+        """
+        scheduler = getattr(V.graph, "scheduler", None)
+        cache = getattr(scheduler, "_nested_reduction_cache", None)
+        if not isinstance(cache, dict):
+            return compute()
+        full_key = (kind, *key())
+        result = cache.get(full_key, _NESTED_PLAN_MISS)
+        if result is _NESTED_PLAN_MISS:
+            result = compute()
+            cache[full_key] = result
+        return result
+
+    @staticmethod
+    def _loop_state_key(nodes: Sequence[BaseSchedulerNode]) -> tuple[Any, ...]:
+        # The group and loop sizes can be reassigned without a generation bump,
+        # so they are part of the key too.
+        return tuple(
+            (
+                node,
+                getattr(node, "_loop_state_gen", None),
+                node.group,
+                tuple(map(tuple, getattr(node, "_sizes", ()))),
+            )
+            for node in nodes
+        )
+
     """
     Detects when an outer reduction and a dependent grouped reduction can be
     fused into one kernel. The outer reduction reduces over a large dimension
@@ -788,6 +825,19 @@ class NestedReduction:
         numel: sympy.Expr,
         rnumel: sympy.Expr,
     ) -> StagedReductionPlan | None:
+        return cls._cached(
+            "sub_parent_epilogue_plan",
+            lambda: (cls._loop_state_key(nodes), numel, rnumel),
+            lambda: cls._sub_parent_epilogue_plan_uncached(nodes, numel, rnumel),
+        )
+
+    @classmethod
+    def _sub_parent_epilogue_plan_uncached(
+        cls,
+        nodes: Sequence[BaseSchedulerNode],
+        numel: sympy.Expr,
+        rnumel: sympy.Expr,
+    ) -> StagedReductionPlan | None:
         """Plan ``nodes`` as a reduction plus a sub-parent pointwise epilogue.
 
         The epilogue runs over the parent's R tile divided into lanes. Returns
@@ -963,20 +1013,40 @@ class NestedReduction:
         reduction = reductions[0]
         # Leave reductions that the outer + grouped planner can own to it; it
         # needs an upstream reduction over the same full domain.
-        full_numel = numel * rnumel
-        for name in reduction.ancestors:
-            upstream = reduction.scheduler.name_to_node.get(name)
-            if (
-                upstream is not None
-                and upstream.is_reduction()
-                and cls.is_candidate(upstream, reduction)
-                and V.graph.sizevars.statically_known_equals(
-                    sympy_product(upstream.group[1]), full_numel
-                )
-            ):
-                return None
+        if cls._has_outer_grouped_owner(reduction, numel * rnumel):
+            return None
         return cls._sub_parent_epilogue_candidate_nodes(
             nodes, numel, rnumel, persistent_factor=factor
+        )
+
+    @classmethod
+    def _has_outer_grouped_owner(
+        cls, reduction: SchedulerNode, full_numel: sympy.Expr
+    ) -> bool:
+        """Whether an upstream reduction over ``full_numel`` can own ``reduction``.
+
+        This scans every ancestor, and depends only on the reduction, so it is
+        cached rather than repeated for each epilogue candidate paired with it.
+        """
+
+        def scan() -> bool:
+            for name in reduction.ancestors:
+                upstream = reduction.scheduler.name_to_node.get(name)
+                if (
+                    upstream is not None
+                    and upstream.is_reduction()
+                    and cls.is_candidate(upstream, reduction)
+                    and V.graph.sizevars.statically_known_equals(
+                        sympy_product(upstream.group[1]), full_numel
+                    )
+                ):
+                    return True
+            return False
+
+        return cls._cached(
+            "has_outer_grouped_owner",
+            lambda: (cls._loop_state_key([reduction]), full_numel),
+            scan,
         )
 
     @staticmethod
@@ -1073,6 +1143,23 @@ class NestedReduction:
 
     @classmethod
     def _sub_parent_epilogue_candidate_nodes(
+        cls,
+        nodes: Sequence[SchedulerNode],
+        numel: sympy.Expr,
+        rnumel: sympy.Expr,
+        *,
+        persistent_factor: int | None = None,
+    ) -> SubParentEpilogueGrouping | None:
+        return cls._cached(
+            "sub_parent_epilogue_candidate_nodes",
+            lambda: (cls._loop_state_key(nodes), numel, rnumel, persistent_factor),
+            lambda: cls._sub_parent_epilogue_candidate_nodes_uncached(
+                nodes, numel, rnumel, persistent_factor=persistent_factor
+            ),
+        )
+
+    @classmethod
+    def _sub_parent_epilogue_candidate_nodes_uncached(
         cls,
         nodes: Sequence[SchedulerNode],
         numel: sympy.Expr,
@@ -1222,8 +1309,27 @@ class NestedReduction:
             return None
         return rate
 
-    @staticmethod
+    @classmethod
     def _pointwise_node_matches_domain(
+        cls,
+        node: SchedulerNode,
+        expected_numel: sympy.Expr,
+        expected_groups: Sequence[sympy.Expr],
+    ) -> bool:
+        return cls._cached(
+            "pointwise_node_matches_domain",
+            lambda: (
+                cls._loop_state_key([node]),
+                expected_numel,
+                tuple(expected_groups),
+            ),
+            lambda: cls._pointwise_node_matches_domain_uncached(
+                node, expected_numel, expected_groups
+            ),
+        )
+
+    @staticmethod
+    def _pointwise_node_matches_domain_uncached(
         node: SchedulerNode,
         expected_numel: sympy.Expr,
         expected_groups: Sequence[sympy.Expr],
@@ -6100,6 +6206,7 @@ class _LoopMutationTracker:
 
 # Distinguishes "not cached" from a cached None in _tiling_memory_cache.
 _TILING_MEMORY_MISS = object()
+_NESTED_PLAN_MISS = object()
 
 
 class Scheduler:
@@ -6119,6 +6226,7 @@ class Scheduler:
     def _init(self, nodes: list[ir.Operation]) -> None:
         self._loop_mutation_trackers: list[_LoopMutationTracker] = []
         self._tiling_memory_cache: dict[tuple[Any, ...], Any] = {}
+        self._nested_reduction_cache: dict[tuple[Any, ...], Any] = {}
         # buffer name -> reuse key, see _single_user_read_reuse_keys
         self._fusion_reuse_keys: dict[str, Any] = {}
         # Failed correctness check of memory timeline modeling disables fusion memory checks
