@@ -12,6 +12,7 @@ the modules of a graph compiler are imported by the pass that is one.
 
 import operator
 import os
+import threading
 import traceback
 from collections.abc import Callable
 from typing import Any
@@ -28,6 +29,15 @@ _BINARY = {
     "//": operator.floordiv,
     "%": operator.mod,
 }
+
+
+class _State(threading.local):
+    # The tensors of the call a graph is being exported from, while its
+    # passes run.
+    examples: list[torch.Tensor] | None = None
+
+
+_state = _State()
 
 
 def _overload(name: str, overload: str) -> Any:
@@ -110,6 +120,22 @@ def graph_module(description: dict[str, Any]) -> torch.fx.GraphModule:
     return torch.fx.GraphModule(torch.nn.Module(), graph)
 
 
+def examples(input_types: list[Any]) -> list[torch.Tensor]:
+    """The tensors a pass that compiles a graph compiles it for: those of the
+    call the graph is being exported from, which is what the engine checks
+    later calls against (dtype, device, ``requires_grad``, sizes, strides).
+    For a pass that is called on its own, tensors of zeros of the types."""
+    found = _state.examples
+    if found is not None and len(found) == len(input_types):
+        return list(found)
+    made = []
+    for t in input_types:
+        sizes = [dim.lo for dim in t.dims]
+        zeros = torch.zeros(sizes, dtype=t.dtype, device=t.device)
+        made.append(zeros.requires_grad_(t.requires_grad))
+    return made
+
+
 class _Compiled(torch.nn.Module):
     """What a pass compiled, as the one submodule of the graph it returns."""
 
@@ -153,7 +179,7 @@ def _callable(gm: torch.fx.GraphModule) -> Callable[..., Any]:
 
 
 def build(
-    description: dict[str, Any], passes: tuple[Any, ...]
+    description: dict[str, Any], passes: tuple[Any, ...], runtime: Any
 ) -> tuple[Callable[..., Any], list[tuple[int, Any]]] | str:
     """What the passes over a graph make of the graph the engine describes:
     the callable that takes the tensors of the graph and returns a tuple of
@@ -166,6 +192,7 @@ def build(
     guards: list[tuple[int, Any]] = []
     for pass_ in passes:
         name = getattr(pass_, "__name__", type(pass_).__name__)
+        _state.examples = inputs
         try:
             made = pass_(gm, types)
         except Exception as e:
@@ -178,6 +205,8 @@ def build(
                 last = frames[-1]
                 reason += f" (in {last.name}, {os.path.basename(last.filename)}:{last.lineno})"
             return reason
+        finally:
+            _state.examples = None
         if not isinstance(made, torch.fx.GraphModule):
             return f"the pass {name} returned a {type(made).__name__}, not the graph"
         taken = sum(node.op == "placeholder" for node in made.graph.nodes)
@@ -191,15 +220,20 @@ def build(
         made.meta.pop(_types._GUARDS, None)
         made.recompile()
         gm = made
+    compiles = any(getattr(pass_, "compiles", False) for pass_ in passes)
+    if compiles and any(tensor.is_cuda for tensor in inputs):
+        # A kernel on a GPU is started and not waited for: what measures a
+        # function against the interpreter waits for the device from here on.
+        runtime.trial_settles(torch._C._cuda_synchronize)
     return _callable(gm), guards
 
 
-def exporter(passes: tuple[Any, ...]) -> Callable[[dict[str, Any]], Any]:
+def exporter(passes: tuple[Any, ...], runtime: Any) -> Callable[[dict[str, Any]], Any]:
     """What the engine is given to export its graphs with: called with the
     description of a graph, it returns what :func:`build` returns for these
     passes."""
 
     def export(description: dict[str, Any]) -> Any:
-        return build(description, passes)
+        return build(description, passes, runtime)
 
     return export
