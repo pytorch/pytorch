@@ -4740,7 +4740,8 @@ class SIMDScheduling(BaseScheduling):
                 # Skip a hint that empties a numel like s0 - 1024, or that grows one like
                 # s0**4 (duck sizing) past both int32 and the size this graph was traced at.
                 limits = [
-                    max(2**31 - 1, V.graph.sizevars.optimization_hint(n)) for n in numels
+                    max(2**31 - 1, V.graph.sizevars.optimization_hint(n))
+                    for n in numels
                 ]
                 hints = [
                     hint
@@ -4761,9 +4762,7 @@ class SIMDScheduling(BaseScheduling):
                 )
                 self.codegen_node_schedule_with_kernel(node_schedule, kernel)
                 key = tuple(
-                    tuple(
-                        V.graph.sizevars.optimization_hint_at(s, hint) for s in shape
-                    )
+                    tuple(V.graph.sizevars.optimization_hint_at(s, hint) for s in shape)
                     for shape in shapes
                 )
                 kernels_by_shape[key] = kernel
