@@ -13,7 +13,6 @@ from torch.export import Dim
 from torch.export.experimental import _ExportPackage
 from torch.export.pt2_archive._package import _load_aoti
 from torch.testing._internal.common_utils import (
-    decorateIf,
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
@@ -210,10 +209,6 @@ class TestAOTIPackageDeviceValidation(TestCase):
                 load_package("model.pt2")
 
     @parametrize("device_type", ["cuda", "xpu"])
-    @decorateIf(
-        unittest.skip("https://github.com/intel/torch-xpu-ops/issues/5156"),
-        lambda params: params["device_type"] == "xpu",
-    )
     def test_cpp_aoti_package_loader_validates_accelerator_availability(
         self, device_type
     ):
