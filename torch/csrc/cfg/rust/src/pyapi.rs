@@ -370,7 +370,12 @@ impl CfgFunction {
                         format!("    ; if {}", guards.join(" and "))
                     }
                 ));
-                func.dump_code(&mut out, &version.insts, &version.term);
+                // Where graphs are exported, a block is shown as it runs
+                // while they are there: with what enters them.
+                let entered = |site: &Arc<GraphSite>| site.exporter.is_some();
+                let entering = version.entering.as_ref().filter(|copy| copy.graphs.iter().any(entered));
+                let insts = entering.map_or(&version.insts, |copy| &copy.insts);
+                func.dump_code(&mut out, insts, &version.term);
             }
         }
         out
@@ -434,13 +439,14 @@ impl CfgFunction {
         // are no longer exported.
         let (mut built, mut exported, mut hits, mut misses, mut given_up) = (0usize, 0u64, 0u64, 0u64, 0usize);
         for (_, _, _, site) in self.graph_sites() {
+            if site.outer().is_some() || site.short().is_some() {
+                continue;
+            }
             built += 1;
             exported += site.exports.load(Ordering::Relaxed);
             given_up += matches!(*site.state.borrow(), GraphState::GivenUp(_)) as usize;
-            if let Some(path) = site.path() {
-                hits += path.hits.load(Ordering::Relaxed);
-                misses += path.misses.load(Ordering::Relaxed);
-            }
+            hits += site.hits.load(Ordering::Relaxed);
+            misses += site.misses.load(Ordering::Relaxed);
         }
         let graphs = PyDict::new(py);
         graphs.set_item("built", built)?;
@@ -513,28 +519,48 @@ impl CfgFunction {
     }
 
     /// The graphs of the function and of the functions it called, and what
-    /// was left out of them. One dict per graph of a specialized block, with
-    /// `where` (function, block, and the generic instructions from its first
-    /// operation to its last), `state` ("built": the VM runs it; "waiting":
-    /// it is exported at its next call; "compiled": what the passes over it
-    /// made runs in its place, with a `reason` if it is not exported for
-    /// further kinds of calls; "vm" with a `reason`: it is not exported, or
-    /// not for the calls it has seen), `ops` and `operators`, `inputs` and
-    /// `outputs` (how many values it takes and gives), `ends` (the block and
-    /// instruction the code goes on at behind it) and `why` (it ends
-    /// there), `variants` (how many
-    /// exported forms it has), `hits` and `misses` (how many calls ran an
-    /// exported form, and how many came to the graph and ran its
+    /// was left out of them. One dict per graph, with `where` (function,
+    /// block, and the generic instructions of the block from its first
+    /// operation to the last of its run there), `state` ("built": the VM
+    /// runs it; "waiting": it is exported at its next call; "compiled":
+    /// what the passes over it made runs in its place, with a `reason` if
+    /// it is not exported for further kinds of calls; "vm" with a `reason`:
+    /// it is not exported, or not for the calls it has seen), `ops` and
+    /// `operators` of the path that ran last, `inputs` and `outputs` (how
+    /// many values that takes and gives), `branches` (how many branches and
+    /// loop tests it goes through), `paths` (how many paths were taken
+    /// down), `ends` (per path, the block and instruction the function goes
+    /// on at behind it) and `why` (the last one ends there), `variants` (how
+    /// many exported forms it has), `hits` and `misses` (how many calls ran
+    /// an exported form, and how many came to the graph and ran its
     /// instructions), `exports` (how many times it was handed to the passes
     /// over graphs), `version` (of the block), and `forms`: per kind of call
     /// it was recorded for, the one that ran last first, `checks` (what a
     /// call has to be like, as text), `hits`, and the `reason` if calls of
     /// the kind are not exported. And one per instruction or run of
     /// instructions with tensor work that is in no graph, with `state` "vm",
-    /// the `reason`, and for one instruction its `text`.
+    /// the `reason`, and for one instruction its `text`. A graph that
+    /// starts where the path of another went through is part of that one,
+    /// and not listed.
     fn graphs(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let out = PyList::empty(py);
         let mut known: Vec<(String, String)> = Vec::new();
+        let mut shown: Vec<*const GraphSite> = Vec::new();
+        let mut left = |py: Python<'_>, place: String, reason: String, text: Option<String>| -> PyResult<()> {
+            let entry = (place, reason);
+            if known.contains(&entry) {
+                return Ok(());
+            }
+            let d = PyDict::new(py);
+            d.set_item("where", entry.0.clone())?;
+            d.set_item("state", "vm")?;
+            d.set_item("reason", entry.1.clone())?;
+            if let Some(text) = text {
+                d.set_item("text", text)?;
+            }
+            known.push(entry);
+            out.append(d)
+        };
         let mut functions = vec![self.inner.clone()];
         functions.extend(self.inner.callees.compiled());
         for cf in &functions {
@@ -544,24 +570,55 @@ impl CfgFunction {
                 let blocks = state.blocks.iter().enumerate();
                 blocks.flat_map(|(b, bs)| bs.versions.iter().map(move |version| (b, version.clone()))).collect()
             };
+            let place = |b: usize, lo: usize, hi: usize| {
+                if hi == lo + 1 {
+                    (format!("{} (block {})[{}]", func.qualname, b, lo), func.blocks[b].insts.get(lo))
+                } else {
+                    (format!("{} (block {})[{}:{}]", func.qualname, b, lo, hi), None)
+                }
+            };
             for (b, version) in versions {
                 for site in &version.graphs {
-                    let Some(path) = site.path() else {
+                    if shown.contains(&Arc::as_ptr(site)) || site.outer().is_some() {
                         continue;
-                    };
-                    let forms: Vec<Arc<crate::graph::Exported>> = path.exported.borrow().clone();
-                    let compiled = path.compiled();
-                    let closed = forms.iter().find_map(|form| form.closed.clone());
+                    }
+                    shown.push(Arc::as_ptr(site));
+                    if site.entry && site.short().is_some() {
+                        continue;
+                    }
+                    if let Some(count) = site.short() {
+                        // A run that is too short to be a graph, and that
+                        // no path from it made longer.
+                        let seed = site.seed.borrow().clone();
+                        let (place, inst) = place(b, seed.root.1, seed.land.1);
+                        let reason = format!("{} operations, fewer than min_ops ({})", count, site.min_ops);
+                        left(py, place, reason, inst.map(|inst| func.op_repr(&inst.op)))?;
+                        continue;
+                    }
+                    let path = site.path();
+                    let paths = site.paths();
+                    let (compiled, _) = site.forms();
+                    let forms: Vec<(Arc<crate::graph::Path>, Arc<crate::graph::Exported>)> = paths
+                        .iter()
+                        .flat_map(|path| path.exported.borrow().iter().map(|form| (path.clone(), form.clone())).collect::<Vec<_>>())
+                        .collect();
+                    let closed = forms.iter().find_map(|(_, form)| form.closed.clone());
                     let (state, reason) = match &*site.state.borrow() {
                         GraphState::GivenUp(reason) if compiled > 0 => ("compiled", Some(reason.clone())),
                         GraphState::GivenUp(reason) => ("vm", Some(reason.clone())),
-                        GraphState::Built => ("built", None),
                         GraphState::Waiting if compiled > 0 => ("compiled", None),
                         GraphState::Waiting if closed.is_some() => ("vm", closed),
                         GraphState::Waiting => ("waiting", None),
+                        GraphState::Built | GraphState::Small(_) => ("built", None),
                     };
                     let d = PyDict::new(py);
-                    d.set_item("where", site.name.clone())?;
+                    // A graph is named by its first operation, whether its
+                    // path starts there or with the function.
+                    let named = match path.first {
+                        Some((block, first)) => format!("{} (block {})[{}]", func.qualname, block, first),
+                        None => site.name.clone(),
+                    };
+                    d.set_item("where", named)?;
                     d.set_item("state", state)?;
                     if let Some(reason) = reason {
                         d.set_item("reason", reason)?;
@@ -570,17 +627,24 @@ impl CfgFunction {
                     d.set_item("operators", path.operators.clone())?;
                     d.set_item("inputs", path.inputs.len())?;
                     d.set_item("outputs", path.outputs.len())?;
-                    d.set_item("ends", vec![path.land])?;
+                    d.set_item("branches", path.branches)?;
+                    d.set_item("paths", paths.len())?;
+                    let mut ends: Vec<(usize, usize)> = paths.iter().map(|path| path.land).collect();
+                    if ends.is_empty() {
+                        ends.push(path.land);
+                    }
+                    ends.dedup();
+                    d.set_item("ends", ends)?;
                     d.set_item("why", path.ends.clone())?;
                     d.set_item("variants", compiled)?;
-                    d.set_item("hits", path.hits.load(Ordering::Relaxed))?;
-                    d.set_item("misses", path.misses.load(Ordering::Relaxed))?;
+                    d.set_item("hits", site.hits.load(Ordering::Relaxed))?;
+                    d.set_item("misses", site.misses.load(Ordering::Relaxed))?;
                     d.set_item("exports", site.exports.load(Ordering::Relaxed))?;
                     d.set_item("version", version.id)?;
                     let listed = PyList::empty(py);
-                    for form in &forms {
+                    for (path, form) in &forms {
                         let one = PyDict::new(py);
-                        one.set_item("checks", unsafe { form.conditions(func) })?;
+                        one.set_item("checks", unsafe { form.conditions(func, path) })?;
                         one.set_item("hits", form.hits.load(Ordering::Relaxed))?;
                         if let Some(reason) = &form.closed {
                             one.set_item("reason", reason.clone())?;
@@ -590,26 +654,9 @@ impl CfgFunction {
                     d.set_item("forms", listed)?;
                     out.append(d)?;
                 }
-                for left in &version.left {
-                    let one = left.hi == left.lo + 1;
-                    let place = if one {
-                        format!("{} (block {})[{}]", func.qualname, b, left.lo)
-                    } else {
-                        format!("{} (block {})[{}:{}]", func.qualname, b, left.lo, left.hi)
-                    };
-                    let entry = (place, left.reason.clone());
-                    if known.contains(&entry) {
-                        continue;
-                    }
-                    let d = PyDict::new(py);
-                    d.set_item("where", entry.0.clone())?;
-                    d.set_item("state", "vm")?;
-                    d.set_item("reason", entry.1.clone())?;
-                    if let Some(inst) = func.blocks[b].insts.get(left.lo as usize).filter(|_| one) {
-                        d.set_item("text", func.op_repr(&inst.op))?;
-                    }
-                    known.push(entry);
-                    out.append(d)?;
+                for entry in &version.left {
+                    let (place, inst) = place(b, entry.lo as usize, entry.hi as usize);
+                    left(py, place, entry.reason.clone(), inst.map(|inst| func.op_repr(&inst.op)))?;
                 }
             }
         }

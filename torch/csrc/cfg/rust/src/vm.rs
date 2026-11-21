@@ -16,7 +16,7 @@
 use crate::analysis::{self, Analysis};
 use crate::bytecode::OpcodeTable;
 use crate::capi::{self, SiteSlot, TcfgApi, TcfgPyOp, TcfgTensorInfo};
-use crate::graph::{self, Cond, Exported, GraphSite, Kind, Path, Recording, Stage};
+use crate::graph::{self, Assert, Cond, Def, Exported, GraphSite, Held, Kind, Path, PathInst, PathValue, Stage, Trace};
 use crate::ir::*;
 use crate::pyffi::{self, new_ref, py_bool, xdecref, Obj, PyObj, Shared};
 use crate::{frontend, inline, unroll};
@@ -106,6 +106,10 @@ pub struct BlockState {
     pub rejected: Option<String>,
     /// What a pass left here for its next run on this block.
     pub note: Option<PyObj>,
+    /// The graphs that start in the block, each by the generic instruction
+    /// its first operation stands for: the versions of the block share
+    /// them, so what was recorded for one is there for the next.
+    pub graphs: Vec<(u32, Arc<GraphSite>)>,
 }
 
 pub struct State {
@@ -1149,15 +1153,6 @@ unsafe fn versions_moved(versions: &[(Obj, u64)], api: &TcfgApi) -> bool {
     })
 }
 
-/// What became of an instruction that an exported form runs out of its
-/// place (see `Compiled::exec_quiet`).
-enum Quiet {
-    Done(Obj),
-    /// It was not run: it could run Python code.
-    Unsure,
-    Raised,
-}
-
 /// Some values and, of the lists and tuples among them, what they hold.
 unsafe fn flattened(values: &[Obj]) -> Vec<Obj> {
     let mut all = Vec::new();
@@ -1177,16 +1172,63 @@ unsafe fn flattened(values: &[Obj]) -> Vec<Obj> {
 
 /// How entering a graph ended (see `Compiled::enter_graph`).
 enum PathEnd {
-    /// The work of its instructions is done: the block goes on behind them.
-    Done,
     /// Nothing was done: the instructions run.
     Miss,
-    /// An instruction raised: the offset of its bytecode.
-    Raised(u32),
-    /// A guard failed while the instructions ran: the generic instruction to
-    /// resume at.
+    /// The work up to an instruction is done: the function goes on there.
+    Landed(Landing),
+    /// An instruction of a block raised: the block, and the offset of the
+    /// instruction's bytecode.
+    Raised(usize, u32),
+    /// A guard of a block failed while its instructions were taken down:
+    /// the block, and the generic instruction to resume at.
+    Deopt(usize, usize),
+}
+
+/// Where a function goes on: at an instruction of some code of a block (the
+/// generic code, for null), or at the block itself, entered with what an
+/// edge to it does already done (`AFRESH`).
+#[derive(Clone, Copy)]
+struct Landing {
+    block: usize,
+    code: *const BlockCode,
+    pc: usize,
+}
+
+const AFRESH: usize = usize::MAX;
+
+/// What became of one path that a call tried (see `Compiled::run_path`).
+enum Ran {
+    Landed(Landing),
+    /// The path is not for this call: another may be.
+    Other,
+    /// The call is one that runs the instructions.
+    Miss,
+}
+
+/// How a stage of a path ended (see `Compiled::run_stage`).
+#[derive(PartialEq)]
+enum Staged {
+    Done,
+    /// A check failed, or an instruction raised: the path is not for the
+    /// call.
+    Failed,
+    /// An instruction could run Python code where it stands.
+    Unsure,
+}
+
+/// What became of an instruction that is taken down (see
+/// `Compiled::record_inst`).
+enum Taken {
+    Went,
+    /// It is no part of a path, for this reason: the path ends in front of
+    /// it.
+    Ends(String),
+    Raised,
     Deopt(usize),
 }
+
+/// How many instructions a path has at most.
+const MAX_PATH_STEPS: usize = 200_000;
 
 /// Says, for as long as it lives, whom the frames that the interpreter
 /// starts on this thread are offered to.
@@ -1651,8 +1693,10 @@ impl Compiled {
                 term_kills,
                 entry_guards: Vec::new(),
                 id: 0,
+                origins: (0..block.insts.len() as u32).collect(),
                 graphs: Vec::new(),
                 left: Vec::new(),
+                entering: None,
             }));
         }
         let blocks = func
@@ -1675,6 +1719,7 @@ impl Compiled {
                 deopts: 0,
                 rejected: None,
                 note: None,
+                graphs: Vec::new(),
             })
             .collect();
         let state = State {
@@ -4121,17 +4166,24 @@ impl Compiled {
         let mut st = self.state.borrow_mut();
         let bs = &mut st.blocks[b];
         bs.execs += 1;
+        // The copy of a version that enters its graphs runs in its place
+        // while one of them has something to do. `enter_graph` has the
+        // block looked at again when one has not.
+        let entered = |version: &Arc<BlockCode>| {
+            let copy = version.entering.as_ref().filter(|copy| copy.graphs.iter().any(|site| site.runs()));
+            copy.map_or(Arc::as_ptr(version), Arc::as_ptr)
+        };
         // One version that is entered unconditionally, or none and no more
         // attempts at one: from now on there is nothing to decide.
         if bs.versions.len() == 1 && bs.versions[0].entry_guards.is_empty() {
-            settle(Arc::as_ptr(&bs.versions[0]), true);
+            settle(entered(&bs.versions[0]), true);
         } else if bs.versions.is_empty() && bs.respec_left == 0 {
             settle(generic, false);
         }
         for version in &bs.versions {
             if version.entry_guards.iter().all(|g| Self::guard_holds(g, regs, api)) {
                 bs.spec_execs += 1;
-                return (Arc::as_ptr(version), Mode::Spec);
+                return (entered(version), Mode::Spec);
             }
         }
         if !bs.versions.is_empty() {
@@ -4242,47 +4294,98 @@ impl Compiled {
     // Graphs
     // ------------------------------------------------------------------
 
-    /// Runs `Op::Graph`, which stands in front of the instructions of a
-    /// graph that is exported. If one of the forms that were made of the
-    /// graph is for the values of this call, its callable runs in place of
-    /// the nodes. If none is and the graph may get another, the
-    /// instructions run here and are taken down, and a form is made from
-    /// what they did. Returns how that ended, and how many instructions
-    /// behind the `Graph` the graph is: after `Done` the block goes on
-    /// behind those.
+    /// Runs `Op::Graph`, which stands in front of the first operation of a
+    /// graph, at instruction `pc - 1` of `code`. If one of the paths that
+    /// were taken down from here is the one this call takes, and one of the
+    /// forms that were made of it is for the values of the call, its
+    /// callable runs in place of the nodes and the function goes on where
+    /// the path ends. If none is and the graph may get another, the
+    /// instructions run here and are taken down as a path. Otherwise
+    /// nothing happens. `serial` tells the calls of the function apart.
     #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
     unsafe fn enter_graph(
         &self,
-        site: &GraphSite,
+        site: &Arc<GraphSite>,
         regs: &mut [Obj],
         frames: &mut Frames,
         api: &TcfgApi,
-    ) -> (PathEnd, usize) {
-        let Some(path) = site.path() else {
-            return (PathEnd::Miss, 0);
-        };
-        let tried = if site.runs(&path) { self.call_path(site, &path, regs, frames, api) } else { Some(PathEnd::Miss) };
-        let end = match tried {
-            Some(PathEnd::Done) => {
-                path.hits.fetch_add(1, Ordering::Relaxed);
-                return (PathEnd::Done, path.body.len());
-            }
-            Some(end) => end,
-            None if site.records(&path) => self.record_path(site, &path, regs, frames, api),
-            None => PathEnd::Miss,
-        };
-        path.misses.fetch_add(1, Ordering::Relaxed);
-        (end, path.body.len())
-    }
-
-    /// Releases what the instructions of a path have defined so far: the
-    /// registers are then what they were in front of the path.
-    unsafe fn undo_path(&self, path: &Path, regs: &mut [Obj]) {
-        for inst in &path.body {
-            if inst.dst != NONE {
-                capi::release(take(regs, inst.dst));
+        block: usize,
+        code: *const BlockCode,
+        pc: usize,
+        serial: u64,
+    ) -> PathEnd {
+        if !site.runs() {
+            // The code that enters it is not needed for it anymore.
+            let unsettled = Settled { code: std::ptr::null(), ..self.settled.blocks[block].get() };
+            self.settled.blocks[block].set(unsettled);
+            return PathEnd::Miss;
+        }
+        if site.missed.load(Ordering::Relaxed) == serial {
+            return PathEnd::Miss;
+        }
+        let modes = (api.call_modes)();
+        let (mut included, mut excluded) = (0u64, 0u64);
+        (api.dispatch_keys)(&mut included, &mut excluded);
+        let world = (modes, included, excluded);
+        // What else a compiled graph depends on is asked of Python: only
+        // for a call that is like one a form was made for in all the rest.
+        let mut state: Option<u64> = None;
+        for (at, path) in site.paths().into_iter().enumerate() {
+            match self.run_path(site, &path, regs, frames, api, world, &mut state) {
+                Ran::Landed(landing) => {
+                    site.hits.fetch_add(1, Ordering::Relaxed);
+                    if at > 0 {
+                        let mut paths = site.variants.borrow_mut();
+                        if paths.get(at).is_some_and(|other| Arc::ptr_eq(other, &path)) {
+                            let ran = paths.remove(at);
+                            paths.insert(0, ran);
+                        }
+                    }
+                    return PathEnd::Landed(landing);
+                }
+                Ran::Miss => {
+                    site.misses.fetch_add(1, Ordering::Relaxed);
+                    return PathEnd::Miss;
+                }
+                Ran::Other => {}
             }
         }
+        if site.exporter.is_none() && site.variants.borrow().is_empty() && self.asks(site, block) {
+            // A graph that starts earlier in the function is taken down
+            // again: this call goes a way its path does not, and may come
+            // through here.
+            return PathEnd::Miss;
+        }
+        site.misses.fetch_add(1, Ordering::Relaxed);
+        if site.records() {
+            let state = state.unwrap_or_else(|| graph::thread_state());
+            return self.record(site, regs, frames, api, block, code, pc, (modes, included, excluded, state));
+        }
+        // The loop that comes here again in this call finds the same.
+        site.missed.store(serial, Ordering::Relaxed);
+        PathEnd::Miss
+    }
+
+    /// For a graph that is not exported and has no path yet: whether a
+    /// graph that starts earlier in the function and has its path is asked
+    /// to take another one down, which a graph does twice at most. Where
+    /// graphs are exported, the earlier one finds out itself that a call is
+    /// not on its path.
+    unsafe fn asks(&self, site: &Arc<GraphSite>, block: usize) -> bool {
+        let earlier: Option<(usize, Arc<GraphSite>)> = {
+            let st = self.state.borrow();
+            let before = st.blocks[..=block].iter().enumerate();
+            before
+                .flat_map(|(b, bs)| bs.graphs.iter().map(move |(_, other)| (b, other.clone())))
+                .find(|(_, other)| !Arc::ptr_eq(other, site) && other.asked())
+        };
+        let Some((at, _)) = earlier else {
+            return false;
+        };
+        let unsettled = Settled { code: std::ptr::null(), ..self.settled.blocks[at].get() };
+        self.settled.blocks[at].set(unsettled);
+        true
     }
 
     /// Whether the values of a call are what an exported form was made for.
@@ -4342,16 +4445,16 @@ impl Compiled {
         true
     }
 
-    /// Runs an instruction of a path where an exported form has it run: in
-    /// front of the callable or behind it, and so not where the function
-    /// has it, and a second time when the call turns out to be one the form
-    /// is not for. That is only right for what runs no Python code and
-    /// writes nothing, so the instruction runs only if its operands show
-    /// that it does neither: a read of a variable, arithmetic on numbers, an
-    /// attribute that is found without a property or a `__getattr__` of
-    /// Python, an item of a list, a tuple or a dict.
-    unsafe fn exec_quiet(&self, regs: &mut [Obj], op: &Op, api: &TcfgApi) -> Quiet {
-        let fine = match op {
+    /// Whether an instruction of a path runs no Python code and writes to
+    /// nothing but what the path made, on the values it has now: what an
+    /// exported form has run in front of its callable or behind it, and so
+    /// not where the function has it, and again when the call turns out to
+    /// be one the path is not for. A read of a variable; arithmetic on
+    /// numbers; an attribute that is found without a property or a
+    /// `__getattr__` of Python; an item of a list, a tuple or a dict.
+    unsafe fn quiet(&self, regs: &[Obj], op: &Op, api: &TcfgApi) -> bool {
+        let at = |v: V| reg(regs, v);
+        match op {
             Op::Const(_)
             | Op::LoadGlobal(_)
             | Op::LoadDeref(_)
@@ -4366,85 +4469,80 @@ impl Compiled {
             | Op::BuildList(_)
             | Op::BuildSlice(..)
             | Op::CheckBound(..) => true,
-            Op::Binary(..) | Op::Compare(..) | Op::Unary(..) | Op::ToBool(_) => {
-                let mut numbers = true;
-                op.for_each_use(|v| numbers &= !reg(regs, v).is_null() && graph::is_number(reg(regs, v)));
-                numbers
-            }
+            Op::Binary(_, a, b) => [a, b].iter().all(|v| !at(**v).is_null() && graph::is_number(at(**v))),
+            Op::Unary(UnaryKind::Not, a) | Op::ToBool(a) => !at(*a).is_null() && graph::quiet_truth(at(*a)),
+            Op::Unary(_, a) => !at(*a).is_null() && graph::is_number(at(*a)),
+            Op::Compare(_, a, b) => !at(*a).is_null() && !at(*b).is_null() && graph::quiet_compare(at(*a), at(*b)),
             Op::LoadAttr(a, name) => {
-                let o = reg(regs, *a);
-                !o.is_null() && graph::quiet_attr(o, self.func.consts[*name as usize].as_ptr(), api)
+                !at(*a).is_null() && graph::quiet_attr(at(*a), self.func.consts[*name as usize].as_ptr(), api)
             }
-            Op::GetItem(a, k) => {
-                let (a, k) = (reg(regs, *a), reg(regs, *k));
-                !a.is_null() && !k.is_null() && graph::quiet_item(a, k)
-            }
+            Op::GetItem(a, k) => !at(*a).is_null() && !at(*k).is_null() && graph::quiet_item(at(*a), at(*k)),
             Op::Contains(item, container, _) => {
-                let (item, container) = (reg(regs, *item), reg(regs, *container));
-                !item.is_null() && !container.is_null() && graph::quiet_contains(item, container)
+                !at(*item).is_null() && !at(*container).is_null() && graph::quiet_contains(at(*item), at(*container))
             }
-            Op::GetLen(v) | Op::Unpack(v, _) => !reg(regs, *v).is_null() && graph::quiet_sized(reg(regs, *v)),
+            Op::GetLen(v) | Op::Unpack(v, _) => !at(*v).is_null() && graph::quiet_sized(at(*v)),
             _ => false,
-        };
-        if !fine {
-            return Quiet::Unsure;
-        }
-        match self.exec_op(regs, op) {
-            Ok(obj) => Quiet::Done(obj),
-            Err(()) => Quiet::Raised,
         }
     }
 
-    /// Runs the instructions of one stage of a path for an exported form.
-    /// False if one of them cannot be run there or raised: the registers
-    /// are then what they were in front of the path, and no error is set.
+    /// Runs the instructions of one stage of a path, and its checks, on the
+    /// registers of the path. `function` is the function that is running,
+    /// for its closure.
     unsafe fn run_stage(
         &self,
         site: &GraphSite,
         path: &Path,
         stage: Stage,
-        regs: &mut [Obj],
+        own: &mut [Obj],
+        function: Obj,
         api: &TcfgApi,
-    ) -> bool {
+    ) -> Staged {
         for inst in path.body.iter().filter(|inst| inst.stage == stage) {
-            let done = match &inst.op {
-                Op::Guard(g) => Self::guard_holds(&g.cond, regs, Some(api)),
-                op => match self.exec_quiet(regs, op, api) {
-                    Quiet::Done(obj) => {
-                        if inst.dst != NONE {
-                            capi::release(std::mem::replace(&mut regs[inst.dst as usize], obj));
-                        } else {
-                            capi::release(obj);
-                        }
-                        true
-                    }
-                    // The instructions raise it where they get to it.
-                    Quiet::Raised => {
-                        ffi::PyErr_Clear();
-                        false
-                    }
-                    Quiet::Unsure => {
-                        let text = self.func.op_repr(op);
-                        site.unsure(path, text.split_whitespace().next().unwrap_or("an instruction"));
-                        false
-                    }
-                },
+            if let Some(assert) = &inst.assert {
+                let holds = match assert {
+                    Assert::Truth(v, way) => reg(own, *v) == if *way { ffi::Py_True() } else { ffi::Py_False() },
+                    Assert::Null(v, exhausted) => reg(own, *v).is_null() == *exhausted,
+                    Assert::Guard(cond) => Self::guard_holds(cond, own, Some(api)),
+                };
+                if !holds {
+                    return Staged::Failed;
+                }
+                continue;
+            }
+            let result = match &inst.op {
+                // The registers of a path do not have the function.
+                Op::LoadDeref(i) => {
+                    let closure = ffi::PyFunction_GetClosure(function);
+                    let there = !closure.is_null() && ffi::PyTuple_GET_SIZE(closure) > *i as isize;
+                    let held = if there { pyffi::PyCell_Get(ffi::PyTuple_GET_ITEM(closure, *i as isize)) } else { null_mut() };
+                    checked(held)
+                }
+                op if self.quiet(own, op, api) => self.exec_op(own, op),
+                op => {
+                    let text = self.func.op_repr(op);
+                    site.unsure(text.split_whitespace().next().unwrap_or("an instruction"));
+                    return Staged::Unsure;
+                }
             };
-            if !done {
-                self.undo_path(path, regs);
-                return false;
+            match result {
+                Ok(obj) if inst.dst != NONE => capi::release(std::mem::replace(&mut own[inst.dst as usize], obj)),
+                Ok(obj) => capi::release(obj),
+                // The instructions raise it where they get to it.
+                Err(()) => {
+                    ffi::PyErr_Clear();
+                    return Staged::Failed;
+                }
             }
         }
-        true
+        Staged::Done
     }
 
-    /// Whether an object stays alive where a callable has run in place of
-    /// a path, whatever the path lets go of: a parameter of the frame that
-    /// the path does not bind anew holds it, or a register of the function
-    /// that does not die in the path. `frame` is the frame on top and
-    /// whether it is the function's own (inside a call that is inlined it
-    /// is that call's, and its variables are not the function's
-    /// parameters).
+    /// Whether an object stays alive where a path lands, whatever the path
+    /// lets go of: a parameter of the frame that the path does not bind
+    /// anew holds it, or a register of the function that the path neither
+    /// writes nor clears. `frame` is the frame on top and whether it is
+    /// the function's own (inside a call that is inlined it is that
+    /// call's, and its variables are not the function's parameters).
     unsafe fn kept(&self, path: &Path, o: Obj, regs: &[Obj], frame: (Frame, bool)) -> bool {
         let (frame, own) = frame;
         if own && !frame.locals.is_null() {
@@ -4455,50 +4553,55 @@ impl Compiled {
                 }
             }
         }
-        (0..self.func.nvalues as usize).any(|v| regs[v] == o && !path.dying().any(|other| other as usize == v))
+        (0..self.func.nvalues as usize).any(|v| {
+            regs[v] == o && !path.clears.contains(&(v as V)) && !path.writes.iter().any(|(_, to)| *to as usize == v)
+        })
     }
 
-    /// Whether everything a path lets go of can be let go of where a
-    /// callable has run in its place. The instructions let go of a
-    /// reference in their place; with a callable that is behind everything
-    /// the path read, so an object whose end runs Python code must not end
-    /// by it. What a path lets go of that was there before it: what the
-    /// values that die in it hold, and what the variables of the frame
-    /// hold that it binds anew. Each such object dies without Python code
-    /// running, if it dies (`graph::dies_quietly`), or stays alive: a
-    /// parameter of the function or a register that does not die in the
-    /// path holds it (`kept`); the path leaves it, as it is or in a tuple
-    /// it builds, in a register or a variable of the function; or it has
-    /// more references than the path lets go of (`graph::outlives`). Asked
-    /// in front of the instructions of the path: its own values are not
-    /// there yet.
-    unsafe fn lets_all_go(&self, path: &Path, regs: &[Obj], frame: (Frame, bool)) -> bool {
+    /// Whether everything a path lets go of where it lands can be let go
+    /// of there. The instructions let go of a reference in their place; a
+    /// path does where it lands, behind everything it read, so an object
+    /// whose end runs Python code must not end by it. What a path lets go
+    /// of that was there before it ran: what the registers of the
+    /// function hold that it overwrites or clears, and what the variables
+    /// of the frame hold that it binds anew. Each such object dies without
+    /// Python code running, if it dies (`graph::dies_quietly`), or stays
+    /// alive: a parameter or an untouched register of the function holds
+    /// it (`kept`); the path hands it on, as it is or in a tuple it
+    /// builds, to a register or a variable of the function; or it has
+    /// more references than the path lets go of and may itself hold
+    /// (`graph::outlives`).
+    unsafe fn lets_all_go(&self, path: &Path, own: &[Obj], regs: &[Obj], frame: (Frame, bool)) -> bool {
         let mut gone: Vec<Obj> = Vec::new();
         let mut take = |held: Obj| {
             if !held.is_null() && !capi::is_unboxed(held) {
                 gone.push(held);
             }
         };
-        for v in path.dying() {
-            take(reg(regs, v));
+        for v in &path.clears {
+            take(reg(regs, *v));
+        }
+        for (made, v) in &path.writes {
+            if reg(regs, *v) != reg(own, *made) {
+                take(reg(regs, *v));
+            }
         }
         if !frame.0.locals.is_null() {
             for (slot, _) in &path.bound {
                 take(frame_owned(*frame.0.locals.add(*slot as usize)));
             }
         }
-        let mut handed: Option<Vec<V>> = None;
+        let mut handed: Option<Vec<PathValue>> = None;
         let mut given: Option<Vec<Obj>> = None;
         for (at, o) in gone.iter().enumerate() {
             if gone[..at].contains(o) || graph::dies_quietly(*o) || self.kept(path, *o, regs, frame) {
                 continue;
             }
-            // What the path leaves in a register of the function or binds
+            // What the path writes to a register of the function or binds
             // to a variable, and the items of a tuple it builds that is
-            // such a value, are there when it has run.
+            // such a value, are there when it has landed.
             let handed = handed.get_or_insert_with(|| {
-                let left = |inst: &&graph::PathInst| inst.dst != NONE && !path.dying().any(|other| other == inst.dst);
-                let mut handed: Vec<V> = path.body.iter().filter(left).map(|inst| inst.dst).collect();
+                let mut handed: Vec<PathValue> = path.writes.iter().map(|(made, _)| *made).collect();
                 handed.extend(path.bound.iter().map(|(_, made)| *made));
                 for inst in path.body.iter().rev() {
                     if let (Op::BuildTuple(items), true) = (&inst.op, handed.contains(&inst.dst)) {
@@ -4507,59 +4610,69 @@ impl Compiled {
                 }
                 handed
             });
-            if path.inputs.iter().any(|v| reg(regs, *v) == *o && handed.contains(v)) {
+            if path.inputs.iter().any(|(v, made)| reg(regs, *v) == *o && handed.contains(made)) {
                 continue;
             }
-            let given = given.get_or_insert_with(|| path.inputs.iter().map(|v| reg(regs, *v)).collect::<Vec<Obj>>());
+            let given = given.get_or_insert_with(|| path.inputs.iter().map(|(_, made)| reg(own, *made)).collect::<Vec<Obj>>());
             let dropped = gone.iter().filter(|other| *other == o).count() as isize;
-            if graph::outlives(*o, &[], given, dropped) {
+            if graph::outlives(*o, own, given, dropped) {
                 continue;
+            }
+            if graph::debug() {
+                eprintln!(
+                    "torch.vm graph: a path of {} is not for this call: where it lands it would let go of an object of the class {}, whose end may run Python code",
+                    self.func.qualname,
+                    pyffi::type_name(*o)
+                );
             }
             return false;
         }
         true
     }
 
-    /// Runs an exported form of a path in place of its instructions, if one
-    /// is for this call: the instructions that depend on no node, then the
-    /// checks of the form, the callable, and the instructions that work on
-    /// what it returned. None if there is no form for the call; `Miss` if
-    /// there is one that is not to run (it has no callable, a guard of a
-    /// pass does not hold, it failed the first time it ran) or an
-    /// instruction cannot be run out of its place: the registers are then
-    /// as they were.
-    unsafe fn call_path(
+    /// Runs a path in place of the instructions it was taken down from, if
+    /// it is the one this call takes and one of its exported forms is for
+    /// the values of the call. On registers of its own, which get the values
+    /// it reads of the function's: the instructions that depend on no node,
+    /// with the checks on the ways the branches went; then the checks of
+    /// the form, the callable, and the instructions that work on what it
+    /// returned. Only then the registers of the function are made what they
+    /// are where the path ends: until there, a call the path is not for has
+    /// changed nothing.
+    unsafe fn run_path(
         &self,
         site: &GraphSite,
         path: &Path,
         regs: &mut [Obj],
         frames: &mut Frames,
         api: &TcfgApi,
-    ) -> Option<PathEnd> {
+        world: (u64, u64, u64),
+        state: &mut Option<u64>,
+    ) -> Ran {
+        let of_world = |exported: &Exported| (exported.modes, exported.included, exported.excluded) == world;
         let count = path.exported.borrow().len();
-        if count == 0 {
-            return None;
+        if !path.exported.borrow().iter().any(|exported| of_world(exported)) {
+            return Ran::Other;
         }
-        let modes = (api.call_modes)();
-        let (mut included, mut excluded) = (0u64, 0u64);
-        (api.dispatch_keys)(&mut included, &mut excluded);
-        let world = |exported: &Exported| {
-            exported.modes == modes && exported.included == included && exported.excluded == excluded
+        let mut own = path.registers.borrow_mut().pop().unwrap_or_else(|| vec![null_mut(); path.nregs]);
+        for (v, made) in &path.inputs {
+            let held = reg(regs, *v);
+            capi::retain(held);
+            own[*made as usize] = held;
+        }
+        let function = reg(regs, self.func.nvalues);
+        // Lets go of what the registers of the path hold.
+        let leave = |mut own: Vec<Obj>| {
+            for held in own.iter_mut() {
+                capi::release(std::mem::replace(held, null_mut()));
+            }
+            path.registers.borrow_mut().push(own);
         };
-        // What else a compiled graph depends on is asked of Python: only
-        // for a call that is like one a form was made for in all the rest.
-        let mut state: Option<u64> = None;
-        if !path.exported.borrow().iter().any(|exported| world(exported)) {
-            return None;
-        }
-        // What the path lets go of (what the values that die in it and the
-        // variables it binds hold) must be something whose end runs no
-        // Python code, or stay alive.
-        if !self.lets_all_go(path, regs, (frames.top(), frames.depth == 0)) {
-            return Some(PathEnd::Miss);
-        }
-        if !self.run_stage(site, path, Stage::Before, regs, api) {
-            return Some(PathEnd::Miss);
+        let other = |staged: Staged| if staged == Staged::Unsure { Ran::Miss } else { Ran::Other };
+        let staged = self.run_stage(site, path, Stage::Before, &mut own, function, api);
+        if staged != Staged::Done {
+            leave(own);
+            return other(staged);
         }
         // The forms, the one that ran last first.
         let mut found = None;
@@ -4567,8 +4680,8 @@ impl Compiled {
             let Some(exported) = path.exported.borrow().get(k).cloned() else {
                 break;
             };
-            let fits = world(&exported)
-                && self.accepts(&exported, regs, api)
+            let fits = of_world(&exported)
+                && self.accepts(&exported, &mut own, api)
                 && exported.state == *state.get_or_insert_with(|| graph::thread_state());
             if fits {
                 found = Some((k, exported));
@@ -4576,8 +4689,8 @@ impl Compiled {
             }
         }
         let Some((at, exported)) = found else {
-            self.undo_path(path, regs);
-            return None;
+            leave(own);
+            return Ran::Other;
         };
         if at > 0 {
             let mut forms = path.exported.borrow_mut();
@@ -4591,7 +4704,7 @@ impl Compiled {
             // have been the same for a few calls in a row, the kind of call
             // is open again, and the next one is taken down.
             if !exported.varying.is_empty() {
-                let now: Vec<Obj> = exported.varying.iter().map(|place| place.at(regs)).collect();
+                let now: Vec<Obj> = exported.varying.iter().map(|place| place.at(&own)).collect();
                 let same = {
                     let last = exported.last.borrow();
                     last.len() == now.len() && last.iter().zip(&now).all(|(was, is)| !is.is_null() && graph::same_value(was.as_ptr(), *is))
@@ -4606,20 +4719,17 @@ impl Compiled {
                     *exported.last.borrow_mut() = kept.collect();
                 }
             }
-            self.undo_path(path, regs);
-            return Some(PathEnd::Miss);
+            leave(own);
+            return Ran::Miss;
         };
-        let mut small: [Obj; 12] = [null_mut(); 12];
-        let big: Vec<Obj>;
-        let args: &[Obj] = if exported.args.len() <= small.len() {
-            for (i, place) in exported.args.iter().enumerate() {
-                small[i] = place.at(regs);
-            }
-            &small[..exported.args.len()]
-        } else {
-            big = exported.args.iter().map(|place| place.at(regs)).collect();
-            &big
-        };
+        // What the path lets go of where it lands (what the registers and
+        // the variables of the function hold and it overwrites) must be
+        // something whose end runs no Python code, or stay alive.
+        if !self.lets_all_go(path, &own, regs, (frames.top(), frames.depth == 0)) {
+            leave(own);
+            return Ran::Other;
+        }
+        let args: Vec<Obj> = exported.args.iter().map(|place| place.at(&own)).collect();
         let bc = path.body[0].bc;
         frames.top().at(bc & OFFSET_MASK);
         if self.unbound.any.get() {
@@ -4629,19 +4739,20 @@ impl Compiled {
         let result = {
             // What was made of the graph is not the function's own code.
             let _nobody = Hooked::nobody();
+            let mut held = true;
             for (position, check) in &exported.guards {
                 let holds = ffi::PyObject_GetAttrString(check.as_ptr(), c"holds".as_ptr());
                 let tensor = args.get(*position).copied().unwrap_or(null_mut());
                 let asked = !holds.is_null() && !tensor.is_null();
                 let said = if asked { ffi::PyObject_CallOneArg(holds, tensor) } else { null_mut() };
-                let held = !said.is_null() && ffi::PyObject_IsTrue(said) == 1;
+                held &= !said.is_null() && ffi::PyObject_IsTrue(said) == 1;
                 xdecref(holds);
                 xdecref(said);
-                if !held {
-                    ffi::PyErr_Clear();
-                    self.undo_path(path, regs);
-                    return Some(PathEnd::Miss);
-                }
+            }
+            if !held {
+                ffi::PyErr_Clear();
+                leave(own);
+                return Ran::Miss;
             }
             let result = ffi::PyObject_Vectorcall(callable.as_ptr(), args.as_ptr(), args.len(), null_mut());
             let fits = result.is_null()
@@ -4659,16 +4770,18 @@ impl Compiled {
             }
         };
         if result.is_null() {
-            // One that has run before raises what it raises. One that has
-            // not is taken back, and the instructions run from then on.
+            // One that has run before raises what it raises: nothing was
+            // done yet, and the instructions would raise it too. One that
+            // has not is taken back, and the instructions run from then on.
             if exported.proven.load(Ordering::Relaxed) || ffi::PyErr_ExceptionMatches(ffi::PyExc_Exception) == 0 {
-                return Some(PathEnd::Raised(bc));
+                leave(own);
+                return Ran::Landed(Landing { block: usize::MAX, code: std::ptr::null(), pc: bc as usize });
             }
             let reason = graph::raised_text();
             path.exported.borrow_mut().retain(|other| !Arc::ptr_eq(other, &exported));
             site.give_up(format!("the compiled graph failed: {}", reason));
-            self.undo_path(path, regs);
-            return Some(PathEnd::Miss);
+            leave(own);
+            return Ran::Miss;
         }
         exported.proven.store(true, Ordering::Relaxed);
         let item = |i: usize| {
@@ -4678,7 +4791,7 @@ impl Compiled {
                 ffi::PyList_GET_ITEM(result, i as isize)
             }
         };
-        // What the guards of the block ask of the tensors that stay inside.
+        // What the guards of the code ask of the tensors that stay inside.
         let kept = path.exits.iter().enumerate().all(|(i, cond)| {
             let found = ffi::PyLong_AsLongLong(item(path.outputs.len() + i));
             match cond {
@@ -4687,32 +4800,42 @@ impl Compiled {
             }
         });
         if !kept {
-            // The form gives what the block is not for: the instructions
+            // The form gives what the code is not for: the instructions
             // run, this time and on every later call.
             ffi::PyErr_Clear();
             ffi::Py_DECREF(result);
             path.exported.borrow_mut().retain(|other| !Arc::ptr_eq(other, &exported));
-            self.undo_path(path, regs);
-            return Some(PathEnd::Miss);
+            leave(own);
+            return Ran::Miss;
         }
         for (i, v) in path.outputs.iter().enumerate() {
-            capi::release(std::mem::replace(&mut regs[*v as usize], new_ref(item(i))));
+            capi::release(std::mem::replace(&mut own[*v as usize], new_ref(item(i))));
         }
         ffi::Py_DECREF(result);
         // Nothing of what the callable did is to be seen yet: where an
         // instruction behind it cannot run, its results are dropped.
-        if !self.run_stage(site, path, Stage::After, regs, api) {
-            return Some(PathEnd::Miss);
+        let staged = self.run_stage(site, path, Stage::After, &mut own, function, api);
+        if staged != Staged::Done {
+            leave(own);
+            return other(staged);
         }
         site.sure();
         exported.hits.fetch_add(1, Ordering::Relaxed);
-        for (slot, v) in &path.bound {
-            self.store_local(frames.top(), *slot, reg(regs, *v));
+        // The registers of the function, as they are where the path ends.
+        for (made, v) in &path.writes {
+            let held = reg(&own, *made);
+            capi::retain(held);
+            capi::release(std::mem::replace(&mut regs[*v as usize], held));
         }
-        for v in path.dying() {
-            capi::release(take(regs, v));
+        for v in &path.clears {
+            capi::release(take(regs, *v));
         }
-        Some(PathEnd::Done)
+        for (slot, made) in &path.bound {
+            self.store_local(frames.top(), *slot, reg(&own, *made));
+        }
+        leave(own);
+        let (code, pc) = path.resume.unwrap_or((std::ptr::null(), AFRESH));
+        Ran::Landed(Landing { block: path.land.0, code, pc })
     }
 
     /// Runs a node of a path that is being recorded, as `exec_dispatch`
@@ -4738,127 +4861,395 @@ impl Compiled {
         (result, if learned { d.slot.get(d.slot.len() - 1) } else { null_mut() })
     }
 
-    /// Runs the instructions of a path as the block would, and takes down
-    /// what an exported form is made from: the values the nodes take from
-    /// outside the graph, and the site each node ran with what it returned.
-    /// Then has the form made; a run that cannot be exported gets a form
-    /// without a callable, so that the calls like it are not recorded
-    /// again.
-    unsafe fn record_path(
+    /// The value of a path that a value of the function is: one the path
+    /// made, or one it reads from before it, which is an input from then
+    /// on.
+    unsafe fn path_value(&self, t: &mut Trace, regs: &mut [Obj], v: V) -> PathValue {
+        if v == UNDEF {
+            return UNDEF;
+        }
+        let known = t.map[v as usize];
+        if known != NONE {
+            return known;
+        }
+        let kept = if reg(regs, v).is_null() { null_mut() } else { new_ref(self.obj(regs, v)) };
+        let made = t.defs.len() as PathValue;
+        t.defs.push(Def::default());
+        t.source.push(v);
+        t.rec.values.push(kept);
+        t.map[v as usize] = made;
+        t.inputs.push((v, made));
+        made
+    }
+
+    /// The values that the instructions of some code of a block read from
+    /// instruction `pc` on, and the blocks after it.
+    fn read_from(&self, code: &BlockCode, block: usize, pc: usize) -> analysis::BitSet {
+        let mut read = self.read_out(block);
+        for inst in &code.insts[pc..] {
+            if !matches!(inst.op, Op::Hold(_)) {
+                inst.op.for_each_use(|v| {
+                    read.insert(v);
+                });
+            }
+            if let Op::Guard(g) = &inst.op {
+                read.union_with(&self.read_at(block, g.resume as usize));
+            }
+        }
+        code.term.for_each_use(|v| {
+            read.insert(v);
+        });
+        read
+    }
+
+    /// Whether an instruction that is no call site is an operation of a
+    /// graph all the same (see `graph::generic`), on the values it is about
+    /// to run on: its operators, as they are reported.
+    unsafe fn operation(&self, block: usize, origin: u32, inst: &Inst, regs: &[Obj], api: &TcfgApi) -> Option<String> {
+        let mut info = TcfgTensorInfo::empty();
+        let mut tensor = |v: V| !reg(regs, v).is_null() && (api.tensor_info)(reg(regs, v), &mut info) != 0;
+        let fits = match &inst.op {
+            // A method that was bound to a tensor earlier has its receiver
+            // in no operand.
+            Op::Call { callee, .. } => {
+                let c = reg(regs, *callee);
+                let function = !c.is_null() && !capi::is_unboxed(c) && ffi::PyCFunction_Check(c) != 0;
+                let bound = if function { ffi::PyCFunction_GetSelf(c) } else { null_mut() };
+                function && (bound.is_null() || (api.tensor_info)(bound, &mut info) == 0)
+            }
+            Op::CallMethod { .. } => true,
+            Op::GetItem(a, _) => tensor(*a),
+            _ => false,
+        };
+        if !fits || origin == NONE || inst.dst == NONE {
+            return None;
+        }
+        let st = self.state.borrow();
+        let found = st.blocks[block].facts.get(origin as usize)?;
+        let pure = found.runs > 0
+            && matches!(found.kernels, Kernels::One | Kernels::Many)
+            && !(found.frames || found.raised || found.wrote)
+            && matches!(found.callee, spec::CalleeFact::Unseen)
+            && matches!(st.obs.get(inst.dst as usize), Some(ValueObs::Tensor { .. }))
+            && !found.operators.is_empty()
+            && found.operators.iter().all(|name| graph::pure_operator(name));
+        pure.then(|| found.operators.join("+"))
+    }
+
+    /// Takes down one instruction of a path: decides whether it can be part
+    /// of one, on the values it is about to run on, and if so runs it as
+    /// the block loop does and adds it to the trace, renamed.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn record_inst(
         &self,
-        site: &GraphSite,
-        path: &Path,
+        t: &mut Trace,
+        site: &Arc<GraphSite>,
+        block: usize,
+        code: &BlockCode,
+        pc: usize,
         regs: &mut [Obj],
         frames: &mut Frames,
         api: &TcfgApi,
-    ) -> PathEnd {
-        let mut rec = Recording::new(path);
-        let modes = (api.call_modes)();
-        let (mut included, mut excluded) = (0u64, 0u64);
-        (api.dispatch_keys)(&mut included, &mut excluded);
-        let state = graph::thread_state();
-        // Under a mode, or a transform, the operations run as they are: the
-        // run is only looked at for what kind of call it is.
-        let mode = (modes >> 16 != 0).then_some("a torch function mode is on");
-        rec.failed = mode.or_else(|| graph::interposed()).map(|why| why.to_string());
-        for inst in &path.body {
-            if inst.kind == Kind::Node || inst.in_graph {
-                let mut taken: Vec<V> = Vec::new();
-                graph::reads(&inst.op, |v| taken.push(v));
-                for v in taken {
-                    let feed = path.feeds.iter().position(|f| *f == v).filter(|k| rec.feeds[*k].is_null());
-                    if let (Some(k), false) = (feed, reg(regs, v).is_null()) {
-                        rec.feeds[k] = new_ref(self.obj(regs, v));
-                    }
-                }
-            }
-            let result = match &inst.op {
-                Op::Guard(g) => {
-                    if !Self::guard_holds(&g.cond, regs, Some(api)) {
-                        return PathEnd::Deopt(g.resume as usize);
-                    }
-                    Ok(null_mut())
-                }
-                Op::StoreLocal(slot, v) => {
-                    self.store_local(frames.top(), *slot, reg(regs, *v));
-                    Ok(null_mut())
-                }
-                Op::Dispatch(d) if inst.kind == Kind::Node => {
-                    frames.top().at(inst.bc & OFFSET_MASK);
-                    let given: Vec<Obj> = d.operands.iter().map(|v| reg(regs, *v)).collect();
-                    let versions = versions_of(&given, api);
-                    let (result, picked) = self.exec_node(regs, d, api);
-                    rec.wrote |= versions_moved(&versions, api);
-                    result.map(|obj| {
-                        // What the node returned is read from its Python
-                        // object.
-                        let boxed = if capi::is_unboxed(obj) { (api.tensor_box)(obj) } else { obj };
-                        if boxed.is_null() {
-                            panic!("torch.vm: could not create the Python object of a tensor");
-                        }
-                        if picked.is_null() && rec.failed.is_none() {
-                            rec.failed = Some("an operation of the graph ran without a call site".to_string());
-                        }
-                        // Its type is read from its Python object, which a
-                        // mode would see: only for a run that is described.
-                        let described = rec.failed.is_none();
-                        rec.nodes.push((picked, if described { graph::tensor_meta(boxed) } else { null_mut() }));
-                        boxed
-                    })
-                }
-                op if inst.kind == Kind::Node => {
-                    // An operation that is no call site: it runs as it is,
-                    // and may be handed lists of tensors.
-                    frames.top().at(inst.bc & OFFSET_MASK);
-                    if self.unbound.any.get() {
-                        self.bind();
-                    }
-                    let mut given: Vec<Obj> = Vec::new();
-                    op.for_each_use(|v| given.push(reg(regs, v)));
-                    let versions = versions_of(&flattened(&given), api);
-                    let result = self.exec_op(regs, op);
-                    rec.wrote |= versions_moved(&versions, api);
-                    result.inspect(|obj| {
-                        let mut info = TcfgTensorInfo::empty();
-                        let tensor = (api.tensor_info)(*obj, &mut info) != 0;
-                        if !tensor && rec.failed.is_none() {
-                            rec.failed = Some("an operation of the graph gave no tensor".to_string());
-                        }
-                        let described = tensor && rec.failed.is_none();
-                        rec.nodes.push((null_mut(), if described { graph::tensor_meta(*obj) } else { null_mut() }));
-                    })
-                }
-                op => {
-                    frames.top().at(inst.bc & OFFSET_MASK);
-                    self.exec_op(regs, op)
-                }
-            };
-            let result = match result {
-                Ok(obj) if inst.op.is_call() && ffi::PyErr_CheckSignals() != 0 => {
-                    capi::release(obj);
-                    Err(())
-                }
-                other => other,
-            };
-            match result {
-                Ok(obj) if inst.dst != NONE => {
-                    capi::release(std::mem::replace(&mut regs[inst.dst as usize], obj));
-                }
-                Ok(obj) => capi::release(obj),
-                Err(()) => return PathEnd::Raised(inst.bc),
-            }
-            for v in &inst.kills {
-                capi::release(take(regs, *v));
+    ) -> Taken {
+        let inst = &code.insts[pc];
+        let origin = code.origins[pc];
+        // A graph that starts further on is part of this one.
+        for other in code.graphs.iter().filter(|other| other.root == (block, origin as usize)) {
+            if !Arc::ptr_eq(other, site) {
+                *other.within.borrow_mut() = Arc::downgrade(site);
             }
         }
-        let mut described = path.describe(&site.name, &self.func, &rec, api);
-        let world = (modes, included, excluded, state);
+        let kill = |t: &mut Trace, regs: &mut [Obj]| {
+            for v in &inst.kills {
+                capi::release(take(regs, *v));
+                t.held[*v as usize] = Held::Empty;
+            }
+        };
+        // What only renames, binds or holds.
+        match &inst.op {
+            Op::Graph(_) => return Taken::Went,
+            Op::Hold(_) => {
+                kill(t, regs);
+                return Taken::Went;
+            }
+            Op::Guard(g) => {
+                if !Self::guard_holds(&g.cond, regs, Some(api)) {
+                    return Taken::Deopt(g.resume as usize);
+                }
+                let cond = graph::renamed_guard(&g.cond, &mut |v| self.path_value(t, regs, v));
+                t.check(Assert::Guard(cond), inst.bc);
+                kill(t, regs);
+                return Taken::Went;
+            }
+            Op::StoreLocal(slot, v) => {
+                self.store_local(frames.top(), *slot, reg(regs, *v));
+                let bound = self.path_value(t, regs, *v);
+                t.bound.push((*slot, bound));
+                kill(t, regs);
+                return Taken::Went;
+            }
+            _ => {}
+        }
+        // What the instruction is to a path, or why it is no part of one.
+        let operators = self.operation(block, origin, inst, regs, api);
+        let kind = match &inst.op {
+            Op::Dispatch(d) if d.slot.traits() == 0 && d.slot.len() > 0 => Some(Kind::Node),
+            Op::Call { .. } | Op::CallMethod { .. } | Op::GetItem(..) if operators.is_some() => Some(Kind::Node),
+            Op::LoadGlobal(_) | Op::LoadDeref(_) | Op::CellGet(..) => Some(Kind::Read),
+            Op::LoadAttr(..) | Op::GetItem(..) | Op::Contains(..) | Op::GetLen(_) | Op::Unpack(..) => {
+                self.quiet(regs, &inst.op, api).then_some(Kind::Read)
+            }
+            op => self.quiet(regs, op, api).then_some(Kind::Pure),
+        };
+        let ends = || {
+            let st = self.state.borrow();
+            let bs = &st.blocks[block];
+            let found = bs.facts.get(origin as usize);
+            let reason = bs.reasons.get(origin as usize).and_then(|r| r.as_ref());
+            Taken::Ends(graph::why_not(&self.func, &inst.op, found, reason))
+        };
+        let Some(kind) = kind else {
+            return ends();
+        };
+        let Some(renamed) = graph::renamed(&inst.op, &mut |v| self.path_value(t, regs, v)) else {
+            return ends();
+        };
+        if kind == Kind::Node {
+            // A node takes nothing that was computed from a node and that
+            // the graph cannot compute itself.
+            let mut fits = true;
+            graph::reads(&renamed, |v| {
+                let taken = t.defs[v as usize];
+                fits &= !taken.late || taken.node || taken.graph;
+            });
+            if !fits {
+                return Taken::Ends("an operation takes what the graph cannot compute".to_string());
+            }
+        }
+        // It runs as the block loop runs it.
+        frames.top().at(inst.bc & OFFSET_MASK);
+        if self.unbound.any.get() && inst.op.is_call() && !matches!(inst.op, Op::Dispatch(_)) {
+            self.bind();
+        }
+        let result = match (&inst.op, kind) {
+            (Op::Dispatch(d), Kind::Node) => {
+                let given: Vec<Obj> = d.operands.iter().map(|v| reg(regs, *v)).collect();
+                let versions = versions_of(&given, api);
+                let (result, picked) = self.exec_node(regs, d, api);
+                t.rec.wrote |= versions_moved(&versions, api);
+                if result.is_ok() && picked.is_null() && t.rec.failed.is_none() {
+                    t.rec.failed = Some("an operation of the graph ran without a call site".to_string());
+                }
+                result.map(|obj| (obj, picked))
+            }
+            (op, Kind::Node) => {
+                let mut given: Vec<Obj> = Vec::new();
+                op.for_each_use(|v| given.push(reg(regs, v)));
+                let versions = versions_of(&flattened(&given), api);
+                let result = self.exec_op(regs, op);
+                t.rec.wrote |= versions_moved(&versions, api);
+                result.map(|obj| (obj, null_mut()))
+            }
+            (op, _) => self.exec_op(regs, op).map(|obj| (obj, null_mut())),
+        };
+        let result = match result {
+            Ok((obj, _)) if inst.op.is_call() && ffi::PyErr_CheckSignals() != 0 => {
+                capi::release(obj);
+                Err(())
+            }
+            other => other,
+        };
+        let Ok((obj, picked)) = result else {
+            return Taken::Raised;
+        };
+        // What it gave is kept for the graph to be described with: a tensor
+        // with its Python object.
+        let obj = if capi::is_unboxed(obj) {
+            let boxed = (api.tensor_box)(obj);
+            if boxed.is_null() {
+                panic!("torch.vm: could not create the Python object of a tensor");
+            }
+            boxed
+        } else {
+            obj
+        };
+        let mut dst = NONE;
+        if inst.dst != NONE {
+            let mut late = kind == Kind::Node;
+            graph::reads(&renamed, |v| late |= t.defs[v as usize].late);
+            let int = |v: PathValue| {
+                let held = t.rec.values[v as usize];
+                !held.is_null() && ffi::PyLong_CheckExact(held) != 0
+            };
+            let node = kind == Kind::Node;
+            let graph = late && !node && graph::computed(&renamed, &t.defs, int);
+            ffi::Py_XINCREF(obj);
+            dst = t.define(inst.dst, Def { node, late, graph }, obj);
+            capi::release(std::mem::replace(&mut regs[inst.dst as usize], obj));
+        } else {
+            capi::release(obj);
+        }
+        if kind == Kind::Node {
+            let mut info = TcfgTensorInfo::empty();
+            let held = if dst == NONE { null_mut() } else { t.rec.values[dst as usize] };
+            let tensor = !held.is_null() && (api.tensor_info)(held, &mut info) != 0;
+            if !tensor && t.rec.failed.is_none() {
+                t.rec.failed = Some("an operation of the graph gave no tensor".to_string());
+            }
+            // Its type is read from its Python object, which a mode would
+            // see: only for a run that is described.
+            let described = tensor && t.rec.failed.is_none();
+            t.rec.nodes.push((picked, if described { graph::tensor_meta(held) } else { null_mut() }));
+            t.operators.push(match &inst.op {
+                Op::Dispatch(d) => d.slot.operator().unwrap_or_else(|| "?".to_string()),
+                _ => operators.unwrap_or_else(|| "?".to_string()),
+            });
+            if t.operators.len() == 1 && origin != NONE {
+                t.first = Some((block, origin));
+            }
+        }
+        let taken = PathInst { op: renamed, dst, kind, bc: inst.bc, stage: Stage::Before, in_graph: false, assert: None };
+        t.body.push(taken);
+        kill(t, regs);
+        Taken::Went
+    }
+
+    /// Takes a path down: runs the instructions of the function from
+    /// instruction `pc` of `code`, the first operation of a graph, as the
+    /// block loop would, through the blocks as this call goes through them,
+    /// up to the first instruction that can be no part of a path, and
+    /// keeps what an exported form is made from. The function goes on
+    /// where that instruction is. With a pass over graphs, the path is
+    /// handed to it; a run that cannot be exported gets a form without a
+    /// callable, so that the calls like it are not taken down again.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn record(
+        &self,
+        site: &Arc<GraphSite>,
+        regs: &mut [Obj],
+        frames: &mut Frames,
+        api: &TcfgApi,
+        block: usize,
+        code: *const BlockCode,
+        pc: usize,
+        world: (u64, u64, u64, u64),
+    ) -> PathEnd {
+        let func = &self.func;
+        let mut t = Trace::new(func.nvalues as usize);
+        // Under a mode, or a transform, the operations run as they are: the
+        // run is only looked at for what kind of call it is.
+        let mode = (world.0 >> 16 != 0).then_some("a torch function mode is on");
+        t.rec.failed = mode.or_else(|| graph::interposed()).map(|why| why.to_string());
+        let (mut b, mut code, mut pc) = (block, code, pc);
+        let root = (block, (&(*code).origins)[pc..].iter().find(|o| **o != NONE).map_or(0, |o| *o as usize));
+        // The guards a version was entered under hold for the values the
+        // path starts with, whichever version enters it later.
+        let guards = |t: &mut Trace, regs: &mut [Obj], code: &BlockCode, bc: u32| {
+            for cond in &code.entry_guards {
+                if !reg(regs, cond.value()).is_null() {
+                    let cond = graph::renamed_guard(cond, &mut |v| self.path_value(t, regs, v));
+                    t.check(Assert::Guard(cond), bc);
+                }
+            }
+        };
+        guards(&mut t, regs, &*code, (&(*code).insts)[pc].bc);
+        t.shape.extend([b as u32, (*code).id, pc as u32]);
+        let mut afresh = false;
+        let ends = 'path: loop {
+            let c = &*code;
+            while pc < c.insts.len() {
+                if t.body.len() >= MAX_PATH_STEPS {
+                    break 'path "the path is as long as a path may be".to_string();
+                }
+                match self.record_inst(&mut t, site, b, c, pc, regs, frames, api) {
+                    Taken::Went => pc += 1,
+                    Taken::Ends(reason) => break 'path reason,
+                    Taken::Raised => return PathEnd::Raised(b, c.insts[pc].bc),
+                    Taken::Deopt(at) => return PathEnd::Deopt(b, at),
+                }
+            }
+            let bc = func.blocks[b].term_bc;
+            let next = match &c.term {
+                Term::Jump(next) => *next,
+                Term::Br { cond, then_, else_ } => {
+                    let held = reg(regs, *cond);
+                    if held != ffi::Py_True() && held != ffi::Py_False() {
+                        break 'path "a branch on what is no bool".to_string();
+                    }
+                    let way = held == ffi::Py_True();
+                    let cond = self.path_value(&mut t, regs, *cond);
+                    t.check(Assert::Truth(cond, way), bc);
+                    if way { *then_ } else { *else_ }
+                }
+                Term::BrNull { v, null, nonnull } => {
+                    let exhausted = reg(regs, *v).is_null();
+                    let v = self.path_value(&mut t, regs, *v);
+                    t.check(Assert::Null(v, exhausted), bc);
+                    if exhausted { *null } else { *nonnull }
+                }
+                Term::Return(_) => break 'path "the function returns".to_string(),
+                Term::Raise { .. } | Term::Reraise(..) => break 'path "the block raises".to_string(),
+            } as usize;
+            // The edge, as the block loop takes it.
+            for v in &c.term_kills {
+                capi::release(take(regs, *v));
+                t.held[*v as usize] = Held::Empty;
+            }
+            let pi = func.blocks[next].preds.iter().position(|p| *p as usize == b).unwrap_or(0);
+            let moves = &self.analysis.edge_moves[next][pi];
+            let moved: Vec<(Obj, PathValue)> = moves
+                .iter()
+                .map(|(_, src)| {
+                    let held = reg(regs, *src);
+                    capi::retain(held);
+                    (held, self.path_value(&mut t, regs, *src))
+                })
+                .collect();
+            for ((dst, _), (held, value)) in moves.iter().zip(moved) {
+                capi::release(std::mem::replace(&mut regs[*dst as usize], held));
+                t.rename(*dst, value);
+            }
+            for v in &self.analysis.edge_kills[next][pi] {
+                capi::release(take(regs, *v));
+                t.held[*v as usize] = Held::Empty;
+            }
+            b = next;
+            let (found, mode) = self.select(b, regs, Some(api));
+            if mode == Mode::Profile {
+                afresh = true;
+                break 'path "a block that was not profiled yet".to_string();
+            }
+            code = found;
+            pc = 0;
+            guards(&mut t, regs, &*code, func.blocks[b].bc_start);
+            t.shape.extend([b as u32, (*code).id]);
+        };
+        t.shape.extend([u32::MAX, b as u32, if afresh { u32::MAX } else { pc as u32 }]);
+        let c = &*code;
+        let (land, resume, live) = if afresh {
+            ((b, 0), None, self.without_holds().1.live_in[b].clone())
+        } else {
+            let index = c.origins[pc..].iter().find(|o| **o != NONE).map_or(func.blocks[b].insts.len(), |o| *o as usize);
+            ((b, index), Some((code, pc)), self.read_from(c, b, pc))
+        };
+        let landing = Landing { block: b, code, pc: if afresh { AFRESH } else { pc } };
+        let path = Path::of(&mut t, root, land, resume, &live, ends, afresh);
+        if graph::debug() {
+            let (steps, ops) = (path.body.len(), path.operators.len());
+            eprintln!("torch.vm graph {}: a path of {} instructions, {} operations, ends at {:?}: {}", site.name, steps, ops, land, path.ends);
+        }
+        let finished = path.provisional || path.operators.len() < site.min_ops || site.exporter.is_none();
+        if finished {
+            site.install(path, None);
+            return PathEnd::Landed(landing);
+        }
+        let mut described = path.describe(&site.name, func, &t.rec, api);
         let mut changing: Vec<graph::Place> = Vec::new();
         if described.closed.is_none() {
             // One more form for nothing but another number, with none of
             // the `EVER_NEW` before it ever run again: the numbers are new
             // every time, and what is checked for them never comes.
-            if let Some(varying) = site.ever_new(path, world, &described.checks, &described.numbers) {
+            if let Some(varying) = site.ever_new(&path.shape, world, &described.checks, &described.numbers) {
                 changing = varying.iter().map(|k| described.checks[*k].target).collect();
                 let mut at = 0;
                 described.checks.retain(|_| {
@@ -4869,20 +5260,25 @@ impl Compiled {
             }
         }
         let graph::Described { description, closed, checks, numbers, args } = described;
+        if let (true, Some(why)) = (graph::debug(), &closed) {
+            eprintln!("torch.vm graph {}: not exported for this call: {}", site.name, why);
+        }
+        let (modes, included, excluded, state) = world;
         let form = |callable: Option<PyObj>, guards: Vec<(usize, PyObj)>, closed: Option<String>| {
             let proven = std::sync::atomic::AtomicBool::new(false);
             let hits = AtomicU64::new(0);
             let sizes = crate::shapes::ShapeGuard::exact(&numbers);
             let varying = if closed.as_deref() == Some(graph::EVER_NEW_REASON) { changing.clone() } else { Vec::new() };
             let (last, repeats) = (crate::pyffi::Shared::new(Vec::new()), std::sync::atomic::AtomicU32::new(0));
-            Arc::new(Exported { modes, included, excluded, state, checks, sizes, args, guards, callable, varying, last, repeats, closed, proven, hits })
+            let form = Exported {
+                modes, included, excluded, state, checks, sizes, args, guards, callable, varying, last, repeats, closed, proven, hits,
+            };
+            Arc::new(form)
         };
         let Some(description) = description.filter(|_| closed.is_none()) else {
-            path.exported.borrow_mut().insert(0, form(None, Vec::new(), closed));
-            return PathEnd::Done;
+            site.install(path, Some(form(None, Vec::new(), closed)));
+            return PathEnd::Landed(landing);
         };
-        let bc = path.body[0].bc;
-        frames.top().at(bc & OFFSET_MASK);
         if self.unbound.any.get() {
             self.bind();
         }
@@ -4895,13 +5291,22 @@ impl Compiled {
         };
         match made {
             Ok((callable, guards)) => {
-                path.exported.borrow_mut().insert(0, form(Some(callable), guards, None));
+                site.install(path, Some(form(Some(callable), guards, None)));
                 plan_changed();
             }
-            Err(_) if !ffi::PyErr_Occurred().is_null() => return PathEnd::Raised(bc),
-            Err(reason) => site.give_up(reason),
+            Err(_) if !ffi::PyErr_Occurred().is_null() => {
+                let bc = c.insts.get(pc).map_or(func.blocks[b].term_bc, |inst| inst.bc);
+                return PathEnd::Raised(b, bc);
+            }
+            Err(reason) => {
+                if graph::debug() {
+                    eprintln!("torch.vm graph {}: given up: {}", site.name, reason);
+                }
+                site.install(path, None);
+                site.give_up(reason)
+            }
         }
-        PathEnd::Done
+        PathEnd::Landed(landing)
     }
 
     // ------------------------------------------------------------------
@@ -4925,6 +5330,7 @@ impl Compiled {
         if self.options.specialize {
             self.settled.calls.set(self.settled.calls.get() + 1);
         }
+        let serial = self.settled.calls.get();
         let mut cur: usize = 0;
         let mut pred: usize = usize::MAX;
         let mut back_edges: u32 = 0;
@@ -4993,6 +5399,7 @@ impl Compiled {
             let mut pc: usize = 0;
             let next: usize = loop {
                 let mut resume: Option<usize> = None;
+                let mut leap: Option<Landing> = None;
                 {
                     let code_ref: &BlockCode = &*code;
                     let insts = &code_ref.insts;
@@ -5008,18 +5415,24 @@ impl Compiled {
                                 }
                             }
                             Op::Graph(site) => {
-                                let (end, len) = self.enter_graph(site, regs, frames, api.unwrap_unchecked());
-                                match end {
+                                let api = api.unwrap_unchecked();
+                                match self.enter_graph(site, regs, frames, api, cur, code, pc + 1, serial) {
                                     PathEnd::Miss => Ok(null_mut()),
-                                    PathEnd::Done => {
-                                        pc += len;
-                                        Ok(null_mut())
-                                    }
-                                    PathEnd::Raised(bc) => {
-                                        self.fail(frames, bc);
+                                    // What was made of a graph raised.
+                                    PathEnd::Landed(landing) if landing.block == usize::MAX => {
+                                        self.fail(frames, landing.pc as u32);
                                         raised!('blocks, cur);
                                     }
-                                    PathEnd::Deopt(at) => {
+                                    PathEnd::Landed(landing) => {
+                                        leap = Some(landing);
+                                        break;
+                                    }
+                                    PathEnd::Raised(block, bc) => {
+                                        self.fail(frames, bc);
+                                        raised!('blocks, block);
+                                    }
+                                    PathEnd::Deopt(block, at) => {
+                                        cur = block;
                                         resume = Some(at);
                                         break;
                                     }
@@ -5098,7 +5511,7 @@ impl Compiled {
                         }
                         pc += 1;
                     }
-                    if resume.is_none() {
+                    if resume.is_none() && leap.is_none() {
                         if mode == Mode::Profile {
                             self.specialize(cur);
                         }
@@ -5167,6 +5580,21 @@ impl Compiled {
                         }
                         break next;
                     }
+                }
+                if let Some(landing) = leap {
+                    // The registers are what they are at that instruction:
+                    // the function goes on from there, in the code that is
+                    // named, or in the generic tier.
+                    cur = landing.block;
+                    if landing.pc == AFRESH {
+                        pred = usize::MAX;
+                        continue 'blocks;
+                    }
+                    let generic = Arc::as_ptr(self.generic.get_unchecked(cur));
+                    code = if landing.code.is_null() { generic } else { landing.code };
+                    mode = if code == generic { Mode::Generic } else { Mode::Spec };
+                    pc = landing.pc;
+                    continue;
                 }
                 // A guard failed: this block goes back to the generic tier,
                 // from the instruction the guard names.

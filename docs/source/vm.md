@@ -10,18 +10,23 @@ The default passes make each tensor operation of a block a direct call of its
 kernel. `torch.vm.passes.Graphs()` looks one level up: in every block, once
 the other passes are done with it, it finds the runs of such calls together
 with what sits between them (reads of globals and attributes, constants,
-arithmetic on sizes) and takes each run down as a graph. An operation that
+arithmetic on sizes). An operation that
 the default passes leave as it is can be an operation of a graph as well, if
 all it did whenever the block was watched was run kernels that neither write
 nor draw random numbers: `torch.cat` and `torch.stack` of a list, a subscript
 of a tensor (`x[mask]`, `x[0]`, `x[1:, 2]`), `torch.conv2d` with ints for
-stride and padding. A run ends in front of everything else: a call of a
-Python function, an operation that writes to one of its arguments or draws
-random numbers, a number read from a tensor. A run of fewer than `min_ops`
-operations (4 unless the pass is made with another number) is no graph.
+stride and padding.
+
+A graph starts at the first operation of such a run, and one starts with the
+function. From there the engine takes a path down while a call runs:
+the instructions of the function in the order that call runs them, through
+the branches as they go,
+up to the first instruction that can be no part of a graph. A path of fewer
+than `min_ops` operations (4 unless the pass is made with another number) is
+no graph.
 
 With `Graphs()` in the list the function runs as it runs without it. The
-engine runs a graph as it runs the rest of the block: the same kernels, on
+engine runs a graph as it runs the rest of the function: the same kernels, on
 the same values, in the same order, on the autograd tape of eager mode. The
 results are those of eager mode bit for bit, and `torch.vm.is_exact` is true
 for such a list. What the pass adds is what `torch.vm.regions` reports:
@@ -46,21 +51,24 @@ torch.vm.is_exact((*torch.vm.DEFAULT_PASSES, P.Graphs()))  # True
 torch.vm.regions(g)
 # [{'where': 'f (block 0)[2]', 'state': 'built', 'ops': 6,
 #   'operators': ['aten::matmul', 'aten::tanh', 'aten::sum',
-#   'aten::mul.Tensor', 'aten::mean', 'aten::add.Tensor'], 'inputs': 3,
-#   'outputs': 1, 'ends': [(0, 11)], 'why': 'the function returns',
-#   'variants': 0, 'hits': 0, 'misses': 0, 'exports': 0, 'version': 1,
-#   'forms': []}]
+#   'aten::mul.Tensor', 'aten::mean', 'aten::add.Tensor'], 'inputs': 2,
+#   'outputs': 1, 'branches': 0, 'paths': 1, 'ends': [(0, 12)],
+#   'why': 'the function returns', 'variants': 0, 'hits': 0, 'misses': 1,
+#   'exports': 0, 'version': 1, 'forms': []}]
 ```
 
 `where` names the function, the block, and the instruction of the first
-operation of the graph (`g.dump()` shows them). The state
-`"built"` says that the engine runs the graph itself. `inputs` and `outputs`
-are how many values the graph takes from the code in front of it (here `x`,
-`w` and the function `torch.tanh`) and how many the code behind it reads.
-`ends` is the block and the instruction the function goes on at behind the
-graph, and `why` what ends the graph there. What was left out of the graphs
-of a block that has tensor work on both sides of it is listed too, with the
-state `"vm"` and the reason:
+operation of the graph, whether its path starts there or with the function
+(`g.dump()` shows them). The state `"built"` says that the engine runs
+the graph itself. `ops` and `operators` are the operations of the path that
+was taken down last, and `inputs` and `outputs` how many values that path
+takes from the code in front of it (here `x` and `w`) and how many the code
+behind it reads. `ends` is the block and the instruction the function goes
+on at behind the path, and `why` what ends the path there. `misses` counts
+the calls that came to the graph and ran its instructions, the one the path
+was taken down from among them. What was left out of the graphs of a block
+that has tensor work on both sides of it is listed too, with the state
+`"vm"` and the reason:
 
 ```python
 def two(x):
@@ -81,11 +89,89 @@ for found in torch.vm.regions(g):
 # two (block 0)[13] vm None aten::add_.Tensor writes to an argument
 ```
 
-A graph is a part of one block of one function. It does not go on through a
-call of a Python function, a branch or a loop: the function that is called
-has graphs of its own, in its own blocks. A model made of modules therefore
-has its operations spread over the `forward` of each module, one or two to a
-block, and none of those runs is a graph unless `min_ops` is lowered:
+### Paths
+
+A path follows the call it is taken down from. Where the function branches
+on something that is known without looking into a tensor (a flag, `None`, a
+number, a str, a size of a tensor), the path goes the way the call went, and
+that way is checked on the calls that come later. A call that goes another
+way, to operations that are on no path yet, is taken down in its turn, as
+another path of the same graph:
+
+```python
+def branchy(x, flag):
+    y = x.sin() * 2
+    if flag:
+        y = y.cos() + 1
+    else:
+        y = y.tanh() - 1
+    return (y * y).exp().sum()
+
+
+g = torch.vm(branchy, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs()))
+x = torch.randn(4)
+for flag in (True, True, True, False, False, False):
+    same = torch.equal(g(x, flag), branchy(x, flag))
+(found,) = torch.vm.regions(g)
+found["where"], found["ops"], found["branches"], found["paths"]  # ('branchy (block 0)[1]', 7, 1, 2)
+found["operators"][2:4]  # ['aten::tanh', 'aten::sub.Tensor']: of the path that was taken down last
+found["ends"], found["why"]  # ([(3, 6)], 'the function returns')
+```
+
+`branches` is how many branches the path goes through and `paths` how many
+ways through the function were taken down; `ends` says for each path where
+the function goes on behind it, once for paths that end at the same place.
+The first call that goes a new way runs a block for the first time, which
+the engine watches as it watches every block, and the path is taken down at
+the call after it.
+A `while` loop on a count is its iterations one after the other, with the
+test of the loop as a branch each time round.
+
+What ends a path:
+
+- a call of a Python function, which has graphs of its own, or of
+  something else that is no operation, like `print`;
+- an operation that writes to one of its arguments or draws random numbers,
+  one with several results (`x.split(2)`, `torch.max(x, 0)`), a store into
+  an object or a subscript;
+- a number read from a tensor (`x.item()`, `float(x)`), and with it a branch
+  on the data of a tensor;
+- an instruction that could run Python code on the values of this call: a
+  read of an attribute that is a property, an iterator that is unpacked;
+- a `for` loop: neither `range` nor taking the iterator of a value is part
+  of a path;
+- in a function with a `try`, a read or a write of a variable that one of
+  its handlers may read: such a function keeps them where the handlers find
+  them;
+- the end of the function, a block that this call is the first to run (the
+  path is taken down again at the next call, up to three times), and 200,000
+  instructions.
+
+A branch on the data of a tensor therefore ends a graph, and another starts
+behind it:
+
+```python
+def on_data(x):
+    y = x.sin() * 2 + 1
+    if y.sum() > 0:
+        y = y.cos()
+    return (y * y).tanh().exp().sum()
+
+
+g = torch.vm(on_data, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs()))
+for sign in (1, 1, 1, -1, -1, 1):
+    out = g(sign * torch.ones(3))
+for found in torch.vm.regions(g):
+    print(found["where"], found.get("ops"), found.get("why") or found.get("reason"))
+# on_data (block 0)[1] 5 aten::is_nonzero gives a number read from a tensor
+# on_data (block 0)[11] None aten::is_nonzero gives a number read from a tensor
+# on_data (block 1)[1] 5 the function returns
+```
+
+A graph does not go on through a call of a Python function: the function
+that is called has graphs of its own. A model made of modules therefore has
+its operations spread over the `forward` of each module, one or two to a
+function, and none of those is a graph unless `min_ops` is lowered:
 
 ```python
 model = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.ReLU(), torch.nn.Linear(8, 2))
@@ -108,13 +194,14 @@ A graph leaves the engine only for a pass over graphs: a function of two
 arguments, `pass_(gm, input_types) -> gm`, that stands behind `Graphs()` in
 the list. (With such a pass in the list and no `Graphs()`, the pass is taken
 to be there, in front of the first of them. A pass over graphs in front of
-`Graphs()` is a `ValueError`.) The engine then puts an instruction in front
-of each graph, which `dump()` shows as `graph f (block 0)[2:11]: 6
-operations`, and the graph is `"waiting"`.
+`Graphs()` is a `ValueError`.) The engine then enters each graph through an
+instruction of its own, which `dump()` shows where the graph starts (`graph
+f (block 0)[2:11]: 6 operations`), and the graph is `"waiting"`.
 
-The next call that comes to the graph runs its operations as before, and the
-engine takes down what they did: the kernel call each operation made, and the
-values the operations took from outside the graph. From that one run it
+The next call that comes to the graph runs its instructions as before, and
+the engine takes down the path and what its operations did: the kernel call
+each operation made, and the values the operations took from outside the
+graph. From that one run it
 describes the graph to Python, where it becomes a `torch.fx.GraphModule`: a
 placeholder per tensor the graph takes, one `call_function` per operation, of
 the operator overload the function called (`torch.ops.aten.matmul.default`,
@@ -185,6 +272,31 @@ torch.vm.regions(g)[0]["operators"][5:8]
 # ['aten::index.Tensor', 'aten::sum', 'aten::select.int+aten::slice.Tensor']
 ```
 
+Every path of a graph is exported by itself. The graph a pass is given has
+the operations of one way through the function and no branch,
+and it takes as inputs only what its operations take: a flag that a branch
+is on is none.
+On a later call the engine first runs what the path has in front of its
+operations (the reads, the arithmetic on numbers), on registers of the
+path's own, and checks that the branches go the way they went. Then what was
+made of the graph runs, then what the path has behind its operations, where a
+branch on a size that the graph computes is checked, and only then the
+function goes on where the path ended. A call that goes another way has
+changed nothing by the time a check fails: it tries the next path, and if
+none is for it, it runs the instructions of the function from where the
+graph starts and is taken down as a path of its own.
+
+```python
+g = torch.vm(branchy, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), show))
+v = torch.randn(4)
+for flag in (True, True, True, False, False, False, True):
+    same = torch.equal(g(v, flag), branchy(v, flag))
+["cos" in code for code, _ in shown[-2:]]  # [True, False]: a graph for each way
+[types for _, types in shown[-2:]]  # [[float32[4]], [float32[4]]]: the flag is no input
+(found,) = torch.vm.regions(g)
+found["paths"], found["variants"], found["hits"], found["misses"]  # (2, 2, 3, 3)
+```
+
 The passes are applied in the order of the list. What the last one returns
 is what the engine calls in place of the operations from then on, with the
 tensors in the order of the placeholders. A pass rewrites the graph and
@@ -223,8 +335,8 @@ what else its rewrite depends on with `torch.vm.guard(gm, placeholder,
 torch.vm.Dim(0, range(16, 33)))`: a call that fails a guard runs the
 operations.
 
-`torch.vm.regions` lists the forms of a graph under `forms`, the one that ran
-last first: what a call has to be like to be of the kind (`checks`, as
+`torch.vm.regions` lists the forms of a graph under `forms`, those of the
+path that ran last first: what a call has to be like to be of the kind (`checks`, as
 text), how many calls ran the form (`hits`), and the `reason` if calls of
 the kind are not exported. `exports` is how many times the graph was handed
 to the passes, and `fn.stats()["graphs"]` has the totals for a function and
@@ -607,8 +719,10 @@ torch.vm(f, passes=(*default, keep, P.Inductor())).passes
 
 What graphs do not do at this stage:
 
-- One block. A graph does not go on through a call of a Python function, a
-  branch or a loop, as said above.
+- One function. A graph does not go on through a call of a Python function,
+  as said above, and a `for` loop ends a path.
+- A path per way. A function whose calls go many ways through it has a path
+  and an export for each, and they share the `max_variants` of the graph.
 - No effects. An operation that writes to one of its arguments is in no
   graph, and a call whose operations turn out to write when they are taken
   down is not exported: a batch norm in training, which updates its running
@@ -616,6 +730,13 @@ What graphs do not do at this stage:
   exported for the calls in eval mode. A store into a subscript (`x[0] =
   y`) ends a graph, and so does an operation with several results
   (`x.split(2)`, `torch.max(x, 0)`).
+- In the call in which a path is taken down, a variable that the function
+  deletes inside the path (`del name`) is let go of where the path ends and
+  not at the `del`. Where it held the last reference to an object whose end
+  runs Python code, that code runs behind what the call reads behind the
+  `del`. A call that would run what was made of the path is turned down for
+  such an object ("Passes over graphs"), and is then one in which a path is
+  taken down again, for as long as the graph may get another form.
 - Sizes are fixed per export. Every size a graph is called with is a kind of
   call of its own, with a graph of its own, so a function that is called
   with many sizes uses up `max_variants`. Sizes of the tensors the graph
