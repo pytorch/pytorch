@@ -79,6 +79,7 @@ using upsampling_trilinear3d = void(*)(const Tensor& output, const Tensor& input
 using upsampling_bicubic2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 using _upsampling_bicubic2d_aa = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 using _upsampling_lanczos2d_aa = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
+using _upsampling_inter_area2d = void(*)(const Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
 DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_kernel)
 DECLARE_DISPATCH(_upsampling_nearest_exact1d, _upsample_nearest_exact1d_kernel)
 DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_kernel)
@@ -104,6 +105,7 @@ DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_kernel)
 DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_backward_kernel)
 DECLARE_DISPATCH(_upsampling_lanczos2d_aa, _upsample_lanczos2d_aa_kernel)
 DECLARE_DISPATCH(_upsampling_lanczos2d_aa, _upsample_lanczos2d_aa_backward_kernel)
+DECLARE_DISPATCH(_upsampling_inter_area2d, _upsample_inter_area2d_kernel)
 
 [[maybe_unused]] inline std::array<int64_t, 3> upsample_1d_common_check(
     IntArrayRef input_size,
