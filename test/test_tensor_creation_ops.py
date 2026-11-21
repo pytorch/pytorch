@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast,
     largeTensorTest, precisionOverride, dtypes, skipCPUIf, skipCUDAIf, skipXPU, dtypesIfCUDA,
-    dtypesIfCPU, dtypesIfXPU, skipMeta, onlyAccelerator, expectedFailureXLA, onlyCPU
+    dtypesIfCPU, dtypesIfXPU, skipMeta, onlyAccelerator, expectedFailureXLA, onlyCPU, onlyCUDA
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
@@ -1217,6 +1217,46 @@ class TestTensorCreation(TestCase):
         y = torch.randint(low=-100, high=100, size=(1, SIZE, SIZE), device=device).to(dtype)
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
+
+
+    @dtypes(torch.float32)
+    def test_cat_transpose_last_dim(self, device, dtype):
+        # #203778: cat along the last dim of transpose(-1, -2) views of
+        # contiguous tensors routes to the copy_-based tiled transpose on CUDA
+        # when every input is >= 4 MiB (1024 * 1024 fp32 elements); 1025 is not
+        # a multiple of 32. Smaller inputs and a non-contiguous out= below take
+        # the generic path.
+        nc = 1024
+        for batch_shape in ((), (2,), (2, 2)):
+            lin = [make_tensor(batch_shape + (hw, nc), device=device, dtype=dtype)
+                   for hw in (1024, 1025)]
+            views = [t.transpose(-1, -2) for t in lin]
+            expected = torch.cat([v.cpu() for v in views], -1)
+            self.assertEqual(torch.cat(views, -1).cpu(), expected)
+
+        hws = (128, 33, 16)
+        lin = [make_tensor((2, hw, 64), device=device, dtype=dtype) for hw in hws]
+        views = [t.transpose(-1, -2) for t in lin]
+        expected = torch.cat([v.cpu() for v in views], -1)
+        self.assertEqual(torch.cat(views, -1).cpu(), expected)
+        out = torch.empty(2, sum(hws), 64, device=device).transpose(1, 2)
+        torch.cat(views, -1, out=out)
+        self.assertEqual(out.cpu(), expected)
+
+    @onlyCUDA
+    def test_cat_transpose_last_dim_fallback_dtypes(self, device):
+        # bool and complex128 are excluded from the fast path and concatenated
+        # by the generic kernel; both must still be correct.
+        for dtype in (torch.bool, torch.complex128):
+            lin = [
+                torch.randint(0, 2, (2, hw, 64), device=device, dtype=torch.bool)
+                if dtype == torch.bool
+                else make_tensor((2, hw, 64), device=device, dtype=dtype)
+                for hw in (128, 33, 16)
+            ]
+            views = [t.transpose(-1, -2) for t in lin]
+            expected = torch.cat([v.cpu() for v in views], -1)
+            self.assertEqual(torch.cat(views, -1).cpu(), expected)
 
     @dtypes(torch.float)
     def test_cat_size1(self, device, dtype):
