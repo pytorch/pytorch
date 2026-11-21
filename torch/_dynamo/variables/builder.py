@@ -25,6 +25,7 @@ import contextlib
 import contextvars
 import copy
 import dataclasses
+import datetime
 import enum
 import functools
 import gc
@@ -146,7 +147,6 @@ from ..source import (
     ChainedSource,
     ConstDictKeySource,
     ConvertIntSource,
-    CurrentStreamSource,
     DictGetItemSource,
     DictSubclassGetItemSource,
     DynamicScalarSource,
@@ -217,7 +217,6 @@ from ..utils import (
     list_reverseiterator_len,
     module_hook_attrs,
     namedtuple_fields,
-    odict_keys,
     odict_values,
     proxy_args_kwargs,
     range_iterator,
@@ -265,6 +264,7 @@ from .dicts import (
     _contains_nan,
     ConstDictVariable,
     DictKeysVariable,
+    DictValuesVariable,
     FrozenDictVariable,
     MappingProxyVariable,
     NNModuleGlobalHooksDictVariable,
@@ -1285,13 +1285,14 @@ class VariableBuilder:
 
         if self.source != result.source:
             tracer = self.tx.output.current_tracer
-            if tracer.tracks_lexical_sources:
+            if tracer.in_nested_compile_region:
                 record_lexical_alias(tracer.lexical_sources, self.source, result.source)
             dup_guard = make_dupe_guard(self.source, result.source)
             if dup_guard is not None:
                 self.install_guards(dup_guard)
             elif (
-                isinstance(result, ConstDictVariable)
+                isinstance(result, NNModuleGlobalHooksDictVariable)
+                or isinstance(result, ConstDictVariable)
                 and any(
                     isinstance(source, AttrSource)
                     and source.member in module_hook_attrs
@@ -1378,7 +1379,7 @@ class VariableBuilder:
                 cls.wrap_tensor,
             ),
             (
-                (tuple, list, odict_values, collections.deque, torch.Size),
+                (tuple, list, collections.deque, torch.Size),
                 cls.wrap_listlike,
             ),
             (bytearray, cls.wrap_bytearray),
@@ -1684,21 +1685,6 @@ class VariableBuilder:
                 # values. Indices are cheap to save.
                 self.tx.output.guard_on_key_order.add(self.source)
 
-            hook_source = None
-            if (
-                value is hook_api._global_forward_hooks
-                or value is hook_api._global_forward_pre_hooks
-            ):
-                hook_source = self.get_source()
-                # Direct capture of Module._call_impl reads its globals without an AttrSource.
-                if isinstance(
-                    hook_source, GlobalSource
-                ) and self.tx.output.root_tx.f_globals is vars(hook_api):
-                    hook_source = AttrSource(
-                        self.tx.import_source(hook_api.__name__),
-                        hook_source.global_name,
-                    )
-
             # We need all the keys to be hashable. We do this within the
             # HashableTracker class in hashable.py
             def build_key_value(
@@ -1714,8 +1700,6 @@ class VariableBuilder:
                         if istype(value, collections.OrderedDict)
                         else None
                     )
-                    if hook_source is not None and type(k) is int:
-                        key_source = ConstDictKeySource(hook_source, i)
                     key = ConstantVariable.create(k, source=key_source)
                     source_key = k
                 else:
@@ -2103,7 +2087,7 @@ class VariableBuilder:
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, torch.Stream):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            if isinstance(self.source, CurrentStreamSource):
+            if self.source == self.tx.symbolic_stream_state.current_stream_source:
                 # Reuse the index pre-allocated in SymbolicStreamState.__init__
                 index = CURRENT_STREAM_INDEX
             else:
@@ -2897,9 +2881,10 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = FrozenDataClassVariable(value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
-        elif isinstance(value, dict_keys):
+        elif isinstance(value, (dict_keys, odict_values)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            if all(ConstantVariable.is_literal(k) for k in value):
+            values_view = type(value) is odict_values
+            if values_view or all(ConstantVariable.is_literal(k) for k in value):
                 # Model the view over its owning dict (the view's only gc
                 # referent) so mutations of the dict are visible through it.
                 dict_source = MappingProxyMappingSource(self.source)
@@ -2912,9 +2897,9 @@ class VariableBuilder:
                         explanation="Dynamo cannot access this dictionary view's owner storage.",
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
-                return DictKeysVariable(
-                    dict_vt, source=self.source, is_ordered=type(value) is odict_keys
-                )
+                view_cls = DictValuesVariable if values_view else DictKeysVariable
+                ordered = type(value) is not dict_keys
+                return view_cls(dict_vt, source=self.source, is_ordered=ordered)
             else:
                 unimplemented(
                     gb_type="non-const keys in dict_keys",
@@ -3003,9 +2988,7 @@ class VariableBuilder:
 
     def wrap_listlike(
         self,
-        value: Union[
-            tuple[Any, ...], list[Any], collections.deque[Any], odict_values, NamedTuple
-        ],
+        value: Union[tuple[Any, ...], list[Any], collections.deque[Any], NamedTuple],
     ) -> VariableTracker:
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
@@ -6148,7 +6131,15 @@ class SourcelessBuilder:
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
         elif isinstance(
-            value, (importlib.machinery.ModuleSpec, torch.utils._pytree.TreeSpec)
+            value,
+            (
+                importlib.machinery.ModuleSpec,
+                torch.utils._pytree.TreeSpec,
+                datetime.date,
+                datetime.time,
+                datetime.timedelta,
+                datetime.tzinfo,
+            ),
         ):
             return UserDefinedObjectVariable(value)
         elif isinstance(value, (re.Pattern, re.Match)):
