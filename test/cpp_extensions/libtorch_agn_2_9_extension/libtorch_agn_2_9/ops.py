@@ -2,6 +2,45 @@ import torch
 from torch import Tensor
 
 
+def my_grad_mode_set_enabled(enabled: bool) -> None:
+    """Set grad mode on the current thread through the stable API.
+
+    Args:
+        enabled: Whether to enable grad mode.
+    """
+    torch.ops.libtorch_agn_2_9.my_grad_mode_set_enabled.default(enabled)
+
+
+def my_grad_mode_is_enabled() -> bool:
+    """Read grad mode on the current thread through the stable API.
+
+    Returns:
+        Whether grad mode is enabled.
+    """
+    return torch.ops.libtorch_agn_2_9.my_grad_mode_is_enabled.default()
+
+
+def my_auto_grad_mode_guard(enabled: bool) -> tuple[bool, bool]:
+    """Return the grad mode inside a stable guard and its previous value.
+
+    Args:
+        enabled: Grad mode to set while the guard is active.
+
+    Returns:
+        The mode inside the guard and the mode before it was constructed.
+    """
+    return torch.ops.libtorch_agn_2_9.my_auto_grad_mode_guard.default(enabled)
+
+
+def my_no_grad_guard() -> tuple[bool, bool]:
+    """Read grad mode inside a stable no-grad guard.
+
+    Returns:
+        The mode inside the guard and the mode before it was constructed.
+    """
+    return torch.ops.libtorch_agn_2_9.my_no_grad_guard.default()
+
+
 def sgd_out_of_place(param, grad, weight_decay, lr, maximize) -> Tensor:
     """
     Computes a single step of SGD on a single parameter Tensor with grad.

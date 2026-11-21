@@ -1,3 +1,4 @@
+#include <c10/core/AutogradState.h>
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
 #include <c10/util/Exception.h>
@@ -705,6 +706,14 @@ torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference) {
         torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
     *ret_is_inference = t->is_inference();
   });
+}
+
+AOTI_TORCH_EXPORT bool torch_is_fw_grad_mode_enabled() {
+  return c10::AutogradState::get_tls_state().get_fw_grad_mode();
+}
+
+AOTI_TORCH_EXPORT void torch_set_fw_grad_mode_enabled(bool enabled) {
+  c10::AutogradState::get_tls_state().set_fw_grad_mode(enabled);
 }
 
 // Python interop conversions. These are the only stable
