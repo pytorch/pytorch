@@ -543,6 +543,7 @@ class LSTM(RNNBase):
         max_batch_size: int,
         sorted_indices: Optional[Tensor],
     ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
+        hx_supplied = hx is not None
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
             zeros = torch.zeros(
@@ -553,12 +554,12 @@ class LSTM(RNNBase):
                 device=input.device,
             )
             hx = (zeros, zeros)
-        else:
-            # Each batch of the hidden state should match the input sequence that
-            # the user believes he/she is passing in.
-            hx = self.permute_hidden(hx, sorted_indices)
 
+        # Each batch of the hidden state should match the input sequence that
+        # the user believes he/she is passing in.
         self.check_forward_args(input, hx, batch_sizes)
+        if hx_supplied:
+            hx = self.permute_hidden(hx, sorted_indices)
 
         _all_params = [m.param for m in self._all_weight_values]
         if batch_sizes is None:
@@ -841,6 +842,7 @@ class GRU(RNNBase):
         max_batch_size: int,
         sorted_indices: Optional[Tensor],
     ) -> tuple[Tensor, Tensor]:
+        hx_supplied = hx is not None
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
             zeros = torch.zeros(
@@ -851,12 +853,12 @@ class GRU(RNNBase):
                 device=input.device,
             )
             hx = zeros
-        else:
-            # Each batch of the hidden state should match the input sequence that
-            # the user believes he/she is passing in.
-            hx = self.permute_hidden(hx, sorted_indices)
 
+        # Each batch of the hidden state should match the input sequence that
+        # the user believes he/she is passing in.
         self.check_forward_args(input, hx, batch_sizes)
+        if hx_supplied:
+            hx = self.permute_hidden(hx, sorted_indices)
 
         _all_params = [m.param for m in self._all_weight_values]
         if batch_sizes is None:
