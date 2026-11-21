@@ -145,6 +145,7 @@ from .object_protocol import (
     _resolve_descriptor_get,
     generic_is_true,
     guard_mro_absent,
+    guardable_mro_source,
     is_nb_not_implemented,
     mro_attr_source,
     mro_lookup,
@@ -750,9 +751,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 klass_vt, name
             ):
                 if self.source is not None:
-                    guard_mro_absent(tx, self.value, self.source, name, idx)
+                    source = guardable_mro_source(self.source)
+                    guard_mro_absent(tx, self.value, source, name, idx)
                     if klass_vt is not self:
-                        mro_entry = GetItemSource(TypeMROSource(self.source), idx)
+                        mro_entry = GetItemSource(TypeMROSource(source), idx)
                         install_guard(mro_entry.make_guard(GuardBuilder.CLASS_MATCH))
                 return klass_vt
             if name in namespace:
@@ -889,7 +891,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         if name == "__mro__":
             if meta_attr is type.__dict__["__mro__"]:
-                attr_source = self.source and TypeMROSource(self.source)
+                attr_source = self.source and TypeMROSource(
+                    guardable_mro_source(self.source)
+                )
             else:
                 attr_source = source
             return VariableTracker.build(tx, self.value.__mro__, attr_source)
@@ -1068,10 +1072,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not is_torch_class(self.value)
             and name not in ("__get__", "__set__", "__delete__")
         ):
+            descriptor_source = (
+                self.get_source_by_walking_mro(tx, name)
+                if self.source is not None
+                else None
+            )
             return VariableBuilder.create_internal_wrapper_descriptor(
                 cls_attr,
                 owner=self._descriptor_defining_class_vt(tx, cls_attr),
-                source=source,
+                source=descriptor_source,
             )
 
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L140-L141
@@ -1080,10 +1089,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not is_torch_class(self.value)
             and name not in ("__get__", "__set__", "__delete__")
         ):
+            descriptor_source = (
+                self.get_source_by_walking_mro(tx, name)
+                if self.source is not None
+                else None
+            )
             return VariableBuilder.create_internal_method_descriptor(
                 cls_attr,
                 owner=self._descriptor_defining_class_vt(tx, cls_attr),
-                source=source,
+                source=descriptor_source,
             )
 
         # User-defined descriptor with Python __get__.
@@ -1468,12 +1482,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # the two always match. A custom metaclass can leave __mro__ stale.
             # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L2935-L2945
             # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L3001-L3014
-            if self.source is not None:
+            source = self.source and guardable_mro_source(self.source)
+            if source is not None:
                 # cls.mro is type.mro while no class in the MRO defines mro.
-                guard_mro_absent(
-                    tx, self.value, self.source, "mro", len(self.value.__mro__)
-                )
-            mro_source = self.source and TypeMROSource(self.source)
+                guard_mro_absent(tx, self.value, source, "mro", len(self.value.__mro__))
+            mro_source = source and TypeMROSource(source)
             mro = VariableTracker.build(tx, self.value.__mro__, mro_source)
             items = mro.unpack_var_sequence(tx)
             return variables.ListVariable(items, mutation_type=ValueMutationNew())

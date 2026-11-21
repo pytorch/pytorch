@@ -1294,6 +1294,23 @@ user_stack=None)
         global_pair.y = "foo"
         self.assertFalse(guard_manager.check(global_pair))
 
+    def test_type_metadata_accessors_reject_non_types(self):
+        for accessor, value in (
+            ("type_dict_manager", dict(vars(int))),
+            ("type_mro_manager", int.__mro__),
+        ):
+            with self.subTest(accessor=accessor):
+                root = RootGuardManager()
+                # A custom guard filter can retain this accessor without CLASS_MATCH.
+                child = getattr(root, accessor)(accessor, value, default_mgr_enum)
+                child.add_type_match_guard(id(type(value)), ["metadata type"], None)
+                self.assertTrue(root.check(int))
+                self.assertTrue(root.check_verbose(int).result)
+                self.assertFalse(root.check(None))
+                debug = root.check_verbose(None)
+                self.assertFalse(debug.result)
+                self.assertIn("expected a type", debug.verbose_code_parts[0])
+
     def test_type_manager(self):
         guard_manager = RootGuardManager()
 
