@@ -967,6 +967,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 AOTIModelPackageLoader::~AOTIModelPackageLoader() {
   // Clean up the temporary directory
   if (!temp_dir_.empty() && !is_directory_) {
+    // Windows cannot delete a loaded DLL, so unload the model library first.
+    runner_.reset();
     std::error_code remove_ec;
     fs::remove_all(temp_dir_, remove_ec);
     if (remove_ec) {
@@ -991,6 +993,12 @@ std::vector<at::Tensor> AOTIModelPackageLoader::boxed_run(
     std::vector<at::Tensor>&& inputs,
     void* stream_handle) {
   return runner_->boxed_run(std::move(inputs), stream_handle);
+}
+
+std::vector<at::Tensor> AOTIModelPackageLoader::run_with_lazy_cuda_graphs(
+    const std::vector<at::Tensor>& inputs,
+    void* stream_handle) {
+  return runner_->run_with_lazy_cuda_graphs(inputs, stream_handle);
 }
 
 std::unordered_map<std::string, std::string> AOTIModelPackageLoader::

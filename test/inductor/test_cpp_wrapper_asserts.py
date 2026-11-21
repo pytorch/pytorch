@@ -3,15 +3,24 @@
 import sys
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 import torch
 from torch._inductor import config, ir
+from torch._inductor.codegen import cpp_wrapper_cpu as cwc, cpp_wrapper_gpu as cwg
+from torch._inductor.codegen.cpp_wrapper_mps import CppWrapperMps
+from torch._inductor.codegen.wrapper import KernelCallLine
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import GPU_ALIGN_BYTES, run_and_get_cpp_code
+from torch._inductor.utils import (
+    GPU_ALIGN_BYTES,
+    make_codegen_buffer,
+    run_and_get_cpp_code,
+)
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.inductor_utils import RUN_CPU
+from torch.utils._ordered_set import OrderedSet
 
 
 try:
@@ -191,6 +200,162 @@ class CppWrapperAssertTests(InductorTestCase):
 
         compiled = torch.compile(fn)
         self.assertEqual(compiled(sample), fn(sample))
+
+    @config.patch(
+        cpp_wrapper=True,
+        fx_graph_cache=False,
+        implicit_fallbacks=True,
+        alignment_asserts=True,
+    )
+    def test_fallback_undefined_output(self):
+        def fn(*args):
+            q, qkv_weight, qkv_bias, proj_weight, proj_bias = (a + 1 for a in args)
+            return torch._native_multi_head_attention(
+                q, q, q, 6, 2, qkv_weight, qkv_bias, proj_weight, proj_bias, None, False
+            )
+
+        args = (
+            torch.randn(1, 3, 6),
+            torch.randn(18, 6),
+            torch.randn(18),
+            torch.randn(6, 6),
+            torch.randn(6),
+        )
+        out, code = run_and_get_cpp_code(torch.compile(fn), *args)
+        self.assertEqual(out, fn(*args))
+        FileCheck().check_count("assert_alignment(", 2, exactly=True).run(code)
+
+
+class CppWrapperXpu(CppWrapperMps):
+    """A retargeting subclass, shared by the tests below."""
+
+    device = "xpu"
+
+
+class CppWrapperMpsDeviceTests(InductorTestCase):
+    """Tests that CppWrapperMps guards and filters on its class-level ``device``.
+
+    Production paths under test: the guard in _generate_kernel_call_helper and the
+    device filter in codegen_additional_funcs, both reading ``self.device``, which
+    CppWrapperGpu leaves alone when a subclass (or CppWrapperMps itself) sets
+    it -- the CppWrapperCpu hasattr pattern. The factory test runs the real
+    CppWrapperMps and CppWrapperGpu __init__ (only CppWrapperCpu's is stubbed), so
+    a revert of that hasattr check cannot stay green; the other tests build
+    wrappers via object.__new__ to skip the chain, which requires a complete graph
+    lowering.
+    """
+
+    def _install_fake_graph(self):
+        self.enterContext(
+            V.set_graph_handler(
+                SimpleNamespace(is_dual_wrapper_mode=False, aot_mode=False)
+            )
+        )
+
+    def _make_wrapper(self, cls=None):
+        self._install_fake_graph()
+        wrapper = object.__new__(CppWrapperMps if cls is None else cls)
+        wrapper._used_kernel_names = OrderedSet()
+        wrapper.lines = []
+        wrapper.prefix = make_codegen_buffer()
+        return wrapper
+
+    def _make_kernel_call_line(self, device_type, kernel_name):
+        return KernelCallLine(
+            wrapper=None,
+            kernel_name=kernel_name,
+            call_args=(),
+            raw_keys=(),
+            raw_args=(),
+            arg_types=[],
+            triton=False,
+            triton_meta=None,
+            inductor_meta=None,
+            device=torch.device(device_type),
+            graph_name="graph_0",
+            original_fxnode_name="l0",
+            current_stream_idx=None,
+        )
+
+    def test_guard_rejects_foreign_device(self):
+        wrapper = self._make_wrapper()
+        # xpu (not cpu, not mps) reaches the class guard without taking the
+        # CppWrapperCpu delegation path that cpu would take.
+        with self.assertRaisesRegex(
+            AssertionError, "expected device.type == 'mps', got xpu"
+        ):
+            wrapper._generate_kernel_call_helper(
+                device=torch.device("xpu"),
+                kernel_name="mps_lib_0",
+                call_args=[],
+                arg_types=[],
+            )
+
+    def test_matching_line_emits_handle(self):
+        wrapper = self._make_wrapper()
+        wrapper.lines = [self._make_kernel_call_line("mps", "mps_lib_0")]
+        wrapper.codegen_additional_funcs()
+        self.assertIn("get_mps_lib_0_handle", wrapper.prefix.getvalue())
+
+    def test_nonmatching_line_emits_nothing(self):
+        wrapper = self._make_wrapper()
+        wrapper.lines = [self._make_kernel_call_line("xpu", "xpu_lib_0")]
+        wrapper.codegen_additional_funcs()
+        self.assertEqual(wrapper.prefix.getvalue(), "")
+
+    def test_subclass_device_filters_for_its_own_device(self):
+        wrapper = self._make_wrapper(CppWrapperXpu)
+        # The same line shapes, judged against the subclass override: the mps
+        # line is filtered out and the xpu line emits its handle.
+        wrapper.lines = [
+            self._make_kernel_call_line("mps", "mps_lib_0"),
+            self._make_kernel_call_line("xpu", "xpu_lib_0"),
+        ]
+        wrapper.codegen_additional_funcs()
+        prefix = wrapper.prefix.getvalue()
+        self.assertNotIn("get_mps_lib_0_handle", prefix)
+        self.assertIn("get_xpu_lib_0_handle", prefix)
+
+    def test_subclass_guard_rejects_base_device(self):
+        wrapper = self._make_wrapper(CppWrapperXpu)
+        # An mps device fails for the subclass with the overridden message (and
+        # would pass the base-class guard), proving the guard reads
+        # ``self.device``.
+        with self.assertRaisesRegex(
+            AssertionError, "expected device.type == 'xpu', got mps"
+        ):
+            wrapper._generate_kernel_call_helper(
+                device=torch.device("mps"),
+                kernel_name="x_lib_0",
+                call_args=[],
+                arg_types=[],
+            )
+
+    def test_init_and_factory_keep_the_class_device_field(self):
+        # CppWrapperCpu.__init__ stubbed: the point is the hasattr guard in
+        # CppWrapperGpu.__init__ and the device routing into
+        # get_device_op_overrides, both observed without a real graph.
+        with (
+            mock.patch.object(cwg, "get_gpu_type", lambda: "cuda"),
+            mock.patch.object(cwc.CppWrapperCpu, "__init__", lambda self: None),
+            mock.patch.object(
+                cwg, "get_device_op_overrides", lambda d: f"overrides:{d}"
+            ),
+        ):
+            subclass = CppWrapperXpu()
+            base = CppWrapperMps()
+            made = CppWrapperXpu.create(False, None, None)
+        # Without the hasattr guard the real __init__ would have overwritten both
+        # devices with "cuda", so the subclass's guard/filter would run against the
+        # wrong device. create still returns a CppWrapperXpu there because the base
+        # CppWrapperGpu.create is a classmethod returning cls(); a staticmethod
+        # revert would hand back a plain CppWrapperGpu.
+        self.assertEqual(subclass.device, "xpu")
+        self.assertEqual(subclass.device_codegen, "overrides:xpu")
+        self.assertEqual(base.device, "mps")
+        self.assertEqual(base.device_codegen, "overrides:mps")
+        self.assertIs(type(made), CppWrapperXpu)
+        self.assertEqual(made.device, "xpu")
 
 
 if __name__ == "__main__":

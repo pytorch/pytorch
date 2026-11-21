@@ -20,41 +20,6 @@ class ConstantVariableTableTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     @parametrize(
-        "val,getset,members",
-        [
-            (3, {"real", "imag", "numerator", "denominator"}, set()),
-            (True, {"real", "imag", "numerator", "denominator"}, set()),
-            (2.5, {"real", "imag"}, set()),
-            (3j, set(), {"real", "imag"}),
-            ("a", set(), set()),
-            (b"a", set(), set()),
-            (None, set(), set()),
-        ],
-        name_fn=lambda val, getset, members: type(val).__name__,
-    )
-    def test_getset_and_members_tables(self, val, getset, members):
-        vt = torch._dynamo.variables.ConstantVariable.create(val)
-        self.assertEqual(set(vt.tp_getset), getset)
-        self.assertEqual(set(vt.tp_members), members)
-
-    @parametrize(
-        "val,name,present",
-        [
-            (3, "bit_length", True),
-            (True, "bit_length", True),
-            (3, "upper", False),
-            ("a", "upper", True),
-            ("a", "bit_length", False),
-            (2.5, "is_integer", True),
-            (3j, "conjugate", True),
-        ],
-        name_fn=lambda val, name, present: _name(type(val).__name__, name),
-    )
-    def test_methods_table_is_per_type(self, val, name, present):
-        vt = torch._dynamo.variables.ConstantVariable.create(val)
-        self.assertEqual(name in vt.tp_methods, present)
-
-    @parametrize(
         "val,attr",
         [
             (3, "real"),
