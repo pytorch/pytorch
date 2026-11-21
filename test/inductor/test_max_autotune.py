@@ -1197,17 +1197,22 @@ class TestMaxAutotune(TestCase):
         {
             "max_autotune": True,
             "test_configs.force_extern_kernel_in_multi_template": True,
+            "triton.native_matmul": False,
         }
     )
     def test_addmm_strided_bias_extern_fallback(self, beta):
-        # realize_inputs copies a strided bias; the extern fallback must read that copy.
+        # The MultiTemplateBuffer finalizes to the extern choice with a bias that
+        # realize_inputs has to copy.
         bias = torch.randn(64, device=GPU_TYPE)[::2]
         x = torch.randn(16, 8, device=GPU_TYPE)
         y = torch.randn(8, 32, device=GPU_TYPE)
 
-        compiled_out = torch.compile(torch.addmm)(bias, x, y, beta=beta)
+        compiled_out, code = run_and_get_code(
+            torch.compile(torch.addmm), bias, x, y, beta=beta
+        )
 
         self.assertEqual(compiled_out, torch.addmm(bias, x, y, beta=beta))
+        FileCheck().check("extern_kernels.addmm").run(code[0])
 
     @fresh_cache()
     def test_addmm_1d_bias_no_reinterpret_tensor(self):

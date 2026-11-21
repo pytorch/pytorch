@@ -991,11 +991,14 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
     use_zero_inp = template_inp is not inp
     inp = realize_inputs(inp)
     template_inp = realize_inputs(template_inp) if use_zero_inp else inp
-    if not isinstance(template_inp, TensorBox):
-        template_inp = TensorBox(template_inp)
+    # expand needs a TensorBox, but the ATen choices keep the bare node: a boxed view
+    # gets past the ReinterpretView check in should_use_layout_constraints.
+    boxed_inp = (
+        template_inp if isinstance(template_inp, TensorBox) else TensorBox(template_inp)
+    )
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(
-        mat1, mat2, template_inp, layout=layout
+        mat1, mat2, boxed_inp, layout=layout
     )
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "addmm"
@@ -1003,9 +1006,6 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
     # Create MMKernelInputs for AddMM at the top
     kernel_inputs = MMKernelInputs(
         [inp_expanded, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
-    )
-    kernel_inputs_aten = MMKernelInputs(
-        [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
     )
 
     choices: list[ChoiceCaller] = []
@@ -1028,7 +1028,7 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
     ):
         choices.extend(
             V.choices.get_template_configs(
-                kernel_inputs_aten,
+                MMKernelInputs([inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)),
                 [aten_addmm],
                 name,
             )
@@ -1039,7 +1039,7 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
         return node
 
     # A MultiTemplateBuffer depends only on inp_expanded, so its ATen choices must read
-    # the buffer inp_expanded views.
+    # the realized buffer inp_expanded is derived from.
     kernel_inputs_aten = MMKernelInputs(
         [template_inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
     )
@@ -1055,7 +1055,6 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
         ):
             aten_templates.append(aten_bias_addmm)
 
-        # On ROCm, ATen choices use original bias input; non-ROCm keeps unified inputs.
         choices.extend(
             V.choices.get_template_configs(kernel_inputs_aten, aten_templates, name)
         )
