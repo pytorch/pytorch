@@ -10,7 +10,8 @@ from torch.distributed.tensor.parallel.style import (
     ParallelStyle,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
     NUM_DEVICES,
@@ -54,6 +55,7 @@ class DummyModel(torch.nn.Module):
 
 class TensorParallelTest(DTensorContinuousTestBase):
     world_size = NUM_DEVICES
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def assert_has_c10d_ops(
         self, gm: torch.fx.GraphModule, expected_ops_count: dict[str, int]
@@ -66,9 +68,10 @@ class TensorParallelTest(DTensorContinuousTestBase):
         self.assertDictEqual(expected_ops_count, actual_ops_count)
 
     @with_comms
-    def test_tp_transform_with_uncovered_op(self):
-        model = DummyModel().to(device=self.device_type)
-        inputs = (torch.randn(7, 3, requires_grad=False).to(device=self.device_type),)
+    def test_tp_transform_with_uncovered_op(self, device):
+        device_type = torch.device(device).type
+        model = DummyModel().to(device=device_type)
+        inputs = (torch.randn(7, 3, requires_grad=False).to(device=device_type),)
         with torch.no_grad():
             res = model(*inputs)
             exported_program = torch.export.export(
@@ -78,7 +81,7 @@ class TensorParallelTest(DTensorContinuousTestBase):
             exported_program,
             self.rank,
             self.world_size,
-            self.device_type,
+            device_type,
             {"fc": ColwiseParallel},
         )
         tp_model = tp_exported_program.module()
@@ -95,10 +98,11 @@ class TensorParallelTest(DTensorContinuousTestBase):
         )
 
     @with_comms
-    def test_tp_transform_e2e(self):
+    def test_tp_transform_e2e(self, device):
+        device_type = torch.device(device).type
         torch.manual_seed(0)
-        model = MLPListModule(2).to(device=self.device_type)
-        inputs = (torch.randn((10, 12)).to(device=self.device_type),)
+        model = MLPListModule(2).to(device=device_type)
+        inputs = (torch.randn((10, 12)).to(device=device_type),)
         parallel_strategies: dict[str, ParallelStyle] = {
             "mlps.0.0": ColwiseParallel,
             "mlps.0.2": RowwiseParallel,
@@ -115,7 +119,7 @@ class TensorParallelTest(DTensorContinuousTestBase):
             exported_program,
             self.rank,
             self.world_size,
-            self.device_type,
+            device_type,
             parallel_strategies,
         )
         tp_model = tp_exported_program.module()
@@ -132,10 +136,11 @@ class TensorParallelTest(DTensorContinuousTestBase):
         )
 
     @with_comms
-    def test_tp_transform_no_bias(self):
+    def test_tp_transform_no_bias(self, device):
+        device_type = torch.device(device).type
         torch.manual_seed(0)
-        model = MLPListModule(1, bias=False).to(device=self.device_type)
-        inputs = (torch.randn((10, 12)).to(device=self.device_type),)
+        model = MLPListModule(1, bias=False).to(device=device_type)
+        inputs = (torch.randn((10, 12)).to(device=device_type),)
         parallel_strategies: dict[str, ParallelStyle] = {
             "mlps.0.0": ColwiseParallel,
             "mlps.0.2": RowwiseParallel,
@@ -150,7 +155,7 @@ class TensorParallelTest(DTensorContinuousTestBase):
             exported_program,
             self.rank,
             self.world_size,
-            self.device_type,
+            device_type,
             parallel_strategies,
         )
         tp_model = tp_exported_program.module()
@@ -164,6 +169,14 @@ class TensorParallelTest(DTensorContinuousTestBase):
                 "_c10d_functional.wait_tensor.default": 1,
             },
         )
+
+
+instantiate_device_type_tests(
+    TensorParallelTest,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
