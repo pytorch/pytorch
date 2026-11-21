@@ -378,6 +378,21 @@ def load(
     Loads an :class:`ExportedProgram` previously saved with
     :func:`torch.export.save <torch.export.save>`.
 
+    A program can call tensor subclasses and custom autograd functions. Load
+    finds them by name in modules that are already imported. It does not import
+    the modules that the file names for them, because importing a module runs
+    its code. So import the module that each ``__module__`` names before
+    loading::
+
+        import my_project.ops  # defines a custom autograd function the program calls
+
+        ep = torch.export.load("exported_program.pt2")
+
+    This is not a safety guarantee: as the warning above says, load unpickles
+    data, and other parts of the file, such as the specs of the program's
+    inputs and outputs or the inputs of other higher order ops, can import
+    modules too.
+
     Args:
         f (str | os.PathLike[str] | IO[bytes]): A file-like object (has to
          implement write and flush) or a string containing a file name.
@@ -419,13 +434,15 @@ def load(
 
     from torch.export.pt2_archive._package import load_pt2, PT2ArchiveContents
 
+    load_error = None
     try:
         pt2_contents = load_pt2(
             f,
             expected_opset_version=expected_opset_version,
         )
-    except RuntimeError:
+    except RuntimeError as e:
         log.warning("Ran into the following error when deserializing", exc_info=True)
+        load_error = e
         pt2_contents = PT2ArchiveContents({}, {}, {})
 
     if len(pt2_contents.exported_programs) > 0 or len(pt2_contents.extra_files) > 0:
@@ -440,7 +457,7 @@ def load(
             raise RuntimeError(
                 "We ran into an error when deserializing the saved file. "
                 "Please check the warnings above for possible errors. "
-            )
+            ) from load_error
 
         log.warning(
             "Trying to deserialize for the older format. This version of file is "
