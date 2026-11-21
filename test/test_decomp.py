@@ -1377,6 +1377,60 @@ class DecompOneOffTests(TestCase):
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
+    def test_matmul_broadcast_batch_fold(self, device):
+        # https://github.com/pytorch/pytorch/issues/154128
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        # y is folded into the rows of x only when expanding y would copy it and x and
+        # y are not both 4-D, as in multi-query attention
+        for size_x, size_y, folded, num_clones in (
+            ((2, 3, 4, 5, 6), (2, 3, 1, 6, 7), True, 0),
+            ((1, 3, 4, 1, 6), (1, 3, 1, 6, 7), True, 0),
+            ((2, 6, 3, 1, 5), (3, 5, 4), True, 1),
+            ((6, 3, 1, 5), (3, 5, 4), True, 1),
+            ((2, 4, 8, 16), (2, 1, 16, 8), False, 1),
+            ((1, 4, 8, 16), (1, 1, 16, 8), False, 0),
+            ((2, 4, 8, 16), (1, 1, 16, 8), False, 0),
+        ):
+            x = torch.randn(size_x, device=device)
+            y = torch.randn(size_y, device=device)
+            expected = x @ y.expand(*size_x[:-2], *size_y[-2:]).contiguous()
+            for tracing_mode in ("real", "symbolic"):
+                with enable_python_dispatcher():
+                    gm = make_fx(torch.matmul, tracing_mode=tracing_mode)(x, y)
+                targets = [node.target for node in gm.graph.nodes]
+                self.assertEqual(torch.ops.aten.expand.default not in targets, folded)
+                clones = targets.count(torch.ops.aten.clone.default)
+                self.assertEqual(clones, num_clones)
+                self.assertEqual(gm(x, y), expected)
+
+        # Same for a matrix y and a non-contiguous x, which should_fold here does not
+        # fold into a matrix
+        x = torch.randn(4, 8, 12, device=device)[..., :6]
+        y = torch.randn(6, 5, device=device)
+        with enable_python_dispatcher():
+            gm = make_fx(torch.matmul)(x, y)
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(torch.ops.aten.expand.default, targets)
+        self.assertEqual(gm(x, y), x.contiguous() @ y)
+
+        # Not folded either when the folded rows or their stride do not fit in an int
+        big = 2**31 + 8
+        x_rows = torch.empty(1, 2, 2**16, 2**15 + 1, 1, device="meta")
+        x_ld = torch.empty_strided(
+            (1, 2, 2, 1, 8), (4 * big, 2 * big, big, 8, 1), device="meta"
+        )
+        for x, y in (
+            (x_rows, torch.empty(1, 2, 1, 1, 2, device="meta")),
+            (x_ld, torch.empty(1, 2, 1, 8, 4, device="meta")),
+        ):
+            with enable_python_dispatcher():
+                gm = make_fx(torch.matmul)(x, y)
+            targets = [node.target for node in gm.graph.nodes]
+            self.assertIn(torch.ops.aten.expand.default, targets)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
     def test_softshrink_backward_lambd_range(self, device):
         # Like the kernel, reject finite lambd outside the computation dtype's
         # range, but accept inf and nan. (Long enough for the CPU kernel to take
