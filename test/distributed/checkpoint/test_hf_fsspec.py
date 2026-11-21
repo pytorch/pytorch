@@ -366,6 +366,40 @@ class TestHfStorageOnFsspec(_MemoryFsTestCase):
         loaded = self._load(dist_cp.HuggingFaceStorageReader(path=self.path))
         self.assertEqual(loaded, self.state_dict)
 
+    def test_consolidating_writer_reset_uses_checkpoint_id(self) -> None:
+        # The reset onto checkpoint_id must keep shards in checkpoint_id/sharded and
+        # consolidate into checkpoint_id. The second save onto the same id would
+        # otherwise read the consolidated files as shards.
+        writer = dist_cp.HuggingFaceStorageWriter(
+            path=f"{self.root}/other",
+            fqn_to_index_mapping={"w": 1, "b": 2},
+            save_distributed=True,
+            enable_consolidation=True,
+        )
+        for _ in range(2):
+            dist_cp.save(
+                self.state_dict, storage_writer=writer, checkpoint_id=self.path
+            )
+
+        self.assertFalse(self.memory_fs.exists(f"/{self.name}/other"))
+        ckpt = f"/{self.name}/ckpt"
+        self.assertEqual(
+            sorted(os.path.basename(p) for p in self.memory_fs.find(ckpt)),
+            [
+                "model-00001-of-00002.safetensors",
+                "model-00002-of-00002.safetensors",
+                _metadata_fn,
+                "shard-00001-model-00001-of-00002.safetensors",
+                "shard-00001-model-00002-of-00002.safetensors",
+            ],
+        )
+        self.assertTrue(self.memory_fs.isdir(f"{ckpt}/sharded"))
+        self.assertFalse(
+            any("shard-" in p for p in self.memory_fs.ls(ckpt, detail=False))
+        )
+        loaded = self._load(dist_cp.HuggingFaceStorageReader(path=self.path))
+        self.assertEqual(loaded, self.state_dict)
+
 
 class _ListingCachingLocalFileSystem(LocalFileSystem):
     """``file://`` that caches directory listings, as gcsfs, s3fs and adlfs do."""

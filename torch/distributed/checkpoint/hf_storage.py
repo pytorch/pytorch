@@ -94,21 +94,24 @@ class HuggingFaceStorageWriter(FileSystemWriter):
         self.save_distributed: bool = save_distributed
         self.enable_consolidation: bool = enable_consolidation
         self.consolidated_output_path: str | None = None
+        self._set_path(path)
+        self.thread_count_consolidation = thread_count_consolidation
+
+    def _set_path(self, path: str | os.PathLike) -> None:
         # The parent declares fs as FileSystem; this may be an fsspec _FileSystem.
         # pyrefly: ignore [bad-override]
         self.fs, self.path = _get_fs_and_path(path)
         if self.enable_consolidation:
             self.consolidated_output_path = str(self.path)
             self.path = self.fs.concat_path(self.path, SHARDED_DIR_NAME)
-        self.thread_count_consolidation = thread_count_consolidation
 
     def reset(self, checkpoint_id: str | os.PathLike | None = None) -> None:
-        # The parent rebuilds the filesystem without _get_fs_and_path, which
-        # would turn fsspec's listing cache back on for a remote checkpoint_id.
+        # The parent sets path to checkpoint_id without _get_fs_and_path, which
+        # turns fsspec's listing cache back on for a remote checkpoint_id and
+        # drops the sharded subdirectory used with enable_consolidation.
         super().reset()
         if checkpoint_id:
-            # pyrefly: ignore [bad-override]
-            self.fs, self.path = _get_fs_and_path(checkpoint_id)
+            self._set_path(checkpoint_id)
 
     def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
         new_plans = []
