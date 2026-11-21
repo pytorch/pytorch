@@ -3795,7 +3795,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertIsNone(torch.compile(fn, backend="eager")().strerror)
 
-    @unittest.expectedFailure
     def test_property_without_name_no_setter(self):
         class C:
             pass
@@ -5412,25 +5411,24 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             torch.compile(minimal, fullgraph=True, backend="eager")(x), minimal(x)
         )
 
-    def test_deepcopy_memo_with_local_hash(self):
-        class Key:
+    @parametrize("nested", [False, True])
+    def test_deepcopy_ordered_dict_memo(self, nested):
+        class Value:
             def __hash__(self):
                 return id(self)
 
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x, mapping):
-            return x + len(copy.deepcopy(mapping, {hash(Key()): None}))
+            def __deepcopy__(self, memo):
+                memo[id(self)] = value = []
+                return value if nested else self
 
-        self.assertEqual(fn(torch.tensor(1), collections.OrderedDict(a=1)), 2)
+        def region(x, m):
+            copied = copy.deepcopy(m, None if nested else {hash(Value()): None})
+            return x + len(copied) + (copied["a"] is m["a"])
 
-    def test_deepcopy_ordered_dict_nested_region_memo(self):
-        @torch.compiler.nested_compile_region
-        def region(x, mapping):
-            return x + len(copy.deepcopy(mapping))
-
-        fn = torch.compile(lambda x, m: region(x, m), backend="eager", fullgraph=True)
-        mapping = collections.OrderedDict(a={1}, b=([],), c=1)
-        self.assertEqual(fn(torch.tensor(1), mapping), 4)
+        run = torch.compiler.nested_compile_region(region) if nested else region
+        fn = torch.compile(lambda x, m: run(x, m), backend="eager", fullgraph=True)
+        mapping = collections.OrderedDict(a=Value(), b={1}, c=([],))
+        self.assertEqual(fn(torch.tensor(1), mapping), 4 if nested else 5)
 
     @parametrize(
         "copier", [copy.copy, copy.deepcopy, lambda od: copy.deepcopy([od], {17: 3})[0]]
@@ -5470,22 +5468,28 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         od = collections.OrderedDict(a=1)
         self.assertEqual(vars(compiled(x, od)[1]), {})
         od.tag = [42]
+        with self.assertRaisesRegex(Unsupported, "OrderedDict.__deepcopy__"):
+            torch.compile(hasattr, backend="eager", fullgraph=True)(od, "__deepcopy__")
         copied = compiled(x, od)[1]
         self.assertEqual(vars(copied), vars(od))
         self.assertEqual(copied.tag is od.tag, copier is copy.copy)
 
     @parametrize("copier", [copy.copy, copy.deepcopy])
-    def test_ordered_dict_copy_after_instance_dict_write(self, copier):
+    @parametrize("direct", [False, True])
+    def test_ordered_dict_copy_after_instance_dict_write(self, copier, direct):
         def fn(x, od):
-            od.__dict__["tag"] = [42]
-            return x + 1, od, copier(od)
+            if direct:
+                od.tag = [42]
+            else:
+                od.__dict__["tag"] = [42]
+            return x + 1, copier(od)
 
         x = torch.tensor(10)
         inp = collections.OrderedDict(a=1)
-        result, od, copied = torch.compile(fn, backend="eager")(x, inp)
+        result, copied = torch.compile(fn, backend="eager")(x, inp)
         self.assertEqual(result, x + 1)
         self.assertEqual(copied.tag, [42])
-        self.assertEqual(copied.tag is od.tag, copier is copy.copy)
+        self.assertEqual(copied.tag is inp.tag, copier is copy.copy)
 
     @parametrize("copier", [copy.copy, copy.deepcopy])
     def test_ordered_dict_copy_after_possible_instance_dict_alias_write(self, copier):
@@ -6259,6 +6263,106 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    # Reads of an instance __dict__ after an attribute write: these exercise the
+    # mapping view, not the setattr protocol (see test_tp_setattro.py for that).
+
+    def test_dict_getitem_after_attr_write(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x):
+            obj = Foo(x)
+            obj.y = 5
+            return obj.__dict__["y"]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_len_and_keys_after_attr_write(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x):
+            obj = Foo(x)
+            obj.y = 5
+            return len(obj.__dict__), sorted(obj.__dict__)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_contains_after_attr_write(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x):
+            obj = Foo(x)
+            obj.y = 5
+            return "y" in obj.__dict__, "x" in obj.__dict__
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_attr_read_after_dict_write(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x):
+            obj = Foo(x)
+            obj.__dict__["y"] = 5
+            return obj.y
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_simple_namespace_repr_after_write(self):
+        # SimpleNamespace is backed by its __dict__, so repr() reads it too.
+        def fn(x):
+            ns = types.SimpleNamespace()
+            ns.a = 1
+            return repr(ns), sorted(ns.__dict__)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_copy_copy_reads_instance_dict(self):
+        # copy.copy does dst.__dict__.update(src.__dict__), so it only sees x if
+        # the write from __init__ is visible in the mapping view.
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x):
+            return copy.copy(Foo(x)).x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_view_on_graph_input_object(self):
+        # Same view, on an object that enters as an input rather than being built
+        # in the region. Each call gets its own object so the eager run does not
+        # pre-populate the one the compiled run sees.
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x, obj):
+            obj.y = 5
+            return sorted(obj.__dict__)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x, Foo(x)), opt_fn(x, Foo(x)))
 
     def test_class_object_dunder_dict(self):
         # A class object's __dict__ is a read-only mappingproxy, not an instance
@@ -20179,7 +20283,6 @@ A.last
         self.assertEqual(res[9], float.fromhex("0x1.ffffp10"))
         self.assertEqual(res[10], "0x1.8000000000000p+0")
 
-    @unittest.expectedFailure
     def test_builtin_numeric_unbound_method_constant_fold(self):
         def fn():
             out = [
@@ -20206,6 +20309,16 @@ A.last
             return out
 
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_type_subclasscheck_non_class_raises_type_error(self):
+        def fn(x):
+            try:
+                return x + 1, type.__subclasscheck__(int, True)
+            except TypeError as exc:
+                return x + 1, str(exc)
+
+        x = torch.tensor(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_builtin_constant_fold_str_conversions(self):
         @torch.compile(backend="eager", fullgraph=True)
