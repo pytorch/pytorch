@@ -3241,6 +3241,8 @@ class SymNodeVariable(VariableTracker):
     handle logic like float_tensor.item() or unspecialized float inputs.
     """
 
+    _cpython_type = (int, float, bool)
+
     _nonvar_fields = {
         "proxy",
         "sym_num",
@@ -4138,6 +4140,8 @@ class UntypedStorageVariable(VariableTracker):
 
 
 class DataPtrVariable(VariableTracker):
+    _cpython_type = int
+
     _DATA_PTR_PRESERVING_TARGETS = {
         ("call_method", "detach"),
         ("call_function", torch.ops.aten.detach.default),

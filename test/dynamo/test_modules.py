@@ -1200,6 +1200,7 @@ def temporary_tensor_subclass(torch_function=None):
     return TensorProxy
 
 
+@instantiate_parametrized_tests
 class NNModuleTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1850,6 +1851,108 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             res3 = opt_mod(x)
             self.assertTrue(torch.allclose(ref3, res3))
             self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
+
+    def test_registered_attribute_presence_invalidation(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                try:
+                    self.value
+                except AttributeError:
+                    return x
+                return x + 1
+
+        model = Model()
+        model.register_buffer("value", None)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(model, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x), x + 1)
+        self.assertEqual(compiled(x), x + 1)
+        del model._buffers["value"]
+        self.assertEqual(compiled(x), x)
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("custom_getitem", [False, True])
+    def test_export_registered_attribute_custom_registry(self, custom_getitem):
+        class Registry(dict):
+            pass
+
+        class ScaledRegistry(dict):
+            def __getitem__(self, name):
+                return super().__getitem__(name) * 2
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + self.weight + self.offset
+
+        model = Model()
+        model.torchdynamo_force_dynamic = False
+        weight = model.weight = torch.nn.Parameter(torch.tensor(5.0))
+        offset = torch.tensor(3.0)
+        model.register_buffer("offset", offset)
+        registry = ScaledRegistry if custom_getitem else Registry
+        model._parameters = registry(model._parameters)
+        model._buffers = registry(model._buffers)
+        x = torch.ones(1)
+        exported = torch._dynamo.export(model)(x).graph_module
+        self.assertEqual(len(exported.graph.find_nodes(op="placeholder")), 1)
+        self.assertEqual(exported(x), model(x))
+        with torch.no_grad():
+            weight.add_(1)
+            offset.add_(3)
+        self.assertEqual(exported(x), model(x))
+
+    def test_registered_attribute_lookup_custom_registry(self):
+        class HiddenValue(dict):
+            def __contains__(self, name):
+                return name != "value" and super().__contains__(name)
+
+        def fn(x, module):
+            return x + module.value
+
+        module = torch.nn.Module()
+        module.torchdynamo_force_dynamic = False
+        module.register_buffer("value", torch.tensor(2.0))
+        module._parameters["value"] = torch.nn.Parameter(torch.tensor(5.0))
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+
+        class VisibleValue(dict):
+            pass
+
+        for registry in (dict, HiddenValue, VisibleValue):
+            module._parameters = registry(module._parameters)
+            self.assertEqual(compiled(x, module), fn(x, module))
+        module.__dict__["value"] = torch.tensor(9.0)
+        self.assertEqual(compiled(x, module), fn(x, module))
+
+    @parametrize("specialize", [False, True])
+    def test_registered_attribute_lookup_precedence(self, specialize):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("value", torch.tensor(2.0))
+                self._modules["value"] = torch.nn.Identity()
+
+            def forward(self, x):
+                value = self.value
+                return value(x) + 7 if isinstance(value, torch.nn.Module) else x + value
+
+        model = Model()
+        model.torchdynamo_force_dynamic = not specialize
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(model, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(compiled(x), x + 2)
+        self.assertEqual(compiled(x), x + 2)
+        self.assertEqual(counter.frame_count, 1)
+        model._parameters["value"] = torch.nn.Parameter(torch.tensor(5.0))
+        self.assertEqual(compiled(x), x + 5)
+        del model._parameters["value"]
+        self.assertEqual(compiled(x), x + 2)
+        del model._buffers["value"]
+        self.assertEqual(compiled(x), x + 7)
+        self.assertEqual(counter.frame_count, 3)
 
 
 class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):

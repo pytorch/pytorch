@@ -20,17 +20,20 @@ import types
 import typing
 from collections.abc import Callable, Generator
 from functools import lru_cache, partial
-from typing import NoReturn, TYPE_CHECKING
+from typing import cast, NoReturn, TYPE_CHECKING
 
 import torch
 from torch._C._dynamo import (
     get_type_slots,
+    get_type_tp_name,
     has_slot,
+    is_generic_getattr,
     PyMappingSlots,
     PyNumberSlots,
     PySequenceSlots,
     PyTypeSlots,
 )
+from torch._library.fake_class_registry import FakeScriptObject
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..current_scope_id import current_scope_id
@@ -44,11 +47,12 @@ from ..exc import (
     UnhandledDescriptorError,
     unimplemented,
 )
-from ..guards import GuardBuilder, install_guard
+from ..guards import _slot_is_set, GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     ConstantSource,
     DictGetItemSource,
+    GenericAttrSource,
     GetItemSource,
     GlobalSource,
     is_constant_source,
@@ -264,6 +268,7 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
 Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
 Py_TPFLAGS_IMMUTABLETYPE = 1 << 8
 Py_TPFLAGS_HEAPTYPE = 1 << 9
+Py_TPFLAGS_BASETYPE = 1 << 10
 
 
 def type_is_immutable(obj_type: type, /) -> bool:
@@ -2404,6 +2409,8 @@ def mro_attr_source(
     klass: type,
     klass_source: Source,
     name: str,
+    *,
+    raw_metadata: bool = False,
 ) -> "DictGetItemSource | None":
     r"""Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
 
@@ -2414,6 +2421,8 @@ def mro_attr_source(
 
     Guards absence in every skipped class, including a complete MRO miss.
     Returns None on a complete miss; callers decide whether that is an error.
+    Use raw_metadata for instance lookup that reads type dictionaries directly,
+    even if the metaclass customizes ordinary class attribute access.
     """
     mro = get_type_mro_no_user_code(klass)
     klass_source = guardable_mro_source(klass_source)
@@ -2441,7 +2450,7 @@ def mro_attr_source(
             attr = "__dict__"
         elif not direct and has_custom_metaclass_accessor(klass, "__mro__"):
             attr = "__mro__"
-        if attr is not None:
+        if attr is not None and not raw_metadata:
             unimplemented(
                 gb_type="Custom metaclass metadata access",
                 context=f"metadata={attr}, name={name}",
@@ -2505,6 +2514,41 @@ def _resolve_descriptor_set(  # noqa: RVT001
             descr_vt = VariableTracker.build(tx, descriptor, source)
         return descr_vt.tp_descr_set_impl(tx, obj, value)
     return None
+
+
+def _can_guard_lookup_hooks(cls: type) -> bool:
+    return type(cls) is type or (
+        not has_custom_metaclass_accessor(cls, "__mro__")
+        and all(
+            not has_custom_metaclass_accessor(base, "__dict__")
+            for base in get_type_mro_no_user_code(cls)
+        )
+    )
+
+
+def _guard_getattribute(
+    tx: "InstructionTranslatorBase", cls: type, source: Source
+) -> None:
+    hook = mro_attr_source(tx, cls, source, "__getattribute__", raw_metadata=True)
+    if hook is not None:
+        owner = next(
+            base for base, ns in iter_mro_static_dicts(cls) if "__getattribute__" in ns
+        )
+        if not type_is_immutable(owner):
+            install_guard(hook.make_guard(GuardBuilder.ID_MATCH))
+
+
+def _modeled_class_source(
+    tx: "InstructionTranslatorBase", obj: VariableTracker, cls: type
+) -> Source:
+    if obj.source:
+        return TypeSource(obj.source)
+    module = sys.modules.get(cls.__module__)
+    if module is None or vars(module).get(cls.__name__) is not cls:
+        raise _UnhandledDescriptorError(f"No source for mutable type {cls}")
+    source = AttrSource(tx.import_source(module.__name__), cls.__name__)
+    install_guard(source.make_guard(GuardBuilder.CLASS_MATCH))
+    return source
 
 
 def _is_skipped_constant_property(
@@ -2654,12 +2698,13 @@ def object_generic_getattr(
       4. Non-data descriptor -> invoke tp_descr_get
       5. Plain class variable -> wrap in VT
       6. __getattr__ fallback -> obj.call_getattr_fallback(tx, name)
-      7. AttributeError
+      7. AttributeError for an exact runtime type with generic lookup, no instance
+         dictionary and no __getattr__. Guard the lookup if the type is mutable.
     """
     from .user_defined import is_data_descriptor
 
     py_type = obj.python_type()
-    source = obj.source and AttrSource(obj.source, name)
+    source: Source | None = obj.source and AttrSource(obj.source, name)
 
     # Step 1: MRO walk.
     type_attr = mro_lookup(py_type, name)
@@ -2702,8 +2747,16 @@ def object_generic_getattr(
             f"{type(type_attr)} for {name}"
         )
 
-    # Step 5: Plain class variable (no __get__).
+    # Step 5: A sourceless instance can still read from a mutable modeled class.
     if type_attr is not NO_SUCH_SUBOBJ:
+        if (
+            source is None
+            and obj._cpython_type is py_type
+            and not type_is_immutable(py_type)
+        ):
+            source = mro_attr_source(
+                tx, py_type, _modeled_class_source(tx, obj, py_type), name
+            )
         return VariableTracker.build(tx, type_attr, source)
 
     # Step 6: __getattr__ fallback.
@@ -2711,20 +2764,40 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
-    # Step 7: Attribute not found. With generic tp_getattro, no instance
-    # __dict__ and no __getattr__, the MRO walk was the whole lookup, so this
-    # is CPython's AttributeError; otherwise signal the caller to fall back.
-    from .user_defined import _safe_c_slots
-
+    # A tracker can model a base type whose subclass overrides attribute lookup.
     if (
-        py_type.__dictoffset__ == 0
-        and py_type.__getattribute__ in _safe_c_slots()
+        not type.__dict__["__dictoffset__"].__get__(py_type)
+        and is_generic_getattr(py_type)
         and mro_lookup(py_type, "__getattr__") is NO_SUCH_SUBOBJ
     ):
-        raise_attribute_error(
-            tx,
-            f"'{py_type.__name__}' object has no attribute '{name}'",
+        modeled = obj._cpython_type
+        flags = type.__dict__["__flags__"].__get__(py_type)
+        exact_type = not (flags & Py_TPFLAGS_BASETYPE) or (
+            any(py_type is t for t in modeled)
+            if isinstance(modeled, tuple)
+            else py_type is modeled
         )
+        if (
+            obj.source
+            and (actual_type := tx.output.source_types.get(obj.source)) is not None
+        ):
+            exact_type = actual_type is py_type
+        if exact_type:
+            if not type_is_immutable(py_type):
+                cls_source = _modeled_class_source(tx, obj, py_type)
+                mro_attr_source(tx, py_type, cls_source, name)
+                mro_attr_source(tx, py_type, cls_source, "__getattr__")
+                _guard_getattribute(tx, py_type, cls_source)
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[
+                    f"'{get_type_tp_name(py_type)}' object has no attribute '{name}'"
+                ],
+                kwargs={"name": ConstantVariable.create(name), "obj": obj},
+            )
+
+    # Attribute absence was not proven -- signal to the caller to fall back.
     raise _UnhandledDescriptorError(
         f"object_generic_getattr: '{py_type.__name__}' has no attribute '{name}'"
     )
@@ -2747,6 +2820,20 @@ def generic_getattr(
     # NOTE [Tensor "grad" and "_grad" attr]
     if obj.is_tensor() and name == "_grad":
         name = "grad"
+
+    # Opaque fake wrappers have a different class from the runtime source.
+    fake_opaque = (
+        isinstance(obj, variables.UserDefinedObjectVariable)
+        and type(obj.value) is FakeScriptObject
+    )
+    if (
+        default is not _NO_DEFAULT
+        and not fake_opaque
+        and isinstance(obj, variables.UserDefinedObjectVariable)
+        and obj.cls_source is not None
+    ):
+        if not obj.source or _can_guard_lookup_hooks(obj.python_type()):
+            _guard_getattribute(tx, obj.python_type(), obj.cls_source)
 
     # Side effects: check for pending attribute mutations.
     if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
@@ -2776,10 +2863,77 @@ def generic_getattr(
             ):
                 return value
 
+    # A user descriptor must run once; hasattr followed by getattr runs it twice.
+    if (
+        default is not _NO_DEFAULT
+        and not fake_opaque
+        and isinstance(obj, variables.UserDefinedObjectVariable)
+        and (
+            (dict_attr := obj.lookup_class_mro_attr("__dict__")) is NO_SUCH_SUBOBJ
+            or isinstance(dict_attr, types.GetSetDescriptorType)
+        )
+    ):
+        slot = isinstance(obj.lookup_class_mro_attr(name), types.MemberDescriptorType)
+        if (
+            slot
+            and obj.source
+            and not is_constant_source(obj.source)
+            and not (tx.output.side_effects.has_pending_mutation_of_attr(obj, name))
+        ):
+            # Reading a missing slot with hasattr would run the user's __getattr__.
+            present = _slot_is_set(obj.value, name)
+            if present is not None:
+                install_guard(
+                    obj.source.make_guard(
+                        partial(GuardBuilder.SLOT_PRESENCE, name=name, present=present)
+                    )
+                )
+        try:
+            result = generic_getattr(tx, obj, name)
+        except ObservedAttributeError:
+            handle_observed_exception(tx)
+            if slot:
+                obj.guard_attribute_absence(tx, name)
+                try:
+                    fallback = obj.call_getattr_fallback(tx, name)
+                    if fallback is not None:
+                        return fallback
+                except ObservedAttributeError:
+                    handle_observed_exception(tx)
+            elif (
+                obj.lookup_class_mro_attr(name) is not NO_SUCH_SUBOBJ
+                or obj._check_for_getattr() is not None
+            ):
+                # A descriptor or __getattr__ can raise before the ordinary miss installs guards.
+                obj.guard_attribute_absence(tx, name)
+            return cast(VariableTracker, default)
+        if (
+            not result.is_realized()
+            and obj.source
+            and result.source == AttrSource(obj.source, name)
+            and isinstance(dict_attr, types.GetSetDescriptorType)
+            and name in object.__getattribute__(obj.value, "__dict__")
+        ):
+            # A lazy return reads the attribute at runtime; deleting it must select the default.
+            install_guard(
+                GenericAttrSource(obj.source, "__dict__").make_guard(
+                    partial(GuardBuilder.DICT_CONTAINS, key=name)
+                )
+            )
+        elif (
+            not result.is_realized()
+            and isinstance(result.source, DictGetItemSource)
+            and isinstance(result.source.base, TypeDictSource)
+            and result.source.index == name
+        ):
+            # The owner must still have a plain attribute, even when the value stays lazy.
+            install_guard(result.source.make_guard(GuardBuilder.TYPE_MATCH))
+        return result
+
     # Handle default for getattr(obj, name, default).
     if default is not _NO_DEFAULT:
         if not generic_hasattr_str(tx, obj, name):
-            return default  # type: ignore[return-value]
+            return cast(VariableTracker, default)
 
     # tp_getset/tp_members are data descriptors: resolve ahead of the VT's
     # tp_getattro so a tp_getattro_impl override need not repeat the consult.
