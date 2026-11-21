@@ -573,7 +573,15 @@ was exported for. That is right only for what runs no Python code. So the
 engine looks at each of them on every call before it runs it: an attribute
 that is found without a property, a descriptor or a `__getattr__` written in
 Python, an item of a list, a tuple or a dict under a number or a str,
-arithmetic on exact numbers. A call in which one of them could run Python
+arithmetic on exact numbers. A dict or a set compares the key that is looked
+up with every key it holds under the same hash, and a key of a class with an
+`__eq__` does that in Python. So a lookup in a dict or a set
+(`d[k]`, `k in d`) runs no Python code only while every key in it is
+a number, a str or None, or a tuple of them: a dict that has only ever been
+given strs for keys is known to hold no other (CPython 3.13 and below say so
+of a dict; under 3.14 it counts as any other), any other dict and any set is
+looked through where it holds at most 32 keys, and is taken to run Python
+code where it holds more. A call in which one of these could run Python
 code runs the operations of the function as they are, every read once and
 where the function has it, and after three such calls in a row the graph is
 left to the engine:
