@@ -151,6 +151,7 @@ VIEW_TEST_CASES = {k: v for v, k in get_view_test_cases()}
 
 
 compile_full_eager = torch.compile(backend="eager", fullgraph=True)
+compile_full_aot_eager = torch.compile(backend="aot_eager", fullgraph=True)
 
 
 class BaseTorchFunction(torch.Tensor):
@@ -2077,6 +2078,86 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         res_act = fn_opt(x)
         self.assertEqual(res_exp, res_act)
         self.assertIsInstance(res_act, MyTensor)
+
+    # https://github.com/pytorch/pytorch/issues/204954
+    @parametrize(
+        "dunder,fn",
+        [
+            ("__add__", lambda t: t + 1.0),
+            ("__radd__", lambda t: 1.0 + t),
+            ("__mul__", lambda t: t * 2.0),
+            ("__matmul__", lambda t: t @ t),
+            ("__neg__", lambda t: -t),
+            ("__abs__", lambda t: abs(t)),
+            ("__getitem__", lambda t: t[0]),
+        ],
+        name_fn=lambda dunder, fn: dunder.strip("_"),
+    )
+    def test_subclass_operator_override(self, dunder, fn):
+        # Operator syntax calls type(t).__op__, so the subclass's override wins.
+        override = {dunder: lambda self, *args: torch.full((2,), -7.0)}
+        x = torch.tensor([1.0, 2.0]).as_subclass(type("Sub", (torch.Tensor,), override))
+        res, ref = compile_full_aot_eager(fn)(x), fn(x)
+        self.assertEqual(res, ref)
+        self.assertIs(type(res), type(ref))
+
+    def test_subclass_operator_override_dispatch_order(self):
+        # Python's operator protocol decides which operand's method runs.
+        class RAdd(torch.Tensor):
+            def __radd__(self, other):
+                return other * 10
+
+        class InheritsRAdd(RAdd):
+            pass
+
+        class Declines(torch.Tensor):
+            def __add__(self, other):
+                return NotImplemented
+
+        def add(a, b):
+            return a + b
+
+        x, y = torch.ones(2), torch.full((2,), 2.0)
+        for a, b in [
+            # A subclass on the right that overrides __radd__ goes first...
+            (x, y.as_subclass(RAdd)),
+            # ...but not when it only inherits it.
+            (x.as_subclass(RAdd), y.as_subclass(InheritsRAdd)),
+            # NotImplemented moves on to the other operand.
+            (x.as_subclass(Declines), y.as_subclass(RAdd)),
+        ]:
+            res, ref = compile_full_aot_eager(add)(a, b), add(a, b)
+            self.assertEqual(res, ref)
+            self.assertIs(type(res), type(ref))
+
+        def add_or_none(a, b):
+            try:
+                return a + b
+            except TypeError:
+                return None
+
+        # When every method declines, Python raises TypeError.
+        d = x.as_subclass(Declines)
+        self.assertIsNone(compile_full_aot_eager(add_or_none)(d, d.clone()))
+
+    def test_subclass_operator_override_pass_through(self):
+        # Common override shapes that defer to torch.Tensor keep compiling.
+        class MySubclass(torch.Tensor):
+            __rmul__ = torch.Tensor.__mul__
+
+            def __getitem__(self, idx):
+                return super().__getitem__(idx) * 2
+
+            def __add__(self, other):
+                return super().__add__(other) * 2
+
+        def fn(x):
+            return x[0] + (x + 1) + 3 * x
+
+        x = torch.tensor([1.0, 2.0]).as_subclass(MySubclass)
+        res, ref = compile_full_aot_eager(fn)(x), fn(x)
+        self.assertEqual(res, ref)
+        self.assertIs(type(res), type(ref))
 
     def test_tensor_subclass_attr_codegen_tos(self):
         # This repros a very subtle interaction between

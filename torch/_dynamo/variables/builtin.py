@@ -1902,12 +1902,20 @@ class BuiltinVariable(TypeVariable):
             return None
 
         from .torch_function import (
+            call_overridden_operator_dunder,
             can_dispatch_torch_function,
             dispatch_torch_function,
             TensorWithTFOverrideVariable,
         )
 
         fn = self.fn
+
+        # Operator syntax calls a tensor subclass's own dunder, whether or not
+        # __torch_function__ dispatch is enabled.
+        if not kwargs:
+            result = call_overridden_operator_dunder(tx, fn, args)
+            if result is not None:
+                return result
 
         def use_numpy_operator() -> bool:
             # NumpyNdarrayVariable inherits from TensorVariable for implementation

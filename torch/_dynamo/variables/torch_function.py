@@ -28,9 +28,9 @@ import collections
 import contextlib
 import inspect
 import operator
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from types import TracebackType
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeGuard
 
 import torch._C
 import torch.utils._pytree as pytree
@@ -42,7 +42,7 @@ from torch.overrides import (
 )
 from torch.utils._device import DeviceContext
 
-from .. import graph_break_hints
+from .. import graph_break_hints, trace_rules
 from ..exc import unimplemented
 from ..polyfills import NoEnterTorchFunctionMode
 from ..source import AttrSource, GlobalSource, TorchFunctionModeStackSource, TypeSource
@@ -60,7 +60,7 @@ from .ctx_manager import GenericContextWrappingVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .lazy import LazyVariableTracker
 from .lists import TupleVariable
-from .tensor import TensorVariable
+from .tensor import SymNodeVariable, TensorVariable, UnspecializedPythonVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -478,6 +478,130 @@ def _is_attr_overridden(
     return overridden
 
 
+# Binary operator -> (dunder on the left operand, reflected dunder on the right,
+# symbol for the TypeError when both operands decline).
+_BINARY_DUNDERS: dict[Callable[..., Any], tuple[str, str, str]] = {
+    operator.add: ("__add__", "__radd__", "+"),
+    operator.sub: ("__sub__", "__rsub__", "-"),
+    operator.mul: ("__mul__", "__rmul__", "*"),
+    operator.matmul: ("__matmul__", "__rmatmul__", "@"),
+    operator.truediv: ("__truediv__", "__rtruediv__", "/"),
+    operator.floordiv: ("__floordiv__", "__rfloordiv__", "//"),
+    operator.mod: ("__mod__", "__rmod__", "%"),
+    operator.pow: ("__pow__", "__rpow__", "** or pow()"),
+    operator.lshift: ("__lshift__", "__rlshift__", "<<"),
+    operator.rshift: ("__rshift__", "__rrshift__", ">>"),
+    operator.and_: ("__and__", "__rand__", "&"),
+    operator.or_: ("__or__", "__ror__", "|"),
+    operator.xor: ("__xor__", "__rxor__", "^"),
+}
+# Operators that only look up a method on their first operand.
+_FIRST_OPERAND_DUNDERS: dict[Callable[..., Any], str] = {
+    operator.neg: "__neg__",
+    operator.pos: "__pos__",
+    operator.abs: "__abs__",
+    operator.invert: "__invert__",
+    operator.getitem: "__getitem__",
+}
+_NUMBER_TYPES = (bool, int, float, complex)
+
+
+def _is_tensor_operand(var: VariableTracker) -> bool:
+    # Exact type: NumPy arrays and wrapped Python scalars also subclass
+    # TensorVariable.
+    return type(var) is TensorVariable or isinstance(var, TensorWithTFOverrideVariable)
+
+
+def _is_number_operand(var: VariableTracker) -> bool:
+    # A number's own operator methods return NotImplemented for a tensor.
+    if isinstance(var, (SymNodeVariable, UnspecializedPythonVariable)):
+        return True
+    return isinstance(var, ConstantVariable) and type(var.value) in _NUMBER_TYPES
+
+
+def _has_override(
+    var: VariableTracker, name: str
+) -> TypeGuard["TensorWithTFOverrideVariable"]:
+    if not isinstance(var, TensorWithTFOverrideVariable):
+        return False
+    attr = inspect.getattr_static(var.class_type, name, None)
+    return attr is not None and attr is not getattr(torch.Tensor, name, None)
+
+
+def _call_override(
+    tx: "InstructionTranslatorBase",
+    var: "TensorWithTFOverrideVariable",
+    name: str,
+    args: list[VariableTracker],
+) -> VariableTracker:
+    attr = inspect.getattr_static(var.class_type, name)
+    if attr in trace_rules.get_tensor_method():
+        # An alias of a torch.Tensor C method, e.g. __rsub__ = torch.Tensor.__sub__.
+        return VariableTracker.build(tx, attr).call_function(tx, [var, *args], {})
+    return var.tp_getattro_impl(tx, name).call_function(tx, args, {})
+
+
+def call_overridden_operator_dunder(
+    tx: "InstructionTranslatorBase",
+    fn: Callable[..., Any],
+    args: list[VariableTracker],
+) -> VariableTracker | None:
+    """Call a tensor subclass's own dunder for operator syntax.
+
+    ``x + y`` calls ``type(x).__add__`` (or ``type(y).__radd__``) before any
+    ``__torch_function__`` runs, so in eager an override on the subclass wins.
+    Returns None to keep the default tensor handling.
+    """
+    from .object_protocol import binop_type_error, is_nb_not_implemented
+
+    if not any(isinstance(a, TensorWithTFOverrideVariable) for a in args):
+        return None
+
+    if fn in _FIRST_OPERAND_DUNDERS:
+        dunder = _FIRST_OPERAND_DUNDERS[fn]
+        if not _has_override(args[0], dunder):
+            return None
+        return _call_override(tx, args[0], dunder, list(args[1:]))
+
+    if fn not in _BINARY_DUNDERS:
+        return None
+    lhs, rhs = args
+    dunder, rdunder, symbol = _BINARY_DUNDERS[fn]
+    lhs_is_tensor, rhs_is_tensor = _is_tensor_operand(lhs), _is_tensor_operand(rhs)
+    if not (lhs_is_tensor or _is_number_operand(lhs)):
+        return None
+    if not (rhs_is_tensor or _is_number_operand(rhs)):
+        return None
+
+    # binary_op1 order: a right operand whose type is a proper subclass of the
+    # left one's goes first if it overloads the reflected method, and operands
+    # of the same type never try it. Number operands are skipped.
+    same_type = rhs_first = False
+    if lhs_is_tensor and rhs_is_tensor:
+        l_type, r_type = lhs.python_type(), rhs.python_type()
+        same_type = r_type is l_type
+        if not same_type and issubclass(r_type, l_type):
+            l_method = inspect.getattr_static(l_type, rdunder, None)
+            rhs_first = inspect.getattr_static(r_type, rdunder, None) is not l_method
+
+    candidates = []
+    if rhs_first:
+        candidates.append((rhs, rdunder, lhs))
+    if lhs_is_tensor:
+        candidates.append((lhs, dunder, rhs))
+    if rhs_is_tensor and not rhs_first and not same_type:
+        candidates.append((rhs, rdunder, lhs))
+
+    for var, name, other in candidates:
+        if not _has_override(var, name):
+            # torch.Tensor's own method: the default tensor handling applies.
+            return None
+        result = _call_override(tx, var, name, [other])
+        if not is_nb_not_implemented(result):
+            return result
+    binop_type_error(tx, lhs, rhs, symbol)
+
+
 def call_torch_function(
     tx: "InstructionTranslatorBase",
     torch_function_var: VariableTracker,
@@ -747,6 +871,12 @@ class TensorWithTFOverrideVariable(TensorVariable):
                     )
 
         return super().tp_getattro_impl(tx, name)
+
+    def nb_absolute_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # abs(x) reaches here through pynumber_absolute, not the operator path.
+        if _has_override(self, "__abs__"):
+            return _call_override(tx, self, "__abs__", [])
+        return super().nb_absolute_impl(tx)
 
     def call_torch_function(
         self,
