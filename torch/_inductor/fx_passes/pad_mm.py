@@ -290,16 +290,23 @@ def pad_addmm(
     alpha: float = 1.0,
     mat1_pre_padded: bool = False,
     mat2_pre_padded: bool = False,
+    preserve_stride_order: bool = False,
 ) -> Tensor:
     # for paddings, dim order is reversed for some reasons
     # and for every dim, we need to specify left and right padding
     if not mat1_pre_padded:
         mat1 = pad_mat1(
-            mat1, m_padded_length=m_padded_length, k_padded_length=k_padded_length
+            mat1,
+            m_padded_length=m_padded_length,
+            k_padded_length=k_padded_length,
+            preserve_stride_order=preserve_stride_order,
         )
     if not mat2_pre_padded:
         mat2 = pad_mat2(
-            mat2, k_padded_length=k_padded_length, n_padded_length=n_padded_length
+            mat2,
+            k_padded_length=k_padded_length,
+            n_padded_length=n_padded_length,
+            preserve_stride_order=preserve_stride_order,
         )
 
     # the add broadcasts, so we only pad if the dimension != 1
@@ -697,6 +704,7 @@ def _should_pad(
                 m_padded_length=m_padded_length,
                 k_padded_length=k_padded_length,
                 is_bmm=is_bmm,
+                preserve_stride_order=True,
             )
 
             def write_pad():
@@ -714,6 +722,7 @@ def _should_pad(
                 k_padded_length=k_padded_length,
                 n_padded_length=n_padded_length,
                 is_bmm=is_bmm,
+                preserve_stride_order=True,
             )
 
             def write_pad():
@@ -738,6 +747,7 @@ def _should_pad(
                     n_padded_length,
                     mat1_pre_padded=mat1_pre_padded,
                     mat2_pre_padded=mat2_pre_padded,
+                    preserve_stride_order=True,
                 )
             )
         elif op is torch.ops.aten.mm:
@@ -750,6 +760,7 @@ def _should_pad(
                     n_padded_length,
                     mat1_pre_padded=mat1_pre_padded,
                     mat2_pre_padded=mat2_pre_padded,
+                    preserve_stride_order=True,
                 )
             )
         else:
@@ -762,6 +773,7 @@ def _should_pad(
                     n_padded_length,
                     mat1_pre_padded=mat1_pre_padded,
                     mat2_pre_padded=mat2_pre_padded,
+                    preserve_stride_order=True,
                 )
             )
 
@@ -927,27 +939,73 @@ def should_pad_mm(match: Match) -> bool:
     return should_pad(match, mat1, mat2, torch.ops.aten.mm)
 
 
+def _constant_pad_nd_preserving_stride_order(t: Tensor, pad_arg: list[int]) -> Tensor:
+    """
+    Pad ``t`` while keeping the relative order of its strides.
+
+    Eager ``aten.constant_pad_nd`` always materializes a contiguous output, but
+    inductor lowers it as a pointwise op and preserves the stride order of its
+    input. Padding a transposed operand therefore yields a contiguous tensor in
+    eager and a transposed one in the compiled graph. Benchmarking the eager
+    result would time a layout the compiled graph never produces, so the
+    benchmark pads through a permuted view instead.
+    """
+    ndim = t.dim()
+    # dims ordered from slowest to fastest varying, i.e. the permutation that
+    # makes `t` contiguous
+    perm = sorted(range(ndim), key=lambda d: -t.stride(d))
+    if perm == list(range(ndim)):
+        return aten.constant_pad_nd(t, pad_arg)
+
+    # constant_pad_nd takes (left, right) per dim, starting from the last dim
+    per_dim_pad = [tuple(pad_arg[2 * i : 2 * i + 2]) for i in reversed(range(ndim))]
+    permuted_pad_arg: list[int] = []
+    for d in reversed(perm):
+        permuted_pad_arg.extend(per_dim_pad[d])
+
+    padded = aten.constant_pad_nd(t.permute(perm), permuted_pad_arg)
+
+    inverse_perm = [0] * ndim
+    for i, d in enumerate(perm):
+        inverse_perm[d] = i
+    return padded.permute(inverse_perm)
+
+
 def pad_mat1(
-    mat1: Tensor, *, m_padded_length: int, k_padded_length: int, is_bmm: bool = False
+    mat1: Tensor,
+    *,
+    m_padded_length: int,
+    k_padded_length: int,
+    is_bmm: bool = False,
+    preserve_stride_order: bool = False,
 ) -> Tensor:
     if k_padded_length != 0 or m_padded_length != 0:
         # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
         pad_arg = [0, k_padded_length, 0, m_padded_length]
         if is_bmm:
             pad_arg.extend((0, 0))
+        if preserve_stride_order:
+            return _constant_pad_nd_preserving_stride_order(mat1, pad_arg)
         return aten.constant_pad_nd(mat1, pad_arg)
     else:
         return mat1
 
 
 def pad_mat2(
-    mat2: Tensor, *, k_padded_length: int, n_padded_length: int, is_bmm: bool = False
+    mat2: Tensor,
+    *,
+    k_padded_length: int,
+    n_padded_length: int,
+    is_bmm: bool = False,
+    preserve_stride_order: bool = False,
 ) -> Tensor:
     if k_padded_length != 0 or n_padded_length != 0:
         # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
         pad_arg = [0, n_padded_length, 0, k_padded_length]
         if is_bmm:
             pad_arg.extend((0, 0))
+        if preserve_stride_order:
+            return _constant_pad_nd_preserving_stride_order(mat2, pad_arg)
         return aten.constant_pad_nd(mat2, pad_arg)
     else:
         return mat2
@@ -961,14 +1019,21 @@ def pad_mm(
     n_padded_length: int,
     mat1_pre_padded: bool = False,
     mat2_pre_padded: bool = False,
+    preserve_stride_order: bool = False,
 ) -> Tensor:
     if not mat1_pre_padded:
         mat1 = pad_mat1(
-            mat1, m_padded_length=m_padded_length, k_padded_length=k_padded_length
+            mat1,
+            m_padded_length=m_padded_length,
+            k_padded_length=k_padded_length,
+            preserve_stride_order=preserve_stride_order,
         )
     if not mat2_pre_padded:
         mat2 = pad_mat2(
-            mat2, k_padded_length=k_padded_length, n_padded_length=n_padded_length
+            mat2,
+            k_padded_length=k_padded_length,
+            n_padded_length=n_padded_length,
+            preserve_stride_order=preserve_stride_order,
         )
     res = aten.mm(mat1, mat2)
     if m_padded_length != 0:
@@ -1008,6 +1073,7 @@ def pad_bmm(
     n_padded_length: int,
     mat1_pre_padded: bool = False,
     mat2_pre_padded: bool = False,
+    preserve_stride_order: bool = False,
 ) -> Tensor:
     if not mat1_pre_padded:
         mat1 = pad_mat1(
@@ -1015,6 +1081,7 @@ def pad_bmm(
             m_padded_length=m_padded_length,
             k_padded_length=k_padded_length,
             is_bmm=True,
+            preserve_stride_order=preserve_stride_order,
         )
     if not mat2_pre_padded:
         mat2 = pad_mat2(
@@ -1022,6 +1089,7 @@ def pad_bmm(
             k_padded_length=k_padded_length,
             n_padded_length=n_padded_length,
             is_bmm=True,
+            preserve_stride_order=preserve_stride_order,
         )
     res = aten.bmm(mat1, mat2)
     if m_padded_length != 0:
