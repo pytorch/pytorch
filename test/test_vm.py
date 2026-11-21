@@ -10472,6 +10472,80 @@ def graph_starts_twice(x, at=0):
     return torch.tanh(h * scale).sum()
 
 
+def graph_weak_told():
+    GRAPH_END_LOG.append("an entry is taken out")
+    GRAPH_END_STATE[0] += 1.0
+
+
+class GraphWeakAsks(weakref.WeakKeyDictionary):
+    # A weak dictionary of the standard library's, of a class of the
+    # user's: what its own callback asks of it runs this code.
+    @property
+    def _iterating(self):
+        graph_weak_told()
+        return self.__dict__["asked"]
+
+    @_iterating.setter
+    def _iterating(self, value):
+        self.__dict__["asked"] = value
+
+
+class GraphWeakTakesOut:
+    # Line for line the dictionary by identity that `torch.compile` notes
+    # modules in, with code of the user's where it takes an entry out.
+    def __init__(self):
+        self.values = {}
+        self.refs = {}
+
+    def __setitem__(self, key, value):
+        idx = id(key)
+        if idx not in self.refs:
+            self.refs[idx] = weakref.ref(key, lambda ref: self._remove_id(idx))
+        self.values[idx] = value
+
+    def _remove_id(self, idx):
+        graph_weak_told()
+        if idx in self.values:
+            del self.values[idx]
+        if idx in self.refs:
+            del self.refs[idx]
+
+
+class GraphWeakDict(dict):
+    def __delitem__(self, key):
+        graph_weak_told()
+        super().__delitem__(key)
+
+
+class GraphEndBytes(bytearray):
+    # Memory that a tensor is made around: its end runs this.
+    def __del__(self):
+        if GRAPH_END_LOG is not None:
+            GRAPH_END_LOG.append("the end of a buffer")
+            GRAPH_END_STATE[0] += 1.0
+
+
+class GraphEndTensor(torch.Tensor):
+    def __del__(self):
+        if GRAPH_END_LOG is not None:
+            GRAPH_END_LOG.append("the end of a tensor")
+            GRAPH_END_STATE[0] += 1.0
+
+
+def graph_reads_again(x, at=0):
+    # The same globals and the same attributes of modules are read many
+    # times over; `GRAPH_READS` is a module at first and an object with
+    # the same attributes later.
+    h = torch.nn.functional.relu(x) + GRAPH_READS.functional.relu(x)
+    h = torch.nn.functional.tanh(h) * GRAPH_READS.functional.tanh(h)
+    h = torch.nn.functional.relu(h) + GRAPH_READS.functional.relu(h)
+    return torch.nn.functional.tanh(h) * GRAPH_READS.scale
+
+
+GRAPH_READS = torch.nn
+torch.nn.scale = 2.0
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -11871,6 +11945,272 @@ class TestVmGraphResults(TestCase):
         self.assertGreaterEqual(graphs[0]["hits"], 30)
         self.assertEqual(handed, [7])
         GRAPH_BEHIND_LOG.clear()
+
+    def test_a_callback_that_is_not_a_weak_containers_own_is_turned_down(self, device):
+        # A weak reference with a callback is no reason against letting
+        # go of an object where the callback is a weak container's own,
+        # which takes the entry out and does nothing else. That is known
+        # by what the callback is (the very code of the container's
+        # class), by the exact class of the container and of the
+        # reference, and by the exact types of what the callback reaches
+        # of the container: not by names. A dictionary of the standard
+        # library and the one by identity of `torch._dynamo.utils` pass,
+        # and the path runs; a subclass whose attribute is a property, a
+        # subclass with another method to take the entry out, an object
+        # with such a method of its own, a class written line for line
+        # like the original, and the original with a dict of another
+        # class for its values all run code of the user's when the
+        # object ends: the instructions run, and it ends in its place.
+        from torch._dynamo.utils import ExactWeakKeyDictionary
+
+        def keep(gm, input_types):
+            return gm
+
+        class TakesOut(ExactWeakKeyDictionary):
+            def _remove_id(self, idx):
+                graph_weak_told()
+                super()._remove_id(idx)
+
+        def own_method(made):
+            # It takes the entry out as the class does (an entry that
+            # stayed would keep a later object at the same place from
+            # being noted), and runs code of the user's.
+            def remove(idx):
+                graph_weak_told()
+                ExactWeakKeyDictionary._remove_id(made, idx)
+
+            return remove
+
+        classes = {"standard": weakref.WeakKeyDictionary, "asks": GraphWeakAsks}
+        classes.update({"subclass": TakesOut, "alike": GraphWeakTakesOut})
+
+        def container(what):
+            made = classes.get(what, ExactWeakKeyDictionary)()
+            if what == "own method":
+                made._remove_id = own_method(made)
+            if what == "own values":
+                made.values = GraphWeakDict()
+            return made
+
+        def calls(run, what, graded, boxed):
+            GRAPH_END_BOX.item = None
+            del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+            GRAPH_END_STATE[0] = 0.5
+            noted, found = container(what), []
+            for at in range(12):
+                made = 0
+                if at in (7, 10):
+                    made = GraphEndWatched()
+                    noted[made] = at
+                if boxed:
+                    GRAPH_END_BOX.item = made
+                else:
+                    GRAPH_END_HELD.append(made)
+                del made
+                torch.manual_seed(at)
+                x = torch.randn(3, 4, device=device, requires_grad=graded)
+                out = run(x)
+                out = out[0] if isinstance(out, tuple) else out
+                if graded:
+                    out.backward()
+                entries = noted.data if what in ("standard", "asks") else noted.values
+                ended = (len(GRAPH_END_LOG), GRAPH_END_STATE[0])
+                found.append((out.item(), *ended, len(entries)))
+                del GRAPH_END_HELD[:]
+            GRAPH_END_BOX.item = None
+            return found
+
+        kinds = ("standard", "identity", "asks", "subclass", "own method", "alike")
+        for fn in (graph_end_variable, graph_end_attribute, graph_end_deleted):
+            boxed = fn is graph_end_attribute
+            for what in (*kinds, "own values"):
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{fn.__name__} {what} {behind} {graded}"
+                    got = calls(compiled, what, graded, boxed)
+                    expected = calls(fn, what, graded, boxed)
+                    self.assertEqual(got, expected, msg=msg)
+                    if behind and what in ("standard", "identity"):
+                        # Every call behind the first two is the path's,
+                        # those in which the object ends included.
+                        listed = torch.vm.regions(compiled)
+                        graphs = [g for g in listed if "ops" in g]
+                        ran = sum(g["hits"] for g in graphs if "within" not in g)
+                        self.assertGreaterEqual(ran, 10, msg=msg)
+        del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+        GRAPH_END_STATE[0] = 0.5
+
+    def test_what_owns_the_memory_of_a_tensor_ends_in_its_place(self, device):
+        # A tensor that requires no gradient can still keep an object
+        # alive that it does not show: what owns its memory (a numpy array
+        # over a buffer, the buffer of `torch.frombuffer`, the tensor a
+        # DLPack capsule was made of), or its `.grad`. And an object that
+        # shows nothing at all can (the capsule itself). A path lets go
+        # of such a tensor only where it stays alive: its memory must be
+        # torch's own allocation, its `.grad` is looked at like what it
+        # refers to, and an object of a class that shows nothing must be
+        # of one that is known to hold nothing.
+        import numpy
+
+        def keep(gm, input_types):
+            return gm
+
+        def plant(what):
+            if what in ("numpy", "array"):
+                buffer = GraphEndBytes(b"\0" * 16)
+                array = numpy.frombuffer(buffer, dtype=numpy.float32)
+                return array if what == "array" else torch.from_numpy(array)
+            if what == "buffer":
+                return torch.frombuffer(GraphEndBytes(b"\0" * 16), dtype=torch.float32)
+            if what in ("capsule", "dlpack"):
+                owned = torch.ones(2).as_subclass(GraphEndTensor)
+                if what == "capsule":
+                    return torch.utils.dlpack.to_dlpack(owned)
+                return torch.from_dlpack(owned)
+            loudly = torch.ones(2, requires_grad=True) * 2
+            loudly.register_hook(lambda grad, held=GraphEnds(): grad)
+            made = torch.ones(2)
+            made.grad = loudly
+            return made
+
+        def calls(run, what, kept, graded, boxed):
+            GRAPH_END_BOX.item = None
+            del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+            GRAPH_END_STATE[0] = 0.5
+            found = []
+            for at in range(12):
+                made = plant(what) if at in (7, 10) else torch.ones(2)
+                if boxed:
+                    GRAPH_END_BOX.item = made
+                else:
+                    GRAPH_END_HELD.append(made)
+                if not kept:
+                    del made
+                torch.manual_seed(at)
+                x = torch.randn(3, 4, device=device, requires_grad=graded)
+                out = run(x)
+                out = out[0] if isinstance(out, tuple) else out
+                if graded:
+                    out.backward()
+                found.append((out.item(), len(GRAPH_END_LOG), GRAPH_END_STATE[0]))
+                del GRAPH_END_HELD[:]
+                made = None
+            GRAPH_END_BOX.item = None
+            return found
+
+        def check(fn, what, kept, behind, graded):
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            msg = f"{fn.__name__} {what} kept {kept} {behind} {graded}"
+            boxed = fn is graph_end_attribute
+            got = calls(compiled, what, kept, graded, boxed)
+            expected = calls(fn, what, kept, graded, boxed)
+            self.assertEqual(got, expected, msg=msg)
+            if behind or graded:
+                # A tensor of torch's own memory is let go of by the path
+                # at every other call, and one that the caller keeps at
+                # every call.
+                listed = torch.vm.regions(compiled)
+                graphs = [g for g in listed if "ops" in g and "within" not in g]
+                ran = sum(g["hits"] for g in graphs)
+                self.assertGreaterEqual(ran, 7 if kept else 4, msg=msg)
+
+        for fn in (graph_end_attribute, graph_end_variable):
+            for what in ("numpy", "buffer", "capsule", "dlpack", "array", "grad"):
+                for kept in (False, True):
+                    for behind, graded in (((), False), ((keep,), False), ((), True)):
+                        check(fn, what, kept, behind, graded)
+        del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+        GRAPH_END_STATE[0] = 0.5
+
+    def test_a_module_that_torch_compile_noted_is_let_go_of_by_a_path(self, device):
+        # Once `torch.compile` has compiled a function in a process, every
+        # module that is made afterwards is noted in a weak dictionary of
+        # Dynamo's, whose entry a function of that dictionary takes out
+        # when the module ends: as the weak containers of `weakref` do,
+        # and no reason to turn a path down. The list that the slice of a
+        # `ModuleList` makes is such a module, held by the function alone.
+        # In a process of its own: the noting stays on for good.
+        script = f"""
+import json, weakref
+import torch
+import torch.vm
+
+P = torch.vm.passes
+LAYERS = torch.nn.ModuleList([torch.nn.Linear(4, 4) for _ in range(3)]).to({device!r})
+
+
+def drops(x, at=0):
+    # The list is in no variable: it ends when the loop has what it
+    # goes over, inside the graph that starts behind the slice.
+    h = x
+    for layer in LAYERS[:2]:
+        h = layer(h)
+    return torch.tanh(h) * 2.0
+
+
+def keep(gm, input_types):
+    return gm
+
+
+torch.compile(lambda x: x + 1, backend="eager")(torch.ones(2))
+made = LAYERS[:2]
+noted = [type(ref.__callback__).__name__ for ref in weakref.getweakrefs(made)]
+del made
+passes = (*torch.vm.DEFAULT_PASSES, P.Graphs(), keep)
+compiled = torch.vm(drops, passes=passes, fallback=False, demote=False)
+same = True
+for at in range(40):
+    torch.manual_seed(at)
+    x = torch.randn(3, 4, device={device!r})
+    same &= bool((compiled(x, at) == drops(x, at)).all())
+listed = [g for g in torch.vm.regions(compiled) if "ops" in g and "within" not in g]
+graphs = [(g["ops"], g["state"], g["hits"] >= 30) for g in listed]
+print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
+"""
+        command = [sys.executable, "-c", script]
+        ran = subprocess.run(command, capture_output=True, text=True, check=True)
+        found = __import__("json").loads(ran.stdout.strip().split("\n")[-1])
+        self.assertEqual(found["noted"], ["function"])
+        self.assertTrue(found["same"])
+        self.assertEqual(found["graphs"], [[4, "compiled", True]])
+
+    def test_a_read_in_front_of_a_graph_is_made_once(self, device):
+        # A global, and an attribute of a module, that a path reads more
+        # than once in front of what stands for its operations is read
+        # once per call: nothing changes between those reads. What is
+        # read is read at every call (a global that is bound anew between
+        # calls is followed), and where it is read of what is no module
+        # (an object with the same attributes), every read is made.
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(3, 4, device=device)
+        global GRAPH_READS
+        functional = torch.nn.functional
+        plain = types_module.SimpleNamespace(functional=functional, scale=2.0)
+        other = {"relu": functional.relu, "tanh": functional.sigmoid}
+        swapped = types_module.SimpleNamespace(scale=2.0)
+        swapped.functional = types_module.SimpleNamespace(**other)
+        fn = graph_reads_again
+        try:
+            for behind in ((), (keep,)):
+                passes = (*DEFAULT, P.Graphs(), *behind)
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                for read in (torch.nn, plain, swapped, torch.nn, plain):
+                    GRAPH_READS = read
+                    for at in range(8):
+                        self.assertEqual(compiled(x * at), fn(x * at), atol=0, rtol=0)
+                if behind:
+                    listed = torch.vm.regions(compiled)
+                    graphs = [g for g in listed if "ops" in g and "within" not in g]
+                    found = [(g["ops"], g["why"]) for g in graphs]
+                    expected = [(11, "the function returns")]
+                    self.assertEqual(found, expected, msg=str(graphs))
+                    self.assertGreaterEqual(graphs[0]["hits"], 30)
+        finally:
+            GRAPH_READS = torch.nn
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
