@@ -296,7 +296,13 @@ class FunctionalTensor(torch.Tensor):
         )
 
     def __repr__(self, *, tensor_contents: object | None = None) -> str:
-        return f"FunctionalTensor({repr(self.elem)})"
+        # Format the unwrapped inner value directly. Passing the raw functional
+        # elem to _tensor_str makes it call unpack_dual on the elem while a
+        # forward-AD dual level is active, which dispatches _fw_primal and can
+        # crash on the resulting functional view (gh-192639).
+        with torch.utils._mode_utils.no_dispatch():
+            inner = torch._from_functional_tensor(self.elem)
+        return f"FunctionalTensor({inner!r})"
 
     @staticmethod
     def to_functional(x: torch.Tensor) -> FunctionalTensor:
@@ -304,6 +310,18 @@ class FunctionalTensor(torch.Tensor):
 
         if torch._is_functional_tensor(x):
             raise AssertionError("x must not already be a functional tensor")
+
+        import torch.autograd.forward_ad as fwAD
+
+        # Dual tensors are wrapped component-wise and the dual structure is
+        # rebuilt on the wrappers, so the tangent stays reachable through
+        # unpack_dual inside the functionalized region (gh-192639).
+        primal, tangent = fwAD.unpack_dual(x)
+        if tangent is not None:
+            primal_functional = FunctionalTensor.to_functional(primal)
+            tangent_functional = FunctionalTensor.to_functional(tangent)
+            return fwAD.make_dual(primal_functional, tangent_functional)
+
         # The only autograd metadata we care about on the FunctionalTensor is:
         # - requires_grad (so autograd runs)
         # - is_leaf (so that mutations on graph inputs that are not leaves are allowed by the autograd engine)
@@ -326,8 +344,43 @@ class FunctionalTensor(torch.Tensor):
         return out
 
     def from_functional(self) -> torch.Tensor:
+        import torch.autograd.forward_ad as fwAD
+
+        # Mirror image of to_functional: unwrap dual components separately and
+        # rebuild the dual on the unwrapped tensors.
+        primal, tangent = fwAD.unpack_dual(self)
+        if tangent is not None:
+            if not isinstance(primal, FunctionalTensor) or not isinstance(
+                tangent, FunctionalTensor
+            ):
+                raise AssertionError("dual components must be FunctionalTensors")
+            primal_unwrapped = primal.from_functional()
+            tangent_unwrapped = tangent.from_functional()
+            with torch.utils._mode_utils.no_dispatch():
+                return torch._VF._make_dual(
+                    primal_unwrapped, tangent_unwrapped, level=fwAD._current_level
+                )
+
         torch._sync(self)
         return torch._from_functional_tensor(self.elem)
+
+    def unpack_dual(
+        self, level: int
+    ) -> tuple[FunctionalTensor, FunctionalTensor | None]:
+        # The primal goes through the dispatcher so the mode sees a real
+        # _fw_primal view; the tangent is read raw under no_dispatch because
+        # the dual structure lives on this wrapper itself (see to_functional).
+        primal = torch.ops.aten._fw_primal.default(self, level)
+        with torch.utils._mode_utils.no_dispatch():
+            tangent = torch._VF._unpack_dual(self, level=level)[1]
+        if tangent is None:
+            return primal, None
+        if isinstance(tangent, FunctionalTensor):
+            tangent = tangent.from_functional()
+        # Returned as a fresh functional tensor: mutations to it are not
+        # written back through the dual, matching the C++ Functionalize
+        # kernel for aten::_unpack_dual.
+        return primal, FunctionalTensor.to_functional(tangent)
 
     def is_base_tensor(self) -> bool:
         return torch._is_functional_tensor_base(self.elem)
@@ -819,8 +872,7 @@ def dispatch_functionalize(
                         "Non-FunctionalTensor torch.Tensor should not be a functional tensor"
                     )
             return t
-        torch._sync(t)
-        return torch._from_functional_tensor(t.elem)
+        return t.from_functional()
 
     def inner(*args: Any, **kwargs: Any) -> Any:
         disable_above = torch._C._ExcludeDispatchKeyGuard(
@@ -899,9 +951,13 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
     def unwrap_tensors(
         self, args: torch.Tensor | tuple[torch.Tensor, ...] | list[torch.Tensor]
     ) -> Any:
-        return torch.utils._pytree.tree_map_only(
-            FunctionalTensor, FunctionalTensor.from_functional, args
-        )
+        # Enter the mode (mirroring wrap_tensors): unwrapping a dual
+        # FunctionalTensor reconstructs it via _fw_primal, which must dispatch
+        # through the mode (gh-192639).
+        with self.mode:
+            return torch.utils._pytree.tree_map_only(
+                FunctionalTensor, FunctionalTensor.from_functional, args
+            )
 
     # pyrefly: ignore [implicit-any]
     def functionalize(self, inner_f: Callable) -> Callable:
