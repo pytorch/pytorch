@@ -1709,6 +1709,7 @@ def get_dynamo_stats():
                 - torch._dynamo.utils.counters["frames"]["ok"]
             ),
             "graph_breaks": sum(torch._dynamo.utils.counters["graph_break"].values()),
+            "recompiles": torch._dynamo.utils.counters["stats"]["recompiles"],
             # NB: The plus removes zero counts
             "unique_graph_breaks": len(+torch._dynamo.utils.counters["graph_break"]),
             "autograd_captures": torch._dynamo.utils.counters["compiled_autograd"][

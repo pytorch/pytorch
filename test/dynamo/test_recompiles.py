@@ -33,6 +33,40 @@ from torch.testing._internal.common_utils import (
 class RecompileTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @dc.patch(automatic_dynamic_shapes=False)
+    def test_recompile_counter(self):
+        torch._dynamo.reset()
+        counters = torch._dynamo.utils.counters
+        counters.clear()
+
+        def f(x):
+            return x.sin() + 1
+
+        compiled = torch.compile(f, backend="eager", dynamic=False, fullgraph=True)
+        for size, expected in ((2, 0), (3, 1), (4, 2), (2, 2)):
+            with self.subTest(size=size, expected=expected):
+                compiled(torch.ones(size))
+                self.assertEqual(counters["stats"]["recompiles"], expected)
+
+    @dc.patch(automatic_dynamic_shapes=False, recompile_limit=2)
+    def test_recompile_counter_includes_limit_hit(self):
+        torch._dynamo.reset()
+        counters = torch._dynamo.utils.counters
+        counters.clear()
+
+        def f(x):
+            return x.sin() + 1
+
+        compiled = torch.compile(f, backend="eager", dynamic=False)
+        compiled(torch.ones(2))
+        compiled(torch.ones(3))
+        self.assertEqual(counters["stats"]["recompiles"], 1)
+        with self.assertLogs("torch._dynamo", level="WARNING"):
+            compiled(torch.ones(4))
+        self.assertEqual(counters["stats"]["recompiles"], 2)
+        compiled(torch.ones(5))
+        self.assertEqual(counters["stats"]["recompiles"], 2)
+
     def test_automatic_dynamic_reduce_recompiles(self):
         # Test the counterfactual, lots of recompiles without this config
         def foo(x, y):
