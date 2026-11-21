@@ -12,7 +12,7 @@ namespace at::native::mkldnn {
 // With bias. Bias is disabled if it is empty.
 // `reorder_src` and `reorder_weight` indicate whether
 // src/dst and weight/bias should be checked and possibly reordered.
-// Set them to False if you are sure they don't need reordering.
+// Only <true, true> is instantiated.
 template <bool reorder_src = true, bool reorder_weight = true>
 void convolution_transpose_forward_compute_v3(
     const ideep::tensor& src,
@@ -35,7 +35,7 @@ void convolution_transpose_forward_compute_v3(
 // Without bias.
 // `reorder_src` and `reorder_weight` indicate whether
 // src/dst and weight/bias should be checked and possibly reordered.
-// Set them to False if you are sure they don't need reordering.
+// Only <true, true> is instantiated.
 template <bool reorder_src = true, bool reorder_weight = true>
 void convolution_transpose_forward_compute_v3(
     const ideep::tensor& src,
@@ -53,11 +53,13 @@ void convolution_transpose_forward_compute_v3(
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward);
 
 // Ported from ideep::convolution_transpose_forward::expected_weights_desc.
-/// @param is_channels_last Indicate whether weight is channels-last or not.
+/// @param is_channels_last Whether src/dst use a channels-last format. Weights
+///                   always use format_tag::any.
 /// @param transposed If true, return weight desc in [i, o, ...] or [g, i/g, o, ...]
 ///                   format, which is used by PyTorch/Aten. If false, return desc in
 ///                   [o, i, ...] or [g, o, i/g, ...] format used by oneDNN. By default
-///                   it is true for backward compatibility (e.g. Caffe2)
+///                   it is true, giving ATen's layout.
+/// Instantiated for <true, true>, <false, true> and <true, false>.
 template <bool is_channels_last = false, bool transposed = true>
 ideep::tensor::desc convolution_transpose_forward_expected_weights_desc(
     const dnnl::memory::dims& weights_dims, // [i, o, ...]
@@ -75,7 +77,7 @@ ideep::tensor::desc convolution_transpose_forward_expected_weights_desc(
 // Ported from ideep::convolution_transpose_backward_data::compute_v3.
 void convolution_transpose_backward_data_compute_v3(
     const ideep::tensor& diff_dst,
-    const ideep::tensor& weights, // dim: {i, o[, d], h, w}
+    const ideep::tensor& weights, // dim: {o, i[, d], h, w}
     const dnnl::memory::dims& diff_src_dims,
     ideep::tensor& diff_src,
     const dnnl::memory::dims& strides,
