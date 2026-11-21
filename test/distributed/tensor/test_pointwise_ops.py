@@ -23,6 +23,7 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -85,6 +86,8 @@ def deepcopy_convert_from_dtensor(val: Any) -> Any:
 
 
 class DistElementwiseOpsTest(DTensorOpTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _compare_pairwise_ops(
         self,
         *,
@@ -1426,6 +1429,7 @@ instantiate_parametrized_tests(DistElementwiseOpsTest)
 class TestPointwiseRuleValidation(TestCase):
     """Validate registered partial-placement rules via OpInfo samples."""
 
+    hw_classification = HardwareClassification.GENERIC
     world_size = 2
 
     def setUp(self):
