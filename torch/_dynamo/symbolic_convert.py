@@ -366,6 +366,7 @@ class SpeculationLog:
     # instead of tracing it. Set when we detect that such an intermediate
     # leaks as a graph output with requires_grad=True.
     graph_break_on_requires_grad_: bool = False
+    reconstruction_recovery: bool = False
 
     def restart(self) -> None:
         self.index = 0
@@ -373,6 +374,7 @@ class SpeculationLog:
     def clear(self) -> None:
         self.entries.clear()
         self.index = 0
+        self.reconstruction_recovery = False
 
     def next(
         self, filename: str, lineno: int, instruction_pointer: int, inst: Instruction
@@ -1161,6 +1163,11 @@ def break_graph_if_unsupported(
             prev_push = self.current_instruction_push
             self.current_instruction_push = push
             speculation = self.speculate()
+            if self.speculation_log.reconstruction_recovery:
+                self.reconstruction_checkpoints[id(speculation)] = (
+                    speculation,
+                    self.output.can_reconstruct_continuation(self),
+                )
             if speculation.failed(self):
                 # no need to restore current_instruction_push if speculation failed
                 if speculation.reason is None:
@@ -1217,6 +1224,11 @@ def break_graph_if_unsupported(
 
                 if self.maybe_has_backedge():
                     self.raise_loop_graph_break(self.f_code, excp)
+
+                if self.output.should_reject_reconstruction_checkpoint(
+                    self, speculation, excp
+                ):
+                    raise
 
                 self.log_graph_break(
                     self.code_options,
@@ -1569,6 +1581,7 @@ class InstructionTranslatorBase(
     inline_depth: int
     inconsistent_side_effects: bool
     current_speculation: SpeculationEntry | None
+    reconstruction_checkpoints: dict[int, tuple[SpeculationEntry, bool | None]]
     dispatch_table: list[Any]
     exn_vt_stack: ExceptionStack
     exec_recorder: ExecutionRecorder | None
@@ -1907,6 +1920,11 @@ class InstructionTranslatorBase(
             and self.is_non_empty_graph()
         ):
             self.current_speculation = self.speculate()
+            if self.speculation_log.reconstruction_recovery:
+                self.reconstruction_checkpoints[id(self.current_speculation)] = (
+                    self.current_speculation,
+                    self.output.can_reconstruct_continuation(self),
+                )
             if self.current_speculation.failed(self):
                 self.step_graph_break(inst)
                 return False
@@ -1988,6 +2006,10 @@ class InstructionTranslatorBase(
             # Nested fallback would retain a caller resume on each loop iteration.
             if self.parent is not None and self.parent.maybe_has_backedge():
                 self.raise_loop_graph_break(self.f_code, e)
+            if self.output.should_reject_reconstruction_checkpoint(
+                self, self.current_speculation, e
+            ):
+                raise
             reason = (
                 "Encountered graph break that we cannot resume from. "
                 "Compiling up to the previous resumable state, "
@@ -5508,6 +5530,7 @@ class InstructionTranslatorBase(
         self.is_tracing_resume_prologue = False
 
         self.current_speculation = None
+        self.reconstruction_checkpoints = {}
 
         self.strict_checks_fn = None
 
