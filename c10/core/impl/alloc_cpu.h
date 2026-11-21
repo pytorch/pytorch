@@ -10,6 +10,11 @@ namespace c10 {
 C10_API void* alloc_cpu(size_t nbytes);
 C10_API void free_cpu(void* data);
 
+// Request that the built-in allocator release unused CPU memory. Returns true
+// when this build supports an explicit release operation and the request was
+// issued; it does not report whether any memory was actually released.
+C10_API bool release_unused_cpu_memory();
+
 #if defined(__linux__) && !defined(__ANDROID__)
 C10_API size_t c10_compute_alignment(size_t nbytes);
 #endif
