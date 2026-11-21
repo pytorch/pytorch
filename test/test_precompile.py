@@ -4819,6 +4819,15 @@ def step(model, x, *, scale=1.0):
     return y.sum(dim=0)
 
 
+@torch.compiler.assume_constant_result
+def model_type():
+    return Model
+
+
+def reads_constant_mro(model, x):
+    return x + len(model_type().__mro__)
+
+
 def single(model, x):
     return model(x).sum(dim=0)
 
@@ -5053,6 +5062,13 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("served", out.stdout)
         return out.stdout
+
+    def test_driver_restores_constant_result_global(self):
+        fn = self.mod.reads_constant_mro
+        with self._capture(fn, backend="eager") as cap:
+            expected = fn(self.model, self.x2)
+            self.assertEqual(cap(self.model, self.x2), expected)
+        self._serve_in_fresh_process([((self.x2,), {}, expected)])
 
     def test_capture_takes_pathlike_paths(self):
         import pathlib

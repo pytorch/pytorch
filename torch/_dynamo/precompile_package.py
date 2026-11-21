@@ -334,9 +334,8 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     nested nor local and whose reduction (its ``copyreg.dispatch_table``
     entry, else ``__reduce_ex__``) names that global, such as
     ``typing.List``. A ``<locals>`` class, a module missing from
-    ``sys.modules``, a ``functools.wraps`` wrapper, a NamedTuple class nested
-    in a class (the guard-state pickler rebuilds it as a fresh class) and a
-    singleton stored as a class attribute are still dropped, and so is a class
+    ``sys.modules``, a ``functools.wraps`` wrapper and a singleton stored
+    as a class attribute are still dropped, and so is a class
     whose metaclass is nested or local. An object defined in
     ``__main__`` is kept like any other and resolves against the loading
     process's ``__main__``: a serving script that does not define it fails the
@@ -1035,6 +1034,8 @@ def _reads_a_builtin(source: Source, value: object) -> bool:
     ACT2FN-style table -- is a slot like any other, so this deliberately keys
     on where the read comes FROM rather than on who owns the value.
     """
+    from .variables.object_protocol import type_is_immutable
+
     return (
         isinstance(source, DictGetItemSource)
         and isinstance(source.base, GlobalSource)
@@ -1044,10 +1045,7 @@ def _reads_a_builtin(source: Source, value: object) -> bool:
             # Py_TPFLAGS_IMMUTABLETYPE: a static type CPython built, not a
             # class statement or type() call, whose __module__ is writable. Read
             # through type's descriptor, past any metaclass shadowing __flags__.
-            or (
-                isinstance(value, type)
-                and bool(vars(type)["__flags__"].__get__(value) & (1 << 8))
-            )
+            or (isinstance(value, type) and type_is_immutable(value))
         )
         and _owning_module(value) == "builtins"
         and getattr(value, "__name__", None) == source.index
@@ -2232,16 +2230,27 @@ class PrecompileSession(Generic[_P, _R]):
                 f"refuses this whatever require_complete says."
             )
         if require_no_risky_drops and summary.risky_dropped_guards:
+            mro_advice = (
+                "Keep mutable MRO bases and classes returned by assume_constant_result "
+                "importable under stable qualified names, with module-level metaclasses."
+                if any(
+                    ".__mro__[" in name or name.endswith(".__mro__")
+                    for _, name in summary.risky_dropped_guards
+                )
+                else ""
+            )
             raise PackageError(
-                f"Precompilation dropped guard(s) that can affect dispatch on "
-                f"{[n for _, n in summary.risky_dropped_guards]}. Each of those names "
-                f"a slot whose value differed between captured variants, a "
-                f"configuration-dependent identity slot, or a guard discarded by a "
-                f"custom filter. Nothing checks it at load time, so a different value "
-                f"can silently select the wrong graph instead of recompiling. Make the "
-                f"value reachable through a serializable guard, pin both machines to "
-                f"the same value, or pass require_no_risky_drops=False to accept the "
-                f"risk explicitly."
+                (
+                    f"Precompilation dropped guard(s) that can affect dispatch on "
+                    f"{[n for _, n in summary.risky_dropped_guards]}. Each of those names "
+                    f"a slot whose value differed between captured variants, a "
+                    f"configuration-dependent identity slot, a mutable MRO base, or a guard discarded by a "
+                    f"custom filter. Nothing checks it at load time, so a different value "
+                    f"can silently select the wrong graph instead of recompiling. Make the "
+                    f"value reachable through a serializable guard, pin both machines to "
+                    f"the same value, or pass require_no_risky_drops=False to accept the "
+                    f"risk explicitly. {mro_advice}"
+                ).rstrip()
             )
         if require_complete:
             if summary.capture_errors:

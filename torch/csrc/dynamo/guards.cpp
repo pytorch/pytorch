@@ -2196,10 +2196,12 @@ struct OrderedDictObjectPrefix {
 };
 
 static std::optional<std::vector<py::object>> ordered_dict_keys(
-    py::handle value) {
+    py::handle value,
+    bool empty_only) {
   TORCH_CHECK_TYPE(PyODict_Check(value.ptr()), "expected an OrderedDict");
   std::optional<std::vector<py::object>> result;
-  const auto size = static_cast<size_t>(PyDict_Size(value.ptr()));
+  const auto size =
+      empty_only ? 0 : static_cast<size_t>(PyDict_Size(value.ptr()));
   std::vector<py::object> keys;
   // Allocate outside the critical section: an exception must not bypass its
   // end.
@@ -2221,7 +2223,8 @@ static std::optional<std::vector<py::object>> ordered_dict_keys(
 
 #else
 static std::optional<std::vector<py::object>> ordered_dict_keys(
-    py::handle value) {
+    py::handle value,
+    bool) {
   TORCH_CHECK(false, "Python 3.16+ OrderedDict snapshots are not supported");
 }
 #endif
@@ -7429,6 +7432,9 @@ class TypeDictGuardAccessor : public GuardAccessor {
   // reference, so we must decref after use.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
+    if (!PyType_Check(obj)) {
+      return false;
+    }
 #if PY_VERSION_HEX >= 0x030C0000
     PyObject* x = PyType_GetDict((PyTypeObject*)obj); // new ref
     if (x == nullptr) {
@@ -7448,6 +7454,9 @@ class TypeDictGuardAccessor : public GuardAccessor {
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
+    if (!PyType_Check(obj)) {
+      return GuardDebugInfo(false, "expected a type on " + repr(), 0);
+    }
 #if PY_VERSION_HEX >= 0x030C0000
     PyObject* x = PyType_GetDict((PyTypeObject*)obj); // new ref
     if (x == nullptr) {
@@ -7509,13 +7518,22 @@ class TypeMROGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
+    if (!PyType_Check(obj)) {
+      return false;
+    }
     PyObject* x = ((PyTypeObject*)obj)->tp_mro; // borrowed ref
-    return _guard_manager->check_nopybind(x);
+    return x != nullptr && _guard_manager->check_nopybind(x);
   }
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
+    if (!PyType_Check(obj)) {
+      return GuardDebugInfo(false, "expected a type on " + repr(), 0);
+    }
     PyObject* x = ((PyTypeObject*)obj)->tp_mro; // borrowed ref
+    if (x == nullptr) {
+      return GuardDebugInfo(false, "null type MRO on " + repr(), 0);
+    }
     return _guard_manager->check_verbose_nopybind(x);
   }
 
@@ -8576,7 +8594,12 @@ PyObject* torch_c_dynamo_guards_init() {
            py::list,
            py::object>())
       .def("__call__", &ORDERED_DICT_ORDER_MATCH::check);
-  py_m.def("ordered_dict_keys", ordered_dict_keys);
+  py_m.def(
+      "ordered_dict_keys",
+      ordered_dict_keys,
+      py::arg("value"),
+      py::kw_only(),
+      py::arg("empty_only") = false);
   py::class_<TYPE_MATCH, LeafGuard, std::shared_ptr<TYPE_MATCH>>(
       py_m, "TYPE_MATCH")
       .def(py::init<RootGuardManager*, py::object, py::list, py::object>())

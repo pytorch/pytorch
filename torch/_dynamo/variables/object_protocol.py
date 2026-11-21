@@ -46,8 +46,10 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    ConstantSource,
     DictGetItemSource,
     GetItemSource,
+    GlobalSource,
     is_constant_source,
     is_from_skip_guard_source,
     Source,
@@ -2288,6 +2290,26 @@ def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
     return GetItemSource(TypeMROSource(klass_source), idx)
 
 
+def guardable_mro_source(source: Source) -> Source:
+    # A ConstantSource suppresses the builder's class identity guard.
+    if is_constant_source(source):
+        source = source.clone(
+            lambda s: GlobalSource(s.source_name)
+            if isinstance(s, ConstantSource)
+            else s
+        )
+        # A class reached through an attribute of the result can be replaced by a non-type.
+        install_guard(source.make_guard(GuardBuilder.CLASS_MATCH))
+    return source
+
+
+def _can_guard_mro(tx: "InstructionTranslatorBase", source: Source) -> bool:
+    return (
+        not tx.output.tracing_context.guards_context.skip_install
+        and not is_from_skip_guard_source(source)
+    )
+
+
 def guard_mro_absent(
     tx: "InstructionTranslatorBase",
     klass: type,
@@ -2296,8 +2318,7 @@ def guard_mro_absent(
     stop: int,
 ) -> None:
     """Guard that *name* stays out of the ``__dict__`` of ``klass.__mro__[:stop]``."""
-    guards_context = tx.output.tracing_context.guards_context
-    if guards_context.skip_install or is_from_skip_guard_source(klass_source):
+    if not _can_guard_mro(tx, klass_source):
         return
     for idx in range(stop):
         absent_key = (id(klass), idx, name)
@@ -2327,22 +2348,40 @@ def mro_attr_source(
     Guards absence in every skipped class, including a complete MRO miss.
     Returns None on a complete miss; callers decide whether that is an error.
     """
+    mro = get_type_mro_no_user_code(klass)
+    klass_source = guardable_mro_source(klass_source)
+    can_guard = _can_guard_mro(tx, klass_source)
+    if (
+        can_guard
+        and not type_is_immutable(klass)
+        and id(klass) not in tx.output.guarded_mro_type_ids
+    ):
+        # TYPE_MATCH pins the class, not its bases. Cached owner sources require both.
+        mro_source = TypeMROSource(klass_source)
+        install_guard(mro_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+        # The builtin metaclass always puts the already guarded class first.
+        first = 1 if type(klass) is type else 0
+        # A custom ancestor MRO can replace even an object tail at constant length.
+        for index in range(first, len(mro)):
+            install_guard(
+                GetItemSource(mro_source, index).make_guard(GuardBuilder.CLASS_MATCH)
+            )
+        tx.output.guarded_mro_type_ids.add(id(klass))
     for idx, (base, namespace) in enumerate(iter_mro_static_dicts(klass)):
-        if not is_constant_source(klass_source):
-            direct = not idx and base is klass
-            attr = None
-            if has_custom_metaclass_accessor(base, "__dict__"):
-                attr = "__dict__"
-            elif not direct and has_custom_metaclass_accessor(klass, "__mro__"):
-                attr = "__mro__"
-            if attr is not None:
-                unimplemented(
-                    gb_type="Custom metaclass metadata access",
-                    context=f"metadata={attr}, name={name}",
-                    explanation="Dynamo cannot safely construct a class metadata source "
-                    "through custom metaclass accessors.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
+        direct = not idx and base is klass
+        attr = None
+        if has_custom_metaclass_accessor(base, "__dict__"):
+            attr = "__dict__"
+        elif not direct and has_custom_metaclass_accessor(klass, "__mro__"):
+            attr = "__mro__"
+        if attr is not None:
+            unimplemented(
+                gb_type="Custom metaclass metadata access",
+                context=f"metadata={attr}, name={name}",
+                explanation="Dynamo cannot safely construct a class metadata source "
+                "through custom metaclass accessors.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         if name not in namespace:
             continue
 
@@ -2356,19 +2395,18 @@ def mro_attr_source(
         # the descriptor: a descriptor shared by unrelated classes needs a
         # source through each one.
         cache_key = (id(base), name)
-        cached = tx.output.mro_source_cache.get(cache_key)
+        cached = tx.output.mro_source_cache.get(cache_key) if can_guard else None
         if cached is not None:
             return cached
 
         source = DictGetItemSource(
             TypeDictSource(_mro_entry_source(klass, klass_source, idx)), name
         )
-        tx.output.mro_source_cache[cache_key] = source
+        if can_guard:
+            tx.output.mro_source_cache[cache_key] = source
         return source
 
-    guard_mro_absent(
-        tx, klass, klass_source, name, len(get_type_mro_no_user_code(klass))
-    )
+    guard_mro_absent(tx, klass, klass_source, name, len(mro))
     return None
 
 
@@ -2858,6 +2896,23 @@ def object_generic_setattr_str(
         cls_source = getattr(obj, "cls_source", None) or (
             TypeSource(obj.source) if obj.source else None
         )
+        if (
+            cls_source is not None
+            and is_constant_source(cls_source)
+            and isinstance(obj, variables.UserDefinedObjectVariable)
+            and type_implements_tp_descr_set(type(attr))
+        ):
+            unimplemented(
+                gb_type="Descriptor mutation on a constant-source object",
+                context=f"name={name}, class_source={cls_source.name}",
+                explanation="Dynamo does not track descriptor mutations on an object "
+                "returned by a constant-result function.",
+                hints=[
+                    "Pass the object as an input instead of returning it from a function "
+                    "marked with `torch._dynamo.assume_constant_result`.",
+                    "Move the descriptor mutation outside the compiled region.",
+                ],
+            )
         descr_source = (
             mro_attr_source(tx, py_type, cls_source, name) if cls_source else None
         )

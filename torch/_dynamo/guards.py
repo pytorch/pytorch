@@ -3604,15 +3604,18 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: _sequence_length(value),
         eval_fn=lambda value, metadata: _sequence_length(value) == metadata,
     )
-    def SEQUENCE_LENGTH(self, guard: Guard) -> None:
+    def SEQUENCE_LENGTH(self, guard: Guard, *, length: int | None = None) -> None:
         # This guard is used to check length of PySequence objects like list,
         # tuple, collections.deque etc
         ref = self.arg_ref(guard)
         value = self.get(guard)
-        length = _sequence_length(value)
+        if length is None:
+            length = _sequence_length(value)
 
-        if not issubclass(type(value), dict):
-            # C++ DICT_LENGTH checks for type
+        if not issubclass(type(value), dict) and not istype(
+            guard.originating_source, TypeMROSource
+        ):
+            # DICT_LENGTH checks its type; TypeMROSource reads the always-tuple tp_mro.
             self.TYPE_MATCH(guard)
 
         code = []
@@ -5544,6 +5547,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             return obj._torch_unpickler, (obj._torch_handler_name,)
 
         elif _is_nested_named_tuple_type(obj):
+            if id(obj) in self.guard_tree_values and _resolves_by_reference(obj):
+                return NotImplemented
             return type(self)._unpickle_named_tuple_type, (obj.__name__, obj._fields)
 
         elif isinstance(obj, (torch.SymInt, torch.SymFloat, torch.SymBool)):
@@ -5564,9 +5569,10 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(
             obj, (types.MethodDescriptorType, types.ClassMethodDescriptorType)
         ):
+            from .variables.object_protocol import type_is_immutable
+
             owner = obj.__objclass__
-            flags = type.__dict__["__flags__"].__get__(owner, type(owner))
-            if not flags & (1 << 8):  # Py_TPFLAGS_IMMUTABLETYPE
+            if not type_is_immutable(owner):
                 raise torch._dynamo.exc.PackageError(
                     f"Cannot serialize {type(obj).__name__} with a mutable owner"
                 )
@@ -5844,8 +5850,7 @@ def _resolves_by_reference(value: object) -> bool:
             and getattr(owner, value.name, None) is value
         )
     if _is_nested_named_tuple_type(value):
-        # GuardsStatePickler.reducer_override rebuilds it as a fresh class.
-        return False
+        return type(value) is type and FunctionPicklerBase._fqn_resolves(value)
     if isinstance(value, type) and type(value).__qualname__ != type(value).__name__:
         # GuardsStatePickler.reducer_override refuses a nested or local metaclass.
         return False
@@ -6397,8 +6402,48 @@ class CheckFunctionManager:
                 used_local_vars.add(name)
 
         output_graph_guards_state = output_graph.dump_guards_state()
-        # Only serialize the global variables that are actually used in guards.
+
+        def tuple_example(value: tuple[Any, ...]) -> tuple[Any, ...]:
+            # Keep the shape and the guarded paths without pickling unread members.
+            if id(value) in builder.value_guarded_containers:
+                return value
+            items = []
+            for item in value:
+                if id(item) not in builder.guard_tree_values:
+                    item = None
+                elif type(item) is tuple:
+                    item = tuple_example(item)
+                items.append(item)
+            return tuple(items)
+
+        mro_guard_values: dict[Source, object] = {}
         for guard in sorted_guards:
+            source = guard.originating_source
+            if (
+                guard.create_fn is GuardBuilder.CLASS_MATCH
+                and isinstance(source, GetItemSource)
+                and isinstance(source.base, TypeMROSource)
+            ):
+                mro_guard_values[source] = builder.get(guard)
+            elif isinstance(source, DictGetItemSource) and isinstance(
+                source.base, TypeDictSource
+            ):
+                # A direct owner has no intervening TypeMROSource. The class is
+                # loaded by reference, so its dictionary can have changed at load.
+                value = builder.get(guard)
+                if type(value) is tuple and guard.create_fn in (
+                    GuardBuilder.SEQUENCE_LENGTH,
+                    GuardBuilder.CONSTANT_MATCH,
+                    GuardBuilder.EQUALS_MATCH,
+                ):
+                    mro_guard_values[source] = tuple_example(value)
+                elif (
+                    guard.create_fn is GuardBuilder.CONSTANT_MATCH
+                    and FunctionPicklerBase._is_literal(value)
+                    or guard.create_fn is GuardBuilder.ID_MATCH
+                    and isinstance(value, enum.Enum)
+                ):
+                    mro_guard_values[source] = value
             if isinstance(guard.originating_source, ShapeEnvSource):
                 if not self.shape_code_parts:
                     raise AssertionError(
@@ -6426,7 +6471,11 @@ class CheckFunctionManager:
 
             return x
 
-        def portable_create_fn(x: Callable[..., None]) -> Callable[..., None]:
+        def portable_create_fn(guard: Guard) -> Callable[..., None]:
+            x: Callable[..., None] = guard.create_fn
+            source = guard.originating_source
+            if x is GuardBuilder.SEQUENCE_LENGTH and isinstance(source, TypeMROSource):
+                return functools.partial(x, length=len(builder.get(guard)))
             if x is GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS:
                 fingerprint = builder.saved_tensors_hooks_fingerprint
                 if fingerprint is _LIVE_SAVED_TENSORS_HOOKS:
@@ -6436,6 +6485,7 @@ class CheckFunctionManager:
                 return functools.partial(x, hooks_fingerprint=fingerprint)
             return normalize_create_fn(x)
 
+        # Only serialize the global variables that are actually used in guards.
         global_scope_state = {
             k: v
             for k, v in output_graph_guards_state.global_scope.items()
@@ -6457,13 +6507,18 @@ class CheckFunctionManager:
                 if k in used_local_vars or k in self.additional_used_local_vars
             },
             global_scope=global_scope_state,
+            mro_guard_values=mro_guard_values,
+            constant_result_names=(
+                output_graph_guards_state.constant_result_names
+                & global_scope_state.keys()
+            ),
             _guards=torch._guards.GuardsSet(
                 OrderedSet(
                     dataclasses.replace(
                         guard,
                         obj_weakref=None,
                         guarded_class_weakref=None,
-                        create_fn=portable_create_fn(guard.create_fn),
+                        create_fn=portable_create_fn(guard),
                     )
                     for guard in sorted_guards
                 )
@@ -6526,6 +6581,11 @@ class CheckFunctionManager:
             runtime_global_scope=self.runtime_global_scope,
             guard_filter_fn=guard_filter_fn,
         )
+
+        # Descendant sources must also rebuild their guards against the capture-time
+        # example. Their runtime accessors still read the live class and its attributes.
+        if output_graph.mro_guard_values:
+            builder.src_get_value_cache.update(output_graph.mro_guard_values)
 
         # Break retain cycle. See test_release_scope_memory
         def cleanup_builder(weak_b: weakref.ref[GuardBuilder]) -> None:
