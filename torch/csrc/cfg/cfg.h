@@ -97,7 +97,64 @@ struct TcfgTensorInfo {
 
 #define TCFG_NO_VERSION UINT64_MAX
 
-#define TCFG_API_VERSION 15
+#define TCFG_API_VERSION 17
+
+// A node of the autograd graph, as the engine reads it when it takes the
+// backward of a graph down (node_info).
+struct TcfgNodeInfo {
+  // Valid until the next node_info of the thread.
+  const char* name;
+  uint64_t sequence_nr;
+  // How many gradients it is handed, and how many edges what it gives goes
+  // along.
+  uint32_t n_inputs;
+  uint32_t n_edges;
+  uint32_t flags;
+};
+
+enum : uint32_t {
+  // Written in Python: the engine does not call it.
+  TCFG_NODE_PYTHON = 1,
+  // Accumulates into the .grad of a leaf.
+  TCFG_NODE_LEAF = 2,
+};
+
+// How node_call, op_call and program_run run kernels. Without a flag
+// op_call and program_run run them as the thread is, and node_call with
+// gradients disabled, as the autograd engine calls a node.
+enum : uint32_t {
+  // As the autograd kernel of an operator runs what is below it: with the
+  // autograd keys excluded, so that nothing is recorded on the tape. The
+  // kernel that counts a write or makes a view runs for an operator that
+  // has one; what the kernel of any other operator calls in turn counts no
+  // write and makes no view. The grad mode is left as it is.
+  TCFG_RUN_BELOW_AUTOGRAD = 1,
+  // With gradients enabled: eager can differentiate what ran.
+  TCFG_RUN_ON_TAPE = 2,
+};
+
+// What graph_node registers. The node of a graph calls it, with the GIL
+// held, when the autograd engine hands it gradients: grads has one entry per
+// root (borrowed; null where none came), outs room for one new reference per
+// contribution (left null where there is none), and needed says per
+// contribution whether the autograd engine asks for it: it does not where
+// the gradients of some tensors only are asked for and the contribution
+// goes to none of them. flags is TCFG_RUN_ON_TAPE when the backward is to
+// be differentiated again (create_graph). Returns 0, or -1 with a Python
+// error set, which the node throws.
+typedef int32_t (*TcfgBackward)(
+    void* state,
+    PyObject* const* grads,
+    uint32_t n_grads,
+    PyObject** outs,
+    uint32_t n_outs,
+    const uint8_t* needed,
+    uint32_t flags);
+// Called with the GIL held when the autograd engine lets go of what a
+// backward kept (dropped is 0: a backward that did not retain the graph has
+// run; the node then raises eager's error by itself), and when the node
+// dies (1).
+typedef void (*TcfgRelease)(void* state, int32_t dropped);
 
 // What frame_hook registers. It is offered the frame the interpreter made
 // for a call of func, with the arguments bound and nothing run. It returns 0
@@ -263,6 +320,99 @@ struct TcfgApi {
   // compiled for tensors without one would drop. obj may be an unboxed
   // tensor.
   int32_t (*tensor_forward_grad)(PyObject* obj);
+
+  // Version 16: the backward of a graph.
+  //
+  // tape_begin starts taking down the kernels the current thread runs: of
+  // every call of the dispatcher the first kernel below the autograd keys,
+  // with what it took and what it gave. What a kernel calls in turn is not
+  // taken down. Unlike capture_begin it keeps the tensors of every kernel
+  // alive until tape_end. tape_end returns a new reference to a list of
+  // (operator, name, arguments, result, written, random, view): the
+  // operator as op_find gives it, the arguments in the order of the schema,
+  // the result (a tensor, a tuple, or None), the indices of the arguments
+  // the kernel writes to, whether it draws random numbers, and whether
+  // what it gives is a view of its first argument. Null with an error set
+  // when a kernel threw.
+  void (*tape_begin)();
+  PyObject* (*tape_end)();
+
+  // The node the gradient of a tensor goes to (its grad_fn, or what
+  // accumulates into its .grad), as a new reference to the Python object of
+  // the node, and which of the node's inputs the tensor is. Null without an
+  // error for a tensor that needs no gradient.
+  PyObject* (*node_of)(PyObject* tensor, uint32_t* input_nr);
+  // Returns 0 for what is no node.
+  int32_t (*node_info)(PyObject* node, TcfgNodeInfo* out);
+  // Where the edge of a node leads: a new reference, and which input of
+  // that node. Null without an error for an edge that leads nowhere.
+  PyObject* (*node_next)(PyObject* node, uint32_t edge, uint32_t* input_nr);
+  // Calls a node as the autograd engine calls it: grads is a tuple with one
+  // entry per input (None where no gradient came), and what the node gives
+  // is brought to the sizes, dtype and device of where each edge leads
+  // (validate_outputs). New reference to a tuple with one entry per edge,
+  // None where the node gave nothing. The node runs on the stream its
+  // forward ran on, as in the autograd engine. Where a backward for some
+  // inputs only is running on the calling thread, the node is called on a
+  // thread of the engine's own with the thread-local state of the caller,
+  // and the nodes it makes are numbered on with the caller's: a node asks
+  // the backward that runs on its thread which gradients are wanted. A
+  // tape that is being taken down on the calling thread sees the kernels
+  // either way.
+  PyObject* (*node_call)(PyObject* node, PyObject* grads, uint32_t flags);
+
+  // An operator by its name and overload name: a new reference to what
+  // tape_end names operators with. Null with an error for none.
+  PyObject* (*op_find)(const char* name, const char* overload);
+  // Calls an operator with the arguments of its schema, in order.
+  PyObject* (*op_call)(PyObject* op, PyObject* args, uint32_t flags);
+
+  // A straight-line program of operators over numbered values. ops is a
+  // list as the engine's joint graph describes one: per operation
+  // (operator, arguments, keyword arguments, [(place, value)], single),
+  // an argument being ("v", value), ("c", constant), ("l", [arguments])
+  // or ("t", [arguments]). Null with the reason written when an operation
+  // cannot be made one.
+  void* (*program_new)(
+      PyObject* ops,
+      uint32_t n_values,
+      char* reason,
+      size_t reason_len);
+  void (*program_free)(void* program);
+  // Runs a program: inputs[i] is value input_values[i]; returns a new
+  // reference to a tuple of the values output_values name.
+  PyObject* (*program_run)(
+      void* program,
+      PyObject* const* inputs,
+      const uint32_t* input_values,
+      uint32_t n_inputs,
+      const uint32_t* output_values,
+      uint32_t n_outputs,
+      uint32_t flags);
+
+  // Gives the tensors of roots (a tuple of tensors that were made below the
+  // autograd keys) one node, "GraphBackward", with one edge per entry of
+  // targets (a tuple of tensors; the same tensor once per contribution it
+  // gets), in that order. The node calls backward with state when it is
+  // handed gradients. Returns 0, or -1 with an error set.
+  int32_t (*graph_node)(
+      PyObject* roots,
+      PyObject* targets,
+      void* state,
+      TcfgBackward backward,
+      TcfgRelease release);
+
+  // Of the frames frame_count counts, those that a kernel enters by itself:
+  // the router of an operator whose kernel is chosen in Python
+  // (eager_router of torch/_native/registry.py) with what it calls, and
+  // what shows a warning that a kernel gave (the warnings module). Such a
+  // frame is not Python code that the caller of the operator enters, and
+  // is not offered to frame_hook. Null where frame_push is.
+  uint64_t (*frame_count_kernel)();
+
+  // Whether gradients are enabled on this thread: bit 0 of call_modes, for
+  // what asks for nothing else at every call.
+  uint32_t (*grad_enabled)();
 };
 
 } // extern "C"
