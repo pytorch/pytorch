@@ -21,7 +21,7 @@ use crate::pyffi::Obj;
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyCapsule, PyDict, PyList, PyTuple};
+use pyo3::types::{PyCapsule, PyDict, PyList, PyTuple, PyWeakrefMethods, PyWeakrefReference};
 use std::collections::{HashMap, HashSet};
 use std::ffi::{c_void, CStr};
 use std::os::raw::c_char;
@@ -132,6 +132,23 @@ fn seed<'py>(py: Python<'py>, tensor: &Bound<'py, PyAny>) -> PyResult<Bound<'py,
 
 fn same_bits(a: &Bound<'_, PyAny>, b: &Bound<'_, PyAny>) -> PyResult<bool> {
     torch(a.py())?.call_method1("equal", (a, b))?.extract()
+}
+
+/// The names under which the nodes of a class hold what they saved.
+static SAVED: Mutex<Option<HashMap<usize, Vec<String>>>> = Mutex::new(None);
+
+/// The names under which a node of autograd holds what it saved, in the
+/// order of the names.
+fn saved_names(py: Python<'_>, node: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
+    let kind = node.get_type();
+    let known = SAVED.lock().unwrap().get_or_insert_with(HashMap::new).get(&(kind.as_ptr() as usize)).cloned();
+    if let Some(names) = known {
+        return Ok(names);
+    }
+    let listed: Vec<String> = py.import("builtins")?.getattr("dir")?.call1((&kind,))?.extract()?;
+    let names: Vec<String> = listed.into_iter().filter(|name| name.starts_with("_saved_")).collect();
+    SAVED.lock().unwrap().get_or_insert_with(HashMap::new).insert(kind.as_ptr() as usize, names.clone());
+    Ok(names)
 }
 
 /// Sets the grad mode of the thread until it is dropped.
@@ -277,7 +294,11 @@ impl<'py> Node<'py> {
         if unsafe { (bapi()?.node_info)(obj.as_ptr(), &mut found) } == 0 {
             return Err(PyTypeError::new_err("what a gradient goes to is no node of autograd"));
         }
-        let name = unsafe { CStr::from_ptr(found.name) }.to_string_lossy().into_owned();
+        let name = if found.flags & TCFG_NODE_PYTHON != 0 {
+            obj.get_type().name()?.to_string()
+        } else {
+            unsafe { CStr::from_ptr(found.name) }.to_string_lossy().into_owned()
+        };
         Ok(Node { obj, name, sequence: found.sequence_nr, inputs: found.n_inputs, edges: found.n_edges, flags: found.flags })
     }
 
@@ -1248,13 +1269,6 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
     let mut flags = vec![true; nodes.roots.len()];
     flags.extend(vec![false; rest.len()]);
     joint_says(py, joint.results(nodes.roots.iter().chain(&rest).cloned().collect(), flags.clone()))?;
-    for tensor in feeds.iter().chain(&nodes.roots) {
-        if let Some((node, input)) = Node::of_tensor(tensor)? {
-            if node.flags & TCFG_NODE_LEAF == 0 {
-                joint_says(py, joint.producer(tensor, node.name.clone(), input))?;
-            }
-        }
-    }
     if !nodes.roots.is_empty() {
         // What is taken down for all the roots is used for some of them: a
         // node that is handed nothing must give nothing.
@@ -1300,6 +1314,34 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
             let given: Vec<Bound<'py, PyAny>> = chosen.iter().map(|at| seeds[*at].clone()).collect();
             nodes.proven(py, feeds, &roots, &given, &nodes.sums(py, &part)?)?;
         }
+    }
+    // Eager's node of every value the backwards read, and which node of
+    // the backward it is: what eager names where the value was written to
+    // in place before a backward.
+    let numbers: HashMap<usize, u32> = nodes.order.iter().enumerate().map(|(at, node)| (node.key(), at as u32)).collect();
+    for value in joint.read() {
+        let Some(tensor) = joint.tensor(py, value) else {
+            continue;
+        };
+        if let Some((node, output)) = Node::of_tensor(&tensor)? {
+            if node.flags & TCFG_NODE_LEAF == 0 {
+                joint.made_by(value, node.name.clone(), output, numbers.get(&node.key()).copied());
+            }
+        }
+    }
+    // What each node kept of the forward, in the order it looks at it when
+    // it runs: by the names it keeps it under.
+    for (number, node) in nodes.order.iter().enumerate() {
+        let mut kept: Vec<Value> = Vec::new();
+        for name in saved_names(py, &node.obj)? {
+            let Ok(held) = node.obj.getattr(name.as_str()) else {
+                continue;
+            };
+            let mut found = Vec::new();
+            tensors_in(&held, &mut found);
+            kept.extend(found.iter().filter_map(|tensor| joint.value(tensor)));
+        }
+        joint.kept_by(number as u32, kept);
     }
     joint.finish();
     Ok(Taken { joint, ran, marks, targets: nodes.targets.clone(), shape, cut: None })
@@ -1479,6 +1521,28 @@ struct Back {
     takes: Vec<Value>,
 }
 
+/// A value the forward keeps in memory the caller can get at, for eager's
+/// text where it was written to in place before a backward.
+struct Named {
+    /// Where it is in what the forward keeps.
+    at: usize,
+    /// Eager's node that gave it when the form was taken down, and which
+    /// of that node's results it is.
+    name: Option<String>,
+    output: u32,
+    held: Held,
+}
+
+/// What of a call a value is.
+enum Held {
+    Feed(usize),
+    Root(usize),
+    /// A result that is no root.
+    Result,
+    /// A view, made in the graph, of an input or of a result.
+    View,
+}
+
 struct Plan {
     graph: Arc<Graph>,
     joint: Joint,
@@ -1490,9 +1554,14 @@ struct Plan {
     forward: Program,
     /// The values the forward keeps for the backwards.
     saved: Vec<Value>,
-    /// Of those, what is checked for writes at a backward, with eager's
-    /// node and result number for the text.
-    checked: HashMap<Value, (Option<String>, u32)>,
+    /// Of those, what is checked for writes at a backward.
+    checked: HashMap<Value, Named>,
+    /// The roots among them.
+    watched: Vec<usize>,
+    /// Per set of roots that come with a gradient: what eager's nodes look
+    /// at, in the order the nodes run, each with whether the node that
+    /// looks at it first is the one that gave it.
+    looked: Mutex<HashMap<Vec<bool>, Arc<Vec<(Value, bool)>>>>,
     /// Whether the forward can run again: it draws no random numbers and
     /// writes to no tensor from outside.
     again: bool,
@@ -1514,6 +1583,24 @@ impl Plan {
         let inputs: u32 = part("inputs")?.extract()?;
         let saved: Vec<Value> = part("saved")?.extract()?;
         let checked: Vec<(Value, Option<String>, u32)> = part("checked")?.extract()?;
+        let results: Vec<Value> = part("results")?.extract()?;
+        let mut named: HashMap<Value, Named> = HashMap::new();
+        for (value, name, output) in checked {
+            let held = if value < inputs {
+                Held::Feed(value as usize)
+            } else if let Some(root) = shape.roots.iter().position(|root| *root == value) {
+                Held::Root(root)
+            } else if results.contains(&value) {
+                Held::Result
+            } else {
+                Held::View
+            };
+            if let Some(at) = saved.iter().position(|kept| *kept == value) {
+                named.insert(value, Named { at, name, output, held });
+            }
+        }
+        let mut watched: Vec<usize> = named.values().filter_map(|named| if let Held::Root(root) = named.held { Some(root) } else { None }).collect();
+        watched.sort_unstable();
         let again = !(part("draws")?.extract::<bool>()? || part("writes")?.extract::<bool>()?);
         let (behind, _) = graph.behind(&ran);
         // Behind its roots the forward gives what is kept and is no input,
@@ -1550,7 +1637,9 @@ impl Plan {
             gives: gives.into_iter().enumerate().map(|(at, value)| (value, at)).collect(),
             forward,
             saved,
-            checked: checked.into_iter().map(|(value, name, output)| (value, (name, output))).collect(),
+            checked: named,
+            watched,
+            looked: Mutex::new(HashMap::new()),
             again,
             outer,
             behind,
@@ -1587,6 +1676,18 @@ impl Plan {
         Ok(Arc::new(Back { run, slots: gives.iter().map(|(slot, _)| *slot).collect(), takes }))
     }
 
+    /// What eager's nodes look at when a backward for these roots runs.
+    fn looked_at(&self, pattern: &[bool]) -> Arc<Vec<(Value, bool)>> {
+        if let Some(known) = self.looked.lock().unwrap().get(pattern) {
+            return known.clone();
+        }
+        let mut whole = pattern.to_vec();
+        whole.resize(self.joint.results_len(), false);
+        let found = Arc::new(self.joint.looked_at(&whole));
+        self.looked.lock().unwrap().insert(pattern.to_vec(), found.clone());
+        found
+    }
+
     /// The roots, of the results of another run on the tape.
     fn roots_of<'py>(&self, results: &[Bound<'py, PyAny>]) -> PyResult<Vec<Bound<'py, PyAny>>> {
         let mut roots = Vec::new();
@@ -1607,10 +1708,13 @@ struct Kept {
     /// What the forward kept, with the version each tensor was at; let go
     /// when a backward that does not retain the graph has run.
     saved: Mutex<Vec<(Py<PyAny>, u64)>>,
+    /// The roots that are checked for writes (`Plan::watched`), each for
+    /// as long as it lives: the node must not hold what holds the node.
+    roots: Vec<Py<PyWeakrefReference>>,
 }
 
 /// Eager's text for a tensor that is needed for a backward and was written
-/// to in place.
+/// to in place: `producer` is the node it names, and which of its results.
 fn modified(tensor: &Bound<'_, PyAny>, producer: &(Option<String>, u32), expected: u64) -> PyResult<String> {
     let kind: String = tensor.call_method0("type")?.extract()?;
     let sizes: Vec<i64> = tensor.getattr("shape")?.extract()?;
@@ -1631,24 +1735,70 @@ fn modified(tensor: &Bound<'_, PyAny>, producer: &(Option<String>, u32), expecte
     Ok(text + " Hint: enable anomaly detection to find the operation that failed to compute its gradient, with torch.autograd.set_detect_anomaly(True, check_nan=False).")
 }
 
+/// What eager raises for a tensor that a node kept as one of its operands
+/// and that has no node any more.
+const DETACHED: &str = "Trying to use a saved tensor that has been detached in-place, i.e. with .detach_().This is not supported, please use out-of-place `.detach()` instead";
+
 impl Kept {
-    /// Raises what eager raises where a tensor a backward needs was written
-    /// to in place behind the forward.
-    fn unwritten<'py>(&self, py: Python<'py>, read: Option<&[Value]>) -> PyResult<Vec<Bound<'py, PyAny>>> {
-        // Not held while Python is asked something: another thread could
-        // wait for it with the GIL.
-        let saved: Vec<(Py<PyAny>, u64)> = self.saved.lock().unwrap().iter().map(|(tensor, at)| (tensor.clone_ref(py), *at)).collect();
-        let mut tensors = Vec::new();
-        for ((tensor, expected), value) in saved.iter().zip(&self.plan.saved) {
-            let tensor = tensor.bind(py);
-            if let Some(producer) = self.plan.checked.get(value) {
-                if read.is_none_or(|read| read.contains(value)) && version(tensor) != *expected {
-                    return Err(PyRuntimeError::new_err(modified(tensor, producer, *expected)?));
-                }
+    /// What the forward kept, with the version each tensor was at. The lock
+    /// is not held while Python is asked something: another thread could
+    /// wait for it with the GIL.
+    fn held<'py>(&self, py: Python<'py>) -> Vec<(Bound<'py, PyAny>, u64)> {
+        self.saved.lock().unwrap().iter().map(|(tensor, at)| (tensor.bind(py).clone(), *at)).collect()
+    }
+
+    /// The tensor a caller has of a value that is checked, if it lives.
+    fn live<'py>(&self, py: Python<'py>, named: &Named) -> Option<Bound<'py, PyAny>> {
+        match named.held {
+            Held::Feed(at) => Some(self.feeds[at].bind(py).clone()),
+            Held::Root(root) => {
+                let at = self.plan.watched.iter().position(|watched| *watched == root)?;
+                self.roots[at].bind(py).upgrade()
             }
-            tensors.push(tensor.clone());
+            Held::Result | Held::View => None,
         }
-        Ok(tensors)
+    }
+
+    /// The node eager names for a value that a node of the backward kept as
+    /// one of its operands: the node the tensor has now.
+    fn names(&self, py: Python<'_>, named: &Named) -> PyResult<Option<String>> {
+        let Some(live) = self.live(py, named) else {
+            // Eager makes a view whose memory was written to a node anew.
+            let view = matches!(named.held, Held::View);
+            return Ok(named.name.as_ref().map(|name| if view { "AsStridedBackward0".to_string() } else { name.clone() }));
+        };
+        Ok(match Node::of_tensor(&live)? {
+            Some((node, _)) if node.flags & TCFG_NODE_LEAF != 0 => None,
+            // The node of a graph stands for the nodes of its operations.
+            Some((node, _)) if node.name == "GraphBackward" => named.name.clone().or(Some(node.name)),
+            Some((node, _)) => Some(node.name),
+            None => None,
+        })
+    }
+
+    /// Raises what eager raises where a tensor a backward needs was written
+    /// to in place behind the forward, for a backward for these roots.
+    fn unwritten(&self, py: Python<'_>, pattern: &[bool]) -> PyResult<()> {
+        let saved = self.held(py);
+        for (value, gave) in self.plan.looked_at(pattern).iter() {
+            let Some(named) = self.plan.checked.get(value) else {
+                continue;
+            };
+            let Some((tensor, expected)) = saved.get(named.at) else {
+                continue;
+            };
+            if !*gave && matches!(named.held, Held::Root(_)) && self.live(py, named).is_some_and(|live| !requires_grad(&live)) {
+                return Err(PyRuntimeError::new_err(DETACHED));
+            }
+            if version(tensor) != *expected {
+                // A node names itself for what it kept of its own result,
+                // and for an operand the node that the tensor has by now,
+                // always as its first result.
+                let producer = if *gave { (named.name.clone(), named.output) } else { (self.names(py, named)?, 0) };
+                return Err(PyRuntimeError::new_err(modified(tensor, &producer, *expected)?));
+            }
+        }
+        Ok(())
     }
 
     fn backward<'py>(&self, py: Python<'py>, grads: &[Option<Bound<'py, PyAny>>], twice: bool) -> PyResult<Vec<Option<Bound<'py, PyAny>>>> {
@@ -1656,19 +1806,19 @@ impl Kept {
         if grads.iter().all(Option::is_none) {
             return Ok(out);
         }
+        let pattern: Vec<bool> = grads.iter().map(Option::is_some).collect();
+        self.unwritten(py, &pattern)?;
         if twice {
             return self.again(py, grads, out, true, "");
         }
-        let pattern: Vec<bool> = grads.iter().map(Option::is_some).collect();
         let given: Vec<Bound<'py, PyAny>> = grads.iter().flatten().cloned().collect();
-        let saved = self.unwritten(py, Some(&[]))?;
+        let saved: Vec<Bound<'py, PyAny>> = self.held(py).into_iter().map(|(tensor, _)| tensor).collect();
         let back = match self.plan.back(py, &pattern) {
             Ok(back) => back,
             Err(Stop::Refused(why)) => return self.again(py, grads, out, false, &why),
             Err(Stop::Cut(_)) => return self.again(py, grads, out, false, "the graph is cut"),
             Err(Stop::Raised(error)) => return Err(error),
         };
-        self.unwritten(py, Some(&back.takes))?;
         let mut inputs: Vec<Bound<'py, PyAny>> = Vec::new();
         for value in &back.takes {
             let at = self.plan.saved.iter().position(|kept| kept == value).expect("kept");
@@ -1687,7 +1837,6 @@ impl Kept {
     /// the tape, from the inputs, and eager's nodes are called for it as
     /// when the form was taken down.
     fn again<'py>(&self, py: Python<'py>, grads: &[Option<Bound<'py, PyAny>>], mut out: Vec<Option<Bound<'py, PyAny>>>, twice: bool, why: &str) -> PyResult<Vec<Option<Bound<'py, PyAny>>>> {
-        self.unwritten(py, None)?;
         let asked = if twice { "was asked for with create_graph=True".to_string() } else { format!("is for results that came with a gradient as never before ({why})") };
         if !self.plan.again {
             return Err(PyRuntimeError::new_err(format!(
@@ -1805,7 +1954,14 @@ impl Plan {
                 let at = version(&kept);
                 saved.push((kept.unbind(), at));
             }
-            let kept = Kept { plan: self.clone(), feeds: feeds.iter().map(|feed| feed.clone().unbind()).collect(), fed: feeds.iter().map(version).collect(), saved: Mutex::new(saved) };
+            let weak: Vec<Py<PyWeakrefReference>> = self.watched.iter().map(|at| PyWeakrefReference::new(&roots[*at]).map(Bound::unbind)).collect::<PyResult<_>>()?;
+            let kept = Kept {
+                plan: self.clone(),
+                feeds: feeds.iter().map(|feed| feed.clone().unbind()).collect(),
+                fed: feeds.iter().map(version).collect(),
+                saved: Mutex::new(saved),
+                roots: weak,
+            };
             let targets = PyTuple::new(py, self.targets.iter().map(|at| &feeds[*at as usize]))?;
             let state = Box::into_raw(Box::new(kept)) as *mut c_void;
             // The state is the node's from here on, also when the call fails.
