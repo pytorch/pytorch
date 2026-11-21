@@ -436,6 +436,7 @@ class BaseSetVariable(VariableTracker):
         if fast is not None:
             return fast
         out_items = dict(self.items)
+        value = self._default_value()
         for other in args:
             other_keys = self._operand_keys(tx, other)
             # CPython uses the smaller set (ties: other); OrderedSet keeps self order.
@@ -444,9 +445,9 @@ class BaseSetVariable(VariableTracker):
             ):
                 other_keys, out_items = (
                     list(out_items),
-                    dict.fromkeys(other_keys, self._default_value()),
+                    dict.fromkeys(other_keys, value),
                 )
-            out_items = {k: self._default_value() for k in other_keys if k in out_items}
+            out_items = dict.fromkeys((k for k in other_keys if k in out_items), value)
         return self._new_set(out_items)
 
     def union(
