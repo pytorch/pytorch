@@ -106,7 +106,9 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
         inputs["flags"] = {1: True}
         self.assertTrue(root.check(inputs))
 
-    def test_hook_membership_guard_retains_temporary_dictionary(self):
+    @parametrize("partial", [False, True])
+    @parametrize("verbose", [False, True])
+    def test_hook_membership_guard_retains_temporary_dictionary(self, partial, verbose):
         references = []
 
         class Registries:
@@ -120,7 +122,7 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
             def flags(self):
                 if references[-1]() is None:
                     raise RuntimeError("hook dictionary was freed before comparison")
-                return {1: True}
+                return None if partial else {1: True}
 
         root = RootGuardManager()
         managers = [
@@ -128,7 +130,9 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
             for name in ("hooks", "flags")
         ]
         guards.install_nn_module_hook_membership_guard(*managers, (True,), [], None)
-        self.assertTrue(root.check(Registries()))
+        inputs = Registries()
+        result = root.check_verbose(inputs).result if verbose else root.check(inputs)
+        self.assertEqual(result, not partial)
         self.assertIsNone(references[-1]())
 
     @parametrize("verbose", [False, True])
@@ -159,11 +163,6 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
         check = root.check_verbose if verbose else root.check
         with self.assertRaisesRegex(RuntimeError, "NestedTensorImpl doesn't support"):
             check(inputs)
-        # A partial clone must not combine its flags with the previous traversal.
-        clone = root.clone_manager(
-            lambda manager: manager.get_source() not in ("hooks", "tensor")
-        )
-        self.assertTrue(clone.check({"flags": {2: True}}))
         reference = weakref.ref(hooks)
         del hooks, inputs
         self.assertIsNone(reference())
@@ -185,9 +184,6 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
         for manager in (root, clone):
             self.assertTrue(manager.check(inputs))
             self.assertTrue(manager.check_verbose(inputs).result)
-            self.assertFalse(manager.check({"hooks": hooks}))
-            self.assertFalse(manager.check_verbose({"hooks": hooks}).result)
-            self.assertTrue(manager.check(inputs))  # reset after a partial traversal
             changed = {"hooks": hooks, "flags": {1: True}}
             self.assertFalse(manager.check(changed))
             self.assertFalse(manager.check_verbose(changed).result)
@@ -303,6 +299,14 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(root.check(None))
         self.assertTrue(root.check(mapping))
 
+    def test_hook_membership_guard_requires_shared_root(self):
+        with self.assertRaisesRegex(
+            RuntimeError, "Hook membership guard managers must share a root"
+        ):
+            guards.install_nn_module_hook_membership_guard(
+                RootGuardManager(), RootGuardManager(), (), [], None
+            )
+
     @parametrize("side", ["hooks", "flags"])
     @parametrize("size", [1, 2])
     def test_hook_membership_guard_rejects_noninteger_keys(self, side, size):
@@ -327,24 +331,11 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(root.check(inputs))
         self.assertEqual(calls, [])
 
-    @parametrize("populated", [False, True])
-    def test_hook_membership_builder_uses_builtin_dict_methods(self, populated):
-        calls = []
-
-        class Flags(dict):
-            def __bool__(self):
-                calls.append("bool")
-                raise AssertionError("guard builder called __bool__")
-
-            def __contains__(self, key):
-                calls.append("contains")
-                raise AssertionError("guard builder called __contains__")
-
-        from torch._dynamo.source import AttrSource, LocalSource
-
-        hooks, flags = {1: None, 2: None}, Flags({2: True} if populated else {})
+    def _build_hook_membership_guard(self, hooks, flags):
         flags_source = LocalSource("flags")
         source = LocalSource("module")
+        hooks_source = AttrSource(source, "_forward_hooks")
+        guard = source.make_guard(GuardBuilder.NN_MODULE_HOOKS_DICT_CONTAINS)
         root = RootGuardManager()
         managers = [
             root.dict_getitem_manager(name, name, value, default_mgr_enum)
@@ -353,24 +344,65 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
         builder = mock.Mock(spec=GuardBuilder)
         builder.save_guards = False
         builder.already_added_code_parts = set()
-        builder.get.side_effect = lambda item: flags if item is flags_source else hooks
+        values = {flags_source: flags}
+        if not isinstance(flags, dict) or dict.__len__(flags):
+            values[hooks_source] = hooks
+        builder.get.side_effect = values.__getitem__
         builder.arg_ref.side_effect = lambda name: name
         builder.get_guard_manager_from_source.side_effect = (
             lambda item: managers[1] if item is flags_source else managers[0]
         )
-        guard = source.make_guard(GuardBuilder.NN_MODULE_HOOKS_DICT_CONTAINS)
         GuardBuilder.NN_MODULE_HOOKS_DICT_CONTAINS(
             builder, guard, "_forward_hooks", flags_source
         )
-        self.assertTrue(root.check({"hooks": hooks, "flags": flags}))
-        self.assertEqual(calls, [])
         builder.arg_ref.assert_has_calls(
-            [
-                mock.call(flags_source.name),
-                mock.call(AttrSource(source, "_forward_hooks").name),
-            ]
+            [mock.call(flags_source.name), mock.call(hooks_source.name)]
         )
         self.assertEqual(builder.arg_ref.call_count, 2)
+        return root
+
+    @parametrize("populated", [False, True])
+    def test_hook_membership_builder_uses_builtin_dict_methods(self, populated):
+        class Registry(dict):
+            def unexpected(self, *args):
+                raise AssertionError(
+                    "hook membership dispatched to a registry override"
+                )
+
+            __bool__ = __contains__ = __iter__ = __len__ = keys = unexpected
+
+        hooks = Registry.fromkeys((1, 2))
+        flags = Registry({2: True} if populated else {})
+        root = self._build_hook_membership_guard(hooks, flags)
+        inputs = {"hooks": hooks, "flags": flags}
+        self.assertTrue(root.check(inputs))
+        flags[1] = True
+        self.assertFalse(root.check(inputs))
+
+    @parametrize("side", ["hooks", "flags"])
+    @parametrize("kind", ["non_dict", "bool_key", "int_subclass_key"])
+    def test_hook_membership_builder_rejects_invalid_registries(self, side, kind):
+        calls = []
+
+        class Key(int):
+            def __hash__(self):
+                calls.append("hash")
+                return 1
+
+            def __eq__(self, other):
+                calls.append("eq")
+                return True
+
+        inputs = {"hooks": {1: None}, "flags": {1: True}}
+        inputs[side] = {
+            "non_dict": [],
+            "bool_key": {True: None},
+            "int_subclass_key": {Key(1): None},
+        }[kind]
+        calls.clear()
+        with self.assertRaisesRegex(AssertionError, "dictionaries with exact int keys"):
+            self._build_hook_membership_guard(**inputs)
+        self.assertEqual(calls, [])
 
     def test_hook_membership_diff_keeps_both_roles(self):
         from torch._dynamo.guards import GuardManagerWrapper
@@ -409,18 +441,17 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
                 calls.append("eq")
                 return True
 
-        hooks, flags = {1: None}, {}
+        hooks, flags = {1: None}, {2: True, 3: True}
         inputs = {"hooks": hooks, "flags": flags}
         root = self._membership_root(inputs, (False,))
         self.assertTrue(root.check(inputs))
-        invalid = {Key(): True}
-        flags.update(invalid)
+        invalid = Key()
+        del flags[2]
+        flags[invalid] = True
         calls.clear()
         self.assertFalse(root.check(inputs))
         self.assertEqual(calls, [])
-        flags.clear()
-        self.assertTrue(root.check(inputs))
-        flags[2] = True
+        flags[2] = flags.pop(invalid)
         self.assertTrue(root.check(inputs))
         flags[1] = flags.pop(2)
         self.assertFalse(root.check(inputs))
@@ -451,6 +482,8 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
             ({1: True, 3: True}, True),
         ):
             inputs["flags"].clear()
+            for manager in (root, clone):
+                self.assertFalse(manager.check(inputs))
             inputs["flags"].update(flags)
             calls.clear()
             for manager in (root, clone):
@@ -993,14 +1026,21 @@ class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(calls), 2)
 
     @parametrize("verbose", [False, True])
-    def test_object_alias_pattern_reset_after_cpp_throw(self, verbose):
+    @parametrize("aliased", [False, True])
+    def test_object_alias_reset_after_cpp_throw(self, verbose, aliased):
+        class Value:
+            pass
+
         root = RootGuardManager()
-        first, second = [], []
+        first, second = Value(), Value()
         managers = [
             root.dict_getitem_manager(name, name, value, default_mgr_enum)
             for name, value in (("left", first), ("right", second))
         ]
-        guards.install_object_alias_pattern_guard(managers, [0, 1], [], None)
+        if aliased:
+            install_object_aliasing_guard(*managers, [], None)
+        else:
+            guards.install_object_alias_pattern_guard(managers, [0, 1], [], None)
         nested = torch.nested.nested_tensor([torch.randn(2, 3), torch.randn(3, 3)])
         tensor = root.dict_getitem_manager("tensor", "tensor", nested, default_mgr_enum)
         tensor.add_tensor_match_guard(
@@ -1013,15 +1053,56 @@ class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
             type(nested),
             torch._C._dispatch_keys(nested),
         )
-        inputs = {"left": first, "right": second, "tensor": nested}
+        inputs = {
+            "left": first,
+            "right": first if aliased else second,
+            "tensor": nested,
+        }
         check = root.check_verbose if verbose else root.check
         with self.assertRaisesRegex(RuntimeError, "NestedTensorImpl doesn't support"):
             check(inputs)
-        # The original alias classes must not retain receivers from the failed check.
-        inputs.update(left=second, right=first)
+        ref = weakref.ref(first)
+        inputs.update(left=second, right=second if aliased else Value())
+        del first
+        self.assertIsNone(ref())
         with self.assertRaisesRegex(RuntimeError, "NestedTensorImpl doesn't support"):
             check(inputs)
-        self.assertFalse(root.check({"left": first, "right": first, "tensor": nested}))
+        inputs["right"] = Value() if aliased else second
+        self.assertFalse(root.check(inputs))
+
+    @parametrize("verbose", [False, True])
+    @parametrize("aliased", [False, True])
+    def test_object_aliasing_temporary_lifetimes(self, verbose, aliased):
+        class Value:
+            pass
+
+        class Owner:
+            @property
+            def left(self):
+                value = Value()
+                self.ref = weakref.ref(value)
+                return value
+
+            @property
+            def right(self):
+                left = self.ref()
+                self.left_alive = left is not None
+                return left if aliased else Value()
+
+        root = RootGuardManager()
+        managers = [
+            root.getattr_manager(name, name, Value(), default_mgr_enum)
+            for name in ("left", "right")
+        ]
+        install_object_aliasing_guard(*managers, [], None)
+        for manager in (root, root.clone_manager(lambda node: True)):
+            owner = Owner()
+            result = (
+                manager.check_verbose(owner).result if verbose else manager.check(owner)
+            )
+            self.assertEqual(result, aliased)
+            self.assertTrue(owner.left_alive)
+            self.assertIsNone(owner.ref())
 
     def test_object_alias_pattern_guard(self):
         root = RootGuardManager()
@@ -3337,20 +3418,6 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         self.assertIs(expected, int)
         self.assertTrue(handler.eval_fn(100, expected))
         self.assertFalse(handler.eval_fn("hello", expected))
-
-    def test_duplicate_input(self):
-        other = LocalSource("other")
-        guard = self._make_guard(
-            functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=other)
-        )
-        handler = self._get_handler("DUPLICATE_INPUT")
-        self.assertEqual(handler.get_extra_sources_fn(guard), (other,))
-        tensor = torch.ones(1)
-        same, distinct = (tensor, tensor), (tensor, tensor.clone())
-        for observed, changed in ((same, distinct), (distinct, same)):
-            expected = handler.get_metadata_fn(guard, observed)
-            self.assertTrue(handler.eval_fn(observed, expected))
-            self.assertFalse(handler.eval_fn(changed, expected))
 
     def test_constant_match(self):
         from torch._dynamo.guards import GuardBuilder

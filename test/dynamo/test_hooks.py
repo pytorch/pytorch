@@ -446,7 +446,8 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
 
     @parametrize("capture", [False, True])
     @parametrize("global_hook", [False, True])
-    def test_global_hook_flags_reuse(self, capture, global_hook):
+    @parametrize("local_kwargs", [False, True])
+    def test_global_hook_flags_reuse(self, capture, global_hook, local_kwargs):
         def hook(module, args, *rest):
             if isinstance(module, torch.nn.Identity):
                 return rest[-1] * 2 + len(rest)
@@ -465,7 +466,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
 
         def make_module():
             module = torch.nn.Identity()
-            module.register_forward_hook(hook)
+            module.register_forward_hook(hook, with_kwargs=local_kwargs)
             return module
 
         module = make_module()
@@ -820,7 +821,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         def fn(x, first, second):
             return region(x, first), region(x, second)
 
-        flags = flags_type.fromkeys(initial_flags if global_flags else (), True)
+        flags = flags_type.fromkeys(initial_flags, True)
         with (
             torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=recursive),
             patch.object(
@@ -835,6 +836,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             compiled, counter = self.compile_counted(fn)
             self.assertEqual(fn(x, *modules), expected)
             self.assertEqual(compiled(x, *modules), expected)
+            self.assertEqual(counter.frame_count, 1)
             if global_flags:
                 flags.clear()
                 flags[3] = True
@@ -961,8 +963,8 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             subtest(lambda d: 1 in {k for k, _ in d.items()}, name="set_comprehension"),
             subtest(lambda d: 1 in frozenset(d), name="frozenset"),
             subtest(lambda d: 1 in HookKeyFrozenSet(d), name="frozenset_subclass"),
-            subtest(lambda d: 1 in dict.fromkeys(set(d)), name="fromkeys_set"),
-            subtest(lambda d: 1 in dict.fromkeys(d), name="fromkeys"),
+            subtest(lambda d: 1 in dict.fromkeys(set(d)), name="fromkeys"),
+            subtest(lambda d: 1 in dict.fromkeys(d), name="fromkeys_mapping"),
             subtest(lambda d: 1 in {0}.union(d), name="union"),
             subtest(lambda d: 1 in {1}.intersection(d), name="intersection"),
             subtest(lambda d: 1 in {1}.difference(d), name="difference"),
@@ -1114,9 +1116,10 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         hook_api = torch.nn.modules.module
 
         def fn(x, module):
-            hooks = getattr(module, f"_{registry}_hooks", None)
             if registry == "global":
                 hooks = hook_api._global_forward_hooks_with_kwargs
+            else:
+                hooks = getattr(module, f"_{registry}_hooks")
             try:
                 return x + 1, operation(hooks)
             except (TypeError, KeyError, AttributeError) as error:
