@@ -20,6 +20,7 @@ mod pyffi;
 mod shapes;
 mod shortcuts;
 mod spec;
+mod joint;
 mod unroll;
 mod vm;
 
@@ -48,5 +49,6 @@ fn _cfg_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pyapi::Region>()?;
     m.add_class::<pyapi::Replay>()?;
     m.add_class::<shapes::ShapeGuard>()?;
+    m.add_class::<joint::Joint>()?;
     Ok(())
 }
