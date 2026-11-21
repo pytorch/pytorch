@@ -6,6 +6,8 @@
 #include <ATen/WrapDimUtilsMulti.h>
 
 #include <c10/util/irange.h>
+#include <algorithm>
+#include <numeric>
 #include <utility>
 namespace at::functionalization {
 
@@ -410,7 +412,6 @@ Tensor FunctionalInverses::unfold_inverse(const Tensor& base, const Tensor& muta
       return mutated_view.as_strided_symint(
           base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
     } else {
-      // I think autograd and the functionalization pass want the exact same thing here, but need to test to confirm.
       // unfold_backward() is safe to use here because it is NOT a view op.
       // (note: technically, we'll have an extra memory copy.
       // We'd need to add an aliasing version of unfold_backward to fix that though).
@@ -421,7 +422,33 @@ When using torch.compile (or running functionalization directly), this is banned
 as the behavior is not well defined. Consider cloning the tensor before mutating it, \
 or removing the mutation from your model."
           );
-      return unfold_backward(mutated_view, base.sizes(), dimension, size, step);
+      // unfold_backward returns a contiguous tensor. Unlike autograd, functionalization wants the
+      // base's strides back (see Note [*_scatter ops preserve strides]). We only recover them for
+      // a dense base with static strides: run unfold_backward in the base's memory order and
+      // permute back. Storage offset is not preserved, and non-dense, symbolic (dynamic shapes)
+      // and NeverView cases still get a contiguous result (permute_copy is contiguous too).
+      if (inverse_return_mode == InverseReturnMode::NeverView ||
+          base.unsafeGetTensorImpl()->has_symbolic_sizes_strides() || base.is_contiguous() ||
+          !base.is_non_overlapping_and_dense()) {
+        return at::unfold_backward_symint(mutated_view, base.sym_sizes(), dimension, size, step);
+      }
+      const auto ndim = base.dim();
+      dimension = at::maybe_wrap_dim(dimension, ndim);
+      std::vector<int64_t> perm(ndim);
+      std::iota(perm.begin(), perm.end(), 0);
+      std::stable_sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) { return base.stride(a) > base.stride(b); });
+      std::vector<int64_t> perm_sizes(ndim);
+      int64_t perm_dim = 0;
+      for (const auto i : c10::irange(ndim)) {
+        perm_sizes[i] = base.size(perm[i]);
+        if (perm[i] == dimension) {
+          perm_dim = i;
+        }
+      }
+      auto view_perm = perm;
+      view_perm.push_back(ndim);
+      auto out = unfold_backward(mutated_view.permute(view_perm), perm_sizes, perm_dim, size, step);
+      return at::functionalization::permute_inverse(out, perm, inverse_return_mode);
     }
 }
 
