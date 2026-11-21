@@ -493,6 +493,68 @@ AOTITorchError aoti_torch_cpu__qconv2d_pointwise_binary_tensor(
   });
 }
 
+AOTITorchError aoti_torch_cpu__qconv2d_pointwise_binary_tensor_(
+    AtenTensorHandle accum,
+    AtenTensorHandle X,
+    AtenTensorHandle act_scale,
+    AtenTensorHandle act_zero_point,
+    AtenTensorHandle onednn_weight,
+    AtenTensorHandle weight_scales,
+    AtenTensorHandle weight_zero_points,
+    AtenTensorHandle* B,
+    const int64_t* stride_args,
+    int64_t stride_len_,
+    const int64_t* padding_args,
+    int64_t padding_len_,
+    const int64_t* dilation_args,
+    int64_t dilation_len_,
+    int64_t groups,
+    double output_scale,
+    int64_t output_zero_point,
+    const int32_t* output_dtype,
+    double accum_scale,
+    int64_t accum_zero_point,
+    const char* binary_attr,
+    double* alpha,
+    const char** unary_attr,
+    const double** unary_scalars,
+    int64_t unary_scalars_len_,
+    const char** unary_algorithm,
+    AtenTensorHandle* ret0) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::List<std::optional<c10::Scalar>> unary_scalars_list;
+    unary_scalars_list.reserve(unary_scalars_len_);
+    for (const auto i : c10::irange(unary_scalars_len_)) {
+      unary_scalars_list.emplace_back(pointer_to_optional(unary_scalars[i]));
+    }
+    at::native::QConvoneDNN::run_pointwise_binary_tensor_(
+        *tensor_handle_to_tensor_pointer(accum),
+        *tensor_handle_to_tensor_pointer(X),
+        *tensor_handle_to_tensor_pointer(act_scale),
+        *tensor_handle_to_tensor_pointer(act_zero_point),
+        *tensor_handle_to_tensor_pointer(onednn_weight),
+        *tensor_handle_to_tensor_pointer(weight_scales),
+        *tensor_handle_to_tensor_pointer(weight_zero_points),
+        pointer_to_optional<at::Tensor>(B),
+        convert_to_c10_List<int64_t>(stride_args, stride_len_),
+        convert_to_c10_List<int64_t>(padding_args, padding_len_),
+        convert_to_c10_List<int64_t>(dilation_args, dilation_len_),
+        groups,
+        output_scale,
+        output_zero_point,
+        pointer_to_optional<at::ScalarType>(output_dtype),
+        accum_scale,
+        accum_zero_point,
+        binary_attr,
+        pointer_to_optional<c10::Scalar>(alpha),
+        pointer_to_optional<std::string_view>(unary_attr),
+        unary_scalars_list,
+        pointer_to_optional<std::string_view>(unary_algorithm));
+    // The op returns (), but Inductor's cpp wrapper always passes an output handle.
+    *ret0 = new_tensor_handle(at::Tensor(*tensor_handle_to_tensor_pointer(accum)));
+  });
+}
+
 #if AT_MKL_ENABLED()
 
 AOTITorchError aoti_torch_cpu__mkl_linear(

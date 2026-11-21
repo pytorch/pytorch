@@ -8627,6 +8627,39 @@ class TestQuantizedConv(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
+    def test_qconv2d_binary_tensor_inplace(self):
+        # qconv2d_pointwise_.binary_tensor writes into qaccum and returns None;
+        # qaccum must match the result of the functional .binary_tensor overload.
+        groups = 1
+        in_ch, out_ch = 4, 4
+        x = torch.randint(0, 8, (1, in_ch, 5, 5), dtype=torch.uint8)
+        x = x.to(memory_format=torch.channels_last)
+        w_raw = torch.randint(-4, 4, (out_ch, in_ch, 3, 3), dtype=torch.int8)
+        w_scale = torch.tensor([1.0], dtype=torch.float)
+        w_zp = torch.tensor([0], dtype=torch.int64)
+        packed_w = torch.ops.onednn.qconv_prepack(
+            w_raw, w_scale, 1.0, 0, [1, 1], [1, 1], [1, 1], groups, x.size(),
+        )
+        x_scale = torch.tensor([1.0])
+        x_zp = torch.tensor([0])
+        conv_args = ([1, 1], [1, 1], [1, 1], groups, 1.0, 0, None, 1.0, 0, "sum", None)
+        for unary_attr in ["none", "relu"]:
+            qaccum = torch.randint(0, 8, (1, out_ch, 5, 5), dtype=torch.uint8)
+            qaccum = qaccum.to(memory_format=torch.channels_last)
+            qaccum_inplace = qaccum.clone()
+            expected = torch.ops.onednn.qconv2d_pointwise.binary_tensor(
+                x, x_scale, x_zp, packed_w, w_scale, w_zp, qaccum, None,
+                *conv_args, unary_attr, [], None,
+            )
+            result = torch.ops.onednn.qconv2d_pointwise_.binary_tensor(
+                qaccum_inplace, x, x_scale, x_zp, packed_w, w_scale, w_zp, None,
+                *conv_args, unary_attr, [], None,
+            )
+            self.assertIsNone(result)
+            self.assertEqual(qaccum_inplace, expected)
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
     def test_qconv2d_binary_empty_output_no_aliasing(self):
         # Trigger the early return path when output has 0 elements.
         # Use batch_size=0 so the convolution output has numel == 0.

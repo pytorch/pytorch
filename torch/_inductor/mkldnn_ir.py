@@ -746,16 +746,26 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         """
         self.device_type = get_device_type(inputs[0])
         self.has_bias = len(inputs) == 8
-        self.idx_for_inplace_sum = 6
+        if self.device_type == "cpu":
+            # The functional CPU op returns a copy of the mutated accum. The
+            # in-place op takes accum as its first input and skips that copy.
+            inputs = [inputs[6], *inputs[:6], *inputs[7:]]
+            self.idx_for_inplace_sum = 0
+            op_overload = torch.ops.onednn.qconv2d_pointwise_.binary_tensor
+            cpp_kernel_name = "aoti_torch_cpu__qconv2d_pointwise_binary_tensor_"
+        else:
+            self.idx_for_inplace_sum = 6
+            op_overload = torch.ops.onednn.qconv2d_pointwise.binary_tensor
+            cpp_kernel_name = (
+                f"aoti_torch_{self.device_type}__qconv2d_pointwise_binary_tensor"
+            )
         super().__init__(
             layout,
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.onednn.qconv2d_pointwise.binary_tensor,
-            cpp_kernel_name=(
-                f"aoti_torch_{self.device_type}__qconv2d_pointwise_binary_tensor"
-            ),
+            op_overload=op_overload,
+            cpp_kernel_name=cpp_kernel_name,
         )
 
     def codegen(self, wrapper):
