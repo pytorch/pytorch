@@ -746,7 +746,20 @@ struct ScaledMMBlockwiseRowLoader {
     }
   }
 
+  // Zeros a row past the operand's end once, so store can skip it: branching
+  // to the per-value path every step would stall its simdgroup's other rows.
+  void init(threadgroup S* dst) const thread {
+    if (!valid) {
+      for (uint i = 0; i < step; ++i) {
+        dst[i] = S(0);
+      }
+    }
+  }
+
   void store(uint k, threadgroup S* dst) const thread {
+    if (!valid) {
+      return;
+    }
     if (whole(k)) {
 #pragma unroll
       for (uint c = 0; c < step / chunk; ++c) {
@@ -762,7 +775,7 @@ struct ScaledMMBlockwiseRowLoader {
     }
     for (uint i = 0; i < step; ++i) {
       const uint kk = k + i;
-      dst[i] = valid && kk < k_size
+      dst[i] = kk < k_size
           ? S(F::element(data, kk) * F::scale(scales[kk / F::block]))
           : S(0);
     }
@@ -802,6 +815,7 @@ kernel void scaled_mm_blockwise_mpp(
       {}};
   loader.fetch(0);
   threadgroup S* dst = (is_b ? b_tile : a_tile) + tid % tile * pitch;
+  loader.init(dst);
   // Both tiles are K-contiguous, so B is the transposed right operand
   using tile_t = tensor<threadgroup S, dextents<int32_t, 2>, tensor_inline>;
   tile_t aa(
