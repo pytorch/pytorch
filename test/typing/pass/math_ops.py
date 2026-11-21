@@ -31,6 +31,14 @@ torch.addcdiv(torch.randn(1, 3), torch.randn(3, 1), torch.randn(1, 3), value=0.1
 # addcmul
 torch.addcmul(torch.randn(1, 3), torch.randn(3, 1), torch.randn(1, 3), value=0.1)
 
+# amax/amin
+torch.amax(a, dim=None)
+torch.amax(a, dim=None, out=torch.empty(()))
+a.amax(dim=None)
+torch.amin(a, dim=None)
+torch.amin(a, dim=None, out=torch.empty(()))
+a.amin(dim=None)
+
 # angle
 torch.angle(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])) * 180 / 3.14159
 
@@ -156,6 +164,11 @@ torch.fmod(torch.tensor([1, 2, 3, 4, 5]), 1.5)
 # frac
 torch.frac(torch.tensor([1, 2.5, -3.2]))
 
+# hash_tensor
+torch.hash_tensor(a, dim=None)
+torch.hash_tensor(a, dim=None, out=torch.empty((), dtype=torch.uint64))
+a.hash_tensor(dim=None)
+
 # imag
 torch.randn(4, dtype=torch.cfloat).imag
 
@@ -270,6 +283,25 @@ torch.polygamma(2, torch.tensor([1, 0.5]))
 torch.polygamma(3, torch.tensor([1, 0.5]))
 torch.polygamma(4, torch.tensor([1, 0.5]))
 
+# pooling
+x1 = torch.randn(1, 1, 4)
+x2 = torch.randn(1, 1, 4, 4)
+x3 = torch.randn(1, 1, 4, 4, 4)
+torch.avg_pool1d(x1, 2, stride=None)
+torch.max_pool1d(x1, 2, stride=None)
+torch.max_pool1d_with_indices(x1, 2, stride=None)
+torch.max_pool2d(x2, 2, stride=None)
+torch.max_pool3d(x3, 2, stride=None)
+torch.mkldnn_max_pool2d(x2.to_mkldnn(), 2, stride=None)
+torch.mkldnn_max_pool3d(x3.to_mkldnn(), 2, stride=None)
+
+q1 = torch.quantize_per_tensor(x1, 0.1, 0, torch.quint8)
+q2 = torch.quantize_per_tensor(x2, 0.1, 0, torch.quint8)
+q3 = torch.quantize_per_tensor(x3, 0.1, 0, torch.quint8)
+torch.quantized_max_pool1d(q1, 2, stride=None)
+torch.quantized_max_pool2d(q2, 2, stride=None)
+torch.quantized_max_pool3d(q3, 2, stride=None)
+
 # pow
 torch.pow(a, 2)
 torch.pow(torch.arange(1.0, 5.0), torch.arange(1.0, 5.0))
@@ -286,6 +318,10 @@ torch.reciprocal(a)
 # remainder
 torch.remainder(torch.tensor([-3.0, -2, -1, 1, 2, 3]), 2)
 torch.remainder(torch.tensor([1, 2, 3, 4, 5]), 1.5)
+
+# roll
+torch.roll(a, 1, dims=None)
+a.roll(1, dims=None)
 
 # round
 torch.round(a)
@@ -346,3 +382,23 @@ g = torch.tensor([3, 2, 1])
 torch.xlogy(f, g)
 torch.xlogy(f, 4)
 torch.xlogy(2, g)
+
+
+def scaled_matmul(x: torch.Tensor, scale: list[torch.Tensor]) -> None:
+    torch._scaled_addmm(x, x, x, scale, [], [], scale, [], [], contraction_dim=None)
+    torch._scaled_addmm(
+        x, x, x, scale, [], [], scale, [], [], contraction_dim=None, out=x
+    )
+    torch._scaled_addmm_(x, x, x, scale, [], [], scale, [], [], contraction_dim=None)
+    torch._scaled_mm_v2(
+        x, x, scale, [], [], scale, [], [], None, None, contraction_dim=None
+    )
+    torch._scaled_mm_v2(
+        x, x, scale, [], [], scale, [], [], None, None, contraction_dim=None, out=x
+    )
+    torch._scaled_grouped_mm_v2(
+        x, x, scale, [], [], scale, [], [], contraction_dim=None
+    )
+    torch._scaled_grouped_mm_v2(
+        x, x, scale, [], [], scale, [], [], contraction_dim=None, out=x
+    )
