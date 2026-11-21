@@ -3,6 +3,7 @@
 import collections
 import collections.abc
 import copy
+import dataclasses
 import dis
 import functools
 import gc
@@ -6881,6 +6882,148 @@ def graph_attends_plainly(q, rate):
     return (out * 2).tanh().exp()
 
 
+class GraphOut:
+    """What a function gives: a class with an `__init__` and a method."""
+
+    def __init__(self, hidden, scale=2):
+        self.hidden = hidden
+        self.scale = scale
+
+    def scaled(self):
+        return self.hidden * self.scale
+
+
+@dataclasses.dataclass
+class GraphData:
+    hidden: torch.Tensor
+    rate: float = 0.5
+    extra: object = None
+
+    def __post_init__(self):
+        self.half = self.hidden * self.rate
+
+
+class GraphBare:
+    pass
+
+
+class GraphObjectHolder:
+    def __init__(self):
+        self.kept = None
+        self.other = None
+
+
+GRAPH_HOLDER = GraphObjectHolder()
+GRAPH_LOG = []
+
+
+def graph_init_that_returns(self, hidden, what):
+    self.hidden = hidden
+    return what
+
+
+class GraphReturns:
+    # An `__init__` that gives something back: the call raises a TypeError.
+    __init__ = graph_init_that_returns
+
+
+class GraphRaises:
+    def __init__(self, hidden, at):
+        self.hidden = hidden
+        if at % 3 == 2:
+            raise ValueError(f"no {at}")
+        self.late = at
+
+
+class GraphFinalized:
+    def __init__(self, hidden):
+        self.hidden = hidden
+
+    def __del__(self):
+        GRAPH_LOG.append("gone")
+
+
+class GraphSwitched:
+    def __init__(self, hidden):
+        self.hidden = hidden
+        self.flag = 1
+
+
+def graph_makes_object(x):
+    y = (x.sin() + 1).cos()
+    out = GraphOut(y)
+    return (out.hidden * 3).tanh().exp() + out.scale
+
+
+def graph_calls_method(x):
+    y = (x.sin() + 1).cos()
+    out = GraphOut(y, scale=3)
+    return (out.scaled() + out.hidden).tanh().exp()
+
+
+def graph_makes_dataclass(x):
+    y = (x.sin() + 1).cos()
+    out = GraphData(y, extra=(y * 2).tanh())
+    return (out.half + out.extra).exp().sum() + out.rate
+
+
+def graph_fills_object(x):
+    y = (x.sin() + 1).cos()
+    out = GraphBare()
+    out.kept = (y * 2).tanh()
+    return (out.kept + y).exp()
+
+
+def graph_gives_object(x):
+    y = (x.sin() + 1).cos()
+    return GraphOut((y * 2).tanh(), scale=y.exp())
+
+
+def graph_object_by_two_ways(x, at):
+    y = (x.sin() + 1).cos()
+    first, second = GraphOut(y), GraphOut(y * 2)
+    made = [first, second]
+    picked = made[at % 2]
+    picked.scale = 7
+    first.scale = 3
+    scaled = first.hidden * first.scale + second.hidden * second.scale
+    return scaled.tanh().exp()
+
+
+def graph_object_or_holder(x, at):
+    y = (x.sin() + 1).cos()
+    out = GraphOut(y)
+    target = GRAPH_HOLDER if at % 2 else out
+    target.kept = y * 2
+    GRAPH_HOLDER.other = out
+    out.kept = y * 3
+    return (out.kept + GRAPH_HOLDER.other.hidden).tanh().exp()
+
+
+def graph_init_returns(x, at):
+    y = (x.sin() + 1).cos()
+    out = GraphReturns(y, None if at % 4 else 1)
+    return (out.hidden * 3).tanh().exp()
+
+
+def graph_init_raises(x, at):
+    y = (x.sin() + 1).cos()
+    out = GraphRaises(y, at)
+    return (out.hidden * 3).tanh().exp() + out.late
+
+
+def graph_object_finalized(x, at):
+    y = (x.sin() + 1).cos()
+    out = GraphFinalized(y)
+    return (out.hidden * 3).tanh().exp() + len(GRAPH_LOG)
+
+
+def graph_class_switched(x, at):
+    y = (x.sin() + 1).cos()
+    out = GraphSwitched(y)
+    return (out.hidden * out.flag).tanh().exp(), sorted(vars(out))
+
+
 def graph_imports(x):
     y = (x.sin() + 1).cos()
     import torch.fx
@@ -10454,6 +10597,103 @@ class TestVmGraphResults(TestCase):
         found = [(g["ops"], g["why"]) for g in graphs]
         self.assertEqual(found, [(4, draws), (4, "the function returns")])
 
+    def test_an_object_of_a_class_that_is_called_is_made_on_a_path(self, device):
+        # A class with an `__init__` in Python that is called: the object
+        # is the path's own, the `__init__` is gone into, what it stores is
+        # what a read of the attribute gives, and a method of the object is
+        # the function its class has. A dataclass with a `__post_init__`,
+        # and a class without an `__init__` that is stored into.
+        x = torch.randn(3, 4, device=device)
+        cases = (
+            (graph_makes_object, 7),
+            (graph_calls_method, 7),
+            (graph_makes_dataclass, 10),
+            (graph_fills_object, 7),
+        )
+        for fn, ops in cases:
+            compiled = self.whole_graph(fn, (x,), ops)
+            self.assertEqual(compiled(x * 2), fn(x * 2), atol=0, rtol=0)
+        # The object that the function gives is one of its class, new at
+        # every call, with what eager's has.
+        fn, passes = graph_gives_object, (*DEFAULT, P.Graphs())
+        compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+        seen = []
+        for _ in range(6):
+            got, expected = compiled(x), fn(x)
+            self.assertIs(type(got), GraphOut)
+            self.assertEqual(sorted(vars(got)), sorted(vars(expected)))
+            ours, eagers = (got.hidden, got.scale), (expected.hidden, expected.scale)
+            self.assertEqual(ours, eagers, atol=0, rtol=0)
+            seen.append(got)
+        self.assertEqual(len({id(got) for got in seen}), 6)
+        (graph,) = (g for g in torch.vm.regions(compiled) if "ops" in g)
+        self.assertEqual((graph["ops"], graph["why"]), (6, "the function returns"))
+
+    def test_an_object_a_path_made_is_eagers_where_it_could_differ(self, device):
+        # The same object by two ways (out of a list at a place that is
+        # another one at the next call); a store that goes to the object or
+        # to one from outside; an `__init__` that returns something, and one
+        # that raises midway; a class whose objects say when they go; a
+        # class that takes a store itself from some call on.
+        def keep(gm, input_types):
+            return gm
+
+        def flag(self):
+            return 5
+
+        def set_flag(self, value):
+            GRAPH_LOG.append("set")
+
+        def prepare(fn, at):
+            if fn is graph_class_switched and at == 6:
+                GraphSwitched.flag = property(flag, set_flag)
+            if at == 0:
+                if "flag" in vars(GraphSwitched):
+                    del GraphSwitched.flag
+                GRAPH_LOG.clear()
+                GRAPH_HOLDER.kept = GRAPH_HOLDER.other = None
+
+        def alike(got, expected):
+            self.assertIs(type(got), type(expected), f"{got!r} for {expected!r}")
+            if isinstance(expected, torch.Tensor):
+                self.assertEqual(got, expected, atol=0, rtol=0)
+            elif isinstance(expected, (tuple, list)):
+                self.assertEqual(len(got), len(expected))
+                for one, other in zip(got, expected):
+                    alike(one, other)
+            else:
+                self.assertEqual(got, expected)
+
+        functions = (
+            graph_object_by_two_ways,
+            graph_object_or_holder,
+            graph_init_returns,
+            graph_init_raises,
+            graph_object_finalized,
+            graph_class_switched,
+        )
+        for fn in functions:
+            for behind in ((), (keep,)):
+                passes = (*DEFAULT, P.Graphs(), *behind)
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                found = []
+                for run in (compiled, fn):
+                    given = []
+                    for at in range(12):
+                        prepare(fn, at)
+                        torch.manual_seed(at)
+                        x = torch.randn(3, 4, device=device)
+                        try:
+                            out = run(x, at)
+                        except Exception as error:
+                            out = f"{type(error).__name__}: {error}"
+                        kept = GRAPH_HOLDER.kept
+                        kept = None if kept is None else kept.clone()
+                        given.append((out, list(GRAPH_LOG), kept))
+                    found.append(given)
+                alike(found[0], found[1])
+        prepare(graph_class_switched, 0)
+
     def test_an_import_of_a_module_that_was_imported_does_not_end_a_graph(self, device):
         # `import a.b` of what was imported before looks the module and its
         # outermost package up and runs nothing: libraries ask this way
@@ -10853,6 +11093,15 @@ def back_kept_apart(x, w, b):
     return (x @ w).tanh(), (b * 2).sum()
 
 
+def back_apart(x, w, b):
+    return (x @ w).tanh().sum(), (b * 2).sum()
+
+
+def back_copied(x, w, b):
+    h = (x @ w + b).tanh()
+    return h.clone(), (h * h.exp()).sum()
+
+
 def back_writes_input(x, w, b):
     w.mul_(2)
     return (x @ w + b).tanh().sum(), b.sum()
@@ -11017,6 +11266,17 @@ def back_results_in_list(x, w, b):
     h = (h @ w).tanh()
     states.append(h)
     return states, (h * h.exp()).sum()
+
+
+class BackOut:
+    def __init__(self, hidden, loss):
+        self.hidden = hidden
+        self.loss = loss
+
+
+def back_result_in_object(x, w, b):
+    h = (x @ w + b).tanh()
+    return BackOut(h, (h * h.exp()).sum())
 
 
 def back_result_is_base(x, w, b):
@@ -11691,6 +11951,9 @@ class TestVmGraphBackward(TestCase):
         def named(out):
             return out["hidden"], out["loss"]
 
+        def in_object(out):
+            return out.hidden, out.loss
+
         def earlier(out):
             return out[0][0], out[1]
 
@@ -11709,6 +11972,8 @@ class TestVmGraphBackward(TestCase):
             (back_reads_result, as_given, TWO_NODES, uses),
             (back_result_kept, kept, TWO_NODES, uses),
             (back_result_in_dict, named, TWO_NODES, uses),
+            # An object of a class that the function makes and gives.
+            (back_result_in_object, in_object, TWO_NODES, uses),
             (back_results_in_list, earlier, two_cuts, uses),
             (back_results_in_list, later, two_cuts, some),
             # What the function gives is a view of the tensor.
@@ -11734,6 +11999,54 @@ class TestVmGraphBackward(TestCase):
                         self.alike(found[0], found[1])
                     said = f"{fn.__name__}, {use.__name__}"
                     self.assertEqual(self.states(), states, said)
+
+    def test_a_hook_on_a_result_that_no_gradient_reaches_is_not_called(self, device):
+        # Two results of a function, a hook on one (and its gradient
+        # kept), a backward of the other. In eager mode the one has a node
+        # of its own, which does not run: the hook is not called, also not
+        # with None, and nothing is kept. So it is for what a graph gives:
+        # each result has a node of its own in front of the node of the
+        # graph.
+        def looked(first, second):
+            seen = []
+
+            def look(grad):
+                seen.append(None if grad is None else grad.clone())
+
+            first.register_hook(look)
+            first.retain_grad()
+            second.sum().backward()
+            return seen, first.grad
+
+        def changed(first, second):
+            first.register_hook(lambda grad: grad * 2)
+            second.sum().backward()
+            return None
+
+        def both(first, second):
+            seen = []
+            first.register_hook(lambda grad: seen.append(grad.clone()) or grad * 2)
+            second.register_hook(lambda grad: seen.append(grad.clone()))
+            (first.sum() + second.sum()).backward()
+            return seen
+
+        for fn in (back_pair, back_apart, back_copied):
+            for use in (looked, changed, both):
+                for swap in (False, True):
+                    compiled = self.staged(fn)
+                    for at in range(10):
+                        found = []
+                        for run in (compiled, fn):
+                            torch.manual_seed(at)
+                            x = torch.randn(3, 4, device=device)
+                            w = torch.randn(4, 4, device=device, requires_grad=True)
+                            b = torch.randn(4, device=device, requires_grad=True)
+                            first, second = run(x, w, b)
+                            if swap:
+                                first, second = second, first
+                            found.append((use(first, second), w.grad, b.grad))
+                        self.alike(found[0], found[1])
+                    self.assertIn("the engine's backward", self.states())
 
     def test_a_result_that_is_only_looked_at_is_no_reason_to_cut_a_graph(self, device):
         # The graph gives the tensor so that its sizes and its type can be
