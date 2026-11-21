@@ -32,6 +32,7 @@ from torchgen.gen import (
     parse_native_yaml_struct,
     static_dispatch,
 )
+from torchgen.gen_functionalization_type import wrap_propagate_mutations_and_return
 from torchgen.gen_lazy_tensor import validate_shape_inference_header
 from torchgen.model import (
     BackendIndex,
@@ -881,6 +882,62 @@ class TestNativeFunctionGeneratrion(unittest.TestCase):
             str(native_functions[1].func),
             "op_3.vec_out(Tensor input, SymInt[]? output_size, float[]? scale_factors, *, Tensor(a!) out) -> Tensor(a!)",
         )
+
+
+class TestWrapPropagateMutationsAndReturn(unittest.TestCase):
+    @staticmethod
+    def _native_function(func: str) -> NativeFunction:
+        f, _ = NativeFunction.from_yaml(
+            {"func": func}, loc=Location(__file__, 1), valid_tags=set()
+        )
+        return f
+
+    def _generate(self, outer: str, functional: str) -> str:
+        outer_f = self._native_function(outer)
+        functional_f = self._native_function(functional)
+        with native_function_manager(outer_f):
+            return wrap_propagate_mutations_and_return(
+                outer_f, functional_f, "tmp_output"
+            )
+
+    def test_out_variant_with_mutable_input_and_aliased_returns(self) -> None:
+        # The functional op returns (out, save_mean, save_invstd, running_mean_out,
+        # running_var_out): the aliased returns come first, the updated mutable
+        # inputs that are not returned come last.
+        code = self._generate(
+            "_native_batch_norm_legit.out(Tensor input, Tensor? weight, Tensor? bias, "
+            "Tensor(a!) running_mean, Tensor(b!) running_var, bool training, "
+            "float momentum, float eps, *, Tensor(d!) out, Tensor(e!) save_mean, "
+            "Tensor(f!) save_invstd) -> (Tensor(d!), Tensor(e!), Tensor(f!))",
+            "_native_batch_norm_legit_functional(Tensor input, Tensor? weight, "
+            "Tensor? bias, Tensor running_mean, Tensor running_var, bool training, "
+            "float momentum, float eps) -> (Tensor, Tensor, Tensor, "
+            "Tensor running_mean_out, Tensor running_var_out)",
+        )
+        for arg, idx in (
+            ("out", 0),
+            ("save_mean", 1),
+            ("save_invstd", 2),
+            ("running_mean", 3),
+            ("running_var", 4),
+        ):
+            self.assertIn(
+                f"replace_({arg}, std::get<{idx}>(tmp_output));",
+                code,
+            )
+        self.assertIn(
+            "return ::std::tuple<at::Tensor &,at::Tensor &,at::Tensor &>"
+            "(out, save_mean, save_invstd);",
+            code,
+        )
+
+    def test_inplace_variant(self) -> None:
+        code = self._generate(
+            "foo_(Tensor(a!) self) -> Tensor(a!)",
+            "foo(Tensor self) -> Tensor",
+        )
+        self.assertIn("replace_(self, tmp_output);", code)
+        self.assertIn("return self;", code)
 
 
 # Test for static_dispatch
