@@ -36,7 +36,7 @@ struct XPUEvent {
         sycl::ext::oneapi::experimental::ipc::event::open(
             handle_data, c10::xpu::get_device_context()));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_event_creation(
           c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
     }
@@ -46,7 +46,7 @@ struct XPUEvent {
   ~XPUEvent() {
     if (isCreated()) {
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-      if (C10_UNLIKELY(interp)) {
+      if (interp) [[unlikely]] {
         (*interp)->trace_gpu_event_deletion(
             c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
       }
@@ -124,7 +124,7 @@ struct XPUEvent {
       assignEvent(stream.queue());
     }
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       if (first_record) {
         (*interp)->trace_gpu_event_creation(
             c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
@@ -150,7 +150,7 @@ struct XPUEvent {
       }
 
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-      if (C10_UNLIKELY(interp)) {
+      if (interp) [[unlikely]] {
         (*interp)->trace_gpu_event_wait(
             c10::kXPU,
             reinterpret_cast<uintptr_t>(event_.get()),
@@ -185,7 +185,7 @@ struct XPUEvent {
   void synchronize() const {
     if (isCreated()) {
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-      if (C10_UNLIKELY(interp)) {
+      if (interp) [[unlikely]] {
         (*interp)->trace_gpu_event_synchronization(
             c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
       }
@@ -201,7 +201,7 @@ struct XPUEvent {
     if (!isCreated()) {
       createEvent(c10::xpu::current_device());
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-      if (C10_UNLIKELY(interp)) {
+      if (interp) [[unlikely]] {
         (*interp)->trace_gpu_event_creation(
             c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
       }

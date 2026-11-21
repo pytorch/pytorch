@@ -536,7 +536,7 @@ void Comm::progress_loop() {
       c10::cuda::set_device(cuda_device_index);
       CUcontext pctx = nullptr;
       at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx);
-      if (C10_UNLIKELY(!pctx)) {
+      if (!pctx) [[unlikely]] {
         at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(
             &pctx, cuda_device_index);
         at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);

@@ -146,12 +146,10 @@ class TestMinifier(TestCase):
         gm = torch.fx.GraphModule({}, graph)
 
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        fake_tensor = (
-            torch._subclasses.fake_tensor.FakeTensorConverter().from_meta_and_device(
-                fake_mode,
-                torch.empty_strided((2, 3), (3, 1), device="meta"),
-                torch.device("cuda:7"),
-            )
+        fake_tensor = fake_mode.fake_tensor_converter.from_meta_and_device(
+            fake_mode,
+            torch.empty_strided((2, 3), (3, 1), device="meta"),
+            torch.device("cuda:7"),
         )
 
         buf = io.StringIO()

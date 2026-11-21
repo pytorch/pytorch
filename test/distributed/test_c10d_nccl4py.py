@@ -3,9 +3,11 @@
 import os
 import unittest
 from datetime import timedelta
+from unittest import mock
 
 import torch
 import torch.distributed as dist
+from torch._C._distributed_c10d import WorkResult
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
@@ -59,6 +61,34 @@ class TestNCCL4PyBackendUnit(TestCase):
         self.assertTrue(backend.supports_splitting)
         self.assertEqual(backend.options.backend, "nccl4py")
         backend.shutdown()
+
+    def test_get_future_result_pending_after_abort(self):
+        backend = NCCL4PyBackend(
+            dist.HashStore(), 0, 1, timeout=torch.distributed.default_pg_timeout
+        )
+        self.addCleanup(backend.abort)
+        backend_mod = torch.distributed._nccl4py.backend
+
+        def issue():
+            t = torch.ones(4, device=backend._device)
+            work = backend.allreduce([t], dist.AllreduceOptions())
+            with mock.patch.object(backend_mod, "stream_complete") as monitor:
+                result = work.get_future_result()
+            self.assertIs(work.get_future_result(), result)
+            # Cancels the timeout handle.
+            work.wait()
+            return result, monitor.call_args.args[0]
+
+        result, on_complete = issue()
+        on_complete()
+        self.assertTrue(result.done())
+        self.assertEqual(WorkResult(result.wait()), WorkResult.SUCCESS)
+
+        # Kernels cut short by abort() also complete their events.
+        result, on_complete = issue()
+        backend.abort()
+        on_complete()
+        self.assertFalse(result.done())
 
 
 @skip_unless_nccl4py
@@ -275,9 +305,15 @@ class TestNCCL4PyBackendCollectives(MultiProcContinuousTest):
         t1 = torch.ones(4, device=device) * (self.rank + 1)
         t2 = torch.ones(4, device=device) * (self.rank + 1) * 10
         backend.start_coalescing()
-        backend.allreduce([t1], dist.AllreduceOptions())
+        coalesced = backend.allreduce([t1], dist.AllreduceOptions())
         backend.allreduce([t2], dist.AllreduceOptions())
+        # Through PyWork, as FlightRecorderHook calls it at issue.
+        coalesced_result = dist.Work.get_future_result(coalesced)
+        self.assertFalse(coalesced_result.done())
         work = backend.end_coalescing()
+        result = dist.Work.get_future_result(work)
+        self.assertEqual(WorkResult(result.wait()), WorkResult.SUCCESS)
+        self.assertEqual(WorkResult(coalesced_result.wait()), WorkResult.SUCCESS)
         work.wait()
         torch.cuda.synchronize(device)
         self.assertEqual(t1, torch.full((4,), 3.0, device=device))
@@ -293,6 +329,28 @@ class TestNCCL4PyBackendCollectives(MultiProcContinuousTest):
         torch.cuda.synchronize(device)
         expected = torch.full((4,), 3.0, device=device)
         self.assertEqual(t, expected)
+
+    @skip_if_lt_x_gpu(2)
+    def test_get_future_result(self):
+        device = torch.device(f"cuda:{self.rank}")
+        t = torch.ones(4, device=device) * (self.rank + 1)
+        work = dist.all_reduce(t, async_op=True)
+        result = work.get_future_result().wait()
+        self.assertEqual(WorkResult(result), WorkResult.SUCCESS)
+        self.assertEqual(t, torch.full((4,), 3.0, device=device))
+
+        # wait() clears the events; the result still tracks the kernels. On the
+        # backend directly: FlightRecorderHook requests the result at issue.
+        backend = dist.distributed_c10d._get_default_group()._get_backend(device)
+        work = backend.allreduce([t], dist.AllreduceOptions())
+        work.wait()
+        backend_mod = torch.distributed._nccl4py.backend
+        with mock.patch.object(
+            backend_mod, "stream_complete", wraps=backend_mod.stream_complete
+        ) as monitor:
+            result = dist.Work.get_future_result(work)
+        self.assertEqual(monitor.call_count, 1)
+        self.assertEqual(WorkResult(result.wait()), WorkResult.SUCCESS)
 
 
 @skip_unless_nccl4py

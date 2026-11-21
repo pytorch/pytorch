@@ -18,10 +18,41 @@
 // ROCM_VERSION arrives as -DROCM_VERSION=FB_ROCM_VERSION and collapses to 0
 // wherever the tp2 toolchain does not substitute it, which selects this branch.
 #if ROCM_VERSION < 60400
+// Scoped builtins need LLVM 18 (ROCm 6.2+). Keep the old calls before that.
+#if defined(__has_builtin) && __has_builtin(__scoped_atomic_load_n) && \
+    __has_builtin(__scoped_atomic_compare_exchange_n)
+#define TORCH_HIP_RELAXED_AGENT_LOAD(ptr) \
+  __scoped_atomic_load_n((ptr), __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE)
+#define TORCH_HIP_RELAXED_AGENT_CAS(ptr, expected, desired) \
+  __scoped_atomic_compare_exchange_n(                       \
+      (ptr),                                                \
+      (expected),                                           \
+      (desired),                                            \
+      false,                                                \
+      __ATOMIC_RELAXED,                                     \
+      __ATOMIC_RELAXED,                                     \
+      __MEMORY_SCOPE_DEVICE)
+#else
+#define TORCH_HIP_RELAXED_AGENT_LOAD(ptr) \
+  __hip_atomic_load((ptr), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT)
+#define TORCH_HIP_RELAXED_AGENT_CAS(ptr, expected, desired) \
+  __hip_atomic_compare_exchange_strong(                     \
+      (ptr),                                                \
+      (expected),                                           \
+      (desired),                                            \
+      __ATOMIC_RELAXED,                                     \
+      __ATOMIC_RELAXED,                                     \
+      __HIP_MEMORY_SCOPE_AGENT)
+#endif
 __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(
     __hip_bfloat162* address,
     __hip_bfloat162 value) {
+  // Test TUs set this so a GPU with the hardware atomic still runs the CAS.
+#if defined(TORCH_HEADERONLY_FORCE_PACKED_CAS)
+  if (false) {
+#else
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2bf16)) {
+#endif
     typedef short __attribute__((ext_vector_type(2))) vec_short2;
     static_assert(sizeof(vec_short2) == sizeof(__hip_bfloat162_raw));
     union {
@@ -38,17 +69,11 @@ __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(
       unsigned int u32;
     };
     u_hold old_val, new_val;
-    old_val.u32 = __hip_atomic_load(
-        (unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    old_val.u32 = TORCH_HIP_RELAXED_AGENT_LOAD((unsigned int*)address);
     do {
       new_val.h2r = __hadd2(old_val.h2r, value);
-    } while (!__hip_atomic_compare_exchange_strong(
-        (unsigned int*)address,
-        &old_val.u32,
-        new_val.u32,
-        __ATOMIC_RELAXED,
-        __ATOMIC_RELAXED,
-        __HIP_MEMORY_SCOPE_AGENT));
+    } while (!TORCH_HIP_RELAXED_AGENT_CAS(
+        (unsigned int*)address, &old_val.u32, new_val.u32));
     return old_val.h2r;
   }
 }
@@ -56,7 +81,11 @@ __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(
 __device__ inline __half2 preview_unsafeAtomicAdd(
     __half2* address,
     __half2 value) {
+#if defined(TORCH_HEADERONLY_FORCE_PACKED_CAS)
+  if (false) {
+#else
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2f16)) {
+#endif
     // The api expects an ext_vector_type of half
     typedef _Float16 __attribute__((ext_vector_type(2))) vec_fp162;
     static_assert(sizeof(vec_fp162) == sizeof(__half2_raw));
@@ -74,20 +103,16 @@ __device__ inline __half2 preview_unsafeAtomicAdd(
       unsigned int u32;
     };
     u_hold old_val, new_val;
-    old_val.u32 = __hip_atomic_load(
-        (unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    old_val.u32 = TORCH_HIP_RELAXED_AGENT_LOAD((unsigned int*)address);
     do {
       new_val.h2r = __hadd2(old_val.h2r, value);
-    } while (!__hip_atomic_compare_exchange_strong(
-        (unsigned int*)address,
-        &old_val.u32,
-        new_val.u32,
-        __ATOMIC_RELAXED,
-        __ATOMIC_RELAXED,
-        __HIP_MEMORY_SCOPE_AGENT));
+    } while (!TORCH_HIP_RELAXED_AGENT_CAS(
+        (unsigned int*)address, &old_val.u32, new_val.u32));
     return old_val.h2r;
   }
 }
+#undef TORCH_HIP_RELAXED_AGENT_LOAD
+#undef TORCH_HIP_RELAXED_AGENT_CAS
 #define ATOMICADD preview_unsafeAtomicAdd
 #else
 #define ATOMICADD unsafeAtomicAdd

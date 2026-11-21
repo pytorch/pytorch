@@ -77,11 +77,11 @@ class AppendOnlyList {
   std::enable_if_t<std::is_same_v<T0, T> && std::is_trivially_copyable_v<T>>
   copy(c10::ArrayRef<T0> src) {
     size_t n = src.size();
-    if (C10_UNLIKELY(n == 0)) {
+    if (n == 0) [[unlikely]] {
       return;
     }
     maybe_grow();
-    if (C10_LIKELY(next_ && (next_ + n <= end_))) {
+    if (next_ && (next_ + n <= end_)) [[likely]] {
       std::memcpy((void*)next_, (void*)src.begin(), n * sizeof(T0));
       next_ += n;
     } else {
@@ -180,7 +180,7 @@ class AppendOnlyList {
 
  private:
   void maybe_grow() {
-    if (C10_UNLIKELY(next_ == end_)) {
+    if (next_ == end_) [[unlikely]] {
       buffer_last_ = buffer_.emplace_after(buffer_last_);
       n_blocks_++;
       next_ = buffer_last_->data();
