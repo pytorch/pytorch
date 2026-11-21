@@ -218,6 +218,31 @@ class EtcdRendezvousHandler(RendezvousHandler):
 # but is verbose to add everywhere. Consider wrapping the client calls
 # into auto-retry for these errors?
 #
+def _lease_renewal_worker(client, path, ttl, stop_event):
+    while True:
+        try:
+            client.refresh(path, ttl=ttl)
+        except etcd.EtcdKeyNotFound:
+            break
+        except ConnectionRefusedError:
+            # This error usually occurs during test when the server already got terminated but the
+            # python garbage collector has not yet invoked the __del__ method.
+            break
+        except etcd.EtcdException:
+            # Transient etcd failure (timeout, dropped connection, cluster hiccup).
+            # Keep the thread alive and retry on the next cycle instead of letting the
+            # key expire. A permanent failure still expires the lease at the same
+            # deadline, since its lifetime depends only on the last successful refresh.
+            logger.warning(
+                "Transient etcd error while renewing lease on %s; will retry",
+                path,
+                exc_info=True,
+            )
+
+        if stop_event.wait(timeout=ttl / 2):
+            break
+
+
 class EtcdRendezvous:
     """A rendezvous implementation that uses `etcd <https://etcd.io/>`__ as the backend store."""
 
@@ -887,23 +912,10 @@ class EtcdRendezvous:
         # release the Python's GIL! An example of this is calling a pybind11
         # extension function that is blocking / long-running, but is not
         # doing a scoped release of the GIL.
-        def lease_worker(client, path, ttl, stop_event):
-            while True:
-                try:
-                    client.refresh(path, ttl=ttl)
-                except etcd.EtcdKeyNotFound:
-                    break
-                except ConnectionRefusedError:
-                    # This error usually occurs during test when the server already got terminated but the
-                    # python garbage collector has not yet invoked the __del__ method.
-                    break
-
-                if stop_event.wait(timeout=ttl / 2):
-                    break
-
         lease_stop_event = threading.Event()
         lease_thread = threading.Thread(
-            target=lease_worker, args=(self.client, full_path, ttl, lease_stop_event)
+            target=_lease_renewal_worker,
+            args=(self.client, full_path, ttl, lease_stop_event),
         )
 
         lease_thread.daemon = True
