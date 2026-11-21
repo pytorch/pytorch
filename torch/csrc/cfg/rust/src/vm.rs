@@ -4681,6 +4681,34 @@ impl Compiled {
         true
     }
 
+    /// Why a recorded run with writes in place is not exported, if what
+    /// autograd saved of its operations is not what it was, or cannot be
+    /// shown to be (asked of `torch.vm._export.saved_changed`): a tensor
+    /// that an operation saved for its derivative and that a later one
+    /// wrote to in place makes eager raise when it goes backward.
+    unsafe fn saved_changed(&self, path: &Path, rec: &graph::Recording) -> Option<String> {
+        let results = ffi::PyList_New(0);
+        for inst in path.body.iter().filter(|inst| inst.kind == Kind::Node && inst.dst != NONE) {
+            let held = rec.values[inst.dst as usize];
+            if !held.is_null() {
+                ffi::PyList_Append(results, held);
+            }
+        }
+        let _nobody = Hooked::nobody();
+        let module = ffi::PyImport_ImportModule(c"torch.vm._export".as_ptr());
+        let said = if module.is_null() { null_mut() } else { ffi::PyObject_CallMethod(module, c"saved_changed".as_ptr(), c"O".as_ptr(), results) };
+        let why = if said.is_null() || ffi::PyUnicode_Check(said) == 0 {
+            Some("what autograd saved could not be asked for".to_string())
+        } else {
+            Some(pyffi::str_to_string(said)).filter(|why| !why.is_empty())
+        };
+        ffi::PyErr_Clear();
+        for held in [results, module, said] {
+            xdecref(held);
+        }
+        why
+    }
+
     /// Whether an instruction of a path runs no Python code and writes to
     /// nothing but what the path made, on the values it has now: what an
     /// exported form has run in front of its callable or behind it, and so
@@ -5244,9 +5272,37 @@ impl Compiled {
     /// Whether an instruction that is no call site is an operation of a
     /// graph all the same (see `graph::generic`), on the values it is about
     /// to run on: its operators, as they are reported.
-    unsafe fn operation(&self, block: usize, origin: u32, inst: &Inst, regs: &[Obj], api: &TcfgApi) -> Option<String> {
+    unsafe fn operation(
+        &self,
+        block: usize,
+        origin: u32,
+        inst: &Inst,
+        regs: &[Obj],
+        api: &TcfgApi,
+        own: &dyn Fn(V) -> bool,
+    ) -> Option<String> {
         let mut info = TcfgTensorInfo::empty();
         let mut tensor = |v: V| !reg(regs, v).is_null() && (api.tensor_info)(reg(regs, v), &mut info) != 0;
+        // A subscript store into a tensor of the path's own.
+        if let Op::SetItem { obj, .. } = &inst.op {
+            let st = self.state.borrow();
+            let found = st.blocks[block].facts.get(origin as usize);
+            let fine = tensor(*obj) && own(*obj) && !found.is_some_and(|f| f.frames || f.raised);
+            let operators = found.map_or(String::new(), |f| f.operators.join("+"));
+            return fine.then(|| if operators.is_empty() { "setitem".to_string() } else { operators });
+        }
+        // The first tensor it is handed, in the order of the call.
+        let mut first: Option<V> = None;
+        let mut look = |v: V| {
+            if first.is_none() && tensor(v) {
+                first = Some(v);
+            }
+        };
+        match &inst.op {
+            Op::Call { args, .. } => args.iter().for_each(|v| look(*v)),
+            Op::CallMethod { recv, args, .. } => std::iter::once(recv).chain(args.iter()).for_each(|v| look(*v)),
+            _ => {}
+        }
         let fits = match &inst.op {
             // A method that was bound to a tensor earlier has its receiver
             // in no operand.
@@ -5260,19 +5316,25 @@ impl Compiled {
             Op::GetItem(a, _) => tensor(*a),
             _ => false,
         };
-        if !fits || origin == NONE || inst.dst == NONE {
+        if !fits || origin == NONE {
             return None;
         }
         let st = self.state.borrow();
         let found = st.blocks[block].facts.get(origin as usize)?;
-        let pure = found.runs > 0
+        let known = found.runs > 0
             && matches!(found.kernels, Kernels::One | Kernels::Many)
-            && !(found.frames || found.raised || found.wrote)
+            && !(found.frames || found.raised)
             && matches!(found.callee, spec::CalleeFact::Unseen)
-            && matches!(st.obs.get(inst.dst as usize), Some(ValueObs::Tensor { .. }))
-            && !found.operators.is_empty()
-            && found.operators.iter().all(|name| graph::pure_operator(name));
-        pure.then(|| found.operators.join("+"))
+            && !found.operators.is_empty();
+        let gives = inst.dst != NONE && matches!(st.obs.get(inst.dst as usize), Some(ValueObs::Tensor { .. }));
+        let pure = found.operators.iter().all(|name| graph::pure_operator(name));
+        // What writes, writes to its first tensor and to nothing else, and
+        // that is the path's own; or it is handed no tensor, and writes to
+        // what it makes.
+        let written = |name: &String| graph::pure_operator(name) || graph::writes_first(name);
+        let writes = !pure && found.operators.iter().all(written) && first.is_none_or(own);
+        let fine = if writes { gives || inst.dst == NONE } else { pure && gives && !found.wrote };
+        (known && fine).then(|| found.operators.join("+"))
     }
 
     /// Takes down one instruction of a path: decides whether it can be part
@@ -5439,7 +5501,8 @@ impl Compiled {
                 }
             }
         }
-        let operators = self.operation(block, origin, inst, regs, api);
+        let owned = |t: &Trace, v: V| t.mapped(v) != NONE && t.defs[t.mapped(v) as usize].own;
+        let operators = self.operation(block, origin, inst, regs, api, &|v| owned(t, v));
         if operators.is_none() {
             if let Some(taken) = self.record_call(t, site, (block, code as *const BlockCode, pc), regs, frames, api) {
                 return taken;
@@ -5489,7 +5552,19 @@ impl Compiled {
                 let idle = d.operands.last().is_some_and(|train| reg(regs, *train) == ffi::Py_False());
                 (dropout && idle).then_some(Kind::Node)
             }
-            Op::Call { .. } | Op::CallMethod { .. } | Op::GetItem(..) if operators.is_some() => Some(Kind::Node),
+            Op::Call { .. } | Op::CallMethod { .. } | Op::GetItem(..) | Op::SetItem { .. } if operators.is_some() => {
+                Some(Kind::Node)
+            }
+            // An operator that writes to its first tensor and to nothing
+            // else, where that tensor is the path's own.
+            Op::Dispatch(d) if d.slot.traits() == capi::SITE_WRITES && d.slot.len() > 0 => {
+                let mut info = TcfgTensorInfo::empty();
+                let mut tensor = |v: &&V| !reg(regs, **v).is_null() && (api.tensor_info)(reg(regs, **v), &mut info) != 0;
+                let written = d.operands.iter().find(|v| tensor(v));
+                let fine = written.is_some_and(|v| owned(t, *v))
+                    && d.slot.operator().is_some_and(|name| graph::writes_first(&name));
+                fine.then_some(Kind::Node)
+            }
             Op::Call { callee, args, kwnames } if *kwnames == NONE => {
                 let given: Vec<Obj> = args.iter().map(|v| reg(regs, *v)).collect();
                 graph::pure_call(reg(regs, *callee), &given, |i| made(t, args[i]), api).map(|own| {
@@ -5570,7 +5645,7 @@ impl Compiled {
                     let graph = late && graph::computed(&op, &t.defs, |_| false);
                     let kept = t.rec.values[v as usize];
                     ffi::Py_XINCREF(kept);
-                    let list = t.value(Def { node: false, late, graph, made: false }, kept);
+                    let list = t.value(Def { node: false, late, graph, made: false, own: false }, kept);
                     t.source[list as usize] = t.source[v as usize];
                     t.push(op, list, Kind::Pure, inst.bc);
                     lists.push((v, list));
@@ -5598,7 +5673,9 @@ impl Compiled {
         }
         let result = match (&inst.op, kind) {
             (Op::Dispatch(d), Kind::Node) => {
-                let given: Vec<Obj> = d.operands.iter().map(|v| reg(regs, *v)).collect();
+                // A write to what is the path's own is no write to what it
+                // was given.
+                let given: Vec<Obj> = d.operands.iter().filter(|v| !owned(t, **v)).map(|v| reg(regs, *v)).collect();
                 let versions = versions_of(&given, api);
                 let (result, picked) = self.exec_node(regs, d, api);
                 t.rec.wrote |= versions_moved(&versions, api);
@@ -5609,7 +5686,11 @@ impl Compiled {
             }
             (op, Kind::Node) => {
                 let mut given: Vec<Obj> = Vec::new();
-                op.for_each_use(|v| given.push(reg(regs, v)));
+                op.for_each_use(|v| {
+                    if !owned(t, v) {
+                        given.push(reg(regs, v));
+                    }
+                });
                 let versions = versions_of(&flattened(&given), api);
                 let result = self.exec_op(regs, op);
                 t.rec.wrote |= versions_moved(&versions, api);
@@ -5638,6 +5719,25 @@ impl Compiled {
         } else {
             obj
         };
+        // What a node gave: a tensor, or nothing that is read (a store, a
+        // write whose result is dropped).
+        let mut info = TcfgTensorInfo::empty();
+        let gave = !obj.is_null() && (api.tensor_info)(obj, &mut info) != 0;
+        let silent = inst.dst == NONE && (matches!(inst.op, Op::SetItem { .. }) || gave);
+        if kind == Kind::Node {
+            let writes = match &inst.op {
+                Op::Dispatch(d) => d.slot.traits() & capi::SITE_WRITES != 0,
+                Op::SetItem { .. } => true,
+                _ => operators.as_ref().is_some_and(|names| names.split('+').any(|name| !graph::pure_operator(name))),
+            };
+            t.inplace |= writes;
+        }
+        if kind == Kind::Node && !gave && !silent && t.rec.failed.is_none() {
+            // Several tensors, or none (`split`, `max` along a dimension,
+            // `meshgrid`): it has run, and is no operation of a graph. The
+            // path ends in front of it.
+            return Taken::Cut(obj, "an operation gives no single tensor".to_string());
+        }
         let mut dst = NONE;
         if inst.dst != NONE {
             let mut late = kind == Kind::Node;
@@ -5649,7 +5749,28 @@ impl Compiled {
             let node = kind == Kind::Node;
             let graph = late && !node && graph::computed(&renamed, &t.defs, int);
             ffi::Py_XINCREF(obj);
-            dst = t.define(inst.dst, Def { node, late, graph, made: makes }, obj);
+            // Its memory is that of an operand it gave back or is a view
+            // of, and then as much the path's own as that is, or new.
+            let mut own = node && gave && !info.data.is_null();
+            if own {
+                let memory = info.data;
+                let mut other = TcfgTensorInfo::empty();
+                graph::reads(&renamed, |v| {
+                    let held = t.rec.values[v as usize];
+                    if held.is_null() {
+                        return;
+                    }
+                    if (api.tensor_info)(held, &mut other) != 0 {
+                        own &= other.data != memory || t.defs[v as usize].own;
+                    } else if ffi::PyList_CheckExact(held) != 0 || ffi::PyTuple_CheckExact(held) != 0 {
+                        // What a list holds is not known to be the path's.
+                        for item in flattened(&[held]) {
+                            own &= (api.tensor_info)(item, &mut other) == 0 || other.data != memory;
+                        }
+                    }
+                });
+            }
+            dst = t.define(inst.dst, Def { node, late, graph, made: makes, own }, obj);
             capi::release(std::mem::replace(&mut regs[inst.dst as usize], obj));
         } else {
             capi::release(obj);
@@ -5658,7 +5779,7 @@ impl Compiled {
             let mut info = TcfgTensorInfo::empty();
             let held = if dst == NONE { null_mut() } else { t.rec.values[dst as usize] };
             let tensor = !held.is_null() && (api.tensor_info)(held, &mut info) != 0;
-            if !tensor && t.rec.failed.is_none() {
+            if !tensor && !silent && t.rec.failed.is_none() {
                 t.rec.failed = Some("an operation of the graph gave no tensor".to_string());
             }
             // Its type is read from its Python object, which a mode would
@@ -6588,11 +6709,15 @@ impl Compiled {
         t.rec.failed = mode.or_else(|| graph::interposed()).map(|why| why.to_string());
         let root = (block, (&(*code).origins)[pc..].iter().find(|o| **o != NONE).map_or(0, |o| *o as usize));
         // Where this run of the function has got to.
+        let mut left = false;
         let (went, ends) = match self.walk(&mut t, site, regs, frames, api, block, Some((code, pc))) {
             Walked::Ended { block, code, pc, afresh, reason } => {
                 (Landing { block, code, pc: if afresh { AFRESH } else { pc } }, reason)
             }
-            Walked::Left { block, code, call, reason } => (Landing { block, code, pc: call + 1 }, reason),
+            Walked::Left { block, code, call, reason } => {
+                left = true;
+                (Landing { block, code, pc: call + 1 }, reason)
+            }
             Walked::Raised(block, bc) => return PathEnd::Raised(block, bc),
             Walked::Deopt(block, at) => return PathEnd::Deopt(block, at),
             Walked::Returned(..) => unreachable!("the function a path starts in is not left by it"),
@@ -6605,6 +6730,9 @@ impl Compiled {
                 t.back();
                 (block, code, pc, false, if inlined { format!("in a call that is inlined: {}", ends) } else { ends })
             }
+            // An instruction of the function itself that has run and is no
+            // part of the path: the path ends in front of it.
+            None if left => (went.block, went.code, went.pc - 1, false, ends),
             None => (went.block, went.code, if went.pc == AFRESH { 0 } else { went.pc }, went.pc == AFRESH, ends),
         };
         // A call that was not gone into because the function it enters is
@@ -6651,7 +6779,13 @@ impl Compiled {
                 described.closed = Some(graph::EVER_NEW_REASON.to_string());
             }
         }
-        let graph::Described { description, closed, checks, numbers, args } = described;
+        let graph::Described { description, mut closed, checks, numbers, args } = described;
+        if closed.is_none() && t.inplace {
+            // What autograd kept of an operation was written to in place:
+            // eager raises when it goes backward, and so must this call.
+            // The same where that could not be found out.
+            closed = self.saved_changed(&path, &t.rec);
+        }
         if let (true, Some(why)) = (graph::debug(), &closed) {
             eprintln!("torch.vm graph {}: not exported for this call: {}", site.name, why);
         }

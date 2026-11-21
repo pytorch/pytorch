@@ -132,6 +132,10 @@ def graph_module(description: dict[str, Any]) -> torch.fx.GraphModule:
             _, (tensor, index), _, value, meta = parts
             node = graph.call_function(operator.getitem, (of(tensor), of(index)))
             values[value] = typed(node, meta)
+        elif kind == "setitem":
+            # A store into a tensor the graph made: it gives no value.
+            _, (tensor, index, stored), _, _, _ = parts
+            graph.call_function(operator.setitem, (of(tensor), of(index), of(stored)))
         elif kind == "size":
             tensor, dim, value = parts
             size = torch.ops.aten.sym_size.int
@@ -163,6 +167,54 @@ def graph_module(description: dict[str, Any]) -> torch.fx.GraphModule:
         given.append(graph.call_function(asked[kind], (of(tensor), *dim)))
     graph.output(tuple(given))
     return torch.fx.GraphModule(torch.nn.Module(), graph)
+
+
+# What a function of autograd saved, by its class: the names are those of
+# the class, and are looked up once.
+_SAVED: dict[type, tuple[str, ...]] = {}
+# How many functions of autograd a run is followed back through.
+_HISTORY = 4096
+
+
+def saved_changed(results: list[Any]) -> str:
+    """Why the run that gave ``results`` is not exported, as far as what
+    autograd saved goes; empty if nothing stands against it. An operation
+    that wrote in place to a tensor that an earlier one saved for its
+    derivative makes eager raise when it goes backward; a graph whose
+    writes a compiler made functional would not. The engine asks this of a
+    run with writes before it exports it. The functions that the results
+    came from are gone through, and those before them (a tensor that was
+    written to has the function of the write, and the one that saved it
+    comes before that): where there are more of them than ``_HISTORY``, or
+    one does not let what it saved be looked at, the answer is that it
+    cannot be shown."""
+    if not torch.is_grad_enabled():
+        return ""
+    seen: set[Any] = set()
+    functions = [getattr(result, "grad_fn", None) for result in results]
+    left = [function for function in functions if function is not None]
+    while left:
+        function = left.pop()
+        if function in seen:
+            continue
+        if len(seen) >= _HISTORY:
+            return f"what autograd saved is not looked at behind {_HISTORY} functions"
+        seen.add(function)
+        names = _SAVED.get(type(function))
+        if names is None:
+            listed = dir(type(function))
+            names = tuple(name for name in listed if name.startswith("_saved_"))
+            _SAVED[type(function)] = names
+        for name in names:
+            try:
+                getattr(function, name)
+            except RuntimeError as e:
+                if "modified by an inplace operation" in str(e):
+                    return "a tensor that autograd saved is written in place"
+                return f"what autograd saved cannot be looked at: {str(e).splitlines()[0][:80]}"
+        earlier = [before for before, _ in function.next_functions]
+        left.extend(before for before in earlier if before is not None)
+    return ""
 
 
 def examples(input_types: list[Any]) -> list[torch.Tensor]:
