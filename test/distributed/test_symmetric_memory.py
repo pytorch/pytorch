@@ -2300,12 +2300,13 @@ class AsyncTPTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    @skipIf(not SM100OrLater or TEST_WITH_ROCM, "MXFP8 async-TP requires NVIDIA SM100+")
     @parametrize("shard_shape", [(256,), (2, 128)])
     def test_fused_all_gather_scaled_matmul_mxfp8(self, shard_shape) -> None:
         self._init_process()
         group = dist.group.WORLD
-        K, N = 128, 64
+        # K=256 spans two K tiles of the swizzled scale.
+        K, N = 256, 64
         mx, sw = ScalingType.BlockWise1x32.value, SwizzleType.SWIZZLE_32_4_4.value
 
         A_hp, A_q, A_scale = _mxfp8_quantize(
@@ -2318,7 +2319,7 @@ class AsyncTPTest(MultiProcContinuousTest):
             Bs_hp.append(b_hp)
             Bs_q.append(b_q.t())
             B_scales.append(b_scale)
-        # None must default to bf16 in both the op and the fallback.
+        # With MXFP8, None means bf16.
         out_dtypes = [None, torch.bfloat16, torch.float32]
 
         outputs = []
@@ -2362,16 +2363,16 @@ class AsyncTPTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    @skipIf(not SM100OrLater or TEST_WITH_ROCM, "MXFP8 async-TP requires NVIDIA SM100+")
     def test_fused_scaled_matmul_reduce_scatter_mxfp8(self) -> None:
         self._init_process()
         group = dist.group.WORLD
-        M, K, N = 256 * self.world_size, 128, 64
+        # K=256 spans two K tiles of the swizzled scale.
+        M, K, N = 256 * self.world_size, 256, 64
         mx, sw = ScalingType.BlockWise1x32.value, SwizzleType.SWIZZLE_32_4_4.value
 
-        # Scaled down so the reduction stays within what bf16 resolves.
-        A_hp, A_q, A_scale = _mxfp8_quantize(torch.randn(M, K, device=device_type) / 8)
-        B_hp, B_q, B_scale = _mxfp8_quantize(torch.randn(N, K, device=device_type) / 8)
+        A_hp, A_q, A_scale = _mxfp8_quantize(torch.randn(M, K, device=device_type))
+        B_hp, B_q, B_scale = _mxfp8_quantize(torch.randn(N, K, device=device_type))
 
         outputs = []
         for context in test_contexts:
@@ -2394,19 +2395,22 @@ class AsyncTPTest(MultiProcContinuousTest):
                     )
                 )
 
-        # The op reduces partials in fp32 while the fallback reduces in bf16 through
-        # NCCL, so compare each against the dequantized reference, not each other.
+        # Compare each against the dequantized reference, not each other: they
+        # reduce the rank partials in different orders (the op in fp32, the
+        # fallback in bf16 through NCCL). Both round each partial (|x| up to ~70
+        # here, a 0.5 bf16 ulp) to bf16 first, which near zero costs up to about
+        # an ulp per partial.
         ref = torch.empty(M // self.world_size, N, device=device_type)
         dist.reduce_scatter_tensor(ref, A_hp.float() @ B_hp.float().t())
         for out in outputs:
             self.assertEqual(out.dtype, torch.bfloat16)
-            torch.testing.assert_close(out.float(), ref, rtol=2e-2, atol=5e-2)
+            torch.testing.assert_close(out.float(), ref, rtol=1e-2, atol=1.0)
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @skipUnless(SM100OrLater, "MXFP8 requires compute capability >= 10.0")
+    @skipIf(not SM100OrLater or TEST_WITH_ROCM, "MXFP8 async-TP requires NVIDIA SM100+")
     def test_fused_scaled_matmul_mxfp8_rejections(self) -> None:
         self._init_process()
         group_name = dist.group.WORLD.group_name
@@ -2414,16 +2418,16 @@ class AsyncTPTest(MultiProcContinuousTest):
         mx, sw = ScalingType.BlockWise1x32.value, SwizzleType.SWIZZLE_32_4_4.value
         _, B_q, B_scale = _mxfp8_quantize(torch.randn(N, K, device=device_type))
 
-        def all_gather(A_q, A_scale, gather_dim=0):
+        def all_gather(A_q, A_scale, gather_dim=0, swizzle=sw):
             return torch.ops.symm_mem.fused_all_gather_scaled_matmul(
                 A_q,
                 [B_q.t()],
                 A_scale,
                 mx,
-                sw,
+                swizzle,
                 [B_scale],
                 mx,
-                sw,
+                swizzle,
                 gather_dim,
                 group_name,
                 [None],
@@ -2470,6 +2474,16 @@ class AsyncTPTest(MultiProcContinuousTest):
                 )
                 with self.assertRaisesRegex(ValueError, "expected"):
                     all_gather(A_q, A_scale[: A_scale.numel() // 2])
+
+                # Only the 32x4x4 layout can be gathered and sliced per rank.
+                mn_k4 = SwizzleType.SWIZZLE_MN_K4.value
+                with self.assertRaisesRegex(ValueError, "SWIZZLE_32_4_4"):
+                    all_gather(A_q, A_scale, swizzle=mn_k4)
+
+                # A 2-D shard gathered along its last dim takes the
+                # last-gather-dim path, which must validate too.
+                with self.assertRaisesRegex(ValueError, "along dim 0"):
+                    all_gather(A_q, A_scale, gather_dim=1)
 
                 # Non-leading gather/scatter dim reorders rows under the scale.
                 rows = 128 * self.world_size

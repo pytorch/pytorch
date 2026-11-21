@@ -72,7 +72,9 @@ def _get_tensor(node: torch.fx.Node) -> torch.Tensor:
     return val
 
 
-def _infer_scaled_mm_recipes(mm_node: torch.fx.Node) -> tuple[Any, Any]:
+def _infer_scaled_mm_recipes(
+    mm_node: torch.fx.Node,
+) -> tuple[ScalingType | None, ScalingType | None]:
     A, B, A_scale, B_scale = (
         _get_tensor(cast("torch.fx.Node", n)) for n in mm_node.args[:4]
     )
@@ -725,6 +727,9 @@ class _ScaledMatmul(_Matmul):
         B_node = cast("torch.fx.Node", mm_node.args[1])
         A_scale_node = cast("torch.fx.Node", mm_node.args[2])
         B_scale_node = cast("torch.fx.Node", mm_node.args[3])
+        recipe = _infer_scaled_mm_recipes(mm_node)[0]
+        if recipe is None:
+            raise AssertionError(f"from_match on an unfusible _scaled_mm: {mm_node}")
 
         return _ScaledMatmul(
             nodes=match,
@@ -732,7 +737,7 @@ class _ScaledMatmul(_Matmul):
             B_node=B_node,
             A_scale_node=A_scale_node,
             B_scale_node=B_scale_node,
-            recipe=_infer_scaled_mm_recipes(mm_node)[0],
+            recipe=recipe,
             bias_node=get_arg(mm_node, 4, None),
             out_dtype=get_arg(mm_node, 6, None),
             use_fast_accum=get_arg(mm_node, 7, False),
@@ -834,6 +839,11 @@ def _get_fusible_all_gather_matmuls(
         return []
     if last_dim and isinstance(matmuls[0], _ScaledMatmul):
         return []
+    if isinstance(matmuls[0], _ScaledMatmul):
+        # The fused op takes a single A scale and a single recipe for every B.
+        scaled_matmuls = cast("list[_ScaledMatmul]", matmuls)
+        if len(OrderedSet((m.A_scale_node, m.recipe) for m in scaled_matmuls)) != 1:
+            return []
     return matmuls
 
 
@@ -857,7 +867,8 @@ def _insert_fused_all_gather_matmul(
         )
     elif mm_type == _ScaledMatmul:
         scaled_matmuls = cast("list[_ScaledMatmul]", matmuls)
-        # Matmuls sharing A share its recipe, and B's recipe must match A's.
+        # One recipe for all matmuls (_get_fusible_all_gather_matmuls), and
+        # _is_unfusible_scaled_mm requires B's recipe to match A's.
         recipe = scaled_matmuls[0].recipe.value
         no_swizzle = SwizzleType.NO_SWIZZLE.value
         return graph.call_function(
@@ -1352,23 +1363,6 @@ def _get_micro_pipeline_tp_patterns(
             if x.reduce_scatter_node not in unexposed_collectives
         ]
     return all_gathers, reduce_scatters
-
-
-def is_micro_pipeline_tp_candidate(node: torch.fx.Node) -> bool:
-    """Whether ``node`` belongs to a matmul this TP pass can structurally fuse."""
-
-    all_gathers, reduce_scatters = _get_micro_pipeline_tp_patterns(node.graph)
-    for all_gather in all_gathers:
-        if any(
-            node in matmul.nodes
-            for matmul in _get_fusible_all_gather_matmuls(all_gather)
-        ):
-            return True
-    for reduce_scatter in reduce_scatters:
-        matmul = _get_fusible_reduce_scatter_matmul(reduce_scatter)
-        if matmul is not None and node in matmul.nodes:
-            return True
-    return False
 
 
 def micro_pipeline_tp_pass(graph: torch.fx.Graph):

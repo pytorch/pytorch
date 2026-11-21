@@ -21,7 +21,7 @@ from torch._C._distributed_c10d import (
     Work as _Work,
 )
 from torch._prims_common import make_contiguous_strides_for
-from torch.nn.functional import ScalingType
+from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils._triton import has_triton
 
 
@@ -625,16 +625,40 @@ class _ScaleMode(Enum):
 _MX_ROW_TILE = 128
 
 
+def _is_mx_recipe(recipe_a: int, swizzle_a: int, swizzle_b: int) -> bool:
+    """Whether the scaled-matmul ops run MXFP8; validates its scale layouts."""
+    if ScalingType(recipe_a) != ScalingType.BlockWise1x32:
+        return False
+    swizzles = (SwizzleType(swizzle_a), SwizzleType(swizzle_b))
+    if swizzles != (SwizzleType.SWIZZLE_32_4_4,) * 2:
+        # Gathering and slicing the scale per rank relies on its 128-row tiles.
+        # SWIZZLE_MN_K4, for one, can have the same number of elements but is
+        # ordered by K block, so slicing it by rank would silently mix rows.
+        raise ValueError(
+            f"MXFP8 requires SWIZZLE_32_4_4 scales for A and B (got {swizzles})"
+        )
+    return True
+
+
 def _check_mx_operand(
     A: torch.Tensor, scale: torch.Tensor, dim: int, num_chunks: int
 ) -> None:
     """Validate an MXFP8 operand whose rows are split into `num_chunks` along `dim`."""
-    if A.device.type != "meta" and (
-        A.device.type != "cuda" or torch.version.hip is not None
+    from torch._subclasses.fake_tensor import maybe_get_fake_device
+
+    # Traced fake tensors report "meta" inside a Meta kernel; check the device
+    # they stand for. Only a genuine meta tensor skips the check.
+    device = maybe_get_fake_device(A) or A.device
+    if device.type != "meta" and (
+        device.type != "cuda" or torch.version.hip is not None
     ):
         raise ValueError(
             "MXFP8 async-TP requires an NVIDIA CUDA device, as it relies on the "
-            f"swizzled 32x4x4 scale layout (got {A.device})"
+            f"swizzled 32x4x4 scale layout (got {device})"
+        )
+    if A.dtype not in (torch.float8_e4m3fn, torch.float8_e5m2):
+        raise ValueError(
+            f"MXFP8 async-TP requires float8_e4m3fn or float8_e5m2 data (got {A.dtype})"
         )
     if dim != 0:
         raise ValueError(
@@ -643,10 +667,11 @@ def _check_mx_operand(
         )
     rows, k = math.prod(A.shape[:-1]), A.shape[-1]
     if rows % (num_chunks * _MX_ROW_TILE) != 0:
+        split = f" split over {num_chunks} ranks" if num_chunks > 1 else ""
         raise ValueError(
-            f"MXFP8 requires each rank's share of the {rows} rows to be a multiple "
-            f"of {_MX_ROW_TILE}, since the swizzled scale pads every rank's rows "
-            f"to {_MX_ROW_TILE}-row tiles"
+            f"MXFP8 requires each rank's rows to be a multiple of {_MX_ROW_TILE}, "
+            f"since the swizzled scale pads them to {_MX_ROW_TILE}-row tiles "
+            f"(got {rows} rows{split})"
         )
     expected = rows * (((k + 31) // 32 + 3) // 4 * 4)
     if scale.numel() != expected:
@@ -670,7 +695,7 @@ def _check_and_verify_fp8_all_gather_scale_mode(
         return _ScaleMode.UNSCALED
     elif recipe == ScalingType.TensorWise and scale.numel() == 1:
         return _ScaleMode.TENSOR_WISE
-    elif recipe == ScalingType.RowWise and scale.shape[-1] == 1:
+    elif recipe == ScalingType.RowWise and scale.dim() > 0 and scale.shape[-1] == 1:
         if scale.shape[:-1] == shard.shape[:-1]:
             return _ScaleMode.ROW_WISE_SHARDED
         if list(scale.shape[:-1]) == full_shape[:-1]:
@@ -1290,7 +1315,7 @@ def _fused_all_gather_scaled_matmul_fallback(
     use_fast_accum: list[bool],
 ) -> tuple[torch.Tensor, list[torch.Tensor]]:
     out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
-    if ScalingType(recipe_a) == ScalingType.BlockWise1x32:
+    if _is_mx_recipe(recipe_a, swizzle_a, swizzle_b):
         # fp8 (the operand dtype) is not a valid block-scaled output dtype.
         out_dtypes = [dt or torch.bfloat16 for dt in out_dtypes]
 
@@ -1398,17 +1423,19 @@ def _fused_all_gather_scaled_matmul(
     (MXFP8). A row-wise `A_scale` can be sharded like `A_shard` or replicated
     (covering the gathered `A`).
 
-    MXFP8 (CUDA only): pass this rank's e8m0 scales in the swizzled 32x4x4 layout
-    (the output of `to_blocked`) with SWIZZLE_32_4_4. They are gathered alongside
-    `A_shard`, which requires gather_dim=0 and `prod(A_shard.shape[:-1])` to be a
-    multiple of 128. `out_dtypes` entries default to bfloat16.
+    MXFP8 (NVIDIA CUDA only): pass this rank's e8m0 scales for
+    `A_shard.flatten(0, -2)` in the swizzled 32x4x4 layout, e.g. from
+    `torch.nn.functional.quantize_tensor(..., swizzle_type=SWIZZLE_32_4_4)`, with
+    both swizzles SWIZZLE_32_4_4. They are gathered alongside `A_shard`, which
+    requires gather_dim=0 and `prod(A_shard.shape[:-1])` to be a multiple of 128.
+    None entries of `out_dtypes` mean bfloat16 rather than the operand dtype.
 
     Optimal stride order for `A_shard` - if `A_shard.movedim(gather_dim, 0)` is
     contiguous, no extra copy is required for input layout transformation.
     Otherwise A_shard needs to be copied once.
     """
     out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
-    if ScalingType(recipe_a) == ScalingType.BlockWise1x32:
+    if _is_mx_recipe(recipe_a, swizzle_a, swizzle_b):
         # fp8 (the operand dtype) is not a valid block-scaled output dtype.
         out_dtypes = [dt or torch.bfloat16 for dt in out_dtypes]
 
@@ -1652,7 +1679,7 @@ def _fused_scaled_matmul_reduce_scatter(
     out_dtype: torch.dtype | None = None,
     use_fast_accum: bool = False,
 ) -> torch.Tensor:
-    if ScalingType(recipe_a) == ScalingType.BlockWise1x32:
+    if _is_mx_recipe(recipe_a, swizzle_a, swizzle_b):
         # fp8 (the operand dtype) is not a valid block-scaled output dtype.
         out_dtype = out_dtype or torch.bfloat16
     if _is_test_mode:
@@ -1719,6 +1746,10 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     out_dtype: torch.dtype | None = None,
     use_fast_accum: bool = False,
 ) -> torch.Tensor:
+    is_mx = _is_mx_recipe(recipe_a, swizzle_a, swizzle_b)
+    if is_mx:
+        # fp8 (the operand dtype) is not a valid block-scaled output dtype.
+        out_dtype = out_dtype or torch.bfloat16
     if ScalingType(recipe_a) == ScalingType.RowWise:
         if A_scale.shape[:-1] != A.shape[:-1]:
             raise ValueError(
@@ -1727,10 +1758,9 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
                 f"(A shape: {A.shape}, A_scale shape: {A_scale.shape})"
             )
         A_scale = A_scale.flatten(0, -2).contiguous()
-    elif ScalingType(recipe_a) == ScalingType.BlockWise1x32:
+    elif is_mx:
         group_size = c10d._get_group_size_by_name(group_name)
         _check_mx_operand(A, A_scale, scatter_dim_after_maybe_reshape, group_size)
-        out_dtype = out_dtype or torch.bfloat16
     elif A_scale.numel() != 1:
         raise ValueError(
             "Invalid A_scale shape "

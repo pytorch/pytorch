@@ -805,22 +805,30 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     ``out_dtypes``, and ``use_fast_accum`` corresponds to the entry at the
     same position in ``Bs`` and is forwarded to ``aten._scaled_mm_v2``.
 
-    ``recipe_a``/``recipe_b`` are ``torch.nn.functional.ScalingType`` values
-    and ``swizzle_a``/``swizzle_b`` are ``torch.nn.functional.SwizzleType``
-    values, as in ``aten._scaled_mm_v2``. ``recipe_b`` applies to every entry
-    of ``Bs``. The recipes must be both ``TensorWise``, both ``RowWise``, or
-    both ``BlockWise1x32`` (MXFP8). With ``RowWise``, ``A_scale`` may be sharded
-    like ``A_shard`` or cover the fully gathered tensor.
+    ``recipe_a``/``recipe_b`` are the integer values of
+    ``torch.nn.functional.ScalingType`` members and ``swizzle_a``/``swizzle_b``
+    those of ``torch.nn.functional.SwizzleType`` members (e.g.
+    ``ScalingType.RowWise.value``), as in ``aten._scaled_mm_v2``. ``recipe_b``
+    applies to every entry of ``Bs``. The recipes must be both ``TensorWise``,
+    both ``RowWise``, or both ``BlockWise1x32`` (MXFP8). With ``RowWise``,
+    ``A_scale`` may be sharded like ``A_shard`` or cover the fully gathered
+    tensor.
 
-    MXFP8 is supported on NVIDIA CUDA devices only. ``A_scale`` holds this
-    rank's ``float8_e8m0fnu`` scales in the swizzled 32x4x4 layout with
-    ``SWIZZLE_32_4_4``, and is gathered alongside ``A_shard``. This requires
-    ``gather_dim=0`` and the number of rows of ``A_shard`` (the product of all
-    but its last dimension) to be a multiple of 128. ``None`` entries of
-    ``out_dtypes`` default to ``torch.bfloat16``. The exact dtype, scale-layout, and accelerator
-    requirements are those of ``aten._scaled_mm_v2``. This is a specialized compiler fusion target; support
-    for a particular FP8 format or shape must be checked on the target
-    accelerator.
+    MXFP8 is supported on NVIDIA CUDA devices only, with ``float8_e4m3fn`` or
+    ``float8_e5m2`` data. ``A_scale`` holds this rank's ``float8_e8m0fnu``
+    scales for ``A_shard.flatten(0, -2)`` in the swizzled 32x4x4 layout, as
+    returned by ``torch.nn.functional.quantize_tensor`` with
+    ``swizzle_type=SwizzleType.SWIZZLE_32_4_4``, and both swizzles must be
+    ``SWIZZLE_32_4_4``. ``A_scale`` is gathered alongside ``A_shard``, which
+    requires ``gather_dim=0`` and the number of rows of ``A_shard`` (the
+    product of all but its last dimension) to be a multiple of 128. With
+    MXFP8, ``None`` entries of ``out_dtypes`` mean ``torch.bfloat16`` rather
+    than the operand dtype.
+
+    The exact dtype, scale-layout, and accelerator requirements are otherwise
+    those of ``aten._scaled_mm_v2``. This is a specialized compiler fusion
+    target; support for a particular FP8 format or shape must be checked on the
+    target accelerator.
 
     :returns: The gathered ``A`` and the list of scaled-matmul results.
 
@@ -861,10 +869,10 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 
     The recipe and swizzle arguments are as in
     :func:`fused_all_gather_scaled_matmul`. For MXFP8, ``A_scale`` is the
-    swizzled scale of the whole ``A``, which is sliced per rank; this requires
-    both scatter dimensions to be 0 and the rows of ``A`` divided by the
-    process-group size to be a multiple of 128. ``out_dtype`` defaults to
-    ``torch.bfloat16``.
+    swizzled scale of the whole ``A.flatten(0, -2)``, which is sliced per rank;
+    this requires ``scatter_dim_after_maybe_reshape=0`` and the rows of ``A``
+    divided by the process-group size to be a multiple of 128. With MXFP8,
+    ``out_dtype=None`` means ``torch.bfloat16`` rather than the operand dtype.
 
     This operator is primarily a compiler target. Its supported dtypes, scale
     layouts, and hardware follow ``aten._scaled_mm_v2`` and are narrower than
