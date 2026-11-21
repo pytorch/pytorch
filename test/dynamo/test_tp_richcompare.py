@@ -976,7 +976,7 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         )
 
     # =====================================================================
-    # Builtin function comparison (BaseBuiltinVariable)
+    # Builtin function comparison (TypeVariable)
     # =====================================================================
 
     def test_builtin_cmp(self):

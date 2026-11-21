@@ -30,12 +30,14 @@ from ..exc import (
 from ..guards import (
     _method_identity_guards_filtered,
     _receiver_alias_pattern,
+    _untracked_method_identity,
     GuardBuilder,
     install_guard,
 )
 from ..source import AttrSource, is_from_skip_guard_source, TypeMROSource, TypeSource
 from ..utils import is_tensor_base_attr_getter, is_torch_class
 from .base import (
+    _compute_slotdefs,
     AsPythonConstantNotImplementedError,
     GetSet,
     getset_build,
@@ -52,8 +54,8 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .functions import BaseUserFunctionVariable, UserMethodVariable
-from .object_protocol import guardable_mro_source, python_constant_repr_impl
-from .user_defined import UserDefinedObjectVariable
+from .object_protocol import guardable_mro_source, mro_lookup, python_constant_repr_impl
+from .user_defined import setattr_hackcheck, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
@@ -138,6 +140,27 @@ def descr_repr(
     return VariableTracker.build(
         tx, f"<{kind} '{name}' of '{get_type_tp_name(objclass)}' objects>"
     )
+
+
+def _vt_cls_modeling(vt: VariableTracker, py_type: type) -> type | None:
+    if py_type is object:
+        return variables.VariableTracker
+    if py_type is type:
+        return variables.TypeVariable
+
+    from .base import VariableTrackerMeta
+
+    for subclass in VariableTrackerMeta.all_subclasses:
+        cpython_type = getattr(subclass, "_cpython_type", None)
+        if cpython_type is None:
+            continue
+        types = cpython_type if isinstance(cpython_type, tuple) else (cpython_type,)
+        # Only a class vt is an instance of: another class's slot impls assume
+        # their own representation, e.g. IntConstantVariable's fold a constant
+        # and cannot run on a SymNodeVariable that also models int.
+        if py_type in types and isinstance(vt, subclass):
+            return subclass
+    return None
 
 
 class DescriptorVariable(VariableTracker):
@@ -239,11 +262,32 @@ class WrapperDescriptorVariable(DescriptorVariable):
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
-        _check_descriptor_obj_type(tx, self.descriptor, obj)
+        name, objclass = self.descriptor.__name__, self.descriptor.__objclass__
+        if not issubclass(obj.python_type(), objclass):
+            raise_type_error(
+                tx,
+                f"descriptor '{name}' requires a '{objclass.__name__}' object "
+                f"but received a '{obj.python_type_name()}'",
+            )
         # Dispatch through the owner (UDCV for the defining class) rather
         # than obj.call_method, which would do MRO resolution from type(obj)
         # and find Python overrides on subclasses. Routing through the class
         # mirrors CPython's wrapperdescr_call which invokes the C slot directly.
+        obj = obj.realize()
+        if name in ("__setattr__", "__delattr__"):
+            setattr_hackcheck(tx, obj, self.descriptor)
+        if self.descriptor is object.__eq__ and len(rest) == 1 and not kwargs:
+            if isinstance(obj, BoundBuiltinMethodVariable):
+                return self.owner.call_method(tx, name, args, kwargs)
+        if objclass is dict and isinstance(obj, variables.ConstDictVariable):
+            obj.check_base_dict_mutation(tx, name)
+        # The VT class modeling objclass, e.g. ConstDictVariable for
+        # dict.__eq__ on an OrderedDict: its impl, not the subclass VT's.
+        vt_cls = _vt_cls_modeling(obj, objclass)
+        sd = _compute_slotdefs(objclass).get(name)
+        if vt_cls is not None and sd is not None:
+            impl = getattr(vt_cls, sd.impl)
+            return sd.wrapper(obj, tx, impl, rest, kwargs)
         return self.owner.call_method(
             tx, self.descriptor.__name__, [obj, *rest], kwargs
         )
@@ -339,12 +383,17 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         "__self__": Member(lambda s, tx: s.obj, readonly_setter),
     }
 
-    def get_real_python_backed_value(self) -> types.MethodWrapperType:
-        return self.as_python_constant()
+    def get_real_python_backed_value(self) -> object:
+        # The owner may be backed by a real object without being a constant
+        # (e.g. an lru_cache wrapper).
+        obj_value = self.obj.get_real_python_backed_value()
+        if obj_value is NO_SUCH_SUBOBJ:
+            return NO_SUCH_SUBOBJ
+        return self.descriptor.__get__(obj_value, type(obj_value))
 
     def is_python_constant(self) -> bool:
         # Container materialization copies the receiver, changing the wrapper's identity.
-        return type(self.obj.realize()) is ConstantVariable
+        return ConstantVariable.is_constant_vt(self.obj.realize())
 
     def as_python_constant(self) -> types.MethodWrapperType:
         obj_value = self.obj.as_python_constant()
@@ -401,12 +450,7 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
 
     def _check_identity_guards(self, tx: "InstructionTranslatorBase") -> None:
         if _method_identity_guards_filtered(tx):
-            unimplemented(
-                gb_type="slot-wrapper identity requires receiver guards",
-                context=f"{self}",
-                explanation="Slot-wrapper identity operations require receiver guards that saved capture may filter out.",
-                hints=["Compare or hash slot wrappers outside the compiled region."],
-            )
+            _untracked_method_identity(f"slot-wrapper identity requires guards: {self}")
 
     def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         self._check_identity_guards(tx)
@@ -415,7 +459,7 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         # CPython wrapper_hash:
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1347
         method = self.descriptor.__get__(receiver, type(receiver))
-        return hash(method), type(obj) is not ConstantVariable
+        return hash(method), not ConstantVariable.is_constant_vt(obj)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
@@ -507,23 +551,31 @@ class MethodDescriptorVariable(DescriptorVariable):
                 tx, f"unbound method {self.descriptor.__qualname__}() needs an argument"
             )
         obj, *rest = args
-        name = self.descriptor.__name__
+        name, objclass = self.descriptor.__name__, self.descriptor.__objclass__
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         obj = obj.realize()
         if isinstance(obj, variables.ConstDictVariable):
             result = obj.call_method_descriptor(tx, self.descriptor, rest, kwargs)
             if result is not None:
                 return result
-        if isinstance(obj, UserDefinedObjectVariable):
-            base_methods = obj._base_methods
-            if base_methods is not None and self.descriptor in base_methods:
-                return obj.call_base_method(tx, name, rest, kwargs)
-        method = obj.lookup_tp_method(name)
-        if method is not None:
-            result = method(obj, tx, name, rest, kwargs)
-            if result is not None:
-                return result
-        return self.owner.call_method(tx, name, [obj, *rest], kwargs)
+
+        if vt_cls := _vt_cls_modeling(obj, objclass):
+            if meth := vt_cls._lookup_tp_table(name, "tp_methods"):
+                result = meth(obj, tx, name, rest, kwargs)
+                if result is not None:
+                    return result
+        if mro_lookup(obj.python_type(), name) is self.descriptor:
+            # Nothing overrides it, so name lookup reaches the same C method.
+            return obj.call_method(tx, name, rest, kwargs)
+        if isinstance(obj, UserDefinedObjectVariable) and objclass is dict:
+            return obj.call_base_method(tx, name, rest, kwargs)
+        unimplemented(
+            gb_type="Unbound method descriptor call with unmodeled owner",
+            context=f"{self.descriptor.__qualname__}({obj}, ...)",
+            explanation=f"Dynamo has no model of {objclass.__qualname__}.{name} for a "
+            f"{obj.python_type().__qualname__} receiver.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def tp_descr_get_impl(
         self,
@@ -670,14 +722,7 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
 
     def get_id(self, tx: "InstructionTranslatorBase") -> int | None:
         if self.value is not None and _method_identity_guards_filtered(tx):
-            unimplemented(
-                gb_type="Prebound builtin method identity requires wrapper guards",
-                context="builtin method wrapper identity",
-                explanation="Binding guards cannot preserve builtin method wrapper identity when identity guards are filtered.",
-                hints=[
-                    "Keep wrapper identity observations outside saved or guard-filtered functions."
-                ],
-            )
+            _untracked_method_identity("method identity requires wrapper guards")
         return super().get_id(tx)
 
     def has_fresh_container_receiver(self) -> bool:
@@ -730,7 +775,7 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
         receiver = _bound_method_receiver(tx, obj)
         # Ordinary compilation can pin a constant receiver. Saved graphs cannot
         # retain its address-based hash when identity guards are filtered out.
-        is_fake = type(obj) is not ConstantVariable or filtered
+        is_fake = not ConstantVariable.is_constant_vt(obj) or filtered
         return hash(_bind_builtin_method(self.descriptor, receiver)), is_fake
 
     def tp_richcompare_impl(self, tx, other, op):
@@ -781,10 +826,8 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
                         aliases=_receiver_alias_pattern(values),
                     )
                     install_guard(source.make_guard(alias_guard))
-                    tracer = tx.output.current_tracer
-                    while tracer is not None:
+                    for tracer in tx.output.tracers:
                         tracer.has_builtin_method_identity = True
-                        tracer = tracer.parent
         elif (
             left.source is not None or right.source is not None
         ) and _method_identity_guards_filtered(tx):
@@ -949,6 +992,8 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
         # producing a builtin_function_or_method via PyCMethod_New.
         # It first requires owner to be a type and a subtype of __objclass__.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
+        if owner.is_constant_none():
+            owner = obj.tp_getattro_impl(tx, "__class__")
         owner_type = owner.python_type()
         if not issubclass(owner_type, type):
             raise_type_error(
