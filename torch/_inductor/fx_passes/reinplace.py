@@ -277,6 +277,125 @@ def annotate_scatter_chain_lengths(graph: torch.fx.Graph) -> None:
             node.meta["scatter_chain_length"] = len(chain)
 
 
+# Indexed updates allowed between generalized_scatter and copy_ back to a graph
+# input when deciding scatter reinplace profitability (see #195285).
+# index_copy is omitted: it is not in inplaceable_ops and is normally decomposed
+# to index_put before this pass.
+_SCATTER_COPY_BACK_THROUGH_OPS = OrderedSet(
+    [
+        aten.index_put.default,
+        aten._unsafe_index_put.default,
+    ]
+)
+
+
+def _is_aliasing_view_user(user: torch.fx.Node, alias: torch.fx.Node) -> bool:
+    return (bool(_is_view_op(user.target)) and user.args[0] is alias) or (
+        user.target is operator.getitem
+        and user.args[0] is alias
+        and bool(_is_view_op(alias.target))
+    )
+
+
+def _has_data_use_of_aliases_after_node(
+    nodes: Sequence[torch.fx.Node], after: torch.fx.Node
+) -> bool:
+    """True if any of `nodes` (or a view/getitem alias) has a real use after `after`.
+
+    Metadata-only and control_deps ordering-only uses are ignored. Following
+    getitem of multi-output views is required so split/unbind results count as
+    live aliases of an indexed-update result.
+    """
+    pending = list(nodes)
+    seen: OrderedSet[torch.fx.Node] = OrderedSet()
+    while pending:
+        alias = pending.pop()
+        if alias in seen:
+            continue
+        seen.add(alias)
+        for user in alias.users:
+            if _is_aliasing_view_user(user, alias):
+                pending.append(user)
+            elif (
+                # FX nodes are ordered by graph insertion (NodeBase.__lt__).
+                user > after
+                and user.target not in META_ONLY_OPS
+                and not _is_control_deps_ordering_only_use(user, alias)
+            ):
+                return True
+    return False
+
+
+def _first_copy_into_input(inp: torch.fx.Node) -> torch.fx.Node | None:
+    """Match can_inplace: the first copy_ that mutates a graph input."""
+    for n in inp.graph.nodes:
+        if n.target is aten.copy_.default and n.args[0] is inp:
+            return n
+    return None
+
+
+def _scatter_copied_back_through_indexed_updates(
+    node: torch.fx.Node, inp: torch.fx.Node
+) -> bool:
+    """True if the first copy_(inp, ...) is a safe indexed-update copy-back.
+
+    Collect every indexed update reachable over the mutation-base edge,
+    including through view/getitem aliases. Align with can_inplace by only
+    accepting the *first* copy_ into inp. View-only copy-backs (no indexed
+    update) are rejected unless the copy source is layout-preserving vs inp,
+    matching _is_layout_preserving_view_copy_back used by the core pass.
+    """
+    pending = [node]
+    reachable: OrderedSet[torch.fx.Node] = OrderedSet([node])
+    indexed_results: OrderedSet[torch.fx.Node] = OrderedSet()
+    seen: OrderedSet[torch.fx.Node] = OrderedSet()
+    copy_backs: OrderedSet[torch.fx.Node] = OrderedSet()
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        for user in current.users:
+            if (
+                user.target is aten.copy_.default
+                and user.args[0] is inp
+                and user.args[1] is current
+            ):
+                # Direct scatter -> copy_ is handled by the caller; this helper
+                # only covers indexed-update (and layout-preserving view) paths.
+                if current is node:
+                    continue
+                if current in indexed_results:
+                    copy_backs.add(user)
+                elif _is_view_op(current.target) or (
+                    current.target is operator.getitem
+                    and isinstance(current.args[0], torch.fx.Node)
+                    and _is_view_op(current.args[0].target)
+                ):
+                    base = _get_view_base(current)
+                    if base in indexed_results and _same_size_stride_and_storage_offset(
+                        cast(torch.Tensor, current.meta["val"]),
+                        cast(torch.Tensor, inp.meta["val"]),
+                    ):
+                        copy_backs.add(user)
+            elif _is_aliasing_view_user(user, current):
+                pending.append(user)
+            elif (
+                user.target in _SCATTER_COPY_BACK_THROUGH_OPS
+                and user.args[0] is current
+            ):
+                indexed_results.add(user)
+                reachable.add(user)
+                pending.append(user)
+
+    first_copy = _first_copy_into_input(inp)
+    return (
+        first_copy is not None
+        and first_copy in copy_backs
+        and not _has_data_use_of_aliases_after_node(tuple(reachable), first_copy)
+    )
+
+
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -302,12 +421,19 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     if is_node_realized(inp) and is_node_realized(node):  # type: ignore[arg-type]
         return True
 
-    # If the output is copied back into the input, this forces both to be
-    # realized as the output is a user of the input
-    if inp.op in ("placeholder", "get_attr") and any(  # type: ignore[union-attr]
-        user.target is aten.copy_.default and user.args[0] is inp for user in node.users
-    ):
-        return True
+    # If the output is copied back into the input (directly, or through a
+    # chain of known inplaceable indexed updates), this forces both to be
+    # realized as the output is a user of the input. Direct copy-back skips the
+    # indexed-update liveness check intentionally (unchanged pre-#195285
+    # behavior). The indexed-update path must not leave any reachable result
+    # alias live after the first copy_ into inp, since reinplacing would make
+    # that alias observe the input mutation.
+    if isinstance(inp, torch.fx.Node) and inp.op in ("placeholder", "get_attr"):
+        if any(
+            user.target is aten.copy_.default and user.args[0] is inp
+            for user in node.users
+        ) or _scatter_copied_back_through_indexed_updates(node, inp):
+            return True
 
     # TODO This can and should be moved to a fxgraph pass upstream
     # A long chain of scatters should NOT be kept in functional variant, as each thread block
