@@ -1,3 +1,4 @@
+#include <ATen/cpu/Utils.h>
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
 #include <c10/util/Exception.h>
@@ -20,6 +21,31 @@
 #include <torch/csrc/shim_conversion_utils.h>
 #include <torch/csrc/shim_exception_state.h>
 #include <torch/csrc/stable/c/shim.h>
+
+namespace {
+// Initialize on the first shim call.
+const std::unordered_map<std::string, c10::IValue>&
+_torch_get_cpu_capabilities() {
+  static const auto capabilities = at::cpu::get_cpu_capabilities();
+  return capabilities;
+}
+} // namespace
+
+AOTI_TORCH_EXPORT AOTITorchError torch_get_l1d_cache_size(int64_t* ret_size) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    const auto& capabilities = _torch_get_cpu_capabilities();
+    const auto it = capabilities.find("l1d_cache_size");
+    *ret_size = it == capabilities.end() ? 0 : it->second.toInt();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_get_l2_cache_size(int64_t* ret_size) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    const auto& capabilities = _torch_get_cpu_capabilities();
+    const auto it = capabilities.find("l2_cache_size");
+    *ret_size = it == capabilities.end() ? 0 : it->second.toInt();
+  });
+}
 
 AOTITorchError torch_new_list_reserve_size(size_t size, StableListHandle* ret) {
   auto list_ptr = std::make_unique<std::vector<StableIValue>>();
