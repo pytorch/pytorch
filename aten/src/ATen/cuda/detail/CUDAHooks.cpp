@@ -364,6 +364,19 @@ long CUDAHooks::versionCuDNNFrontend() const {
 #endif
 }
 
+// MIOpen's RDNA3 / RDNA3.5 / RDNA4 solvers for grouped and depthwise convolutions with dilation
+// (forward), faster for inference than PyTorch's SlowDilated2d / CudaDepthwise2d.
+bool CUDAHooks::supportsGroupedDilatedConvolutionWithMIOpen() const {
+#if AT_ROCM_ENABLED()
+  // TODO: placeholder; the first MIOpen version with ROCm/rocm-libraries#15225 and #15233.
+  constexpr long kMIOpenVersion = 30700;
+  return hasROCM() && versionMIOpen() >= kMIOpenVersion &&
+      isGPUArch({"gfx110", "gfx115", "gfx120"});
+#else
+  return false;
+#endif
+}
+
 long CUDAHooks::versionMIOpen() const {
 #if AT_ROCM_ENABLED()
   return MIOPEN_VERSION_MAJOR * 10000 +
