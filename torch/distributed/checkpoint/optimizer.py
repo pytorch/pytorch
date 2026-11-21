@@ -103,11 +103,13 @@ def _alloc_tensor(
     props: TensorProperties, size: Sequence[int], device_type: str = "cuda"
 ) -> torch.Tensor:
     if device_type == "cpu":
-        device = cast(torch.device, _get_device_module(device_type).current_device())
+        device = torch.device("cpu")
+    elif torch.accelerator.is_available():
+        device = torch.device(device_type, torch.accelerator.current_device_index())
     else:
-        device = torch.device(
-            device_type, _get_device_module(device_type).current_device()
-        )
+        mod = getattr(torch, device_type, None)
+        idx = mod.current_device() if mod and hasattr(mod, "current_device") else 0
+        device = torch.device(device_type, idx)
 
     return torch.empty(
         size=size,
