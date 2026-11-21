@@ -382,7 +382,20 @@ class GenericAttrSource(ChainedSource):
 # Represents obj.__dict__ where obj is a type object
 @dataclass_with_cached_hash(frozen=True)
 class TypeDictSource(ChainedSource):
+    # Read type->tp_dict directly instead of going through type.__getattribute__,
+    # where a metaclass __dict__ property would run during guard evaluation.
+    raw: bool = False
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        if self.raw:
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    "torch._dynamo.utils", "get_type_dict_no_user_code"
+                )
+            )
+            codegen(self.base)
+            codegen.extend_output(create_call_function(1, False))
+            return
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("__dict__"))
 
@@ -392,6 +405,8 @@ class TypeDictSource(ChainedSource):
         # guard accessor, we use type->tp_dict which is a dict. So,
         # forcefully pass a dict object to ensure that the GuardManager
         # registers that it's working on a dict object.
+        if self.raw:
+            return "dict(type.__dict__['__dict__'].__get__({0}))"
         return "dict({0}.__dict__)"
 
 
@@ -414,12 +429,27 @@ class MappingProxyMappingSource(ChainedSource):
 # Represents obj.__mro__ where object is type object
 @dataclass_with_cached_hash(frozen=True)
 class TypeMROSource(ChainedSource):
+    # Read type->tp_mro directly instead of going through type.__getattribute__,
+    # where a metaclass __mro__ property would run during guard evaluation.
+    raw: bool = False
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        if self.raw:
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    "torch._dynamo.utils", "get_type_mro_no_user_code"
+                )
+            )
+            codegen(self.base)
+            codegen.extend_output(create_call_function(1, False))
+            return
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("__mro__"))
 
     @property
     def _name_template(self) -> str:
+        if self.raw:
+            return "type.__dict__['__mro__'].__get__({0})"
         return "{0}.__mro__"
 
 
