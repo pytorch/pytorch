@@ -34,6 +34,13 @@ class TestUnaryUfuncs(TestCase):
 
     def test_cbrt(self):
         assert_allclose(np.cbrt(0.5), cbrt(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.cbrt(-8.0), cbrt(-8.0), atol=1e-14, check_dtype=False)
+        assert_allclose(
+            np.cbrt([-8.0, -1.0, -0.0, 0.0, 1.0, 8.0]),
+            cbrt([-8.0, -1.0, -0.0, 0.0, 1.0, 8.0]),
+            atol=1e-14,
+            check_dtype=False,
+        )
 
     def test_ceil(self):
         assert_allclose(np.ceil(0.5), ceil(0.5), atol=1e-14, check_dtype=False)
@@ -63,6 +70,17 @@ class TestUnaryUfuncs(TestCase):
 
     def test_expm1(self):
         assert_allclose(np.expm1(0.5), expm1(0.5), atol=1e-14, check_dtype=False)
+
+    def test_fix(self):
+        assert_allclose(np.fix(0.5), fix(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.fix(1.5), fix(1.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.fix(-1.5), fix(-1.5), atol=1e-14, check_dtype=False)
+        assert_allclose(
+            np.fix([1.5, -1.5, 2.5, -2.5, 8.0, -8.0]),
+            fix([1.5, -1.5, 2.5, -2.5, 8.0, -8.0]),
+            atol=1e-14,
+            check_dtype=False,
+        )
 
     def test_fabs(self):
         assert_allclose(np.fabs(0.5), fabs(0.5), atol=1e-14, check_dtype=False)
