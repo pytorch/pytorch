@@ -454,6 +454,37 @@ class TestRefs(TestCase):
             x = torch.ones(4, device=device)
             x.to(device="meta")
 
+    # From https://github.com/pytorch/pytorch/issues/195705
+    @dtypes(torch.bfloat16, torch.float16, torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_alpha_dropout_dtype(self, device, dtype):
+        # python_ref_db skips the ref-vs-eager comparisons for dropout because
+        # the mask is redrawn per call, and test_python_ref_meta compares the
+        # ref against itself, so nothing else cross-checks the output dtype.
+        a = make_tensor((8,), device=device, dtype=dtype)
+        for p in (0.0, 0.5, 1.0):
+            actual = refs.nn.functional.alpha_dropout(a, p=p, training=True)
+            self.assertEqual(actual.dtype, dtype)
+        actual = refs.nn.functional.alpha_dropout(a, p=0.5, training=False)
+        self.assertEqual(actual.dtype, dtype)
+
+    @dtypes(torch.float64, torch.complex128)
+    def test_alpha_dropout_values(self, device, dtype):
+        # p in {0, 1} and training=False hit early returns, and the dtype check
+        # above does not catch the float64 coefficients being built in a lower
+        # precision. Seed so the mask is reproducible, then compare against the
+        # formula evaluated entirely in float64.
+        x = make_tensor((1024,), device=device, dtype=dtype)
+        p = 0.5
+        torch.manual_seed(0)
+        actual = refs.nn.functional.alpha_dropout(x, p=p, training=True)
+        torch.manual_seed(0)
+        mask = refs.nn.functional._dropout_helper(x, 1 - p)
+        alpha = -1.7580993408473766
+        a = ((alpha * alpha * p + 1) * (1 - p)) ** -0.5
+        expected = x * (mask.to(dtype) * a) + (
+            torch.logical_not(mask).to(dtype) * (alpha * a) + alpha * a * p
+        )
+        self.assertEqual(actual, expected, atol=0, rtol=0)
 
 
 instantiate_device_type_tests(TestRefs, globals())
