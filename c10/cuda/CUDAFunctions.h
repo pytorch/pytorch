@@ -134,6 +134,14 @@ C10_CUDA_API void __inline__ stream_synchronize(cudaStream_t stream) {
 C10_CUDA_API bool hasPrimaryContext(DeviceIndex device_index);
 C10_CUDA_API std::optional<DeviceIndex> getDeviceIndexWithPrimaryContext();
 
+#ifdef USE_ROCM
+// Whether hipMemImportFromShareableHandle takes a POSIX file descriptor by
+// value, as CUDA does, rather than through a pointer to it. HIP 7.1 switched to
+// the value, and some HIP 7.0 builds backport that without changing their
+// version, so this asks the loaded runtime instead of relying on ROCM_VERSION.
+C10_CUDA_API bool hipMemImportTakesFdByValue();
+#endif
+
 } // namespace c10::cuda
 
 #ifdef USE_ROCM
