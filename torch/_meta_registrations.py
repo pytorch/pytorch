@@ -2393,9 +2393,11 @@ def _pad2d_common(input, padding, *, is_reflection):
     else:
         output = input.new_empty((nbatch, nplane, output_h, output_w))
         # CPU kernels preserve channels_last via suggest_memory_format(),
-        # but CUDA kernels always produce contiguous output.
+        # but CUDA kernels always produce contiguous output. Registered
+        # privateuse1 backends (e.g. Ascend NPU) follow CUDA semantics.
+        private_backend = torch._C._get_privateuse1_backend_name()
         if (
-            device_hint(input) != "cuda"
+            device_hint(input) not in ("cuda", private_backend)
             and utils.suggest_memory_format(input) == torch.channels_last
         ):
             output = output.to(memory_format=torch.channels_last)
