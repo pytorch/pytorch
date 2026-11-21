@@ -1,6 +1,7 @@
 // #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/EmptyTensor.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/core/Tensor.h>
@@ -344,6 +345,15 @@ Tensor _to_copy(
        at::accelerator::isAcceleratorExcluded(self.device().type(), at::kMPS) &&
        options.device().is_cpu() && (options.layout() == c10::kStrided));
 
+  auto empty_strided_out = [&](IntArrayRef strides) -> Tensor {
+    auto strided_options = options.pinned_memory(pin_out);
+    if (options.device().is_cpu() && options.layout() == c10::kStrided) {
+      return at::detail::empty_strided_cpu(
+          self.sizes(), strides, strided_options);
+    }
+    return at::empty_strided(self.sizes(), strides, strided_options);
+  };
+
   if (memory_format == MemoryFormat::Preserve) {
     if (options.device().supports_as_strided()) {
       if (self.is_non_overlapping_and_dense()) {
@@ -354,16 +364,14 @@ Tensor _to_copy(
           r.copy_(self, non_blocking);
           set_quantizer_(r, quantizer);
         } else {
-          r = at::empty_strided(
-              self.sizes(), self.strides(), options.pinned_memory(pin_out));
+          r = empty_strided_out(self.strides());
           r.copy_(self, non_blocking);
         }
         return r;
       } else if (!self.is_quantized() && self.layout() == kStrided) {
         Tensor r;
         auto strides = infer_dense_strides(self.sizes(), self.strides());
-        r = at::empty_strided(
-            self.sizes(), strides, options.pinned_memory(pin_out));
+        r = empty_strided_out(strides);
         r.copy_(self, non_blocking);
         return r;
       } else {
