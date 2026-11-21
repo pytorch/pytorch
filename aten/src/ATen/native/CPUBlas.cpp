@@ -1183,7 +1183,7 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
     }
     static bool fp16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_fp16;
     static bool fp32_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx2;
-    static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core;
+    static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_bf16;
     static bool u8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
     static bool s8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_vnni;
 #ifdef ONEDNN_FP8_UKERNEL_AVAILABLE
@@ -1507,6 +1507,14 @@ void pack(
 bool could_pack(ScalarType dt_in) {
 #if defined(ONEDNN_UKERNEL_ENABLED)
   return Pack::could_pack(dt_in);
+#else
+  return false;
+#endif
+}
+
+bool can_use_brgemm(ScalarType dt_in) {
+#if defined(ONEDNN_UKERNEL_ENABLED)
+  return dt_in == ScalarType::BFloat16 && Brgemm::device_check(dt_in);
 #else
   return false;
 #endif
