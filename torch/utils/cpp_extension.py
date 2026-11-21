@@ -1997,7 +1997,10 @@ def load(name,
          with_sycl: bool | None = None,
          is_python_module=True,
          is_standalone=False,
-         keep_intermediates=True):
+         keep_intermediates=True,
+         *,
+         dlink=False,
+         dlink_libraries=None):
     """
     Load a PyTorch C++ extension just-in-time (JIT).
 
@@ -2057,8 +2060,8 @@ def load(name,
         verbose: If ``True``, turns on verbose logging of load steps.
         with_cuda: Determines whether CUDA headers and libraries are added to
             the build. If set to ``None`` (default), this value is
-            automatically determined based on the existence of ``.cu`` or
-            ``.cuh`` in ``sources``. Set it to `True`` to force CUDA headers
+            enabled when ``sources`` contains ``.cu`` or ``.cuh`` files, or
+            CUDA device linking is requested. Set it to ``True`` to force CUDA headers
             and libraries to be included.
         with_sycl: Determines whether SYCL headers and libraries are added to
             the build. If set to ``None`` (default), this value is
@@ -2071,6 +2074,14 @@ def load(name,
         is_standalone: If ``False`` (default) loads the constructed extension
             into the process as a plain dynamic library. If ``True``, build a
             standalone executable.
+        dlink: If ``True``, add a CUDA device-link step before the host link.
+            Compile sources that reference device symbols across compilation
+            units with ``extra_cuda_cflags=['-rdc=true']``. Only supported for
+            CUDA, not ROCm. Enables CUDA support when ``with_cuda=None``.
+        dlink_libraries: Optional list of library names to link during the CUDA
+            device-link step. A nonempty list also enables ``dlink``. Library
+            search paths can be passed in ``extra_ldflags`` using ``-L``
+            (or ``/LIBPATH:`` on Windows), as for the host link.
 
     Returns:
         If ``is_python_module`` is ``True``:
@@ -2107,7 +2118,9 @@ def load(name,
         with_sycl,
         is_python_module,
         is_standalone,
-        keep_intermediates=keep_intermediates)
+        keep_intermediates=keep_intermediates,
+        dlink=dlink,
+        dlink_libraries=dlink_libraries)
 
 @deprecated("PyBind11 ABI handling is internal to PyBind11; this will be removed after PyTorch 2.9.0")
 def _get_pybind11_abi_build_flags() -> list[str]:
@@ -2285,7 +2298,10 @@ def load_inline(name,
                 keep_intermediates=True,
                 use_pch=False,
                 no_implicit_headers=False,
-                gil_not_used=False):
+                gil_not_used=False,
+                *,
+                dlink=False,
+                dlink_libraries=None):
     r'''
     Load a PyTorch C++ extension just-in-time (JIT) from string sources.
 
@@ -2341,8 +2357,8 @@ def load_inline(name,
             docstrings (which are otherwise just the function names).
         with_cuda: Determines whether CUDA headers and libraries are added to
             the build. If set to ``None`` (default), this value is
-            automatically determined based on whether ``cuda_sources`` is
-            provided. Set it to ``True`` to force CUDA headers
+            enabled when ``cuda_sources`` is provided or CUDA device linking
+            is requested. Set it to ``True`` to force CUDA headers
             and libraries to be included.
         with_sycl: Determines whether SYCL headers and libraries are added to
             the build. If set to ``None`` (default), this value is
@@ -2475,7 +2491,9 @@ def load_inline(name,
         with_sycl,
         is_python_module,
         is_standalone=False,
-        keep_intermediates=keep_intermediates)
+        keep_intermediates=keep_intermediates,
+        dlink=dlink,
+        dlink_libraries=dlink_libraries)
 
 
 def _jit_compile(name,
@@ -2491,12 +2509,20 @@ def _jit_compile(name,
                  with_sycl: bool | None,
                  is_python_module,
                  is_standalone,
-                 keep_intermediates=True) -> types.ModuleType | str:
+                 keep_intermediates=True,
+                 dlink=False,
+                 dlink_libraries=None) -> types.ModuleType | str:
     if is_python_module and is_standalone:
         raise ValueError("`is_python_module` and `is_standalone` are mutually exclusive.")
 
+    dlink_libraries = list(dlink_libraries or [])
+    dlink = bool(dlink or dlink_libraries)
     if with_cuda is None:
-        with_cuda = any(map(_is_cuda_file, sources))
+        with_cuda = dlink or any(map(_is_cuda_file, sources))
+    if dlink and not with_cuda:
+        raise ValueError("CUDA device linking requires with_cuda=True.")
+    if dlink and IS_HIP_EXTENSION:
+        raise ValueError("CUDA device linking is not supported for ROCm JIT extensions.")
     with_cudnn = any('cudnn' in f for f in extra_ldflags or [])
     if with_sycl is None:
         with_sycl = any(map(_is_sycl_file, sources))
@@ -2508,7 +2534,7 @@ def _jit_compile(name,
     version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
         name,
         sources,
-        build_arguments=[extra_cflags, extra_cuda_cflags, extra_ldflags, extra_include_paths],
+        build_arguments=[extra_cflags, extra_cuda_cflags, extra_ldflags, extra_include_paths, [dlink], dlink_libraries],
         build_directory=build_directory,
         with_cuda=with_cuda,
         with_sycl=with_sycl,
@@ -2590,7 +2616,9 @@ def _jit_compile(name,
                     verbose=verbose,
                     with_cuda=with_cuda,
                     with_sycl=with_sycl,
-                    is_standalone=is_standalone)
+                    is_standalone=is_standalone,
+                    dlink=dlink,
+                    dlink_libraries=dlink_libraries)
         elif verbose:
             logger.debug('No modifications detected for re-loaded extension module %s, skipping build step...', name)
 
@@ -2697,7 +2725,9 @@ def _write_ninja_file_and_build_library(
         verbose: bool,
         with_cuda: bool | None,
         with_sycl: bool | None,
-        is_standalone: bool = False) -> None:
+        is_standalone: bool = False,
+        dlink=False,
+        dlink_libraries=None) -> None:
     verify_ninja_availability()
 
     compiler = get_cxx_compiler()
@@ -2712,7 +2742,7 @@ def _write_ninja_file_and_build_library(
             "cannot have both SYCL and CUDA files in the same extension"
         )
     extra_ldflags = _prepare_ldflags(
-        extra_ldflags or [],
+        list(extra_ldflags or []),
         with_cuda,
         with_sycl,
         verbose,
@@ -2741,7 +2771,9 @@ def _write_ninja_file_and_build_library(
         extra_include_paths=extra_include_paths or [],
         with_cuda=with_cuda,
         with_sycl=with_sycl,
-        is_standalone=is_standalone)
+        is_standalone=is_standalone,
+        dlink=dlink,
+        dlink_libraries=dlink_libraries)
 
     if verbose:
         logger.info('Building extension module %s...', name)
@@ -3252,7 +3284,9 @@ def _write_ninja_file_to_build_library(path,
                                        extra_include_paths,
                                        with_cuda,
                                        with_sycl,
-                                       is_standalone) -> None:
+                                       is_standalone,
+                                       dlink=False,
+                                       dlink_libraries=None) -> None:
     extra_cflags = [flag.strip() for flag in extra_cflags]
     extra_cuda_cflags = [flag.strip() for flag in extra_cuda_cflags]
     extra_sycl_cflags = [flag.strip() for flag in extra_sycl_cflags]
@@ -3331,6 +3365,23 @@ def _write_ninja_file_to_build_library(path,
     else:
         cuda_flags = None
 
+    cuda_dlink_post_cflags = None
+    if dlink:
+        if cuda_flags is None:
+            raise ValueError("CUDA device linking requires CUDA compilation flags.")
+        # Reuse compile flags so explicit CUDA architectures and host compiler agree.
+        cuda_dlink_post_cflags = [flag for flag in cuda_flags if flag not in ('-dc', '--device-c', '-dw', '--device-w')]
+        dlink_flags = ['-dlink']
+        for index, flag in enumerate(extra_ldflags):
+            if flag == '-L':
+                dlink_flags.extend(extra_ldflags[index:index + 2])
+            elif flag.startswith(('-L', '/LIBPATH:')):
+                dlink_flags.append(f'-L{flag[9:]}' if flag.startswith('/LIBPATH:') else flag)
+        dlink_flags += [f'-l{library}' for library in dlink_libraries or []]
+        if torch.version.cuda is not None and TorchVersion(torch.version.cuda) >= '11.2':
+            dlink_flags.append('-dlto')
+        cuda_dlink_post_cflags += _nt_quote_args(dlink_flags) if IS_WINDOWS else [shlex.quote(flag) for flag in dlink_flags]
+
     if with_sycl:
         sycl_cflags = cflags + _COMMON_SYCL_FLAGS
         sycl_cflags += extra_sycl_cflags
@@ -3380,7 +3431,7 @@ def _write_ninja_file_to_build_library(path,
         post_cflags=None,
         cuda_cflags=cuda_flags,
         cuda_post_cflags=None,
-        cuda_dlink_post_cflags=None,
+        cuda_dlink_post_cflags=cuda_dlink_post_cflags,
         sycl_cflags=sycl_cflags,
         sycl_post_cflags=[],
         sycl_dlink_post_cflags=sycl_dlink_post_cflags,
