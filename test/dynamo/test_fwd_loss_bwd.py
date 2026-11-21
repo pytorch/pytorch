@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import builtins
 import contextlib
 import copy
 import functools
@@ -165,6 +166,7 @@ class <lambda>(torch.nn.Module):
             OrderedDict,
             functools.partial(defaultdict, None),
             MappingProxyType,
+            getattr(builtins, "frozendict", dict),
         ],
     )
     def test_autograd_grad_dict_inputs(self, mapping_cls):
@@ -368,6 +370,7 @@ class <lambda>(torch.nn.Module):
             OrderedDict,
             functools.partial(defaultdict, None),
             MappingProxyType,
+            getattr(builtins, "frozendict", dict),
         ],
     )
     def test_backward_dict_inputs(self, mapping_cls):

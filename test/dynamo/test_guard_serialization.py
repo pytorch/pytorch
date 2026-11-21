@@ -6924,6 +6924,27 @@ class TestGuardSerialization(TestGuardSerializationBase):
             invalid["owner"]["c"] = invalid["owner"].pop("b")
             check(invalid, False)
 
+    @unittest.skipIf(not torch._has_frozendict, "requires builtins.frozendict")
+    def test_frozen_input_keys_view(self):
+        def fn(x, view):
+            return x + sum(view)
+
+        def inputs(mapping):
+            return {"x": torch.ones(1), "view": mapping.keys()}
+
+        first = inputs(builtins.frozendict({1: 2, 3: 4}))
+        check = self._roundtrip_checks(
+            ("TYPE_MATCH", "EQUALS_MATCH", "SEQUENCE_LENGTH", "TENSOR_MATCH"), fn, first
+        )
+        check(inputs(builtins.frozendict({1: 20, 3: 40})), True)
+        check(inputs(builtins.frozendict({1: 2, 5: 4})), False)
+        check(inputs({1: 2, 3: 4}), False)
+
+        view = self._saved_scope["view"]
+        self.assertIs(type(view), type(first["view"]))
+        self.assertIs(type(gc.get_referents(view)[0]), builtins.frozendict)
+        self.assertEqual(list(view), [1, 3])
+
     @parametrize("iterate", [False, True])
     def test_dict_keys_serialization(self, iterate):
         d = {1: 2, 3: threading.Lock()}
