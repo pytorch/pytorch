@@ -4577,6 +4577,9 @@ impl Compiled {
         // graph that holds these operations, and so may a graph that starts
         // earlier and is not done being taken down: that one goes first.
         if WARMING.with(|w| w.get()) > self.settled.warming.get() || profiling_depth() > 0 {
+            // A call in which a graph waits says nothing about how fast the
+            // function is going to be: it is no sample of a measurement.
+            unsettled();
             return PathEnd::Miss;
         }
         let waits = {
@@ -4585,6 +4588,7 @@ impl Compiled {
             others.any(|other| !Arc::ptr_eq(other, site) && other.pending())
         };
         if waits {
+            unsettled();
             return PathEnd::Miss;
         }
         if site.exporter.is_none() && site.variants.borrow().is_empty() && self.asks(site, block) {
@@ -6732,6 +6736,8 @@ impl Compiled {
         world: (u64, u64, u64, u64),
     ) -> PathEnd {
         let func = &self.func;
+        // Neither does a call in which a path is taken down.
+        unsettled();
         let mut t = Trace::new(self as *const Compiled, func.nvalues as usize);
         // Under a mode, or a transform, the operations run as they are: the
         // run is only looked at for what kind of call it is.

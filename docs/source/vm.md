@@ -391,7 +391,9 @@ A path does not go into every call. It ends in front of a call
   function among its own, so what was measured says nothing about it. The
   small functions of plain Python on the way through a model (an argument
   check, the `__iter__` of a container) are the ones that are demoted, and
-  the graph of the model goes through them;
+  the graph of the model goes through them. A call in which a graph of a
+  function waits, or a path of it is taken down, is no sample of that
+  measurement: it says nothing about how fast the function is going to be;
 - of a function that is on the path eight times already: a function that
   calls itself is gone into that often, and an `nn.Sequential` inside an
   `nn.Sequential` is on a path twice;
