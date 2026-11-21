@@ -142,12 +142,6 @@ endif()
 # libraries installed. This flag should only be used for binary builds, so
 # end-users should never have this flag set.
 
-# cuda
-add_library(caffe2::cuda INTERFACE IMPORTED)
-set_property(
-    TARGET caffe2::cuda PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::cuda_driver)
-
 # cudart
 add_library(torch::cudart INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
@@ -300,7 +294,7 @@ set_property(
 add_library(caffe2::nvrtc INTERFACE IMPORTED)
 set_property(
     TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::nvrtc caffe2::cuda)
+    CUDA::nvrtc CUDA::cuda_driver)
 
 # Add onnx namespace definition to nvcc
 if(ONNX_NAMESPACE)
