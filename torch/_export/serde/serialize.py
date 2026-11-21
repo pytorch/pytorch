@@ -38,6 +38,7 @@ from torch._higher_order_ops.flat_apply import func_to_graphable
 from torch._higher_order_ops.user_kernel_hop import get_user_kernel_hop_info
 from torch._library.opaque_object import get_opaque_type_name, is_custom_class_obj
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
+from torch.export._tree_utils import is_equivalent
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.traceback import NodeSource
@@ -867,15 +868,6 @@ def _same_value(a: Any, b: Any) -> bool:
     return a == b
 
 
-def _same_spec(a: pytree.TreeSpec, b: pytree.TreeSpec) -> bool:
-    return (
-        a.type is b.type
-        and _same_value(a.context, b.context)
-        and a.num_children == b.num_children
-        and all(map(_same_spec, a.children(), b.children()))
-    )
-
-
 def _find_flat_apply_func(
     name: str, in_spec: pytree.TreeSpec, flat_args: Sequence[Any]
 ) -> Any:
@@ -931,17 +923,17 @@ def _find_flat_apply_func(
         or not pair[0].child(0).is_leaf()
     ):
         raise SerializeError("Expected an autograd function name as the first input")
-    _find_autograd_function(flat_args[0])
+    _check_autograd_function(flat_args[0])
     return func
 
 
-def _find_autograd_function(name: Any) -> type[torch.autograd.Function]:
+def _check_autograd_function(name: Any) -> None:
     """
-    Find the custom autograd function that the helper for custom autograd
-    functions calls by name, with ``_find_imported``. The helper imports that
-    name's module when the program runs, so save and load check the name
-    first. They accept only a function that export calls, one with an apply
-    decorated for export in its class or in a base class.
+    Check that ``name`` finds, with ``_find_imported``, a custom autograd
+    function that export calls: one with an apply decorated for export in its
+    class or in a base class. The helper for custom autograd functions imports
+    that name's module when the program runs, so save and load check the name
+    first.
     """
     function_cls = _find_imported(name) if isinstance(name, str) else None
     if not (
@@ -960,7 +952,6 @@ def _find_autograd_function(name: Any) -> type[torch.autograd.Function]:
             "apply in its class hierarchy is decorated with "
             "torch._export.wrappers.allow_in_pre_dispatch_graph"
         )
-    return function_cls
 
 
 @final
@@ -1567,7 +1558,11 @@ class GraphModuleSerializer(metaclass=Final):
                 f"Cannot serialize flat_apply node {node.name}: its input spec "
                 f"cannot be saved: {e}"
             ) from e
-        if not _same_spec(loaded_spec, in_spec_value):
+        if not is_equivalent(
+            loaded_spec,
+            in_spec_value,
+            lambda t1, c1, t2, c2: t1 is t2 and _same_value(c1, c2),
+        ):
             raise SerializeError(
                 f"Cannot serialize flat_apply node {node.name}: its input spec "
                 "would load back different, because JSON cannot store a part of "
@@ -3118,7 +3113,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 target
                 is torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch
             ):
-                _find_autograd_function(args[0] if args else None)
+                _check_autograd_function(args[0] if args else None)
             name = serialized_node.name if serialized_node.name else None
             fx_node = self.graph.create_node(
                 "call_function", target, args, kwargs, name

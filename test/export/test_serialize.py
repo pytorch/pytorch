@@ -578,7 +578,6 @@ def forward(self, x):
         json_bytes = _to_json_bytes(
             ExportedProgramSerializer().serialize(ep).exported_program
         )
-        import json
 
         def parse_constant(x):
             raise RuntimeError(f"Invalid JSON float: {x}")
@@ -3219,6 +3218,53 @@ class TestPredispatchSerialization(TestCase):
                 x = torch.randn(4)
                 self.assertEqual(torch.export.load(buffer).module()(x), x * 2)
 
+        with self.subTest("int enum in a dict context of a registered type"):
+            # It would load back as a plain int inside the dict.
+            flag = enum.IntEnum("Flag", {"A": 1}).A
+
+            class Holder:
+                def __init__(self, x):
+                    self.x = x
+
+            pytree.register_pytree_node(
+                Holder,
+                lambda holder: ([holder.x], {"k": flag}),
+                lambda xs, context: Holder(xs[0]),
+                serialized_type_name="flat_apply_test.Holder",
+            )
+            self.addCleanup(pytree._deregister_pytree_node, Holder)
+            ep = wrapped(Holder, lambda holder: holder.x)
+            with self.assertRaisesRegex(SerializeError, "load back different"):
+                torch.export.save(ep, io.BytesIO())
+
+        def register(name, context):
+            class Box:
+                def __init__(self, x):
+                    self.x = x
+
+            pytree.register_pytree_node(
+                Box,
+                lambda box: ([box.x], context),
+                lambda xs, context: Box(xs[0]),
+                serialized_type_name=name,
+            )
+            self.addCleanup(pytree._deregister_pytree_node, Box)
+            return Box
+
+        with self.subTest("int key in a dict context of a registered type"):
+            # JSON stores dict keys as strings, so it would load back as "1".
+            ep = wrapped(register("flat_apply_test.IntKey", {1: "a"}), lambda b: b.x)
+            with self.assertRaisesRegex(SerializeError, "load back different"):
+                torch.export.save(ep, io.BytesIO())
+
+        with self.subTest("type whose serialized name a later type took"):
+            # Load would build the later type.
+            first = register("flat_apply_test.Shared", None)
+            register("flat_apply_test.Shared", None)
+            ep = wrapped(first, lambda b: b.x)
+            with self.assertRaisesRegex(SerializeError, "load back different"):
+                torch.export.save(ep, io.BytesIO())
+
     def test_predispatch_flat_apply_save_load_by_name(self):
         Scale = self._scale_function()
 
@@ -3303,11 +3349,18 @@ class TestPredispatchSerialization(TestCase):
                 torch.export.save(ep, buffer)
                 buffer.seek(0)
                 loaded = torch.export.load(buffer)
+                reads = []
                 for program in (ep, loaded):
                     nodes = program.graph.find_nodes(
                         op="call_function", target=torch.ops.higher_order.flat_apply
                     )
                     self.assertEqual(len(nodes), calls)
+                    # Nothing uses the flag of WithFlag, so only the getitem that
+                    # reads it shows how load reads it.
+                    reads.append(
+                        [(u.target, u.args[1:]) for n in nodes for u in n.users]
+                    )
+                self.assertEqual(reads[0], reads[1])
                 self.assertEqual(loaded.module()(x), expected)
 
         # A function that moved still loads while its old module imports it.
