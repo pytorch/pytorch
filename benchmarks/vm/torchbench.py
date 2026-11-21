@@ -162,6 +162,14 @@ def run_one(args):
         if args.device == "cuda":
             torch.cuda.synchronize()
 
+    def held(key):
+        # What the process held at most: of the machine's memory, and of the
+        # GPU's (what tensors had allocated at once, not what the allocator
+        # has reserved from the driver).
+        out[key + "_rss_mb"] = peak_rss_mb()
+        if args.device == "cuda":
+            out[key + "_cuda_mb"] = torch.cuda.max_memory_allocated() >> 20
+
     try:
         from torchbenchmark import load_model_by_name
 
@@ -344,7 +352,7 @@ def run_one(args):
             out["demoted"] = bool(compiled.stats()["demoted"])
             # Before torch.compile, and for training its copy of the model, share
             # the process.
-            out["peak_rss_mb"] = peak_rss_mb()
+            held("peak")
             if args.paired and out["call_s"] <= args.paired_limit:
                 try:
                     other_model = copy.deepcopy(model) if training else model
@@ -388,8 +396,10 @@ def run_one(args):
         out["error"] = (
             f"{type(e).__name__}: {text[0][:300]}" if text else type(e).__name__
         )
-    out["process_peak_rss_mb"] = peak_rss_mb()
+    held("process_peak")
     out.setdefault("peak_rss_mb", out["process_peak_rss_mb"])
+    if "process_peak_cuda_mb" in out:
+        out.setdefault("peak_cuda_mb", out["process_peak_cuda_mb"])
     print(MARKER + json.dumps(out))
 
 
