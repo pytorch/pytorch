@@ -9443,6 +9443,85 @@ print(json.dumps(found))
                 self.assertEqual(closed, [reason] if reason else [])
 
 
+GRAPH_END_STATE = [0.5]
+GRAPH_END_LOG = []
+
+
+class GraphEnds:
+    # Its end changes what the functions below read.
+    def __del__(self):
+        if GRAPH_END_LOG is None:
+            return
+        GRAPH_END_LOG.append("the end of an object")
+        GRAPH_END_STATE[0] += 1.0
+
+
+class GraphEndWatched:
+    pass
+
+
+def graph_end_callback(reference):
+    GRAPH_END_LOG.append("a weak reference is told")
+    GRAPH_END_STATE[0] += 1.0
+
+
+class GraphEndBox:
+    item = None
+
+
+GRAPH_END_BOX = GraphEndBox()
+GRAPH_END_DICT = {"k": None}
+GRAPH_END_LIST = [None]
+GRAPH_END_MODULE = torch.nn.Identity()
+GRAPH_END_MODULE.item = None
+GRAPH_END_HELD = [None]
+GRAPH_END_REFS = []
+GRAPH_END_WEAK = weakref.WeakKeyDictionary()
+
+
+def graph_end_attribute(x, keep=None):
+    h = torch.relu(x) + 1
+    h = h * GRAPH_END_STATE[0]
+    GRAPH_END_BOX.item = 0
+    h = h + GRAPH_END_STATE[0]
+    return (torch.tanh(h) * 2 - 1).sum() + GRAPH_END_STATE[0]
+
+
+def graph_end_dict_item(x, keep=None):
+    h = torch.relu(x) + 1
+    h = h * GRAPH_END_STATE[0]
+    GRAPH_END_DICT["k"] = 0
+    h = h + GRAPH_END_STATE[0]
+    return (torch.tanh(h) * 2 - 1).sum() + GRAPH_END_STATE[0]
+
+
+def graph_end_list_item(x, keep=None):
+    h = torch.relu(x) + 1
+    h = h * GRAPH_END_STATE[0]
+    GRAPH_END_LIST[0] = 0
+    h = h + GRAPH_END_STATE[0]
+    return (torch.tanh(h) * 2 - 1).sum() + GRAPH_END_STATE[0]
+
+
+def graph_end_module_attribute(x, keep=None):
+    h = torch.relu(x) + 1
+    h = h * GRAPH_END_STATE[0]
+    GRAPH_END_MODULE.item = 0
+    h = h + GRAPH_END_STATE[0]
+    return (torch.tanh(h) * 2 - 1).sum() + GRAPH_END_STATE[0]
+
+
+def graph_end_variable(x, keep=None):
+    # The variable holds the last reference to what `pop` gave, from in
+    # front of the first operation on.
+    held = GRAPH_END_HELD.pop()
+    h = torch.relu(x) + 1
+    h = h * GRAPH_END_STATE[0]
+    held = None
+    h = h + GRAPH_END_STATE[0]
+    return (torch.tanh(h) * 2 - 1).sum() + GRAPH_END_STATE[0], held
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -9809,6 +9888,69 @@ class TestVmGraphResults(TestCase):
         # goes into these, and each is asked once.
         for n in (1, 2, 0):
             same(fn, lambda: (x, GraphAnswers(n), GraphAnswers(1)))
+
+    def test_what_a_path_lets_go_of_ends_where_the_instructions_end_it(self, device):
+        # A store replaces what was there, and a variable that is bound
+        # anew lets go of what it held: where that was the last reference
+        # to an object whose end runs Python code (a `__del__`, a callback
+        # of a weak reference), the code runs where the instruction is,
+        # and what the function reads behind it is what that code left.
+        # A path does its stores where it lands, behind everything it
+        # read: it is not for such a call.
+        def keep(gm, input_types):
+            return gm
+
+        def plant(what):
+            made = GraphEndWatched() if what in ("watched", "keyed") else GraphEnds()
+            if what == "watched":
+                GRAPH_END_REFS.append(weakref.ref(made, graph_end_callback))
+            if what == "keyed":
+                GRAPH_END_WEAK[made] = GraphEnds()
+            return [made] if what == "inside" else made
+
+        def empty():
+            GRAPH_END_BOX.item, GRAPH_END_DICT["k"] = None, None
+            GRAPH_END_LIST[0], GRAPH_END_MODULE.item = None, None
+            del GRAPH_END_HELD[:], GRAPH_END_REFS[:], GRAPH_END_LOG[:]
+
+        def calls(run, what, graded):
+            empty()
+            GRAPH_END_STATE[0] = 0.5
+            found = []
+            for at in range(12):
+                planted = at in (7, 10)
+                kept = plant(what) if planted and what == "kept" else None
+                GRAPH_END_HELD.append(plant(what) if planted and what != "kept" else 0)
+                if planted:
+                    GRAPH_END_BOX.item = kept if what == "kept" else plant(what)
+                    GRAPH_END_DICT["k"], GRAPH_END_LIST[0] = plant(what), plant(what)
+                    GRAPH_END_MODULE.item = plant(what)
+                torch.manual_seed(at)
+                x = torch.randn(3, 4, device=device, requires_grad=graded)
+                out = run(x, kept)
+                out = out[0] if isinstance(out, tuple) else out
+                if graded:
+                    out.backward()
+                found.append((out.item(), len(GRAPH_END_LOG), GRAPH_END_STATE[0]))
+                del kept
+            return found
+
+        stores = (graph_end_attribute, graph_end_dict_item, graph_end_list_item)
+        for fn in (*stores, graph_end_module_attribute, graph_end_variable):
+            # An object with a `__del__`; one inside a list that goes with
+            # it; one with a weak reference that is told of its end; one
+            # that is a key of a weak dictionary whose value has a
+            # `__del__`; and one that an argument of the call keeps alive
+            # (a path is for that call: nothing ends).
+            for what in ("ends", "inside", "watched", "keyed", "kept"):
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    got = calls(compiled, what, graded)
+                    expected = calls(fn, what, graded)
+                    name = f"{fn.__name__} {what} {behind} {graded}"
+                    self.assertEqual(got, expected, msg=name)
+        empty()
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
