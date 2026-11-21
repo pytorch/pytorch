@@ -3839,7 +3839,7 @@ class DictBuiltinVariable(TypeVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
+        return DictBuiltinVariable.construct_dict(tx, *args, **kwargs)
 
     def fromkeys(
         self,
@@ -3918,19 +3918,15 @@ class DictBuiltinVariable(TypeVariable):
         return super().call_method(tx, name, args, kwargs)
 
     @staticmethod
-    def call_custom_dict(
+    def construct_dict(
         tx: "InstructionTranslatorBase",
-        user_cls: type,
         /,
         *args: VariableTracker,
         **kwargs: VariableTracker,
-    ) -> VariableTracker:
-        args_list = list(args)
-        return tx.inline_user_function_return(
-            VariableTracker.build(tx, polyfills.construct_dict),
-            [VariableTracker.build(tx, user_cls), *args_list],
-            kwargs,
-        )
+    ) -> ConstDictVariable:
+        result = ConstDictVariable({}, mutation_type=ValueMutationNew())
+        result.tp_init_impl(tx, list(args), kwargs)
+        return result
 
     @staticmethod
     def call_custom_dict_fromkeys(
