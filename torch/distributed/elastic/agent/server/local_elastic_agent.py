@@ -37,6 +37,7 @@ from torch.distributed.elastic.metrics.api import prof
 from torch.distributed.elastic.multiprocessing import (
     LogsSpecs,
     PContext,
+    ProcessFailure,
     start_processes,
 )
 from torch.distributed.elastic.utils import macros
@@ -554,28 +555,30 @@ class LocalElasticAgent(SimpleElasticAgent):
     def _check_uninterruptible_state_timeout(
         self, worker_group: WorkerGroup, timeout: float
     ) -> RunResult | None:
-        """Return UNHEALTHY when any worker has been in Linux uninterruptible
-        sleep (D-state) for at least ``timeout`` seconds; otherwise update
-        bookkeeping and return None.
+        """Return UNHEALTHY, with a failure per stuck global rank, when any
+        worker has been in Linux uninterruptible sleep (D-state) for at least
+        ``timeout`` seconds; otherwise update bookkeeping and return None.
         """
         if self._pcontext is None:
             return None
         role = worker_group.spec.role
-        live_pids = set(self._pcontext.pids().values())
+        pids = self._pcontext.pids()
+        live_pids = set(pids.values())
         # Drop bookkeeping for pids that have exited since the last check.
         for pid in list(self._uninterruptible_state_first_seen):
             if pid not in live_pids:
                 self._uninterruptible_state_first_seen.pop(pid, None)
 
-        timed_out: list[tuple[int, float]] = []
-        for pid in live_pids:
+        timed_out: list[tuple[int, int, float]] = []
+        for local_rank, pid in pids.items():
             elapsed = self._update_uninterruptible_dwell(pid, role, timeout)
             if elapsed is not None and elapsed >= timeout:
-                timed_out.append((pid, elapsed))
+                timed_out.append((local_rank, pid, elapsed))
 
         if not timed_out:
             return None
-        for pid, elapsed in timed_out:
+        failures = {}
+        for local_rank, pid, elapsed in timed_out:
             logger.error(
                 "[%s] Worker pid=%s stuck in uninterruptible sleep (D-state)"
                 " for %.1fs (>= %.1fs); marking worker group UNHEALTHY and"
@@ -585,12 +588,26 @@ class LocalElasticAgent(SimpleElasticAgent):
                 elapsed,
                 timeout,
             )
+            # The worker is still alive: exitcode 1 is a placeholder, and its
+            # error file may be half written or on the mount it is hung on.
+            failure = ProcessFailure(
+                local_rank=local_rank, pid=pid, exitcode=1, error_file=""
+            )
+            failure.message = (
+                "Worker stuck in uninterruptible sleep (D-state)"
+                f" for {elapsed:.1f}s (>= {timeout:.1f}s)"
+            )
+            failure.error_file_data = {
+                **failure.error_file_data,
+                "message": failure.message,
+            }
+            failures[worker_group.workers[local_rank].global_rank] = failure
         # Disable restarts: a wedged worker is holding a kernel resource
         # (GPU, NIC) that a fresh worker on the same host would conflict
         # with. Force the supervising loop into the _stop_workers branch
         # so the agent can exit promptly.
         self._remaining_restarts = 0
-        return RunResult(state=WorkerState.UNHEALTHY)
+        return RunResult(state=WorkerState.UNHEALTHY, failures=failures)
 
     def _update_uninterruptible_dwell(
         self, pid: int, role: str, timeout: float
