@@ -1201,8 +1201,7 @@ class TestMaxAutotune(TestCase):
         }
     )
     def test_addmm_strided_bias_extern_fallback(self, beta):
-        # The MultiTemplateBuffer finalizes to the extern choice with a bias that
-        # realize_inputs has to copy.
+        # A strided bias makes realize_inputs copy it.
         bias = torch.randn(64, device=GPU_TYPE)[::2]
         x = torch.randn(16, 8, device=GPU_TYPE)
         y = torch.randn(8, 32, device=GPU_TYPE)
@@ -1212,7 +1211,12 @@ class TestMaxAutotune(TestCase):
         )
 
         self.assertEqual(compiled_out, torch.addmm(bias, x, y, beta=beta))
-        FileCheck().check("extern_kernels.addmm").run(code[0])
+        addmm_call = (
+            f"aoti_torch_{GPU_TYPE}_addmm_out"
+            if config.cpp_wrapper
+            else "extern_kernels.addmm"
+        )
+        FileCheck().check(addmm_call).run(code[0])
 
     @fresh_cache()
     def test_addmm_1d_bias_no_reinterpret_tensor(self):

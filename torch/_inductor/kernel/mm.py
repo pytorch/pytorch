@@ -991,8 +991,8 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
     use_zero_inp = template_inp is not inp
     inp = realize_inputs(inp)
     template_inp = realize_inputs(template_inp) if use_zero_inp else inp
-    # expand needs a TensorBox, but the ATen choices keep the bare node: a boxed view
-    # gets past the ReinterpretView check in should_use_layout_constraints.
+    # expand needs a TensorBox; the ATen choices must not get a boxed ReinterpretView,
+    # which gets past the view check in should_use_layout_constraints.
     boxed_inp = (
         template_inp if isinstance(template_inp, TensorBox) else TensorBox(template_inp)
     )
