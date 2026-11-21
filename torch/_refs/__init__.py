@@ -639,10 +639,34 @@ def _make_inplace(fn):
 
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
-    exact_dtype=True,
+    aten_op=None,
 )
-def abs(a):
+def _abs(a):
     return prims.abs(a)
+
+
+@register_decomposition(aten.abs)
+def abs(a: TensorLikeType, *, out: TensorLikeType | None = None) -> TensorLikeType:
+    # Eager abs requires out.dtype == a.dtype for real inputs, but for complex
+    # inputs it also accepts any floating out dtype.
+    if out is not None and isinstance(a, TensorLike):
+        torch._check(
+            out.dtype == a.dtype
+            or (utils.is_complex_dtype(a.dtype) and utils.is_float_dtype(out.dtype)),
+            lambda: f"Expected out tensor to have dtype {a.dtype} but got {out.dtype} instead",
+        )
+    return _abs(a, out=out)
+
+
+@wraps(abs)
+def _abs_inplace(a, *args, **kwargs):
+    # abs(z, out=z) is valid for complex z, so abs's out= check cannot reject
+    # the in-place variant, which eager does not support for complex tensors.
+    torch._check(
+        not utils.is_complex_dtype(a.dtype),
+        lambda: "In-place abs is not supported for complex tensors.",
+    )
+    return abs(a, *args, **kwargs)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -6988,7 +7012,7 @@ def select_scatter(x: TensorLikeType, src: TensorLikeType, dim: int, index: int)
 
 
 # inplace
-abs_ = _make_inplace(abs)
+abs_ = _make_inplace(_abs_inplace)
 acos_ = _make_inplace(acos)
 acosh_ = _make_inplace(acosh)
 add_ = _make_inplace(add)

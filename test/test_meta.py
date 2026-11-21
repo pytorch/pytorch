@@ -2528,6 +2528,38 @@ class TestMetaKernelRegistrations(TestCase):
                 inp, dim=-1, keepdim=False, min=out_min, max=out_max
             )
 
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    @parametrize("in_dtype", [torch.float32, torch.complex64, torch.complex128])
+    @parametrize(
+        "out_dtype",
+        [
+            torch.int64,
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+            torch.complex64,
+            torch.complex128,
+        ],
+    )
+    def test_abs_out_dtype_matches_eager(self, in_dtype, out_dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/197112.
+        def run(device):
+            inp = torch.ones(3, dtype=in_dtype, device=device)
+            out = torch.empty(0, dtype=out_dtype, device=device)
+            try:
+                return torch.abs(inp, out=out).dtype
+            except RuntimeError:
+                return None
+
+        self.assertEqual(run("meta"), run("cpu"))
+
+    @skipIfTorchDynamo("tests raw meta kernel, not dynamo")
+    def test_abs_inplace_complex_raises(self):
+        inp = torch.ones(3, dtype=torch.complex64, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "In-place abs is not supported"):
+            inp.abs_()
+
     def test_grid_sampler_2d_cpu_fallback_meta(self):
         # The meta kernels' whole contract is output metadata, so compare
         # shape/stride/dtype against eager for the forward and both backward
