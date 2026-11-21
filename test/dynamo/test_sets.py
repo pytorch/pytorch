@@ -2,6 +2,7 @@
 
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
+import copy
 import math
 import unittest
 from collections import OrderedDict
@@ -38,6 +39,18 @@ class BadCmp:
 
     def __eq__(self, other):
         raise RuntimeError
+
+
+class DeepcopyTracer:
+    # Mirrors the element class of CPython test_set.py test_deepcopy.
+    def __init__(self, value):
+        self.value = value
+
+    def __hash__(self):
+        return self.value
+
+    def __deepcopy__(self, memo=None):
+        return DeepcopyTracer(self.value + 1)
 
 
 class _BaseSetTests(torch._dynamo.test_case.TestCase):
@@ -969,7 +982,31 @@ class _SetBase(_FrozensetBase):
         self.assertRaises(TypeError, self.thetype("abc").discard, [])
 
 
-class FrozensetTests(_FrozensetBase, _BaseSetTests):
+class _SetReduceMixin:
+    # copy.deepcopy reaches set.__reduce__ through the object.__reduce_ex__
+    # that set and frozenset inherit.
+    @make_dynamo_test
+    def test_reduce(self):
+        s = self.thetype([1, 2])
+        cls, (items,), state = s.__reduce_ex__(4)
+        self.assertTrue(cls is self.thetype)
+        self.assertEqual(sorted(items), [1, 2])
+        self.assertTrue(state is None)
+        self.assertEqual(s.__reduce__(), (cls, (items,), state))
+
+    @make_dynamo_test
+    def test_deepcopy(self):
+        t = DeepcopyTracer(10)
+        s = self.thetype([t])
+        dup = copy.deepcopy(s)
+        self.assertTrue(type(dup) is self.thetype)
+        self.assertTrue(id(dup) != id(s))
+        (newt,) = dup
+        self.assertTrue(id(newt) != id(t))
+        self.assertEqual(newt.value, 11)
+
+
+class FrozensetTests(_FrozensetBase, _SetReduceMixin, _BaseSetTests):
     thetype = frozenset
 
     @make_dynamo_test
@@ -1000,14 +1037,16 @@ class _SetKeyCoercionMixin:
         self.assertEqual(len(s), 0)
 
 
-class SetTests(_SetBase, _SetKeyCoercionMixin, _BaseSetTests):
+class SetTests(_SetBase, _SetKeyCoercionMixin, _SetReduceMixin, _BaseSetTests):
     thetype = set
 
     def test_in_frozenset(self):
         super().test_in_frozenset()
 
 
-class UserDefinedSetTests(_SetBase, _SetKeyCoercionMixin, _BaseSetTests):
+class UserDefinedSetTests(
+    _SetBase, _SetKeyCoercionMixin, _SetReduceMixin, _BaseSetTests
+):
     class CustomSet(set):
         pass
 
@@ -1020,7 +1059,7 @@ class UserDefinedSetTests(_SetBase, _SetKeyCoercionMixin, _BaseSetTests):
         super().test_equality()
 
 
-class UserDefinedFrozensetTests(_FrozensetBase, _BaseSetTests):
+class UserDefinedFrozensetTests(_FrozensetBase, _SetReduceMixin, _BaseSetTests):
     class CustomFrozenset(frozenset):
         pass
 
@@ -2096,6 +2135,44 @@ class SetSubclassSideEffectTests(torch._dynamo.test_case.TestCase):
         torch.compile(fn, backend="eager", fullgraph=True)(res, x)
         self.assertEqual(sorted(res), [1, 2, 9])
         self.assertEqual(calls, [])
+
+    def test_set_subclass_reduce_instance_dict(self):
+        # The reduce state is the instance __dict__ itself, or None while the
+        # dict is empty.
+        def fn(s):
+            first_state = s.__reduce__()[2]
+            s.attr = [1]
+            state = s.__reduce__()[2]
+            dup = copy.deepcopy(s)
+            return first_state, state is s.__dict__, dup.attr, dup.attr is s.attr
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for cls in (SetSubclass, FrozenstSubclass):
+            self.assertEqual(opt_fn(cls([1])), fn(cls([1])))
+            ref, res = cls([1]), cls([1])
+            ref.other = res.other = 2
+            self.assertEqual(opt_fn(res), fn(ref))
+
+    def test_set_subclass_reduce_getstate_override(self):
+        class StatefulSet(set):
+            def __getstate__(self):
+                return {"size": len(self)}
+
+        def fn(s):
+            return s.__reduce__()[2], copy.copy(s).size
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(StatefulSet([1, 2])), fn(StatefulSet([1, 2])))
+
+    def test_set_subclass_reduce_slots_unsupported(self):
+        class SlottedSet(set):
+            __slots__ = ("x",)
+
+        def fn(s):
+            return s.__reduce__()
+
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(SlottedSet([1]))
 
 
 if __name__ == "__main__":
