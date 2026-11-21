@@ -4,10 +4,12 @@ import base64
 import contextlib
 import contextvars
 import copy
+import functools
 import hashlib
 import importlib
 import itertools
 import linecache
+import operator
 import sys
 import traceback
 import warnings
@@ -39,6 +41,7 @@ from .graph import (
     _override_sym_repr,
     _PyTreeCodeGen,
     Graph,
+    inplace_methods,
     PythonCode,
 )
 
@@ -51,6 +54,36 @@ __all__ = [
 
 _USER_PRESERVED_ATTRIBUTES_KEY = "_user_preserved_attributes"
 FX_GRAPH_MODULE_FILE_PREFIX = "fx_generated_"
+
+
+@functools.cache
+def _inplace_op_proxy_cls() -> type:
+    """
+    Returns a Proxy subclass that records in-place operators (``x += y``) as
+    ``operator.iadd`` nodes. ``Proxy`` itself only defines the out-of-place
+    operators, so Python falls back to ``x = x + y`` and an in-place node would
+    be silently turned into an out-of-place one. This is only used when
+    re-tracing the generated ``forward`` of a deserialized ``GraphModule``, whose
+    code contains an in-place operator exactly where the original graph had an
+    in-place node. Imported lazily to avoid a circular import with ``proxy``.
+    """
+    from .proxy import Proxy
+
+    class _InplaceOpProxy(Proxy):
+        pass
+
+    def define(name: str) -> None:
+        def impl(self: Proxy, other: Any) -> Proxy:
+            target = getattr(operator, name)
+            return self.tracer.create_proxy("call_function", target, (self, other), {})
+
+        impl.__name__ = f"__{name}__"
+        setattr(_InplaceOpProxy, f"__{name}__", impl)
+
+    for name in inplace_methods:
+        if name != "setitem":
+            define(name)
+    return _InplaceOpProxy
 
 
 # Normal exec loses the source code, however we can work with
@@ -247,6 +280,16 @@ def _deserialize_graph_module(
         # because they were not traced in the original GraphModule
         def is_leaf_module(self, _: torch.nn.Module, __: str) -> bool:
             return True
+
+        def proxy(self, node: Any) -> Any:
+            proxy = super().proxy(node)
+            # Preserve in-place operators (e.g. operator.iadd) in the code
+            if (
+                type(proxy).__name__ == "Proxy"
+                and type(proxy).__module__ == "torch.fx.proxy"
+            ):
+                return _inplace_op_proxy_cls()(node, self)
+            return proxy
 
     com = _CodeOnlyModule(body)
 
