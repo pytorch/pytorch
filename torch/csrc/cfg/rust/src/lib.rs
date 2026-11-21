@@ -9,6 +9,7 @@
 mod analysis;
 mod bytecode;
 mod capi;
+mod chunks;
 mod frontend;
 mod inline;
 mod ir;
