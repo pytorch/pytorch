@@ -5592,6 +5592,16 @@
       ]
     }
   ],
+  "GB5747": [
+    {
+      "Gb_type": "functools.partial instance dictionary",
+      "Context": "partial.__dict__",
+      "Explanation": "Accessing functools.partial.__dict__ can create the instance dictionary, which torch.compile cannot replay.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0291": [
     {
       "Gb_type": "logging.Logger method not supported for non-export cases",
