@@ -20,6 +20,10 @@
 #include <ATen/ops/zeros.h>
 #endif
 
+#include <cmath>
+#include <limits>
+#include <type_traits>
+
 namespace at {
 namespace cuda {
 #define RATIO_OF_GMEM_ATOMIC_ADD_TO_SMEM_ATOMIC_ADD 8
@@ -334,8 +338,21 @@ Tensor _histc_cuda_template(
     maxvalue = max_tensor.item<input_t>();
   }
   if (minvalue == maxvalue) {
-    minvalue = minvalue - 1;
-    maxvalue = maxvalue + 1;
+    /* Widen the equal bounds by at least one representable step: +/-1 can
+     * round to a no-op for large floating values. Keep the historical +/-1
+     * when it is the wider of the two; integral bounds are always +/-1.
+     */
+    if constexpr (std::is_floating_point_v<bounds_t>) {
+      minvalue = std::min(
+          std::nextafter(minvalue, std::numeric_limits<bounds_t>::lowest()),
+          minvalue - 1);
+      maxvalue = std::max(
+          std::nextafter(maxvalue, std::numeric_limits<bounds_t>::max()),
+          maxvalue + 1);
+    } else {
+      minvalue = minvalue - 1;
+      maxvalue = maxvalue + 1;
+    }
   }
 
 // Microsoft's STL has a problem with integer overloads of std::fpclassify used
