@@ -11,6 +11,8 @@ import re
 from enum import auto, Enum
 from typing import Any, Literal
 
+import sympy
+
 import torch
 from torch._inductor import config
 from torch._inductor.autotune_process import (
@@ -504,8 +506,89 @@ class NVUniversalGemmCaller(ChoiceCaller):
         self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
         return self.bmreq.benchmark(*args, out=out)
 
-    def output_node(self) -> TensorBox:
+    @staticmethod
+    def _tensor_constraint_checks(size, stride, constraint):
+        expected = constraint.stride
+        rank = len(stride)
+        if (
+            expected is None
+            or rank == 0
+            or len(size) != rank
+            or len(expected) not in (rank, rank + 1)
+        ):
+            raise ValueError("NVGEMM operand constraint has incompatible rank")
+        expected = expected[-rank:]
+        if 1 not in expected:
+            raise ValueError("NVGEMM operand constraint has no contiguous mode")
+        major = expected.index(1)
+        yield sympy.Eq(stride[major], 1), "NVGEMM operand is not contiguous"
+        divisor = constraint.divisibility
+        if divisor > 1:
+            yield (
+                sympy.Eq(sympy.Mod(size[major], divisor), 0),
+                "NVGEMM operand extent violates alignment",
+            )
+            for dim, step in enumerate(stride):
+                if dim != major:
+                    yield (
+                        sympy.Eq(sympy.Mod(step, divisor), 0),
+                        "NVGEMM operand stride violates alignment",
+                    )
+
+    def _operand_constraints(self):
+        if self.variant != GemmVariant.GEMM:
+            return
+        operands = self.kernel.metadata.operands
+        a_idx, b_idx = (1, 0) if self.swap_ab else (0, 1)
+        for node, constraint in (
+            (self.input_nodes[a_idx], operands.A),
+            (self.input_nodes[b_idx], operands.B),
+        ):
+            size, stride = list(node.get_size()), list(node.get_stride())
+            if self.swap_ab:
+                size[-2:] = reversed(size[-2:])
+                stride[-2:] = reversed(stride[-2:])
+            yield size, stride, constraint
+        yield self._kernel_layout.size, self._kernel_layout.stride, operands.out
+
+    @staticmethod
+    def _shape_constraint_satisfied(condition) -> bool:
+        import torch.fx.experimental._config as exp_config
+
+        sizevars = V.graph.sizevars
+        if sizevars.shape_env.frozen or exp_config.backed_size_oblivious:
+            return sizevars.statically_known_true(condition)
+        symbols = tuple(condition.free_symbols)
+        hints = sizevars.optimization_hints(symbols)
+        return condition.xreplace(dict(zip(symbols, hints, strict=True))) is sympy.true
+
+    def _supports_current_shape_constraints(self) -> bool:
+        try:
+            return all(
+                self._shape_constraint_satisfied(condition)
+                for geometry in self._operand_constraints()
+                for condition, _ in self._tensor_constraint_checks(*geometry)
+            )
+        except ValueError:
+            return False
+
+    def _guard_dynamic_shape_constraints(self) -> None:
+        if self.variant != GemmVariant.GEMM:
+            return
+        sizevars = V.graph.sizevars
+        for geometry in self._operand_constraints():
+            for condition, message in self._tensor_constraint_checks(*geometry):
+                if sizevars.shape_env.frozen:
+                    if not sizevars.statically_known_true(condition):
+                        raise AssertionError(message)
+                elif not sizevars.guard_or_false(condition):
+                    raise AssertionError(message)
+
+    def output_node(self, *, install_guards: bool = True) -> TensorBox:
         from torch._inductor.ir import NVUniversalGemmBuffer
+
+        if install_guards:
+            self._guard_dynamic_shape_constraints()
 
         # Without memoization, each call registers a new buffer (via
         # TemplateBuffer.__init__ → V.graph.register_buffer), leaking orphan
@@ -1036,6 +1119,8 @@ def _add_nv_gemm_choices_impl(
                 bias_node=bias_node,
                 output_scale_node=output_scale_node,
             )
+            if not caller._supports_current_shape_constraints():
+                continue
             choices.append(caller)
             num_added += 1
         except Exception:

@@ -23,7 +23,10 @@ from typing import Any, cast
 import sympy
 
 import torch
-from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+from torch.fx.experimental.symbolic_shapes import (
+    GuardOnDataDependentSymNode,
+    has_free_symbols,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from ...ir import Buffer, ComputedBuffer, Pointwise, Reduction
@@ -525,6 +528,8 @@ class NVGemmEpilogueLowering:
             if len(reduction.reduction_ranges) != 1:
                 return None
             group_extent = reduction.reduction_ranges[0]
+            if has_free_symbols(group_extent):
+                return None
             try:
                 group = V.graph.sizevars.optimization_hint(group_extent)
             except (GuardOnDataDependentSymNode, TypeError, ValueError):
