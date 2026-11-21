@@ -5343,15 +5343,6 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
         # sq_length (sequence protocol). Redirect so generic_size works.
         return self.mp_length_impl(tx)
 
-    def mp_subscript_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        key: VariableTracker,
-    ) -> VariableTracker:
-        # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
-        # TODO(follow-up): add test for unhashable/invalid key type, Counter missing key
-        return super().mp_subscript_impl(tx, key)
-
     def tp_init_impl(
         self,
         tx: "InstructionTranslatorBase",
