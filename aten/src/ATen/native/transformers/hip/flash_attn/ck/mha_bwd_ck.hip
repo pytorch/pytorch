@@ -561,7 +561,19 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
 
         float t = aiter::mha_bwd(args, stream_config);
 
-        TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
+        // A negative time means no instance matched the requested traits. Those
+        // traits are not only determinism, so name it as the likely cause rather
+        // than the certain one, but still point at the two ways out.
+        TORCH_CHECK(t >= 0,
+                    "invalid argument for fmha_bwd",
+                    deterministic
+                        ? ": no instance matched this configuration, which requested a "
+                          "deterministic backward. This composable_kernel build may not provide "
+                          "deterministic fmha_bwd instances. Either select the AOTriton backend "
+                          "with torch.backends.cuda.preferred_rocm_fa_library(\"aotriton\"), or "
+                          "allow a non-deterministic backward with "
+                          "torch.use_deterministic_algorithms(True, warn_only=True)."
+                        : "");
     } else {
         // No kernel ran, so nothing wrote the grads. All three are empty when
         // batch_size == 0; when only seqlen_q is 0 they are not, and the grad of an

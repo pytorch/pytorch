@@ -577,7 +577,18 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
         set_fmha_bwd_pinned_host_alloc(args, pinned_host_alloc);
 
         float t = aiter::mha_bwd(args, stream_config);
-        TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
+        // Same diagnosis as the non-varlen backward in mha_bwd_ck.hip: a negative
+        // time means no instance matched, and determinism is one of the traits.
+        TORCH_CHECK(t >= 0,
+                    "invalid argument for fmha_bwd",
+                    deterministic
+                        ? ": no instance matched this configuration, which requested a "
+                          "deterministic backward. This composable_kernel build may not provide "
+                          "deterministic fmha_bwd instances. Either select the AOTriton backend "
+                          "with torch.backends.cuda.preferred_rocm_fa_library(\"aotriton\"), or "
+                          "allow a non-deterministic backward with "
+                          "torch.use_deterministic_algorithms(True, warn_only=True)."
+                        : "");
     } else {
         // No kernel ran, so nothing wrote the grads. All three are empty when
         // batch_size == 0; when only max_seqlen_q is 0 they are not, and the grad of an
