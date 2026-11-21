@@ -1322,10 +1322,6 @@ class _AdaptiveMaxPoolNd(Module):
         return f"output_size={self.output_size}"
 
 
-# FIXME (by @ssnl): Improve adaptive pooling docs: specify what the input and
-#   output shapes are, and how the operation computes output.
-
-
 class AdaptiveMaxPool1d(_AdaptiveMaxPoolNd):
     r"""Applies a 1D adaptive max pooling over an input signal composed of several input planes.
 
@@ -1515,6 +1511,22 @@ class AdaptiveAvgPool1d(_AdaptiveAvgPoolNd):
     The output size is :math:`L_{out}`, for any input size.
     The number of output features is equal to the number of input planes.
 
+    Each output element is the average over a region of the input whose bounds are
+    derived from the input and output sizes:
+
+    .. math::
+        \text{start}(k) = \left\lfloor \frac{k \times L_{in}}{L_{out}} \right\rfloor
+        \qquad
+        \text{end}(k) = \left\lceil \frac{(k + 1) \times L_{in}}{L_{out}} \right\rceil
+
+    .. math::
+        out(N_i, C_j, k) = \frac{1}{\text{end}(k) - \text{start}(k)}
+                \sum_{l=\text{start}(k)}^{\text{end}(k) - 1} input(N_i, C_j, l)
+
+    When :math:`L_{in}` is not divisible by :math:`L_{out}`, these regions may have
+    different sizes and may overlap. For example, an input of size 5 pooled to size 3
+    uses the regions :math:`[0, 2)`, :math:`[1, 4)` and :math:`[3, 5)`.
+
     Args:
         output_size: the target output size :math:`L_{out}`.
 
@@ -1545,6 +1557,28 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
 
     The output is of size H x W, for any input size.
     The number of output features is equal to the number of input planes.
+
+    Each output element is the average over a rectangular region of the input. The
+    bounds are computed independently for each spatial dimension, from an output index
+    :math:`k`, an input size :math:`I` and an output size :math:`O`:
+
+    .. math::
+        \text{start}(k, I, O) = \left\lfloor \frac{k \times I}{O} \right\rfloor
+        \qquad
+        \text{end}(k, I, O) = \left\lceil \frac{(k + 1) \times I}{O} \right\rceil
+
+    Writing :math:`h_0 = \text{start}(h, H_{in}, H_{out})` and
+    :math:`h_1 = \text{end}(h, H_{in}, H_{out})`, and likewise :math:`w_0` and
+    :math:`w_1` from :math:`(W_{in}, W_{out})`, the output is
+
+    .. math::
+        out(N_i, C_j, h, w) = \frac{1}{(h_1 - h_0)(w_1 - w_0)}
+                \sum_{m=h_0}^{h_1 - 1} \sum_{n=w_0}^{w_1 - 1} input(N_i, C_j, m, n)
+
+    When an input size is not divisible by the corresponding output size, these regions
+    may have different sizes and may overlap. For example, a :math:`3 \times 3` input
+    pooled to :math:`2 \times 2` averages over four overlapping
+    :math:`2 \times 2` regions.
 
     Args:
         output_size: the target output size of the image of the form H x W.
@@ -1585,6 +1619,23 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
 
     The output is of size D x H x W, for any input size.
     The number of output features is equal to the number of input planes.
+
+    Each output element is the average over a cuboidal region of the input. The bounds
+    are computed independently for each spatial dimension, from an output index
+    :math:`k`, an input size :math:`I` and an output size :math:`O`:
+
+    .. math::
+        \text{start}(k, I, O) = \left\lfloor \frac{k \times I}{O} \right\rfloor
+        \qquad
+        \text{end}(k, I, O) = \left\lceil \frac{(k + 1) \times I}{O} \right\rceil
+
+    The region for output element :math:`(d, h, w)` spans
+    :math:`[\text{start}(d, D_{in}, D_{out}), \text{end}(d, D_{in}, D_{out}))` along the
+    depth dimension, and likewise with :math:`(H_{in}, H_{out})` and
+    :math:`(W_{in}, W_{out})` along height and width.
+
+    When an input size is not divisible by the corresponding output size, these regions
+    may have different sizes and may overlap.
 
     Args:
         output_size: the target output size of the form D x H x W.
