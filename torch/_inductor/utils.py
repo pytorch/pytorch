@@ -596,6 +596,11 @@ TRITON_FLOAT8_DTYPES = (
     torch.float8_e5m2fnuz,
 )
 
+
+def is_float8_type(dtype: Any) -> bool:
+    return dtype in TRITON_FLOAT8_DTYPES or dtype == torch.float8_e8m0fnu
+
+
 # PyTorch dtypes with valid CUtensorMapDataType mappings.
 # Ref: triton/backends/nvidia/include/cuda.h (CUtensorMapDataType enum)
 #      triton/_internal_testing.py (tma_dtypes test list)

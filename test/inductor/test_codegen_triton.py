@@ -26,11 +26,13 @@ from torch._inductor.codegen.triton import (
     FixedTritonConfig,
     get_triton_reduction_function,
     IndexingOptions,
+    needs_upcast_to_float32,
     texpr,
     TMACompatibilityChecker,
     TritonCSEVariable,
     TritonKernel,
     TritonKernelOverrides,
+    TritonOverrides,
     TritonScheduling,
     TritonSymbols,
 )
@@ -1997,6 +1999,49 @@ def helper(x):
             is_triton_fp8_dtype_supported(
                 torch.float8_e5m2fnuz, triton_backend="hip", triton_arch="gfx942"
             )
+        )
+
+    def test_float8_comparison_codegen_upcasts_to_fp32(self):
+        v_f8 = CSEVariable("v_f8", ValueRanges.unknown(), torch.float8_e5m2)
+        v_f8_2 = CSEVariable("v_f8_2", ValueRanges.unknown(), torch.float8_e5m2)
+        v_f32 = CSEVariable("v_f32", ValueRanges.unknown(), torch.float32)
+
+        self.assertTrue(needs_upcast_to_float32(v_f8))
+        self.assertFalse(needs_upcast_to_float32(v_f32))
+
+        self.assertEqual(
+            TritonOverrides.eq(v_f8, v_f8_2),
+            "(v_f8.to(tl.float32) == v_f8_2.to(tl.float32))",
+        )
+        self.assertEqual(
+            TritonOverrides.ne(v_f8, 0.0),
+            "(v_f8.to(tl.float32) != 0.0)",
+        )
+        self.assertEqual(
+            TritonOverrides.lt(0.0, v_f8),
+            "(0.0 < v_f8.to(tl.float32))",
+        )
+        self.assertEqual(
+            TritonOverrides.le(v_f8, v_f8_2),
+            "(v_f8.to(tl.float32) <= v_f8_2.to(tl.float32))",
+        )
+        self.assertEqual(
+            TritonOverrides.gt(v_f8, v_f8_2),
+            "(v_f8.to(tl.float32) > v_f8_2.to(tl.float32))",
+        )
+        self.assertEqual(
+            TritonOverrides.ge(v_f8, v_f8_2),
+            "(v_f8.to(tl.float32) >= v_f8_2.to(tl.float32))",
+        )
+
+        # non-fp8 variables should not be upcast
+        v_i32 = CSEVariable("v_i32", ValueRanges.unknown(), torch.int32)
+        self.assertEqual(TritonOverrides.eq(v_i32, 0), "v_i32 == 0")
+
+        # float8 to bool in to_dtype upcasts to float32
+        self.assertEqual(
+            TritonOverrides.to_dtype(v_f8, torch.bool),
+            "(v_f8.to(tl.float32) != 0)",
         )
 
     def test_signature_of_float8_e4m3fn_uses_uint8_on_pre_sm89_cuda_inputs(self):
