@@ -9089,6 +9089,76 @@ SavedForBackwardsAOTOutput(idx=5)""",
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(dual)
 
+    def test_zerotensor_input_materialized(self):
+        # https://github.com/pytorch/pytorch/issues/197067
+        def fn(t):
+            return t[-1] + 10
+
+        def make_zerotensor():
+            x = torch.randn(3, requires_grad=True)
+            z = torch.autograd.grad(torch.sgn(x).sum(), x)[0]
+            self.assertTrue(z._is_zerotensor())
+            return z
+
+        z = make_zerotensor()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(torch.ones(3)), fn(torch.ones(3)))
+        self.assertEqual(opt_fn(z), fn(z))
+        self.assertEqual(cnt.frame_count, 2)
+
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="inductor")(z), fn(z))
+
+        torch._dynamo.reset()
+        z = make_zerotensor()
+        torch._dynamo.mark_static_address(z, guard=True)
+        self.assertEqual(torch.compile(fn, backend="inductor")(z), fn(z))
+
+        torch._dynamo.reset()
+        z = make_zerotensor()
+        with torch._dynamo.config.patch(install_free_tensors=True):
+            self.assertEqual(torch.compile(fn, backend="inductor")(z), fn(z))
+
+    def test_zerotensor_optimizer_grad_guarded(self):
+        # Optimizer grads are normally guarded with NOT_NONE_MATCH only.
+        p = torch.nn.Parameter(torch.ones(3))
+        opt = torch.optim.SGD([p], lr=1.0)
+        step = torch.compile(opt.step, backend="eager")
+        p.grad = torch._efficientzerotensor(3)
+        step()
+        self.assertEqual(p, torch.ones(3))
+        p.grad = torch.ones(3)
+        step()
+        self.assertEqual(p, torch.zeros(3))
+
+    def test_zerotensor_input_strict_export(self):
+        class M(torch.nn.Module):
+            def forward(self, t):
+                return t + 10
+
+        ep = torch.export.export(M(), (torch._efficientzerotensor(3),), strict=True)
+        self.assertEqual(ep.module()(torch.ones(3)), torch.full((3,), 11.0))
+
+    def test_zerotensor_input_requires_grad_or_subclass_graph_breaks(self):
+        class MyTensor(torch.Tensor):
+            pass
+
+        def fn(t):
+            return (t * 2).sum()
+
+        z = torch._efficientzerotensor(3).requires_grad_()
+        cnt = torch._dynamo.testing.CompileCounter()
+        out = torch.compile(fn, backend=cnt)(z)
+        self.assertEqual(cnt.frame_count, 0)
+        out.backward()
+        self.assertEqual(z.grad, torch.full((3,), 2.0))
+
+        for t in (z, torch._efficientzerotensor(3).as_subclass(MyTensor)):
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "ZeroTensor"):
+                torch.compile(fn, backend="eager", fullgraph=True)(t)
+
     def test_swap_tensors_after_discarded_attempt(self):
         # Issue #186796: a discarded restart/skip attempt fakifies the real
         # params and builds guards on them, leaving weakrefs on the real params
