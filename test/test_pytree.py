@@ -1190,6 +1190,54 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
         ):
             python_pytree.treespec_dumps(spec)
 
+    def test_pytree_deserialize_namedtuple_names_a_namedtuple(self):
+        import json
+
+        self.addCleanup(python_pytree.treespec_loads.cache_clear)
+
+        class InstanceFields:
+            def __get__(self, obj, owner):
+                if obj is None:
+                    raise TypeError("_fields needs an instance")
+                return ("x",)
+
+        Point = namedtuple("Point", ["x", "y"])
+        Pair = type("Pair", (tuple,), {})
+        Vec = type("Vec", (list,), {})
+        OldPair = type("OldPair", (tuple,), {"_fields": ("x", "y")})
+        LazyFields = type("LazyFields", (tuple,), {"_fields": InstanceFields()})
+        refused = [
+            type("ListFields", (tuple,), {"_fields": ["x"]}),
+            type("IntFields", (tuple,), {"_fields": (0,)}),
+            type("NotTuple", (), {"_fields": ("x",)}),
+        ]
+        for cls in (Pair, Vec, LazyFields):
+            python_pytree._register_namedtuple(
+                cls, serialized_type_name=f"test_pytree.{cls.__name__}"
+            )
+            self.addCleanup(python_pytree._deregister_pytree_node, cls)
+        for cls in (Point, OldPair, *refused):
+            python_pytree._private_register_pytree_node(
+                cls,
+                lambda node: (list(node), None),
+                lambda values, _: tuple(values),
+                serialized_type_name=f"test_pytree.{cls.__name__}",
+            )
+            self.addCleanup(python_pytree._deregister_pytree_node, cls)
+        spec = python_pytree.tree_structure((Pair((1, 2)), Vec([5]), Point(3, 4)))
+        self.assertEqual(
+            python_pytree.treespec_loads(python_pytree.treespec_dumps(spec)), spec
+        )
+        node = {"type": "collections.namedtuple", "children_spec": []}
+        for cls in (OldPair, LazyFields):
+            text = json.dumps([1, {**node, "context": f"test_pytree.{cls.__name__}"}])
+            self.assertIs(python_pytree.treespec_loads(text).context, cls)
+        names = ["collections.defaultdict", "builtins.tuple", "collections.namedtuple"]
+        names += [f"test_pytree.{cls.__name__}" for cls in refused]
+        for name in names:
+            with self.assertRaisesRegex(NotImplementedError, "not a namedtuple class"):
+                python_pytree.treespec_loads(json.dumps([1, {**node, "context": name}]))
+
     def test_pytree_custom_type_serialize_bad(self):
         class DummyType:
             def __init__(self, x, y):

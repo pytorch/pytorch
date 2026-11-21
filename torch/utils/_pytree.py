@@ -919,6 +919,30 @@ def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
         )
 
     typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[dumpable_context]
+    # Besides namedtuple nodes, this loads the context of any class registered
+    # with _register_namedtuple, which need not be a namedtuple. treespec_dumps
+    # writes a namedtuple node for a namedtuple class registered with
+    # register_pytree_node, and older releases did so for any direct tuple
+    # subclass with string _fields. isinstance(typ, type) refuses the namedtuple
+    # factory, which is registered with this function too. The registry test
+    # comes first because reading _fields can raise for a registered class.
+    if not (
+        isinstance(typ, type)
+        and (
+            SUPPORTED_SERIALIZED_TYPES[typ].from_dumpable_context
+            is _namedtuple_deserialize
+            or (
+                issubclass(typ, tuple)
+                and isinstance(getattr(typ, "_fields", None), tuple)
+                and all(type(field) is str for field in typ._fields)
+            )
+        )
+    ):
+        raise NotImplementedError(
+            f"Can't deserialize a namedtuple TreeSpec: {dumpable_context!r} points "
+            f"to {typ}, which is not a namedtuple class. If the class changed after "
+            "the spec was saved, save the spec again."
+        )
     return typ
 
 
