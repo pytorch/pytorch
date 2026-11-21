@@ -149,7 +149,9 @@ class SubgraphTracingInfo:
     side_effect_stack: traceback.StackSummary | None = None
     # All sources accessed via VariableBuilder during the subgraph trace.
     traced_sources: OrderedSet[Any] = field(default_factory=OrderedSet)
+    has_container_identity: bool = False
     has_builtin_method_identity: bool = False
+    lexical_sources: set[tuple[Source, int]] = field(default_factory=set)
 
 
 # This function is a syntax sugar for creating a dummy new subtracer so that
@@ -1708,6 +1710,7 @@ def speculate_subgraph_with_auto_output_flattening(
     # backward where we do need to account for all the inputs of the backwards
     # to be lifted as inputs for making the fwd-bwd graph consistent.
     set_subgraph_inputs: SetSubgraphInputs = "automatic",
+    track_lexical_sources: bool = False,
     # If True, exposes intermediates to subgraph outputs to allow later tensor ops to
     # access intermediates from the subgraph, this is useful for mutation
     allow_side_effects: bool = False,
@@ -1861,6 +1864,7 @@ def speculate_subgraph_with_auto_output_flattening(
 
     try:
         with tx.output.subtracer(source_target, tracer, description) as subtracer:
+            subtracer.tracks_lexical_sources |= track_lexical_sources
             args = get_hop_args(
                 tx,
                 f,
@@ -2034,6 +2038,8 @@ def speculate_subgraph_with_auto_output_flattening(
             tracing_info = SubgraphTracingInfo(
                 side_effect_stack=subtracer.side_effect_stack,
                 traced_sources=subtracer.traced_sources,
+                lexical_sources=subtracer.lexical_sources,
+                has_container_identity=subtracer.has_container_identity,
                 has_builtin_method_identity=subtracer.has_builtin_method_identity,
             )
 
@@ -3943,6 +3949,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         description: str,
         *,
         subgraph_name: str = "wrap_body",
+        track_lexical_sources: bool = False,
         set_subgraph_inputs: Literal[
             "automatic", "automatic_with_forced_inputs"
         ] = "automatic",
@@ -3970,6 +3977,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             kwargs,
             description,
             source_target=self.value,
+            track_lexical_sources=track_lexical_sources,
             set_subgraph_inputs=set_subgraph_inputs,
             allow_side_effects=self.allow_side_effects,
             filter_aliased_intermediates=getattr(

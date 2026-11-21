@@ -853,6 +853,8 @@ def forward(self, x_1):
             """{u1: [Eq(Eq(u0, 1), Eq(u1, 1))]}""",
         )
 
+        cached = ShapeEnv.get_implications(shape_env, expr.node.expr)
+        self.assertIs(shape_env.get_implications(e=expr.node.expr), cached)
         implications = [
             implication for implication, _ in shape_env.get_implications(expr.node.expr)
         ]
@@ -870,6 +872,19 @@ Ne(Eq(u1, 1), Eq(u0, 1))""",
         )
         self.assertFalse(any(i.has(sympy.Gt, sympy.Ge) for i in implications))
         self.assertTrue(all(i == canonicalize_bool_expr(i) for i in implications))
+
+    def test_canonicalize_simple_bound_respects_evaluation_mode(self):
+        dim = sympy.Symbol("dim", integer=True)
+        reduce = "torch.fx.experimental.symbolic_shapes._reduce_to_lowest_terms"
+        with unittest.mock.patch(reduce, side_effect=AssertionError):
+            for evaluate in (True, False):
+                with sympy.evaluate(evaluate):
+                    self.assertEqual(canonicalize_bool_expr(dim >= 3), sympy.Le(3, dim))
+        bound = sympy.Le(0, dim, evaluate=False)
+        self.assertEqual(canonicalize_bool_expr(bound), bound)
+        with sympy.evaluate(False):
+            expected = sympy.Add(dim, 0, evaluate=False)
+            self.assertEqual(canonicalize_bool_expr(bound).rhs, expected)
 
     def test_canonicalize_bool_expr_constant_difference(self):
         # sympy leaves relations between bitwise expressions unevaluated, so
