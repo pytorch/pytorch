@@ -1,11 +1,29 @@
 #pragma once
 
+#include <c10/util/Exception.h>
 #include <c10/util/bit_cast.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <cstdint>
 
 namespace torch::inductor::static_launcher {
+
+// Parsed by _log_autotune_exceptions in select_algorithm.py; keep this format.
+[[noreturn]] inline void throwOutOfResourceError(
+    const char* funcName,
+    uint64_t required,
+    uint64_t limit) {
+  TORCH_CHECK_WITH(
+      OutOfMemoryError,
+      false,
+      "out of resource: ",
+      funcName,
+      " Required: ",
+      required,
+      " Hardware limit: ",
+      limit,
+      " Reducing block sizes or `num_stages` may help.");
+}
 
 // Match Triton's generated launchers: fp16 packs directly from the Python
 // double, while bf16 narrows to fp32 and keeps its high 16 bits. Keep the bf16

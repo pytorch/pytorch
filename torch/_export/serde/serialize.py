@@ -1870,6 +1870,8 @@ class GraphModuleSerializer(metaclass=Final):
             return Argument.create(as_sym_int=SymIntArgument.create(as_name=x.name))
         elif isinstance(x, ep.SymFloatArgument):
             return Argument.create(as_sym_float=SymFloatArgument.create(as_name=x.name))
+        elif isinstance(x, ep.SymBoolArgument):
+            return Argument.create(as_sym_bool=SymBoolArgument.create(as_name=x.name))
         elif isinstance(x, ep.ConstantArgument):
             return self.serialize_input(x.value)
         elif isinstance(x, ep.CustomObjArgument):
@@ -3261,6 +3263,9 @@ class GraphModuleDeserializer(metaclass=Final):
     def deserialize_outputs(self, serialized_node: Node, fx_node: torch.fx.Node):
         # Check single value return
         if len(serialized_node.outputs) == 0:
+            if isinstance(fx_node.target, torch._ops.HigherOrderOperator):
+                # serialize_hoo_outputs saves no outputs when the HOP returns ().
+                fx_node.meta["val"] = ()
             return
 
         if (
@@ -3536,6 +3541,8 @@ class GraphModuleDeserializer(metaclass=Final):
             return ep.SymIntArgument(name=x.as_sym_int.as_name)
         elif x.type == "as_sym_float":
             return ep.SymFloatArgument(name=x.as_sym_float.as_name)
+        elif x.type == "as_sym_bool":
+            return ep.SymBoolArgument(name=x.as_sym_bool.as_name)
         elif x.type == "as_custom_obj":
             return ep.ConstantArgument(
                 name=x.as_custom_obj.name, value=self.deserialize_input(x)
@@ -4292,6 +4299,14 @@ def canonicalize(
                     pass
                 else:
                     raise AssertionError(f"Unknown sym_float type: {f}")
+            elif arg.type == "as_sym_bool":
+                b = arg.as_sym_bool
+                if b.type == "as_name":
+                    b.as_name = replace_table[b.as_name]
+                elif b.type == "as_bool":
+                    pass
+                else:
+                    raise AssertionError(f"Unknown sym_bool type: {b}")
             elif arg.type in (
                 "as_none",
                 "as_bool",
@@ -4348,6 +4363,14 @@ def canonicalize(
                     pass
                 else:
                     raise AssertionError(f"Unknown sym_float type: {f}")
+            elif arg.type == "as_sym_bool":
+                b = arg.as_sym_bool
+                if b.type == "as_name":
+                    b.as_name = replace_table[b.as_name]
+                elif b.type == "as_bool":
+                    pass
+                else:
+                    raise AssertionError(f"Unknown sym_bool type: {b}")
             elif arg.type in ("as_none", "as_bool", "as_int", "as_float", "as_string"):
                 return
             else:
