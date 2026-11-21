@@ -842,6 +842,58 @@ found = torch.vm.regions(g)[0]
 found["state"], found["reason"]  # ('vm', 'load_attr could run Python code')
 ```
 
+Where the function binds a variable anew between its operations, the variable
+lets go of what it held. If that was the last reference to an object whose
+end runs Python code (a `__del__`, a weak reference with a callback), the
+code runs at the binding, in front of what the function reads behind it.
+What was made of the graph binds the variable when it has run, behind every
+read. So the engine looks, on every call and before anything of it runs, at
+what the call would let go of that way. Each such object has to end without
+Python code running: neither it nor anything it refers to has a finalizer,
+or a weak reference that is told of its end (the entry of a weak dictionary
+or of a weak set, which only takes itself out, is none). Or it has to stay
+alive: a parameter of the function or another value of it holds it, the
+function keeps it, or it has more references than the call lets go of. A
+call for which neither can be shown runs the operations of the function as
+they are:
+
+```python
+class Ends:
+    def __del__(self):
+        STATE[0] += 1.0  # what the function reads behind the binding
+
+
+STATE, HELD = [0.5], []
+
+
+def lets_go(x):
+    held = HELD.pop()
+    y = (x.sin() + 1).cos() * STATE[0]
+    held = None  # the last reference to what `pop` gave
+    return (y + STATE[0]).tanh(), held
+
+
+def eight_calls(fn):
+    STATE[0] = 0.5
+    outs = []
+    for at in range(8):
+        HELD.append(Ends() if at == 6 else 0)
+        outs.append(fn(x)[0])
+    return outs
+
+
+g = torch.vm(lets_go, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+x = torch.randn(5)
+got, expected = eight_calls(g), eight_calls(lets_go)
+all(torch.equal(a, b) for a, b in zip(got, expected)), STATE[0]  # (True, 1.5)
+```
+
+What an object refers to is what it shows the garbage collector, up to 64
+objects (with more, the call runs the operations). What a tensor holds
+outside of that, in the nodes of its history, is not seen; objects in a
+reference cycle end when the collector runs, as they do in eager mode; and
+what a pass's own callable does is not looked at.
+
 Some kinds of calls are not exported: one whose operations write to what
 they are given, one with a tensor that carries a forward-mode gradient or is
 of a subclass of `torch.Tensor`, and one under a `TorchDispatchMode`, a
@@ -1527,6 +1579,13 @@ of itself: into an object whose class has a `__setattr__` of its own, through
 a property or another descriptor that takes stores, and on a module where
 `nn.Module.__setattr__` does more than one store (a `Parameter` or a module
 that is assigned is registered).
+
+A store also lets go of what it replaces: the attribute that was there, the
+value under the key, the item at the place. That is looked at as what a
+variable lets go of is ("Passes over graphs"), for every call in front of
+what was made of the graph and once more when the path ends: where a store
+would end an object whose end runs Python code, the path is not for the
+call, and the instructions run and end it where the store stands.
 
 ```python
 class Guarded(Keeps):
@@ -2444,6 +2503,15 @@ What graphs do not do at this stage:
   the layers of a transformer in training mode that is seldom so, and their
   paths end at a dropout that drops or at an attention with a dropout rate
   ("Models" has what a training step of one looks like).
+- In the call in which a path is taken down, a variable that the function
+  deletes inside the path (`del name`) is let go of where the path ends and
+  not at the `del`, and so is a value that is in no variable and ends inside
+  the path (what a call gave, put into a tuple that the path builds and
+  drops). Where one of them held the last reference to an object whose end
+  runs Python code, that code runs behind what the call reads behind it. A
+  call that would run what was made of the path is turned down for such an
+  object ("Passes over graphs"), and is then one in which a path is taken
+  down again, for as long as the graph may get another form.
 - Sizes are fixed per export. Every size a graph is called with is a kind of
   call of its own, with a graph of its own, so a function that is called
   with many sizes uses up `max_variants`. Sizes of the tensors the graph
