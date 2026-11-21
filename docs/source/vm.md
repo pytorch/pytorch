@@ -411,9 +411,9 @@ A path does not go into every call. It ends in front of a call
   calls itself is gone into that often, and an `nn.Sequential` inside an
   `nn.Sequential` is on a path twice;
 - more than 48 calls deep;
-- of a `functools.partial`, of a class (constructing an object), and of a
-  function that was made on the path (a closure that the function defines
-  and calls);
+- of a `functools.partial`, of a class whose objects a path does not make
+  ("Objects a path makes"), and of a function that was made on the path (a
+  closure that the function defines and calls);
 - whose arguments do not fit the function: the call raises the `TypeError`
   where the function has it;
 - that hands on `**kwargs` from a dict whose keys are no strs;
@@ -1688,6 +1688,72 @@ appended  # [1, 1, 1, 1, 1, 2, 1, 2]: where the two are one object, `a.n` is wha
 found["ops"], found["exports"], found["hits"]  # (8, 2, 5)
 ```
 
+### Objects a path makes
+
+A class that is defined in Python and called is an instruction of a path
+where calling it is no more than `object.__new__(cls)` and then its
+`__init__`: its own class is `type`, it has no `__new__` of its own, it is
+not abstract, its objects have no `__del__`, and its `__init__` is a Python
+function, or `object`'s where the call hands over nothing. The object is
+the path's own, as a list the path made is: a new one at every call, of the
+class the callee is at that call. The path goes into the `__init__` as into
+any function it calls and checks that it returns None. Where it returns
+something else the call raises eager's `TypeError`, and where the path does
+not go on inside it (it raises, or does what no path does) the call has run
+as the interpreter runs it and the path ends in front of the call. A
+dataclass is such a class, with the `__init__` that was made for it and its
+`__post_init__`.
+
+A store into such an object (`self.hidden = h` in the `__init__`, or
+anywhere behind it) is done where it stands, at every call, where the class
+keeps what is stored as `object` does: no `__setattr__` of its own, nothing
+in the class that takes a store under the name (a property, a slot),
+objects with a dict. The path checks that of the class in front of what
+stands for the graph, so the store cannot fail behind it; any other store
+ends the path in front of itself. A read of an attribute that the path
+stored is the value that was stored, so a tensor that goes through an
+object is still the value of the graph it was, and what the class has for
+its objects (a method, a property) is read of the class. The gradient at a
+tensor that such an object holds is eager's: the object is something that
+holds it ("Gradients").
+
+```python
+class Out:
+    def __init__(self, hidden, scale=2):
+        self.hidden = hidden
+        self.scale = scale
+
+    def scaled(self):
+        return self.hidden * self.scale
+
+
+def makes(x):
+    y = (x.sin() + 1).cos()
+    out = Out(y, scale=3)
+    return (out.scaled() + out.hidden).tanh().exp()
+
+
+def gives(x):
+    y = (x.sin() + 1).cos()
+    return Out((y * 2).tanh(), scale=y.exp())
+
+
+g = torch.vm(makes, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(6):
+    same = torch.equal(g(v), makes(v))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["why"]  # (True, 7, 'the function returns')
+g = torch.vm(gives, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+outs = [g(v) for _ in range(6)]
+type(outs[-1]).__name__, sorted(vars(outs[-1])), len({id(out) for out in outs})  # ('Out', ['hidden', 'scale'], 6)
+torch.equal(outs[-1].scale, gives(v).scale)  # True
+```
+
+A path does not make an object of a class with a `__new__` of its own (a
+named tuple), with a `__setattr__` written in Python, or made of `dict`, nor
+one of a class that is called with `*` or `**`: such a call ends it, as
+`getattr(obj, name)` and `vars(obj)` of an object the path made do.
+
 ### Operations with several results
 
 An operation that gives several tensors is an operation of a graph:
@@ -2611,11 +2677,13 @@ What graphs do not do at this stage:
 - A raise that is caught ends a path: `getattr(obj, name, default)` and
   `hasattr` where a `__getattribute__` written in Python raises
   `AttributeError`, a `try` around a call that raises, `Mapping.get` of a key
-  that is not there. So do constructing an object (a dataclass of outputs,
-  a named tuple, `functools.partial`), making an inner function or a
-  lambda, a `with` block, and library code a path is not known to be able
-  to call (`inspect.signature`). These are what the paths of transformer
-  models end at ("Models").
+  that is not there. So do constructing an object of a class that a path
+  does not make objects of ("Objects a path makes": a named tuple, a class
+  with a `__setattr__` of its own or made of `dict`, as the output objects
+  of the transformer models are), `functools.partial`, making an inner
+  function or a lambda, a `with` block, and library code a path is not
+  known to be able to call (`inspect.signature`). These are what the paths
+  of transformer models end at ("Models").
 - A call with `*` or `**` is an operation only where the operator it runs
   enters no Python code ("Methods read off a tensor, and what a call
   spreads"). The router of an operator whose kernel is chosen in Python and

@@ -113,6 +113,10 @@ pub enum Assert {
     /// object that was stored into and where it keeps what was stored
     /// (`apart`).
     Apart(PathValue, bool, PathValue, Keeps),
+    /// An object of the class keeps what is stored under the name in its
+    /// own dict, as `object` has it (`stores_plainly`): a store into an
+    /// object the path made cannot fail and runs no Python code.
+    Plain(PathValue, PyObj),
 }
 
 impl Assert {
@@ -131,7 +135,8 @@ impl Assert {
             | Assert::Flag(v)
             | Assert::Is(v, _)
             | Assert::Same(v, _)
-            | Assert::Apart(v, ..) => *v,
+            | Assert::Apart(v, ..)
+            | Assert::Plain(v, _) => *v,
             Assert::Guard(cond) => cond.value(),
         }
     }
@@ -1420,12 +1425,12 @@ unsafe fn holds_others(o: Obj) -> bool {
 /// the registers of the path that hold the object (`own`), and what the
 /// values in those registers refer to where a value may be something the
 /// path made (a container or an iterator of the interpreter's own
-/// classes, and what such a one holds inside), but not what the function
-/// had before the path (`given`). If the object has more references than
-/// that, one of them is somebody else's, and it stays. False where there
-/// is too much to look at, or containers are more than four deep inside
-/// one another.
-pub unsafe fn outlives(o: Obj, own: &[Obj], given: &[Obj], dropped: isize) -> bool {
+/// classes, and what such a one holds inside; an object of a class that
+/// the path made, `made`), but not what the function had before the path
+/// (`given`). If the object has more references than that, one of them is
+/// somebody else's, and it stays. False where there is too much to look
+/// at, or containers are more than four deep inside one another.
+pub unsafe fn outlives(o: Obj, own: &[Obj], given: &[Obj], made: &[Obj], dropped: isize) -> bool {
     const LOOKED_AT: usize = 4096;
     let mut slots: Vec<Obj> = own.iter().copied().filter(|held| !held.is_null() && !capi::is_unboxed(*held)).collect();
     let mut held = slots.iter().filter(|other| **other == o).count() as isize;
@@ -1434,7 +1439,7 @@ pub unsafe fn outlives(o: Obj, own: &[Obj], given: &[Obj], dropped: isize) -> bo
     let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
     let mut work: Vec<(Obj, u32)> = Vec::new();
     for other in &slots {
-        if *other != o && !given.contains(other) && holds_others(*other) {
+        if *other != o && !given.contains(other) && (holds_others(*other) || made.contains(other)) {
             work.push((*other, 0));
         }
     }
@@ -1997,6 +2002,8 @@ pub unsafe fn pure_method(recv: Obj, name: Obj, args: &[Obj], api: &TcfgApi) -> 
 /// The names of the functions that a class has for what the interpreter
 /// does with its instances without a call being written.
 pub struct Specials {
+    pub new: PyObj,
+    pub init: PyObj,
     pub iter: PyObj,
     pub len: PyObj,
     pub getitem: PyObj,
@@ -2012,6 +2019,8 @@ pub unsafe fn specials() -> &'static Specials {
     static NAMES: std::sync::OnceLock<Specials> = std::sync::OnceLock::new();
     let name = |name: &std::ffi::CStr| PyObj::from_owned(ffi::PyUnicode_InternFromString(name.as_ptr()));
     NAMES.get_or_init(|| Specials {
+        new: name(c"__new__"),
+        init: name(c"__init__"),
         iter: name(c"__iter__"),
         len: name(c"__len__"),
         getitem: name(c"__getitem__"),
@@ -2034,6 +2043,51 @@ pub unsafe fn special(o: Obj, name: &PyObj) -> Obj {
     }
     let found = pyffi::_PyType_Lookup(ffi::Py_TYPE(o), name.as_ptr());
     if !found.is_null() && ffi::PyFunction_Check(found) != 0 { found } else { null_mut() }
+}
+
+/// The C function that makes an object of a class where the class is
+/// called: the `__new__` of `object`, which the class has unless it or a
+/// class it is made of defines one. It gives a new, empty object of the
+/// class whatever else it is handed (the arguments of the call are for
+/// `__init__`), runs no Python code, and what it does depends on nothing but
+/// the class. Only for a class defined in Python whose own class is `type`
+/// (calling it is `__new__` and then `__init__`), that can have objects
+/// (an abstract class raises) and whose objects go without a `__del__`
+/// being called (an object that a path made and that a later check of the
+/// path gives up is let go of). Null for any other. Borrowed.
+pub unsafe fn fresh_new(class: Obj) -> Obj {
+    const IS_ABSTRACT: std::os::raw::c_ulong = 1 << 20;
+    if class.is_null() || capi::is_unboxed(class) || ffi::Py_TYPE(class) != std::ptr::addr_of_mut!(ffi::PyType_Type) {
+        return null_mut();
+    }
+    let ty = class as *mut ffi::PyTypeObject;
+    if is_static(ty) || ffi::PyType_HasFeature(ty, IS_ABSTRACT) != 0 || (*ty).tp_finalize.is_some() || (*ty).tp_del.is_some() {
+        return null_mut();
+    }
+    let object = std::ptr::addr_of_mut!(ffi::PyBaseObject_Type);
+    let found = pyffi::_PyType_Lookup(ty, specials().new.as_ptr());
+    if !found.is_null() && found == pyffi::_PyType_Lookup(object, specials().new.as_ptr()) { found } else { null_mut() }
+}
+
+/// Whether an object of a class keeps what is stored under a name in its
+/// own dict, by C code that cannot fail: the class stores attributes as
+/// `object` does, has nothing of its own that takes a store under the name
+/// (a property, a slot), and its objects have a dict. Not for the names the
+/// interpreter keeps for itself.
+pub unsafe fn stores_plainly(class: Obj, name: Obj) -> bool {
+    if class.is_null() || capi::is_unboxed(class) || ffi::PyType_Check(class) == 0 || ffi::PyUnicode_CheckExact(name) == 0 {
+        return false;
+    }
+    let ty = class as *mut ffi::PyTypeObject;
+    let text = pyffi::str_to_string(name);
+    if is_static(ty) || (*ty).tp_dictoffset == 0 || text.starts_with("__") {
+        return false;
+    }
+    let object = std::ptr::addr_of_mut!(ffi::PyBaseObject_Type);
+    let setattr = specials().setattr.as_ptr();
+    let descr = pyffi::_PyType_Lookup(ty, name);
+    let data = !descr.is_null() && (*ffi::Py_TYPE(descr)).tp_descr_set.is_some();
+    !data && pyffi::_PyType_Lookup(ty, setattr) == pyffi::_PyType_Lookup(object, setattr)
 }
 
 /// The Python function that `isinstance(obj, class)` comes down to: the
@@ -3507,8 +3561,8 @@ pub struct Def {
     /// An integer, or a list, tuple or slice, that the graph can compute
     /// itself.
     pub graph: bool,
-    /// A list, a dict or an iterator that an instruction of the path made:
-    /// the path may change it.
+    /// A list, a dict, an iterator or an object of a class that an
+    /// instruction of the path made: the path may change it.
     pub made: bool,
     /// A tensor whose memory an operation of the path made (it, or one it
     /// is a view of): nothing outside the path has it, and an operation
@@ -4236,6 +4290,10 @@ pub struct Stored {
     pub attribute: bool,
     pub target: PathValue,
     pub value: PathValue,
+    /// The store is into an object the path made, and is done where the
+    /// instruction is: a read behind it that is no read of that object by
+    /// the value it is finds what it finds.
+    pub own: bool,
 }
 
 /// How an attribute store that runs no Python code is done.
@@ -4354,6 +4412,7 @@ pub struct Mark {
     /// a call it went into.
     pub frames: usize,
     stores: usize,
+    classes: usize,
     flags: (bool, bool, bool),
     pinned: usize,
     body: usize,
@@ -4397,6 +4456,10 @@ pub struct Trace {
     /// past; and what was already checked to be apart (`Assert::Apart`).
     pub stores: Vec<Stored>,
     pub apart: Vec<(PathValue, bool, PathValue, Keeps)>,
+    /// The objects the path made by calling a class, each with the value
+    /// that the class is: what the class has for its objects is read of
+    /// the class, in front of whatever is stored into the object.
+    pub classes: Vec<(PathValue, PathValue)>,
     /// The run is no run to make a form of (an operation that is no part
     /// of the path changed what kind of tensor one of its tensors is): the
     /// path is taken down again at the next call.
@@ -4445,6 +4508,7 @@ impl Trace {
             mark: None,
             stores: Vec::new(),
             apart: Vec::new(),
+            classes: Vec::new(),
             again: false,
             writes: false,
             fallible: false,
@@ -4459,6 +4523,12 @@ impl Trace {
 
     fn act(&mut self) -> &mut Act {
         self.acts.last_mut().expect("a trace is in a function")
+    }
+
+    /// The value that the class of an object is, for an object the path
+    /// made by calling the class.
+    pub fn class_of(&self, object: PathValue) -> Option<PathValue> {
+        self.classes.iter().find(|(made, _)| *made == object).map(|(_, class)| *class)
     }
 
     /// Whether the trace is in the function it started in.
@@ -4557,7 +4627,10 @@ impl Trace {
         let unsure = |def: Def| def.late && !def.fixed;
         let mut late = unsure(self.defs[assert.value() as usize]);
         if let Assert::Same(_, other) | Assert::Apart(_, _, other, _) = &assert {
-            late |= unsure(self.defs[*other as usize]);
+            // Which object one that the path made is is known in front of
+            // the callable.
+            let own = matches!(assert, Assert::Apart(..)) && self.class_of(*other).is_some();
+            late |= unsure(self.defs[*other as usize]) && !own;
         }
         if late {
             self.fails_late();
@@ -4625,6 +4698,7 @@ impl Trace {
             at,
             frames,
             stores: self.stores.len(),
+            classes: self.classes.len(),
             flags: (self.writes, self.fallible, self.inplace),
             pinned: self.pinned.len(),
             body: self.body.len(),
@@ -4656,6 +4730,7 @@ impl Trace {
         };
         self.body.truncate(mark.body);
         self.stores.truncate(mark.stores);
+        self.classes.truncate(mark.classes);
         self.apart.clear();
         (self.writes, self.fallible, self.inplace) = mark.flags;
         if self.operators.is_empty() {
@@ -4948,7 +5023,10 @@ impl Path {
                             let mut late = defs[v].late;
                             if let Assert::Same(_, other) | Assert::Apart(_, _, other, _) = assert {
                                 need[*other as usize] = true;
-                                late |= defs[*other as usize].late;
+                                // Which object one that the path made is
+                                // does not wait for what is put into it.
+                                let own = matches!(assert, Assert::Apart(..)) && trace.classes.iter().any(|(made, _)| made == other);
+                                late |= defs[*other as usize].late && !own;
                             }
                             if late { Stage::After } else { Stage::Before }
                         }
