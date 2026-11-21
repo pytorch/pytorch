@@ -19,8 +19,8 @@ import tempfile
 import types
 import unittest
 import zipfile
-from collections import deque, namedtuple
-from dataclasses import dataclass
+from collections import defaultdict, deque, namedtuple
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import NamedTuple
 from unittest.mock import patch
@@ -47,10 +47,10 @@ from torch._export.serde.serialize import (
     GraphModuleDeserializer,
     GraphModuleSerializer,
     serialize,
-    SerializedArtifact,
     SerializeError,
 )
 from torch._export.utils import wrap_method
+from torch._export.wrappers import _ALLOWED_IN_PRE_DISPATCH_GRAPH
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._library.opaque_object import get_opaque_type_name, register_custom_class
 from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
@@ -3204,13 +3204,35 @@ class TestPredispatchSerialization(TestCase):
             self.addCleanup(pytree._deregister_pytree_node, Box)
             return Box
 
+        def lists(context):
+            # JSON cannot store these kinds, so they get an encoder to a list.
+            kind = type(context)
+            if kind in (set, frozenset, deque):
+                return dict(to_dumpable_context=list, from_dumpable_context=kind)
+            return {}
+
+        def loads_back(ep):
+            # Load before the next wrapped() call, which puts a new Unwrap in
+            # the test module.
+            buffer = io.BytesIO()
+            torch.export.save(ep, buffer)
+            buffer.seek(0)
+            x = torch.randn(4)
+            self.assertEqual(torch.export.load(buffer).module()(x), x * 2)
+
+        with self.subTest("inputs that load back the same"):
+            loads_back(keyed("k"))
+            for i, context in enumerate(({"a": 1}, {1, 2}, deque([1, 2]))):
+                box = register(f"flat_apply_test.Same{i}", context, **lists(context))
+                loads_back(wrapped(box, lambda b: b.x))
+
         mode = enum.Enum("Mode", {"FAST": "fast"}, type=str).FAST
+        flag = enum.IntEnum("Flag", {"A": 1}).A
         with self.subTest("context of a registered type that JSON cannot store"):
             # An int or str enum would load back as a plain int or str, which
             # compares equal to it, and a dict key 1 as "1". Every NaN loads back
             # as one shared object without its sign, which changes the dict keys
             # and set members that it matches.
-            flag = enum.IntEnum("Flag", {"A": 1}).A
             contexts = (
                 [mode],
                 {"k": flag},
@@ -3218,18 +3240,12 @@ class TestPredispatchSerialization(TestCase):
                 {flag},
                 frozenset({flag}),
                 deque([flag]),
+                deque([1], maxlen=1),
                 math.nan,
                 {math.nan},
             )
             for i, context in enumerate(contexts):
-                kind = type(context)
-                # JSON cannot store these kinds, so they get an encoder to a list.
-                encoder = (
-                    dict(to_dumpable_context=list, from_dumpable_context=kind)
-                    if kind in (set, frozenset, deque)
-                    else {}
-                )
-                box = register(f"flat_apply_test.Context{i}", context, **encoder)
+                box = register(f"flat_apply_test.Context{i}", context, **lists(context))
                 ep = wrapped(box, lambda b: b.x)
                 with (
                     self.subTest(context=context),
@@ -3238,18 +3254,52 @@ class TestPredispatchSerialization(TestCase):
                     torch.export.save(ep, io.BytesIO())
 
         with self.subTest("str enum in a context with its own encoder"):
-            # The encoder keeps the enum, so it saves.
+            # The decoder gives back the same enum, so the spec loads back the same.
             coded = dict(
                 to_dumpable_context=str, from_dumpable_context=lambda _: [mode]
             )
-            ep = wrapped(
-                register("flat_apply_test.Coded", [mode], **coded), lambda b: b.x
+            box = register("flat_apply_test.Coded", [mode], **coded)
+            loads_back(wrapped(box, lambda b: b.x))
+
+        with self.subTest("context that its own codec changes"):
+            # == misses a changed defaultdict factory, the sign of a zero and the
+            # type of a dataclass field. The exact codec of each saves.
+            @dataclass
+            class Config:
+                flag: int
+
+            codecs = (
+                (
+                    defaultdict(int),
+                    dict,
+                    functools.partial(defaultdict, None),
+                    functools.partial(defaultdict, int),
+                ),
+                (-0.0, float, abs, float),
+                (
+                    Config(flag),
+                    vars,
+                    lambda d: Config(**d),
+                    lambda d: Config(type(flag)(d["flag"])),
+                ),
             )
-            buffer = io.BytesIO()
-            torch.export.save(ep, buffer)
-            buffer.seek(0)
-            x = torch.randn(4)
-            self.assertEqual(torch.export.load(buffer).module()(x), x * 2)
+            for i, (context, encode, *decoders) in enumerate(codecs):
+                for lossy, decode in zip((True, False), decoders):
+                    box = register(
+                        f"flat_apply_test.Changed{i}{lossy}",
+                        context,
+                        to_dumpable_context=encode,
+                        from_dumpable_context=decode,
+                    )
+                    ep = wrapped(box, lambda b: b.x)
+                    if not lossy:
+                        loads_back(ep)
+                        continue
+                    with (
+                        self.subTest(context=context),
+                        self.assertRaisesRegex(SerializeError, "load back"),
+                    ):
+                        torch.export.save(ep, io.BytesIO())
 
         with self.subTest("type whose serialized name a later type took"):
             # Load would build the later type.
@@ -3298,7 +3348,11 @@ class TestPredispatchSerialization(TestCase):
 
         class ScaleViaSuper(Scale):
             # Export calls the decorated apply of the base class, which gets
-            # this class.
+            # this class, so load must call this forward.
+            @staticmethod
+            def forward(x):
+                return x * 3
+
             @classmethod
             def apply(cls, *args, **kwargs):
                 return super().apply(*args, **kwargs)
@@ -3314,17 +3368,17 @@ class TestPredispatchSerialization(TestCase):
 
         class Nothing(Scale):
             @staticmethod
-            def forward(x):
+            def forward(x, flag):
                 return ()
 
         class Results(torch.nn.Module):
             def forward(self, x):
-                Nothing.apply(x)
+                Nothing.apply(x, True)
                 return WithFlag.apply(x)[0]
 
         # An autograd function from an imported module saves, loads and runs,
         # also with a dataclass input whose __post_init__ reads its tensors, and
-        # with a bool result next to a tensor or no result at all.
+        # with a bool result next to a tensor, or a bool input and no result.
         functions = {
             "Scale": Scale,
             "AddPair": AddPair,
@@ -3339,7 +3393,7 @@ class TestPredispatchSerialization(TestCase):
         for m, expected, calls in (
             (Bar(), x * 2 + 1, 1),
             (Qux(), x * 4, 1),
-            (Baz(), x * 2 + 1, 1),
+            (Baz(), x * 3 + 1, 1),
             (Results(), x * 2, 2),
         ):
             with self.subTest(module=type(m).__name__):
@@ -3375,10 +3429,11 @@ class TestPredispatchSerialization(TestCase):
         del sys.modules[module.__name__]
         with self.assertRaisesRegex(RuntimeError, "error when deserializing") as cm:
             torch.export.load(buffer)
-        self.assertIsInstance(cm.exception.__cause__, SerializeError)
-        self.assertIn(
-            f"module {module.__name__} is not imported", str(cm.exception.__cause__)
-        )
+        # Load wraps the error of each node in one naming the node.
+        cause = cm.exception.__cause__
+        self.assertIsInstance(cause, SerializeError)
+        self.assertIsInstance(cause.__cause__, SerializeError)
+        self.assertIn(f"module {module.__name__} is not imported", str(cause.__cause__))
 
     @staticmethod
     def _index_in_vmap_program():
@@ -3401,17 +3456,6 @@ class TestPredispatchSerialization(TestCase):
         return serialize(cls._index_in_vmap_program())
 
     @staticmethod
-    def _load_exported_program(artifact, exported_program):
-        return deserialize(
-            SerializedArtifact(
-                exported_program,
-                artifact.state_dict,
-                artifact.constants,
-                artifact.example_inputs,
-            )
-        )
-
-    @staticmethod
     def _flat_apply_node(program):
         (node,) = [
             n
@@ -3424,7 +3468,9 @@ class TestPredispatchSerialization(TestCase):
         # Each case edits its own copy of the serialized flat_apply node.
         program = json.loads(artifact.exported_program)
         change(self._flat_apply_node(program))
-        return self._load_exported_program(artifact, json.dumps(program).encode())
+        return deserialize(
+            replace(artifact, exported_program=json.dumps(program).encode())
+        )
 
     def _load_with_name(self, artifact, replaced, name):
         # Loads the artifact with the function name, or the autograd class name
@@ -3434,12 +3480,14 @@ class TestPredispatchSerialization(TestCase):
         ).encode()
         self.assertEqual(artifact.exported_program.count(old), 1)
         payload = artifact.exported_program.replace(old, json.dumps(name).encode())
-        return self._load_exported_program(artifact, payload)
+        return deserialize(replace(artifact, exported_program=payload))
 
     @parametrize(
         "replaced,name,reason",
         [
-            subtest(("function", "builtins.exec", "cannot be used"), name="exec"),
+            subtest(
+                ("function", "builtins.exec", "not a class or function"), name="exec"
+            ),
             subtest(
                 ("function", "torch.nn.parameter.Parameter", "cannot be used"),
                 name="parameter",
@@ -3460,8 +3508,13 @@ class TestPredispatchSerialization(TestCase):
             ),
             subtest(("function", "__mp_main__.f", "__main__ module"), name="mp_main"),
             subtest(
-                ("class", "builtins.exec", "is not a torch.autograd.Function"),
+                ("class", "builtins.exec", "not a class or function"),
                 name="class_exec",
+            ),
+            # The lookahead keeps the error of the apply check below from matching.
+            subtest(
+                ("class", "torch.nn.Linear", "not a torch.autograd.Function(?! that)"),
+                name="class_not_function",
             ),
             # Export only calls autograd functions whose apply allows it.
             subtest(
@@ -3484,7 +3537,8 @@ class TestPredispatchSerialization(TestCase):
     def _side_effect_modules(self):
         # Modules whose code creates a marker file when it runs: one not imported
         # yet, a lazily loaded one, which runs on its first attribute read, and
-        # one with a module __getattr__. Returns the marker path.
+        # one with a module __getattr__ and autograd functions whose apply is
+        # not a classmethod, or has a mark that runs code. Returns the marker path.
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp)
         ran = os.path.join(tmp, "ran")
@@ -3503,6 +3557,28 @@ class TestPredispatchSerialization(TestCase):
             raise AttributeError(attr)
 
         holder.__getattr__ = module_getattr
+
+        class G(torch.autograd.Function):
+            apply = type(
+                "Apply", (), {"__func__": property(lambda _: open(ran, "w").close())}
+            )()
+
+        G.__module__, G.__qualname__ = holder.__name__, "G"
+        holder.G = G
+
+        class Truthy:
+            def __bool__(self):
+                open(ran, "w").close()
+                return True
+
+        class H(torch.autograd.Function):
+            @classmethod
+            def apply(cls, *args):
+                raise AssertionError("not called")
+
+        setattr(H.apply.__func__, _ALLOWED_IN_PRE_DISPATCH_GRAPH, Truthy())
+        H.__module__, H.__qualname__ = holder.__name__, "H"
+        holder.H = H
         # Unlike patch.dict, this removes only these modules afterwards, not the
         # torch modules that loading imports the first time it runs.
         sys.modules[holder.__name__] = holder
@@ -3537,6 +3613,14 @@ class TestPredispatchSerialization(TestCase):
                 ("class", "flat_apply_side_effect.F", "is not imported"),
                 name="class",
             ),
+            subtest(
+                ("class", "flat_apply_holder.G", "allow_in_pre_dispatch_graph"),
+                name="class_apply",
+            ),
+            subtest(
+                ("class", "flat_apply_holder.H", "allow_in_pre_dispatch_graph"),
+                name="class_mark",
+            ),
         ],
     )
     def test_predispatch_flat_apply_load_runs_no_module_code(
@@ -3556,6 +3640,7 @@ class TestPredispatchSerialization(TestCase):
             "name as the first input",
         ),
         "not_a_pair": (_set_in_spec(((0, 0), {}, 0)), "name as the first input"),
+        "outer_list": (_set_in_spec([(0, 0, 0), {}]), "name as the first input"),
         "args_empty": (
             _set_in_spec(((), {"a": 0, "b": 0, "c": 0})),
             "name as the first input",
@@ -3579,12 +3664,6 @@ class TestPredispatchSerialization(TestCase):
         ),
     }
 
-    @parametrize("case", list(_BAD_SPECS))
-    def test_predispatch_flat_apply_load_rejects_bad_specs(self, case):
-        change, reason = self._BAD_SPECS[case]
-        with self.assertRaisesRegex(SerializeError, reason):
-            self._load_changed(self._index_in_vmap_artifact(), change)
-
     _OTHER_INPUTS = {
         # An input that names an operator would reach the function as a
         # callable.
@@ -3607,9 +3686,9 @@ class TestPredispatchSerialization(TestCase):
         "direct_call": (_call_helper_directly, "allow_in_pre_dispatch_graph"),
     }
 
-    @parametrize("case", list(_OTHER_INPUTS))
-    def test_predispatch_flat_apply_load_rejects_other_inputs(self, case):
-        change, reason = self._OTHER_INPUTS[case]
+    @parametrize("case", [*_BAD_SPECS, *_OTHER_INPUTS])
+    def test_predispatch_flat_apply_load_rejects_bad_nodes(self, case):
+        change, reason = {**self._BAD_SPECS, **self._OTHER_INPUTS}[case]
         with self.assertRaisesRegex(SerializeError, reason):
             self._load_changed(self._index_in_vmap_artifact(), change)
 
@@ -3635,12 +3714,13 @@ class TestPredispatchSerialization(TestCase):
             def __init__(self, make):
                 super().__init__()
                 self.flat_apply_func_spec = make(torch.ones(4))
-                self.flat_apply_in_spec = make(torch.ones(4))
+                # A submodule takes the first part of the names of its state.
+                self.flat_apply_in_spec = torch.nn.Module()
+                self.flat_apply_in_spec.state = make(torch.ones(4))
 
             def forward(self, x):
-                return (
-                    Scale.apply(x) + self.flat_apply_func_spec + self.flat_apply_in_spec
-                )
+                spec = self.flat_apply_in_spec
+                return Scale.apply(x) + self.flat_apply_func_spec + spec.state
 
         x = torch.randn(4)
         for make in (torch.nn.Buffer, torch.nn.Parameter, torch.clone):
@@ -3682,11 +3762,13 @@ class TestPredispatchSerialization(TestCase):
 
         class Cond(torch.nn.Module):
             def forward(self, x):
-                return torch.cond(x.sum() > 0, torch.neg, torch.sin, (Scale.apply(x),))
+                # Load reads the subgraphs of the first cond before the call.
+                y = Scale.apply(torch.cond(x.sum() > 0, torch.cos, torch.sin, (x,)))
+                return torch.cond(y.sum() > 0, torch.neg, torch.sin, (y,))
 
         with self.subTest(subgraph="flat_apply_func_spec"):
             ep, buffer = export(Cond(), (x,), strict=False), io.BytesIO()
-            (cond,) = ep.graph.find_nodes(
+            *_, cond = ep.graph.find_nodes(
                 op="call_function", target=torch.ops.higher_order.cond
             )
             branch = cond.args[1]
@@ -3708,6 +3790,14 @@ class TestPredispatchSerialization(TestCase):
             "of kind as_operator",
         ),
         "leaf_count": (_drop_last_flat_input, "flat inputs, but its input spec"),
+        "list_result": (
+            lambda node: node.meta.update(val=([node.meta["val"]],)),
+            "single result that is a list",
+        ),
+        "dict_result": (
+            lambda node: node.meta.update(val={"a": node.meta["val"]}),
+            "dict result",
+        ),
         "spec_not_attribute": (
             lambda node: node.update_arg(1, 0),
             "input spec to be TreeSpec graph attributes",
@@ -3716,7 +3806,7 @@ class TestPredispatchSerialization(TestCase):
 
     @parametrize("case", list(_OTHER_INPUTS_IN_GRAPH))
     def test_predispatch_flat_apply_save_rejects_other_inputs(self, case):
-        # Save refuses the same inputs, so it never writes what load refuses.
+        # Save refuses these, so it does not write a file that load refuses.
         change, reason = self._OTHER_INPUTS_IN_GRAPH[case]
         ep = self._index_in_vmap_program()
         (node,) = ep.graph.find_nodes(
