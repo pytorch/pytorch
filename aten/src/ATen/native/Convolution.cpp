@@ -525,7 +525,7 @@ struct ConvParams {
     return !(input.dim() == 4 && native_fits_32_bit_indexing()
              && miopen_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous);
   }
-  bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const  {
+  bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight, bool is_backward) const  {
 #if AT_MKLDNN_ENABLED()
     if (!at::globalContext().userEnabledMkldnn()) {
       return false;
@@ -536,6 +536,12 @@ struct ConvParams {
     if (input.device().is_cpu() &&
         ((input.scalar_type() == at::kBFloat16 && mkldnn_bf16_device_check()) ||
          (input.scalar_type() == at::kHalf && mkldnn_fp16_device_check()))) {
+      // oneDNN supports bf16/fp16 convolution forward but not backward on avx2_vnni_2.
+      if (is_backward && !input.is_mkldnn() && ideep::check_isa_is_avx2_vnni_2()) {
+        TORCH_WARN_ONCE("oneDNN does not support bf16/fp16 convolution backward on CPUs with avx2_vnni_2"
+                        " as their best ISA; falling back to the native implementation.");
+        return false;
+      }
       return true;
     }
     // Without ACL, oneDNN runs dense and transposed convolutions via gemm, which is slower than Slow2d
@@ -1291,7 +1297,8 @@ static ConvBackend _select_conv_backend(
     const std::optional<Tensor>& bias,
     const at::OptionalArrayRef<T> bias_sizes_opt,
     const bool need_backward,
-    const ConvParams<T>& params) {
+    const ConvParams<T>& params,
+    const bool is_backward) {
 
   // don't send empty inputs through backends
   if constexpr (std::is_same_v<T, c10::SymInt>) {
@@ -1341,7 +1348,7 @@ static ConvBackend _select_conv_backend(
     // Faster than oneDNN's gemm-based convolution when oneDNN lacks optimized kernels
     return ConvBackend::Winograd3x3Depthwise;
 #endif
-  } else if (params.use_mkldnn(input, weight)) {
+  } else if (params.use_mkldnn(input, weight, is_backward)) {
     if (params.transposed) {
       return ConvBackend::MkldnnTranspose;
     } else {
@@ -1444,7 +1451,7 @@ ConvBackend select_conv_backend(
   auto bias_sizes = bias.defined() ? std::optional<SymIntArrayRef>(bias.sym_sizes()) : bias_sizes_opt;
   bool need_backward = GradMode::is_enabled() &&
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
-  return _select_conv_backend(input, weight, bias, bias_sizes, need_backward, params);
+  return _select_conv_backend(input, weight, bias, bias_sizes, need_backward, params, /*is_backward=*/ false);
 }
 
 // For BC reasons, have a copy that does not require bias_opt
@@ -1453,8 +1460,9 @@ static ConvBackend select_conv_backend(
     const Tensor& weight,
     const at::OptionalIntArrayRef bias_sizes_opt,
     const bool need_backward,
-    const ConvParams<int64_t>& params) {
-  return _select_conv_backend(input, weight, {}, bias_sizes_opt, need_backward, params);
+    const ConvParams<int64_t>& params,
+    const bool is_backward) {
+  return _select_conv_backend(input, weight, {}, bias_sizes_opt, need_backward, params, is_backward);
 }
 
 static at::Tensor _convolution_nogroup_backend(
@@ -1611,7 +1619,7 @@ at::Tensor _convolution(
   auto bias_sizes_opt = bias.defined() ? std::optional<IntArrayRef>(bias.sizes()) : std::nullopt;
   bool need_backward = GradMode::is_enabled() &&
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
-  ConvBackend backend = _select_conv_backend(input, weight, bias, c10::OptionalIntArrayRef(bias_sizes_opt), need_backward, params);
+  ConvBackend backend = _select_conv_backend(input, weight, bias, c10::OptionalIntArrayRef(bias_sizes_opt), need_backward, params, /*is_backward=*/ false);
   at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight, backend);
 
   // Call the backend.
@@ -2109,7 +2117,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   if (!transposed && groups == 1 && (k == 4 || k == 5) &&
       input.dim() == k - 1 && grad_output.dim() == k - 1) {
     ConvBackend dilated_backend = select_conv_backend(
-        input.unsqueeze(0), weight, bias_sizes_opt, /*need_backward=*/true, params);
+        input.unsqueeze(0), weight, bias_sizes_opt, /*need_backward=*/true, params, /*is_backward=*/true);
     if (dilated_backend == ConvBackend::SlowDilated2d ||
         dilated_backend == ConvBackend::SlowDilated3d) {
       return _convolution_backward_nogroup_backend(
@@ -2143,7 +2151,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   }
 
   // Select appropriate backend to use.
-  ConvBackend backend = select_conv_backend(input, weight, bias_sizes_opt, /*need_backward=*/ true, params);
+  ConvBackend backend = select_conv_backend(input, weight, bias_sizes_opt, /*need_backward=*/ true, params, /*is_backward=*/ true);
   at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight, backend);
 
   // Call the backend.
