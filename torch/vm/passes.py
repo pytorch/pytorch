@@ -103,9 +103,9 @@ class Graphs(BuiltinPass):
     A graph starts at an operation that the engine calls directly
     (:class:`ResolveDispatch`), or with the function, and goes on along the
     way a call takes through the function: through the branches as they go,
-    with what sits between the
+    round the loops as often as they go round, with what sits between the
     operations (reads of globals and attributes, constants, arithmetic on
-    sizes). Each way a branch went is checked
+    sizes, lists that the function fills). Each way a branch went is checked
     on later calls; a call that goes another way gets a path of its own. A
     graph ends in front of everything else: a call of a Python function, an
     operation that writes to one of its arguments or draws random numbers, a
@@ -122,7 +122,8 @@ class Graphs(BuiltinPass):
     one's own, :class:`AOTAutograd` or :class:`Inductor`. The graph is then
     exported as a ``torch.fx.GraphModule`` of the operators the function
     called (``torch.ops.aten.linear.default``, not what a kernel decomposes
-    into), for the tensors of one call of it. The passes are applied in the
+    into; a loop is as many copies of its operations as it went round), for
+    the tensors of one call of it. The passes are applied in the
     order of the list, and what the last one returns runs in place of the
     operations for every call whose tensors have the dtypes, devices, sizes,
     strides and ``requires_grad`` of that one, with the same modes, and with

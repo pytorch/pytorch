@@ -56,7 +56,8 @@ pub enum Kind {
     /// Reads a global, a cell, or an attribute or item of an object, which
     /// entered no frame and ran no kernel when it was profiled.
     Read,
-    /// Keeps values alive, or binds a variable of the frame.
+    /// Keeps values alive, binds a variable of the frame, or works on a
+    /// list, a dict or an iterator that the path made itself.
     Residual,
     /// What the path took for granted where it went on (`Assert`).
     Check,
@@ -1246,6 +1247,107 @@ pub unsafe fn quiet_compare(a: Obj, b: Obj) -> bool {
     (is_number(a) && is_number(b)) || (text(a) && text(b)) || (token(a) && token(b))
 }
 
+/// Whether iterating over a value runs no Python code: Some(false) for a
+/// list, a tuple, a dict, a str or a range; Some(true) for an `enumerate`
+/// or a `zip`, of which that is only known where a path made it (see
+/// `pure_call`).
+pub unsafe fn quiet_iter(o: Obj) -> Option<bool> {
+    if capi::is_unboxed(o) {
+        return None;
+    }
+    let ty = ffi::Py_TYPE(o);
+    let plain = ffi::PyList_CheckExact(o) != 0
+        || ffi::PyTuple_CheckExact(o) != 0
+        || ffi::PyDict_CheckExact(o) != 0
+        || ffi::PyUnicode_CheckExact(o) != 0
+        || ty == std::ptr::addr_of_mut!(ffi::PyRange_Type);
+    if plain {
+        return Some(false);
+    }
+    let made = [Builtin::Enumerate, Builtin::Zip].iter().any(|which| builtin_named(*which) == ty as usize);
+    made.then_some(true)
+}
+
+/// The functions of the interpreter that a path may call: they run no
+/// Python code on arguments of the kinds `pure_call` asks for, and change
+/// nothing.
+#[derive(Clone, Copy, PartialEq)]
+enum Builtin {
+    Len,
+    Range,
+    Enumerate,
+    Zip,
+    IsInstance,
+}
+
+const BUILTINS: [(&std::ffi::CStr, Builtin); 5] = [
+    (c"len", Builtin::Len),
+    (c"range", Builtin::Range),
+    (c"enumerate", Builtin::Enumerate),
+    (c"zip", Builtin::Zip),
+    (c"isinstance", Builtin::IsInstance),
+];
+
+/// The address of one of them.
+unsafe fn builtin_named(which: Builtin) -> usize {
+    static FOUND: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
+    let found = FOUND.get_or_init(|| {
+        let module = ffi::PyImport_ImportModule(c"builtins".as_ptr());
+        let found = BUILTINS
+            .iter()
+            .map(|(name, _)| {
+                let function = if module.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(module, name.as_ptr()) };
+                // The module keeps it.
+                xdecref(function);
+                function as usize
+            })
+            .collect();
+        ffi::PyErr_Clear();
+        xdecref(module);
+        found
+    });
+    found[BUILTINS.iter().position(|(_, other)| *other == which).unwrap()]
+}
+
+/// Whether a call is one of a function a path may call, with arguments on
+/// which it runs no Python code: Some, with whether it makes something to
+/// iterate over that is the path's own (a `range`, an `enumerate`, a
+/// `zip`).
+pub unsafe fn pure_call(callee: Obj, args: &[Obj], api: &TcfgApi) -> Option<bool> {
+    if callee.is_null() || args.iter().any(|o| o.is_null()) {
+        return None;
+    }
+    let which = BUILTINS.iter().map(|(_, which)| *which).find(|which| builtin_named(*which) == callee as usize)?;
+    let sequence = |o: Obj| !capi::is_unboxed(o) && (ffi::PyList_CheckExact(o) != 0 || ffi::PyTuple_CheckExact(o) != 0);
+    let fine = match which {
+        Builtin::Len => {
+            let mut info = TcfgTensorInfo::empty();
+            args.len() == 1 && (quiet_sized(args[0]) || (api.tensor_info)(args[0], &mut info) != 0)
+        }
+        Builtin::Range => {
+            (1..=3).contains(&args.len()) && args.iter().all(|o| !capi::is_unboxed(*o) && ffi::PyLong_CheckExact(*o) != 0)
+        }
+        Builtin::Enumerate => args.len() == 1 && sequence(args[0]),
+        Builtin::Zip => !args.is_empty() && args.iter().all(|o| sequence(*o)),
+        Builtin::IsInstance => {
+            static CLASS: std::sync::OnceLock<PyObj> = std::sync::OnceLock::new();
+            let name = CLASS.get_or_init(|| PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__class__".as_ptr())));
+            // A class whose instances `type` itself tells.
+            let class = |o: Obj| {
+                !capi::is_unboxed(o) && ffi::Py_TYPE(o) == std::ptr::addr_of_mut!(ffi::PyType_Type)
+            };
+            let classes = |o: Obj| {
+                class(o)
+                    || (!capi::is_unboxed(o)
+                        && ffi::PyTuple_CheckExact(o) != 0
+                        && (0..ffi::PyTuple_GET_SIZE(o)).all(|i| class(ffi::PyTuple_GET_ITEM(o, i))))
+            };
+            args.len() == 2 && classes(args[1]) && quiet_attr(args[0], name.as_ptr(), api)
+        }
+    };
+    fine.then_some(matches!(which, Builtin::Range | Builtin::Enumerate | Builtin::Zip))
+}
+
 /// Whether what a type has under a name is given out by Python code: a
 /// property whose getter is a Python function, or a descriptor of a class
 /// that is defined in Python.
@@ -2190,6 +2292,9 @@ pub struct Def {
     /// An integer, or a list, tuple or slice, that the graph can compute
     /// itself.
     pub graph: bool,
+    /// A list, a dict or an iterator that an instruction of the path made:
+    /// the path may change it.
+    pub made: bool,
 }
 
 /// The binary operators a graph computes on integers: + - * // %.
@@ -2503,7 +2608,7 @@ fn define(unit: &Unit, cx: &PassCx, roles: &[Role], defs: &mut HashMap<V, Def>, 
     }
     if inst.dst != NONE {
         let graph = late && !node && computes(&inst.op, defs, cx, unit);
-        defs.insert(inst.dst, Def { node, late, graph });
+        defs.insert(inst.dst, Def { node, late, graph, made: false });
     }
     true
 }
@@ -2805,6 +2910,7 @@ pub fn renamed(op: &Op, f: &mut impl FnMut(V) -> V) -> Option<Op> {
         Op::Hold(_) => Op::Hold(Vec::new()),
         Op::BuildTuple(vs) => Op::BuildTuple(all(vs)),
         Op::BuildList(vs) => Op::BuildList(all(vs)),
+        Op::BuildMap(vs) => Op::BuildMap(all(vs)),
         Op::Dispatch(d) => {
             let operands = all(&d.operands);
             Op::Dispatch(Box::new(DispatchOp { slot: d.slot.clone(), operands, fallback: Op::Hold(Vec::new()) }))
@@ -2831,9 +2937,14 @@ pub fn renamed(op: &Op, f: &mut impl FnMut(V) -> V) -> Option<Op> {
         Op::ToBool(a) => Op::ToBool(f(*a)),
         Op::IsNone(a, invert) => Op::IsNone(f(*a), *invert),
         Op::GetItem(a, b) => Op::GetItem(f(*a), f(*b)),
+        Op::ListAppend(a, b) => Op::ListAppend(f(*a), f(*b)),
+        Op::MapAdd(a, b, c) => Op::MapAdd(f(*a), f(*b), f(*c)),
+        Op::ListToTuple(a) => Op::ListToTuple(f(*a)),
         Op::Unpack(a, n) => Op::Unpack(f(*a), *n),
         Op::TupleGet(a, i) => Op::TupleGet(f(*a), *i),
         Op::GetLen(a) => Op::GetLen(f(*a)),
+        Op::GetIter(a) => Op::GetIter(f(*a)),
+        Op::IterNext(a) => Op::IterNext(f(*a)),
         Op::CheckBound(a, n) => Op::CheckBound(f(*a), *n),
         Op::IsFunction { v, func, code } => Op::IsFunction { v: f(*v), func: *func, code: *code },
         Op::TensorSize { t, dim } => Op::TensorSize { t: f(*t), dim: *dim },
@@ -2988,6 +3099,21 @@ impl Path {
                             need[v] = true;
                             if defs[v].late { Stage::After } else { Stage::Before }
                         }
+                    }
+                }
+                Kind::Residual => {
+                    // What changes something the path made goes with it.
+                    let mut target = NONE;
+                    inst.op.for_each_use(|v| {
+                        if target == NONE {
+                            target = v;
+                        }
+                    });
+                    let kept = needed || (dst == NONE && target != NONE && need[target as usize]);
+                    if kept && !matches!(inst.op, Op::Hold(_) | Op::StoreLocal(..)) {
+                        uses(&inst.op, &mut need)
+                    } else {
+                        Stage::Skipped
                     }
                 }
                 _ if dst != NONE && wanted[dst as usize] => {

@@ -5778,6 +5778,20 @@ def graph_optional(x, bias=None):
     return y.cos().tanh().sum()
 
 
+def graph_loops(x, n):
+    y = x.sin()
+    for i in range(n):
+        y = y * 0.5 + i
+    return y.cos().sum()
+
+
+def graph_collects(xs):
+    out = []
+    for x in xs:
+        out.append(x.sin() * 2)
+    return torch.cat(out).tanh().sum()
+
+
 def graph_on_data(x):
     y = x.sin() * 2 + 1
     if y.sum() > 0:
@@ -5872,6 +5886,11 @@ def graph_paths(case, device):
     if case == "branches":
         flags = (True, True, True, False, False, True)
         return graph_branches, [(make(4), flag) for flag in flags]
+    if case == "loops":
+        return graph_loops, [(make(4), n) for n in (20, 20, 20, 12, 12, 20)]
+    if case == "collects":
+        counts = (3, 3, 3, 2, 2, 3)
+        return graph_collects, [([make(3) for _ in range(n)],) for n in counts]
     return graph_on_a_size, [(make(n),) for n in (4, 4, 4, 2, 2, 4)]
 
 
@@ -6765,6 +6784,74 @@ print(json.dumps(found))
         (graph,) = self.graphs(compiled)
         self.assertEqual((graph["paths"], graph["branches"], graph["hits"]), (2, 1, 3))
 
+    def test_a_graph_goes_round_a_loop(self):
+        graphs = []
+
+        def keep(gm, input_types):
+            graphs.append(gm)
+            return gm
+
+        for behind in ((), (keep,)):
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(graph_loops, passes=passes, fallback=False)
+            x = torch.randn(4)
+            for _ in range(4):
+                self.assertEqual(compiled(x, 100), graph_loops(x, 100), atol=0, rtol=0)
+            # Sine, a hundred times round, cosine and sum; the test of the
+            # loop a hundred and one times.
+            (graph,) = self.graphs(compiled)
+            shape = (graph["ops"], graph["branches"], graph["paths"])
+            self.assertEqual(shape, (203, 101, 1))
+            if not behind:
+                continue
+            counts = (graph["variants"], graph["hits"], graph["misses"])
+            self.assertEqual(counts, (1, 2, 1))
+            # The number of times round is no input: it is the path. Another
+            # number is another path, taken down at the call that has it.
+            for _ in range(3):
+                self.assertEqual(compiled(x, 7), graph_loops(x, 7), atol=0, rtol=0)
+            (graph,) = self.graphs(compiled)
+            shape = (graph["ops"], graph["paths"], graph["variants"])
+            self.assertEqual(shape, (17, 2, 2))
+            self.assertEqual((graph["hits"], graph["misses"]), (4, 2))
+            self.assertEqual(compiled(x, 100), graph_loops(x, 100), atol=0, rtol=0)
+            self.assertEqual(self.graphs(compiled)[0]["hits"], 5)
+            self.assertEqual([len(self.targets(gm)) for gm in graphs], [203, 17])
+
+    def test_a_loop_over_a_list_of_tensors_is_one_graph(self):
+        graphs = []
+
+        def keep(gm, input_types):
+            graphs.append(gm)
+            return gm
+
+        passes = (*DEFAULT, P.Graphs(), keep)
+        compiled = torch.vm(graph_collects, passes=passes, fallback=False)
+        for n in (3, 3, 3, 2, 2, 3):
+            xs = [torch.randn(3) for _ in range(n)]
+            self.assertEqual(compiled(xs), graph_collects(xs), atol=0, rtol=0)
+        # From the first instruction of the function: the list it fills is
+        # one the graph makes, and what is concatenated is what the loop
+        # appended to it.
+        (graph,) = self.graphs(compiled)
+        self.assertEqual((graph["ops"], graph["paths"], graph["variants"]), (9, 2, 2))
+        self.assertEqual((graph["inputs"], graph["hits"]), (1, 3))
+        nodes = graphs[0].graph.nodes
+        placeholders = [n.target for n in nodes if n.op == "placeholder"]
+        self.assertEqual(placeholders, ["x", "x_2", "x_3"])
+        (cat,) = [n for n in graphs[0].graph.nodes if n.target is torch.cat]
+        parts = [p.target for p in cat.args[0]]
+        self.assertEqual(parts, [torch.ops.aten.mul.Tensor] * 3)
+        self.assertEqual(len(self.targets(graphs[1])), 7)
+        # The engine's own graph is the same one.
+        compiled = torch.vm(graph_collects, passes=GRAPHS, fallback=False)
+        xs = [torch.randn(3) for _ in range(3)]
+        for _ in range(3):
+            self.assertEqual(compiled(xs), graph_collects(xs), atol=0, rtol=0)
+        (graph,) = self.graphs(compiled)
+        self.assertEqual((graph["state"], graph["ops"]), ("built", 9))
+        self.assertIn("aten::cat", graph["operators"])
+
     def test_a_branch_on_the_data_of_a_tensor_ends_a_graph(self):
         def keep(gm, input_types):
             return gm
@@ -7184,7 +7271,7 @@ class TestVmGraphResults(TestCase):
         (graph,) = [r for r in torch.vm.regions(compiled) if "ops" in r]
         self.assertEqual((graph["state"], graph["hits"]), ("compiled", 2))
 
-    @parametrize("case", ("branches", "size"))
+    @parametrize("case", ("branches", "loops", "collects", "size"))
     def test_a_path_computes_what_the_function_computes(self, device, case):
         def keep(gm, input_types):
             return gm
