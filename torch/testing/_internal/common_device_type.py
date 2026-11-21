@@ -2574,12 +2574,24 @@ def onlyAccelerator(fn):
     def only_fn(self, *args, **kwargs):
         if self.device_type in ("cpu", "meta"):
             reason = "onlyAccelerator: doesn't run on CPU or meta devices"
+            if getattr(self, "bypass_device_restrictions", False):
+                return fn(self, *args, **kwargs)
+
+            if IS_SANDCASTLE or IS_FBCODE:
+                print(
+                    f"Skipping {fn.__name__} on sandcastle for following reason: {reason}",
+                    file=sys.stderr,
+                )
+                return
             raise unittest.SkipTest(reason)
+
         return fn(self, *args, **kwargs)
 
     add_skip_condition(
         only_fn,
-        _skips_on_device_type(lambda device_type: device_type in ("cpu", "meta")),
+        _skips_on_device_type(lambda device_type: device_type in ("cpu", "meta"))
+        or IS_SANDCASTLE
+        or IS_FBCODE,
         "onlyAccelerator: doesn't run on CPU or meta devices",
     )
     only_fn._preserves_device_arguments = only_fn
