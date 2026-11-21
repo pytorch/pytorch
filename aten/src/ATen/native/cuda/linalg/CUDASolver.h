@@ -2,6 +2,10 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
+#ifndef USE_ROCM
+#include <ATen/cuda/CUDADataType.h>
+#endif
+
 #if (defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && CUSOLVER_VERSION >= 11000) || \
     (defined(USE_ROCM) && ROCM_VERSION >= 71400)
 // cuSOLVER version >= 11000 / ROCm >= 7.14 includes 64-bit API
@@ -747,6 +751,19 @@ void xsyevBatched_bufferSize<c10::complex<float>, float>(
 template <>
 void xsyevBatched_bufferSize<c10::complex<double>, double>(
     CUDASOLVER_XSYEV_BATCHED_BUFFERSIZE_ARGTYPES(c10::complex<double>, double));
+
+#ifndef USE_ROCM
+template <class scalar_t, class value_t = scalar_t>
+cusolverStatus_t xsyevBatched_bufferSize_unchecked(
+    CUDASOLVER_XSYEV_BATCHED_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
+  return cusolverDnXsyevBatched_bufferSize(
+      handle, params, jobz, uplo, n,
+      at::cuda::getCudaDataType<scalar_t>(), A, lda,
+      at::cuda::getCudaDataType<value_t>(), W,
+      at::cuda::getCudaDataType<scalar_t>(),
+      workspaceInBytesOnDevice, workspaceInBytesOnHost, batchSize);
+}
+#endif
 
 #define CUDASOLVER_XSYEV_BATCHED_ARGTYPES(scalar_t, value_t) \
     cusolverDnHandle_t handle,                               \
