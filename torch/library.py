@@ -1192,6 +1192,14 @@ def register_fake(
     (and may not directly access the storage or data of any input or
     intermediate Tensors).
 
+    .. note::
+        Under ``torch.compile``, Dynamo may call the operator with a Tensor
+        subclass that wraps FakeTensors. If that subclass's
+        ``__torch_dispatch__`` passes the operator through, the operator's own
+        implementation runs on fake data and this FakeTensor implementation is
+        not used. To run it, register a rule for the operator and subclass with
+        :func:`torch.library.register_torch_dispatch` that unwraps the subclass.
+
     This API may be used as a decorator (see examples).
 
     For a detailed guide on custom ops, please see
