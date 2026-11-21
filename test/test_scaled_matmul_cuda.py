@@ -3023,6 +3023,32 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             if sqnr.item() <= approx_match_sqnr_target:
                 raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
+    @onlyAccelerator
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @parametrize("M", [2, 31, 128])
+    def test_blockwise_mxfp8_special_scales(self, M, device) -> None:
+        # e8m0 scales of 2^120 and 2^-120 multiply to 1 without overflowing their product, and the NaN
+        # code 0xff makes its row of A or column of B NaN
+        K, N = 128, 128
+        a = torch.ones(M, K, device=device).to(torch.float8_e4m3fn)
+        b = torch.ones(N, K, device=device).to(torch.float8_e4m3fn)
+        sa = torch.full((M, K // 32), 127 + 120, dtype=torch.uint8, device=device)
+        sb = torch.full((N, K // 32), 127 - 120, dtype=torch.uint8, device=device)
+        sa[0, 1] = sb[1, 2] = 0xFF
+        swizzle = mx_swizzle_for(device, a.dtype)
+
+        def scales(s):
+            s = s.view(torch.float8_e8m0fnu)
+            return s if swizzle == SwizzleType.NO_SWIZZLE else mx_scale_swizzle(s, a.dtype)
+
+        out = scaled_mm_wrap(
+            a, b.t(), scales(sa), scales(sb),
+            scale_recipe_a=ScalingType.BlockWise1x32, scale_recipe_b=ScalingType.BlockWise1x32,
+            swizzle_a=swizzle, swizzle_b=swizzle, out_dtype=torch.bfloat16,
+        )
+        expected = torch.full_like(out, K)
+        expected[0, :] = expected[:, 1] = float("nan")
+        self.assertEqual(out, expected, equal_nan=True)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
@@ -5495,8 +5521,9 @@ class TestFP8MatmulMpsOnly(TestCase):
     @parametrize("mnk", [(1, 7, 2048), (3, 130, 1024), (4, 64, 512), (8, 100, 256), (64, 96, 2048)],
                  name_fn=lambda mnk: f"{mnk[0]}_{mnk[1]}_{mnk[2]}")
     def test_blockwise_layouts(self, recipe, layout, mnk, device) -> None:
-        # MPS reads A row-major and B column-major with unswizzled scales; the leading
-        # strides may be padded or the data unaligned.
+        # MPS picks a decode kernel for M <= 4, MPP or tiles otherwise, and the native
+        # Metal 4.1 kernel for dense MXFP8; padded and unaligned operands must take or
+        # fall back to a kernel that handles them.
         M, N, K = mnk
         block = 16 if recipe == "nvfp4" else 32
         packed = 2 if recipe == "nvfp4" else 1

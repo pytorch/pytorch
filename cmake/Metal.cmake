@@ -118,10 +118,12 @@ set(METAL_41_PROBE_CODE "
 #include <metal_stdlib>
 #include <MetalPerformancePrimitives/MetalPerformancePrimitives.h>
   using namespace metal;
-  kernel void test(device uchar* a, device float* ptr) {
-    using fp8_tensor = tensor<device metal_fp8_e4m3_format, dextents<int32_t, 2>, tensor_inline>;
-    fp8_tensor ta(a, dextents<int32_t, 2>(16, 16));
-    constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(16, 16);
+  kernel void test(device uchar* a, device uchar* s, device float* ptr) {
+    using scales_t = tensor_blockwise<tensor_plane_scales, device metal_fp8_ue8m0_format, 32, 1>;
+    using fp8_tensor = tensor<device metal_fp8_e4m3_format, dextents<int32_t, 2>, tensor_inline, scales_t>;
+    fp8_tensor ta(a, dextents<int32_t, 2>(32, 16), array<int32_t, 2>{1, 32}, scales_t(s));
+    // MPP takes block scales only on a transposed right operand
+    constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(16, 16, static_cast<int>(dynamic_extent), false, true);
     mpp::tensor_ops::matmul2d<desc, execution_simdgroup> op;
     auto acc = op.get_destination_cooperative_tensor<fp8_tensor, fp8_tensor, float>();
     op.run(ta, ta, acc);
