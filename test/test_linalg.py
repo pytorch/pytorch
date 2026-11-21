@@ -6870,6 +6870,20 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
         result = torch._weight_int8pack_mm(a, b, scales)
         self.assertEqual(result, torch.full((m, n), k, device=device, dtype=dtype), atol=0, rtol=0)
 
+    @onlyCPU
+    @dtypes(torch.bfloat16)
+    def test_weight_int8pack_mm_cpu_tail_scales(self, device, dtype):
+        if torch.backends.cpu.get_cpu_capability() not in ("AVX2", "AVX512"):
+            self.skipTest("Tests the x86 vectorized BF16 kernels")
+        k = 17
+        a = torch.arange(1, 2 * k + 1, device=device, dtype=dtype).reshape(2, k)
+        b = (torch.arange(3 * k, device=device, dtype=torch.int8) % 5 - 2).reshape(3, k)
+        scales = torch.tensor([0.5, 2.0, 4.0], device=device, dtype=dtype)
+
+        result = torch._weight_int8pack_mm(a, b, scales)
+        expected = ((a.float() @ b.float().T) * scales.float()).to(dtype)
+        self.assertEqual(result, expected, atol=0, rtol=0)
+
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyNativeDeviceTypes
