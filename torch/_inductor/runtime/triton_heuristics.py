@@ -1802,9 +1802,9 @@ class CachingAutotuner(KernelInterface):
             device=self.device_props.type,
             **benchmark_kwargs,  # type: ignore[arg-type]
         )
-        # benchmarker.benchmark() only returns float("inf") when catching an
-        # "invalid configuration" exception - all other exceptions are re-raised.
-        # Therefore, if result is inf here, it must be due to invalid config.
+        # benchmarker.benchmark() returns float("inf") when catching an
+        # "invalid configuration" exception (all other exceptions are re-raised)
+        # or when no timing sample was positive; both are counted as invalid config.
         if result == float("inf"):
             self.benchmark_failure_reasons[launcher] = (
                 BenchmarkFailureReason.INVALID_CONFIG
