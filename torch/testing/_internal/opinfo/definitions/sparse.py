@@ -162,6 +162,16 @@ def sample_inputs_sparse_reduction(
             kwargs=sample_input.kwargs,
         )
 
+        if sample_input.input.ndim == 2:
+            # zero-nnz samples
+            yield SampleInput(
+                torch.zeros_like(sample_input.input)
+                .to_sparse(layout=layout, blocksize=blocksize)
+                .requires_grad_(requires_grad),
+                args=sample_input.args,
+                kwargs=sample_input.kwargs,
+            )
+
         if layout is torch.sparse_coo and (dtype.is_floating_point or dtype.is_complex):
             # uncoalesced samples
             inp = sample_input.input.detach().to_sparse(layout=layout)
