@@ -539,7 +539,6 @@ lib.define(
     "Tensor A, Tensor[] Bs, Tensor A_scale, Tensor[] B_scales, "
     "int gather_dim, str group_name, "
     "Tensor?[] biases, "
-    "Tensor?[] result_scales, "
     "ScalarType?[] out_dtypes, "
     "bool[] use_fast_accum) -> (Tensor, Tensor[])",
     tags=[torch._C.Tag.needs_fixed_stride_order],
@@ -553,7 +552,6 @@ lib.define(
     "Tensor A, Tensor B, Tensor A_scale, Tensor B_scale, "
     "str reduce_op, int orig_scatter_dim, int scatter_dim_after_maybe_reshape, str group_name, SymInt[]? output_shape, "
     "Tensor? bias = None, "
-    "Tensor? result_scale = None, "
     "ScalarType? out_dtype = None, "
     "bool use_fast_accum = False) -> Tensor",
     tags=[torch._C.Tag.needs_fixed_stride_order],
@@ -1214,7 +1212,6 @@ def _fused_all_gather_scaled_matmul_fallback(
     gather_dim: int,
     group_name: c10d.GroupName,
     biases: list[torch.Tensor | None],
-    result_scales: list[torch.Tensor | None],
     out_dtypes: list[torch.dtype | None],
     use_fast_accum: list[bool],
 ) -> tuple[torch.Tensor, list[torch.Tensor]]:
@@ -1253,7 +1250,6 @@ def _fused_all_gather_scaled_matmul_fallback(
         A_scale: torch.Tensor,
         B_scale: torch.Tensor,
         bias: torch.Tensor | None,
-        result_scale: torch.Tensor | None,
         out_dtype: torch.dtype | None,
         use_fast_accum: bool,
     ) -> torch.Tensor:
@@ -1264,18 +1260,15 @@ def _fused_all_gather_scaled_matmul_fallback(
             A_scale,
             B_scale,
             bias,
-            result_scale,
             out_dtype=out_dtype,
             use_fast_accum=use_fast_accum,
         )
-        return res.unflatten(0, leading_dims)
+        return res.unflatten(0, leading_dims).movedim(0, gather_dim)
 
     return A.movedim(0, gather_dim), [
-        scaled_matmul(
-            A, B, A_scale, B_scale, bias, result_scale, out_dtype, fast_accum
-        ).movedim(0, gather_dim)
-        for B, B_scale, bias, result_scale, out_dtype, fast_accum in zip(
-            Bs, B_scales, biases, result_scales, out_dtypes, use_fast_accum
+        scaled_matmul(A, B, A_scale, B_scale, bias, out_dtype, fast_accum)
+        for B, B_scale, bias, out_dtype, fast_accum in zip(
+            Bs, B_scales, biases, out_dtypes, use_fast_accum
         )
     ]
 
@@ -1290,7 +1283,6 @@ def _fused_all_gather_scaled_matmul(
     gather_dim: int,
     group_name: c10d.GroupName,
     biases: list[torch.Tensor | None],
-    result_scales: list[torch.Tensor | None],
     out_dtypes: list[torch.dtype | None],
     use_fast_accum: list[bool],
 ) -> tuple[torch.Tensor, list[torch.Tensor]]:
@@ -1314,8 +1306,6 @@ def _fused_all_gather_scaled_matmul(
 
     if len(biases) != len(Bs):
         raise ValueError("len(biases) must be the same as len(Bs)")
-    if len(result_scales) != len(Bs):
-        raise ValueError("len(result_scales) must be the same as len(Bs)")
     if len(out_dtypes) != len(Bs):
         raise ValueError("len(out_dtypes) must be the same as len(Bs)")
     if len(use_fast_accum) != len(Bs):
@@ -1330,7 +1320,6 @@ def _fused_all_gather_scaled_matmul(
             gather_dim,
             group_name,
             biases,
-            result_scales,
             out_dtypes,
             use_fast_accum,
         )
@@ -1345,12 +1334,11 @@ def _fused_all_gather_scaled_matmul(
                 {
                     "scale_b": B_scale,
                     "bias": bias,
-                    "scale_result": result_scale,
                     "out_dtype": out_dtype,
                     "use_fast_accum": fast_accum,
                 }
-                for B_scale, bias, result_scale, out_dtype, fast_accum in zip(
-                    B_scales, biases, result_scales, out_dtypes, use_fast_accum
+                for B_scale, bias, out_dtype, fast_accum in zip(
+                    B_scales, biases, out_dtypes, use_fast_accum
                 )
             ],
             out_dtypes,
@@ -1540,7 +1528,6 @@ def _fused_scaled_matmul_reduce_scatter(
     group_name: c10d.GroupName,
     output_shape: list[int],
     bias: torch.Tensor | None = None,
-    result_scale: torch.Tensor | None = None,
     out_dtype: torch.dtype | None = None,
     use_fast_accum: bool = False,
 ) -> torch.Tensor:
@@ -1556,7 +1543,6 @@ def _fused_scaled_matmul_reduce_scatter(
             group_name,
             output_shape,
             bias,
-            result_scale,
             out_dtype,
             use_fast_accum,
         )
@@ -1569,7 +1555,6 @@ def _fused_scaled_matmul_reduce_scatter(
             kwargs={
                 "scale_b": B_scale,
                 "bias": bias,
-                "scale_result": result_scale,
                 "out_dtype": out_dtype,
                 "use_fast_accum": use_fast_accum,
             },
@@ -1594,7 +1579,6 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     group_name: c10d.GroupName,
     output_shape: list[int],
     bias: torch.Tensor | None = None,
-    result_scale: torch.Tensor | None = None,
     out_dtype: torch.dtype | None = None,
     use_fast_accum: bool = False,
 ) -> torch.Tensor:
@@ -1618,9 +1602,8 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
         A_scale,
         B_scale,
         bias,
-        result_scale,
-        out_dtype,
-        use_fast_accum,
+        out_dtype=out_dtype,
+        use_fast_accum=use_fast_accum,
     )
     C = C.view(*output_shape[:-1], B.shape[1])
     res = funcol.reduce_scatter_single(
