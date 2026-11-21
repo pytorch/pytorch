@@ -483,6 +483,12 @@ pub struct GraphSite {
     /// if the list of passes has a pass over graphs; the fewest operations
     /// a graph has; and how many forms one may have.
     pub exporter: Option<PyObj>,
+    /// The graph is exported for nothing but its backward
+    /// (`Graphs::derives`), and whether a call whose tensors need a
+    /// gradient has come to it. Until one has, the graph is one the VM
+    /// runs itself.
+    pub derives: bool,
+    pub grads: AtomicBool,
     pub min_ops: usize,
     pub max_variants: usize,
     unsure: AtomicU32,
@@ -528,8 +534,10 @@ impl GraphSite {
             asks: AtomicU32::new(0),
             seed: Shared::new(Arc::new(seed)),
             variants: Shared::new(Vec::new()),
-            state: Shared::new(if exported { GraphState::Waiting } else { GraphState::Built }),
+            state: Shared::new(if exported && !graphs.derives { GraphState::Waiting } else { GraphState::Built }),
             exporter: graphs.export.clone(),
+            derives: graphs.derives,
+            grads: AtomicBool::new(false),
             min_ops: graphs.min_ops,
             max_variants: graphs.max_variants,
             unsure: AtomicU32::new(0),
@@ -646,6 +654,28 @@ impl GraphSite {
         *self.state.borrow_mut() = GraphState::GivenUp(reason);
     }
 
+    /// Whether the paths of the graph are taken down as what a callable can
+    /// stand for: there is an exporter, or the engine derives backwards and
+    /// a call whose tensors need a gradient has come.
+    pub fn exports(&self) -> bool {
+        if self.derives {
+            self.grads.load(Ordering::Relaxed)
+        } else {
+            self.exporter.is_some()
+        }
+    }
+
+    /// A call whose tensors need a gradient has come to a graph that is
+    /// exported for nothing but its backward: from here on its paths are
+    /// taken down for that.
+    pub fn needs_gradients(&self) {
+        self.grads.store(true, Ordering::Relaxed);
+        let mut state = self.state.borrow_mut();
+        if matches!(*state, GraphState::Built) {
+            *state = GraphState::Waiting;
+        }
+    }
+
     /// Takes a path that was taken down, with the form that was made of the
     /// run if one was: a path it has already gets the form. A path that is
     /// not final (see `Path::provisional`) is taken a few times at most.
@@ -744,6 +774,10 @@ impl GraphSite {
     /// guards of the passes, or the reason there is none as a str. An error
     /// that is no Exception is left set.
     pub unsafe fn export(&self, description: Obj) -> Result<(PyObj, Vec<(usize, PyObj)>), String> {
+        if self.derives {
+            // Nothing of Python is asked: the engine runs the graph itself.
+            return crate::backward::staged(description).map(|callable| (callable, Vec::new()));
+        }
         let Some(exporter) = &self.exporter else {
             return Err("nothing exports graphs".to_string());
         };
@@ -3070,11 +3104,15 @@ pub struct Graphs {
     pub min_ops: usize,
     pub max_variants: usize,
     pub export: Option<PyObj>,
+    /// There is no pass over graphs, and the engine derives the backward of
+    /// a graph whose tensors need a gradient: such a graph is exported to
+    /// the engine itself (`backward::Staged`), and no other.
+    pub derives: bool,
 }
 
 impl Default for Graphs {
     fn default() -> Graphs {
-        Graphs { min_ops: 4, max_variants: 8, export: None }
+        Graphs { min_ops: 4, max_variants: 8, export: None, derives: false }
     }
 }
 
