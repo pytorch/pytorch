@@ -35,17 +35,6 @@ struct Attr : public dnnl::primitive_attr {
     *this = other;
   }
 
-  Attr(const dnnl::primitive_attr& other) : dnnl::primitive_attr(other) {}
-
-  /// @param arg Parameter argument index
-  Attr(int arg, int mask, const std::vector<float>& scales) {
-    set_scales_mask(arg, mask);
-    if (!scales_) {
-      scales_.reset(new scale_map());
-    }
-    (*scales_)[arg] = std::make_pair(scales, mask);
-  }
-
   // Default arg = DNNL_ARG_DST
   Attr(int mask, const std::vector<float>& scales) {
     set_scales_mask(DNNL_ARG_DST, mask);
@@ -53,12 +42,6 @@ struct Attr : public dnnl::primitive_attr {
       scales_.reset(new scale_map());
     }
     (*scales_)[DNNL_ARG_DST] = std::make_pair(scales, mask);
-  }
-
-  Attr(dnnl_fpmath_mode_t fpmath_mode,
-       dnnl::scratchpad_mode sp_mode = dnnl::scratchpad_mode::user) {
-    set_fpmath_mode(fpmath_mode);
-    set_scratchpad_mode(sp_mode);
   }
 
   Attr& set_fpmath_mode(dnnl_fpmath_mode_t mode) {
@@ -263,7 +246,7 @@ struct Attr : public dnnl::primitive_attr {
         akind, scale, alpha, beta, alg, zero_point, binary_src_desc);
   }
 
-  bool non_negitive_output() const {
+  bool non_negative_output() const {
     auto po = get_post_ops();
     auto last = po.len() - 1;
     if (last < 0) {
@@ -375,9 +358,8 @@ struct Attr : public dnnl::primitive_attr {
     utils::to_bytes(bytes, get_accumulation_mode()); // accumulation mode
     utils::to_bytes(bytes, get_deterministic()); // deterministic mode
 
-    // Note: depthwise/binary post op, zero points, scales, rnn params are
-    // not encoded so far. PD cache is supposed to use in convolution only
-    // as a temporary workaround for gemm-based conv pd overhead
+    // Note: depthwise post ops and rnn params are not encoded, and binary post
+    // ops only encode their algorithm and src dims.
   }
 
   // ideep::tensor's reorders still take ideep::attr_t until the tensor port.
