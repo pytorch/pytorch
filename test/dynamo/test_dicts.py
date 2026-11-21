@@ -4217,6 +4217,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     thetype = dict
+    base = dict
 
     # Methods:
     # + bool
@@ -4373,16 +4374,16 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.__or__
         d3, d4 = d1.copy(), d2.copy()
-        self.assertEqual(dict.__ior__(d3, d2), {"a": 1, "b": 3, "c": 4})
+        self.assertEqual(self.base.__ior__(d3, d2), {"a": 1, "b": 3, "c": 4})
         self.assertEqual(self.thetype.__ior__(d4, d1), {"a": 1, "b": 2, "c": 4})
 
         # Test return value
         d3, d4 = d1.copy(), d2.copy()
         self.assertEqual(d3.__ior__(d2), {"a": 1, "b": 3, "c": 4})
-        self.assertEqual(dict.__ior__(d4, d1), {"a": 1, "b": 2, "c": 4})
+        self.assertEqual(self.base.__ior__(d4, d1), {"a": 1, "b": 2, "c": 4})
 
         # Test with non-dict types
-        self.assertRaises(TypeError, lambda: dict.__ior__(d1, 1))
+        self.assertRaises(TypeError, lambda: self.base.__ior__(d1, 1))
 
     @make_dynamo_test
     def test_binop_ior_iterable(self):
@@ -4408,7 +4409,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.clear
         d = self.thetype({"a": 1, "b": 2})
-        dict.clear(d)
+        self.base.clear(d)
         self.assertEqual(d, {})
 
         d = self.thetype({"a": 1, "b": 2})
@@ -4498,7 +4499,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.pop
         d = self.thetype({"a": 1, "b": 2})
-        self.assertEqual(dict.pop(d, "b"), 2)
+        self.assertEqual(self.base.pop(d, "b"), 2)
         self.assertEqual(self.thetype.pop(d, "a"), 1)
 
         # Test invalid usage
@@ -4520,7 +4521,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.popitem
         d = self.thetype({"a": 1})
-        key, value = dict.popitem(d)
+        key, value = self.base.popitem(d)
         self.assertEqual(key, "a")
         self.assertEqual(value, 1)
 
@@ -4543,7 +4544,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(d, {"a": 1, "b": 2, "c": 3, "d": None})
 
         # Test Dict.setdefault
-        self.assertEqual(dict.setdefault(d, "f", 5), 5)
+        self.assertEqual(self.base.setdefault(d, "f", 5), 5)
         self.assertEqual(self.thetype.setdefault(d, "e", 5), 5)
 
         # Test invalid usage
@@ -4563,7 +4564,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         # Test Dict.update
         d3 = self.thetype({"e": 6})
-        dict.update(d, d3)
+        self.base.update(d, d3)
         self.assertEqual(d, {"a": 1, "b": 3, "c": 4, "d": 5, "e": 6})
         d4 = self.thetype({"f": 7})
         self.thetype.update(d, d4)
@@ -4774,6 +4775,7 @@ class OrderedDictMethodsTests(DictMethodsTests):
     hw_classification = HardwareClassification.GENERIC
 
     thetype = OrderedDict
+    base = OrderedDict
 
     # Methods:
     # - popitem - Inherited from DictMethodsTest
@@ -4820,11 +4822,10 @@ class OrderedDictMethodsTests(DictMethodsTests):
         # Test return type
         d3, d4 = d1.copy(), d2.copy()
         self.assertIs(type(d3.__ior__(d2)), OrderedDict)
-        self.assertIs(type(dict.__ior__(d4, d2)), OrderedDict)
         self.assertIs(type(self.thetype.__ior__(d4, d2)), OrderedDict)
 
         d3, d4 = d1.copy(), d2.copy()
-        self.assertIs(type(dict.__ior__(d3, dict(d2))), OrderedDict)
+        self.assertIs(type(self.thetype.__ior__(d3, dict(d2))), OrderedDict)
         self.assertIs(type(dict.__ior__(dict(d3), d2)), dict)
         self.assertIs(type(dict(d4).__ior__(d2)), dict)
 

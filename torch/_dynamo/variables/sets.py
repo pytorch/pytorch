@@ -69,7 +69,7 @@ def pyset_check(obj: VariableTracker) -> TypeIs["SetVariable"]:
     return issubclass(obj.python_type(), set)
 
 
-def set_copy(obj: VariableTracker) -> VariableTracker:
+def set_copy(obj: "BaseSetVariable") -> "BaseSetVariable":
     """Mirrors CPython's internal `set_copy` (Objects/setobject.c).
 
     Always allocates a fresh set/frozenset with a shallow-copied items dict.
@@ -1307,7 +1307,9 @@ class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
         from .hashable import RawHash
         from .object_protocol import generic_hash_impl
 
-        if self.is_python_constant():
+        if self.is_python_constant() and not any(
+            key._hash_is_identity for key in self.items
+        ):
             return hash(self.as_python_constant()), False
         is_fake = False
         raw_hashes = []

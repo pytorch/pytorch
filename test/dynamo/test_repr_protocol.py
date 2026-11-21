@@ -697,21 +697,32 @@ class TpReprTests(TestCase):
         self.assertTrue(same)
         self.assertTrue(distinct)
 
-    def test_repr_of_hash_of_compile_time_object(self):
+    @parametrize("observe", [repr, lambda h: ["0", "1"][h % 2]])
+    def test_repr_of_hash_of_compile_time_object(self, observe):
         # hash() returning id(self) on a sourceless object yields a
-        # FakeIdVariable (HASH kind); repr() must route through its
-        # tp_repr_impl and mirror int.__repr__ (a decimal string).
+        # FakeIdVariable (HASH kind). Its text must not embed a temporary hash.
         class Obj:
             def __hash__(self):
                 return id(self)
 
         def fn(x):
-            s = repr(hash(Obj()))
+            s = observe(hash(Obj()))
             return x + 1, s.isdigit()
 
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        _, is_digit = compiled(torch.randn(4))
-        self.assertTrue(is_digit)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Conversion of compile-time-only hash value"
+        ):
+            compiled(torch.randn(4))
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+        def index_of_hash(x):
+            first, second = Obj(), Obj()
+            return x + [hash(first), hash(second)].index(hash(second))
+
+        compiled = torch.compile(index_of_hash, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), index_of_hash(x))
 
     def test_object_repr_placeholder_address(self):
         # Sourced and compile-time objects both get the placeholder address,

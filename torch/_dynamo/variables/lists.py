@@ -604,7 +604,7 @@ class BaseListVariable(VariableTracker):
         if isinstance(idx, SymNodeVariable):
             const_idx = idx.evaluate_expr()
         else:
-            const_idx = idx.as_python_constant()
+            const_idx = pylong_as_ssize_t(tx, pynumber_index(tx, idx))
         tx.output.side_effects.mutation(self)
         # type: ignore[arg-type]
         self.items.insert(const_idx, value)
@@ -699,7 +699,7 @@ class BaseListVariable(VariableTracker):
         key_fn_var = kwargs.pop("key", ConstantVariable.create(None))
         reverse = kwargs.pop(
             "reverse", ConstantVariable.create(False)
-        ).as_python_constant()
+        ).guard_as_python_constant()
         if len(kwargs) != 0:
             raise_args_mismatch(tx, "sort", "0 kwargs", f"{len(kwargs)} kwargs")
 
@@ -955,7 +955,7 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
         arg_type = maybe_get_python_type(arg)
         if pyindex_check(arg_type):
             i = pynumber_index(tx, arg)
-            return self.apply_index(tx, i.as_python_constant())
+            return self.apply_index(tx, i.guard_as_python_constant())
         elif pyslice_check(arg):
             return self.apply_slice(arg.as_index_slice(tx))
         raise_type_error(
@@ -1010,7 +1010,7 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
         # `count` and `sq_contains_impl` only send exact ints and bools here;
         # other needles use equality-based iteration.
         # range_contains_long: https://github.com/python/cpython/blob/v3.13.5/Objects/rangeobject.c#L436-L480
-        x = specialize_symnode(x).as_python_constant()
+        x = specialize_symnode(x).guard_as_python_constant()
 
         start, stop, step = self.start(), self.stop(), self.step()
 
@@ -1126,7 +1126,7 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
                 [iterator, args[0]],
                 {"not_found_msg": ConstantVariable.create(self._index_not_found_msg)},
             )
-        x = specialize_symnode(args[0]).as_python_constant()
+        x = specialize_symnode(args[0]).guard_as_python_constant()
         start, stop, step = self.start(), self.stop(), self.step()
         in_range = (start <= x < stop) if step > 0 else (stop < x <= start)
         if in_range and ((x - start) % step) == 0:
@@ -1335,7 +1335,7 @@ class ListVariable(BaseListVariable):  # noqa: RVT001
             return super().mp_ass_subscript_impl(tx, key, value)
         # value=None signals delete (CPython NULL sentinel).
         if pyindex_check(key.python_type()):
-            i = key.nb_index_impl(tx).as_python_constant()
+            i = pynumber_as_ssize_t(tx, key).as_python_constant()
             if i < 0:
                 i += len(self.items)
             # Explicit unbound dispatch
@@ -1345,7 +1345,7 @@ class ListVariable(BaseListVariable):  # noqa: RVT001
         elif pyslice_check(key):
             # CPython runs PySlice_Unpack first, which raises ValueError on
             # step==0 before the iterable check.
-            key_as_const = key.as_python_constant()
+            key_as_const = key.as_index_slice(tx)
             if key_as_const.step == 0:
                 raise_observed_exception(
                     ValueError, tx, args=["slice step cannot be zero"]
@@ -1490,7 +1490,7 @@ class DequeVariable(BaseListVariable):  # noqa: RVT001
         # does that itself with _PyArg_CheckPositional.
         check_positional(tx, "rotate", len(args), 0, 1)
         n_vt = args[0] if args else ConstantVariable.create(1)
-        n = n_vt.nb_index_impl(tx).as_python_constant()
+        n = pylong_as_ssize_t(tx, pynumber_index(tx, n_vt))
         length = len(self.items)
         if length > 1:
             tx.output.side_effects.mutation(self)
@@ -3170,7 +3170,11 @@ class SizeVariable(TupleVariable):  # noqa: RVT001
                 )
             index = constant.item()
         else:
-            index = arg.as_python_constant()
+            index = (
+                arg.as_index_slice(tx)
+                if pyslice_check(arg)
+                else arg.guard_as_python_constant()
+            )
 
         if isinstance(index, slice):
             return SizeVariable(self.items[index])
@@ -3303,7 +3307,7 @@ class SliceVariable(VariableTracker):  # noqa: RVT001
                     tx,
                     "slice indices must be integers or None or have an __index__ method",
                 )
-            members.append(pynumber_index(tx, member).as_python_constant())
+            members.append(pynumber_index(tx, member).guard_as_python_constant())
         return slice(*members)
 
     def is_hashable(self) -> bool:
@@ -3358,14 +3362,14 @@ class SliceVariable(VariableTracker):  # noqa: RVT001
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         length_var = args[0].nb_index_impl(tx)
-        length = length_var.as_python_constant()
+        length = length_var.guard_as_python_constant()
         items: list[int | None] = []
         for item in self.items:
             if item.is_constant_none():
                 items.append(None)
             else:
                 idx_var = item.nb_index_impl(tx)
-                items.append(idx_var.as_python_constant())
+                items.append(idx_var.guard_as_python_constant())
 
         try:
             result = slice(*items).indices(length)

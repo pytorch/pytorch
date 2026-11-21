@@ -359,6 +359,23 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         fresh_globals[name] = object
         self.assertFalse(loaded.guard_check(x))
 
+    def test_native_method_guards_survive_serialization(self):
+        def fn(x, left, right, method):
+            equal = list.count.__get__(left) == list.count.__get__(right)
+            return x + equal, x + 1, method.__qualname__
+
+        receiver = collections.OrderedDict()
+        base = dict.__setitem__.__get__(receiver)
+        derived = type(receiver).__setitem__.__get__(receiver)
+        x, left, right = torch.ones(1), [], []
+        compiled = _aot_compile(fn, x, [], [], base)
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        loaded = AOTCompiledFunction.deserialize(data, guard_globals=globals())
+        self.assertTrue(loaded.guard_check(x, left, right, base))
+        self.assertEqual(loaded(x, left, right, base), fn(x, left, right, base))
+        self.assertFalse(loaded.guard_check(x, left, left, base))
+        self.assertFalse(loaded.guard_check(x, left, right, derived))
+
     def test_constant_mro_length_changed_before_reload(self):
         x = torch.ones(1)
         compiled = _aot_compile(_constant_mro_length, x)
@@ -717,7 +734,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         control_state, _ = _kept_types(control)
         # The kept keys-match is all that tells the two artifacts' guards apart
         # beyond the identity guards on objects a load resolves by reference
-        # (G['pytree'], two of its classes and torch), which the pre-check's type
+        # (G['pytree'], its referenced classes and torch), which the pre-check's type
         # tests drop. Counted per type, because a set of type names hides a
         # second divergence in a type that keeps another instance.
         self.assertIn("DICT_KEYS_MATCH", kept)
@@ -731,8 +748,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # from Python 3.11 on; before that it is a _SpecialForm, guarded by an
         # ID_MATCH that is kept because it pickles as the global typing.Any.
         any_is_class = isinstance(pytree.Any, type)
-        # The object entry in TreeSpec's MRO also needs a class identity guard.
-        class_matches, id_matches = (3, 2) if any_is_class else (2, 3)
+        # The tensor type and TreeSpec's MRO base also need class identity guards.
+        class_matches, id_matches = (4, 2) if any_is_class else (3, 3)
         self.assertEqual(
             counts - control_counts,
             {

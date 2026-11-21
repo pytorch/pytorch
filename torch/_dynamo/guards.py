@@ -157,6 +157,7 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
+from .exc import unimplemented
 from .source import (
     AttrProxySource,
     AttrSource,
@@ -267,6 +268,7 @@ if TYPE_CHECKING:
 
     from torch._C import DispatchKeySet
     from torch._dynamo.output_graph import OutputGraphCommon, OutputGraphGuardsState
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch.utils._python_dispatch import TraceableWrapperSubclass
 
 T = TypeVar("T")
@@ -336,28 +338,96 @@ class NativeMethodMetadata(NamedTuple):
     # Pickled by reference, so it is the loading process's class.
     receiver: type
     name: str
+    receiver_id: int | None = None  # process-local instance identity
 
 
-def _native_method_metadata(value: object) -> NativeMethodMetadata | None:
-    # A builtin bound to a class, like an autograd Function's ``apply``: every
-    # attribute read makes a new bound object, so only equality is portable.
+def _native_method_metadata(
+    value: object, *, portable: bool = True
+) -> NativeMethodMetadata | None:
     if type(value) is not types.BuiltinMethodType:
         return None
     receiver = value.__self__
-    if not isinstance(receiver, type) or not _resolves_by_reference(receiver):
+    is_cls = issubclass(type(receiver), type)
+    if not portable:
+        from .variables.object_protocol import type_is_immutable
+
+        owner = receiver if is_cls else type(receiver)
+        if type(owner) is not type or not type_is_immutable(owner):
+            return None
+        descr = inspect.getattr_static(owner, value.__name__, None)
+        kind = types.ClassMethodDescriptorType if is_cls else types.MethodDescriptorType
+        if type(descr) is not kind:
+            return None
+        if not is_cls:
+            expected = NativeMethodMetadata(owner, value.__name__, id(receiver))
+            return expected if _native_method_matches(value, expected) else None
+    if not is_cls or not _resolves_by_reference(receiver):
         return None
     if getattr(receiver, value.__name__, None) != value:
         return None
-    return NativeMethodMetadata(receiver, value.__name__)
+    return NativeMethodMetadata(cast(type, receiver), value.__name__)
 
 
 def _native_method_matches(value: object, expected: NativeMethodMetadata) -> bool:
+    if expected.receiver_id is not None:
+        # Metadata only binds descriptors on immutable builtin classes.
+        return (
+            type(value) is types.BuiltinMethodType
+            and value.__name__ == expected.name
+            and type(receiver := value.__self__) is expected.receiver
+            and id(receiver) == expected.receiver_id
+            and value == getattr(expected.receiver, expected.name).__get__(receiver)
+        )
     # The type check first: == would otherwise run the new value's __eq__.
     return (
         type(value) is types.BuiltinMethodType
         and value.__self__ is expected.receiver
+        and value.__name__ == expected.name
         and value == getattr(expected.receiver, expected.name)
     )
+
+
+def _method_identity_guards_filtered(
+    tx: InstructionTranslatorBase, *, binding_only: bool = False
+) -> bool:
+    guards = tx.output.tracing_context.guards_context
+    if guards.skip_install:
+        return not (binding_only and guards.tracing_reuse_hash)
+    if tx.output.package is not None:
+        return True
+    if tx.export or torch.compiler.is_exporting():
+        # Export can call a bound method on the captured module. Its graph
+        # still cannot preserve observations of process-local wrapper identities.
+        return not binding_only
+    context = CompileContext.try_get()
+    return context is not None and context.is_aot_capture
+
+
+def _untracked_method_identity(context: str, *, skip_frame: bool = False) -> NoReturn:
+    unimplemented(
+        gb_type="Builtin method operation requires identity guards",
+        context=context,
+        explanation="Dynamo cannot establish the stable receiver identity required by this operation.",
+        hints=["Bind on a stable receiver and retain its identity guards."],
+        skip_frame=skip_frame,
+        preserve_skip_frame_after_inline=skip_frame,
+    )
+
+
+def install_builtin_method_guard(
+    tx: InstructionTranslatorBase, source: Source, value: object = None
+) -> None:
+    filtered = _method_identity_guards_filtered(tx, binding_only=True)
+    if value is None:
+        value = tx.output.resolve_source_value(source)
+    expected = _native_method_metadata(value, portable=filtered)
+    if expected is not None:
+        create = functools.partial(GuardBuilder.NATIVE_METHOD_MATCH, expected=expected)
+        install_guard(source.make_guard(create))
+    elif filtered:
+        _untracked_method_identity(f"binding prebound builtin method {source.name}")
+    else:
+        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
 
 
 def _mapping_proxy_mapping(value: object) -> object:
@@ -3595,16 +3665,20 @@ class GuardBuilder(GuardBuilderBase):
         eval_fn=_native_method_matches,
     )
     def NATIVE_METHOD_MATCH(self, guard: Guard, expected: NativeMethodMetadata) -> None:
-        last_match: list[object] = []
+        if self.save_guards and expected.receiver_id is not None:
+            raise torch._dynamo.exc.PackageError(
+                f"Instance method {expected.name!r} at {guard.name} needs receiver identity. "
+                "Bind it in the saved function."
+            )
+        last_match: weakref.ReferenceType[object] | None = None
 
         def guard_fn(value: object) -> bool:
-            # The object ID_MATCH would have pinned; holding it keeps its id
-            # from being reused.
-            if last_match and value is last_match[0]:
+            nonlocal last_match
+            if value is not None and last_match is not None and value is last_match():
                 return True
             if not _native_method_matches(value, expected):
                 return False
-            last_match[:] = [value]
+            last_match = weakref.ref(value)
             return True
 
         code = (
@@ -3612,6 +3686,10 @@ class GuardBuilder(GuardBuilderBase):
             f"{expected.receiver.__module__}.{expected.receiver.__qualname__}.{expected.name})"
         )
         self._set_guard_export_info(guard, [code])
+        key = f"{code} {(id(expected.receiver), expected.receiver_id)}"
+        if key in self.already_added_code_parts:
+            return
+        self.already_added_code_parts.add(key)
         self.get_guard_manager(guard).add_lambda_guard(
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
@@ -5095,6 +5173,12 @@ class GuardsStatePickler(FunctionPicklerBase):
         else:
             setstate(attrs)
 
+    @staticmethod
+    def _unpickle_method_wrapper(
+        owner: type, name: str, receiver: object
+    ) -> types.MethodWrapperType:
+        return inspect.getattr_static(owner, name).__get__(receiver, type(receiver))
+
     @classmethod
     def _unpickle_count_iter(cls, item: int, step: int) -> itertools.count[int]:
         return itertools.count(item, step)
@@ -5400,6 +5484,14 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         if id(obj) in self.empty_values:
             return type(obj).__new__, (type(obj),)
+
+        if type(obj) is types.MethodWrapperType:
+            # Pickle's getattr(receiver, name) can select a different subclass slot.
+            return type(self)._unpickle_method_wrapper, (
+                obj.__objclass__,
+                obj.__name__,
+                obj.__self__,
+            )
 
         if obj is dict_keys:
             return type, (dict[Any, Any]().keys(),)
@@ -5972,7 +6064,7 @@ def _guard_value(builder: GuardBuilder, guard: Guard) -> object:
         return None
 
 
-_PORTABLE_FUNCTION_GUARD_TYPES = ("CLOSURE_MATCH", "ID_MATCH")
+_PORTABLE_FUNCTION_GUARD_TYPES = ("BUILTIN_MATCH", "CLOSURE_MATCH", "ID_MATCH")
 
 
 def _portable_function_metadata(

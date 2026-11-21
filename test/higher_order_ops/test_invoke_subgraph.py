@@ -20,6 +20,7 @@ import torch.utils._pytree as pytree
 from functorch.compile import aot_function, nop
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+from torch._dynamo.precompile_package import precompile_capture
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     EagerAndRecordGraphs,
@@ -63,6 +64,7 @@ from torch.testing._internal.triton_utils import (
 
 
 nested_compile_region = torch.compiler.nested_compile_region
+_shape_bucket = {4: 0, 8: 1}.get
 
 if HAS_GPU:
     import triton
@@ -3681,6 +3683,25 @@ class TestInvokeSubgraphCompileCUDA(TestCase):
 class TestInvokeSubgraphReuse(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_method_receiver_alias_guards_retrace(self):
+        from types import SimpleNamespace
+
+        @nested_compile_region
+        def region(x, pair):
+            return x + (list.count.__get__(pair.left) == list.count.__get__(pair.right))
+
+        def fn(x, first, second):
+            return region(x, first) + region(x, second)
+
+        x, shared = torch.ones(1), []
+        first = SimpleNamespace(left=[], right=[])
+        second = SimpleNamespace(left=shared, right=shared)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self._count_speculate_calls() as count:
+            result = compiled(x, first, second)
+        self.assertEqual(result, 2 * x + 1)
+        self.assertEqual(count(), 2)
+
     @contextlib.contextmanager
     def _count_speculate_calls(self):
         count = 0
@@ -6048,7 +6069,7 @@ class TestInvokeSubgraphReuseHashFn(TestCase):
         """Hash fn that uses tensor shape to differentiate inputs."""
 
         def hash_fn(x):
-            return x.shape[0]
+            return _shape_bucket(x.shape[0])
 
         @nested_compile_region(reuse_hash_fn=hash_fn)
         def gn(x):
@@ -6068,6 +6089,11 @@ class TestInvokeSubgraphReuseHashFn(TestCase):
 
         with self._count_speculate_calls() as count:
             res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x4, x8a, x8b)
+
+        with precompile_capture(fn, backend="eager") as call:
+            with self._count_speculate_calls() as captured:
+                self.assertEqual(call(x4, x8a, x8b), ref)
+        self.assertEqual(captured(), 2)
 
         # shape[0]=4 and shape[0]=8 → 2 traces, third call reuses shape=8
         self.assertEqual(count(), 2)
