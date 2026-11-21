@@ -17325,6 +17325,45 @@ graph():
         self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
         self.assertEqual(filtered_nn_module_stack[1], "sub_net.2")
 
+    def test_cond_branch_tracers_share_module_maps(self):
+        from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                linears = [torch.nn.Linear(4, 4) for _ in range(4)]
+                self.experts = torch.nn.ModuleList(linears)
+                self.shared = self.experts[0]
+
+            def forward(self, x):
+                for e in self.experts:
+                    x = torch.cond(x.sum() > 0, e, torch.clone, (x,))
+                return self.shared(x)
+
+        # submodule_paths is reset to None after each trace, so record it at init.
+        paths = {}
+        children = []
+        orig_init = _ModuleStackTracer.__init__
+
+        def init(self, *args, parent=None, **kwargs):
+            orig_init(self, *args, parent=parent, **kwargs)
+            paths[self] = self.submodule_paths
+            if parent is not None:
+                children.append((self, parent))
+
+        m = M()
+        with patch.object(_ModuleStackTracer, "__init__", init):
+            ep = export(m, (torch.randn(4),), strict=False)
+
+        self.assertGreater(len(children), 0)
+        for child, parent in children:
+            self.assertIsNotNone(paths[child])
+            self.assertIs(paths[child], paths[parent])
+            self.assertEqual(child.enable_attr_proxy, parent.enable_attr_proxy)
+        self.assertTrue(any(child.enable_attr_proxy for child, _ in children))
+        x = torch.randn(4)
+        self.assertEqual(ep.module()(x), m(x))
+
     def test_slice_nn_module_stack(self):
         class N(torch.nn.Module):
             def forward(self, x, y):
