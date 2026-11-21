@@ -7055,6 +7055,124 @@ def graph_genexpr_logs(x, at=0):
     return (parts[0] + parts[1]).exp()
 
 
+GRAPH_CACHE_LOG = []
+
+
+class GraphNotes:
+    @functools.lru_cache(None)  # noqa: B019
+    def once(self, text):
+        GRAPH_CACHE_LOG.append(("once", text))
+
+
+GRAPH_NOTES = GraphNotes()
+
+
+@functools.lru_cache(None)
+def graph_cached_scale(kind):
+    GRAPH_CACHE_LOG.append(("scale", kind))
+    return {"small": 0.5, "large": 2.0}.get(kind, 1.0)
+
+
+@functools.lru_cache(maxsize=2)
+def graph_cached_bounded(n):
+    GRAPH_CACHE_LOG.append(("bounded", n))
+    return n + 1.0
+
+
+@functools.lru_cache(None, typed=True)
+def graph_cached_typed(a, b):
+    GRAPH_CACHE_LOG.append(("typed", a, b))
+    return float(a) + 1.0
+
+
+@functools.lru_cache(None)
+def graph_cached_named(a, b=2):
+    GRAPH_CACHE_LOG.append(("named", a, b))
+    return float(a * b)
+
+
+class GraphLoudKey:
+    def __init__(self, n):
+        self.n = n
+
+    def __hash__(self):
+        GRAPH_CACHE_LOG.append(("hash", self.n))
+        return self.n
+
+    def __eq__(self, other):
+        GRAPH_CACHE_LOG.append(("eq", self.n))
+        return isinstance(other, GraphLoudKey) and other.n == self.n
+
+
+@functools.lru_cache(None)
+def graph_cached_of_key(key):
+    GRAPH_CACHE_LOG.append(("of_key", key.n))
+    return key.n * 0.5
+
+
+GRAPH_LOUD_KEY = GraphLoudKey(3)
+GRAPH_CACHES = (
+    graph_cached_scale,
+    graph_cached_bounded,
+    graph_cached_typed,
+    graph_cached_named,
+    graph_cached_of_key,
+    GraphNotes.once,
+)
+
+
+def graph_calls_cached(x, at=0):
+    # A wrapper that is found on a class and bound to the object, and one
+    # that is called three times, with what it gives going into operations.
+    h = torch.relu(x) + 1
+    GRAPH_NOTES.once(f"at {at % 2}")
+    kind = "large" if at % 3 else "other"
+    h = h * graph_cached_scale("small") + graph_cached_scale(kind)
+    h = torch.tanh(h) * 2
+    return h.sum() + graph_cached_scale("small")
+
+
+def graph_cache_is_cleared(x, at=0):
+    h = torch.relu(x) + 1
+    if at in (5, 6, 9):
+        graph_cached_scale.cache_clear()
+    h = h * graph_cached_scale("small")
+    h = torch.tanh(h) * 2 - 1
+    return h.sum() * graph_cached_scale("small")
+
+
+def graph_cache_is_bounded(x, at=0):
+    h = (torch.relu(x) + 1) * 2 - 1
+    h = h * graph_cached_bounded(at % 3)
+    return (torch.tanh(h) * 2 - 1).sum() + 1
+
+
+def graph_cache_is_typed(x, at=0):
+    h = (torch.relu(x) + 1) * 2 - 1
+    h = h * graph_cached_typed(1, 2) + graph_cached_typed(1.0, 2)
+    h = h + graph_cached_typed(at % 2, int)
+    return (torch.tanh(h) * 2 - 1).sum() + 1
+
+
+def graph_cache_by_name(x, at=0):
+    h = (torch.relu(x) + 1) * 2 - 1
+    h = h * graph_cached_named(3) + graph_cached_named(3, b=2) + graph_cached_named(a=3)
+    return (torch.tanh(h) * 2 - 1).sum() + 1
+
+
+def graph_cache_of_loud_key(x, at=0):
+    h = (torch.relu(x) + 1) * 2 - 1
+    h = h * graph_cached_of_key(GRAPH_LOUD_KEY) + graph_cached_of_key(GraphLoudKey(3))
+    return (torch.tanh(h) * 2 - 1).sum() + 1
+
+
+def graph_cache_is_counted(x, at=0):
+    h = torch.relu(x) + 1
+    h = h * graph_cached_scale("small")
+    info = graph_cached_scale.cache_info()
+    return (h.sum() + 1) * 2 - 3, info.hits, info.misses, info.currsize
+
+
 def graph_imports(x):
     y = (x.sin() + 1).cos()
     import torch.fx
@@ -10844,6 +10962,60 @@ class TestVmGraphResults(TestCase):
                     self.assertIs(type(got[0]), type(expected[0]))
                     self.assertEqual(got[0], expected[0], atol=0, rtol=0)
         GRAPH_GEN_LOG.clear()
+
+    def test_a_call_that_finds_its_entry_in_a_cache_is_part_of_a_path(self, device):
+        # A call of a `functools.lru_cache` wrapper whose cache has the
+        # entry runs no Python code: it is made once per call of the
+        # function, as in the interpreter, and what it gives is read of the
+        # cache. One that would run the wrapped function ends the path.
+        def reset():
+            GRAPH_CACHE_LOG.clear()
+            for wrapper in GRAPH_CACHES:
+                wrapper.cache_clear()
+
+        def keep(gm, input_types):
+            return gm
+
+        # One graph up to the return, with the calls in the middle of it.
+        for fn in (graph_calls_cached, graph_cache_is_cleared):
+            reset()
+            x = torch.randn(3, 4, device=device)
+            fn(x)
+            compiled = self.whole_graph(fn, (x,), 8)
+            self.assertEqual(compiled(x * 2), fn(x * 2), atol=0, rtol=0)
+        # What is returned, what the wrapped functions were asked, and what
+        # every wrapper counted, call by call: a cache that is cleared
+        # between calls, one with a bound, one that tells types apart,
+        # calls with names, a key that is hashed and compared in Python.
+        functions = (
+            graph_calls_cached,
+            graph_cache_is_cleared,
+            graph_cache_is_bounded,
+            graph_cache_is_typed,
+            graph_cache_by_name,
+            graph_cache_of_loud_key,
+            graph_cache_is_counted,
+        )
+        for fn in functions:
+            for behind in ((), (keep,)):
+                passes = (*DEFAULT, P.Graphs(), *behind)
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                found = []
+                for run in (compiled, fn):
+                    reset()
+                    given = []
+                    for at in range(14):
+                        torch.manual_seed(at)
+                        x = torch.randn(3, 4, device=device)
+                        out = run(x, at)
+                        counts = [tuple(w.cache_info()) for w in GRAPH_CACHES]
+                        given.append((out, list(GRAPH_CACHE_LOG), counts))
+                    found.append(given)
+                for got, expected in zip(found[0], found[1]):
+                    self.assertEqual(got[1], expected[1])
+                    self.assertEqual(got[2], expected[2])
+                    self.assertEqual(got[0], expected[0], atol=0, rtol=0)
+        reset()
 
     def test_an_import_of_a_module_that_was_imported_does_not_end_a_graph(self, device):
         # `import a.b` of what was imported before looks the module and its

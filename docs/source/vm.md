@@ -2008,6 +2008,53 @@ one that something else than `tuple` or `list` goes over (`sum`, `all`,
 `any`, `set`), nor a generator function: a path ends where the function of
 such a generator is made.
 
+### Calls that find their entry in a cache
+
+A call of a `functools.lru_cache` wrapper is part of a path where the cache
+has the entry the call finds. Nothing is remembered of an earlier call: the
+path shows by looking, without running Python code, that the cache has the
+entry (every argument and every key of the cache is hashed and compared by
+C code: a number, a text, None, an object whose class hashes and compares
+as `object` does, a tuple of such), what the call gives is read of the
+cache, and the call itself is made once where the path lands, in the order
+of the function. The wrapper so counts the call as it does in the
+interpreter, and `cache_info()` is eager's at every call. A call that would
+find no entry (the first one, one behind `cache_clear()`) ends the path in
+front of itself, and the instruction runs the wrapped function. A wrapper
+that is found on a class is bound to the object by C code, as a function
+is: `Logger.warning_once`, which the transformer models call on their way
+to the loss, is one.
+
+```python
+import functools
+
+
+@functools.lru_cache(None)
+def scale_of(kind):
+    return {"small": 0.5, "large": 2.0}.get(kind, 1.0)
+
+
+def scaled(x, kind):
+    h = torch.relu(x) + 1
+    h = h * scale_of("small") + scale_of(kind)
+    h = torch.tanh(h) * 2
+    return h.sum() + scale_of("small")
+
+
+g = torch.vm(scaled, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(6):
+    same = torch.equal(g(v, "large"), scaled(v, "large"))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["why"]  # (True, 8, 'the function returns')
+scale_of.cache_info()  # CacheInfo(hits=34, misses=2, maxsize=None, currsize=2)
+```
+
+A path ends in front of a call of a wrapper with a bound (`maxsize=N`: its
+calls reorder its entries) or one that tells types apart (`typed=True`), of
+a call that hands arguments over by name, of one whose arguments or whose
+cache's keys hash or compare in Python, and of one into a cache of more
+than 256 entries.
+
 ### Methods read off a tensor, and what a call spreads
 
 `y.to(device)` is a call of a method by its name. Where the code reads the
@@ -2645,7 +2692,7 @@ profiler counts an operation of a graph as less than one):
 | mobilenetv2_100 (timm) | 1 | 1 | 152 of 152 |
 | adv_inception_v3 (timm) | 1 | 1 | 314 of 314 |
 | deit_base_distilled_patch16_224 (timm) | 1 | 1 | 233 of 233 |
-| DistillGPT2 (HuggingFace) | 4 | 9 | 249 of 247 |
+| DistillGPT2 (HuggingFace) | 4 | 9 | 251 of 247 |
 | hf_DistilBert (TorchBench) | 3 | 13 | 132 of 136 |
 | MobileBertForMaskedLM (HuggingFace) | 3 | 3 | 1295 of 1250 |
 | whisper-tiny (HuggingFace) | 5 | 22 | 342 of 385 |
@@ -2660,7 +2707,7 @@ attention mask is made), a branch on what the mask holds, the objects the
 models construct for their outputs, and library code such as
 `inspect.signature` ("Limits"). A training step has fewer of its operations
 in graphs (counted on eager's tape, with `Graphs(backward=False)`): for
-DistillGPT2, 5 graphs that run 15 times in a step, with 189
+DistillGPT2, 5 graphs that run 15 times in a step, with 191
 of the about 820 operators that the profiler counts in one step of eager
 mode (forward, loss, backward and update together), since a dropout that
 drops and an attention with a dropout rate are operations only where

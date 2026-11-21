@@ -1196,6 +1196,152 @@ pub unsafe fn quiet_keys(dict: Obj) -> bool {
     true
 }
 
+/// The class of what `functools.lru_cache` makes of a function, or null
+/// where `functools` was not imported.
+unsafe fn cache_wrapper() -> *mut ffi::PyTypeObject {
+    static WRAPPER: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let found = *WRAPPER.get_or_init(|| {
+        let module = ffi::PyDict_GetItemString(ffi::PyImport_GetModuleDict(), c"functools".as_ptr());
+        let class = if module.is_null() || ffi::PyModule_CheckExact(module) == 0 {
+            null_mut()
+        } else {
+            ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), c"_lru_cache_wrapper".as_ptr())
+        };
+        ffi::PyErr_Clear();
+        if class.is_null() || ffi::PyType_Check(class) == 0 { 0 } else { class as usize }
+    });
+    found as *mut ffi::PyTypeObject
+}
+
+/// Whether an object is what `functools.lru_cache` made of a function.
+/// Read off an object as an attribute its class has, it is bound to the
+/// object by C code, as a function is.
+pub unsafe fn is_cache_wrapper(o: Obj) -> bool {
+    !o.is_null() && !capi::is_unboxed(o) && !cache_wrapper().is_null() && ffi::Py_TYPE(o) == cache_wrapper()
+}
+
+/// A value that is hashed and compared by C code alone, as a key or as an
+/// item of a tuple that is one: a number, a text, None, an object whose
+/// class hashes and compares as `object` does (by which object it is), or
+/// a tuple of such.
+unsafe fn plain_member(o: Obj, depth: usize) -> bool {
+    if o.is_null() || capi::is_unboxed(o) {
+        return false;
+    }
+    if is_plain(o) {
+        return true;
+    }
+    if ffi::PyTuple_CheckExact(o) != 0 {
+        return depth < 4 && (0..ffi::PyTuple_GET_SIZE(o)).all(|i| plain_member(ffi::PyTuple_GET_ITEM(o, i), depth + 1));
+    }
+    let (ty, object) = (ffi::Py_TYPE(o), std::ptr::addr_of!(ffi::PyBaseObject_Type));
+    let same = |own: usize, of_object: usize| own != 0 && own == of_object;
+    same((*ty).tp_hash.map_or(0, |f| f as usize), (*object).tp_hash.map_or(0, |f| f as usize))
+        && same((*ty).tp_richcompare.map_or(0, |f| f as usize), (*object).tp_richcompare.map_or(0, |f| f as usize))
+}
+
+/// What the garbage collector is shown of an object: the exact dicts and
+/// the classes among what it refers to.
+struct Referents {
+    dicts: Vec<Obj>,
+    classes: Vec<Obj>,
+}
+
+unsafe extern "C" fn referent(o: Obj, arg: *mut std::ffi::c_void) -> std::ffi::c_int {
+    let seen = &mut *(arg as *mut Referents);
+    if !o.is_null() && ffi::PyDict_CheckExact(o) != 0 && !seen.dicts.contains(&o) {
+        seen.dicts.push(o);
+    }
+    if !o.is_null() && ffi::PyType_Check(o) != 0 {
+        seen.classes.push(o);
+    }
+    0
+}
+
+/// What a call of a `functools.lru_cache` wrapper (or of one that is bound
+/// to an object as a method) with these positional arguments returns
+/// without calling the function it wraps: the entry its cache has for
+/// them. Borrowed; None where that cannot be shown by looking, in which
+/// case the call may run the function. Nothing here runs Python code.
+///
+/// The cache is the one exact dict the wrapper refers to besides the dict
+/// of its own attributes (what it shows the garbage collector). Its keys
+/// are made of the arguments in one of two ways, by whether the wrapper
+/// tells arguments of different types apart, which cannot be asked: the
+/// arguments as a tuple (a lone text or whole number as itself), or that
+/// tuple with the types of the arguments behind them. A key of the first
+/// kind that is found in a cache of the second kind would end in a type,
+/// so one whose last argument is no type and that is found is the key of
+/// this call. Every key of the cache and every argument is hashed and
+/// compared by C code (`plain_member`; a cache of more than 256 entries
+/// is not gone through). A wrapper with a bound on its size keeps its
+/// results inside objects of a class of its own, which it refers to: what
+/// is found is the result only where it is of none of the classes the
+/// wrapper refers to.
+pub unsafe fn cached(callee: Obj, args: &[Obj]) -> Option<Obj> {
+    const SCANNED: isize = 256;
+    if callee.is_null() || capi::is_unboxed(callee) || cache_wrapper().is_null() {
+        return None;
+    }
+    let mut given: Vec<Obj> = Vec::with_capacity(args.len() + 1);
+    let wrapper = if ffi::Py_TYPE(callee) == std::ptr::addr_of_mut!(pyffi::PyMethod_Type) {
+        given.push(pyffi::PyMethod_Self(callee));
+        pyffi::PyMethod_Function(callee)
+    } else {
+        callee
+    };
+    if !is_cache_wrapper(wrapper) {
+        return None;
+    }
+    given.extend_from_slice(args);
+    if !given.iter().all(|o| plain_member(*o, 0)) {
+        return None;
+    }
+    let traverse = (*ffi::Py_TYPE(wrapper)).tp_traverse?;
+    let mut seen = Referents { dicts: Vec::new(), classes: Vec::new() };
+    traverse(wrapper, referent, &mut seen as *mut Referents as *mut std::ffi::c_void);
+    let slot = pyffi::_PyObject_GetDictPtr(wrapper);
+    let own = if slot.is_null() { null_mut() } else { *slot };
+    seen.dicts.retain(|dict| *dict != own);
+    let [cache] = seen.dicts[..] else {
+        return None;
+    };
+    if ffi::PyDict_Size(cache) > SCANNED {
+        return None;
+    }
+    let (mut at, mut key, mut value) = (0, null_mut(), null_mut());
+    while ffi::PyDict_Next(cache, &mut at, &mut key, &mut value) != 0 {
+        if !plain_member(key, 0) {
+            return None;
+        }
+    }
+    let lone = given.len() == 1 && (ffi::PyUnicode_CheckExact(given[0]) != 0 || ffi::PyLong_CheckExact(given[0]) != 0);
+    let found = if lone {
+        ffi::PyDict_GetItemWithError(cache, given[0])
+    } else {
+        if given.last().is_some_and(|last| ffi::PyType_Check(*last) != 0) {
+            return None;
+        }
+        let key = ffi::PyTuple_New(given.len() as isize);
+        if key.is_null() {
+            ffi::PyErr_Clear();
+            return None;
+        }
+        for (i, o) in given.iter().enumerate() {
+            ffi::PyTuple_SET_ITEM(key, i as isize, new_ref(*o));
+        }
+        let found = ffi::PyDict_GetItemWithError(cache, key);
+        ffi::Py_DECREF(key);
+        found
+    };
+    if found.is_null() {
+        ffi::PyErr_Clear();
+        return None;
+    }
+    let class = ffi::Py_TYPE(found) as Obj;
+    (!seen.classes.contains(&class)).then_some(found)
+}
+
 /// A weak reference as the interpreter lays it out: only looked into on the
 /// versions whose layout this is.
 #[cfg(not(Py_3_13))]
@@ -2316,7 +2462,8 @@ unsafe fn python_descriptor(descr: Obj) -> bool {
         xdecref(getter);
         return python;
     }
-    !is_static(ty) && ffi::PyFunction_Check(descr) == 0
+    // What `functools.lru_cache` made is bound to the object by C code.
+    !is_static(ty) && ffi::PyFunction_Check(descr) == 0 && !is_cache_wrapper(descr)
 }
 
 /// Whether `getattr(obj, name)` runs no Python code, as far as that can be
