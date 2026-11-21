@@ -972,6 +972,7 @@ def allowVmapFallbackUsage(fn):
 # NB: TestVmapBaseLegacy is a nested class. This prevents test runners from picking
 # it up and running it.
 class Namespace:
+    # Helper base only -- no test_* methods (avoids leaking into ACCELERATOR subclasses).
     class TestVmapBaseLegacy(TestCase):
         def __init__(self, method_name="runTest"):
             super().__init__(method_name)
@@ -1010,32 +1011,36 @@ class Namespace:
 
             return types.MethodType(wrapper, self)
 
-        @allowVmapFallbackUsage
-        def test_vmap_fallback_check_ok(self):
-            # One day we'll implement a batching rule for torch.var_mean.
-            # When that happens, please change the example to use an
-            # operator that doesn't have a batching rule implemented.
-            op_using_fallback = torch.var_mean
+
+class TestVmapFallbackCheckLegacy(Namespace.TestVmapBaseLegacy):
+    hw_classification = HardwareClassification.GENERIC
+
+    @allowVmapFallbackUsage
+    def test_vmap_fallback_check_ok(self):
+        # One day we'll implement a batching rule for torch.var_mean.
+        # When that happens, please change the example to use an
+        # operator that doesn't have a batching rule implemented.
+        op_using_fallback = torch.var_mean
+        vmap(op_using_fallback)(torch.rand(3))
+
+    def test_vmap_fallback_check(self):
+        @self._wrap_method_with_vmap_fallback_check
+        def no_fallback(self):
+            pass
+
+        # One day we'll implement a batching rule for torch.var_mean.
+        # When that happens, please change the example to use an
+        # operator that doesn't have a batching rule implemented.
+        op_using_fallback = torch.var_mean
+
+        @self._wrap_method_with_vmap_fallback_check
+        def uses_fallback(self):
             vmap(op_using_fallback)(torch.rand(3))
 
-        def test_vmap_fallback_check(self):
-            @self._wrap_method_with_vmap_fallback_check
-            def no_fallback(self):
-                pass
+        no_fallback(self)
 
-            # One day we'll implement a batching rule for torch.var_mean.
-            # When that happens, please change the example to use an
-            # operator that doesn't have a batching rule implemented.
-            op_using_fallback = torch.var_mean
-
-            @self._wrap_method_with_vmap_fallback_check
-            def uses_fallback(self):
-                vmap(op_using_fallback)(torch.rand(3))
-
-            no_fallback(self)
-
-            with self.assertRaises(AssertionError):
-                uses_fallback(self)
+        with self.assertRaises(AssertionError):
+            uses_fallback(self)
 
 
 class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
