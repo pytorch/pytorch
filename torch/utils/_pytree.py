@@ -922,6 +922,28 @@ def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
     return typ
 
 
+def _namedtuple_node_deserialize(dumpable_context: DumpableContext) -> Context:
+    typ = _namedtuple_deserialize(dumpable_context)
+    # Only namedtuple nodes check the class: _namedtuple_deserialize also loads
+    # any class registered with _register_namedtuple, which need not be a
+    # namedtuple. Older releases wrote any direct tuple subclass with string
+    # _fields as a namedtuple, so this is looser than is_namedtuple_class.
+    if not (
+        isinstance(typ, type)
+        and issubclass(typ, tuple)
+        and isinstance(getattr(typ, "_fields", None), tuple)
+        and all(type(field) is str for field in typ._fields)
+    ):
+        raise ValueError(
+            f"Can't deserialize a namedtuple TreeSpec: {dumpable_context!r} points "
+            f"to {typ}, which is not a namedtuple class. If the class changed after "
+            "the spec was saved, save the spec again. To load the old spec as it "
+            "is, give the new class its own serialized_type_name and register the "
+            "old namedtuple class under this name."
+        )
+    return typ
+
+
 def _ordereddict_flatten(d: OrderedDict[Any, T]) -> tuple[list[T], Context]:
     return list(d.values()), list(d.keys())
 
@@ -1049,7 +1071,7 @@ _private_register_pytree_node(
     _namedtuple_unflatten,
     serialized_type_name="collections.namedtuple",
     to_dumpable_context=_namedtuple_serialize,
-    from_dumpable_context=_namedtuple_deserialize,
+    from_dumpable_context=_namedtuple_node_deserialize,
     flatten_with_keys_fn=_namedtuple_flatten_with_keys,
 )
 _private_register_pytree_node(

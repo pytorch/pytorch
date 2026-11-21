@@ -1190,6 +1190,41 @@ if cxx_pytree.tree_leaves(foo) != [foo]:
         ):
             python_pytree.treespec_dumps(spec)
 
+    def test_pytree_deserialize_namedtuple_names_a_namedtuple(self):
+        import json
+
+        self.addCleanup(python_pytree.treespec_loads.cache_clear)
+
+        Point = namedtuple("Point", ["x", "y"])
+        SubPoint = type("SubPoint", (Point,), {})
+        Empty = namedtuple("Empty", [])
+        Pair = type("Pair", (tuple,), {})
+        Vec = type("Vec", (list,), {})
+        OldPair = type("OldPair", (tuple,), {"_fields": ("x", "y")})
+        refused = [
+            type("ListFields", (tuple,), {"_fields": ["x"]}),
+            type("IntFields", (tuple,), {"_fields": (0,)}),
+            type("NotTuple", (), {"_fields": ("x",)}),
+        ]
+        for cls in (Point, SubPoint, Empty, Pair, Vec, OldPair, *refused):
+            python_pytree._register_namedtuple(
+                cls, serialized_type_name=f"test_pytree.{cls.__name__}"
+            )
+            self.addCleanup(python_pytree._deregister_pytree_node, cls)
+        tree = (Pair((1, 2)), Vec([5]), Point(3, 4), SubPoint(6, 7), Empty())
+        spec = python_pytree.tree_structure(tree)
+        self.assertEqual(
+            python_pytree.treespec_loads(python_pytree.treespec_dumps(spec)), spec
+        )
+        node = {"type": "collections.namedtuple", "children_spec": []}
+        text = json.dumps([1, {**node, "context": "test_pytree.OldPair"}])
+        self.assertIs(python_pytree.treespec_loads(text).context, OldPair)
+        names = ["collections.defaultdict", "builtins.tuple", "collections.namedtuple"]
+        names += [f"test_pytree.{cls.__name__}" for cls in (Vec, *refused)]
+        for name in names:
+            with self.assertRaisesRegex(ValueError, "not a namedtuple class"):
+                python_pytree.treespec_loads(json.dumps([1, {**node, "context": name}]))
+
     def test_pytree_custom_type_serialize_bad(self):
         class DummyType:
             def __init__(self, x, y):
