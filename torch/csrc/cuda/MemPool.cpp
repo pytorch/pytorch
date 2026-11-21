@@ -26,4 +26,22 @@ void THCPMemPool_init(PyObject* module) {
           }))
       .def_property_readonly("id", &::at::cuda::MemPool::id)
       .def("use_count", &::at::cuda::MemPool::use_count);
+  // Destroying a pool frees its cached blocks, and cudaFreeHost waits for the
+  // GPU. Creating and querying it take allocator locks. Do not hold the GIL.
+  shared_ptr_class_<::at::cuda::HostMemPool>(torch_C_m, "_HostMemPool")
+      .def(py::init([]() {
+        std::shared_ptr<::at::cuda::HostMemPool> pool;
+        {
+          py::gil_scoped_release no_gil;
+          pool = std::shared_ptr<::at::cuda::HostMemPool>(
+              new ::at::cuda::HostMemPool(),
+              torch::impl::destroy_without_gil<::at::cuda::HostMemPool>);
+        }
+        return pool;
+      }))
+      .def_property_readonly("id", &::at::cuda::HostMemPool::id)
+      .def(
+          "use_count",
+          &::at::cuda::HostMemPool::use_count,
+          py::call_guard<py::gil_scoped_release>());
 }

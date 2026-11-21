@@ -2070,6 +2070,13 @@ class UserMethodVariable(BaseUserFunctionVariable):  # noqa: RVT001
             return SourcelessBuilder.create_internal_torch_ctx_manager(
                 func
             ).call_function(tx, [self.im_self, *args], kwargs)
+        elif func is torch.cuda.use_mem_pool._recreate_cm:
+            # A function decorated with use_mem_pool: rebuild the context from
+            # the decorator's arguments, as for the `with` form.
+            args_var = self.im_self.tp_getattro_impl(tx, "_args")
+            use_mem_pool = torch.cuda.use_mem_pool
+            ctx = SourcelessBuilder.create_internal_torch_ctx_manager(use_mem_pool)
+            return ctx.call_function(tx, args_var.unpack_var_sequence(tx), {})
         if self.is_constant:
             fn = getattr(self.im_self.value, func.__name__)  # type: ignore[attr-defined]
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)

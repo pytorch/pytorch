@@ -210,7 +210,6 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.cpu.amp.autocast_mode.autocast,
         torch.cuda.amp.autocast_mode.autocast,
         torch.cuda.use_mem_pool,
-        torch.cuda.use_mem_pool.__wrapped__,  # type: ignore[attr-defined]
         torch.fx.traceback.annotate,
         torch.fx.traceback.annotate.__wrapped__,  # type: ignore[attr-defined]
         torch.fx.traceback._dynamo_region_activation_memory_budget,
@@ -764,10 +763,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 return ctx.call_function(tx, args, kwargs)
             else:
                 return GradModeVariable.create(tx, False)
-        elif self.value in (
-            torch.cuda.use_mem_pool,
-            torch.cuda.use_mem_pool.__wrapped__,  # type: ignore[attr-defined]
-        ):
+        elif self.value is torch.cuda.use_mem_pool:
             unexpected_kwargs = [k for k in kwargs if k not in ("pool", "device")]
             if unexpected_kwargs:
                 raise_type_error(
