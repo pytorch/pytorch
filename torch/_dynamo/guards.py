@@ -409,14 +409,14 @@ def _method_identity_guards_filtered(
     return context is not None and context.is_aot_capture
 
 
-def _untracked_method_identity(context: str) -> NoReturn:
+def _untracked_method_identity(context: str, *, skip_frame: bool = False) -> NoReturn:
     unimplemented(
         gb_type="Builtin method operation requires identity guards",
         context=context,
-        explanation="Dynamo cannot preserve the identity needed by this operation when identity guards are skipped or filtered.",
-        hints=[
-            "Perform the operation outside the compiled function or use a capture mode that retains identity guards."
-        ],
+        explanation="Dynamo cannot establish the stable receiver identity required by this operation.",
+        hints=["Bind on a stable receiver and retain its identity guards."],
+        skip_frame=skip_frame,
+        preserve_skip_frame_after_inline=skip_frame,
     )
 
 
@@ -1803,6 +1803,7 @@ class GuardBuilder(GuardBuilderBase):
         # Save the guard managers to avoid repeatedly traversing sources.
         self._cached_guard_managers: dict[str, GuardManager] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
+        self._cached_distinct_inputs: set[frozenset[Source]] = set()
         self.object_aliasing_guard_codes: list[tuple[str, str]] = []
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
@@ -3965,18 +3966,22 @@ class GuardBuilder(GuardBuilderBase):
     # Multi-source guard (two inputs aliasing) — not expressible as a
     # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
-    @register_guard_check_spec(
+    _identity_check_spec = register_guard_check_spec(
         get_metadata_fn=lambda guard, values: values[0] is values[1],
         eval_fn=lambda values, expected: (values[0] is values[1]) == expected,
         get_extra_sources_fn=lambda g: (_guard_create_fn_keyword(g, "source_b"),),
     )
-    def DUPLICATE_INPUT(
-        self, guard: Guard, source_b: Source, *, same: bool | None = None
-    ) -> None:
-        if same is not None:
-            pair = (guard.originating_source, source_b)
-            self.BUILTIN_METHOD_RECEIVER_ALIAS(guard, pair, (0, 0 if same else 1))
-            return
+
+    @_identity_check_spec
+    def NOT_DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
+        pair = (guard.originating_source, source_b)
+        key = frozenset(pair)
+        if key not in self._cached_distinct_inputs:
+            self._cached_distinct_inputs.add(key)
+            self.BUILTIN_METHOD_RECEIVER_ALIAS(guard, pair, (0, 1))
+
+    @_identity_check_spec
+    def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
         if is_from_skip_guard_source(
             guard.originating_source
         ) or is_from_skip_guard_source(source_b):
@@ -5259,9 +5264,8 @@ class GuardsStatePickler(FunctionPicklerBase):
         self._missing_cache: dict[str, _Missing] = {}
         self._globals_snapshots: dict[int, dict[str, Any]] = {}
         self._pruned_cells: dict[int, types.CellType] = {}
-        # Elements of a container carried verbatim (a value-guarded __defaults__
-        # tuple, see _keep_container_verbatim) must stay real even when an
-        # unguarded attribute is the very same object and registers it mid-dump.
+        # Guarded tuple elements and namedtuple referents (including dictionary
+        # values) must survive pruning of other references to the same objects.
         self._verbatim_elements: set[int] = set()
         stack = list(value_guarded_containers.values())
         while stack:
@@ -5622,8 +5626,8 @@ class GuardsStatePickler(FunctionPicklerBase):
         global_scope: dict[str, Any],
         dictionaries: collections.abc.Collection[dict[Any, Any]],
     ) -> None:
-        """Keep dictionary keys first, then mark discarded local roots, skipping candidate slots.
-        Retain constructor dependencies reachable from surviving roots before freezing the slots.
+        """Retain keys, then prune unused pytree leaves and bound receivers.
+        Keep constructor dependencies reachable from surviving roots before freezing dictionary slots.
         """
         value: Any
         for value in itertools.chain(self.guard_tree_values.values(), dictionaries):
@@ -8162,7 +8166,11 @@ def unique(seq: Sequence[T]) -> Generator[T, None, None]:
 def guard_mixed_scope_alias(left: Source, right: Source) -> None:
     # make_dupe_guard cannot relate a local argument to a preloaded global.
     if is_from_local_source(left) != is_from_local_source(right):
-        install_guard(*(s.make_guard(GuardBuilder.ID_MATCH) for s in (left, right)))
+        install_guard(
+            left.make_guard(
+                functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=right)
+            )
+        )
 
 
 def record_lexical_alias(

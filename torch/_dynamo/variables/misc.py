@@ -275,8 +275,13 @@ class SuperVariable(VariableTracker):
         if self.objvar is None:
             raise AssertionError("super() requires objvar to be set for method calls")
         if is_wrapper_or_member_descriptor(inner_fn) and inner_fn.__objclass__ is dict:
-            if isinstance(self.objvar, variables.ConstDictVariable):
-                self.objvar.check_base_dict_mutation(tx, inner_fn.__name__)
+            if isinstance(obj := self.objvar, variables.OrderedDictVariable):
+                if (
+                    isinstance(inner_fn, types.MethodDescriptorType)
+                    and inner_fn.__name__ in obj._mutating_dict_methods
+                ):
+                    obj.call_method_descriptor(tx, inner_fn, args, kwargs, bound=True)
+                obj.check_base_dict_mutation(tx, inner_fn.__name__)
         # This essentially simulates CPython's `super_getattro`:
         # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L11138-L11168
         # where `inner_fn` is the VT for `res = _super_lookup_descr(...)`.
@@ -2191,6 +2196,7 @@ class StringFormatVariable(VariableTracker):
     Represents a call to str.format(), we delay calling format until after the graph.
     """
 
+    _cpython_type = str
     _nonvar_fields = {"format_string", *VariableTracker._nonvar_fields}
 
     def python_type(self) -> type:
@@ -3015,6 +3021,8 @@ class RandomVariable(VariableTracker):
 
 
 class WeakRefVariable(VariableTracker):
+    _cpython_type = weakref.ref
+
     @staticmethod
     def create(
         referent_vt: VariableTracker, callback_vt: VariableTracker, **options: Any
