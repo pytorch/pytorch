@@ -97,7 +97,7 @@ struct TcfgTensorInfo {
 
 #define TCFG_NO_VERSION UINT64_MAX
 
-#define TCFG_API_VERSION 12
+#define TCFG_API_VERSION 15
 
 // What frame_hook registers. It is offered the frame the interpreter made
 // for a call of func, with the arguments bound and nothing run. It returns 0
@@ -233,6 +233,36 @@ struct TcfgApi {
   // (2) and for the CPU (3), the default dtype (bits 8 to 15) and, from bit
   // 16, how many torch function modes are active.
   uint64_t (*call_modes)();
+
+  // New reference: what a graph that has the call of a site as a node is
+  // built from, a dict with the operator ("op", "overload"), per schema
+  // argument where its value comes from ("args": tuples of the name, whether
+  // it is keyword-only, and "operand" with the operand and its conversion,
+  // "packed" with the operands of an int list, or "const" with the value as a
+  // Python object), per operand what the site checks of it ("guards": "none",
+  // "tensor", "exact", "is_none" or "identity"), what it returns ("returns":
+  // "tensor", "bool", "int" or "float"), and whether the operator writes to an
+  // argument ("writes") or draws random numbers ("random").
+  PyObject* (*site_export)(const TcfgSite*);
+
+  // How many dispatcher calls a capture saw at its top level, those of the
+  // captures that began and ended inside it included.
+  int32_t (*trace_calls)(const TcfgTrace*);
+
+  // The dispatch keys the thread adds to and takes from every call: what a
+  // site compares with the ones it was captured under before it runs.
+  void (*dispatch_keys)(uint64_t* included, uint64_t* excluded);
+
+  // How many frames the interpreter has started or resumed on this thread
+  // while some thread wanted them offered (frame_want): calls of functions,
+  // class bodies, and every resumption of a generator or coroutine. Null
+  // where frame_push is.
+  uint64_t (*frame_count)();
+
+  // Whether a tensor carries a forward-mode gradient, which a graph that was
+  // compiled for tensors without one would drop. obj may be an unboxed
+  // tensor.
+  int32_t (*tensor_forward_grad)(PyObject* obj);
 };
 
 } // extern "C"

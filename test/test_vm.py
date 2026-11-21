@@ -4978,6 +4978,42 @@ def vm_scaled(x, y):
 
 
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmGraphs(TestCase):
+    """The graphs the engine makes of the tensor work of a block, and the
+    passes over them."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_a_call_site_says_what_a_graph_needs_of_it(self):
+        x = torch.randn(3)
+        made = torch._C._cfg_make_site
+        site = made("binary", lambda: x * 2, (x, 2), constants=(False, True))[1]
+        found = site.export()
+        self.assertEqual((found["op"], found["overload"]), ("aten::mul", "Tensor"))
+        operand = ("self", False, "operand", (0, "tensor"))
+        self.assertEqual(found["args"], [operand, ("other", False, "const", 2)])
+        self.assertEqual(found["guards"], ["tensor", "none"])
+        self.assertEqual((found["returns"], found["writes"]), ("tensor", False))
+        # A dtype is the object, not the number the kernel takes.
+        double = torch.float64
+        to = made("method", lambda: x.to(double), (x, double), callee=x.to)[1]
+        self.assertIn(("dtype", False, "const", double), to.export()["args"])
+        self.assertEqual(to.export()["guards"], ["tensor", "identity"])
+        y = torch.randn(3)
+        add_ = made("method", lambda: y.add_(1), (y, 1), callee=y.add_)[1]
+        self.assertEqual(add_.export()["writes"], True)
+        self.assertEqual(add_.info()["writes"], True)
+        drop = torch.dropout
+        operands = (drop, x, 0.5, True)
+        drawn = made("call", lambda: drop(x, 0.5, True), operands, callee=drop)[1]
+        self.assertEqual(drawn.export()["random"], True)
+        self.assertEqual(site.info()["random"], False)
+        positive = x.sum() > 0
+        truth = made("unary", lambda: bool(positive), (positive,))[1]
+        self.assertEqual(truth.info()["returns"], "bool")
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmApi(TestCase):
     """How torch.vm is asked for things."""
 
