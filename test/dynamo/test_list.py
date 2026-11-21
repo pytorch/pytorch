@@ -298,6 +298,14 @@ class ListTests(TupleTests):
 
         # Wrong number of arguments
         self.assertRaises(TypeError, p.append)
+
+    @make_dynamo_test
+    def test_unbound_getitem(self):
+        # list.__getitem__ is a METH_COEXIST method, not a slot wrapper.
+        p = self.thetype([1, 2, 3])
+        self.assertEqual(list.__getitem__(p, 0), 1)
+        self.assertEqual(list.__getitem__(p, slice(1, None)), [2, 3])
+        self.assertRaises(IndexError, list.__getitem__, p, 5)
         self.assertRaises(TypeError, p.append, 2, 3)
 
     @make_dynamo_test

@@ -831,6 +831,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
         return self
 
     tp_methods = {
+        "__contains__": Method.from_slot(BaseSetVariable.sq_contains_impl),
         "intersection": Method(BaseSetVariable.intersection),
         "union": Method(BaseSetVariable.union),
         "difference": Method(BaseSetVariable.difference),
@@ -1277,6 +1278,7 @@ class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
         return FrozensetVariable(r.items)  # type: ignore[attr-defined]
 
     tp_methods = {
+        "__contains__": Method.from_slot(BaseSetVariable.sq_contains_impl),
         "copy": Method(copy),
         "difference": Method(difference),
         "intersection": Method(intersection),
