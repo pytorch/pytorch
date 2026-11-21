@@ -76,28 +76,22 @@ def is_hashable(x: VariableTracker) -> bool:
     return x.is_hashable()
 
 
-def _guard_lazy_key(vt: VariableTracker) -> VariableTracker:
-    if isinstance(vt, variables.LazyVariableTracker):
-        if not vt.is_realized() and vt.source is not None and vt.is_hashable_lazy():
-            if isinstance(vt.source, ConstDictKeySource):
-                return vt
-            from .builder import bound_builtin_method_descriptor
+def _guard_lazy_key(vt: variables.LazyVariableTracker) -> bool:
+    if isinstance(vt.source, ConstDictKeySource):
+        return True
+    from ..symbolic_convert import InstructionTranslator
+    from .builder import bound_builtin_method_descriptor
 
-            value = vt.original_value()
-            if (
-                type(value) is types.BuiltinMethodType
-                and bound_builtin_method_descriptor(value) is not None
-            ):
-                from ..symbolic_convert import InstructionTranslator
-
-                tx = InstructionTranslator.current_tx()
-                if _method_identity_guards_filtered(tx):
-                    return vt.realize()
-                install_builtin_method_guard(tx, vt.source, value)
-                return vt
-        # Constructed keys must guard their elements, not just a trace-time hash.
-        return vt.realize()
-    return vt
+    value = vt.original_value()
+    if vt.source is None or type(value) is not types.BuiltinMethodType:
+        return False
+    if bound_builtin_method_descriptor(value) is None:
+        return False
+    tx = InstructionTranslator.current_tx()
+    if _method_identity_guards_filtered(tx):
+        return False
+    install_builtin_method_guard(tx, vt.source, value)
+    return True
 
 
 class RawHash:
@@ -131,7 +125,7 @@ class HashableTracker:
 
     def __init__(self, vt: VariableTracker) -> None:
         # We specialize SymNodes
-        vt = specialize_symnode(_guard_lazy_key(vt))
+        vt = specialize_symnode(vt)
 
         # Fast path for unrealized LazyVariableTrackers: check and hash without
         # realizing, to avoid inserting guards.  If the fast-path check fails,
@@ -140,6 +134,7 @@ class HashableTracker:
             isinstance(vt, variables.LazyVariableTracker)
             and not vt.is_realized()
             and vt.is_hashable_lazy()
+            and _guard_lazy_key(vt)
         ):
             self._hash = hash(vt.original_value())
             self._hash_is_identity = False
@@ -153,6 +148,7 @@ class HashableTracker:
         from .object_protocol import generic_hash_impl
 
         tx = InstructionTranslator.current_tx()
+        vt = vt.realize()
         if type(vt) is variables.CallMethodVariable:
             vt = vt.as_bound_builtin_method(tx) or vt
         # is_fake marks an identity-based hash (e.g. id(fake_tensor)); such VTs
