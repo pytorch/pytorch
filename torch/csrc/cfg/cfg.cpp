@@ -3,9 +3,12 @@
 
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/autocast_mode.h>
 #include <ATen/core/dispatch/DispatchCapture.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <c10/core/DefaultDtype.h>
 #include <c10/core/GradMode.h>
+#include <c10/core/InferenceMode.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
@@ -2117,6 +2120,17 @@ int32_t isTracing() {
   return torch::jit::tracer::isTracing();
 }
 
+uint64_t callModes() {
+  uint64_t modes = c10::GradMode::is_enabled() ? 1 : 0;
+  modes |= c10::InferenceMode::is_enabled() ? 2 : 0;
+  modes |= at::autocast::is_autocast_enabled(at::kCUDA) ? 4 : 0;
+  modes |= at::autocast::is_autocast_enabled(at::kCPU) ? 8 : 0;
+  modes |= static_cast<uint64_t>(c10::get_default_dtype_as_scalartype()) << 8;
+  modes |= static_cast<uint64_t>(at::impl::PythonTorchFunctionTLS::stack_len())
+      << 16;
+  return modes;
+}
+
 void* workspaceEnterRaw(void* workspace) {
   return torch::cfg::workspaceEnter(
       static_cast<torch::cfg::Workspace*>(workspace));
@@ -2156,7 +2170,7 @@ const TcfgApi api_table = {
     nullptr,
     nullptr,
 #endif
-    &isTracing,       &workspaceEnterRaw, &workspaceLeaveRaw,
+    &isTracing,       &workspaceEnterRaw, &workspaceLeaveRaw, &callModes,
 };
 
 } // namespace
