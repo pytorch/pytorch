@@ -719,6 +719,10 @@ class SplitCatSimplifier:
         if not transform_params_list:
             return
 
+        counters[backend]["scmerge_split_sections_removed"] = len(split_sections) - len(
+            simplified_split_ranges
+        )
+
         # Start actual replacement
         user_inputs_list_new = self.replace_split(
             graph, split_node, split_sections, user_inputs_list, simplified_split_ranges
@@ -831,9 +835,6 @@ class SplitCatSimplifier:
         split_ranges = self.fill_gaps(split_ranges, 0, cumulative_sizes[-1])
         if len(split_sections) == len(split_ranges):  # Simplification not possible
             return None
-        counters[backend]["scmerge_split_sections_removed"] = len(split_sections) - len(
-            split_ranges
-        )
         return split_ranges
 
     def has_non_overlapping_ranges(self, ranges: list[_Range]) -> bool:
@@ -867,6 +868,7 @@ class SplitCatSimplifier:
         """
         split_dim = _get_dim(split_node)
         split_sections = split_node.args[1]
+        split_input = split_node.args[0]
         transform_params_list: list[list[_TransformParam]] = []
 
         for user_node, user_inputs in zip(next_users, user_inputs_list):
@@ -875,6 +877,33 @@ class SplitCatSimplifier:
                 continue
 
             cat_dim = get_arg_value(user_node, 1, "dim")
+            if cat_dim is None:
+                cat_dim = 0
+            if is_node_meta_valid(split_input):  # type: ignore[arg-type]
+                ndim = len(split_input.meta["example_value"].shape)  # type: ignore[union-attr]
+                if split_dim < 0:
+                    split_dim += ndim
+                if cat_dim < 0:
+                    cat_dim += ndim
+
+            if user_node.target is torch.cat and split_dim != cat_dim:
+                # When split_dim != cat_dim, split inputs are unflattened and moved to
+                # cat_dim while non-split inputs are unsqueezed at cat_dim, shifting the
+                # original cat_dim to cat_dim + 1. All inputs must therefore match in
+                # size along cat_dim.
+                if not is_node_meta_valid(split_input):  # type: ignore[arg-type]
+                    return None
+                expected_cat_dim_size = split_input.meta["example_value"].shape[cat_dim]  # type: ignore[union-attr]
+                for user_input in user_inputs:
+                    if not isinstance(user_input, tuple):
+                        if not is_node_meta_valid(user_input):
+                            return None
+                        if not guard_or_false(
+                            user_input.meta["example_value"].shape[cat_dim]
+                            == expected_cat_dim_size
+                        ):
+                            return None
+
             transform_params: list[_TransformParam] = []
             for user_input in user_inputs:
                 if split_dim == cat_dim and user_node.target is torch.cat:
