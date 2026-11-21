@@ -17,6 +17,25 @@ We discuss each of these in detail
 The inlined C++ headers living in [`torch/headeronly`](https://github.com/pytorch/pytorch/tree/main/torch/headeronly) are completely decoupled from LibTorch. The headers consist of certain utilities that might be familiar to custom extension writers. For example, the
 `c10::ScalarType` enum lives here as `torch::headeronly::ScalarType`, as well as a libtorch-independent version of `TORCH_CHECK` that is `STD_TORCH_CHECK`. You can trust all APIs in the `torch::headeronly` namespace to not depend on `libtorch.so`. These APIs are also globally listed in [torch/header_only_apis.txt](https://github.com/pytorch/pytorch/blob/main/torch/header_only_apis.txt).
 
+(headeronly-cpu-flags)=
+#### CPU-specific code paths and build flags
+
+Some `torch/headeronly` headers pick a faster CPU implementation at compile time, based on the flags the including file is built with. For example, `c10::Half` in `torch/headeronly/util/Half.h` converts to and from `float` with a portable software routine unless the compiler is told that the target CPU has the x86 F16C instructions. libtorch is built with those flags for its own CPU kernels, but your extension is compiled separately and `torch.utils.cpp_extension` does not add them, because a binary built with them crashes with an illegal instruction on CPUs that lack them. So the headers behave correctly in your extension on every CPU, but you do not automatically get the fast paths that libtorch itself uses.
+
+To opt in, pass the flags yourself, and only when every CPU you ship to supports them (or call the fast code behind your own runtime dispatch). With GCC or clang on x86-64, add `-mf16c`, for example `-mavx2 -mfma -mf16c` or `-march=haswell`. Note that `-mavx2` on its own does not enable F16C. With these compilers you do not need to define libtorch's internal `CPU_CAPABILITY_AVX2` or `CPU_CAPABILITY_AVX512` macros: `-mf16c` produces the same hardware conversion instructions, and defining the macros without the matching ISA flags fails to compile.
+
+```python
+from torch.utils.cpp_extension import CppExtension
+
+CppExtension(
+    name="my_ext",
+    sources=["my_ext.cpp"],
+    extra_compile_args=["-mavx2", "-mfma", "-mf16c"],
+)
+```
+
+For `torch.utils.cpp_extension.load` and `load_inline`, pass the same list as `extra_cflags`. On aarch64 the native half-precision conversion is used by default and no flag is needed. This applies to code compiled by the host C++ compiler; the F16C path is not used in files compiled by `nvcc`.
+
 ### `torch/csrc/stable`
 
 This is a set of inlined C++ headers that provide wrappers around the C API that handle the rough edges
