@@ -7205,6 +7205,66 @@ def graph_runs_to_the_return(compiled):
     return sum(g["hits"] for g in graphs if g["why"] == "the function returns")
 
 
+def graph_weak_told():
+    GRAPH_END_LOG.append("an entry is taken out")
+    GRAPH_END_STATE[0] += 1.0
+
+
+class GraphWeakAsks(weakref.WeakKeyDictionary):
+    # A weak dictionary of the standard library's, of a class of the
+    # user's: what its own callback asks of it runs this code.
+    @property
+    def _iterating(self):
+        graph_weak_told()
+        return self.__dict__["asked"]
+
+    @_iterating.setter
+    def _iterating(self, value):
+        self.__dict__["asked"] = value
+
+
+class GraphWeakTakesOut:
+    # Line for line the dictionary by identity that `torch.compile` notes
+    # modules in, with code of the user's where it takes an entry out.
+    def __init__(self):
+        self.values = {}
+        self.refs = {}
+
+    def __setitem__(self, key, value):
+        idx = id(key)
+        if idx not in self.refs:
+            self.refs[idx] = weakref.ref(key, lambda ref: self._remove_id(idx))
+        self.values[idx] = value
+
+    def _remove_id(self, idx):
+        graph_weak_told()
+        if idx in self.values:
+            del self.values[idx]
+        if idx in self.refs:
+            del self.refs[idx]
+
+
+class GraphWeakDict(dict):
+    def __delitem__(self, key):
+        graph_weak_told()
+        super().__delitem__(key)
+
+
+class GraphEndBytes(bytearray):
+    # Memory that a tensor is made around: its end runs this.
+    def __del__(self):
+        if GRAPH_END_LOG is not None:
+            GRAPH_END_LOG.append("the end of a buffer")
+            GRAPH_END_STATE[0] += 1.0
+
+
+class GraphEndTensor(torch.Tensor):
+    def __del__(self):
+        if GRAPH_END_LOG is not None:
+            GRAPH_END_LOG.append("the end of a tensor")
+            GRAPH_END_STATE[0] += 1.0
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -7655,6 +7715,172 @@ class TestVmGraphResults(TestCase):
                     got = calls(compiled, planted, graded)
                     expected = calls(fn, planted, graded)
                     self.assertEqual(got, expected, msg=msg)
+        del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+        GRAPH_END_STATE[0] = 0.5
+
+    def test_a_callback_that_is_not_a_weak_containers_own_is_turned_down(self, device):
+        # A weak reference with a callback is no reason against letting
+        # go of an object where the callback is a weak container's own,
+        # which takes the entry out and does nothing else. That is known
+        # by what the callback is (the very code of the container's
+        # class), by the exact class of the container and of the
+        # reference, and by the exact types of what the callback reaches
+        # of the container: not by names. A dictionary of the standard
+        # library and the one by identity of `torch._dynamo.utils` pass,
+        # and the path runs; a subclass whose attribute is a property, a
+        # subclass with another method to take the entry out, an object
+        # with such a method of its own, a class written line for line
+        # like the original, and the original with a dict of another
+        # class for its values all run code of the user's when the
+        # object ends: the instructions run, and it ends in its place.
+        from torch._dynamo.utils import ExactWeakKeyDictionary
+
+        def keep(gm, input_types):
+            return gm
+
+        class TakesOut(ExactWeakKeyDictionary):
+            def _remove_id(self, idx):
+                graph_weak_told()
+                super()._remove_id(idx)
+
+        def own_method(made):
+            # It takes the entry out as the class does (an entry that
+            # stayed would keep a later object at the same place from
+            # being noted), and runs code of the user's.
+            def remove(idx):
+                graph_weak_told()
+                ExactWeakKeyDictionary._remove_id(made, idx)
+
+            return remove
+
+        classes = {"standard": weakref.WeakKeyDictionary, "asks": GraphWeakAsks}
+        classes.update({"subclass": TakesOut, "alike": GraphWeakTakesOut})
+
+        def container(what):
+            made = classes.get(what, ExactWeakKeyDictionary)()
+            if what == "own method":
+                made._remove_id = own_method(made)
+            if what == "own values":
+                made.values = GraphWeakDict()
+            return made
+
+        def calls(run, what, graded):
+            del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+            GRAPH_END_STATE[0] = 0.5
+            noted, found = container(what), []
+            for at in range(12):
+                made = 0
+                if at in (7, 10):
+                    made = GraphEndWatched()
+                    noted[made] = at
+                GRAPH_END_HELD.append(made)
+                del made
+                torch.manual_seed(at)
+                x = torch.randn(3, 4, device=device, requires_grad=graded)
+                out = run(x)
+                out = out[0] if isinstance(out, tuple) else out
+                if graded:
+                    out.backward()
+                entries = noted.data if what in ("standard", "asks") else noted.values
+                ended = (len(GRAPH_END_LOG), GRAPH_END_STATE[0])
+                found.append((out.item(), *ended, len(entries)))
+                del GRAPH_END_HELD[:]
+            return found
+
+        kinds = ("standard", "identity", "asks", "subclass", "own method", "alike")
+        for fn in (graph_end_variable, graph_end_deleted):
+            for what in (*kinds, "own values"):
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{fn.__name__} {what} {behind} {graded}"
+                    got = calls(compiled, what, graded)
+                    expected = calls(fn, what, graded)
+                    self.assertEqual(got, expected, msg=msg)
+                    if behind and what in ("standard", "identity"):
+                        # Every call behind the first two is the path's,
+                        # those in which the object ends included.
+                        listed = torch.vm.regions(compiled)
+                        graphs = [g for g in listed if "ops" in g]
+                        ran = sum(g["hits"] for g in graphs if "within" not in g)
+                        self.assertGreaterEqual(ran, 10, msg=msg)
+        del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+        GRAPH_END_STATE[0] = 0.5
+
+    def test_what_owns_the_memory_of_a_tensor_ends_in_its_place(self, device):
+        # A tensor that requires no gradient can still keep an object
+        # alive that it does not show: what owns its memory (a numpy array
+        # over a buffer, the buffer of `torch.frombuffer`, the tensor a
+        # DLPack capsule was made of), or its `.grad`. And an object that
+        # shows nothing at all can (the capsule itself). A path lets go
+        # of such a tensor only where it stays alive: its memory must be
+        # torch's own allocation, its `.grad` is looked at like what it
+        # refers to, and an object of a class that shows nothing must be
+        # of one that is known to hold nothing.
+        import numpy
+
+        def keep(gm, input_types):
+            return gm
+
+        def plant(what):
+            if what in ("numpy", "array"):
+                buffer = GraphEndBytes(b"\0" * 16)
+                array = numpy.frombuffer(buffer, dtype=numpy.float32)
+                return array if what == "array" else torch.from_numpy(array)
+            if what == "buffer":
+                return torch.frombuffer(GraphEndBytes(b"\0" * 16), dtype=torch.float32)
+            if what in ("capsule", "dlpack"):
+                owned = torch.ones(2).as_subclass(GraphEndTensor)
+                if what == "capsule":
+                    return torch.utils.dlpack.to_dlpack(owned)
+                return torch.from_dlpack(owned)
+            loudly = torch.ones(2, requires_grad=True) * 2
+            loudly.register_hook(lambda grad, held=GraphEnds(): grad)
+            made = torch.ones(2)
+            made.grad = loudly
+            return made
+
+        def calls(run, what, kept, graded):
+            del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+            GRAPH_END_STATE[0] = 0.5
+            found = []
+            for at in range(12):
+                made = plant(what) if at in (7, 10) else torch.ones(2)
+                GRAPH_END_HELD.append(made)
+                if not kept:
+                    del made
+                torch.manual_seed(at)
+                x = torch.randn(3, 4, device=device, requires_grad=graded)
+                out = run(x)
+                out = out[0] if isinstance(out, tuple) else out
+                if graded:
+                    out.backward()
+                found.append((out.item(), len(GRAPH_END_LOG), GRAPH_END_STATE[0]))
+                del GRAPH_END_HELD[:]
+                made = None
+            return found
+
+        def check(fn, what, kept, behind, graded):
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            msg = f"{fn.__name__} {what} kept {kept} {behind} {graded}"
+            got = calls(compiled, what, kept, graded)
+            expected = calls(fn, what, kept, graded)
+            self.assertEqual(got, expected, msg=msg)
+            if behind:
+                # A tensor of torch's own memory is let go of by the path
+                # at every other call, and one that the caller keeps at
+                # every call.
+                listed = torch.vm.regions(compiled)
+                graphs = [g for g in listed if "ops" in g and "within" not in g]
+                ran = sum(g["hits"] for g in graphs)
+                self.assertGreaterEqual(ran, 7 if kept else 4, msg=msg)
+
+        fn = graph_end_variable
+        for what in ("numpy", "buffer", "capsule", "dlpack", "array", "grad"):
+            for kept in (False, True):
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    check(fn, what, kept, behind, graded)
         del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
         GRAPH_END_STATE[0] = 0.5
 
