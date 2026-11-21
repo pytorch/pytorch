@@ -368,9 +368,30 @@ inline bool only_sparse_compressed_binary_op_trivial_cases(
     const binary_op_t& binary_op,
     const binary_op_out_t& binary_op_out) {
   // Only sparse compressed! Just like the name says :)
-  TORCH_INTERNAL_ASSERT(at::sparse_csr::is_sparse_compressed(self));
-  TORCH_INTERNAL_ASSERT(at::sparse_csr::is_sparse_compressed(other));
-  TORCH_INTERNAL_ASSERT(at::sparse_csr::is_sparse_compressed(out));
+  TORCH_CHECK_VALUE(
+      at::sparse_csr::is_sparse_compressed(self),
+      "torch.add: Expected self to be a sparse compressed tensor, but got layout ",
+      self.layout());
+  TORCH_CHECK_VALUE(
+      at::sparse_csr::is_sparse_compressed(other),
+      "torch.add: Expected other to be a sparse compressed tensor, but got layout ",
+      other.layout());
+  TORCH_CHECK_VALUE(
+      at::sparse_csr::is_sparse_compressed(out),
+      "torch.add: Expected out to be a sparse compressed tensor, but got layout ",
+      out.layout());
+  // Trivial path copies self's compressed indices into out; mismatched
+  // compressed layouts (e.g. CSR inputs with CSC/BSR/BSC out) would
+  // silently write transposed or invalid structure.
+  TORCH_CHECK_VALUE(
+      self.layout() == other.layout() && out.layout() == self.layout(),
+      "torch.add: Expected all tensors to have the same layout, but got self (",
+      self.layout(),
+      "), other (",
+      other.layout(),
+      "), out (",
+      out.layout(),
+      ")");
 
   // Bypass BLAS if there are matches in (self, other, out)
   if (self.is_same(out) && self.is_same(other)) {
