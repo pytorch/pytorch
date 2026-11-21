@@ -365,7 +365,8 @@ class TestAOTCompileToPython(TestCase):
         self.assertEqual(yc, ye)  # mutation landed on the right tensor
         self.assertEqual(yc._version, ye._version)  # and bumped the right version
 
-    def test_synthetic_base_aliased_mutated_input_runs_like_eager(self):
+    @parametrize("detached", [False, True])
+    def test_synthetic_base_aliased_mutated_input_runs_like_eager(self, detached):
         # Aliased + mutated inputs drive AOTSyntheticBaseWrapper, also applied AROUND the
         # orchestration. It collapses the aliased inputs into a synthetic base BEFORE the
         # orchestration runs, so it must be composed OUTSIDE it (same requirement as dedup):
@@ -377,7 +378,7 @@ class TestAOTCompileToPython(TestCase):
 
         def make():
             base = torch.arange(4, dtype=torch.float32) + 1
-            return base[:], base  # a aliases b
+            return (base.detach() if detached else base[:]), base  # a aliases b
 
         gm = make_fx(f)(*make())
         a0, b0 = make()
