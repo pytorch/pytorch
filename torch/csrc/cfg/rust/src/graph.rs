@@ -83,6 +83,9 @@ pub enum Assert {
     /// The object has no attribute of the name (`absent`): reading it
     /// comes down to the `__getattr__` of its class.
     Absent(PathValue, PyObj),
+    /// The class of the object has nothing under the name: no `__len__`
+    /// and no `__length_hint__`, which `list` and `tuple` would ask.
+    Lacks(PathValue, PyObj),
     /// What a call hands on with `*`: exactly of this class, a tuple or a
     /// list, with this many items. With `**`: an exact dict with these
     /// names, in this order.
@@ -99,6 +102,7 @@ impl Assert {
             | Assert::Iterator(v)
             | Assert::Count(v)
             | Assert::Absent(v, _)
+            | Assert::Lacks(v, _)
             | Assert::Sequence(v, ..)
             | Assert::Keys(v, _) => *v,
             Assert::Guard(cond) => cond.value(),
@@ -890,9 +894,56 @@ unsafe fn is_plain_container(o: Obj) -> bool {
             || (ffi::PyTuple_Check(o) != 0 && is_static(ffi::Py_TYPE(o))))
 }
 
+/// Whether a plain key is looked up in a dict, or put into it, without a
+/// key of the dict being compared with it in Python code (a key of a class
+/// with an `__eq__`, whose hash is that of the plain one): every key the
+/// dict has is plain. A dict that has taken nothing but texts says so
+/// itself (`pyffi::text_keys`); any other is gone through, if it is small.
+pub unsafe fn quiet_keys(dict: Obj) -> bool {
+    const SCANNED: isize = 32;
+    if pyffi::text_keys(dict) {
+        return true;
+    }
+    if ffi::PyDict_Size(dict) > SCANNED {
+        return false;
+    }
+    let (mut at, mut key, mut value) = (0, null_mut(), null_mut());
+    while ffi::PyDict_Next(dict, &mut at, &mut key, &mut value) != 0 {
+        if !is_plain_key(key) {
+            return false;
+        }
+    }
+    true
+}
+
+/// The same for a set: a small one that holds nothing but plain values.
+unsafe fn quiet_members(set: Obj) -> bool {
+    const SCANNED: isize = 32;
+    if ffi::PySet_Size(set) > SCANNED {
+        return false;
+    }
+    let members = ffi::PyObject_GetIter(set);
+    if members.is_null() {
+        ffi::PyErr_Clear();
+        return false;
+    }
+    let mut plain = true;
+    loop {
+        let member = ffi::PyIter_Next(members);
+        if member.is_null() {
+            break;
+        }
+        plain &= is_plain_key(member);
+        ffi::Py_DECREF(member);
+    }
+    ffi::PyErr_Clear();
+    ffi::Py_DECREF(members);
+    plain
+}
+
 /// Whether `container[key]` runs no Python code.
 pub unsafe fn quiet_item(container: Obj, key: Obj) -> bool {
-    is_plain_container(container) && is_plain_key(key)
+    is_plain_container(container) && is_plain_key(key) && (ffi::PyDict_Check(container) == 0 || quiet_keys(container))
 }
 
 /// Whether the entries of one dict go into another without Python code
@@ -954,8 +1005,11 @@ pub unsafe fn quiet_contains(item: Obj, container: Obj) -> bool {
     if capi::is_unboxed(item) || capi::is_unboxed(container) || !is_plain(item) {
         return false;
     }
-    if is_plain_dict(container) || ffi::PyAnySet_CheckExact(container) != 0 {
-        return true;
+    if is_plain_dict(container) {
+        return quiet_keys(container);
+    }
+    if ffi::PyAnySet_CheckExact(container) != 0 {
+        return quiet_members(container);
     }
     if ffi::PyUnicode_CheckExact(container) != 0 {
         return ffi::PyUnicode_CheckExact(item) != 0;
@@ -1096,11 +1150,49 @@ pub unsafe fn is_len(callee: Obj) -> bool {
     builtin_named(Builtin::Len) == callee as usize
 }
 
-/// Whether a callee is a builtin that goes over its arguments: what it
-/// does with an object is what it does with an iterator over the object.
-pub unsafe fn goes_over(callee: Obj) -> bool {
+/// For a call of a builtin that asks its arguments for an iterator and for
+/// nothing else, in their order, before it does anything with them: how
+/// many of the arguments it asks, from the first on; 0 for any other call.
+/// `iter(x)` (not `iter(x, sentinel)`, which calls `x`), `enumerate(x)` and
+/// `enumerate(x, n)` with an int (which is asked for its index first),
+/// `zip(...)`, and `list(x)` and `tuple(x)` of an object whose class has
+/// neither `__len__` nor `__length_hint__`, which those ask of the object
+/// itself.
+pub unsafe fn goes_over(callee: Obj, args: &[Obj]) -> usize {
     const TAKE: [Builtin; 5] = [Builtin::Enumerate, Builtin::Zip, Builtin::Iter, Builtin::List, Builtin::Tuple];
-    TAKE.iter().any(|which| builtin_named(*which) == callee as usize)
+    static HINT: std::sync::OnceLock<PyObj> = std::sync::OnceLock::new();
+    let Some(which) = TAKE.iter().copied().find(|which| builtin_named(*which) == callee as usize) else {
+        return 0;
+    };
+    if args.is_empty() || args.iter().any(|o| o.is_null()) {
+        return 0;
+    }
+    let one = args.len() == 1;
+    let plain = |o: Obj| {
+        let hint = HINT.get_or_init(|| PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__length_hint__".as_ptr())));
+        let ty = ffi::Py_TYPE(o);
+        !capi::is_unboxed(o)
+            && pyffi::_PyType_Lookup(ty, specials().len.as_ptr()).is_null()
+            && pyffi::_PyType_Lookup(ty, hint.as_ptr()).is_null()
+    };
+    match which {
+        Builtin::Iter => one as usize,
+        Builtin::Enumerate => {
+            (one || (args.len() == 2 && !capi::is_unboxed(args[1]) && ffi::PyLong_CheckExact(args[1]) != 0)) as usize
+        }
+        Builtin::List | Builtin::Tuple => (one && plain(args[0])) as usize,
+        _ => args.len(),
+    }
+}
+
+/// The name `__length_hint__`, for a check that a class has none.
+pub unsafe fn length_hint() -> PyObj {
+    PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__length_hint__".as_ptr()))
+}
+
+/// Whether a callee is the builtin `list` or `tuple`.
+pub unsafe fn makes_sequence(callee: Obj) -> bool {
+    builtin_named(Builtin::List) == callee as usize || builtin_named(Builtin::Tuple) == callee as usize
 }
 
 /// The modules whose functions a path may call on any arguments (`torch._C`:
@@ -1224,7 +1316,7 @@ pub unsafe fn pure_method(recv: Obj, name: Obj, args: &[Obj], api: &TcfgApi) -> 
     }
     match name.as_str() {
         "keys" | "values" | "items" => args.is_empty(),
-        "get" => (1..=2).contains(&args.len()) && is_plain_key(args[0]),
+        "get" => (1..=2).contains(&args.len()) && is_plain_key(args[0]) && quiet_keys(recv),
         _ => false,
     }
 }
