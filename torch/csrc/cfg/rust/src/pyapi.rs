@@ -652,6 +652,7 @@ impl CfgFunction {
                     d.set_item("operators", path.operators.clone())?;
                     d.set_item("inputs", path.inputs.len())?;
                     d.set_item("outputs", path.outputs.len())?;
+                    d.set_item("held", path.held.iter().filter(|held| **held).count())?;
                     d.set_item("branches", path.branches)?;
                     d.set_item("calls", path.calls)?;
                     d.set_item("paths", paths.len())?;
