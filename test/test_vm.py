@@ -5806,6 +5806,26 @@ def graph_on_a_size(x):
     return (y + 1).tanh().sum()
 
 
+def graph_handled(x, table):
+    y = x.sin() * 2
+    try:
+        k = table["k"]
+        y = y.cos() + k
+    except KeyError:
+        y = y - 1
+    return (y * 2).tanh().sum()
+
+
+def graph_handled_then(x, table):
+    try:
+        y = x.sin() * 2
+        z = (y + table["k"]).cos().tanh()
+    except KeyError:
+        z = x
+    str(table)
+    return z * 2
+
+
 def graph_looks_up(x, table, key):
     y = x.sin() * 2
     if key:
@@ -6867,6 +6887,37 @@ print(json.dumps(found))
         # The graph behind the branch has the side that has operations.
         self.assertEqual((second["ops"], second["why"]), (5, "the function returns"))
         self.assertEqual(self.left(compiled), [read])
+
+    def test_a_graph_in_a_function_that_handles_exceptions(self):
+        def keep(gm, input_types):
+            return gm
+
+        for behind in ((), (keep,)):
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(graph_handled, passes=passes, fallback=False)
+            x = torch.randn(4)
+            for table in ({"k": 2.0}, {"k": 2.0}, {"k": 2.0}, {}, {}, {"k": 2.0}):
+                got = compiled(x, table)
+                self.assertEqual(got, graph_handled(x, table), atol=0, rtol=0)
+            # The variables of such a function are kept where its handlers
+            # find them; the graph goes on across their reads and writes.
+            (graph,) = self.graphs(compiled)
+            self.assertEqual((graph["ops"], graph["why"]), (7, "the function returns"))
+            ((block, _),) = graph["ends"]
+            self.assertGreater(block, 0)
+            if behind:
+                self.assertEqual((graph["variants"], graph["hits"]), (1, 2))
+            # A variable that a handler finds, bound by a graph and read
+            # behind it, where the function goes on.
+            compiled = torch.vm(graph_handled_then, passes=passes, fallback=False)
+            for table in ({"k": 2.0}, {"k": 2.0}, {"k": 2.0}, {}, {"k": 2.0}):
+                got = compiled(x, table)
+                self.assertEqual(got, graph_handled_then(x, table), atol=0, rtol=0)
+            first = self.graphs(compiled)[0]
+            ended = (first["ops"], first["why"])
+            self.assertEqual(ended, (5, "a call that runs no kernel"))
+            if behind:
+                self.assertEqual(first["hits"], 2)
 
     def test_a_hook_for_every_module_is_not_for_what_was_made_of_a_graph(self):
         def keep(gm, input_types):
