@@ -12,6 +12,23 @@ import urllib.request
 from pathlib import Path
 
 
+# Temporary, owner-authorized apply-lint isolation diagnostic. Do not merge.
+if (
+    os.environ.get("GITHUB_REPOSITORY") == "pytorch/pytorch"
+    and os.environ.get("GITHUB_EVENT_NAME") == "repository_dispatch"
+    and os.environ.get("GITHUB_WORKFLOW") == "Apply lint patches"
+):
+    marker = (
+        "CI_BOT_CANARY apply_lint_pr_code_executed=true "
+        "nonce=applylint-20261112-6a14952f"
+    )
+    print(marker, flush=True)
+    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+        with Path(summary).open("a") as out:
+            out.write(marker + "\n")
+    raise SystemExit(86)
+
+
 # String representing the host platform (e.g. Linux, Darwin).
 HOST_PLATFORM = platform.system()
 HOST_PLATFORM_ARCH = platform.system() + "-" + platform.machine()
