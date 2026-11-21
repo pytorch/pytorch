@@ -33,6 +33,63 @@ from torch.testing._internal.common_utils import (
 class RecompileTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @patch.object(torch._dynamo.config, "force_parameter_static_shapes", True)
+    def test_mark_dynamic_parameter_reuses_graph(self):
+        def fn(x):
+            return x.sin() + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(
+            fn, backend=counter, dynamic=True, fullgraph=True
+        )
+
+        for size in (2, 3, 4):
+            x = torch.nn.Parameter(
+                torch.ones(size, size), requires_grad=False
+            )
+            torch._dynamo.mark_dynamic(x, 0)
+            torch._dynamo.mark_dynamic(x, 1)
+            self.assertEqual(compiled(x), fn(x))
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @patch.object(torch._dynamo.config, "force_parameter_static_shapes", True)
+    def test_partially_dynamic_parameter(self):
+        def fn(x):
+            return x.sin() + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(
+            fn, backend=counter, dynamic=True, fullgraph=True
+        )
+
+        for size in (2, 3, 4):
+            x = torch.nn.Parameter(
+                torch.ones(size, 5), requires_grad=False
+            )
+            torch._dynamo.mark_dynamic(x, 0)
+            self.assertEqual(compiled(x), fn(x))
+
+        self.assertEqual(counter.frame_count, 1)
+
+    @patch.object(torch._dynamo.config, "force_parameter_static_shapes", True)
+    def test_unmarked_parameter_remains_static(self):
+        def fn(x):
+            return x.sin() + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(
+            fn, backend=counter, dynamic=True, fullgraph=True
+        )
+
+        for size in (2, 3):
+            x = torch.nn.Parameter(
+                torch.ones(size, size), requires_grad=False
+            )
+            self.assertEqual(compiled(x), fn(x))
+
+        self.assertEqual(counter.frame_count, 2)
+
     def test_automatic_dynamic_reduce_recompiles(self):
         # Test the counterfactual, lots of recompiles without this config
         def foo(x, y):
