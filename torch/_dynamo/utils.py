@@ -6097,6 +6097,7 @@ def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
     KEYS_TO_COPY = [
         "_dynamo_static_input_type",
         "tag",
+        "_saved_tensors_hooks_input",
     ]
 
     tensor_dict = {

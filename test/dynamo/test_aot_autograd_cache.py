@@ -4009,6 +4009,11 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         )
         self.assertNotEqual(base, self.gen_cache_key(fn, config_with_static_inputs))
 
+        config_with_marked_inputs = dataclasses.replace(
+            self.default_config(), saved_tensors_hooks_input_indices=[0]
+        )
+        self.assertNotEqual(base, self.gen_cache_key(fn, config_with_marked_inputs))
+
         config_with_backend = self.default_config()
         config_with_backend = dataclasses.replace(
             config_with_backend, precompile_backend_id="backend"

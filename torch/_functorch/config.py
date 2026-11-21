@@ -456,6 +456,14 @@ _sync_cache_decision_cross_ranks = False
 # "no_static" - applied to all saved but not "static"
 # (this includes parameters and user marked as static)
 # "all" - no filtering, everything saved for backward.
+# In every mode, a graph input whose tensor has `_saved_tensors_hooks_input = True`
+# in its `__dict__` is also passed to the hooks when it is saved for backward,
+# with node.meta["saved_tensors_hooks_input"] = True. This covers inputs that
+# Dynamo passes to AOTAutograd as plain inputs (with inlined nn modules this
+# includes parameters), not tensor subclass inputs, synthetic bases or export.
+# Views of a marked input that backward uses are recomputed in backward, so the
+# marked input itself is saved, unless the graph mutates the input or, with the
+# default partitioner, has an impure op that it rejects when it recomputes.
 saved_tensors_hooks_filtering_mode = "donated"
 
 
