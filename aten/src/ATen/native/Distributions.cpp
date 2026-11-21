@@ -4,6 +4,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <c10/util/Exception.h>
+#include <limits>
 #include <optional>
 
 #include <ATen/CPUGeneratorImpl.h>
@@ -79,6 +80,11 @@ namespace {
 
 int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
   TORCH_CHECK(lambda >= 0, "invalid Poisson rate, expected rate to be non-negative");
+  // Converting INT64_MAX to double rounds up to the exclusive upper bound.
+  constexpr double int64_upper_bound = static_cast<double>(std::numeric_limits<int64_t>::max());
+  // Leave ten standard deviations of headroom, as in NumPy.
+  const double max_lambda = int64_upper_bound - 10 * std::sqrt(int64_upper_bound);
+  TORCH_CHECK(lambda <= max_lambda, "invalid Poisson rate, expected rate to be no greater than ", max_lambda);
   at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
   if (lambda >= 10) {
     // transformed rejection method, (Hoermann, 1993)
@@ -95,10 +101,13 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
       double V = standard_uniform(generator);
       double us = 0.5 - std::fabs(U);
       auto k = std::floor((2 * a / us + b) * U + lambda + 0.43);
+      if (!(k >= 0 && k < int64_upper_bound)) {
+        continue;
+      }
       if ((us >= 0.07) && (V <= vr)) {
         return static_cast<int64_t>(k);
       }
-      if ((k < 0) || ((us < 0.013) && (V > us))) {
+      if ((us < 0.013) && (V > us)) {
         continue;
       }
       if ((std::log(V) + std::log(invalpha) - std::log(a / (us * us) + b)) <=
