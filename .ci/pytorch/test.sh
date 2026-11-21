@@ -1947,6 +1947,18 @@ test_without_numpy() {
   popd
 }
 
+test_rocm_packed_atomic() {
+  # test_aoti_abi_check otherwise runs only in inductor_cpp_wrapper, which
+  # ROCm jobs do not select. This filter is the ROCm packed-atomic case.
+  local bin="${TORCH_BIN_DIR}/test_aoti_abi_check"
+  if [[ ! -x "$bin" ]]; then
+    bin="${BUILD_BIN_DIR}/test_aoti_abi_check"
+  fi
+  mkdir -p test/test-reports/cpp
+  "$bin" --gtest_filter='TestRocmPackedAtomic.*' \
+    --gtest_output=xml:test/test-reports/cpp/test_rocm_packed_atomic.xml
+}
+
 test_libtorch() {
   local SHARD="$1"
 
@@ -2955,6 +2967,9 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_python_shard 1
   test_aten
   test_libtorch 1
+  if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+    test_rocm_packed_atomic
+  fi
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     test_xpu_bin
   fi
