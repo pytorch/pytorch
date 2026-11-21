@@ -15,17 +15,55 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_strings.h>
 
 #include <c10/util/irange.h>
 #include <fmt/format.h>
 
+#include <pthread.h>
 #include <sys/wait.h>
+#include <atomic>
 #include <csignal>
 #include <map>
+#include <memory>
 #include <set>
 #include <sstream>
 
 using namespace torch;
+
+struct WorkerSignalMessageAffixes {
+  const std::string prefix_storage;
+  const std::string suffix_storage;
+  const char* const prefix = prefix_storage.data();
+  const size_t prefix_size = prefix_storage.size();
+  const char* const suffix = suffix_storage.data();
+  const size_t suffix_size = suffix_storage.size();
+};
+
+// These handlers terminate the process. Mark it before loading the snapshot;
+// setters check after exchanging it and retain old snapshots until termination
+// if a handler may have read them. Both atomics must remain sequentially
+// consistent. The child-atfork callback resets only the terminal marker.
+static std::atomic<const WorkerSignalMessageAffixes*> worker_signal_affixes{
+    nullptr};
+static std::atomic<bool> worker_signal_handler_started{false};
+static_assert(decltype(worker_signal_affixes)::is_always_lock_free);
+static_assert(decltype(worker_signal_handler_started)::is_always_lock_free);
+
+static void writeWorkerSignalMessage(const char* message, size_t size) {
+  worker_signal_handler_started.store(true);
+  const auto* affixes = worker_signal_affixes.load();
+  if (affixes != nullptr) {
+    auto prefix_w = write(STDERR_FILENO, affixes->prefix, affixes->prefix_size);
+    (void)prefix_w;
+  }
+  auto message_w = write(STDERR_FILENO, message, size);
+  (void)message_w;
+  if (affixes != nullptr) {
+    auto suffix_w = write(STDERR_FILENO, affixes->suffix, affixes->suffix_size);
+    (void)suffix_w;
+  }
+}
 
 // Critical signal handlers should be registered on worker processes before
 // doing work.
@@ -34,9 +72,7 @@ using namespace torch;
 // Python handle is _set_worker_signal_handlers().
 #define SIGNAL_HANDLER(SIGNAL, HANDLER_NAME, ERROR_MSG)                    \
   static void HANDLER_NAME(int sig, siginfo_t* info, void* ctx) {          \
-    auto _w =                                                              \
-        write(STDERR_FILENO, ERROR_MSG, sizeof(ERROR_MSG) / sizeof(char)); \
-    (void)_w;                                                              \
+    writeWorkerSignalMessage(ERROR_MSG, sizeof(ERROR_MSG) / sizeof(char)); \
     struct sigaction sa{};                                                 \
     sa.sa_handler = SIG_DFL;                                               \
     sa.sa_flags = 0;                                                       \
@@ -114,6 +150,39 @@ static PyObject* THPModule_setWorkerSignalHandlers(
   setSignalHandler(SIGTERM, &handler_SIGTERM, nullptr);
   setSignalHandler(SIGFPE, &handler_SIGFPE, nullptr);
   setDataLoaderSignalHandlers();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_setWorkerSignalMessageAffixes(
+    PyObject* /*module*/,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  PyObject* prefix = nullptr;
+  PyObject* suffix = nullptr;
+  if (!PyArg_ParseTuple(
+          args, "OO:_set_worker_signal_message_affixes", &prefix, &suffix)) {
+    return nullptr;
+  }
+  TORCH_CHECK_TYPE(
+      THPUtils_checkString(prefix) && THPUtils_checkString(suffix),
+      "_set_worker_signal_message_affixes expects str or bytes for prefix and suffix.");
+  TORCH_CHECK(
+      !worker_signal_handler_started.load(),
+      "cannot configure worker signal messages after fatal signal handling starts");
+  auto affixes = std::unique_ptr<const WorkerSignalMessageAffixes>(
+      new WorkerSignalMessageAffixes{
+          THPUtils_unpackString(prefix), THPUtils_unpackString(suffix)});
+  if (affixes->prefix_size == 0 && affixes->suffix_size == 0) {
+    affixes.reset();
+  }
+  std::unique_ptr<const WorkerSignalMessageAffixes> previous(
+      worker_signal_affixes.exchange(affixes.release()));
+  if (worker_signal_handler_started.load()) {
+    // New setters are rejected, so only already in-flight setters can retain
+    // snapshots here. The fatal handler still owns any snapshot it loaded.
+    previous.release();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -232,6 +301,12 @@ static PyObject* THPModule_setWorkerSignalHandlers(
   Py_RETURN_NONE;
 }
 
+static PyObject* THPModule_setWorkerSignalMessageAffixes(
+    PyObject* /*module*/,
+    PyObject* /*args*/) {
+  Py_RETURN_NONE;
+}
+
 static PyObject* THPModule_setWorkerPIDs(PyObject* module, PyObject* _ignored) {
   Py_RETURN_NONE;
 }
@@ -250,11 +325,27 @@ static PyObject* THPModule_errorIfAnyWorkerFails(
 
 #endif
 
+bool THPDataLoader_initModule(PyObject* /*module*/) {
+#ifndef _WIN32
+  TORCH_CHECK(
+      pthread_atfork(
+          nullptr,
+          nullptr,
+          []() { worker_signal_handler_started.store(false); }) == 0,
+      "unable to set DataLoader pthread_atfork handler");
+#endif
+  return true;
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 PyMethodDef DataLoaderMethods[] = {
     {"_set_worker_signal_handlers",
      THPModule_setWorkerSignalHandlers,
      METH_NOARGS,
+     nullptr},
+    {"_set_worker_signal_message_affixes",
+     THPModule_setWorkerSignalMessageAffixes,
+     METH_VARARGS,
      nullptr},
     {"_set_worker_pids", THPModule_setWorkerPIDs, METH_VARARGS, nullptr},
     {"_remove_worker_pids", THPModule_removeWorkerPIDs, METH_O, nullptr},
