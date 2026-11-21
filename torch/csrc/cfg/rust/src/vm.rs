@@ -5083,9 +5083,9 @@ impl Compiled {
                     Assert::Truth(v, way) => reg(own, *v) == if *way { ffi::Py_True() } else { ffi::Py_False() },
                     Assert::Null(v, exhausted) => reg(own, *v).is_null() == *exhausted,
                     Assert::Guard(cond) => Self::guard_holds(cond, own, Some(api)),
-                    Assert::Enters(v, compiled) => {
+                    Assert::Enters(v, compiled, defaults) => {
                         let function = reg(own, *v);
-                        !function.is_null() && self.follows(function) == Some(*compiled)
+                        !function.is_null() && self.follows(function) == Some(*compiled) && Self::defaults_of(function) == *defaults
                     }
                     Assert::Iterator(v) => !reg(own, *v).is_null() && ffi::PyIter_Check(reg(own, *v)) != 0,
                     Assert::Count(v) => !reg(own, *v).is_null() && graph::is_count(reg(own, *v)),
@@ -5157,6 +5157,12 @@ impl Compiled {
                     checked(held)
                 }
                 op if owner.quiet(own, op, api) => owner.exec_op(own, op),
+                // An attribute that the path read is not there at this
+                // call, and `object` says so itself: the read raises and
+                // does nothing else, where the instructions get to it.
+                Op::LoadAttr(of, name) if graph::plainly_absent(reg(own, *of), owner.func.consts[*name as usize].as_ptr()) => {
+                    return Staged::Failed;
+                }
                 op => {
                     let text = owner.func.op_repr(op);
                     site.unsure(text.split_whitespace().next().unwrap_or("an instruction"));
@@ -5944,6 +5950,12 @@ impl Compiled {
         t.input(v, kept)
     }
 
+    /// How many defaults a Python function has for its last parameters.
+    unsafe fn defaults_of(function: Obj) -> usize {
+        let defaults = ffi::PyFunction_GetDefaults(function);
+        if defaults.is_null() || ffi::PyTuple_Check(defaults) == 0 { 0 } else { ffi::PyTuple_GET_SIZE(defaults) as usize }
+    }
+
     /// The compiled form of a function that a path goes into, which is what
     /// a path checks of every call it holds. One that is still measured
     /// against the interpreter, or was measured to run faster there and is
@@ -6586,7 +6598,7 @@ impl Compiled {
             let reason = bs.reasons.get(origin as usize).and_then(|r| r.as_ref());
             if graph::debug() {
                 let seen = found.map_or(String::new(), |f| format!("runs {} operators {:?} frames {} wrote {}", f.runs, f.operators, f.frames, f.wrote));
-                eprintln!("torch.vm graph: a path ends in front of {} ({})", self.func.op_repr(&inst.op), seen);
+                eprintln!("torch.vm graph: a path ends in {} in front of {} ({})", self.func.qualname, self.func.op_repr(&inst.op), seen);
             }
             graph::why_not(&self.func, &inst.op, found, reason)
         };
@@ -8449,7 +8461,7 @@ impl Compiled {
                 t.derive(Op::Part(Part::Getter, found), Kind::Read, false, new_ref(func), bc)
             }
         };
-        t.check(Assert::Enters(function, compiled), bc);
+        t.check(Assert::Enters(function, compiled, Self::defaults_of(func)), bc);
         t.enter(compiled, cf.nvalues as usize, function);
         for i in 0..total.min(cf.argcount) {
             t.rename(cf.params[i], given[i]);
