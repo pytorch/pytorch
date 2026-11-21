@@ -225,6 +225,20 @@ def _get_spec(code: types.CodeType) -> FunctionSpec:
     return spec
 
 
+_POS_DEFAULT_LENGTH_GUARD = functools.partial(
+    GuardBuilder.SEQUENCE_LENGTH,
+    recompile_hint=(
+        "Dynamo used a positional default while tracing this function call. "
+        "It guards the number of defaults because that count determines which "
+        "parameter receives each value; a different count could change how the "
+        "compiled call assigns arguments. "
+        "Adding a default for an argument this call already supplies can trigger "
+        "recompilation even if its result stays the same. Pass omitted arguments "
+        "explicitly to avoid this guard."
+    ),
+)
+
+
 class BindArgsTypeError(TypeError):
     pass
 
@@ -342,7 +356,7 @@ def _bind_args_with_spec(
                 # length; guard it without wrapping every default value.
                 install_guard(
                     AttrSource(fn_source, "__defaults__").make_guard(
-                        GuardBuilder.SEQUENCE_LENGTH
+                        _POS_DEFAULT_LENGTH_GUARD
                     )
                 )
                 guarded_pos_defaults_len = True

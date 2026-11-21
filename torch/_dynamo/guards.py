@@ -2673,7 +2673,7 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: type(value),
         eval_fn=lambda value, metadata: type(value) is metadata,
     )
-    def TYPE_MATCH(self, guard: Guard) -> None:
+    def TYPE_MATCH(self, guard: Guard, recompile_hint: str | None = None) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         value = self.get(guard)
         t = maybe_get_fake_pytype(value) or type(value)
@@ -2691,7 +2691,7 @@ class GuardBuilder(GuardBuilderBase):
         self.get_guard_manager(guard).add_type_match_guard(
             obj_id,
             get_verbose_code_parts(
-                code, guard, recompile_hint=f"type {t.__qualname__}"
+                code, guard, recompile_hint=recompile_hint or f"type {t.__qualname__}"
             ),
             guard.user_stack,
         )
@@ -3604,7 +3604,7 @@ class GuardBuilder(GuardBuilderBase):
         get_metadata_fn=lambda guard, value: _sequence_length(value),
         eval_fn=lambda value, metadata: _sequence_length(value) == metadata,
     )
-    def SEQUENCE_LENGTH(self, guard: Guard) -> None:
+    def SEQUENCE_LENGTH(self, guard: Guard, recompile_hint: str | None = None) -> None:
         # This guard is used to check length of PySequence objects like list,
         # tuple, collections.deque etc
         ref = self.arg_ref(guard)
@@ -3613,7 +3613,7 @@ class GuardBuilder(GuardBuilderBase):
 
         if not issubclass(type(value), dict):
             # C++ DICT_LENGTH checks for type
-            self.TYPE_MATCH(guard)
+            self.TYPE_MATCH(guard, recompile_hint)
 
         code = []
         if issubclass(type(value), dict):
@@ -3628,16 +3628,17 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"len({ref}) == {length}")
 
         self._set_guard_export_info(guard, code)
+        verbose_code_parts = get_verbose_code_parts(code, guard, recompile_hint)
         if issubclass(type(value), dict):
             self.get_guard_manager(guard).add_dict_length_check_guard(
                 length,
-                get_verbose_code_parts(code, guard),
+                verbose_code_parts,
                 guard.user_stack,
             )
         else:
             self.get_guard_manager(guard).add_length_check_guard(
                 length,
-                get_verbose_code_parts(code, guard),
+                verbose_code_parts,
                 guard.user_stack,
             )
 
