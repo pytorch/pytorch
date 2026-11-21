@@ -80,7 +80,6 @@
   "test/distributed/checkpoint/test_tp_checkpoint.py",
   "test/distributed/checkpoint/test_utils.py",
   "test/distributed/elastic/agent/server/test/exit_barrier_timeout_test.py",
-  "test/distributed/elastic/agent/server/test/shutdown_timeout_test.py",
   "test/distributed/elastic/multiprocessing/api_test.py",
   "test/distributed/elastic/rendezvous/dynamic_rendezvous_test.py",
   "test/distributed/elastic/rendezvous/etcd_rendezvous_backend_test.py",
