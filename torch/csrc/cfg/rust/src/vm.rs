@@ -1526,6 +1526,49 @@ unsafe fn set_error(exc: Obj, msg: String) {
     ffi::PyErr_SetString(exc, c.as_ptr());
 }
 
+/// What `len` gives for what a `__len__` returned, as the interpreter makes
+/// it (`slot_sq_length`, then `len`): the index of it, which may not be
+/// negative and has to fit, as an int. Takes the reference; null with the
+/// error set where `len` raises.
+unsafe fn counted(returned: Obj) -> Obj {
+    let index = ffi::PyNumber_Index(returned);
+    ffi::Py_DECREF(returned);
+    if index.is_null() {
+        return null_mut();
+    }
+    let zero = ffi::PyLong_FromLong(0);
+    let negative = ffi::PyObject_RichCompareBool(index, zero, ffi::Py_LT);
+    ffi::Py_DECREF(zero);
+    if negative != 0 {
+        if negative > 0 {
+            set_error(ffi::PyExc_ValueError, "__len__() should return >= 0".to_string());
+        }
+        ffi::Py_DECREF(index);
+        return null_mut();
+    }
+    let count = ffi::PyNumber_AsSsize_t(index, ffi::PyExc_OverflowError);
+    ffi::Py_DECREF(index);
+    if count == -1 && !ffi::PyErr_Occurred().is_null() {
+        return null_mut();
+    }
+    ffi::PyLong_FromSsize_t(count)
+}
+
+/// What stands for an object whose `__iter__` returned `returned`, for a
+/// builtin that goes over the object (`pyapi::Iterated`). Owned; null with
+/// the error set.
+unsafe fn iterated(returned: Obj) -> Obj {
+    let py = pyo3::Python::assume_attached();
+    let returned = pyo3::Bound::<pyo3::PyAny>::from_borrowed_ptr(py, returned).unbind();
+    match pyo3::Py::new(py, crate::pyapi::Iterated { returned }) {
+        Ok(stand) => stand.into_ptr(),
+        Err(error) => {
+            error.restore(py);
+            null_mut()
+        }
+    }
+}
+
 /// A NameError carries the name it is about, as the interpreter's does (an
 /// UnboundLocalError does not).
 unsafe fn set_name_error(exc: Obj, msg: String, name: Obj) {
@@ -4771,6 +4814,10 @@ impl Compiled {
                     Assert::Iterator(v) => !reg(own, *v).is_null() && ffi::PyIter_Check(reg(own, *v)) != 0,
                     Assert::Count(v) => !reg(own, *v).is_null() && graph::is_count(reg(own, *v)),
                     Assert::Absent(v, name) => graph::absent(reg(own, *v), name.as_ptr()),
+                    Assert::Lacks(v, name) => {
+                        let held = reg(own, *v);
+                        !held.is_null() && !capi::is_unboxed(held) && pyffi::_PyType_Lookup(ffi::Py_TYPE(held), name.as_ptr()).is_null()
+                    }
                     Assert::Sequence(v, class, count) => {
                         let held = reg(own, *v);
                         !held.is_null()
@@ -4800,6 +4847,7 @@ impl Compiled {
                             Assert::Enters(..) => "the function a call enters",
                             Assert::Iterator(_) | Assert::Count(_) => "what a function of a class returned",
                             Assert::Absent(..) => "an attribute left to __getattr__",
+                            Assert::Lacks(..) => "a class without a __len__",
                             Assert::Sequence(..) | Assert::Keys(..) => "what a call spreads",
                             Assert::Equals(..) => "the place of an item",
                         };
@@ -5712,10 +5760,22 @@ impl Compiled {
             Op::Call { callee, args, kwnames } => {
                 let held = reg(regs, *callee);
                 let plain = *kwnames == NONE && !held.is_null() && !capi::is_unboxed(held);
+                // A builtin that asks its arguments for an iterator, one of
+                // them through an `__iter__` written in Python, and the
+                // others in C.
+                let over = if plain {
+                    let given: Vec<Obj> = args.iter().map(|v| reg(regs, *v)).collect();
+                    let asked = &args[..graph::goes_over(held, &given)];
+                    let python = |v: &V| special(*v, &names.iter);
+                    let goes = asked.iter().any(python) && asked.iter().all(|v| python(v) || graph::quiet_iter(reg(regs, *v)).is_some());
+                    if goes { asked.len() } else { 0 }
+                } else {
+                    0
+                };
                 if plain && args.len() == 1 && graph::is_len(held) && special(args[0], &names.len) {
                     Form::Special(&names.len, args[0], None)
-                } else if plain && graph::goes_over(held) && args.iter().any(|v| special(*v, &names.iter)) {
-                    return Some(self.record_over(t, site, at, *callee, args, regs, frames, api));
+                } else if over > 0 {
+                    return Some(self.record_over(t, site, at, *callee, args, over, regs, frames, api));
                 } else {
                     Form::Call { callee: *callee, args, kwnames: *kwnames }
                 }
@@ -5741,35 +5801,29 @@ impl Compiled {
         let (result, value) = match self.follow(t, site, at, regs, frames, api, &form) {
             Followed::Not => return None,
             Followed::Raised => return Some(Taken::Raised),
-            Followed::Left(result, reason) => return Some(Taken::Cut(result, reason)),
+            // The function ran to its end off the path, which ends in front
+            // of the instruction: that gives what the interpreter makes of
+            // what the function returned or raised.
+            Followed::Left(result, reason) => return Some(Taken::Cut(self.makes_of(&form, inst, regs, result), reason)),
             Followed::Returned(result, value) => (result, value),
         };
-        // What the interpreter asks of what such a function returns.
+        // What the interpreter makes of what such a function returns. A path
+        // goes on where that is the value itself under a check the path can
+        // make at every call (an iterator, a count); anything else
+        // is made of it here (`makes_of`), and the path ends in front.
         if let Form::Special(name, ..) = &form {
-            if std::ptr::eq(*name, &names.iter) {
-                if ffi::PyIter_Check(result) == 0 {
-                    set_error(
-                        ffi::PyExc_TypeError,
-                        format!("iter() returned non-iterator of type '{}'", pyffi::type_name(result)),
-                    );
-                    ffi::Py_DECREF(result);
-                    return Some(Taken::Raised);
-                }
-                t.check(Assert::Iterator(value), inst.bc);
+            let (goes, check, why) = if std::ptr::eq(*name, &names.iter) {
+                (ffi::PyIter_Check(result) != 0, Assert::Iterator(value), "an __iter__ returns what is no iterator")
             } else if std::ptr::eq(*name, &names.len) {
-                if !graph::is_count(result) {
-                    let count = ffi::PyNumber_AsSsize_t(result, ffi::PyExc_OverflowError);
-                    ffi::Py_DECREF(result);
-                    if count < 0 {
-                        if ffi::PyErr_Occurred().is_null() {
-                            set_error(ffi::PyExc_ValueError, "__len__() should return >= 0".to_string());
-                        }
-                        return Some(Taken::Raised);
-                    }
-                    let reason = "a __len__ returns what is no count".to_string();
-                    return Some(Taken::Cut(ffi::PyLong_FromSsize_t(count), reason));
-                }
-                t.check(Assert::Count(value), inst.bc);
+                (graph::is_count(result), Assert::Count(value), "a __len__ returns what is no count")
+            } else {
+                (true, Assert::Count(NONE), "")
+            };
+            if !goes {
+                return Some(Taken::Cut(self.makes_of(&form, inst, regs, result), why.to_string()));
+            }
+            if !why.is_empty() {
+                t.check(check, inst.bc);
             }
         }
         t.unmark();
@@ -5786,10 +5840,74 @@ impl Compiled {
         Some(Taken::Went)
     }
 
-    /// `record_call` for a builtin that goes over its arguments
-    /// (`enumerate`, `zip`, `iter`, `list`, `tuple`) where the class of one
-    /// has an `__iter__` in Python: the path goes into that function, and
-    /// the builtin gets the iterator it returned, which is the path's own.
+    /// What an instruction gives for what the Python function it went into
+    /// on its behalf returned (null: the function raised, and the error is
+    /// set), as the interpreter makes it of that. Every way out of such a
+    /// function on which the path does not go on comes through here:
+    /// `iter` and `for` raise for what is no iterator; `len` gives the
+    /// index of what `__len__` returned as an int and raises for a negative
+    /// one; a read of an attribute whose property or descriptor raised
+    /// AttributeError asks the `__getattr__` of the class, if it has one.
+    /// Any other instruction gives what the function returned, and raises
+    /// what it raised. Takes the reference to `result`; gives one, or null
+    /// with the error set.
+    unsafe fn makes_of(&self, form: &Form, inst: &Inst, regs: &mut [Obj], result: Obj) -> Obj {
+        let names = graph::specials();
+        match (form, &inst.op) {
+            (Form::Property(v, name) | Form::Descriptor(v, name), _) if result.is_null() => {
+                self.asks_getattr(reg(regs, *v), self.func.consts[*name as usize].as_ptr())
+            }
+            _ if result.is_null() => null_mut(),
+            (Form::Special(name, ..), _) if std::ptr::eq(*name, &names.iter) => {
+                if ffi::PyIter_Check(result) == 0 {
+                    set_error(ffi::PyExc_TypeError, format!("iter() returned non-iterator of type '{}'", pyffi::type_name(result)));
+                    ffi::Py_DECREF(result);
+                    return null_mut();
+                }
+                result
+            }
+            (Form::Special(name, ..), _) if std::ptr::eq(*name, &names.len) => counted(result),
+            _ => result,
+        }
+    }
+
+    /// For a read of an attribute that raised AttributeError in the lookup
+    /// of `object` (the getter of a property, the `__get__` of a
+    /// descriptor): what the `__getattr__` of the class gives, if the class
+    /// has one, which the interpreter then asks (`slot_tp_getattr_hook`).
+    /// Null with the error as it is for any other error and for a class
+    /// without one.
+    unsafe fn asks_getattr(&self, object: Obj, name: Obj) -> Obj {
+        if object.is_null() || capi::is_unboxed(object) || ffi::PyErr_ExceptionMatches(ffi::PyExc_AttributeError) == 0 {
+            return null_mut();
+        }
+        let class = ffi::Py_TYPE(object);
+        let hook = pyffi::_PyType_Lookup(class, graph::specials().getattr.as_ptr());
+        if hook.is_null() {
+            return null_mut();
+        }
+        ffi::PyErr_Clear();
+        let _kept = PyObj::from_borrowed(hook);
+        let bound = match (*ffi::Py_TYPE(hook)).tp_descr_get {
+            Some(get) => get(hook, object, class as Obj),
+            None => new_ref(hook),
+        };
+        if bound.is_null() {
+            return null_mut();
+        }
+        let given = ffi::PyObject_CallOneArg(bound, name);
+        ffi::Py_DECREF(bound);
+        given
+    }
+
+    /// `record_call` for a builtin that asks its arguments for an iterator
+    /// (`graph::goes_over`) where the class of one has an `__iter__` in
+    /// Python: the path goes into that function. Where what it returned is
+    /// an iterator that C code goes over and the path came back from the
+    /// function, the builtin is called with that iterator and the path goes
+    /// on. On every other way out the builtin is called with what stands
+    /// for the object (`iterated`), which gives it what the `__iter__`
+    /// returned, and the path ends in front of the call.
     #[allow(clippy::too_many_arguments)]
     unsafe fn record_over(
         &self,
@@ -5798,6 +5916,7 @@ impl Compiled {
         at: (usize, *const BlockCode, usize),
         callee: V,
         args: &[V],
+        over: usize,
         regs: &mut [Obj],
         frames: &mut Frames,
         api: &TcfgApi,
@@ -5805,51 +5924,65 @@ impl Compiled {
         let inst = &(&(*at.1).insts)[at.2];
         let names = graph::specials();
         let builtin = reg(regs, callee);
+        // What the builtin is handed where the path goes on: for an
+        // argument whose `__iter__` the path went into, the iterator that
+        // returned, which is one that C code goes over.
         let mut given: Vec<PyObj> = args.iter().map(|v| PyObj::from_borrowed(self.obj(regs, *v))).collect();
+        // And where it cannot: what stands for such an argument
+        // (`iterated`), so that the builtin does with what the `__iter__`
+        // returned what it does when it calls the `__iter__` itself.
+        let mut stands = given.clone();
         let mut values: Vec<PathValue> = vec![NONE; args.len()];
-        // The call as the interpreter makes it, on what the arguments are
-        // by now, for a path that cannot go on.
-        let call = |given: &[PyObj]| {
-            let objects: Vec<Obj> = given.iter().map(|o| o.as_ptr()).collect();
+        let call = |handed: &[PyObj]| {
+            let objects: Vec<Obj> = handed.iter().map(|o| o.as_ptr()).collect();
             ffi::PyObject_Vectorcall(builtin, objects.as_ptr(), objects.len(), null_mut())
         };
-        for (i, v) in args.iter().enumerate() {
+        let mut went = false;
+        for (i, v) in args.iter().enumerate().take(over) {
             if graph::special(reg(regs, *v), &names.iter).is_null() {
                 continue;
             }
             let form = Form::Special(&names.iter, *v, None);
-            let stopped = match self.follow(t, site, at, regs, frames, api, &form) {
-                Followed::Returned(iterator, value) if ffi::PyIter_Check(iterator) != 0 => {
-                    t.check(Assert::Iterator(value), inst.bc);
-                    given[i] = PyObj::from_owned(iterator);
-                    values[i] = value;
-                    continue;
-                }
-                // The builtin says what is wrong with it.
-                Followed::Returned(other, _) => {
-                    given[i] = PyObj::from_owned(other);
-                    "an __iter__ returns what is no iterator".to_string()
-                }
+            let (returned, value, stopped) = match self.follow(t, site, at, regs, frames, api, &form) {
+                Followed::Returned(returned, value) => (returned, value, "an __iter__ returns what is no iterator".to_string()),
                 Followed::Raised => return Taken::Raised,
-                Followed::Left(result, _) if result.is_null() => return Taken::Raised,
-                Followed::Left(result, reason) => {
-                    given[i] = PyObj::from_owned(result);
-                    reason
-                }
-                Followed::Not if t.mark.is_none() || !t.outermost() => {
+                Followed::Left(result, reason) if result.is_null() => return Taken::Cut(result, reason),
+                Followed::Left(result, reason) => (result, NONE, reason),
+                // No `__iter__` has been called: the call is the
+                // interpreter's.
+                Followed::Not if !went => {
                     return Taken::Ends(format!("{} goes over what enters Python code", pyffi::function_str(builtin)));
                 }
-                Followed::Not => "an __iter__ that is not gone into".to_string(),
+                Followed::Not => return Taken::Cut(call(&stands), "an __iter__ that is not gone into".to_string()),
             };
-            return Taken::Cut(call(&given), stopped);
+            went = true;
+            let returned = PyObj::from_owned(returned);
+            let stand = iterated(returned.as_ptr());
+            if stand.is_null() {
+                return Taken::Cut(stand, stopped);
+            }
+            stands[i] = PyObj::from_owned(stand);
+            if value == NONE || ffi::PyIter_Check(returned.as_ptr()) == 0 {
+                return Taken::Cut(call(&stands), stopped);
+            }
+            t.check(Assert::Iterator(value), inst.bc);
+            given[i] = returned;
+            values[i] = value;
         }
         let objects: Vec<Obj> = given.iter().map(|o| o.as_ptr()).collect();
         let Some(own) = graph::pure_call(builtin, &objects, |i| values[i] != NONE, api) else {
-            return Taken::Cut(call(&given), "a call that goes over what enters Python code".to_string());
+            return Taken::Cut(call(&stands), "a call that goes over what enters Python code".to_string());
         };
         let result = call(&given);
         if result.is_null() {
             return Taken::Raised;
+        }
+        if graph::makes_sequence(builtin) {
+            // `list` and `tuple` ask an object that has a `__len__` or a
+            // `__length_hint__` for it: this one's class has neither.
+            let object = self.path_value(t, regs, args[0]);
+            t.check(Assert::Lacks(object, names.len.clone()), inst.bc);
+            t.check(Assert::Lacks(object, graph::length_hint()), inst.bc);
         }
         let function = self.path_value(t, regs, callee);
         for (i, v) in args.iter().enumerate() {
