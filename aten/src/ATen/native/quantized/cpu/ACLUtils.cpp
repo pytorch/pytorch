@@ -340,8 +340,8 @@ void QuantAdd::configure() {
 } // namespace at::native::acl_utils
 
 PackedLinearWeightsACL::PackedLinearWeightsACL(
-    std::unique_ptr<ideep::tensor> weight,
-    std::optional<ideep::tensor> bias,
+    std::unique_ptr<at::native::mkldnn::ITensor> weight,
+    std::optional<at::native::mkldnn::ITensor> bias,
     at::Tensor orig_weight,
     std::optional<at::Tensor> orig_bias)
     : PackedLinearWeightsOnednn(
