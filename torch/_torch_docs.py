@@ -960,7 +960,7 @@ Example::
    :noindex:
 
 For each row of :attr:`input` in the given dimension :attr:`dim`,
-returns `True` if any element in the row evaluate to `True` and `False` otherwise.
+returns `True` if any element in the row evaluates to `True` and `False` otherwise.
 
 {keepdim_details}
 
@@ -1027,7 +1027,7 @@ Create a view of an existing `torch.Tensor` :attr:`input` with specified
 .. warning::
     Prefer using other view functions, like :meth:`torch.Tensor.view` or
     :meth:`torch.Tensor.expand`, to setting a view's strides manually with
-    `as_strided`, as this function will throw an error on non-standard Pytorch
+    `as_strided`, as this function will throw an error on non-standard PyTorch
     backends (that do not have a concept of stride) and the result will depend
     on the current layout in memory. The constructed view must only refer to
     elements within the Tensor's storage or a runtime error will be thrown.
@@ -3094,7 +3094,7 @@ corresponding to the polar coordinates with absolute value :attr:`abs` and angle
 """
     + r"""
 Args:
-    abs (Tensor): The absolute value the complex tensor. Must be float or double.
+    abs (Tensor): The absolute value of the complex tensor. Must be float or double.
     angle (Tensor): The angle of the complex tensor. Must be same dtype as
         :attr:`abs`.
 
@@ -3815,7 +3815,7 @@ add_docstr(
     r"""
 diagonal(input, offset=0, dim1=0, dim2=1) -> Tensor
 
-Returns a partial view of :attr:`input` with the its diagonal elements
+Returns a partial view of :attr:`input` with its diagonal elements
 with respect to :attr:`dim1` and :attr:`dim2` appended as a dimension
 at the end of the shape.
 
@@ -4987,7 +4987,7 @@ Keyword args:
 
     dim (``int``, ``list of int``, optional): the dimension or dimensions to approximate the gradient over.  By default
         the partial  gradient in every dimension is computed. Note that when :attr:`dim` is  specified the elements of
-        the :attr:`spacing` argument must correspond with the specified dims."
+        the :attr:`spacing` argument must correspond with the specified dims.
 
     edge_order (``int``, optional): 1 or 2, for `first-order
         <https://www.ams.org/journals/mcom/1988-51-184/S0025-5718-1988-0935077-0/S0025-5718-1988-0935077-0.pdf>`_ or
@@ -6245,7 +6245,7 @@ add_docstr(
 linspace(start, end, steps, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Creates a one-dimensional tensor of size :attr:`steps` whose values are evenly
-spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
+spaced from :attr:`start` to :attr:`end`, inclusive. That is, the values are:
 
 .. math::
     (\text{start},
@@ -7345,7 +7345,7 @@ By default, :attr:`dim` is the last dimension of the :attr:`input` tensor.
 If :attr:`keepdim` is ``True``, the output tensors are of the same size
 as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
-the outputs tensor having 1 fewer dimension than :attr:`input`.
+the output tensors having 1 fewer dimension than :attr:`input`.
 
 .. note::
     The median is not unique for :attr:`input` tensors with an even number
@@ -8108,7 +8108,7 @@ Indices are ordered from left to right according to when each was sampled
 
 If :attr:`input` is a vector, :attr:`out` is a vector of size :attr:`num_samples`.
 
-If :attr:`input` is a matrix with `m` rows, :attr:`out` is an matrix of shape
+If :attr:`input` is a matrix with `m` rows, :attr:`out` is a matrix of shape
 :math:`(m \times \text{{num\_samples}})`.
 
 If replacement is ``True``, samples are drawn with replacement.
@@ -8612,7 +8612,7 @@ non-zero elements in the :attr:`input` tensor.
 
 Returns a tuple of 1-D tensors, one for each dimension in :attr:`input`,
 each containing the indices (in that dimension) of all non-zero elements of
-:attr:`input` .
+:attr:`input`.
 
 If :attr:`input` has :math:`n` dimensions, then the resulting tuple contains :math:`n`
 tensors of size :math:`z`, where :math:`z` is the total number of
@@ -10063,7 +10063,7 @@ This function returns a view of the original tensor with the given dimension rem
 
 .. note:: If :attr:`input` is a sparse tensor and returning a view of
           the tensor is not possible, a RuntimeError exception is
-          raised. In this is the case, consider using
+          raised. If this is the case, consider using
           :func:`torch.select_copy` function.
 
 Args:
@@ -10592,9 +10592,9 @@ Args:
         coordinates of each element or block in values. (B+1)-dimensional
         tensor with the same length as values.
 
-    values (array_list): Initial values for the tensor. Can be a list,
-        tuple, NumPy ``ndarray``, scalar, and other types.  that
-        represents a (1+K)-dimensional (for CSR and CSC layouts) or
+    values (array_like): Initial values for the tensor. Can be a list,
+        tuple, NumPy ``ndarray``, scalar, and other types that
+        represent a (1+K)-dimensional (for CSR and CSC layouts) or
         (1+2+K)-dimensional tensor (for BSR and BSC layouts) where
         ``K`` is the number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
@@ -10644,7 +10644,7 @@ add_docstr(
 
 Constructs a :ref:`sparse tensor in CSR (Compressed Sparse Row) <sparse-csr-docs>` with specified
 values at the given :attr:`crow_indices` and :attr:`col_indices`. Sparse matrix multiplication operations
-in CSR format are typically faster than that for sparse tensors in COO format. Make you have a look
+in CSR format are typically faster than that for sparse tensors in COO format. Make sure you have a look
 at :ref:`the note on the data type of the indices <sparse-csr-docs>`.
 
 {sparse_factory_device_note}
@@ -10660,9 +10660,9 @@ Args:
     col_indices (array_like): Column coordinates of each element in
         values. (B+1)-dimensional tensor with the same length
         as values.
-    values (array_list): Initial values for the tensor. Can be a list,
+    values (array_like): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types that
-        represents a (1+K)-dimensional tensor where ``K`` is the number
+        represent a (1+K)-dimensional tensor where ``K`` is the number
         of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows, ncols, *densesize)``. If
@@ -10707,7 +10707,7 @@ Constructs a :ref:`sparse tensor in CSC (Compressed Sparse Column)
 <sparse-csc-docs>` with specified values at the given
 :attr:`ccol_indices` and :attr:`row_indices`. Sparse matrix
 multiplication operations in CSC format are typically faster than that
-for sparse tensors in COO format. Make you have a look at :ref:`the
+for sparse tensors in COO format. Make sure you have a look at :ref:`the
 note on the data type of the indices <sparse-csc-docs>`.
 
 {sparse_factory_device_note}
@@ -10723,9 +10723,9 @@ Args:
     row_indices (array_like): Row coordinates of each element in
         values. (B+1)-dimensional tensor with the same length as
         values.
-    values (array_list): Initial values for the tensor. Can be a list,
+    values (array_like): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types that
-        represents a (1+K)-dimensional tensor where ``K`` is the number
+        represent a (1+K)-dimensional tensor where ``K`` is the number
         of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows, ncols, *densesize)``. If
@@ -10766,11 +10766,11 @@ add_docstr(
     r"""sparse_bsr_tensor(crow_indices, col_indices, values, size=None, """
     r"""*, dtype=None, device=None, pin_memory=False, requires_grad=False, check_invariants=None) -> Tensor
 
-Constructs a :ref:`sparse tensor in BSR (Block Compressed Sparse Row))
+Constructs a :ref:`sparse tensor in BSR (Block Compressed Sparse Row)
 <sparse-bsr-docs>` with specified 2-dimensional blocks at the given
 :attr:`crow_indices` and :attr:`col_indices`. Sparse matrix
 multiplication operations in BSR format are typically faster than that
-for sparse tensors in COO format. Make you have a look at :ref:`the
+for sparse tensors in COO format. Make sure you have a look at :ref:`the
 note on the data type of the indices <sparse-bsr-docs>`.
 
 {sparse_factory_device_note}
@@ -10786,9 +10786,9 @@ Args:
     col_indices (array_like): Column block coordinates of each block
         in values. (B+1)-dimensional tensor with the same length as
         values.
-    values (array_list): Initial values for the tensor. Can be a list,
+    values (array_like): Initial values for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, scalar, and other types that
-        represents a (1 + 2 + K)-dimensional tensor where ``K`` is the
+        represent a (1 + 2 + K)-dimensional tensor where ``K`` is the
         number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows * blocksize[0], ncols *
@@ -10835,10 +10835,10 @@ add_docstr(
     r"""*, dtype=None, device=None, pin_memory=False, requires_grad=False, check_invariants=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in BSC (Block Compressed Sparse
-Column)) <sparse-bsc-docs>` with specified 2-dimensional blocks at the
+Column) <sparse-bsc-docs>` with specified 2-dimensional blocks at the
 given :attr:`ccol_indices` and :attr:`row_indices`. Sparse matrix
 multiplication operations in BSC format are typically faster than that
-for sparse tensors in COO format. Make you have a look at :ref:`the
+for sparse tensors in COO format. Make sure you have a look at :ref:`the
 note on the data type of the indices <sparse-bsc-docs>`.
 
 {sparse_factory_device_note}
@@ -10854,13 +10854,13 @@ Args:
     row_indices (array_like): Row block coordinates of each block in
         values. (B+1)-dimensional tensor with the same length
         as values.
-    values (array_list): Initial blocks for the tensor. Can be a list,
+    values (array_like): Initial blocks for the tensor. Can be a list,
         tuple, NumPy ``ndarray``, and other types that
-        represents a (1 + 2 + K)-dimensional tensor where ``K`` is the
+        represent a (1 + 2 + K)-dimensional tensor where ``K`` is the
         number of dense dimensions.
     size (list, tuple, :class:`torch.Size`, optional): Size of the
         sparse tensor: ``(*batchsize, nrows * blocksize[0], ncols *
-        blocksize[1], *densesize)`` If not provided, the size will be
+        blocksize[1], *densesize)``. If not provided, the size will be
         inferred as the minimum size big enough to hold all non-zero
         blocks.
 
@@ -10935,7 +10935,7 @@ Keyword args:
     {pin_memory}
     {requires_grad}
     {check_invariants}
-    is_coalesced (bool, optional): When``True``, the caller is
+    is_coalesced (bool, optional): When ``True``, the caller is
         responsible for providing tensor indices that correspond to a
         coalesced tensor.  If the :attr:`check_invariants` flag is
         False, no error will be raised if the prerequisites are not
@@ -10943,7 +10943,7 @@ Keyword args:
         coalescing please use :meth:`coalesce` on the resulting
         Tensor.
         Default: None: except for trivial cases (e.g. nnz < 2) the
-        resulting Tensor has is_coalesced set to ``False```.
+        resulting Tensor has is_coalesced set to ``False``.
 
 Example::
 
@@ -11449,7 +11449,7 @@ always be real-valued, even if :attr:`input` is complex.
              have zero nor repeated singular values.
 
 .. warning:: If the distance between any two singular values is close to zero, the gradients with respect to
-             `U` and `V` will be numerically unstable, as they depends on
+             `U` and `V` will be numerically unstable, as they depend on
              :math:`\frac{1}{\min_{i \neq j} \sigma_i^2 - \sigma_j^2}`. The same happens when the matrix
              has small singular values, as these gradients also depend on `S^{-1}`.
 
@@ -12080,7 +12080,7 @@ The argument :attr:`diagonal` controls which diagonal to consider. If
 :attr:`diagonal` = 0, all elements on and below the main diagonal are
 retained. A positive value includes just as many diagonals above the main
 diagonal, and similarly a negative value excludes just as many diagonals below
-the main diagonal. The main diagonal are the set of indices
+the main diagonal. The main diagonal is the set of indices
 :math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]` where
 :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 """
@@ -12123,7 +12123,7 @@ Example::
 """.format(**common_args),
 )
 
-# docstr is split in two parts to avoid format mis-captureing :math: braces '{}'
+# docstr is split in two parts to avoid format mis-capturing :math: braces '{}'
 # as common args.
 add_docstr(
     torch.tril_indices,
@@ -12142,7 +12142,7 @@ The argument :attr:`offset` controls which diagonal to consider. If
 :attr:`offset` = 0, all elements on and below the main diagonal are
 retained. A positive value includes just as many diagonals above the main
 diagonal, and similarly a negative value excludes just as many diagonals below
-the main diagonal. The main diagonal are the set of indices
+the main diagonal. The main diagonal is the set of indices
 :math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
 where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
@@ -12197,7 +12197,7 @@ The argument :attr:`diagonal` controls which diagonal to consider. If
 :attr:`diagonal` = 0, all elements on and above the main diagonal are
 retained. A positive value excludes just as many diagonals above the main
 diagonal, and similarly a negative value includes just as many diagonals below
-the main diagonal. The main diagonal are the set of indices
+the main diagonal. The main diagonal is the set of indices
 :math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]` where
 :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 """
@@ -12267,7 +12267,7 @@ The argument :attr:`offset` controls which diagonal to consider. If
 :attr:`offset` = 0, all elements on and above the main diagonal are
 retained. A positive value excludes just as many diagonals above the main
 diagonal, and similarly a negative value includes just as many diagonals below
-the main diagonal. The main diagonal are the set of indices
+the main diagonal. The main diagonal is the set of indices
 :math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
 where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
@@ -13022,7 +13022,7 @@ a negative determinant.
 .. note::
     Backward through :meth:`logdet` internally uses SVD results when :attr:`input`
     is not invertible. In this case, double backward through :meth:`logdet` will
-    be unstable in when :attr:`input` doesn't have distinct singular values. See
+    be unstable when :attr:`input` doesn't have distinct singular values. See
     :func:`torch.linalg.svd` for details.
 
 .. seealso::
@@ -13546,7 +13546,7 @@ Arguments:
     x (Tensor): If specified, defines spacing between values as specified above.
 
 Keyword arguments:
-    dx (float): constant spacing between values. If neither :attr:`x` or :attr:`dx`
+    dx (float): constant spacing between values. If neither :attr:`x` nor :attr:`dx`
         are specified then this defaults to 1. Effectively multiplies the result by its value.
     dim (int): The dimension along which to compute the trapezoidal rule.
         The last (inner-most) dimension by default.
@@ -13625,7 +13625,7 @@ used to specify arbitrary spacing along :attr:`dim`.
 
 For more details, please read :func:`torch.trapezoid`. The difference between :func:`torch.trapezoid`
 and this function is that, :func:`torch.trapezoid` returns a value for each integration,
-where as this function returns a cumulative value for every spacing within the integration. This
+whereas this function returns a cumulative value for every spacing within the integration. This
 is analogous to how `.sum` returns a value and `.cumsum` returns a cumulative sum.
 
 Arguments:
@@ -13633,7 +13633,7 @@ Arguments:
     x (Tensor): If specified, defines spacing between values as specified above.
 
 Keyword arguments:
-    dx (float): constant spacing between values. If neither :attr:`x` or :attr:`dx`
+    dx (float): constant spacing between values. If neither :attr:`x` nor :attr:`dx`
         are specified then this defaults to 1. Effectively multiplies the result by its value.
     dim (int): The dimension along which to compute the trapezoidal rule.
         The last (inner-most) dimension by default.
@@ -14048,7 +14048,7 @@ Arguments:
         numbers indicate higher priority. By default, streams have priority 0.
 
 Returns:
-    Stream: An torch.Stream object.
+    Stream: A torch.Stream object.
 
 Example::
 
@@ -14194,7 +14194,7 @@ Arguments:
     interprocess (bool): if ``True``, the event can be shared between processes (default: ``False``)
 
 Returns:
-    Event: An torch.Event object.
+    Event: A torch.Event object.
 
 Example::
 
@@ -14375,7 +14375,7 @@ Arguments:
     device (:class:`torch.device`, optional): the desired device for the generator.
 
 Returns:
-    Generator: An torch.Generator object.
+    Generator: A torch.Generator object.
 
 .. seealso::
     :class:`torch.Generator` is stateful. For a stateless, key-based PRNG API
@@ -14437,7 +14437,7 @@ Sets the state of the generator to the specified state in a manner that is safe 
 This method is crucial for ensuring that the generator's state can be captured in the CUDA graph.
 
 Arguments:
-    state (torch.Generator): A Generator point to the new state for the generator, typically obtained from `graphsafe_get_state`.
+    state (torch.Generator): A Generator pointing to the new state for the generator, typically obtained from `graphsafe_get_state`.
 
 Example:
     >>> g_cuda = torch.Generator(device='cuda')
@@ -14456,7 +14456,7 @@ Retrieves the current state of the generator in a manner that is safe for graph 
 This method is crucial for ensuring that the generator's state can be captured in the CUDA graph.
 
 Returns:
-    torch.Generator: A Generator point to the current state of the generator
+    torch.Generator: A Generator pointing to the current state of the generator
 
 Example:
     >>> g_cuda = torch.Generator(device='cuda')
@@ -14569,7 +14569,7 @@ Arguments:
         `0xffff_ffff_ffff_ffff + seed`.
 
 Returns:
-    Generator: An torch.Generator object.
+    Generator: A torch.Generator object.
 
 Example::
 
@@ -14691,7 +14691,7 @@ Keyword args:
     right (bool, optional): if False, return the first suitable location that is found. If True, return the
                             last such index. If no suitable index found, return 0 for non-numerical value
                             (eg. nan, inf) or the size of *innermost* dimension within :attr:`sorted_sequence`
-                            (one pass the last index of the *innermost* dimension). In other words, if False,
+                            (one past the last index of the *innermost* dimension). In other words, if False,
                             gets the lower bound index for each value in :attr:`values` on the corresponding
                             *innermost* dimension of the :attr:`sorted_sequence`. If True, gets the upper
                             bound index instead. Default value is False. :attr:`side` does the same and is

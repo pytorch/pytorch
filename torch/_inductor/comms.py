@@ -1966,7 +1966,7 @@ def _sink_waits_iterative_internal(
                 # Check if candidate has sync runtime
                 if not contains_async_collective(candidate):
                     # If candidate has sync runtime,
-                    # Waits of gorup_colls are on the right from group.
+                    # Waits of group_colls are on the right from group.
                     # Swap can increase their exposed time.
                     c_runtime = runtimes[candidate]
 

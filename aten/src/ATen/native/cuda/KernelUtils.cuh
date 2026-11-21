@@ -219,7 +219,7 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
 
   // not coalesced, so now let try to capture lane-matches...
 
-  if (numel > 16 /*<-hueristic threshold*/ * 64) {
+  if (numel > 16 /*<-heuristic threshold*/ * 64) {
     // well shucks, unlikely to capture same-dest atomics in a wave.
     // fall back to direct fastAtomic...
     fastAtomicAdd(self_ptr, index, numel, value, true);

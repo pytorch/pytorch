@@ -368,7 +368,7 @@ class TORCH_API Context {
   //
   // * Throw an error when `Context::deterministicAlgorithms()` is true. Most
   //   of the time, this should be accomplished by calling
-  //   `at::globalContext().alertNotDeterminstic().
+  //   `at::globalContext().alertNotDeterministic().
   //
   // * Have an entry in the list of nondeterministic PyTorch operations in the
   //   docstring of `use_deterministic_algorithms()` in torch/__init__.py

@@ -501,7 +501,7 @@ def smoke_test_cuda(
         for module in get_modules_for_package(package):
             imported_module = importlib.import_module(module["name"])
             # TBD for vision move extension module to private so it will
-            # be _extention.
+            # be _extension.
             version = "N/A"
             if module["extension"] == "extension":
                 version = imported_module.extension._check_cuda_version()

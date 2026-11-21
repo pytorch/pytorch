@@ -144,7 +144,7 @@ def config_list(**configs):
     Reserved Args:
         attr_names(reserved): a list of names for input shapes.
         attrs(reserved): a list of values for each input shape.
-        corss_product: a dictionary of attributes which will be
+        cross_product: a dictionary of attributes which will be
                        cross produced with the input shapes.
         tags(reserved): a tag used to filter inputs.
 

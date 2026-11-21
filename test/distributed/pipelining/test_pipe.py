@@ -29,12 +29,12 @@ class ExampleCode(torch.nn.Module):
         self.lin2 = torch.nn.Linear(d_hid, d_hid)
 
     def forward(self, x, y):
-        x = torch.mm(x, self.mm_param1)  # mutli-use param
+        x = torch.mm(x, self.mm_param1)  # multi-use param
         skip_connection = x
         x = x + y
         x = torch.relu(x)
         pipe_split()
-        x = torch.mm(x, self.mm_param1)  # mutli-use param
+        x = torch.mm(x, self.mm_param1)  # multi-use param
         x = self.lin1(x)
         pipe_split()
         x = torch.relu(x)

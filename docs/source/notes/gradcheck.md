@@ -37,7 +37,7 @@ In a basic setting of Wirtinger calculus, the chain rule requires access to both
 Both {math}`W` and {math}`CW` need to be propagated because in general, despite their name, one is not the complex conjugate of the other.
 
 To avoid having to propagate both values, for backward mode AD, we always work under the assumption that the function whose derivative is being calculated is either a real-valued function or is part of a bigger real-valued function. This assumption means that all the intermediary gradients we compute during the backward pass are also associated with real-valued functions.
-In practice, this assumption is not restrictive when doing optimization as such problem require real-valued objectives (as there is no natural ordering of the complex numbers).
+In practice, this assumption is not restrictive when doing optimization as such problems require real-valued objectives (as there is no natural ordering of the complex numbers).
 
 Under this assumption, using {math}`W` and {math}`CW` definitions, we can show that {math}`W = CW^*` (we use {math}`*` to denote complex conjugation here) and so only one of the two values actually need to be "backwarded through the graph" as the other one can easily be recovered.
 To simplify internal computations, PyTorch uses {math}`2 * CW` as the value it backwards and returns when the user asks for gradients.
@@ -214,7 +214,7 @@ Using such complex {math}`u'`, the problem is that when doing the numerical eval
 \end{aligned}
 ```
 
-Which would require four evaluations of real-to-real finite difference (twice as much compared to the approached proposed above).
+Which would require four evaluations of real-to-real finite difference (twice as much compared to the approach proposed above).
 Since this approach does not have more degrees of freedom (same number of real valued variables) and we try to get the fastest possible evaluation here, we use the other formulation above.
 
 
@@ -224,7 +224,7 @@ Just like in the slow case, we consider two real-valued functions and use the ap
 
 ## Gradgradcheck implementation
 
-PyTorch also provide a utility to verify second order gradients. The goal here is to make sure that the backward implementation is also properly differentiable and computes the right thing.
+PyTorch also provides a utility to verify second order gradients. The goal here is to make sure that the backward implementation is also properly differentiable and computes the right thing.
 
 This feature is implemented by considering the function {math}`F: x, v \to v^T J_f` and use the gradcheck defined above on this function.
 Note that {math}`v` in this case is just a random vector with the same type as {math}`f(x)`.

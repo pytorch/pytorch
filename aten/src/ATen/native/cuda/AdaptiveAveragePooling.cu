@@ -420,7 +420,7 @@ namespace {
         }
         scalar_t *ptr_gradInput = gradInput + (ih * isizeW + iw) * sizeC;
         int cached_index = threadIdx.x;
-        // write accumulated gradIput to global memory;
+        // write accumulated gradInput to global memory;
         for (index_t c = channel_offset;
              c < sizeC;
              c += blockDim.x*kernel_stride_C) {

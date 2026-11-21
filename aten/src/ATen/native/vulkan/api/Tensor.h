@@ -309,7 +309,7 @@ class vTensor final {
   std::shared_ptr<api::UniformParamsBuffer> extents_ubo();
 
   /*
-   * Constructs a BufferMetdata struct based on the original sizes and strides
+   * Constructs a BufferMetadata struct based on the original sizes and strides
    * to pass into a shader.
    */
   BufferMetadata get_cpu_buffer_metadata() const;
