@@ -42,20 +42,26 @@ from torch._dynamo import device_interface
 from torch._inductor import codegen, ir, metrics
 from torch._inductor.codegen import common
 from torch._inductor.codegen.common import (
+    IndentedBuffer,
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
-    IndentedBuffer,
     register_backend_for_device,
     register_device_op_overrides,
 )
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.utils import get_triton_code, run_and_get_triton_code
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    IS_MACOS,
+    HardwareClassification,
+)
 from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
     HAS_CPU,
-    HAS_GPU_AND_TRITON,
+    HAS_TRITON,
     TRITON_HAS_CPU,
 )
 from torch.utils._triton import has_triton_package
@@ -66,18 +72,9 @@ try:
 except ImportError:
     from test_extension_backend import BaseExtensionBackendTests
 
-if TRITON_HAS_CPU or HAS_GPU_AND_TRITON:
+if HAS_TRITON:
     import triton
     import triton.language as tl
-
-    if TRITON_HAS_CPU:
-        TRITON_DEVICE_TYPE = "cpu"
-    else:
-        TRITON_DEVICE_TYPE = GPU_TYPE
-
-requires_triton_backend = unittest.skipUnless(
-    HAS_GPU_AND_TRITON or TRITON_HAS_CPU, "Requires Triton backend."
-)
 
 
 def mock_triton_hash_with_backend(*args, **kwargs):
@@ -86,10 +83,10 @@ def mock_triton_hash_with_backend(*args, **kwargs):
     return "".join(random.choices(string.ascii_uppercase + string.digits, k=64))
 
 
-@unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
-class TritonExtensionBackendTests(BaseExtensionBackendTests):
+class _TritonExtensionBackendTestsBase(BaseExtensionBackendTests):
     """
-    Test creating a backend for inductor with Triton scheduling.
+    Shared fixture for the Triton extension backend tests: resets the backend
+    registration and stashes/restores the default lowerings around the class.
     """
 
     @classmethod
@@ -113,6 +110,16 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
 
         # Restore the default backend.
         cls._default_backend_patch.stop()
+
+
+@unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
+class TritonExtensionBackendGenericTests(_TritonExtensionBackendTestsBase):
+    """
+    Test creating a backend for inductor with Triton scheduling.
+    Device-agnostic tests that do not require a specific accelerator.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_open_device_registration(self):
         torch._register_device_module("privateuseone", self.module)
@@ -184,6 +191,16 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
             "def triton_tem_fused_flex_attention"
         ).run(code)
 
+
+@unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
+class TritonExtensionBackendAcceleratorTests(_TritonExtensionBackendTestsBase):
+    """
+    Test creating a backend for inductor with Triton scheduling.
+    Device-specific tests that run on an accelerator (CUDA/NPU).
+    """
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _register_custom_backend_with_heuristics(self, device):
         path_to_ext_heuristics = str(
             Path(__file__).parent / "extension_backends" / "triton"
@@ -244,14 +261,14 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
             device, ExtensionTritonScheduling, ExtensionPythonWrapperCodegen
         )
 
-    @requires_triton_backend
-    def test_codegen_with_custom_heuristics_module(self):
-        self._register_custom_backend_with_heuristics(TRITON_DEVICE_TYPE)
+    @unittest.skipUnless(HAS_TRITON or TRITON_HAS_CPU, "requires triton")
+    def test_codegen_with_custom_heuristics_module(self, device):
+        self._register_custom_backend_with_heuristics(device)
 
         def add(x, y):
             return x + y
 
-        x = torch.zeros((32,), device=GPU_TYPE)
+        x = torch.zeros((32,), device=device)
         y = x
         compiled_add = torch.compile(add)
 
@@ -260,9 +277,9 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
             f"{EXTENSION_TRITON_META_FIELD}"
         ).check("@triton.jit").run(code)
 
-    @requires_triton_backend
-    def test_codegen_with_custom_heuristics_module_udtk(self):
-        self._register_custom_backend_with_heuristics(TRITON_DEVICE_TYPE)
+    @unittest.skipUnless(HAS_TRITON or TRITON_HAS_CPU, "requires triton")
+    def test_codegen_with_custom_heuristics_module_udtk(self, device):
+        self._register_custom_backend_with_heuristics(device)
 
         @triton.jit
         def add_kernel(
@@ -291,12 +308,20 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
             add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
             return output
 
-        args = [torch.randn(32, device=GPU_TYPE) for _ in range(2)]
+        args = [torch.randn(32, device=device) for _ in range(2)]
         code = run_and_get_triton_code(torch.compile(add), *args)
 
         FileCheck().check("import extension_triton_heuristics").check(
             "@triton.jit"
         ).run(code)
+
+
+instantiate_device_type_tests(
+    TritonExtensionBackendAcceleratorTests,
+    globals(),
+    except_for=None if TRITON_HAS_CPU else "cpu",
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ import torch
 import torch._dynamo
 import torch.utils.cpp_extension
 from torch._C import FileCheck
-from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.common_utils import HardwareClassification, skipIfWindows
 from torch.testing._internal.inductor_utils import has_cpp_wrapper_for_device
 
 
@@ -38,9 +38,9 @@ from torch._inductor.codegen.common import (
 from torch._inductor.codegen.cpp_utils import device_to_aten
 from torch._inductor.codegen.cpu_device_op_overrides import CpuDeviceOpOverrides
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
+    instantiate_parametrized_tests,
     parametrize,
     xfailIfS390X,
 )
@@ -76,8 +76,10 @@ TestCase = test_torchinductor.TestCase
 
 
 class DeviceToAtenTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
-        "device, expected",
+        "device_type, expected",
         [
             ("cpu", "at::kCPU"),
             ("cuda", "at::kCUDA"),
@@ -87,8 +89,8 @@ class DeviceToAtenTests(TestCase):
             ("mtia", "at::kMTIA"),
         ],
     )
-    def test_builtin_device_types(self, device, expected):
-        self.assertEqual(device_to_aten(device), expected)
+    def test_builtin_device_types(self, device_type, expected):
+        self.assertEqual(device_to_aten(device_type), expected)
 
     def test_unregistered_device_type(self):
         with self.assertRaisesRegex(RuntimeError, "No ATen device type mapping"):
@@ -108,10 +110,10 @@ class DeviceToAtenTests(TestCase):
         with self.assertRaisesRegex(RuntimeError, "must return.*at::k"):
             device_to_aten(device)
 
-    @parametrize("device", ["tpu"])
-    def test_unsupported_device_types(self, device):
+    @parametrize("device_type", ["tpu"])
+    def test_unsupported_device_types(self, device_type):
         with self.assertRaisesRegex(RuntimeError, "No ATen device type mapping"):
-            device_to_aten(device)
+            device_to_aten(device_type)
 
 
 class BaseExtensionBackendTests(TestCase):
@@ -169,6 +171,8 @@ class BaseExtensionBackendTests(TestCase):
 
 @unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
 class ExtensionBackendTests(BaseExtensionBackendTests):
+    hw_classification = HardwareClassification.GENERIC
+
     @xfailIfS390X
     @skipIfWindows
     def test_open_device_registration(self):
@@ -234,32 +238,31 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
                 res = opt_fn(x, y, z)
                 self.assertEqual(ref, res.to(device="cpu"))
 
-    @parametrize("device", ["cpu", "has_cpp_wrapper_extension_device"])
-    def test_has_cpp_wrapper_for_device(self, device: str):
+    @parametrize("device_type", ["cpu", "has_cpp_wrapper_extension_device"])
+    def test_has_cpp_wrapper_for_device(self, device_type: str):
         # Check that calling the function without having registered a backend
         # ourselves doesn't error.
-        _ = has_cpp_wrapper_for_device(device)
+        _ = has_cpp_wrapper_for_device(device_type)
 
         # Check when we don't have a C++ wrapper
         register_backend_for_device(
-            device,
+            device_type,
             ExtensionScheduling,
             ExtensionWrapperCodegen,
         )
-        self.assertFalse(has_cpp_wrapper_for_device(device))
+        self.assertFalse(has_cpp_wrapper_for_device(device_type))
 
         # Check when we have a C++ wrapper
         register_backend_for_device(
-            device,
+            device_type,
             ExtensionScheduling,
             ExtensionWrapperCodegen,
             ExtensionCppWrapperCodegen,
         )
-        self.assertTrue(has_cpp_wrapper_for_device(device))
+        self.assertTrue(has_cpp_wrapper_for_device(device_type))
 
 
 instantiate_parametrized_tests(DeviceToAtenTests)
-instantiate_parametrized_tests(ExtensionBackendTests)
 
 
 if __name__ == "__main__":
