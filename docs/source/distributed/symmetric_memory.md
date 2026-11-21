@@ -808,9 +808,16 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     ``recipe_a``/``recipe_b`` are ``torch.nn.functional.ScalingType`` values
     and ``swizzle_a``/``swizzle_b`` are ``torch.nn.functional.SwizzleType``
     values, as in ``aten._scaled_mm_v2``. ``recipe_b`` applies to every entry
-    of ``Bs``. The recipes must be both ``TensorWise`` or both ``RowWise``.
-    With ``RowWise``, ``A_scale`` may be sharded like ``A_shard`` or cover the
-    fully gathered tensor. The exact dtype, scale-layout, and accelerator
+    of ``Bs``. The recipes must be both ``TensorWise``, both ``RowWise``, or
+    both ``BlockWise1x32`` (MXFP8). With ``RowWise``, ``A_scale`` may be sharded
+    like ``A_shard`` or cover the fully gathered tensor.
+
+    MXFP8 is supported on NVIDIA CUDA devices only. ``A_scale`` holds this
+    rank's ``float8_e8m0fnu`` scales in the swizzled 32x4x4 layout with
+    ``SWIZZLE_32_4_4``, and is gathered alongside ``A_shard``. This requires
+    ``gather_dim=0`` and the number of rows of ``A_shard`` (the product of all
+    but its last dimension) to be a multiple of 128. ``None`` entries of
+    ``out_dtypes`` default to ``torch.bfloat16``. The exact dtype, scale-layout, and accelerator
     requirements are those of ``aten._scaled_mm_v2``. This is a specialized compiler fusion target; support
     for a particular FP8 format or shape must be checked on the target
     accelerator.
@@ -853,7 +860,11 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     dimensions and pass ``[*A.shape[:-1], B.shape[1]]`` as ``output_shape``.
 
     The recipe and swizzle arguments are as in
-    :func:`fused_all_gather_scaled_matmul`.
+    :func:`fused_all_gather_scaled_matmul`. For MXFP8, ``A_scale`` is the
+    swizzled scale of the whole ``A``, which is sliced per rank; this requires
+    both scatter dimensions to be 0 and the rows of ``A`` divided by the
+    process-group size to be a multiple of 128. ``out_dtype`` defaults to
+    ``torch.bfloat16``.
 
     This operator is primarily a compiler target. Its supported dtypes, scale
     layouts, and hardware follow ``aten._scaled_mm_v2`` and are narrower than

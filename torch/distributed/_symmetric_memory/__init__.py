@@ -613,6 +613,47 @@ class _ScaleMode(Enum):
     TENSOR_WISE = "tensor-wise"
     ROW_WISE_SHARDED = "row-wise-sharded"
     ROW_WISE_REPLICATED = "row-wise-replicated"
+    # MXFP8: e8m0 block scales in the swizzled 32x4x4 layout, sharded like A_shard.
+    MX_SWIZZLED = "mx-swizzled"
+
+
+# The swizzled 32x4x4 layout stores scales in 128-row tiles, ordered by row tile.
+# When each rank's share of the rows is a multiple of 128, concatenating per-rank
+# scales equals swizzling the concatenated rows, and each rank's slice of the
+# scale is a valid swizzled scale for its rows. Otherwise every rank pads its own
+# tail tile, and neither holds.
+_MX_ROW_TILE = 128
+
+
+def _check_mx_operand(
+    A: torch.Tensor, scale: torch.Tensor, dim: int, num_chunks: int
+) -> None:
+    """Validate an MXFP8 operand whose rows are split into `num_chunks` along `dim`."""
+    if A.device.type != "meta" and (
+        A.device.type != "cuda" or torch.version.hip is not None
+    ):
+        raise ValueError(
+            "MXFP8 async-TP requires an NVIDIA CUDA device, as it relies on the "
+            f"swizzled 32x4x4 scale layout (got {A.device})"
+        )
+    if dim != 0:
+        raise ValueError(
+            f"MXFP8 requires gathering/scattering along dim 0 (got {dim}): other "
+            "dims reorder the flattened rows, which the swizzled scale can't follow"
+        )
+    rows, k = math.prod(A.shape[:-1]), A.shape[-1]
+    if rows % (num_chunks * _MX_ROW_TILE) != 0:
+        raise ValueError(
+            f"MXFP8 requires each rank's share of the {rows} rows to be a multiple "
+            f"of {_MX_ROW_TILE}, since the swizzled scale pads every rank's rows "
+            f"to {_MX_ROW_TILE}-row tiles"
+        )
+    expected = rows * (((k + 31) // 32 + 3) // 4 * 4)
+    if scale.numel() != expected:
+        raise ValueError(
+            f"MXFP8 scale has {scale.numel()} elements, expected {expected} for a "
+            f"{tuple(A.shape)} operand in the swizzled 32x4x4 layout"
+        )
 
 
 def _check_and_verify_fp8_all_gather_scale_mode(
@@ -634,6 +675,9 @@ def _check_and_verify_fp8_all_gather_scale_mode(
             return _ScaleMode.ROW_WISE_SHARDED
         if list(scale.shape[:-1]) == full_shape[:-1]:
             return _ScaleMode.ROW_WISE_REPLICATED
+    elif recipe == ScalingType.BlockWise1x32:
+        _check_mx_operand(shard, scale, gather_dim, num_chunks=1)
+        return _ScaleMode.MX_SWIZZLED
     raise ValueError(
         f"Invalid scale for fp8 all-gather with recipe {recipe} "
         f"(shard shape: {shard.shape}, scale shape: {scale.shape})"
@@ -680,6 +724,13 @@ def _fused_all_gather_matmul_impl(
         raise ValueError("Invalid gather_dim")
 
     group = c10d._resolve_process_group(group_name)
+    scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
+        shard=A_shard,
+        scale=A_scale,
+        recipe=recipe_a,
+        gather_dim=gather_dim,
+        group_size=group.size(),
+    )
 
     if gather_dim == A_shard.ndim - 1 or gather_dim == -1:
         return _fused_all_gather_matmul_last_gather_dim_impl(
@@ -717,22 +768,18 @@ def _fused_all_gather_matmul_impl(
     ]
     output_shards = [output.chunk(group.size()) for output in outputs]
 
-    scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
-        shard=A_shard,
-        scale=A_scale,
-        recipe=recipe_a,
-        gather_dim=gather_dim,
-        group_size=group.size(),
-    )
-
     # Computing block-wise matmul along the first dim of A
-    if scale_mode == _ScaleMode.ROW_WISE_SHARDED:
+    if scale_mode in (_ScaleMode.ROW_WISE_SHARDED, _ScaleMode.MX_SWIZZLED):
         if A_scale is None:
             raise AssertionError
-        A_scale_shard = A_scale.movedim(gather_dim, 0).flatten(0, -2)
+        if scale_mode == _ScaleMode.ROW_WISE_SHARDED:
+            A_scale_shard = A_scale.movedim(gather_dim, 0).flatten(0, -2)
+        else:
+            # Gathered as an opaque flat buffer; see _MX_ROW_TILE.
+            A_scale_shard = A_scale.flatten()
         A_scale_flat = A_scale_shard.new_empty(
             A_scale_shard.shape[0] * group.size(),
-            A_scale_shard.shape[1],
+            *A_scale_shard.shape[1:],
         )
 
         def row_wise_sharded_consumer(shard: list[torch.Tensor], rank: int) -> None:
@@ -1243,6 +1290,9 @@ def _fused_all_gather_scaled_matmul_fallback(
     use_fast_accum: list[bool],
 ) -> tuple[torch.Tensor, list[torch.Tensor]]:
     out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
+    if ScalingType(recipe_a) == ScalingType.BlockWise1x32:
+        # fp8 (the operand dtype) is not a valid block-scaled output dtype.
+        out_dtypes = [dt or torch.bfloat16 for dt in out_dtypes]
 
     group_size = c10d._get_group_size_by_name(group_name)
     A = torch.ops._c10d_functional.all_gather_into_tensor(
@@ -1271,6 +1321,13 @@ def _fused_all_gather_scaled_matmul_fallback(
         )
     elif scale_mode == _ScaleMode.ROW_WISE_REPLICATED:
         A_scale = A_scale.movedim(gather_dim, 0).flatten(0, -2)
+    elif scale_mode == _ScaleMode.MX_SWIZZLED:
+        # NCCL has no e8m0 dtype; the swizzled scale is opaque bytes to the gather.
+        scale_dtype = A_scale.dtype
+        A_scale = torch.ops._c10d_functional.all_gather_into_tensor(
+            A_scale.flatten().contiguous().view(torch.uint8), group_size, group_name
+        )
+        A_scale = torch.ops._c10d_functional.wait_tensor(A_scale).view(scale_dtype)
     else:
         if scale_mode != _ScaleMode.TENSOR_WISE:
             raise AssertionError
@@ -1337,14 +1394,23 @@ def _fused_all_gather_scaled_matmul(
         )
         res = res.unflatten(0, leading_dims)
 
-    The recipes must be both TensorWise or both RowWise. A row-wise `A_scale`
-    can be sharded like `A_shard` or replicated (covering the gathered `A`).
+    The recipes must be both TensorWise, both RowWise, or both BlockWise1x32
+    (MXFP8). A row-wise `A_scale` can be sharded like `A_shard` or replicated
+    (covering the gathered `A`).
+
+    MXFP8 (CUDA only): pass this rank's e8m0 scales in the swizzled 32x4x4 layout
+    (the output of `to_blocked`) with SWIZZLE_32_4_4. They are gathered alongside
+    `A_shard`, which requires gather_dim=0 and `prod(A_shard.shape[:-1])` to be a
+    multiple of 128. `out_dtypes` entries default to bfloat16.
 
     Optimal stride order for `A_shard` - if `A_shard.movedim(gather_dim, 0)` is
     contiguous, no extra copy is required for input layout transformation.
     Otherwise A_shard needs to be copied once.
     """
     out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
+    if ScalingType(recipe_a) == ScalingType.BlockWise1x32:
+        # fp8 (the operand dtype) is not a valid block-scaled output dtype.
+        out_dtypes = [dt or torch.bfloat16 for dt in out_dtypes]
 
     if len(biases) != len(Bs):
         raise ValueError("len(biases) must be the same as len(Bs)")
@@ -1586,6 +1652,9 @@ def _fused_scaled_matmul_reduce_scatter(
     out_dtype: torch.dtype | None = None,
     use_fast_accum: bool = False,
 ) -> torch.Tensor:
+    if ScalingType(recipe_a) == ScalingType.BlockWise1x32:
+        # fp8 (the operand dtype) is not a valid block-scaled output dtype.
+        out_dtype = out_dtype or torch.bfloat16
     if _is_test_mode:
         return _fused_scaled_matmul_reduce_scatter_fallback(
             A,
@@ -1658,6 +1727,10 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
                 f"(A shape: {A.shape}, A_scale shape: {A_scale.shape})"
             )
         A_scale = A_scale.flatten(0, -2).contiguous()
+    elif ScalingType(recipe_a) == ScalingType.BlockWise1x32:
+        group_size = c10d._get_group_size_by_name(group_name)
+        _check_mx_operand(A, A_scale, scatter_dim_after_maybe_reshape, group_size)
+        out_dtype = out_dtype or torch.bfloat16
     elif A_scale.numel() != 1:
         raise ValueError(
             "Invalid A_scale shape "
@@ -1755,6 +1828,11 @@ def _fused_scaled_matmul_reduce_scatter_impl(
         A_scale_shards = [
             t if t.data_ptr() % 16 == 0 else t.clone() for t in A_scale_shards
         ]
+    elif recipe_a == ScalingType.BlockWise1x32:
+        # Each rank's slice of the swizzled scale is the scale of its rows; see
+        # _MX_ROW_TILE.
+        _check_mx_operand(A, A_scale, scatter_dim_after_maybe_reshape, group.size())
+        A_scale_shards = list(A_scale.flatten().chunk(group.size()))
     else:
         raise ValueError(f"Unsupported recipe_a: {recipe_a}")
 
