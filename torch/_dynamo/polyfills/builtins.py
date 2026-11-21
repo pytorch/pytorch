@@ -14,6 +14,8 @@ import typing
 from collections.abc import Callable
 from typing import TYPE_CHECKING, TypeVar
 
+import torch
+
 from ..decorators import substitute_in_graph
 
 
@@ -216,7 +218,9 @@ def _expand_format(template, args, kwargs, depth, position):
         value = args[key] if isinstance(key, int) else kwargs[key]
         for is_attr, index in path:
             value = getattr(value, index) if is_attr else value[index]
-        if conv == "s":
+        if isinstance(value, torch.Tensor) and conv in ("s", "r", "a"):
+            value = ("{!" + conv + "}").format(value)
+        elif conv == "s":
             value = str(value)
         elif conv in ("r", "a"):
             value = repr(value)

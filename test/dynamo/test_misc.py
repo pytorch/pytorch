@@ -5413,22 +5413,28 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
     @parametrize("nested", [False, True])
     def test_deepcopy_ordered_dict_memo(self, nested):
-        class Value:
-            def __hash__(self):
-                return id(self)
-
+        class Obj:
             def __deepcopy__(self, memo):
-                memo[id(self)] = value = []
+                memo[getattr(self, "memo_key", id(self))] = value = ()
                 return value if nested else self
 
         def region(x, m):
-            copied = copy.deepcopy(m, None if nested else {hash(Value()): None})
+            copied = copy.deepcopy(m, None if nested else {id(Obj()): None})
             return x + len(copied) + (copied["a"] is m["a"])
 
         run = torch.compiler.nested_compile_region(region) if nested else region
         fn = torch.compile(lambda x, m: run(x, m), backend="eager", fullgraph=True)
-        mapping = collections.OrderedDict(a=Value(), b={1}, c=([],))
-        self.assertEqual(fn(torch.tensor(1), mapping), 4 if nested else 5)
+        m = collections.OrderedDict(a=Obj(), b=[Obj()], c={"k": Obj()}, d=([],), e={1})
+        self.assertEqual(fn(torch.tensor(1), m), 1 + len(m) + (not nested))
+        if nested:
+            report = torch._dynamo.explain(region)(torch.tensor(1), m)
+            self.assertEqual(report.graph_break_count, 0)
+            names = [g.create_fn_name() for g in report.out_guards]
+            self.assertNotIn("DEEPCOPY_MEMO_CONTAINS_ID", names)
+            if hasattr(copy, "_deepcopy_atomic"):
+                m["a"].memo_key = id(next(reversed(m)))
+                with self.assertRaisesRegex(Unsupported, "memo may already contain"):
+                    torch._dynamo.export(region)(torch.tensor(1), m)
 
     @parametrize(
         "copier", [copy.copy, copy.deepcopy, lambda od: copy.deepcopy([od], {17: 3})[0]]
@@ -5468,7 +5474,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         od = collections.OrderedDict(a=1)
         self.assertEqual(vars(compiled(x, od)[1]), {})
         od.tag = [42]
-        with self.assertRaisesRegex(Unsupported, "OrderedDict.__deepcopy__"):
+        with self.assertRaisesRegex(Unsupported, r"(?s)lookup outside.*__deepcopy__"):
             torch.compile(hasattr, backend="eager", fullgraph=True)(od, "__deepcopy__")
         copied = compiled(x, od)[1]
         self.assertEqual(vars(copied), vars(od))
@@ -5477,19 +5483,28 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     @parametrize("copier", [copy.copy, copy.deepcopy])
     @parametrize("direct", [False, True])
     def test_ordered_dict_copy_after_instance_dict_write(self, copier, direct):
+        def store(od):
+            od.tag = [42]
+
         def fn(x, od):
+            view = od.values()
             if direct:
-                od.tag = [42]
+                store(od)
             else:
                 od.__dict__["tag"] = [42]
-            return x + 1, copier(od)
+            return x + next(iter(view)), od, copier(od)
 
         x = torch.tensor(10)
+        compiled = torch.compile(fn, backend="eager")
         inp = collections.OrderedDict(a=1)
-        result, copied = torch.compile(fn, backend="eager")(x, inp)
+        result, od, copied = compiled(x, inp)
         self.assertEqual(result, x + 1)
+        self.assertIs(od, inp)
         self.assertEqual(copied.tag, [42])
-        self.assertEqual(copied.tag is inp.tag, copier is copy.copy)
+        self.assertEqual(copied.tag is od.tag, copier is copy.copy)
+        attempts = counters["frames"]["total"]
+        compiled(x, collections.OrderedDict(a=1))
+        self.assertEqual(counters["frames"]["total"], attempts)
 
     @parametrize("copier", [copy.copy, copy.deepcopy])
     def test_ordered_dict_copy_after_possible_instance_dict_alias_write(self, copier):
