@@ -815,7 +815,8 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                                     IntArrayRef stride,
                                     IntArrayRef dilation,
                                     int64_t groups,
-                                    std::optional<IntArrayRef> input_shape) {
+                                    std::optional<IntArrayRef> input_shape,
+                                    Tensor output_t = {}) {
   // MPSGraph 2D conv miscomputes the output once a filter spatial dim reaches 256; use a Metal kernel instead.
   if (input_t.dim() == 4 && (weight_t.size(2) >= 256 || weight_t.size(3) >= 256)) {
     const auto outH = (input_t.size(2) + 2 * padding[0] - dilation[0] * (weight_t.size(2) - 1) - 1) / stride[0] + 1;
@@ -846,14 +847,16 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   checkAllSameType(c, {input, weight});
   checkAllSameGPU(c, {input, weight});
 
-  auto output_t =
-      at::empty(input_shape.has_value() ? input_shape.value()
-                                        : conv_output_size(input->sizes(), weight->sizes(), padding, stride, dilation),
-                input->scalar_type(),
-                std::nullopt,
-                kMPS,
-                std::nullopt,
-                is_channels_last ? (is3DConv ? kChannelsLast3d : kChannelsLast) : kContiguous);
+  if (!output_t.defined()) {
+    output_t = at::empty(input_shape.has_value()
+                             ? input_shape.value()
+                             : conv_output_size(input->sizes(), weight->sizes(), padding, stride, dilation),
+                         input->scalar_type(),
+                         std::nullopt,
+                         kMPS,
+                         std::nullopt,
+                         is_channels_last ? (is3DConv ? kChannelsLast3d : kChannelsLast) : kContiguous);
+  }
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -880,6 +883,14 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   }
   if (is1DConv) {
     conv1d_metal_forward(input_t, weight_t, bias_opt, padding[1], stride[1], dilation[1], groups, output_t);
+    return output_t;
+  }
+  if (input_t.size(0) > UINT16_MAX) {
+    const auto inputs = input_t.split(UINT16_MAX);
+    const auto outputs = output_t.split(UINT16_MAX);
+    for (size_t i = 0; i < inputs.size(); i++) {
+      _mps_convolution_impl(inputs[i], weight_t, bias_opt, padding, stride, dilation, groups, std::nullopt, outputs[i]);
+    }
     return output_t;
   }
 
@@ -1057,6 +1068,17 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{grad_input_t, "result", 0};
   convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
+  if (!is3DConv && grad_output_t.size(0) > UINT16_MAX) {
+    const auto grad_outputs = grad_output_t.split(UINT16_MAX);
+    const auto grad_inputs = grad_input_t.split(UINT16_MAX);
+    for (size_t i = 0; i < grad_outputs.size(); i++) {
+      const auto chunk_size = grad_inputs[i].sizes();
+      const auto chunk = mps_convolution_backward_input(
+          chunk_size, grad_outputs[i], weight_t, padding, stride, dilation, groups, bias_defined, output_memory_format);
+      grad_inputs[i].copy_(chunk);
+    }
+    return grad_input_t;
+  }
 
   // Contig scratch when graph emits NCDHW but grad_input is CL3d -- covers
   // the macOS-14 fallback and the 3D NCDHW fallback on macOS 15+.
