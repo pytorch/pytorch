@@ -313,12 +313,12 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
   auto [x1, x2] = expand_outplace(x1_t, x2_t);
 
 
-  // We want to divide each tensor by its norm first, as it's more numerically stable.
-  // This keeps the result between -1.0 and 1.0
-  // We clone them, as we're going to modify them in-place
-  // This allows the gradients to propagate properly all the way to x1 and x2
-  auto x1_norm = at::linalg_vector_norm(*x1, 2, /*dim=*/dim, /*keepdim=*/true).clone();
-  auto x2_norm = at::linalg_vector_norm(*x2, 2, /*dim=*/dim, /*keepdim=*/true).clone();
+  // Divide each tensor by max(||x||, eps) first for numerical stability and to
+  // keep the result in [-1, 1]. Use out-of-place clamp_min so autograd sees the
+  // clamp (in-place + NoGradGuard left a scaled correction term in the grad when
+  // ||x|| < eps; see #203946).
+  auto x1_norm = at::linalg_vector_norm(*x1, 2, /*dim=*/dim, /*keepdim=*/true);
+  auto x2_norm = at::linalg_vector_norm(*x2, 2, /*dim=*/dim, /*keepdim=*/true);
 
   // Convert eps to a scalar tensor to ensure consistent CPU/CUDA behavior when eps overflows the dtype.
   // Use float32 if commonDtype is a reduced floating type (float16/bfloat16), otherwise use commonDtype.
@@ -328,11 +328,8 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
   auto eps_dtype = common_is_reduced ? at::kFloat : commonDtype;
   auto eps_tensor = at::scalar_tensor(eps, at::TensorOptions().dtype(eps_dtype).device(x1_norm.device()));
 
-  {
-    at::NoGradGuard guard;
-    x1_norm.clamp_min_(eps_tensor);
-    x2_norm.clamp_min_(eps_tensor);
-  }
+  x1_norm = x1_norm.clamp_min(eps_tensor);
+  x2_norm = x2_norm.clamp_min(eps_tensor);
 
   return ((*x1 / x1_norm) * (*x2 / x2_norm)).sum(dim);
 }
