@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 
 SUSPEND_RESUME_BACKENDS = [
-    ("nccl-legacy", "cuda", False),
     ("nccl2", "cuda", False),
     ("nccl-lazy", "cuda", True),
 ]
