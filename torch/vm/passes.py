@@ -159,10 +159,10 @@ class Graphs(BuiltinPass):
             what eager's own autograd nodes run when they are called behind
             it. Once two calls came out the same, and what the nodes gave
             was what the autograd engine gives, the graph runs without a
-            tape and its results have one node. A graph that cannot be taken
-            down (an operation of its backward looks at what a tensor holds,
-            say) keeps eager's tape. With a pass over graphs behind it a
-            graph is the pass's, as without ``backward``.
+            tape and its results have one node; a pass over graphs then gets
+            a forward graph and a backward graph with nothing left to
+            derive. A graph that cannot be taken down (an operation of its
+            backward looks at what a tensor holds, say) keeps eager's tape.
     """
 
     engine: ClassVar[str] = "graphs"

@@ -10808,7 +10808,11 @@ class TestVmGraphBackward(TestCase):
 
     def test_a_training_graph_has_eagers_gradients_bit_for_bit(self, device):
         self.assertTrue(torch.vm.is_exact((*DEFAULT, P.Graphs(backward=True))))
-        for passes in ((),):
+
+        def keep(gm, input_types):
+            return gm
+
+        for passes in ((), (keep,)):
             torch.manual_seed(0)
             model, reference = BackConvNet().to(device), BackConvNet().to(device)
             reference.load_state_dict(model.state_dict())
@@ -11182,6 +11186,35 @@ class TestVmGraphBackward(TestCase):
         self.assertEqual(got[0][0], expected[0][0])
         self.assertEqual((expected[0][1], expected[0][2]), (True, False))
         self.assertEqual((got[0][1], got[0][2]), (True, True))
+
+    def test_a_pass_compiles_two_plain_graphs_and_derives_nothing(self, device):
+        net, other = BackConvNet().to(device), BackConvNet().to(device)
+        other.load_state_dict(net.state_dict())
+        # What a compiler makes of a dropout draws other elements than eager
+        # does: the gradients are compared without the draws.
+        net.drop.p = other.drop.p = 0.0
+        compiled = self.staged(lambda x, y: net(x, y), (P.Inductor(),))
+        for step in range(6):
+            x = torch.randn(4, 3, 8, 8, device=device)
+            y = torch.randint(0, 5, (4,), device=device)
+            net.zero_grad()
+            other.zero_grad()
+            torch.manual_seed(step)
+            loss = compiled(x, y)
+            loss.backward()
+            torch.manual_seed(step)
+            other(x, y).backward()
+            for ours, eagers in zip(net.parameters(), other.parameters()):
+                self.assertEqual(ours.grad, eagers.grad)
+            for ours, eagers in zip(net.buffers(), other.buffers()):
+                self.assertEqual(ours, eagers)
+        self.assertEqual(self.states(), ["the engine's backward"])
+        names = []
+        node = loss.grad_fn
+        while node is not None and len(names) < 3:
+            names.append(node.name())
+            node = node.next_functions[0][0]
+        self.assertEqual(names[-1], "GraphBackward")
 
     def test_the_forward_keeps_fewer_bytes_than_the_backward_reads(self, device):
         import torch._cfg_rs as runtime
