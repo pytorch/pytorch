@@ -7,7 +7,8 @@ from math import prod
 from typing import Any, cast
 
 import torch
-from torch._inductor.utils import get_collective_config
+from torch._inductor.utils import get_collective_config, infer_scale_swizzle
+from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, inductor_prims
@@ -21,7 +22,6 @@ from ..pattern_matcher import (
     PatternExpr,
     PatternMatcherPass,
 )
-from ..utils import FOLDED_SCALED_MM_OUTPUT_SCALE
 
 
 log = logging.getLogger(__name__)
@@ -72,15 +72,29 @@ def _get_tensor(node: torch.fx.Node) -> torch.Tensor:
     return val
 
 
-def _has_folded_scaled_mm_output_scale(node: torch.fx.Node) -> bool:
-    """Whether a scaled-mm node carries a compiler-created output multiply.
+def _infer_scaled_mm_recipes(mm_node: torch.fx.Node) -> tuple[Any, Any]:
+    A, B, A_scale, B_scale = (
+        _get_tensor(cast("torch.fx.Node", n)) for n in mm_node.args[:4]
+    )
+    return infer_scale_swizzle(A, A_scale)[0], infer_scale_swizzle(B, B_scale)[0]
 
-    The symmetric-memory scaled-matmul operators receive ``scale_result`` with
-    its public ATen semantics, which ignore it for BF16 output.  They therefore
-    cannot replace a node whose private marker means that the scale represents
-    an explicit multiply that must be preserved.
-    """
-    return bool(node.meta.get(FOLDED_SCALED_MM_OUTPUT_SCALE, False))
+
+def _is_unfusible_scaled_mm(node: torch.fx.Node) -> bool:
+    """The symm_mem scaled-matmul ops take no ``scale_result`` and only support
+    matching tensor-wise or row-wise recipes, so leave other ``_scaled_mm`` nodes unfused."""
+    if node.target is not aten._scaled_mm.default:
+        return False
+    args, kwargs = node.args, node.kwargs
+    scale_result = args[5] if len(args) > 5 else kwargs.get("scale_result")
+    if scale_result is not None:
+        log.debug("async TP: not fusing %s, it has a scale_result", node)
+        return True
+    recipe_a, recipe_b = _infer_scaled_mm_recipes(node)
+    fusible = (ScalingType.TensorWise, ScalingType.RowWise)
+    if recipe_a != recipe_b or recipe_a not in fusible:
+        log.debug("async TP: not fusing %s, recipes %s/%s", node, recipe_a, recipe_b)
+        return True
+    return False
 
 
 @dataclass
@@ -671,8 +685,8 @@ class _Matmul:
 class _ScaledMatmul(_Matmul):
     A_scale_node: torch.fx.Node
     B_scale_node: torch.fx.Node
+    recipe: ScalingType
     bias_node: torch.fx.Node | None
-    result_scale_node: torch.fx.Node | None
     out_dtype: torch.dtype | None
     use_fast_accum: bool
     pre_mm_reshape: torch.fx.Node | None
@@ -718,8 +732,8 @@ class _ScaledMatmul(_Matmul):
             B_node=B_node,
             A_scale_node=A_scale_node,
             B_scale_node=B_scale_node,
+            recipe=_infer_scaled_mm_recipes(mm_node)[0],
             bias_node=get_arg(mm_node, 4, None),
-            result_scale_node=get_arg(mm_node, 5, None),
             out_dtype=get_arg(mm_node, 6, None),
             use_fast_accum=get_arg(mm_node, 7, False),
             pre_mm_reshape=pre_mm_reshape,
@@ -735,7 +749,7 @@ def _find_reshape_mm_reshape(node: torch.fx.Node) -> list[_Matmul]:
     for mm_node in node.users:
         if mm_node.target not in (aten.mm.default, aten._scaled_mm.default):
             continue
-        if _has_folded_scaled_mm_output_scale(mm_node):
+        if _is_unfusible_scaled_mm(mm_node):
             continue
         for reshape_node in mm_node.users:
             if reshape_node.target != aten.reshape.default:
@@ -791,7 +805,7 @@ def _find_consumer_matmuls(node: torch.fx.Node) -> list[_Matmul]:
             matmul = _Matmul.from_match(match=[user])
             matmuls.append(matmul)
         elif user.target is aten._scaled_mm.default:
-            if _has_folded_scaled_mm_output_scale(user):
+            if _is_unfusible_scaled_mm(user):
                 continue
             matmul = _ScaledMatmul.from_match([user])
             matmuls.append(matmul)
@@ -843,17 +857,23 @@ def _insert_fused_all_gather_matmul(
         )
     elif mm_type == _ScaledMatmul:
         scaled_matmuls = cast("list[_ScaledMatmul]", matmuls)
+        # Matmuls sharing A share its recipe, and B's recipe must match A's.
+        recipe = scaled_matmuls[0].recipe.value
+        no_swizzle = SwizzleType.NO_SWIZZLE.value
         return graph.call_function(
             torch.ops.symm_mem.fused_all_gather_scaled_matmul.default,
             args=(
                 shard_node,
                 [matmul.B_node for matmul in scaled_matmuls],
                 scaled_matmuls[0].A_scale_node,
+                recipe,
+                no_swizzle,
                 [matmul.B_scale_node for matmul in scaled_matmuls],
+                recipe,
+                no_swizzle,
                 gather_dim,
                 group_name,
                 [matmul.bias_node for matmul in scaled_matmuls],
-                [matmul.result_scale_node for matmul in scaled_matmuls],
                 [matmul.out_dtype for matmul in scaled_matmuls],
                 [matmul.use_fast_accum for matmul in scaled_matmuls],
             ),
@@ -1013,7 +1033,7 @@ def _find_producer_matmul(node: torch.fx.Node) -> _Matmul | None:
     if node.target is aten.mm.default:
         return _Matmul.from_match(match=[node])
     elif node.target is aten._scaled_mm.default:
-        if _has_folded_scaled_mm_output_scale(node):
+        if _is_unfusible_scaled_mm(node):
             return None
         return _ScaledMatmul.from_match(match=[node])
     elif node.target is aten.reshape.default:
@@ -1024,7 +1044,7 @@ def _find_producer_matmul(node: torch.fx.Node) -> _Matmul | None:
             raise AssertionError(f"expected an fx Node, got {type(mm_node)}")
         if mm_node.target not in (aten.mm.default, aten._scaled_mm.default):
             return None
-        if _has_folded_scaled_mm_output_scale(mm_node):
+        if _is_unfusible_scaled_mm(mm_node):
             return None
 
         reshape_node_0 = mm_node.args[0]
@@ -1097,14 +1117,17 @@ def _insert_fused_matmul_reduce_scatter(
                 matmul.A_node,
                 matmul.B_node,
                 matmul.A_scale_node,
+                matmul.recipe.value,
+                SwizzleType.NO_SWIZZLE.value,
                 matmul.B_scale_node,
+                matmul.recipe.value,
+                SwizzleType.NO_SWIZZLE.value,
                 reduce_op,
                 orig_scatter_dim,
                 scatter_dim_after_reshape,
                 group_name,
                 output_shape,
                 matmul.bias_node,
-                matmul.result_scale_node,
                 matmul.out_dtype,
                 matmul.use_fast_accum,
             ),
