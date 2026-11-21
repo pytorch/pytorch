@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipIf,
 )
+from torch.testing._internal.common_distributed import exit_if_lt_x_accelerators
 
 
 if not dist.is_available():
@@ -27,7 +28,7 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     MultiThreadedTestCase,
-    TEST_SKIPS,
+    require_accelerator_for_each_rank,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -488,15 +489,6 @@ class TestAllGatherViewOptimization(TestCase):
         self.assertNotIsInstance(res, ft_c.AsyncCollectiveTensor)
 
 
-# allows you to check for multiple accelerator irrespective of device type
-# to add new device types to this check simply follow the same format
-# and append an elif with the conditional and appropriate device count function for your new device
-def exit_if_lt_x_accelerators(x):
-    if torch.accelerator.is_available():
-        if torch.accelerator.device_count() < x:
-            sys.exit(TEST_SKIPS[f"multi-device-{x}"].exit_code)
-
-
 def with_comms(func=None):
     if func is None:
         return partial(with_comms)
@@ -505,11 +497,8 @@ def with_comms(func=None):
     def wrapper(self, *args, **kwargs):
         # The injected device can carry an index, such as "cuda:0". Use the type.
         device = torch.device(kwargs["device"]).type
-        if (
-            self.backend(device) != dist.Backend.GLOO
-            and torch.accelerator.device_count() < self.world_size
-        ):
-            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
+        if self.backend(device) != dist.Backend.GLOO:
+            exit_if_lt_x_accelerators(self.world_size)
 
         kwargs["device"] = device
         self.pg = self.create_pg(device=device)
@@ -524,9 +513,9 @@ def with_comms(func=None):
 class TestCollectivesWithDistributedBackend(DistributedTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @require_accelerator_for_each_rank
     @with_comms()
     def test_all_gather_into_tensor_coalesced(self, device):
-        exit_if_lt_x_accelerators(self.world_size)
         tensors = [
             torch.ones([4], device=device),
             torch.ones([4], device=device) + 1,
@@ -605,9 +594,8 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         "Inductor+gpu needs triton and recent GPU arch",
         device_type=("cuda", "xpu"),
     )
+    @require_accelerator_for_each_rank
     def test_tracing_with_fakepg(self, device):
-        exit_if_lt_x_accelerators(self.world_size)
-
         def allreduce(t, pg):
             return ft_c.all_reduce(t, "sum", pg)
 
@@ -653,9 +641,9 @@ class TestDistributedBackendCollectivesWithWorldSize4(
     def world_size(self):
         return 4
 
+    @require_accelerator_for_each_rank
     @with_comms()
     def test_permute_tensor_with_sub_group(self, device):
-        exit_if_lt_x_accelerators(self.world_size)
         mesh_dim_names = ["dp", "tp"]
 
         mesh_2d = dt.init_device_mesh(
