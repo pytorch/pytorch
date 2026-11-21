@@ -153,12 +153,23 @@ class Graphs(BuiltinPass):
         max_variants: how many exported forms a graph has, one per kind of
             call; the form that ran last is tried first. The calls of
             further kinds run its operations as they are.
+        backward: the engine derives the backward of a graph whose inputs
+            need a gradient. Such a graph runs on eager's tape for its first
+            calls, and each is taken down: the kernels of the forward, and
+            what eager's own autograd nodes run when they are called behind
+            it. Once two calls came out the same, and what the nodes gave
+            was what the autograd engine gives, the graph runs without a
+            tape and its results have one node. A graph that cannot be taken
+            down (an operation of its backward looks at what a tensor holds,
+            say) keeps eager's tape. With a pass over graphs behind it a
+            graph is the pass's, as without ``backward``.
     """
 
     engine: ClassVar[str] = "graphs"
 
     min_ops: int = 4
     max_variants: int = 8
+    backward: bool = False
 
     def __post_init__(self) -> None:
         for name, least in (("min_ops", 1), ("max_variants", 0)):

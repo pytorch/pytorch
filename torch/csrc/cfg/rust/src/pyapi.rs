@@ -678,6 +678,14 @@ impl CfgFunction {
                         if let Some(reason) = &form.closed {
                             one.set_item("reason", reason.clone())?;
                         }
+                        // What derives the backward of the form, where its
+                        // inputs need a gradient (`Graphs(backward=True)`).
+                        if let Some(callable) = &form.callable {
+                            let held = unsafe { Bound::<PyAny>::from_borrowed_ptr(py, callable.as_ptr()) };
+                            if let Ok(state) = held.getattr("state") {
+                                one.set_item("backward", state)?;
+                            }
+                        }
                         listed.append(one)?;
                     }
                     d.set_item("forms", listed)?;

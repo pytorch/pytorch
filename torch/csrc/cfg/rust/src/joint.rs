@@ -496,6 +496,87 @@ impl Joint {
         Ok((part.pattern.clone(), part.incoming.clone(), PyList::new(py, all)?, part.gives.clone()).into_pyobject(py)?.into_any())
     }
 
+    /// How many operations the forward has.
+    pub(crate) fn forward_len(&self) -> usize {
+        self.forward.len()
+    }
+
+    /// The values an operation of the forward takes, and those it gives.
+    pub(crate) fn forward_reads(&self, at: usize) -> Vec<Value> {
+        let mut taken = Vec::new();
+        self.reads(&self.forward[at], &mut taken);
+        taken
+    }
+
+    pub(crate) fn forward_gives(&self, at: usize) -> &[Value] {
+        &self.forward[at].results
+    }
+
+    pub(crate) fn forward_name(&self, at: usize) -> &str {
+        &self.forward[at].name
+    }
+
+    /// Operations of the forward, described as `describe` describes them.
+    pub(crate) fn described_forward<'py>(&self, py: Python<'py>, which: &[usize]) -> PyResult<Bound<'py, PyList>> {
+        let none = HashMap::new();
+        let all: PyResult<Vec<Bound<'py, PyAny>>> = which.iter().map(|at| Self::described_op(py, &self.forward[*at], &none)).collect();
+        PyList::new(py, all?)
+    }
+
+    /// How many values the graph has.
+    pub(crate) fn values(&self) -> u32 {
+        self.metas.len() as u32
+    }
+
+    /// How many values the form gives.
+    pub(crate) fn results_len(&self) -> usize {
+        self.results.len()
+    }
+
+    /// The backward for the results of `pattern`, for what runs it: its
+    /// operations (described), the values of the gradients that come in,
+    /// what it gives, and the values of the forward it takes.
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn part_program<'py>(
+        &self,
+        py: Python<'py>,
+        pattern: &[bool],
+    ) -> PyResult<(Bound<'py, PyList>, Vec<Value>, Vec<(u32, Value)>, Vec<Value>)> {
+        let part = self.part(pattern)?;
+        let again = self.again_for(&part);
+        let none = HashMap::new();
+        let mut all: Vec<Bound<'py, PyAny>> = Vec::new();
+        let mut made: HashSet<Value> = HashSet::new();
+        let mut takes: Vec<Value> = Vec::new();
+        let mut read = |op: &Op, made: &HashSet<Value>| {
+            let mut found = Vec::new();
+            self.reads(op, &mut found);
+            for value in found {
+                if !made.contains(&value) && !takes.contains(&value) {
+                    takes.push(value);
+                }
+            }
+        };
+        for at in &again {
+            let op = &self.forward[*at as usize];
+            read(op, &made);
+            made.extend(op.results.iter().copied());
+            all.push(Self::described_op(py, op, &none)?);
+        }
+        for at in &part.ops {
+            let op = &part.back.ops[*at];
+            read(op, &made);
+            all.push(Self::described_op(py, op, &part.alias)?);
+        }
+        for (_, value) in &part.gives {
+            let forward = matches!(self.metas[*value as usize].kind, Kind::Input(_) | Kind::Forward(_));
+            if forward && !made.contains(value) && !takes.contains(value) {
+                takes.push(*value);
+            }
+        }
+        Ok((PyList::new(py, all)?, part.incoming.clone(), part.gives.clone(), takes))
+    }
+
     /// Whether a backward may run a forward operation again: it is one of
     /// `AGAIN`, gives one tensor, and nothing behind it in the forward wrote
     /// to the memory of what it takes.
