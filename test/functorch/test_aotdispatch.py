@@ -3460,6 +3460,76 @@ def forward(self, primals_1):
     return (as_strided_scatter, add_1)""",
         )
 
+    def test_input_mutation_aliases_other_input_no_grad(self):
+        def f(a, b):
+            with torch.no_grad():
+                a.mul_(3)
+            return b.square()
+
+        def inp_callable(req_grad):
+            x = torch.arange(1, 9, dtype=torch.float32, requires_grad=req_grad)
+            base = x * 2
+            a = base[:5]
+            b = base[2:7]
+            return [x], [a, b]
+
+        self.verify_aot_autograd(
+            f,
+            partial(inp_callable, req_grad=False),
+            test_mutation=True,
+        )
+        self.verify_aot_autograd(
+            f,
+            partial(inp_callable, req_grad=True),
+            test_mutation=True,
+        )
+
+    # See https://github.com/pytorch/pytorch/issues/204433
+    def test_input_mutation_multiple_aliases_mutated(self):
+        def f(a, b):
+            a.mul_(2)
+            b.mul_(3)
+            return a + b
+
+        def inp_callable(req_grad):
+            x = torch.arange(1, 9, dtype=torch.float32, requires_grad=req_grad)
+            base = x * 2
+            return [x], [base[:5], base[2:7]]
+
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=False), test_mutation=True
+        )
+        self.verify_aot_autograd(
+            f, partial(inp_callable, req_grad=True), test_mutation=True
+        )
+
+    # See https://github.com/pytorch/pytorch/issues/204433
+    @skipIfDynamoInput("Dynamo fails to handle storage mutation next to synthetic base")
+    def test_input_mutation_set_storage_next_to_synthetic_base(self):
+        def f(a, b, c, d):
+            with torch.no_grad():
+                a.set_(b)
+                b.mul_(2)
+                c.mul_(2)
+            return d.square() + a.sum()
+
+        def inp_callable():
+            a = torch.arange(4, dtype=torch.float32)
+            b = torch.arange(4, dtype=torch.float32) + 1
+            x = torch.arange(1, 9, dtype=torch.float32, requires_grad=True)
+            base = x * 2
+            return [a, b, x], [a, b, base[:5], base[2:7]]
+
+        def run(fn):
+            inputs, graph_inputs = inp_callable()
+            out = fn(*graph_inputs)
+            out.sum().backward()
+            return out, inputs, inputs[-1].grad
+
+        self.verify_aot_autograd(
+            f, inp_callable, test_mutation=True, keep_inp_mutations=True
+        )
+
     def test_input_mutation_aliases_and_output_alias(self):
         def f(a, b):
             # Here, we need to take care:that because and b are aliased
