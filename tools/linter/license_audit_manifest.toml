@@ -70,6 +70,7 @@ paths = [
   'third_party/onnx/LICENSE',
   'third_party/perfetto/LICENSE',
   'third_party/tensorpipe/third_party/libnop/LICENSE',
+  'third_party/zendnn/LICENSE',
 ]
 
 [[spdx]]
@@ -115,6 +116,7 @@ paths = [
   'third_party/protobuf/LICENSE',
   'third_party/pybind11/LICENSE',
   'third_party/tensorpipe/LICENSE.txt',
+  'third_party/zendnn/aocl-dlp/LICENSE',
   'torch/csrc/profiler/kineto/LICENSE',
 ]
 
@@ -167,4 +169,16 @@ paths = [
 expression = 'Apache-2.0 WITH LLVM-exception AND MIT'
 paths = [
   'third_party/nccl_ep/ThirdPartyNotices.txt',
+]
+
+[[spdx]]
+expression = 'Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MIT AND NCSA'
+paths = [
+  'third_party/zendnn/THIRD-PARTY-NOTICES',
+]
+
+[[spdx]]
+expression = 'BSD-3-Clause AND MIT AND NCSA'
+paths = [
+  'third_party/zendnn/aocl-utils/License.txt',
 ]
