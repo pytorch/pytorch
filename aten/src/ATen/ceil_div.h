@@ -13,6 +13,14 @@ C10_ALWAYS_INLINE C10_HOST_DEVICE T ceil_div(T a, T b) {
 }
 
 /**
+   Computes ceil(a / b) avoiding overflow
+*/
+template <typename T, typename = std::enable_if_t<std::is_unsigned_v<T>>>
+C10_ALWAYS_INLINE C10_HOST_DEVICE T ceil_div_safe(T a, T b) {
+  return a / b + static_cast<T>(a % b != 0);
+}
+
+/**
    Computes ceil(a / b) * b; i.e., rounds up `a` to the next highest
    multiple of b
 */

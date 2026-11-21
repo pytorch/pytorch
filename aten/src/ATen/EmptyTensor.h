@@ -1,7 +1,29 @@
 #pragma once
 #include <ATen/core/TensorBase.h>
 
-namespace at::detail {
+namespace at {
+
+namespace native {
+// Sub-byte quantized dtypes (QUInt4x2, QUInt2x4) pack multiple logical
+// elements per storage byte. Itemsize is still 1, so the standard
+// element*itemsize formula over-counts; divide by this packing factor.
+inline int64_t subByteElementPerByte(const c10::ScalarType data_type) {
+  switch (data_type) {
+    case c10::ScalarType::QUInt4x2:
+      return 2;
+    case c10::ScalarType::QUInt2x4:
+      return 4;
+    default:
+      return 1;
+  }
+}
+
+inline int64_t subByteElementPerByte(const caffe2::TypeMeta& data_type) {
+  return subByteElementPerByte(c10::typeMetaToScalarType(data_type));
+}
+} // namespace native
+
+namespace detail {
 
 inline void check_size_nonnegative(ArrayRef<int64_t> size) {
   for (const auto& x : size) {
@@ -163,4 +185,6 @@ TORCH_API TensorBase empty_strided_symint_meta(
     SymIntArrayRef stride,
     const TensorOptions& options);
 
-} // namespace at::detail
+} // namespace detail
+
+} // namespace at
