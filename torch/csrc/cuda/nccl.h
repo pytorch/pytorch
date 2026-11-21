@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAContext.h>
 
 #include <cstddef>
+#include <mutex>
 #include <optional>
 #include <vector>
 
@@ -122,6 +123,20 @@ TORCH_CUDA_CPP_API void get_unique_id(ncclUniqueId& id);
 TORCH_CUDA_CPP_API ncclComm_t
 comm_init_rank(int nranks, const ncclUniqueId& comm_id, int rank);
 TORCH_CUDA_CPP_API void comm_destroy(ncclComm_t comm);
+
+// Note [Serialize ncclCommGetAsyncError]
+// NCCL does not guarantee that ncclCommGetAsyncError is safe to call
+// concurrently. On a nonblocking communicator it also reaps the pending group
+// job, and RCCL 2.32 claims comm->groupJob non-atomically, so two concurrent
+// callers can free the job while one of them is still joining its thread and
+// hang. ProcessGroupNCCL's watchdog and main threads both poll the same
+// communicator, the main thread partly through the helpers in this file, so
+// every PyTorch caller holds this mutex around the call. It is process-wide
+// because one group job is shared by all communicators in an NCCL group.
+// RCCL also calls ncclCommGetAsyncError internally at the end of a nonblocking
+// enqueue, which this cannot serialize; the complete fix is in RCCL
+// (ROCm/rocm-systems#13590).
+TORCH_CUDA_CPP_API std::mutex& get_async_error_mutex();
 
 TORCH_CUDA_CPP_API void broadcast(
     at::TensorList tensors,
