@@ -10884,6 +10884,11 @@ def back_view_read_twice(x, w, b):
     return q, s, (s + b).sum()
 
 
+def back_casts(x, w, b):
+    h = (x @ w).tanh()
+    return (h * h.exp()).sum() + b.sum(), h.pow(3).mean()
+
+
 def back_kept_result(x, w, b):
     h = (x @ w).tanh()
     return (h + b).sum(), h
@@ -12010,6 +12015,47 @@ class TestVmGraphBackward(TestCase):
         got, expected = self.both(back_pair, device, use)
         self.alike(got, expected)
         self.assertEqual(len(got[0]), 2)
+
+    def test_a_backward_behind_and_inside_the_autocast_of_the_forward(self, device):
+        kind = torch.device(device).type
+        dtype = torch.bfloat16 if kind == "cpu" else torch.float16
+
+        def step(fn, x, w, b, inside):
+            # Eager's nodes run under the autocast of the thread that asks
+            # for the backward: none behind the region, the forward's in it.
+            w.grad = b.grad = None
+            with torch.autocast(kind, dtype=dtype):
+                first, second = fn(x, w, b)
+                loss = first.float() + second.float() * 2
+                if inside:
+                    loss.backward()
+            if not inside:
+                loss.backward()
+            return first, second, w.grad.clone(), b.grad.clone()
+
+        compiled = self.staged(back_casts)
+        torch.manual_seed(0)
+        w = torch.randn(4, 4, device=device, requires_grad=True)
+        b = torch.randn(4, device=device, requires_grad=True)
+        for _ in range(12):
+            x = torch.randn(3, 4, device=device)
+            for inside in (False, True):
+                got = step(compiled, x, w, b, inside)
+                self.alike(got, step(back_casts, x, w, b, inside))
+        self.assertEqual(self.states(), ["the engine's backward"])
+        # A backward under an autocast that the forward did not run under:
+        # the forward runs once more on the tape, and eager's nodes under
+        # the autocast of the backward.
+        compiled, w, b = self.proven(back_casts, device)
+        x = torch.randn(3, 4, device=device)
+        found = []
+        for run in (compiled, back_casts):
+            w.grad = b.grad = None
+            first, second = run(x, w, b)
+            with torch.autocast(kind, dtype=dtype):
+                (first + second * 2).backward()
+            found.append((first, second, w.grad.clone(), b.grad.clone()))
+        self.alike(found[0], found[1])
 
     def test_what_is_accumulated_when_a_backward_raises(self, device):
         # Eager raises at the node that needs the tensor that was written
