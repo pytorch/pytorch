@@ -2433,6 +2433,24 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         default_kpack = get_default_kpack()
 
+        # Pipelining helps gfx1250 prefill, but can regress short head-64 sequences.
+        if (
+            config.max_autotune
+            and rocm_gfx_arch() == "gfx1250"
+            and dtype in (torch.float16, torch.bfloat16)
+            and head_dim in (64, 128, 256)
+            and v_head_dim in (None, head_dim)
+            and (head_dim != 64 or V.graph.sizevars.statically_known_geq(seq_len, 2048))
+        ):
+            flex_attn_fwd_configs.append(
+                ROCmFlexConfig(
+                    128, 128 if head_dim == 64 else 64, 2, 4, kpack=default_kpack
+                )
+            )
+            flex_attn_fwd_configs.append(
+                ROCmFlexConfig(64, 64, 2, 2, kpack=default_kpack)
+            )
+
         if head_dim <= 256:
             default_config = self._generic_flex_attn_fwd_config(dtype)
             if using_rocm_rdna3():
@@ -2449,6 +2467,15 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                     default_config = self.rdna3_default_flex_config.get(
                         (dtype, head_dim), default_config
                     )
+            elif (
+                rocm_gfx_arch() == "gfx1250"
+                and dtype in (torch.float16, torch.bfloat16)
+                and head_dim == 128
+                and v_head_dim in (None, head_dim)
+                and V.graph.sizevars.statically_known_geq(seq_len, 2048)
+                and V.graph.sizevars.statically_known_leq(seq_len, 8192)
+            ):
+                default_config = ROCmFlexConfig(64, 64, 2, 2, kpack=default_kpack)
             else:
                 default_config = self.flex_fwd_config_by_arch.get(
                     rocm_gfx_arch(), {}
