@@ -1,4 +1,5 @@
 import logging
+import math
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -116,6 +117,60 @@ eligible_amplifier_node = OrderedSet(
         aten.addmm.default,
     ]
 )
+
+
+
+def _is_leading_batch_dim_split(in_shape: Sequence[int], out_shape: Sequence[int]) -> bool:
+    """
+    True when out_shape is in_shape with dim0 split into 2+ leading dims,
+    e.g. [B*T, V] -> [B, T, V]. Trailing dims must match exactly.
+    """
+    if not in_shape or len(out_shape) <= len(in_shape):
+        return False
+    if math.prod(in_shape) != math.prod(out_shape):
+        return False
+    suffix = list(in_shape[1:])
+    prod = 1
+    max_leading = len(out_shape) - len(suffix)
+    for k in range(max_leading):
+        prod *= out_shape[k]
+        if k >= 1 and prod == in_shape[0] and list(out_shape[k + 1 :]) == suffix:
+            return True
+        if prod > in_shape[0]:
+            return False
+    return False
+
+
+def promote_amplifier_past_batch_split_views(amplifier_node: Node) -> Node:
+    """
+    Prefer chunking on the logical batch dim B.
+
+    nn.Linear on [B, T, C] lowers to addmm on [B*T, C] then view back to
+    [B, T, V]. Starting from addmm makes chunk_dim=0 mean B*T, and the
+    following view splits that dim. Promote through such views so chunk_dim=0
+    means B instead.
+    """
+    node = amplifier_node
+    while True:
+        users = list(node.users)
+        if len(users) != 1:
+            break
+        user = users[0]
+        if user.op != "call_function" or user.target != aten.view.default:
+            break
+        in_ft = get_fake_tensor_from_node_arg(node)
+        out_ft = get_fake_tensor_from_node_arg(user)
+        if in_ft is None or out_ft is None:
+            break
+        if not _is_leading_batch_dim_split(list(in_ft.shape), list(out_ft.shape)):
+            break
+        log.debug(
+            "Promote amplifier past batch-split view: %s -> %s",
+            node.format_node(),
+            user.format_node(),
+        )
+        node = user
+    return node
 
 
 def find_amplifier_node(graph: Graph) -> Node | None:
