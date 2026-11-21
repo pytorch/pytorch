@@ -14,6 +14,7 @@
 #include <torch/library.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/detail/Conv.h>
+#include <ATen/native/mkldnn/detail/Deconv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -369,7 +370,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
   auto padding_l = padding.vec();
   auto padding_r = padding.vec();
   auto dilates = dilation.vec();
-  auto op_attr = ideep::attr_t();
+  auto op_attr = at::native::mkldnn::Attr();
   std::vector<int32_t> wgt_zero_points;
   std::vector<float> wgt_scales;
   const int output_channels = transpose ? weight.size(1) * groups
@@ -421,7 +422,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
   const bool with_groups = groups > 1;
   if (transpose) {
     // template args: <(src/dst) is_channels_last, transposed>
-    w_desc = ideep::convolution_transpose_forward::expected_weights_desc<true, false>(
+    w_desc = at::native::mkldnn::convolution_transpose_forward_expected_weights_desc<true, false>(
         dims, dnnl::memory::data_type::s8,
         strides, padding_l, padding_r, dilates, groups,
         dnnl::algorithm::deconvolution_direct, dnnl::prop_kind::forward_inference,
@@ -555,7 +556,7 @@ at::Tensor _qconv_prepack_onednn(
   auto padding_l = padding.vec();
   auto padding_r = padding.vec();
   auto dilates = dilation.vec();
-  auto op_attr = ideep::attr_t();
+  auto op_attr = at::native::mkldnn::Attr();
 
   std::vector<float> weights_scales(weight_scales.numel());
 
