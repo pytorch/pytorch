@@ -12186,6 +12186,36 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 with self.assertRaisesRegex(RuntimeError, msg):
                     fn(x, dim, index, y)
 
+    def test_index_ops_source_dtype_mismatch(self):
+        index = torch.tensor([0, 1], device=self.device)
+        source = torch.ones(2, dtype=torch.int64, device=self.device)
+        cases = (
+            (torch.index_add, (0, index, source), "same scalar type"),
+            (torch.Tensor.index_add_, (0, index, source), "same scalar type"),
+            (torch.index_copy, (0, index, source), "same dtype"),
+            (torch.Tensor.index_copy_, (0, index, source), "same dtype"),
+            (torch.put, (index, source), "same dtype"),
+            (torch.Tensor.put_, (index, source), "same dtype"),
+        )
+        for op, args, msg in cases:
+            with self.subTest(op=op.__name__):
+                x = torch.zeros(3, device=self.device)
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    op(x, *args)
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    torch.compile(op)(x, *args)
+
+    def test_index_fill_tensor_value_dtype(self):
+        def fn(x, index, value):
+            return x.index_fill(0, index, value)
+
+        x = torch.zeros(4, 3, device=self.device)
+        index = torch.tensor([0, 2], device=self.device)
+        self.common(fn, [x, index, torch.tensor(2)])
+        value = torch.tensor(1 + 2j, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "complex Scalar to non-complex"):
+            torch.compile(fn)(x, index, value)
+
     def test_index_put2(self):
         def fn(a, b, c):
             return torch.index_put(a, [b], c, True)

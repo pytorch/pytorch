@@ -3472,6 +3472,13 @@ def _index_add(
         ),
     )
     torch._check(
+        x.dtype == tensor.dtype,
+        lambda: (
+            f"index_add_(): self ({x.dtype}) and source ({tensor.dtype}) "
+            "must have the same scalar type"
+        ),
+    )
+    torch._check(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
@@ -3563,6 +3570,13 @@ def _index_copy(
             f"index_copy(): self, index and source expected to be in the same device, "
             f"but got (self) {x.device}, (index) {index.device}, "
             f"and (source) {tensor.device}"
+        ),
+    )
+    torch._check(
+        x.dtype == tensor.dtype,
+        lambda: (
+            "index_copy_(): self and source expected to have the same dtype, "
+            f"but got (self) {x.dtype} and (source) {tensor.dtype}"
         ),
     )
     torch._check(

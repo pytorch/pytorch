@@ -1368,6 +1368,13 @@ def put(
     source: torch.Tensor,
     accumulate: bool = False,
 ) -> torch.Tensor:
+    torch._check(
+        self.dtype == source.dtype,
+        lambda: (
+            "put_(): self and source expected to have the same dtype, but got "
+            f"self.dtype = {self.dtype} and source.dtype = {source.dtype}"
+        ),
+    )
     flattened = self.flatten()
     flattened = torch.index_put(
         flattened, [index], source.reshape(index.shape), accumulate

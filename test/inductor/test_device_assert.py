@@ -10,6 +10,7 @@ from torch.testing._internal.common_device_type import (
     skipIf,
 )
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
@@ -91,6 +92,45 @@ class TestTorchDeviceAssertTriggerGeneric(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             torch._dynamo.reset()
             torch.compile(func, backend=backend, fullgraph=True)(*args)
+
+    @parametrize("backend", ["aot_eager_decomp_partition", "inductor"])
+    @parametrize("deterministic", [False, True])
+    def test_index_fill_tensor_value_overflow(self, backend, deterministic):
+        # The decomposition casts value to self's dtype; eager rejects overflow.
+        def func(x, value):
+            return x.index_fill(0, torch.tensor([1, 2]), value)
+
+        fits = [
+            (torch.int8, torch.tensor(127)),
+            (torch.uint8, torch.tensor(-255)),
+            (torch.int8, torch.tensor(127.9)),
+            (torch.float16, torch.tensor(float("inf"))),
+            (torch.int32, torch.tensor(1.0, dtype=torch.float8_e4m3fn)),
+        ]
+        overflows = [
+            (torch.int8, torch.tensor(128)),
+            (torch.uint8, torch.tensor(-256)),
+            (torch.int8, torch.tensor(-128.5)),
+            (torch.int64, torch.tensor(2**63, dtype=torch.uint64)),
+            (torch.int8, torch.tensor(float("nan"))),
+            (torch.float16, torch.tensor(1e6)),
+            (torch.int8, torch.tensor(448.0, dtype=torch.float8_e4m3fn)),
+            (torch.complex64, torch.tensor(1 + 1e300j, dtype=torch.complex128)),
+        ]
+        cases = [(*c, True) for c in fits] + [(*c, False) for c in overflows]
+        with DeterministicGuard(deterministic):
+            for dtype, value, fits_dtype in cases:
+                with self.subTest(dtype=dtype, value=value.item()):
+                    x = torch.zeros(4, dtype=dtype)
+                    torch._dynamo.reset()
+                    compiled = torch.compile(func, backend=backend, fullgraph=True)
+                    if fits_dtype:
+                        self.assertEqual(compiled(x, value), func(x, value))
+                        continue
+                    with self.assertRaisesRegex(RuntimeError, "without overflow"):
+                        func(x, value)
+                    with self.assertRaisesRegex(RuntimeError, "without overflow"):
+                        compiled(x, value)
 
 
 class TestTorchDeviceAssertTriggerAccelerator(TestCase):
