@@ -12,7 +12,8 @@ namespace at::native::mkldnn {
 
 // Ported from ideep::conv_deconv_utils::prepare_parameters.
 // Common logic to prepare parameters for conv/deconv
-// quantization version
+// quantization version. Also used for fp32 when scales and zero points are
+// empty.
 void prepare_parameters(
     const ideep::tensor& src,
     const ideep::tensor& weights,
@@ -850,7 +851,7 @@ void compute_dispatch(
 }
 
 // Ported from ideep::convolution_forward::compute_dispatch.
-// For int8
+// For int8. Also used for fp32 when scales and zero points are empty.
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void compute_dispatch(
     const ideep::tensor& src,
