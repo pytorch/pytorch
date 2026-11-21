@@ -140,7 +140,6 @@ from ..source import (
     ChainedSource,
     ConstDictKeySource,
     ConvertIntSource,
-    CurrentStreamSource,
     DictGetItemSource,
     DictSubclassGetItemSource,
     DynamicScalarSource,
@@ -1973,7 +1972,7 @@ class VariableBuilder:
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, torch.Stream):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            if isinstance(self.source, CurrentStreamSource):
+            if self.source == self.tx.symbolic_stream_state.current_stream_source:
                 # Reuse the index pre-allocated in SymbolicStreamState.__init__
                 index = CURRENT_STREAM_INDEX
             else:
