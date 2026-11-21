@@ -789,6 +789,21 @@ class ForeachTests(TestCase):
             torch._inductor.metrics.generated_kernel_count, expected_kernels
         )
 
+    @torch._inductor.config.patch(combo_kernel_dynamic_max_num_nodes=2)
+    def test_combo_kernel_cap_counts_only_dynamic_subkernels(self):
+        from torch._inductor.codegen.triton_combo_kernel import (
+            ComboKernel,
+            PartitionState,
+        )
+
+        state = PartitionState([], [], 0)
+        # Static subkernels never trigger the cap: three dynamic ones are split
+        # 2 + 1 no matter how many static ones sit between them.
+        for i, is_dynamic in enumerate([False, True, False, False, True, True, False]):
+            ComboKernel._update_partition(state, 1, i, is_dynamic)
+        state.finalize()
+        self.assertEqual(state.partitions, [[0, 1, 2, 3, 4], [5, 6]])
+
     @requires_gpu
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     @torch._dynamo.config.patch("assume_static_by_default", False)
