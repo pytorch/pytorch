@@ -11,8 +11,11 @@
 #include "Logger.h"
 #include "XpuptiActivityBuffer.h"
 #include "XpuptiProfilerMacros.h"
+#include "time_since_epoch.h"
 
+#include <chrono>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <map>
 #include <ostream>
@@ -240,8 +243,31 @@ constexpr std::span<const pti_view_kind> findPtiViewKinds(
 }
 } // namespace
 
+uint64_t XpuptiActivityApi::ptiClockNs() {
+#if defined(__linux__)
+  timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+  return static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL +
+      static_cast<uint64_t>(ts.tv_nsec);
+#else
+  return libkineto::timeSinceEpoch(std::chrono::system_clock::now());
+#endif
+}
+
 void XpuptiActivityApi::enableXpuptiActivities(
     const ActivityTypeMask& selected_activities) {
+#if defined(__linux__)
+  // PTI re-samples its REALTIME - MONOTONIC_RAW offset per pushed batch, so
+  // under NTP slew back-to-back kernels land on different offsets and appear
+  // to overlap (intel/torch-xpu-ops#5717). Keep PTI on MONOTONIC_RAW (offset
+  // ~0, process-wide) and map once per session in toKinetoTime().
+  ptiClockIsMonotonicRaw_ =
+      ptiViewSetTimestampCallback(ptiClockNs) == PTI_SUCCESS;
+  if (!ptiClockIsMonotonicRaw_) {
+    LOG(WARNING) << "ptiViewSetTimestampCallback failed; XPU activity "
+                    "timestamps may be offset by clock drift";
+  }
+#endif
   XPUPTI_CALL(ptiViewSetCallbacks(
       bufferRequestedTrampoline, bufferCompletedTrampoline));
 
