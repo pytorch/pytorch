@@ -18,7 +18,7 @@ set(NCCL_INCLUDE_DIR $ENV{NCCL_INCLUDE_DIR} CACHE PATH "Folder contains NVIDIA N
 set(NCCL_LIB_DIR $ENV{NCCL_LIB_DIR} CACHE PATH "Folder contains NVIDIA NCCL libraries")
 set(NCCL_VERSION $ENV{NCCL_VERSION} CACHE STRING "Version of NCCL to build with")
 
-if ($ENV{NCCL_ROOT_DIR})
+if (NOT "$ENV{NCCL_ROOT_DIR}" STREQUAL "")
   message(WARNING "NCCL_ROOT_DIR is deprecated. Please set NCCL_ROOT instead.")
 endif()
 list(APPEND NCCL_ROOT $ENV{NCCL_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR})

@@ -297,11 +297,7 @@ endif()
 # Generic BLAS library?
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "generic")))
-  if(ENV{GENERIC_BLAS_LIBRARIES} STREQUAL "")
-    set(GENERIC_BLAS "blas")
-  else()
-    set(GENERIC_BLAS $ENV{GENERIC_BLAS_LIBRARIES})
-  endif()
+  include(cmake/GenericBLAS.cmake)
   check_fortran_libraries(
   BLAS_LIBRARIES
   BLAS

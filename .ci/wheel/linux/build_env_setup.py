@@ -47,8 +47,8 @@ CUDA_BUILD_ENV_STATIC: dict[str, str] = {
     # and to bundle NVPL on aarch64 -- keep it explicit even though CMake
     # would auto-detect.
     "USE_CUDA": "1",
-    "NCCL_ROOT_DIR": "/usr/local/cuda",
-    "CUDNN_ROOT_DIR": "/usr/local/cuda",
+    "NCCL_ROOT": "/usr/local/cuda",
+    "CUDNN_ROOT": "/usr/local/cuda",
     "INSTALL_TEST": "0",
     "USE_STATIC_CUDNN": "0",
     "USE_STATIC_NCCL": "0",
