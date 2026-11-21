@@ -1785,6 +1785,356 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(result, expected)
 
     @parametrize(
+        "indexed_update",
+        [
+            subtest("index_put_", name="index_put_"),
+            subtest("index_copy_", name="index_copy_"),
+        ],
+    )
+    def test_generalized_scatter_through_index_put_copy_back(self, indexed_update):
+        # Data-dependent indexed values from the updated field (#195285).
+        def composed(field, delta, indices, gain):
+            field[1:-1].add_(delta)
+            values = torch.index_select(field, 0, indices) * gain
+            if indexed_update == "index_put_":
+                field.index_put_((indices,), values)
+            else:
+                field.index_copy_(0, indices, values)
+
+        field = torch.randn(512, device=device)
+        delta = torch.randn(510, device=device)
+        indices = torch.arange(0, 64, 2, device=device, dtype=torch.int64)
+        gain = torch.randn(indices.shape[0], device=device)
+
+        expected = field.clone()
+        composed(expected, delta, indices, gain)
+
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        compiled = torch.compile(composed, fullgraph=True, backend="inductor")
+        with ctx():
+            actual = field.clone()
+            compiled(actual, delta, indices, gain)
+        post_grad_graphs = "\n".join(
+            log_stream.getvalue().strip().split("\n")[3:]
+        ).strip()
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(post_grad_graphs.count("aten.clone"), 0)
+        self.assertNotIn("aten.slice_scatter.default", post_grad_graphs)
+
+    def test_generalized_scatter_copy_back_preserves_live_view(self):
+        # Returning a pre-copy view of the scatter must not alias the mutated input.
+        def composed(field, src, indices, values):
+            scatter = aten.slice_scatter.default(field, src, 0, 1, -1)
+            view = aten.slice.Tensor(scatter, 0, 0, 2)
+            updated = aten.index_put.default(scatter, [indices], values)
+            aten.copy_.default(field, updated)
+            return view
+
+        field = torch.arange(6, dtype=torch.float32, device=device)
+        src = torch.tensor([-1.0, -2.0, -3.0, -4.0], device=device)
+        indices = torch.tensor([0], dtype=torch.int64, device=device)
+        values = torch.tensor([99.0], device=device)
+
+        expected_field = field.clone()
+        expected = composed(expected_field, src, indices, values)
+
+        compiled = torch.compile(composed, fullgraph=True, backend="inductor")
+        actual_field = field.clone()
+        actual = compiled(actual_field, src, indices, values)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_field, expected_field)
+        self.assertFalse(torch._C._is_alias_of(expected, expected_field))
+        self.assertFalse(torch._C._is_alias_of(actual, actual_field))
+
+    @parametrize(
+        "output_kind", ("terminal", "intermediate_view", "sibling", "view_sibling")
+    )
+    def test_generalized_scatter_copy_back_preserves_live_indexed_update(
+        self, output_kind
+    ):
+        # Path-wide liveness: reinplacing must not overwrite returned terminal,
+        # intermediate-view, sibling, or view-sibling indexed-update results
+        # via copy-back.
+        def composed(field, src, indices, first_values, second_values):
+            scatter = aten.slice_scatter.default(field, src, 0, 1, -1)
+            first = aten.index_put.default(scatter, [indices], first_values)
+            if output_kind == "intermediate_view":
+                result = aten.slice.Tensor(first, 0, 0, 2)
+                updated = aten.index_put.default(first, [indices], second_values)
+            elif output_kind == "sibling":
+                result = aten.index_put.default(scatter, [indices], second_values)
+                updated = first
+            elif output_kind == "view_sibling":
+                view = aten.slice.Tensor(scatter, 0, 0, 2)
+                result = aten.index_put.default(view, [indices], second_values)
+                updated = first
+            else:
+                result = updated = first
+            aten.copy_.default(field, updated)
+            return result
+
+        field = torch.arange(6, dtype=torch.float32, device=device)
+        src = torch.tensor([10.0, 11.0, 12.0, 13.0], device=device)
+        indices = torch.tensor([0], dtype=torch.int64, device=device)
+        first_values = torch.tensor([100.0], device=device)
+        second_values = torch.tensor([999.0], device=device)
+
+        expected_field = field.clone()
+        expected = composed(expected_field, src, indices, first_values, second_values)
+
+        compiled = torch.compile(composed, fullgraph=True, backend="inductor")
+        actual_field = field.clone()
+        actual = compiled(actual_field, src, indices, first_values, second_values)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_field, expected_field)
+        self.assertFalse(torch._C._is_alias_of(expected, expected_field))
+        self.assertFalse(torch._C._is_alias_of(actual, actual_field))
+
+        actual_field.add_(1)
+        self.assertEqual(actual, expected)
+
+    @parametrize(
+        "put_op",
+        [
+            subtest(aten.index_put.default, name="index_put"),
+            subtest(aten._unsafe_index_put.default, name="unsafe_index_put"),
+        ],
+    )
+    def test_should_reinplace_scatter_indexed_update_chain(self, put_op):
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+        from torch._inductor.fx_passes.reinplace import should_reinplace_scatter
+
+        def build_graph(
+            *,
+            values_from_scatter: bool,
+            copy_dst_is_inp: bool,
+            num_updates: int = 1,
+            post_copy_use: str | None = None,
+            view_before_put: str | None = None,
+            extra_early_copy: bool = False,
+            view_only_copy_back: str | None = None,
+        ):
+            g = torch.fx.Graph()
+            inp = g.placeholder("inp")
+            other = g.placeholder("other")
+            src = g.placeholder("src")
+            indices = g.placeholder("indices")
+            values = g.placeholder("values")
+            early = g.placeholder("early")
+            subgraph = g.placeholder("subgraph")
+            view_ops = [ViewOp(target=aten.slice.Tensor, args=(0, 1, -1), kwargs={})]
+            scatter = g.call_function(_generalized_scatter, (inp, src, view_ops))
+            live_result = None
+            if post_copy_use == "view_output":
+                live_result = g.call_function(aten.slice.Tensor, (scatter, 0, 0, None))
+            if values_from_scatter:
+                values = g.call_function(aten.index.Tensor, (scatter, [indices]))
+            base = scatter
+            if view_before_put == "permute":
+                base = g.call_function(aten.permute.default, (scatter, [0]))
+            elif view_before_put == "slice":
+                base = g.call_function(aten.slice.Tensor, (scatter, 0, 0, None))
+            updates = [base]
+            for _ in range(num_updates):
+                updates.append(
+                    g.call_function(put_op, (updates[-1], [indices], values, False))
+                )
+            put = updates[-1]
+            if post_copy_use == "indexed_output":
+                live_result = put
+            elif post_copy_use == "intermediate_view_output":
+                live_result = g.call_function(
+                    aten.slice.Tensor, (updates[-2], 0, 0, None)
+                )
+            elif post_copy_use == "sibling_output":
+                live_result = g.call_function(
+                    put_op, (scatter, [indices], values, False)
+                )
+            elif post_copy_use == "view_sibling_output":
+                view = g.call_function(aten.slice.Tensor, (scatter, 0, 0, 2))
+                live_result = g.call_function(put_op, (view, [indices], values, False))
+            elif post_copy_use == "indexed_split_output":
+                split = g.call_function(aten.split.Tensor, (put, 1))
+                live_result = g.call_function(operator.getitem, (split, 0))
+            if extra_early_copy:
+                g.call_function(aten.copy_.default, (inp, early))
+            copy_dst = inp if copy_dst_is_inp else other
+            if view_only_copy_back == "permute":
+                viewed = g.call_function(aten.permute.default, (scatter, [0]))
+                g.call_function(aten.copy_.default, (inp, viewed))
+            else:
+                g.call_function(aten.copy_.default, (copy_dst, put))
+            if post_copy_use == "metadata":
+                g.call_function(aten.sym_size.int, (scatter, 0))
+            elif post_copy_use == "ordering":
+                g.call_function(control_deps, ((scatter,), subgraph, other))
+            elif post_copy_use not in (
+                None,
+                "view_output",
+                "indexed_output",
+                "intermediate_view_output",
+                "sibling_output",
+                "view_sibling_output",
+                "indexed_split_output",
+            ):
+                raise AssertionError(f"unexpected post_copy_use: {post_copy_use}")
+            g.output(live_result if live_result is not None else copy_dst)
+            return scatter
+
+        self.assertTrue(
+            should_reinplace_scatter(
+                build_graph(values_from_scatter=False, copy_dst_is_inp=True)
+            )
+        )
+        self.assertTrue(
+            should_reinplace_scatter(
+                build_graph(values_from_scatter=True, copy_dst_is_inp=True)
+            )
+        )
+        self.assertTrue(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    num_updates=2,
+                )
+            )
+        )
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(values_from_scatter=False, copy_dst_is_inp=False)
+            )
+        )
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    post_copy_use="view_output",
+                )
+            )
+        )
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    post_copy_use="sibling_output",
+                )
+            )
+        )
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    post_copy_use="view_sibling_output",
+                )
+            )
+        )
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    post_copy_use="indexed_split_output",
+                )
+            )
+        )
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    post_copy_use="indexed_output",
+                )
+            )
+        )
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=True,
+                    copy_dst_is_inp=True,
+                    post_copy_use="indexed_output",
+                )
+            )
+        )
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    num_updates=2,
+                    post_copy_use="intermediate_view_output",
+                )
+            )
+        )
+        self.assertTrue(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    post_copy_use="metadata",
+                )
+            )
+        )
+        self.assertTrue(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    post_copy_use="ordering",
+                )
+            )
+        )
+        # View-only copy_(inp, permute(scatter)) must not count as copy-back.
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    view_only_copy_back="permute",
+                )
+            )
+        )
+        # can_inplace keys off the first copy_ into inp; an earlier unrelated
+        # copy_ must not let a later clean indexed copy-back reinplace.
+        self.assertFalse(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    extra_early_copy=True,
+                )
+            )
+        )
+        # Non-layout-preserving view between scatter and index_put is still
+        # profitable when the terminal copy_ source is the indexed update.
+        self.assertTrue(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    view_before_put="permute",
+                )
+            )
+        )
+        self.assertTrue(
+            should_reinplace_scatter(
+                build_graph(
+                    values_from_scatter=False,
+                    copy_dst_is_inp=True,
+                    view_before_put="slice",
+                )
+            )
+        )
+
+    @parametrize(
         "factory_op",
         [
             subtest(torch.ones_like, name="ones_like"),
