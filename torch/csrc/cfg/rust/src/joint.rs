@@ -118,6 +118,8 @@ const NOBODY: u32 = u32::MAX - 1;
 
 struct Back {
     pattern: Vec<bool>,
+    /// Which way of running it this is (`Joint::under`).
+    variant: u32,
     /// The gradients that come in, one per result of the pattern.
     incoming: Vec<Value>,
     ops: Vec<Op>,
@@ -149,6 +151,10 @@ pub struct Joint {
     /// front of an addition.
     owner: u32,
     before: u32,
+    /// Which way of running a backward the next one that is begun is taken
+    /// down for: 0 as a backward runs by itself, 1 as one runs under the
+    /// autocast that the forward ran under.
+    variant: u32,
 }
 
 /// A backward for some of the results, made of one that was taken down.
@@ -380,14 +386,14 @@ impl Joint {
     /// gradients meet and one is missing, the other is the sum. A node
     /// that would be handed some of its gradients and not others was not
     /// taken down like that, and is refused.
-    fn part(&self, pattern: &[bool]) -> PyResult<Part<'_>> {
+    fn part(&self, pattern: &[bool], variant: u32) -> PyResult<Part<'_>> {
         if pattern.len() != self.results.len() || !pattern.iter().any(|on| *on) {
             return Err(refused("a backward is for some of the results of the graph".to_string()));
         }
-        if let Some(back) = self.backs.iter().find(|back| back.pattern == pattern) {
+        if let Some(back) = self.backs.iter().find(|back| back.variant == variant && back.pattern == pattern) {
             return Ok(Part::whole(back));
         }
-        let covers = |back: &&Back| pattern.iter().zip(&back.pattern).all(|(on, had)| !*on || *had);
+        let covers = |back: &&Back| back.variant == variant && pattern.iter().zip(&back.pattern).all(|(on, had)| !*on || *had);
         let Some(back) = self.backs.iter().find(covers) else {
             return Err(refused("no backward was taken down for these results".to_string()));
         };
@@ -533,6 +539,12 @@ impl Joint {
         self.results.len()
     }
 
+    /// The backwards that are begun from here on are taken down for this
+    /// way of running one.
+    pub(crate) fn under(&mut self, variant: u32) {
+        self.variant = variant;
+    }
+
     /// The backward for the results of `pattern`, for what runs it: its
     /// operations (described), the values of the gradients that come in,
     /// what it gives, and the values of the forward it takes.
@@ -541,8 +553,9 @@ impl Joint {
         &self,
         py: Python<'py>,
         pattern: &[bool],
+        variant: u32,
     ) -> PyResult<(Bound<'py, PyList>, Vec<Value>, Vec<(u32, Value)>, Vec<Value>)> {
-        let part = self.part(pattern)?;
+        let part = self.part(pattern, variant)?;
         let again = self.again_for(&part);
         let none = HashMap::new();
         let mut all: Vec<Bound<'py, PyAny>> = Vec::new();
@@ -661,6 +674,7 @@ impl Joint {
             saved: Vec::new(),
             owner: NOBODY,
             before: NOBODY,
+            variant: 0,
         };
         for (at, input) in inputs.iter().enumerate() {
             let value = joint.define(input, Kind::Input(at as u32), "an input")?;
@@ -726,7 +740,8 @@ impl Joint {
             values.push(self.define(tensor, Kind::Incoming(*at), "an incoming gradient")?);
         }
         let (ops, owners, handed, gives) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-        self.backs.push(Back { pattern, incoming: values, ops, owners, handed, gives });
+        let variant = self.variant;
+        self.backs.push(Back { pattern, variant, incoming: values, ops, owners, handed, gives });
         self.open = true;
         (self.owner, self.before) = (NOBODY, NOBODY);
         Ok(())
@@ -760,7 +775,7 @@ impl Joint {
 
     /// The backward for the results of `pattern`, as `describe` gives one.
     pub fn backward_for<'py>(&self, py: Python<'py>, pattern: Vec<bool>) -> PyResult<Bound<'py, PyAny>> {
-        self.described_part(py, &self.part(&pattern)?)
+        self.described_part(py, &self.part(&pattern, 0)?)
     }
 
     /// The tensor of a value, while the run is taken down.
@@ -820,7 +835,7 @@ impl Joint {
             return Some("not the same backwards in two runs".to_string());
         }
         for (a, b) in self.backs.iter().zip(&other.backs) {
-            if a.pattern != b.pattern || a.gives != b.gives || a.incoming != b.incoming || a.owners != b.owners || a.handed != b.handed {
+            if a.pattern != b.pattern || a.variant != b.variant || a.gives != b.gives || a.incoming != b.incoming || a.owners != b.owners || a.handed != b.handed {
                 return Some("a backward gives other gradients in another run".to_string());
             }
             if let Some(why) = Self::same_ops(py, &a.ops, &b.ops, "a backward") {
@@ -939,7 +954,7 @@ impl Joint {
         made.set_item("writes", self.forward.iter().any(outside))?;
         let backs = PyList::empty(py);
         for back in &self.backs {
-            backs.append(self.described_part(py, &self.part(&back.pattern)?)?)?;
+            backs.append(self.described_part(py, &self.part(&back.pattern, back.variant)?)?)?;
         }
         made.set_item("backs", backs)?;
         Ok(made)
