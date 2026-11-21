@@ -137,6 +137,21 @@ _index_types = f"SupportsIndex | {_leaf_types} | _NestedSequence[{_leaf_types}]"
 _index_type_def = f"_Index: TypeAlias = {_index_types}  # fmt: skip"
 INDICES = "indices: _Index | tuple[_Index, ...]"
 
+# Tensor methods whose result keeps the type of `self` through
+# `__torch_function__`, so a Tensor subclass gets its own type back.
+SELF_RETURNING_TENSOR_METHODS = frozenset(
+    {
+        "clone",
+        "detach",
+        "new_empty",
+        "new_empty_strided",
+        "new_full",
+        "new_ones",
+        "new_tensor",
+        "new_zeros",
+    }
+)
+
 blocklist = [
     "__init_subclass__",
     "__new__",
@@ -1947,6 +1962,13 @@ def gen_pyi(
 
     tensor_method_hints = []
     for name, hints in sorted(unsorted_tensor_method_hints.items()):
+        if name in SELF_RETURNING_TENSOR_METHODS:
+            tensor_suffix = " -> Tensor: ..."
+            if not all(hint.endswith(tensor_suffix) for hint in hints):
+                raise AssertionError(f"Expected {name} hints to return Tensor")
+            hints = [
+                f"{hint.removesuffix(tensor_suffix)} -> Self: ..." for hint in hints
+            ]
         if len(hints) > 1:
             hints = ["@overload\n" + h for h in hints]
         docstr = docstrs.get(f"torch._C.TensorBase.{name}")

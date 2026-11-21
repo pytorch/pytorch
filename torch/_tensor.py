@@ -8,7 +8,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from copy import deepcopy
 from numbers import Number
-from typing import Any, cast, Concatenate, TypeVar, Union
+from typing import Any, cast, Concatenate, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -826,9 +826,12 @@ class Tensor(torch._C.TensorBase):
             )
         )
 
-    detach = _C._add_docstr(
-        _C.TensorBase.detach,
-        r"""
+    # Type checkers resolve `Self` of the aliased method to `TensorBase`, so they
+    # use the `TensorBase.detach` stub instead.
+    if not TYPE_CHECKING:
+        detach = _C._add_docstr(
+            _C.TensorBase.detach,
+            r"""
     Returns a new Tensor, detached from the current graph.
 
     The result will never require gradient.
@@ -842,7 +845,7 @@ class Tensor(torch._C.TensorBase):
       In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
     """,
-    )
+        )
 
     detach_ = _C._add_docstr(
         _C.TensorBase.detach_,
