@@ -669,61 +669,111 @@ struct WeakRef {
     wr_next: *mut WeakRef,
 }
 
-/// The code of the functions that the weak containers give their weak
-/// references to call when what they refer to ends, each with what the
-/// container keeps by the reference: 0 for a dictionary whose keys are the
-/// references (`weakref.WeakKeyDictionary`, torch's `WeakIdKeyDictionary`),
-/// 1 for one whose values are (`weakref.WeakValueDictionary`), 2 for a set
-/// (`weakref.WeakSet`). Such a function takes the entry out of its
-/// container and does nothing else. Found by looking (the functions are
-/// defined inside `__init__` of the classes), without running anything.
+/// The function by which a weak container takes an entry out when what
+/// a weak reference of it refers to ends, known by what it is: its code
+/// (the code object that the class's `__init__`, or `__setitem__`, has
+/// among its constants), the class whose objects make it, the classes of
+/// the weak references such a container makes, and, where the function
+/// calls a method of the container, the code of that method.
 #[cfg(not(Py_3_13))]
-unsafe fn weak_containers() -> Vec<(usize, u8)> {
-    const CLASSES: [(&std::ffi::CStr, &std::ffi::CStr, u8); 4] = [
-        (c"torch.utils.weak", c"WeakIdKeyDictionary", 0),
-        (c"weakref", c"WeakKeyDictionary", 0),
-        (c"weakref", c"WeakValueDictionary", 1),
-        (c"_weakrefset", c"WeakSet", 2),
+#[derive(Clone)]
+struct Remover {
+    code: usize,
+    /// What the container keeps by the reference: 0 a dictionary whose
+    /// keys are the references, 1 one whose values are, 2 a set, 3 a
+    /// dictionary that keeps its values under the identities of its keys.
+    kind: u8,
+    class: usize,
+    references: Vec<usize>,
+    method: usize,
+}
+
+/// The weak containers whose own callbacks are let pass, found once by
+/// looking, without running anything: `weakref.WeakKeyDictionary`,
+/// `weakref.WeakValueDictionary`, `weakref.WeakSet`, torch's
+/// `WeakIdKeyDictionary` (a tracer's memo of the tensors it has seen) and
+/// `ExactWeakKeyDictionary` of `torch._dynamo.utils` (in which every module
+/// is noted that is made after `torch.compile` compiled a function). The
+/// names only say where to look. What is found is taken only if it is
+/// what is expected: a function among the constants of the method that
+/// uses no names but those of the container's own attributes. A class
+/// whose module was not imported is looked for again later.
+#[cfg(not(Py_3_13))]
+unsafe fn weak_containers() -> Vec<Remover> {
+    type Class = (&'static std::ffi::CStr, &'static std::ffi::CStr);
+    const WEAKREF: Class = (c"weakref", c"ref");
+    const OWN: [&str; 7] = ["_iterating", "_pending_removals", "append", "data", "KeyError", "key", "discard"];
+    const CLASSES: [(Class, u8, &[Class]); 5] = [
+        ((c"torch.utils.weak", c"WeakIdKeyDictionary"), 0, &[(c"torch.utils.weak", c"WeakIdRef"), (c"torch.utils.weak", c"_WeakHashRef")]),
+        ((c"weakref", c"WeakKeyDictionary"), 0, &[WEAKREF]),
+        ((c"weakref", c"WeakValueDictionary"), 1, &[(c"weakref", c"KeyedRef")]),
+        ((c"_weakrefset", c"WeakSet"), 2, &[WEAKREF]),
+        ((c"torch._dynamo.utils", c"ExactWeakKeyDictionary"), 3, &[WEAKREF]),
     ];
-    static FOUND: std::sync::OnceLock<Vec<(usize, u8)>> = std::sync::OnceLock::new();
+    static FOUND: std::sync::OnceLock<Vec<Remover>> = std::sync::OnceLock::new();
     if let Some(found) = FOUND.get() {
         return found.clone();
     }
-    let init = PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__init__".as_ptr()));
-    let (mut found, mut all) = (Vec::new(), true);
-    for (module, class, kind) in CLASSES {
+    let class_of = |(module, class): Class| {
         let module = ffi::PyDict_GetItemString(ffi::PyImport_GetModuleDict(), module.as_ptr());
-        let class = if module.is_null() || ffi::PyModule_Check(module) == 0 {
+        let found = if module.is_null() || ffi::PyModule_Check(module) == 0 {
             null_mut()
         } else {
             ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), class.as_ptr())
         };
-        let made = if class.is_null() || ffi::PyType_Check(class) == 0 {
-            null_mut()
-        } else {
-            pyffi::_PyType_Lookup(class as *mut ffi::PyTypeObject, init.as_ptr())
-        };
-        if made.is_null() || ffi::PyFunction_Check(made) == 0 {
+        if found.is_null() || ffi::PyType_Check(found) == 0 { null_mut() } else { found }
+    };
+    // The names a code object uses, and whether it has code of its own
+    // among its constants.
+    let names_of = |code: Obj| {
+        let names = ffi::PyObject_GetAttrString(code, c"co_names".as_ptr());
+        let mut found = Vec::new();
+        if !names.is_null() && ffi::PyTuple_Check(names) != 0 {
+            found.extend((0..ffi::PyTuple_GET_SIZE(names)).map(|i| pyffi::str_to_string(ffi::PyTuple_GET_ITEM(names, i))));
+        }
+        xdecref(names);
+        found
+    };
+    let consts_of = |code: Obj| {
+        let consts = ffi::PyObject_GetAttrString(code, c"co_consts".as_ptr());
+        let mut found = Vec::new();
+        if !consts.is_null() && ffi::PyTuple_Check(consts) != 0 {
+            // The code keeps its constants for as long as it lives.
+            found.extend((0..ffi::PyTuple_GET_SIZE(consts)).map(|i| ffi::PyTuple_GET_ITEM(consts, i)).filter(|held| ffi::PyCode_Check(*held) != 0));
+        }
+        xdecref(consts);
+        found
+    };
+    let method_of = |class: Obj, name: &std::ffi::CStr| {
+        let name = PyObj::from_owned(ffi::PyUnicode_InternFromString(name.as_ptr()));
+        let found = pyffi::_PyType_Lookup(class as *mut ffi::PyTypeObject, name.as_ptr());
+        if found.is_null() || ffi::PyFunction_Check(found) == 0 { null_mut() } else { ffi::PyFunction_GetCode(found) }
+    };
+    let (mut found, mut all) = (Vec::new(), true);
+    for (named, kind, made) in CLASSES {
+        let class = class_of(named);
+        let references: Vec<usize> = made.iter().map(|named| class_of(*named) as usize).collect();
+        let within = if class.is_null() { null_mut() } else { method_of(class, if kind == 3 { c"__setitem__" } else { c"__init__" }) };
+        if within.is_null() || references.contains(&0) {
             all = false;
             continue;
         }
-        let consts = ffi::PyObject_GetAttrString(ffi::PyFunction_GetCode(made), c"co_consts".as_ptr());
-        let count = if consts.is_null() || ffi::PyTuple_Check(consts) == 0 { 0 } else { ffi::PyTuple_GET_SIZE(consts) };
-        for i in 0..count {
-            let inner = ffi::PyTuple_GET_ITEM(consts, i);
-            if ffi::PyCode_Check(inner) == 0 {
-                continue;
-            }
-            let name = ffi::PyObject_GetAttrString(inner, c"co_name".as_ptr());
-            let text = if name.is_null() { String::new() } else { pyffi::str_to_string(name) };
-            xdecref(name);
-            if text == "remove" || text == "_remove" {
-                // Kept for good: it is compared by where it is.
-                ffi::Py_INCREF(inner);
-                found.push((inner as usize, kind));
-            }
+        let inner = consts_of(within);
+        // The method that the function of the last kind calls: it may
+        // name nothing but what the container keeps its entries in.
+        let method = if kind == 3 { method_of(class, c"_remove_id") } else { null_mut() };
+        let plain = kind != 3 || (!method.is_null() && consts_of(method).is_empty() && names_of(method).iter().all(|name| name == "values" || name == "refs"));
+        let fits = |code: Obj| {
+            let names = names_of(code);
+            let own = if kind == 3 { names == ["_remove_id"] } else { names.iter().all(|name| OWN.contains(&name.as_str())) };
+            own && consts_of(code).is_empty()
+        };
+        if let (true, [code], true) = (plain, inner.as_slice(), inner.iter().all(|code| fits(*code))) {
+            // Kept for good: they are compared by where they are.
+            ffi::Py_INCREF(*code);
+            ffi::Py_XINCREF(method);
+            found.push(Remover { code: *code as usize, kind, class: class as usize, references, method: method as usize });
         }
-        xdecref(consts);
     }
     ffi::PyErr_Clear();
     if all {
@@ -732,18 +782,64 @@ unsafe fn weak_containers() -> Vec<(usize, u8)> {
     found
 }
 
+/// For the function by which a dictionary that keeps its values under the
+/// identities of its keys takes an entry out: the dictionary and the
+/// identity, which are the variables `self` and `idx` of the method the
+/// function was made in. Borrowed.
+#[cfg(not(Py_3_13))]
+unsafe fn enclosed(callback: Obj) -> Option<(Obj, Obj)> {
+    let closure = ffi::PyFunction_GetClosure(callback);
+    let names = ffi::PyObject_GetAttrString(ffi::PyFunction_GetCode(callback), c"co_freevars".as_ptr());
+    if names.is_null() {
+        ffi::PyErr_Clear();
+        return None;
+    }
+    let mut found = (null_mut(), null_mut());
+    let fits = !closure.is_null() && ffi::PyTuple_Check(names) != 0 && ffi::PyTuple_GET_SIZE(names) == ffi::PyTuple_GET_SIZE(closure);
+    if fits {
+        for i in 0..ffi::PyTuple_GET_SIZE(names) {
+            let held = pyffi::PyCell_Get(ffi::PyTuple_GET_ITEM(closure, i));
+            match pyffi::str_to_string(ffi::PyTuple_GET_ITEM(names, i)).as_str() {
+                "self" => found.0 = held,
+                "idx" => found.1 = held,
+                _ => {}
+            }
+            // The cells keep what they hold.
+            xdecref(held);
+        }
+    }
+    xdecref(names);
+    (!found.0.is_null() && !found.1.is_null()).then_some(found)
+}
+
 /// What ends with an object besides itself because of the weak references
-/// to it, added to `more`: for a weak reference that a weak container
-/// keeps (`weak_containers`), what goes with the entry that the container
-/// takes out (the value under the reference, the key of a value). False
-/// where a weak reference has anything else to call when the object ends.
+/// to it, added to `more`; true where a weak reference has something to
+/// call when the object ends that may run code of the user's.
+///
+/// A callback is let pass only if all of this holds, each by identity or
+/// by exact type, nothing by a name: it is a function whose code is the
+/// very code object of a known weak container's own function
+/// (`weak_containers`); the weak reference is of exactly a class such a
+/// container makes its references of; the container that the function
+/// was made for is of exactly the class (no subclass, whose attributes
+/// and methods could be anything); and what the function reaches of the
+/// container is what the class put there: the dict or set of the
+/// entries, the set of who goes over it, the list of what is to be
+/// taken out later, each of the interpreter's own exact type, so that
+/// taking the entry out compares and removes in C. For the dictionary
+/// by identity, whose function calls a method: the container has no
+/// attribute of its own under the method's name, and the class has the
+/// method it had when it was found. What goes with the entry that the
+/// container takes out (the value under the reference, the key of a
+/// value) is added to `more` and looked at like what the object refers
+/// to.
 #[cfg(not(Py_3_13))]
 unsafe fn weakly_watched(o: Obj, more: &mut Vec<PyObj>) -> bool {
     let offset = (*ffi::Py_TYPE(o)).tp_weaklistoffset;
     if offset == 0 {
         return false;
     }
-    let mut known: Option<Vec<(usize, u8)>> = None;
+    let mut known: Option<Vec<Remover>> = None;
     let mut at = *((o as *mut u8).offset(offset) as *mut *mut WeakRef);
     while !at.is_null() {
         let callback = (*at).wr_callback;
@@ -757,25 +853,66 @@ unsafe fn weakly_watched(o: Obj, more: &mut Vec<PyObj>) -> bool {
         }
         let code = ffi::PyFunction_GetCode(callback) as usize;
         let known = known.get_or_insert_with(|| weak_containers());
-        let Some((_, kind)) = known.iter().find(|(other, _)| *other == code) else {
+        let Some(remover) = known.iter().find(|other| other.code == code) else {
             return true;
         };
-        // The container, through the weak reference to it that the
-        // function has as a default, and what it keeps its entries in.
-        let defaults = ffi::PyFunction_GetDefaults(callback);
-        let to_it = if defaults.is_null() || ffi::PyTuple_GET_SIZE(defaults) == 0 { null_mut() } else { ffi::PyTuple_GET_ITEM(defaults, 0) };
-        if to_it.is_null() || ffi::PyWeakref_Check(to_it) == 0 {
+        if !remover.references.contains(&(ffi::Py_TYPE(reference) as usize)) {
             return true;
         }
-        let container = ffi::PyWeakref_GetObject(to_it);
+        // The container: a variable of the method that made the function,
+        // or behind the weak reference to it that the function has as a
+        // default.
+        let (container, identity) = if remover.kind == 3 {
+            let Some(found) = enclosed(callback) else {
+                return true;
+            };
+            found
+        } else {
+            let defaults = ffi::PyFunction_GetDefaults(callback);
+            let to_it = if defaults.is_null() || ffi::PyTuple_GET_SIZE(defaults) == 0 { null_mut() } else { ffi::PyTuple_GET_ITEM(defaults, 0) };
+            if to_it.is_null() || ffi::PyWeakref_CheckRefExact(to_it) == 0 {
+                return true;
+            }
+            (ffi::PyWeakref_GetObject(to_it), null_mut())
+        };
         if container.is_null() || container == ffi::Py_None() {
+            // The container is gone: the function finds that and returns.
             continue;
         }
-        match kind {
+        if ffi::Py_TYPE(container) as usize != remover.class {
+            return true;
+        }
+        let slot = pyffi::_PyObject_GetDictPtr(container);
+        if slot.is_null() || (*slot).is_null() {
+            return true;
+        }
+        let own = |name: &std::ffi::CStr| ffi::PyDict_GetItemString(*slot, name.as_ptr());
+        let dict = |held: Obj| !held.is_null() && ffi::PyDict_CheckExact(held) != 0;
+        let set = |held: Obj| !held.is_null() && ffi::PySet_CheckExact(held) != 0;
+        let list = |held: Obj| !held.is_null() && ffi::PyList_CheckExact(held) != 0;
+        if remover.kind == 3 {
+            let method = PyObj::from_owned(ffi::PyUnicode_InternFromString(c"_remove_id".as_ptr()));
+            let found = pyffi::_PyType_Lookup(ffi::Py_TYPE(container), method.as_ptr());
+            let same = !found.is_null() && ffi::PyFunction_Check(found) != 0 && ffi::PyFunction_GetCode(found) as usize == remover.method;
+            let (values, references) = (own(c"values"), own(c"refs"));
+            if !same || !own(c"_remove_id").is_null() || !dict(values) || !dict(references) || ffi::PyLong_CheckExact(identity) == 0 {
+                return true;
+            }
+            let value = ffi::PyDict_GetItemWithError(values, identity);
+            if value.is_null() {
+                ffi::PyErr_Clear();
+            } else {
+                more.push(PyObj::from_borrowed(value));
+            }
+            continue;
+        }
+        let (data, waiting) = (own(c"data"), own(c"_pending_removals"));
+        if !set(own(c"_iterating")) || !(list(waiting) || set(waiting)) {
+            return true;
+        }
+        match remover.kind {
             0 => {
-                let slot = pyffi::_PyObject_GetDictPtr(container);
-                let data = if slot.is_null() || (*slot).is_null() { null_mut() } else { ffi::PyDict_GetItemString(*slot, c"data".as_ptr()) };
-                if data.is_null() || ffi::PyDict_CheckExact(data) == 0 || ffi::PyDict_Size(data) > 65536 {
+                if !dict(data) || ffi::PyDict_Size(data) > 65536 {
                     return true;
                 }
                 let (mut place, mut key, mut value) = (0, null_mut(), null_mut());
@@ -786,6 +923,9 @@ unsafe fn weakly_watched(o: Obj, more: &mut Vec<PyObj>) -> bool {
                 }
             }
             1 => {
+                if !dict(data) {
+                    return true;
+                }
                 let key = ffi::PyObject_GetAttrString(reference, c"key".as_ptr());
                 if key.is_null() {
                     ffi::PyErr_Clear();
@@ -793,7 +933,11 @@ unsafe fn weakly_watched(o: Obj, more: &mut Vec<PyObj>) -> bool {
                 }
                 more.push(PyObj::from_owned(key));
             }
-            _ => {}
+            _ => {
+                if !set(data) {
+                    return true;
+                }
+            }
         }
     }
     false
@@ -825,6 +969,120 @@ unsafe extern "C" fn every_referent(o: Obj, arg: *mut std::ffi::c_void) -> std::
 pub unsafe fn holds_unseen(o: Obj) -> bool {
     let mut info = TcfgTensorInfo::empty();
     capi::api().is_some_and(|api| (api.tensor_info)(o, &mut info) != 0 && info.requires_grad != 0)
+}
+
+/// A class by where it is, found once: `module.name`. Null where the
+/// module was not imported or has no such class.
+unsafe fn class_named(module: &std::ffi::CStr, name: &std::ffi::CStr) -> Obj {
+    let module = ffi::PyDict_GetItemString(ffi::PyImport_GetModuleDict(), module.as_ptr());
+    let found = if module.is_null() || ffi::PyModule_Check(module) == 0 {
+        null_mut()
+    } else {
+        ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), name.as_ptr())
+    };
+    if found.is_null() || ffi::PyType_Check(found) == 0 { null_mut() } else { found }
+}
+
+/// What a tensor that ends holds besides what it shows the garbage
+/// collector, as far as that can be asked without running Python code.
+/// Err where it may hold something that cannot be looked at from here,
+/// so that its end has to be taken to run Python code:
+///
+/// - it requires a gradient (`holds_unseen`);
+/// - it is of a class other than `torch.Tensor` itself (what is asked
+///   below is answered by `__torch_function__` for such a tensor, which
+///   is Python code);
+/// - its memory is not known to be torch's own allocation: a storage
+///   that cannot be resized was made around memory that something else
+///   owns (a numpy array, a buffer, a DLPack capsule, a file that is
+///   mapped), and what gives that memory back when the storage ends is
+///   out of sight. Whether the storage ends with the tensor (another
+///   tensor may share it) cannot be asked from here either.
+///
+/// Ok with the tensor's `.grad` where it has one (a new reference): C++
+/// holds it for the tensor, and it is looked at like what the tensor
+/// refers to.
+unsafe fn unseen(o: Obj) -> Result<Option<PyObj>, ()> {
+    static NAMES: std::sync::OnceLock<(PyObj, PyObj)> = std::sync::OnceLock::new();
+    if holds_unseen(o) {
+        return Err(());
+    }
+    if ffi::Py_TYPE(o) as Obj != class_named(c"torch", c"Tensor") {
+        return Err(());
+    }
+    let (storage, resizable) = NAMES.get_or_init(|| {
+        let name = |text: &std::ffi::CStr| PyObj::from_owned(ffi::PyUnicode_InternFromString(text.as_ptr()));
+        (name(c"untyped_storage"), name(c"resizable"))
+    });
+    let own = {
+        let memory = ffi::PyObject_CallMethodNoArgs(o, storage.as_ptr());
+        let said = if memory.is_null() { null_mut() } else { ffi::PyObject_CallMethodNoArgs(memory, resizable.as_ptr()) };
+        let own = said == ffi::Py_True();
+        xdecref(said);
+        xdecref(memory);
+        own
+    };
+    // A tensor without a storage of this kind says so by raising.
+    ffi::PyErr_Clear();
+    if !own {
+        return Err(());
+    }
+    let gradient = ffi::PyObject_GetAttrString(o, c"grad".as_ptr());
+    if gradient.is_null() {
+        ffi::PyErr_Clear();
+        return Err(());
+    }
+    let gradient = PyObj::from_owned(gradient);
+    Ok((gradient.as_ptr() != ffi::Py_None()).then_some(gradient))
+}
+
+/// Whether an object that shows the garbage collector nothing (its class
+/// has no `tp_traverse`) is known to hold nothing whose end could run
+/// Python code: an object of one of the interpreter's own built-in
+/// classes (numbers, texts, bytes, ranges and what goes over them, code,
+/// None), other than a capsule (which owns what its destructor lets go
+/// of) and what goes over a text or bytes (which holds it, and it may be
+/// of a class of the user's); a dtype, a device, a layout or a memory
+/// format of torch's; a number of numpy's. An object of any other such
+/// class may hold references that cannot be seen (a numpy array and the
+/// buffer it is over, a storage), and its end is taken to run Python
+/// code.
+unsafe fn holds_nothing(o: Obj) -> bool {
+    // The interpreter marks its own built-in classes.
+    const BUILT_IN: std::ffi::c_ulong = 1 << 1;
+    if is_plain(o) {
+        return true;
+    }
+    let ty = ffi::Py_TYPE(o);
+    let class = ty as Obj;
+    if ffi::PyType_GetFlags(ty) & BUILT_IN != 0 {
+        static RANGES: std::sync::OnceLock<[usize; 2]> = std::sync::OnceLock::new();
+        let ranges = RANGES.get_or_init(|| {
+            // What goes over a range, a short one and a long one.
+            let over = |stop: Obj| {
+                let range = ffi::PyObject_CallOneArg(std::ptr::addr_of_mut!(ffi::PyRange_Type) as Obj, stop);
+                let made = if range.is_null() { null_mut() } else { ffi::PyObject_GetIter(range) };
+                let class = if made.is_null() { 0 } else { ffi::Py_TYPE(made) as usize };
+                xdecref(made);
+                xdecref(range);
+                xdecref(stop);
+                ffi::PyErr_Clear();
+                class
+            };
+            [over(ffi::PyLong_FromLong(1)), over(ffi::PyLong_FromDouble(1e30))]
+        });
+        let goes_over = (*ty).tp_iternext.is_some() && !ranges.contains(&(class as usize));
+        return ffi::PyCapsule_CheckExact(o) == 0 && !goes_over;
+    }
+    const OWN: [&std::ffi::CStr; 4] = [c"dtype", c"device", c"layout", c"memory_format"];
+    if OWN.iter().any(|name| class == class_named(c"torch", name)) {
+        return true;
+    }
+    // A number of numpy's own kinds: a class defined in C under `number`
+    // or `bool_`.
+    let (number, flag) = (class_named(c"numpy", c"number"), class_named(c"numpy", c"bool_"));
+    let under = |base: Obj| !base.is_null() && ffi::PyType_IsSubtype(ty, base as *mut ffi::PyTypeObject) != 0;
+    is_static(ty) && (under(number) || under(flag))
 }
 
 /// Whether the end of an object runs code of its class: a `__del__`, or
@@ -964,15 +1222,25 @@ pub unsafe fn end_quietly(gone: &mut [Obj], stay: &[Obj]) -> Result<(), Obj> {
             if finalized(o) || weakly_watched(o, &mut more) {
                 return Err(o);
             }
-            // A tensor that requires a gradient ends with what C++ holds
-            // for it, which cannot be looked at.
+            // A tensor ends with what C++ holds for it: its history
+            // and the hooks on it, what owns its memory, its `.grad`.
+            // Where that cannot be looked at, its end is taken to run
+            // Python code.
             let tensor = is_tensor(o);
-            if tensor && holds_unseen(o) {
-                return Err(o);
+            if tensor {
+                match unseen(o) {
+                    Ok(gradient) => more.extend(gradient),
+                    Err(()) => return Err(o),
+                }
             }
             found.extend(more[before..].iter().map(|other| other.as_ptr()));
-            if let Some(traverse) = (*ty).tp_traverse {
-                traverse(o, every_referent, &mut found as *mut Vec<Obj> as *mut std::ffi::c_void);
+            match (*ty).tp_traverse {
+                Some(traverse) => {
+                    traverse(o, every_referent, &mut found as *mut Vec<Obj> as *mut std::ffi::c_void);
+                }
+                // What shows nothing may hold what cannot be seen.
+                None if !holds_nothing(o) => return Err(o),
+                None => {}
             }
             for other in &found {
                 // A class does not end where a reference to it is let go of.
