@@ -23,6 +23,12 @@ struct MetadataField {
   using FieldType = T;
 
   std::string_view name;
+
+  // Field identity is the name, independent of the declared value type.
+  template <typename U>
+  constexpr bool operator==(const MetadataField<U>& other) const noexcept {
+    return name == other.name;
+  }
 };
 
 struct MetadataDict {
