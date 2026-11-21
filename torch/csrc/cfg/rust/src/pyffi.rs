@@ -26,6 +26,7 @@ extern "C" {
     pub fn PyErr_SetHandledException(exc: Obj);
     // Borrowed reference to what the type's MRO holds for name, or null.
     pub fn _PyType_Lookup(ty: *mut ffi::PyTypeObject, name: Obj) -> Obj;
+    pub fn PyType_GetDict(ty: *mut ffi::PyTypeObject) -> Obj;
     // Like getattr, but a method comes back unbound: returns 1 with the
     // function in *method, to be called with obj as its first argument.
     pub fn _PyObject_GetMethod(obj: Obj, name: Obj, method: *mut Obj) -> std::os::raw::c_int;
