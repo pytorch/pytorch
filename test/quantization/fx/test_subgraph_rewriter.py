@@ -23,6 +23,7 @@ if __name__ == '__main__':
 class TestSubgraphRewriter(JitTestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    hw_classification = HardwareClassification.GENERIC
     def test_subgraph_rewriter_preserves_logic(self):
         class M(torch.nn.Module):
             def forward(self, x):
