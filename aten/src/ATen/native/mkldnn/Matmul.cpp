@@ -316,6 +316,13 @@ bool mkldnn_fp16_gemm(
     const c10::Half *b, int64_t ldb,
     float beta,
     c10::Half *c, int64_t ldc) {
+#if AT_MKLDNN_ACL_ENABLED()
+  if (n == 1 && alpha == 1.0f && transa != TransposeType::NoTranspose &&
+      transb == TransposeType::NoTranspose && cpuinfo_initialize() &&
+      cpuinfo_has_arm_sve()) {
+    return false;
+  }
+#endif
   return mkldnn_gemm<c10::Half>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
