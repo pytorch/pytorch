@@ -62,6 +62,10 @@ pub enum Kind {
     Residual,
     /// What the path took for granted where it went on (`Assert`).
     Check,
+    /// A store into an object from outside the path: an attribute, an item
+    /// of a list or a dict, an append. It is done when the path lands, in
+    /// the order of the function, behind every check.
+    Effect,
 }
 
 /// What a path takes for granted of a value where it goes on.
@@ -94,6 +98,15 @@ pub enum Assert {
     /// The number is this one: the place of an item that the path takes
     /// out of a list it filled itself.
     Equals(PathValue, PyObj),
+    /// Two values are one object: a read behind a store of the path, of
+    /// the same object by another way, is given what was stored.
+    Same(PathValue, PathValue),
+    /// What a read behind a store of the path goes through is not what the
+    /// store changes: the first value (the list or dict that is read, or,
+    /// with the flag, the object an attribute is read of) against the
+    /// object that was stored into and where it keeps what was stored
+    /// (`apart`).
+    Apart(PathValue, bool, PathValue, Keeps),
 }
 
 impl Assert {
@@ -108,7 +121,9 @@ impl Assert {
             | Assert::Lacks(v, _)
             | Assert::Sequence(v, ..)
             | Assert::Keys(v, _)
-            | Assert::Equals(v, _) => *v,
+            | Assert::Equals(v, _)
+            | Assert::Same(v, _)
+            | Assert::Apart(v, ..) => *v,
             Assert::Guard(cond) => cond.value(),
         }
     }
@@ -125,6 +140,8 @@ pub enum Stage {
     After,
     /// Not at all: nothing behind the path needs what it does.
     Skipped,
+    /// Where the path lands, behind everything that can fail: an effect.
+    Landing,
 }
 
 pub struct PathInst {
@@ -325,6 +342,9 @@ pub struct Path {
     /// It ended at a block that had not been profiled yet: the next run
     /// gets further.
     pub provisional: bool,
+    /// It has stores into objects from outside (`Kind::Effect`), which are
+    /// done when it lands.
+    pub effects: bool,
     pub exported: Shared<Vec<Arc<Exported>>>,
     /// Register files for the calls that run it, kept from one to the next.
     pub registers: Shared<Vec<Vec<Obj>>>,
@@ -1372,6 +1392,17 @@ pub unsafe fn quiet_compare(a: Obj, b: Obj) -> bool {
     (is_number(a) && is_number(b)) || (text(a) && text(b)) || (token(a) && token(b))
 }
 
+/// An iterator over, or a view of, a list, a tuple, a dict or a range: what
+/// is read of it is read of what it was made of.
+pub unsafe fn goes_over_another(o: Obj) -> bool {
+    let plain = ffi::PyList_Check(o) != 0
+        || ffi::PyTuple_Check(o) != 0
+        || ffi::PyDict_Check(o) != 0
+        || ffi::PyUnicode_Check(o) != 0
+        || ffi::Py_TYPE(o) == std::ptr::addr_of_mut!(ffi::PyRange_Type);
+    !plain && quiet_iter(o).is_some()
+}
+
 /// Whether iterating over a value runs no Python code: Some(false) for a
 /// list, a tuple, a dict, a view of a dict, a str or a range; Some(true)
 /// for an iterator over one of those, an `enumerate` or a `zip`, which is
@@ -1484,6 +1515,12 @@ unsafe fn builtin_named(which: Builtin) -> usize {
         found
     });
     found[BUILTINS.iter().position(|(_, other)| *other == which).unwrap()]
+}
+
+/// Whether a callee is `getattr` or `hasattr`: a read of an attribute by
+/// its name.
+pub unsafe fn reads_attribute(callee: Obj) -> bool {
+    builtin_named(Builtin::GetAttr) == callee as usize || builtin_named(Builtin::HasAttr) == callee as usize
 }
 
 /// Whether a callee is the builtin `len`.
@@ -1670,7 +1707,8 @@ pub struct Specials {
     pub getitem: PyObj,
     pub get: PyObj,
     pub getattr: PyObj,
-    getattribute: PyObj,
+    pub setattr: PyObj,
+    pub getattribute: PyObj,
 }
 
 pub unsafe fn specials() -> &'static Specials {
@@ -1682,6 +1720,7 @@ pub unsafe fn specials() -> &'static Specials {
         getitem: name(c"__getitem__"),
         get: name(c"__get__"),
         getattr: name(c"__getattr__"),
+        setattr: name(c"__setattr__"),
         getattribute: name(c"__getattribute__"),
     })
 }
@@ -3310,6 +3349,7 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
         calls: 0,
         first: None,
         provisional: false,
+        effects: false,
         exported: Shared::new(Vec::new()),
         registers: Shared::new(Vec::new()),
     }
@@ -3328,6 +3368,164 @@ pub enum Held {
     Value(PathValue),
     /// It holds nothing anymore.
     Empty,
+}
+
+/// Where a store of a path puts what it stores: into the list or the dict
+/// itself, into the dict the object keeps its attributes in, or into the
+/// dict a module keeps its buffers in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Keeps {
+    Itself,
+    Attributes,
+    Buffers,
+}
+
+/// The list or dict of an object that a store of that kind changes; null
+/// where there is none.
+pub unsafe fn kept(o: Obj, keeps: Keeps) -> Obj {
+    if o.is_null() || capi::is_unboxed(o) {
+        return null_mut();
+    }
+    if keeps == Keeps::Itself {
+        return o;
+    }
+    let slot = pyffi::_PyObject_GetDictPtr(o);
+    if slot.is_null() || (*slot).is_null() {
+        return null_mut();
+    }
+    if keeps == Keeps::Attributes { *slot } else { ffi::PyDict_GetItemString(*slot, c"_buffers".as_ptr()) }
+}
+
+/// Whether what a read goes through is not what a store changes: `read`
+/// is the list or dict that is read, or with `attributes` the object an
+/// attribute is read of, whose dict and, for a module, the dicts of its
+/// parameters, buffers and modules are looked into. Two objects may keep
+/// their attributes in one dict, and a dict that is handed about may be
+/// the one an object keeps its attributes in: what is compared is the
+/// dict or list itself, and the objects only where one has no dict yet.
+pub unsafe fn apart(read: Obj, attributes: bool, target: Obj, keeps: Keeps) -> bool {
+    if read.is_null() || target.is_null() || read == target || capi::is_unboxed(read) {
+        return false;
+    }
+    let changed = kept(target, keeps);
+    if changed.is_null() {
+        return true;
+    }
+    if !attributes {
+        return read != changed;
+    }
+    let own = kept(read, Keeps::Attributes);
+    let part = |name: &std::ffi::CStr| if own.is_null() { null_mut() } else { ffi::PyDict_GetItemString(own, name.as_ptr()) };
+    ![own, part(c"_parameters"), part(c"_buffers"), part(c"_modules")].contains(&changed)
+}
+
+/// A store that a path has taken down: the object as it was in the run
+/// that was taken down and where it keeps what was stored, the name of the
+/// attribute or the key of the dict (none for what changes a list), and
+/// the values of the path that the object and what was stored are.
+pub struct Stored {
+    pub object: Obj,
+    pub keeps: Keeps,
+    pub key: Option<PyObj>,
+    pub attribute: bool,
+    pub target: PathValue,
+    pub value: PathValue,
+}
+
+/// How an attribute store that runs no Python code is done.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Store {
+    /// As `object.__setattr__` does it.
+    Plain,
+    /// `nn.Module.__setattr__` of the name of a buffer: into that dict.
+    Buffer(Obj),
+}
+
+/// What `nn.Module.__setattr__` is, the dict of the hooks it calls for a
+/// buffer, and the classes it tells apart: `nn.Module` and `torch.Tensor`.
+unsafe fn module_store() -> (usize, usize, usize, usize) {
+    static FOUND: std::sync::OnceLock<(usize, usize, usize, usize)> = std::sync::OnceLock::new();
+    *FOUND.get_or_init(|| {
+        let torch = ffi::PyImport_ImportModule(c"torch".as_ptr());
+        let tensor = if torch.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(torch, c"Tensor".as_ptr()) };
+        let module = ffi::PyImport_ImportModule(c"torch.nn.modules.module".as_ptr());
+        let class = if module.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(module, c"Module".as_ptr()) };
+        let dict = if class.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(class, c"__dict__".as_ptr()) };
+        let setattr = if dict.is_null() { null_mut() } else { ffi::PyObject_GetItem(dict, specials().setattr.as_ptr()) };
+        let hooks =
+            if module.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(module, c"_global_buffer_registration_hooks".as_ptr()) };
+        ffi::PyErr_Clear();
+        // The module keeps them.
+        for held in [module, class, dict, setattr, hooks, torch, tensor] {
+            xdecref(held);
+        }
+        (setattr as usize, hooks as usize, class as usize, tensor as usize)
+    })
+}
+
+/// How `obj.name = value` is done if it runs no Python code and cannot
+/// fail: on an object whose class stores attributes as `object` does and
+/// has no descriptor of its own for the name, or on an `nn.Module` whose
+/// class has `Module.__setattr__`, for the cases of that function that
+/// come down to one store: a value that is a plain tensor or of a class
+/// that is neither a tensor's nor a module's (so no parameter, module or
+/// buffer object), under a name that is no parameter and no module, which
+/// goes to the object, or, under the name of a buffer and being a plain
+/// tensor or None with no hook registered for buffers, into the dict of
+/// buffers.
+/// None for everything else: a path ends in front of such a store.
+pub unsafe fn store_kind(obj: Obj, name: Obj, value: Obj, api: &TcfgApi) -> Option<Store> {
+    const KEPT: [&[u8]; 4] = [b"__dict__", b"__class__", b"_forward", b"_backward"];
+    if obj.is_null() || value.is_null() || capi::is_unboxed(obj) || ffi::PyType_Check(obj) != 0 {
+        return None;
+    }
+    let text = pyffi::str_to_string(name);
+    if KEPT.iter().any(|kept| text.as_bytes().starts_with(kept)) || text.starts_with("_compiled") {
+        return None;
+    }
+    let ty = ffi::Py_TYPE(obj);
+    let slot = pyffi::_PyObject_GetDictPtr(obj);
+    let descr = pyffi::_PyType_Lookup(ty, name);
+    let data = !descr.is_null() && (*ffi::Py_TYPE(descr)).tp_descr_set.is_some();
+    if slot.is_null() || data {
+        return None;
+    }
+    let names = specials();
+    let object = std::ptr::addr_of_mut!(ffi::PyBaseObject_Type);
+    let setattr = pyffi::_PyType_Lookup(ty, names.setattr.as_ptr());
+    if setattr == pyffi::_PyType_Lookup(object, names.setattr.as_ptr()) {
+        return Some(Store::Plain);
+    }
+    let (module, hooks, layer, tensors) = module_store();
+    if setattr.is_null() || setattr as usize != module || (*slot).is_null() || layer == 0 || tensors == 0 {
+        return None;
+    }
+    // What the value is: a tensor that is no parameter and no buffer
+    // object, or something that is neither a tensor nor a module.
+    let mut info = TcfgTensorInfo::empty();
+    let tensor = (api.tensor_info)(value, &mut info) != 0;
+    let exact = tensor
+        && (capi::is_unboxed(value) || {
+            let own = pyffi::_PyObject_GetDictPtr(value);
+            ffi::Py_TYPE(value) as usize == tensors && (own.is_null() || (*own).is_null() || ffi::PyDict_Size(*own) == 0)
+        });
+    let of_class = |class: usize| ffi::PyType_IsSubtype(ffi::Py_TYPE(value), class as *mut ffi::PyTypeObject) != 0;
+    if !(exact || (!tensor && !capi::is_unboxed(value) && !of_class(layer) && !of_class(tensors))) {
+        return None;
+    }
+    let of = |kind: &std::ffi::CStr| ffi::PyDict_GetItemString(*slot, kind.as_ptr());
+    let holds = |dict: Obj| !dict.is_null() && ffi::PyDict_CheckExact(dict) != 0 && !ffi::PyDict_GetItemWithError(dict, name).is_null();
+    let (parameters, modules, buffers) = (of(c"_parameters"), of(c"_modules"), of(c"_buffers"));
+    let known = |dict: Obj| dict.is_null() || dict == ffi::Py_None() || ffi::PyDict_CheckExact(dict) != 0;
+    if !known(parameters) || !known(modules) || !known(buffers) || holds(parameters) || holds(modules) {
+        return None;
+    }
+    if !holds(buffers) {
+        return Some(Store::Plain);
+    }
+    let hooked = hooks == 0 || ffi::PyObject_Size(hooks as Obj) != 0;
+    ffi::PyErr_Clear();
+    ((exact || value == ffi::Py_None()) && !hooked).then_some(Store::Buffer(buffers))
 }
 
 /// One activation of a function along a trace: the function, the value of
@@ -3349,6 +3547,7 @@ pub struct Mark {
     /// How many inlined calls the trace is in since then; 0 for the mark of
     /// a call it went into.
     pub frames: usize,
+    stores: usize,
     inplace: bool,
     body: usize,
     values: usize,
@@ -3386,6 +3585,11 @@ pub struct Trace {
     pub shape: Vec<u32>,
     pub rec: Recording,
     pub mark: Option<Mark>,
+    /// The stores of the path so far (`Kind::Effect`), in the order of the
+    /// function, which a read behind them has to see or be shown to go
+    /// past; and what was already checked to be apart (`Assert::Apart`).
+    pub stores: Vec<Stored>,
+    pub apart: Vec<(PathValue, bool, PathValue, Keeps)>,
     /// An operation of the path writes to a tensor in place.
     pub inplace: bool,
     /// See `Path::first`.
@@ -3417,6 +3621,8 @@ impl Trace {
             shape: Vec::new(),
             rec: Recording { values: vec![null_mut()], nodes: Vec::new(), failed: None, wrote: false },
             mark: None,
+            stores: Vec::new(),
+            apart: Vec::new(),
             inplace: false,
             first: None,
             inlined: Vec::new(),
@@ -3510,6 +3716,10 @@ impl Trace {
                 self.shape.push(u32::MAX - 4);
                 self.shape.extend(names.iter().map(|name| name.as_ptr() as usize as u32));
             }
+            Assert::Same(a, b) => self.shape.extend([u32::MAX - 5, *a, *b]),
+            Assert::Apart(a, attributes, b, keeps) => {
+                self.shape.extend([u32::MAX - 6, *a, *attributes as u32, *b, *keeps as u32])
+            }
             _ => {}
         }
         self.push(Op::Hold(Vec::new()), NONE, Kind::Check, bc);
@@ -3553,6 +3763,7 @@ impl Trace {
         self.mark = Some(Mark {
             at,
             frames,
+            stores: self.stores.len(),
             inplace: self.inplace,
             body: self.body.len(),
             values: self.defs.len(),
@@ -3582,6 +3793,8 @@ impl Trace {
             return;
         };
         self.body.truncate(mark.body);
+        self.stores.truncate(mark.stores);
+        self.apart.clear();
         self.inplace = mark.inplace;
         if self.operators.is_empty() {
             self.first = None;
@@ -3650,6 +3863,7 @@ pub fn renamed(op: &Op, f: &mut impl FnMut(V) -> V) -> Option<Op> {
             Op::ImportName { name: *name, fromlist: f(*fromlist), level: f(*level) }
         }
         Op::SetItem { obj, key, val } => Op::SetItem { obj: f(*obj), key: f(*key), val: f(*val) },
+        Op::StoreAttr { obj, name, val } => Op::StoreAttr { obj: f(*obj), name: *name, val: f(*val) },
         Op::ListAppend(a, b) => Op::ListAppend(f(*a), f(*b)),
         Op::ListExtend(a, b) => Op::ListExtend(f(*a), f(*b)),
         Op::DictMerge(a, b, c) => Op::DictMerge(f(*a), f(*b), f(*c)),
@@ -3725,6 +3939,7 @@ impl Path {
             calls: 0,
             first: None,
             provisional: false,
+            effects: false,
             exported: Shared::new(Vec::new()),
             registers: Shared::new(Vec::new()),
         }
@@ -3815,9 +4030,20 @@ impl Path {
                             branches += matches!(assert, Assert::Truth(..) | Assert::Null(..)) as usize;
                             calls += matches!(assert, Assert::Enters(..)) as usize;
                             need[v] = true;
-                            if defs[v].late { Stage::After } else { Stage::Before }
+                            let mut late = defs[v].late;
+                            if let Assert::Same(_, other) | Assert::Apart(_, _, other, _) = assert {
+                                need[*other as usize] = true;
+                                late |= defs[*other as usize].late;
+                            }
+                            if late { Stage::After } else { Stage::Before }
                         }
                     }
+                }
+                // What it stores is there when the path lands: what the
+                // graph computed is one of its results.
+                Kind::Effect => {
+                    inst.op.for_each_use(|v| need[v as usize] = true);
+                    Stage::Landing
                 }
                 Kind::Residual => {
                     // What changes something the path made goes with it.
@@ -3860,6 +4086,7 @@ impl Path {
         }
         outputs.reverse();
         exits.reverse();
+        let effects = trace.body.iter().any(|inst| inst.stage == Stage::Landing);
         let mut feeds: Vec<PathValue> = Vec::new();
         for inst in trace.body.iter().filter(|inst| inst.kind == Kind::Node || inst.in_graph) {
             reads(&inst.op, |v| {
@@ -3905,6 +4132,7 @@ impl Path {
             calls,
             first: trace.first,
             provisional,
+            effects,
             exported: Shared::new(Vec::new()),
             registers: Shared::new(Vec::new()),
         }
