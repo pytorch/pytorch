@@ -10656,5 +10656,697 @@ class TestVmApi(TestCase):
         self.assertEqual(seen.count("before"), 8)
 
 
+def back_pair(x, w, b):
+    h = (x @ w + b).tanh()
+    return (h * h.exp()).sum(), h.relu().mean()
+
+
+def back_drops(x, w, b):
+    h = torch.nn.functional.dropout((x @ w + b).tanh(), 0.5, True)
+    return (h * h.exp()).sum(), h.relu().mean()
+
+
+def back_scaled(x, w, b):
+    h = (x @ w).tanh()
+    return (h * b).sum(), (h + b).mean()
+
+
+def back_multiplies(x, w, b):
+    return ((x @ w + b).tanh() + 2).prod(), (x @ w).mean()
+
+
+def back_selects(x, w, b):
+    return (x @ w + b).tanh().masked_select(x > 0).sum(), (x @ w).mean()
+
+
+def back_views(x, w, b):
+    h = x @ w + b
+    return h.t(), h[1]
+
+
+def back_views_kept(x, w, b):
+    h = (x @ w + b).tanh()
+    return h.t(), h[1]
+
+
+def back_view_read(x, w, b):
+    q = (x @ w + b).tanh().t()
+    return q, (q * 2).sum()
+
+
+def back_view_read_twice(x, w, b):
+    q = (x @ w + b).tanh().t()
+    s = (q * 2).t()
+    return q, s, (s + b).sum()
+
+
+def back_kept_result(x, w, b):
+    h = (x @ w).tanh()
+    return (h + b).sum(), h
+
+
+def back_writes_input(x, w, b):
+    w.mul_(2)
+    return (x @ w + b).tanh().sum(), b.sum()
+
+
+def back_five(x, w, b):
+    h = (x @ w + b).tanh()
+    return h.sum(), h.exp().sum(), (h * h).sum(), h.sin().sum(), h.relu().sum()
+
+
+def back_halves(x, w, b):
+    first, second = (x @ w + b).tanh().chunk(2, dim=1)
+    return first.exp().sum(), second.sin().sum()
+
+
+def back_halves_drop(x, w, b):
+    dropped = torch.nn.functional.dropout((x @ w + b).tanh(), 0.5, True)
+    first, second = dropped.chunk(2, dim=1)
+    return first.exp().sum(), second.sin().sum()
+
+
+class BackConvNet(torch.nn.Module):
+    """A convnet as they are trained: batch norm, an activation in place, a
+    max pool, a dropout, a loss."""
+
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 8, 3, padding=1)
+        self.bn = torch.nn.BatchNorm2d(8)
+        self.act = torch.nn.ReLU(inplace=True)
+        self.pool = torch.nn.MaxPool2d(2)
+        self.drop = torch.nn.Dropout(0.3)
+        self.head = torch.nn.Linear(8 * 4 * 4, 5)
+
+    def forward(self, x, y):
+        h = self.drop(self.pool(self.act(self.bn(self.conv(x)))))
+        return torch.nn.functional.cross_entropy(self.head(h.flatten(1)), y)
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmGraphBackward(TestCase):
+    """`Graphs(backward=True)`: the engine derives the backward of a graph
+    whose inputs need a gradient."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def staged(self, fn, passes=()):
+        import torch._cfg_rs as runtime
+
+        runtime.backward_forms(True)
+        passes = (*DEFAULT, P.Graphs(backward=True), *passes)
+        return torch.vm(fn, passes=passes, fallback=False, demote=False)
+
+    def states(self):
+        import torch._cfg_rs as runtime
+
+        return sorted(state for state, calls, _, _ in runtime.backward_forms() if calls)
+
+    def proven(self, fn, device, drops=False):
+        """`fn` compiled and called until its form has the engine's backward:
+        the compiled function, and the parameters."""
+        compiled = self.staged(fn)
+        torch.manual_seed(0)
+        w = torch.randn(4, 4, device=device, requires_grad=True)
+        b = torch.randn(4, device=device, requires_grad=True)
+        for _ in range(4):
+            compiled(torch.randn(3, 4, device=device), w, b)
+        self.assertEqual(self.states(), ["the engine's backward"])
+        # The forms are looked at behind the calls: the function stays.
+        self.compiled = compiled
+        return compiled, w, b
+
+    def both(self, fn, device, use):
+        """What `use(function, x, w, b)` gives or raises for the compiled
+        function and for eager, the gradients it leaves included."""
+        compiled, w, b = self.proven(fn, device)
+        x = torch.randn(3, 4, device=device)
+        # Eager has parameters of its own, which hold the same.
+        others = tuple(p.detach().clone().requires_grad_() for p in (w, b))
+        found = []
+        for run, (weight, bias) in ((compiled, (w, b)), (fn, others)):
+            torch.manual_seed(1)
+            try:
+                given = use(run, x, weight, bias)
+            except Exception as error:
+                given = (type(error).__name__, str(error))
+            left = [p.grad for p in (weight, bias)]
+            found.append((given, [None if g is None else g.clone() for g in left]))
+        return found
+
+    def alike(self, got, expected):
+        self.assertIs(type(got), type(expected), f"{got!r} for {expected!r}")
+        if isinstance(expected, torch.Tensor):
+            self.assertEqual(got, expected, atol=0, rtol=0)
+        elif isinstance(expected, (tuple, list)):
+            self.assertEqual(len(got), len(expected))
+            for one, other in zip(got, expected):
+                self.alike(one, other)
+        else:
+            self.assertEqual(got, expected)
+
+    def test_a_training_graph_has_eagers_gradients_bit_for_bit(self, device):
+        self.assertTrue(torch.vm.is_exact((*DEFAULT, P.Graphs(backward=True))))
+
+        def keep(gm, input_types):
+            return gm
+
+        for passes in ((), (keep,)):
+            torch.manual_seed(0)
+            model, reference = BackConvNet().to(device), BackConvNet().to(device)
+            reference.load_state_dict(model.state_dict())
+            compiled = self.staged(model, passes)
+            for step in range(7):
+                x = torch.randn(4, 3, 8, 8, device=device)
+                y = torch.randint(0, 5, (4,), device=device)
+                losses = []
+                for run, net in ((compiled, model), (reference, reference)):
+                    net.zero_grad()
+                    torch.manual_seed(step)
+                    loss = run(x, y)
+                    loss.backward()
+                    losses.append(loss)
+                self.assertEqual(losses[0], losses[1], atol=0, rtol=0)
+                for mine, theirs in zip(model.parameters(), reference.parameters()):
+                    self.assertEqual(mine.grad, theirs.grad, atol=0, rtol=0)
+                for mine, theirs in zip(model.buffers(), reference.buffers()):
+                    self.assertEqual(mine, theirs, atol=0, rtol=0)
+            # The model up to its loss is one graph (a loss can fail behind
+            # the write to the statistics), and it has the engine's
+            # backward: one node behind the loss's.
+            self.assertEqual(self.states(), ["the engine's backward"])
+            node, names = losses[0].grad_fn, []
+            while node is not None and len(names) < 3:
+                names.append(type(node).__name__)
+                node = node.next_functions[0][0] if node.next_functions else None
+            expected = ["NllLossBackward0", "LogSoftmaxBackward0", "GraphBackward"]
+            self.assertEqual(names, expected)
+
+    def test_results_come_with_a_gradient_in_any_combination(self, device):
+        def use(fn, x, w, b):
+            first, second = fn(x, w, b)
+            some = torch.autograd.grad(second, [b], retain_graph=True)
+            first.backward(retain_graph=True)
+            one = [w.grad.clone(), b.grad.clone()]
+            second.backward(retain_graph=True)
+            (first * 2 + second).backward()
+            return some, one, first.requires_grad, first.is_leaf, second.requires_grad
+
+        got, expected = self.both(back_pair, device, use)
+        self.alike(got, expected)
+
+    def test_a_second_backward_and_a_written_tensor_raise_eagers_errors(self, device):
+        def twice(fn, x, w, b):
+            out = fn(x, w, b)[0]
+            out.backward()
+            out.backward()
+
+        def written(fn, x, w, b):
+            out = fn(x, w, b)[0]
+            with torch.no_grad():
+                b.mul_(2)
+            out.backward()
+
+        def result_written(fn, x, w, b):
+            first, second = fn(x, w, b)
+            first.add_(1)
+            (first + second).backward()
+
+        texts = ("a second time", "modified by an inplace operation", None)
+        for use, text in zip((twice, written, result_written), texts):
+            got, expected = self.both(back_scaled, device, use)
+            self.alike(got, expected)
+            if text is not None:
+                self.assertIn(text, expected[0][1])
+
+    def test_hooks_on_results_and_inputs_run_as_eagers(self, device):
+        def use(fn, x, w, b):
+            seen = []
+            first, second = fn(x, w, b)
+            first.register_hook(lambda grad: seen.append(grad.clone()) or grad * 2)
+            second.retain_grad()
+            handle = w.register_hook(lambda grad: seen.append(grad.clone()))
+            (first + second * 3).backward()
+            handle.remove()
+            return seen, second.grad
+
+        got, expected = self.both(back_pair, device, use)
+        self.alike(got, expected)
+
+    def test_create_graph_is_eagers_or_says_why_not(self, device):
+        def use(fn, x, w, b):
+            first, _ = fn(x, w, b)
+            (gw,) = torch.autograd.grad(first, w, create_graph=True)
+            gw.square().sum().backward()
+            return gw.detach()
+
+        got, expected = self.both(back_pair, device, use)
+        self.alike(got, expected)
+        # A graph that draws cannot be run again on the tape: it says so.
+        got, expected = self.both(back_drops, device, use)
+        self.assertEqual(got[0][0], "RuntimeError")
+        self.assertIn("create_graph=True", got[0][1])
+        self.assertIsInstance(expected[0], torch.Tensor)
+
+    def test_what_the_engine_does_not_serve_runs_on_the_tape(self, device):
+        def anomaly(fn, x, w, b):
+            with torch.autograd.detect_anomaly(check_nan=False):
+                first, _ = fn(x, w, b)
+                first.backward()
+            return type(first.grad_fn).__name__
+
+        def transform(fn, x, w, b):
+            return torch.func.grad(lambda other: fn(x, other, b)[0])(w)
+
+        def no_grad(fn, x, w, b):
+            with torch.no_grad():
+                first, _ = fn(x, w, b)
+            return first.requires_grad, first
+
+        for use in (anomaly, transform, no_grad):
+            got, expected = self.both(back_pair, device, use)
+            self.alike(got, expected)
+
+    def test_a_graph_that_cannot_be_taken_down_keeps_the_tape(self, device):
+        # What a masked select gives has a size that depends on what a
+        # tensor holds. The backward of a product looks for zeros among what
+        # it multiplied, and does one thing or another by what it finds.
+        reasons = [(back_selects, "looks at what a tensor holds")]
+        reasons += [(back_multiplies, "aten::nonzero looks at what a tensor holds")]
+        for fn, reason in reasons:
+            compiled = self.staged(fn)
+            torch.manual_seed(0)
+            w = torch.randn(4, 4, device=device, requires_grad=True)
+            b = torch.randn(4, device=device, requires_grad=True)
+            for step in range(5):
+                x = torch.randn(3, 4, device=device)
+                found = []
+                for run in (compiled, fn):
+                    w.grad = b.grad = None
+                    first, second = run(x, w, b)
+                    (first + second).sum().backward()
+                    found.append((first, w.grad.clone(), b.grad.clone()))
+                self.alike(found[0], found[1])
+            states = self.states()
+            self.assertEqual(len(states), 1)
+            self.assertIn("eager's tape", states[0])
+            self.assertIn(reason, states[0])
+            graphs = torch.vm.regions(compiled)
+            forms = [form for graph in graphs for form in graph.get("forms", ())]
+            self.assertIn(states[0], [form.get("backward") for form in forms])
+
+    def test_a_result_that_is_a_view_is_eagers_view(self, device):
+        def use(fn, x, w, b):
+            turned, row = fn(x, w, b)
+            base = turned._base
+            said = [turned.grad_fn.name(), row.grad_fn.name(), base is row._base]
+            said += [base.requires_grad, turned.is_leaf]
+            # Written to in place: eager rewrites the history of what it is a view of.
+            row.mul_(2)
+            said.append(row.grad_fn.name())
+            (turned.sum() + row.exp().sum()).backward()
+            return said, turned.detach().clone()
+
+        got, expected = self.both(back_views, device, use)
+        self.alike(got, expected)
+        self.assertEqual(got[0][0][:2], ["TBackward0", "SelectBackward0"])
+        # What the views are views of is what a hyperbolic tangent gave,
+        # which its backward needs as it was.
+        got, expected = self.both(back_views_kept, device, use)
+        self.alike(got, expected)
+        self.assertEqual(got[0][0], "RuntimeError")
+        text = "output 0 of Tanh, is at version 1; expected version 0"
+        self.assertIn(text, got[0][1])
+
+    def test_a_form_is_cut_where_it_reads_a_view_that_a_result_is_made_of(self, device):
+        # A view that is a result is eager's view when it is made behind a
+        # node. What reads it in the graph is a part of its own, behind it.
+        def use(fn, x, w, b):
+            turned, total = fn(x, w, b)
+            based, tracked = turned._base is not None, total.grad_fn is not None
+            said = [turned.grad_fn.name(), based, tracked]
+            (turned.exp().sum() + total * 3).backward()
+            return said, turned.detach().clone(), total.detach().clone()
+
+        compiled = self.staged(back_view_read)
+        torch.manual_seed(0)
+        w = torch.randn(4, 4, device=device, requires_grad=True)
+        b = torch.randn(4, device=device, requires_grad=True)
+        for _ in range(8):
+            x = torch.randn(3, 4, device=device)
+            found = []
+            for run in (compiled, back_view_read):
+                w.grad = b.grad = None
+                found.append((use(run, x, w, b), w.grad.clone(), b.grad.clone()))
+            self.alike(found[0], found[1])
+        self.assertEqual(self.states(), ["in parts"] + ["the engine's backward"] * 2)
+        # A part is cut again where it reads a view that it gives.
+        compiled = self.staged(back_view_read_twice)
+        for _ in range(12):
+            x = torch.randn(3, 4, device=device)
+            found = []
+            for run in (compiled, back_view_read_twice):
+                w.grad = b.grad = None
+                first, second, total = run(x, w, b)
+                (first.exp().sum() + second.sin().sum() * 2 + total).backward()
+                grads = (w.grad.clone(), b.grad.clone())
+                found.append((first, second, total, second.grad_fn.name(), *grads))
+            self.alike(found[0], found[1])
+        engines = ["the engine's backward"] * 3
+        self.assertEqual(self.states(), ["in parts"] * 2 + engines)
+
+    def test_any_of_many_results_come_with_a_gradient(self, device):
+        compiled, w, b = self.proven(back_five, device)
+        x = torch.randn(3, 4, device=device)
+        # Of five results only all of them and each alone were compared with
+        # the autograd engine when the form was taken down.
+        for chosen in ((0, 3), (1, 2, 4), (4,), (0, 1, 2, 3, 4)):
+            found = []
+            for run in (compiled, back_five):
+                w.grad = b.grad = None
+                given = run(x, w, b)
+                sum(given[at] * (at + 1) for at in chosen).backward()
+                found.append((given, w.grad.clone(), b.grad.clone()))
+            self.alike(found[0], found[1])
+        self.assertEqual(self.states(), ["the engine's backward"])
+
+    def test_gradients_for_some_results_of_a_node_with_several(self, device):
+        # Eager's node of a chunk is handed a gradient for each half. For
+        # one of them alone its backward was not taken down: the forward
+        # runs again on the tape, and eager's nodes are called for it.
+        def use(fn, x, w, b):
+            first, _ = fn(x, w, b)
+            first.backward()
+            return first.detach()
+
+        got, expected = self.both(back_halves, device, use)
+        self.alike(got, expected)
+        self.assertEqual(self.states(), ["the engine's backward"])
+        # A graph that draws cannot run again: it says so.
+        got, expected = self.both(back_halves_drop, device, use)
+        self.assertEqual(got[0][0], "RuntimeError")
+        self.assertIn("as never before", got[0][1])
+        self.assertIn("draws random numbers", got[0][1])
+
+    def test_an_input_that_was_computed_of_another_input(self, device):
+        compiled = self.staged(back_pair)
+        torch.manual_seed(0)
+        w = torch.randn(4, 4, device=device, requires_grad=True)
+        ran = []
+        for step in range(6):
+            x = torch.randn(3, 4, device=device)
+            found = []
+            for run in (compiled, back_pair):
+                w.grad = None
+                mid = w * 2
+                mid.register_hook(lambda grad: ran.append(step))
+                # What is computed of `w` is an input, and `w` is one too.
+                first, second = run(x, w, mid.sum(0))
+                # Taking the backward down runs no node that is not the graph's.
+                self.assertEqual(ran.count(step), len(found))
+                (first + second).backward()
+                found.append((first, second, w.grad.clone()))
+            self.alike(found[0], found[1])
+        self.assertEqual(self.states(), ["the engine's backward"])
+
+    def test_an_input_that_is_written_to_with_a_gradient_through_it(self, device):
+        # Eager gives the input a new node at the write. A graph that ran
+        # without a tape would leave it the old one.
+        compiled = self.staged(back_writes_input)
+        torch.manual_seed(0)
+        w = torch.randn(4, 4, device=device, requires_grad=True)
+        b = torch.randn(4, device=device, requires_grad=True)
+        for _ in range(6):
+            x = torch.randn(3, 4, device=device)
+            found = []
+            for run in (compiled, back_writes_input):
+                w.grad = b.grad = None
+                mid = w * 0.5
+                first, second = run(x, mid, b)
+                (first + second).backward()
+                grads = (w.grad.clone(), b.grad.clone())
+                found.append((first, mid.detach().clone(), mid.grad_fn.name(), *grads))
+            self.alike(found[0], found[1])
+        self.assertNotIn("the engine's backward", self.states())
+
+    def test_backwards_from_several_threads(self, device):
+        import threading
+
+        compiled, w, b = self.proven(back_pair, device)
+        x = torch.randn(3, 4, device=device)
+        expected = torch.autograd.grad(sum(back_pair(x, w, b)), (w, b))
+        # One call of the graph, and six backwards of it at once.
+        first, second = compiled(x, w, b)
+        found = [None] * 6
+
+        def again(at):
+            found[at] = torch.autograd.grad(first + second, (w, b), retain_graph=True)
+
+        six = range(len(found))
+        threads = [threading.Thread(target=again, args=(at,)) for at in six]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        for got in found:
+            self.alike(got, expected)
+        # Six calls of the graph, and the backward of each on a thread of its own.
+        calls = []
+        for at in range(len(found)):
+            leaves = [p.detach().clone().requires_grad_() for p in (w, b)]
+            mine = (torch.randn(3, 4, device=device), *leaves)
+            calls.append((mine, compiled(*mine)))
+
+        def own(at):
+            (_, weight, bias), (one, other) = calls[at]
+            (one * (at + 1) + other).backward()
+            found[at] = (weight.grad, bias.grad)
+
+        threads = [threading.Thread(target=own, args=(at,)) for at in range(len(found))]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        for at, ((x, weight, bias), _) in enumerate(calls):
+            eagers = [p.detach().clone().requires_grad_() for p in (weight, bias)]
+            one, other = back_pair(x, *eagers)
+            (one * (at + 1) + other).backward()
+            self.alike(found[at], (eagers[0].grad, eagers[1].grad))
+        self.assertEqual(self.states(), ["the engine's backward"])
+
+    def test_a_backward_inside_a_backward(self, device):
+        # A hook of a tensor, and the backward of a function of autograd,
+        # run the backward of another call of the graph while one runs.
+        def use(fn, x, w, b):
+            seen = []
+            first, second = fn(x, w, b)
+            other = tuple(p.detach().clone().requires_grad_() for p in (w, b))
+            inner, _ = fn(x * 2, *other)
+
+            def hook(grad):
+                seen.append(torch.autograd.grad(inner, other, retain_graph=True))
+                return grad
+
+            class Passes(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, value):
+                    return value * 1
+
+                @staticmethod
+                def backward(ctx, grad):
+                    seen.append(torch.autograd.grad(inner, other, retain_graph=True))
+                    return grad
+
+            first.register_hook(hook)
+            (Passes.apply(first) + second * 2).backward()
+            return seen
+
+        got, expected = self.both(back_pair, device, use)
+        self.alike(got, expected)
+        self.assertEqual(len(got[0]), 2)
+
+    def test_what_is_accumulated_when_a_backward_raises(self, device):
+        # Eager raises at the node that needs the tensor that was written
+        # to, and has by then added up the gradient of an input whose nodes
+        # all ran before it. The node of a graph raises before it gives
+        # anything: nothing of that backward is in an input of the graph.
+        def use(fn, x, w, b):
+            total, kept = fn(x, w, b)
+            kept.mul_(2)
+            try:
+                total.backward()
+            except RuntimeError as error:
+                return str(error), w.grad is None, b.grad is None
+            return None
+
+        got, expected = self.both(back_kept_result, device, use)
+        text = "output 0 of Tanh, is at version 1; expected version 0"
+        self.assertIn(text, expected[0][0])
+        self.assertEqual(got[0][0], expected[0][0])
+        self.assertEqual((expected[0][1], expected[0][2]), (True, False))
+        self.assertEqual((got[0][1], got[0][2]), (True, True))
+
+    def test_a_pass_compiles_two_plain_graphs_and_derives_nothing(self, device):
+        net, other = BackConvNet().to(device), BackConvNet().to(device)
+        other.load_state_dict(net.state_dict())
+        # What a compiler makes of a dropout draws other elements than eager
+        # does: the gradients are compared without the draws.
+        net.drop.p = other.drop.p = 0.0
+        compiled = self.staged(lambda x, y: net(x, y), (P.Inductor(),))
+        for step in range(6):
+            x = torch.randn(4, 3, 8, 8, device=device)
+            y = torch.randint(0, 5, (4,), device=device)
+            net.zero_grad()
+            other.zero_grad()
+            torch.manual_seed(step)
+            loss = compiled(x, y)
+            loss.backward()
+            torch.manual_seed(step)
+            other(x, y).backward()
+            for ours, eagers in zip(net.parameters(), other.parameters()):
+                self.assertEqual(ours.grad, eagers.grad)
+            for ours, eagers in zip(net.buffers(), other.buffers()):
+                self.assertEqual(ours, eagers)
+        self.assertEqual(self.states(), ["the engine's backward"])
+        names = []
+        node = loss.grad_fn
+        while node is not None and len(names) < 3:
+            names.append(node.name())
+            node = node.next_functions[0][0]
+        self.assertEqual(names[-1], "GraphBackward")
+
+    def test_the_forward_keeps_fewer_bytes_than_the_backward_reads(self, device):
+        import torch._cfg_rs as runtime
+
+        compiled, w, b = self.proven(back_pair, device)
+        ((_, _, read, kept),) = [form for form in runtime.backward_forms() if form[1]]
+        self.assertLess(kept, read)
+        graphs = torch.vm.regions(compiled)
+        forms = [form for graph in graphs for form in graph.get("forms", ())]
+        self.assertIn("the engine's backward", [form.get("backward") for form in forms])
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmJoint(TestCase):
+    """The joint graph of the engine (`torch._cfg_rs.Joint`), by itself."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def joint(self, scale):
+        runtime = torch.vm._load_runtime()
+        aten = torch.ops.aten
+        x = torch.arange(6.0).reshape(2, 3)
+        joint = runtime.Joint([x])
+        y = aten.mul.Scalar(x, scale)
+        joint.forward(aten.mul.Scalar, "aten::mul.Scalar", (x, scale), {}, y, [], False)
+        z = aten.tanh.default(y)
+        joint.forward(aten.tanh.default, "aten::tanh.default", (y,), {}, z, [], False)
+        joint.results([z], [True])
+        seed = torch.ones_like(z)
+        joint.begin([True], [seed])
+        # What autograd saved of `z` is wrapped anew: found by where it is.
+        back, again = aten.tanh_backward.default, z.view_as(z)
+        g = back(seed, again)
+        joint.backward(back, "aten::tanh_backward.default", (seed, again), {}, g)
+        out = aten.mul.Scalar(g, scale)
+        joint.backward(aten.mul.Scalar, "aten::mul.Scalar", (g, scale), {}, out)
+        joint.give(0, out)
+        joint.end()
+        return joint, x
+
+    def test_two_runs_are_the_same_graph_or_it_says_what_is_not(self):
+        first, second, third = (self.joint(scale)[0] for scale in (2.0, 2.0, 3.0))
+        self.assertIsNone(first.differs(second))
+        self.assertIn("is not the same in two runs", first.differs(third))
+        self.assertEqual(first.counts(), (2, [2]))
+
+    def test_what_looks_at_a_tensor_and_what_is_no_value_are_refused(self):
+        joint, x = self.joint(2.0)
+        aten = torch.ops.aten
+
+        def takes(op, name, tensor, gives):
+            joint.forward(op, name, (tensor,), {}, gives, [], False)
+
+        with self.assertRaisesRegex(ValueError, "looks at what a tensor holds"):
+            takes(aten.item.default, "aten::item.default", x, 1.0)
+        other = torch.ones(2, 3)
+        with self.assertRaisesRegex(ValueError, "is no value of the graph"):
+            takes(aten.neg.default, "aten::neg.default", other, -other)
+
+    def test_a_backward_for_some_results_is_made_of_the_one_for_all(self):
+        runtime = torch.vm._load_runtime()
+        aten = torch.ops.aten
+        x = torch.arange(6.0).reshape(2, 3)
+
+        def taken(together):
+            # y = exp(x) and z = sin(x); eager's node of z runs first. With
+            # `together` one node is handed both gradients.
+            joint = runtime.Joint([x])
+            y = aten.exp.default(x)
+            joint.forward(aten.exp.default, "aten::exp.default", (x,), {}, y, [], False)
+            z = aten.sin.default(x)
+            joint.forward(aten.sin.default, "aten::sin.default", (x,), {}, z, [], False)
+            joint.results([y, z], [True, True])
+            gy, gz = torch.ones_like(y), torch.full_like(z, 2.0)
+            joint.begin([True, True], [gy, gz])
+            joint.node(0, [gy, gz] if together else [gz])
+            cos = aten.cos.default(x)
+            joint.backward(aten.cos.default, "aten::cos.default", (x,), {}, cos)
+            first = aten.mul.Tensor(gz, cos)
+            joint.backward(aten.mul.Tensor, "aten::mul.Tensor", (gz, cos), {}, first)
+            joint.node(0 if together else 1, [gy, gz] if together else [gy])
+            second = aten.mul.Tensor(gy, y)
+            joint.backward(aten.mul.Tensor, "aten::mul.Tensor", (gy, y), {}, second)
+            joint.adds(True)
+            summed = (first, second)
+            both = aten.add.Tensor(*summed)
+            joint.backward(aten.add.Tensor, "aten::add.Tensor", summed, {}, both)
+            joint.adds(False)
+            joint.give(0, both)
+            joint.end()
+            joint.cut(False)
+            return joint, [joint.value(tensor) for tensor in (first, second, both)]
+
+        def names(back):
+            return [op[0]._schema.name for op in back[2]]
+
+        def said(back):
+            return names(back), back[3], len(back[1])
+
+        joint, (first, second, both) = taken(False)
+        whole = joint.backward_for([True, True])
+        expected = ["aten::cos", "aten::mul", "aten::mul", "aten::add"]
+        self.assertEqual(names(whole), expected)
+        self.assertEqual(whole[3], [(0, both)])
+        # For one result alone the node of the other does not run, and the
+        # sum is what the one node gave.
+        alone = joint.backward_for([True, False])
+        self.assertEqual(said(alone), (["aten::mul"], [(0, second)], 1))
+        alone = joint.backward_for([False, True])
+        self.assertEqual(said(alone), (["aten::cos", "aten::mul"], [(0, first)], 1))
+        # A node that was handed both was not taken down with one of them.
+        joint, _ = taken(True)
+        self.assertEqual(len(joint.backward_for([True, True])[2]), 4)
+        with self.assertRaisesRegex(ValueError, "some of its gradients and not others"):
+            joint.backward_for([True, False])
+
+    def test_the_cut_keeps_what_the_backward_cannot_compute_again(self):
+        joint, _ = self.joint(2.0)
+        read, kept = joint.cut(False)
+        self.assertEqual((read, kept), (24, 24))
+        described = joint.describe()
+        # The backward reads the result, which the caller can get at: it is
+        # kept as eager keeps it, with the smallest cut too.
+        self.assertEqual(described["saved"], [2])
+        self.assertEqual(joint.cut(True), (24, 24))
+        self.assertEqual(joint.describe()["saved"], [2])
+        (pattern, incoming, ops, gives) = described["backs"][0]
+        self.assertEqual((pattern, incoming, gives), ([True], [3], [(0, 5)]))
+
+
+instantiate_device_type_tests(TestVmGraphBackward, globals())
+
+
 if __name__ == "__main__":
     run_tests()
