@@ -2560,6 +2560,20 @@ def prod(
     )
 
 
+def _zero_numel_check_dims(a: TensorLikeType, dim: DimsType, fn_name: str) -> None:
+    # Eager checks explicitly requested dims with zero_numel_check_dims
+    # (ReduceOpsUtils.h) and raises IndexError, before _reduction's generic
+    # RuntimeError. Not mirrored: the scalar branch (unreachable here) and the
+    # empty-dims branch (dim=() still raises _reduction's RuntimeError).
+    if a.ndim == 0:
+        return
+    for d in (dim,) if isinstance(dim, Dim) else dim:
+        torch._check_index(
+            a.shape[utils.canonicalize_dim(a.ndim, d)] > 0,
+            lambda d=d: f"{fn_name}: Expected reduction dim {d} to have non-zero size.",
+        )
+
+
 @register_decomposition(aten.amin)
 def amin(
     a: TensorLikeType,
@@ -2574,6 +2588,9 @@ def amin(
             lambda: f"Expected the dtype for input and out to match, but got "
             f"{a.dtype} for input's dtype and {out.dtype} for out's dtype.",
         )
+
+    if dim is not None:
+        _zero_numel_check_dims(a, dim, "amin()")
 
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
@@ -2605,6 +2622,9 @@ def amax(
             lambda: f"Expected the dtype for input and out to match, but got "
             f"{a.dtype} for input's dtype and {out.dtype} for out's dtype.",
         )
+
+    if dim is not None:
+        _zero_numel_check_dims(a, dim, "amax()")
 
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
