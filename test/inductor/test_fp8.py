@@ -45,7 +45,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     skipIfRocm,
-    skipIfXpu,
     xfailIf,
 )
 from torch.testing._internal.inductor_utils import (
@@ -1505,8 +1504,7 @@ class TestFP8Lowering(TestCase):
             # The clones should be visible in the generated code
             self.assertIn("clone", wrapper.lower())
 
-    @onlyOn(("cuda", "xpu"))
-    @skipIfXpu(msg="torch-xpu-ops/issues/4852")
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
         not has_triton_tma_device() or not is_big_gpu(),
@@ -1673,8 +1671,7 @@ class TestFP8Lowering(TestCase):
         not has_triton_tma_device() or not is_big_gpu(),
         "Need device-side TMA support in Triton and max-autotune",
     )
-    @onlyOn(("cuda", "xpu"))
-    @skipIfXpu(msg="torch-xpu-ops/issues/4852")
+    @onlyOn(["cuda", "xpu"])
     @parametrize("shape", ("16,32,32", "1024,1024,512"))
     @parametrize("use_fast_accum", (False, True))
     def test_rowwise_scaling_tma_template(
