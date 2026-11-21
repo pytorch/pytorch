@@ -81,11 +81,13 @@ def _hollow(value: Any) -> Any:
     return value
 
 
-def _sizes(value: Any) -> Any:
+def _sizes(value: Any, dtypes: bool) -> Any:
+    """The sizes of a tensor and, with ``dtypes``, its dtype; those of the
+    items of a list or tuple; None for what is neither."""
     if isinstance(value, torch.Tensor):
-        return (tuple(value.shape), value.dtype)
+        return (tuple(value.shape), value.dtype if dtypes else None)
     if isinstance(value, (list, tuple)):
-        return tuple(_sizes(item) for item in value)
+        return tuple(_sizes(item, dtypes) for item in value)
     return None
 
 
@@ -100,8 +102,13 @@ def sized(kind: str, head: Any, operands: list[Any], kwnames: Any, result: Any) 
     made of other operators, when it takes its call down: ``kind`` is
     ``"site"`` for a kernel call (``head`` describes it), ``"call"`` for a
     call of the function ``head``, ``"method"`` for a call of the method of
-    that name of the first operand, ``"item"`` for a subscript."""
-    wanted = _sizes(result)
+    that name of the first operand, ``"item"`` for a subscript.
+
+    What it gives must have the dtypes of what the operation gave as well,
+    unless the thread is under autocast: autocast casts on the device of the
+    tensors of a call, and not where tensors hold nothing."""
+    dtypes = not torch._C._is_any_autocast_enabled()
+    wanted = _sizes(result, dtypes)
     if wanted is None:
         return False
     hollow = [_hollow(operand) for operand in operands]
@@ -122,7 +129,7 @@ def sized(kind: str, head: Any, operands: list[Any], kwnames: Any, result: Any) 
                     found = head(*positional, **kwargs)
     except Exception:
         return False
-    return _sizes(found) == wanted
+    return _sizes(found, dtypes) == wanted
 
 
 def graph_module(description: dict[str, Any]) -> torch.fx.GraphModule:
