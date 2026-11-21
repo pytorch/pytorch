@@ -159,6 +159,62 @@ impl Drop for GradMode<'_> {
     }
 }
 
+/// Whether autocast is on for the thread, per kind of device, and to which
+/// dtype it casts there.
+struct Cast {
+    on: [bool; 2],
+    dtypes: [Py<PyAny>; 2],
+}
+
+const CAST_DEVICES: [&str; 2] = ["cpu", "cuda"];
+
+impl Cast {
+    fn now(py: Python<'_>) -> PyResult<Cast> {
+        let torch = torch(py)?;
+        let on = |device: &str| -> PyResult<bool> { torch.call_method1("is_autocast_enabled", (device,))?.extract() };
+        let dtype = |device: &str| -> PyResult<Py<PyAny>> { Ok(torch.call_method1("get_autocast_dtype", (device,))?.unbind()) };
+        Ok(Cast { on: [on("cpu")?, on("cuda")?], dtypes: [dtype("cpu")?, dtype("cuda")?] })
+    }
+
+    fn off(&self) -> bool {
+        !self.on[0] && !self.on[1]
+    }
+
+    /// Whether a thread with this state casts as one with the other does.
+    fn same(&self, other: &Cast) -> bool {
+        (0..2).all(|at| self.on[at] == other.on[at] && (!self.on[at] || self.dtypes[at].is(&other.dtypes[at])))
+    }
+
+    /// Sets the thread to this state, or with `off` to no autocast, until
+    /// what is returned is dropped.
+    fn set<'py>(&self, py: Python<'py>, off: bool) -> PyResult<CastGuard<'py>> {
+        let before = Cast::now(py)?;
+        let torch = torch(py)?;
+        for (at, device) in CAST_DEVICES.iter().enumerate() {
+            torch.call_method1("set_autocast_enabled", (*device, self.on[at] && !off))?;
+            if self.on[at] && !off {
+                torch.call_method1("set_autocast_dtype", (*device, self.dtypes[at].bind(py)))?;
+            }
+        }
+        Ok(CastGuard { torch, before })
+    }
+}
+
+struct CastGuard<'py> {
+    torch: &'py Bound<'py, PyModule>,
+    before: Cast,
+}
+
+impl Drop for CastGuard<'_> {
+    fn drop(&mut self) {
+        let py = self.torch.py();
+        for (at, device) in CAST_DEVICES.iter().enumerate() {
+            let _ = self.torch.call_method1("set_autocast_enabled", (*device, self.before.on[at]));
+            let _ = self.torch.call_method1("set_autocast_dtype", (*device, self.before.dtypes[at].bind(py)));
+        }
+    }
+}
+
 /// Why this call runs on eager's tape, if something is on that the engine's
 /// backward does not serve: looked at at every call of a form.
 fn needs_tape(py: Python<'_>) -> PyResult<Option<&'static str>> {
@@ -1134,6 +1190,8 @@ struct Taken {
     shape: Shape,
     /// Where the form is cut in two, in place of a backward.
     cut: Option<usize>,
+    /// The autocast the forward ran under.
+    cast: Cast,
 }
 
 impl Taken {
@@ -1142,7 +1200,7 @@ impl Taken {
             return Some(why);
         }
         let marks = self.marks.len() == other.marks.len() && self.marks.iter().zip(&other.marks).all(|(a, b)| a.0 == b.0 && a.1.same(&b.1));
-        if !marks || self.ran != other.ran || self.targets != other.targets || self.shape != other.shape || self.cut != other.cut {
+        if !marks || self.ran != other.ran || self.targets != other.targets || self.shape != other.shape || self.cut != other.cut || !self.cast.same(&other.cast) {
             return Some("two runs give the graph's tensors as other values".to_string());
         }
         None
@@ -1268,7 +1326,7 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
             joint_says(py, joint.results(results.clone(), vec![false; results.len()]))?;
             joint.finish();
             let shape = Shape { roots: Vec::new(), views: Vec::new(), outer: Vec::new(), sources: Vec::new(), found: Vec::new() };
-            return Ok(Taken { joint, ran, marks, targets: Vec::new(), shape, cut: Some(at) });
+            return Ok(Taken { joint, ran, marks, targets: Vec::new(), shape, cut: Some(at), cast: Cast::now(py)? });
         }
         Err(stop) => return Err(stop),
     };
@@ -1285,54 +1343,64 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
             }
         }
     }
+    let cast = Cast::now(py)?;
     if !nodes.roots.is_empty() {
-        // What is taken down for all the roots is used for some of them: a
-        // node that is handed nothing must give nothing.
-        for node in &nodes.order {
-            match node.call(&vec![None; node.inputs as usize], false) {
-                Ok(given) if given.iter().all(Option::is_none) => {}
-                Ok(_) => return refused(format!("{} gives a gradient when it is handed none", node.name)),
-                Err(_) => return refused(format!("{} cannot be handed no gradient", node.name)),
+        // A backward runs under the autocast of the thread that asks for
+        // it, which is none where it is asked for behind the region the
+        // forward ran in, and that of the forward where it is asked for
+        // inside it: it is taken down for both, as eager's nodes run then.
+        let ways: &[u32] = if cast.off() { &[0] } else { &[0, 1] };
+        for way in ways {
+            let _cast = cast.set(py, *way == 0)?;
+            joint.under(*way);
+            // What is taken down for all the roots is used for some of
+            // them: a node that is handed nothing must give nothing.
+            for node in &nodes.order {
+                match node.call(&vec![None; node.inputs as usize], false) {
+                    Ok(given) if given.iter().all(Option::is_none) => {}
+                    Ok(_) => return refused(format!("{} gives a gradient when it is handed none", node.name)),
+                    Err(_) => return refused(format!("{} cannot be handed no gradient", node.name)),
+                }
             }
-        }
-        let seeds: Vec<Bound<'py, PyAny>> = nodes.roots.iter().map(|root| seed(py, root)).collect::<PyResult<_>>()?;
-        let handed: Vec<Option<Bound<'py, PyAny>>> = seeds.iter().cloned().map(Some).collect();
-        joint_says(py, joint.begin(flags.clone(), seeds.clone()))?;
-        let given = nodes.driven(py, Some(&mut joint), &handed, false)?;
-        joint_says(py, joint.end())?;
-        nodes.proven(py, feeds, &nodes.roots, &seeds, &nodes.sums(py, &given)?)?;
-        // The backwards for some of the roots are made of this one; those
-        // that are checked here against the autograd engine too.
-        joint.cut(false);
-        let many = nodes.roots.len();
-        let some: Vec<usize> = if many <= 3 { (1..(1 << many) - 1).collect() } else if many <= 8 { (0..many).map(|at| 1 << at).collect() } else { Vec::new() };
-        for mask in some {
-            let mut pattern: Vec<bool> = (0..many).map(|at| mask >> at & 1 == 1).collect();
-            let chosen: Vec<usize> = (0..many).filter(|at| pattern[*at]).collect();
-            pattern.extend(vec![false; rest.len()]);
-            let (ops, incoming, gives, takes) = match joint.part_program(py, &pattern) {
-                Ok(found) => found,
-                Err(error) if error.is_instance_of::<PyValueError>(py) => continue,
-                Err(error) => return Err(Stop::Raised(error)),
-            };
-            let mut inputs: Vec<Bound<'py, PyAny>> = Vec::new();
-            for value in &takes {
-                inputs.push(joint.tensor(py, *value).ok_or_else(|| PyRuntimeError::new_err("torch.vm: a value of a run is gone"))?);
+            let seeds: Vec<Bound<'py, PyAny>> = nodes.roots.iter().map(|root| seed(py, root)).collect::<PyResult<_>>()?;
+            let handed: Vec<Option<Bound<'py, PyAny>>> = seeds.iter().cloned().map(Some).collect();
+            joint_says(py, joint.begin(flags.clone(), seeds.clone()))?;
+            let given = nodes.driven(py, Some(&mut joint), &handed, false)?;
+            joint_says(py, joint.end())?;
+            nodes.proven(py, feeds, &nodes.roots, &seeds, &nodes.sums(py, &given)?)?;
+            // The backwards for some of the roots are made of this one;
+            // those that are checked here against the autograd engine too.
+            joint.cut(false);
+            let many = nodes.roots.len();
+            let some: Vec<usize> = if many <= 3 { (1..(1 << many) - 1).collect() } else if many <= 8 { (0..many).map(|at| 1 << at).collect() } else { Vec::new() };
+            for mask in some {
+                let mut pattern: Vec<bool> = (0..many).map(|at| mask >> at & 1 == 1).collect();
+                let chosen: Vec<usize> = (0..many).filter(|at| pattern[*at]).collect();
+                pattern.extend(vec![false; rest.len()]);
+                let (ops, incoming, gives, takes) = match joint.part_program(py, &pattern, *way) {
+                    Ok(found) => found,
+                    Err(error) if error.is_instance_of::<PyValueError>(py) => continue,
+                    Err(error) => return Err(Stop::Raised(error)),
+                };
+                let mut inputs: Vec<Bound<'py, PyAny>> = Vec::new();
+                for value in &takes {
+                    inputs.push(joint.tensor(py, *value).ok_or_else(|| PyRuntimeError::new_err("torch.vm: a value of a run is gone"))?);
+                }
+                inputs.extend(chosen.iter().map(|at| seeds[*at].clone()));
+                let all: Vec<Value> = takes.iter().chain(&incoming).copied().collect();
+                let program = Program::new(ops.as_any(), joint.values(), all, gives.iter().map(|(_, value)| *value).collect())?;
+                let mode = GradMode::set(py, false)?;
+                let run = program.run(py, &inputs, TCFG_RUN_BELOW_AUTOGRAD)?;
+                drop(mode);
+                let part: Vec<(u32, Bound<'py, PyAny>)> = gives.iter().map(|(slot, _)| *slot).zip(run).collect();
+                let roots: Vec<Bound<'py, PyAny>> = chosen.iter().map(|at| nodes.roots[*at].clone()).collect();
+                let given: Vec<Bound<'py, PyAny>> = chosen.iter().map(|at| seeds[*at].clone()).collect();
+                nodes.proven(py, feeds, &roots, &given, &nodes.sums(py, &part)?)?;
             }
-            inputs.extend(chosen.iter().map(|at| seeds[*at].clone()));
-            let all: Vec<Value> = takes.iter().chain(&incoming).copied().collect();
-            let program = Program::new(ops.as_any(), joint.values(), all, gives.iter().map(|(_, value)| *value).collect())?;
-            let mode = GradMode::set(py, false)?;
-            let run = program.run(py, &inputs, TCFG_RUN_BELOW_AUTOGRAD)?;
-            drop(mode);
-            let part: Vec<(u32, Bound<'py, PyAny>)> = gives.iter().map(|(slot, _)| *slot).zip(run).collect();
-            let roots: Vec<Bound<'py, PyAny>> = chosen.iter().map(|at| nodes.roots[*at].clone()).collect();
-            let given: Vec<Bound<'py, PyAny>> = chosen.iter().map(|at| seeds[*at].clone()).collect();
-            nodes.proven(py, feeds, &roots, &given, &nodes.sums(py, &part)?)?;
         }
     }
     joint.finish();
-    Ok(Taken { joint, ran, marks, targets: nodes.targets.clone(), shape, cut: None })
+    Ok(Taken { joint, ran, marks, targets: nodes.targets.clone(), shape, cut: None, cast })
 }
 
 /// The roots, and how the results are made of them: for a result that is a
@@ -1533,8 +1601,10 @@ struct Plan {
     /// and the values they take with what each is.
     behind: Vec<usize>,
     marks: Vec<(u32, Mark)>,
-    backs: Mutex<HashMap<Vec<bool>, Result<Arc<Back>, String>>>,
+    backs: Mutex<HashMap<(u32, Vec<bool>), Result<Arc<Back>, String>>>,
     export: Option<Py<PyAny>>,
+    /// The autocast the forward ran under.
+    cast: Cast,
 }
 
 /// Makes a program of operations, or with passes over graphs what the passes
@@ -1559,7 +1629,7 @@ fn runner<'py>(py: Python<'py>, export: &Option<Py<PyAny>>, ops: &Bound<'py, PyA
 
 impl Plan {
     fn new<'py>(py: Python<'py>, graph: Arc<Graph>, taken: Taken, export: Option<Py<PyAny>>, feeds: &[Bound<'py, PyAny>]) -> Result<Plan, Stop> {
-        let Taken { joint, ran, marks, targets, shape, .. } = taken;
+        let Taken { joint, ran, marks, targets, shape, cast, .. } = taken;
         let described = joint.describe(py)?;
         let part = |name: &str| described.get_item(name)?.ok_or_else(|| PyRuntimeError::new_err("torch.vm: the joint graph does not say what it should"));
         let inputs: u32 = part("inputs")?.extract()?;
@@ -1608,29 +1678,31 @@ impl Plan {
             marks,
             backs: Mutex::new(HashMap::new()),
             export,
+            cast,
         })
     }
 
     /// The backward for the roots that came with a gradient, made when it
     /// is first asked for of the backward that was taken down.
-    fn back<'py>(&self, py: Python<'py>, pattern: &[bool], saved: &[Bound<'py, PyAny>], grads: &[Bound<'py, PyAny>]) -> Result<Arc<Back>, Stop> {
-        if let Some(known) = self.backs.lock().unwrap().get(pattern) {
+    fn back<'py>(&self, py: Python<'py>, way: u32, pattern: &[bool], saved: &[Bound<'py, PyAny>], grads: &[Bound<'py, PyAny>]) -> Result<Arc<Back>, Stop> {
+        let key = (way, pattern.to_vec());
+        if let Some(known) = self.backs.lock().unwrap().get(&key) {
             return known.clone().map_err(Stop::Refused);
         }
-        let made = self.make(py, pattern, saved, grads);
+        let made = self.make(py, way, pattern, saved, grads);
         let kept = match &made {
             Ok(back) => Ok(back.clone()),
             Err(Stop::Refused(why)) => Err(why.clone()),
             Err(_) => return made,
         };
-        self.backs.lock().unwrap().insert(pattern.to_vec(), kept);
+        self.backs.lock().unwrap().insert(key, kept);
         made
     }
 
-    fn make<'py>(&self, py: Python<'py>, pattern: &[bool], saved: &[Bound<'py, PyAny>], grads: &[Bound<'py, PyAny>]) -> Result<Arc<Back>, Stop> {
+    fn make<'py>(&self, py: Python<'py>, way: u32, pattern: &[bool], saved: &[Bound<'py, PyAny>], grads: &[Bound<'py, PyAny>]) -> Result<Arc<Back>, Stop> {
         let mut whole = pattern.to_vec();
         whole.resize(self.joint.results_len(), false);
-        let (ops, incoming, gives, takes) = joint_says(py, self.joint.part_program(py, &whole))?;
+        let (ops, incoming, gives, takes) = joint_says(py, self.joint.part_program(py, &whole, way))?;
         let mut examples: Vec<Bound<'py, PyAny>> = Vec::new();
         for value in &takes {
             let Some(at) = self.saved.iter().position(|kept| kept == value) else {
@@ -1716,10 +1788,20 @@ impl Kept {
         if twice {
             return self.again(py, grads, out, true, "");
         }
+        // The backward that was taken down as this thread runs one: with
+        // no autocast, or with that of the forward.
+        let cast = Cast::now(py)?;
+        let way = if cast.off() {
+            0
+        } else if cast.same(&self.plan.cast) {
+            1
+        } else {
+            return self.again(py, grads, out, false, "the backward runs under an autocast that the forward did not run under");
+        };
         let pattern: Vec<bool> = grads.iter().map(Option::is_some).collect();
         let given: Vec<Bound<'py, PyAny>> = grads.iter().flatten().cloned().collect();
         let saved = self.unwritten(py, Some(&[]))?;
-        let back = match self.plan.back(py, &pattern, &saved, &given) {
+        let back = match self.plan.back(py, way, &pattern, &saved, &given) {
             Ok(back) => back,
             Err(Stop::Refused(why)) => return self.again(py, grads, out, false, &why),
             Err(Stop::Cut(_)) => return self.again(py, grads, out, false, "the graph is cut"),
@@ -1758,7 +1840,9 @@ impl Kept {
         }
         let graph = &self.plan.graph;
         let values = {
+            // As the forward ran: with gradients, under its autocast.
             let _mode = GradMode::set(py, true)?;
+            let _cast = self.plan.cast.set(py, false)?;
             graph.run(py, &feeds)?
         };
         let mut results = Vec::new();
