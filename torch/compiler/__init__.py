@@ -399,6 +399,9 @@ def set_stance(
     Can be used as a function, context manager, or decorator.
     Do not use this function inside a `torch.compile` region - an error will be raised otherwise.
 
+    Stances are local to the current Python context. Other threads and
+    independent contexts are unaffected; copied contexts inherit the stance.
+
     .. code-block:: python
 
         @torch.compile

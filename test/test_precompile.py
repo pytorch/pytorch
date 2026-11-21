@@ -4884,7 +4884,7 @@ STANCES = []
 def record_stance():
     # A plain torch.compile mid-call, like another thread's, must still compile.
     torch.compile(lambda t: t + 1, backend="eager")(torch.ones(1))
-    STANCES.append(torch._dynamo.eval_frame._stance.stance)
+    STANCES.append(torch._dynamo.eval_frame._stance.get().stance)
 
 
 def records_stance(model, x):
