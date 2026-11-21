@@ -383,4 +383,34 @@ void SetTargetDevice() {
 }
 #endif
 
+#ifdef USE_ROCM
+bool hipMemImportTakesFdByValue() {
+#if ROCM_VERSION >= 70000
+  static const bool by_value = [] {
+    int version = 0;
+    if (hipRuntimeGetVersion(&version) != hipSuccess) {
+      (void)hipGetLastError();
+      return ROCM_VERSION >= 70100;
+    }
+    if (version >= 70100000) {
+      return true;
+    }
+    // The backports bring the HIP 7.1 API hipMemcpyBatchAsync with them.
+    void* fn = nullptr;
+    auto status = HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND;
+    if (hipGetProcAddress(
+            "hipMemcpyBatchAsync", &fn, version / 100000, 0, &status) !=
+        hipSuccess) {
+      (void)hipGetLastError();
+    }
+    return fn != nullptr ||
+        status == HIP_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT;
+  }();
+  return by_value;
+#else
+  return false;
+#endif
+}
+#endif
+
 } // namespace c10::cuda
