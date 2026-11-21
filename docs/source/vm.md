@@ -1837,6 +1837,12 @@ same, found["ops"], found["why"]  # (True, 9, 'the function returns')
 torch.equal(g(x, [w[:1]], 2, 6), hands_on(x, [w[:1]], 2, 6))  # True: other items are another form
 ```
 
+A call with `*` is an operation only where the operator it runs enters no
+Python code. On a GPU that is not so for `bmm`, and for what comes down to
+it (`matmul` of two stacks of matrices), whose CUDA kernel is entered
+through a Python function (`torch._native`): a path ends in front of such a
+call of them, where a call that is written out goes on.
+
 ### What a call names with a dict, and what gives back what it was handed
 
 A C function that is called with `**` is an operation where the path built
@@ -1845,7 +1851,11 @@ random numbers only at a rate (`scaled_dot_product_attention` with its
 `dropout_p`) draws nothing at a rate of zero and is an operation like any
 other, with the rate checked at every call; at another rate it is one under
 the rule of "Writes", as every operation that only draws now is, whether it
-is a call site or not. `contiguous` of a tensor that is contiguous runs no
+is a call site or not. A call with `**` is an operation under the condition
+of one with `*`, that the operator it runs enters no Python code: on a GPU
+the attention comes down to `bmm` where torch is built without the fused
+attention kernels, and a path then ends in front of a call of it with `**`.
+`contiguous` of a tensor that is contiguous runs no
 kernel and gives the tensor back; it is the operation all the same, which
 copies where the tensor of another call is laid out otherwise. A tuple that
 a function gives back and its caller unpacks is the values it was made of,
