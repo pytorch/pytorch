@@ -398,7 +398,80 @@ for dtype in (torch.bfloat16, torch.float16, torch.bfloat16):
 kinds  # [(torch.bfloat16, 1), (torch.float16, 2), (torch.bfloat16, 2)]
 ```
 
-The limits of this stage:
+### AOTAutograd and Inductor
+
+Two passes over graphs come with `torch.vm`, and they are the ones that
+compile a graph:
+
+- `torch.vm.passes.AOTAutograd()` has AOTAutograd trace the graph, and its
+  backward when gradients are recorded, ahead of time. The eager kernels run
+  both.
+- `torch.vm.passes.Inductor()` has Inductor compile the graph, and its
+  backward when gradients are recorded.
+
+Each is called as any pass over a graph is, `pass_(gm, input_types)`,
+compiles the graph for the tensors of the call it was exported from, and
+returns a graph whose forward calls what it compiled. The compilers are
+imported when such a pass first runs, not when it is put in a list: a
+process that uses `torch.vm` with the default passes, with `Graphs()`, or
+with passes over graphs of its own imports neither `torch._inductor` nor
+`torch._functorch.aot_autograd` nor `torch._dynamo`.
+
+```python
+g = torch.vm(f, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), P.Inductor()))
+x, w = torch.randn(4, 8), torch.randn(8, 8, requires_grad=True)
+kinds = []
+for _ in range(5):
+    out = g(x, w)
+    kinds.append(type(out.grad_fn).__name__)
+kinds
+# ['AddBackward0', 'AddBackward0', 'CompiledFunctionBackward', 'CompiledFunctionBackward', 'CompiledFunctionBackward']
+torch.allclose(out, f(x, w))  # True
+(found,) = torch.vm.regions(g)
+found["state"], found["variants"], found["hits"], found["misses"]  # ('compiled', 1, 3, 1)
+```
+
+The first call is the one the block is profiled on and the second the one
+the graph is exported from, and both run the operations of the function; from
+the third call on the compiled graph runs, and with gradients recorded what
+it returns has one compiled autograd function as its `grad_fn`. A call under
+`torch.no_grad()` is another kind of call and is compiled by itself, without
+a backward. What a compiler makes of the operations is not what eager runs,
+so the last bits of a result may differ, and `torch.vm.is_exact` is false
+for a list with one of these passes in it (and for a list with a pass of
+one's own, which is not taken to be exact).
+
+### The order of the list
+
+- `Graphs()` can stand anywhere among the passes over a block. It looks at a
+  block when the others are done with it, wherever it stands.
+- The passes over a graph stand behind `Graphs()`, in the order they are to
+  be applied in. When the list has such a pass and no `Graphs()`, it is taken
+  to be there, in front of the first of them.
+- At most one pass compiles, and it is the last pass over a graph: what it
+  returns is run, not rewritten.
+
+`torch.vm` raises a `ValueError` for a list that breaks one of these when the
+function is handed to it:
+
+```python
+default = torch.vm.DEFAULT_PASSES
+torch.vm(f, passes=(P.Inductor(), *default, P.Graphs()))
+# ValueError: passes has torch.vm.passes.Inductor() in front of torch.vm.passes.Graphs(): a pass over a graph
+# is given the graphs that Graphs makes, so it goes behind it
+torch.vm(f, passes=(*default, P.Graphs(), P.AOTAutograd(), P.Inductor()))
+# ValueError: passes has torch.vm.passes.AOTAutograd() and torch.vm.passes.Inductor(): a graph is compiled
+# once, by the last pass over it
+torch.vm(f, passes=(*default, P.Graphs(), P.Inductor(), keep))
+# ValueError: passes has keep behind torch.vm.passes.Inductor(): what a pass that compiles a graph returns is
+# run, not rewritten, so it is the last pass over a graph
+torch.vm(f, passes=(*default, keep, P.Inductor())).passes
+# ['resolve_dispatch', 'tensor_accessors', 'method_calls', 'fold', 'dce', 'graphs']
+```
+
+### Limits
+
+What graphs do not do at this stage:
 
 - One block. A graph does not go on through a call of a Python function, a
   branch or a loop, as said above.
@@ -411,7 +484,8 @@ The limits of this stage:
   call of its own, with a graph of its own, so a function that is called
   with many sizes uses up `max_variants`. Sizes of the tensors the graph
   computes are computed in it (`torch.ops.aten.sym_size.int`), but its
-  inputs have the sizes of the call it was exported from.
+  inputs have the sizes of the call it was exported from. With `Inductor()`
+  every export is a compilation.
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported.
@@ -544,6 +618,14 @@ The limits of this stage:
 
 ```{eval-rst}
 .. autoclass:: torch.vm.passes.Graphs
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.AOTAutograd
+```
+
+```{eval-rst}
+.. autoclass:: torch.vm.passes.Inductor
 ```
 
 ```{eval-rst}
