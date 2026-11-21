@@ -22,6 +22,11 @@ class NcclCommRegistration:
     removes the entry so a successor producer can register cleanly under the
     same ``group_name``.
 
+    Release all windowed symmetric-memory tensors and retained handles on all
+    participating ranks before dropping this registration. Otherwise late
+    cleanup can leave their windows registered until communicator teardown.
+    Unregister the old registration before publishing a same-name replacement.
+
     The comm's lifetime is *not* owned by this object; the registration only
     publishes a borrowed pointer. Optionally a strong reference to the source
     comm object is held so a stray ``del comm`` cannot dangle the registered
@@ -40,7 +45,7 @@ class NcclCommRegistration:
         self._active = True
 
     def unregister(self) -> None:
-        """Remove the registration. Idempotent."""
+        """Remove the registration after releasing its windowed buffers. Idempotent."""
         if not self._active:
             return
         # Imported lazily: only present in NCCL builds with symmetric-memory
@@ -96,6 +101,12 @@ def register_external_nccl_comm(
         NcclCommRegistration: keep this alive for as long as symmetric memory
         should use this comm; drop it (or call ``unregister()``) to remove the
         registration.
+
+    .. note::
+        Keep the returned registration alive until all associated windowed
+        tensors and retained handles are released on every rank. Removing a
+        registration does not itself destroy the communicator; late window
+        cleanup can be deferred until that communicator is torn down.
 
     .. note::
         This is only available in NCCL builds with symmetric-memory device

@@ -2498,6 +2498,128 @@ class NCCLSymmetricMemoryRestartTest(MultiProcContinuousTest):
         torch.cuda.synchronize(self.device)
 
 
+@requires_cuda_p2p_access()
+@skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "CUDA NCCL teardown coverage")
+class NCCLSymmetricMemoryCommLifetimeTest(MultiProcessTestCase):
+    # Isolate abort/destroy cases rather than sharing process-level NCCL state.
+    def _print_cleanup_diagnostics(self) -> None:
+        for rank in range(self.world_size):
+            path = f"{self.file_name}.nccl-window-rank-{rank}.log"
+            try:
+                with open(path, encoding="utf-8", errors="replace") as diagnostics:
+                    messages = diagnostics.read()
+            except OSError:
+                continue
+            print(f"Rank {rank} window cleanup diagnostics:\n{messages}", file=sys.stderr)
+
+    def _check_return_codes(self, fn, elapsed_time) -> None:
+        try:
+            exit_codes = [process.exitcode for process in self.processes]
+            self.assertEqual(len(exit_codes), self.world_size)
+            # The base checks rank 0's expected exit code, not every rank's.
+            if self.TEST_ERROR_EXIT_CODE not in exit_codes:
+                self.assertIsNotNone(exit_codes[0], "Worker has no final exit code")
+                self.assertEqual(exit_codes, [exit_codes[0]] * self.world_size)
+            super()._check_return_codes(fn, elapsed_time)
+        except SkipTest:
+            raise
+        except Exception:
+            self._print_cleanup_diagnostics()
+            raise
+
+    def setUp(self) -> None:
+        super().setUp()
+        patch_env(
+            self,
+            TORCH_SYMMMEM_IMPLICIT_POOL="0",
+            TORCH_CPP_LOG_LEVEL="WARNING",
+            # Create unwrapped groups; no DETAIL wrapper should retain the backend.
+            TORCH_DISTRIBUTED_DEBUG="OFF",
+        )
+        self._spawn_processes()
+
+    def tearDown(self) -> None:
+        try:
+            super().tearDown()
+        finally:
+            for rank in range(self.world_size):
+                try:
+                    os.remove(f"{self.file_name}.nccl-window-rank-{rank}.log")
+                except FileNotFoundError:
+                    pass
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @requires_nccl()
+    @requires_nccl_version((2, 29), "NCCL symmetric window support")
+    @skip_if_lt_x_gpu(2)
+    @parametrize("retirement", ["live", "destroy", "abort"])
+    def test_release_after_comm_retirement(self, retirement: str) -> None:
+        if not PLATFORM_SUPPORTS_SYMM_MEM:
+            raise SkipTest("Test requires SymmMem support")
+        device = torch.device("cuda", self.rank)
+        torch.cuda.set_device(device)
+        symm_mem.set_backend("NCCL")
+        c10d.init_process_group(
+            backend="gloo",
+            store=c10d.FileStore(self.file_name, self.world_size),
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=60),
+        )
+        try:
+            pg = c10d.new_group(
+                ranks=list(range(self.world_size)),
+                backend="nccl2",
+                timeout=timedelta(seconds=60),
+                device_id=device,
+            )
+            self.assertIsInstance(pg._get_backend(device), c10d.ProcessGroupNCCL2)
+            probe = torch.ones(1, device=device)
+            c10d.all_reduce(probe, group=pg)
+            self.assertEqual(probe, torch.full_like(probe, self.world_size))
+            tensor = symm_mem.empty(4096, dtype=torch.float32, device=device)
+            handle = symm_mem.rendezvous(tensor, group=pg)
+            self.assertIsNotNone(handle)
+            torch.cuda.synchronize(device)
+            c10d.barrier()
+            # Keep pg alive: retirement must not wait for its destructor.
+            if retirement == "abort":
+                c10d.distributed_c10d._abort_process_group(pg)
+            elif retirement == "destroy":
+                c10d.destroy_process_group(pg)
+            c10d.barrier()
+            path = f"{self.file_name}.nccl-window-rank-{self.rank}.log"
+            # A named per-rank file survives a native crash. The parent prints
+            # it on failure before tearDown removes it.
+            with open(path, "w+b") as diagnostics:
+                witness = weakref.ref(tensor)
+                original_stderr = os.dup(2)
+                try:
+                    sys.stderr.flush()
+                    os.dup2(diagnostics.fileno(), 2)
+                    del handle, tensor
+                    gc.collect()
+                    torch.cuda.synchronize(device)
+                    self.assertIsNone(witness())
+                finally:
+                    os.dup2(original_stderr, 2)
+                    os.close(original_stderr)
+                diagnostics.seek(0)
+                messages = diagnostics.read().decode("utf-8", errors="replace")
+            self.assertNotIn("ncclCommWindowDeregister failed:", messages, messages)
+            c10d.barrier()
+            if retirement == "live":
+                c10d.destroy_process_group(pg)
+        finally:
+            c10d.destroy_process_group()
+
+
+instantiate_parametrized_tests(NCCLSymmetricMemoryCommLifetimeTest)
+
+
 instantiate_device_type_tests(TestNCCL, globals(), only_for="cuda")
 
 if __name__ == "__main__":
