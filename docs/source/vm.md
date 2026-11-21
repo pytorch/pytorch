@@ -37,6 +37,10 @@
 ```
 
 ```{eval-rst}
+.. autoclass:: torch.vm.passes.Unroll
+```
+
+```{eval-rst}
 .. autoclass:: torch.vm.passes.ResolveDispatch
 ```
 
