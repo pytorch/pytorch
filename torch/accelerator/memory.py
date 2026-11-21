@@ -269,10 +269,12 @@ def _snapshot(device=None, augment_with_fx_traces: bool = False):
         dict: a dictionary containing memory allocator state information.
     """
     acc = torch.accelerator.current_accelerator()
-    if acc is not None and acc.type == "xpu":
-        return torch.xpu.memory._snapshot(
-            device, augment_with_fx_traces=augment_with_fx_traces
-        )
+    if acc is not None:
+        memory_module = getattr(torch.get_device_module(acc), "memory", None)
+        if memory_module is not None and hasattr(memory_module, "_snapshot"):
+            return memory_module._snapshot(
+                device, augment_with_fx_traces=augment_with_fx_traces
+            )
     return torch.cuda.memory._snapshot(
         device, augment_with_fx_traces=augment_with_fx_traces
     )

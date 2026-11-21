@@ -5,6 +5,7 @@ import operator
 import sys
 import unittest
 from contextlib import nullcontext
+from unittest import mock
 
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -33,6 +34,28 @@ if not TEST_ACCELERATOR:
 
 
 class TestAccelerator(TestCase):
+    def test_snapshot_uses_current_device_memory_module(self):
+        memory_module = mock.Mock()
+        memory_module._snapshot.return_value = {"segments": []}
+        device_module = mock.Mock(memory=memory_module)
+
+        with (
+            mock.patch.object(
+                torch.accelerator,
+                "current_accelerator",
+                return_value=torch.device("privateuseone"),
+            ),
+            mock.patch.object(torch, "get_device_module", return_value=device_module),
+        ):
+            self.assertEqual(
+                torch.accelerator.memory._snapshot(augment_with_fx_traces=True),
+                {"segments": []},
+            )
+
+        memory_module._snapshot.assert_called_once_with(
+            None, augment_with_fx_traces=True
+        )
+
     def test_current_accelerator(self):
         self.assertTrue(torch.accelerator.is_available())
         self.assertEqual(torch.accelerator.current_accelerator().type, self.device_type)
