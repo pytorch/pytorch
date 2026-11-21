@@ -4913,6 +4913,232 @@ def forward(self, tangents_1):
         self.assertNotIn((3,), _packed_shapes)
         self.assertIn((4, 3), _packed_shapes)
 
+    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="all")
+    def test_saved_tensors_hooks_placement(self):
+        aten = torch.ops.aten
+
+        def fn(x, w):
+            a = x.sin()
+            c = a.cos().exp()
+            d = F.linear(a * c, w)
+            return (d * a).sum()
+
+        # Both hooks inline as several nodes, and pack returns a tuple.
+        def pack(x):
+            return x * 2, x + 1
+
+        def unpack(packed):
+            return (packed[0] + packed[1] - 1) / 3
+
+        graphs = {"fw": [], "bw": []}
+
+        def capture(key):
+            def compile_fn(gm, example_inputs):
+                graphs[key].append(gm.graph)
+                return gm
+
+            return make_boxed_compiler(compile_fn)
+
+        def backend(gm, example_inputs):
+            return aot_module_simplified(
+                gm,
+                example_inputs,
+                fw_compiler=capture("fw"),
+                bw_compiler=capture("bw"),
+                partition_fn=default_partition,
+            )
+
+        ref_x = torch.randn(4, 8, requires_grad=True)
+        ref_w = torch.randn(8, 8, requires_grad=True)
+        fn(ref_x, ref_w).backward()
+
+        torch._dynamo.reset()
+        x = ref_x.detach().clone().requires_grad_()
+        w = ref_w.detach().clone().requires_grad_()
+        pack_gm, unpack_gm = saved_tensors_hooks_to_gm(
+            pack, unpack, "pack_hash", "unpack_hash"
+        )
+        with torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm):
+            out = torch.compile(fn, backend=backend, fullgraph=True)(x, w)
+            out.backward()
+        self.assertEqual(out, fn(ref_x, ref_w))
+        self.assertEqual(x.grad, ref_x.grad)
+        self.assertEqual(w.grad, ref_w.grad)
+
+        (fw_g,) = graphs["fw"]
+        (bw_g,) = graphs["bw"]
+
+        def assert_only_hooks_between(start, end, hooks):
+            n = start.next
+            while n is not end:
+                self.assertIn(n, hooks)
+                n = n.next
+
+        fw_order = {n: i for i, n in enumerate(fw_g.nodes)}
+        packs = {
+            n
+            for n in fw_g.nodes
+            if (n.target is aten.mul.Tensor and n.args[1] == 2)
+            or (n.target is aten.add.Tensor and n.args[1] == 1)
+        }
+        saved_tensors = {n.args[0] for n in packs}
+
+        def base_of(n):
+            while n.target in (aten.t.default, aten.detach.default):
+                n = n.args[0]
+            return n
+
+        moved, kept = [], []
+        for saved in saved_tensors:
+            group = sorted(
+                (n for n in packs if n.args[0] is saved), key=fw_order.__getitem__
+            )
+            self.assertEqual(len(group), 2)
+            self.assertIs(group[0].next, group[1])
+            base = base_of(saved)
+            if base.op == "placeholder":
+                # x, w and t(w) use caller-owned storage: their packs stay last.
+                assert_only_hooks_between(group[1], fw_g.output_node(), packs)
+                kept.append(saved)
+                continue
+            # The pack follows the last use of any alias of the saved tensor,
+            # e.g. of exp when detach(exp) is saved.
+            aliases = [n for n in fw_g.nodes if n not in packs and base_of(n) is base]
+            uses = [
+                u
+                for alias in aliases
+                for u in alias.users
+                if u not in packs and u.op != "output"
+            ]
+            last_use = max(aliases + uses, key=fw_order.__getitem__)
+            assert_only_hooks_between(last_use, group[0], packs)
+            moved.append(saved)
+        self.assertTrue(any(s.target is aten.t.default for s in kept))
+        # a = sin(x) has three forward uses far apart; its pack follows the last.
+        (a,) = (s for s in moved if s.target is aten.sin.default)
+        self.assertEqual(len([u for u in a.users if u not in packs]), 3)
+
+        bw_order = {n: i for i, n in enumerate(bw_g.nodes)}
+        unpack_outs = [
+            n for n in bw_g.nodes if n.target is aten.div.Tensor and n.args[1] == 3
+        ]
+        unpack_groups = [(n.args[0].args[0], n.args[0], n) for n in unpack_outs]
+        unpacks = {n for group in unpack_groups for n in group}
+        self.assertEqual(len(unpack_groups), len(saved_tensors))
+        max_users = 0
+        for add, sub, div in unpack_groups:
+            self.assertIs(add.next, sub)
+            self.assertIs(sub.next, div)
+            users = [u for u in div.users if u.op != "output"]
+            max_users = max(max_users, len(users))
+            first_use = min(users, key=bw_order.__getitem__)
+            assert_only_hooks_between(div, first_use, unpacks)
+        # Some unpacked tensor has backward users at different depths.
+        self.assertGreater(max_users, 1)
+
+    def test_saved_tensors_hooks_pack_placement_aliases_and_outputs(self):
+        from torch._functorch._aot_autograd.graph_compile import _pack_insert_points
+
+        aten = torch.ops.aten
+        g = torch.fx.Graph()
+        fake_mode = FakeTensorMode()
+
+        def placeholder(name, *shape):
+            n = g.placeholder(name)
+            with fake_mode:
+                n.meta["val"] = torch.empty(shape)
+            return n
+
+        def call(target, *args):
+            n = g.call_function(target, args)
+            vals = pytree.tree_map_only(torch.fx.Node, lambda a: a.meta["val"], args)
+            with fake_mode:
+                n.meta["val"] = target(*vals)
+            return n
+
+        x = placeholder("x", 6, 4)
+        w = placeholder("w", 4, 4)
+        # a is last used through its view a_t.
+        a = call(aten.sin.default, x)
+        a_t = call(aten.t.default, a)
+        b = call(aten.cos.default, a)
+        c = call(aten.sin.default, a_t)
+        # q and k share storage with v, which is used later.
+        qkv = call(aten.cos.default, x)
+        chunks = call(aten.split.Tensor, qkv, 2)
+        q = call(operator.getitem, chunks, 0)
+        k = call(operator.getitem, chunks, 1)
+        v = call(operator.getitem, chunks, 2)
+        s = call(aten.add.Tensor, call(aten.sin.default, q), k)
+        r = call(aten.exp.default, v)
+        # w_t is a view of an input.
+        w_t = call(aten.t.default, w)
+        mm = call(aten.mm.default, x, w_t)
+        # d has no forward use besides its pack.
+        d = call(aten.tanh.default, x)
+        # f's view f_t is a user output, and e is a user output itself.
+        f = call(aten.exp.default, x)
+        f_t = call(aten.t.default, f)
+        h = call(aten.sin.default, f)
+        e = call(aten.neg.default, x)
+        tail = call(aten.cos.default, x)
+        # u_t is saved without a hook, so u's storage outlives forward.
+        u = call(aten.sin.default, x)
+        u_t = call(aten.t.default, u)
+        saved = [a, q, k, w_t, d, f, e, x, u, u_t]
+        user_outs = [b, c, s, r, mm, f_t, h, e, tail]
+        # Forward returns the user outputs, then the saved tensors.
+        g.output((*user_outs, *saved))
+
+        points = _pack_insert_points(g, set(saved) - {u_t}, len(user_outs))
+        self.assertIs(points[a], c)
+        self.assertIs(points[q], r)
+        self.assertIs(points[k], r)
+        self.assertIs(points[d], d)
+        # The caller keeps the storage of w_t, f, e, x and u alive, so their
+        # packs go right before the output node.
+        for n in (w_t, f, e, x, u):
+            self.assertIsNone(points[n])
+
+    def test_saved_tensors_hooks_unpack_placement(self):
+        from torch._functorch._aot_autograd.graph_compile import _first_use
+
+        aten = torch.ops.aten
+        g = torch.fx.Graph()
+        p0, p1, p2, grad = (g.placeholder(name) for name in ("p0", "p1", "p2", "g"))
+        m = g.call_function(aten.mul.Tensor, (grad, grad))
+        # p0 and p1 feed one node, and p0 is used again later.
+        y = g.call_function(aten.mul.Tensor, (p0, p1))
+        z = g.call_function(aten.sin.default, (y,))
+        out = g.call_function(aten.mul.Tensor, (z, p0))
+        # p2 is used only by the output.
+        g.output((out, m, p2))
+
+        order = {n: i for i, n in enumerate(g.nodes)}
+        self.assertIs(_first_use(list(p0.users), order), y)
+        self.assertIs(_first_use(list(p1.users), order), y)
+        self.assertIsNone(_first_use(list(p2.users), order))
+
+    def test_saved_tensors_hooks_placement_detects_streams(self):
+        from torch._functorch._aot_autograd.graph_compile import _uses_streams
+
+        aten = torch.ops.aten
+
+        def graph(stream=None, sync=False):
+            g = torch.fx.Graph()
+            x = g.placeholder("x")
+            y = g.call_function(aten.sin.default, (x,))
+            if stream is not None:
+                y.meta["custom"] = {"stream": stream}
+            if sync:
+                g.call_function(torch.ops.streams.record_event.default, (0, 0))
+            g.output((y,))
+            return g
+
+        self.assertFalse(_uses_streams(graph()))
+        self.assertTrue(_uses_streams(graph(stream=1)))
+        self.assertTrue(_uses_streams(graph(sync=True)))
+
     @skipIfCppFakeTensor("no nested tensor support")
     def test_mark_activations_dynamic_with_nested(self):
         # The flattened tensors of the nested tensor aren't
@@ -10684,6 +10910,79 @@ class TestPartitioningDevice(AOTTestCase):
         compiled = torch.compile(fn, backend="aot_eager")
         out = compiled(x, w)
         out.sum().backward()
+
+    @onlyAccelerator
+    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="all")
+    def test_saved_tensors_hooks_stay_at_boundary_with_streams(self, device):
+        """The stream passes run before the hooks are inlined, so in a graph that
+        uses streams the hooks stay at the graph boundary."""
+        device_mod = torch.get_device_module(torch.device(device).type)
+
+        def fn(x):
+            a = x.sin()
+            s1 = device_mod.Stream()
+            s1.wait_stream(device_mod.current_stream())
+            with device_mod.stream(s1):
+                d = a.cos() * a
+            device_mod.current_stream().wait_stream(s1)
+            return d.sum()
+
+        def pack(x):
+            return x * 2
+
+        def unpack(packed):
+            return packed / 2
+
+        graphs = {"fw": [], "bw": []}
+
+        def capture(key):
+            def compile_fn(gm, example_inputs):
+                graphs[key].append(gm.graph)
+                return gm
+
+            return make_boxed_compiler(compile_fn)
+
+        def backend(gm, example_inputs):
+            return aot_module_simplified(
+                gm,
+                example_inputs,
+                fw_compiler=capture("fw"),
+                bw_compiler=capture("bw"),
+                partition_fn=default_partition,
+            )
+
+        ref_x = torch.randn(4, 8, device=device, requires_grad=True)
+        fn(ref_x).backward()
+        torch._dynamo.reset()
+        x = ref_x.detach().clone().requires_grad_()
+        pack_gm, unpack_gm = saved_tensors_hooks_to_gm(
+            pack, unpack, "pack_hash", "unpack_hash"
+        )
+        with torch.autograd.graph.saved_tensors_hooks(pack_gm, unpack_gm):
+            out = torch.compile(fn, backend=backend, fullgraph=True)(x)
+            out.backward()
+        self.assertEqual(out, fn(ref_x))
+        self.assertEqual(x.grad, ref_x.grad)
+
+        (fw_g,) = graphs["fw"]
+        (bw_g,) = graphs["bw"]
+        packs = [
+            n
+            for n in fw_g.nodes
+            if n.target is torch.ops.aten.mul.Tensor and n.args[1] == 2
+        ]
+        unpacks = [
+            n
+            for n in bw_g.nodes
+            if n.target is torch.ops.aten.div.Tensor and n.args[1] == 2
+        ]
+        self.assertGreater(len(packs), 0)
+        self.assertEqual(len(packs), len(unpacks))
+        # Packs sit right before the output node, unpacks right after the
+        # placeholders.
+        self.assertEqual(set(list(fw_g.nodes)[-1 - len(packs) : -1]), set(packs))
+        first_bw = [n for n in bw_g.nodes if n.op != "placeholder"]
+        self.assertEqual(set(first_bw[: len(unpacks)]), set(unpacks))
 
     @onlyAccelerator
     def test_min_cut_partitions_device_valued_node(self, device):
