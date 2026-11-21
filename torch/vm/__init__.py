@@ -4,7 +4,7 @@
     This is an experiment and a temporary API. Everything about it may change.
 
 ``torch.vm(fn)`` turns the bytecode of ``fn`` into one control-flow graph in
-SSA form, branches and loops included::
+SSA form, branches and loops included, and runs it in a small VM::
 
     @torch.vm
     def f(x, y):
@@ -13,9 +13,8 @@ SSA form, branches and loops included::
         return x
 
 
+    f(torch.ones(3), torch.ones(3))
     print(f.dump())  # the SSA graph
-
-Nothing executes the graph yet: calling ``f`` runs the original function.
 """
 
 import functools
@@ -69,7 +68,7 @@ def vm(
     *,
     fallback: bool = True,
 ) -> Any:
-    """Turns ``fn`` into an SSA control-flow graph.
+    """Runs ``fn`` as an SSA control-flow graph in the VM.
 
     ``torch.vm`` itself is this function: ``@torch.vm``, ``@torch.vm(...)`` and
     ``torch.vm(fn, ...)`` all work.
