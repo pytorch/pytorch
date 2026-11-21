@@ -2062,6 +2062,34 @@ def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
     return torch.contiguous_format
 
 
+def upsample_output_memory_format(input: TensorLikeType) -> torch.memory_format:
+    # Mirrors at::native::upsample::output_memory_format (bilinear, bicubic and lanczos): for a
+    # uint8 CPU input, suggest_memory_format() also requires the stride of a size-1 batch dimension
+    # to fit the layout, so e.g. `hwc.permute(2, 0, 1)[None]` is reported as contiguous; retry with a
+    # batch stride that fits any layout.
+    from torch._subclasses.fake_tensor import maybe_get_fake_device
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    memory_format = suggest_memory_format(input)
+    # Inside a fake tensor's meta function, input.device is "meta".
+    device = maybe_get_fake_device(input) or input.device
+    if (
+        memory_format != torch.contiguous_format
+        or device.type != "cpu"
+        or input.dtype != torch.uint8
+        or input.ndim != 4
+        or not guard_or_false(input.shape[0] == 1)
+    ):
+        return memory_format
+    strides = list(input.stride())
+    strides[0] = 1
+    for s, n in zip(input.stride()[1:], input.shape[1:]):
+        strides[0] = cast(int, sym_max(strides[0], s * n))
+    if are_strides_like_channels_last_or_false(input.shape, strides):
+        return torch.channels_last
+    return memory_format
+
+
 def prod(xs: Sequence[NumberType]) -> NumberType:
     """Product of elements in input sequence. Returns 1 for empty sequence"""
     return reduce(operator.mul, xs, 1)

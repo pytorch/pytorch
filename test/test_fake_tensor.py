@@ -2857,6 +2857,40 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
         self.assertTrue(out[1].is_contiguous())
         self.checkMetaProps(out[0], out[1])
 
+    @parametrize(
+        "op_name",
+        [
+            "upsample_nearest2d",
+            "_upsample_nearest_exact2d",
+            "upsample_bilinear2d",
+            "upsample_bicubic2d",
+            "_upsample_bilinear2d_aa",
+            "_upsample_bicubic2d_aa",
+            "_upsample_lanczos2d_aa",
+            "upsample_nearest3d",
+            "_upsample_nearest_exact3d",
+            "upsample_trilinear3d",
+        ],
+    )
+    def test_upsample_channels_last_view_with_size1_batch(self, device, op_name):
+        if op_name == "_upsample_lanczos2d_aa" and torch.device(device).type != "cpu":
+            self.skipTest("lanczos is CPU only")
+        op = getattr(torch.ops.aten, op_name).default
+        spatial = (5, 6) if op_name.endswith(("2d", "2d_aa")) else (4, 5, 6)
+        args = [[2 * s for s in spatial]] + ([] if "nearest" in op_name else [False])
+        # uint8 views are recognized as channels-last on CPU; trilinear has no uint8 kernel.
+        on_cpu = torch.device(device).type == "cpu"
+        dtype = torch.uint8 if on_cpu and "trilinear" not in op_name else torch.float32
+        out = []
+        mode = FakeTensorMode()
+        for context in [contextlib.nullcontext, lambda: mode]:
+            with context():
+                # Channels-last except for the stride of the size-1 batch dim.
+                x = torch.empty(*spatial, 3, dtype=dtype, device=device)
+                x = x.movedim(-1, 0)[None]
+                out.append(op(x, *args))
+        self.checkMetaProps(out[0], out[1])
+
     @onlyAccelerator
     def test_cpu_fallback(self, device):
         with FakeTensorMode(allow_fallback_kernels=False):

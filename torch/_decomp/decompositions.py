@@ -4820,7 +4820,7 @@ def _upsample_linear(
     result = vs[0]
 
     # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(input)
+    memory_format = utils.upsample_output_memory_format(input)
 
     # following "heuristic: only use channels_last path when it's faster than the contiguous path"
     if input.device.type == "cuda" and n_channels < 16:
@@ -5611,7 +5611,7 @@ def upsample_bicubic2d_default(
         result = _sum_tensors(c1 * c2 for (c1, c2) in zip(src_y, weights_y))
 
     # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(input)
+    memory_format = utils.upsample_output_memory_format(input)
     result = result.contiguous(memory_format=memory_format)
     return result
 
