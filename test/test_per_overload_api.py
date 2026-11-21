@@ -13,6 +13,7 @@ class TestPerOverloadAPI(TestCase):
 
         # class attributes
         self.assertEqual(add_packet.__name__, "add")
+        self.assertEqual(add_packet.__qualname__, "aten::add")
         self.assertEqual(str(add_packet), "aten.add")
 
         # callable
@@ -41,6 +42,7 @@ class TestPerOverloadAPI(TestCase):
         # class attributes
         self.assertEqual(str(add_tensoroverload), "aten.add.Tensor")
         self.assertEqual(add_tensoroverload.__name__, "add.Tensor")
+        self.assertEqual(add_tensoroverload.__qualname__, "aten::add.Tensor")
         self.assertEqual(add_tensoroverload.overloadpacket, add_packet)
 
         # copy and deepcopy are no-ops
