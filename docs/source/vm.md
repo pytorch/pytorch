@@ -626,7 +626,9 @@ on or off, inference mode, autocast on or off and the dtype it casts to, the
 default dtype, whether algorithms have to be deterministic, the dispatch
 keys it adds); and the same
 numbers and objects where an operation takes one from outside the graph (the
-function a global names, a float). A call of another kind runs the
+function a global names, a float; a list or a tuple of numbers by what is in
+it at the call, to any depth, not by which list it is: one that was changed
+in place since is another value). A call of another kind runs the
 operations and is exported in its turn. What was made for a kind of call is
 a form of the graph, and a graph has `max_variants` of them at most (8
 unless `Graphs` is made with another number); calls of further kinds then
@@ -1222,8 +1224,9 @@ of other operators (`torch.argwhere`, `torch.where` with one argument,
 graphs are exported, such an operator is run once more when its call is
 taken down, on tensors of the same sizes and dtypes that hold nothing, and
 its sizes are taken to follow from those of what it is given only if it
-runs there and gives the same sizes. A branch on a size that does not is a
-check of every call:
+runs there and gives the same sizes (and the same dtypes, unless the call
+is under autocast, which does not cast tensors that hold nothing). A branch
+on a size that does not is a check of every call:
 
 ```python
 def weighs(x):
