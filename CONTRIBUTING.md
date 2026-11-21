@@ -34,6 +34,7 @@ aspects of contributing to PyTorch.
   - [Skip CI while iterating](#skip-ci-while-iterating)
   - [Keep PR stacks small](#keep-pr-stacks-small)
 - [Merging your Change](#merging-your-change)
+  - [Continue a GitHub-native stack after part of it lands](#continue-a-github-native-stack-after-part-of-it-lands)
 - [GreenLight](#greenlight)
 - [Writing documentation](#writing-documentation)
   - [Docstring type formatting](#docstring-type-formatting)
@@ -671,6 +672,23 @@ The bot also handles GitHub-native stacks of PRs based on `main`. `@pytorchbot m
 
 A merge of a stacked PR, ghstack or GitHub-native, holds every PR it lands to the same checks as the commented PR: it waits for their checks, ciflow runs included, and a failure on any of them stops the merge unless Dr. CI classifies it as unrelated to that PR. `@pytorchbot merge -i` ignores the failures already present on any of them when the merge starts.
 
+### Continue a GitHub-native stack after part of it lands
+
+The bot lands a PR by pushing its commit to `main` and closing the PR, so GitHub shows the PR as closed, not merged. The landed PRs stay at the bottom of the GitHub stack, and keeping them there matters: when a PR above them lands, its commit lists them as stack dependencies, and that link is what makes `@pytorchbot revert` on a landed PR also revert the PRs that landed on top of it.
+
+[`gh stack`](https://github.com/github/gh-stack) skips only branches whose PR GitHub marks as merged, so it treats the landed branches as active branches with no PR: `gh stack submit` opens new PRs for them, `gh stack rebase`, `sync` and `push` rebase and force-push them, and `gh stack unstack` takes them out of the GitHub stack. Do not run `gh stack` on a stack until all of it has landed. Keep the rest of it up to date with plain git instead: give the topmost landed branch the exact content of `main` with a merge commit, then merge each branch into the one above it, bottom to top. For a stack `A <- B <- C` whose bottom PR `A` has landed:
+
+```bash
+git fetch origin
+git checkout A && git merge --ff-only origin/A
+git merge --ff-only "$(git commit-tree -p HEAD -p origin/main -m 'Merge main into A' 'origin/main^{tree}')"
+git push origin A
+git checkout B && git merge --ff-only origin/B && git merge A && git push origin B
+git checkout C && git merge --ff-only origin/C && git merge B && git push origin C
+```
+
+A plain `git merge origin/main` is not enough for `A`: `main` holds `A`'s changes as a different commit, so later `main` changes to those lines conflict, and a file `A` added that `main` later deleted would stay on `A` and reach the PRs above. Every push is a fast-forward, and each open PR still shows only its own changes. You only need this to pick up a newer `main` or to resolve conflicts with it; `@pytorchbot rebase -b main` on the top PR does the same update on GitHub. New work goes the same way: commit on its branch, merge it into the branches above, and `git push`. Never add commits other than merges of `main` to a landed branch: the bot refuses to land the PRs above a closed PR whose branch has commits that never landed.
+
 ## GreenLight
 
 GreenLight is an automated reviewer for pull requests. It is separate from the automated review in the [PR lifecycle](#pr-lifecycle): it only applies to authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml), and can approve their PRs without a human review.
@@ -946,7 +964,6 @@ On the initial build, you can also speed things up by disabling the features you
 - `USE_CUDA=0` will disable compiling CUDA.
 - `BUILD_TEST=0` will disable building C++ test binaries.
 - `USE_FBGEMM=0` will disable using FBGEMM (quantized 8-bit server operators).
-- `USE_NNPACK=0` will disable compiling with NNPACK.
 - `USE_XNNPACK=0` will disable compiling with XNNPACK.
 - `USE_FLASH_ATTENTION=0` and `USE_MEM_EFF_ATTENTION=0` will disable compiling flash attention and memory efficient kernels respectively.
 - `BUILD_LAZY_TS_BACKEND=0` will disable the lazy TorchScript backend (Lazy Tensor Core).
@@ -965,7 +982,7 @@ documented at the top of [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwardi
 
 For example, a good default for the most minimal build is to add to your bashrc is:
 ```bash
-alias BUILD_CONFIG='CMAKE_GENERATOR=Ninja USE_DISTRIBUTED=0 USE_FLASH_ATTENTION=0 USE_MEM_EFF_ATTENTION=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_XNNPACK=0 BUILD_LAZY_TS_BACKEND=0 USE_PYTORCH_QNNPACK=0 USE_CPU_VECTORIZATION=0 USE_COLORIZE_OUTPUT=1'
+alias BUILD_CONFIG='CMAKE_GENERATOR=Ninja USE_DISTRIBUTED=0 USE_FLASH_ATTENTION=0 USE_MEM_EFF_ATTENTION=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_XNNPACK=0 BUILD_LAZY_TS_BACKEND=0 USE_PYTORCH_QNNPACK=0 USE_CPU_VECTORIZATION=0 USE_COLORIZE_OUTPUT=1'
 ```
 
 You can then re-enable features selectively

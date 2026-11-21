@@ -914,7 +914,7 @@ class DeviceCachingAllocator {
   }
 
   BlockPool& get_pool(size_t size, sycl::queue* queue) {
-    if (C10_UNLIKELY(!allocation_scopes_.empty())) {
+    if (!allocation_scopes_.empty()) [[unlikely]] {
       // Search allocation_scopes_ in LIFO order so the innermost scope wins.
       for (auto& entry : std::views::reverse(allocation_scopes_)) {
         // lookup for mempool id matching current capture graph
@@ -1579,7 +1579,7 @@ class DeviceCachingAllocator {
   // Returns true iff the calling thread's current stream is actively recording
   // into a XPU graph.
   bool is_capture_context() const {
-    if (C10_LIKELY(num_active_captures_ == 0)) {
+    if (num_active_captures_ == 0) [[likely]] {
       return false;
     }
     return xpu::getCurrentXPUStream(device_index).is_capturing();
@@ -1600,7 +1600,7 @@ class DeviceCachingAllocator {
   // handle deferred event which is not used by xpugraph
   void insert_events_deferred_until_no_capture(
       const std::shared_ptr<GatheredContext>& context) {
-    if (C10_UNLIKELY(!deferred_blocks.empty())) {
+    if (!deferred_blocks.empty()) [[unlikely]] {
       for (auto* block : deferred_blocks) {
         TORCH_INTERNAL_ASSERT(!block->stream_uses.empty());
         // Strip stream uses added during capture;
@@ -1778,7 +1778,7 @@ class DeviceCachingAllocator {
     auto context = maybeGatherContext(RecordContext::STATE);
 
     std::scoped_lock<std::recursive_mutex> lock(mutex);
-    if (C10_LIKELY(!is_capture_context())) {
+    if (!is_capture_context()) [[likely]] {
       process_events(context);
     }
     size_t size = round_size(orig_size);
@@ -1882,7 +1882,7 @@ class DeviceCachingAllocator {
         context ? context : block->context_when_allocated);
 
     if (!block->stream_uses.empty()) {
-      if (C10_UNLIKELY(is_capture_context())) {
+      if (is_capture_context()) [[unlikely]] {
         deferred_blocks.insert(block);
       } else {
         insert_events(block);
@@ -1905,7 +1905,7 @@ class DeviceCachingAllocator {
       return;
     }
     const bool inserted = block->stream_uses.insert(stream).second;
-    if (C10_UNLIKELY(is_capture_context())) {
+    if (is_capture_context()) [[unlikely]] {
       if (inserted) {
         block_to_xpugraph_stream_uses[block].insert(stream);
       }
@@ -2549,7 +2549,7 @@ class NativeCachingAllocator : public XPUAllocator {
     add_allocated_block(block);
     *devPtr = block->ptr;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_memory_allocation(
           c10::kXPU, reinterpret_cast<uintptr_t>(*devPtr));
     }
@@ -2563,7 +2563,7 @@ class NativeCachingAllocator : public XPUAllocator {
     TORCH_CHECK(block, "invalid device pointer: ", ptr);
     device_allocators[block->device]->free(block);
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_memory_deallocation(
           c10::kXPU, reinterpret_cast<uintptr_t>(block->ptr));
     }

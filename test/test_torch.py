@@ -38,6 +38,7 @@ from torch.testing._internal.common_optimizers import (
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     MI200_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA, TEST_CUDA_GRAPH, run_tests, IS_JETSON,
     IS_FILESYSTEM_UTF8_ENCODING,
+    skipIfCppFakeTensor,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
@@ -57,6 +58,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
     onlyCPU,
+    preserves_device_selection,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
     get_all_device_types, skipXLA, onlyAccelerator, skipCUDAIf)
@@ -157,6 +159,9 @@ def _random_bytes(shape, dtype, device):
 
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
+    if TEST_WITH_TORCHINDUCTOR:
+        setUp = preserves_device_selection(TestCase.setUp)
+        setUpClass = classmethod(preserves_device_selection(TestCase.setUpClass.__func__))
 
     # TODO: move all tensor creation to common ops
     def _rand_shape(self, dim, min_size, max_size):
@@ -459,6 +464,16 @@ class TestTorchDeviceType(TestCase):
         s = t.storage()
         self._check_storage_meta(s, s_check)
 
+    def test_storage_repr(self, device):
+        t = torch.ones(4, device=device)
+        untyped = f"[torch.storage.UntypedStorage(device={t.device}) of size 16]"
+        typed = f"[torch.storage.TypedStorage(dtype=torch.float32, device={t.device}) of size 4]"
+        # Printing must not read the data: on CUDA that would sync once per element.
+        with CudaSyncGuard("error") if t.is_cuda else contextlib.nullcontext():
+            for s, expected in ((t.untyped_storage(), untyped), (t.storage(), typed)):
+                self.assertEqual(repr(s), expected)
+                self.assertEqual(str(s), expected)
+
     @onlyAccelerator
     def test_module_share_memory(self, device):
         # Test fix for issue #80733
@@ -502,6 +517,84 @@ class TestTorchDeviceType(TestCase):
         a = torch.tensor(5, dtype=dtype, device=device)
         self.assertEqual(a.size(), deepcopy(a).size())
         self.assertEqual(a, deepcopy(a))
+
+    @onlyNativeDeviceTypes
+    def test_has_storage_data(self, device):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        base = torch.arange(12.0, device=device)
+        empty_view = base[4:4]
+        self.assertEqual(empty_view.data_ptr(), 0)
+        for t in (base, base[2:6], empty_view, torch.nn.Parameter(base)):
+            self.assertTrue(torch._C._has_storage_data(t))
+
+        other = torch.arange(12.0, device=device)
+        wrappers = [TwoTensor(base[off:off + 4], other[off:off + 4]) for off in (0, 4)]
+        self.assertEqual(wrappers[1].storage_offset(), 4)
+        with FakeTensorMode():
+            fake = torch.empty(4, device=device)
+        vmapped = []
+        torch.func.vmap(lambda x: vmapped.append(x) or x)(base)
+        for t in (
+            *wrappers,
+            fake,
+            torch.empty(0, device=device),
+            torch.empty(4, device="meta"),
+            base.to_sparse(),
+            vmapped[0],
+        ):
+            self.assertFalse(torch._C._has_storage_data(t))
+
+    @skipXLA
+    @skipCUDAIf(TEST_CUDAMALLOCASYNC, "COW requires allocation stream metadata")
+    def test_has_storage_data_does_not_materialize_cow(self, device):
+        t = torch.arange(4.0, device=device)
+        cow = torch._lazy_clone(t)
+        self.assertTrue(torch._C._is_cow_tensor(cow))
+        self.assertTrue(torch._C._has_storage_data(cow))
+        self.assertTrue(torch._C._is_cow_tensor(cow))
+        self.assertTrue(torch._C._is_cow_tensor(t))
+
+    @onlyNativeDeviceTypes
+    def test_has_storage_data_ignores_data_access_checks(self, device):
+        # _has_storage_data must not raise for storages whose data access is
+        # forbidden, e.g. CUDA graph outputs overwritten by a later replay, or
+        # fake tensors made under tracing.
+        real = torch.arange(4.0, device=device)
+        meta = torch.empty(4, device="meta")
+        for t in (real, meta):
+            torch._C._set_storage_data_ptr_access_error_msg(
+                t.untyped_storage()._cdata, "forbidden"
+            )
+            with self.assertRaisesRegex(RuntimeError, "forbidden"):
+                t.const_data_ptr()
+        self.assertTrue(torch._C._has_storage_data(real))
+        self.assertFalse(torch._C._has_storage_data(meta))
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode() as mode:
+            mode._allow_unsafe_data_ptr_access = False
+            fake = torch.empty(4, device=device)
+        with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer"):
+            fake.data_ptr()
+        self.assertFalse(torch._C._has_storage_data(fake))
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCm >= 5.3 required for graphs")
+    @skipCUDAIf(TEST_CUDAMALLOCASYNC, "COW requires allocation stream metadata")
+    def test_has_storage_data_ignores_cow_read_check_in_cuda_graph_capture(self, device):
+        # Reading a COW storage made before a capture raises inside the capture.
+        cow = torch._lazy_clone(torch.arange(4.0, device=device))
+        self.assertTrue(torch._C._is_cow_tensor(cow))
+        out = torch.zeros(4, device=device)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            with self.assertRaisesRegex(RuntimeError, "Materialize COW graph inputs"):
+                cow.const_data_ptr()
+            self.assertTrue(torch._C._has_storage_data(cow))
+            out.add_(1)
+        self.assertTrue(torch._C._is_cow_tensor(cow))
 
     def check_internal_mem_overlap(self, inplace_op, num_inputs,
                                    dtype, device,
@@ -1279,6 +1372,48 @@ class TestTorchDeviceType(TestCase):
                     max_val = torch.iinfo(dtype).max
                 self.assertTrue(res.eq(max_val).all())
 
+    @onlyCUDA
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    def test_nondeterministic_alert_sparse_mm(self, device):
+        # cuSPARSE has deterministic algorithms for these; hipSPARSE does not,
+        # so ROCm alerts instead. See Note [Enabling Deterministic Operations]
+        should_alert = TEST_WITH_ROCM
+        dense = torch.randn(4, 3, device=device)
+        vec = torch.randn(4, device=device)
+        coo = torch.eye(4, device=device).to_sparse_coo()
+        csr = torch.eye(4, device=device).to_sparse_csr()
+
+        self.check_nondeterministic_alert(
+            lambda: torch.mm(coo, dense),
+            'addmm_out_sparse_dense_cuda',
+            should_alert)
+        self.check_nondeterministic_alert(
+            lambda: torch.mm(csr, dense),
+            'addmm_out_sparse_compressed_cuda',
+            should_alert)
+        self.check_nondeterministic_alert(
+            lambda: torch.mv(csr, vec),
+            'addmv_out_sparse_compressed_cuda',
+            should_alert)
+        self.check_nondeterministic_alert(
+            lambda: torch.addmm(dense, coo, dense),
+            'addmm_out_sparse_dense_cuda',
+            should_alert)
+        self.check_nondeterministic_alert(
+            lambda: torch.addmm(dense, csr, dense),
+            'addmm_out_sparse_compressed_cuda',
+            should_alert)
+        self.check_nondeterministic_alert(
+            lambda: torch.addmv(vec, csr, vec),
+            'addmv_out_sparse_compressed_cuda',
+            should_alert)
+        csr_batched = torch.sparse_csr_tensor(
+            csr.crow_indices(), csr.col_indices(), csr.values(), (2, 4, 4), check_invariants=False)
+        self.check_nondeterministic_alert(
+            lambda: torch.bmm(csr_batched, dense.expand(2, 4, 3).contiguous()),
+            'addmm_out_sparse_compressed_cuda',
+            should_alert)
+
     # FIXME: update OpInfos to support "nondeterministic samples" and port these tests
     #   to that architecture
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
@@ -1735,22 +1870,6 @@ class TestTorchDeviceType(TestCase):
         self.check_nondeterministic_alert(
             lambda: module(input, target),
             'nll_loss2d_forward_out_cuda_template',
-            torch.device(device).type == 'cuda')
-
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
-    def test_nondeterministic_alert_CTCLoss(self, device):
-        module = torch.nn.CTCLoss()
-        input = torch.randn(50, 3, 15, device=device, requires_grad=True)
-        target = torch.randint(1, 14, (3, 30), device=device)
-        input_lengths = [50, 50, 50]
-        target_lengths = [30, 25, 20]
-        res = module(input, target, input_lengths, target_lengths)
-        grad = torch.ones_like(res)
-
-        self.check_nondeterministic_alert(
-            lambda: res.backward(grad, retain_graph=True),
-            'ctc_loss_backward_gpu',
             torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
@@ -3300,6 +3419,25 @@ class TestTorchDeviceType(TestCase):
 
             dst.conj().copy_(src._neg_view())
             self.assertEqual(dst, src.neg().conj_physical(), exact_dtype=False)
+
+    # Exercises the multi-threaded CPU path for dense 2D transpose copies; the
+    # 100x100 copies in other tests fit in one grain and run on one thread.
+    # Every shape here is split among the threads, for every block size:
+    # (1000, 1003) has partial blocks on both edges and thread ranges that start
+    # inside a row of blocks, and the skinny shapes have a single row or column
+    # of partial blocks.
+    @onlyCPU
+    @dtypes(torch.uint8, torch.bool, torch.bfloat16, torch.float32, torch.float64, torch.complex64)
+    def test_copy_transpose_parallel(self, device, dtype):
+        num_threads = torch.get_num_threads()
+        try:
+            torch.set_num_threads(4)
+            for h, w in ((1000, 1003), (59, 5000), (5000, 59)):
+                src = make_tensor((h, w), dtype=dtype, device=device)
+                out = src.t().contiguous()
+                self.assertEqual(out, src.t(), atol=0, rtol=0)
+        finally:
+            torch.set_num_threads(num_threads)
 
     # FIXME: move to data movement test suite
     @onlyNativeDeviceTypes
@@ -6088,7 +6226,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(found_inf, 1.0)
 
     @onlyNativeDeviceTypes
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5375")
     def test_grad_scaling_state_dict(self, device):
         device = torch.device(device)
         GradScaler = partial(torch.GradScaler, device=device.type)
@@ -6102,10 +6239,8 @@ class TestTorchDeviceType(TestCase):
             if lazy_init_scale:
                 # Dummy scale() call to ensure the scale tensor is lazily initialized.
                 s1.scale(torch.full((1,), 4.0, dtype=torch.float32, device=device))
-                if "cuda" == device.type:
-                    self.assertTrue(isinstance(s1._scale, torch.cuda.FloatTensor))
-                else:
-                    self.assertTrue(isinstance(s1._scale, torch.FloatTensor))
+                self.assertEqual(s1._scale.dtype, torch.float32)
+                self.assertEqual(s1._scale.device, device)
 
             s1.load_state_dict(s0.state_dict())
 
@@ -8230,6 +8365,9 @@ class TestTorch(TestCase):
         self.assertFalse(t1.is_same_size(t3))
         self.assertTrue(t1.is_same_size(t4))
 
+    @skipIfCppFakeTensor("no nested tensor support")
+    def test_is_same_size_nested(self):
+        t1 = torch.empty(3, 4, 9, 10)
         nt1 = torch.nested.nested_tensor([torch.ones(2, 4), torch.ones(3, 4), torch.ones(5, 4)])
         nt2 = torch.nested.nested_tensor([torch.ones(2, 4), torch.ones(2, 4), torch.ones(2, 4)])
         nt3 = torch.nested.nested_tensor([torch.ones(2, 4, 5), torch.ones(2, 6, 5)])
@@ -9272,6 +9410,22 @@ class TestTorch(TestCase):
         if IS_FILESYSTEM_UTF8_ENCODING:
             with TemporaryDirectoryName(suffix='\u4e2d\u6587') as dname, TemporaryFileName(dir=dname) as fname:
                 assert_with_filename(fname)
+
+    def test_from_file_shared_grow_preserves_contents(self):
+        # https://github.com/pytorch/pytorch/issues/204636
+        original = [7, 8, 9, 10]
+        expected = original + [0, 0, 0, 0]
+        from_file_fns = [
+            lambda f: torch.from_file(f, shared=True, size=8, dtype=torch.uint8).tolist(),
+            lambda f: torch.UntypedStorage.from_file(f, True, 8).tolist(),
+        ]
+        for from_file in from_file_fns:
+            with TemporaryFileName() as fname:
+                with open(fname, "wb") as f:
+                    f.write(bytes(original))
+                self.assertEqual(from_file(fname), expected)
+                with open(fname, "rb") as f:
+                    self.assertEqual(list(f.read()), expected)
 
     def test_print(self):
         default_type = torch.tensor([]).type()

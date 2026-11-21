@@ -41,7 +41,17 @@ from types import (
     MethodType,
     ModuleType,
 )
-from typing import Any, cast, Generic, Literal, NoReturn, Self, TYPE_CHECKING, TypeVar
+from typing import (
+    Any,
+    cast,
+    Generic,
+    Literal,
+    NoReturn,
+    NotRequired,
+    Self,
+    TYPE_CHECKING,
+    TypeVar,
+)
 from typing_extensions import override, TypedDict
 
 import torch
@@ -64,6 +74,7 @@ from torch._inductor import config, config_comms, exc, metrics
 from torch._inductor.codegen.common import (
     custom_backend_codegen_configs,
     custom_backend_passes,
+    device_op_overrides_dict,
     init_backend_registration,
 )
 from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
@@ -107,6 +118,7 @@ from torch._inductor.utils import (
     clear_on_fresh_cache,
     determine_aoti_mmap_flags,
     fp32_matmul_precision_key,
+    get_cpp_wrapper_header_device,
     is_linux,
     is_windows,
     parallel_num_threads,
@@ -158,6 +170,8 @@ T = TypeVar("T")
 
 class SystemDeviceInfo(TypedDict):
     name: str | None
+    # The XCC count depends on the compute partition mode, not on the arch.
+    xcc_count: NotRequired[int | None]
 
 
 class SystemVersionInfo(TypedDict, total=False):
@@ -356,6 +370,7 @@ class CacheBase:
                 version_info["cuda"] = torch.version.cuda
             else:
                 device_info["name"] = device_properties.gcnArchName
+                device_info["xcc_count"] = getattr(device_properties, "xcc_count", None)
                 version_info["hip"] = torch.version.hip
             hash_input["device"] = device_info
         except (AssertionError, RuntimeError):
@@ -1803,6 +1818,13 @@ class FxGraphHashDetails:
 
         # Register inductor backends and custom passes and get their UUIDs.
         init_backend_registration()
+        from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+        shim_tables = {"": inductor_fallback_ops}
+        for device, overrides in device_op_overrides_dict.items():
+            if (ops := overrides.get_aten_c_shim_ops()) is not None:
+                shim_tables[device] = dict(ops)
+        self.aten_c_shim_ops = json.dumps(shim_tables, sort_keys=True)
         self.custom_backend_passes = tuple(
             map(self._get_custom_pass_detail, custom_backend_passes.values())
         )
@@ -4009,7 +4031,7 @@ def _get_cpp_prefix_header(device: str) -> str | None:
 def _get_cpp_wrapper_header(device: str, aot_mode: bool = False) -> str:
     """Given a device type (and optionally whether we're in AOT Inductor mode), returns
     the path to the cpp_wrapper header file to be precompiled."""
-    base_device = device.split(":", maxsplit=1)[0]
+    base_device = get_cpp_wrapper_header_device(device.split(":", maxsplit=1)[0])
     is_array_ref = config.aot_inductor.allow_stack_allocation and base_device == "cpu"
     return (
         "torch/csrc/inductor/"
@@ -4168,9 +4190,17 @@ class CppCodeCache:
             restore_cpp_kernel,
         )
 
+        # With optimized code, the main source is only compiled, so its command
+        # line lacks the flags that reach only the link.
+        link_flags = (
+            " " + " ".join(config.cpp.extra_ldflags) if config.cpp.extra_ldflags else ""
+        )
+
         # Both keys come from here; only the command line passed in differs.
         def kernel_key(cmd_line: str) -> str:
-            return get_hash(main_code.strip(), f"{optimized_code} {cmd_line}")
+            return get_hash(
+                main_code.strip(), f"{optimized_code} {cmd_line}{link_flags}"
+            )
 
         key, main_path = write(main_code, "main.cpp", key=kernel_key(main_cmd_line))
 

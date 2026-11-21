@@ -1168,7 +1168,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
               kMemHandleTypePosixFd);
         }
         if (import_err != hipSuccess) {
-          (void)hipGetLastError();
+          C10_CUDA_CLEAR_ERROR();
           TORCH_CHECK(
               false,
               "hipMemImportFromShareableHandle failed: ",

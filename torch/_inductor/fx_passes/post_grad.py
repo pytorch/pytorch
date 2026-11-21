@@ -36,6 +36,9 @@ from torch._prims_common import (
     make_contiguous_strides_for,
 )
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.passes.graph_transform_observer import (
+    GraphTransformObserver as GraphTransformObserverBase,
+)
 from torch.fx.passes.reinplace import _is_view_op
 from torch.utils._ordered_set import OrderedSet
 
@@ -378,7 +381,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     The IR here has been normalized and functionalized.
     """
     GraphTransformObserver = functools.partial(
-        torch.fx.passes.graph_transform_observer.GraphTransformObserver,
+        GraphTransformObserverBase,
         subsystem="post_grad_passes",
     )
 
@@ -690,8 +693,17 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
         if introduced_mutation:
             fake_tensor_updater.incremental_update()
+    auto_functionalized_decomposition_enabled = (
+        not GraphTransformObserverBase.is_pass_disabled(
+            "decompose_auto_functionalized", "post_grad_passes"
+        )
+    )
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
-        functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
+        functools.partial(
+            reinplace_inplaceable_ops,
+            fake_tensor_updater,
+            rewire_auto_functionalized_outputs=auto_functionalized_decomposition_enabled,
+        ),
     )
 
     # Fix aliasing detection for dtype views AFTER reinplace determines cloning needs
@@ -704,9 +716,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
     ).apply_graph_pass(decompose_user_kernel_wrapper_functional)
-    GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
-        decompose_auto_functionalized
-    )
+    if auto_functionalized_decomposition_enabled:
+        GraphTransformObserver(
+            gm, "decompose_auto_functionalized", subsystem=None
+        ).apply_graph_pass(decompose_auto_functionalized)
     GraphTransformObserver(gm, "decompose_scan_to_while_loop").apply_gm_pass(
         decompose_scan_to_while_loop
     )
@@ -1493,7 +1506,11 @@ def slice_noop(self, dim=0, start=None, end=None, step=1):
 
     slice_dim_size = self.shape[dim]
     if (
-        statically_known_true(sym_eq(start, 0))
+        (
+            statically_known_true(sym_eq(start, 0))
+            # negative starts at or below -slice_dim_size normalize to 0
+            or statically_known_true(start <= -slice_dim_size)
+        )
         and (
             statically_known_true(end >= 2**63 - 1)
             or statically_known_true(end >= slice_dim_size)
@@ -1578,16 +1595,20 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
         end = 2**63 - 1
     slice_scatter_dim_size = self.shape[dim]
     full_replacement = (
-        self.shape == src.shape
-        and start == 0
+        statically_known_true(sym_eq(self.shape, src.shape))
+        and (
+            statically_known_true(sym_eq(start, 0))
+            # negative starts at or below -slice_scatter_dim_size normalize to 0
+            or statically_known_true(start <= -slice_scatter_dim_size)
+        )
         and (
             statically_known_true(end >= 2**63 - 1)
             or statically_known_true(end >= slice_scatter_dim_size)
         )
-        and step == 1
+        and statically_known_true(sym_eq(step, 1))
     )
     partial_self_replacement = (
-        step == 1
+        statically_known_true(sym_eq(step, 1))
         and self.dim() == src.dim()
         and all(
             statically_known_true(sym_eq(src.shape[d], self.shape[d]))
@@ -1874,6 +1895,16 @@ def remove_noop_ops(graph: torch.fx.Graph):
         for n in graph.find_nodes(op="call_function", target=target)
     )
 
+    # replace_all_uses_with does not update users' meta["val"], so a view of an
+    # erased copy still reports the copy's storage. Map each erased copy's
+    # storage to the storage that replaced it and compare resolved storages.
+    replaced_storages: dict[int | None, int | None] = {}
+
+    def resolve(storage: int | None) -> int | None:
+        while storage in replaced_storages:
+            storage = replaced_storages[storage]
+        return storage
+
     for node in graph.nodes:
         if node.target in noop_registry:
             cond, src_index = noop_registry[node.target]
@@ -1905,8 +1936,8 @@ def remove_noop_ops(graph: torch.fx.Graph):
             # Don't introduce new aliasing between inputs and outputs.
             # See fx_passes/README.md for a discussion of why this is
             # necessary.
-            node_storage = get_node_storage(node)
-            src_storage = get_node_storage(src)
+            node_storage = resolve(get_node_storage(node))
+            src_storage = resolve(get_node_storage(src))
             node_is_view = node_storage == src_storage
             if (
                 not node_is_view
@@ -1925,7 +1956,9 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 continue
 
             # Keep a real copy of a storage that is mutated in this graph.
-            if not node_is_view and src_storage in mutated_storages:
+            if not node_is_view and any(
+                resolve(storage) == src_storage for storage in mutated_storages
+            ):
                 continue
 
             is_valid, args, kwargs = get_fake_args_kwargs(node)
@@ -1947,6 +1980,12 @@ def remove_noop_ops(graph: torch.fx.Graph):
             ):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
+                if not node_is_view and node_storage is not None:
+                    replaced_storages[node_storage] = src_storage
+                # src now backs an output, so a later copy of src into another
+                # output must stay a copy or both outputs become one tensor.
+                if node_storage in output_storages:
+                    output_storages.add(src_storage)
 
 
 # We can potentially generalize to arbitrary view ops by validating
