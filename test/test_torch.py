@@ -3439,6 +3439,66 @@ class TestTorchDeviceType(TestCase):
         finally:
             torch.set_num_threads(num_threads)
 
+    # Narrowed/padded 2D transposed sources (src.stride(1) > src.size(0)), such as
+    # a column slice of a transposed tensor. Sources larger than 4 MiB with at
+    # least 512 rows and 2048 columns take the blocked path; others, including
+    # the skinny cases, stay on the generic loop. The (2304, 2048) case is above
+    # 4 MiB even for 1-byte dtypes, and the offsets exercise storage_offset.
+    @onlyCPU
+    @dtypes(torch.uint8, torch.bool, torch.bfloat16, torch.float32, torch.float64, torch.complex64)
+    def test_copy_transpose_padded(self, device, dtype):
+        num_threads = torch.get_num_threads()
+        try:
+            for threads in (1, 4):
+                torch.set_num_threads(threads)
+                for h, w, pad, offset in ((2304, 2048, 64, 5), (1000, 1003, 7, 3),
+                                          (61, 5000, 1, 0), (5000, 61, 64, 0)):
+                    base = make_tensor((w, h + pad + offset), dtype=dtype, device=device)
+                    src = base[:, offset:offset + h].t()
+                    self.assertEqual(src.stride(), (1, h + pad + offset))
+                    self.assertEqual(src.contiguous(), src, atol=0, rtol=0)
+                    out = torch.empty(h, w, dtype=dtype, device=device)
+                    self.assertEqual(out.copy_(src), src, atol=0, rtol=0)
+        finally:
+            torch.set_num_threads(num_threads)
+
+    # Stacks of transposed matrices (3 or more dims): the last two dims are a
+    # transposed, possibly padded matrix, and the leading dims may have any
+    # strides, including 0 (expand) and interleaved (permute). Sources above
+    # 4 MiB whose matrices have at least 512 rows and 2048 columns take the
+    # blocked path; the tiny-matrix case stays on the generic loop.
+    @onlyCPU
+    @dtypes(torch.uint8, torch.bool, torch.bfloat16, torch.float32, torch.float64, torch.complex64)
+    def test_copy_transpose_batched(self, device, dtype):
+        def mk(*shape):
+            return make_tensor(shape, dtype=dtype, device=device)
+
+        def sources():
+            # Dense batch of transposes; above 4 MiB even for 1-byte dtypes.
+            yield mk(4, 2050, 523).transpose(-1, -2)
+            # Padded pitch with a storage offset, like a column slice of a
+            # transposed fused-MoE expert tensor.
+            yield mk(4, 2050, 593)[..., 5:528].transpose(-1, -2)
+            # 4-D, odd sizes.
+            yield mk(2, 3, 2051, 523).transpose(-1, -2)
+            # Batch stride 0.
+            yield mk(1, 2050, 523).expand(4, 2050, 523).transpose(-1, -2)
+            # Interleaved batches: strides (523, 1, 2092).
+            yield mk(2050, 4, 523).permute(1, 2, 0)
+            # Many tiny matrices.
+            yield mk(20000, 16, 16).transpose(-1, -2)
+
+        num_threads = torch.get_num_threads()
+        try:
+            for threads in (1, 4):
+                torch.set_num_threads(threads)
+                for src in sources():
+                    self.assertEqual(src.contiguous(), src, atol=0, rtol=0)
+                    out = torch.empty(src.shape, dtype=dtype, device=device)
+                    self.assertEqual(out.copy_(src), src, atol=0, rtol=0)
+        finally:
+            torch.set_num_threads(num_threads)
+
     # FIXME: move to data movement test suite
     @onlyNativeDeviceTypes
     @dtypes(torch.int64, torch.float32, torch.complex64)
