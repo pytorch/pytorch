@@ -6792,6 +6792,21 @@ def graph_asks_settings(x, settings):
     return (y * getattr(settings, "hidden", 1.0)).tanh().exp()
 
 
+class GraphKeepsKeys:
+    def __init__(self):
+        self.keys = None
+        self.updated = {}
+
+
+def graph_keeps_and_reads(x, settings, kept):
+    y = (x.sin() + 1).cos()
+    kept.keys = y
+    kept.updated[0] = True
+    if settings.kind == "plain":
+        y = y * settings.width
+    return (y * settings.hidden).tanh().exp()
+
+
 def graph_reads_what_it_stored(x, doubles):
     y = (x.sin() + 1).cos()
     doubles.scale = 1.5
@@ -10338,6 +10353,23 @@ class TestVmGraphResults(TestCase):
             self.assertEqual(left(x, other), expected, atol=0, rtol=0)
         large = [g for g in torch.vm.regions(left) if "ops" in g and g["ops"] > 4]
         self.assertEqual(large, [])
+
+    def test_a_class_that_reads_its_attributes_itself_behind_a_store(self, device):
+        x = torch.randn(3, 4, device=device)
+        settings, kept = GraphSettings(), GraphKeepsKeys()
+        # Stores into another object, then reads that go into the
+        # `__getattribute__` of a class: each thing that function reads is
+        # looked at behind the stores, and none of them is what was stored.
+        compiled = self.whole_graph(graph_keeps_and_reads, (x, settings, kept), 7)
+        self.assertEqual(kept.updated, {0: True})
+        # The same object in both places: what is read is what was stored.
+        both = GraphSettings()
+        both.updated = {}
+        for args in ((x, both, both), (x, settings, kept), (x, both, both)):
+            for _ in range(2):
+                expected = graph_keeps_and_reads(*args)
+                self.assertEqual(compiled(*args), expected, atol=0, rtol=0)
+        self.assertEqual(both.updated, {0: True})
 
     def test_getattr_and_hasattr_of_a_class_that_reads_attributes_itself(self, device):
         x = torch.randn(3, 4, device=device)
