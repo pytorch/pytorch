@@ -7683,41 +7683,36 @@ class GraphModule(torch.nn.Module):
         self._check_key_fallback(escaped, (None,), "FakeIdVariable")
         self._check_key_reuse(lambda x, _: x + len({receiver.count}), (None,), frames=1)
 
-    @parametrize("binding", ["wrapper", "attribute", "descriptor"])
-    def test_bound_method_constant_receiver_hash(self, binding):
+    @parametrize(
+        "bind",
+        [None, lambda s: s.upper, lambda s: str.__dict__["upper"].__get__(s, str)],
+    )
+    def test_bound_method_constant_receiver_hash(self, bind):
         def fn(x, receiver):
-            if binding == "descriptor":
-                receiver = str.__dict__["upper"].__get__(receiver, str)
-            elif binding == "attribute":
-                receiver = receiver.upper
-            return x + 1, hash(receiver)
+            return x + 1, hash(bind(receiver) if bind else receiver)
 
-        first, second = ("".join(("hello", "world")) for _ in range(2))
-        self.assertIsNot(first, second)
-        receivers = (first, second, first)
-        if binding == "wrapper":
-            receivers = tuple(s.__hash__ for s in receivers)
-        self._check_key_reuse(fn, receivers, frames=2)
+        a, b = ("".join(("hello", "world")) for _ in range(2))
+        self.assertIsNot(a, b)
+        inputs = (a, b, a) if bind else tuple(s.__hash__ for s in (a, b, a))
+        self._check_key_reuse(fn, inputs)
 
     @parametrize("capture", ["aot", "cache"])
     @parametrize("op", [hash, lambda m: m.__name__, lambda m: m(1), lambda m: len({m})])
     def test_prebound_builtin_saved_identity_refusal(self, op, capture):
         fn = lambda x, method: (x + 1, op(method))
-        self._check_capture_refusal(fn, [1].count, capture, "requires identity guards")
+        self._check_capture_refusal(fn, [1].count, capture, "binding prebound builtin")
 
     @parametrize("capture", ["aot", "cache"])
     @parametrize("source", ["prebound", "aggregate", "captured", "argument"])
     def test_bound_builtin_method_hash_cannot_be_saved(self, capture, source):
         text = "hello"
-
-        def fn(x, value):
-            if source == "aggregate":
-                value = frozenset((value,))
-            elif source in ("captured", "argument"):
-                value = (text if source == "captured" else value).upper
-            return x + 1, hash(value)
-
-        value = text if source in ("captured", "argument") else MethodKeyDict.fromkeys
+        if source in ("captured", "argument"):
+            value = text
+            bind = lambda s: (text if source == "captured" else s).upper
+        else:
+            value = MethodKeyDict.fromkeys
+            bind = lambda m: frozenset((m,)) if source == "aggregate" else m
+        fn = lambda x, m: (x + 1, hash(bind(m)))
         self._check_capture_refusal(fn, value, capture, _HASH_ESCAPE)
 
     @parametrize("mode", ["hash", "literal", "alias"])
@@ -7728,8 +7723,7 @@ class GraphModule(torch.nn.Module):
             if mode == "alias":
                 return x + 1, hash(descriptor.__get__(other, int)) == hash(method)
             if mode == "hash":
-                mapping = {method: 1}
-                return x + method.__self__, x + method(), len(mapping)
+                return x + method.__self__, x + method(), len({method: 1})
             return x + 1, descriptor.__get__(10001, int) == method
 
         if mode == "alias":
@@ -7771,14 +7765,11 @@ class GraphModule(torch.nn.Module):
         member = enum.IntEnum("MethodKeyEnum", {"value": 1}).value
 
         def fn(x, key):
-            receiver = []
-            method = list.append.__get__(receiver, list)
+            method = list.append.__get__([], list)
             original = key
             if constructed and isinstance(key, (str, tuple, frozenset)):
-                if type(key) is record:
-                    key = record(*key)
-                else:
-                    key = type(key)(list(key) if isinstance(key, frozenset) else key)
+                value = list(key) if isinstance(key, frozenset) else key
+                key = record(*key) if type(key) is record else type(key)(value)
             return x + len({key: 1, method: 2}), type(key), key == original
 
         keys = (torch.ones(1), torch.Size([1]), frozenset({1}), NoHint(), member)
@@ -8762,6 +8753,9 @@ class GraphModule(torch.nn.Module):
             lambda h: slice(1, h % 5).indices(5),
             lambda h: torch.Size([1, 2])[h % 2],
             lambda h: h % 3 in range(2),
+            lambda h: range(3).index(h % 3),
+            lambda h: [2, 1].sort(reverse=h % 2),
+            lambda h: sorted([2, 1], reverse=h % 2),
         ],
     )
     def test_skipped_builtin_hash_guard(self, convert):
@@ -8808,10 +8802,30 @@ class GraphModule(torch.nn.Module):
             self._check_key_reuse(fn, (label,), frames=1)
             self.assertEqual(compiled(x, label), fn(x, label))
         for mutate, label.tag in ((True, "a"), (False, "b")):
-            if base is int or (base is object and mutate):
+            if base in (int, object) and mutate:
                 with self.assertRaisesRegex(Unsupported, f"class mutation: {mutate}"):
                     torch.compile(fn, backend="eager", fullgraph=True)(x, label, mutate)
             self.assertEqual(compiled(x, label, mutate), fn(x, label, mutate))
+
+    def test_format_enum_members_and_tensor_conversions(self):
+        def fn(x, key):
+            template = "{} {!r} {!s} {:>4}"
+            return x + 1, format(key), template.format(key, x, x, re.RegexFlag(2))
+
+        self._check_key_reuse(fn, (torch._C.DispatchKey.CPU,), frames=1)
+
+    def test_format_unrelated_class_mutation(self):
+        unrelated = type("Unrelated", (), {})
+
+        class Formattable:
+            def __format__(self, spec):
+                return "original" + spec
+
+        def fn(x, member):
+            unrelated.__format__ = lambda self, spec: "changed"
+            return x + 1, f"{member:>8}", str.format("{:>8}", member)
+
+        self._check_key_reuse(fn, (Formattable(),), frames=1)
 
     @parametrize("template", ["{1!r}", "{0!é}", "{} {0.real}", "{0:{0:{}}}"])
     def test_format_sourced_enum_errors(self, template):

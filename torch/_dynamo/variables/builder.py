@@ -25,6 +25,7 @@ import contextlib
 import contextvars
 import copy
 import dataclasses
+import datetime
 import enum
 import functools
 import gc
@@ -146,7 +147,6 @@ from ..source import (
     ChainedSource,
     ConstDictKeySource,
     ConvertIntSource,
-    CurrentStreamSource,
     DictGetItemSource,
     DictSubclassGetItemSource,
     DynamicScalarSource,
@@ -1279,13 +1279,14 @@ class VariableBuilder:
 
         if self.source != result.source:
             tracer = self.tx.output.current_tracer
-            if tracer.tracks_lexical_sources:
+            if tracer.in_nested_compile_region:
                 record_lexical_alias(tracer.lexical_sources, self.source, result.source)
             dup_guard = make_dupe_guard(self.source, result.source)
             if dup_guard is not None:
                 self.install_guards(dup_guard)
             elif (
-                isinstance(result, ConstDictVariable)
+                isinstance(result, NNModuleGlobalHooksDictVariable)
+                or isinstance(result, ConstDictVariable)
                 and any(
                     isinstance(source, AttrSource)
                     and source.member in module_hook_attrs
@@ -1643,21 +1644,6 @@ class VariableBuilder:
                 # values. Indices are cheap to save.
                 self.tx.output.guard_on_key_order.add(self.source)
 
-            hook_source = None
-            if (
-                value is hook_api._global_forward_hooks
-                or value is hook_api._global_forward_pre_hooks
-            ):
-                hook_source = self.get_source()
-                # Direct capture of Module._call_impl reads its globals without an AttrSource.
-                if isinstance(
-                    hook_source, GlobalSource
-                ) and self.tx.output.root_tx.f_globals is vars(hook_api):
-                    hook_source = AttrSource(
-                        self.tx.import_source(hook_api.__name__),
-                        hook_source.global_name,
-                    )
-
             # We need all the keys to be hashable. We do this within the
             # HashableTracker class in hashable.py
             def build_key_value(
@@ -1666,8 +1652,6 @@ class VariableBuilder:
                 base = self.get_source()
                 if all_const:
                     key = ConstantVariable.create(k)
-                    if hook_source is not None and type(k) is int:
-                        key = key.clone(source=ConstDictKeySource(hook_source, i))
                     source_key = k
                 else:
                     source_key = ConstDictKeySource(base, i)
@@ -2054,7 +2038,7 @@ class VariableBuilder:
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, torch.Stream):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            if isinstance(self.source, CurrentStreamSource):
+            if self.source == self.tx.symbolic_stream_state.current_stream_source:
                 # Reuse the index pre-allocated in SymbolicStreamState.__init__
                 index = CURRENT_STREAM_INDEX
             else:
@@ -6094,7 +6078,15 @@ class SourcelessBuilder:
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
         elif isinstance(
-            value, (importlib.machinery.ModuleSpec, torch.utils._pytree.TreeSpec)
+            value,
+            (
+                importlib.machinery.ModuleSpec,
+                torch.utils._pytree.TreeSpec,
+                datetime.date,
+                datetime.time,
+                datetime.timedelta,
+                datetime.tzinfo,
+            ),
         ):
             return UserDefinedObjectVariable(value)
         elif isinstance(value, (re.Pattern, re.Match)):
