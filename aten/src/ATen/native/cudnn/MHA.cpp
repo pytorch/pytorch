@@ -169,6 +169,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cudnn/Handle.h>
+#include <ATen/native/cudnn/LRUCache.h>
 #include <ATen/native/cudnn/MHA.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils.h>
@@ -180,11 +181,16 @@ void run_cudnn_SDP_bprop_nestedtensor(
 #include <ATen/native/utils/ParamsHash.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/util/safe_conv.h>
 #include <cudnn.h>
 
+#include <atomic>
+#include <charconv>
 #include <cstdint>
 #include <iostream>
+#include <system_error>
 
 #if CUDNN_FRONTEND_VERSION >= 12500 && CUDNN_VERSION >= 92400
 #define AT_CUDNN_HAS_CUMULATIVE_SEQUENCE_LENGTHS 1
@@ -570,48 +576,176 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
   }
 };
 
+int getMHACacheLimit() {
+  static const int limit = [] {
+    constexpr int default_limit = 0;
+    const auto value = c10::utils::get_env("TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT");
+    if (!value) {
+      return default_limit;
+    }
+    int result = 0;
+    const auto* end = value->data() + value->size();
+    const auto parsed = std::from_chars(value->data(), end, result);
+    if (parsed.ec == std::errc{} && parsed.ptr == end) {
+      return result;
+    }
+    TORCH_WARN_ONCE(
+        "Invalid TORCH_CUDNN_SDPA_LRU_CACHE_LIMIT; using the default (unlimited) cache.");
+    return default_limit;
+  }();
+  return limit;
+}
+
+struct MHAGraphReleases {
+  std::shared_ptr<fe::graph::Graph> own(
+      std::unique_ptr<fe::graph::Graph> graph) {
+    const auto device = c10::cuda::current_device();
+    auto* entry = new Entry{std::move(graph), device};
+    return {entry->graph.get(), [this, entry](fe::graph::Graph*) {
+              enqueue(entry);
+            }};
+  }
+
+  void drain() {
+    if (!pending_.load(std::memory_order_acquire)) {
+      return;
+    }
+    // Only unreferenced plans reach this queue. Destruction can free device
+    // memory or unload code, so relax capture checks while releasing them.
+    c10::cuda::CUDAStreamCaptureModeGuard guard(cudaStreamCaptureModeRelaxed);
+    while (auto* entry =
+               pending_.exchange(nullptr, std::memory_order_acquire)) {
+      try {
+        while (entry) {
+          c10::cuda::CUDAGuard device_guard(entry->device);
+          auto* retired = entry;
+          entry = entry->next;
+          delete retired;
+        }
+      } catch (...) {
+        while (entry) {
+          auto* next = entry->next;
+          enqueue(entry);
+          entry = next;
+        }
+        throw;
+      }
+    }
+  }
+
+ private:
+  struct Entry {
+    std::unique_ptr<fe::graph::Graph> graph;
+    c10::DeviceIndex device;
+    Entry* next = nullptr;
+  };
+
+  void enqueue(Entry* entry) noexcept {
+    auto* head = pending_.load(std::memory_order_relaxed);
+    do {
+      entry->next = head;
+    } while (!pending_.compare_exchange_weak(
+        head, entry, std::memory_order_release, std::memory_order_relaxed));
+  }
+
+  std::atomic<Entry*> pending_{nullptr};
+};
+
+MHAGraphReleases& getMHAGraphReleases() {
+  // CUDA user-object callbacks can outlive static destruction.
+  static auto* releases = new MHAGraphReleases();
+  return *releases;
+}
+
 struct MHAGraphCache {
   using KeyType = MHACacheKeyWrapper;
-  using ValueType = std::unique_ptr<fe::graph::Graph>;
-  using MapType =
-      std::unordered_map<KeyType, ValueType, ParamsWrapperHash<KeyType>>;
-  using iterator = typename MapType::iterator;
-  using const_iterator = typename MapType::const_iterator;
+  using ValueType = std::shared_ptr<fe::graph::Graph>;
 
-  MapType engine_cache;
-  int count = 0;
-  int hits = 0;
+  explicit MHAGraphCache(const char* direction) : direction_(direction) {}
 
-  // no mutexes here as caches are now thread local for v8, can also return a
-  // pointer to the Execution Plan if we know it will not be invalidated by
-  // another thread
-  iterator find(const KeyType& key) {
-    static bool flag =
-        c10::utils::check_env("TORCH_CUDNN_SDPA_CACHE_DEBUG") == true;
-    if (flag && count) {
+  ValueType find(const KeyType& key) {
+    auto* graph = cache_.find(key);
+    if (debug_) {
+      if (graph) {
+        ++hits_;
+      } else {
+        ++misses_;
+      }
+    }
+    return graph ? *graph : nullptr;
+  }
+
+  void update(const KeyType& key, const ValueType& graph) {
+    const bool evicted = cache_.update(key, graph);
+    if (debug_ && evicted) {
+      ++evictions_;
+    }
+  }
+
+  ValueType own(std::unique_ptr<fe::graph::Graph> graph) const {
+    if (limit_ == 0) {
+      return ValueType(std::move(graph));
+    }
+    return getMHAGraphReleases().own(std::move(graph));
+  }
+
+  void prepare_execution(const ValueType& graph, bool cache_miss) const {
+    if (limit_ == 0) {
+      return;
+    }
+    const auto capture =
+        c10::cuda::captureInfoMayInitCtx(c10::cuda::getCurrentCUDAStream());
+    if (capture.status == c10::cuda::CaptureStatus::Active) {
+      // Recorded kernels can outlive this call and their cache entry. In
+      // particular, runtime-compiled code is owned by the execution plan.
+      c10::cuda::retainGraphUserObject(
+          capture.graph,
+          std::make_unique<ValueType>(graph),
+          release_captured_graph);
+    }
+    if (cache_miss) {
+      // Releasing plans can wait for GPU work; preserve asynchronous warm hits.
+      getMHAGraphReleases().drain();
+    }
+  }
+
+  void finish_execution(ValueType& graph) const {
+    if (limit_ < 0) {
+      graph.reset();
+      getMHAGraphReleases().drain();
+    }
+  }
+
+  void report() const {
+    if (debug_) {
       TORCH_WARN(
-          "SDPA Cache Called ",
-          count,
-          " times. Hit rate: ",
-          100 * hits / count,
-          "%");
+          "cuDNN SDPA cache: ",
+          direction_,
+          " size=",
+          cache_.size(),
+          " hits=",
+          hits_,
+          " misses=",
+          misses_,
+          " evictions=",
+          evictions_);
     }
-    count++;
-    auto it = engine_cache.find(key);
-    if (it != engine_cache.end()) {
-      hits++;
-    }
-    return it;
   }
 
-  const_iterator end() const {
-    return engine_cache.end();
+ private:
+  static void CUDART_CB release_captured_graph(void* opaque) {
+    // The shared_ptr's deleter only queues the graph, without calling CUDA.
+    delete static_cast<ValueType*>(opaque);
   }
 
-  template <typename... Args>
-  std::pair<iterator, bool> try_emplace(const KeyType& key, Args&&... args) {
-    return engine_cache.try_emplace(key, std::forward<Args>(args)...);
-  }
+  const int limit_ = getMHACacheLimit();
+  LRUCache<KeyType, ValueType, ParamsWrapperHash<KeyType>> cache_{limit_};
+  const char* direction_;
+  const bool debug_ =
+      c10::utils::check_env("TORCH_CUDNN_SDPA_CACHE_DEBUG") == true;
+  uint64_t hits_ = 0;
+  uint64_t misses_ = 0;
+  uint64_t evictions_ = 0;
 };
 
 // @eqy: use thread local caches as cuDNN Execution Plans are not guaranteed to
@@ -620,12 +754,12 @@ struct MHAGraphCache {
 // We also leak the caches to workaround potential teardown race issues.
 
 MHAGraphCache& getMHAGraphCache_() {
-  thread_local MHAGraphCache* instance{new MHAGraphCache()};
+  thread_local MHAGraphCache* instance{new MHAGraphCache("forward")};
   return *instance;
 }
 
 MHAGraphCache& getMHAGraphBackwardCache_() {
-  thread_local MHAGraphCache* instance{new MHAGraphCache()};
+  thread_local MHAGraphCache* instance{new MHAGraphCache("backward")};
   return *instance;
 }
 
@@ -1684,9 +1818,11 @@ void run_cudnn_SDP_fprop(
       is_causal ? CausalMask::TOP_LEFT : CausalMask::NONE,
       return_softmaxstats,
       false);
-  auto [cache_it, not_found] = getMHAGraphCache_().try_emplace(key, nullptr);
-  if (not_found) {
-    cache_it->second = build_graph(
+  auto& cache = getMHAGraphCache_();
+  auto graph = cache.find(key);
+  const bool cache_miss = !graph;
+  if (cache_miss) {
+    graph = cache.own(build_graph(
         b,
         h,
         s_q,
@@ -1705,9 +1841,11 @@ void run_cudnn_SDP_fprop(
         o,
         _dropoutseed,
         _dropoutoffset,
-        handle);
+        handle));
+    cache.update(key, graph);
   }
-  const fe::graph::Graph& mha_graph = *cache_it->second;
+  cache.report();
+  const fe::graph::Graph& mha_graph = *graph;
   std::unordered_map<int64_t, void*> variant_pack = {
       {Q, q.mutable_data_ptr()},
       {K, k.mutable_data_ptr()},
@@ -1738,8 +1876,10 @@ void run_cudnn_SDP_fprop(
   auto workspace_size = mha_graph.get_workspace_size();
   auto workspace_ptr =
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
+  cache.prepare_execution(graph, cache_miss);
   auto err = mha_graph.execute(handle, variant_pack, workspace_ptr.get());
   check_cudnn_sdpa_execution(std::move(err));
+  cache.finish_execution(graph);
 }
 
 void run_cudnn_SDP_fprop_nestedtensor(
@@ -1849,9 +1989,10 @@ void run_cudnn_SDP_fprop_nestedtensor(
       sequence_length_mode);
 
   MHAGraphCache& cache = getMHAGraphCache_();
-  auto cache_it = cache.find(key);
-  if (cache_it == cache.end()) {
-    auto graph = build_graph_nestedtensor(
+  auto graph = cache.find(key);
+  const bool cache_miss = !graph;
+  if (cache_miss) {
+    graph = cache.own(build_graph_nestedtensor(
         b,
         h_q,
         h_k,
@@ -1876,10 +2017,11 @@ void run_cudnn_SDP_fprop_nestedtensor(
         o,
         dropoutseed,
         dropoutoffset,
-        handle);
-    cache_it = cache.try_emplace(key, std::move(graph)).first;
+        handle));
+    cache.update(key, graph);
   }
-  const fe::graph::Graph& mha_graph = *cache_it->second;
+  cache.report();
+  const fe::graph::Graph& mha_graph = *graph;
 
   check_ragged_offset_capacity(q, "query");
   check_ragged_offset_capacity(o, "out");
@@ -1952,8 +2094,10 @@ void run_cudnn_SDP_fprop_nestedtensor(
   auto workspace_size = mha_graph.get_workspace_size();
   auto workspace_ptr =
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
+  cache.prepare_execution(graph, cache_miss);
   auto err = mha_graph.execute(handle, variant_pack, workspace_ptr.get());
   check_cudnn_sdpa_execution(std::move(err));
+  cache.finish_execution(graph);
 }
 
 void run_cudnn_SDP_bprop(
@@ -2064,10 +2208,11 @@ void run_cudnn_SDP_bprop(
       is_causal ? CausalMask::TOP_LEFT : CausalMask::NONE,
       true,
       false);
-  auto [cache_it, not_found] =
-      getMHAGraphBackwardCache_().try_emplace(key, nullptr);
-  if (not_found) {
-    cache_it->second = build_graph_backward(
+  auto& cache = getMHAGraphBackwardCache_();
+  auto graph = cache.find(key);
+  const bool cache_miss = !graph;
+  if (cache_miss) {
+    graph = cache.own(build_graph_backward(
         b,
         h,
         s_q,
@@ -2089,9 +2234,11 @@ void run_cudnn_SDP_bprop(
         dV,
         _dropoutseed,
         _dropoutoffset,
-        handle);
+        handle));
+    cache.update(key, graph);
   }
-  const fe::graph::Graph& mha_graph = *cache_it->second;
+  cache.report();
+  const fe::graph::Graph& mha_graph = *graph;
 
   std::unordered_map<int64_t, void*> variant_pack = {
       // inputs
@@ -2127,8 +2274,10 @@ void run_cudnn_SDP_bprop(
   auto workspace_ptr =
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
   TORCH_CHECK(!workspace_size || workspace_ptr.get());
+  cache.prepare_execution(graph, cache_miss);
   auto err = mha_graph.execute(handle, variant_pack, workspace_ptr.get());
   check_cudnn_sdpa_execution(std::move(err));
+  cache.finish_execution(graph);
 }
 
 void run_cudnn_SDP_bprop_nestedtensor(
@@ -2251,9 +2400,10 @@ void run_cudnn_SDP_bprop_nestedtensor(
       true);
 
   MHAGraphCache& cache = getMHAGraphBackwardCache_();
-  auto cache_it = cache.find(key);
-  if (cache_it == cache.end()) {
-    auto graph = build_graph_backward_nestedtensor(
+  auto graph = cache.find(key);
+  const bool cache_miss = !graph;
+  if (cache_miss) {
+    graph = cache.own(build_graph_backward_nestedtensor(
         b,
         h_q,
         h_k,
@@ -2279,10 +2429,11 @@ void run_cudnn_SDP_bprop_nestedtensor(
         dV,
         dropoutseed,
         dropoutoffset,
-        handle);
-    cache_it = cache.try_emplace(key, std::move(graph)).first;
+        handle));
+    cache.update(key, graph);
   }
-  const fe::graph::Graph& mha_graph = *cache_it->second;
+  cache.report();
+  const fe::graph::Graph& mha_graph = *graph;
   std::unordered_map<int64_t, void*> variant_pack = {
       // inputs
       {Q, q_.mutable_data_ptr()},
@@ -2319,8 +2470,10 @@ void run_cudnn_SDP_bprop_nestedtensor(
   auto workspace_ptr =
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
   TORCH_CHECK(!workspace_size || workspace_ptr.get());
+  cache.prepare_execution(graph, cache_miss);
   auto err = mha_graph.execute(handle, variant_pack, workspace_ptr.get());
   check_cudnn_sdpa_execution(std::move(err));
+  cache.finish_execution(graph);
 }
 
 } // namespace at::native
