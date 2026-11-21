@@ -1144,6 +1144,7 @@ def meta_max(self):
 @register_meta([aten.max.dim, aten.max.dim_max])
 @out_wrapper("max", "max_values", exact_dtype=True)
 def meta_max_dim(self, dim, keepdim=False):
+    zero_numel_check_dims(self, maybe_wrap_dim(dim, self.dim()), "max()")
     dim = utils.reduction_dims(self.shape, (dim,))
     output_shape = _compute_reduction_shape(self, dim, keepdim)
     return (
@@ -1161,6 +1162,7 @@ def meta_min(self):
 @register_meta([aten.min.dim, aten.min.dim_min])
 @out_wrapper("min", "min_indices", exact_dtype=True)
 def meta_min_dim(self, dim, keepdim=False):
+    zero_numel_check_dims(self, maybe_wrap_dim(dim, self.dim()), "min()")
     dim = utils.reduction_dims(self.shape, (dim,))
     output_shape = _compute_reduction_shape(self, dim, keepdim)
     return (
