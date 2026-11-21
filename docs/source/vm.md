@@ -411,9 +411,9 @@ A path does not go into every call. It ends in front of a call
   calls itself is gone into that often, and an `nn.Sequential` inside an
   `nn.Sequential` is on a path twice;
 - more than 48 calls deep;
-- of a `functools.partial`, of a class (constructing an object), and of a
-  function that was made on the path (a closure that the function defines
-  and calls);
+- of a `functools.partial`, of a class whose objects a path does not make
+  ("Objects a path makes"), and of a function that was made on the path (a
+  closure that the function defines and calls);
 - whose arguments do not fit the function: the call raises the `TypeError`
   where the function has it;
 - that hands on `**kwargs` from a dict whose keys are no strs;
@@ -1629,6 +1629,72 @@ appended  # [1, 1, 1, 1, 1, 2, 1, 2]: where the two are one object, `a.n` is wha
 found["ops"], found["exports"], found["hits"]  # (8, 2, 5)
 ```
 
+### Objects a path makes
+
+A class that is defined in Python and called is an instruction of a path
+where calling it is no more than `object.__new__(cls)` and then its
+`__init__`: its own class is `type`, it has no `__new__` of its own, it is
+not abstract, its objects have no `__del__`, and its `__init__` is a Python
+function, or `object`'s where the call hands over nothing. The object is
+the path's own, as a list the path made is: a new one at every call, of the
+class the callee is at that call. The path goes into the `__init__` as into
+any function it calls and checks that it returns None. Where it returns
+something else the call raises eager's `TypeError`, and where the path does
+not go on inside it (it raises, or does what no path does) the call has run
+as the interpreter runs it and the path ends in front of the call. A
+dataclass is such a class, with the `__init__` that was made for it and its
+`__post_init__`.
+
+A store into such an object (`self.hidden = h` in the `__init__`, or
+anywhere behind it) is done where it stands, at every call, where the class
+keeps what is stored as `object` does: no `__setattr__` of its own, nothing
+in the class that takes a store under the name (a property, a slot),
+objects with a dict. The path checks that of the class in front of what
+stands for the graph, so the store cannot fail behind it; any other store
+ends the path in front of itself. A read of an attribute that the path
+stored is the value that was stored, so a tensor that goes through an
+object is still the value of the graph it was, and what the class has for
+its objects (a method, a property) is read of the class. The gradient at a
+tensor that such an object holds is eager's: the object is something that
+holds it ("Gradients").
+
+```python
+class Out:
+    def __init__(self, hidden, scale=2):
+        self.hidden = hidden
+        self.scale = scale
+
+    def scaled(self):
+        return self.hidden * self.scale
+
+
+def makes(x):
+    y = (x.sin() + 1).cos()
+    out = Out(y, scale=3)
+    return (out.scaled() + out.hidden).tanh().exp()
+
+
+def gives(x):
+    y = (x.sin() + 1).cos()
+    return Out((y * 2).tanh(), scale=y.exp())
+
+
+g = torch.vm(makes, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(6):
+    same = torch.equal(g(v), makes(v))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["why"]  # (True, 7, 'the function returns')
+g = torch.vm(gives, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+outs = [g(v) for _ in range(6)]
+type(outs[-1]).__name__, sorted(vars(outs[-1])), len({id(out) for out in outs})  # ('Out', ['hidden', 'scale'], 6)
+torch.equal(outs[-1].scale, gives(v).scale)  # True
+```
+
+A path does not make an object of a class with a `__new__` of its own (a
+named tuple), with a `__setattr__` written in Python, or made of `dict`, nor
+one of a class that is called with `*` or `**`: such a call ends it, as
+`getattr(obj, name)` and `vars(obj)` of an object the path made do.
+
 ### Operations with several results
 
 An operation that gives several tensors is an operation of a graph:
@@ -2059,8 +2125,12 @@ as the autograd engine calls them. What the nodes gave is compared, bit for
 bit, with what the autograd engine gives for the same tape. Once two calls
 came out as the same operations, the graph runs without a tape: its forward
 is one program below autograd, which keeps what the backward reads, and its
-results share one node, `GraphBackward`, whose edges go where the gradients
-of the inputs go. When gradients arrive, the node runs the backward for the
+results go through one node, `GraphBackward`, whose edges go where the
+gradients of the inputs go. Each result has a node of its own in front of
+that one, which hands on the gradient that reaches the result: a hook on a
+result, and what `retain_grad()` keeps of it, are called where a gradient
+reaches that result, and not where the graph's node runs for another.
+When gradients arrive, the graph's node runs the backward for the
 results that came with one (the backward for all of them is what was taken
 down; the one for some of them is made of it) and hands each input its
 contributions one by one, in eager's order, so the autograd engine adds
@@ -2091,7 +2161,8 @@ nodes[:5]  # ['SumBackward0', 'SumBackward0', 'SumBackward0', 'SumBackward0', 'S
 nodes[5:]  # ['GraphBackward', 'GraphBackward']
 says[2], says[4]  # (['being taken down'], ["the engine's backward"])
 states[:3]  # ['built', 'waiting', 'compiled']
-first.grad_fn is second.grad_fn, len(first.grad_fn.next_functions)  # (True, 2)
+node = first.grad_fn.next_functions[0][0]
+second.grad_fn.next_functions[0][0] is node, len(node.next_functions)  # (True, 2)
 mine = torch.autograd.grad(first * 2 + second, (w, b))
 eagers = two(x, w, b)
 theirs = torch.autograd.grad(eagers[0] * 2 + eagers[1], (w, b))
@@ -2110,9 +2181,8 @@ does a backward behind a write in place to a tensor it needs (an input, a
 result, what a result is a view of), with eager's text: the tensor it names
 is the first one that eager's nodes would find changed, and the node it
 names is the one eager names. Hooks on
-results and on inputs run as they do for eager where a gradient comes to
-them ("Limits" has what a hook sees where none does). A result that is a
-view is eager's view, made on the tape behind the node.
+results and on inputs run as they do for eager. A result that is a view is
+eager's view, made on the tape behind the node.
 
 A graph that gives a tensor and also computes something of it (a hidden
 state and the loss computed of it) is cut in front of the first operation
@@ -2140,7 +2210,8 @@ cut = torch.vm(keeps, passes=derives)
 for _ in range(9):
     h, loss = cut(x, w, b)
 backward_of(cut)  # ['in parts']
-h.grad_fn is loss.grad_fn, loss.grad_fn.next_functions[0][0] is h.grad_fn  # (False, True)
+behind = loss.grad_fn.next_functions[0][0]  # the node of the part that reads `h`
+h.grad_fn in [node for node, _ in behind.next_functions]  # True
 (at_h,) = torch.autograd.grad(loss, [h])
 eager_h, eager_loss = keeps(x, w, b)
 torch.equal(at_h, torch.autograd.grad(eager_loss, [eager_h])[0])  # True
@@ -2547,11 +2618,13 @@ What graphs do not do at this stage:
 - A raise that is caught ends a path: `getattr(obj, name, default)` and
   `hasattr` where a `__getattribute__` written in Python raises
   `AttributeError`, a `try` around a call that raises, `Mapping.get` of a key
-  that is not there. So do constructing an object (a dataclass of outputs,
-  a named tuple, `functools.partial`), making an inner function or a
-  lambda, a `with` block, and library code a path is not known to be able
-  to call (`inspect.signature`). These are what the paths of transformer
-  models end at ("Models").
+  that is not there. So do constructing an object of a class that a path
+  does not make objects of ("Objects a path makes": a named tuple, a class
+  with a `__setattr__` of its own or made of `dict`, as the output objects
+  of the transformer models are), `functools.partial`, making an inner
+  function or a lambda, a `with` block, and library code a path is not
+  known to be able to call (`inspect.signature`). These are what the paths
+  of transformer models end at ("Models").
 - A call with `*` or `**` is an operation only where the operator it runs
   enters no Python code ("Methods read off a tensor, and what a call
   spreads"). The router of an operator whose kernel is chosen in Python and
@@ -2587,12 +2660,6 @@ What graphs do not do at this stage:
   is on. The two settings are the process's: a convolution that another
   thread runs in that time runs that way too. They are as the caller set
   them again when the call returns.
-- With the engine's backward a hook on a result of a graph is called with
-  None in a backward that brings no gradient to that result but brings one
-  to another result of the same node (two losses of one graph, and the
-  backward of the second): the node runs, and eager, where each result has
-  a node of its own, does not call the hook. A hook that takes None for a
-  gradient sees nothing else that is not eager's.
 - Where AOTAutograd derives the backward of a graph (with `AOTAutograd()` in
   the list), the gradient at a tensor that the graph gives and also computes
   something of is what `torch.compile` gives and not eager's: one compiled
