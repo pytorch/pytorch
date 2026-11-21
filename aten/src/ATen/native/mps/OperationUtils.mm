@@ -1583,6 +1583,8 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
         const auto inner_tiles =
             (static_cast<NSUInteger>(inner) + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD;
         mtl_dispatch2DJob(computeEncoder, binaryPSO, inner_tiles, static_cast<NSUInteger>(iter.numel()) / inner);
+      } else if (output_cast_needed || (!use_scalar_kernel && !iter.is_contiguous())) {
+        mtl_dispatchStridedBinaryJob(computeEncoder, binaryPSO, iter);
       } else {
         const auto dispatch_n =
             dense_ilp ? (iter.numel() + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD : iter.numel();

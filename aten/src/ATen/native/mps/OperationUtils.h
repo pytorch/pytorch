@@ -665,6 +665,33 @@ static inline void mtl_dispatch3DJob(id<MTLComputeCommandEncoder> encoder,
   [encoder dispatchThreads:MTLSizeMake(dim0, dim1, dim2) threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, tg_z)];
 }
 
+// Strided binary kernels take a 3D dispatch: the first two (coalesced) dims map straight onto the grid and only
+// dims past the second pay for a div/mod. As in exec_ternary_kernel, a transposed input gets a 32-wide
+// threadgroup so that it is read from a few cache lines rather than one line per thread; its 256 threads are
+// spread over dims 1 and 2 when dim 0 is narrower, e.g. for a batch of small matrices.
+static inline void mtl_dispatchStridedBinaryJob(id<MTLComputeCommandEncoder> encoder,
+                                                id<MTLComputePipelineState> cplState,
+                                                const TensorIteratorBase& iter) {
+  const auto ndim = iter.ndim();
+  const auto dim0 = ndim > 0 ? static_cast<NSUInteger>(iter.shape()[0]) : 1;
+  const auto dim1 = ndim > 1 ? static_cast<NSUInteger>(iter.shape()[1]) : 1;
+  const auto dim2 = static_cast<NSUInteger>(iter.numel()) / (dim0 * dim1);
+  bool transposed = false;
+  for (const auto i : c10::irange(1, iter.ntensors())) {
+    const auto strides = iter.strides(i);
+    transposed |= ndim > 1 && strides[1] > 0 && strides[0] > strides[1];
+  }
+  if (transposed) {
+    const auto tg_size = std::min<NSUInteger>(256, [cplState maxTotalThreadsPerThreadgroup]);
+    const auto tg_x = std::min<NSUInteger>(32, dim0);
+    const auto tg_y = std::min(tg_size / tg_x, dim1);
+    const auto tg_z = std::min(tg_size / (tg_x * tg_y), dim2);
+    [encoder dispatchThreads:MTLSizeMake(dim0, dim1, dim2) threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, tg_z)];
+  } else {
+    mtl_dispatch3DJob(encoder, cplState, dim0, dim1, dim2);
+  }
+}
+
 // Threadgroups that keep every GPU core busy: 4 x 1024 threads cover the ~3072 resident threads per core
 static inline int64_t occupancy_threadgroups() {
   constexpr int64_t threadgroups_per_core = 4;
@@ -885,7 +912,11 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
         mtl_setArgs<3>(
             computeEncoder, params, sizes, iter.strides(0), iter.strides(1), iter.strides(2), ndim_and_types);
       }
-      mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
+      if (iter.is_contiguous()) {
+        mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
+      } else {
+        mtl_dispatchStridedBinaryJob(computeEncoder, binaryPSO, iter);
+      }
       getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
     }
   });

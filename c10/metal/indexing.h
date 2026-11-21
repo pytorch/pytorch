@@ -104,6 +104,35 @@ inline array<int, sizeof...(S)> offsets_from_thread_index(
   return offs;
 }
 
+// 3D dispatch overload: thread_pos.x and thread_pos.y are the dim 0 and dim 1
+// coordinates, thread_pos.z is the linear index over dims [2, ndim).
+template <typename... S>
+inline array<int, sizeof...(S)> offsets_from_thread_index(
+    uint3 thread_pos,
+    constant DimDivider* sizes,
+    uint ndim,
+    S... strides) {
+  array<int, sizeof...(S)> offs = {};
+  if (ndim > 0) {
+    add_offsets<0>(offs, int(thread_pos.x), 0, strides...);
+  }
+  if (ndim > 1) {
+    add_offsets<0>(offs, int(thread_pos.y), 1, strides...);
+  }
+  uint idx = thread_pos.z;
+  for (uint dim = 2; dim < ndim; ++dim) {
+    uint pos = idx;
+    if (dim + 1 < ndim) {
+      const auto d = sizes[dim];
+      const auto qr = d.d.divmod(pos);
+      idx = qr.div;
+      pos = qr.mod;
+    }
+    add_offsets<0>(offs, int(pos), dim, strides...);
+  }
+  return offs;
+}
+
 // 2D dispatch overload: thread_pos.x is the dim 0 coordinate, thread_pos.y is
 // the linear index over dims [1, ndim).
 template <typename... S>
@@ -740,7 +769,7 @@ kernel void binary_strided(
     constant long* input_strides [[buffer(5)]],
     constant long* other_strides [[buffer(6)]],
     constant uint3& ndim [[buffer(7)]],
-    uint index [[thread_position_in_grid]]) {
+    uint3 index [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T>;
   const auto offs = offsets_from_thread_index(
@@ -761,7 +790,7 @@ kernel void binary_alpha_strided(
     constant long* input_strides [[buffer(6)]],
     constant long* other_strides [[buffer(7)]],
     constant uint3& ndim [[buffer(8)]],
-    uint index [[thread_position_in_grid]]) {
+    uint3 index [[thread_position_in_grid]]) {
   F f;
   const auto offs = offsets_from_thread_index(
       index, sizes, ndim.x, input_strides, other_strides, output_strides);
@@ -780,7 +809,7 @@ kernel void binary_strided_cast(
     constant long* input_strides [[buffer(5)]],
     constant long* other_strides [[buffer(6)]],
     constant uint4& ndim_types [[buffer(7)]],
-    uint index [[thread_position_in_grid]]) {
+    uint3 index [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T>;
   const auto offs = offsets_from_thread_index(
@@ -808,7 +837,7 @@ kernel void binary_strided_castout(
     constant long* input_strides [[buffer(5)]],
     constant long* other_strides [[buffer(6)]],
     constant uint4& ndim_types [[buffer(7)]],
-    uint index [[thread_position_in_grid]]) {
+    uint3 index [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T>;
   const auto offs = offsets_from_thread_index(
@@ -833,7 +862,7 @@ kernel void binary_alpha_strided_cast(
     constant long* input_strides [[buffer(6)]],
     constant long* other_strides [[buffer(7)]],
     constant uint4& ndim_types [[buffer(8)]],
-    uint index [[thread_position_in_grid]]) {
+    uint3 index [[thread_position_in_grid]]) {
   F f;
   const auto offs = offsets_from_thread_index(
       index, sizes, ndim_types.x, input_strides, other_strides, output_strides);
@@ -1127,7 +1156,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant long* input_strides,                                        \
           constant long* other_strides,                                        \
           constant uint3& ndim,                                                \
-          uint tid);                                                           \
+          uint3 tid);                                                          \
   template [[host_name(#NAME "_inner_contiguous_" #DTYPEO "_" #DTYPEI)]]       \
   kernel void ::c10::metal::                                                   \
       binary_inner_contiguous<DTYPEI, NAME##_functor, OMT>(                    \
@@ -1151,7 +1180,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
               constant long* input_strides,                                    \
               constant long* other_strides,                                    \
               constant uint4& ndim_types,                                      \
-              uint tid);                                                       \
+              uint3 tid);                                                      \
   template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI)]] kernel void ::   \
       c10::metal::binary_dense<DTYPEI, NAME##_functor, OMT>(                   \
           device ::c10::metal::result_of<NAME##_functor, DTYPEI, DTYPEI> *     \
@@ -1234,7 +1263,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant long* input_strides,                                 \
           constant long* other_strides,                                 \
           constant uint4& ndim_types,                                   \
-          uint tid)
+          uint3 tid)
 
 #define REGISTER_BINARY_ALPHA_OP(NAME, DTYPEI, DTYPEA, DTYPEO)              \
   static_assert(                                                            \
@@ -1254,7 +1283,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant long* input_strides,                                     \
           constant long* other_strides,                                     \
           constant uint3& ndim,                                             \
-          uint tid);                                                        \
+          uint3 tid);                                                       \
   template [[host_name(#NAME "_strided_cast_" #DTYPEO "_" #DTYPEI           \
                              "_" #DTYPEA)]] kernel void ::c10::metal::      \
       binary_alpha_strided_cast<DTYPEI, DTYPEA, NAME##_functor>(            \
@@ -1267,7 +1296,7 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant long* input_strides,                                     \
           constant long* other_strides,                                     \
           constant uint4& ndim_types,                                       \
-          uint tid);                                                        \
+          uint3 tid);                                                       \
   template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI                  \
                              "_" #DTYPEA)]] kernel void ::c10::metal::      \
       binary_alpha_dense<DTYPEI, DTYPEA, NAME##_functor>(                   \
