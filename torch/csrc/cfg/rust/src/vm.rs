@@ -6185,7 +6185,7 @@ impl Compiled {
                 }
                 let held = rate.map_or(null_mut(), |v| t.rec.values[v as usize]);
                 if let (Some(v), false) = (rate, held.is_null()) {
-                    t.check(Assert::Equals(v, PyObj::from_borrowed(held)), inst.bc);
+                    t.check(Assert::Equals(v, graph::frozen(held)), inst.bc);
                 }
             }
         }
@@ -6383,7 +6383,7 @@ impl Compiled {
                         t.pinned.push(v);
                     }
                 } else if graph::checkable(held) {
-                    t.check(Assert::Equals(v, PyObj::from_borrowed(held)), inst.bc);
+                    t.check(Assert::Equals(v, graph::frozen(held)), inst.bc);
                 } else {
                     t.check(Assert::Is(v, PyObj::from_borrowed(held)), inst.bc);
                 }
@@ -7748,7 +7748,7 @@ impl Compiled {
                 return false;
             }
             if apply {
-                t.check(Assert::Equals(v, PyObj::from_borrowed(held)), bc);
+                t.check(Assert::Equals(v, graph::frozen(held)), bc);
                 t.defs[v as usize].fixed = true;
             }
             return true;
