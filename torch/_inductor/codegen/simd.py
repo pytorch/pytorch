@@ -4720,6 +4720,7 @@ class SIMDScheduling(BaseScheduling):
             self.supports_multi_kernel_hints
             and config.multi_kernel_hints
             and not V.graph.cpp_wrapper
+            and not V.graph.fx_wrapper
             and len(kernels) == 1
         ):
             # Tensor arguments exist only after codegen, so the first kernel supplies
@@ -4749,6 +4750,10 @@ class SIMDScheduling(BaseScheduling):
                         for n, limit in zip(numels, limits)
                     )
                 ]
+                # A lone hint would only trade the kernel tuned at the traced size for one
+                # tuned at that hint, behind a dispatch with nothing to choose.
+                if len(hints) == 1:
+                    hints = []
             for hint in hints:
                 # hint_override only changes size_hints, so this is one kernel.
                 (kernel,) = self.create_kernel_choices(

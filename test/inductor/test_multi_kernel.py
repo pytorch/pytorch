@@ -361,15 +361,15 @@ class MultiKernelTest(TestCase):
     @config.patch("triton.multi_kernel", 0)
     def test_size_hint_multi_kernel_skips_two_dynamic_symbols(self):
         def f(x, y):
-            return x[y.shape[0] :].relu() + 1
+            return x[:, None] + y
 
-        x = torch.randn(4096, 1024, device=GPU_TYPE)
+        x = torch.randn(4096, device=GPU_TYPE)
         y = torch.randn(1024, device=GPU_TYPE)
         torch._dynamo.mark_dynamic(x, 0)
         torch._dynamo.mark_dynamic(y, 0)
         act, (wrapper_code,) = run_and_get_code(torch.compile(f), x, y)
         self.assertEqual(f(x, y), act)
-        # A numel like s0 - s1 has no meaningful value with both symbols at one hint.
+        # s0*s1 stays positive at every hint, so only the one-symbol check skips it.
         self.assertFalse(_contains_size_hint_multi_kernel_code(wrapper_code))
 
     @parametrize("force_kernel", (0, 1))
