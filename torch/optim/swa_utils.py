@@ -77,7 +77,7 @@ def get_ema_multi_avg_fn(decay=0.999):
             torch._foreach_lerp_(ema_param_list, current_param_list, 1 - decay)
         else:
             for p_ema, p_model in zip(ema_param_list, current_param_list, strict=True):
-                p_ema.copy_(p_ema * decay + p_model * (1 - decay))
+                p_ema.copy_(p_model)
 
     return ema_update
 
@@ -101,17 +101,7 @@ def get_swa_multi_avg_fn():
                 cast(float, 1 / (num_averaged + 1)),
             )
         else:
-            diffs = torch._foreach_sub(current_param_list, averaged_param_list)
-            if isinstance(num_averaged, Tensor):
-                torch._foreach_addcdiv_(
-                    averaged_param_list,
-                    diffs,
-                    [num_averaged + 1] * len(averaged_param_list),
-                )
-            else:
-                torch._foreach_add_(
-                    averaged_param_list, diffs, alpha=1.0 / (num_averaged + 1)
-                )
+            torch._foreach_copy_(averaged_param_list, current_param_list)
 
     return swa_update
 
@@ -145,6 +135,8 @@ def get_ema_avg_fn(decay=0.999):
 
     @torch.no_grad()
     def ema_update(ema_param: Tensor, current_param: Tensor, num_averaged):
+        if not (ema_param.is_floating_point() or ema_param.is_complex()):
+            return current_param
         return decay * ema_param + (1 - decay) * current_param
 
     return ema_update
@@ -157,6 +149,8 @@ def get_swa_avg_fn():
     def swa_update(
         averaged_param: Tensor, current_param: Tensor, num_averaged: Tensor | int
     ):
+        if not (averaged_param.is_floating_point() or averaged_param.is_complex()):
+            return current_param
         return averaged_param + (current_param - averaged_param) / (num_averaged + 1)
 
     return swa_update
