@@ -4977,12 +4977,109 @@ def vm_scaled(x, y):
     return unr_loop(x, y)[0] * 2
 
 
+class GraphProbe:
+    """What the instructions of ``graph_facts`` look at."""
+
+    def __init__(self):
+        self.items = [1, 2, 3]
+        self.plain = 2.0
+        self.offered = []
+
+    @property
+    def scale(self):
+        return 2.0
+
+    def shift(self, x):
+        return x + 1
+
+    def __call__(self, x):
+        return x - 1
+
+    def __rmul__(self, other):
+        self.offered.append(cfg_rs.frames_offered())
+        return other * 3
+
+
+def graph_plus_one(x):
+    return x + 1
+
+
+def graph_facts(x, probe, fn):
+    y = x * probe.scale
+    k = probe.plain
+    n = len(probe.items)
+    z = probe.shift(y)
+    z = probe(z)
+    z = fn(z)
+    z.add_(n)
+    w = x * probe
+    return z.sum() + k + w.sum()
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphs(TestCase):
     """The graphs the engine makes of the tensor work of a block, and the
     passes over them."""
 
     hw_classification = HardwareClassification.GENERIC
+
+    def test_what_an_instruction_did_is_taken_down(self):
+        compiled = torch.vm(graph_facts, fallback=False)
+        x, probe = torch.ones(3), GraphProbe()
+        expected = graph_facts(x, GraphProbe(), graph_plus_one)
+        for _ in range(3):
+            self.assertEqual(compiled(x, probe, graph_plus_one), expected)
+        facts = compiled.facts()
+        self.assertTrue(all(fact["runs"] >= 1 for fact in facts))
+
+        def one(text):
+            (found,) = [fact for fact in facts if text in fact["instruction"]]
+            return found
+
+        # A property is a frame; an attribute of the object is neither a
+        # frame nor a kernel.
+        scale, plain = one("'scale'"), one("'plain'")
+        self.assertEqual((scale["kernels"], scale["frames"]), ("none", True))
+        self.assertEqual((plain["kernels"], plain["frames"]), ("none", False))
+        calls = [fact for fact in facts if fact["instruction"].startswith("call ")]
+        entered = [fact["callee"] for fact in calls if fact["callee"] is not None]
+        found = [(callee["name"], callee["kind"]) for callee in entered]
+        expected = [
+            ("GraphProbe.shift", "method"),
+            ("GraphProbe.__call__", "instance"),
+            ("graph_plus_one", "function"),
+        ]
+        self.assertEqual(found, expected)
+        self.assertIs(entered[2]["code"], graph_plus_one.__code__)
+        self.assertTrue(all(fact["frames"] for fact in calls if fact["callee"]))
+        # len: a call that runs no kernel and enters no frame.
+        quiet = [f for f in calls if f["kernels"] == "none" and not f["frames"]]
+        self.assertEqual(len(quiet), 1)
+        # The call that writes to its receiver is the one of add_.
+        (wrote,) = [fact for fact in facts if fact["wrote"]]
+        self.assertEqual((wrote["kernels"], wrote["callee"]), ("one", None))
+        self.assertIn(wrote, calls)
+        # x * probe is one kernel, in a frame that C code entered while the
+        # operation was looked at: the interpreter ran it.
+        reflected = one("binary * %x.1 %probe")
+        self.assertEqual((reflected["kernels"], reflected["frames"]), ("one", True))
+        self.assertEqual(probe.offered[0], False)
+        self.assertFalse(any(fact["raised"] for fact in facts))
+
+    def test_a_pass_over_a_block_is_given_the_facts(self):
+        seen = {}
+
+        def look(region):
+            for inst in region.instructions():
+                seen[inst["text"].split("    ;")[0]] = inst["facts"]
+            self.assertEqual(region.observed(2)["kind"], "object")
+            return False
+
+        compiled = torch.vm(graph_facts, passes=(*DEFAULT, look), fallback=False)
+        compiled(torch.ones(3), GraphProbe(), graph_plus_one)
+        self.assertEqual(seen["load_attr %probe.2 'scale'"]["frames"], True)
+        self.assertEqual(seen["load_attr %probe.2 'plain'"]["frames"], False)
+        self.assertEqual(seen["load_global 'len'"]["kernels"], "none")
 
     def test_a_call_site_says_what_a_graph_needs_of_it(self):
         x = torch.randn(3)

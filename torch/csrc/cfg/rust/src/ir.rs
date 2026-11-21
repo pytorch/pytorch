@@ -437,6 +437,47 @@ impl Op {
         )
     }
 
+    /// Whether running the instruction can run code that is not the VM's own:
+    /// a method of an object, a function, a kernel. What cannot neither
+    /// enters a frame nor calls the dispatcher.
+    pub fn calls_out(&self) -> bool {
+        !matches!(
+            self,
+            Op::Const(_)
+                | Op::LoadGlobal(_)
+                | Op::LoadDeref(_)
+                | Op::LoadClosure(_)
+                | Op::MakeCell(_)
+                | Op::CellGet(..)
+                | Op::CellSet(..)
+                | Op::StoreDeref(..)
+                | Op::MakeFunction { .. }
+                | Op::Hold(_)
+                | Op::LoadSlot(_)
+                | Op::StoreSlot(..)
+                | Op::StoreLocal(..)
+                | Op::CaughtException
+                | Op::CaughtLasti
+                | Op::PushExcInfo(_)
+                | Op::PopExcInfo(_)
+                | Op::Is(..)
+                | Op::IsNone(..)
+                | Op::BuildTuple(_)
+                | Op::BuildList(_)
+                | Op::BuildSlice(..)
+                | Op::ListAppend(..)
+                | Op::ListToTuple(_)
+                | Op::TupleGet(..)
+                | Op::CheckBound(..)
+                | Op::IsFunction { .. }
+                | Op::FrameEnter(_)
+                | Op::FrameLeave
+                | Op::TensorSize { .. }
+                | Op::TensorDim(_)
+                | Op::Guard(_)
+        )
+    }
+
     /// Whether the instruction can be run again on other values without
     /// anything but its operands and the objects they lead to mattering: no
     /// frame, no cells, no stores into variables, no iteration state.

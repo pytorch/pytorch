@@ -55,6 +55,8 @@ pub struct TcfgTensorInfo {
     pub version: u64,
 }
 
+pub const TCFG_NO_VERSION: u64 = u64::MAX;
+
 impl TcfgTensorInfo {
     pub fn empty() -> TcfgTensorInfo {
         TcfgTensorInfo {

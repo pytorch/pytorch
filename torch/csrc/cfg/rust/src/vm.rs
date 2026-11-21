@@ -21,7 +21,7 @@ use crate::pyffi::{self, new_ref, py_bool, xdecref, Obj, PyObj, Shared};
 use crate::{frontend, inline, unroll};
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
-use crate::spec::{self, PassCx, Pipeline, Unit, ValueObs};
+use crate::spec::{self, CalleeKind, InstFacts, Kernels, PassCx, Pipeline, Unit, ValueObs};
 use pyo3::ffi;
 use std::ffi::CString;
 use std::os::raw::c_char;
@@ -91,6 +91,8 @@ pub struct BlockState {
     /// Why an instruction that made dispatcher calls did not become a site.
     pub reasons: Vec<Option<String>>,
     pub capture_attempts: Vec<u32>,
+    /// What the profiling tier saw each instruction do.
+    pub facts: Vec<InstFacts>,
     pub respec_left: u32,
     pub profile_runs: u32,
     /// How many profiling runs in a row ended in a raise.
@@ -404,6 +406,11 @@ pub struct Callees {
     /// from (see `leave_to_interpreter`), by address.
     left: Shared<HashMap<usize, PyObj>>,
     call_name: PyObj,
+    /// Set for a call that runs in the profiling tier, until the callee of
+    /// that call has been looked at; and the Python function it came down
+    /// to, with how.
+    callee_asked: std::cell::Cell<bool>,
+    callee_seen: std::cell::RefCell<Option<(PyObj, CalleeKind)>>,
 }
 
 unsafe impl Send for Callees {}
@@ -429,6 +436,8 @@ impl Callees {
             call_name: unsafe {
                 PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__call__".as_ptr()))
             },
+            callee_asked: std::cell::Cell::new(false),
+            callee_seen: std::cell::RefCell::new(None),
         }
     }
 
@@ -1055,6 +1064,79 @@ thread_local! {
     static HOOKED: std::cell::Cell<*const Compiled> = const { std::cell::Cell::new(std::ptr::null()) };
 }
 
+/// What `exec_profiled` takes down in front of an instruction that can run
+/// code that is not the VM's, for the facts it finds behind it.
+struct Probe {
+    /// How many frames the interpreter has counted.
+    frames: u64,
+    /// The tensors the instruction is given, each with its version counter.
+    versions: Vec<(Obj, u64)>,
+    /// For a call: what a call further up was waiting to learn of its callee.
+    outer: Option<(bool, Option<(PyObj, CalleeKind)>)>,
+}
+
+impl Probe {
+    unsafe fn start(callees: &Callees, regs: &[Obj], op: &Op, api: &TcfgApi) -> Probe {
+        // The interpreter counts the frames it starts while they are wanted.
+        if let (Some(want), Some(_)) = (api.frame_want, api.frame_count) {
+            want(1);
+        }
+        let mut given: Vec<Obj> = Vec::new();
+        op.for_each_use(|v| given.push(reg(regs, v)));
+        if let Op::Call { callee, .. } = op {
+            // The receiver of a method that was looked up earlier.
+            let c = reg(regs, *callee);
+            if !c.is_null() && !capi::is_unboxed(c) && ffi::PyCFunction_Check(c) != 0 {
+                given.push(ffi::PyCFunction_GetSelf(c));
+            }
+        }
+        let versions = versions_of(&given, api);
+        let call = matches!(op, Op::Call { .. } | Op::CallMethod { .. } | Op::CallEx { .. });
+        let outer = call.then(|| (callees.callee_asked.replace(true), callees.callee_seen.take()));
+        Probe { frames: api.frame_count.map_or(0, |count| count()), versions, outer }
+    }
+
+    unsafe fn finish(self, callees: &Callees, facts: &mut InstFacts, api: &TcfgApi) {
+        // Where the interpreter does not tell of its frames, one may have
+        // been entered.
+        facts.frames |= api.frame_count.is_none_or(|count| count() != self.frames);
+        if let (Some(want), Some(_)) = (api.frame_want, api.frame_count) {
+            want(-1);
+        }
+        facts.wrote |= versions_moved(&self.versions, api);
+        if let Some((asked, seen)) = self.outer {
+            callees.callee_asked.set(asked);
+            // A function the VM runs itself has no frame of the
+            // interpreter's making to count.
+            if let Some((code, kind)) = callees.callee_seen.replace(seen) {
+                facts.frames = true;
+                facts.saw_callee(code, kind);
+            }
+        }
+    }
+}
+
+/// The tensors among some values that count the writes to them, each with
+/// its version counter.
+unsafe fn versions_of(values: &[Obj], api: &TcfgApi) -> Vec<(Obj, u64)> {
+    let mut versions = Vec::new();
+    for o in values {
+        let mut info = TcfgTensorInfo::empty();
+        if !o.is_null() && (api.tensor_info)(*o, &mut info) != 0 && info.version != capi::TCFG_NO_VERSION {
+            versions.push((*o, info.version));
+        }
+    }
+    versions
+}
+
+/// Whether one of the tensors was written to in place since.
+unsafe fn versions_moved(versions: &[(Obj, u64)], api: &TcfgApi) -> bool {
+    versions.iter().any(|(tensor, version)| {
+        let mut info = TcfgTensorInfo::empty();
+        (api.tensor_info)(*tensor, &mut info) != 0 && info.version != *version
+    })
+}
+
 /// Says, for as long as it lives, whom the frames that the interpreter
 /// starts on this thread are offered to.
 struct Hooked {
@@ -1240,6 +1322,9 @@ enum Mode {
 }
 
 const MAX_CAPTURE_ATTEMPTS: u32 = 8;
+/// How many profiling runs of an instruction that is no candidate for a call
+/// site count its dispatcher calls.
+const MAX_COUNTED_RUNS: u32 = 8;
 
 type OpResult = Result<Obj, ()>;
 
@@ -1526,6 +1611,7 @@ impl Compiled {
                 slots: vec![None; block.insts.len()],
                 reasons: vec![None; block.insts.len()],
                 capture_attempts: vec![0; block.insts.len()],
+                facts: vec![InstFacts::default(); block.insts.len()],
                 respec_left: options.max_respecializations,
                 profile_runs: 0,
                 raised: 0,
@@ -2044,13 +2130,19 @@ impl Compiled {
     /// is bound to (null for a plain function): a function, a bound method,
     /// or an instance of a class whose `__call__` is a Python function.
     unsafe fn compiled_callee(&self, callee: Obj) -> Option<(*const Compiled, Obj, Obj)> {
+        // The call the profiling tier is looking at is this one, whatever it
+        // comes down to.
+        let profiled = self.callees.callee_asked.get();
+        if profiled {
+            self.callees.callee_asked.set(false);
+        }
         if !self.options.callees || REPLAY_DEPTH.with(|d| d.get()) > 0 {
             return None;
         }
-        let (func, receiver) = if ffi::PyFunction_Check(callee) != 0 {
-            (callee, null_mut())
+        let (func, receiver, kind) = if ffi::PyFunction_Check(callee) != 0 {
+            (callee, null_mut(), CalleeKind::Function)
         } else if ffi::Py_TYPE(callee) == std::ptr::addr_of_mut!(pyffi::PyMethod_Type) {
-            (pyffi::PyMethod_Function(callee), pyffi::PyMethod_Self(callee))
+            (pyffi::PyMethod_Function(callee), pyffi::PyMethod_Self(callee), CalleeKind::Method)
         } else {
             let ty = ffi::Py_TYPE(callee);
             if ffi::PyType_HasFeature(ty, ffi::Py_TPFLAGS_HEAPTYPE) == 0 || ffi::PyType_Check(callee) != 0 {
@@ -2064,12 +2156,21 @@ impl Compiled {
             } else {
                 null_mut()
             };
-            (if target.is_null() { call } else { target }, callee)
+            (if target.is_null() { call } else { target }, callee, CalleeKind::Instance)
         };
         if func.is_null() || ffi::PyFunction_Check(func) == 0 {
             return None;
         }
+        if profiled {
+            self.note_callee(func, kind);
+        }
         self.compiled_function(func).map(|compiled| (compiled, func, receiver))
+    }
+
+    #[cold]
+    unsafe fn note_callee(&self, func: Obj, kind: CalleeKind) {
+        let code = PyObj::from_borrowed(ffi::PyFunction_GetCode(func));
+        *self.callees.callee_seen.borrow_mut() = Some((code, kind));
     }
 
     #[inline(always)]
@@ -3379,6 +3480,12 @@ impl Compiled {
                 // A method takes the receiver as its first argument; any
                 // other attribute is called on its own.
                 let (first, receiver) = if unbound == 1 { (0, buf[0]) } else { (1, null_mut()) };
+                if unbound == 1 && self.callees.callee_asked.get() {
+                    self.callees.callee_asked.set(false);
+                    if ffi::PyFunction_Check(method) != 0 {
+                        self.note_callee(method, CalleeKind::Method);
+                    }
+                }
                 // A function found on the type runs compiled, bound to the
                 // receiver; anything else that was found is called as any
                 // callee is, which finds what it comes down to.
@@ -3637,9 +3744,9 @@ impl Compiled {
         op: &Op,
         kind: i32,
         api: &TcfgApi,
-    ) -> (OpResult, *mut capi::TcfgSite, Option<String>) {
+    ) -> (OpResult, *mut capi::TcfgSite, Option<String>, Kernels) {
         let Some(operands) = self.site_operands(kind, op) else {
-            return (self.exec_op(regs, op), null_mut(), None);
+            return (self.exec_op(regs, op), null_mut(), None, Kernels::Unseen);
         };
         // Operands are borrowed from the registers, which the operation does
         // not touch; read them first so a call sees its callee.
@@ -3670,6 +3777,7 @@ impl Compiled {
         drop(nobody);
         let mut site = null_mut();
         let mut reason = None;
+        let kernels = Self::counted(trace, api);
         if !trace.is_null() {
             if let Ok(obj) = result {
                 if let (false, Some(ptrs)) = (obj.is_null(), ptrs_before) {
@@ -3712,7 +3820,19 @@ impl Compiled {
             (api.trace_free)(trace);
         }
         xdecref(method);
-        (result, site, reason)
+        (result, site, reason, kernels)
+    }
+
+    /// How many dispatcher calls a capture saw.
+    unsafe fn counted(trace: *mut capi::TcfgTrace, api: &TcfgApi) -> Kernels {
+        if trace.is_null() {
+            return Kernels::None;
+        }
+        match (api.trace_calls)(trace) {
+            0 => Kernels::None,
+            1 => Kernels::One,
+            _ => Kernels::Many,
+        }
     }
 
     /// Calls the kernel of the first site whose guards accept the operands.
@@ -3774,7 +3894,7 @@ impl Compiled {
             self.bind();
         }
         if n < self.options.max_site_variants && misses < MAX_CAPTURE_ATTEMPTS as u64 * 4 {
-            let (result, site, _) = self.capture_exec(regs, fallback, slot.kind, api);
+            let (result, site, _, _) = self.capture_exec(regs, fallback, slot.kind, api);
             if !site.is_null() {
                 slot.push(site);
             }
@@ -3783,7 +3903,10 @@ impl Compiled {
         self.exec_op(regs, fallback)
     }
 
-    /// One instruction in the profiling tier.
+    /// One instruction in the profiling tier: it runs as the generic one
+    /// does, and what it did is taken down. Whether it is one dispatcher
+    /// call that can become a call site, and for every instruction what it
+    /// was seen to do (`InstFacts`).
     unsafe fn exec_profiled(
         &self,
         b: usize,
@@ -3792,26 +3915,44 @@ impl Compiled {
         regs: &mut [Obj],
         api: &TcfgApi,
     ) -> OpResult {
-        let (slot, attempts) = {
+        let (slot, attempts, runs) = {
             let st = self.state.borrow();
             let bs = &st.blocks[b];
-            (bs.slots[index].clone(), bs.capture_attempts[index])
+            (bs.slots[index].clone(), bs.capture_attempts[index], bs.facts[index].runs)
         };
+        let outward = inst.op.calls_out();
+        let probe = if outward { Some(Probe::start(&self.callees, regs, &inst.op, api)) } else { None };
+        // A call of anything but a C function is not put under a capture:
+        // what it runs has no end that is known here.
+        let call = matches!(inst.op, Op::Call { .. } | Op::CallMethod { .. } | Op::CallEx { .. });
+        let count = outward && !call && runs < MAX_COUNTED_RUNS;
+        let mut kernels = if outward { Kernels::Unseen } else { Kernels::None };
         let result = if let Some(slot) = slot {
             let ptrs = self
                 .site_operands(slot.kind, &inst.op)
                 .and_then(|operands| self.operand_ptrs(regs, slot.kind, &inst.op, &operands));
+            kernels = Kernels::One;
             match ptrs {
                 Some(ptrs) => self.exec_slot(regs, &slot, ptrs.as_ptr(), 0, &inst.op, api),
                 None => self.exec_op(regs, &inst.op),
             }
-        } else if attempts >= MAX_CAPTURE_ATTEMPTS {
-            self.exec_op(regs, &inst.op)
         } else {
-            match self.site_kind(regs, &inst.op, api) {
+            let kind = if attempts >= MAX_CAPTURE_ATTEMPTS { None } else { self.site_kind(regs, &inst.op, api) };
+            match kind {
+                None if count => {
+                    (api.capture_begin)();
+                    let result = self.exec_op(regs, &inst.op);
+                    let trace = (api.capture_end)();
+                    kernels = Self::counted(trace, api);
+                    if !trace.is_null() {
+                        (api.trace_free)(trace);
+                    }
+                    result
+                }
                 None => self.exec_op(regs, &inst.op),
                 Some(kind) => {
-                    let (result, site, reason) = self.capture_exec(regs, &inst.op, kind, api);
+                    let (result, site, reason, calls) = self.capture_exec(regs, &inst.op, kind, api);
+                    kernels = calls;
                     let mut st = self.state.borrow_mut();
                     let bs = &mut st.blocks[b];
                     bs.capture_attempts[index] += 1;
@@ -3827,9 +3968,17 @@ impl Compiled {
                 }
             }
         };
+        let mut st = self.state.borrow_mut();
+        let facts = &mut st.blocks[b].facts[index];
+        facts.runs += 1;
+        facts.saw_kernels(kernels);
+        facts.raised |= result.is_err();
+        if let Some(probe) = probe {
+            probe.finish(&self.callees, facts, api);
+        }
         if let Ok(obj) = result {
             if inst.dst != NONE {
-                self.state.borrow_mut().obs[inst.dst as usize].observe(obj);
+                st.obs[inst.dst as usize].observe(obj);
             }
         }
         result
@@ -3925,7 +4074,7 @@ impl Compiled {
     unsafe fn specialize(&self, b: usize) {
         // The passes are not the function's code.
         let _nobody = Hooked::nobody();
-        let (slots, obs, speculate, id) = {
+        let (slots, obs, facts, speculate, id) = {
             let mut st = self.state.borrow_mut();
             let obs = st.obs.clone();
             let bs = &mut st.blocks[b];
@@ -3938,10 +4087,10 @@ impl Compiled {
             let id = bs.next_version_id;
             bs.next_version_id += 1;
             // The last attempt must hold for every input.
-            (bs.slots.clone(), obs, bs.respec_left > 0, id)
+            (bs.slots.clone(), obs, bs.facts.clone(), bs.respec_left > 0, id)
         };
         let mut unit = Unit::from_generic(&self.func, b, speculate);
-        let cx = PassCx { cf: self, slots: &slots, obs: &obs };
+        let cx = PassCx { cf: self, slots: &slots, obs: &obs, facts: &facts };
         let outcome = match self.pipeline.run(&mut unit, &cx) {
             Ok(true) => spec::finalize(unit, self, id).map(Some),
             Ok(false) => Ok(None),
