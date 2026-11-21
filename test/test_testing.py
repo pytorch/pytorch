@@ -4339,6 +4339,7 @@ class TestImports(TestCase):
                            "torch.distributed.examples",  # requires CUDA and torchvision
                            "torch.distributed.tensor.examples",  # example scripts
                            "torch.distributed._tools.sac_ilp",  # depends on pulp
+                           "torch.distributed._symmetric_memory._fused_flydsl_kernels",  # depends on flydsl
                            "torch.csrc",  # files here are devtools, not part of torch
                            "torch.include",  # torch include files after install
                            "torch._inductor.kernel.vendored_templates.cutedsl",  # depends on cutlass
