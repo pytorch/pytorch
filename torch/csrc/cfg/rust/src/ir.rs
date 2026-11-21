@@ -257,6 +257,10 @@ pub enum Part {
     /// (`graph::fresh_new`): what calling the class makes before its
     /// `__init__` runs.
     Instance,
+    /// What a call of a `functools.lru_cache` wrapper finds in its cache:
+    /// the object is a tuple of the callee and its arguments, and the
+    /// entry is read without the call (`graph::cached`).
+    Cached,
 }
 
 /// A call of a post-dispatch kernel. `operands` feed the prepared call sites
