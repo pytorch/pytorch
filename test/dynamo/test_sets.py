@@ -3,6 +3,7 @@
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
 import math
+import sys
 import unittest
 from collections import OrderedDict
 from collections.abc import Iterable
@@ -282,6 +283,27 @@ class DictSetOperandTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(1)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x), (x + 2, True, (int,)))
+
+    @parametrize("operation", [set, frozenset, set.update, lambda m: set().union(m)])
+    def test_ordered_dict_collision_order(self, operation):
+        def fn(x, mapping):
+            if operation is set.update:
+                result = set()
+                result.update(mapping)
+            else:
+                result = operation(mapping)
+            return x + 1, list(result)
+
+        # OrderedDict takes CPython's iterable path, not its exact-dict fast path.
+        # With colliding hashes, insertion order affects the resulting set order.
+        mapping = OrderedDict.fromkeys((0, sys.hash_info.modulus))
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        for _ in range(2):
+            self.assertEqual(compiled(x, mapping), fn(x, mapping))
+            mapping.move_to_end(next(iter(mapping)))
+        self.assertEqual(counter.frame_count, 2)
 
     @parametrize("mapping_type", (dict, OrderedDict))
     @parametrize(

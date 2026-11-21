@@ -787,6 +787,7 @@ class OutputGraph(OutputGraphCommon):
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: dict[Source, VariableTracker] = {}
+        self.deepcopy_id_types: dict[VariableTracker, tuple[type, Source | None]] = {}
         self.builtin_method_keys = BuiltinMethodKeyTracker()
         # List of TensorVariables that are leaf tensors created in-graph
         # (e.g., nn.Parameter via tracable_create_parameter). These need to be
@@ -3997,6 +3998,7 @@ class OutputGraph(OutputGraphCommon):
         self.dynamo_flat_name_to_original_fqn.clear()
         self.tracing_context.clear()
         self.input_source_to_var.clear()
+        self.deepcopy_id_types.clear()
         self.builtin_method_keys.clear()
         self.leaf_var_creation_order.clear()
         self.unspec_variable_map.clear()
