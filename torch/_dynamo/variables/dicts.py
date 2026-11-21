@@ -84,7 +84,7 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import ConstantVariable
+from .constant import ConstantVariable, IntConstantVariable
 from .hashable import (
     guard_key_collisions,
     HashableTracker,
@@ -1266,7 +1266,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
                     gb_type="Unsupported OrderedDict instance state",
                     context=f"OrderedDict.{name}",
                     explanation=f"Dynamo cannot trace {name} on an OrderedDict with nonempty or potentially modified instance attributes.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
+                    hints=["Move the copy or attribute lookup outside compiled code."],
                 )
             install_guard(instance_dict.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
@@ -1702,20 +1702,22 @@ class NNModuleHookFlagsDictVariable(NNModuleHooksDictVariable):
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         source = item.source
-        if (
-            isinstance(source, ConstDictKeySource)
-            and isinstance(source.base, AttrSource)
-            and self.source is not None
+        # Global callback iteration already guards its integer IDs. Check a fixed
+        # ID directly, regardless of how the callback registry was reached.
+        hooks_source = source.base if isinstance(source, ConstDictKeySource) else None
+        if not (
+            isinstance(hooks_source, AttrSource)
+            and hooks_source.member in ("_forward_hooks", "_forward_pre_hooks")
             and (
-                source.base.member
-                in ("_global_forward_hooks", "_global_forward_pre_hooks")
-                or source.base.member in ("_forward_hooks", "_forward_pre_hooks")
-                and (
-                    self.GLOBAL_FLAGS
-                    or isinstance(self.source, AttrSource)
-                    and source.base.base == self.source.base
-                )
+                self.GLOBAL_FLAGS
+                or isinstance(self.source, AttrSource)
+                and hooks_source.base == self.source.base
             )
+        ):
+            hooks_source = None
+        if (
+            (hooks_source is not None or type(item) is IntConstantVariable)
+            and self.source is not None
             and not tx.output.side_effects.is_modified(self)
         ):
             key = _get_literal_key(item)
@@ -1725,8 +1727,13 @@ class NNModuleHookFlagsDictVariable(NNModuleHooksDictVariable):
                 if all(type(k) is int for k in keys):
                     self._hook_flag_keys = frozenset(keys)
             if type(key) is int and self._hook_flag_keys is not None:
-                if source.base not in self._hook_membership_sources:
-                    hooks = tx.output.resolve_source_value(source.base)
+                contains = key in self._hook_flag_keys
+                if hooks_source is None:
+                    self.install_dict_contains_guard(
+                        tx, HashableTracker(item), key_present=contains
+                    )
+                elif hooks_source not in self._hook_membership_sources:
+                    hooks = tx.output.resolve_source_value(hooks_source)
                     if not all(type(k) is int for k in dict.keys(hooks)):
                         return super().sq_contains_impl(tx, item)
                     if not config.skip_nnmodule_hook_guards:
@@ -1736,17 +1743,17 @@ class NNModuleHookFlagsDictVariable(NNModuleHooksDictVariable):
                     if self.GLOBAL_FLAGS:
                         self.install_dict_keys_match_guard()
                     install_guard(
-                        source.base.base.make_guard(
+                        hooks_source.base.make_guard(
                             functools.partial(
                                 GuardBuilder.NN_MODULE_HOOKS_DICT_CONTAINS,
-                                hooks_name=source.base.member,
+                                hooks_name=hooks_source.member,
                                 flags_source=self.source,
                             )
                         )
                     )
                     if not TracingContext.get().guards_context.skip_install:
-                        self._hook_membership_sources.add(source.base)
-                return ConstantVariable.create(key in self._hook_flag_keys)
+                        self._hook_membership_sources.add(hooks_source)
+                return ConstantVariable.create(contains)
         if not self.items and isinstance(item, variables.LazyConstantVariable):
             item.python_type()  # install TYPE_MATCH without specializing the value
             self.install_dict_keys_match_guard()
