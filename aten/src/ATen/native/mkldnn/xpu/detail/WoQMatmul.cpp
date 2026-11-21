@@ -330,4 +330,81 @@ void woq_matmul_int4(
   }
 }
 
+void woq_matmul_int8(
+    Tensor& result, // [M, N], dtype of mat1
+    const Tensor& mat1, // [M, K], f16/bf16/f32, contiguous on K
+    const Tensor& mat2, // [N, K], s8, contiguous
+    const Tensor& scales) { // [N]
+  auto& engine = GpuEngineManager::Instance().get_engine();
+  auto& stream = GpuStreamManager::Instance().get_stream();
+
+  const int64_t m = mat1.size(0);
+  const int64_t k = mat1.size(1);
+  const int64_t n = mat2.size(0);
+
+  auto src_dt = get_onednn_dtype(mat1);
+  dnnl::memory::desc src_md({m, k}, src_dt, {mat1.stride(0), mat1.stride(1)});
+  // [N, K] row-major viewed as the logical [K, N] weights ("ba" layout).
+  dnnl::memory::desc wei_md(
+      {k, n}, dnnl::memory::data_type::s8, {mat2.stride(1), mat2.stride(0)});
+  dnnl::memory::desc dst_md(
+      {m, n}, get_onednn_dtype(result), {result.stride(0), result.stride(1)});
+
+  dnnl::primitive_attr pattr;
+  pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+#if ONEDNN_SUPPORT_DETERMINISTIC
+  if (at::globalContext().deterministicAlgorithms() ||
+      at::globalContext().deterministicMkldnn()) {
+    pattr.set_deterministic(true);
+  }
+#endif
+  // One scale per output channel (dim 1 of the logical [K, N] weights).
+  Tensor scales_f32 = scales.to(at::kFloat).contiguous();
+  pattr.set_scales(
+      DNNL_ARG_WEIGHTS, /* mask */ 1 << 1, {}, dnnl::memory::data_type::f32);
+  // apply_to_int=true lets oneDNN up-convert the s8 weights to the activation
+  // type inside the GEMM (weight decompression); without it the only matching
+  // implementation is ocl:ref:any.
+  if (src_dt == dnnl::memory::data_type::f16) {
+    pattr.set_fpmath_mode(dnnl::fpmath_mode::f16, true);
+  } else if (src_dt == dnnl::memory::data_type::bf16) {
+    pattr.set_fpmath_mode(dnnl::fpmath_mode::bf16, true);
+  } else {
+    pattr.set_fpmath_mode(dnnl::fpmath_mode::strict, true);
+  }
+
+  auto matmul_pd =
+      dnnl::matmul::primitive_desc(engine, src_md, wei_md, dst_md, pattr);
+  auto matmul_p = dnnl::matmul(matmul_pd);
+
+  Tensor scratchpad_tensor = at::empty(
+      {static_cast<int64_t>(matmul_pd.scratchpad_desc().get_size())},
+      mat1.options().dtype(at::kByte),
+      std::nullopt);
+
+  std::unordered_map<int, dnnl::memory> args;
+  args.insert(
+      {DNNL_ARG_SRC,
+       make_onednn_memory(src_md, engine, mat1.const_data_ptr())});
+  args.insert(
+      {DNNL_ARG_WEIGHTS,
+       make_onednn_memory(wei_md, engine, mat2.const_data_ptr())});
+  args.insert(
+      {DNNL_ARG_DST,
+       make_onednn_memory(dst_md, engine, result.mutable_data_ptr())});
+  args.insert(
+      {DNNL_ARG_SCRATCHPAD,
+       make_onednn_memory(
+           matmul_pd.scratchpad_desc(),
+           engine,
+           scratchpad_tensor.mutable_data_ptr())});
+  dnnl::memory::desc sc_md(
+      {n}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::x);
+  args.insert(
+      {DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS,
+       make_onednn_memory(sc_md, engine, scales_f32.const_data_ptr())});
+
+  dnnl::sycl_interop::execute(matmul_p, stream, args);
+}
+
 } // namespace at::native::onednn
