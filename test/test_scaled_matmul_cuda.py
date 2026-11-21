@@ -3023,10 +3023,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
     @decorateIf(
-        unittest.skip('Error messages test not supported on XPU, skipping'),
-        lambda p: 'xpu' in p['device'],
-    )
-    @decorateIf(
         unittest.skip('nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping'),
         lambda p: p['recipe'] == 'nvfp4' and torch.version.hip and not rocm_nvfp4_supported(),
     )
@@ -3035,8 +3031,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         lambda p: p['recipe'] == 'mxfp4' and IS_SM12X,
     )
     def test_blockwise_mxfp8_nvfp4_mxfp4_error_messages(self, device, recipe) -> None:
-        if "xpu" in device:
-            raise unittest.SkipTest("Error messages test not supported on XPU, skipping")
         if recipe == "nvfp4" and torch.version.hip and not rocm_nvfp4_supported():
             raise unittest.SkipTest("nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping")
         if recipe == "mxfp4" and IS_SM12X:
