@@ -116,7 +116,9 @@ mm_template = TritonTemplate(
     source=load_kernel_template("triton_mm")
     if (torch.version.hip is None) or triton_version >= "3.3.0"
     # FIXME: To get around rocm failures.
-    # The only difference between the two templates is M >= BLOCK_M and N >= BLOCK_N checking.
+    # triton_mm_rocm applies the contiguity hints without the M % BLOCK_M == 0,
+    # N % BLOCK_N == 0 and K > 1 guards, so a prologue fused into it can still
+    # read across the wrap in the last tile.
     # See more details in https://github.com/pytorch/pytorch/pull/146293
     else load_kernel_template("triton_mm_rocm"),
     cache_codegen_enabled_for_template=True,
