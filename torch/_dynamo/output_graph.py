@@ -1752,6 +1752,7 @@ class OutputGraph(OutputGraphCommon):
             yield tracer
             # Successful ordinary HOP traces contribute to enclosing reuse conditions.
             if tracer.parent is not None and tracer.parent.tracks_lexical_sources:
+                tracer.parent.has_container_identity |= tracer.has_container_identity
                 tracer.parent.traced_sources.update(tracer.traced_sources)
                 tracer.parent.lexical_sources.update(
                     item
@@ -4334,12 +4335,15 @@ class SubgraphTracer(fx.Tracer):
         # this subtracer's trace. Used by invoke_subgraph reuse to collect
         # guards and detect mutations on captured variables.
         self.traced_sources: OrderedSet[Source] = OrderedSet()
-        # Ordinary child HOPs contribute reads only when an enclosing region can be reused.
-        self.tracks_lexical_sources = (
+        self.in_nested_compile_region = (
             source_target is torch._higher_order_ops.invoke_subgraph
-            or (parent is not None and parent.tracks_lexical_sources)
+            or (parent is not None and parent.in_nested_compile_region)
+        )
+        self.tracks_lexical_sources = (
+            parent is not None and parent.tracks_lexical_sources
         )
         self.lexical_sources: set[tuple[Source, int]] = set()
+        self.has_container_identity = False
         self.has_builtin_method_identity = False
 
         # True if this tracer is currently tracing (reconstructing) into a Python generator

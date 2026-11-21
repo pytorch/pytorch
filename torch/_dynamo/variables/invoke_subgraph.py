@@ -540,6 +540,8 @@ def is_reuse_eligible(
             for read, _ in reads
         ):
             return _reject_reuse("argument aliases a lexical read")
+        if fingerprint.treespec is not None and tracing_info.has_container_identity:
+            return _reject_reuse("flattened inputs do not preserve container identity")
         if tracing_info.has_builtin_method_identity:
             # Stamp-out cannot replay remapped receiver-alias guards.
             hc_log.debug("subgraph_reuse: not eligible -- builtin-method identity")
@@ -1440,6 +1442,7 @@ def stamp_out_subgraph(
         remap = match.remap_source
         tx.output.guard_on_key_order.update(map(remap, condition.guard_on_key_order))
         if tracer.tracks_lexical_sources:
+            tracer.has_container_identity |= condition.has_container_identity
             tracer.traced_sources.update(map(remap, condition.traced_sources))
             for source, scope in condition.lexical_sources:
                 if scope <= tracer.debug_level:
@@ -1824,7 +1827,14 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 body_name,
                 body_graph_output_vts,
                 tracing_info,
-            ) = self.create_wrapped_node(tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME)
+            ) = self.create_wrapped_node(
+                tx,
+                fn_var,
+                fn_args_vt,
+                kwargs,
+                self._HOP_NAME,
+                track_lexical_sources=reuse and reuse_hash_fn is None,
+            )
 
         if len(p_kwargs) > 0:
             unimplemented(
@@ -1893,6 +1903,9 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                     )
                     if condition is not None:
                         condition.lexical_sources = tracing_info.lexical_sources.copy()
+                        condition.has_container_identity = (
+                            tracing_info.has_container_identity
+                        )
                         save_reuse_entry(
                             tx,
                             fn_var,
