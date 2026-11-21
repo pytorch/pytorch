@@ -1238,6 +1238,7 @@ class VariableBuilder:
                 return cached_vt
 
         vt = self._wrap(value)
+        self.tx.output.source_types[self.source] = type(value)
 
         if vt.source is None:
             vt.source = self.source

@@ -1408,6 +1408,7 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "SEQUENCE_LENGTH",
         "SET_CONTAINS",
         "SET_NOT_CONTAINS",
+        "SLOT_PRESENCE",
         "TENSOR_MATCH",
         "TUPLE_ITERATOR_LEN",
         "TYPE_MATCH",

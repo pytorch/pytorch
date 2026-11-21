@@ -1658,11 +1658,15 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         def foo(counter, x):
             if hasattr(counter, "missing"):
                 x = x + 1
-            return x, getattr(counter, "missing", None)
+            return x + 1, getattr(counter, "missing", None)
 
         x = torch.ones(2, 3)
-        opt_foo = torch.compile(foo, backend="eager", fullgraph=True)
-        self.assertEqual(opt_foo(counter, x), foo(counter, x))
+        backend = CompileCounter()
+        opt_foo = torch.compile(foo, backend=backend, fullgraph=True)
+        # The registered guard specializes on `start`, not `end`.
+        for value in (counter, Counter(0, 9)):
+            self.assertEqual(opt_foo(value, x), foo(value, x))
+        self.assertEqual(backend.frame_count, 1)
 
     def test_compile_fixed_stride_order(self):
         hs_name = get_opaque_type_name(HoistedString)

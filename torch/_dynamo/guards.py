@@ -441,6 +441,17 @@ def _mapping_proxy_mapping(value: object) -> object:
     return gc.get_referents(value)[0]
 
 
+def _slot_is_set(value: object, name: str) -> bool | None:
+    slot = next(iter_mro_static_attrs(type(value), name), None)
+    if type(slot) is not types.MemberDescriptorType:
+        return None
+    try:
+        slot.__get__(value, type(value))
+    except AttributeError:
+        return False
+    return True
+
+
 def _cow_tensor_matches(value: object, expected: object) -> bool:
     if not isinstance(expected, bool):
         return False
@@ -1116,6 +1127,7 @@ def _get_closure_vars() -> dict[str, object]:
             "___namedtuple_fields": lambda x: x._fields,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "___get_current_stream": get_current_stream,
+            "___slot_is_set": _slot_is_set,
             "___cow_tensor_matches": _cow_tensor_matches,
             "___has_no_tangent": _has_no_tangent,
             "__math_isnan": math.isnan,
@@ -3010,6 +3022,25 @@ class GuardBuilder(GuardBuilderBase):
             self.get_guard_manager(guard).add_false_match_guard(
                 get_verbose_code_parts(code, guard), guard.user_stack
             )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (
+            _guard_create_fn_keyword(guard, "name"),
+            _guard_create_fn_keyword(guard, "present"),
+        ),
+        eval_fn=lambda value, metadata: _slot_is_set(value, metadata[0]) is metadata[1],
+    )
+    def SLOT_PRESENCE(self, guard: Guard, *, name: str, present: bool) -> None:
+        code = f"___slot_is_set({self.arg_ref(guard)}, {name!r}) is {present}"
+        if code in self.already_added_code_parts:
+            return
+        self.already_added_code_parts.add(code)
+        self._set_guard_export_info(guard, [code])
+        self.get_guard_manager(guard).add_lambda_guard(
+            lambda value: _slot_is_set(value, name) is present,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: _try_is_cow_tensor(value),

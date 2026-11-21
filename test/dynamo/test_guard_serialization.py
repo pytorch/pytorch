@@ -5047,6 +5047,27 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with mock.patch.object(_TupleOwner, "Point", tuple):
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
+    @parametrize("present", [False, True])
+    def test_slot_presence(self, present):
+        def fn(x, holder):
+            return (
+                x + getattr(holder, "global_add", 1) + getattr(holder, "global_add", 2)
+            )
+
+        x, holder = torch.ones(1), SlottedByName()
+        if present:
+            holder.global_add = 2
+        ref, loaded = self._test_serialization("SLOT_PRESENCE", fn, x, holder)
+        for manager in (ref, loaded):
+            self.assertEqual(str(manager).count("LAMBDA_GUARD: ___slot_is_set"), 1)
+        inputs = {"x": x, "holder": holder}
+        self._test_check_fn(ref, loaded, inputs, True)
+        if present:
+            del holder.global_add
+        else:
+            holder.global_add = 3
+        self._test_check_fn(ref, loaded, inputs, False)
+
     def test_guarded_user_object_prunes_unguarded_attributes(self):
         def fn(x, holder):
             return x * holder.scale
