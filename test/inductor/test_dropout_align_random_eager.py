@@ -159,7 +159,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         )
 
     @requires_gpu()
-    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
+    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4882")
     def test_linear_block_compile_parity_forward(self):
         device = torch.device(GPU_TYPE)
 
@@ -189,7 +189,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             self.assertSmallMismatchFraction(y_eager, y_comp)
 
     @requires_gpu()
-    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
+    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4882")
     def test_linear_block_compile_parity_backward(self):
         device = torch.device(GPU_TYPE)
 
@@ -222,7 +222,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             self.assertSmallMismatchFraction(p_ref.grad, p_new.grad)
 
     @requires_gpu()
-    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
+    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4882")
     def test_dropout_mask_parity_and_rng_offset_cuda(self):
         device = torch.device(GPU_TYPE)
         props = torch.cuda.get_device_properties(device)
@@ -275,7 +275,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # multiple dropouts + multiple iterations
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
-    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
+    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4882")
     def test_multi_dropout_multi_iterations_parity(self):
         device = torch.device(GPU_TYPE)
 
@@ -305,7 +305,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # dynamic shapes test (a)
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
-    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
+    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4882")
     def test_dropout_parity_dynamic_shapes(self):
         device = torch.device(GPU_TYPE)
 
@@ -337,7 +337,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # cudagraphs test via mode='reduce-overhead' (b)
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
-    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
+    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4882")
     def test_dropout_parity_cudagraphs_reduce_overhead(self):
         device = torch.device(GPU_TYPE)
 
@@ -468,7 +468,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # nn.Dropout as primitive RNG consumer (should PASS)
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
-    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
+    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4882")
     def test_primitive_nn_dropout_parity(self):
         device = torch.device(GPU_TYPE)
         shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
@@ -494,7 +494,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
     # Seeds > 2^32 overflow.
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
-    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4851")
+    @skipIfXpu(msg="intel/torch-xpu-ops/issue/4882")
     def test_large_seed(self):
         for seed in [2**33 + 1, 2**40 + 12345]:
             with self.subTest(seed=seed):

@@ -240,7 +240,9 @@ class TestCustomLowering(InductorTestCase):
 
     @requires_gpu()
     @skipIfRocm
-    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
+    @skipIfXpu(
+        msg="inline asm emits CUDA PTX; XPU needs Intel vISA, intel/torch-xpu-ops#6050"
+    )
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_tanh_approx(self):
         def fn(inp):
@@ -255,7 +257,9 @@ class TestCustomLowering(InductorTestCase):
 
     @requires_gpu()
     @skipIfRocm
-    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
+    @skipIfXpu(
+        msg="inline asm emits CUDA PTX; XPU needs Intel vISA, intel/torch-xpu-ops#6050"
+    )
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_reused_inline_asm_realized(self):
         def fn(inp):
@@ -270,7 +274,9 @@ class TestCustomLowering(InductorTestCase):
         self.assertEqual("\n".join(code).count("tanh.approx.f32"), 1)
 
     @requires_gpu()
-    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
+    @skipIfXpu(
+        msg="inline asm emits CUDA PTX; XPU needs Intel vISA, intel/torch-xpu-ops#6050"
+    )
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_multi_inp_asm(self):
         def fn(a, b):
