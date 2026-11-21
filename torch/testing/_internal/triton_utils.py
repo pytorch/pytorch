@@ -7,19 +7,29 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_MTIA_AND_TRITON,
     HAS_XPU_AND_TRITON,
+    missing_triton_backend,
 )
 from torch.utils._triton import has_triton
 
 
+def _skip_hint(*device_types: str) -> str:
+    hints = []
+    for device_type in device_types:
+        reason = missing_triton_backend(device_type)
+        if reason is not None:
+            hints.append(f"; {device_type} device found but {reason}")
+    return "".join(hints)
+
+
 requires_cuda_and_triton = unittest.skipUnless(
-    HAS_CUDA_AND_TRITON, "requires cuda and triton"
+    HAS_CUDA_AND_TRITON, "requires cuda and triton" + _skip_hint("cuda")
 )
 requires_xpu_and_triton = unittest.skipUnless(
-    HAS_XPU_AND_TRITON, "requires xpu and triton"
+    HAS_XPU_AND_TRITON, "requires xpu and triton" + _skip_hint("xpu")
 )
 requires_gpu_and_triton = unittest.skipUnless(
     HAS_XPU_AND_TRITON or HAS_CUDA_AND_TRITON or HAS_MTIA_AND_TRITON,
-    "requires gpu and triton",
+    "requires gpu and triton" + _skip_hint("cuda", "xpu", "mtia"),
 )
 requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
 
