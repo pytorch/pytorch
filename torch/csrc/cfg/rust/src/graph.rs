@@ -87,8 +87,8 @@ pub enum Assert {
     /// The object has no attribute of the name (`absent`): reading it
     /// comes down to the `__getattr__` of its class.
     Absent(PathValue, PyObj),
-    /// The class of the object has nothing under the name: no `__len__`
-    /// and no `__length_hint__`, which `list` and `tuple` would ask.
+    /// The class of the object has nothing under the name: no
+    /// `__getattr__` behind a `__getattribute__` that the path went into.
     Lacks(PathValue, PyObj),
     /// What a call hands on with `*`: exactly of this class, a tuple or a
     /// list, with this many items. With `**`: an exact dict with these
@@ -1699,6 +1699,11 @@ pub unsafe fn reads_attribute(callee: Obj) -> bool {
     builtin_named(Builtin::GetAttr) == callee as usize || builtin_named(Builtin::HasAttr) == callee as usize
 }
 
+/// Whether a callee is the builtin `hasattr`.
+pub unsafe fn is_hasattr(callee: Obj) -> bool {
+    builtin_named(Builtin::HasAttr) == callee as usize
+}
+
 /// Whether a callee is the builtin `len`.
 pub unsafe fn is_len(callee: Obj) -> bool {
     builtin_named(Builtin::Len) == callee as usize
@@ -1776,6 +1781,16 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
     if callee.is_null() || capi::is_unboxed(callee) || args.iter().any(|o| o.is_null()) {
         return None;
     }
+    // What `object` reads of the object it is bound to, where that runs
+    // no Python code. Of a tensor nothing is read this way.
+    let reader = generic_reader(callee);
+    if !reader.is_null() {
+        let mut info = TcfgTensorInfo::empty();
+        let named = args.len() == 1 && !capi::is_unboxed(args[0]) && ffi::PyUnicode_CheckExact(args[0]) != 0;
+        let fine = named && (api.tensor_info)(reader, &mut info) == 0 && quiet_generic(reader, args[0]);
+        xdecref(reader);
+        return fine.then_some(false);
+    }
     if ffi::PyCFunction_Check(callee) != 0 {
         let function = callee as *mut ffi::PyCFunctionObject;
         let (state, math, operator) = quiet_modules();
@@ -1834,10 +1849,11 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
         Builtin::Type | Builtin::Callable => args.len() == 1,
         Builtin::GetAttr | Builtin::HasAttr => {
             let found = which == Builtin::GetAttr && args.len() == 3;
-            (args.len() == 2 || found)
-                && !capi::is_unboxed(args[1])
-                && ffi::PyUnicode_CheckExact(args[1]) != 0
-                && quiet_attr(args[0], args[1], api)
+            let named = (args.len() == 2 || found) && !capi::is_unboxed(args[1]) && ffi::PyUnicode_CheckExact(args[1]) != 0;
+            // What is not there is answered too where nothing is raised
+            // out of the call.
+            let caught = which == Builtin::HasAttr || found;
+            named && (quiet_attr(args[0], args[1], api) || (caught && quiet_absent(args[0], args[1])))
         }
         Builtin::IsInstance => {
             static CLASS: std::sync::OnceLock<PyObj> = std::sync::OnceLock::new();
@@ -1921,6 +1937,7 @@ pub struct Specials {
     pub setattr: PyObj,
     pub instancecheck: PyObj,
     pub getattribute: PyObj,
+    pub contains: PyObj,
 }
 
 pub unsafe fn specials() -> &'static Specials {
@@ -1935,6 +1952,7 @@ pub unsafe fn specials() -> &'static Specials {
         setattr: name(c"__setattr__"),
         instancecheck: name(c"__instancecheck__"),
         getattribute: name(c"__getattribute__"),
+        contains: name(c"__contains__"),
     })
 }
 
@@ -2010,6 +2028,121 @@ pub unsafe fn absent(o: Obj, name: Obj) -> bool {
     !has(name) && !(ffi::PyModule_Check(o) != 0 && has(specials().getattr.as_ptr()))
 }
 
+/// Whether an object has no attribute of a name and says so without
+/// changing anything: neither its class nor the object has it, and the
+/// `__getattr__` of the class is one with a shortcut (that of `nn.Module`)
+/// none of whose dicts has it, which then raises AttributeError and does
+/// nothing else. `hasattr` is False then, and `getattr` gives its default;
+/// both call the function, at every call.
+pub unsafe fn quiet_absent(obj: Obj, name: Obj) -> bool {
+    absent(obj, name)
+        && ffi::PyModule_Check(obj) == 0
+        && crate::shortcuts::has_getattr(ffi::Py_TYPE(obj))
+        && !crate::shortcuts::finds(obj, name)
+}
+
+/// For what `object.__getattribute__` is when it is bound to an object
+/// (what `super().__getattribute__(name)` comes down to in a class that
+/// reads its attributes in a function of its own): the object. Owned;
+/// null for anything else.
+pub unsafe fn generic_reader(callee: Obj) -> Obj {
+    static WRAPPER: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    if callee.is_null() || capi::is_unboxed(callee) {
+        return null_mut();
+    }
+    let names = specials();
+    let wrapper = *WRAPPER.get_or_init(|| {
+        let bound = ffi::PyObject_GetAttr(ffi::Py_None(), names.getattribute.as_ptr());
+        ffi::PyErr_Clear();
+        let class = if bound.is_null() { 0 } else { ffi::Py_TYPE(bound) as usize };
+        xdecref(bound);
+        class
+    });
+    if wrapper == 0 || ffi::Py_TYPE(callee) as usize != wrapper {
+        return null_mut();
+    }
+    let class = ffi::PyObject_GetAttrString(callee, c"__objclass__".as_ptr());
+    let name = ffi::PyObject_GetAttrString(callee, c"__name__".as_ptr());
+    let lookup = class == std::ptr::addr_of_mut!(ffi::PyBaseObject_Type) as Obj
+        && !name.is_null()
+        && ffi::PyUnicode_Check(name) != 0
+        && ffi::PyUnicode_Compare(name, names.getattribute.as_ptr()) == 0;
+    ffi::PyErr_Clear();
+    xdecref(class);
+    xdecref(name);
+    if !lookup {
+        return null_mut();
+    }
+    let bound = ffi::PyObject_GetAttrString(callee, c"__self__".as_ptr());
+    ffi::PyErr_Clear();
+    bound
+}
+
+/// Whether the lookup of `object` finds an attribute of an object without
+/// running Python code, whatever the class of the object does when an
+/// attribute is read: what `object.__getattribute__(obj, name)` does.
+/// False for a name that is not there.
+pub unsafe fn quiet_generic(obj: Obj, name: Obj) -> bool {
+    if obj.is_null() || capi::is_unboxed(obj) || ffi::PyType_Check(obj) != 0 {
+        return false;
+    }
+    let descr = pyffi::_PyType_Lookup(ffi::Py_TYPE(obj), name);
+    let python = !descr.is_null() && python_descriptor(descr);
+    let data = !descr.is_null() && (*ffi::Py_TYPE(descr)).tp_descr_set.is_some();
+    if data {
+        return !python;
+    }
+    let slot = pyffi::_PyObject_GetDictPtr(obj);
+    let own = !slot.is_null() && !(*slot).is_null() && !ffi::PyDict_GetItemWithError(*slot, name).is_null();
+    own || (!descr.is_null() && !python)
+}
+
+/// The property that the lookup of `object` comes down to for a name of
+/// an object, whatever the object holds itself. Null for anything else.
+/// Borrowed.
+pub unsafe fn generic_property(obj: Obj, name: Obj) -> Obj {
+    if obj.is_null() || capi::is_unboxed(obj) || ffi::PyType_Check(obj) != 0 {
+        return null_mut();
+    }
+    let descr = pyffi::_PyType_Lookup(ffi::Py_TYPE(obj), name);
+    let property = !descr.is_null() && ffi::Py_TYPE(descr) == std::ptr::addr_of_mut!(ffi::PyProperty_Type);
+    if property { descr } else { null_mut() }
+}
+
+/// Whether reading an attribute of what `super(class, obj)` gave runs no
+/// Python code: the classes behind `class`, in the order of the class of
+/// `obj`, are gone through for the name, and what the first that has it
+/// holds is bound by C code (a function, a method of a class written in
+/// C) or is no descriptor. False for a name none of them has.
+unsafe fn quiet_super(bound: Obj, name: Obj) -> bool {
+    if pyffi::str_to_string(name) == "__class__" {
+        return false;
+    }
+    let this = ffi::PyObject_GetAttrString(bound, c"__thisclass__".as_ptr());
+    let class = ffi::PyObject_GetAttrString(bound, c"__self_class__".as_ptr());
+    ffi::PyErr_Clear();
+    let mut quiet = false;
+    if !this.is_null() && !class.is_null() && ffi::PyType_Check(class) != 0 {
+        let order = (*(class as *mut ffi::PyTypeObject)).tp_mro;
+        let count = if order.is_null() { 0 } else { ffi::PyTuple_GET_SIZE(order) };
+        if let Some(start) = (0..count).find(|i| ffi::PyTuple_GET_ITEM(order, *i) == this) {
+            for i in start + 1..count {
+                let dict = pyffi::PyType_GetDict(ffi::PyTuple_GET_ITEM(order, i) as *mut ffi::PyTypeObject);
+                let found = if dict.is_null() { null_mut() } else { ffi::PyDict_GetItemWithError(dict, name) };
+                xdecref(dict);
+                if !found.is_null() {
+                    quiet = !python_descriptor(found);
+                    break;
+                }
+            }
+        }
+    }
+    ffi::PyErr_Clear();
+    xdecref(this);
+    xdecref(class);
+    quiet
+}
+
 /// Whether what a type has under a name is given out by Python code: a
 /// property whose getter is a Python function, or a descriptor of a class
 /// that is defined in Python.
@@ -2042,6 +2175,9 @@ pub unsafe fn quiet_attr(obj: Obj, name: Obj, api: &TcfgApi) -> bool {
     if ffi::PyModule_CheckExact(obj) != 0 {
         let dict = ffi::PyModule_GetDict(obj);
         return !dict.is_null() && !ffi::PyDict_GetItemWithError(dict, name).is_null();
+    }
+    if ty == std::ptr::addr_of_mut!(ffi::PySuper_Type) {
+        return quiet_super(obj, name);
     }
     if ffi::PyType_Check(obj) != 0 {
         // A class: what it has itself, or else what `type` has for it.
@@ -4517,6 +4653,9 @@ pub fn renamed(op: &Op, f: &mut impl FnMut(V) -> V) -> Option<Op> {
         Op::DictMerge(a, b, c) => Op::DictMerge(f(*a), f(*b), f(*c)),
         Op::MapAdd(a, b, c) => Op::MapAdd(f(*a), f(*b), f(*c)),
         Op::ListToTuple(a) => Op::ListToTuple(f(*a)),
+        Op::SuperObject { global_super, class, this, explicit } => {
+            Op::SuperObject { global_super: f(*global_super), class: f(*class), this: f(*this), explicit: *explicit }
+        }
         Op::Format { val, conv, spec } => Op::Format { val: f(*val), conv: *conv, spec: if *spec == NONE { NONE } else { f(*spec) } },
         Op::BuildString(vs) => Op::BuildString(all(vs)),
         Op::Unpack(a, n) => Op::Unpack(f(*a), *n),
