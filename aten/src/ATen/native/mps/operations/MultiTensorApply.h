@@ -65,6 +65,30 @@ struct FusedAdamEncodingFunctor {
                 grad_scale,
                 found_inf);
   }
+
+  void operator()(id<MTLComputeCommandEncoder>& computeEncoder,
+                  id<MTLBuffer>& tensorArgumentBuffer,
+                  const MetadataArguments& metadata_arguments,
+                  const at::Tensor& lr,
+                  const at::Tensor& beta1,
+                  const at::Tensor& beta2,
+                  const double weight_decay,
+                  const double eps,
+                  const bool maximize,
+                  const std::optional<at::Tensor>& grad_scale,
+                  const std::optional<at::Tensor>& found_inf) const {
+    mtl_setArgs(computeEncoder,
+                tensorArgumentBuffer,
+                metadata_arguments,
+                lr,
+                beta1,
+                beta2,
+                weight_decay,
+                eps,
+                maximize,
+                grad_scale,
+                found_inf);
+  }
 };
 
 template <bool momentum>

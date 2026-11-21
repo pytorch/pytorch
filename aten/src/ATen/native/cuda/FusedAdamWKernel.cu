@@ -183,4 +183,94 @@ void _fused_adamw_kernel_cuda_(
   }
 }
 
+// The following overload has a Tensor lr, beta1 and beta2
+void _fused_adamw_kernel_cuda_(
+    at::TensorList params,
+    at::TensorList grads,
+    at::TensorList exp_avgs,
+    at::TensorList exp_avg_sqs,
+    at::TensorList max_exp_avg_sqs,
+    at::TensorList state_steps,
+    const at::Tensor& lr,
+    const at::Tensor& beta1,
+    const at::Tensor& beta2,
+    const double weight_decay,
+    const double eps,
+    const bool amsgrad,
+    const bool maximize,
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
+  // Manually check devices since we specify no device check in
+  // native_functions.yaml
+  Device param_device = params[0].device();
+  if (grad_scale.has_value()) {
+    TORCH_CHECK(
+        grad_scale->device() == param_device,
+        "grad_scale must be on the same GPU device as the params");
+  }
+  if (found_inf.has_value()) {
+    TORCH_CHECK(
+        found_inf->device() == param_device,
+        "found_inf must be on the same GPU device as the params");
+  }
+  TORCH_CHECK(
+      lr.is_cpu() || lr.device() == param_device,
+      "lr must be on CPU or on the same GPU device as the params");
+  TORCH_CHECK(
+      beta1.is_cpu() || beta1.device() == param_device,
+      "beta1 must be on CPU or on the same GPU device as the params");
+  TORCH_CHECK(
+      beta2.is_cpu() || beta2.device() == param_device,
+      "beta2 must be on CPU or on the same GPU device as the params");
+
+  const bool is_mixed_precision =
+      params[0].scalar_type() != exp_avgs[0].scalar_type();
+  if (amsgrad) {
+    TORCH_CHECK(
+        at::native::check_fast_path_restrictions(
+            {params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs},
+            /*scalarList=*/{},
+            /*does_op_promote_integer_inputs_to_float=*/false,
+            /*skip_cross_list_dtype_check=*/is_mixed_precision),
+        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout");
+    _fused_adamw_amsgrad_cuda_impl_(
+        params,
+        grads,
+        exp_avgs,
+        exp_avg_sqs,
+        max_exp_avg_sqs,
+        state_steps,
+        lr,
+        beta1,
+        beta2,
+        weight_decay,
+        eps,
+        maximize,
+        grad_scale,
+        found_inf);
+  } else {
+    TORCH_CHECK(
+        at::native::check_fast_path_restrictions(
+            {params, grads, exp_avgs, exp_avg_sqs},
+            /*scalarList=*/{},
+            /*does_op_promote_integer_inputs_to_float=*/false,
+            /*skip_cross_list_dtype_check=*/is_mixed_precision),
+        "params, grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and layout");
+    _fused_adamw_cuda_impl_(
+        params,
+        grads,
+        exp_avgs,
+        exp_avg_sqs,
+        state_steps,
+        lr,
+        beta1,
+        beta2,
+        weight_decay,
+        eps,
+        maximize,
+        grad_scale,
+        found_inf);
+  }
+}
+
 } // namespace at::native

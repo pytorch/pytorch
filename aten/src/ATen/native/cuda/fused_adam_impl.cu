@@ -69,4 +69,36 @@ void _fused_adam_cuda_impl_(
       found_inf);
 }
 
+// The following overload has a Tensor lr, beta1 and beta2
+void _fused_adam_cuda_impl_(
+    at::TensorList params,
+    at::TensorList grads,
+    at::TensorList exp_avgs,
+    at::TensorList exp_avg_sqs,
+    at::TensorList state_steps,
+    const at::Tensor& lr,
+    const at::Tensor& beta1,
+    const at::Tensor& beta2,
+    const double weight_decay,
+    const double eps,
+    const bool maximize,
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
+  _fused_adam_cuda_impl_common<ADAM_MODE::ORIGINAL, /*amsgrad=*/false>(
+      params,
+      grads,
+      exp_avgs,
+      exp_avg_sqs,
+      /*max_exp_avg_sqs=*/{},
+      state_steps,
+      lr,
+      beta1,
+      beta2,
+      weight_decay,
+      eps,
+      maximize,
+      grad_scale,
+      found_inf);
+}
+
 } // namespace at::native

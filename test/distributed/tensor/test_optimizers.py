@@ -135,6 +135,11 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
                 for config in fused_adam_float_lr_configs
             ]
         )
+        # betas could be Tensors as well when fused=True
+        betas = tuple(torch.tensor(b, device=self.device_type) for b in (0.9, 0.999))
+        fused_adam_tensor_lr_configs.extend(
+            [{**config, "betas": betas} for config in fused_adam_float_lr_configs]
+        )
         adam_configs = [
             *adam_float_lr_configs,
             *fused_adam_float_lr_configs,
@@ -210,6 +215,11 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
                 {**config, "lr": torch.tensor([0.1])}
                 for config in fused_adamw_float_lr_configs
             ]
+        )
+        # betas could be Tensors as well when fused=True
+        betas = tuple(torch.tensor(b, device=self.device_type) for b in (0.6, 0.66))
+        fused_adamw_tensor_lr_configs.extend(
+            [{**config, "betas": betas} for config in fused_adamw_float_lr_configs]
         )
         adamw_configs = [
             *adamw_float_lr_configs,
