@@ -1619,11 +1619,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
             wrap_fx_proxy,
         )
         from .ctx_manager import (
+            AutocastModeVariable,
             CurrentDeviceContextVariable,
             GenericContextWrappingVariable,
             get_device_context_manager,
         )
         from .tensor import CurrentDeviceVariable
+        from .torch import (
+            _install_privateuse1_autocast_guards,
+            _is_privateuse1_autocast,
+        )
 
         constant_args = check_constant_args(args, kwargs)
 
@@ -1683,6 +1688,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .ctx_manager import NullContextVariable
 
             return NullContextVariable(*args, **kwargs)  # noqa: RVT001
+        elif _is_privateuse1_autocast(self.value):
+            if self.source is not None:
+                # Closure-sourced classes do not receive a class identity
+                # guard in VariableBuilder.
+                try:
+                    install_guard(self.source.make_guard(GuardBuilder.CLASS_MATCH))
+                except NotImplementedError:
+                    # A ConstantSource cannot be guarded; the explicit
+                    # constant-result contract and registered entrypoint
+                    # guard still protect this specialization.
+                    pass
+            _install_privateuse1_autocast_guards()
+            # pyrefly: ignore [bad-argument-type]
+            return AutocastModeVariable.create(tx, self.value, args, kwargs)
         elif self.value is collections.defaultdict:
             # defaultdict construction — use track_new_user_defined_object
             # which creates DefaultDictVariable. __init__ handler extracts

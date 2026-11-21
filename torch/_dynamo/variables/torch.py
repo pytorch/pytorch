@@ -229,6 +229,49 @@ supported_ctx_manager_classes = dict.fromkeys(
 )
 
 
+def _get_privateuse1_autocast() -> Any:
+    device_type = torch._C._get_privateuse1_backend_name()
+    device_module = getattr(torch, device_type, None)
+    amp_module = getattr(device_module, "amp", None)
+    return getattr(amp_module, "autocast", None)
+
+
+def _is_privateuse1_autocast(value: Any) -> bool:
+    """Recognize an explicitly opted-in, fixed-device autocast wrapper.
+
+    The registered class must declare ``_dynamo_autocast_passthrough = True``
+    directly and expose only ``dtype``, ``enabled``, and ``cache_enabled``.
+    The declaration promises to forward these arguments unchanged to the
+    base autocast for the registered backend, with no additional eager
+    behavior in construction or context entry/exit. Other wrappers retain
+    generic Dynamo handling.
+    """
+    if not isinstance(value, type) or not issubclass(
+        value, torch.amp.autocast_mode.autocast
+    ):
+        return False
+    if value is not _get_privateuse1_autocast():
+        return False
+    if vars(value).get("_dynamo_autocast_passthrough") is not True:
+        return False
+
+    parameters = inspect.signature(value).parameters
+    return parameters.keys() == {"dtype", "enabled", "cache_enabled"} and all(
+        parameter.kind
+        not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+        for parameter in parameters.values()
+    )
+
+
+def _install_privateuse1_autocast_guards() -> None:
+    torch_source = ImportSource("torch")
+    device_type = torch._C._get_privateuse1_backend_name()
+    autocast_source = AttrSource(
+        AttrSource(AttrSource(torch_source, device_type), "amp"), "autocast"
+    )
+    install_guard(autocast_source.make_guard(GuardBuilder.CLASS_MATCH))
+
+
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
     [
         torch._shape_as_tensor,
@@ -725,12 +768,9 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         # are implemented as a function decorated by contextlib.contextmanager,
         # E.g., torch._functorch.vmap.vmap_increment_nesting.
         return (
-            # Context manager type or function with @contextmanager is callable
             callable(value)
-            and (
-                hashable(value)  # accesses value.__hash__()
-                and value in supported_ctx_manager_classes
-            )
+            and hashable(value)
+            and value in supported_ctx_manager_classes
         )
 
     def call_function(
@@ -915,7 +955,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.cpu.amp.autocast,
         ):
             # pyrefly: ignore [bad-argument-type]
-            return AutocastModeVariable.create(self.value, args, kwargs)
+            return AutocastModeVariable.create(tx, self.value, args, kwargs)
         elif self.value in (
             torch.profiler.record_function,
             torch.autograd.profiler.record_function,
