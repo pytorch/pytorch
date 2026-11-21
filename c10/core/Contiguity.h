@@ -55,13 +55,21 @@ inline static bool _is_contiguous_or_false(
   // NB: make sure we do signed arithmetic
   for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
     const auto& size_d = sizes[d];
-    if (TORCH_GUARD_OR_FALSE(sym_eq(size_d, 1))) {
-      continue;
-    }
+    // A dim of size 1 is contiguous for any stride, so when the stride already
+    // statically matches, the size question decides nothing and must not add a
+    // guard. Ask it only when the stride does not match.
+    const bool stride_matches =
+        TORCH_STATICALLY_KNOWN_TRUE(sym_eq(strides[d], expected_stride)) ||
+        TORCH_STATICALLY_KNOWN_TRUE(sym_eq(strides[d], expected_stride_max));
+    if (!stride_matches) {
+      if (TORCH_GUARD_OR_FALSE(sym_eq(size_d, 1))) {
+        continue;
+      }
 
-    if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride)) &&
-        TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride_max))) {
-      return false;
+      if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride)) &&
+          TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride_max))) {
+        return false;
+      }
     }
     // Nested ints don't support max.
     const bool is_nested_int = size_d.is_heap_allocated() &&
