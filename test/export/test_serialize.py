@@ -2768,7 +2768,6 @@ _FLAT_APPLY_HELPER = (
 )
 _MOD_INDEX = "torch._dynamo._trace_wrapped_higher_order_op.ModIndex"
 _OS_SYSTEM_OP = {"as_operator": "torch.os.system"}
-_COND_OP = {"as_operator": "torch.ops.higher_order.cond"}
 _DICT_WITH_OP = {"as_string_to_argument": {"f": _OS_SYSTEM_OP}}
 _CUSTOM_OBJ = {"as_custom_obj": {"name": "obj0", "class_fqn": "a.b"}}
 
@@ -3589,14 +3588,7 @@ class TestPredispatchSerialization(TestCase):
     _OTHER_INPUTS = {
         # An input that names an operator would reach the function as a
         # callable.
-        "torch_os_system": (_set_last_input(arg=_OS_SYSTEM_OP), "outside torch.ops"),
-        "unregistered_op": (
-            _set_last_input(
-                arg={"as_operator": "torch.ops.flat_apply_test_ns.op.default"}
-            ),
-            "not registered",
-        ),
-        "higher_order_op": (_set_last_input(arg=_COND_OP), "not an operator overload"),
+        "operator": (_set_last_input(arg=_OS_SYSTEM_OP), "of kind as_operator"),
         # A dict of arguments could hold one too, and export passes neither
         # dicts nor keyword arguments through flat_apply.
         "dict": (_set_last_input(arg=_DICT_WITH_OP), "of kind as_string_to_argument"),
@@ -3711,9 +3703,9 @@ class TestPredispatchSerialization(TestCase):
             lambda node: node.update_kwarg("checked_output", False),
             "keyword input",
         ),
-        "higher_order_op": (
+        "operator": (
             lambda node: node.update_arg(-1, torch.ops.higher_order.cond),
-            "not an operator overload",
+            "of kind as_operator",
         ),
         "leaf_count": (_drop_last_flat_input, "flat inputs, but its input spec"),
         "spec_not_attribute": (
@@ -3733,37 +3725,6 @@ class TestPredispatchSerialization(TestCase):
         change(node)
         with self.assertRaisesRegex(SerializeError, reason):
             serialize(ep)
-
-    def test_predispatch_custom_autograd_operator_input(self):
-        # An operator overload is an input that save and load accept, so an
-        # autograd function that takes one saves, loads and runs.
-        Scale = self._scale_function()
-
-        class ApplyOp(Scale):
-            @staticmethod
-            def forward(x, op):
-                return op(x, x)
-
-            @staticmethod
-            def backward(ctx, grad):
-                return grad * 2, None
-
-        class UsesOp(torch.nn.Module):
-            def forward(self, x):
-                return ApplyOp.apply(x, torch.ops.aten.add.Tensor)
-
-        module = self._import_test_module(ApplyOp=ApplyOp)
-        ApplyOp.__module__, ApplyOp.__qualname__ = module.__name__, "ApplyOp"
-        x = torch.randn(4)
-        ep = export(UsesOp(), (x,), strict=False)
-        (node,) = ep.graph.find_nodes(
-            op="call_function", target=torch.ops.higher_order.flat_apply
-        )
-        self.assertIn(torch.ops.aten.add.Tensor, node.args)
-        buffer = io.BytesIO()
-        torch.export.save(ep, buffer)
-        buffer.seek(0)
-        self.assertEqual(torch.export.load(buffer).module()(x), x + x)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")

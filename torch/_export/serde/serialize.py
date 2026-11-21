@@ -776,11 +776,11 @@ def _find_imported(name: str) -> Any:
     return obj
 
 
-# The kinds of saved inputs that a flat_apply call may have: plain values and
-# operators. Load turns some other kinds, such as graphs, into objects that the
-# function could call, and dicts of arguments can hold operators. Custom
-# objects, which export uses for enum values and other opaque objects, are
-# refused too for now.
+# The kinds of saved inputs that a flat_apply call may have: plain values. Load
+# turns some other kinds, such as operators and graphs, into objects that the
+# function could call, and dicts of arguments can hold them. Custom objects,
+# which export uses for enum values and other opaque objects, are refused too
+# for now.
 _FLAT_APPLY_INPUT_KINDS = frozenset(
     {
         "as_none",
@@ -797,15 +797,14 @@ _FLAT_APPLY_INPUT_KINDS = frozenset(
         "as_memory_format",
         "as_layout",
         "as_device",
-        "as_operator",
     }
 )
 
 
 def _check_flat_apply_inputs(where: str, inputs: Sequence[NamedArgument]) -> None:
     """
-    Save and load both refuse keyword inputs of a flat_apply call, inputs other
-    than plain values and operators, and operator names outside torch.ops.
+    Save and load both refuse keyword inputs of a flat_apply call, and inputs
+    other than plain values.
     """
     for inp in inputs:
         if inp.kind != ArgumentKind.POSITIONAL or inp.name:
@@ -815,40 +814,9 @@ def _check_flat_apply_inputs(where: str, inputs: Sequence[NamedArgument]) -> Non
         if inp.arg.type not in _FLAT_APPLY_INPUT_KINDS:
             raise SerializeError(
                 f"{where} has an input of kind {inp.arg.type}, which cannot be "
-                "saved or loaded. Use plain values or operator overloads; enum "
-                "values and other custom objects are not supported yet."
+                "saved or loaded. Use plain values; operators, enum values and "
+                "other custom objects are not supported yet."
             )
-        # Looking up a name outside torch.ops reads attributes of torch, which
-        # can import a torch module.
-        if inp.arg.type == "as_operator" and not (
-            isinstance(inp.arg.as_operator, str)
-            and inp.arg.as_operator.startswith("torch.ops.")
-        ):
-            raise SerializeError(
-                f"{where} has an operator input outside torch.ops: {inp.arg.as_operator}"
-            )
-
-
-def _check_operator_inputs(
-    where: str, inputs: Sequence[NamedArgument], args: Sequence[Any]
-) -> None:
-    """
-    Save and load both refuse operator inputs of a flat_apply call other than
-    operator overloads. They run it after ``_check_flat_apply_inputs``, so all
-    inputs are positional.
-    """
-    for inp, arg in zip(inputs, args):
-        if inp.arg.type != "as_operator" or isinstance(arg, torch._ops.OpOverload):
-            continue
-        if isinstance(arg, str):
-            raise SerializeError(
-                f"{where} names an operator that is not registered: {arg}. "
-                "Import the library that defines it before loading."
-            )
-        raise SerializeError(
-            f"{where} has an operator input that is not an operator overload: "
-            f"{inp.arg.as_operator}"
-        )
 
 
 def _find_in_spec(spec: pytree.TreeSpec, pred: Callable[..., bool]) -> bool:
@@ -1594,7 +1562,6 @@ class GraphModuleSerializer(metaclass=Final):
             )
         flat_inputs = self.serialize_hoo_inputs(flat_args, node.kwargs)
         _check_flat_apply_inputs(f"flat_apply node {node.name}", flat_inputs)
-        _check_operator_inputs(f"flat_apply node {node.name}", flat_inputs, flat_args)
         return [
             NamedArgument(
                 name="",
@@ -3501,7 +3468,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 f"flat_apply node {serialized_node.name} does not start with its "
                 "function and input spec"
             )
-        func_name, flat_inputs = flat_apply_spec.func, inputs[1:]
+        flat_inputs = inputs[1:]
         try:
             # Loading an enum or a defaultdict factory would import a module
             # that the file names.
@@ -3510,11 +3477,9 @@ class GraphModuleDeserializer(metaclass=Final):
             raise SerializeError(
                 f"Cannot load the input spec of flat_apply node {serialized_node.name}: {e}"
             ) from e
-        where = f"flat_apply node {serialized_node.name}"
-        _check_flat_apply_inputs(where, flat_inputs)
+        _check_flat_apply_inputs(f"flat_apply node {serialized_node.name}", flat_inputs)
         args, kwargs = self.deserialize_hoo_inputs(flat_inputs)
-        _check_operator_inputs(where, flat_inputs, args)
-        func = _find_flat_apply_func(func_name, in_spec, args)
+        func = _find_flat_apply_func(flat_apply_spec.func, in_spec, args)
         specs = {"func_spec": func_to_graphable(func)[1], "in_spec": in_spec}
         # module() adds parameters, buffers and constants as attributes after
         # load, under the first part of their names.
