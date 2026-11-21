@@ -2755,7 +2755,7 @@ class _AutogradForwardEpilogue:
                 mut_inp_infos = [
                     x
                     for x in self.metadata.input_info
-                    if x.mutates_data or x.mutates_metadata
+                    if x.mutation_type == MutationType.MUTATED_OUT_GRAPH
                 ]
                 if len(user_mutated_inputs_raw) != len(mut_inp_infos):
                     raise AssertionError(
@@ -3601,7 +3601,7 @@ class _AOTDispatchAutogradFunctionFactory:
                     mut_inp_infos = [
                         x
                         for x in fw_metadata.input_info
-                        if x.mutates_data or x.mutates_metadata
+                        if x.mutation_type == MutationType.MUTATED_OUT_GRAPH
                     ]
                     if len(user_mutated_inputs_raw) != len(mut_inp_infos):
                         raise AssertionError(
