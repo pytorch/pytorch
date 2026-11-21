@@ -27,10 +27,7 @@ pub const TCFG_ALLOW_SKIP_AUTOGRAD: u32 = 1;
 
 pub const TCFG_UNBOXED_RESULT: u32 = 1;
 
-pub const TCFG_API_VERSION: u32 = 15;
-/// The version that has what the backward of a graph is derived with
-/// behind the entries of version 15 (cfg.h).
-pub const TCFG_API_VERSION_BACKWARD: u32 = 16;
+pub const TCFG_API_VERSION: u32 = 17;
 
 #[repr(C)]
 pub struct TcfgPyOp {
