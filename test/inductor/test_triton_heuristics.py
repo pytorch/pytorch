@@ -1561,6 +1561,11 @@ class TestTritonHeuristics(TestCase):
                     "torch._inductor.heuristics.template.triton.rocm_gfx_arch",
                     lambda: arch,
                 ),
+                # the backward reads the current GPU's target by index
+                patch(
+                    "torch._inductor.heuristics.template.triton._rocm_native_device_arch_name",
+                    lambda device: arch,
+                ),
                 patch(
                     "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
                     lambda: False,
@@ -1589,12 +1594,201 @@ class TestTritonHeuristics(TestCase):
                 fallback = configs_for(unregistered, get_configs)
                 for arch in targets:
                     configs = configs_for(arch, get_configs)
-                    tuned = registry.get(arch, {}).get((dtype, head_dim))
+                    # an entry may be keyed by the (QK, V) width pair, which
+                    # is (head_dim, head_dim) here, ahead of (dtype, head_dim)
+                    table = registry.get(arch, {})
+                    tuned = table.get((dtype, head_dim, head_dim))
+                    if tuned is None:
+                        tuned = table.get((dtype, head_dim))
                     if tuned is None:
                         self.assertEqual(configs, fallback, msg=arch)
                     else:
                         self.assertEqual(configs, [tuned], msg=arch)
                         self.assertNotEqual(configs, fallback, msg=arch)
+
+    @runOnRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_flex_bwd_gfx1250_measured_defaults(self):
+        """gfx1250 has measured backward tiles for some 16-bit width pairs.
+
+        The tiles were measured on gfx1250-strict, where the shared defaults
+        spill at these head dims and regressed the TDM backward. The entries are
+        keyed by the (QK, V) width pair, so every other pair, head dim and dtype
+        keeps the shared fallback, since only these cases were measured.
+        """
+        from torch._inductor.heuristics.template.triton import (
+            ROCmConfigHeuristic,
+            ROCmFlexBwDConfig,
+        )
+        from torch._inductor.utils import get_default_kpack
+
+        heuristic = ROCmConfigHeuristic()
+
+        def configs_for(arch, head_dim, dtype, v_head_dim=None):
+            with (
+                patch(
+                    "torch._inductor.heuristics.template.triton._rocm_native_device_arch_name",
+                    lambda device: arch,
+                ),
+                patch(
+                    "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
+                    lambda: False,
+                ),
+            ):
+                return heuristic.get_flex_attn_bwd_configs(head_dim, dtype, v_head_dim)
+
+        # the default of the GPU that built the heuristic, here the only one
+        kpack = get_default_kpack()
+        tuned = {
+            (64, None): ROCmFlexBwDConfig(32, 64, 64, 32, 1, 4, kpack=kpack),
+            (64, 64): ROCmFlexBwDConfig(32, 64, 64, 32, 1, 4, kpack=kpack),
+            (128, None): ROCmFlexBwDConfig(32, 128, 128, 32, 1, 4, kpack=kpack),
+            (128, 128): ROCmFlexBwDConfig(32, 128, 128, 32, 1, 4, kpack=kpack),
+            (64, 128): ROCmFlexBwDConfig(32, 128, 128, 32, 1, 4, kpack=kpack),
+        }
+        for (head_dim, v_head_dim), measured in tuned.items():
+            for dtype in (torch.float16, torch.bfloat16):
+                with self.subTest(head_dim=head_dim, v=v_head_dim, dtype=dtype):
+                    self.assertEqual(
+                        configs_for("gfx1250", head_dim, dtype, v_head_dim),
+                        [measured],
+                    )
+                    self.assertNotEqual(
+                        configs_for("gfx000", head_dim, dtype, v_head_dim),
+                        [measured],
+                    )
+        for head_dim, v_head_dim, dtype in (
+            (64, 256, torch.float16),
+            (128, 64, torch.bfloat16),
+            (256, None, torch.float16),
+            (32, None, torch.bfloat16),
+            (64, None, torch.float32),
+            (128, None, torch.float32),
+        ):
+            with self.subTest(head_dim=head_dim, v=v_head_dim, dtype=dtype):
+                self.assertEqual(
+                    configs_for("gfx1250", head_dim, dtype, v_head_dim),
+                    configs_for("gfx000", head_dim, dtype, v_head_dim),
+                )
+
+    @runOnRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_flex_bwd_tiles_follow_query_device_arch(self):
+        """Backward tiles follow the query's GPU, in either visit order.
+
+        With GPUs of different targets in one process, the lowering makes the
+        query's GPU current for the lookup, which reads that GPU's target, so
+        neither the calling GPU nor the first lookup decides the tiles. The GPU
+        switch is mocked, so this runs on one GPU.
+        """
+        import contextlib
+        from types import SimpleNamespace
+
+        from torch._inductor.heuristics.template.triton import ROCmConfigHeuristic
+        from torch._inductor.kernel.flex.flex_attention import _query_device_context
+        from torch._inductor.utils import _rocm_native_device_arch_name
+
+        heuristic = ROCmConfigHeuristic()
+        archs = {0: "gfx942:sramecc+:xnack-", 1: "gfx1250"}
+        # gfx942 has no backward table and keeps the shared head_dim 128 tiles
+        expected = {0: (64, 128, 128, 64), 1: (32, 128, 128, 32)}
+        current = [0]
+
+        def index_of(device):
+            # an unindexed "cuda" names the current GPU
+            index = torch.device(device).index
+            return current[0] if index is None else index
+
+        @contextlib.contextmanager
+        def switch_to(device):
+            previous, current[0] = current[0], torch.device(device).index
+            try:
+                yield
+            finally:
+                current[0] = previous
+
+        def tiles_for(query_index):
+            caller = 1 - query_index
+            current[0] = caller
+            with _query_device_context(torch.device("cuda", query_index)):
+                (conf,) = heuristic.get_flex_attn_bwd_configs(128, torch.float16, 128)
+            self.assertEqual(current[0], caller, "the caller's GPU is restored")
+            return (conf.block_m1, conf.block_n1, conf.block_m2, conf.block_n2)
+
+        _rocm_native_device_arch_name.cache_clear()
+        self.addCleanup(_rocm_native_device_arch_name.cache_clear)
+        with (
+            patch("torch.cuda.current_device", lambda: current[0]),
+            patch("torch.cuda.device", switch_to),
+            patch(
+                "torch.cuda.get_device_properties",
+                lambda d: SimpleNamespace(gcnArchName=archs[index_of(d)]),
+            ),
+            patch(
+                "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
+                lambda: False,
+            ),
+        ):
+            for order in ((0, 1), (1, 0)):
+                _rocm_native_device_arch_name.cache_clear()
+                with self.subTest(order=order):
+                    for index in order:
+                        self.assertEqual(tiles_for(index), expected[index])
+
+    @runOnRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_flex_bwd_config_lookup_runs_on_query_device(self):
+        """The backward lowering looks up its configs with the query's GPU current.
+
+        The test above checks the context and the lookup on their own; this one
+        checks that a real backward compilation enters the context, for the
+        query's device, around the lookup. The hooks observe this process, so
+        the backward must be lowered here: caches (remote ones included) are
+        disabled, and subprocess compilation is skipped.
+        """
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.compile_fx import fx_compile_mode, FxCompileMode
+
+        if fx_compile_mode == FxCompileMode.SUBPROCESS:
+            self.skipTest("the hooks cannot observe a subprocess compilation")
+        from torch._inductor.kernel.flex import flex_attention as flex_lowering
+        from torch.nn.attention.flex_attention import flex_attention
+
+        real_context = flex_lowering._query_device_context
+        real_lookup = InductorChoices.get_flex_attention_bwd_configs
+        entered, lookups, inside = [], [], [False]
+
+        @contextlib.contextmanager
+        def recording_context(device):
+            entered.append(device)
+            with real_context(device):
+                inside[0] = True
+                try:
+                    yield
+                finally:
+                    inside[0] = False
+
+        def recording_lookup(choices, *args, **kwargs):
+            lookups.append((inside[0], torch.cuda.current_device()))
+            return real_lookup(choices, *args, **kwargs)
+
+        q, k, v = (
+            torch.randn(1, 2, 128, 64, device=GPU_TYPE, requires_grad=True)
+            for _ in range(3)
+        )
+        torch._dynamo.reset()
+        with (
+            fresh_cache(),
+            config.patch(force_disable_caches=True),
+            patch.object(flex_lowering, "_query_device_context", recording_context),
+            patch.object(
+                InductorChoices, "get_flex_attention_bwd_configs", recording_lookup
+            ),
+        ):
+            torch.compile(flex_attention)(q, k, v).sum().backward()
+
+        self.assertEqual(entered, [q.device])
+        self.assertEqual(lookups, [(True, q.device.index)])
 
     @unittest.skipIf(not torch.version.hip, "ROCm-specific MFMA config pruning")
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
