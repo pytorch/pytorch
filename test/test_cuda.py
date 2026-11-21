@@ -203,8 +203,8 @@ def skip_unless_blas_library_selectable(backend):
 def get_wait_for_cpu_kernel():
     """Returns a compiled CUDA/HIP spin-wait kernel that blocks the GPU stream
     until the host sets a pinned int32 flag to non-zero. On NVIDIA, requires
-    SM70+ for the relaxed-system-scope PTX load. On AMD, uses
-    __hip_atomic_load with __HIP_MEMORY_SCOPE_SYSTEM (the AMDGCN equivalent).
+    SM70+ for the relaxed-system-scope PTX load. On AMD, uses a relaxed
+    system-scope atomic load.
 
     Usage::
 
@@ -225,7 +225,7 @@ def get_wait_for_cpu_kernel():
                 int flag = 0;
                 do {
             #ifdef __HIP_PLATFORM_AMD__
-                    flag = __hip_atomic_load(pinned_cpu_flag, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+                    flag = __scoped_atomic_load_n(pinned_cpu_flag, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
             #else
                     asm volatile("ld.relaxed.sys.global.s32 %0, [%1];" : "=r"(flag) : "l"(pinned_cpu_flag) : "memory");
             #endif
@@ -6688,6 +6688,103 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
         cuda_python_error_check(cudart.cudaGraphExecGetFlags(cudart_cuda_graph_exec))
 
         graph.replay()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH or TEST_WITH_ROCM, "NVIDIA CUDA graphs required"
+    )
+    @requires_cuda_python_bindings
+    @parametrize("hook_raises", [False, True])
+    def test_cuda_graph_set_raw_graph_exec(self, hook_raises):
+        import cuda.bindings.runtime as cudart
+
+        from torch.cuda._utils import _check_cuda_bindings
+
+        graph = torch.cuda.CUDAGraph(keep_graph=True, num_rng_states=0)
+        instantiate_flags = (
+            cudart.cudaGraphInstantiateFlags.cudaGraphInstantiateFlagAutoFreeOnLaunch.value
+            | cudart.cudaGraphInstantiateFlags.cudaGraphInstantiateFlagUseNodePriority.value
+        )
+        x = torch.zeros(64, device="cuda")
+        x.add_(0)
+        torch.cuda.synchronize()
+        with torch.cuda.graph(graph):
+            x.add_(1)
+        observed = []
+
+        def hook(g):
+            observed.append(g.raw_cuda_graph_exec())
+            if hook_raises:
+                raise RuntimeError("setter hook failure")
+
+        hook_handle = graph.register_post_instantiate_hook(hook)
+        executables = set()
+        expected_execs = []
+        try:
+            for expected in (1, 2):
+                old_exec = graph.raw_cuda_graph_exec() if graph._has_graph_exec else 0
+                new_exec = int(
+                    _check_cuda_bindings(
+                        cudart.cudaGraphInstantiateWithFlags(
+                            graph.raw_cuda_graph(), instantiate_flags
+                        )
+                    )
+                )
+                executables.add(new_exec)
+                expected_execs.append(new_exec)
+                if hook_raises:
+                    with self.assertRaisesRegex(RuntimeError, "setter hook failure"):
+                        graph.set_raw_cuda_graph_exec(graph_exec=new_exec)
+                else:
+                    graph.set_raw_cuda_graph_exec(graph_exec=new_exec)
+                self.assertEqual(graph.raw_cuda_graph_exec(), new_exec)
+                if old_exec:
+                    # Installing a replacement must leave the old exec alive.
+                    _check_cuda_bindings(cudart.cudaGraphExecGetFlags(old_exec))
+                    _check_cuda_bindings(cudart.cudaGraphExecDestroy(old_exec))
+                    executables.remove(old_exec)
+                graph.replay()
+                torch.cuda.synchronize()
+                self.assertEqual(x, torch.full_like(x, expected))
+
+            self.assertEqual(observed, expected_execs)
+            graph.set_raw_cuda_graph_exec(0)
+            self.assertFalse(graph._has_graph_exec)
+            _check_cuda_bindings(cudart.cudaGraphExecGetFlags(new_exec))
+            _check_cuda_bindings(cudart.cudaGraphExecDestroy(new_exec))
+            executables.remove(new_exec)
+            self.assertEqual(len(observed), 2)
+            hook_handle.remove()
+            graph.instantiate()
+            graph.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(x, torch.full_like(x, 3))
+        finally:
+            torch.cuda.synchronize()
+            installed = graph.raw_cuda_graph_exec() if graph._has_graph_exec else 0
+            for graph_exec in executables - {installed}:
+                _check_cuda_bindings(cudart.cudaGraphExecDestroy(graph_exec))
+            graph.reset()
+
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA graphs required")
+    def test_cuda_graph_set_raw_graph_exec_preconditions(self):
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        with self.assertRaisesRegex(RuntimeError, "capture_end"):
+            graph.set_raw_cuda_graph_exec(0)
+        graph = torch.cuda.CUDAGraph()
+        x = torch.zeros(64, device="cuda")
+        with torch.cuda.graph(graph):
+            x.add_(1)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "keep_graph=True"):
+                graph.set_raw_cuda_graph_exec(0)
+            graph.enable_debug_mode()
+            with self.assertRaisesRegex(RuntimeError, r"retained (cuda|hip)Graph_t"):
+                graph.set_raw_cuda_graph_exec(0)
+            graph.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(x, torch.ones_like(x))
+        finally:
+            graph.reset()
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"

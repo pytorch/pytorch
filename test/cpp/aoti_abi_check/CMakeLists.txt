@@ -27,6 +27,7 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_mathconstants.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_memoryformat.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_metaprogramming.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_model_pool.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_native_math.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_overflows.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_rand.cpp
@@ -50,6 +51,29 @@ if(USE_CUDA)
     ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_kernel_utils.cu
   )
 endif()
+# This directory is not hipified. The CUDA file above stays CUDA-only.
+# The ROCm file forces ROCM_VERSION 0 so the packed-atomic branch is compiled.
+if(USE_ROCM)
+  list(APPEND AOTI_ABI_CHECK_TEST_SRCS
+    ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_rocm_packed_atomic.cu
+  )
+  set_source_files_properties(
+    ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_rocm_packed_atomic.cu
+    PROPERTIES LANGUAGE HIP COMPILE_DEFINITIONS USE_ROCM)
+endif()
+
+# test_model_pool.cpp follows the build's device macro, like the pool's code.
+# ROCm builds hipify the pool's USE_CUDA into USE_ROCM.
+if(USE_CUDA)
+  set_source_files_properties(${AOTI_ABI_CHECK_TEST_ROOT}/test_model_pool.cpp
+    PROPERTIES COMPILE_DEFINITIONS USE_CUDA)
+elseif(USE_ROCM)
+  set_source_files_properties(${AOTI_ABI_CHECK_TEST_ROOT}/test_model_pool.cpp
+    PROPERTIES COMPILE_DEFINITIONS USE_ROCM)
+elseif(USE_XPU)
+  set_source_files_properties(${AOTI_ABI_CHECK_TEST_ROOT}/test_model_pool.cpp
+    PROPERTIES COMPILE_DEFINITIONS USE_XPU)
+endif()
 
 add_executable(test_aoti_abi_check
   ${AOTI_ABI_CHECK_TEST_SRCS}
@@ -63,6 +87,8 @@ target_compile_definitions(test_aoti_abi_check PRIVATE USE_GTEST)
 target_link_libraries(test_aoti_abi_check PRIVATE gtest_main sleef)
 if(USE_CUDA)
   target_link_libraries(test_aoti_abi_check PRIVATE torch::cudart)
+elseif(USE_ROCM)
+  target_link_libraries(test_aoti_abi_check PRIVATE hip::host)
 endif()
 target_include_directories(test_aoti_abi_check PRIVATE ${ATen_CPU_INCLUDE})
 if(NOT USE_SYSTEM_SLEEF)

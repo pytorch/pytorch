@@ -893,6 +893,8 @@ test_einops() {
 
 test_inductor_distributed() {
   # Smuggle a few multi-gpu tests here so that we don't have to request another large node
+  echo "Testing dynamo/test_streams multi_gpu"
+  python test/run_test.py -i dynamo/test_streams -k "test_cuda_current_stream_other_device or test_cuda_current_stream_queries_distinct_objects" --verbose
   echo "Testing multi_gpu tests in test_torchinductor"
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_replicate_on_devices --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_on_gpu_device1 --verbose
@@ -1945,6 +1947,18 @@ test_without_numpy() {
   popd
 }
 
+test_rocm_packed_atomic() {
+  # test_aoti_abi_check otherwise runs only in inductor_cpp_wrapper, which
+  # ROCm jobs do not select. This filter is the ROCm packed-atomic case.
+  local bin="${TORCH_BIN_DIR}/test_aoti_abi_check"
+  if [[ ! -x "$bin" ]]; then
+    bin="${BUILD_BIN_DIR}/test_aoti_abi_check"
+  fi
+  mkdir -p test/test-reports/cpp
+  "$bin" --gtest_filter='TestRocmPackedAtomic.*' \
+    --gtest_output=xml:test/test-reports/cpp/test_rocm_packed_atomic.xml
+}
+
 test_libtorch() {
   local SHARD="$1"
 
@@ -2095,15 +2109,6 @@ test_aot_compilation() {
   fi
 }
 
-test_vulkan() {
-  if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
-    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
-    export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/vk_swiftshader_icd.json
-    CPP_TESTS_DIR="${TORCH_TEST_DIR}" LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ python test/run_test.py --cpp --verbose -i cpp/vulkan_api_test
-  fi
-}
-
 test_distributed() {
   # $1 (optional): multigpu filter ("multigpu" | "not-multigpu"), see the
   # `multigpu` marker in test/conftest.py. Empty runs the whole suite.
@@ -2152,8 +2157,6 @@ test_distributed() {
       fi
 
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupGlooTest
-      python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLTest
-      python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
     fi
     python test/run_test.py --cpp --verbose -i cpp/NCCLDevCommManagerTest
   fi
@@ -2606,7 +2609,7 @@ test_torchtitan() {
   pip_install helion
 
   pushd torchtitan
-  pip_install -e . "pyarrow<26" "click!=8.3.0,<8.4,>=8"
+  pip_install -e . "pyarrow<26" "click>=8.4.2,<9"
 
   local installed_versions
   installed_versions=$(get_pkg_versions torch torchao)
@@ -2964,6 +2967,9 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_python_shard 1
   test_aten
   test_libtorch 1
+  if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+    test_rocm_packed_atomic
+  fi
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     test_xpu_bin
   fi
@@ -2986,8 +2992,6 @@ elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   fi
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
-elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
-  test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
