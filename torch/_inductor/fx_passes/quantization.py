@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import contextlib
 import copy
 import itertools
 import math
@@ -8,6 +9,7 @@ import operator
 import torch
 from torch._dynamo.utils import counters
 from torch.fx.node import map_arg
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..lowering import lowerings as L, require_channels_last
@@ -1131,6 +1133,120 @@ def _register_quantization_reshape():
     )
 
 
+# Device types on which the weight-only-quant (WOQ) int8pack-mm fusion may
+# fire. Third-party backends that implement aten._weight_int8pack_mm can opt
+# in via the register/unregister functions below.
+_woq_int8pack_fusion_devices: OrderedSet[str] = OrderedSet(["cpu", "cuda", "xpu"])
+
+# NB: the concat-linear int8 fusion deliberately has no registration hook:
+# the ``cat([w1, w2, w3])`` subgraph it matches is only produced by the
+# freezing pass's int8_woq_fusion_replacement
+# (torch/_inductor/fx_passes/freezing_patterns.py), whose
+# check_int8_woq_concat_linear_weights extra_check rejects non-CPU inputs and
+# additionally requires config.cpp.enable_concat_linear, so a registered
+# third-party device type could never reach the check below.
+
+
+def _validate_woq_device_type(device_type: str) -> None:
+    """Reject ``device_type`` values that can never match the fusion check."""
+    if not isinstance(device_type, str):
+        raise TypeError(f"device_type must be a str, got {type(device_type).__name__}")
+    try:
+        parsed = torch.device(device_type).type
+    except RuntimeError as e:
+        raise ValueError(
+            f"expected a bare device type such as 'cuda', got {device_type!r} "
+            "which torch.device cannot parse (for a PrivateUse1 backend, "
+            "register after torch.utils.rename_privateuse1_backend)"
+        ) from e
+    if parsed != device_type:
+        raise ValueError(
+            f"expected a bare device type such as 'cuda', got {device_type!r}: "
+            "a device index (e.g. 'cuda:0') or the pre-rename 'privateuseone' "
+            "would never match (for a PrivateUse1 backend, register after "
+            "torch.utils.rename_privateuse1_backend)"
+        )
+
+
+def register_woq_int8pack_fusion_device(device_type: str) -> None:
+    """Enable the WOQ int8pack-mm fusion on ``device_type``.
+
+    For third-party backends that implement ``aten._weight_int8pack_mm``;
+    the default allowlist (cpu/cuda/xpu) is unchanged. The allowlist is
+    part of the FX-graph cache key, so changing it produces new cache
+    entries instead of reusing stale ones, with the unlocked-path
+    exceptions below.
+
+    The allowlist is only mutated while holding
+    ``torch._dynamo.convert_frame.compile_lock``, so a registration
+    racing an in-flight compile waits for the compile to finish instead
+    of changing the allowlist between the cache key and the matcher.
+    The lock is held across that interval by the standard torch.compile
+    path (dynamo acquires it around backend invocation) and, explicitly,
+    by ``compile_fx_backward``. Two kinds of path hash and match without
+    it, so a registration can still land between a key and the compile
+    filed under it: direct ``compile_fx`` entry points
+    (``torch._inductor.compile``, ``standalone_compile``,
+    ``compile_to_python``) take no lock at all, and with the
+    AOTAutograd cache a lazily-lowered backward is saved under the
+    forward-time key after ``compile_fx_backward`` releases the lock, so
+    a registration landing between the forward compile and the first
+    ``.backward()`` is captured in that entry; that window is shared by
+    every process-global compile input (``config`` included).
+    NB: calling this from a package's ``__init__`` while another thread
+    compiles can deadlock if that compile's backend initialization
+    imports the same package; register from a post-import initialization
+    step instead.
+    """
+    from torch._dynamo.convert_frame import compile_lock
+
+    _validate_woq_device_type(device_type)
+    with compile_lock:
+        _woq_int8pack_fusion_devices.add(device_type)
+
+
+def unregister_woq_int8pack_fusion_device(device_type: str) -> None:
+    """Disable the WOQ int8pack-mm fusion on ``device_type`` (e.g. teardown).
+
+    Serialized against in-flight compilations like the register function,
+    and subject to the same unlocked-path exceptions documented there.
+    """
+    from torch._dynamo.convert_frame import compile_lock
+
+    _validate_woq_device_type(device_type)
+    with compile_lock:
+        _woq_int8pack_fusion_devices.discard(device_type)
+
+
+def _get_woq_int8pack_fusion_devices() -> tuple[str, ...]:
+    """Snapshot the allowlist for the FX-graph cache key and compile workers.
+
+    The two consumers must stay identical.
+    """
+    return tuple(sorted(_woq_int8pack_fusion_devices))
+
+
+@contextlib.contextmanager
+def _patch_woq_int8pack_fusion_devices(devices):
+    """Apply an allowlist snapshot captured in the parent process.
+
+    Used by ``_run_in_child`` so the worker's pattern matching follows the
+    parent's allowlist. Mutated in place so ``from ... import`` references
+    observe the change. The swap and restore assume ``compile_lock`` is
+    held (true on the torch.compile path, which wraps the serialized
+    compile); on the unlocked direct ``compile_fx`` paths a concurrent
+    registration could interleave with them.
+    """
+    saved = OrderedSet(_woq_int8pack_fusion_devices)
+    _woq_int8pack_fusion_devices.clear()
+    _woq_int8pack_fusion_devices.update(devices)
+    try:
+        yield
+    finally:
+        _woq_int8pack_fusion_devices.clear()
+        _woq_int8pack_fusion_devices.update(saved)
+
+
 def _is_valid_concat_linear_int8_woq_optimization_pattern():
     def fn(match):
         if not config.cpp.enable_concat_linear:
@@ -1189,7 +1305,7 @@ def _is_valid_woq_optimization_pattern():
             x.dtype == torch.bfloat16
             and weight.dtype == torch.int8
             and scales.dtype == torch.bfloat16
-            and x.device.type in ("cpu", "cuda", "xpu")
+            and x.device.type in _woq_int8pack_fusion_devices
             and x.device == weight.device
             and x.device == scales.device
         )
@@ -1498,6 +1614,8 @@ def concat_linear_woq_int4(gm: torch.fx.GraphModule):
         if (
             not node._erased
             and isinstance(node.meta.get("val"), torch.Tensor)
+            # Intentionally CPU-only: the fused op
+            # aten._weight_int4pack_mm_for_cpu is a CPU-specific ATen op.
             and node.meta["val"].device.type == "cpu"
         ):
             act = node.args[0]
