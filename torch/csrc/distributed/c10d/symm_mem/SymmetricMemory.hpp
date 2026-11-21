@@ -41,6 +41,36 @@ inline void check_rank(int rank, int world_size) {
 // provided that the signal pads remain zero-filled following successful
 // synchronization.
 //
+// On the CUDA backend, PyTorch's own operations do not use this pad; see
+// NOTE [symmetric memory group signal pad].
+//
+// NOTE [symmetric memory group signal pad]
+// On the CUDA backend, barrier(), put_signal(), wait_signal() and the
+// collectives synchronize through an internal pad per (process group, device),
+// shared by every allocation rendezvoused on the group, so groups that share an
+// allocation cannot take each other's signals. As for other collectives:
+//  (1) Every rank issues the group's operations in the same order, whichever
+//      allocation each one runs on. They share the pad's slots: put_signal()
+//      on one allocation can satisfy wait_signal() on another, and a barrier
+//      on channel c, or a collective (which synchronizes block b on channel b),
+//      can take a signal pending on that channel.
+//  (2) Two of the group's operations do not run concurrently unless something
+//      orders them. GroupStreamGuard orders them across streams in eager mode
+//      and within one graph capture, one capture at a time; nothing orders a
+//      graph replay against another replay or eager work.
+// Breaking either can pair signals wrongly without an error, or make an
+// operation time out or hang. The group's first rendezvous on a device creates
+// the pad and fixes its rank-to-device mapping (a later rendezvous with another
+// mapping raises), its size (the handle's group_signal_pad_size) and whether it
+// has a multicast mapping. If creating the pad fails on some ranks but not
+// others, or a signal is left set, the group stays that way on the device. In
+// each case a new group starts clean. A pad costs at least one allocation
+// granule, its peer mappings and, with multicast, a multicast object. It is
+// freed once the group is destroyed and every allocation and handle
+// rendezvoused on it is gone; the group's reference is dropped the next time
+// state is created for another group or device. The NCCL and NVSHMEM backends
+// use the allocation's pad, so the rules hold per allocation there.
+//
 // NOTE [symmetric memory synchronization channel]
 // Synchronization channels allow users to use a single SymmetricMemory object
 // to perform isolated synchronizations on different streams. For example,
@@ -116,6 +146,16 @@ class TORCH_API SymmetricMemory : public torch::CustomClassHolder {
   // memory load and store.
   virtual bool world_within_direct_access() {
     TORCH_CHECK(false, "NYI");
+  }
+
+  // The peer pad pointers PyTorch's own operations synchronize through, and
+  // that pad's size: on the CUDA backend, the group's internal pad; otherwise
+  // the allocation's pad, reported with the current get_signal_pad_size().
+  virtual void** get_group_signal_pad_ptrs_dev() {
+    return get_signal_pad_ptrs_dev();
+  }
+  virtual size_t get_group_signal_pad_size() {
+    return get_signal_pad_size();
   }
 };
 
@@ -231,10 +271,12 @@ TORCH_API std::optional<std::string> get_backend(c10::Device device);
 // Returns the user-configured size if set, otherwise returns the default size.
 TORCH_API size_t get_signal_pad_size();
 
-// Set the signal pad size for future symmetric memory allocations.
-// This must be called before any symmetric memory allocations are made.
-// The size should be proportional to the number of blocks the user launches
-// and the world size.
+// Set the signal pad size for future symmetric memory allocations, and on the
+// CUDA backend for process groups' internal pads created from now on; existing
+// allocations and pads keep their size. The NCCL and NVSHMEM channel checks
+// read the current size, so on those backends set it before allocating. The
+// size should be proportional to the number of blocks the user launches and
+// the world size.
 TORCH_API void set_signal_pad_size(size_t size);
 
 C10_EXPORT void register_mempool_allocator(

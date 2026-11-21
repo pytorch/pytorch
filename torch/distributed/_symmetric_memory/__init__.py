@@ -1964,13 +1964,15 @@ def _check_lc_ag_out(
 
 
 def _check_lc_signal_pad_capacity(symm_mem: _SymmetricMemory) -> None:
-    required_bytes = (_CE_MULTICAST_BARRIER_CHANNEL + 1) * symm_mem.world_size * 4
-    actual_bytes = _SymmetricMemory.signal_pad_size
-    if actual_bytes < required_bytes:
+    channels = symm_mem.group_signal_pad_channels
+    if channels <= _CE_MULTICAST_BARRIER_CHANNEL:
+        required_bytes = (_CE_MULTICAST_BARRIER_CHANNEL + 1) * symm_mem.world_size * 4
         raise RuntimeError(
-            f"low_contention all-gather requires signal_pad_size >= "
+            f"low_contention all-gather requires a signal pad of at least "
             f"{required_bytes} bytes for world_size={symm_mem.world_size}, but "
-            f"the current size is {actual_bytes} bytes."
+            f"the pad its barriers use has {symm_mem.group_signal_pad_size} bytes. "
+            "Call set_signal_pad_size() with a larger size before the group's "
+            "first rendezvous on this device, or before rendezvousing a new group."
         )
 
 
@@ -2361,6 +2363,16 @@ def rendezvous(
         captured graph the same number of times, because each replay performs
         the peer synchronization for that rank.
 
+    .. note::
+        On the CUDA backend, the handle's ``barrier()``, ``put_signal()``,
+        ``wait_signal()`` and the symmetric memory collectives synchronize
+        through one signal pad per process group and device, shared by all of
+        the group's allocations. Every rank must issue them in the same order,
+        whichever allocation they use, and graphs that use the group must not
+        replay concurrently with each other or with the group's eager
+        operations. ``get_signal_pad()`` returns the allocation's own pad,
+        which these operations do not use.
+
     Args:
         tensor (:class:`torch.Tensor`): the local tensor used to establish the symmetric memory tensor.
             It must be allocated via :func:`torch._distributed._symmetric_memory.empty()`. The shape,
@@ -2435,8 +2447,12 @@ def set_signal_pad_size(size: int) -> None:
     the signal pad size to be proportional to their workload requirements.
 
     .. warning::
-        This must be called before any symmetric memory allocations are made.
-        The size cannot be changed after allocations have been performed.
+        The size applies to allocations made after the call and, on the CUDA
+        backend, to the internal signal pad a process group creates on its
+        first rendezvous on a device; existing allocations and pads keep their
+        size. On the NCCL and NVSHMEM backends the channel checks read the
+        current size, so set it there before allocating. Every rank must use
+        the same size.
 
     Args:
         size (int): the signal pad size in bytes. The size should be

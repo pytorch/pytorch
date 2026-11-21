@@ -127,7 +127,7 @@ inline void check_channel(int channel, int world_size, size_t signal_pad_size) {
       num_channels - 1,
       " (got ",
       channel,
-      ")");
+      "); the handle's group_signal_pad_channels reports the bound");
 }
 
 // All-to-all signal barrier over the symmetric-memory signal pads, shared by
@@ -228,10 +228,10 @@ __device__ __forceinline__ bool wait_wrap_ge_u32(
   return true;
 }
 
-// The arrival counters live in the barrier state, one per channel, separate
-// from the signal pad so a pending signal is never counted as an arrival.
-// `local_barrier_state` and `mc_barrier_state` are its base through this
-// rank's mapping and the multicast one.
+// The arrival counters live in the barrier state of the group's signal pad,
+// one word per channel, separate from the slots, so a pending signal is never
+// counted as an arrival. `local_barrier_state` and `mc_barrier_state` are its
+// base through this rank's mapping and the multicast one.
 [[maybe_unused]] static __global__ void multimem_barrier_kernel(
     uint32_t* local_barrier_state,
     uint32_t* mc_barrier_state,
