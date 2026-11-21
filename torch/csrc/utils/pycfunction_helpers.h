@@ -16,8 +16,20 @@ inline PyCFunction castPyCFunctionWithKeywords(PyCFunctionWithKeywords func) {
 #if !IS_PYTHON_3_13_PLUS
 using PyCFunctionFast = _PyCFunctionFast;
 #endif
+#if !IS_PYTHON_3_14_PLUS
+using PyCFunctionFastWithKeywords = _PyCFunctionFastWithKeywords;
+#endif
 
 inline PyCFunction castPyCFunctionFast(PyCFunctionFast func) {
+  C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wcast-function-type")
+  C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wcast-function-type-strict")
+  return reinterpret_cast<PyCFunction>(func);
+  C10_DIAGNOSTIC_POP()
+  C10_DIAGNOSTIC_POP()
+}
+
+inline PyCFunction castPyCFunctionFastWithKeywords(
+    PyCFunctionFastWithKeywords func) {
   C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wcast-function-type")
   C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wcast-function-type-strict")
   return reinterpret_cast<PyCFunction>(func);
