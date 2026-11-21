@@ -37,7 +37,7 @@ class BlockAnalysisTest(TestCase):
         [
             (5, x, Identity(5 * x)),
             (4, y, 4 * Identity(y)),
-            (3, x, Identity(3) * x),
+            (3, x, Identity(3, evaluate=False) * x),
         ],
     )
     def test_affine_identity(self, stride: int, symbol: sympy.Symbol, expr: sympy.Expr):

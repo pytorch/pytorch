@@ -1441,10 +1441,19 @@ class ToFloat(sympy.Function):
 
 class Identity(sympy.Function):
     """
-    Prevents expansion and other optimizations
+    Prevents expansion and other optimizations.
+
+    Identity(number) simplifies to just the number, e.g. Identity(0) -> 0.
+    Use evaluate=False if you need to keep the Identity.
     """
 
     precedence = 10
+
+    @classmethod
+    def eval(cls, arg: sympy.Expr) -> sympy.Expr | None:
+        if arg.is_Number and arg.is_comparable:
+            return arg
+        return None
 
     def __repr__(self) -> str:  # type: ignore[override]
         return f"Identity({self.args[0]})"
