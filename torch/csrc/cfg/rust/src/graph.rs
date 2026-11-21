@@ -23,7 +23,7 @@ use crate::capi::{self, TcfgApi, TcfgSite, TcfgTensorInfo, SITE_RANDOM, SITE_SCA
 use crate::ir::*;
 use crate::pyffi::{self, new_ref, xdecref, Obj, PyObj, Shared};
 use crate::shapes::{key_of, ShapeGuard, KIND_BYTES};
-use crate::spec::{CalleeFact, CfgPass, InstFacts, Kernels, PassCx, UInst, Unit};
+use crate::spec::{CalleeFact, CfgPass, InstFacts, Kernels, PassCx, UInst, Unit, ValueObs};
 use pyo3::ffi;
 use pyo3::prelude::*;
 use std::collections::HashMap;
@@ -37,7 +37,10 @@ pub type PathValue = V;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
-    /// A kernel call site: an operation of the graph.
+    /// An operation of the graph: a kernel call site, or a call of a C
+    /// function, a method of a tensor or a subscript of one that runs
+    /// kernels and nothing else and is no call site (a list of tensors
+    /// among its arguments, an index).
     Node,
     /// Makes a value from its operands alone: a constant, a size, arithmetic
     /// on numbers, a check.
@@ -74,9 +77,44 @@ pub struct PathInst {
     pub in_graph: bool,
 }
 
+/// What a check looks at and a callable is handed: a value, or one of the
+/// items of a list or tuple that a value is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Place {
+    pub value: PathValue,
+    /// Which item, or NONE for the value itself.
+    pub item: u32,
+}
+
+impl Place {
+    pub fn of(value: PathValue) -> Place {
+        Place { value, item: NONE }
+    }
+
+    /// What is there: borrowed, and possibly an unboxed tensor; null if
+    /// nothing is.
+    pub unsafe fn at(&self, regs: &[Obj]) -> Obj {
+        let held = regs[self.value as usize];
+        if self.item == NONE || held.is_null() {
+            return held;
+        }
+        let sequence = !capi::is_unboxed(held)
+            && (ffi::PyList_CheckExact(held) != 0 || ffi::PyTuple_CheckExact(held) != 0)
+            && (self.item as isize) < ffi::PyObject_Size(held);
+        if sequence { sequence_item(held, self.item as isize) } else { null_mut() }
+    }
+
+    pub fn text(&self, func: &Function) -> String {
+        match self.item {
+            NONE => func.value_name(self.value),
+            item => format!("{}[{}]", func.value_name(self.value), item),
+        }
+    }
+}
+
 /// What a call has to find for an exported form to be run for it.
 pub struct Check {
-    pub target: PathValue,
+    pub target: Place,
     pub cond: Cond,
 }
 
@@ -92,6 +130,13 @@ pub enum Cond {
     /// one that is made per call would otherwise be gone, and its address
     /// that of another.
     Type(PyObj),
+    /// An object that has this very value under a name, and gives it out
+    /// without running Python code: the module a function is called
+    /// through.
+    Has(PyObj, PyObj),
+    /// A list or a tuple, by its exact type, of this many items: one whose
+    /// items the graph takes.
+    Sequence(usize, usize),
 }
 
 /// What a callable made for a tensor depends on, but for its sizes and
@@ -126,7 +171,7 @@ pub struct Exported {
     /// other, as the form was made on them: it leaves none of them open.
     pub sizes: ShapeGuard,
     /// The tensors the callable is called with.
-    pub args: Vec<PathValue>,
+    pub args: Vec<Place>,
     /// What the passes asked of an argument (`torch.vm.guard`): its position
     /// and an object with `holds(tensor)`.
     pub guards: Vec<(usize, PyObj)>,
@@ -137,7 +182,7 @@ pub struct Exported {
     /// For a form that was closed because numbers were new at every call
     /// (`GraphSite::ever_new`): where those numbers are, what they were at
     /// the last call of the kind, and how many calls in a row had them.
-    pub varying: Vec<PathValue>,
+    pub varying: Vec<Place>,
     pub last: Shared<Vec<PyObj>>,
     pub repeats: AtomicU32,
     pub closed: Option<String>,
@@ -1143,12 +1188,49 @@ pub unsafe fn interposed() -> Option<&'static str> {
     }
 }
 
+/// Whether an operator, as the dispatcher names it (`aten::cat`,
+/// `aten::add_.Tensor`), neither writes to an argument nor draws random
+/// numbers: its schema and its tags are asked once.
+pub fn pure_operator(name: &str) -> bool {
+    static KNOWN: std::sync::OnceLock<Shared<HashMap<String, bool>>> = std::sync::OnceLock::new();
+    let known = KNOWN.get_or_init(|| Shared::new(HashMap::new()));
+    if let Some(pure) = known.borrow().get(name) {
+        return *pure;
+    }
+    let (qualified, overload) = match name.split_once("::").and_then(|(_, rest)| rest.find('.')) {
+        Some(dot) => {
+            let at = name.len() - (name.split_once("::").unwrap().1.len() - dot);
+            (&name[..at], &name[at + 1..])
+        }
+        None => (name, ""),
+    };
+    let asked = |py: Python<'_>| -> PyResult<bool> {
+        let binding = py.import("torch._C")?;
+        let schema = binding.call_method1("_get_schema", (qualified, overload))?;
+        if schema.getattr("is_mutable")?.is_truthy()? {
+            return Ok(false);
+        }
+        let found = binding.call_method1("_get_operation_overload", (qualified, overload))?;
+        if found.is_none() {
+            return Ok(false);
+        }
+        let seeded = py.import("torch")?.getattr("Tag")?.getattr("nondeterministic_seeded")?;
+        Ok(!found.get_item(2)?.contains(seeded)?)
+    };
+    let quiet = !UPDATES_STATISTICS.iter().any(|(op, _)| *op == qualified);
+    let pure = quiet && unsafe { asked(Python::assume_attached()).unwrap_or(false) };
+    unsafe { ffi::PyErr_Clear() };
+    known.borrow_mut().insert(name.to_string(), pure);
+    pure
+}
+
 /// What a run of a path on the values of a call found, for an exported form
 /// to be made from: the values its nodes took from outside the graph (owned,
 /// null until one is taken), and per node the site that ran and what it
 /// returned (dtype, device, requires_grad, sizes: an owned tuple).
 pub struct Recording {
     pub feeds: Vec<Obj>,
+    /// The site is null for an operation that is no call site.
     pub nodes: Vec<(*mut TcfgSite, Obj)>,
     /// Why the run cannot be described, once something says so.
     pub failed: Option<String>,
@@ -1160,6 +1242,17 @@ impl Recording {
     pub fn new(path: &Path) -> Recording {
         let feeds = vec![null_mut(); path.feeds.len()];
         Recording { feeds, nodes: Vec::new(), failed: None, wrote: false }
+    }
+
+    /// The values the nodes took, where registers would have them: for
+    /// `Place::at`.
+    fn feeds_by_value(&self, path: &Path) -> Vec<Obj> {
+        let most = path.feeds.iter().copied().max().map_or(0, |v| v as usize + 1);
+        let mut values = vec![null_mut(); most];
+        for (k, v) in path.feeds.iter().enumerate() {
+            values[*v as usize] = self.feeds[k];
+        }
+        values
     }
 }
 
@@ -1214,6 +1307,12 @@ unsafe fn value_ref(v: PathValue) -> Obj {
     tuple_of(&[text("v"), ffi::PyLong_FromLong(v as _)])
 }
 
+/// The value that the k-th tensor a graph takes out of a list or tuple is
+/// in its description: a number no value of a function has.
+fn item_id(k: usize) -> i64 {
+    (1i64 << 32) + k as i64
+}
+
 /// ("c", object): a constant of the graph.
 unsafe fn const_ref(o: Obj) -> Obj {
     tuple_of(&[text("c"), new_ref(o)])
@@ -1240,7 +1339,7 @@ pub struct Described {
     pub checks: Vec<Check>,
     pub numbers: Vec<i64>,
     /// The tensors the callable is called with.
-    pub args: Vec<PathValue>,
+    pub args: Vec<Place>,
 }
 
 impl Path {
@@ -1250,11 +1349,16 @@ impl Path {
     ///   where: the name of the graph;
     ///   inputs, input_ids, input_names: the tensors the graph takes, as
     ///     they are in this call, with the value each is and a name for it;
-    ///   nodes: in order, ("aten", what `site_export` gives, operands, value,
-    ///     meta) per kernel call, and ("size", tensor, dim, value), ("dim",
-    ///     tensor, value), ("binary", symbol, a, b, value), ("neg", a, value)
-    ///     or ("tuple", items, value) per integer the graph computes; an
-    ///     operand is ("v", value) or ("c", object), a constant;
+    ///   nodes: in order, per operation ("aten", what `site_export` gives,
+    ///     operands, value, meta) for a call site, and for what is none
+    ///     ("call", callee, operands, kwnames, value, meta), ("method",
+    ///     name, operands, kwnames, value, meta) or ("getitem", None,
+    ///     [tensor, index], None, value, meta); and ("size", tensor, dim,
+    ///     value), ("dim", tensor, value), ("binary", symbol, a, b, value),
+    ///     ("neg", a, value), ("tuple", items, value), ("list", items,
+    ///     value) or ("slice", [start, stop, step], value) per integer and
+    ///     container the graph makes; an operand is ("v", value) or ("c",
+    ///     object), a constant;
     ///   outputs: the values the callable returns, as a tuple in this order;
     ///   exits: integers it returns behind them, ("dim", tensor) or ("size",
     ///     tensor, dim) each.
@@ -1263,10 +1367,11 @@ impl Path {
     pub unsafe fn describe(&self, name: &str, func: &Function, rec: &Recording, api: &TcfgApi) -> Described {
         let mut checks: Vec<Check> = Vec::new();
         let mut tensors = vec![false; self.feeds.len()];
+        let mut items: Vec<Place> = Vec::new();
         let mut closed = rec.failed.clone();
         let mut wrote = rec.wrote;
         let nodes = match &closed {
-            None => self.nodes(rec, api, &mut checks, &mut tensors, &mut wrote),
+            None => self.nodes(func, rec, api, &mut checks, &mut tensors, &mut items, &mut wrote),
             Some(_) => Ok(PyObj::from_owned(ffi::PyList_New(0))),
         };
         let nodes = nodes.unwrap_or_else(|why| {
@@ -1277,47 +1382,54 @@ impl Path {
         // this call; those the graph takes are its arguments.
         let list = || PyObj::from_owned(ffi::PyList_New(0));
         let (inputs, ids, names) = (list(), list(), list());
-        let mut args: Vec<PathValue> = Vec::new();
+        let mut args: Vec<Place> = Vec::new();
         let mut given: Vec<Obj> = Vec::new();
         let mut numbers: Vec<i64> = Vec::new();
+        // The tensors among the values the nodes take, and then those the
+        // graph takes out of lists and tuples.
+        let feeds = self.feeds.iter().enumerate().map(|(k, v)| (Place::of(*v), rec.feeds[k], tensors[k]));
+        let held = items.iter().map(|place| (*place, place.at(&rec.feeds_by_value(self)), true));
+        let places: Vec<(Place, Obj, bool)> = feeds.chain(held).collect();
         // A run whose operations could not be followed says nothing of the
         // values they took: the form is then for calls that have a value of
         // the same class wherever this one has something that is no plain
         // tensor, and for no other.
         let constants: Vec<PathValue> =
             self.body.iter().filter(|inst| matches!(inst.op, Op::Const(_))).map(|inst| inst.dst).collect();
-        for (k, v) in self.feeds.iter().enumerate() {
-            let (tensor, taken) = (rec.feeds[k], tensors[k]);
+        for (k, (place, tensor, taken)) in places.into_iter().enumerate() {
             let same = given.iter().position(|o| *o == tensor).unwrap_or(given.len());
             let Some(row) = (if tensor.is_null() { None } else { Row::of(tensor, same, &mut numbers, api) }) else {
                 let unsaid = rec.failed.is_some()
                     && !tensor.is_null()
                     && !capi::is_unboxed(tensor)
-                    && !constants.contains(v)
-                    && !checks.iter().any(|check| check.target == *v);
+                    && !constants.contains(&place.value)
+                    && !checks.iter().any(|check| check.target == place);
                 if unsaid {
-                    checks.push(Check { target: *v, cond: Cond::Type(PyObj::from_borrowed(ffi::Py_TYPE(tensor) as Obj)) });
+                    checks.push(Check { target: place, cond: Cond::Type(PyObj::from_borrowed(ffi::Py_TYPE(tensor) as Obj)) });
                 }
                 continue;
             };
             if row.forward && taken && closed.is_none() {
                 closed = Some("a tensor of the call carries a forward-mode gradient".to_string());
             }
-            checks.push(Check { target: *v, cond: Cond::Tensor(row) });
+            checks.push(Check { target: place, cond: Cond::Tensor(row) });
             given.push(tensor);
             if !taken {
                 continue;
             }
-            args.push(*v);
+            args.push(place);
             ffi::PyList_Append(inputs.as_ptr(), tensor);
-            let id = ffi::PyLong_FromLong(*v as _);
+            let id = match place.item {
+                NONE => ffi::PyLong_FromLong(place.value as _),
+                _ => ffi::PyLong_FromLongLong(item_id(k - self.feeds.len())),
+            };
             ffi::PyList_Append(ids.as_ptr(), id);
             ffi::Py_DECREF(id);
-            let label = match func.value_names.get(*v as usize).and_then(|n| n.as_ref()) {
+            let label = match func.value_names.get(place.value as usize).and_then(|n| n.as_ref()) {
                 Some(label) => label.clone(),
-                None => format!("v{}", v),
+                None => format!("v{}", place.value),
             };
-            let label = text(&label);
+            let label = if place.item == NONE { text(&label) } else { text(&format!("{}_{}", label, place.item)) };
             ffi::PyList_Append(names.as_ptr(), label);
             ffi::Py_DECREF(label);
         }
@@ -1364,16 +1476,54 @@ impl Path {
         Described { description, closed, checks, numbers, args }
     }
 
+    /// For a method call whose receiver the graph is given and that is no
+    /// tensor: the function the receiver has under the name, as a constant
+    /// of the graph, which the form is then checked for. None for a
+    /// receiver that is a tensor or a value of the graph.
+    unsafe fn function_of(
+        &self,
+        recv: PathValue,
+        name: Obj,
+        rec: &Recording,
+        api: &TcfgApi,
+        checks: &mut Vec<Check>,
+    ) -> Option<Result<Obj, String>> {
+        let feed = self.feeds.iter().position(|f| *f == recv)?;
+        let value = rec.feeds[feed];
+        let mut info = TcfgTensorInfo::empty();
+        if value.is_null() || (api.tensor_info)(value, &mut info) != 0 {
+            return None;
+        }
+        let function = if quiet_attr(value, name, api) { ffi::PyObject_GetAttr(value, name) } else { null_mut() };
+        ffi::PyErr_Clear();
+        let bound = !function.is_null()
+            && ffi::PyCFunction_Check(function) != 0
+            && !ffi::PyCFunction_GetSelf(function).is_null()
+            && (api.tensor_info)(ffi::PyCFunction_GetSelf(function), &mut info) != 0;
+        if function.is_null() || ffi::PyCFunction_Check(function) == 0 || bound {
+            xdecref(function);
+            checks.push(Check { target: Place::of(recv), cond: Cond::Type(PyObj::from_borrowed(ffi::Py_TYPE(value) as Obj)) });
+            return Some(Err(format!("an operation of the graph is a method of a {}", pyffi::type_name(value))));
+        }
+        let function = PyObj::from_owned(function);
+        let found = const_ref(function.as_ptr());
+        checks.push(Check { target: Place::of(recv), cond: Cond::Has(PyObj::from_borrowed(name), function) });
+        Some(Ok(found))
+    }
+
     /// The nodes of the description of a recorded run, as a list. Adds the
     /// checks on the values the graph has as constants, marks the feeds it
-    /// takes as tensors, and finds whether a normalization updated its
-    /// statistics. The reason, if the run cannot be exported.
+    /// takes as tensors, lists the tensors it takes out of lists and tuples
+    /// (`items`: the k-th is the value `item_id(k)` of the graph), and finds
+    /// whether a normalization updated its statistics. The reason, if the run cannot be exported.
     unsafe fn nodes(
         &self,
+        func: &Function,
         rec: &Recording,
         api: &TcfgApi,
         checks: &mut Vec<Check>,
         tensors: &mut [bool],
+        items: &mut Vec<Place>,
         wrote: &mut bool,
     ) -> Result<PyObj, String> {
         let inside: Vec<PathValue> = self
@@ -1382,10 +1532,15 @@ impl Path {
             .filter(|inst| inst.kind == Kind::Node || inst.in_graph)
             .map(|inst| inst.dst)
             .collect();
+        // The closure below and what is said of a receiver both add checks.
+        let checks = std::cell::RefCell::new(checks);
+        let constants: Vec<PathValue> =
+            self.body.iter().filter(|inst| matches!(inst.op, Op::Const(_))).map(|inst| inst.dst).collect();
         // An operand as the graph has it: a value of its own, a tensor it is
         // given, or a constant, which the exported form is then checked for.
-        // How it is taken is what its call site says.
-        let mut operand = |v: PathValue, how: &str| -> Result<Obj, String> {
+        // How it is taken is what its call site says, or, without one, what
+        // the value is.
+        let mut operand = |v: PathValue, how: Option<&str>| -> Result<Obj, String> {
             if inside.contains(&v) {
                 return Ok(value_ref(v));
             }
@@ -1396,20 +1551,63 @@ impl Path {
             }
             let mut info = TcfgTensorInfo::empty();
             let tensor = (api.tensor_info)(value, &mut info) != 0;
+            let function = !tensor && ffi::PyCFunction_Check(value) != 0;
+            let how = match how {
+                Some(how) => how,
+                // A constant of the function is what it is.
+                None if constants.contains(&v) => "none",
+                None if tensor => "tensor",
+                // A method bound to a tensor is another object at every call.
+                None if function => {
+                    let bound = ffi::PyCFunction_GetSelf(value);
+                    let free = bound.is_null() || (api.tensor_info)(bound, &mut info) == 0;
+                    if free { "identity" } else { "bound" }
+                }
+                None => "exact",
+            };
             let fits = match how {
                 "tensor" => tensor,
                 "int" => ffi::PyLong_CheckExact(value) != 0,
                 "exact" => checkable(value),
+                "bound" => false,
                 _ => true,
             };
+            let sequence = ffi::PyList_CheckExact(value) != 0 || ffi::PyTuple_CheckExact(value) != 0;
+            if how == "exact" && !fits && sequence {
+                // A list or tuple with tensors in it: the graph takes its
+                // items, and is for one of this length.
+                let count = ffi::PyObject_Size(value);
+                let mut parts: Vec<Obj> = Vec::new();
+                let mut held = checks.borrow_mut();
+                held.push(Check { target: Place::of(v), cond: Cond::Sequence(ffi::Py_TYPE(value) as usize, count as usize) });
+                for i in 0..count {
+                    let item = sequence_item(value, i);
+                    let place = Place { value: v, item: i as u32 };
+                    if (api.tensor_info)(item, &mut info) != 0 {
+                        parts.push(tuple_of(&[text("v"), ffi::PyLong_FromLongLong(item_id(items.len()))]));
+                        items.push(place);
+                    } else if checkable(item) {
+                        let kept = frozen(item);
+                        parts.push(const_ref(kept.as_ptr()));
+                        held.push(Check { target: place, cond: Cond::ValueEq(kept) });
+                    } else {
+                        parts.into_iter().for_each(|o| ffi::Py_DECREF(o));
+                        held.push(Check { target: place, cond: Cond::Type(PyObj::from_borrowed(ffi::Py_TYPE(item) as Obj)) });
+                        return Err(format!("an operand of the graph holds a {}", pyffi::type_name(item)));
+                    }
+                }
+                let kind = if ffi::PyList_CheckExact(value) != 0 { "l" } else { "t" };
+                return Ok(tuple_of(&[text(kind), list_of(parts)]));
+            }
+            let v = Place::of(v);
             if !fits {
-                checks.push(Check { target: v, cond: Cond::Type(PyObj::from_borrowed(ffi::Py_TYPE(value) as Obj)) });
+                checks.borrow_mut().push(Check { target: v, cond: Cond::Type(PyObj::from_borrowed(ffi::Py_TYPE(value) as Obj)) });
                 return Err(format!("an operand of the graph is a {}", pyffi::type_name(value)));
             }
             let cond = match how {
                 "tensor" => {
                     tensors[feed.unwrap()] = true;
-                    return Ok(value_ref(v));
+                    return Ok(value_ref(v.value));
                 }
                 "none" => return Ok(const_ref(value)),
                 "int" | "exact" => Cond::ValueEq(frozen(value)),
@@ -1421,18 +1619,18 @@ impl Path {
                 Cond::ValueEq(kept) => const_ref(kept.as_ptr()),
                 _ => const_ref(value),
             };
-            let known = checks.iter().any(|c| {
+            let known = checks.borrow().iter().any(|c| {
                 c.target == v && std::mem::discriminant(&c.cond) == std::mem::discriminant(&cond)
             });
             if !known {
-                checks.push(Check { target: v, cond });
+                checks.borrow_mut().push(Check { target: v, cond });
             }
             Ok(constant)
         };
         // Some operands, as a list.
-        type Taken<'a> = [(PathValue, &'a str)];
+        type Taken<'a> = [(PathValue, Option<&'a str>)];
         fn gather(
-            operand: &mut impl FnMut(PathValue, &str) -> Result<Obj, String>,
+            operand: &mut impl FnMut(PathValue, Option<&str>) -> Result<Obj, String>,
             vs: &Taken,
         ) -> Result<Obj, String> {
             let mut items: Vec<Obj> = Vec::new();
@@ -1447,12 +1645,14 @@ impl Path {
             }
             Ok(unsafe { list_of(items) })
         }
+        let free = |vs: &[V]| -> Vec<(PathValue, Option<&str>)> { vs.iter().map(|v| (*v, None)).collect() };
         let nodes = PyObj::from_owned(ffi::PyList_New(0));
         let add = |node: Obj| {
             ffi::PyList_Append(nodes.as_ptr(), node);
             ffi::Py_DECREF(node);
         };
         let number = |n: i64| ffi::PyLong_FromLongLong(n);
+        let none = || new_ref(ffi::Py_None());
         let mut recorded = rec.nodes.iter();
         let did_not_run = || "an operation of the graph did not run".to_string();
         for inst in &self.body {
@@ -1481,37 +1681,86 @@ impl Path {
                             }
                         })
                         .collect();
-                    let taken: Vec<(PathValue, &str)> =
-                        d.operands.iter().zip(&hows).map(|(v, how)| (*v, how.as_str())).collect();
+                    let taken: Vec<(PathValue, Option<&str>)> =
+                        d.operands.iter().zip(&hows).map(|(v, how)| (*v, Some(how.as_str()))).collect();
                     let taken = gather(&mut operand, &taken)?;
                     let meta = if meta.is_null() { ffi::Py_None() } else { *meta };
                     add(tuple_of(&[text("aten"), new_ref(exported.as_ptr()), taken, number(value), new_ref(meta)]));
                 }
+                op if inst.kind == Kind::Node => {
+                    let (_, meta) = recorded.next().ok_or_else(did_not_run)?;
+                    let names = |kwnames: u32| {
+                        if kwnames == NONE {
+                            none()
+                        } else {
+                            new_ref(func.consts[kwnames as usize].as_ptr())
+                        }
+                    };
+                    let (kind, head, taken, keywords) = match op {
+                        Op::Call { callee, args, kwnames } => {
+                            ("call", operand(*callee, None)?, free(args), names(*kwnames))
+                        }
+                        Op::CallMethod { recv, name, args, kwnames } => {
+                            let name = func.consts[*name as usize].as_ptr();
+                            match self.function_of(*recv, name, rec, api, &mut checks.borrow_mut()) {
+                                // A function of a module: a call of what the
+                                // module has under the name.
+                                Some(function) => ("call", function?, free(args), names(*kwnames)),
+                                None => {
+                                    let mut taken = free(&[*recv]);
+                                    taken.extend(free(args));
+                                    ("method", new_ref(name), taken, names(*kwnames))
+                                }
+                            }
+                        }
+                        Op::GetItem(a, k) => ("getitem", none(), free(&[*a, *k]), none()),
+                        _ => return Err("an operation of the graph has no node".to_string()),
+                    };
+                    let taken = match gather(&mut operand, &taken) {
+                        Ok(taken) => taken,
+                        Err(why) => {
+                            ffi::Py_DECREF(head);
+                            ffi::Py_DECREF(keywords);
+                            return Err(why);
+                        }
+                    };
+                    let meta = if meta.is_null() { ffi::Py_None() } else { *meta };
+                    add(tuple_of(&[text(kind), head, taken, keywords, number(value), new_ref(meta)]));
+                }
                 op if inst.in_graph => {
+                    let tensor: Option<&str> = Some("tensor");
+                    let int: Option<&str> = Some("int");
                     let node = match op {
                         Op::TensorSize { t, dim } => {
-                            let taken = operand(*t, "tensor")?;
+                            let taken = operand(*t, tensor)?;
                             vec![text("size"), taken, number(*dim)]
                         }
                         Op::TensorDim(t) => {
-                            let taken = operand(*t, "tensor")?;
+                            let taken = operand(*t, tensor)?;
                             vec![text("dim"), taken]
                         }
                         Op::Binary(k, a, b) => {
-                            let taken = gather(&mut operand, &[(*a, "int"), (*b, "int")])?;
+                            let taken = gather(&mut operand, &[(*a, int), (*b, int)])?;
                             let (a, b) = (ffi::PyList_GET_ITEM(taken, 0), ffi::PyList_GET_ITEM(taken, 1));
                             let node = vec![text("binary"), text(BINARY_SYMBOLS[*k as usize]), new_ref(a), new_ref(b)];
                             ffi::Py_DECREF(taken);
                             node
                         }
                         Op::Unary(_, a) => {
-                            let taken = operand(*a, "int")?;
+                            let taken = operand(*a, int)?;
                             vec![text("neg"), taken]
                         }
-                        Op::BuildTuple(vs) => {
-                            let items: Vec<(PathValue, &str)> = vs.iter().map(|v| (*v, "int")).collect();
-                            let taken = gather(&mut operand, &items)?;
-                            vec![text("tuple"), taken]
+                        Op::BuildTuple(vs) | Op::BuildList(vs) => {
+                            let taken = gather(&mut operand, &free(vs))?;
+                            vec![text(if matches!(op, Op::BuildTuple(_)) { "tuple" } else { "list" }), taken]
+                        }
+                        Op::BuildSlice(a, b, c) => {
+                            let parts = gather(&mut operand, &free(&[*a, *b]))?;
+                            let step = if *c == NONE { Ok(const_ref(ffi::Py_None())) } else { operand(*c, None) };
+                            let step = step.inspect_err(|_| ffi::Py_DECREF(parts))?;
+                            ffi::PyList_Append(parts, step);
+                            ffi::Py_DECREF(step);
+                            vec![text("slice"), parts]
                         }
                         _ => return Err("a value of the graph has no node".to_string()),
                     };
@@ -1544,6 +1793,9 @@ impl Exported {
             match (&mine.cond, &theirs.cond) {
                 (Cond::Is(a), Cond::Is(b)) if a.as_ptr() == b.as_ptr() => {}
                 (Cond::Type(a), Cond::Type(b)) if a.as_ptr() == b.as_ptr() => {}
+                (Cond::Has(name, a), Cond::Has(other, b))
+                    if name.as_ptr() == other.as_ptr() && a.as_ptr() == b.as_ptr() => {}
+                (Cond::Sequence(a, n), Cond::Sequence(b, m)) if (a, n) == (b, m) => {}
                 (Cond::Tensor(a), Cond::Tensor(b)) if a == b => {}
                 (Cond::ValueEq(a), Cond::ValueEq(b)) if same_value(a.as_ptr(), b.as_ptr()) => {}
                 (Cond::ValueEq(a), Cond::ValueEq(b))
@@ -1569,11 +1821,17 @@ impl Exported {
         self.checks
             .iter()
             .map(|check| {
-                let value = func.value_name(check.target);
+                let value = check.target.text(func);
                 match &check.cond {
                     Cond::Is(expected) => format!("{} is {}", value, short(expected)),
                     Cond::ValueEq(expected) => format!("{} == {}", value, short(expected)),
                     Cond::Type(ty) => format!("type({}) is {}", value, pyffi::class_name(ty.as_ptr())),
+                    Cond::Has(name, expected) => {
+                        format!("{}.{} is {}", value, pyffi::str_to_string(name.as_ptr()), short(expected))
+                    }
+                    Cond::Sequence(ty, count) => {
+                        format!("{} is a {} of {}", value, pyffi::class_name(*ty as Obj), count)
+                    }
                     Cond::Tensor(row) => {
                         let field = |i: usize| i32::from_ne_bytes(row.kind[4 * i..4 * i + 4].try_into().unwrap());
                         let (rank, dtype, flags) = (field(0) as usize, field(1), field(3));
@@ -1846,6 +2104,7 @@ fn role(unit: &Unit, cx: &PassCx, i: usize) -> Role {
     let numbers = |vs: &[V]| vs.iter().all(|v| number(cx, unit, *v));
     let kind = match &unit.insts[i].inst.op {
         Op::Dispatch(d) if d.slot.traits() == 0 && d.slot.len() > 0 && !wrote => Some(Kind::Node),
+        Op::Call { .. } | Op::CallMethod { .. } | Op::GetItem(..) if generic(unit, cx, i) => Some(Kind::Node),
         Op::Const(_)
         | Op::TensorSize { .. }
         | Op::TensorDim(_)
@@ -1854,6 +2113,8 @@ fn role(unit: &Unit, cx: &PassCx, i: usize) -> Role {
         | Op::Is(..)
         | Op::IsFunction { .. }
         | Op::BuildTuple(_)
+        | Op::BuildList(_)
+        | Op::BuildSlice(..)
         | Op::CheckBound(..)
         | Op::Guard(_) => Some(Kind::Pure),
         Op::Binary(_, a, b) | Op::Compare(_, a, b) if numbers(&[*a, *b]) => Some(Kind::Pure),
@@ -1869,6 +2130,39 @@ fn role(unit: &Unit, cx: &PassCx, i: usize) -> Role {
         Some(kind) => Role::Part(kind),
         None => Role::Break(why(unit, cx, i)),
     }
+}
+
+/// Whether an instruction that is no call site is an operation of a graph
+/// all the same: a call of a C function, a method of a tensor or a subscript
+/// of one that, whenever it was profiled, gave a tensor, ran kernels that
+/// neither write to an argument nor draw random numbers, and entered no
+/// frame.
+fn generic(unit: &Unit, cx: &PassCx, i: usize) -> bool {
+    let inst = &unit.insts[i].inst;
+    let Some(found) = facts(cx, unit, i) else {
+        return false;
+    };
+    let tensor = |v: V| matches!(cx.obs.get(v as usize), Some(ValueObs::Tensor { .. }));
+    let fits = match &inst.op {
+        // A method that was bound earlier has its receiver in no operand.
+        Op::Call { callee, .. } => !matches!(unit.def_op(*callee), Some(Op::LoadAttr(recv, _)) if tensor(*recv)),
+        Op::CallMethod { .. } => true,
+        Op::GetItem(a, _) => tensor(*a),
+        _ => false,
+    };
+    fits && inst.dst != NONE
+        && tensor(inst.dst)
+        && found.runs > 0
+        && matches!(found.kernels, Kernels::One | Kernels::Many)
+        && !(found.frames || found.raised || found.wrote)
+        && matches!(found.callee, CalleeFact::Unseen)
+        && !found.operators.is_empty()
+        && found.operators.iter().all(|name| pure_operator(name))
+}
+
+/// A list, a tuple or a slice that the instructions make.
+fn container(op: &Op) -> bool {
+    matches!(op, Op::BuildTuple(_) | Op::BuildList(_) | Op::BuildSlice(..))
 }
 
 /// Why an instruction is in no graph.
@@ -1962,11 +2256,15 @@ fn computes(op: &Op, defs: &HashMap<V, Def>, cx: &PassCx, unit: &Unit) -> bool {
         Some(def) if def.late => def.graph,
         _ => int_like(cx, unit, *v),
     };
+    // What a container may hold: what the graph has, and whatever is there
+    // in front of it, which is looked at when a run is exported.
+    let held = |v: &V| defs.get(v).is_none_or(|def| !def.late || def.node || def.graph);
     match op {
         Op::TensorSize { t, .. } | Op::TensorDim(t) => defs.get(t).is_some_and(|def| def.node),
         Op::Binary(k, a, b) => INT_BINARY.contains(k) && fits(a) && fits(b),
         Op::Unary(UnaryKind::Neg, a) => fits(a),
-        Op::BuildTuple(vs) => vs.iter().all(fits),
+        Op::BuildTuple(vs) | Op::BuildList(vs) => vs.iter().all(held),
+        Op::BuildSlice(a, b, c) => [a, b, c].into_iter().all(|v| *v == NONE || held(v)),
         _ => false,
     }
 }
@@ -2020,6 +2318,7 @@ fn stretch(unit: &Unit, cx: &PassCx, roles: &[Role], at: usize) -> usize {
 fn droppable(op: &Op, kind: Kind) -> bool {
     kind == Kind::Read
         || op.is_pure()
+        || container(op)
         || matches!(op, Op::Binary(0 | 5 | 10, ..) | Op::Compare(..) | Op::Unary(UnaryKind::Neg, _))
 }
 
@@ -2039,6 +2338,9 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
         };
         if let Op::Dispatch(d) = &inst.op {
             operators.push(unsafe { d.slot.operator() }.unwrap_or_else(|| "?".to_string()));
+        } else if *kind == Kind::Node {
+            // What is no call site may call more than one operator.
+            operators.push(facts(cx, unit, i).map_or_else(|| "?".to_string(), |f| f.operators.join("+")));
         }
         body.push(PathInst {
             op: inst.op.clone(),
@@ -2094,7 +2396,7 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
                 Stage::Inside
             }
             // An integer the graph computes is one it can give.
-            _ if needed && computed => {
+            _ if needed && computed && !container(&inst.op) => {
                 outputs.push(inst.dst);
                 Stage::Inside
             }
@@ -2111,15 +2413,21 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
     exits.reverse();
     // The integers the graph computes: what its nodes take of them, what it
     // gives of them, and what those are computed from.
+    let containers: Vec<V> = body.iter().filter(|inst| container(&inst.op)).map(|inst| inst.dst).collect();
     let mut wanted: Vec<V> = Vec::new();
     for inst in body.iter().rev() {
         let given = inst.kind != Kind::Node && outputs.contains(&inst.dst);
         if given {
             wanted.push(inst.dst);
         }
+        // An operation that is no call site is described with the lists,
+        // tuples and slices it is given, item by item.
+        let unfolds = (inst.kind == Kind::Node && !matches!(inst.op, Op::Dispatch(_)))
+            || (container(&inst.op) && wanted.contains(&inst.dst));
         if inst.kind == Kind::Node || wanted.contains(&inst.dst) {
             reads(&inst.op, |v| {
-                if defs.get(&v).is_some_and(|def| def.late && !def.node) {
+                let made = unfolds && containers.contains(&v);
+                if made || defs.get(&v).is_some_and(|def| def.late && !def.node) {
                     wanted.push(v);
                 }
             });

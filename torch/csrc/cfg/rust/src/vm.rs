@@ -1158,6 +1158,23 @@ enum Quiet {
     Raised,
 }
 
+/// Some values and, of the lists and tuples among them, what they hold.
+unsafe fn flattened(values: &[Obj]) -> Vec<Obj> {
+    let mut all = Vec::new();
+    for o in values.iter().filter(|o| !o.is_null()) {
+        all.push(*o);
+        if capi::is_unboxed(*o) {
+            continue;
+        }
+        if ffi::PyList_CheckExact(*o) != 0 {
+            all.extend((0..ffi::PyList_GET_SIZE(*o)).map(|i| ffi::PyList_GET_ITEM(*o, i)));
+        } else if ffi::PyTuple_CheckExact(*o) != 0 {
+            all.extend((0..ffi::PyTuple_GET_SIZE(*o)).map(|i| ffi::PyTuple_GET_ITEM(*o, i)));
+        }
+    }
+    all
+}
+
 /// How entering a graph ended (see `Compiled::enter_graph`).
 enum PathEnd {
     /// The work of its instructions is done: the block goes on behind them.
@@ -3789,9 +3806,9 @@ impl Compiled {
         op: &Op,
         kind: i32,
         api: &TcfgApi,
-    ) -> (OpResult, *mut capi::TcfgSite, Option<String>, Kernels) {
+    ) -> (OpResult, *mut capi::TcfgSite, Option<String>, Kernels, Vec<String>) {
         let Some(operands) = self.site_operands(kind, op) else {
-            return (self.exec_op(regs, op), null_mut(), None, Kernels::Unseen);
+            return (self.exec_op(regs, op), null_mut(), None, Kernels::Unseen, Vec::new());
         };
         // Operands are borrowed from the registers, which the operation does
         // not touch; read them first so a call sees its callee.
@@ -3822,6 +3839,7 @@ impl Compiled {
         drop(nobody);
         let mut site = null_mut();
         let mut reason = None;
+        let mut operators = Vec::new();
         let kernels = Self::counted(trace, api);
         if !trace.is_null() {
             if let Ok(obj) = result {
@@ -3862,10 +3880,35 @@ impl Compiled {
                     }
                 }
             }
+            if site.is_null() {
+                operators = Self::called(trace, api);
+            }
             (api.trace_free)(trace);
         }
         xdecref(method);
-        (result, site, reason, kernels)
+        (result, site, reason, kernels, operators)
+    }
+
+    /// The operators a capture saw the instruction call itself: not what
+    /// those called in turn.
+    unsafe fn called(trace: *mut capi::TcfgTrace, api: &TcfgApi) -> Vec<String> {
+        let records = (api.trace_records)(trace);
+        if records.is_null() || ffi::PyList_Check(records) == 0 {
+            ffi::PyErr_Clear();
+            xdecref(records);
+            return vec![spec::UNKNOWN_OPERATOR.to_string()];
+        }
+        let mut names = Vec::new();
+        for i in 0..ffi::PyList_GET_SIZE(records) {
+            let record = ffi::PyList_GET_ITEM(records, i);
+            let depth = ffi::PyLong_AsLong(ffi::PyTuple_GET_ITEM(record, 2));
+            let again = ffi::PyObject_IsTrue(ffi::PyTuple_GET_ITEM(record, 3)) != 0;
+            if depth == 0 && !again {
+                names.push(pyffi::str_to_string(ffi::PyTuple_GET_ITEM(record, 0)));
+            }
+        }
+        ffi::Py_DECREF(records);
+        names
     }
 
     /// How many dispatcher calls a capture saw.
@@ -3939,7 +3982,7 @@ impl Compiled {
             self.bind();
         }
         if n < self.options.max_site_variants && misses < MAX_CAPTURE_ATTEMPTS as u64 * 4 {
-            let (result, site, _, _) = self.capture_exec(regs, fallback, slot.kind, api);
+            let (result, site, _, _, _) = self.capture_exec(regs, fallback, slot.kind, api);
             if !site.is_null() {
                 slot.push(site);
             }
@@ -3972,6 +4015,7 @@ impl Compiled {
         let call = matches!(inst.op, Op::Call { .. } | Op::CallMethod { .. } | Op::CallEx { .. });
         let count = outward && !call && runs < MAX_COUNTED_RUNS;
         let mut kernels = if outward { Kernels::Unseen } else { Kernels::None };
+        let mut operators = Vec::new();
         let result = if let Some(slot) = slot {
             let ptrs = self
                 .site_operands(slot.kind, &inst.op)
@@ -3990,14 +4034,16 @@ impl Compiled {
                     let trace = (api.capture_end)();
                     kernels = Self::counted(trace, api);
                     if !trace.is_null() {
+                        operators = Self::called(trace, api);
                         (api.trace_free)(trace);
                     }
                     result
                 }
                 None => self.exec_op(regs, &inst.op),
                 Some(kind) => {
-                    let (result, site, reason, calls) = self.capture_exec(regs, &inst.op, kind, api);
+                    let (result, site, reason, calls, names) = self.capture_exec(regs, &inst.op, kind, api);
                     kernels = calls;
+                    operators = names;
                     let mut st = self.state.borrow_mut();
                     let bs = &mut st.blocks[b];
                     bs.capture_attempts[index] += 1;
@@ -4017,6 +4063,7 @@ impl Compiled {
         let facts = &mut st.blocks[b].facts[index];
         facts.runs += 1;
         facts.saw_kernels(kernels);
+        facts.saw_operators(operators);
         facts.raised |= result.is_err();
         if let Some(probe) = probe {
             probe.finish(&self.callees, facts, api);
@@ -4243,13 +4290,28 @@ impl Compiled {
     unsafe fn accepts(&self, exported: &Exported, regs: &mut [Obj], api: &TcfgApi) -> bool {
         let mut numbers: Vec<i64> = Vec::with_capacity(32);
         for check in &exported.checks {
-            let o = reg(regs, check.target);
+            let o = check.target.at(regs);
             let holds = !o.is_null()
                 && match &check.cond {
                     Cond::Is(expected) => o == expected.as_ptr(),
                     Cond::ValueEq(expected) => !capi::is_unboxed(o) && graph::same_value(o, expected.as_ptr()),
                     Cond::Tensor(row) => row.fits(o, &mut numbers, api),
                     Cond::Type(ty) => !capi::is_unboxed(o) && ffi::Py_TYPE(o) as Obj == ty.as_ptr(),
+                    Cond::Sequence(ty, count) => {
+                        !capi::is_unboxed(o)
+                            && ffi::Py_TYPE(o) as usize == *ty
+                            && ffi::PyObject_Size(o) as usize == *count
+                    }
+                    Cond::Has(name, expected) => {
+                        let found = if graph::quiet_attr(o, name.as_ptr(), api) {
+                            ffi::PyObject_GetAttr(o, name.as_ptr())
+                        } else {
+                            null_mut()
+                        };
+                        ffi::PyErr_Clear();
+                        xdecref(found);
+                        found == expected.as_ptr()
+                    }
                 };
             if !holds {
                 return false;
@@ -4265,7 +4327,11 @@ impl Compiled {
             let Cond::Tensor(row) = &check.cond else {
                 continue;
             };
-            let o = self.obj(regs, check.target);
+            // What a list holds has its Python object.
+            let o = match check.target.item {
+                NONE => self.obj(regs, check.target.value),
+                _ => check.target.at(regs),
+            };
             let ty = ffi::Py_TYPE(o);
             let same = seen.iter().position(|other| *other == o).unwrap_or(seen.len());
             if ty as usize != row.ty || (*ty).tp_version_tag != row.type_version || same != row.same {
@@ -4525,7 +4591,7 @@ impl Compiled {
             // have been the same for a few calls in a row, the kind of call
             // is open again, and the next one is taken down.
             if !exported.varying.is_empty() {
-                let now: Vec<Obj> = exported.varying.iter().map(|place| reg(regs, *place)).collect();
+                let now: Vec<Obj> = exported.varying.iter().map(|place| place.at(regs)).collect();
                 let same = {
                     let last = exported.last.borrow();
                     last.len() == now.len() && last.iter().zip(&now).all(|(was, is)| !is.is_null() && graph::same_value(was.as_ptr(), *is))
@@ -4546,12 +4612,12 @@ impl Compiled {
         let mut small: [Obj; 12] = [null_mut(); 12];
         let big: Vec<Obj>;
         let args: &[Obj] = if exported.args.len() <= small.len() {
-            for (i, v) in exported.args.iter().enumerate() {
-                small[i] = reg(regs, *v);
+            for (i, place) in exported.args.iter().enumerate() {
+                small[i] = place.at(regs);
             }
             &small[..exported.args.len()]
         } else {
-            big = exported.args.iter().map(|v| reg(regs, *v)).collect();
+            big = exported.args.iter().map(|place| place.at(regs)).collect();
             &big
         };
         let bc = path.body[0].bc;
@@ -4740,6 +4806,28 @@ impl Compiled {
                         boxed
                     })
                 }
+                op if inst.kind == Kind::Node => {
+                    // An operation that is no call site: it runs as it is,
+                    // and may be handed lists of tensors.
+                    frames.top().at(inst.bc & OFFSET_MASK);
+                    if self.unbound.any.get() {
+                        self.bind();
+                    }
+                    let mut given: Vec<Obj> = Vec::new();
+                    op.for_each_use(|v| given.push(reg(regs, v)));
+                    let versions = versions_of(&flattened(&given), api);
+                    let result = self.exec_op(regs, op);
+                    rec.wrote |= versions_moved(&versions, api);
+                    result.inspect(|obj| {
+                        let mut info = TcfgTensorInfo::empty();
+                        let tensor = (api.tensor_info)(*obj, &mut info) != 0;
+                        if !tensor && rec.failed.is_none() {
+                            rec.failed = Some("an operation of the graph gave no tensor".to_string());
+                        }
+                        let described = tensor && rec.failed.is_none();
+                        rec.nodes.push((null_mut(), if described { graph::tensor_meta(*obj) } else { null_mut() }));
+                    })
+                }
                 op => {
                     frames.top().at(inst.bc & OFFSET_MASK);
                     self.exec_op(regs, op)
@@ -4765,7 +4853,7 @@ impl Compiled {
         }
         let mut described = path.describe(&site.name, &self.func, &rec, api);
         let world = (modes, included, excluded, state);
-        let mut changing: Vec<graph::PathValue> = Vec::new();
+        let mut changing: Vec<graph::Place> = Vec::new();
         if described.closed.is_none() {
             // One more form for nothing but another number, with none of
             // the `EVER_NEW` before it ever run again: the numbers are new
