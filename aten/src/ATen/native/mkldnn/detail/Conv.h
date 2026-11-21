@@ -38,7 +38,8 @@ void prepare_parameters(
 // Ported from ideep::conv_deconv_utils::prepare_parameters (shared with
 // detail/Deconv.cpp).
 // Common logic to prepare parameters for conv/deconv
-// quantization version
+// quantization version. Also used for fp32 when scales and zero points are
+// empty.
 void prepare_parameters(
     const ideep::tensor& src,
     const ideep::tensor& weights,
