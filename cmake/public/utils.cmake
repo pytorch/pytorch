@@ -417,7 +417,10 @@ function(torch_compile_options libname)
         # NVCC + clang15  reports deprecated copies from GPU lambda instantiations
         list(APPEND private_compile_options -Wno-deprecated-copy)
         # NVCC inserts whitespace into literal operators, triggering a spurious Clang warning.
-        list(APPEND private_compile_options -Wno-deprecated-literal-operator)
+        check_cxx_compiler_flag("-Wno-deprecated-literal-operator" COMPILER_SUPPORTS_WNO_DEPRECATED_LITERAL_OPERATOR)
+        if(COMPILER_SUPPORTS_WNO_DEPRECATED_LITERAL_OPERATOR)
+          list(APPEND private_compile_options -Wno-deprecated-literal-operator)
+        endif()
       endif()
       list(APPEND private_compile_options -Wmove)
     else()
