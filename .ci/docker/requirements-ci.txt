@@ -300,7 +300,7 @@ typing-extensions==4.15.0
 #Pinned versions:
 #test that import:
 
-unittest-xml-reporting<=3.2.0,>=2.0.0
+unittest-xml-reporting>=2.0.0,<=4.0.0
 #Description: saves unit test results to xml
 #Pinned versions:
 #test that import:
