@@ -3114,6 +3114,65 @@ def _tma_descriptor_max_offset_fits_in_int32(
     )
 
 
+def _xpu_descriptor_operands_compatible(matrices: Sequence[IRNode]) -> bool:
+    """Whether each 2D operand can be loaded through a tensor descriptor with a
+    literal unit inner stride, in either orientation.
+
+    Decided guard-free on hints; only on acceptance are the facts the descriptor
+    relies on (unit inner stride, 16-byte aligned outer stride and offset, int32
+    sizes) installed as guards, so a rejection leaves the graph unconstrained.
+    Under AOTI, where those guards are not checked at runtime, they must instead
+    be statically provable.
+    """
+    from .virtualized import V
+
+    sizevars = V.graph.sizevars
+    aot_mode = V.graph.aot_mode
+    conditions = []
+    for mat in matrices:
+        strides = mat.get_stride()
+        if len(strides) != 2 or mat.get_name() in V.graph.unaligned_buffers:
+            return False
+        row_major = tdm_descriptor_row_major(mat)
+        if row_major is None:
+            return False
+        inner, outer = (strides[1], strides[0]) if row_major else strides
+        conditions.append(sympy.Eq(inner, 1))
+        itemsize = mat.get_dtype().itemsize
+        for nbytes in (outer * itemsize, mat.get_layout().offset * itemsize):
+            if not _bytes_aligned(sizevars.replace_backed_symbols_with_hints(nbytes)):
+                return False
+            conditions.append(sympy.Eq(Mod(nbytes, TMA_ALIGNMENT), 0))
+
+    if not _descriptor_shapes_fit_in_int32(
+        [mat.get_size() for mat in matrices], add_guards=not aot_mode
+    ):
+        return False
+    condition = sympy.And(*conditions)
+    if sizevars.statically_known_true(condition):
+        return True
+    return not aot_mode and sizevars.guard_or_false(condition)
+
+
+def use_triton_xpu_template(*matrices: IRNode, layout: Layout) -> bool:
+    """Whether the XPU mm templates may take this BF16/FP16 mm.
+    Gated to Xe2 or later by the device-ID table in torch.xpu._utils (currently
+    BMG only, where the configs were tuned); other devices keep the default templates."""
+    if not matrices or not config.triton.enable_xpu_mm_templates:
+        return False
+    if layout.device.type != "xpu" or layout.dtype not in (
+        torch.bfloat16,
+        torch.float16,
+    ):
+        return False
+    from torch.utils._triton import has_triton_stable_tma_api
+    from torch.xpu._utils import get_xpu_arch, XPUArch
+
+    if not has_triton_stable_tma_api() or get_xpu_arch(layout.device) < XPUArch.Xe2:
+        return False
+    return _xpu_descriptor_operands_compatible(matrices)
+
+
 def use_triton_tma_template(
     *matrices: IRNode, output_layout: Layout, add_guards: bool = False
 ) -> bool:
