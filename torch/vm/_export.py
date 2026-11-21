@@ -436,17 +436,30 @@ def build(
     the values it gives, and the guards the passes brought, as (which input,
     check). Or, as a str, why there is none: a pass raised, or returned what
     is no graph of these inputs."""
+    from . import passes as listed
+
     inputs = description["inputs"]
-    asked = backward and torch.is_grad_enabled()
-    if asked and any(tensor.requires_grad for tensor in inputs):
+    graded = torch.is_grad_enabled() and any(tensor.requires_grad for tensor in inputs)
+    derived = any(isinstance(pass_, listed.AOTAutograd) for pass_ in passes)
+    compiled = any(isinstance(pass_, listed.Inductor) for pass_ in passes)
+    if backward and graded and not derived:
         # A graph whose inputs need a gradient gets its backward from the
         # engine (``backward.rs``), unless AOTAutograd is asked for by name.
         # The engine runs the graph itself, as it describes it; with passes
         # over graphs it hands them its two graphs when it has them.
-        from . import passes as listed
-
-        if not any(isinstance(pass_, listed.AOTAutograd) for pass_ in passes):
-            return runtime.Staged(description, plain(passes) if passes else None), []
+        return runtime.Staged(description, plain(passes) if passes else None), []
+    if derived and compiled:
+        # AOTAutograd() in front of Inductor(): Inductor compiles the graph
+        # and, for tensors that need a gradient, the backward AOTAutograd
+        # traces for it. That is one compilation, Inductor's.
+        aot = listed.AOTAutograd
+        passes = tuple(pass_ for pass_ in passes if not isinstance(pass_, aot))
+    elif compiled and graded:
+        return (
+            "Inductor() compiles graphs whose tensors need no gradient: the engine "
+            "derives the backward of a graph (Graphs()) and hands it two such graphs, "
+            "or AOTAutograd() in front of it derives one"
+        )
     if not passes:
         return "no pass over graphs: the operations run as they are"
     gm = graph_module(description)

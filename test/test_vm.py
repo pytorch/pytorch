@@ -7794,7 +7794,10 @@ print(json.dumps(found))
         with self.assertRaisesRegex(ValueError, "AOTAutograd.. in front of"):
             torch.vm(f, passes=(aot, *DEFAULT, P.Graphs()))
         with self.assertRaisesRegex(ValueError, "a graph is compiled once"):
-            torch.vm(f, passes=(*DEFAULT, P.Graphs(), aot, inductor))
+            torch.vm(f, passes=(*DEFAULT, P.Graphs(), inductor, aot))
+        # AOTAutograd in front of Inductor is one compilation: AOTAutograd
+        # derives the backward, Inductor compiles both.
+        torch.vm(f, passes=(*DEFAULT, P.Graphs(), aot, inductor))
         with self.assertRaisesRegex(ValueError, "keep behind .*Inductor"):
             torch.vm(f, passes=(*DEFAULT, P.Graphs(), inductor, keep))
         with self.assertRaisesRegex(ValueError, "Inductor is given more than once"):
@@ -12202,6 +12205,55 @@ class TestVmGraphBackward(TestCase):
             names.append(node.name())
             node = node.next_functions[0][0]
         self.assertEqual(names[-1], "GraphBackward")
+
+    def test_inductor_derives_nothing_unless_aot_autograd_is_named(self, device):
+        import torch._functorch._aot_autograd.graph_compile as compiles
+
+        derived, plain = [], []
+        autograd = compiles.aot_stage2_autograd
+        inference = compiles.aot_stage2_inference
+
+        def derives(*args, **kwargs):
+            derived.append(1)
+            return autograd(*args, **kwargs)
+
+        def infers(*args, **kwargs):
+            plain.append(1)
+            return inference(*args, **kwargs)
+
+        compiles.aot_stage2_autograd = derives
+        compiles.aot_stage2_inference = infers
+        w = torch.randn(8, 8, device=device, requires_grad=True)
+        x = torch.randn(4, 8, device=device)
+        try:
+            aot, inductor = P.AOTAutograd(), P.Inductor()
+            cases = (
+                ((P.Graphs(), inductor), "GraphBackward", (0, 2)),
+                ((P.Graphs(), aot, inductor), "CompiledFunctionBackward", (1, 0)),
+                ((P.Graphs(backward=False), inductor), "AddBackward0", (0, 0)),
+            )
+            for passes, node, counts in cases:
+                derived.clear()
+                plain.clear()
+                listed = (*DEFAULT, *passes)
+                compiled = torch.vm(graph_mixed, passes=listed, fallback=False)
+                for _ in range(8):
+                    w.grad = None
+                    out = compiled(x, w)
+                    out.backward()
+                    got = w.grad.clone()
+                    w.grad = None
+                    graph_mixed(x, w).backward()
+                    self.assertEqual(got, w.grad, rtol=1e-4, atol=1e-5)
+                self.assertEqual(type(out.grad_fn).__name__, node)
+                # How often AOTAutograd traced a graph with its backward, and
+                # how often a graph without gradients.
+                self.assertEqual((len(derived), len(plain)), counts)
+            (graph,) = torch.vm.regions(compiled)
+            self.assertIn("AOTAutograd() in front of it", graph["reason"])
+        finally:
+            compiles.aot_stage2_autograd = autograd
+            compiles.aot_stage2_inference = inference
 
     def test_the_forward_keeps_fewer_bytes_than_the_backward_reads(self, device):
         runtime = torch.vm._load_runtime()

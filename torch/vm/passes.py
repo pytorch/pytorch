@@ -178,10 +178,10 @@ class Graphs(BuiltinPass):
             list or a dict or by itself, what it stores into an object and
             what a variable holds; not for a tensor that is only asked for
             its sizes or its type.
-            With ``False`` the engine derives nothing: such a graph runs on
-            eager's tape, and a pass over graphs is handed the one graph
-            with tensors that need a gradient, as with :class:`AOTAutograd`
-            in the list.
+            With ``False`` every such graph keeps eager's tape: a pass of
+            one's own over graphs is handed the one graph with tensors
+            that need a gradient, as with :class:`AOTAutograd` in the list,
+            and :class:`Inductor` by itself is not handed it.
 
             Where it is not eager's: the ``grad_fn`` of what a graph gives
             is a node of the graph's. A backward that raises (a tensor it
@@ -238,8 +238,9 @@ class AOTAutograd(BuiltinPass):
     and returns a graph whose forward calls what it compiled. It compiles
     for the tensors of the call the graph was exported on. A pass that
     compiles is the last pass over a graph in the list, and there is one at
-    most. ``torch._functorch.aot_autograd`` is imported when the pass first
-    runs.
+    most, but for this one in front of :class:`Inductor`, which then
+    compiles what this one traced. ``torch._functorch.aot_autograd`` is
+    imported when the pass first runs.
 
     The gradients are what ``torch.compile`` gives, which is not eager's
     where a graph gives a tensor and also computes something of it (a
@@ -282,8 +283,8 @@ class Inductor(BuiltinPass):
     tensors need a gradient reaches it as two graphs whose tensors need
     none, its forward and its backward, which the engine derived
     (:class:`Graphs`): nothing is traced for a derivative. With
-    ``Graphs(backward=False)`` it is handed the one graph, and AOTAutograd
-    traces the backward for it.
+    :class:`AOTAutograd` in front of it in the list, AOTAutograd derives the
+    backward instead, and Inductor compiles what it traced.
 
     This is the pass that makes a function faster than its kernels allow, and
     one that may change its numerics: what a graph compiler makes of the
@@ -291,8 +292,9 @@ class Inductor(BuiltinPass):
     graph is, ``pass_(gm, input_types)``, and returns a graph whose forward
     calls what it compiled. It compiles for the tensors of the call the graph
     was exported on. A pass that compiles is the last pass over a graph in
-    the list, and there is one at most. ``torch._inductor`` is imported when
-    the pass first runs.
+    the list, and there is one at most, but for :class:`AOTAutograd` in
+    front of this one. ``torch._inductor`` is imported when the pass first
+    runs.
     """
 
     engine: ClassVar[str] = "inductor"
