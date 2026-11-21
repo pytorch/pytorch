@@ -169,14 +169,6 @@ def _get_mask_program_config(mask_graph, mask_mod_other_buffers):
     }, ""
 
 
-def _is_gfx950_device(device) -> bool:
-    if not flydsl_utils.runtime_available() or not torch.cuda.is_available():
-        return False
-    index = device.index if device.index is not None else torch.cuda.current_device()
-    arch = getattr(torch.cuda.get_device_properties(index), "gcnArchName", "")
-    return str(arch).split(":", 1)[0] == "gfx950"
-
-
 def _get_flydsl_common_config(
     *,
     query,
@@ -189,8 +181,8 @@ def _get_flydsl_common_config(
     allow_mask_mod_buffers: bool = False,
     allow_strided_bhsd: bool = False,
 ) -> tuple[dict[str, tuple[int, ...] | None] | None, str]:
-    device = query.get_device()
-    if device is None or device.type != "cuda" or not _is_gfx950_device(device):
+    available = flydsl_utils.runtime_available()
+    if not available or not flydsl_utils.is_gfx950_device(query.get_device()):
         return None, "requires ROCm gfx950 and the FlyDSL runtime"
     if query.get_dtype() != torch.bfloat16:
         return None, f"supports BF16 only, got {query.get_dtype()}"
