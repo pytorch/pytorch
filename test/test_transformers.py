@@ -3956,7 +3956,6 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
     @tf32_off()
-    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     @setSdpaBackendsToDefaultFinally
     @parametrize("enable_gqa", [False, True])
@@ -3994,7 +3993,6 @@ class TestSDPAAccelerator(NNTestCase):
             self.assertEqual(actual_grad, expected_grad, atol=1e-4, rtol=1e-4)
 
     @tf32_off()
-    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     @setSdpaBackendsToDefaultFinally
     @parametrize("dtype", [torch.float32, torch.float16])
@@ -4081,7 +4079,6 @@ class TestSDPAAccelerator(NNTestCase):
                 rtol=grad_tolerance,
             )
 
-    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Memory efficient attention is not supported on this system")
     @setSdpaBackendsToDefaultFinally
     def test_mem_efficient_attention_gqa_dropout(self, device):
@@ -4117,7 +4114,7 @@ class TestSDPAAccelerator(NNTestCase):
         attn_mask_expanded = attn_mask.detach().clone().requires_grad_()
 
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-            torch.cuda.manual_seed(1234)
+            torch.manual_seed(1234)
             actual = scaled_dot_product_attention(
                 query,
                 key,
@@ -4127,7 +4124,7 @@ class TestSDPAAccelerator(NNTestCase):
                 scale=0.37,
                 enable_gqa=True,
             )
-            torch.cuda.manual_seed(1234)
+            torch.manual_seed(1234)
             expected = scaled_dot_product_attention(
                 query_expanded,
                 key_expanded,
@@ -4239,7 +4236,6 @@ class TestSDPAAccelerator(NNTestCase):
         for actual_grad, expected_grad in zip(actual_grads, expected_grads):
             self.assertEqual(actual_grad, expected_grad, atol=5e-4, rtol=4e-4)
 
-    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Memory efficient attention is not supported on this system",
@@ -4620,7 +4616,6 @@ class TestSDPAAccelerator(NNTestCase):
             self.assertEqual(grad.numel(), 0)
 
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
-    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @parametrize(
         "fused_kernel",
         [SDPBackend.FLASH_ATTENTION, ] if TEST_XPU else [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION],
@@ -5350,7 +5345,6 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(actual_grad, expected_grad)
 
-    @skipIfXpu(msg="torch-xpu-ops/issues/4813")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @setSdpaBackendsToDefaultFinally
     def test_mem_efficient_attention_vmap_gqa_backward(self, device):
