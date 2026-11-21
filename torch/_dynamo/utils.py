@@ -3528,7 +3528,7 @@ def check_positional(
 
 
 def check_num_args(
-    tx: InstructionTranslatorBase, args: Sequence[VariableTracker], n: int
+    tx: InstructionTranslatorBase, args: list[VariableTracker], n: int
 ) -> None:
     # Mirrors CPython check_num_args (Objects/typeobject.c), used by the
     # slot wrappers (wrap_binaryfunc, wrap_delitem, ...).
