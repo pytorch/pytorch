@@ -84,6 +84,7 @@ from .variables import (
     UserMethodVariable,
 )
 from .variables.base import VariableTracker
+from .variables.ctx_manager import WarningsFilterVariable
 
 
 np: types.ModuleType | None = None
@@ -444,6 +445,8 @@ manual_torch_name_rule_map: dict[
     # in variables/torch.py fires instead of graph-breaking on _len_torch_dispatch_stack.
     "torch.utils._python_dispatch._get_current_dispatch_mode_stack": TorchInGraphFunctionVariable,
     "torch._utils_internal.justknobs_check": UserFunctionVariable,
+    "warnings.filterwarnings": WarningsFilterVariable,
+    "warnings.simplefilter": WarningsFilterVariable,
     "inspect.signature": InspectSignatureVariable,
 }
 
@@ -4092,7 +4095,7 @@ def check_verbose(
     elif issubclass(rule, TorchInGraphFunctionVariable):
         return SkipResult(False, reasons.pop())
     else:
-        if rule != SkipFunctionVariable:
+        if not issubclass(rule, SkipFunctionVariable):
             raise AssertionError(f"expected SkipFunctionVariable, got {rule}")
         return SkipResult(True, reasons.pop())
 
