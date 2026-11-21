@@ -2731,6 +2731,39 @@ class triton:
         == "1"
     )
 
+    # For a pointwise kernel with atomic_add stores (index_put_ with
+    # accumulate=True, index_add, scatter_add, embedding backward), also generate
+    # a version in which program p adds into replica p % atomic_scatter_replicas
+    # of each destination, in a zero-filled workspace, after which the wrapper
+    # adds the sum of the replicas to the destination. This divides atomic
+    # contention by the replica count, at the cost of zeroing and summing the
+    # replicas. The replicated version runs when both limits below hold: if they
+    # hold for all sizes only it is emitted, if one can never hold it is not
+    # emitted, and otherwise the wrapper picks a version with an `if` on the
+    # real sizes (not with memory_planning). Has no effect when
+    # partitioned_scatter_enabled is set, which is the default on ROCm. Applies
+    # only to the Python wrapper (not cpp_wrapper, AOTInductor, the FX wrapper
+    # or autotune_at_compile_time) and to pointwise kernels with a 1D grid and
+    # no other workspace; combo kernels and template epilogues are never
+    # replicated. For the other kernels, the counters
+    # inductor/atomic_scatter_replica_skipped_<reason> record why a kernel or
+    # destination was not replicated.
+    atomic_scatter_replication = (
+        os.environ.get("TORCHINDUCTOR_ATOMIC_SCATTER_REPLICATION", "0") == "1"
+    )
+    # Replicas per destination; the workspace grows with it. Values below 2
+    # disable replication.
+    atomic_scatter_replicas: int = 16
+    # Largest replica workspace of one kernel launch, in MiB.
+    atomic_scatter_replica_max_mib: int = 512
+    # Minimum number of atomic_add stores per destination element. Below it, the
+    # zeroing and summing cost more than the contention they remove.
+    atomic_scatter_replica_min_ratio: int = 128
+    # Keep the replicas of fp16 and bf16 destinations in fp32, so each element is
+    # rounded once, when the sum of the replicas is added to the destination.
+    # Doubles the workspace of those destinations.
+    atomic_scatter_replica_fp32_accumulation: bool = False
+
     # Fuse staged reduction pipelines, including block reductions and
     # lane-resolution pointwise epilogues.
     nested_reduction: bool = Config(
