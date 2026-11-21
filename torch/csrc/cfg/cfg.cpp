@@ -3,9 +3,12 @@
 
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/ThreadLocalState.h>
 #include <ATen/autocast_mode.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/dispatch/DispatchCapture.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/enum_tag.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/InferenceMode.h>
@@ -16,8 +19,14 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/utils.h>
+#include <torch/csrc/autograd/graph_task.h>
+#include <torch/csrc/autograd/python_cpp_function.h>
+#include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -34,8 +43,11 @@
 #include <cstring>
 #include <deque>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -2316,6 +2328,763 @@ void workspaceLeaveRaw(void* workspace, void* previous) {
       static_cast<torch::cfg::Workspace*>(previous));
 }
 
+// ---------------------------------------------------------------------------
+// The backward of a graph (API version 16): what the Rust runtime takes the
+// kernels of eager's autograd nodes down with, runs two straight-line graphs
+// with, and gives the results of a graph one node with.
+
+constexpr const char* kOperatorCapsule = "torch._C._cfg_operator";
+
+// An operator, for the runtime: operators live as long as the dispatcher, and
+// one handle per operator is kept for as long.
+PyObject* operatorObject(const c10::OperatorHandle& op) {
+  static std::mutex lock;
+  static std::unordered_map<std::string, std::unique_ptr<c10::OperatorHandle>>
+      known;
+  std::lock_guard<std::mutex> guard(lock);
+  auto& held = known[toString(op.operator_name())];
+  if (!held) {
+    held = std::make_unique<c10::OperatorHandle>(op);
+  }
+  return PyCapsule_New(held.get(), kOperatorCapsule, nullptr);
+}
+
+// What names an operator: what operatorObject gives, or an overload of
+// torch.ops (the graphs a dispatch mode took down name operators so).
+c10::OperatorHandle operatorOf(PyObject* obj) {
+  if (PyCapsule_IsValid(obj, kOperatorCapsule) != 0) {
+    return *static_cast<const c10::OperatorHandle*>(
+        PyCapsule_GetPointer(obj, kOperatorCapsule));
+  }
+  const auto schema = py::getattr(py::handle(obj), "_schema");
+  const auto name = py::cast<std::string>(schema.attr("name"));
+  const auto overload = py::cast<std::string>(schema.attr("overload_name"));
+  auto op = c10::Dispatcher::singleton().findSchema({name, overload});
+  TORCH_CHECK(op.has_value(), "torch.vm: no operator ", name, ".", overload);
+  return *op;
+}
+
+struct TapeRecord {
+  c10::OperatorHandle op;
+  std::vector<c10::IValue> inputs;
+  std::vector<c10::IValue> outputs;
+};
+
+// Takes down, of every call of the dispatcher, the first kernel below the
+// autograd keys. What that kernel calls is its own business.
+class TapeSink final : public c10::DispatchCaptureSink {
+ public:
+  void onKernelEnter(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet ks,
+      bool isRedispatch,
+      c10::ArrayRef<const c10::IValue> inputs) override {
+    if (previous != nullptr) {
+      previous->onKernelEnter(op, ks, isRedispatch, inputs);
+    }
+    depth++;
+    const auto key = static_cast<uint16_t>(ks.highestFunctionalityKey());
+    if (taken_at < 0 &&
+        key < static_cast<uint16_t>(c10::DispatchKey::ADInplaceOrView)) {
+      taken_at = depth;
+      TapeRecord record{op, {}, {}};
+      record.inputs.assign(inputs.begin(), inputs.end());
+      records.push_back(std::move(record));
+    }
+  }
+
+  void onKernelExit(
+      const c10::OperatorHandle& op,
+      c10::ArrayRef<const c10::IValue> outputs,
+      bool kernel_threw) override {
+    if (depth == taken_at) {
+      taken_at = -1;
+      if (kernel_threw) {
+        threw = true;
+      } else {
+        records.back().outputs.assign(outputs.begin(), outputs.end());
+      }
+    }
+    depth--;
+    if (previous != nullptr) {
+      previous->onKernelExit(op, outputs, kernel_threw);
+    }
+  }
+
+  std::vector<TapeRecord> records;
+  int32_t depth = 0;
+  int32_t taken_at = -1;
+  bool threw = false;
+  c10::DispatchCaptureSink* previous = nullptr;
+};
+
+thread_local std::vector<std::unique_ptr<TapeSink>> tls_tapes;
+
+void tapeBegin() {
+  auto tape = std::make_unique<TapeSink>();
+  tape->previous = c10::setDispatchCaptureSink(tape.get());
+  tls_tapes.push_back(std::move(tape));
+}
+
+PyObject* tapeEnd() {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(!tls_tapes.empty(), "torch.vm: no tape is being taken down");
+  auto tape = std::move(tls_tapes.back());
+  tls_tapes.pop_back();
+  c10::setDispatchCaptureSink(tape->previous);
+  TORCH_CHECK(
+      !tape->threw, "torch.vm: a kernel raised while a tape was taken down");
+  py::list out;
+  for (auto& r : tape->records) {
+    TORCH_CHECK(
+        r.op.hasSchema(),
+        "torch.vm: an operator without a schema: ",
+        toString(r.op.operator_name()));
+    const auto& arguments = r.op.schema().arguments();
+    py::tuple args(r.inputs.size());
+    py::list written;
+    for (size_t i = 0; i < r.inputs.size(); ++i) {
+      // As an operator called from Python is given it: a number for the
+      // tensor a number was wrapped in, a dtype for the int of one.
+      args[i] = i < arguments.size()
+          ? constantObject(arguments[i], r.inputs[i])
+          : torch::jit::toPyObject(std::move(r.inputs[i]));
+      const auto* alias =
+          i < arguments.size() ? arguments[i].alias_info() : nullptr;
+      if (alias != nullptr && alias->isWrite()) {
+        written.append(i);
+      }
+    }
+    py::object result = py::none();
+    if (r.outputs.size() == 1) {
+      result = torch::jit::toPyObject(std::move(r.outputs[0]));
+    } else if (!r.outputs.empty()) {
+      py::tuple several(r.outputs.size());
+      for (size_t i = 0; i < r.outputs.size(); ++i) {
+        several[i] = torch::jit::toPyObject(std::move(r.outputs[i]));
+      }
+      result = std::move(several);
+    }
+    const auto& returns = r.op.schema().returns();
+    const auto* aliases = returns.empty() ? nullptr : returns[0].alias_info();
+    out.append(py::make_tuple(
+        py::reinterpret_steal<py::object>(operatorObject(r.op)),
+        toString(r.op.operator_name()),
+        std::move(args),
+        std::move(result),
+        std::move(written),
+        r.op.hasTag(at::Tag::nondeterministic_seeded),
+        aliases != nullptr && !aliases->isWrite()));
+  }
+  return out.release().ptr();
+  END_HANDLE_TH_ERRORS
+}
+
+// The node behind its Python object; null for one written in Python.
+torch::autograd::Node* nodePtr(PyObject* obj) {
+  if (torch::autograd::THPCppFunction_Check(obj)) {
+    return reinterpret_cast<torch::autograd::THPCppFunction*>(obj)->cdata.get();
+  }
+  return nullptr;
+}
+
+PyObject* nodeOf(PyObject* tensor, uint32_t* input_nr) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(THPVariable_Check(tensor), "torch.vm: node_of takes a tensor");
+  const auto& t = THPVariable_Unpack(tensor);
+  if (!t.defined() || !t.requires_grad()) {
+    return nullptr;
+  }
+  const auto edge = torch::autograd::impl::gradient_edge(t);
+  if (!edge.is_valid()) {
+    return nullptr;
+  }
+  *input_nr = edge.input_nr;
+  return torch::autograd::functionToPyObject(edge.function);
+  END_HANDLE_TH_ERRORS
+}
+
+int32_t nodeInfo(PyObject* obj, TcfgNodeInfo* out) {
+  static thread_local std::string name;
+  if (THPFunction_Check(obj)) {
+    name = "a node written in Python";
+    *out = TcfgNodeInfo{name.c_str(), 0, 0, 0, TCFG_NODE_PYTHON};
+    return 1;
+  }
+  auto* node = nodePtr(obj);
+  if (node == nullptr) {
+    return 0;
+  }
+  name = node->name();
+  uint32_t flags = 0;
+  if (dynamic_cast<torch::autograd::AccumulateGrad*>(node) != nullptr) {
+    flags |= TCFG_NODE_LEAF;
+  }
+  if (!node->pre_hooks().empty() || !node->post_hooks().empty() ||
+      !node->tensor_pre_hooks().empty() ||
+      !node->retains_grad_hooks().empty()) {
+    flags |= TCFG_NODE_HOOKED;
+  }
+  *out = TcfgNodeInfo{
+      name.c_str(),
+      node->sequence_nr(),
+      node->num_inputs(),
+      static_cast<uint32_t>(node->next_edges().size()),
+      flags};
+  return 1;
+}
+
+PyObject* nodeNext(PyObject* obj, uint32_t edge, uint32_t* input_nr) {
+  HANDLE_TH_ERRORS
+  auto* node = nodePtr(obj);
+  TORCH_CHECK(
+      node != nullptr && edge < node->next_edges().size(),
+      "torch.vm: node_next: no such edge");
+  const auto& next = node->next_edges()[edge];
+  if (!next.is_valid()) {
+    return nullptr;
+  }
+  *input_nr = next.input_nr;
+  return torch::autograd::functionToPyObject(next.function);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* nodeCall(PyObject* obj, PyObject* grads, uint32_t flags) {
+  HANDLE_TH_ERRORS
+  auto* raw = nodePtr(obj);
+  TORCH_CHECK(
+      raw != nullptr && PyTuple_Check(grads),
+      "torch.vm: node_call takes a node of eager's and a tuple of gradients");
+  const auto node = raw->getptr();
+  const auto n = static_cast<size_t>(PyTuple_GET_SIZE(grads));
+  TORCH_CHECK(
+      n == node->num_inputs(),
+      "torch.vm: node_call: one gradient per input of the node");
+  torch::autograd::variable_list inputs;
+  inputs.reserve(n);
+  for (size_t i = 0; i < n; ++i) {
+    PyObject* item = PyTuple_GET_ITEM(grads, i);
+    if (item == Py_None) {
+      inputs.emplace_back();
+    } else {
+      TORCH_CHECK(THPVariable_Check(item), "torch.vm: a gradient is a tensor");
+      inputs.push_back(THPVariable_Unpack(item));
+    }
+  }
+  torch::autograd::variable_list outputs;
+  const bool on_tape = (flags & TCFG_RUN_ON_TAPE) != 0;
+  const auto run = [&]() {
+    at::AutoGradMode mode(on_tape);
+    // As the autograd engine evaluates a node: on the stream its forward
+    // ran on. A thread of its own starts on the default stream, which is
+    // not the one the tensors of the caller are computed on.
+    const c10::OptionalStreamGuard stream_guard{node->stream()};
+    outputs = (*node)(std::move(inputs));
+    torch::autograd::validate_outputs(
+        node->next_edges(), outputs, [&](const std::string& msg) {
+          return "Function " + node->name() + " returned an " + msg;
+        });
+  };
+  if (torch::autograd::get_current_graph_task_id() == -1) {
+    pybind11::gil_scoped_release no_gil;
+    run();
+  } else {
+    // A backward is running on this thread. A node asks the backward of its
+    // thread which of its gradients are wanted (task_should_compute_output)
+    // and computes none that one does not know of: the node is called on a
+    // thread where no backward runs, as this thread is otherwise.
+    const at::ThreadLocalState state;
+    TapeSink* tape = tls_tapes.empty() ? nullptr : tls_tapes.back().get();
+    std::exception_ptr failed;
+    {
+      pybind11::gil_scoped_release no_gil;
+      std::thread worker([&]() {
+        const at::ThreadLocalStateGuard guard(state);
+        c10::DispatchCaptureSink* before =
+            tape != nullptr ? c10::setDispatchCaptureSink(tape) : nullptr;
+        try {
+          run();
+        } catch (...) {
+          failed = std::current_exception();
+        }
+        if (tape != nullptr) {
+          c10::setDispatchCaptureSink(before);
+        }
+      });
+      worker.join();
+    }
+    if (failed) {
+      std::rethrow_exception(failed);
+    }
+  }
+  py::tuple out(outputs.size());
+  for (size_t i = 0; i < outputs.size(); ++i) {
+    if (outputs[i].defined()) {
+      out[i] = py::reinterpret_steal<py::object>(THPVariable_Wrap(outputs[i]));
+    } else {
+      out[i] = py::none();
+    }
+  }
+  return out.release().ptr();
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* opFind(const char* name, const char* overload) {
+  HANDLE_TH_ERRORS
+  auto op = c10::Dispatcher::singleton().findSchema({name, overload});
+  TORCH_CHECK(op.has_value(), "torch.vm: no operator ", name, ".", overload);
+  return operatorObject(*op);
+  END_HANDLE_TH_ERRORS
+}
+
+// An argument of an operator, of the object the tape gave for it: a number
+// where a tensor is taken is the tensor the number was wrapped in.
+c10::IValue argumentValue(
+    const py::handle& obj,
+    const c10::Argument& argument) {
+  c10::TypePtr type = argument.type();
+  if (const auto optional = type->cast<c10::OptionalType>()) {
+    type = optional->getElementType();
+  }
+  if (type->kind() == c10::TypeKind::TensorType && !obj.is_none() &&
+      !THPVariable_Check(obj.ptr())) {
+    if (PyBool_Check(obj.ptr())) {
+      return wrapNumber(at::Scalar(obj.ptr() == Py_True));
+    }
+    if (PyLong_Check(obj.ptr())) {
+      return wrapNumber(at::Scalar(py::cast<int64_t>(obj)));
+    }
+    if (PyFloat_Check(obj.ptr())) {
+      return wrapNumber(at::Scalar(py::cast<double>(obj)));
+    }
+    if (PyComplex_Check(obj.ptr())) {
+      return wrapNumber(at::Scalar(c10::complex<double>(
+          PyComplex_RealAsDouble(obj.ptr()),
+          PyComplex_ImagAsDouble(obj.ptr()))));
+    }
+  }
+  return torch::jit::toIValue(obj, argument.type(), argument.N());
+}
+
+// How kernels run for the runtime: below the autograd keys (the grad mode
+// stays what it is: a view made there is a view like one of eager's), on the
+// tape with gradients enabled, or, without either flag, as the thread is.
+struct RunGuards {
+  explicit RunGuards(uint32_t flags) {
+    if ((flags & TCFG_RUN_ON_TAPE) != 0) {
+      grad.emplace(true);
+    }
+    if ((flags & TCFG_RUN_BELOW_AUTOGRAD) != 0) {
+      below.emplace();
+    }
+  }
+  std::optional<at::AutoGradMode> grad;
+  std::optional<at::AutoDispatchBelowAutograd> below;
+};
+
+PyObject* stackResult(torch::jit::Stack& stack) {
+  if (stack.empty()) {
+    Py_RETURN_NONE;
+  }
+  if (stack.size() == 1) {
+    return torch::jit::toPyObject(std::move(stack[0])).release().ptr();
+  }
+  py::tuple out(stack.size());
+  for (size_t i = 0; i < stack.size(); ++i) {
+    out[i] = torch::jit::toPyObject(std::move(stack[i]));
+  }
+  return out.release().ptr();
+}
+
+PyObject* opCall(PyObject* obj, PyObject* args, uint32_t flags) {
+  HANDLE_TH_ERRORS
+  const auto op = operatorOf(obj);
+  const auto& arguments = op.schema().arguments();
+  TORCH_CHECK(
+      PyTuple_Check(args) &&
+          static_cast<size_t>(PyTuple_GET_SIZE(args)) == arguments.size(),
+      "torch.vm: op_call takes the arguments of the schema, in order");
+  torch::jit::Stack stack;
+  stack.reserve(arguments.size());
+  for (size_t i = 0; i < arguments.size(); ++i) {
+    stack.push_back(argumentValue(PyTuple_GET_ITEM(args, i), arguments[i]));
+  }
+  {
+    pybind11::gil_scoped_release no_gil;
+    const RunGuards guards(flags);
+    op.callBoxed(stack);
+  }
+  return stackResult(stack);
+  END_HANDLE_TH_ERRORS
+}
+
+// An argument of an operation of a program: a value of the program, a
+// constant, or a list of tensors that are values of the program.
+struct ProgramArg {
+  int32_t value = -1;
+  c10::IValue constant;
+  bool several = false;
+  bool optional_items = false;
+  std::vector<int32_t> items;
+};
+
+struct ProgramStep {
+  // The operator; none for a call of a Python function that makes a tensor
+  // of what is no tensor (torch.tensor of numbers), which is called with
+  // the arguments it was described with.
+  std::optional<c10::OperatorHandle> op;
+  py::object callable;
+  py::object call_args;
+  py::object call_kwargs;
+  std::vector<ProgramArg> args;
+  // Where what the operator returned goes: (place, value).
+  std::vector<std::pair<uint32_t, uint32_t>> gives;
+  bool single = false;
+};
+
+struct Program {
+  std::vector<ProgramStep> steps;
+  uint32_t n_values = 0;
+};
+
+// Whether an argument, as the joint graph describes one, names a value.
+bool namesValue(const py::handle& described) {
+  const auto pair = py::cast<py::tuple>(described);
+  const auto kind = py::cast<std::string>(pair[0]);
+  if (kind == "v") {
+    return true;
+  }
+  if (kind == "c") {
+    return false;
+  }
+  for (const auto& item : pair[1]) {
+    if (namesValue(item)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// The Python object an argument without values describes.
+py::object constantOf(const py::handle& described) {
+  const auto pair = py::cast<py::tuple>(described);
+  const auto kind = py::cast<std::string>(pair[0]);
+  if (kind == "c") {
+    return py::reinterpret_borrow<py::object>(pair[1]);
+  }
+  py::list items;
+  for (const auto& item : pair[1]) {
+    items.append(constantOf(item));
+  }
+  if (kind == "t") {
+    return py::tuple(items);
+  }
+  return items;
+}
+
+ProgramArg programArg(
+    const py::handle& described,
+    const c10::Argument& argument,
+    uint32_t n_values) {
+  ProgramArg arg;
+  if (!namesValue(described)) {
+    arg.constant = argumentValue(constantOf(described), argument);
+    return arg;
+  }
+  const auto pair = py::cast<py::tuple>(described);
+  if (py::cast<std::string>(pair[0]) == "v") {
+    arg.value = py::cast<int32_t>(pair[1]);
+    TORCH_CHECK(
+        arg.value >= 0 && static_cast<uint32_t>(arg.value) < n_values,
+        "a value that the program does not have");
+    return arg;
+  }
+  arg.several = true;
+  arg.optional_items =
+      argument.type()->isSubtypeOf(*c10::ListType::ofOptionalTensors()) &&
+      !argument.type()->isSubtypeOf(*c10::ListType::ofTensors());
+  for (const auto& item : pair[1]) {
+    const auto inner = py::cast<py::tuple>(item);
+    const auto kind = py::cast<std::string>(inner[0]);
+    if (kind == "v") {
+      arg.items.push_back(py::cast<int32_t>(inner[1]));
+    } else {
+      TORCH_CHECK(
+          kind == "c" && inner[1].is_none() && arg.optional_items,
+          "a list of tensors with what is no tensor in it");
+      arg.items.push_back(-1);
+    }
+  }
+  return arg;
+}
+
+void* programNew(
+    PyObject* ops,
+    uint32_t n_values,
+    char* reason,
+    size_t reason_len) {
+  auto program = std::make_unique<Program>();
+  program->n_values = n_values;
+  try {
+    for (const auto& described : py::handle(ops)) {
+      const auto parts = py::cast<py::tuple>(described);
+      ProgramStep step;
+      const auto args = py::cast<py::sequence>(parts[1]);
+      const auto kwargs = py::cast<py::dict>(parts[2]);
+      for (const auto& given : parts[3]) {
+        const auto pair = py::cast<py::tuple>(given);
+        const auto value = py::cast<uint32_t>(pair[1]);
+        TORCH_CHECK(value < n_values, "a value that the program does not have");
+        step.gives.emplace_back(py::cast<uint32_t>(pair[0]), value);
+      }
+      step.single = py::cast<bool>(parts[4]);
+      PyObject* named = parts[0].ptr();
+      if (PyCapsule_IsValid(named, kOperatorCapsule) == 0 &&
+          PyObject_HasAttrString(named, "_schema") == 0) {
+        py::list positional;
+        for (const auto& arg : args) {
+          TORCH_CHECK(!namesValue(arg), "a call of a function with a tensor");
+          positional.append(constantOf(arg));
+        }
+        py::dict by_name;
+        for (const auto& item : kwargs) {
+          TORCH_CHECK(
+              !namesValue(item.second), "a call of a function with a tensor");
+          by_name[item.first] = constantOf(item.second);
+        }
+        step.callable = py::reinterpret_borrow<py::object>(named);
+        step.call_args = py::tuple(positional);
+        step.call_kwargs = std::move(by_name);
+        program->steps.push_back(std::move(step));
+        continue;
+      }
+      step.op = operatorOf(named);
+      const auto& arguments = step.op->schema().arguments();
+      TORCH_CHECK(py::len(args) <= arguments.size(), "too many arguments");
+      for (size_t i = 0; i < arguments.size(); ++i) {
+        if (i < py::len(args)) {
+          step.args.push_back(programArg(args[i], arguments[i], n_values));
+        } else if (kwargs.contains(arguments[i].name())) {
+          step.args.push_back(programArg(
+              kwargs[arguments[i].name().c_str()], arguments[i], n_values));
+        } else {
+          TORCH_CHECK(
+              arguments[i].default_value().has_value(),
+              "no argument ",
+              arguments[i].name());
+          ProgramArg arg;
+          arg.constant = *arguments[i].default_value();
+          step.args.push_back(std::move(arg));
+        }
+      }
+      program->steps.push_back(std::move(step));
+    }
+  } catch (const std::exception& error) {
+    PyErr_Clear();
+    std::snprintf(reason, reason_len, "%s", error.what());
+    return nullptr;
+  }
+  return program.release();
+}
+
+void programFree(void* program) {
+  delete static_cast<Program*>(program);
+}
+
+PyObject* programRun(
+    void* raw,
+    PyObject* const* inputs,
+    const uint32_t* input_values,
+    uint32_t n_inputs,
+    const uint32_t* output_values,
+    uint32_t n_outputs,
+    uint32_t flags) {
+  HANDLE_TH_ERRORS
+  const auto& program = *static_cast<const Program*>(raw);
+  std::vector<c10::IValue> values(program.n_values);
+  for (uint32_t i = 0; i < n_inputs; ++i) {
+    TORCH_CHECK(
+        THPVariable_Check(inputs[i]) && input_values[i] < program.n_values,
+        "torch.vm: program_run takes tensors for values of the program");
+    values[input_values[i]] = THPVariable_Unpack(inputs[i]);
+  }
+  {
+    pybind11::gil_scoped_release no_gil;
+    const RunGuards guards(flags);
+    torch::jit::Stack stack;
+    for (const auto& step : program.steps) {
+      if (!step.op.has_value()) {
+        const pybind11::gil_scoped_acquire gil;
+        const py::object given =
+            step.callable(*step.call_args, **step.call_kwargs);
+        for (const auto& [place, value] : step.gives) {
+          const py::object item = step.single
+              ? given
+              : py::reinterpret_borrow<py::object>(given[py::int_(place)]);
+          TORCH_CHECK(
+              THPVariable_Check(item.ptr()),
+              "torch.vm: what makes a tensor of numbers gave no tensor");
+          values[value] = THPVariable_Unpack(item.ptr());
+        }
+        continue;
+      }
+      stack.clear();
+      for (const auto& arg : step.args) {
+        if (arg.value >= 0) {
+          stack.push_back(values[arg.value]);
+        } else if (!arg.several) {
+          stack.push_back(arg.constant);
+        } else if (arg.optional_items) {
+          c10::List<std::optional<at::Tensor>> list;
+          for (const auto item : arg.items) {
+            list.push_back(
+                item < 0 ? std::optional<at::Tensor>()
+                         : std::optional<at::Tensor>(values[item].toTensor()));
+          }
+          stack.emplace_back(std::move(list));
+        } else {
+          c10::List<at::Tensor> list;
+          for (const auto item : arg.items) {
+            list.push_back(values[item].toTensor());
+          }
+          stack.emplace_back(std::move(list));
+        }
+      }
+      step.op->callBoxed(stack);
+      for (const auto& [place, value] : step.gives) {
+        if (stack.size() == 1 && stack[0].isList() && !step.single) {
+          values[value] = stack[0].toListRef().at(place);
+        } else {
+          values[value] = stack.at(step.single ? 0 : place);
+        }
+      }
+    }
+  }
+  py::tuple out(n_outputs);
+  for (uint32_t i = 0; i < n_outputs; ++i) {
+    TORCH_CHECK(
+        output_values[i] < program.n_values,
+        "torch.vm: program_run: a value that the program does not have");
+    out[i] = torch::jit::toPyObject(values[output_values[i]]);
+  }
+  return out.release().ptr();
+  END_HANDLE_TH_ERRORS
+}
+
+// The node of a graph: one node for all the results of a graph that need a
+// gradient, with an edge per contribution to a gradient of an input. What it
+// is handed goes to the runtime, which runs the backward graph.
+class GraphBackward final : public torch::autograd::Node {
+ public:
+  GraphBackward(void* state, TcfgBackward backward, TcfgRelease release)
+      : state_(state), backward_(backward), release_(release) {}
+
+  // A node dies where the last tensor it gave dies, and a tensor is let go
+  // without the GIL (THPVariable_clear): the runtime is called with it.
+  ~GraphBackward() override {
+    const pybind11::gil_scoped_acquire gil;
+    release_(state_, 1);
+  }
+
+  std::string name() const override {
+    return "GraphBackward";
+  }
+
+  void release_variables() override {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    if (!freed_) {
+      freed_ = true;
+      const pybind11::gil_scoped_acquire gil;
+      release_(state_, 0);
+    }
+  }
+
+ protected:
+  torch::autograd::variable_list apply(
+      torch::autograd::variable_list&& grads) override {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    TORCH_CHECK(!freed_, torch::autograd::ERR_BACKWARD_TWICE);
+    const pybind11::gil_scoped_acquire gil;
+    std::vector<py::object> held;
+    std::vector<PyObject*> handed;
+    for (const auto& grad : grads) {
+      if (grad.defined()) {
+        held.push_back(
+            py::reinterpret_steal<py::object>(THPVariable_Wrap(grad)));
+        handed.push_back(held.back().ptr());
+      } else {
+        handed.push_back(nullptr);
+      }
+    }
+    std::vector<PyObject*> given(num_outputs(), nullptr);
+    const uint32_t flags =
+        c10::GradMode::is_enabled() ? uint32_t{TCFG_RUN_ON_TAPE} : 0U;
+    const auto status = backward_(
+        state_,
+        handed.data(),
+        static_cast<uint32_t>(handed.size()),
+        given.data(),
+        static_cast<uint32_t>(given.size()),
+        flags);
+    torch::autograd::variable_list outputs(given.size());
+    for (size_t i = 0; i < given.size(); ++i) {
+      if (given[i] != nullptr) {
+        if (status == 0 && THPVariable_Check(given[i])) {
+          outputs[i] = THPVariable_Unpack(given[i]);
+        }
+        Py_DECREF(given[i]);
+      }
+    }
+    if (status != 0) {
+      torch::throw_python_error();
+    }
+    return outputs;
+  }
+
+ private:
+  void* state_;
+  TcfgBackward backward_;
+  TcfgRelease release_;
+  bool freed_ = false;
+};
+
+// state is the node's from the call on, also when the call fails: release is
+// called for it when the node dies.
+int32_t graphNode(
+    PyObject* roots,
+    PyObject* targets,
+    void* state,
+    TcfgBackward backward,
+    TcfgRelease release) {
+  HANDLE_TH_ERRORS
+  const auto node =
+      c10::make_intrusive<GraphBackward>(state, backward, release);
+  TORCH_CHECK(
+      PyTuple_Check(roots) && PyTuple_Check(targets),
+      "torch.vm: graph_node takes a tuple of roots and a tuple of targets");
+  for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(targets); ++i) {
+    PyObject* item = PyTuple_GET_ITEM(targets, i);
+    TORCH_CHECK(THPVariable_Check(item), "torch.vm: a target is a tensor");
+    const auto& t = THPVariable_Unpack(item);
+    node->add_next_edge(
+        t.requires_grad() ? torch::autograd::impl::gradient_edge(t)
+                          : torch::autograd::Edge());
+  }
+  const c10::intrusive_ptr<torch::autograd::Node> base = node;
+  for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(roots); ++i) {
+    PyObject* item = PyTuple_GET_ITEM(roots, i);
+    TORCH_CHECK(THPVariable_Check(item), "torch.vm: a root is a tensor");
+    const auto& t = THPVariable_Unpack(item);
+    TORCH_CHECK(
+        !t.requires_grad() && !t.is_view(),
+        "torch.vm: a root is a tensor that was made below the autograd keys "
+        "and is no view");
+    torch::autograd::set_history(t, base);
+  }
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
 constexpr const char* kWorkspaceCapsule = "torch._C._cfg_workspace";
 
 void workspaceCapsuleFree(PyObject* capsule) {
@@ -2324,14 +3093,30 @@ void workspaceCapsuleFree(PyObject* capsule) {
 }
 
 const TcfgApi api_table = {
-    TCFG_API_VERSION,   &captureBegin,      &captureEnd,        &traceFree,
-    &traceRecords,      &siteFromTrace,     &siteFree,          &siteCall,
-    &siteInfo,          &tensorInfo,        &tensorBox,         &tensorRetain,
+    TCFG_API_VERSION,
+    &captureBegin,
+    &captureEnd,
+    &traceFree,
+    &traceRecords,
+    &siteFromTrace,
+    &siteFree,
+    &siteCall,
+    &siteInfo,
+    &tensorInfo,
+    &tensorBox,
+    &tensorRetain,
     &tensorRelease,
 #ifdef TCFG_HAS_FRAMES
-    &framePush,         &framePop,          &frameHeld,         &frameSwap,
-    &frameTraced,       &frameHook,         &frameWant,         &frameAdopt,
-    &frameInterpret,    &frameReturns,
+    &framePush,
+    &framePop,
+    &frameHeld,
+    &frameSwap,
+    &frameTraced,
+    &frameHook,
+    &frameWant,
+    &frameAdopt,
+    &frameInterpret,
+    &frameReturns,
 #else
     nullptr,
     nullptr,
@@ -2344,14 +3129,31 @@ const TcfgApi api_table = {
     nullptr,
     nullptr,
 #endif
-    &isTracing,         &workspaceEnterRaw, &workspaceLeaveRaw, &callModes,
-    &siteExport,        &traceCalls,        &dispatchKeys,
+    &isTracing,
+    &workspaceEnterRaw,
+    &workspaceLeaveRaw,
+    &callModes,
+    &siteExport,
+    &traceCalls,
+    &dispatchKeys,
 #ifdef TCFG_HAS_FRAMES
     &frameCount,
 #else
     nullptr,
 #endif
     &tensorForwardGrad,
+    &tapeBegin,
+    &tapeEnd,
+    &nodeOf,
+    &nodeInfo,
+    &nodeNext,
+    &nodeCall,
+    &opFind,
+    &opCall,
+    &programNew,
+    &programFree,
+    &programRun,
+    &graphNode,
 };
 
 } // namespace
@@ -2360,6 +3162,14 @@ namespace torch::cfg {
 
 void initCfgBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+  // The node of a graph has a Python class of its name, as eager's nodes do.
+  static PyTypeObject graph_backward_type;
+  torch::autograd::_initFunctionPyTypeObject(
+      graph_backward_type, "GraphBackward", nullptr, nullptr);
+  // A class that is no heap type is never let go: it holds itself.
+  Py_INCREF(&graph_backward_type);
+  torch::autograd::registerCppFunction(
+      typeid(GraphBackward), &graph_backward_type);
 
   m.def("_cfg_c_api", []() {
     // PyCapsule_New takes a non-const pointer; the table is only read.
