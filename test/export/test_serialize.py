@@ -711,6 +711,77 @@ def forward(self, x):
         self.assertEqual(node.inputs[3].name, "side")
         self.assertEqual(node.inputs[3].arg.as_string, "right")
 
+    @parametrize(
+        "case,kwargs,expected_kwargs,expected_side",
+        [
+            # Serializes identically to an artifact from before mutated_arg_indices existed.
+            ("omitted", {}, {}, 0.0),
+            # while_loop canonicalizes the default; serde preserves the FX node's kwargs.
+            ("explicit_default", {"mutated_arg_indices": ""}, {}, 0.0),
+            (
+                "non_default",
+                {"mutated_arg_indices": "2"},
+                {"mutated_arg_indices": "2"},
+                2.0,
+            ),
+        ],
+        name_fn=lambda case, kwargs, expected_kwargs, expected_side: case,
+    )
+    def test_hop_optional_kwarg_representation(
+        self, case, kwargs, expected_kwargs, expected_side
+    ) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, side):
+                def cond(i, x, side):
+                    return i < 2
+
+                def body(i, x, side):
+                    if kwargs.get("mutated_arg_indices"):
+                        # side follows the carried inputs i and x (mutation index 2).
+                        side.add_(1)
+                    return i + 1, x + 1
+
+                return torch.ops.higher_order.while_loop(
+                    cond, body, (torch.tensor(0), x), (side,), **kwargs
+                )[1]
+
+        ep = export(M(), (torch.ones(2), torch.zeros(2)), strict=False)
+        nodes = ep.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.while_loop
+        )
+        self.assertEqual(len(nodes), 1)
+        self.assertEqual(nodes[0].kwargs, expected_kwargs)
+        serialized = ExportedProgramSerializer().serialize(ep)
+        serialized_node = next(
+            node
+            for node in serialized.exported_program.graph_module.graph.nodes
+            if node.target == "torch.ops.higher_order.while_loop"
+        )
+        self.assertEqual(
+            [arg for arg in serialized_node.inputs if arg.kind == ArgumentKind.KEYWORD],
+            [
+                schema.NamedArgument(
+                    name=name,
+                    arg=schema.Argument.create(as_string=value),
+                    kind=ArgumentKind.KEYWORD,
+                )
+                for name, value in expected_kwargs.items()
+            ],
+        )
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded = load(buffer)
+        nodes = loaded.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.while_loop
+        )
+        self.assertEqual(len(nodes), 1)
+        self.assertEqual(nodes[0].kwargs, expected_kwargs)
+        inputs = (torch.ones(2), torch.zeros(2))
+        self.assertEqual(loaded.module()(*inputs), torch.full((2,), 3.0))
+        self.assertEqual(inputs[0], torch.ones(2))
+        self.assertEqual(inputs[1], torch.full((2,), expected_side))
+
     def test_canonicalize(self) -> None:
         class Module(torch.nn.Module):
             def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -958,6 +1029,9 @@ def forward(self, x):
         buffer.seek(0)
         loaded_ep = load(buffer)
         self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
+
+
+instantiate_parametrized_tests(TestSerialize)
 
 
 class _DeserializeGraphMixin:
