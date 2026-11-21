@@ -802,6 +802,11 @@
   self: hardsigmoid_backward(grad, self)
   result: auto_element_wise
 
+- name: hardsigmoid_backward(Tensor grad_output, Tensor self) -> Tensor
+  grad_output: hardsigmoid_backward(grad, self)
+  self: zeros_like(grad)
+  result: hardsigmoid_backward(grad_output_t, self_p)
+
 - name: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
   output_differentiability: [False]
 
