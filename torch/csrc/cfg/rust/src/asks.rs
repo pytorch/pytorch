@@ -16,20 +16,21 @@ use pyo3::types::{PyDict, PyList, PyTuple};
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
-/// The sizes and dtype of a tensor, those of the items of a list or tuple,
-/// or nothing for what is neither.
+/// The sizes of a tensor and, with `dtypes`, its dtype; those of the items
+/// of a list or tuple; or nothing for what is neither.
 #[derive(PartialEq)]
 enum Sizes {
     Tensor(Vec<i64>, usize),
     Several(Vec<Option<Sizes>>),
 }
 
-fn sizes(value: &Bound<'_, PyAny>) -> PyResult<Option<Sizes>> {
+fn sizes(value: &Bound<'_, PyAny>, dtypes: bool) -> PyResult<Option<Sizes>> {
     if is_tensor(value) {
-        return Ok(Some(Sizes::Tensor(value.getattr("shape")?.extract()?, value.getattr("dtype")?.as_ptr() as usize)));
+        let dtype = if dtypes { value.getattr("dtype")?.as_ptr() as usize } else { 0 };
+        return Ok(Some(Sizes::Tensor(value.getattr("shape")?.extract()?, dtype)));
     }
     if value.is_instance_of::<PyList>() || value.is_instance_of::<PyTuple>() {
-        return Ok(Some(Sizes::Several(value.try_iter()?.map(|item| sizes(&item?)).collect::<PyResult<_>>()?)));
+        return Ok(Some(Sizes::Several(value.try_iter()?.map(|item| sizes(&item?, dtypes)).collect::<PyResult<_>>()?)));
     }
     Ok(None)
 }
@@ -80,13 +81,21 @@ fn asked<'py>(py: Python<'py>, kind: &str, head: &Bound<'py, PyAny>, operands: &
 /// answer is no. `kind` is "site" for a kernel call (`head` describes it),
 /// "call" for a call of the function `head`, "method" for a call of the
 /// method of that name of the first operand, "item" for a subscript.
+///
+/// What it gives must have the dtypes of what the operation gave as well,
+/// unless the thread is under autocast: autocast casts on the device of the
+/// tensors of a call, and not where tensors hold nothing.
 pub unsafe fn sized(kind: &str, head: Obj, operands: Obj, kwnames: Obj, result: Obj) -> bool {
     let py = Python::assume_attached();
     let of = |held: Obj| Bound::<PyAny>::from_borrowed_ptr(py, held);
-    let Ok(Some(wanted)) = sizes(&of(result)) else {
+    let cast = torch(py).and_then(|torch| torch.getattr("_C")?.call_method0("_is_any_autocast_enabled")?.extract::<bool>());
+    let Ok(cast) = cast else {
         return false;
     };
-    match asked(py, kind, &of(head), &of(operands), &of(kwnames)).and_then(|found| sizes(&found)) {
+    let Ok(Some(wanted)) = sizes(&of(result), !cast) else {
+        return false;
+    };
+    match asked(py, kind, &of(head), &of(operands), &of(kwnames)).and_then(|found| sizes(&found, !cast)) {
         Ok(found) => found == Some(wanted),
         Err(_) => false,
     }
