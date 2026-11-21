@@ -1263,6 +1263,13 @@ impl Form<'_> {
     }
 }
 
+/// What a read behind the stores of a path is (see `Compiled::stored`).
+enum Behind {
+    Stored(PathValue),
+    Clear,
+    Ends,
+}
+
 /// What became of a function that a path was to go into.
 enum Followed {
     /// It was not gone into, and nothing has run.
@@ -4830,6 +4837,10 @@ impl Compiled {
                             && ffi::PyObject_Size(held) as usize == *count
                     }
                     Assert::Equals(v, number) => !reg(own, *v).is_null() && graph::same_value(reg(own, *v), number.as_ptr()),
+                    Assert::Same(a, b) => !reg(own, *a).is_null() && reg(own, *a) == reg(own, *b),
+                    Assert::Apart(read, attributes, target, keeps) => {
+                        graph::apart(reg(own, *read), *attributes, reg(own, *target), *keeps)
+                    }
                     Assert::Keys(v, names) => {
                         let held = reg(own, *v);
                         let dict = !held.is_null() && !capi::is_unboxed(held) && ffi::PyDict_CheckExact(held) != 0;
@@ -4854,6 +4865,7 @@ impl Compiled {
                             Assert::Lacks(..) => "a class without a __len__",
                             Assert::Sequence(..) | Assert::Keys(..) => "what a call spreads",
                             Assert::Equals(..) => "the place of an item",
+                            Assert::Same(..) | Assert::Apart(..) => "which object a store of the path was into",
                         };
                         let made = path.body.iter().find(|other| other.dst == assert.value() && other.dst != NONE);
                         let from = made.map_or(String::new(), |made| (&*path.owners[made.owner as usize]).func.op_repr(&made.op));
@@ -4897,6 +4909,51 @@ impl Compiled {
         Staged::Done
     }
 
+    /// What a store of a path lets go of where it is done: the value it
+    /// replaces (borrowed), or null where it replaces nothing. `at` gives
+    /// what the operands of the instruction hold. Err where that cannot
+    /// be told.
+    unsafe fn replaced(&self, op: &Op, at: &dyn Fn(V) -> Obj, api: &TcfgApi) -> Result<Obj, ()> {
+        let found = |dict: Obj, key: Obj| {
+            let held = if dict.is_null() { null_mut() } else { ffi::PyDict_GetItemWithError(dict, key) };
+            ffi::PyErr_Clear();
+            held
+        };
+        match op {
+            Op::StoreAttr { obj, name, val } => {
+                let name = self.func.consts[*name as usize].as_ptr();
+                let (object, value) = (at(*obj), at(*val));
+                let value = if value.is_null() { ffi::Py_None() } else { value };
+                match graph::store_kind(object, name, value, api) {
+                    Some(graph::Store::Plain) => {
+                        let slot = pyffi::_PyObject_GetDictPtr(object);
+                        Ok(if slot.is_null() { null_mut() } else { found(*slot, name) })
+                    }
+                    Some(graph::Store::Buffer(buffers)) => Ok(found(buffers, name)),
+                    None => Err(()),
+                }
+            }
+            Op::SetItem { obj, key, .. } => {
+                let (held, place) = (at(*obj), at(*key));
+                if held.is_null() || place.is_null() || capi::is_unboxed(held) || capi::is_unboxed(place) {
+                    return Err(());
+                }
+                if ffi::PyDict_CheckExact(held) != 0 {
+                    return Ok(found(held, place));
+                }
+                if ffi::PyList_CheckExact(held) == 0 || ffi::PyLong_CheckExact(place) == 0 {
+                    return Err(());
+                }
+                let (asked, count) = (ffi::PyLong_AsSsize_t(place), ffi::PyList_GET_SIZE(held));
+                let index = if asked < 0 { asked + count } else { asked };
+                // An item that an earlier store of the path puts there is
+                // not there yet.
+                if (0..count).contains(&index) { Ok(ffi::PyList_GET_ITEM(held, index)) } else { Err(()) }
+            }
+            _ => Ok(null_mut()),
+        }
+    }
+
     /// Whether an object stays alive where a path lands, whatever the path
     /// lets go of: a parameter of the frame that the path does not bind
     /// anew holds it, or a register of the function that the path neither
@@ -4922,7 +4979,9 @@ impl Compiled {
     /// of there. The instructions let go of a reference in their place; a
     /// path does where it lands, behind everything it read, so an object
     /// whose end runs Python code must not end by it. What a path lets go
-    /// of that was there before it ran: what the registers of the
+    /// of that was there before it ran: what its stores replace (for all
+    /// of them where the path has `landed`, else for those whose object is
+    /// there in front of the callable), what the registers of the
     /// function hold that it overwrites or clears, and what the variables
     /// of the frame hold that it binds anew. Each such object dies without
     /// Python code running, if it dies (`graph::dies_quietly`), or stays
@@ -4931,13 +4990,61 @@ impl Compiled {
     /// builds, to a register or a variable of the function; or it has
     /// more references than the path lets go of and may itself hold
     /// (`graph::outlives`).
-    unsafe fn lets_all_go(&self, path: &Path, own: &[Obj], regs: &[Obj], frame: (Frame, bool)) -> bool {
+    unsafe fn lets_all_go(&self, path: &Path, own: &[Obj], regs: &[Obj], frame: (Frame, bool), landed: bool, api: &TcfgApi) -> bool {
         let mut gone: Vec<Obj> = Vec::new();
         let mut take = |held: Obj| {
             if !held.is_null() && !capi::is_unboxed(held) {
                 gone.push(held);
             }
         };
+        // How many items the stores in front of one put behind the end
+        // of a list: an item among those is one the path put there, and
+        // replacing it lets go of nothing that was there before.
+        let mut grown: Vec<(Obj, isize)> = Vec::new();
+        let stores: &[graph::PathInst] = if path.effects { &path.body } else { &[] };
+        for inst in stores.iter().filter(|inst| inst.stage == Stage::Landing) {
+            let owner = &*path.owners[inst.owner as usize];
+            let at = |v: V| reg(own, v);
+            match &inst.op {
+                Op::ListAppend(list, _) if !at(*list).is_null() => grown.push((at(*list), 1)),
+                Op::ListExtend(list, more) if !at(*list).is_null() && !at(*more).is_null() && !capi::is_unboxed(at(*more)) => {
+                    grown.push((at(*list), ffi::PyObject_Size(at(*more)).max(0)));
+                }
+                Op::StoreAttr { obj, .. } | Op::SetItem { obj, .. } => {
+                    let held = at(*obj);
+                    let key = matches!(&inst.op, Op::SetItem { key, .. } if at(*key).is_null());
+                    if held.is_null() || key {
+                        // What the graph gives: looked at where the path lands.
+                        if landed {
+                            return false;
+                        }
+                        continue;
+                    }
+                    if let Op::SetItem { key, .. } = &inst.op {
+                        let place = at(*key);
+                        if !capi::is_unboxed(held) && ffi::PyList_CheckExact(held) != 0 && !capi::is_unboxed(place) && ffi::PyLong_CheckExact(place) != 0 {
+                            let more: isize = grown.iter().filter(|(other, _)| *other == held).map(|(_, n)| *n).sum();
+                            let (asked, has) = (ffi::PyLong_AsSsize_t(place), ffi::PyList_GET_SIZE(held));
+                            let index = if asked < 0 { asked + has + more } else { asked };
+                            if (has..has + more).contains(&index) {
+                                continue;
+                            }
+                        }
+                    }
+                    // Putting back the object that is there lets go of nothing
+                    // (`buffer += 1` stores what the write gave back).
+                    let (Op::StoreAttr { val, .. } | Op::SetItem { val, .. }) = &inst.op else {
+                        continue;
+                    };
+                    match owner.replaced(&inst.op, &at, api) {
+                        Ok(held) if held == at(*val) => {}
+                        Ok(held) => take(held),
+                        Err(()) => return false,
+                    }
+                }
+                _ => {}
+            }
+        }
         for v in &path.clears {
             take(reg(regs, *v));
         }
@@ -4988,6 +5095,87 @@ impl Compiled {
             return false;
         }
         true
+    }
+
+    /// Whether the stores of a path can be done without Python code
+    /// running, on the registers of the path: all of them (`landed`), or
+    /// those whose object is there in front of the callable.
+    unsafe fn effects_ready(&self, path: &Path, own: &[Obj], landed: bool, api: &TcfgApi) -> bool {
+        // How many items the stores in front of one put behind the end of
+        // a list: a store at a place of the list is at one it has by then.
+        let mut grown: Vec<(Obj, isize)> = Vec::new();
+        path.body.iter().filter(|inst| inst.stage == Stage::Landing).all(|inst| {
+            let owner = &*path.owners[inst.owner as usize];
+            let at = |v: V| reg(own, v);
+            let there = |v: V| !at(v).is_null() && !capi::is_unboxed(at(v));
+            let more = |list: Obj, grown: &[(Obj, isize)]| grown.iter().filter(|(other, _)| *other == list).map(|(_, n)| *n).sum::<isize>();
+            match &inst.op {
+                Op::StoreAttr { obj, name, val } if there(*obj) => {
+                    // What the graph gives is a plain tensor.
+                    let name = owner.func.consts[*name as usize].as_ptr();
+                    let value = if at(*val).is_null() { None } else { Some(at(*val)) };
+                    match value {
+                        Some(value) => graph::store_kind(at(*obj), name, value, api).is_some(),
+                        None => !landed && graph::store_kind(at(*obj), name, ffi::Py_None(), api).is_some(),
+                    }
+                }
+                Op::ListAppend(list, _) if there(*list) => {
+                    grown.push((at(*list), 1));
+                    ffi::PyList_CheckExact(at(*list)) != 0
+                }
+                Op::ListExtend(list, more) if there(*list) => {
+                    let sequence = |o: Obj| ffi::PyList_CheckExact(o) != 0 || ffi::PyTuple_CheckExact(o) != 0;
+                    if there(*more) && sequence(at(*more)) {
+                        grown.push((at(*list), ffi::PyObject_Size(at(*more))));
+                    }
+                    ffi::PyList_CheckExact(at(*list)) != 0 && (!there(*more) && !landed || there(*more) && sequence(at(*more)))
+                }
+                Op::SetItem { obj, key, .. } if there(*obj) && there(*key) => {
+                    let (held, place) = (at(*obj), at(*key));
+                    if ffi::PyDict_CheckExact(held) != 0 {
+                        graph::is_plain_key(place) && graph::quiet_keys(held)
+                    } else {
+                        ffi::PyList_CheckExact(held) != 0 && ffi::PyLong_CheckExact(place) != 0 && {
+                            let (asked, count) = (ffi::PyLong_AsSsize_t(place), ffi::PyList_GET_SIZE(held) + more(held, &grown));
+                            (-count..count).contains(&asked)
+                        }
+                    }
+                }
+                // Into what the graph gives: shown where the path lands.
+                _ => !landed,
+            }
+        })
+    }
+
+    /// Does a store of a path, as the instruction it was taken down from
+    /// does it where it runs no Python code.
+    unsafe fn effect(&self, own: &mut [Obj], op: &Op, api: &TcfgApi) -> Result<(), ()> {
+        let done = match op {
+            Op::StoreAttr { obj, name, val } => {
+                let name = self.func.consts[*name as usize].as_ptr();
+                let (object, value) = (self.obj(own, *obj), self.obj(own, *val));
+                match graph::store_kind(object, name, value, api) {
+                    Some(graph::Store::Plain) => ffi::PyObject_GenericSetAttr(object, name, value),
+                    Some(graph::Store::Buffer(buffers)) => ffi::PyDict_SetItem(buffers, name, value),
+                    None => {
+                        set_error(ffi::PyExc_SystemError, "a store of a path cannot be done".to_string());
+                        -1
+                    }
+                }
+            }
+            Op::ListAppend(list, item) => {
+                let (list, item) = (self.obj(own, *list), self.obj(own, *item));
+                ffi::PyList_Append(list, item)
+            }
+            op => match self.exec_op(own, op) {
+                Ok(nothing) => {
+                    capi::release(nothing);
+                    0
+                }
+                Err(()) => -1,
+            },
+        };
+        if done < 0 { Err(()) } else { Ok(()) }
     }
 
     /// Runs a path in place of the instructions it was taken down from, if
@@ -5092,10 +5280,18 @@ impl Compiled {
             leave(own);
             return Ran::Miss;
         };
+        // The stores of the path are done when it lands. That each can be
+        // done without Python code running is shown first: here for those
+        // into objects that are there already, so that the callable does
+        // not run for nothing.
         // What the path lets go of where it lands (what the registers and
         // the variables of the function hold and it overwrites) must be
         // something whose end runs no Python code, or stay alive.
-        if !self.lets_all_go(path, &own, regs, (frames.top(), frames.depth == 0)) {
+        if !self.lets_all_go(path, &own, regs, (frames.top(), frames.depth == 0), false, api) {
+            leave(own);
+            return Ran::Other;
+        }
+        if path.effects && !self.effects_ready(path, &own, false, api) {
             leave(own);
             return Ran::Other;
         }
@@ -5145,7 +5341,15 @@ impl Compiled {
             // One that has run before raises what it raises: nothing was
             // done yet, and the instructions would raise it too. One that
             // has not is taken back, and the instructions run from then on.
-            if exported.proven.load(Ordering::Relaxed) || ffi::PyErr_ExceptionMatches(ffi::PyExc_Exception) == 0 {
+            let proven = exported.proven.load(Ordering::Relaxed);
+            if proven && path.effects && ffi::PyErr_ExceptionMatches(ffi::PyExc_Exception) != 0 {
+                // The stores in front of what raised are the function's to
+                // do: the instructions run, do them, and raise.
+                ffi::PyErr_Clear();
+                leave(own);
+                return Ran::Miss;
+            }
+            if proven || ffi::PyErr_ExceptionMatches(ffi::PyExc_Exception) == 0 {
                 leave(own);
                 return Ran::Landed(Landing { block: usize::MAX, code: std::ptr::null(), pc: bc as usize });
             }
@@ -5191,6 +5395,20 @@ impl Compiled {
         if staged != Staged::Done {
             leave(own);
             return other(staged);
+        }
+        if path.effects {
+            // Nothing is stored unless everything can be.
+            if !self.lets_all_go(path, &own, regs, (frames.top(), frames.depth == 0), true, api) || !self.effects_ready(path, &own, true, api) {
+                leave(own);
+                return Ran::Other;
+            }
+            for inst in path.body.iter().filter(|inst| inst.stage == Stage::Landing) {
+                let owner = &*path.owners[inst.owner as usize];
+                if owner.effect(&mut own, &inst.op, api).is_err() {
+                    leave(own);
+                    return Ran::Landed(Landing { block: usize::MAX, code: std::ptr::null(), pc: inst.bc as usize });
+                }
+            }
         }
         site.sure();
         exported.hits.fetch_add(1, Ordering::Relaxed);
@@ -5512,6 +5730,14 @@ impl Compiled {
             kill(t, regs);
             return Taken::Went;
         }
+        if let Some(taken) = self.record_effect(t, inst, regs, frames, api) {
+            return taken;
+        }
+        if !t.stores.is_empty() {
+            if let Some(taken) = self.record_behind(t, inst, regs) {
+                return taken;
+            }
+        }
         if let Op::GetItem(list, at) = &inst.op {
             // An item of a list the path filled is the value that was put
             // there, for as long as the place is the same number.
@@ -5547,7 +5773,11 @@ impl Compiled {
             // function a path may call: the read, and then the call.
             let load = Op::LoadAttr(*recv, *name);
             let held = reg(regs, *recv);
-            let read = *kwnames == NONE && !held.is_null() && !capi::is_unboxed(held) && self.quiet(regs, &load, api);
+            let read = *kwnames == NONE
+                && !held.is_null()
+                && !capi::is_unboxed(held)
+                && self.quiet(regs, &load, api)
+                && matches!(self.stored(t, regs, *recv, self.func.consts[*name as usize].as_ptr(), true, inst.bc), Behind::Clear);
             let found = if read { self.exec_op(regs, &load).unwrap_or(null_mut()) } else { null_mut() };
             ffi::PyErr_Clear();
             let given: Vec<Obj> = args.iter().map(|v| reg(regs, *v)).collect();
@@ -5838,6 +6068,323 @@ impl Compiled {
         t.push(renamed, dst, kind, inst.bc);
         kill(t, regs);
         Taken::Went
+    }
+
+    /// Takes a store into an object from outside the path down as an effect
+    /// of the path: an attribute (`graph::store_kind`), an item of an exact
+    /// dict under a plain key or of an exact list at a place it has, an
+    /// `append` or an `extend` of an exact list. The store is done here, as
+    /// the instruction does it; where the path is run it is done when the
+    /// path lands. None for any other instruction.
+    unsafe fn record_effect(
+        &self,
+        t: &mut Trace,
+        inst: &Inst,
+        regs: &mut [Obj],
+        frames: &mut Frames,
+        api: &TcfgApi,
+    ) -> Option<Taken> {
+        let f = &self.func;
+        let made = |t: &Trace, v: V| t.mapped(v) != NONE && t.defs[t.mapped(v) as usize].made;
+        let outside = |t: &Trace, v: V| !reg(regs, v).is_null() && !capi::is_unboxed(reg(regs, v)) && !made(t, v);
+        let list = |v: V| ffi::PyList_CheckExact(reg(regs, v)) != 0;
+        // What it stores, where, under which key, and whether the call
+        // that does it gives None.
+        let mut bound_to: Obj = null_mut();
+        let mut keeps = graph::Keeps::Itself;
+        let (op, target, key, stored, call): (Op, V, Option<Obj>, V, bool) = match &inst.op {
+            Op::StoreAttr { obj, name, val } if *val != UNDEF && outside(t, *obj) => {
+                let name_held = f.consts[*name as usize].as_ptr();
+                keeps = match graph::store_kind(reg(regs, *obj), name_held, reg(regs, *val), api)? {
+                    graph::Store::Plain => graph::Keeps::Attributes,
+                    graph::Store::Buffer(_) => graph::Keeps::Buffers,
+                };
+                (inst.op.clone(), *obj, Some(name_held), *val, false)
+            }
+            Op::SetItem { obj, key, val } if outside(t, *obj) => {
+                let (held, at) = (reg(regs, *obj), reg(regs, *key));
+                let plain = !at.is_null() && !capi::is_unboxed(at);
+                let entry = plain && ffi::PyDict_CheckExact(held) != 0 && graph::is_plain_key(at) && graph::quiet_keys(held);
+                let place = plain && list(*obj) && ffi::PyLong_CheckExact(at) != 0 && {
+                    let (asked, count) = (ffi::PyLong_AsSsize_t(at), ffi::PyList_GET_SIZE(held));
+                    (-count..count).contains(&asked)
+                };
+                if !entry && !place {
+                    return None;
+                }
+                (inst.op.clone(), *obj, entry.then_some(at), *val, false)
+            }
+            Op::CallMethod { recv, name, args, kwnames } if *kwnames == NONE && args.len() == 1 && outside(t, *recv) => {
+                let method = pyffi::str_to_string(f.consts[*name as usize].as_ptr());
+                let more = reg(regs, args[0]);
+                let sequence = !more.is_null()
+                    && !capi::is_unboxed(more)
+                    && (ffi::PyList_CheckExact(more) != 0 || ffi::PyTuple_CheckExact(more) != 0);
+                match method.as_str() {
+                    "append" if list(*recv) => (Op::ListAppend(*recv, args[0]), *recv, None, args[0], true),
+                    "extend" if list(*recv) && sequence => (Op::ListExtend(*recv, args[0]), *recv, None, args[0], true),
+                    _ => return None,
+                }
+            }
+            // `append` or `extend` that was bound to the list earlier.
+            Op::Call { callee, args, kwnames } if *kwnames == NONE && args.len() == 1 => {
+                let bound = reg(regs, *callee);
+                let function = !bound.is_null() && !capi::is_unboxed(bound) && ffi::PyCFunction_Check(bound) != 0;
+                let Some(Op::LoadAttr(recv, name)) = self.analysis.def_op(f, *callee).filter(|_| function) else {
+                    return None;
+                };
+                let held = ffi::PyCFunction_GetSelf(bound);
+                let method = pyffi::str_to_string(f.consts[*name as usize].as_ptr());
+                let exact = !held.is_null() && !capi::is_unboxed(held) && ffi::PyList_CheckExact(held) != 0;
+                if !exact || made(t, *recv) || t.mapped(*recv) == NONE {
+                    return None;
+                }
+                let more = reg(regs, args[0]);
+                let sequence = !more.is_null()
+                    && !capi::is_unboxed(more)
+                    && (ffi::PyList_CheckExact(more) != 0 || ffi::PyTuple_CheckExact(more) != 0);
+                bound_to = held;
+                match method.as_str() {
+                    "append" => (Op::ListAppend(*recv, args[0]), *recv, None, args[0], true),
+                    "extend" if sequence => (Op::ListExtend(*recv, args[0]), *recv, None, args[0], true),
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        let object = if bound_to.is_null() { reg(regs, target) } else { bound_to };
+        frames.top().at(inst.bc & OFFSET_MASK);
+        let Ok(nothing) = self.exec_op(regs, &inst.op) else {
+            return Some(Taken::Raised);
+        };
+        let renamed = graph::renamed(&op, &mut |v| self.path_value(t, regs, v))?;
+        t.push(renamed, NONE, Kind::Effect, inst.bc);
+        let (into, value) = (t.mapped(target), t.mapped(stored));
+        let attribute = matches!(inst.op, Op::StoreAttr { .. });
+        let key = key.map(|key| PyObj::from_borrowed(key));
+        t.stores.push(graph::Stored { object, keeps, key, attribute, target: into, value });
+        if call && inst.dst != NONE {
+            ffi::Py_XINCREF(nothing);
+            let dst = t.define(inst.dst, Def::default(), nothing);
+            t.push(Op::Const(f.const_none), dst, Kind::Pure, inst.bc);
+            capi::release(std::mem::replace(&mut regs[inst.dst as usize], nothing));
+        } else {
+            capi::release(nothing);
+        }
+        for v in &inst.kills {
+            capi::release(take(regs, *v));
+            t.kill(*v);
+        }
+        Some(Taken::Went)
+    }
+
+    /// For an instruction behind a store of the path, which is done where
+    /// the path lands and not where the instruction is run. A read of an
+    /// attribute, or of an entry of a dict, under a name that the path
+    /// stored under is given the stored value where it is of the object
+    /// that was stored into (`stored`). Any other read goes past the
+    /// stores only if what it goes through is not what one of them
+    /// changes: where that is so in this run, the path checks it at every
+    /// call (`Assert::Apart`); where it is not, the path ends.
+    unsafe fn record_behind(&self, t: &mut Trace, inst: &Inst, regs: &mut [Obj]) -> Option<Taken> {
+        let f = &self.func;
+        let ends = || Some(Taken::Ends("reads what a store of the path changed".to_string()));
+        match &inst.op {
+            Op::StoreAttr { .. } | Op::SetItem { .. } | Op::Hold(_) => return None,
+            Op::LoadAttr(a, name) => {
+                let held = reg(regs, *a);
+                return match self.stored(t, regs, *a, f.consts[*name as usize].as_ptr(), true, inst.bc) {
+                    Behind::Clear => None,
+                    Behind::Ends => ends(),
+                    Behind::Stored(value) => {
+                        debug_assert!(!held.is_null());
+                        let Ok(read) = self.exec_op(regs, &inst.op) else {
+                            return Some(Taken::Raised);
+                        };
+                        capi::release(std::mem::replace(&mut regs[inst.dst as usize], read));
+                        t.rename(inst.dst, value);
+                        for v in &inst.kills {
+                            capi::release(take(regs, *v));
+                            t.kill(*v);
+                        }
+                        Some(Taken::Went)
+                    }
+                };
+            }
+            Op::GetItem(a, key) => {
+                let (held, at) = (reg(regs, *a), reg(regs, *key));
+                let entry = !held.is_null()
+                    && !capi::is_unboxed(held)
+                    && ffi::PyDict_Check(held) != 0
+                    && !at.is_null()
+                    && graph::is_plain_key(at);
+                if entry {
+                    return match self.stored(t, regs, *a, at, false, inst.bc) {
+                        Behind::Clear => None,
+                        Behind::Ends => ends(),
+                        Behind::Stored(value) => {
+                            let Ok(read) = self.exec_op(regs, &inst.op) else {
+                                return Some(Taken::Raised);
+                            };
+                            capi::release(std::mem::replace(&mut regs[inst.dst as usize], read));
+                            t.rename(inst.dst, value);
+                            for v in &inst.kills {
+                                capi::release(take(regs, *v));
+                                t.kill(*v);
+                            }
+                            Some(Taken::Went)
+                        }
+                    };
+                }
+            }
+            // `getattr` and `hasattr` read as an attribute is read: what a
+            // store of the path may have changed is not theirs to read.
+            Op::Call { callee, args, .. } if args.len() >= 2 && graph::reads_attribute(reg(regs, *callee)) => {
+                let name = reg(regs, args[1]);
+                let named = !name.is_null() && !capi::is_unboxed(name) && ffi::PyUnicode_CheckExact(name) != 0;
+                if !named || !matches!(self.stored(t, regs, args[0], name, true, inst.bc), Behind::Clear) {
+                    return ends();
+                }
+            }
+            // A dict that was stored into may be the one the globals are
+            // read from.
+            Op::LoadGlobal(name) => {
+                let name = f.consts[*name as usize].as_ptr();
+                let named = |store: &graph::Stored| store.key.as_ref().is_some_and(|key| graph::same_value(key.as_ptr(), name));
+                return if t.stores.iter().any(named) { ends() } else { None };
+            }
+            _ => {}
+        }
+        // What the instruction takes: the lists and dicts among it, and
+        // those that an iterator or a view among it goes over.
+        let mut taken: Vec<V> = Vec::new();
+        inst.op.for_each_use(|v| taken.push(v));
+        let mut read: Vec<PathValue> = Vec::new();
+        for v in taken {
+            let held = reg(regs, v);
+            if held.is_null() || capi::is_unboxed(held) {
+                continue;
+            }
+            let container = ffi::PyList_Check(held) != 0 || ffi::PyDict_Check(held) != 0;
+            if !container && !graph::goes_over_another(held) {
+                continue;
+            }
+            let value = self.path_value(t, regs, v);
+            if value == UNDEF || value == NONE || !Self::sources(t, value, &mut read) {
+                return ends();
+            }
+        }
+        for value in read {
+            let held = t.rec.values[value as usize];
+            let list = ffi::PyList_Check(held) != 0;
+            let stores: Vec<(Obj, PathValue, graph::Keeps)> = t
+                .stores
+                .iter()
+                .filter(|store| (store.key.is_none() && !store.attribute) == list)
+                .map(|store| (store.object, store.target, store.keeps))
+                .collect();
+            for (object, target, keeps) in stores {
+                if !graph::apart(held, false, object, keeps) {
+                    return ends();
+                }
+                if !t.apart.contains(&(value, false, target, keeps)) {
+                    t.apart.push((value, false, target, keeps));
+                    t.check(Assert::Apart(value, false, target, keeps), inst.bc);
+                }
+            }
+        }
+        None
+    }
+
+    /// The lists and dicts that a value of a path is, or goes over: an
+    /// iterator or a view that the path made has what it was made of.
+    /// False for one from outside the path, of which that is not known,
+    /// and for a list or dict whose value is not there.
+    unsafe fn sources(t: &Trace, value: PathValue, found: &mut Vec<PathValue>) -> bool {
+        let held = t.rec.values[value as usize];
+        if held.is_null() || capi::is_unboxed(held) {
+            return true;
+        }
+        if ffi::PyList_Check(held) != 0 || ffi::PyDict_Check(held) != 0 {
+            // What the path made itself is no list or dict from outside.
+            if !t.defs[value as usize].made && !found.contains(&value) {
+                found.push(value);
+            }
+            return true;
+        }
+        if !graph::goes_over_another(held) {
+            return true;
+        }
+        let Some(made) = t.body.iter().rev().find(|inst| inst.dst == value) else {
+            return false;
+        };
+        let mut from: Vec<PathValue> = Vec::new();
+        graph::reads(&made.op, |v| from.push(v));
+        from.into_iter().all(|v| v == value || Self::sources(t, v, found))
+    }
+
+    /// What a read of an attribute of an object (or of an entry of a
+    /// dict), behind the stores of the path, is. Of the stores under the
+    /// same name, the last one whose dict the read looks into decides: if
+    /// it stored into this very object in the same way (an attribute of
+    /// it, an entry of this dict), the read is the value it stored, with a
+    /// check that the object is the same where the path came to it another
+    /// way; if it got there another way (through `__dict__`, through a
+    /// dict two objects share), the path ends. Every store under the name
+    /// that could change what the read sees at another call, which is
+    /// each one behind that store, or each one if there is none, is
+    /// checked to be apart from it.
+    unsafe fn stored(&self, t: &mut Trace, regs: &mut [Obj], object: V, key: Obj, attribute: bool, bc: u32) -> Behind {
+        if t.stores.is_empty() {
+            return Behind::Clear;
+        }
+        let held = reg(regs, object);
+        if held.is_null() || capi::is_unboxed(held) {
+            return Behind::Clear;
+        }
+        // An attribute of a list or a dict is a method of it, which reads
+        // nothing until it is called.
+        if attribute && (ffi::PyList_Check(held) != 0 || ffi::PyDict_Check(held) != 0) {
+            return Behind::Clear;
+        }
+        // What a class reads in a function of its own is not known to be
+        // what was stored.
+        if attribute && !graph::special(held, &graph::specials().getattribute).is_null() {
+            return Behind::Ends;
+        }
+        if attribute && pyffi::str_to_string(key) == "__dict__" {
+            // The dict itself: what is read of it later is looked at then,
+            // unless a store of the path is into it.
+            let own = graph::kept(held, graph::Keeps::Attributes);
+            let changed = t.stores.iter().any(|store| !own.is_null() && graph::kept(store.object, store.keeps) == own);
+            return if changed { Behind::Ends } else { Behind::Clear };
+        }
+        let alike: Vec<usize> = (0..t.stores.len())
+            .filter(|at| t.stores[*at].key.as_ref().is_some_and(|other| other.as_ptr() == key || graph::same_value(other.as_ptr(), key)))
+            .collect();
+        let last = alike.iter().rev().copied().find(|at| !graph::apart(held, attribute, t.stores[*at].object, t.stores[*at].keeps));
+        let by = self.path_value(t, regs, object);
+        let mut given = None;
+        if let Some(at) = last {
+            let store = &t.stores[at];
+            let direct = store.object == held && store.attribute == attribute && (attribute || store.keeps == graph::Keeps::Itself);
+            if !direct {
+                return Behind::Ends;
+            }
+            let (target, value) = (store.target, store.value);
+            if by != target {
+                t.check(Assert::Same(by, target), bc);
+            }
+            given = Some(value);
+        }
+        for at in alike.into_iter().filter(|at| last.is_none_or(|last| *at > last)) {
+            let (target, keeps) = (t.stores[at].target, t.stores[at].keeps);
+            if !t.apart.contains(&(by, attribute, target, keeps)) {
+                t.apart.push((by, attribute, target, keeps));
+                t.check(Assert::Apart(by, attribute, target, keeps), bc);
+            }
+        }
+        given.map_or(Behind::Clear, Behind::Stored)
     }
 
     /// Takes down, in place of an instruction that enters a Python
@@ -6144,6 +6691,7 @@ impl Compiled {
         let mut read: Vec<PyObj> = Vec::new();
         let (mut called, mut receiver, mut descr): (Obj, Obj, Obj) = (null_mut(), null_mut(), null_mut());
         let mut items: Vec<Obj> = Vec::new();
+        let mut behind = Behind::Clear;
         // The names of the values that are handed over under one, which
         // are the last of them.
         let mut keys: Vec<Obj> = Vec::new();
@@ -6157,6 +6705,11 @@ impl Compiled {
                 if let Form::Method { recv, name, .. } = form {
                     let load = Op::LoadAttr(*recv, *name);
                     if !self.quiet(regs, &load, api) {
+                        return Followed::Not;
+                    }
+                    // What a store of the path put there is what is called.
+                    behind = self.stored(t, regs, *recv, f.consts[*name as usize].as_ptr(), true, bc);
+                    if let Behind::Ends = behind {
                         return Followed::Not;
                     }
                     let Ok(found) = self.exec_op(regs, &load) else {
@@ -6298,7 +6851,10 @@ impl Compiled {
             Form::Call { callee, args, .. } | Form::Method { recv: callee, args, .. } => {
                 let mut value = self.path_value(t, regs, *callee);
                 if let Form::Method { name, .. } = form {
-                    value = t.derive(Op::LoadAttr(value, *name), Kind::Read, false, new_ref(called), bc);
+                    value = match behind {
+                        Behind::Stored(stored) => stored,
+                        _ => t.derive(Op::LoadAttr(value, *name), Kind::Read, false, new_ref(called), bc),
+                    };
                 }
                 let function = t.derive(Op::Part(Part::Target, value), Kind::Read, false, new_ref(func), bc);
                 if receiver == called {
