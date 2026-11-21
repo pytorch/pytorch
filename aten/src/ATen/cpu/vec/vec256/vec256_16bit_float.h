@@ -387,7 +387,8 @@ class Vectorized16 {
   // this way For example `Sleef_exp2f8_u10` signature is `const __m256
   // (__m256)`
   C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wignored-qualifiers")
-  Vectorized<T> map(SLEEF_CONST __m256 (*SLEEF_CONST_OLD vop)(__m256)) const {
+  Vectorized<T> map(
+      SLEEF_CONST_OLD __m256 (*SLEEF_CONST_OLD vop)(__m256)) const {
     __m256 lo, hi;
     cvt_to_fp32<T>(values, lo, hi);
     const auto o1 = vop(lo);
