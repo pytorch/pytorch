@@ -71,6 +71,8 @@ static inline MPSDataType getMPSScalarType(const TensorBase& t) {
   return getMPSScalarType(t.scalar_type());
 }
 MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type);
+// Value of a 0-dim CPU tensor as passed to a kernel, with 64-bit floats narrowed to 32-bit ones
+MPSScalar getMPSScalar(const TensorBase& cpu_scalar);
 std::string getMPSTypeString(ScalarType scalar_type, bool short_name = false);
 static inline std::string getMPSTypeString(const TensorBase& t, bool short_name = false) {
   return getMPSTypeString(t.scalar_type(), short_name);
@@ -175,7 +177,9 @@ MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph* mpsGraph, const Scalar& scal
 
 std::string get_mem_format_string(c10::MemoryFormat memory_format);
 
-using MPSCacheKey = uint64_t;
+// Keyed on the full descriptor string, not a hash of it: two distinct ops can no
+// longer land on the same slot and silently get each other's cached graph/kernel.
+using MPSCacheKey = std::string;
 
 struct MPSCachedKernel {
   MPSCachedKernel(NSObject* object) : _object([object retain]) {}
@@ -281,16 +285,13 @@ struct MPSKernelCache {
 
   MPSCachedKernel* CreateCachedKernel(const std::string& key, CreateCachedKernelBlock createCacheBlock) {
     __block MPSCachedKernel* cachedKernel = nil;
-    MPSCacheKey hash = std::hash<std::string>{}(key);
     dispatch_sync_with_rethrow(serialQueue_, ^() {
-      auto it = cache_.find(hash);
+      auto it = cache_.find(key);
       if (it != cache_.end()) {
-        auto& entry = it->second;
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
-        cachedKernel = entry.cachedKernel_;
+        cachedKernel = it->second.cachedKernel_;
       } else {
         cachedKernel = createCacheBlock();
-        cache_.try_emplace(hash, key, cachedKernel);
+        cache_.try_emplace(key, key, cachedKernel);
       }
     });
     return cachedKernel;
@@ -303,13 +304,10 @@ struct MPSKernelCache {
   MPSCachedKernel* LookUp(const std::string& key) const {
     __block MPSCachedKernel* cachedKernel = nil;
 
-    MPSCacheKey hash = std::hash<std::string>{}(key);
     dispatch_sync_with_rethrow(serialQueue_, ^() {
-      auto it = cache_.find(hash);
+      auto it = cache_.find(key);
       if (it != cache_.end()) {
-        auto& entry = it->second;
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached kernel!\n");
-        cachedKernel = entry.cachedKernel_;
+        cachedKernel = it->second.cachedKernel_;
       }
     });
     return cachedKernel;
@@ -378,18 +376,14 @@ struct MPSGraphCache {
   MPSCachedGraph* CreateCachedGraph(const std::string& key, CreateCachedGraphBlock createCacheBlock) {
     __block MPSCachedGraph* cachedGraph = nil;
 
-    MPSCacheKey hash = std::hash<std::string>{}(key);
-
     dispatch_sync_with_rethrow(serialQueue_, ^() {
       // verify the cached entry doesn't already exist
-      auto it = cache_.find(hash);
+      auto it = cache_.find(key);
       if (it != cache_.end()) {
-        auto& entry = it->second;
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
-        cachedGraph = entry.cachedGraph_;
+        cachedGraph = it->second.cachedGraph_;
       } else {
         cachedGraph = createCacheBlock();
-        auto inserted = cache_.try_emplace(hash, key, cachedGraph).first;
+        auto inserted = cache_.try_emplace(key, key, cachedGraph).first;
         profileCachedGraph(inserted->second);
       }
     });
@@ -404,13 +398,10 @@ struct MPSGraphCache {
   MPSCachedGraph* LookUp(const std::string& key) const {
     __block MPSCachedGraph* cachedGraph = nullptr;
 
-    MPSCacheKey hash = std::hash<std::string>{}(key);
-
     dispatch_sync_with_rethrow(serialQueue_, ^() {
-      auto it = cache_.find(hash);
+      auto it = cache_.find(key);
       if (it != cache_.end()) {
         auto& entry = it->second;
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
         cachedGraph = entry.cachedGraph_;
         profileCachedGraph(entry);
       }
@@ -482,19 +473,8 @@ template <typename encoder_t,
 static inline void mtl_setBuffer(encoder_t encoder, const TensorBase& t, unsigned idx) {
   if (t.device().type() == kCPU) [[unlikely]] {
     if constexpr (std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t>) {
-      TORCH_CHECK(t.dim() == 0, "Passed CPU tensor to MPS op");
-      // MPS does not support doubles, silently downcast CPU scalar to float
-      if (t.scalar_type() == kDouble) [[unlikely]] {
-        auto val = static_cast<float>(*reinterpret_cast<const double*>(t.const_data_ptr()));
-        [encoder setBytes:&val length:sizeof(val) atIndex:idx];
-        return;
-      }
-      if (t.scalar_type() == kComplexDouble) [[unlikely]] {
-        auto val = static_cast<c10::complex<float>>(*reinterpret_cast<const c10::complex<double>*>(t.const_data_ptr()));
-        [encoder setBytes:&val length:sizeof(val) atIndex:idx];
-        return;
-      }
-      [encoder setBytes:t.const_data_ptr() length:t.element_size() atIndex:idx];
+      const auto s = getMPSScalar(t);
+      [encoder setBytes:&s.value length:s.size atIndex:idx];
     } else {
       TORCH_CHECK(false, "Passed CPU tensor to MPS op");
     }
@@ -522,6 +502,34 @@ static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const Cont
 
 static inline void mtl_setBytes(id<MTLComputeCommandEncoder> encoder, const MPSScalar& s, unsigned idx) {
   [encoder setBytes:&s.value length:s.size atIndex:idx];
+}
+
+// Returns the GPU address `offset` bytes into t's buffer, for use in argument buffers.
+// Buffers reached only through an argument buffer must be declared, or Metal neither orders the
+// kernel after pending writes to them nor retains them, which the allocator uses to track buffers in use
+static inline uint64_t mtl_useBufferAddress(id<MTLComputeCommandEncoder> encoder,
+                                            const TensorBase& t,
+                                            size_t offset,
+                                            MTLResourceUsage usage) {
+  const auto buffer = getMTLBufferStorage(t);
+  if (buffer) {
+    [encoder useResource:buffer usage:usage];
+  }
+  return buffer.gpuAddress + offset;
+}
+
+// Binds tensors as an argument buffer of 64-bit slots: GPU addresses of MPS tensors, values of CPU scalars
+static inline void mtl_setTensorList(id<MTLComputeCommandEncoder> encoder, ArrayRef<Tensor> tensors, unsigned idx) {
+  std::vector<uint64_t> slots;
+  slots.reserve(tensors.size());
+  for (const auto& t : tensors) {
+    slots.push_back(
+        t.device().is_cpu()
+            ? c10::bit_cast<uint64_t>(getMPSScalar(t).value)
+            : mtl_useBufferAddress(
+                  encoder, t, t.storage_offset() * t.element_size(), MTLResourceUsageRead | MTLResourceUsageWrite));
+  }
+  mtl_setBytes(encoder, slots, idx);
 }
 
 static size_t iter_tensor_offset(TensorIteratorBase& iter, unsigned idx) {
