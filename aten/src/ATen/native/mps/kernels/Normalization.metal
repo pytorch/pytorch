@@ -25,7 +25,6 @@ kernel void layer_norm_single_row(
     device T* bias [[buffer(7)]],
     uint tg_id [[threadgroup_position_in_grid]],
     uint tid [[thread_position_in_threadgroup]],
-    uint lsize [[threads_per_threadgroup]],
     uint simd_lane_id [[thread_index_in_simdgroup]]) {
   constexpr int N_READS = 4;
 
@@ -48,28 +47,65 @@ kernel void layer_norm_single_row(
     }
   }
 
+  // Each simdgroup centers its part of the row on the part's own mean p and
+  // reduces the sum of squares M2 and the sum r of the centered values.
+  // Simdgroup 0 then merges the parts exactly: about the row mean m, a part
+  // of c elements contributes M2 + c * (p - m)^2 + 2 * (p - m) * r. The
+  // identity needs the exact p used for centering, so p is stored rather than
+  // recomputed, and r cancels its rounding error. Like a two-pass variance
+  // this avoids the cancellation of E[x^2]-E[x]^2 for small variances, with a
+  // single threadgroup reduction
+  constexpr int simdgroup_elems = simdgroup_size * N_READS;
   threadgroup float local_sum[simdgroup_size];
-  threadgroup float local_sum_sq[simdgroup_size];
-
-  float partial_sum = 0.0f;
+  threadgroup float local_center[simdgroup_size];
+  threadgroup float local_m2[simdgroup_size];
+  threadgroup float local_r[simdgroup_size];
+  threadgroup float row_stats[2];
+  uint simdgroup_id = tid / simdgroup_size;
+  int part_size = min(
+      simdgroup_elems, (int)axis_size - (int)simdgroup_id * simdgroup_elems);
+  float sum = ::metal::simd_sum(vals.x + vals.y + vals.z + vals.w);
+  float center = sum / float(part_size);
+  float4 d = vals - center;
+  if (count < N_READS) {
 #pragma unroll
-  for (int i = 0; i < N_READS; i++) {
-    partial_sum += vals[i];
+    for (int i = 0; i < N_READS; i++) {
+      if (i >= count) {
+        d[i] = 0.0f;
+      }
+    }
   }
-  float mean =
-      threadgroup_sum(local_sum, partial_sum, tid, lsize) / float(axis_size);
-
-  // Two-pass variance from the centered values avoids the catastrophic
-  // cancellation of E[x^2]-E[x]^2 for small variances.
-  float partial_sum_sq = 0.0f;
-#pragma unroll
-  for (int i = 0; i < N_READS; i++) {
-    float d = (i < count) ? (vals[i] - mean) : 0.0f;
-    partial_sum_sq += d * d;
+  float m2 = ::metal::simd_sum(dot(d, d));
+  float r = ::metal::simd_sum(d.x + d.y + d.z + d.w);
+  if (simd_lane_id == 0) {
+    local_sum[simdgroup_id] = sum;
+    local_center[simdgroup_id] = center;
+    local_m2[simdgroup_id] = m2;
+    local_r[simdgroup_id] = r;
   }
-  float var = threadgroup_sum(local_sum_sq, partial_sum_sq, tid, lsize) /
-      float(axis_size);
-  float inv_std = metal::precise::rsqrt(var + epsilon);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (simdgroup_id == 0) {
+    // Element count of the part this lane merges, 0 past the last part
+    int c = clamp(
+        (int)axis_size - (int)simd_lane_id * simdgroup_elems,
+        0,
+        simdgroup_elems);
+    float s = c > 0 ? local_sum[simd_lane_id] : 0.0f;
+    float mean = ::metal::simd_sum(s) / float(axis_size);
+    float part = 0.0f;
+    if (c > 0) {
+      float dm = local_center[simd_lane_id] - mean;
+      part = local_m2[simd_lane_id] + dm * (c * dm + 2 * local_r[simd_lane_id]);
+    }
+    float var = ::metal::simd_sum(part) / float(axis_size);
+    if (simd_lane_id == 0) {
+      row_stats[0] = mean;
+      row_stats[1] = metal::precise::rsqrt(var + epsilon);
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float mean = row_stats[0];
+  float inv_std = row_stats[1];
 
   if (count == N_READS) {
     // Checking weight and bias once per slice rather than per element keeps
@@ -216,7 +252,6 @@ kernel void layer_norm_looped(
       device DTYPE* bias [[buffer(7)]],                          \
       uint tg_id [[threadgroup_position_in_grid]],               \
       uint tid [[thread_position_in_threadgroup]],               \
-      uint lsize [[threads_per_threadgroup]],                    \
       uint simd_lane_id [[thread_index_in_simdgroup]]);
 
 #define instantiate_layer_norm_looped(DTYPE, IDX_T, IDXNAME)                 \

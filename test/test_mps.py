@@ -3292,14 +3292,17 @@ class TestMPS(TestCaseMPS):
 
     # Regression test for https://github.com/pytorch/pytorch/issues/190491: small
     # per-row variance with small eps used to collapse rstd to rsqrt(eps) on MPS.
-    @parametrize("axis_size", [8, 8192])
+    # The offset row keeps a small variance under a large mean; 1000, 1025 and
+    # 4096 span several simdgroups of the single-row kernel.
+    @parametrize("axis_size", [8, 1000, 1025, 4096, 8192])
     def test_layer_norm_small_variance(self, axis_size):
         a, eps = 1e-4, 1e-9  # var = a^2 = 1e-8, far below the old 1e-6 clamp
-        row = torch.tensor([a, -a] * (axis_size // 2), dtype=torch.float32)
-        cpu_x = row.repeat(4, 1)
+        row = torch.tensor([a, -a] * ((axis_size + 1) // 2), dtype=torch.float32)[:axis_size]
+        offset_row = 1e3 + 1e-2 * torch.linspace(-1, 1, axis_size)
+        cpu_x = torch.stack([row, offset_row])
         weight = torch.rand(axis_size)
         bias = torch.rand(axis_size)
-        cpu_y = F.layer_norm(cpu_x, (axis_size,), weight, bias, eps)
+        cpu_y = F.layer_norm(cpu_x.double(), (axis_size,), weight.double(), bias.double(), eps).float()
         mps_y = F.layer_norm(
             cpu_x.to('mps'), (axis_size,), weight.to('mps'), bias.to('mps'), eps)
         self.assertEqual(mps_y, cpu_y)
