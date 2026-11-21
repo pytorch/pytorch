@@ -1286,9 +1286,9 @@ def logit_backward(
         lo = eps
         hi = 1.0 - lo
         return torch.where(
-            torch.logical_and(self >= lo, self <= hi),
-            grad_output / (self * (1.0 - self)),
+            torch.logical_or(self < lo, self > hi),
             0.0,
+            grad_output / (self * (1.0 - self)),
         )
     else:
         return torch.where(
