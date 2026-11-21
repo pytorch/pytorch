@@ -87,6 +87,44 @@ if TYPE_CHECKING:
     from ..symbolic_convert import InstructionTranslatorBase
 
 
+def _nested_region_identity(
+    left: VariableTracker, right: VariableTracker, a: Source | None, b: Source | None
+) -> ConstantVariable | None:
+    from ..symbolic_convert import InstructionTranslator
+
+    tx = InstructionTranslator.current_tx()
+    tracer = tx.output.current_tracer
+    if not tracer.in_nested_compile_region:
+        return None
+    left, right = left.realize(), right.realize()
+    kind = type(left)
+    if kind is not type(right):
+        return None
+    container = kind in (
+        variables.ListVariable,
+        variables.ConstDictVariable,
+        variables.SetVariable,
+        variables.TupleVariable,
+        variables.RangeVariable,
+        variables.SliceVariable,
+    )
+    tracer.has_container_identity |= container
+    if a is None or b is None or a == b or any(map(is_constant_source, (a, b))):
+        return None
+    if container:
+        # Reconstructed containers do not preserve identity.
+        resolve = tx.output.resolve_source_value
+        same = resolve(a) is resolve(b)
+    elif kind is VariableTracker or isinstance(left, variables.UserDefinedVariable):
+        same = left.value is right.value
+    else:
+        return None
+    check = GuardBuilder.DUPLICATE_INPUT if same else GuardBuilder.NOT_DUPLICATE_INPUT
+    install_guard(a.make_guard(partial(check, source_b=b)))
+    tracer.traced_sources.add(a)
+    return ConstantVariable.create(same)
+
+
 def vt_identity_compare(
     left: VariableTracker,
     right: VariableTracker,
@@ -116,24 +154,10 @@ def vt_identity_compare(
                 if arg.source is not None:
                     arg.get_id(tx)
                     install_guard(arg.source.make_guard(GuardBuilder.ID_MATCH))
-    if a is not None and b is not None and a != b and current_scope_id() > 1:
-        from ..symbolic_convert import InstructionTranslator
-        from .lists import RangeVariable, SliceVariable, TupleVariable
-        from .user_defined import UserDefinedVariable
-
-        tracer = InstructionTranslator.current_tx().output.current_tracer
-        if tracer.tracks_lexical_sources and not any(map(is_constant_source, (a, b))):
-            left, right = left.realize(), right.realize()
-            if type(left) is type(right):
-                if type(left) is VariableTracker or isinstance(
-                    left, UserDefinedVariable
-                ):
-                    same = left.value is right.value
-                    check = partial(GuardBuilder.DUPLICATE_INPUT, source_b=b, same=same)
-                    install_guard(a.make_guard(check))
-                    return ConstantVariable.create(same)
-                if type(left) in (TupleVariable, RangeVariable, SliceVariable):
-                    return None
+    if current_scope_id() > 1:
+        result = _nested_region_identity(left, right, a, b)
+        if result is not None:
+            return result
     if left is right:
         return ConstantVariable.create(True)
 
@@ -3166,9 +3190,8 @@ def object_generic_setattr_str(
                         "reload it from.",
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
-            untracked_ordered_dict = type(obj) is variables.OrderedDictVariable
             if (
-                untracked_ordered_dict
+                type(obj) is variables.OrderedDictVariable
                 or obj.is_tensor()
                 or isinstance(obj, variables.PythonModuleVariable)
             ):
@@ -3180,9 +3203,6 @@ def object_generic_setattr_str(
                     context=f"setattr({obj}, {name}, {value})",
                     explanation=f"setattr() is not supported on type {obj.python_type_name()}",
                     hints=[*graph_break_hints.SUPPORTABLE],
-                    skip_frame=untracked_ordered_dict,
-                    preserve_skip_frame_after_inline=untracked_ordered_dict,
-                    apply_to_code=not untracked_ordered_dict,
                 )
             se.track_attribute_mutation_new(obj)
 

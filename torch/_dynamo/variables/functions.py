@@ -75,6 +75,7 @@ from ..source import (
     ConstantSource,
     ConstDictKeySource,
     DefaultsSource,
+    get_item_source_base,
     GetItemSource,
     ImportSource,
     is_from_skip_guard_source,
@@ -968,9 +969,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             # returns self and deepcopy skips its keepalive list.
             item_type = type(item.value)
             keys: list[VariableTracker] = []
+            owner = get_item_source_base(source.base)
             for key in memo.items:
                 typ, scope = tx.output.deepcopy_id_types.get(key.vt, (item_type, None))
-                if typ is item_type or scope not in (None, source.base):
+                if typ is item_type or scope not in (None, owner):
                     keys.append(key.vt)
             if keys and (
                 not tx.output.is_root_tracer()
@@ -980,7 +982,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 unimplemented(
                     gb_type="Legacy deepcopy memo requires identity guards",
                     context="copy.deepcopy",
-                    explanation="A seeded deepcopy memo can override a mapping key by its process-local ID.",
+                    explanation="The deepcopy memo may already contain a replacement for this mapping key. Checking this requires a guard on the key's identity.",
                     hints=["Copy the mapping outside the captured region."],
                 )
             tokens = tuple(k.value for k in keys if ConstantVariable.is_constant_vt(k))
