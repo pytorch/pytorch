@@ -1167,6 +1167,33 @@ class TestDeserialize(_DeserializeGraphMixin, TestCase):
         self.assertFalse(is_concrete_int(loaded_constant.shape[0]))
         self.assertEqual(loaded_constant.shape[1], 3)
 
+    def test_custom_op_tensor_and_bool_outputs(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::with_flag",
+                "(Tensor x) -> (Tensor, bool)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::with_flag", "cpu", lib=lib)
+            @torch.library.register_fake("mylib::with_flag", lib=lib)
+            def with_flag_impl(x):
+                return x * 2, True
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.mylib.with_flag(x)[0] + 1
+
+            self.check_graph(M(), (torch.randn(3),))
+            # check_graph checks only the tensor items of a tuple val, so check
+            # the bool here.
+            loaded = deserialize(serialize(export(M(), (torch.randn(3),))))
+            (node,) = loaded.graph.find_nodes(
+                op="call_function", target=torch.ops.mylib.with_flag.default
+            )
+            self.assertIs(node.meta["val"][1], True)
+
     def test_optional_tuple(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -2119,6 +2146,33 @@ class TestSaveLoad(TestCase):
         self.assertEqual(loaded(x), m(x))
         self.assertEqual(loaded.state_dict(), m.state_dict())
         save(loaded_ep, io.BytesIO())
+
+    def test_save_load_symbolic_bool_results_of_regions(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                with torch.no_grad():
+                    alone = x.shape[0] > 2
+                with torch.no_grad():
+                    y, with_tensor = x + 1, x.shape[0] > 3
+                return y, alone, with_tensor
+
+        ep = export(M(), (torch.randn(4),), dynamic_shapes=({0: Dim("n")},))
+        # Load reads a bool alone and a bool next to a tensor differently, so
+        # export must keep the 2 regions apart.
+        regions = [
+            [isinstance(v, torch.SymBool) for v in node.meta["val"]]
+            for node in ep.graph.nodes
+            if isinstance(node.target, torch._ops.HigherOrderOperator)
+        ]
+        self.assertEqual(regions, [[True], [False, True]])
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded = load(buffer).module()
+        # At size 3 the 2 bools differ, so a swap is caught.
+        for n in (2, 3, 4):
+            x = torch.randn(n)
+            self.assertEqual(loaded(x), M()(x))
 
     def test_deserialize_torch_artifact_dict(self):
         data = {"key": torch.tensor([1, 2, 3])}
