@@ -197,7 +197,8 @@ What ends a path:
 - behind an operation that writes to a tensor from outside the path or draws
   random numbers: whatever a form would have to check behind what was made
   of the graph, and such an operation behind a check of that kind ("Writes"
-  below); with `Graphs()` alone, an operation that draws random numbers;
+  below); with `Graphs()` alone, an operation that draws random numbers (a
+  dropout that is told not to drop draws none);
 - a store into an object that would run Python code, and a read of a list
   or a dict that a store of the path changed ("Stores into objects");
 - a number read from a tensor (`x.item()`, `float(x)`), and with it a branch
@@ -307,10 +308,26 @@ instructions of the function, and so is a function of torch that graphs do
 not start in.
 The same goes for what the interpreter calls for an object without a call
 being written: its `__iter__` where a `for` goes over it (an `nn.Sequential`
-or an `nn.ModuleList`, also through `enumerate`, `zip`, `list` and `tuple`),
+or an `nn.ModuleList`, also through `iter`, `enumerate` and `zip`),
 its `__len__`, its `__getitem__`, and where an attribute is read, the getter
 of a property, the `__get__` of a descriptor whose class is written in
 Python, or the `__getattr__` of the class for a name that is not there.
+`list(x)` and `tuple(x)` ask the object for its `__len__` or its
+`__length_hint__` as well, once they have its iterator, so a path goes into
+the `__iter__` for them only where the class has neither, which it checks
+at every call: of a module container, or of a tensor, they end the path in
+front of the call.
+
+The instruction that such a function runs for gives what the interpreter
+makes of what the function returned: `for` and `iter` raise `TypeError` for
+what is no iterator, `len` gives the `__index__` of what `__len__` returned
+as an `int` and raises for a negative one, and a read whose property or
+descriptor raised `AttributeError` asks the `__getattr__` of the class, if
+it has one. A path goes on behind the function only where what it returned
+is that already (an iterator, an `int` that is not negative), which it
+checks at every call. For anything else, and where the path ends inside
+the function, which then runs on to its end as instructions (below), the
+instruction gives the interpreter's answer and the path ends in front of it.
 
 ```python
 class Block(torch.nn.Module):
@@ -385,9 +402,9 @@ A path does not go into every call. It ends in front of a call
   calls itself is gone into that often, and an `nn.Sequential` inside an
   `nn.Sequential` is on a path twice;
 - more than 48 calls deep;
-- of a `functools.partial`, of a class (constructing an object), of
-  `super()`, and of a function that was made on the path (a closure that
-  the function defines and calls);
+- of a `functools.partial`, of a class (constructing an object), and of a
+  function that was made on the path (a closure that the function defines
+  and calls);
 - whose arguments do not fit the function: the call raises the `TypeError`
   where the function has it;
 - that hands on `**kwargs` from a dict whose keys are no strs;
@@ -780,7 +797,15 @@ was exported for. That is right only for what runs no Python code. So the
 engine looks at each of them on every call before it runs it: an attribute
 that is found without a property, a descriptor or a `__getattr__` written in
 Python, an item of a list, a tuple or a dict under a number or a str,
-arithmetic on exact numbers. A call in which one of them could run Python
+arithmetic on exact numbers. A dict or a set compares the key that is looked
+up with every key it holds under the same hash, and a key of a class with an
+`__eq__` does that in Python. So a lookup in a dict or a set
+(`d[k]`, `k in d`, `d.get(k)`) runs no Python code only while every key in it is
+a number, a str or None, or a tuple of them: a dict that has only ever been
+given strs for keys is known to hold no other (CPython 3.13 and below say so
+of a dict; under 3.14 it counts as any other), any other dict and any set is
+looked through where it holds at most 32 keys, and is taken to run Python
+code where it holds more. A call in which one of these could run Python
 code runs the operations of the function as they are, every read once and
 where the function has it, and after three such calls in a row the graph is
 left to the engine:
@@ -1359,7 +1384,8 @@ eager's. With a pass over graphs in the list it is an operation of the
 graph, in the order of the function. A pass that returns the graph has it
 run on the kernels of eager mode, so with the same seed the numbers are
 eager's too, and so are those of `AOTAutograd()`, which runs the kernel of
-the draw as it is. What `Inductor()` makes of a dropout draws other numbers.
+the draw as it is. What `Inductor()` makes of a draw (of a dropout, of
+`torch.rand_like`, of `torch.bernoulli`) draws other numbers.
 `torch.vm.is_exact` is false for every list with a compiler in it:
 
 ```python
@@ -1440,7 +1466,10 @@ lists as left out.
 
 A store into a Python object from outside the path is an effect of the path,
 and does not end it: `obj.name = value`, `d[k] = v` on a dict, `l[i] = v`,
-`l.append(x)` and `l.extend(xs)` on a list. While a path is taken down, the
+`l.append(x)` and `l.extend(xs)` on a list. A store under a key compares it
+with the keys the dict holds, as a lookup does, so it is an effect only for
+a dict whose keys are compared without Python code ("Passes over graphs");
+into any other dict it ends the path. While a path is taken down, the
 instructions of the function do the stores where the function has them. Where
 what was made of the graph runs in their place, the stores are done when the
 path ends, all of them, in the order of the function, and behind every check
@@ -1529,7 +1558,12 @@ such a check runs the instructions. Where the read goes through what a store
 changed in the very call the path is taken down in (`h.__dict__["n"] = 7`
 and then `h.n`; `a.append(1)` and then `len(a)`), the path ends in front of
 the read, and so it does for an iterator or a view from outside the path,
-of which it is not known what it goes over. A store at a place of a list
+of which it is not known what it goes over. A read of an attribute of an
+object whose class reads its attributes in a function of its own (a
+`__getattribute__` written in Python) is not given what was stored: the
+path goes into the function, and what that reads of the object is looked
+at behind the stores ("Classes that read their attributes themselves"). A
+store at a place of a list
 (`l[0] = v`) is to a place the list has by then, the items that the stores
 of the path in front of it append counted.
 
@@ -1631,9 +1665,12 @@ found["ops"], found["why"]  # (6, 'what an operation with several results gives 
 A method of a tensor that is written in Python (`Tensor.split`) is gone
 into with the tensor of the graph as its `self`. `isinstance` of a class
 whose `__instancecheck__` is a Python function is followed into that
-function, and the path checks that what it returned is a bool. A C function
+function, and the path checks that what it returned is a bool: for anything
+else `isinstance` gives whether it is true, as the interpreter does, and the
+path ends in front of the call. A C function
 that is called with what the code spreads (`torch.add(*pair)`) is an
-operation where the path built the tuple and no keyword is spread:
+operation ("Methods read off a tensor, and what a call spreads" has what may
+be spread, "What a call names with a dict" what `**` may hand over):
 
 ```python
 class Meta(type):
@@ -1721,6 +1758,245 @@ with torch.no_grad():
 same, found["ops"], found["why"]  # (True, 8, 'the function returns')
 ```
 
+### Texts and sequences on a path
+
+What a function computes with its plain values is part of a path too, where
+C code alone does it. Turning a value into text is: an f-string, `format`
+and `%` on a number, a text, `None`, a dtype or a device, and on a list or a
+tuple of those, the sizes of a tensor among them; so are the methods of a
+number, a text or a tuple of such on such values (`note.startswith("torch")`).
+What a tensor holds is not text a path makes (`f"{y.sum()}"` ends it).
+Putting sequences together is on a path as well: `+` on two texts, two lists
+or two tuples, `*` with a whole number, and a list that is extended by a list
+or a tuple (`(*y.shape[:-1], 2, -1)`, `y.shape[:-1] + (h, w)`, `[1] * n`). A
+list, a tuple or a slice made of nothing but sizes of what the graph computes
+and of constants is the same in every call that a form is for, as a single
+size is, so an operation takes it as a constant of the graph. `a += b` on a
+list is no instruction of a path: it changes the list, which may be the
+caller's. A layer that checks what it is given with a message, as the norm
+layers of vision libraries do, is one graph:
+
+```python
+class Guarded(torch.nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(channels, channels, 3, padding=1, bias=False)
+        self.bn = torch.nn.BatchNorm2d(channels)
+        self.drop = torch.nn.Dropout(0.2)
+
+    def forward(self, x):
+        y = self.conv(x)
+        torch._assert(y.ndim == 4, f"expected 4D input (got {y.ndim}D input)")
+        y = self.drop(torch.relu(self.bn(y)))
+        return y.view((*y.shape[:-1], 2, -1)).sum(-1)
+
+
+model = Guarded(4).eval()
+g = torch.vm(model, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs()))
+images = torch.randn(2, 4, 8, 8)
+with torch.no_grad():
+    for _ in range(4):
+        same = torch.equal(g(images), model(images))
+same, [(found["ops"], found.get("why"), found.get("reason")) for found in torch.vm.regions(g)]
+# (True, [(6, 'the function returns', None)])
+try:
+    g(torch.randn(4, 8, 8))
+except AssertionError as error:
+    said = str(error)
+said  # 'expected 4D input (got 3D input)'
+```
+
+The dropout of the layer is among the six operations: a dropout of a model
+that is not training drops nothing and draws nothing, and is an operation
+like any other, with `Graphs()` alone as well ("Writes" has what one that
+drops is).
+
+### Methods read off a tensor, and what a call spreads
+
+`y.to(device)` is a call of a method by its name. Where the code reads the
+method first and calls it later, or calls it with `*` (`y.view(*shape)`),
+what is called is a method that was bound to the tensor; it is the same
+operation, the method of that name of the tensor it was read off. What a
+call spreads with `*` is handed over item by item. The items of a tuple or
+a list the path built are the values it was built of. Those of any other
+list or tuple (the function's own `*sizes`, a `torch.Size`, a list of the
+caller) are read off it, with a check at every call that it has that many:
+
+```python
+def hands_on(x, pair, *sizes):
+    y = (x.sin() + 1).cos()
+    shape = y.shape[:-1] + (2, 2)
+    y = y.view(*shape).reshape(*sizes)
+    return (torch.mul(y, *pair) * 2).tanh().exp()
+
+
+g = torch.vm(hands_on, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+x, w = torch.randn(3, 4), torch.randn(4)
+for _ in range(6):
+    same = torch.equal(g(x, (w,), 3, 4), hands_on(x, (w,), 3, 4))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["why"]  # (True, 9, 'the function returns')
+torch.equal(g(x, [w[:1]], 2, 6), hands_on(x, [w[:1]], 2, 6))  # True: other items are another form
+```
+
+### What a call names with a dict, and what gives back what it was handed
+
+A C function that is called with `**` is an operation where the path built
+the dict under names: the call with those names. An operator that draws
+random numbers only at a rate (`scaled_dot_product_attention` with its
+`dropout_p`) draws nothing at a rate of zero and is an operation like any
+other, with the rate checked at every call; at another rate it is one under
+the rule of "Writes", as every operation that only draws now is, whether it
+is a call site or not. `contiguous` of a tensor that is contiguous runs no
+kernel and gives the tensor back; it is the operation all the same, which
+copies where the tensor of another call is laid out otherwise. A tuple that
+a function gives back and its caller unpacks is the values it was made of,
+so a tensor that comes back next to something else is still the operation
+that gave it, and a method of a tensor that is written in Python
+(`Tensor.split`) can be read off such a tensor and called later:
+
+```python
+def gives_two(y, **kwargs):
+    left, right = y.split(2, dim=-1)
+    return (left * right).transpose(0, 1).contiguous(), None
+
+
+def attends(q, weight):
+    y = (q.sin() + 1).cos()
+    rate = {"dropout_p": 0.0}
+    out = torch.nn.functional.scaled_dot_product_attention(y, y, y, **rate)
+    out, nothing = gives_two(out, scale=None)
+    return torch.nn.functional.linear(*(out, weight), **{"bias": None}).tanh()
+
+
+g = torch.vm(attends, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+q, weight = torch.randn(2, 2, 5, 4), torch.randn(3, 2)
+for _ in range(6):
+    same = torch.equal(g(q, weight), attends(q, weight))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["why"]  # (True, 10, 'the function returns')
+```
+
+A list or a tuple that the path put together of sizes of what the graph
+computes and of numbers from in front of it (`(*x.shape[:-1], -1,
+self.heads)`) is the same in every call where the path checks those numbers,
+which it does when an operation takes such a sequence.
+
+### Classes that read their attributes themselves
+
+A read of an attribute of an object whose class has a `__getattribute__`
+written in Python goes into that function, as a read goes into a property
+("Paths across calls"), unless the class has a `__getattr__` as well: what
+the function raises is then not what the read raises, and such a read is
+left to the interpreter. `super()` in a method is an instruction of a path,
+and `super().method(...)` is followed like any call of a method.
+`super().__getattribute__(key)`, which is the lookup of `object`, is a call
+the path makes where that lookup runs no Python code, and goes into the
+getter where it finds a property. `getattr` and `hasattr` of such an object
+go into the function as a read does: `hasattr` is `True` where the function
+returns, whatever it returns, and where it raises `AttributeError`,
+`hasattr` and `getattr` with a default make their answer of that, and the
+path ends in front of the call. `a in b` goes into a `__contains__` written
+in Python and gives whether what that returned is true, `a not in b` whether
+it is not; the path goes on behind it where that was a bool, and ends in
+front of the instruction for anything else. `hasattr(module, name)` and
+`getattr(module, name, default)` for a name that an `nn.Module` does not
+have are calls a path makes, at every call, so an attribute that appears
+later is seen.
+
+```python
+class Settings:
+    renamed = {"width": "hidden"}
+
+    def __init__(self):
+        self.hidden = 2.0
+
+    def __getattribute__(self, key):
+        if key != "renamed" and key in super().__getattribute__("renamed"):
+            key = super().__getattribute__("renamed")[key]
+        return super().__getattribute__(key)
+
+
+def reads_settings(x, settings):
+    y = (x.sin() + 1).cos()
+    if hasattr(settings, "width"):
+        y = y * settings.width
+    return (y * getattr(settings, "hidden", 1.0)).tanh().exp()
+
+
+settings = Settings()
+g = torch.vm(reads_settings, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(6):
+    same = torch.equal(g(x, settings), reads_settings(x, settings))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["why"]  # (True, 7, 'the function returns')
+settings.hidden = 3.0
+torch.equal(g(x, settings), reads_settings(x, settings))  # True: what the function reads is read at every call
+```
+
+Behind a store of the path such a read goes into the function too. What the
+function reads with `super().__getattribute__(key)` is then looked at as a
+read of that attribute of the object: it goes on where no store of the path
+can have changed it, under the checks a plain read has ("Stores into
+objects"), and ends the path where one may have. A decoder that stores into
+a cache and then reads its configuration is such code:
+
+```python
+class Cache:
+    def __init__(self):
+        self.keys = None
+
+
+def keeps_and_reads(x, settings, cache):
+    y = (x.sin() + 1).cos()
+    cache.keys = y
+    return (y * settings.hidden).tanh().exp()
+
+
+cache = Cache()
+g = torch.vm(keeps_and_reads, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(6):
+    same = torch.equal(g(x, settings, cache), keeps_and_reads(x, settings, cache))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, cache.keys is not None, found["ops"], found["why"]  # (True, True, 6, 'the function returns')
+```
+
+### Variables an inner function could take
+
+A function with a variable that an inner function could take (a nested
+function, a lambda, a generator expression) keeps it in a cell, which it
+makes when it is entered, whether or not the inner function is ever made.
+Such a cell is the path's own: making it, storing into it and reading it
+are instructions of a path, and a read is what the path put into it last,
+so a tensor that goes through a cell is still the operation that gave it.
+Making the inner function ends the path in front of it.
+
+```python
+def adds_up(y, scale, more):
+    total = y * scale
+    if more:
+
+        def bump():
+            nonlocal total
+            total = total + 1
+
+        bump()
+    return total + scale
+
+
+def has_cells(x, more):
+    y = (x.sin() + 1).cos()
+    return (adds_up(y, 2.0, more) * 2).tanh().exp()
+
+
+g = torch.vm(has_cells, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(6):
+    same = torch.equal(g(x, False), has_cells(x, False))
+same, [(found["ops"], found["why"]) for found in torch.vm.regions(g) if "ops" in found]
+# (True, [(8, 'the function returns')])
+torch.equal(g(x, True), has_cells(x, True))  # True: where the inner function is made, the instructions make it
+```
+
 ### The order of the list
 
 - `Graphs()` can stand anywhere among the passes over a block. It looks at a
@@ -1804,6 +2080,41 @@ the gradient of every parameter of a small model is within 1e-4 of eager's
 at each of 30 steps with `AOTAutograd()` and with `Inductor()`, which is
 what the tests hold.
 
+The models of timm and the transformer models have other code around their
+operations than the convolutional models above, and the graphs they get are
+counted here without times: on the CPU, in float32 with a batch of 2, the
+models loaded and called as the benchmark runner of `benchmarks/dynamo` does,
+with a pass that returns the graph. The operations of a call are the
+operators that Python calls in one call of the model in eager mode, as the
+profiler counts them (a figure can come out a few over that count, where the
+profiler counts an operation of a graph as less than one):
+
+| model | graphs that run | runs of a graph in a call | operations of a call in them |
+|---|---|---|---|
+| mobilenetv2_100 (timm) | 1 | 1 | 152 of 152 |
+| adv_inception_v3 (timm) | 1 | 1 | 314 of 314 |
+| deit_base_distilled_patch16_224 (timm) | 1 | 1 | 233 of 233 |
+| DistillGPT2 (HuggingFace) | 4 | 9 | 249 of 247 |
+| hf_DistilBert (TorchBench) | 3 | 13 | 132 of 136 |
+| MobileBertForMaskedLM (HuggingFace) | 3 | 3 | 1295 of 1250 |
+| whisper-tiny (HuggingFace) | 5 | 22 | 342 of 385 |
+
+The outputs are those of eager mode bit for bit. A timm model and the vision
+transformer are one graph, the whole forward. A transformer language model
+has all or nearly all of its operations in graphs, but in several per call:
+one per layer or per stack of layers, and a few around them. What their
+paths end at is `getattr(config, name, default)` where the configuration
+raises for a name it does not have (at the start of every model, where the
+attention mask is made), a branch on what the mask holds, the objects the
+models construct for their outputs, and library code such as
+`inspect.signature` ("Limits"). A training step has fewer of its operations
+in graphs: for DistillGPT2, 5 graphs that run 15 times in a step, with 189
+of the about 820 operators that the profiler counts in one step of eager
+mode (forward, loss, backward and update together), since a dropout that
+drops and an attention with a dropout rate are operations only where
+nothing that can fail has been taken down in front of them ("Writes"). No
+times are given for these models: they have not been measured on a GPU.
+
 ### Limits
 
 What graphs do not do at this stage:
@@ -1828,6 +2139,19 @@ What graphs do not do at this stage:
   every call to go through another dict or list than the store changes, a
   check per store ("Stores into objects"); a read through what a store
   changed ends the path.
+- A raise that is caught ends a path: `getattr(obj, name, default)` and
+  `hasattr` where a `__getattribute__` written in Python raises
+  `AttributeError`, a `try` around a call that raises, `Mapping.get` of a key
+  that is not there. So do constructing an object (a dataclass of outputs,
+  a named tuple, `functools.partial`), making an inner function or a
+  lambda, a `with` block, and library code a path is not known to be able
+  to call (`inspect.signature`). These are what the paths of transformer
+  models end at ("Models").
+- An operation that draws random numbers is one of a path only where
+  nothing that can fail has been taken down in front of it ("Writes"). In
+  the layers of a transformer in training mode that is seldom so, and their
+  paths end at a dropout that drops or at an attention with a dropout rate
+  ("Models" has what a training step of one looks like).
 - Sizes are fixed per export. Every size a graph is called with is a kind of
   call of its own, with a graph of its own, so a function that is called
   with many sizes uses up `max_variants`. Sizes of the tensors the graph

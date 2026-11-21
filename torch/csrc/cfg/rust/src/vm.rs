@@ -1193,6 +1193,12 @@ unsafe fn flattened(values: &[Obj]) -> Vec<Obj> {
             all.extend((0..ffi::PyList_GET_SIZE(*o)).map(|i| ffi::PyList_GET_ITEM(*o, i)));
         } else if ffi::PyTuple_CheckExact(*o) != 0 {
             all.extend((0..ffi::PyTuple_GET_SIZE(*o)).map(|i| ffi::PyTuple_GET_ITEM(*o, i)));
+        } else if ffi::PyDict_CheckExact(*o) != 0 {
+            // What a call is handed with `**`.
+            let (mut at, mut key, mut value) = (0, null_mut(), null_mut());
+            while ffi::PyDict_Next(*o, &mut at, &mut key, &mut value) != 0 {
+                all.push(value);
+            }
         }
     }
     all
@@ -1273,6 +1279,18 @@ enum Form<'a> {
     Property(V, u32),
     Descriptor(V, u32),
     Getattr(V, u32),
+    /// The `__getattribute__` of the class, where it is a Python function:
+    /// every read of an attribute of the object.
+    Getattribute(V, u32),
+    /// A call of what `object.__getattribute__` is when bound to an object
+    /// (`super().__getattribute__(key)`), for a key under which the class
+    /// has a property: the getter. With a name, the callee is what has
+    /// the bound function under that name.
+    Reads { callee: V, name: Option<u32>, key: V },
+    /// `getattr(object, key)`, with or without a default, and
+    /// `hasattr(object, key)`, of an object whose class has a
+    /// `__getattribute__` written in Python: that function.
+    Asks(V, V),
 }
 
 impl Form<'_> {
@@ -1284,6 +1302,9 @@ impl Form<'_> {
             Form::Property(..) => "a property",
             Form::Descriptor(..) => "a descriptor",
             Form::Getattr(..) => "a __getattr__",
+            Form::Getattribute(..) => "a __getattribute__",
+            Form::Reads { .. } => "a property behind object.__getattribute__",
+            Form::Asks(..) => "a __getattribute__ behind getattr",
         }
     }
 }
@@ -1556,6 +1577,49 @@ type OpResult = Result<Obj, ()>;
 unsafe fn set_error(exc: Obj, msg: String) {
     let c = CString::new(msg).unwrap_or_default();
     ffi::PyErr_SetString(exc, c.as_ptr());
+}
+
+/// What `len` gives for what a `__len__` returned, as the interpreter makes
+/// it (`slot_sq_length`, then `len`): the index of it, which may not be
+/// negative and has to fit, as an int. Takes the reference; null with the
+/// error set where `len` raises.
+unsafe fn counted(returned: Obj) -> Obj {
+    let index = ffi::PyNumber_Index(returned);
+    ffi::Py_DECREF(returned);
+    if index.is_null() {
+        return null_mut();
+    }
+    let zero = ffi::PyLong_FromLong(0);
+    let negative = ffi::PyObject_RichCompareBool(index, zero, ffi::Py_LT);
+    ffi::Py_DECREF(zero);
+    if negative != 0 {
+        if negative > 0 {
+            set_error(ffi::PyExc_ValueError, "__len__() should return >= 0".to_string());
+        }
+        ffi::Py_DECREF(index);
+        return null_mut();
+    }
+    let count = ffi::PyNumber_AsSsize_t(index, ffi::PyExc_OverflowError);
+    ffi::Py_DECREF(index);
+    if count == -1 && !ffi::PyErr_Occurred().is_null() {
+        return null_mut();
+    }
+    ffi::PyLong_FromSsize_t(count)
+}
+
+/// What stands for an object whose `__iter__` returned `returned`, for a
+/// builtin that goes over the object (`pyapi::Iterated`). Owned; null with
+/// the error set.
+unsafe fn iterated(returned: Obj) -> Obj {
+    let py = pyo3::Python::assume_attached();
+    let returned = pyo3::Bound::<pyo3::PyAny>::from_borrowed_ptr(py, returned).unbind();
+    match pyo3::Py::new(py, crate::pyapi::Iterated { returned }) {
+        Ok(stand) => stand.into_ptr(),
+        Err(error) => {
+            error.restore(py);
+            null_mut()
+        }
+    }
 }
 
 /// A NameError carries the name it is about, as the interpreter's does (an
@@ -3719,6 +3783,7 @@ impl Compiled {
                     Part::Receiver if ffi::Py_TYPE(held) == std::ptr::addr_of_mut!(pyffi::PyMethod_Type) => {
                         new_ref(pyffi::PyMethod_Self(held))
                     }
+                    Part::Receiver => graph::generic_reader(held),
                     Part::Target => self.target(held).map_or(null_mut(), |(func, ..)| new_ref(func)),
                     Part::Type => new_ref(ffi::Py_TYPE(held) as Obj),
                     Part::OfType(name) => {
@@ -3735,7 +3800,7 @@ impl Compiled {
                         ffi::PyObject_GetAttrString(held, c"fget".as_ptr())
                     }
                     Part::Index(i) => {
-                        let plain = ffi::PyTuple_CheckExact(held) != 0 || ffi::PyList_CheckExact(held) != 0;
+                        let plain = graph::is_row(held);
                         let there = plain && ffi::PyObject_Size(held) > *i as isize;
                         let found = if there { graph::sequence_item(held, *i as isize) } else { null_mut() };
                         ffi::Py_XINCREF(found);
@@ -4710,14 +4775,17 @@ impl Compiled {
         // half, float, double, the complex types, bfloat16
         const FLOATING: [i32; 7] = [5, 6, 7, 8, 9, 10, 15];
         let mut floats = true;
-        inst.op.for_each_use(|v| {
-            for item in flattened(&[reg(regs, v)]) {
-                let mut info = TcfgTensorInfo::empty();
-                if (api.tensor_info)(item, &mut info) != 0 {
-                    floats &= FLOATING.contains(&info.dtype);
-                }
+        let mut taken: Vec<Obj> = Vec::new();
+        inst.op.for_each_use(|v| taken.push(reg(regs, v)));
+        if let Op::Call { callee, .. } | Op::CallEx { callee, .. } = &inst.op {
+            taken.extend(self.bound_tensor(regs, *callee, api).map(|(tensor, ..)| tensor));
+        }
+        for item in flattened(&taken) {
+            let mut info = TcfgTensorInfo::empty();
+            if (api.tensor_info)(item, &mut info) != 0 {
+                floats &= FLOATING.contains(&info.dtype);
             }
-        });
+        }
         let names = Self::operators_of(inst, operators);
         !names.is_empty()
             && names.iter().all(|name| match graph::total_operator(name) {
@@ -4760,6 +4828,8 @@ impl Compiled {
         let f = &self.func;
         let none = || new_ref(ffi::Py_None());
         let names_of = |kwnames: u32| if kwnames == NONE { none() } else { new_ref(f.consts[kwnames as usize].as_ptr()) };
+        // What a call spreads: the items and the values, borrowed.
+        let mut spread: Vec<Obj> = Vec::new();
         let (kind, head, taken, kwnames): (&std::ffi::CStr, Obj, Vec<V>, Obj) = match &inst.op {
             Op::Dispatch(d) if !picked.is_null() => {
                 let exported = (api.site_export)(picked);
@@ -4769,7 +4839,35 @@ impl Compiled {
                 }
                 (c"site", exported, d.operands.to_vec(), none())
             }
+            // A method that was bound to a tensor: the method of that name
+            // of the tensor, not the bound one, which would run on it.
+            Op::Call { callee, args, kwnames } if self.bound_tensor(regs, *callee, api).is_some() => {
+                let (_, recv, name) = self.bound_tensor(regs, *callee, api).expect("just asked");
+                let mut taken = vec![recv];
+                taken.extend(args.iter().copied());
+                (c"method", new_ref(f.consts[name as usize].as_ptr()), taken, names_of(*kwnames))
+            }
             Op::Call { callee, args, kwnames } => (c"call", new_ref(self.obj(regs, *callee)), args.to_vec(), names_of(*kwnames)),
+            Op::CallEx { callee, args, kwargs } => {
+                let (row, dict) = (reg(regs, *args), if *kwargs == NONE { null_mut() } else { reg(regs, *kwargs) });
+                if row.is_null() || !graph::is_row(row) || (!dict.is_null() && ffi::PyDict_CheckExact(dict) == 0) {
+                    return false;
+                }
+                spread.extend((0..ffi::PyObject_Size(row)).map(|i| graph::sequence_item(row, i)));
+                let names = if dict.is_null() { none() } else { ffi::PyTuple_New(ffi::PyDict_Size(dict)) };
+                if !dict.is_null() {
+                    let (mut at, mut key, mut value, mut k) = (0, null_mut(), null_mut(), 0);
+                    while ffi::PyDict_Next(dict, &mut at, &mut key, &mut value) != 0 {
+                        ffi::PyTuple_SET_ITEM(names, k, new_ref(key));
+                        spread.push(value);
+                        k += 1;
+                    }
+                }
+                match self.bound_tensor(regs, *callee, api) {
+                    Some((_, recv, name)) => (c"method", new_ref(f.consts[name as usize].as_ptr()), vec![recv], names),
+                    None => (c"call", new_ref(self.obj(regs, *callee)), Vec::new(), names),
+                }
+            }
             Op::CallMethod { recv, name, args, kwnames } => {
                 let mut taken = vec![*recv];
                 taken.extend(args.iter().copied());
@@ -4782,6 +4880,9 @@ impl Compiled {
         for v in taken {
             let held = if reg(regs, v).is_null() { ffi::Py_None() } else { self.obj(regs, v) };
             ffi::PyList_Append(operands, held);
+        }
+        for held in spread {
+            ffi::PyList_Append(operands, if held.is_null() { ffi::Py_None() } else { held });
         }
         let _nobody = Hooked::nobody();
         let module = ffi::PyImport_ImportModule(c"torch.vm._export".as_ptr());
@@ -4868,14 +4969,36 @@ impl Compiled {
             // What changes a list, or draws on an iterator, does so to one
             // the path made: `record` takes down no other.
             Op::ListAppend(..) | Op::IterNext(_) => true,
+            // A cell is made, and one that is a cell is put into, in C.
+            Op::MakeCell(_) => true,
+            Op::CellSet(cell, value) => {
+                *value != UNDEF && !at(*cell).is_null() && ffi::Py_TYPE(at(*cell)) == std::ptr::addr_of_mut!(pyffi::PyCell_Type)
+            }
             Op::ListToTuple(l) => !at(*l).is_null() && ffi::PyList_CheckExact(at(*l)) != 0,
             // Onto a list, or into a dict, that the path made.
             Op::ListExtend(l, more) => {
                 let plain = |o: Obj| !o.is_null() && !capi::is_unboxed(o);
-                plain(at(*l))
-                    && plain(at(*more))
-                    && ffi::PyList_CheckExact(at(*l)) != 0
-                    && (ffi::PyList_CheckExact(at(*more)) != 0 || ffi::PyTuple_CheckExact(at(*more)) != 0)
+                plain(at(*l)) && plain(at(*more)) && ffi::PyList_CheckExact(at(*l)) != 0 && graph::is_row(at(*more))
+            }
+            // Turning plain values into text, and putting texts together.
+            Op::Format { val, spec, .. } => {
+                let text = |v: V| !at(v).is_null() && !capi::is_unboxed(at(v)) && ffi::PyUnicode_CheckExact(at(v)) != 0;
+                graph::quiet_text(at(*val)) && (*spec == NONE || text(*spec))
+            }
+            Op::BuildString(vs) => {
+                vs.iter().all(|v| !at(*v).is_null() && !capi::is_unboxed(at(*v)) && ffi::PyUnicode_CheckExact(at(*v)) != 0)
+            }
+            // `super()` with the class of the function and an instance of
+            // it: nothing is asked of the object.
+            Op::SuperObject { global_super, class, this, .. } => {
+                let plain = |o: Obj| !o.is_null() && !capi::is_unboxed(o);
+                let (callee, class, this) = (at(*global_super), at(*class), at(*this));
+                callee == std::ptr::addr_of_mut!(ffi::PySuper_Type) as Obj
+                    && plain(class)
+                    && plain(this)
+                    && ffi::PyType_Check(class) != 0
+                    && ffi::PyType_Check(this) == 0
+                    && ffi::PyType_IsSubtype(ffi::Py_TYPE(this), class as *mut ffi::PyTypeObject) != 0
             }
             Op::DictMerge(d, more, _) => graph::quiet_merge(at(*d), at(*more)),
             Op::ImportName { name, fromlist, level } => {
@@ -4885,7 +5008,7 @@ impl Compiled {
             Op::BuildMap(vs) => vs.iter().step_by(2).all(|k| !at(*k).is_null() && graph::is_plain_key(at(*k))),
             Op::MapAdd(_, k, _) => !at(*k).is_null() && graph::is_plain_key(at(*k)),
             Op::GetIter(v) => !at(*v).is_null() && graph::quiet_iter(at(*v)).is_some(),
-            Op::Binary(_, a, b) => [a, b].iter().all(|v| !at(**v).is_null() && graph::is_number(at(**v))),
+            Op::Binary(kind, a, b) => graph::quiet_binary(*kind, at(*a), at(*b)),
             Op::Unary(UnaryKind::Not, a) | Op::ToBool(a) => !at(*a).is_null() && graph::quiet_truth(at(*a)),
             Op::Unary(_, a) => !at(*a).is_null() && graph::is_number(at(*a)),
             Op::Compare(_, a, b) => !at(*a).is_null() && !at(*b).is_null() && graph::quiet_compare(at(*a), at(*b)),
@@ -4937,6 +5060,10 @@ impl Compiled {
                     Assert::Iterator(v) => !reg(own, *v).is_null() && ffi::PyIter_Check(reg(own, *v)) != 0,
                     Assert::Count(v) => !reg(own, *v).is_null() && graph::is_count(reg(own, *v)),
                     Assert::Absent(v, name) => graph::absent(reg(own, *v), name.as_ptr()),
+                    Assert::Lacks(v, name) => {
+                        let held = reg(own, *v);
+                        !held.is_null() && !capi::is_unboxed(held) && pyffi::_PyType_Lookup(ffi::Py_TYPE(held), name.as_ptr()).is_null()
+                    }
                     Assert::Sequence(v, class, count) => {
                         let held = reg(own, *v);
                         !held.is_null()
@@ -4972,6 +5099,7 @@ impl Compiled {
                             Assert::Enters(..) => "the function a call enters",
                             Assert::Iterator(_) | Assert::Count(_) | Assert::Flag(_) => "what a function of a class returned",
                             Assert::Absent(..) => "an attribute left to __getattr__",
+                            Assert::Lacks(..) => "a class without a __getattr__",
                             Assert::Sequence(..) | Assert::Keys(..) => "what a call spreads",
                             Assert::Equals(..) => "the place of an item",
                             Assert::Is(..) => "an object that is computed with behind the callable",
@@ -5055,7 +5183,7 @@ impl Compiled {
                 Op::SetItem { obj, key, .. } if there(*obj) && there(*key) => {
                     let (held, place) = (at(*obj), at(*key));
                     if ffi::PyDict_CheckExact(held) != 0 {
-                        graph::is_plain_key(place)
+                        graph::is_plain_key(place) && graph::quiet_keys(held)
                     } else {
                         ffi::PyList_CheckExact(held) != 0 && ffi::PyLong_CheckExact(place) != 0 && {
                             let (asked, count) = (ffi::PyLong_AsSsize_t(place), ffi::PyList_GET_SIZE(held) + more(held, &grown));
@@ -5483,6 +5611,26 @@ impl Compiled {
         read
     }
 
+    /// For a callee that is a method of a tensor, bound when it was read
+    /// off the tensor (`x.to`, where the call is not one of a method by its
+    /// name): the tensor, the value it was read off and the name. The call
+    /// is then one of that method of that value.
+    unsafe fn bound_tensor(&self, regs: &[Obj], callee: V, api: &TcfgApi) -> Option<(Obj, V, u32)> {
+        let c = reg(regs, callee);
+        if c.is_null() || capi::is_unboxed(c) || ffi::PyCFunction_Check(c) == 0 {
+            return None;
+        }
+        let bound = ffi::PyCFunction_GetSelf(c);
+        let mut info = TcfgTensorInfo::empty();
+        if bound.is_null() || (api.tensor_info)(bound, &mut info) == 0 {
+            return None;
+        }
+        match self.analysis.def_op(&self.func, callee) {
+            Some(Op::LoadAttr(recv, name)) => Some((bound, *recv, *name)),
+            _ => None,
+        }
+    }
+
     /// Whether an instruction that is no call site is an operation of a
     /// graph all the same (see `graph::generic`), on the values it is about
     /// to run on: its operators, as they are reported.
@@ -5495,6 +5643,7 @@ impl Compiled {
         api: &TcfgApi,
         own: &dyn Fn(V) -> bool,
         outside: Option<&std::cell::Cell<bool>>,
+        draws: bool,
     ) -> Option<String> {
         let mut info = TcfgTensorInfo::empty();
         let mut tensor = |v: V| !reg(regs, v).is_null() && (api.tensor_info)(reg(regs, v), &mut info) != 0;
@@ -5514,8 +5663,14 @@ impl Compiled {
             let operators = found.map_or(String::new(), |f| f.operators.join("+"));
             return fine.then(|| if operators.is_empty() { "setitem".to_string() } else { operators });
         }
+        // A method that was bound to a tensor earlier has its receiver in
+        // no operand: it is the value the method was read off.
+        let bound = match &inst.op {
+            Op::Call { callee, .. } | Op::CallEx { callee, .. } => self.bound_tensor(regs, *callee, api),
+            _ => None,
+        };
         // The first tensor it is handed, in the order of the call.
-        let mut first: Option<V> = None;
+        let mut first: Option<V> = bound.map(|(_, recv, _)| recv);
         let mut look = |v: V| {
             if first.is_none() && tensor(v) {
                 first = Some(v);
@@ -5527,23 +5682,19 @@ impl Compiled {
             _ => {}
         }
         let fits = match &inst.op {
-            // A method that was bound to a tensor earlier has its receiver
-            // in no operand.
-            Op::Call { callee, .. } => {
+            // A C function, or such a method; with `CallEx`, handed what
+            // the code spreads with `*`.
+            Op::Call { callee, .. } | Op::CallEx { callee, .. } => {
                 let c = reg(regs, *callee);
                 let function = !c.is_null() && !capi::is_unboxed(c) && ffi::PyCFunction_Check(c) != 0;
-                let bound = if function { ffi::PyCFunction_GetSelf(c) } else { null_mut() };
-                function && (bound.is_null() || (api.tensor_info)(bound, &mut info) == 0)
+                let free = function && {
+                    let of = ffi::PyCFunction_GetSelf(c);
+                    of.is_null() || (api.tensor_info)(of, &mut info) == 0
+                };
+                free || bound.is_some()
             }
             Op::CallMethod { .. } => true,
             Op::GetItem(a, _) => tensor(*a),
-            // A C function that is handed what the code spreads with `*`.
-            Op::CallEx { callee, .. } => {
-                let c = reg(regs, *callee);
-                let function = !c.is_null() && !capi::is_unboxed(c) && ffi::PyCFunction_Check(c) != 0;
-                let bound = if function { ffi::PyCFunction_GetSelf(c) } else { null_mut() };
-                function && (bound.is_null() || (api.tensor_info)(bound, &mut info) == 0)
-            }
             _ => false,
         };
         if !fits || origin == NONE {
@@ -5551,13 +5702,50 @@ impl Compiled {
         }
         let st = self.state.borrow();
         let found = st.blocks[block].facts.get(origin as usize)?;
+        // `contiguous` of a tensor that is contiguous gives the tensor back
+        // without a call of the dispatcher: the operation all the same,
+        // which copies where the tensor of another call is not.
+        let method = match &inst.op {
+            Op::CallMethod { recv, name, .. } => {
+                let mut other = TcfgTensorInfo::empty();
+                (!reg(regs, *recv).is_null() && (api.tensor_info)(reg(regs, *recv), &mut other) != 0).then_some(*name)
+            }
+            _ => bound.map(|(.., name)| name),
+        };
+        let contiguous = method.is_some_and(|name| pyffi::str_to_string(self.func.consts[name as usize].as_ptr()) == "contiguous");
+        let idle = found.runs > 0
+            && found.kernels == Kernels::None
+            && !(found.frames || found.raised)
+            && matches!(found.callee, spec::CalleeFact::Unseen);
+        if contiguous && idle && inst.dst != NONE && !matches!(inst.op, Op::CallEx { .. }) {
+            return Some("aten::contiguous".to_string());
+        }
         let known = found.runs > 0
             && matches!(found.kernels, Kernels::One | Kernels::Many)
             && !(found.frames || found.raised)
             && matches!(found.callee, spec::CalleeFact::Unseen)
             && !found.operators.is_empty();
         let gives = inst.dst != NONE && matches!(st.obs.get(inst.dst as usize), Some(ValueObs::Tensor { .. }));
-        let pure = found.operators.iter().all(|name| graph::pure_operator(name));
+        // One that draws at a rate draws nothing at a rate of zero.
+        let rests = |name: &String| {
+            graph::DRAWS_AT_A_RATE.iter().find(|(operator, ..)| *operator == name.as_str()).is_some_and(|(_, place, keyword)| {
+                let rate = self.argument(inst, regs, *place, keyword);
+                rate.is_some_and(|rate| rate.is_null() || (!capi::is_unboxed(rate) && graph::is_number(rate) && ffi::PyObject_IsTrue(rate) == 0))
+            })
+        };
+        let pure = found.operators.iter().all(|name| graph::pure_operator(name) || rests(name));
+        // One that draws is an operation where the graph is made something
+        // of, and like a write to a tensor from outside it cannot be taken
+        // back (see the call sites that draw in `record_inst`).
+        let seeded = !pure && draws && found.operators.iter().all(|name| graph::pure_operator(name) || graph::seeded_operator(name));
+        if seeded {
+            let said = outside?;
+            let fine = known && inst.dst != NONE && !found.wrote;
+            if fine {
+                said.set(true);
+            }
+            return fine.then(|| found.operators.join("+"));
+        }
         // What writes, writes to its first tensor and to nothing else, and
         // that is the path's own; or it is handed no tensor, and writes to
         // what it makes.
@@ -5567,6 +5755,38 @@ impl Compiled {
         let spread = matches!(inst.op, Op::CallEx { .. });
         let fine = if writes { !spread && (gives || inst.dst == NONE) } else { pure && inst.dst != NONE && !found.wrote };
         (known && fine).then(|| found.operators.join("+"))
+    }
+
+    /// What a call of a C function is handed for an argument, by the place
+    /// and the name of the argument: Some(null) where it is not handed
+    /// one, None where that cannot be told. Borrowed.
+    unsafe fn argument(&self, inst: &Inst, regs: &[Obj], place: usize, keyword: &std::ffi::CStr) -> Option<Obj> {
+        match &inst.op {
+            Op::Call { args, kwnames, .. } => {
+                let names = if *kwnames == NONE { null_mut() } else { self.func.consts[*kwnames as usize].as_ptr() };
+                let named = if names.is_null() { 0 } else { ffi::PyTuple_GET_SIZE(names) as usize };
+                let first = args.len() - named;
+                for k in 0..named {
+                    if ffi::PyUnicode_CompareWithASCIIString(ffi::PyTuple_GET_ITEM(names, k as isize), keyword.as_ptr()) == 0 {
+                        return Some(reg(regs, args[first + k]));
+                    }
+                }
+                Some(if place < first { reg(regs, args[place]) } else { null_mut() })
+            }
+            Op::CallEx { args, kwargs, .. } => {
+                let (row, dict) = (reg(regs, *args), if *kwargs == NONE { null_mut() } else { reg(regs, *kwargs) });
+                if row.is_null() || !graph::is_row(row) || (!dict.is_null() && ffi::PyDict_CheckExact(dict) == 0) {
+                    return None;
+                }
+                let found = if dict.is_null() { null_mut() } else { ffi::PyDict_GetItemString(dict, keyword.as_ptr()) };
+                if !found.is_null() {
+                    return Some(found);
+                }
+                let there = (place as isize) < ffi::PyObject_Size(row);
+                Some(if there { graph::sequence_item(row, place as isize) } else { null_mut() })
+            }
+            _ => None,
+        }
     }
 
     /// Takes down one instruction of a path: decides whether it can be part
@@ -5760,12 +5980,53 @@ impl Compiled {
                 }
             }
         }
+        if let Op::CellGet(cell, _) = &inst.op {
+            // What is read of a cell the path made is what the path put
+            // into it last.
+            let own = t.mapped(*cell);
+            if own != NONE && t.defs[own as usize].made {
+                let held = t.body.iter().rev().find_map(|other| match &other.op {
+                    Op::CellSet(target, value) if *target == own => Some(*value),
+                    Op::MakeCell(value) if other.dst == own => Some(*value),
+                    _ => None,
+                });
+                if let Some(value) = held.filter(|value| *value != UNDEF && *value != NONE) {
+                    let Ok(read) = self.exec_op(regs, &inst.op) else {
+                        return Taken::Raised;
+                    };
+                    capi::release(std::mem::replace(&mut regs[inst.dst as usize], read));
+                    t.rename(inst.dst, value);
+                    kill(t, regs);
+                    return Taken::Went;
+                }
+            }
+        }
+        if let Op::TupleGet(unpacked, at) = &inst.op {
+            // What is unpacked of a tuple or a list the path built is what
+            // it was built of.
+            let whole = t.mapped(*unpacked);
+            let from = t.body.iter().find(|other| other.dst == whole && whole != NONE).and_then(|other| match &other.op {
+                Op::Unpack(sequence, count) => Some((*sequence, *count)),
+                _ => None,
+            });
+            let items = from.and_then(|(sequence, count)| self.built(t, sequence).filter(|items| items.len() == count as usize));
+            if let Some(items) = items.filter(|items| (*at as usize) < items.len()) {
+                let Ok(item) = self.exec_op(regs, &inst.op) else {
+                    return Taken::Raised;
+                };
+                capi::release(std::mem::replace(&mut regs[inst.dst as usize], item));
+                t.rename(inst.dst, items[*at as usize]);
+                kill(t, regs);
+                return Taken::Went;
+            }
+        }
         let owned = |t: &Trace, v: V| t.mapped(v) != NONE && t.defs[t.mapped(v) as usize].own;
         // A write to a tensor from outside the path is an operation of
         // the graph for as long as nothing that can fail behind the
         // callable has been taken down: it cannot be taken back.
         let outside = std::cell::Cell::new(false);
-        let operators = self.operation(block, origin, inst, regs, api, &|v| owned(t, v), (!t.fallible).then_some(&outside));
+        let draws = site.exporter.is_some() && !t.fallible;
+        let operators = self.operation(block, origin, inst, regs, api, &|v| owned(t, v), (!t.fallible).then_some(&outside), draws);
         if operators.is_none() {
             if let Some(taken) = self.record_call(t, site, (block, code as *const BlockCode, pc), regs, frames, api) {
                 return taken;
@@ -5818,9 +6079,7 @@ impl Compiled {
             // A dropout that is told not to drop anything draws nothing:
             // the form is checked for that operand, as for any number.
             Op::Dispatch(d) if d.slot.traits() == capi::SITE_RANDOM && d.slot.len() > 0 => {
-                const DROPOUTS: [&str; 4] =
-                    ["aten::dropout", "aten::feature_dropout", "aten::alpha_dropout", "aten::feature_alpha_dropout"];
-                let dropout = d.slot.operator().is_some_and(|name| DROPOUTS.contains(&name.as_str()));
+                let dropout = d.slot.operator().is_some_and(|name| graph::DROPOUTS.contains(&name.as_str()));
                 let idle = d.operands.last().is_some_and(|train| reg(regs, *train) == ffi::Py_False());
                 // One that draws is an operation where the graph is made
                 // something of (what that is draws in its place; a pass
@@ -5836,10 +6095,18 @@ impl Compiled {
             // What the code spreads into a call of a C function is known
             // where the path built it: the call with those values.
             Op::CallEx { args, kwargs, .. } if operators.is_some() => {
-                let known = t.mapped(*args) != NONE && self.built(t, t.mapped(*args)).is_some();
-                let bare = *kwargs == NONE
-                    || (t.mapped(*kwargs) != NONE && self.entries(t, t.mapped(*kwargs)).is_some_and(|named| named.is_empty()));
-                (known && bare).then_some(Kind::Node)
+                let held = reg(regs, *args);
+                let row = !held.is_null() && graph::is_row(held);
+                let known = row || (t.mapped(*args) != NONE && self.built(t, t.mapped(*args)).is_some());
+                // With `**`, a dict the path built under names: the call
+                // with those names. One that gives nothing is not followed.
+                let text = |key: Obj| !key.is_null() && !capi::is_unboxed(key) && ffi::PyUnicode_CheckExact(key) != 0;
+                let named = *kwargs == NONE
+                    || (t.mapped(*kwargs) != NONE
+                        && self.entries(t, t.mapped(*kwargs)).is_some_and(|named| {
+                            named.is_empty() || (inst.dst != NONE && named.iter().all(|(key, _)| text(*key)))
+                        }));
+                (known && named).then_some(Kind::Node)
             }
             // An operator that writes to its first tensor and to nothing
             // else, where that tensor is the path's own.
@@ -5869,6 +6136,14 @@ impl Compiled {
                 makes = true;
                 Some(Kind::Pure)
             }
+            // The cell of a variable that an inner function could take:
+            // the path's own, and what is put into it is what is read of
+            // it, for as long as no function is made that has it.
+            Op::MakeCell(_) => {
+                makes = true;
+                Some(Kind::Pure)
+            }
+            Op::CellSet(cell, value) => (made(t, *cell) && *value != UNDEF).then_some(Kind::Residual),
             Op::ListAppend(target, _)
             | Op::MapAdd(target, ..)
             | Op::IterNext(target)
@@ -5905,16 +6180,82 @@ impl Compiled {
         let Some(kind) = kind else {
             return ends();
         };
+        // A method that was bound to a tensor earlier is called as the
+        // method of that name of the value it was read off; what the code
+        // spreads into a call is handed over item by item.
+        let method = match (&inst.op, kind) {
+            (Op::Call { callee, .. } | Op::CallEx { callee, .. }, Kind::Node) => self.bound_tensor(regs, *callee, api),
+            _ => None,
+        };
+        let receiver = method.map(|(_, recv, name)| (t.mapped(recv), name));
+        if receiver.is_some_and(|(recv, _)| recv == NONE) {
+            return ends();
+        }
+        let mut names: Option<PyObj> = None;
         let spread = match (&inst.op, kind) {
-            (Op::CallEx { callee, args, .. }, Kind::Node) => {
-                let callee = self.path_value(t, regs, *callee);
-                self.built(t, t.mapped(*args)).map(|args| Op::Call { callee, args, kwnames: NONE })
+            (Op::CallEx { callee, args, kwargs }, Kind::Node) => {
+                let sequence = self.path_value(t, regs, *args);
+                let mut items = if sequence == UNDEF { None } else { self.spread(t, sequence, inst.bc) };
+                let entries = if *kwargs == NONE { Some(Vec::new()) } else { self.entries(t, t.mapped(*kwargs)) };
+                match (&mut items, entries) {
+                    (Some(items), Some(entries)) if !entries.is_empty() => {
+                        let keys = ffi::PyTuple_New(entries.len() as isize);
+                        for (i, (key, value)) in entries.iter().enumerate() {
+                            ffi::PyTuple_SET_ITEM(keys, i as isize, new_ref(*key));
+                            items.push(*value);
+                        }
+                        names = Some(PyObj::from_owned(keys));
+                    }
+                    (_, None) => items = None,
+                    _ => {}
+                }
+                match receiver {
+                    Some((recv, name)) => items.map(|args| Op::CallMethod { recv, name, args, kwnames: NONE }),
+                    None => {
+                        let callee = self.path_value(t, regs, *callee);
+                        items.map(|args| Op::Call { callee, args, kwnames: NONE })
+                    }
+                }
+            }
+            (Op::Call { args, kwnames, .. }, Kind::Node) if receiver.is_some() => {
+                let (recv, name) = receiver.expect("just asked");
+                let args: Vec<PathValue> = args.iter().map(|v| self.path_value(t, regs, *v)).collect();
+                (!args.contains(&UNDEF)).then_some(Op::CallMethod { recv, name, args, kwnames: *kwnames })
             }
             _ => None,
         };
         let Some(mut renamed) = spread.or_else(|| graph::renamed(&inst.op, &mut |v| self.path_value(t, regs, v))) else {
             return ends();
         };
+        if let (Kind::Node, Some(called), Op::Call { args, kwnames, .. }) = (kind, &operators, &renamed) {
+            // The rate of an operator that draws at one is the rate of
+            // this run at every call: zero, or not.
+            let rated = |name: &str| graph::DRAWS_AT_A_RATE.iter().find(|(operator, ..)| *operator == name);
+            for (_, place, keyword) in called.split('+').filter_map(rated) {
+                let keys = match &names {
+                    Some(names) => names.as_ptr(),
+                    None if *kwnames != NONE => self.func.consts[*kwnames as usize].as_ptr(),
+                    None => null_mut(),
+                };
+                let named = if keys.is_null() { 0 } else { ffi::PyTuple_GET_SIZE(keys) as usize };
+                let first = args.len() - named;
+                let mut rate = (*place < first).then(|| args[*place]);
+                for k in 0..named {
+                    if ffi::PyUnicode_CompareWithASCIIString(ffi::PyTuple_GET_ITEM(keys, k as isize), keyword.as_ptr()) == 0 {
+                        rate = Some(args[first + k]);
+                    }
+                }
+                let held = rate.map_or(null_mut(), |v| t.rec.values[v as usize]);
+                if let (Some(v), false) = (rate, held.is_null()) {
+                    t.check(Assert::Equals(v, PyObj::from_borrowed(held)), inst.bc);
+                }
+            }
+        }
+        if let Op::SuperObject { global_super, .. } = &renamed {
+            // What made it is the builtin, at every call.
+            let builtin = PyObj::from_borrowed(std::ptr::addr_of_mut!(ffi::PySuper_Type) as Obj);
+            t.check(Assert::Is(*global_super, builtin), inst.bc);
+        }
         if let (Op::LoadDeref(cell), false) = (&inst.op, t.outermost()) {
             // The closure of a called function is that of the function the
             // call was found to enter.
@@ -5968,6 +6309,17 @@ impl Compiled {
                 let (taken, held) = (t.defs[v as usize], t.rec.values[v as usize]);
                 taken.fixed && !held.is_null() && graph::checkable(held)
             };
+            // A list or a tuple the path put together of such values and
+            // of numbers from in front of the callable is one where the
+            // path checks those numbers at every call.
+            let mut taken: Vec<PathValue> = Vec::new();
+            graph::reads(&renamed, |v| taken.push(v));
+            for v in taken {
+                let of = t.defs[v as usize];
+                if of.late && !(of.node || of.graph || constant(t, v)) && self.settles(t, v, inst.bc, false, 0) {
+                    self.settles(t, v, inst.bc, true, 0);
+                }
+            }
             let mut fits = true;
             graph::reads(&renamed, |v| {
                 let taken = t.defs[v as usize];
@@ -6070,7 +6422,10 @@ impl Compiled {
                     | Op::GetLen(_)
                     | Op::Unpack(..)
                     | Op::GetIter(_)
-                    | Op::IterNext(_) => true,
+                    | Op::IterNext(_)
+                    | Op::ListToTuple(_)
+                    | Op::Format { .. }
+                    | Op::BuildString(_) => true,
                     Op::Call { .. } | Op::CallMethod { .. } => kind == Kind::Pure,
                     Op::LoadAttr(_, name) => {
                         let name = pyffi::str_to_string(self.func.consts[*name as usize].as_ptr());
@@ -6080,8 +6435,10 @@ impl Compiled {
                 };
                 // What cannot fail is not made the same by checks: it is
                 // if what it is made of is.
+                // A list, a tuple or a slice of nothing but such values is
+                // one too, wherever it is made.
                 let free = graph::infallible(op);
-                late && follows && if free { pins.is_empty() } else { every }
+                follows && if graph::container(op) { pins.is_empty() } else { late && if free { pins.is_empty() } else { every } }
             }
         };
         if fixed && kind != Kind::Node {
@@ -6179,6 +6536,11 @@ impl Compiled {
                         given.push(reg(regs, v));
                     }
                 });
+                if let Some((tensor, recv, _)) = method {
+                    if !owned(t, recv) {
+                        given.push(tensor);
+                    }
+                }
                 let versions = versions_of(&flattened(&given), api);
                 let kinds = kinds_of(&flattened(&given), api);
                 let result = self.exec_op(regs, op);
@@ -6316,14 +6678,25 @@ impl Compiled {
                 t.first = Some((block, origin));
             }
         }
+        if let Op::CellSet(cell, value) = &renamed {
+            // Read behind the graph where it holds what an operation gave.
+            t.defs[*cell as usize].late |= t.defs[*value as usize].late;
+        }
         if let Op::ListAppend(into, ..) | Op::MapAdd(into, ..) | Op::ListExtend(into, _) | Op::DictMerge(into, ..) = &renamed {
             // What is read of a list or a dict that holds what an operation
             // gave is read behind the graph.
-            let mut late = false;
-            graph::reads(&renamed, |v| late |= t.defs[v as usize].late);
+            let (mut late, mut fixed) = (false, true);
+            graph::reads(&renamed, |v| {
+                late |= t.defs[v as usize].late;
+                fixed &= v == *into || t.defs[v as usize].fixed;
+            });
             t.defs[*into as usize].late |= late;
+            t.defs[*into as usize].fixed &= fixed;
         }
         t.push(renamed, dst, kind, inst.bc);
+        if let (Some(names), Some(last)) = (names, t.body.last_mut()) {
+            last.named = Some(names);
+        }
         kill(t, regs);
         Taken::Went
     }
@@ -6362,7 +6735,7 @@ impl Compiled {
             Op::SetItem { obj, key, val } if outside(t, *obj) => {
                 let (held, at) = (reg(regs, *obj), reg(regs, *key));
                 let plain = !at.is_null() && !capi::is_unboxed(at);
-                let entry = plain && ffi::PyDict_CheckExact(held) != 0 && graph::is_plain_key(at);
+                let entry = plain && ffi::PyDict_CheckExact(held) != 0 && graph::is_plain_key(at) && graph::quiet_keys(held);
                 let place = plain && list(*obj) && ffi::PyLong_CheckExact(at) != 0 && {
                     let (asked, count) = (ffi::PyLong_AsSsize_t(at), ffi::PyList_GET_SIZE(held));
                     (-count..count).contains(&asked)
@@ -6463,6 +6836,20 @@ impl Compiled {
             Op::StoreAttr { .. } | Op::SetItem { .. } | Op::Hold(_) => return None,
             Op::LoadAttr(a, name) => {
                 let held = reg(regs, *a);
+                // What `super()` gave reads of the classes: no store of the
+                // path under the name is looked through.
+                let name_of = f.consts[*name as usize].as_ptr();
+                let bound = !held.is_null() && !capi::is_unboxed(held) && ffi::Py_TYPE(held) == std::ptr::addr_of_mut!(ffi::PySuper_Type);
+                let named = |store: &graph::Stored| store.key.as_ref().is_some_and(|key| graph::same_value(key.as_ptr(), name_of));
+                if bound && t.stores.iter().any(named) {
+                    return ends();
+                }
+                // A read that goes into the `__getattribute__` of the class
+                // reads nothing itself: what that function reads is looked
+                // at where it reads it.
+                if self.asks_its_class(held) {
+                    return None;
+                }
                 return match self.stored(t, regs, *a, f.consts[*name as usize].as_ptr(), true, inst.bc) {
                     Behind::Clear => None,
                     Behind::Ends => ends(),
@@ -6512,8 +6899,50 @@ impl Compiled {
             Op::Call { callee, args, .. } if args.len() >= 2 && graph::reads_attribute(reg(regs, *callee)) => {
                 let name = reg(regs, args[1]);
                 let named = !name.is_null() && !capi::is_unboxed(name) && ffi::PyUnicode_CheckExact(name) != 0;
+                if named && self.asks_its_class(reg(regs, args[0])) {
+                    return None;
+                }
                 if !named || !matches!(self.stored(t, regs, args[0], name, true, inst.bc), Behind::Clear) {
                     return ends();
+                }
+            }
+            // What `object.__getattribute__` reads of the object it is
+            // bound to (`super().__getattribute__(key)`): an attribute of
+            // that object, read as `object` reads it. Only what no store
+            // of the path can have changed goes on.
+            Op::Call { callee, args, .. } | Op::CallMethod { recv: callee, args, .. } if !reg(regs, *callee).is_null() => {
+                let held = reg(regs, *callee);
+                let method = matches!(inst.op, Op::CallMethod { .. });
+                let bound = !capi::is_unboxed(held) && ffi::Py_TYPE(held) == std::ptr::addr_of_mut!(ffi::PySuper_Type);
+                let named = |name: u32| graph::same_value(f.consts[name as usize].as_ptr(), graph::specials().getattribute.as_ptr());
+                let reader = match &inst.op {
+                    Op::CallMethod { name, .. } if bound && named(*name) => ffi::PyObject_GetAttrString(held, c"__self__".as_ptr()),
+                    Op::CallMethod { .. } => null_mut(),
+                    _ => graph::generic_reader(held),
+                };
+                ffi::PyErr_Clear();
+                if !reader.is_null() {
+                    let _kept = PyObj::from_owned(reader);
+                    // The value of the path that the object is: what
+                    // `super()` was made with.
+                    let made = |t: &Trace, v: PathValue| t.body.iter().find(|other| other.dst == v && v != NONE).map(|other| other.op.clone());
+                    let mut from = t.mapped(*callee);
+                    if !method {
+                        from = match made(t, from) {
+                            Some(Op::LoadAttr(of, _)) => of,
+                            _ => NONE,
+                        };
+                    }
+                    let this = match made(t, from) {
+                        Some(Op::SuperObject { this, .. }) => this,
+                        _ => NONE,
+                    };
+                    let key = if args.len() == 1 { reg(regs, args[0]) } else { null_mut() };
+                    let text = !key.is_null() && !capi::is_unboxed(key) && ffi::PyUnicode_CheckExact(key) != 0;
+                    let same = this != NONE && t.rec.values[this as usize] == reader;
+                    if !(text && same && matches!(self.stored_of(t, reader, this, key, true, inst.bc), Behind::Clear)) {
+                        return ends();
+                    }
                 }
             }
             // A dict that was stored into may be the one the globals are
@@ -6593,6 +7022,15 @@ impl Compiled {
         from.into_iter().all(|v| v == value || Self::sources(t, v, found))
     }
 
+    /// Whether a read of an attribute of an object goes into the
+    /// `__getattribute__` of its class (see `Form::Getattribute`).
+    unsafe fn asks_its_class(&self, held: Obj) -> bool {
+        let names = graph::specials();
+        !held.is_null()
+            && !graph::special(held, &names.getattribute).is_null()
+            && pyffi::_PyType_Lookup(ffi::Py_TYPE(held), names.getattr.as_ptr()).is_null()
+    }
+
     /// What a read of an attribute of an object (or of an entry of a
     /// dict), behind the stores of the path, is. Of the stores under the
     /// same name, the last one whose dict the read looks into decides: if
@@ -6617,6 +7055,18 @@ impl Compiled {
         if attribute && (ffi::PyList_Check(held) != 0 || ffi::PyDict_Check(held) != 0) {
             return Behind::Clear;
         }
+        // What a class reads in a function of its own is not known to be
+        // what was stored.
+        if attribute && !graph::special(held, &graph::specials().getattribute).is_null() {
+            return Behind::Ends;
+        }
+        let by = self.path_value(t, regs, object);
+        self.stored_of(t, held, by, key, attribute, bc)
+    }
+
+    /// `stored` for an object and the value of the path that it is, read
+    /// as `object` reads an attribute (or as a dict is read).
+    unsafe fn stored_of(&self, t: &mut Trace, held: Obj, by: PathValue, key: Obj, attribute: bool, bc: u32) -> Behind {
         if attribute && pyffi::str_to_string(key) == "__dict__" {
             // The dict itself: what is read of it later is looked at then,
             // unless a store of the path is into it.
@@ -6628,7 +7078,6 @@ impl Compiled {
             .filter(|at| t.stores[*at].key.as_ref().is_some_and(|other| other.as_ptr() == key || graph::same_value(other.as_ptr(), key)))
             .collect();
         let last = alike.iter().rev().copied().find(|at| !graph::apart(held, attribute, t.stores[*at].object, t.stores[*at].keeps));
-        let by = self.path_value(t, regs, object);
         let mut given = None;
         if let Some(at) = last {
             let store = &t.stores[at];
@@ -6676,7 +7125,37 @@ impl Compiled {
             Op::Call { callee, args, kwnames } => {
                 let held = reg(regs, *callee);
                 let plain = *kwnames == NONE && !held.is_null() && !capi::is_unboxed(held);
-                if plain && args.len() == 1 && graph::is_len(held) && special(args[0], &names.len) {
+                let reader = if plain && args.len() == 1 { graph::generic_reader(held) } else { null_mut() };
+                let key = if reader.is_null() { null_mut() } else { reg(regs, args[0]) };
+                let named = !key.is_null() && !capi::is_unboxed(key) && ffi::PyUnicode_CheckExact(key) != 0;
+                let property = named && !graph::generic_property(reader, key).is_null();
+                xdecref(reader);
+                // A builtin that asks its arguments for an iterator, one of
+                // them through an `__iter__` written in Python, and the
+                // others in C.
+                let over = if plain {
+                    let given: Vec<Obj> = args.iter().map(|v| reg(regs, *v)).collect();
+                    let asked = &args[..graph::goes_over(held, &given)];
+                    let python = |v: &V| special(*v, &names.iter);
+                    let goes = asked.iter().any(python) && asked.iter().all(|v| python(v) || graph::quiet_iter(reg(regs, *v)).is_some());
+                    if goes { asked.len() } else { 0 }
+                } else {
+                    0
+                };
+                let asks = plain && (2..=3).contains(&args.len()) && graph::reads_attribute(held) && {
+                    let (object, key) = (reg(regs, args[0]), reg(regs, args[1]));
+                    !object.is_null()
+                        && !key.is_null()
+                        && !capi::is_unboxed(key)
+                        && ffi::PyUnicode_CheckExact(key) != 0
+                        && special(args[0], &names.getattribute)
+                        && pyffi::_PyType_Lookup(ffi::Py_TYPE(object), names.getattr.as_ptr()).is_null()
+                };
+                if property {
+                    Form::Reads { callee: *callee, name: None, key: args[0] }
+                } else if asks {
+                    Form::Asks(args[0], args[1])
+                } else if plain && args.len() == 1 && graph::is_len(held) && special(args[0], &names.len) {
                     Form::Special(&names.len, args[0], None)
                 } else if plain
                     && args.len() == 2
@@ -6686,21 +7165,52 @@ impl Compiled {
                     // The `__instancecheck__` of the class of the class, with
                     // the class and the object.
                     Form::Special(&names.instancecheck, args[1], Some(args[0]))
-                } else if plain && graph::goes_over(held) && args.iter().any(|v| special(*v, &names.iter)) {
-                    return Some(self.record_over(t, site, at, *callee, args, regs, frames, api));
+                } else if over > 0 {
+                    return Some(self.record_over(t, site, at, *callee, args, over, regs, frames, api));
                 } else {
                     Form::Call { callee: *callee, args, kwnames: *kwnames }
                 }
             }
             Op::CallMethod { recv, name, args, kwnames } => {
-                Form::Method { recv: *recv, name: *name, args, kwnames: *kwnames }
+                // `super().__getattribute__(key)` for a key that is a property.
+                let held = reg(regs, *recv);
+                let load = Op::LoadAttr(*recv, *name);
+                let bound = *kwnames == NONE
+                    && args.len() == 1
+                    && !held.is_null()
+                    && !capi::is_unboxed(held)
+                    && ffi::Py_TYPE(held) == std::ptr::addr_of_mut!(ffi::PySuper_Type)
+                    && self.quiet(regs, &load, api);
+                let found = if bound { self.exec_op(regs, &load).unwrap_or(null_mut()) } else { null_mut() };
+                ffi::PyErr_Clear();
+                let reader = graph::generic_reader(found);
+                let key = reg(regs, args.first().copied().unwrap_or(NONE));
+                let named = !reader.is_null() && !key.is_null() && !capi::is_unboxed(key) && ffi::PyUnicode_CheckExact(key) != 0;
+                let property = named && !graph::generic_property(reader, key).is_null();
+                xdecref(reader);
+                xdecref(found);
+                if property {
+                    Form::Reads { callee: *recv, name: Some(*name), key: args[0] }
+                } else {
+                    Form::Method { recv: *recv, name: *name, args, kwnames: *kwnames }
+                }
             }
             Op::CallEx { callee, args, kwargs } => Form::Spread { callee: *callee, args: *args, kwargs: *kwargs },
             Op::GetIter(v) if special(*v, &names.iter) => Form::Special(&names.iter, *v, None),
             Op::GetItem(a, key) if special(*a, &names.getitem) => Form::Special(&names.getitem, *a, Some(*key)),
+            Op::Contains(item, container, _) if special(*container, &names.contains) => {
+                Form::Special(&names.contains, *container, Some(*item))
+            }
             Op::LoadAttr(a, name) if !reg(regs, *a).is_null() && !self.quiet(regs, &inst.op, api) => {
                 let descr = graph::data_descriptor(reg(regs, *a), f.consts[*name as usize].as_ptr());
-                if descr.is_null() {
+                if special(*a, &names.getattribute) {
+                    // With a `__getattr__` behind it, what it raises is not
+                    // what the read raises.
+                    if !pyffi::_PyType_Lookup(ffi::Py_TYPE(reg(regs, *a)), names.getattr.as_ptr()).is_null() {
+                        return None;
+                    }
+                    Form::Getattribute(*a, *name)
+                } else if descr.is_null() {
                     Form::Getattr(*a, *name)
                 } else if ffi::Py_TYPE(descr) == std::ptr::addr_of_mut!(ffi::PyProperty_Type) {
                     Form::Property(*a, *name)
@@ -6710,50 +7220,55 @@ impl Compiled {
             }
             _ => return None,
         };
-        let (result, value) = match self.follow(t, site, at, regs, frames, api, &form) {
+        let (mut result, mut value) = match self.follow(t, site, at, regs, frames, api, &form) {
             Followed::Not => return None,
             Followed::Raised => return Some(Taken::Raised),
-            Followed::Left(result, reason) => return Some(Taken::Cut(result, reason)),
+            // The function ran to its end off the path, which ends in front
+            // of the instruction: that gives what the interpreter makes of
+            // what the function returned or raised.
+            Followed::Left(result, reason) => return Some(Taken::Cut(self.makes_of(&form, inst, regs, result), reason)),
             Followed::Returned(result, value) => (result, value),
         };
-        // What the interpreter asks of what such a function returns.
+        if let (Form::Asks(..), Op::Call { callee, .. }) = (&form, &inst.op) {
+            // What was called is the builtin at every call; `hasattr`
+            // gives that the attribute is there.
+            let builtin = self.path_value(t, regs, *callee);
+            t.check(Assert::Is(builtin, PyObj::from_borrowed(reg(regs, *callee))), inst.bc);
+            if graph::is_hasattr(reg(regs, *callee)) {
+                ffi::Py_DECREF(result);
+                result = new_ref(ffi::Py_True());
+                value = t.derive(Op::Object(PyObj::from_borrowed(ffi::Py_True())), Kind::Pure, false, new_ref(ffi::Py_True()), inst.bc);
+            }
+        }
+        // What the interpreter makes of what such a function returns. A path
+        // goes on where that is the value itself under a check the path can
+        // make at every call (an iterator, a count, a bool); anything else
+        // is made of it here (`makes_of`), and the path ends in front.
         if let Form::Special(name, ..) = &form {
-            if std::ptr::eq(*name, &names.iter) {
-                if ffi::PyIter_Check(result) == 0 {
-                    set_error(
-                        ffi::PyExc_TypeError,
-                        format!("iter() returned non-iterator of type '{}'", pyffi::type_name(result)),
-                    );
-                    ffi::Py_DECREF(result);
-                    return Some(Taken::Raised);
-                }
-                t.check(Assert::Iterator(value), inst.bc);
+            let flag = result == ffi::Py_True() || result == ffi::Py_False();
+            let (goes, check, why) = if std::ptr::eq(*name, &names.iter) {
+                (ffi::PyIter_Check(result) != 0, Assert::Iterator(value), "an __iter__ returns what is no iterator")
             } else if std::ptr::eq(*name, &names.len) {
-                if !graph::is_count(result) {
-                    let count = ffi::PyNumber_AsSsize_t(result, ffi::PyExc_OverflowError);
-                    ffi::Py_DECREF(result);
-                    if count < 0 {
-                        if ffi::PyErr_Occurred().is_null() {
-                            set_error(ffi::PyExc_ValueError, "__len__() should return >= 0".to_string());
-                        }
-                        return Some(Taken::Raised);
-                    }
-                    let reason = "a __len__ returns what is no count".to_string();
-                    return Some(Taken::Cut(ffi::PyLong_FromSsize_t(count), reason));
-                }
-                t.check(Assert::Count(value), inst.bc);
+                (graph::is_count(result), Assert::Count(value), "a __len__ returns what is no count")
             } else if std::ptr::eq(*name, &names.instancecheck) {
-                // `isinstance` gives whether what was returned is true.
-                if result != ffi::Py_True() && result != ffi::Py_False() {
-                    let truth = ffi::PyObject_IsTrue(result);
-                    ffi::Py_DECREF(result);
-                    if truth < 0 {
-                        return Some(Taken::Raised);
-                    }
-                    let reason = "an __instancecheck__ returns what is no bool".to_string();
-                    return Some(Taken::Cut(ffi::PyBool_FromLong(truth as _), reason));
-                }
-                t.check(Assert::Flag(value), inst.bc);
+                (flag, Assert::Flag(value), "an __instancecheck__ returns what is no bool")
+            } else if std::ptr::eq(*name, &names.contains) {
+                (flag, Assert::Flag(value), "a __contains__ returns what is no bool")
+            } else {
+                (true, Assert::Flag(NONE), "")
+            };
+            if !goes {
+                return Some(Taken::Cut(self.makes_of(&form, inst, regs, result), why.to_string()));
+            }
+            if !why.is_empty() {
+                t.check(check, inst.bc);
+            }
+            // `not in` is whether what was returned is not true.
+            if std::ptr::eq(*name, &names.contains) && matches!(inst.op, Op::Contains(_, _, true)) {
+                let flipped = if result == ffi::Py_True() { ffi::Py_False() } else { ffi::Py_True() };
+                ffi::Py_DECREF(result);
+                result = new_ref(flipped);
+                value = t.derive(Op::Unary(UnaryKind::Not, value), Kind::Pure, false, new_ref(flipped), inst.bc);
             }
         }
         t.unmark();
@@ -6770,10 +7285,101 @@ impl Compiled {
         Some(Taken::Went)
     }
 
-    /// `record_call` for a builtin that goes over its arguments
-    /// (`enumerate`, `zip`, `iter`, `list`, `tuple`) where the class of one
-    /// has an `__iter__` in Python: the path goes into that function, and
-    /// the builtin gets the iterator it returned, which is the path's own.
+    /// What an instruction gives for what the Python function it went into
+    /// on its behalf returned (null: the function raised, and the error is
+    /// set), as the interpreter makes it of that. Every way out of such a
+    /// function on which the path does not go on comes through here:
+    /// `iter` and `for` raise for what is no iterator; `len` gives the
+    /// index of what `__len__` returned as an int and raises for a negative
+    /// one; `isinstance`, `in` and `not in` give whether what was returned
+    /// is true (or is not); `hasattr` gives whether the function returned,
+    /// and it and `getattr` with a default make their answer of an
+    /// AttributeError; a read of an attribute whose property or descriptor
+    /// raised AttributeError asks the `__getattr__` of the class, if it
+    /// has one. Any other instruction gives what the function returned,
+    /// and raises what it raised. Takes the reference to `result`; gives
+    /// one, or null with the error set.
+    unsafe fn makes_of(&self, form: &Form, inst: &Inst, regs: &mut [Obj], result: Obj) -> Obj {
+        let names = graph::specials();
+        let truth = |result: Obj, invert: bool| {
+            let truth = ffi::PyObject_IsTrue(result);
+            ffi::Py_DECREF(result);
+            if truth < 0 { null_mut() } else { new_ref(py_bool((truth != 0) != invert)) }
+        };
+        match (form, &inst.op) {
+            (Form::Asks(..), Op::Call { callee, args, .. }) => {
+                let whether = graph::is_hasattr(reg(regs, *callee));
+                if !result.is_null() {
+                    if whether {
+                        ffi::Py_DECREF(result);
+                        return new_ref(ffi::Py_True());
+                    }
+                    return result;
+                }
+                if (whether || args.len() == 3) && ffi::PyErr_ExceptionMatches(ffi::PyExc_AttributeError) != 0 {
+                    ffi::PyErr_Clear();
+                    return new_ref(if whether { ffi::Py_False() } else { self.obj(regs, args[2]) });
+                }
+                null_mut()
+            }
+            (Form::Property(v, name) | Form::Descriptor(v, name), _) if result.is_null() => {
+                self.asks_getattr(reg(regs, *v), self.func.consts[*name as usize].as_ptr())
+            }
+            _ if result.is_null() => null_mut(),
+            (Form::Special(name, ..), _) if std::ptr::eq(*name, &names.iter) => {
+                if ffi::PyIter_Check(result) == 0 {
+                    set_error(ffi::PyExc_TypeError, format!("iter() returned non-iterator of type '{}'", pyffi::type_name(result)));
+                    ffi::Py_DECREF(result);
+                    return null_mut();
+                }
+                result
+            }
+            (Form::Special(name, ..), _) if std::ptr::eq(*name, &names.len) => counted(result),
+            (Form::Special(name, ..), _) if std::ptr::eq(*name, &names.instancecheck) => truth(result, false),
+            (Form::Special(name, ..), op) if std::ptr::eq(*name, &names.contains) => {
+                truth(result, matches!(op, Op::Contains(_, _, true)))
+            }
+            _ => result,
+        }
+    }
+
+    /// For a read of an attribute that raised AttributeError in the lookup
+    /// of `object` (the getter of a property, the `__get__` of a
+    /// descriptor): what the `__getattr__` of the class gives, if the class
+    /// has one, which the interpreter then asks (`slot_tp_getattr_hook`).
+    /// Null with the error as it is for any other error and for a class
+    /// without one.
+    unsafe fn asks_getattr(&self, object: Obj, name: Obj) -> Obj {
+        if object.is_null() || capi::is_unboxed(object) || ffi::PyErr_ExceptionMatches(ffi::PyExc_AttributeError) == 0 {
+            return null_mut();
+        }
+        let class = ffi::Py_TYPE(object);
+        let hook = pyffi::_PyType_Lookup(class, graph::specials().getattr.as_ptr());
+        if hook.is_null() {
+            return null_mut();
+        }
+        ffi::PyErr_Clear();
+        let _kept = PyObj::from_borrowed(hook);
+        let bound = match (*ffi::Py_TYPE(hook)).tp_descr_get {
+            Some(get) => get(hook, object, class as Obj),
+            None => new_ref(hook),
+        };
+        if bound.is_null() {
+            return null_mut();
+        }
+        let given = ffi::PyObject_CallOneArg(bound, name);
+        ffi::Py_DECREF(bound);
+        given
+    }
+
+    /// `record_call` for a builtin that asks its arguments for an iterator
+    /// (`graph::goes_over`) where the class of one has an `__iter__` in
+    /// Python: the path goes into that function. Where what it returned is
+    /// an iterator that C code goes over and the path came back from the
+    /// function, the builtin is called with that iterator and the path goes
+    /// on. On every other way out the builtin is called with what stands
+    /// for the object (`iterated`), which gives it what the `__iter__`
+    /// returned, and the path ends in front of the call.
     #[allow(clippy::too_many_arguments)]
     unsafe fn record_over(
         &self,
@@ -6782,6 +7388,7 @@ impl Compiled {
         at: (usize, *const BlockCode, usize),
         callee: V,
         args: &[V],
+        over: usize,
         regs: &mut [Obj],
         frames: &mut Frames,
         api: &TcfgApi,
@@ -6789,51 +7396,65 @@ impl Compiled {
         let inst = &(&(*at.1).insts)[at.2];
         let names = graph::specials();
         let builtin = reg(regs, callee);
+        // What the builtin is handed where the path goes on: for an
+        // argument whose `__iter__` the path went into, the iterator that
+        // returned, which is one that C code goes over.
         let mut given: Vec<PyObj> = args.iter().map(|v| PyObj::from_borrowed(self.obj(regs, *v))).collect();
+        // And where it cannot: what stands for such an argument
+        // (`iterated`), so that the builtin does with what the `__iter__`
+        // returned what it does when it calls the `__iter__` itself.
+        let mut stands = given.clone();
         let mut values: Vec<PathValue> = vec![NONE; args.len()];
-        // The call as the interpreter makes it, on what the arguments are
-        // by now, for a path that cannot go on.
-        let call = |given: &[PyObj]| {
-            let objects: Vec<Obj> = given.iter().map(|o| o.as_ptr()).collect();
+        let call = |handed: &[PyObj]| {
+            let objects: Vec<Obj> = handed.iter().map(|o| o.as_ptr()).collect();
             ffi::PyObject_Vectorcall(builtin, objects.as_ptr(), objects.len(), null_mut())
         };
-        for (i, v) in args.iter().enumerate() {
+        let mut went = false;
+        for (i, v) in args.iter().enumerate().take(over) {
             if graph::special(reg(regs, *v), &names.iter).is_null() {
                 continue;
             }
             let form = Form::Special(&names.iter, *v, None);
-            let stopped = match self.follow(t, site, at, regs, frames, api, &form) {
-                Followed::Returned(iterator, value) if ffi::PyIter_Check(iterator) != 0 => {
-                    t.check(Assert::Iterator(value), inst.bc);
-                    given[i] = PyObj::from_owned(iterator);
-                    values[i] = value;
-                    continue;
-                }
-                // The builtin says what is wrong with it.
-                Followed::Returned(other, _) => {
-                    given[i] = PyObj::from_owned(other);
-                    "an __iter__ returns what is no iterator".to_string()
-                }
+            let (returned, value, stopped) = match self.follow(t, site, at, regs, frames, api, &form) {
+                Followed::Returned(returned, value) => (returned, value, "an __iter__ returns what is no iterator".to_string()),
                 Followed::Raised => return Taken::Raised,
-                Followed::Left(result, _) if result.is_null() => return Taken::Raised,
-                Followed::Left(result, reason) => {
-                    given[i] = PyObj::from_owned(result);
-                    reason
-                }
-                Followed::Not if t.mark.is_none() || !t.outermost() => {
+                Followed::Left(result, reason) if result.is_null() => return Taken::Cut(result, reason),
+                Followed::Left(result, reason) => (result, NONE, reason),
+                // No `__iter__` has been called: the call is the
+                // interpreter's.
+                Followed::Not if !went => {
                     return Taken::Ends(format!("{} goes over what enters Python code", pyffi::function_str(builtin)));
                 }
-                Followed::Not => "an __iter__ that is not gone into".to_string(),
+                Followed::Not => return Taken::Cut(call(&stands), "an __iter__ that is not gone into".to_string()),
             };
-            return Taken::Cut(call(&given), stopped);
+            went = true;
+            let returned = PyObj::from_owned(returned);
+            let stand = iterated(returned.as_ptr());
+            if stand.is_null() {
+                return Taken::Cut(stand, stopped);
+            }
+            stands[i] = PyObj::from_owned(stand);
+            if value == NONE || ffi::PyIter_Check(returned.as_ptr()) == 0 {
+                return Taken::Cut(call(&stands), stopped);
+            }
+            t.check(Assert::Iterator(value), inst.bc);
+            given[i] = returned;
+            values[i] = value;
         }
         let objects: Vec<Obj> = given.iter().map(|o| o.as_ptr()).collect();
         let Some(own) = graph::pure_call(builtin, &objects, |i| values[i] != NONE, api) else {
-            return Taken::Cut(call(&given), "a call that goes over what enters Python code".to_string());
+            return Taken::Cut(call(&stands), "a call that goes over what enters Python code".to_string());
         };
         let result = call(&given);
         if result.is_null() {
             return Taken::Raised;
+        }
+        if graph::makes_sequence(builtin) {
+            // `list` and `tuple` ask an object that has a `__len__` or a
+            // `__length_hint__` for it: this one's class has neither.
+            let object = self.path_value(t, regs, args[0]);
+            t.check(Assert::Lacks(object, names.len.clone()), inst.bc);
+            t.check(Assert::Lacks(object, graph::length_hint()), inst.bc);
         }
         let function = self.path_value(t, regs, callee);
         for (i, v) in args.iter().enumerate() {
@@ -7000,6 +7621,44 @@ impl Compiled {
                 items.extend([reg(regs, *v), attr]);
                 graph::special(items[0], &names.getattr)
             }
+            Form::Getattribute(v, name) => {
+                items.extend([reg(regs, *v), f.consts[*name as usize].as_ptr()]);
+                graph::special(items[0], &names.getattribute)
+            }
+            Form::Asks(v, key) => {
+                items.extend([reg(regs, *v), reg(regs, *key)]);
+                graph::special(items[0], &names.getattribute)
+            }
+            Form::Reads { callee, name, key } => {
+                let wrapper = match name {
+                    None => new_ref(reg(regs, *callee)),
+                    Some(name) => {
+                        let load = Op::LoadAttr(*callee, *name);
+                        let found = if self.quiet(regs, &load, api) { self.exec_op(regs, &load).unwrap_or(null_mut()) } else { null_mut() };
+                        ffi::PyErr_Clear();
+                        found
+                    }
+                };
+                if wrapper.is_null() {
+                    return Followed::Not;
+                }
+                read.push(PyObj::from_owned(wrapper));
+                called = wrapper;
+                let bound = graph::generic_reader(wrapper);
+                if bound.is_null() {
+                    return Followed::Not;
+                }
+                read.push(PyObj::from_owned(bound));
+                descr = graph::generic_property(bound, reg(regs, *key));
+                let getter = if descr.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(descr, c"fget".as_ptr()) };
+                if getter.is_null() {
+                    ffi::PyErr_Clear();
+                    return Followed::Not;
+                }
+                read.push(PyObj::from_owned(getter));
+                items.push(bound);
+                getter
+            }
         };
         if func.is_null() || ffi::PyFunction_Check(func) == 0 {
             return not("it comes down to no Python function");
@@ -7067,9 +7726,25 @@ impl Compiled {
                         _ => t.derive_fixed(Op::LoadAttr(value, *name), Kind::Read, false, new_ref(called), bc, sure),
                     };
                 }
-                let method = matches!(form, Form::Method { .. });
+                let mut method = matches!(form, Form::Method { .. });
+                // A method that was read off a tensor the graph gives
+                // earlier is bound to that tensor in every call too.
+                let mut read_off = NONE;
+                if let (false, Some(graph::PathInst { op: Op::LoadAttr(of, name), .. })) = (method, t.body.iter().find(|other| other.dst == value)) {
+                    let (of, name) = (*of, *name);
+                    let held = t.rec.values[of as usize];
+                    let bound = !receiver.is_null() && held == receiver && t.defs[of as usize].fixed && t.defs[of as usize].node;
+                    if bound && (api.tensor_info)(held, &mut info) != 0 {
+                        value = t.derive_fixed(Op::LoadAttr(of, name), Kind::Read, false, new_ref(called), bc, true);
+                        read_off = of;
+                        method = true;
+                    }
+                }
+                let sure = sure || read_off != NONE;
                 let function = t.derive_fixed(Op::Part(Part::Target, value), Kind::Read, false, new_ref(func), bc, sure && method);
-                if receiver == called {
+                if read_off != NONE {
+                    given.push(read_off);
+                } else if receiver == called {
                     given.push(value);
                 } else if method && receiver == reg(regs, *callee) {
                     given.push(object);
@@ -7149,6 +7824,34 @@ impl Compiled {
                 let attr = t.derive(Op::Const(*name), Kind::Pure, false, new_ref(items[1]), bc);
                 given.extend([value, attr]);
                 t.derive(Op::Part(Part::OfType(names.getattr.clone()), value), Kind::Read, false, new_ref(func), bc)
+            }
+            Form::Getattribute(v, name) => {
+                let value = self.path_value(t, regs, *v);
+                t.check(Assert::Lacks(value, names.getattr.clone()), bc);
+                let attr = t.derive(Op::Const(*name), Kind::Pure, false, new_ref(items[1]), bc);
+                given.extend([value, attr]);
+                t.derive(Op::Part(Part::OfType(names.getattribute.clone()), value), Kind::Read, false, new_ref(func), bc)
+            }
+            Form::Asks(v, key) => {
+                let value = self.path_value(t, regs, *v);
+                t.check(Assert::Lacks(value, names.getattr.clone()), bc);
+                let attr = self.path_value(t, regs, *key);
+                given.extend([value, attr]);
+                t.derive(Op::Part(Part::OfType(names.getattribute.clone()), value), Kind::Read, false, new_ref(func), bc)
+            }
+            Form::Reads { callee, name, key } => {
+                // The key is the one the property was found under.
+                let asked = self.path_value(t, regs, *key);
+                t.check(Assert::Equals(asked, PyObj::from_borrowed(reg(regs, *key))), bc);
+                let mut reader = self.path_value(t, regs, *callee);
+                if let Some(name) = name {
+                    reader = t.derive(Op::LoadAttr(reader, *name), Kind::Read, false, new_ref(called), bc);
+                }
+                let value = t.derive(Op::Part(Part::Receiver, reader), Kind::Read, false, new_ref(items[0]), bc);
+                let part = Part::OfType(PyObj::from_borrowed(reg(regs, *key)));
+                let found = t.derive(Op::Part(part, value), Kind::Read, false, new_ref(descr), bc);
+                given.push(value);
+                t.derive(Op::Part(Part::Getter, found), Kind::Read, false, new_ref(func), bc)
             }
         };
         t.check(Assert::Enters(function, compiled), bc);
@@ -7279,6 +7982,101 @@ impl Compiled {
         let named = pyffi::str_to_string(self.func.consts[name as usize].as_ptr()) == "append";
         let exact = !held.is_null() && !capi::is_unboxed(held) && ffi::PyList_CheckExact(held) != 0;
         (named && exact && inst.dst != NONE).then_some((list, item))
+    }
+
+    /// The values a call takes out of a list or a tuple that the code
+    /// spreads into it: those the path built it of, or, of one that it did
+    /// not build, its items, each read off it, with a check that it has
+    /// that many.
+    unsafe fn spread(&self, t: &mut Trace, sequence: PathValue, bc: u32) -> Option<Vec<PathValue>> {
+        // What the path built: from what it was built of, a sequence that
+        // was added to it item by item.
+        let steps: Vec<Op> = t.body.iter().filter(|inst| match &inst.op {
+            Op::BuildTuple(_) | Op::BuildList(_) | Op::ListToTuple(_) => inst.dst == sequence,
+            Op::ListAppend(target, _) | Op::ListExtend(target, _) => *target == sequence,
+            _ => false,
+        }).map(|inst| inst.op.clone()).collect();
+        if !steps.is_empty() {
+            let mut items: Option<Vec<PathValue>> = None;
+            for step in steps {
+                match step {
+                    Op::BuildTuple(vs) | Op::BuildList(vs) => items = Some(vs),
+                    Op::ListToTuple(list) => items = Some(self.spread(t, list, bc)?),
+                    Op::ListAppend(_, v) => items.as_mut()?.push(v),
+                    Op::ListExtend(_, more) => {
+                        let more = self.spread(t, more, bc)?;
+                        items.as_mut()?.extend(more);
+                    }
+                    _ => {}
+                }
+            }
+            return items;
+        }
+        let held = t.rec.values[sequence as usize];
+        if held.is_null() || !graph::is_row(held) {
+            return None;
+        }
+        let count = ffi::PyObject_Size(held);
+        t.check(Assert::Sequence(sequence, ffi::Py_TYPE(held) as usize, count as usize), bc);
+        let fixed = t.defs[sequence as usize].fixed;
+        let item = |t: &mut Trace, i: isize| {
+            let kept = new_ref(graph::sequence_item(held, i));
+            t.derive_fixed(Op::Part(Part::Index(i as u32), sequence), Kind::Pure, false, kept, bc, fixed)
+        };
+        Some((0..count).map(|i| item(t, i)).collect())
+    }
+
+    /// Whether a value can be made the same in every call a form is for,
+    /// and with `apply`, makes it so: one that is; a number or a text (or
+    /// a tuple of such) from in front of the callable, which the path then
+    /// checks at every call; a list or a tuple the path built of nothing
+    /// but such values.
+    unsafe fn settles(&self, t: &mut Trace, v: PathValue, bc: u32, apply: bool, depth: usize) -> bool {
+        let of = t.defs[v as usize];
+        if of.fixed {
+            return true;
+        }
+        let held = t.rec.values[v as usize];
+        if held.is_null() || depth > 4 {
+            return false;
+        }
+        if !of.late {
+            if !graph::checkable(held) {
+                return false;
+            }
+            if apply {
+                t.check(Assert::Equals(v, PyObj::from_borrowed(held)), bc);
+                t.defs[v as usize].fixed = true;
+            }
+            return true;
+        }
+        let steps: Vec<Op> = t
+            .body
+            .iter()
+            .filter(|inst| match &inst.op {
+                Op::BuildTuple(_) | Op::BuildList(_) | Op::ListToTuple(_) => inst.dst == v,
+                Op::ListAppend(target, _) | Op::ListExtend(target, _) => *target == v,
+                _ => false,
+            })
+            .map(|inst| inst.op.clone())
+            .collect();
+        if steps.is_empty() || !graph::checkable(held) && ffi::PyList_CheckExact(held) == 0 {
+            return false;
+        }
+        let mut all = true;
+        for step in steps {
+            match step {
+                Op::BuildTuple(vs) | Op::BuildList(vs) => all = all && vs.iter().all(|item| self.settles(t, *item, bc, apply, depth + 1)),
+                Op::ListToTuple(other) | Op::ListAppend(_, other) | Op::ListExtend(_, other) => {
+                    all = all && self.settles(t, other, bc, apply, depth + 1)
+                }
+                _ => {}
+            }
+        }
+        if all && apply {
+            t.defs[v as usize].fixed = true;
+        }
+        all
     }
 
     /// For a tuple or a list that a path built: the values it holds where
