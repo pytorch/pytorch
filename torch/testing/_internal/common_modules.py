@@ -1043,6 +1043,106 @@ def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, tra
     ]
 
 
+def module_error_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, training, **kwargs):
+    N = kwargs['N']
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_module = partial(FunctionInput, device=device, dtype=dtype)
+    kernel_size, C_in, C_out = 3, 4, 5
+    spatial_shape = (kernel_size + 3,) * N
+    return [
+        # Channel count of the input must match in_channels.
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=make_module(C_in, C_out, kernel_size),
+                forward_input=FunctionInput(make_input((2, C_in + 1) + spatial_shape)),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=f"to have {C_in} channels, but got {C_in + 1} channels instead",
+        ),
+        # Input must be (N + 1)D unbatched or (N + 2)D batched.
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=make_module(C_in, C_out, kernel_size),
+                forward_input=FunctionInput(make_input((2, 2, C_in) + spatial_shape)),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=f"Expected {N + 1}D [(]unbatched[)] or {N + 2}D [(]batched[)] input to conv{N}d",
+        ),
+        # The kernel must fit inside the padded input.
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=make_module(C_in, C_out, kernel_size),
+                forward_input=FunctionInput(make_input((2, C_in) + (kernel_size - 1,) * N)),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex="Kernel size can't be greater than actual input size",
+        ),
+        # groups must be positive.
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=make_module(C_in, C_out, kernel_size, groups=0),
+                forward_input=FunctionInput(make_input((2, C_in) + spatial_shape)),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="groups must be a positive integer",
+        ),
+        # in_channels must be divisible by groups.
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=make_module(C_in, C_out, kernel_size, groups=C_in - 1),
+                forward_input=FunctionInput(make_input((2, C_in) + spatial_shape)),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="in_channels must be divisible by groups",
+        ),
+        # out_channels must be divisible by groups.
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=make_module(C_in, C_out, kernel_size, groups=2),
+                forward_input=FunctionInput(make_input((2, C_in) + spatial_shape)),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="out_channels must be divisible by groups",
+        ),
+        # padding strings must be 'same' or 'valid'.
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=make_module(C_in, C_out, kernel_size, padding='foo'),
+                forward_input=FunctionInput(make_input((2, C_in) + spatial_shape)),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="Invalid padding string 'foo'",
+        ),
+        # padding='same' needs stride 1.
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=make_module(C_in, C_out, kernel_size, padding='same', stride=2),
+                forward_input=FunctionInput(make_input((2, C_in) + spatial_shape)),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="padding='same' is not supported for strided convolutions",
+        ),
+        # padding_mode must be a known mode.
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=make_module(C_in, C_out, kernel_size, padding_mode='foo'),
+                forward_input=FunctionInput(make_input((2, C_in) + spatial_shape)),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="padding_mode must be one of",
+        ),
+    ]
+
+
 def module_inputs_torch_nn_CosineEmbeddingLoss(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
@@ -4286,6 +4386,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Conv1d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=False),
+               module_error_inputs_func=partial(module_error_inputs_torch_nn_ConvNd, N=1),
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                decorators=(
@@ -4293,6 +4394,7 @@ module_db: list[ModuleInfo] = [
                )),
     ModuleInfo(torch.nn.Conv2d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False),
+               module_error_inputs_func=partial(module_error_inputs_torch_nn_ConvNd, N=2),
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                skips=(
@@ -4306,6 +4408,7 @@ module_db: list[ModuleInfo] = [
                )),
     ModuleInfo(torch.nn.Conv3d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=False),
+               module_error_inputs_func=partial(module_error_inputs_torch_nn_ConvNd, N=3),
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                skips=(
