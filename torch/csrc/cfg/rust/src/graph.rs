@@ -751,117 +751,185 @@ unsafe extern "C" fn every_referent(o: Obj, arg: *mut std::ffi::c_void) -> std::
     0
 }
 
-/// Whether letting go of a reference to an object runs no Python code even
-/// if it is the last one, as far as that can be shown by looking: neither
-/// the object nor anything it refers to, and so may take with it, is of a
-/// class with a finalizer (`__del__`, a generator's, a file's) or has a
-/// weak reference with a callback, other than the one by which a weak
-/// dictionary or a weak set takes its entry out (what goes with that
-/// entry is looked at like what the object refers to). At most 64 objects
-/// are looked at; with more, the answer is no. A class is not looked into: it does not die
-/// where a reference to it is let go of (its own order of classes refers to
-/// it). What an object holds outside of what it shows the garbage
-/// collector (the history of a tensor in C++) is not seen.
-pub unsafe fn dies_quietly(o: Obj) -> bool {
-    const LOOKED_AT: usize = 64;
-    if o.is_null() || capi::is_unboxed(o) {
+/// Whether an object is a tensor whose end may let go of what cannot be
+/// looked at from here: one that requires a gradient. Such a tensor has a
+/// history, or is a leaf that gradients are accumulated in, and what
+/// that holds (the nodes of the history with the hooks on them and the
+/// Python objects that functions written in Python saved, the hooks of
+/// the tensor) is held from C++ and ends with the tensor where nothing
+/// else holds it.
+pub unsafe fn holds_unseen(o: Obj) -> bool {
+    let mut info = TcfgTensorInfo::empty();
+    capi::api().is_some_and(|api| (api.tensor_info)(o, &mut info) != 0 && info.requires_grad != 0)
+}
+
+/// Whether the end of an object runs code of its class: a `__del__`, or
+/// what the interpreter's own classes do at the end of their objects (a
+/// file is closed, a generator that waits at a `yield` is closed, which
+/// runs what it has left to run). A generator that was never started, or
+/// that ran to its end, has nothing to run.
+unsafe fn finalized(o: Obj) -> bool {
+    let ty = ffi::Py_TYPE(o);
+    if (*ty).tp_del.is_some() {
         return true;
     }
-    let mut seen: Vec<Obj> = vec![o];
-    let mut found: Vec<Obj> = Vec::new();
-    // What a weak container lets go of with its entry: kept while looked at.
+    if (*ty).tp_finalize.is_none() {
+        return false;
+    }
+    if ffi::PyGen_CheckExact(o) == 0 {
+        return true;
+    }
+    let rests = |name: &std::ffi::CStr| {
+        let said = ffi::PyObject_GetAttrString(o, name.as_ptr());
+        let rests = said == ffi::Py_False();
+        if said.is_null() {
+            ffi::PyErr_Clear();
+        }
+        xdecref(said);
+        rests
+    };
+    !(rests(c"gi_suspended") && rests(c"gi_running"))
+}
+
+/// Whether an object is a tensor (of any class of tensors).
+unsafe fn is_tensor(o: Obj) -> bool {
+    let mut info = TcfgTensorInfo::empty();
+    capi::api().is_some_and(|api| (api.tensor_info)(o, &mut info) != 0)
+}
+
+/// Whether the objects that a path lets go of where a callable has run in
+/// its place (`gone`, each as often as the path lets go of a reference to
+/// it; put in order here) end without Python code running, as far as they
+/// end at all. Asked before the path has taken anything of the call, so
+/// that every reference is somebody else's or one that is let go of.
+/// Looked at as the garbage collector looks at a set of objects: an
+/// object ends if its count of references is no larger than the
+/// references to it that the path lets go of and those from objects that
+/// end; else one of its references is somebody else's and it stays, with
+/// everything it refers to, and is not looked into. `stay` are objects
+/// that are known to stay. What ends must be of a class without a
+/// finalizer and have no weak reference with a callback other than a weak
+/// container's own (`weakly_watched`); what it refers to, and what a weak
+/// container lets go of with its entry, is looked at in the same way.
+/// Nothing of this is remembered from one call to the next: which
+/// objects are let go of, how many references each has, what class it is
+/// of and what that class does at the end of an object, the weak
+/// references to it and what it refers to are all read at the call. Err
+/// with the object whose end may run Python code, or with null where
+/// there is too much to look at (4096 objects that end).
+pub unsafe fn end_quietly(gone: &mut [Obj], stay: &[Obj]) -> Result<(), Obj> {
+    const ENDING: usize = 4096;
+    gone.sort_unstable();
+    // The distinct objects, each with how often it is let go of.
+    let runs = |gone: &[Obj]| {
+        let mut runs: Vec<(Obj, isize)> = Vec::new();
+        for o in gone {
+            match runs.last_mut() {
+                Some((last, count)) if *last == *o => *count += 1,
+                _ => runs.push((*o, 1)),
+            }
+        }
+        runs
+    };
+    // A number, a text or None refers to nothing and ends quietly.
+    let ends_alone = |o: Obj| is_plain(o) || ffi::PyBytes_CheckExact(o) != 0;
+    // The common case, without keeping anything: every object has a
+    // reference besides those that are let go of, so nothing ends.
+    let (mut at, mut all) = (0, true);
+    while at < gone.len() && all {
+        let o = gone[at];
+        let count = gone[at..].iter().take_while(|other| **other == o).count();
+        all = ffi::Py_REFCNT(o) > count as isize || ends_alone(o) || stay.contains(&o);
+        at += count;
+    }
+    if all {
+        return Ok(());
+    }
+    // Per object that was reached: the references to it that are not let
+    // go of by the path (counted once, when it is reached),
+    // how many of those are from objects that end, and whether it ends.
+    struct Reached {
+        others: isize,
+        inside: isize,
+        ends: bool,
+        /// It goes with a tensor that ends, whatever its count says.
+        with: bool,
+    }
+    let mut reached: HashMap<usize, Reached> = HashMap::new();
+    // Those that were reached and not counted yet, and those whose count
+    // is to be compared again.
+    let mut fresh: Vec<(Obj, isize)> = Vec::new();
+    let mut touched: Vec<Obj> = Vec::new();
+    for (o, count) in runs(gone) {
+        if !ends_alone(o) && !stay.contains(&o) && !reached.contains_key(&(o as usize)) {
+            reached.insert(o as usize, Reached { others: 0, inside: 0, ends: false, with: false });
+            fresh.push((o, count));
+            touched.push(o);
+        }
+    }
+    // What a weak container lets go of with its entry is kept here while
+    // it is looked at: those references are not anybody's.
     let mut more: Vec<PyObj> = Vec::new();
-    let mut at = 0;
-    while at < seen.len() {
-        let held = seen[at];
-        at += 1;
-        if ffi::PyType_Check(held) != 0 || is_plain(held) || ffi::PyBytes_CheckExact(held) != 0 {
-            continue;
-        }
-        let ty = ffi::Py_TYPE(held);
-        found.clear();
-        let before = more.len();
-        if (*ty).tp_finalize.is_some() || (*ty).tp_del.is_some() || weakly_watched(held, &mut more) {
-            return false;
-        }
-        found.extend(more[before..].iter().map(|other| other.as_ptr()));
-        if let Some(traverse) = (*ty).tp_traverse {
-            traverse(held, every_referent, &mut found as *mut Vec<Obj> as *mut std::ffi::c_void);
-        }
-        for other in &found {
-            if !seen.contains(other) {
-                if seen.len() >= LOOKED_AT {
-                    return false;
-                }
-                seen.push(*other);
-            }
-        }
-    }
-    true
-}
-
-/// Whether an object is of a class of the interpreter itself that holds
-/// references to what it is made of or goes over: a tuple, a list, a dict,
-/// a set, a slice, a cell, a bound method, an iterator, a view. Not a
-/// function (it holds the globals of its module), a class or a module.
-unsafe fn holds_others(o: Obj) -> bool {
-    let ty = ffi::Py_TYPE(o);
-    (*ty).tp_traverse.is_some()
-        && is_static(ty)
-        && ffi::PyType_Check(o) == 0
-        && ffi::PyModule_Check(o) == 0
-        && ffi::PyFunction_Check(o) == 0
-        && ffi::PyCode_Check(o) == 0
-}
-
-/// Whether an object stays alive when a path lands and leaves: `dropped`
-/// of the references to it that were there before the path ran are let go
-/// of where the path lands, and when it leaves, so is every reference the
-/// path itself holds. Those are counted, with whatever else may be one:
-/// the registers of the path that hold the object (`own`), and what the
-/// values in those registers refer to where a value may be something the
-/// path made (a container or an iterator of the interpreter's own
-/// classes, and what such a one holds inside), but not what the function
-/// had before the path (`given`). If the object has more references than
-/// that, one of them is somebody else's, and it stays. False where there
-/// is too much to look at, or containers are more than four deep inside
-/// one another.
-pub unsafe fn outlives(o: Obj, own: &[Obj], given: &[Obj], dropped: isize) -> bool {
-    const LOOKED_AT: usize = 4096;
-    let mut slots: Vec<Obj> = own.iter().copied().filter(|held| !held.is_null() && !capi::is_unboxed(*held)).collect();
-    let mut held = slots.iter().filter(|other| **other == o).count() as isize;
-    slots.sort_unstable();
-    slots.dedup();
-    let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
-    let mut work: Vec<(Obj, u32)> = Vec::new();
-    for other in &slots {
-        if *other != o && !given.contains(other) && holds_others(*other) {
-            work.push((*other, 0));
-        }
-    }
     let mut found: Vec<Obj> = Vec::new();
-    while let Some((at, depth)) = work.pop() {
-        if seen.len() >= LOOKED_AT {
-            return false;
+    let mut ended = 0;
+    loop {
+        for (o, dropped) in fresh.drain(..) {
+            let kept_here = more.iter().filter(|other| other.as_ptr() == o).count() as isize;
+            let entry = reached.get_mut(&(o as usize)).expect("it was reached");
+            entry.others = ffi::Py_REFCNT(o) - kept_here - dropped;
         }
-        seen.insert(at as usize);
-        let Some(traverse) = (*ffi::Py_TYPE(at)).tp_traverse else {
-            continue;
-        };
-        found.clear();
-        traverse(at, every_referent, &mut found as *mut Vec<Obj> as *mut std::ffi::c_void);
-        for other in &found {
-            if *other == o {
-                held += 1;
-            } else if slots.binary_search(other).is_err() && holds_others(*other) && !seen.contains(&(*other as usize)) {
-                if depth >= 4 {
-                    return false;
+        let mut ending: Vec<Obj> = Vec::new();
+        for o in touched.drain(..) {
+            let entry = reached.get_mut(&(o as usize)).expect("it was reached");
+            if !entry.ends && (entry.with || entry.others - entry.inside < 1) {
+                entry.ends = true;
+                ending.push(o);
+            }
+        }
+        if ending.is_empty() {
+            return Ok(());
+        }
+        for o in ending {
+            ended += 1;
+            if ended > ENDING {
+                return Err(null_mut());
+            }
+            let ty = ffi::Py_TYPE(o);
+            found.clear();
+            let before = more.len();
+            if finalized(o) || weakly_watched(o, &mut more) {
+                return Err(o);
+            }
+            // A tensor that requires a gradient ends with what C++ holds
+            // for it, which cannot be looked at.
+            let tensor = is_tensor(o);
+            if tensor && holds_unseen(o) {
+                return Err(o);
+            }
+            found.extend(more[before..].iter().map(|other| other.as_ptr()));
+            if let Some(traverse) = (*ty).tp_traverse {
+                traverse(o, every_referent, &mut found as *mut Vec<Obj> as *mut std::ffi::c_void);
+            }
+            for other in &found {
+                // A class does not end where a reference to it is let go of.
+                if ffi::PyType_Check(*other) != 0 || ends_alone(*other) || stay.contains(other) {
+                    continue;
                 }
-                work.push((*other, depth + 1));
+                let entry = reached.entry(*other as usize).or_insert_with(|| {
+                    let dropped = gone.partition_point(|o| *o <= *other) - gone.partition_point(|o| *o < *other);
+                    fresh.push((*other, dropped as isize));
+                    Reached { others: 0, inside: 0, ends: false, with: false }
+                });
+                entry.inside += 1;
+                // What a tensor shows of itself (its attributes, the
+                // hooks on it) may be held from C++ as well, by what
+                // ends with the tensor: it is looked at whatever its
+                // count of references says.
+                entry.with |= tensor;
+                touched.push(*other);
             }
         }
     }
-    ffi::Py_REFCNT(o) - held - dropped >= 1
 }
 
 /// The same for a set: a small one that holds nothing but plain values.
