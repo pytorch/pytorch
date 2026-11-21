@@ -3,6 +3,10 @@
 #   CAFFE2_INCLUDE_DIRS     - include directories for Caffe2
 # as well as Caffe2 targets for other cmake libraries to use.
 
+if("@MSVC@" AND CMAKE_VERSION VERSION_LESS 3.30)
+  message(FATAL_ERROR "Windows LibTorch packages require CMake 3.30 or newer.")
+endif()
+
 # Utils functions.
 include("${CMAKE_CURRENT_LIST_DIR}/public/utils.cmake")
 
