@@ -247,21 +247,7 @@ inline void convert(const double* src, BFloat16* dst, int64_t n) {
   }
 }
 
-template <>
-Vectorized<BFloat16> inline fmadd(
-    const Vectorized<BFloat16>& a,
-    const Vectorized<BFloat16>& b,
-    const Vectorized<BFloat16>& c) {
-  __m256 a_lo, a_hi;
-  __m256 b_lo, b_hi;
-  __m256 c_lo, c_hi;
-  cvtbf16_fp32(__m256i(a), a_lo, a_hi);
-  cvtbf16_fp32(__m256i(b), b_lo, b_hi);
-  cvtbf16_fp32(__m256i(c), c_lo, c_hi);
-  auto o1 = _mm256_fmadd_ps(a_lo, b_lo, c_lo);
-  auto o2 = _mm256_fmadd_ps(a_hi, b_hi, c_hi);
-  return cvtfp32_bf16(o1, o2);
-}
+FUSED_OPS_AS_FP32(BFloat16)
 
 CONVERT_VECTORIZED_INIT(BFloat16, bfloat16)
 LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16)
