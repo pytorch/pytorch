@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/NumericUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
 #include <ATen/native/DispatchStub.h>
@@ -58,6 +59,21 @@ void clamp_kernel_impl(TensorIteratorBase& iter) {
   }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kHalf, kBFloat16);
 }
 
+void clamp_tensor_backward_kernel_impl(TensorIteratorBase& iter) {
+  AT_DISPATCH_V2(iter.common_dtype(), "clamp_tensor_backward_cuda", AT_WRAP([&] {
+    using opmath_t = at::opmath_type<scalar_t>;
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t grad, scalar_t v, scalar_t lower, scalar_t upper) -> scalar_t {
+      if (v < lower || v > upper) {
+        return scalar_t(0);
+      }
+      if ((v == lower || v == upper) && lower < upper) {
+        return static_cast<scalar_t>(static_cast<opmath_t>(grad) / opmath_t(2));
+      }
+      return grad;
+    });
+  }), AT_EXPAND(AT_FLOATING_TYPES), kHalf, kBFloat16);
+}
+
 void inline launch_clamp_scalar(TensorIteratorBase& iter, Scalar lim0, Scalar lim1, at::native::detail::ClampLimits minmax){
   AT_DISPATCH_V2(iter.common_dtype(), "clamp_scalar_cuda", AT_WRAP([&] {
     using opmath_t = at::opmath_type<scalar_t>;
@@ -108,6 +124,7 @@ REGISTER_DISPATCH(where_kernel, &where_kernel_impl)
 REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl)
 REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl)
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl)
+REGISTER_DISPATCH(clamp_tensor_backward_stub, &clamp_tensor_backward_kernel_impl)
 REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl)
 REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl)
 REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl)

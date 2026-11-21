@@ -24,6 +24,7 @@
 #include <ATen/ops/_aminmax_native.h>
 #include <ATen/ops/_assert_async_native.h>
 #include <ATen/ops/_assert_scalar_native.h>
+#include <ATen/ops/_clamp_tensor_backward_native.h>
 #include <ATen/ops/_functional_assert_async_native.h>
 #include <ATen/ops/_functional_assert_scalar_native.h>
 #include <ATen/ops/_make_per_tensor_quantized_tensor.h>
@@ -156,6 +157,23 @@ TORCH_META_FUNC2(clamp, Tensor)
   } else if (max) {
     build(CLAMP_CONFIG().add_const_input(*max));
   }
+}
+
+TORCH_META_FUNC(_clamp_tensor_backward)
+(const Tensor& grad_output,
+ const Tensor& self,
+ const Tensor& min,
+ const Tensor& max) {
+  build(TensorIteratorConfig()
+            .set_check_mem_overlap(true)
+            .add_output(maybe_get_output())
+            .add_const_input(grad_output)
+            .add_const_input(self)
+            .add_const_input(min)
+            .add_const_input(max)
+            .promote_inputs_to_common_dtype(true)
+            .cast_common_dtype_to_outputs(true)
+            .enforce_safe_casting_to_output(true));
 }
 
 TORCH_META_FUNC(clamp_max)(const Tensor& self, const Scalar& max) {
@@ -384,6 +402,8 @@ DEFINE_DISPATCH(
     mode_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(
     clamp_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(
+    clamp_tensor_backward_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(
     clamp_scalar_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(
@@ -960,6 +980,48 @@ TORCH_IMPL_FUNC(clamp_Tensor_out)
   } else if (max) {
     minimum_stub(device_type(), *this);
   }
+}
+
+TORCH_IMPL_FUNC(_clamp_tensor_backward_out)
+(const Tensor& /*grad_output*/,
+ const Tensor& /*self*/,
+ const Tensor& /*min*/,
+ const Tensor& /*max*/,
+ const Tensor& /*grad_input*/) {
+  clamp_tensor_backward_stub(device_type(), *this);
+}
+
+// Fallback for backends without a clamp_tensor_backward_stub kernel
+Tensor _clamp_tensor_backward_default(
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& min,
+    const Tensor& max) {
+  const auto dtype = at::native::result_type({grad_output, self, min, max});
+  const auto g = grad_output.to(dtype);
+  const auto s = self.to(dtype);
+  const auto lo = min.to(dtype);
+  const auto hi = max.to(dtype);
+  const auto tie = ((s == lo).logical_or(s == hi)).logical_and(lo < hi);
+  const auto inactive = (s < lo).logical_or(s > hi);
+  return at::where(tie, g / 2, g).masked_fill(inactive, 0);
+}
+
+Tensor& _clamp_tensor_backward_out_default(
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& min,
+    const Tensor& max,
+    Tensor& grad_input) {
+  auto tmp = _clamp_tensor_backward_default(grad_output, self, min, max);
+  TORCH_CHECK(
+      canCast(tmp.scalar_type(), grad_input.scalar_type()),
+      "_clamp_tensor_backward: result type ",
+      tmp.scalar_type(),
+      " can't be cast to the desired output type ",
+      grad_input.scalar_type());
+  at::native::resize_output(grad_input, tmp.sizes());
+  return grad_input.copy_(tmp);
 }
 
 TORCH_IMPL_FUNC(clamp_max_out)
