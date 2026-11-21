@@ -118,6 +118,22 @@ extern "C" {
 }
 
 /// A number that is another one once `dict` has changed.
+/// Whether a dict has taken nothing but texts for keys since it was made or
+/// emptied: the interpreter keeps a table for such a dict that compares no
+/// key in Python code. False where that cannot be asked.
+#[cfg(not(Py_3_14))]
+pub unsafe fn text_keys(dict: Obj) -> bool {
+    // The start of `PyDictKeysObject`: a reference count, two sizes and the
+    // kind of the table, which is 0 for one that has taken another key.
+    let keys = (*(dict as *mut ffi::PyDictObject)).ma_keys as *const u8;
+    !keys.is_null() && *keys.add(std::mem::size_of::<isize>() + 2) != 0
+}
+
+#[cfg(Py_3_14)]
+pub unsafe fn text_keys(_dict: Obj) -> bool {
+    false
+}
+
 #[cfg(not(Py_3_14))]
 #[inline(always)]
 #[allow(deprecated)]
