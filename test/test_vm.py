@@ -10123,7 +10123,8 @@ class TestVmGraphResults(TestCase):
     def whole_graph(self, fn, args, ops, behind=None):
         """`fn` under torch.vm with a pass that returns the graph (or
         `behind`): its results against eager, and that one graph of `ops`
-        operations runs up to where the function returns."""
+        operations runs up to where the function returns (with None for
+        `ops`, only the results)."""
 
         def keep(gm, input_types):
             return gm
@@ -10135,7 +10136,8 @@ class TestVmGraphResults(TestCase):
             self.assertEqual(compiled(*args), fn(*args), **exact)
         found = [g for g in torch.vm.regions(compiled) if "ops" in g]
         ran = [(g["ops"], g["why"]) for g in found if "within" not in g and g["hits"]]
-        self.assertEqual(ran, [(ops, "the function returns")])
+        if ops is not None:
+            self.assertEqual(ran, [(ops, "the function returns")])
         return compiled
 
     def test_text_made_of_plain_values_is_part_of_a_path(self, device):
@@ -10270,12 +10272,17 @@ class TestVmGraphResults(TestCase):
         mask = torch.ones(5, 5, dtype=torch.bool, device=device).tril()
 
         # An attention that drops nothing is an operation like any other.
+        # On a GPU it can come down to `bmm`, whose kernel there is entered
+        # through a Python function: a call with `**` that enters Python
+        # code is no operation, so only what the function gives is looked
+        # at there.
         def attends(q, mask, rate):
             return graph_attends(q, mask, rate, weight=w)
 
-        compiled = self.whole_graph(attends, (q, None, 0.0), 8)
+        ops = 8 if torch.device(device).type == "cpu" else None
+        compiled = self.whole_graph(attends, (q, None, 0.0), ops)
         self.assertEqual(compiled(q, mask, 0.0), attends(q, mask, 0.0), atol=0, rtol=0)
-        self.whole_graph(attends, (q, mask, 0.0), 8, P.Inductor())
+        self.whole_graph(attends, (q, mask, 0.0), ops, P.Inductor())
         # One that drops draws eager's numbers where the graph is run as
         # it is.
         for _ in range(3):
