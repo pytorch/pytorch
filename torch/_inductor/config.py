@@ -1932,7 +1932,7 @@ avoid_32bit_indexing_guards: bool = False
 # mix-order / nested / native-matmul-epilogue reductions, templates, user Triton kernels,
 # the cpp wrapper and AOTInductor, the FX wrapper, and triton.autotune_at_compile_time.
 # Skips are logged at debug level (TORCH_LOGS="+inductor").
-dual_index_dtype: bool = False
+dual_index_dtype: bool = True
 
 # For the user-written Triton kernels compiled with the model, ignore the unsupported
 # arguments passed to the @triton.autotune in the user's code; this is unsafe, as
