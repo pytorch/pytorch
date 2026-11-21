@@ -2173,6 +2173,15 @@ class TestMPS(TestCaseMPS):
             torch.nn.functional.linear(torch.rand(size, device='cpu'),
                                        torch.rand(size, device='mps'))
 
+    def test_linear_mixed_dtype_bias(self):
+        weight = torch.rand(4, 16, device='mps')
+        bias = torch.rand(4, dtype=torch.float16, device='mps')
+        with self.assertRaisesRegex(RuntimeError, "self and mat2 must have the same dtype"):
+            torch.nn.functional.linear(torch.rand(8, 16, device='mps'), weight, bias)
+        x = torch.rand(8, 2, 16, device='mps').transpose(0, 1)
+        self.assertEqual(torch.nn.functional.linear(x, weight, bias),
+                         torch.nn.functional.linear(x.cpu(), weight.cpu(), bias.cpu()))
+
     def test_linear_non_contiguous(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/161640
         # Slice tensors to force non-contiguity
