@@ -4865,8 +4865,35 @@ def region_loop(model, batches):
     return total
 
 
+class RegionOutput:
+    # A plain object, as model code uses for results.
+    def __init__(self, logits, hidden, name):
+        self.logits = logits
+        self.hidden = hidden
+        self.name = name
+
+
+class RegionStateful(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.inner = RegionNet()
+        self.scale = torch.tensor(2.0)
+
+    def forward(self, x, cache=None):
+        out = self.inner(x) * self.scale
+        if cache is not None:
+            cache.update(out.detach())
+        return RegionOutput(out, [out.sin(), out.cos()], "out")
+
+
 def region_counter(x, i):
     return ((x + i).sin() * i).cos().exp().tanh()
+
+
+def region_clock(model, x):
+    start = time.perf_counter_ns()
+    out = model(x)
+    return out, start
 
 
 class RegionRecurrent(torch.nn.Module):
@@ -4888,6 +4915,10 @@ def region_pair(pair, kinds):
     if "double" in kinds:
         total = total * 2
     return RegionPair(total, total.tanh().abs().sqrt().neg())
+
+
+def region_method(model, view, x):
+    return model(view(2, 3, 6, 6) + x)
 
 
 def temporaries(x, steps):
@@ -5224,6 +5255,24 @@ class TestVmRegions(TestCase):
         reasons = " / ".join(self.left_to_vm(compiled, "region_pair"))
         self.assertNotIn("from before the region", reasons)
 
+    def test_tensor_kept_as_a_plain_attribute(self):
+        torch.manual_seed(0)
+        model = RegionStateful().eval()
+        compiled = torch.vm(
+            region_infer, passes=with_graphs("aot_eager"), fallback=False
+        )
+        with torch.no_grad():
+            for i in range(8):
+                if i == 5:
+                    model.scale = torch.tensor(-1.0)
+                x = torch.randn(2, 3, 6, 6)
+                self.assertEqual(
+                    compiled(model, x).logits, model(x).logits, atol=0, rtol=0
+                )
+        # The attribute is an input of the graph, not a constant in it.
+        (region,) = self.compiled_regions(compiled)
+        self.assertEqual(region["variants"], 1)
+
     def test_values_that_keep_changing_do_not_multiply_graphs(self):
         graphs = []
 
@@ -5242,6 +5291,22 @@ class TestVmRegions(TestCase):
         self.assertEqual(self.compiled_regions(compiled), [])
         (reason,) = self.left_to_vm(compiled, "region_counter")
         self.assertIn("ever new values", reason)
+
+    def test_call_without_tensors_is_not_frozen(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        compiled = torch.vm(
+            region_clock, passes=with_graphs("aot_eager"), fallback=False
+        )
+        starts = []
+        with torch.no_grad():
+            for _ in range(8):
+                x = torch.randn(2, 3, 6, 6)
+                out, start = compiled(model, x)
+                self.assertEqual(out, model(x), atol=0, rtol=0)
+                starts.append(start)
+        self.assertEqual(sorted(set(starts)), starts)
+        self.assertEqual(len(self.compiled_regions(compiled)), 1)
 
     def looks(self, compiled, *args):
         """How many tensors three calls each make their key of."""
@@ -5542,6 +5607,28 @@ class TestVmRegions(TestCase):
             runtime.ShapeGuard(numbers, offsets, [], [("slot", 99)])
         with self.assertRaises(ValueError):
             runtime.ShapeGuard(numbers, offsets, [], [("power", size, size)])
+
+    def test_method_of_a_tensor_does_not_keep_the_tensor(self):
+        torch.manual_seed(0)
+        model = RegionNet().eval()
+        compiled = torch.vm(
+            region_method, passes=with_graphs("aot_eager"), fallback=False
+        )
+        x = torch.randn(2, 3, 6, 6)
+        batches = []
+        with torch.no_grad():
+            for _ in range(8):
+                batch = torch.randn(216)
+                expected = region_method(model, batch.view, x)
+                got = compiled(model, batch.view, x)
+                self.assertEqual(got, expected, atol=0, rtol=0)
+                batches.append(weakref.ref(batch))
+                del batch
+        gc.collect()
+        # A method of a tensor is an input like the tensor: no variant holds
+        # the one it was made with.
+        self.assertEqual([ref() is None for ref in batches], [True] * 8)
+        self.assertEqual(sum(r["variants"] for r in self.compiled_regions(compiled)), 1)
 
 
 def vm_twelve(x):
@@ -5879,6 +5966,118 @@ def graph_reshaped(x, shape):
     return torch.flatten(x.sin().reshape(shape).cos().tanh(), 2).exp()
 
 
+def graph_helper(x, scale=2.0, *, shift=1.0):
+    return (x * scale + shift).tanh()
+
+
+def graph_calls(x):
+    y = graph_helper(x.sin())
+    z = graph_helper(y, 3.0, shift=0.5)
+    return graph_helper(z, scale=0.25).cos()
+
+
+def graph_wraps(fn):
+    def inner(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    return inner
+
+
+@graph_wraps
+def graph_wrapped(x, scale=2.0, *, shift=1.0):
+    return (x * scale + shift).tanh()
+
+
+def graph_spreads(x):
+    return graph_wrapped(graph_wrapped(x.sin(), 3.0), shift=0.5).cos()
+
+
+class GraphTools:
+    def __init__(self):
+        self.k = 3.0
+        self.log = []
+        self.measured = False
+
+    @staticmethod
+    def double(x):
+        return x * 2
+
+    @classmethod
+    def halve(cls, x):
+        return x / 2
+
+    @property
+    def gain(self):
+        return self.k
+
+    def apply(self, x):
+        return self.double(self.halve(x) + self.gain).tanh()
+
+    def noted(self, x):
+        y = x.sin() * 2
+        self.log.append(1)
+        return y.cos().tanh() + 1
+
+    def picky(self, x, fail):
+        y = x.sin() * 2
+        if fail:
+            raise ValueError("picky")
+        return y.cos()
+
+
+GRAPH_TOOLS = GraphTools()
+
+
+def graph_noted(x):
+    return GRAPH_TOOLS.noted(x.exp()).tanh() * 3
+
+
+def graph_picky(x, fail):
+    try:
+        y = GRAPH_TOOLS.picky(x.exp(), fail)
+    except ValueError:
+        y = x * 0
+    return (y + 1).tanh().sin()
+
+
+def graph_descends(x, n):
+    if n == 0:
+        return x.tanh()
+    return graph_descends(x.sin() * 2, n - 1) + 1
+
+
+def graph_flips(x, more):
+    y = x.sin() * 2
+    dims = [0, 1, 2, *more]
+    return torch.flip(y, [0, 1, 2]).cos().tanh() + y.mean([0, 1, 2]) + y.sum(dims)
+
+
+GRAPH_BIAS = 0.5
+
+
+def graph_counts(n, tools):
+    # A loop of integer arithmetic. While `measured` is set, its compiled
+    # form sleeps: the measurement leaves it to the interpreter whatever
+    # the clock says about the loop.
+    total = 0
+    for i in range(n):
+        total += i * i % 7
+    if tools.measured and cfg_rs.frames_offered():
+        time.sleep(0.002)
+    if tools.k > 4:
+        return float(total) + GRAPH_BIAS
+    return float(total)
+
+
+def graph_counted(x, n):
+    if GRAPH_TOOLS.measured:
+        # And this one sleeps where the interpreter runs it: it is kept.
+        if not cfg_rs.frames_offered():
+            time.sleep(0.002)
+        return graph_counts(n, GRAPH_TOOLS)
+    return ((x.sin() * graph_counts(n, GRAPH_TOOLS)).cos() + 1).tanh().exp()
+
+
 def graph_rated(x, rate):
     return ((x.sin() * rate).cos() + rate).tanh().exp()
 
@@ -5895,6 +6094,16 @@ class GraphCollides:
     def __eq__(self, other):
         self.log.append("eq")
         return False
+
+
+def graph_looks_up_a_key(x, table, members, asked, flag):
+    y = (x.sin() + 1).cos()
+    scale = table["a"]
+    there = "a" in table, "a" in members
+    got = table.get("a")
+    if flag:
+        y = y + 1
+    return (y * scale).tanh().exp(), there, got
 
 
 def graph_reads_a_table(x, table, members):
@@ -6085,8 +6294,9 @@ class TestVmGraphs(TestCase):
             self.assertIn(expected, operators)
         where = {g["where"].split(" (")[0] for g in self.graphs(compiled)}
         self.assertIn("GraphNet.forward", where)
-        # A call of a Python function is in no graph: its blocks have theirs.
-        self.assertIn("calls Conv2d.forward", self.left(compiled))
+        # A call of a Python function that a path goes through is part of
+        # the graph, and is not listed as left out.
+        self.assertNotIn("calls Conv2d.forward", self.left(compiled))
 
     def test_no_graph_compiler_is_imported_for_the_graphs_of_the_engine(self):
         script = """
@@ -6472,15 +6682,20 @@ print(json.dumps(found))
                 model.act.negative_slope = 0.1
                 self.assertEqual(compiled(model, x), first, atol=0, rtol=0)
                 back = compiled.stats()["graphs"]
-            graph, forms = self.forms(compiled, "aten::leaky_relu")
+            # The graph is that of the function, which holds both calls of
+            # the layer; the graph of the layer's own function waits.
+            graphs = self.graphs(compiled)
+            (graph,) = [g for g in graphs if g["where"].startswith("graph_infer")]
+            self.assertEqual(graph["operators"].count("aten::leaky_relu"), 2)
+            forms = [(form["checks"], form["hits"]) for form in graph["forms"]]
             if not behind:
                 # The engine runs the operation with what it reads.
                 self.assertEqual((graph["state"], back["exported"]), ("built", 0))
                 continue
             self.assertEqual(graph["state"], "compiled")
-            # The layer is called with two sizes: a form for each, with the
-            # slope it was exported for, and then two more for the other.
-            self.assertEqual(changed["exported"], steady["exported"] + 2)
+            # A form with the slope it was exported for, which both calls
+            # of the layer read, and then one more for the other.
+            self.assertEqual(changed["exported"], steady["exported"] + 1)
             said = [check for checks, _ in forms for check in checks]
             self.assertEqual(sum("== 0.1" in check for check in said), 2)
             self.assertEqual(sum("== 0.3" in check for check in said), 2)
@@ -7154,6 +7369,128 @@ print(json.dumps(found))
         named = [check.split(" is ")[1] for check in checks if " is " in check]
         self.assertEqual(named, ["torch.flatten"])
 
+    # --- paths across calls
+
+    def whole(self, fn, args, ops, calls=8):
+        """Compiles ``fn`` with a pass that keeps the graphs, calls it, with
+        every result that of the function itself, and returns the compiled
+        function, its one graph that ran, which has ``ops`` operations and
+        was exported once, and the graph modules."""
+        kept = []
+
+        def keep(gm, input_types):
+            kept.append(gm)
+            return gm
+
+        compiled = torch.vm(fn, passes=(*DEFAULT, P.Graphs(), keep), fallback=False)
+        for _ in range(calls):
+            self.assertEqual(compiled(*args), fn(*args), atol=0, rtol=0)
+        (graph,) = [g for g in self.graphs(compiled) if g["hits"]]
+        self.assertEqual((graph["ops"], graph["exports"], len(kept)), (ops, 1, 1))
+        self.assertGreaterEqual(graph["hits"], calls - 4)
+        return compiled, graph, kept
+
+    def test_a_path_goes_through_the_calls_of_a_function(self):
+        # Positional arguments, a default, keywords.
+        _, graph, kept = self.whole(graph_calls, (torch.randn(4, 4),), 11)
+        self.assertEqual(graph["why"], "the function returns")
+        operations = [n.target for n in kept[0].graph.nodes if n.op.startswith("call")]
+        self.assertEqual(len(operations), 11)
+        # A wrapper that hands on what it was given with * and **.
+        _, graph, _ = self.whole(graph_spreads, (torch.randn(4, 4),), 8)
+        self.assertEqual(graph["why"], "the function returns")
+
+    def test_a_path_ends_in_front_of_a_call_it_cannot_go_through(self):
+        def keep(gm, input_types):
+            return gm
+
+        passes = (*DEFAULT, P.Graphs(min_ops=1), keep)
+        x = torch.randn(4, 4)
+        # A store into an object, in a method: once a call, in its place.
+        compiled = torch.vm(graph_noted, passes=passes, fallback=False)
+        del GRAPH_TOOLS.log[:]
+        for _ in range(8):
+            self.assertEqual(compiled(x), graph_noted(x), atol=0, rtol=0)
+        self.assertEqual(len(GRAPH_TOOLS.log), 16)
+        (first, *_) = [g for g in self.graphs(compiled) if g["hits"]]
+        self.assertEqual(first["operators"], ["aten::exp"])
+        self.assertTrue(first["why"].startswith("in noted: "), first["why"])
+        # A call that raises part of the way, and is caught.
+        compiled = torch.vm(graph_picky, passes=passes, fallback=False)
+        for fail in (False, False, False, False, True, True, False, True, False):
+            self.assertEqual(compiled(x, fail), graph_picky(x, fail), atol=0, rtol=0)
+        # A function that calls itself is gone into again, a few times.
+        compiled = torch.vm(graph_descends, passes=passes, fallback=False)
+        for _ in range(8):
+            self.assertEqual(compiled(x, 3), graph_descends(x, 3), atol=0, rtol=0)
+        self.assertTrue(any(g["hits"] for g in self.graphs(compiled)))
+
+    def test_a_list_that_was_extended_is_handed_to_an_operation_as_it_is(self):
+        # A list of three constants and more is built empty and extended.
+        x = torch.randn(2, 3, 4, 5)
+        compiled, graph, kept = self.whole(graph_flips, (x, [3]), 9)
+        calls = [n for n in kept[0].graph.nodes if n.op == "call_function"]
+        flips = [n for n in calls if "flip" in str(n.target)]
+        self.assertEqual([list(n.args[1]) for n in flips], [[0, 1, 2]])
+        # And one that the function extends by what it is handed is checked.
+        for more in ([], [3], []):
+            self.assertEqual(compiled(x, more), graph_flips(x, more), atol=0, rtol=0)
+
+    def test_a_path_goes_into_a_function_that_is_left_to_the_interpreter(self):
+        def keep(gm, input_types):
+            return gm
+
+        def graph_of(compiled):
+            (graph,) = [g for g in self.graphs(compiled) if g["hits"]]
+            return graph
+
+        global GRAPH_BIAS
+        passes = (*without(P.Inline), P.Graphs(), keep)
+        compiled = torch.vm(graph_counted, passes=passes, fallback=False, demote=True)
+        x = torch.randn(4, 4)
+        # What the measurement finds is not left to the clock: while
+        # `measured` is set, the compiled form of the helper sleeps, and
+        # so does the function where the interpreter runs it.
+        GRAPH_TOOLS.measured = True
+        self.addCleanup(setattr, GRAPH_TOOLS, "measured", False)
+        for _ in range(100):
+            counted = compiled(x, 30)
+        self.assertEqual(counted, graph_counted(x, 30))
+        stats = compiled.stats()
+        self.assertEqual(stats["demoted_callees"], ["graph_counts"])
+        self.assertEqual((stats["demoted"], stats["measuring"]), (False, False))
+        GRAPH_TOOLS.measured = False
+        # The graph of the function holds a call of the helper, and goes
+        # on running.
+        for _ in range(8):
+            self.assertEqual(compiled(x, 30), graph_counted(x, 30), atol=0, rtol=0)
+        graph = graph_of(compiled)
+        found = (graph["ops"], graph["why"], graph["exports"])
+        self.assertEqual(found, (6, "the function returns", 1))
+        hits = graph["hits"]
+        for _ in range(20):
+            self.assertEqual(compiled(x, 30), graph_counted(x, 30), atol=0, rtol=0)
+        graph = graph_of(compiled)
+        self.assertEqual((graph["hits"], graph["exports"]), (hits + 20, 1))
+        # What the helper reads and tests is read and tested at every
+        # call: an attribute it branches on, a global, its argument.
+        try:
+            GRAPH_TOOLS.k = 5.0
+            for _ in range(3):
+                self.assertEqual(compiled(x, 30), graph_counted(x, 30), atol=0, rtol=0)
+            GRAPH_BIAS = 2.5
+            for _ in range(3):
+                self.assertEqual(compiled(x, 30), graph_counted(x, 30), atol=0, rtol=0)
+            for _ in range(3):
+                self.assertEqual(compiled(x, 20), graph_counted(x, 20), atol=0, rtol=0)
+        finally:
+            GRAPH_TOOLS.k = 3.0
+            GRAPH_BIAS = 0.5
+        for _ in range(3):
+            self.assertEqual(compiled(x, 30), graph_counted(x, 30), atol=0, rtol=0)
+        self.assertGreaterEqual(graph_of(compiled)["hits"], hits + 20 + 3)
+        self.assertEqual(compiled.stats()["demoted_callees"], ["graph_counts"])
+
     def test_a_kind_of_call_is_open_again_once_its_numbers_stay(self):
         exports = []
 
@@ -7393,6 +7730,57 @@ class TestVmGraphResults(TestCase):
             torch.use_deterministic_algorithms(False)
         (graph,) = [r for r in torch.vm.regions(compiled) if "ops" in r]
         self.assertEqual((graph["variants"], graph["exports"]), (4, 4))
+
+    def same_as_eager(self, fn, make, calls=4):
+        """`fn` under torch.vm, with `Graphs()` alone and with a pass that
+        returns the graph, each on arguments that `make` makes anew for
+        every call, against eager on others it makes: what is returned, or
+        what is raised and with which text, and what the arguments say was
+        asked of them (`log`)."""
+
+        def keep(gm, input_types):
+            return gm
+
+        def outcome(function, args):
+            try:
+                return function(*args)
+            except Exception as error:
+                return type(error).__name__, str(error)
+
+        def alike(got, expected):
+            self.assertIs(type(got), type(expected), f"{got!r} for {expected!r}")
+            if isinstance(expected, torch.Tensor):
+                self.assertEqual(got, expected, atol=0, rtol=0)
+            elif isinstance(expected, (tuple, list)):
+                self.assertEqual(len(got), len(expected))
+                for one, other in zip(got, expected):
+                    alike(one, other)
+            else:
+                self.assertEqual(got, expected)
+
+        for behind in ((), (keep,)):
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            for _ in range(calls):
+                mine, theirs = make(), make()
+                alike(outcome(compiled, mine), outcome(fn, theirs))
+                asked = [getattr(arg, "log", None) for arg in mine]
+                self.assertEqual(asked, [getattr(arg, "log", None) for arg in theirs])
+
+    def test_a_key_that_is_compared_in_python_is_compared_once(self, device):
+        x = torch.randn(3, 4, device=device)
+        # A dict and a set with a key of a class that has an `__eq__` and the
+        # hash of the text that is looked up: looking the text up asks that
+        # key, so it is no instruction of a path, which could run once more
+        # where the path gives up behind it (the flag is another one then).
+        made = []
+
+        def make():
+            made.append(None)
+            key, flag = GraphCollides(), ((len(made) - 1) // 2) % 8 in (3, 5, 6)
+            return x, {key: 1.0, "a": 2.0}, {key, "a"}, key, flag
+
+        self.same_as_eager(graph_looks_up_a_key, make, calls=8)
 
     def test_a_key_that_comes_to_be_compared_in_python_is_compared_once(self, device):
         def keep(gm, input_types):

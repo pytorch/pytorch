@@ -1696,6 +1696,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
     }
     match op {
         Op::Const(_)
+        | Op::Object(_)
         | Op::LoadGlobal(_)
         | Op::LoadDeref(_)
         | Op::LoadClosure(_)
@@ -1733,6 +1734,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::CheckBound(a, _)
         | Op::IsFunction { v: a, .. }
         | Op::TensorSize { t: a, .. }
+        | Op::Part(_, a)
         | Op::TensorDim(a) => r!(a),
         Op::Binary(_, a, b)
         | Op::Compare(_, a, b)
