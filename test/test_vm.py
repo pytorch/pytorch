@@ -7024,6 +7024,37 @@ def graph_class_switched(x, at):
     return (out.hidden * out.flag).tanh().exp(), sorted(vars(out))
 
 
+GRAPH_GEN_SCALES = (2.0, 3.0, 5.0)
+GRAPH_GEN_LOG = []
+
+
+def graph_genexpr_of_tensors(x, at=0):
+    y = (x.sin() + 1).cos()
+    pieces = (y, y * 2, y * 3)
+    parts = tuple(p.tanh() for p in pieces)
+    return (parts[0] + parts[1] + parts[2]).exp()
+
+
+def graph_genexpr_of_numbers(x, at=0):
+    y = (x.sin() + 1).cos()
+    scales = list(s * 2 for s in GRAPH_GEN_SCALES if s != 3.0)  # noqa: C400
+    return (y * scales[0] + scales[-1]).tanh().exp() + len(scales)
+
+
+def graph_genexpr_raises(x, at=0):
+    y = (x.sin() + 1).cos()
+    pieces = (y, at % 3, y * 3)
+    parts = tuple(p if isinstance(p, torch.Tensor) else 1 // p for p in pieces)
+    return (parts[0] + parts[2]).tanh().exp(), parts[1]
+
+
+def graph_genexpr_logs(x, at=0):
+    y = (x.sin() + 1).cos()
+    pieces = (y, y * 2)
+    parts = tuple(GRAPH_GEN_LOG.append(len(GRAPH_GEN_LOG)) or p.tanh() for p in pieces)
+    return (parts[0] + parts[1]).exp()
+
+
 def graph_imports(x):
     y = (x.sin() + 1).cos()
     import torch.fx
@@ -10772,6 +10803,47 @@ class TestVmGraphResults(TestCase):
                     found.append(given)
                 alike(found[0], found[1])
         prepare(graph_class_switched, 0)
+
+    def test_a_generator_expression_under_tuple_or_list_is_part_of_a_path(self, device):
+        # `tuple(f(p) for p in pieces)`: the generator is never run. The
+        # path goes into its code, and what the code gives is kept in a
+        # list of the path, so a tensor that goes through the generator is
+        # still the node it was; what a loop takes out of a tuple the path
+        # built is what the tuple was built of.
+        x = torch.randn(3, 4, device=device)
+        for fn, ops in ((graph_genexpr_of_tensors, 11), (graph_genexpr_of_numbers, 8)):
+            compiled = self.whole_graph(fn, (x,), ops)
+            self.assertEqual(compiled(x * 2), fn(x * 2), atol=0, rtol=0)
+
+        # Code that raises midway at some calls, and code that does what no
+        # path does (a store into a list from outside): what is returned,
+        # raised and stored is eager's at every call.
+        def keep(gm, input_types):
+            return gm
+
+        for fn in (graph_genexpr_raises, graph_genexpr_logs, graph_genexpr_of_tensors):
+            for behind in ((), (keep,)):
+                passes = (*DEFAULT, P.Graphs(), *behind)
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                found = []
+                for run in (compiled, fn):
+                    given = []
+                    GRAPH_GEN_LOG.clear()
+                    for at in range(12):
+                        torch.manual_seed(at)
+                        x = torch.randn(3, 4, device=device)
+                        try:
+                            out = run(x, at)
+                        except Exception as error:
+                            out = f"{type(error).__name__}: {error}"
+                        given.append((out, list(GRAPH_GEN_LOG)))
+                    found.append(given)
+                self.assertEqual(len(found[0]), len(found[1]))
+                for got, expected in zip(found[0], found[1]):
+                    self.assertEqual(got[1], expected[1])
+                    self.assertIs(type(got[0]), type(expected[0]))
+                    self.assertEqual(got[0], expected[0], atol=0, rtol=0)
+        GRAPH_GEN_LOG.clear()
 
     def test_an_import_of_a_module_that_was_imported_does_not_end_a_graph(self, device):
         # `import a.b` of what was imported before looks the module and its

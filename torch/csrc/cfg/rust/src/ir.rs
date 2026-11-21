@@ -58,6 +58,13 @@ pub enum Op {
     /// tuple of names and values; `annotate` is the function that computes
     /// them when they are asked for (3.14).
     MakeFunction { code: V, defaults: V, kwdefaults: V, annotations: V, annotate: V, closure: V },
+    /// In the code of a generator that something goes over to its end
+    /// where it is made (`tuple(x for x in y)`): the value the generator
+    /// gives next, handed to what goes over it. What is sent back is None.
+    Yield(V),
+    /// What the code of a generator makes of an exception that leaves it:
+    /// a StopIteration becomes a RuntimeError, anything else is itself.
+    StopIterationError(V),
     /// `import name`, with the from-list and level the bytecode supplies.
     ImportName { name: u32, fromlist: V, level: V },
     /// The attribute of a module named in `from module import name`.
@@ -379,6 +386,8 @@ impl Op {
             | Op::ToBool(a)
             | Op::IsNone(a, _)
             | Op::ListToTuple(a)
+            | Op::Yield(a)
+            | Op::StopIterationError(a)
             | Op::Unpack(a, _)
             | Op::UnpackEx(a, _, _)
             | Op::GetLen(a)
@@ -857,6 +866,8 @@ impl Function {
             Op::DictUpdate(a, b) => format!("dict_update {} {}", n(a), n(b)),
             Op::DictMerge(a, b, _) => format!("dict_merge {} {}", n(a), n(b)),
             Op::ListToTuple(a) => format!("list_to_tuple {}", n(a)),
+            Op::Yield(a) => format!("yield {}", n(a)),
+            Op::StopIterationError(a) => format!("stop_iteration_error {}", n(a)),
             Op::Unpack(a, k) => format!("unpack {} {}", n(a), k),
             Op::UnpackEx(a, before, after) => format!("unpack_ex {} {} {}", n(a), before, after),
             Op::SuperObject { global_super, class, this, explicit } => format!(
