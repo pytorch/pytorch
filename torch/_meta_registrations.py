@@ -6888,6 +6888,23 @@ def meta__scaled_dot_product_attention_math_for_mps(
     return out, query.new_empty(0)
 
 
+@register_meta([aten._scaled_dot_product_attention_math_for_mps_backward])
+def meta__scaled_dot_product_attention_math_for_mps_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    attn_mask: Tensor | None,
+    is_causal: bool,
+    grad_input_mask: list[bool],
+    scale: float | None = None,
+) -> tuple[Tensor | None, ...]:
+    return tuple(
+        t.new_empty(t.shape) if t is not None and needed else None
+        for t, needed in zip((query, key, value, attn_mask), grad_input_mask)
+    )
+
+
 @register_meta([aten._scaled_dot_product_efficient_attention])
 def meta__scaled_dot_product_efficient_attention(
     query: Tensor,

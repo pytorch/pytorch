@@ -4,6 +4,7 @@
 #include <optional>
 
 #include <ATen/ExpandUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/ceil_div.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -17,8 +18,15 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_fused_sdp_choice_native.h>
+#include <ATen/ops/_safe_softmax.h>
+#include <ATen/ops/_scaled_dot_product_attention_math_for_mps_backward_native.h>
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
+#include <ATen/ops/_softmax_backward_data.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/matmul.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/sum.h>
 #endif
 
 namespace at {
@@ -411,9 +419,95 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   }
   // The attention weights are never materialized (nothing consumes them); an
   // empty tensor stands in, as the flash attention ops do for unrequested outputs.
-  // TODO: implement the flash, efficient and math attention ops for MPS properly
-  // instead of routing them all through this op.
   return {out.view_symint(out_shape), at::empty({0}, q_.options())};
 }
+
+// Recomputes the attention weights with ATen ops rather than saving them in the forward.
+std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_attention_math_mps_backward(
+    const Tensor& grad_out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& attn_mask,
+    bool is_causal,
+    std::array<bool, 4> grad_input_mask,
+    std::optional<double> scale) {
+  if (!grad_out.defined()) {
+    return {};
+  }
+  const auto opmath = at::toOpMathType(query.scalar_type());
+  auto batch_dims = [](const Tensor& t) { return t.sym_sizes().slice(0, t.dim() - 3); };
+  auto batch_shape = at::infer_size_symdimvector(batch_dims(query), batch_dims(key));
+  batch_shape = at::infer_size_symdimvector(batch_shape, batch_dims(value));
+  // Like the forward kernels, K/V heads are shared by groups of query heads whether or not enable_gqa is set.
+  const auto groups = query.sym_size(-3) / key.sym_size(-3);
+  auto expand = [&](const Tensor& t, const c10::SymInt& reps) {
+    auto shape = batch_shape;
+    shape.append({t.sym_size(-3), reps, t.sym_size(-2), t.sym_size(-1)});
+    return t.to(opmath).unsqueeze(-3).expand_symint(shape).flatten(-4, -3);
+  };
+  auto reduce = [](const Tensor& grad, const Tensor& t) {
+    const auto heads = grad.unflatten_symint(-3, {t.sym_size(-3), grad.sym_size(-3) / t.sym_size(-3)});
+    return at::sum_to(heads.sum(-3), t.sym_sizes()).to(t.scalar_type());
+  };
+  const auto q = expand(query, 1);
+  const auto k = expand(key, groups);
+  const auto v = expand(value, groups);
+  const auto scale_factor = sdp::calculate_scale(query, scale).expect_float();
+  // Scaling q rather than the scores keeps a zero head dim (infinite default scale) finite.
+  const auto q_scaled = q.mul(scale_factor);
+  const auto neg_inf = -std::numeric_limits<double>::infinity();
+  auto scores = at::matmul(q_scaled, k.mT());
+  if (is_causal) {
+    const auto causal =
+        at::ones_symint({scores.sym_size(-2), scores.sym_size(-1)}, scores.options().dtype(kBool)).triu(1);
+    scores = scores.masked_fill(causal, neg_inf);
+  } else if (attn_mask.defined()) {
+    scores =
+        attn_mask.scalar_type() == kBool ? scores.masked_fill(attn_mask.logical_not(), neg_inf) : scores.add(attn_mask);
+  }
+  const auto attn = at::_safe_softmax(scores, -1);
+  const auto grad = grad_out.to(opmath);
+  const auto grad_scores = at::_softmax_backward_data(at::matmul(grad, v.mT()), attn, -1, opmath);
+  return {grad_input_mask[0] ? reduce(at::matmul(grad_scores, k).mul(scale_factor), query) : Tensor(),
+          grad_input_mask[1] ? reduce(at::matmul(grad_scores.mT(), q_scaled), key) : Tensor(),
+          grad_input_mask[2] ? reduce(at::matmul(attn.mT(), grad), value) : Tensor(),
+          grad_input_mask[3] ? at::sum_to(grad_scores, attn_mask.sym_sizes()).to(attn_mask.scalar_type()) : Tensor()};
+}
+
+// The Metal kernels above are exposed as the flash attention backend; anything
+// they can not handle (dropout) goes to the math backend.
+int64_t _fused_sdp_choice_mps(const Tensor& query,
+                              const Tensor& key,
+                              const Tensor& value,
+                              const std::optional<Tensor>& /*attn_mask*/,
+                              double dropout_p,
+                              bool /*is_causal*/,
+                              std::optional<double> /*scale*/,
+                              bool enable_gqa) {
+  auto& ctx = at::globalContext();
+  std::string_view reason;
+  if (!ctx.userEnabledFlashSDP()) {
+    reason = "it is disabled";
+  } else if (dropout_p > 0.0) {
+    reason = "it does not support dropout";
+  } else if (!c10::isFloatingType(query.scalar_type())) {
+    reason = "it only supports floating point inputs";
+  } else if (query.dim() < 3 || key.dim() < 3 || value.dim() < 3) {
+    reason = "it requires inputs with a heads dimension";
+  } else if (!enable_gqa && key.sym_size(-3) != 1 && query.sym_size(-3) != key.sym_size(-3)) {
+    // The kernels would broadcast K/V heads, while math only broadcasts a single one
+    reason = "query and key have different numbers of heads and enable_gqa is not set";
+  } else {
+    return static_cast<int64_t>(sdp::SDPBackend::flash_attention);
+  }
+  TORCH_CHECK(ctx.userEnabledMathSDP(),
+              "Flash attention kernel not used because ",
+              reason,
+              ". No available kernel.  Aborting execution.");
+  return static_cast<int64_t>(sdp::SDPBackend::math);
+}
+
+REGISTER_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_mps)
 } // namespace native
 } // namespace at
