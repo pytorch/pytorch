@@ -43,7 +43,8 @@ def _quant_min_max_bounds_check(quant_min, quant_max, dtype):
 
 quantized_decomposed_lib.define(
     "quantize_per_tensor(Tensor input, float scale, int zero_point, "
-    "int quant_min, int quant_max, ScalarType dtype) -> Tensor"
+    "int quant_min, int quant_max, ScalarType dtype) -> Tensor",
+    tags=(torch.Tag.cacheable_fake,),
 )
 
 
@@ -105,7 +106,8 @@ def quantize_per_tensor_meta(
 
 quantized_decomposed_lib.define(
     "quantize_per_tensor.tensor(Tensor input, Tensor scale, Tensor zero_point, "
-    "int quant_min, int quant_max, ScalarType dtype) -> Tensor"
+    "int quant_min, int quant_max, ScalarType dtype) -> Tensor",
+    tags=(torch.Tag.cacheable_fake,),
 )
 
 
@@ -172,7 +174,8 @@ def quantize_per_tensor_tensor_meta(
 # TODO: remove other variants and keep this one
 quantized_decomposed_lib.define(
     "quantize_per_tensor.tensor2(Tensor input, Tensor scale, Tensor zero_point, "
-    "Tensor quant_min, Tensor quant_max, ScalarType dtype) -> Tensor"
+    "Tensor quant_min, Tensor quant_max, ScalarType dtype) -> Tensor",
+    tags=(torch.Tag.cacheable_fake,),
 )
 
 
@@ -235,7 +238,8 @@ def quantize_per_tensor_tensor2_meta(
 # We will revisit this later if we found there are no use cases for it
 quantized_decomposed_lib.define(
     "dequantize_per_tensor(Tensor input, float scale, int zero_point, "
-    "int quant_min, int quant_max, ScalarType dtype, *, ScalarType? out_dtype=None) -> Tensor"
+    "int quant_min, int quant_max, ScalarType dtype, *, ScalarType? out_dtype=None) -> Tensor",
+    tags=(torch.Tag.cacheable_fake,),
 )
 
 
@@ -309,7 +313,8 @@ def dequantize_per_tensor_meta(
 
 quantized_decomposed_lib.define(
     "dequantize_per_tensor.tensor(Tensor input, Tensor scale, Tensor zero_point, "
-    "int quant_min, int quant_max, ScalarType dtype, *, ScalarType? out_dtype=None) -> Tensor"
+    "int quant_min, int quant_max, ScalarType dtype, *, ScalarType? out_dtype=None) -> Tensor",
+    tags=(torch.Tag.cacheable_fake,),
 )
 
 
@@ -386,7 +391,8 @@ def dequantize_per_tensor_tensor_meta(
 # TODO: remove other variants and keep this one
 quantized_decomposed_lib.define(
     "dequantize_per_tensor.tensor2(Tensor input, Tensor scale, Tensor zero_point, "
-    "Tensor quant_min, Tensor quant_max, ScalarType dtype, *, ScalarType? out_dtype=None) -> Tensor"
+    "Tensor quant_min, Tensor quant_max, ScalarType dtype, *, ScalarType? out_dtype=None) -> Tensor",
+    tags=(torch.Tag.cacheable_fake,),
 )
 
 
@@ -590,7 +596,8 @@ def _permute_to_axis_zero(x, axis):
 
 quantized_decomposed_lib.define(
     "quantize_per_channel(Tensor input, Tensor scales, Tensor zero_points, int axis, "
-    "int quant_min, int quant_max, ScalarType dtype) -> Tensor"
+    "int quant_min, int quant_max, ScalarType dtype) -> Tensor",
+    tags=(torch.Tag.cacheable_fake,),
 )
 
 
@@ -672,7 +679,8 @@ def quantize_per_channel_meta(
 # We will revisit this later if we found there are no use cases for it
 quantized_decomposed_lib.define(
     "dequantize_per_channel(Tensor input, Tensor scales, Tensor? zero_points, int axis, "
-    "int quant_min, int quant_max, ScalarType dtype, *, ScalarType? out_dtype=None) -> Tensor"
+    "int quant_min, int quant_max, ScalarType dtype, *, ScalarType? out_dtype=None) -> Tensor",
+    tags=(torch.Tag.cacheable_fake,),
 )
 
 

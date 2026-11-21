@@ -27,6 +27,21 @@
           of Tensor inputs.  Among other things, this implies that this operator
           cannot be run with meta tensor (since data is not available), nor
           can it be symbolically traced.
+- tag: cacheable_fake
+  desc: |
+          This tag lets FakeTensor's dispatch cache cache an operator outside the
+          aten, prim and prims namespaces (those are always eligible).
+          By adding this tag you assert that the fake implementation's results
+          (output metadata, non-Tensor outputs, and whether it raises) depend only
+          on the inputs' tensor metadata, the values of non-Tensor arguments, and
+          the global state FakeTensor already includes in its cache key (e.g. the
+          default dtype and device). It must not read tensor data, depend on any
+          other state (Python globals, configuration, or the state of objects
+          passed as arguments), or have side effects.
+          Replacing the operator's kernels through torch.library invalidates its
+          cached results; kernels registered any other way (e.g. py_impl or a C++
+          library) are not tracked. The cache's other restrictions (e.g.
+          dynamic_output_shape, data_dependent_output, inplace_view) still apply.
 - tag: generated
   desc: |
           This tag indicates that the operator doesn't have an explicit entry in
