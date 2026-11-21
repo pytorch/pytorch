@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import importlib
 import types
 import warnings
 import weakref
@@ -6,9 +7,19 @@ from copyreg import dispatch_table
 from typing import Any
 
 import torch
-import torch.cuda._pin_memory_utils as pin_memory_utils
 from torch.storage import UntypedStorage
 from torch.utils.weak import WeakIdKeyDictionary
+
+
+def _get_pin_memory_utils() -> types.ModuleType | None:
+    accelerator = torch.accelerator.current_accelerator(check_available=True)
+    if accelerator is None:
+        return None
+    try:
+        utils = importlib.import_module(f"torch.{accelerator.type}._pin_memory_utils")
+    except ModuleNotFoundError:
+        return None
+    return utils if utils.is_supported() else None
 
 
 class StateDictStager:
@@ -33,15 +44,14 @@ class StateDictStager:
         share_memory: bool = False,
         pin_memory_min_bytes: int = 5,
     ):
-        if pin_memory and not torch.cuda.is_available():
+        self._pin_memory_utils = _get_pin_memory_utils() if pin_memory else None
+        if pin_memory and self._pin_memory_utils is None:
             warnings.warn(
-                "Ignoring pin_memory flag for checkpoint staging as pinning memory"
-                "requires CUDA, but CUDA is not available. ",
+                "Ignoring pin_memory flag for checkpoint staging as the current "
+                "accelerator does not support pinning host memory in place.",
                 stacklevel=2,
             )
-            self.pin_memory = False
-        else:
-            self.pin_memory = pin_memory
+        self.pin_memory = self._pin_memory_utils is not None
         self.share_memory = share_memory
         # Mapping from original storage objects to CPU storages using weak references
         self._cached_storage_mapping = WeakIdKeyDictionary()
@@ -167,13 +177,14 @@ class StateDictStager:
         # Small tensors (e.g., optimizer step counters, scalars) have negligible
         # transfer time improvement from pinning, but pinning overhead is significant
         if self.pin_memory and new_storage.nbytes() >= self.pin_memory_min_bytes:
-            pin_memory_utils.pin_memory(new_storage.data_ptr(), new_storage.nbytes())
+            utils = self._pin_memory_utils
+            utils.pin_memory(new_storage.data_ptr(), new_storage.nbytes())
             # Set up a weak reference to unpin when cpu storage is garbage collected
             f = weakref.finalize(
-                new_storage, pin_memory_utils.unpin_memory, new_storage.data_ptr()
+                new_storage, utils.unpin_memory, new_storage.data_ptr()
             )
             # This makes sure that the finalizer is not called after
-            # cuda context is destroyed.
+            # the accelerator context is destroyed.
             f.atexit = False
 
         new_storage.copy_(storage, non_blocking=non_blocking)
