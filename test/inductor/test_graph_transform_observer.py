@@ -4,14 +4,16 @@ import math
 import os
 import shutil
 import tempfile
+from unittest import skipIf
 
 import torch
 import torch._dynamo
 import torch._inductor.config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FUSED_ATTENTION
-from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 try:
@@ -26,15 +28,13 @@ HAS_DOT = shutil.which("dot") is not None
 
 
 class TestGraphTransformObserver(TestCase):
-    def test_sdpa_rewriter(self):
-        if not (
-            HAS_GPU_AND_TRITON
-            and PLATFORM_SUPPORTS_FUSED_ATTENTION
-            and HAS_PYDOT
-            and HAS_DOT
-        ):
-            return
+    hw_classification = HardwareClassification.ACCELERATOR
 
+    @skipIf(not HAS_TRITON, "requires triton")
+    @skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "requires fused attention support")
+    @skipIf(not HAS_PYDOT, "Requires pydot")
+    @skipIf(not HAS_DOT, "Requires dot")
+    def test_sdpa_rewriter(self, device):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
@@ -52,9 +52,9 @@ class TestGraphTransformObserver(TestCase):
         compiled_fn = torch.compile(dot_prod_attention, fullgraph=True)
 
         tensor_shape = (4, 2, 16, 32)
-        q = torch.randn(tensor_shape, device=GPU_TYPE)
-        k = torch.randn(tensor_shape, device=GPU_TYPE)
-        v = torch.randn(tensor_shape, device=GPU_TYPE)
+        q = torch.randn(tensor_shape, device=device)
+        k = torch.randn(tensor_shape, device=device)
+        v = torch.randn(tensor_shape, device=device)
         compiled_fn(q, k, v)
 
         found_input_svg = False
@@ -68,6 +68,11 @@ class TestGraphTransformObserver(TestCase):
 
         self.assertTrue(found_input_svg)
         self.assertTrue(found_output_svg)
+
+
+instantiate_device_type_tests(
+    TestGraphTransformObserver, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
