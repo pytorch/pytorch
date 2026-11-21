@@ -19,11 +19,6 @@ struct matmul_forward_dyn_quant_params {
   dnnl::reorder::primitive src_reorder; // to reorder src
 
   matmul_forward_dyn_quant_params() {}
-
-  matmul_forward_dyn_quant_params(
-      ITensor::desc&& src_desc,
-      dnnl::reorder::primitive&& src_reorder)
-      : src_desc(std::move(src_desc)), src_reorder(std::move(src_reorder)) {}
 };
 
 // Ported from ideep::matmul_forward_params.
@@ -43,20 +38,6 @@ struct matmul_forward_params {
       nullptr;
 
   matmul_forward_params() {}
-
-  matmul_forward_params(
-      dnnl::matmul::primitive_desc&& pd,
-      Attr&& op_attr,
-      Attr&& src_attr,
-      Attr&& weights_attr,
-      Attr&& bias_attr)
-      : pd(std::move(pd)),
-        op_attr(std::move(op_attr)),
-        src_attr(std::move(src_attr)),
-        weights_attr(std::move(weights_attr)),
-        bias_attr(std::move(bias_attr)) {
-    primitive = dnnl::matmul(pd);
-  }
 };
 
 // Ported from ideep::matmul_forward::compute (int8 2-in-1, with bias).
