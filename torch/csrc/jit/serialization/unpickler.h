@@ -7,6 +7,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/serialization/pickler_helper.h>
+#include <unordered_map>
 
 namespace torch::jit {
 
@@ -108,6 +109,44 @@ class TORCH_API Unpickler {
   }
 
   static c10::TypePtr defaultTypeParser(const std::string& str) {
+    // Built-in container/scalar type tags recur across pickles; parse each once
+    // and reuse the shared immutable result. Registry-dependent tags (e.g.
+    // torch.classes.*/__torch__) are excluded and fall through to the full
+    // parser below.
+    static const std::unordered_map<std::string, c10::TypePtr>
+        kBuiltinTypeTags = [] {
+          std::unordered_map<std::string, c10::TypePtr> table;
+          for (const char* tag :
+               {"Tensor",
+                "int",
+                "float",
+                "bool",
+                "str",
+                "complex",
+                "List[Tensor]",
+                "List[int]",
+                "List[float]",
+                "List[bool]",
+                "List[str]",
+                "List[Optional[Tensor]]",
+                "Dict[str, Tensor]",
+                "Dict[str, int]",
+                "Dict[str, float]",
+                "Dict[str, bool]",
+                "Dict[str, str]",
+                "Dict[int, Tensor]",
+                "Optional[Tensor]"}) {
+            ScriptTypeParser parser;
+            if (auto type = parser.parseType(tag)) {
+              table.emplace(tag, std::move(type));
+            }
+          }
+          return table;
+        }();
+    auto it = kBuiltinTypeTags.find(str);
+    if (it != kBuiltinTypeTags.end()) {
+      return it->second;
+    }
     ScriptTypeParser parser;
     return parser.parseType(str);
   }
