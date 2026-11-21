@@ -28,27 +28,34 @@ from torch.distributed.tensor.parallel._data_parallel_utils import (
 __all__ = ["DTensorExtensions"]
 
 
-def _get_box(tensor: DTensor) -> tuple[torch.Size, torch.Size]:
+def _get_box_for(tensor: DTensor, idx: int) -> tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
     if device_mesh.ndim != 1:
         raise AssertionError("Only 1D DeviceMeshes currently handled")
 
     placement = tensor.placements[0]
     offsets = [0] * len(tensor.size())
-    num_chunks = device_mesh.size(mesh_dim=0)
+    shard_sizes = list(tensor.size())
 
     # NOTE: is_shard() does not match _StridedShard; see _is_shard_like().
-    if tensor.placements[0].is_shard():
+    # The non-is_shard() fallback returns the full global size, which is
+    # correct for Replicate/Partial but would be wrong for _StridedShard.
+    # This is safe today because _get_box_for requires a 1-D mesh (above)
+    # and _StridedShard is only constructed for 2D+ redistribution.
+    if placement.is_shard():
         shard_dim = cast(DShard, placement).dim
-        chunk_size = tensor.size(shard_dim) // num_chunks
-        offsets[shard_dim] = chunk_size
+        full_dim_size = tensor.size(shard_dim)
+        num_chunks = device_mesh.size(mesh_dim=0)
+        # Use Shard.local_shard_size_and_offset which computes sizes and
+        # offsets using torch.chunk (ceil-division) semantics -- the same
+        # logic DTensor uses internally for Shard placement.
+        shard_size, shard_offset = DShard.local_shard_size_and_offset(
+            full_dim_size, num_chunks, idx
+        )
+        offsets[shard_dim] = shard_offset
+        shard_sizes[shard_dim] = shard_size
 
-    return (torch.Size(offsets), tensor._local_tensor.size())
-
-
-def _get_box_for(tensor: DTensor, idx: int) -> tuple[torch.Size, torch.Size]:
-    offsets, size = _get_box(tensor)
-    return (torch.Size([val * idx for val in offsets]), size)
+    return (torch.Size(offsets), torch.Size(shard_sizes))
 
 
 def _get_local_box(tensor: DTensor) -> tuple[torch.Size, torch.Size]:
