@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
 import ast
+import io
 import textwrap
+from contextlib import redirect_stdout
 from unittest import mock, skipIf
 
 import torch
@@ -10,6 +12,7 @@ from torch._inductor import compile_to_python, config, load_from_python
 from torch._inductor.decomposition import select_decomp_table
 from torch._inductor.standalone_compile import NoRunnableInductorModuleError
 from torch._inductor.utils import fresh_cache
+from torch._inductor.wrapper_benchmark import compiled_module_main
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -536,6 +539,59 @@ class TestInductorCompileToPythonContract(TestCase):
         self.assertIn("def call(", src2)
         with torch.no_grad():
             self.assertEqual(load_from_python(src2)(_flat_inputs(m, x))[0], m(x))
+
+
+class TestCompiledModuleMainPeakMemory(TestCase):
+    # Runtime behavior of the compiled module __main__ harness. Deterministic on CPU
+    # via patches; the accelerator test skips without a device.
+    def _capture_main(self, benchmark_fn, acc_device):
+        buf = io.StringIO()
+        with (
+            mock.patch("sys.argv", ["test", "--times", "1", "--repeat", "1"]),
+            mock.patch(
+                "torch.accelerator.current_accelerator", return_value=acc_device
+            ),
+            mock.patch("torch.accelerator.memory.reset_peak_memory_stats") as reset,
+            mock.patch(
+                "torch.accelerator.memory.max_memory_allocated", return_value=1024
+            ),
+            redirect_stdout(buf),
+        ):
+            compiled_module_main("test_bench", benchmark_fn)
+        return buf.getvalue(), reset
+
+    def test_no_accelerator_skips_peak_memory_stats(self):
+        output, reset = self._capture_main(lambda times, repeat: 0.001, None)
+        self.assertEqual(reset.call_count, 0)
+        self.assertNotIn("Peak", output)
+
+    def test_peak_memory_label_uses_device_type(self):
+        for device_type, label in (("xpu", "XPU"), ("mtia", "MTIA")):
+            with self.subTest(device_type=device_type):
+                output, reset = self._capture_main(
+                    lambda times, repeat: 0.001, torch.device(device_type)
+                )
+                self.assertEqual(reset.call_count, 1)
+                self.assertIn(f"Peak {label} memory usage", output)
+
+    @skipIf(not torch.accelerator.is_available(), "requires an accelerator")
+    def test_accelerator_reports_peak_memory(self):
+        acc = torch.accelerator.current_accelerator()
+        label = "GPU" if acc.type == "cuda" else acc.type.upper()
+
+        def benchmark(times, repeat):
+            x = torch.randn(100, 100, device=acc)
+            del x
+            torch.accelerator.synchronize()
+            return 0.001
+
+        buf = io.StringIO()
+        with (
+            mock.patch("sys.argv", ["test", "--times", "1", "--repeat", "1"]),
+            redirect_stdout(buf),
+        ):
+            compiled_module_main("test_bench", benchmark)
+        self.assertIn(f"Peak {label} memory usage", buf.getvalue())
 
 
 if __name__ == "__main__":
