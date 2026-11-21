@@ -43,6 +43,8 @@ if TYPE_CHECKING:
 
 
 class FrameSummaryVariable(VariableTracker):
+    _cpython_type = traceback.FrameSummary
+
     def __init__(self, frame_summary: traceback.FrameSummary, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.frame_summary = frame_summary

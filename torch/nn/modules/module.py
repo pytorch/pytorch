@@ -283,7 +283,12 @@ def register_module_forward_hook(
     ``register_forward_hook``.
     """
     handle = RemovableHandle(
-        _global_forward_hooks, extra_dict=_global_forward_hooks_always_called
+        _global_forward_hooks,
+        extra_dict=(
+            [_global_forward_hooks_with_kwargs, _global_forward_hooks_always_called]
+            if with_kwargs
+            else _global_forward_hooks_always_called
+        ),
     )
     _global_forward_hooks[handle.id] = hook
     if with_kwargs:

@@ -128,8 +128,8 @@ class _Missing:
 
 # The C pickler bypasses reducer_override for exact builtin containers.
 # The string identifies a discarded container. A dictionary persistent ID is a
-# memoized snapshot of the retained items. Package loads check SystemInfo
-# compatibility before decoding either form with load_guards_state.
+# memoized snapshot with every key and _Missing in each pruned value slot.
+# Package loads check SystemInfo compatibility before decoding either form.
 _PRUNED_VALUE_PID = "pruned"
 
 
