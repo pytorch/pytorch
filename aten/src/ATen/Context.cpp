@@ -316,9 +316,8 @@ bool Context::rocmAllowGroupGemmCk() const {
     const auto allow_group_gemm_ck = c10::utils::check_env(rocm_allow_group_gemm_ck) == true;
     return allow_group_gemm_ck;
 }
-bool Context::rocmAllowGroupGemmCkTile() const {
-    const auto allow_group_gemm_ck_tile = c10::utils::check_env(rocm_allow_group_gemm_ck_tile) == true;
-    return allow_group_gemm_ck_tile;
+std::optional<bool> Context::rocmAllowGroupGemmCkTile() const {
+    return c10::utils::check_env(rocm_allow_group_gemm_ck_tile);
 }
 #endif
 
