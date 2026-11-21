@@ -778,18 +778,14 @@ class DictTests(torch._dynamo.test_case.TestCase):
         reference = OrderedDict(a=1, b=2)
 
         def fn(x, obj):
-            descriptor = getattr(owner, method)
+            desc = getattr(owner, method)
             if method in ("__eq__", "__ne__"):
-                return x + 1, descriptor(reference, obj)
+                return x + 1, desc(reference, obj)
             view = obj
-            if binding == "bound":
-                view = descriptor.__get__(obj)()
-            elif binding == "unbound":
-                view = descriptor(obj)
-            if method == "__iter__":
-                return x + 1, list(view), type(view)
-            if method == "__reversed__":
-                return x + 1, list(view)
+            if binding != "input":
+                view = desc.__get__(obj)() if binding == "bound" else desc(obj)
+            if method in ("__iter__", "__reversed__"):
+                return x + 1, list(view), type(view) if method == "__iter__" else None
             contents = list(view), list(type(view).__reversed__(view))
             return x + 1, contents, type(view), isinstance(view, keys_type), repr(view)
 
