@@ -651,6 +651,7 @@ impl CfgFunction {
                     d.set_item("operators", path.operators.clone())?;
                     d.set_item("inputs", path.inputs.len())?;
                     d.set_item("outputs", path.outputs.len())?;
+                    d.set_item("held", path.held.iter().filter(|held| **held).count())?;
                     d.set_item("branches", path.branches)?;
                     d.set_item("calls", path.calls)?;
                     d.set_item("paths", paths.len())?;
@@ -677,6 +678,14 @@ impl CfgFunction {
                         one.set_item("hits", form.hits.load(Ordering::Relaxed))?;
                         if let Some(reason) = &form.closed {
                             one.set_item("reason", reason.clone())?;
+                        }
+                        // What derives the backward of the form, where its
+                        // inputs need a gradient (`Graphs(backward=True)`).
+                        if let Some(callable) = &form.callable {
+                            let held = unsafe { Bound::<PyAny>::from_borrowed_ptr(py, callable.as_ptr()) };
+                            if let Ok(state) = held.getattr("state") {
+                                one.set_item("backward", state)?;
+                            }
                         }
                         listed.append(one)?;
                     }
