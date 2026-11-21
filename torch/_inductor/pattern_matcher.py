@@ -81,6 +81,7 @@ from torch.fx.traceback import preserve_node_meta
 from torch.utils._ordered_set import OrderedSet
 
 from .._functorch import config as functorch_config
+from .._functorch._aot_autograd.utils import disable_compiled_graph_wrapper
 from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
 from .._subclasses import FakeTensorMode
@@ -3242,8 +3243,12 @@ def joint_fwd_bwd(
     from torch.compiler import config as compiler_config
 
     # Keep compile-on-one-rank device handling out of pattern tracing (see fwd_only).
-    # pyrefly: ignore [missing-attribute]
-    with torch._guards.tracing(None), compiler_config.patch(compile_on_one_rank=False):
+    with (
+        torch._guards.tracing(None),
+        # pyrefly: ignore[missing-attribute]
+        compiler_config.patch(compile_on_one_rank=False),
+        disable_compiled_graph_wrapper(),
+    ):
         aot_function(
             fn,
             # pyrefly: ignore[bad-argument-type]
