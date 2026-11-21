@@ -3796,6 +3796,61 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
+    @torch._dynamo.config.patch(specialize_float=False)
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_float_symbol_guard_bypasses_cache_and_strict_raises(self):
+        def fn(x, s):
+            if s > 0.5:
+                return x * s + 1.0
+            return x * s - 1.0
+
+        def run(callable_fn, s):
+            t = torch.randn(4, requires_grad=True)
+            out = callable_fn(t, s)
+            out.sum().backward()
+            return t, out
+
+        with fresh_cache():
+            counters.clear()
+            compiled_fn = torch.compile(fn, backend="inductor", dynamic=True)
+            t, out = run(compiled_fn, 0.8)
+            self.assertEqual(out, fn(t.detach(), 0.8))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+
+            torch._dynamo.reset()
+            t, out = run(compiled_fn, 0.9)
+            self.assertEqual(out, fn(t.detach(), 0.9))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 2)
+
+            torch._dynamo.reset()
+            with functorch_config.patch({"strict_autograd_cache": True}):
+                with self.assertRaisesRegex(
+                    (
+                        torch._dynamo.exc.BackendCompilerFailed,
+                        autograd_cache.BypassAOTAutogradCache,
+                    ),
+                    "guard on float symbol",
+                ):
+                    run(torch.compile(fn, backend="inductor", dynamic=True), 0.8)
+
+            def int_fn(x, n):
+                if n > 2:
+                    return x * n + 1.0
+                return x * n - 1.0
+
+            torch._dynamo.reset()
+            counters.clear()
+            compiled_int = torch.compile(int_fn, backend="inductor", dynamic=True)
+            t, out = run(compiled_int, 4)
+            self.assertEqual(out, int_fn(t.detach(), 4))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
 
 @functorch_config.patch({"bundled_autograd_cache": True})
 class AOTAutogradCacheBundledTests(AOTAutogradCacheTests):
