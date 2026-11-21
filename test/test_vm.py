@@ -5693,6 +5693,27 @@ def graph_rated(x, rate):
     return ((x.sin() * rate).cos() + rate).tanh().exp()
 
 
+class GraphCollides:
+    """A key whose hash is that of "a", and that says when it is compared."""
+
+    def __init__(self):
+        self.log = []
+
+    def __hash__(self):
+        return hash("a")
+
+    def __eq__(self, other):
+        self.log.append("eq")
+        return False
+
+
+def graph_reads_a_table(x, table, members):
+    y = x.sin()
+    scale = table["a"]
+    there = "a" in table, "a" in members
+    return ((y + 1).cos() * scale).tanh().exp(), there
+
+
 GRAPHS = (*DEFAULT, P.Graphs())
 
 
@@ -6697,6 +6718,28 @@ class TestVmGraphResults(TestCase):
             torch.use_deterministic_algorithms(False)
         (graph,) = [r for r in torch.vm.regions(compiled) if "ops" in r]
         self.assertEqual((graph["variants"], graph["exports"]), (4, 4))
+
+    def test_a_key_that_comes_to_be_compared_in_python_is_compared_once(self, device):
+        def keep(gm, input_types):
+            return gm
+
+        # The graph is found with a dict and a set of texts. Ones that then
+        # hold a key of a class with an `__eq__` and the hash of the text
+        # that is looked up ask that key: such a lookup is no instruction
+        # that runs out of its place, where it would run once more on a call
+        # that nothing was exported for (a tensor of another type).
+        passes = (*DEFAULT, P.Graphs(), keep)
+        fn = graph_reads_a_table
+        compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+        x = torch.randn(3, 4, device=device)
+        for _ in range(6):
+            compiled(x, {"b": 1.0, "a": 2.0}, {"b", "a"})
+        for other in (x, x.double(), x[0], x.long(), x):
+            mine, theirs = GraphCollides(), GraphCollides()
+            got, there = compiled(other, {mine: 1.0, "a": 2.0}, {mine, "a"})
+            expected = fn(other, {theirs: 1.0, "a": 2.0}, {theirs, "a"})
+            self.assertEqual(got, expected[0], atol=0, rtol=0)
+            self.assertEqual((there, mine.log), (expected[1], theirs.log))
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
