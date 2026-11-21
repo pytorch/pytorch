@@ -589,6 +589,7 @@ IMPL_GATHER(MPS)
 IMPL_GATHER_INTO_TENSOR(CPU)
 IMPL_GATHER_INTO_TENSOR(CUDA)
 IMPL_GATHER_INTO_TENSOR(PrivateUse1)
+IMPL_GATHER_INTO_TENSOR(MPS)
 
 #define IMPL_SCATTER(DEV)                                                      \
   std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_##DEV( \
