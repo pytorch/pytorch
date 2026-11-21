@@ -827,6 +827,43 @@ unsafe fn weak_containers() -> Vec<Remover> {
     found
 }
 
+/// Whether an object is hashed without Python code running: a number, a
+/// text, None, bytes; an object whose class has the hash of `object` (the
+/// slot is `object`'s: a class with a `__hash__` of its own has another);
+/// an exact tuple of such.
+#[cfg(not(Py_3_13))]
+unsafe fn hashed_in_c(o: Obj, depth: usize) -> bool {
+    if o.is_null() || capi::is_unboxed(o) {
+        return false;
+    }
+    if is_plain(o) || ffi::PyBytes_CheckExact(o) != 0 {
+        return true;
+    }
+    if ffi::PyTuple_CheckExact(o) != 0 {
+        return depth < 4 && (0..ffi::PyTuple_GET_SIZE(o)).all(|i| hashed_in_c(ffi::PyTuple_GET_ITEM(o, i), depth + 1));
+    }
+    let object = std::ptr::addr_of!(ffi::PyBaseObject_Type);
+    (*ffi::Py_TYPE(o)).tp_hash.map(|own| own as usize) == (*object).tp_hash.map(|own| own as usize)
+}
+
+/// Whether a key is one of the keys of a dict, by identity, and the dict
+/// keeps no other key under the same hash: looking the key up, or taking
+/// its entry out, compares it with no other key.
+#[cfg(not(Py_3_13))]
+unsafe fn alone_under_its_hash(dict: Obj, key: Obj) -> bool {
+    let (mut at, mut other, mut value, mut hash) = (0, null_mut(), null_mut(), 0);
+    let mut hashes: Vec<ffi::Py_hash_t> = Vec::new();
+    let mut own = None;
+    while pyffi::_PyDict_Next(dict, &mut at, &mut other, &mut value, &mut hash) != 0 {
+        if other == key {
+            own = Some(hash);
+        } else {
+            hashes.push(hash);
+        }
+    }
+    own.is_some_and(|own| !hashes.contains(&own))
+}
+
 /// For the function by which a dictionary that keeps its values under the
 /// identities of its keys takes an entry out: the dictionary and the
 /// identity, which are the variables `self` and `idx` of the method the
@@ -968,7 +1005,7 @@ unsafe fn weakly_watched(o: Obj, more: &mut Vec<PyObj>) -> bool {
                 }
             }
             1 => {
-                if !dict(data) {
+                if !dict(data) || ffi::PyDict_Size(data) > 65536 {
                     return true;
                 }
                 let key = ffi::PyObject_GetAttrString(reference, c"key".as_ptr());
@@ -976,7 +1013,19 @@ unsafe fn weakly_watched(o: Obj, more: &mut Vec<PyObj>) -> bool {
                     ffi::PyErr_Clear();
                     return true;
                 }
-                more.push(PyObj::from_owned(key));
+                let key = PyObj::from_owned(key);
+                // The entry is taken out by its key, which is hashed for
+                // that and compared with every key the dict keeps under
+                // the same hash: in C, or the user's code runs.
+                if !hashed_in_c(key.as_ptr(), 0) || !alone_under_its_hash(data, key.as_ptr()) {
+                    return true;
+                }
+                // What goes with the entry is every reference it holds:
+                // the key, and the weak reference, which holds the key
+                // once more (`KeyedRef.key`) and ends with the entry where
+                // nothing else holds it.
+                more.push(key);
+                more.push(PyObj::from_borrowed(reference));
             }
             _ => {
                 if !set(data) {

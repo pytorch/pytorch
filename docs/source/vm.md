@@ -444,15 +444,18 @@ a `WeakKeyDictionary`, a `WeakValueDictionary` or a `WeakSet` of `weakref`,
 torch's `WeakIdKeyDictionary`, or the dictionary in which dynamo notes
 every module that is made once `torch.compile` has been used; a container
 of a class derived from these, or written like them, is taken to run code.
-A tensor that ends has to be of the class `torch.Tensor` itself, require no
-gradient (what a history holds, a hook or what a `torch.autograd.Function`
-kept for its backward, is not to be seen) and have memory that is torch's
-own (a tensor over a numpy array, a buffer or a DLPack capsule keeps their
-owner alive); its attributes and its `.grad` are looked at. An object that
-shows the collector nothing (a capsule, a numpy array, a storage) is taken
-to end with Python code unless its class is known to hold nothing. A call
-for which that cannot be shown runs the operations of the function as they
-are:
+What goes with the entry (the value under a key, the key of a value) is
+looked at as well, and the key of a `WeakValueDictionary` has to be one
+that is hashed without Python code and is alone under its hash, since
+taking the entry out hashes and compares it. A tensor that ends has to be
+of the class `torch.Tensor` itself, require no gradient (what a history
+holds, a hook or what a `torch.autograd.Function` kept for its backward, is
+not to be seen) and have memory that is torch's own (a tensor over a numpy
+array, a buffer or a DLPack capsule keeps their owner alive); its
+attributes and its `.grad` are looked at. An object that shows the
+collector nothing (a capsule, a numpy array, a storage) is taken to end
+with Python code unless its class is known to hold nothing. A call for
+which that cannot be shown runs the operations of the function as they are:
 
 ```python
 class Ends:
@@ -646,10 +649,6 @@ What graphs do not do at this stage:
   variable that the path binds anew, an object whose other reference is
   dropped while what a pass made of the graph runs (by that code itself, or
   by another thread it waits for) ends where the path lands.
-- Where the end of an object takes an entry out of a
-  `weakref.WeakValueDictionary`, the key of the entry goes too. A path lets
-  go of such an object also where the key ends with Python code (a
-  `__del__`), or is hashed or compared by code written in Python.
 - Sizes are fixed per export. Every size a graph is called with is a kind of
   call of its own, with a graph of its own, so a function that is called
   with many sizes uses up `max_variants`. Sizes of the tensors the graph
