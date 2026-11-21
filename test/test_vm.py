@@ -3676,6 +3676,13 @@ def region_small(x, y):
     return x + y
 
 
+def temporaries(x, steps):
+    # Every step frees what the step before it made.
+    for _ in range(steps):
+        x = torch.tanh(x * 1.5 + 0.25)
+    return x
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmWorkspace(TestCase):
     """The memory a compiled function keeps from one call to the next."""
@@ -3694,6 +3701,119 @@ class TestVmWorkspace(TestCase):
         del before, after
         nothing = dict.fromkeys(("calls", "hits", "misses", "kept", "live", "peak"), 0)
         self.assertEqual(torch._C._cfg_workspace_stats(workspace), nothing)
+
+    def test_memory_of_a_call_serves_the_next(self):
+        compiled = torch.vm(temporaries, fallback=False)
+        x = torch.randn(64, 1024)
+        for _ in range(4):
+            self.assertEqual(compiled(x, 6), temporaries(x, 6), atol=0, rtol=0)
+        before = torch.vm.memory(compiled)
+        self.assertEqual(before["live"], 0)
+        self.assertGreaterEqual(before["kept"], x.numel() * 4)
+        compiled(x, 6)
+        after = torch.vm.memory(compiled)
+        # Every tensor of the call found its memory in the workspace.
+        self.assertEqual(after["misses"], before["misses"])
+        self.assertGreaterEqual(after["hits"] - before["hits"], 6)
+        self.assertEqual(after["calls"], before["calls"] + 1)
+
+    def test_result_holds_its_memory(self):
+        compiled = torch.vm(temporaries, fallback=False)
+        x = torch.randn(64, 1024)
+        expected = temporaries(x, 3)
+        kept = [compiled(x, 3) for _ in range(3)]
+        # What they asked for, rounded up to pages.
+        live = torch.vm.memory(compiled)["live"]
+        self.assertGreaterEqual(live, 3 * x.numel() * 4)
+        self.assertLess(live, 3 * (x.numel() * 4 + 8192))
+        # The function goes first: its results still own their memory.
+        del compiled
+        gc.collect()
+        for result in kept:
+            self.assertEqual(result, expected, atol=0, rtol=0)
+
+    def test_result_freed_on_another_thread(self):
+        compiled = torch.vm(temporaries, fallback=False)
+        x = torch.randn(64, 1024)
+        kept = [compiled(x, 2)]
+        thread = threading.Thread(target=kept.clear)
+        thread.start()
+        thread.join()
+        memory = torch.vm.memory(compiled)
+        self.assertEqual(memory["live"], 0)
+        self.assertGreaterEqual(memory["kept"], x.numel() * 4)
+
+    def test_small_tensors_are_left_to_malloc(self):
+        compiled = torch.vm(temporaries, fallback=False)
+        x = torch.randn(16)
+        for _ in range(3):
+            self.assertEqual(compiled(x, 6), temporaries(x, 6), atol=0, rtol=0)
+        memory = torch.vm.memory(compiled)
+        self.assertEqual((memory["hits"], memory["misses"]), (0, 0))
+
+    def test_memory_not_asked_for_is_given_back(self):
+        compiled = torch.vm(temporaries, fallback=False)
+        large, small = torch.randn(256, 1024), torch.randn(16)
+        for _ in range(3):
+            compiled(large, 6)
+        self.assertGreaterEqual(torch.vm.memory(compiled)["kept"], large.numel() * 4)
+        for _ in range(6):
+            compiled(small, 6)
+        self.assertEqual(torch.vm.memory(compiled)["kept"], 0)
+
+    def test_memory_is_cut_to_the_size_that_is_asked_for(self):
+        compiled = torch.vm(temporaries, fallback=False)
+        large, small = torch.ones(8 << 20), torch.ones(1 << 20)
+        for _ in range(2):
+            compiled(large, 3)
+        before = torch.vm.memory(compiled)
+        # An eighth of what a large tensor left behind serves a small one.
+        compiled(small, 3)
+        after = torch.vm.memory(compiled)
+        self.assertEqual(after["misses"], before["misses"])
+        self.assertGreater(after["hits"], before["hits"])
+        # What comes back is one piece again with the memory around it.
+        compiled(large, 3)
+        self.assertEqual(torch.vm.memory(compiled)["misses"], before["misses"])
+
+    def test_holds_little_more_than_its_tensors_did_at_their_most(self):
+        compiled = torch.vm(temporaries, fallback=False)
+        # Every call needs pieces larger than any the calls before it left.
+        for n in (1, 2, 6, 15, 37):
+            compiled(torch.ones(n << 20), 3)
+            memory = torch.vm.memory(compiled)
+            # Half as much again, 256 MB at most; and 64 MB whatever its
+            # tensors held.
+            spare = min(memory["peak"] // 2, 1 << 28)
+            limit = max(memory["peak"] + spare, 1 << 26)
+            self.assertLessEqual(memory["live"] + memory["kept"], limit)
+        # The memory of the last call is all there for the next.
+        self.assertGreaterEqual(memory["kept"], 2 * (37 << 22))
+
+    def test_without_a_workspace(self):
+        compiled = torch.vm(temporaries, fallback=False, keep_memory=False)
+        x = torch.randn(64, 1024)
+        self.assertEqual(compiled(x, 6), temporaries(x, 6), atol=0, rtol=0)
+        self.assertIsNone(torch.vm.memory(compiled))
+        with unittest.mock.patch.dict(os.environ, {"TORCH_VM_KEEP_MEMORY": "0"}):
+            compiled = torch.vm(temporaries, fallback=False)
+        self.assertIsNone(torch.vm.memory(compiled))
+
+    def test_compiled_function_called_by_another(self):
+        inner = torch.vm(temporaries, fallback=False)
+
+        def outer(x):
+            return inner(x, 3) + 1
+
+        compiled = torch.vm(outer, fallback=False, callees=False)
+        x = torch.randn(64, 1024)
+        for _ in range(4):
+            self.assertEqual(compiled(x), temporaries(x, 3) + 1, atol=0, rtol=0)
+        # Back in the outer function, its own workspace is the one in use.
+        self.assertGreater(torch.vm.memory(inner)["hits"], 0)
+        self.assertGreater(torch.vm.memory(compiled)["hits"], 0)
+        self.assertEqual(torch.vm.memory(compiled)["live"], 0)
+        self.assertEqual(torch.vm.memory(inner)["live"], 0)
 
 
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")

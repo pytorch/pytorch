@@ -82,7 +82,7 @@ from . import _shortcuts, passes
 from .passes import BuiltinPass, Inline, Unroll
 
 
-__all__ = ["DEFAULT_PASSES", "Unsupported", "is_available", "passes", "vm"]
+__all__ = ["DEFAULT_PASSES", "Unsupported", "is_available", "memory", "passes", "vm"]
 
 
 class Unsupported(RuntimeError):
@@ -181,6 +181,7 @@ def vm(
     demote: bool | None = None,
     max_versions: int = 4,
     max_respecializations: int = 6,
+    keep_memory: bool | None = None,
 ) -> Any:
     """Runs ``fn`` as an SSA control-flow graph in the VM, with passes applied.
 
@@ -229,6 +230,14 @@ def vm(
         max_versions: how many specialized versions a block can have at once.
         max_respecializations: how many times a block may be profiled and
             specialized again before it settles on code without guards.
+        keep_memory: give the function a workspace: the memory of the CPU
+            tensors its calls make stays with it when they are freed, and the
+            next call uses it again instead of having the system map and fault
+            in the same pages. It holds what the tensors of a call hold at
+            their peak and up to half as much again, 256 MB at most; what a few
+            calls in a row did not ask for is given back.
+            ``torch.vm.memory(fn)`` reports it. On by default
+            (``TORCH_VM_KEEP_MEMORY=0`` turns it off).
 
     Returns:
         A callable with the signature of ``fn``. It has ``dump()``, returning
@@ -236,6 +245,8 @@ def vm(
     """
     if demote is None:
         demote = os.environ.get("TORCH_VM_DEMOTE", "1") != "0"
+    if keep_memory is None:
+        keep_memory = os.environ.get("TORCH_VM_KEEP_MEMORY", "1") != "0"
     passes = DEFAULT_PASSES if passes is None else tuple(passes)
     options: dict[str, Any] = {
         "passes": passes,
@@ -246,6 +257,7 @@ def vm(
         "demote": demote,
         "max_versions": max_versions,
         "max_respecializations": max_respecializations,
+        "keep_memory": keep_memory,
     }
     if fn is None:
         return functools.partial(vm, **options)
@@ -271,12 +283,29 @@ def vm(
             demote=demote,
             max_versions=max_versions,
             max_respecializations=max_respecializations,
+            workspace=torch._C._cfg_workspace() if keep_memory else None,
         )
     except NotImplementedError as e:
         if not fallback:
             raise Unsupported(f"{fn.__qualname__}: {e}") from None
         warnings.warn(f"torch.vm left {fn.__qualname__} as it is: {e}", stacklevel=2)
         return fn
+
+
+def memory(fn: Any) -> dict[str, int] | None:
+    """What a compiled function keeps of the memory of its calls.
+
+    With ``keep_memory`` a compiled function has a workspace: while it runs,
+    the CPU tensors that are made get their memory from it and give it back
+    to it, so that the next call finds blocks of the sizes it needs instead
+    of asking the system for pages again. Returns ``calls``, ``hits`` and
+    ``misses`` (blocks found in the workspace, and blocks malloc had to
+    make), and in bytes ``kept`` (held for the next call), ``live`` (held
+    by tensors now) and ``peak``; or None for a function without one.
+    """
+    fn = getattr(fn, "__func__", fn)
+    workspace = getattr(fn, "workspace", None)
+    return None if workspace is None else torch._C._cfg_workspace_stats(workspace)
 
 
 class _CallableModule(types.ModuleType):

@@ -8,6 +8,7 @@ use crate::pyffi::PyObj;
 use crate::spec::{self, CfgPass, PassCx, Pipeline, PyPass, Unit, ValueObs};
 use crate::vm::{self, Callees, Compiled, Options};
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
+use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyCapsule, PyDict, PyList, PyTuple};
 use std::cell::Cell;
@@ -108,7 +109,7 @@ pub fn clear_shortcuts() {
 }
 
 #[pyfunction]
-#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, callees=true, shortcuts=true, demote=true))]
+#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, callees=true, shortcuts=true, demote=true, workspace=None))]
 pub fn compile(
     py: Python<'_>,
     func: &Bound<'_, PyAny>,
@@ -123,7 +124,19 @@ pub fn compile(
     callees: bool,
     shortcuts: bool,
     demote: bool,
+    workspace: Option<Bound<'_, PyAny>>,
 ) -> PyResult<CfgFunction> {
+    // What `torch._C._cfg_workspace` made: the memory the function keeps
+    // between its calls.
+    let mut memory = 0usize;
+    if let Some(capsule) = &workspace {
+        let pointer =
+            unsafe { ffi::PyCapsule_GetPointer(capsule.as_ptr(), c"torch._C._cfg_workspace".as_ptr()) };
+        if pointer.is_null() {
+            return Err(PyErr::fetch(py));
+        }
+        memory = pointer as usize;
+    }
     let table = OpcodeTable::load(py)?;
     let options = Options {
         specialize,
@@ -173,6 +186,8 @@ pub fn compile(
             Arc::new(Callees::new(table)),
         )),
         wrapped: func.clone().unbind(),
+        workspace: workspace.map(|w| w.unbind()),
+        memory,
     })
 }
 
@@ -182,6 +197,10 @@ pub fn compile(
 pub struct CfgFunction {
     inner: Arc<Compiled>,
     wrapped: PyObject,
+    /// The capsule of the function's workspace and the address in it, or
+    /// none and 0.
+    workspace: Option<PyObject>,
+    memory: usize,
 }
 
 impl Drop for CfgFunction {
@@ -200,8 +219,16 @@ impl CfgFunction {
         args: &Bound<'_, PyTuple>,
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<PyObject> {
+        // For the time of the call, tensors get their memory from what the
+        // function kept of its earlier calls.
+        let memory = self.memory as *mut std::ffi::c_void;
+        let api = if memory.is_null() { None } else { capi::api() };
+        let previous = api.map(|api| unsafe { (api.workspace_enter)(memory) });
         let result =
             unsafe { self.inner.call_measured(self.wrapped.as_ptr(), args.as_ptr(), kwargs.map_or(null_mut(), |k| k.as_ptr())) };
+        if let (Some(api), Some(previous)) = (api, previous) {
+            unsafe { (api.workspace_leave)(memory, previous) };
+        }
         if result.is_null() {
             Err(PyErr::fetch(py))
         } else {
@@ -231,6 +258,12 @@ impl CfgFunction {
     #[getter]
     fn __wrapped__(&self, py: Python<'_>) -> PyObject {
         self.wrapped.clone_ref(py)
+    }
+
+    /// The workspace the function was compiled with, if any.
+    #[getter]
+    fn workspace(&self, py: Python<'_>) -> Option<PyObject> {
+        self.workspace.as_ref().map(|w| w.clone_ref(py))
     }
 
     /// Everything this object does not define itself is read from the
