@@ -641,6 +641,10 @@ inline torch::stable::Tensor empty(
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.16.
 ///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
 /// @param size The size of each dimension of the output tensor.
 /// @param stride The stride of each dimension, in elements.
 /// @param dtype Optional scalar type for the tensor elements.
@@ -700,6 +704,10 @@ inline torch::stable::Tensor empty_strided(
 ///
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
 ///
 /// @param self The input tensor.
 /// @param dim The dimension to slice. Defaults to 0.
