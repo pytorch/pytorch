@@ -775,7 +775,6 @@ class TestCommon(TestCase):
 
     @onlyAccelerator
     @skipIfMPS
-    @skipXPU
     @ops(python_ref_db)
     @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
