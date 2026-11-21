@@ -567,6 +567,9 @@ struct Graph {
     inputs: Vec<u32>,
     steps: Vec<Step>,
     outputs: Vec<u32>,
+    /// Per output: whether something can hold it when the call that the
+    /// graph ran for goes on.
+    held: Vec<bool>,
     /// The ranks and sizes the engine checks of tensors it does not get
     /// back: the tensor, and the dimension for a size.
     exits: Vec<(Operand, Option<i64>)>,
@@ -824,6 +827,13 @@ impl Graph {
         }
         let inputs: Vec<u32> = need("input_ids")?.extract()?;
         let outputs: Vec<u32> = need("outputs")?.extract()?;
+        let held: Vec<bool> = match description.get_item("held")? {
+            Some(held) => held.extract()?,
+            None => vec![true; outputs.len()],
+        };
+        if held.len() != outputs.len() {
+            return Err(PyValueError::new_err("the description of a graph says of other values than its outputs whether they are held"));
+        }
         let mut exits = Vec::new();
         for exit in need("exits")?.try_iter()? {
             let exit = exit?;
@@ -831,14 +841,15 @@ impl Graph {
             let dim = if kind == "size" { Some(exit.get_item(2)?.extract()?) } else { None };
             exits.push((operand(&exit.get_item(1)?)?, dim));
         }
-        let mut graph = Graph { inputs, steps, outputs, exits, values: 0 };
+        let mut graph = Graph { inputs, steps, outputs, held, exits, values: 0 };
         graph.count();
         Ok(graph)
     }
 
     /// Operations of a joint graph as a graph of their own: it takes the
-    /// values `takes` and gives the values `gives`.
-    fn kernels(ops: &Bound<'_, PyList>, takes: Vec<Value>, gives: Vec<Value>) -> PyResult<Graph> {
+    /// values `takes` and gives the values `gives`, of which `held` says
+    /// which something can hold behind the form.
+    fn kernels(ops: &Bound<'_, PyList>, takes: Vec<Value>, gives: Vec<Value>, held: Vec<bool>) -> PyResult<Graph> {
         let mut steps = Vec::new();
         for op in ops.iter() {
             let mut kwargs = Vec::new();
@@ -849,7 +860,7 @@ impl Graph {
             let kind = Kind::Kernel(op.get_item(0)?.unbind(), operands(&op.get_item(1)?)?, kwargs, places, op.get_item(4)?.extract()?);
             steps.push(Step { kind, value: None });
         }
-        let mut graph = Graph { inputs: takes, steps, outputs: gives, exits: Vec::new(), values: 0 };
+        let mut graph = Graph { inputs: takes, steps, outputs: gives, held, exits: Vec::new(), values: 0 };
         graph.count();
         Ok(graph)
     }
@@ -1255,6 +1266,8 @@ struct Taken {
     shape: Shape,
     /// Where the form is cut in two, in place of a backward.
     cut: Option<usize>,
+    /// The values of the results that something can hold behind the form.
+    held: Vec<Value>,
     /// The autocast the forward ran under.
     cast: Cast,
 }
@@ -1371,11 +1384,14 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
         }
     }
     let mut results = Vec::new();
-    for value in &graph.outputs {
-        if let Some(held) = &values[*value as usize] {
-            tensors_in(held.bind(py), &mut results);
+    let mut reached: Vec<bool> = Vec::new();
+    for (value, held) in graph.outputs.iter().zip(&graph.held) {
+        if let Some(given) = &values[*value as usize] {
+            tensors_in(given.bind(py), &mut results);
+            reached.resize(results.len(), *held);
         }
     }
+    let held: Vec<Value> = results.iter().zip(&reached).filter(|(_, reached)| **reached).filter_map(|(result, _)| joint.value(result)).collect();
     let unique: HashSet<usize> = results.iter().map(key).collect();
     if unique.len() != results.len() {
         return refused("a result is given twice");
@@ -1385,13 +1401,13 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
             return refused("an input has a hook: taking the backward down would run it");
         }
     }
-    let (shape, roots, readers) = match shaped(py, &joint, feeds, &results, events) {
+    let (shape, roots, readers) = match shaped(py, &joint, feeds, &results, &reached, events) {
         Ok(found) => found,
         Err(Stop::Cut(at)) if at > 0 => {
             joint_says(py, joint.results(results.clone(), vec![false; results.len()]))?;
             joint.finish();
             let shape = Shape { roots: Vec::new(), views: Vec::new(), outer: Vec::new(), sources: Vec::new(), found: Vec::new() };
-            return Ok(Taken { joint, ran, marks, targets: Vec::new(), shape, cut: Some(at), cast: Cast::now(py)? });
+            return Ok(Taken { joint, ran, marks, targets: Vec::new(), shape, cut: Some(at), held, cast: Cast::now(py)? });
         }
         Err(stop) => return Err(stop),
     };
@@ -1503,18 +1519,20 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
         joint.kept_by(number as u32, kept);
     }
     joint.finish();
-    Ok(Taken { joint, ran, marks, targets: nodes.targets.clone(), shape, cut: None, cast })
+    Ok(Taken { joint, ran, marks, targets: nodes.targets.clone(), shape, cut: None, held, cast })
 }
 
 /// The roots, and how the results are made of them: for a result that is a
 /// view, the operations between it and the root, or the input, it is a view
-/// of. Also, per root, eager's nodes of such views that read it.
+/// of. Also, per root, eager's nodes of such views that read it. `reached`
+/// says per result whether something can hold it behind the form.
 #[allow(clippy::type_complexity)]
 fn shaped<'py>(
     py: Python<'py>,
     joint: &Joint,
     feeds: &[Bound<'py, PyAny>],
     results: &[Bound<'py, PyAny>],
+    reached: &[bool],
     events: &[Event<'py>],
 ) -> Result<(Shape, Vec<Bound<'py, PyAny>>, HashMap<usize, Vec<Node<'py>>>), Stop> {
     let mut made: HashMap<usize, usize> = HashMap::new();
@@ -1619,12 +1637,28 @@ fn shaped<'py>(
     shape.outer = outer.iter().map(|at| events[*at].at).collect();
     shape.outer.sort_unstable();
     // A view that a result is made of is eager's view only behind the node:
-    // nothing in the graph may need a gradient through it.
+    // nothing in the graph may need a gradient through it. Nor through a
+    // root that something can hold behind the form, as a result or as what
+    // a result is a view of: whoever holds it can ask for the gradient at
+    // it, keep it, hook it and change it there, so what the graph computes
+    // of it comes to it from a node of its own, through its gradient
+    // function. What read it before its last write is not there.
     let mut views: HashSet<usize> = HashSet::new();
     for at in &outer {
         let mut given = Vec::new();
         tensors_in(&events[*at].out, &mut given);
         views.extend(given.iter().map(key));
+    }
+    let mut born: HashMap<usize, usize> = HashMap::new();
+    for ((number, _), root) in shape.found.iter().zip(&roots) {
+        let of_root = |result: &Bound<'py, PyAny>| -> PyResult<bool> { Ok(result.is(root) || base_of(result)?.is_some_and(|base| base.is(root))) };
+        let mut held = reached[*number];
+        for (result, reached) in results.iter().zip(reached) {
+            held = held || (*reached && of_root(result)?);
+        }
+        if let (true, Some(at)) = (held, made.get(&key(root))) {
+            born.insert(key(root), *at);
+        }
     }
     for (at, event) in events.iter().enumerate() {
         if outer.contains(&at) {
@@ -1639,7 +1673,7 @@ fn shaped<'py>(
         for arg in event.args.iter() {
             tensors_in(&arg, &mut taken);
         }
-        if taken.iter().any(|tensor| views.contains(&key(tensor))) {
+        if taken.iter().any(|tensor| views.contains(&key(tensor)) || born.get(&key(tensor)).is_some_and(|born| at > *born)) {
             return Err(Stop::Cut(event.at));
         }
     }
@@ -1805,7 +1839,7 @@ impl Plan {
         }
         // The operations behind the node: each takes a root, an input, or
         // what another of them gave.
-        let outer = Graph::kernels(&joint.described_forward(py, &shape.outer)?, Vec::new(), Vec::new())?.steps;
+        let outer = Graph::kernels(&joint.described_forward(py, &shape.outer)?, Vec::new(), Vec::new(), Vec::new())?.steps;
         let mut known: HashSet<Value> = shape.sources.iter().map(|(value, _, _)| *value).collect();
         for step in &outer {
             if !step.reads().iter().all(|value| known.contains(value)) {
@@ -2272,7 +2306,7 @@ struct Parts {
 
 impl Parts {
     fn new(py: Python<'_>, graph: Arc<Graph>, taken: Taken, export: &Option<Py<PyAny>>) -> PyResult<Parts> {
-        let Taken { joint, ran, marks, cut, .. } = taken;
+        let Taken { joint, ran, marks, cut, held, .. } = taken;
         let cut = cut.expect("a form that is cut");
         let (behind, _) = graph.behind(&ran);
         let mut later: Vec<Value> = Vec::new();
@@ -2296,7 +2330,8 @@ impl Parts {
             let after: HashSet<Value> = (last + 1..count).flat_map(|at| joint.forward_reads(at)).collect();
             let mut gives: Vec<Value> = made.iter().copied().filter(|value| later.contains(value) || after.contains(value)).collect();
             gives.sort_unstable();
-            let part = Graph::kernels(&joint.described_forward(py, &chosen)?, takes.clone(), gives.clone())?;
+            let reached = gives.iter().map(|value| held.contains(value)).collect();
+            let part = Graph::kernels(&joint.described_forward(py, &chosen)?, takes.clone(), gives.clone(), reached)?;
             parts.push((Form::new(py, Arc::new(part), export), takes, gives));
         }
         Ok(Parts { graph, parts, inputs, values: joint.values(), behind, marks })
