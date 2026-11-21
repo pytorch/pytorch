@@ -103,11 +103,13 @@ struct Meta {
     bytes: u64,
     /// Where the memory it is in starts: what is written to there changes it.
     storage: usize,
-    /// For a value the caller of the function can get at (an input, a
-    /// result): eager's node that gave it and which of its results it is,
-    /// for eager's text where it was written to before the backward.
+    /// Whether the caller of the function can get at it: an input, a result.
     reachable: bool,
+    /// Eager's node that gave it and which of its results it is, for
+    /// eager's text where it was written to before the backward; and which
+    /// node of the backward that is, as the caller counts them.
     producer: Option<(String, u32)>,
+    node: Option<u32>,
 }
 
 /// Who ran an operation of a backward: a node of eager's (its number, as the
@@ -126,6 +128,8 @@ struct Back {
     owners: Vec<u32>,
     /// Per node of eager's: the gradients it was handed.
     handed: Vec<Vec<Value>>,
+    /// The nodes that ran, in the order they ran.
+    called: Vec<u32>,
     /// Per contribution, in eager's order: which one it is (the caller
     /// numbers them over all backwards), and the value.
     gives: Vec<(u32, Value)>,
@@ -155,6 +159,9 @@ pub struct Joint {
     /// down for: 0 as a backward runs by itself, 1 as one runs under the
     /// autocast that the forward ran under.
     variant: u32,
+    /// Per node of eager's: the values of the forward it kept, in the order
+    /// it looks at them when it runs.
+    unpacks: Vec<Vec<Value>>,
 }
 
 /// A backward for some of the results, made of one that was taken down.
@@ -166,6 +173,8 @@ struct Part<'a> {
     /// A value that is another one here: a sum with one side missing.
     alias: HashMap<Value, Value>,
     gives: Vec<(u32, Value)>,
+    /// The nodes of eager's that run, in the order they run.
+    nodes: Vec<u32>,
 }
 
 impl<'a> Part<'a> {
@@ -177,6 +186,7 @@ impl<'a> Part<'a> {
             ops: (0..back.ops.len()).collect(),
             alias: HashMap::new(),
             gives: back.gives.clone(),
+            nodes: back.called.clone(),
         }
     }
 }
@@ -231,7 +241,7 @@ impl Joint {
             return Err(refused(format!("{what} is a tensor the engine does not know (a subclass, or one that is not dense)")));
         };
         let value = self.metas.len() as Value;
-        self.metas.push(Meta { kind, bytes, storage, reachable: false, producer: None });
+        self.metas.push(Meta { kind, bytes, storage, reachable: false, producer: None, node: None });
         self.by_object.insert(obj.as_ptr() as usize, value);
         if bytes > 0 {
             self.by_layout.insert(layout, value);
@@ -385,8 +395,9 @@ impl Joint {
     /// nothing (the caller has seen that it gives nothing then); where two
     /// gradients meet and one is missing, the other is the sum. A node
     /// that would be handed some of its gradients and not others was not
-    /// taken down like that, and is refused.
-    fn part(&self, pattern: &[bool], variant: u32) -> PyResult<Part<'_>> {
+    /// taken down like that, and is refused; with `lenient` it runs, for
+    /// what only asks which nodes run.
+    fn part(&self, pattern: &[bool], variant: u32, lenient: bool) -> PyResult<Part<'_>> {
         if pattern.len() != self.results.len() || !pattern.iter().any(|on| *on) {
             return Err(refused("a backward is for some of the results of the graph".to_string()));
         }
@@ -402,6 +413,7 @@ impl Joint {
         part.ops.clear();
         part.gives.clear();
         part.incoming.clear();
+        part.nodes.clear();
         let mut missing: HashSet<Value> = HashSet::new();
         let had = (0..pattern.len()).filter(|at| back.pattern[*at]);
         for (at, value) in had.zip(&back.incoming) {
@@ -412,7 +424,15 @@ impl Joint {
             }
         }
         let partly = || refused("a node of eager's would be handed some of its gradients and not others, which was not taken down".to_string());
-        // Per node: whether it runs here.
+        // Whether a node runs here: it is handed what it was handed.
+        let handed = |part: &Part<'_>, missing: &HashSet<Value>, owner: u32| -> PyResult<bool> {
+            let handed = back.handed.get(owner as usize).ok_or_else(partly)?;
+            let gone = handed.iter().filter(|v| missing.contains(part.alias.get(*v).unwrap_or(*v))).count();
+            if gone != 0 && gone != handed.len() && !lenient {
+                return Err(partly());
+            }
+            Ok(gone == 0 || gone != handed.len())
+        };
         let mut runs: HashMap<u32, bool> = HashMap::new();
         for (at, op) in back.ops.iter().enumerate() {
             let owner = back.owners[at];
@@ -420,6 +440,10 @@ impl Joint {
                 let sides: Vec<Value> = op.args.iter().filter_map(|arg| if let Arg::Value(v) = arg { Some(*v) } else { None }).collect();
                 // What else the addition takes (a factor of one) is no side.
                 if sides.len() != 2 || !op.single {
+                    if lenient {
+                        part.ops.push(at);
+                        continue;
+                    }
                     return Err(refused("where two gradients meet is not one addition".to_string()));
                 }
                 let sides: Vec<Value> = sides.iter().map(|v| *part.alias.get(v).unwrap_or(v)).collect();
@@ -438,24 +462,35 @@ impl Joint {
                 continue;
             }
             if owner == NOBODY {
+                if lenient {
+                    part.ops.push(at);
+                    continue;
+                }
                 return Err(refused("no backward was taken down for these results".to_string()));
             }
             let run = match runs.get(&owner) {
                 Some(run) => *run,
                 None => {
-                    let handed = back.handed.get(owner as usize).ok_or_else(partly)?;
-                    let gone = handed.iter().filter(|v| missing.contains(part.alias.get(*v).unwrap_or(*v))).count();
-                    if gone != 0 && gone != handed.len() {
-                        return Err(partly());
-                    }
-                    runs.insert(owner, gone == 0);
-                    gone == 0
+                    let run = handed(&part, &missing, owner)?;
+                    runs.insert(owner, run);
+                    run
                 }
             };
             if run {
                 part.ops.push(at);
             } else {
                 missing.extend(op.results.iter().copied());
+            }
+        }
+        // A node that ran no operation runs like the others: if it is
+        // handed what it was handed.
+        for owner in &back.called {
+            let run = match runs.get(owner) {
+                Some(run) => *run,
+                None => handed(&part, &missing, *owner)?,
+            };
+            if run {
+                part.nodes.push(*owner);
             }
         }
         for (slot, value) in &back.gives {
@@ -518,10 +553,6 @@ impl Joint {
         &self.forward[at].results
     }
 
-    pub(crate) fn forward_name(&self, at: usize) -> &str {
-        &self.forward[at].name
-    }
-
     /// Operations of the forward, described as `describe` describes them.
     pub(crate) fn described_forward<'py>(&self, py: Python<'py>, which: &[usize]) -> PyResult<Bound<'py, PyList>> {
         let none = HashMap::new();
@@ -532,6 +563,33 @@ impl Joint {
     /// How many values the graph has.
     pub(crate) fn values(&self) -> u32 {
         self.metas.len() as u32
+    }
+
+    /// Eager's node for a value and which of its results the value is; with
+    /// `node`, which node of the backward it is, as the caller counts them.
+    pub(crate) fn made_by(&mut self, value: Value, name: String, output: u32, node: Option<u32>) {
+        let meta = &mut self.metas[value as usize];
+        meta.producer = Some((name, output));
+        meta.node = node;
+    }
+
+    /// The values of the forward that the backwards read.
+    pub(crate) fn read(&self) -> Vec<Value> {
+        let mut read: Vec<Value> = Vec::new();
+        for back in &self.backs {
+            back.ops.iter().for_each(|op| self.reads(op, &mut read));
+            read.extend(back.gives.iter().map(|(_, value)| *value));
+        }
+        read.retain(|v| matches!(self.metas[*v as usize].kind, Kind::Input(_) | Kind::Forward(_)));
+        read.sort_unstable();
+        read.dedup();
+        read
+    }
+
+    /// The memory the caller of the function can get at: where the inputs
+    /// and the results are.
+    fn outside(&self) -> HashSet<usize> {
+        self.metas.iter().filter(|meta| meta.reachable).map(|meta| meta.storage).collect()
     }
 
     /// How many values the form gives.
@@ -555,7 +613,7 @@ impl Joint {
         pattern: &[bool],
         variant: u32,
     ) -> PyResult<(Bound<'py, PyList>, Vec<Value>, Vec<(u32, Value)>, Vec<Value>)> {
-        let part = self.part(pattern, variant)?;
+        let part = self.part(pattern, variant, false)?;
         let again = self.again_for(&part);
         let none = HashMap::new();
         let mut all: Vec<Bound<'py, PyAny>> = Vec::new();
@@ -590,10 +648,60 @@ impl Joint {
         Ok((PyList::new(py, all)?, part.incoming.clone(), part.gives.clone(), takes))
     }
 
+    /// What a node of eager's kept of the forward, in the order it looks at
+    /// it when it runs. Asked for after `made_by` said which node gave
+    /// what: a node looks at what it kept of its operands first.
+    pub(crate) fn kept_by(&mut self, node: u32, values: Vec<Value>) {
+        let forward = |v: &&Value| matches!(self.metas[**v as usize].kind, Kind::Input(_) | Kind::Forward(_));
+        let own = |v: &&Value| self.metas[**v as usize].node == Some(node);
+        let mut kept: Vec<Value> = values.iter().filter(forward).filter(|v| !own(v)).copied().collect();
+        kept.extend(values.iter().filter(forward).filter(own));
+        if self.unpacks.len() <= node as usize {
+            self.unpacks.resize(node as usize + 1, Vec::new());
+        }
+        self.unpacks[node as usize] = kept;
+    }
+
+    /// The values of the forward that eager's nodes look at when a backward
+    /// for the results of `pattern` runs, in the order they do, each with
+    /// whether the node that looks at it first is the one that gave it.
+    pub(crate) fn looked_at(&self, pattern: &[bool], variant: u32) -> Vec<(Value, bool)> {
+        let known = |variant: u32| self.part(pattern, variant, true);
+        let Ok(part) = known(variant).or_else(|_| known(0)) else {
+            return Vec::new();
+        };
+        let mut reads: Vec<(Value, bool)> = Vec::new();
+        let mut add = |value: Value, node: Option<u32>| {
+            if !reads.iter().any(|(known, _)| *known == value) {
+                reads.push((value, node.is_some() && self.metas[value as usize].node == node));
+            }
+        };
+        for node in &part.nodes {
+            for value in self.unpacks.get(*node as usize).into_iter().flatten() {
+                add(*value, Some(*node));
+            }
+            // What a node reads and does not say it kept.
+            let mut found = Vec::new();
+            for at in part.ops.iter().filter(|at| part.back.owners[**at] == *node) {
+                self.reads(&part.back.ops[*at], &mut found);
+            }
+            found.iter().for_each(|value| add(*value, Some(*node)));
+        }
+        let mut found = Vec::new();
+        for at in part.ops.iter().filter(|at| !part.nodes.contains(&part.back.owners[**at])) {
+            self.reads(&part.back.ops[*at], &mut found);
+        }
+        found.extend(part.gives.iter().map(|(_, value)| *value).filter(|v| matches!(self.metas[*v as usize].kind, Kind::Input(_) | Kind::Forward(_))));
+        found.iter().for_each(|value| add(*value, None));
+        reads
+    }
+
     /// Whether a backward may run a forward operation again: it is one of
-    /// `AGAIN`, gives one tensor, and nothing behind it in the forward wrote
+    /// `AGAIN`, gives one tensor, takes nothing in memory the caller can
+    /// get at (`outside`: what is written there behind the forward is not
+    /// what the forward read), and nothing behind it in the forward wrote
     /// to the memory of what it takes.
-    fn runs_again(&self, at: usize) -> bool {
+    fn runs_again(&self, at: usize, outside: &HashSet<usize>) -> bool {
         let op = &self.forward[at];
         let base = op.name.split("::").last().unwrap_or("").split('.').next().unwrap_or("");
         if !AGAIN.contains(&base) || !op.single || !op.writes.is_empty() || op.random {
@@ -602,6 +710,9 @@ impl Joint {
         let mut taken = Vec::new();
         self.reads(op, &mut taken);
         let storages: HashSet<usize> = taken.iter().map(|v| self.metas[*v as usize].storage).collect();
+        if storages.iter().any(|storage| outside.contains(storage)) {
+            return false;
+        }
         let written = |later: &Op| later.writes.iter().any(|v| storages.contains(&self.metas[*v as usize].storage));
         !self.forward[at + 1..].iter().any(written)
     }
@@ -675,6 +786,7 @@ impl Joint {
             owner: NOBODY,
             before: NOBODY,
             variant: 0,
+            unpacks: Vec::new(),
         };
         for (at, input) in inputs.iter().enumerate() {
             let value = joint.define(input, Kind::Input(at as u32), "an input")?;
@@ -715,14 +827,6 @@ impl Joint {
         Ok(())
     }
 
-    /// Eager's node for an input or a result, and which of its results the
-    /// tensor is.
-    pub fn producer(&mut self, tensor: &Bound<'_, PyAny>, name: String, output: u32) -> PyResult<()> {
-        let value = self.find(tensor).ok_or_else(|| refused("no value of the graph".to_string()))?;
-        self.metas[value as usize].producer = Some((name, output));
-        Ok(())
-    }
-
     /// Which value of the graph a tensor is, while the run is taken down.
     pub fn value(&self, tensor: &Bound<'_, PyAny>) -> Option<Value> {
         self.find(tensor)
@@ -741,7 +845,7 @@ impl Joint {
         }
         let (ops, owners, handed, gives) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         let variant = self.variant;
-        self.backs.push(Back { pattern, variant, incoming: values, ops, owners, handed, gives });
+        self.backs.push(Back { pattern, variant, incoming: values, ops, owners, handed, called: Vec::new(), gives });
         self.open = true;
         (self.owner, self.before) = (NOBODY, NOBODY);
         Ok(())
@@ -759,6 +863,7 @@ impl Joint {
             back.handed.resize(index as usize + 1, Vec::new());
         }
         back.handed[index as usize] = values;
+        back.called.push(index);
         self.owner = index;
         Ok(())
     }
@@ -775,7 +880,7 @@ impl Joint {
 
     /// The backward for the results of `pattern`, as `describe` gives one.
     pub fn backward_for<'py>(&self, py: Python<'py>, pattern: Vec<bool>) -> PyResult<Bound<'py, PyAny>> {
-        self.described_part(py, &self.part(&pattern, 0)?)
+        self.described_part(py, &self.part(&pattern, 0, false)?)
     }
 
     /// The tensor of a value, while the run is taken down.
@@ -848,18 +953,14 @@ impl Joint {
     /// Decides what the forward keeps for the backwards. Without `least`:
     /// every forward value a backward reads. With it: the set of the fewest
     /// bytes from which the backwards can compute what they read, by
-    /// running forward operations again (`runs_again`). What the caller can
-    /// get at is kept if and only if a backward reads it, as eager keeps
-    /// it: it is what is checked for writes at the backward. Returns the
-    /// bytes of what the backwards read and of what is kept.
+    /// running forward operations again (`runs_again`). What is in memory
+    /// the caller can get at is kept if and only if a backward reads it,
+    /// as eager keeps it: it is what is checked for writes at the
+    /// backward. Returns the bytes of what the backwards read and of what
+    /// is kept.
     pub fn cut(&mut self, least: bool) -> (u64, u64) {
-        let mut read: Vec<Value> = Vec::new();
-        for back in &self.backs {
-            back.ops.iter().for_each(|op| self.reads(op, &mut read));
-            read.extend(back.gives.iter().map(|(_, value)| *value).filter(|v| matches!(self.metas[*v as usize].kind, Kind::Input(_) | Kind::Forward(_))));
-        }
-        read.sort_unstable();
-        read.dedup();
+        let read = self.read();
+        let outside = self.outside();
         let bytes = |values: &[Value]| values.iter().map(|v| self.metas[*v as usize].bytes).sum::<u64>();
         let all = bytes(&read);
         if !least {
@@ -880,10 +981,11 @@ impl Joint {
             let meta = &self.metas[*v as usize];
             // What the caller can get at and no backward reads is not kept:
             // eager does not check it, and it may be written to.
-            let weight = if meta.reachable && !reads.contains(v) { NEVER } else { meta.bytes.max(1) };
+            let reached = outside.contains(&meta.storage);
+            let weight = if reached && !reads.contains(v) { NEVER } else { meta.bytes.max(1) };
             edges.push((into(*v), outof(*v), weight));
             let made = match meta.kind {
-                Kind::Forward(at) if !meta.reachable && self.runs_again(at as usize) => Some(at as usize),
+                Kind::Forward(at) if !reached && self.runs_again(at as usize, &outside) => Some(at as usize),
                 _ => None,
             };
             match made {
@@ -930,22 +1032,15 @@ impl Joint {
         made.set_item("saved", self.saved.clone())?;
         // What is kept in memory the caller can get at (an input, a result,
         // what shares their memory) is checked for writes, with the node
-        // eager names for it.
-        let mut reached: HashMap<usize, Option<(String, u32)>> = HashMap::new();
-        for meta in self.metas.iter().filter(|meta| meta.reachable) {
-            let known = reached.entry(meta.storage).or_insert(None);
-            if known.is_none() {
-                *known = meta.producer.clone();
-            }
-        }
+        // that gave it.
+        let outside = self.outside();
         let checked: Vec<(Value, Option<String>, u32)> = self
             .saved
             .iter()
-            .filter(|v| reached.contains_key(&self.metas[**v as usize].storage))
+            .filter(|v| outside.contains(&self.metas[**v as usize].storage))
             .map(|v| {
-                let meta = &self.metas[*v as usize];
-                let producer = if meta.reachable { meta.producer.clone() } else { reached[&meta.storage].clone() };
-                (*v, producer.as_ref().map(|(name, _)| name.clone()), producer.map_or(0, |(_, output)| output))
+                let producer = &self.metas[*v as usize].producer;
+                (*v, producer.as_ref().map(|(name, _)| name.clone()), producer.as_ref().map_or(0, |(_, output)| *output))
             })
             .collect();
         made.set_item("checked", checked)?;
@@ -954,7 +1049,7 @@ impl Joint {
         made.set_item("writes", self.forward.iter().any(outside))?;
         let backs = PyList::empty(py);
         for back in &self.backs {
-            backs.append(self.described_part(py, &self.part(&back.pattern, back.variant)?)?)?;
+            backs.append(self.described_part(py, &self.part(&back.pattern, back.variant, false)?)?)?;
         }
         made.set_item("backs", backs)?;
         Ok(made)
