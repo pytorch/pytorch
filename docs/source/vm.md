@@ -857,14 +857,21 @@ end runs Python code (a `__del__`, a weak reference with a callback), the
 code runs at the binding, in front of what the function reads behind it.
 What was made of the graph binds the variable when it has run, behind every
 read. So the engine looks, on every call and before anything of it runs, at
-what the call would let go of that way. Each such object has to end without
-Python code running: neither it nor anything it refers to has a finalizer,
-or a weak reference that is told of its end (the entry of a weak dictionary
-or of a weak set, which only takes itself out, is none). Or it has to stay
-alive: a parameter of the function or another value of it holds it, the
-function keeps it, or it has more references than the call lets go of. A
-call for which neither can be shown runs the operations of the function as
-they are:
+what the call would let go of that way, as it is at that call: nothing is
+remembered from one call to the next. An object that has a reference
+besides those the call lets go of stays alive, whatever it is and whatever
+it refers to, and so does one that the function still holds when the graph
+has run. The others end, and each has to end without Python code running:
+its class has no finalizer, no weak reference is told of its end (the entry
+of a weak dictionary or of a weak set, which only takes itself out, is
+none), and what it refers to is looked at in the same way, as a garbage
+collector looks at a set of objects. So a list that a slice made of a list
+of layers ends quietly, since the layers stay. A tensor that requires a
+gradient and ends is taken to end with Python code, since what its history
+holds (a hook, what a `torch.autograd.Function` kept for its backward) is
+not to be seen; of another tensor that ends, its attributes and the hooks
+on it are looked at. A call for which that cannot be shown runs the
+operations of the function as they are:
 
 ```python
 class Ends:
@@ -897,11 +904,46 @@ got, expected = eight_calls(g), eight_calls(lets_go)
 all(torch.equal(a, b) for a, b in zip(got, expected)), STATE[0]  # (True, 1.5)
 ```
 
-What an object refers to is what it shows the garbage collector, up to 64
-objects (with more, the call runs the operations). What a tensor holds
-outside of that, in the nodes of its history, is not seen; objects in a
-reference cycle end when the collector runs, as they do in eager mode; and
-what a pass's own callable does is not looked at.
+What an object refers to is what it shows the garbage collector, and no
+more than 4,096 objects that end are looked at (with more, the call runs
+the operations). What a tensor that requires no gradient keeps alive
+outside of that is not seen: the buffer under `torch.from_numpy` or
+`torch.frombuffer`, what a DLPack capsule owns, a tensor that was assigned
+to its `.grad`. Objects in a reference cycle end when the collector runs,
+as they do in eager mode. What a pass's own callable does is not looked
+at: where it drops the other reference to an object that a variable of the
+function lets go of, the object ends when the callable has run. Once
+`torch.compile` has been used in a process, dynamo keeps a weak reference
+to every module that is made from then on and is told when it ends, so a
+call that lets go of such a module (a slice of an `nn.ModuleList` is a
+module of its own) runs the operations.
+
+A call in which a path is taken down holds on to what the path reads until
+the run has been described. Where the function lets go, in such a call, of
+its last reference to an object whose end may run Python code, the engine
+lets go of all it holds right there, so that the object ends where the
+instruction is, and makes nothing of that call. A graph that could not take
+three calls in a row for what it would let go of (its path was turned down,
+or could not be taken down to its end) gives way for good: it is not
+entered again, the graphs that start further on in the function are their
+own again, and `torch.vm.regions` lists it as `"vm"` with the reason:
+
+```python
+def lets_go_every_time(x):
+    held = HELD.pop()
+    y = (x.sin() + 1).cos() * 2
+    held = None
+    return (y + 1).tanh(), held
+
+
+g = torch.vm(lets_go_every_time, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for at in range(12):
+    HELD.append(Ends() if at >= 6 else 0)
+    out = g(x)
+found = [f for f in torch.vm.regions(g) if "ops" in f][0]
+found["state"], found["reason"]
+# ('vm', 'where its path lands it would let go of an object whose end may run Python code')
+```
 
 Some kinds of calls are not exported: one whose operations write to what
 they are given, one with a tensor that carries a forward-mode gradient or is
@@ -987,8 +1029,12 @@ $ TORCH_VM_GRAPH_TIMES=1 python times.py
 
 With `TORCH_VM_GRAPH_DEBUG=1` in the environment the engine says on stderr
 what it does with graphs: a line per path it takes down (how long it is,
-where it ends and why), per call that is not gone into, and per call that
-did not run what was made of a graph, with the check that did not hold:
+how many of its instructions run in front of what stands for its operations,
+behind it and where it lands, how many registers it has, where it ends and
+why), per call that is not gone into, and per call that did not run what was
+made of a graph, with the check that did not hold (with
+`TORCH_VM_GRAPH_DEBUG=2`, also the instructions that run in front of what
+stands for a path and behind it):
 
 ```console
 $ cat debug.py
@@ -1011,9 +1057,9 @@ x = torch.randn(4)
 for flag in (True, True, True, False):
     out = g(x, flag)
 $ TORCH_VM_GRAPH_DEBUG=1 python debug.py
-torch.vm graph branchy (block 0)[0:4]: a path of 11 instructions, 7 operations, ends at (3, 6): the function returns
-torch.vm graph branchy (block 0)[0:4]: a check of the path does not hold: the way of a branch (instruction 4 of 11, in branchy; of: to_bool %5)
-torch.vm graph branchy (block 0)[0:4]: a path of 5 instructions, 2 operations, ends at (2, 0): a block that was not profiled yet
+torch.vm graph branchy (block 0)[0]: a path of 11 instructions, 7 operations (4 in front of what stands for them, 0 behind, 0 where it lands; 13 registers), ends at (3, 6): the function returns
+torch.vm graph branchy (block 0)[0]: a check of the path does not hold: the way of a branch (instruction 4 of 11, in branchy; of: to_bool %5)
+torch.vm graph branchy (block 0)[0]: a path of 5 instructions, 2 operations (3 in front of what stands for them, 0 behind, 0 where it lands; 7 registers), ends at (2, 0): a block that was not profiled yet
 ```
 
 ### AOTAutograd and Inductor
@@ -2610,15 +2656,12 @@ What graphs do not do at this stage:
   the layers of a transformer in training mode that is seldom so, and their
   paths end at a dropout that drops or at an attention with a dropout rate
   ("Models" has what a training step of one looks like).
-- In the call in which a path is taken down, a variable that the function
-  deletes inside the path (`del name`) is let go of where the path ends and
-  not at the `del`, and so is a value that is in no variable and ends inside
-  the path (what a call gave, put into a tuple that the path builds and
-  drops). Where one of them held the last reference to an object whose end
-  runs Python code, that code runs behind what the call reads behind it. A
-  call that would run what was made of the path is turned down for such an
-  object ("Passes over graphs"), and is then one in which a path is taken
-  down again, for as long as the graph may get another form.
+- A graph does not take a call in which it would let go of the last
+  reference that Python has to a tensor which requires a gradient ("Passes
+  over graphs"), also where what the graph gives keeps the history of that
+  tensor alive: who else holds the nodes of a history cannot be asked. That
+  is a graph which starts in the middle of a function, takes a tensor that
+  the operations in front of it gave, and lets go of the variable it was in.
 - Sizes are fixed per export. Every size a graph is called with is a kind of
   call of its own, with a graph of its own, so a function that is called
   with many sizes uses up `max_variants`. Sizes of the tensors the graph
