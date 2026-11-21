@@ -42,7 +42,8 @@ from torch.testing._internal.common_utils import (
 from torch.utils._triton import has_triton
 
 
-# Upstream Triton enables LLVM real-true16 for Navi3, Navi3.5, Navi4 and gfx1250.
+# Upstream Triton enables LLVM real-true16 for Navi3, Navi3.5, Navi4 and
+# gfx1250/gfx1250-strict.
 TRUE16_ARCH = (*NAVI3_ARCH, *NAVI3_5_ARCH, *NAVI4_ARCH, *MI450_ARCH)
 
 

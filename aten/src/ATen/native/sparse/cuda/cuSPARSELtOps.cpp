@@ -56,7 +56,8 @@ static bool g_hipSparseLtSupported = false;
 
 static const std::vector<std::string>& hipSparseLtSupportedArchs() {
 #if ROCM_VERSION >= 71400
-  static const std::vector<std::string> archs = {"gfx950", "gfx942", "gfx1250"};
+  static const std::vector<std::string> archs = {
+      "gfx950", "gfx942", "gfx1250", "gfx1250-strict"};
 #elif ROCM_VERSION >= 71200
   static const std::vector<std::string> archs = {"gfx950", "gfx942"};
 #else

@@ -397,7 +397,7 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         # Other ROCm archs stay unswizzled.
         if torch.version.hip is None:
             swizzle_type = SwizzleType.SWIZZLE_32_4_4
-        elif swizzle_32_8 and evaluate_gfx_arch_within(["gfx1250"]):
+        elif swizzle_32_8 and evaluate_gfx_arch_within(["gfx1250", "gfx1250-strict"]):
             swizzle_type = SwizzleType.SWIZZLE_128
         else:
             swizzle_type = (
