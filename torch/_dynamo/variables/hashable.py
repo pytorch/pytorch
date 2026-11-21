@@ -116,6 +116,26 @@ def is_hashable(x: VariableTracker) -> bool:
     return x.is_hashable()
 
 
+def _guard_lazy_key(vt: variables.LazyVariableTracker) -> bool:
+    if isinstance(vt.source, ConstDictKeySource):
+        return True
+    from ..symbolic_convert import InstructionTranslator
+    from .builder import bound_builtin_method_descriptor
+
+    value = vt.original_value()
+    if vt.source is None or type(value) is not types.BuiltinMethodType:
+        return False
+    if bound_builtin_method_descriptor(value) is None:
+        return False
+    tx = InstructionTranslator.current_tx()
+    if tx.output.tracing_context.guards_context.skip_install:
+        return True
+    if _method_identity_guards_filtered(tx):
+        return False
+    install_builtin_method_guard(tx, vt.source, value)
+    return True
+
+
 # Note [Builtin method key summaries]
 # Check before lookup/merge; insertions update and removals invalidate summaries.
 # Sizes include DeletedVariable slots. equality_sources finalizes flags before add reads them.
@@ -441,32 +461,6 @@ def invalidate_key_summary(items: _KeyStorage) -> None:
     tx.output.builtin_method_keys.summaries.pop(id(items), None)
 
 
-def _guard_lazy_key(vt: VariableTracker) -> VariableTracker:
-    if isinstance(vt, variables.LazyVariableTracker):
-        if not vt.is_realized() and vt.source is not None and vt.is_hashable_lazy():
-            if isinstance(vt.source, ConstDictKeySource):
-                return vt
-            from .builder import bound_builtin_method_descriptor
-
-            value = vt.original_value()
-            if (
-                type(value) is types.BuiltinMethodType
-                and bound_builtin_method_descriptor(value) is not None
-            ):
-                from ..symbolic_convert import InstructionTranslator
-
-                tx = InstructionTranslator.current_tx()
-                skip_install = TracingContext.get().guards_context.skip_install
-                if not skip_install and _method_identity_guards_filtered(tx):
-                    return vt.realize()
-                if not skip_install:
-                    install_builtin_method_guard(tx, vt.source, value)
-                return vt
-        # Constructed keys must guard their elements, not just a trace-time hash.
-        return vt.realize()
-    return vt
-
-
 class RawHash:
     """Wraps a pre-computed hash value to bypass int.__hash__'s modular reduction.
 
@@ -519,16 +513,7 @@ class HashableTracker:
 
     def __init__(self, vt: VariableTracker) -> None:
         # We specialize SymNodes
-        vt = specialize_symnode(_guard_lazy_key(vt))
-        self.vt = vt
-        if type(vt) is variables.ConstantVariable and (
-            type(vt.value) is int or type(vt.value) is str
-        ):
-            self._key_types = ()
-            self._hash, self._hash_is_identity = hash(vt.value), False
-            return
-
-        from ..symbolic_convert import InstructionTranslator
+        vt = specialize_symnode(vt)
 
         # Fast path for unrealized LazyVariableTrackers: check and hash without
         # realizing, to avoid inserting guards.  If the fast-path check fails,
@@ -537,6 +522,7 @@ class HashableTracker:
             isinstance(vt, variables.LazyVariableTracker)
             and not vt.is_realized()
             and vt.is_hashable_lazy()
+            and _guard_lazy_key(vt)
         ):
             from .builder import bound_builtin_method_descriptor
 
@@ -565,6 +551,8 @@ class HashableTracker:
                     if type(item) is not types.BuiltinMethodType
                 ]
             if input_methods:
+                from ..symbolic_convert import InstructionTranslator
+
                 try:
                     tx = InstructionTranslator.current_tx()
                 except AttributeError:
@@ -580,12 +568,24 @@ class HashableTracker:
                 self.method_receivers = tuple(
                     AttrSource(source, "__self__") for source in input_methods
                 )
+            self.vt = vt
             self._hash = hash(value)
             self._hash_is_identity = False
             return
 
+        if isinstance(vt, variables.LazyVariableTracker):
+            vt = specialize_symnode(vt.realize())
+        self.vt = vt
+        if variables.ConstantVariable.is_constant_vt(vt) and (
+            type(vt.value) is int or type(vt.value) is str
+        ):
+            self._key_types = ()
+            self._hash, self._hash_is_identity = hash(vt.value), False
+            return
+
         # Compute hash via the tp_hash slot (generic_hash_impl).
         # For unhashable types, tp_hash_impl raises ObservedTypeError.
+        from ..symbolic_convert import InstructionTranslator
         from .object_protocol import generic_hash_impl
 
         tx = InstructionTranslator.current_tx()

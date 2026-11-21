@@ -654,7 +654,8 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
     # G['D']['a'] certifies that one item, while the name a load can substitute
     # is D, whose every other key the graph would then read live and unchecked.
     # get_global_source_name would walk such a source up to D.
-    # Order roots alone choose dictionary manager types without certifying values.
+    # guard_on_key_order is deliberately not unioned in, even though a
+    # dict-order check roots a global: it selects a manager without certifying values.
     # Narrower than the serialized global_scope for the same reason: the
     # serializer also fills that from a ShapeEnvSource guard's shape_env_sources
     # and from DUPLICATE_INPUT's source_b -- names whose value no guard checks,
@@ -671,8 +672,8 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
 
 def _recorded_guard_globals(guards_state: "GuardsState") -> set[str]:
     """Global names required to rebuild or check the retained guard tree."""
-    # In addition to the originating sources and order roots used to rebuild
-    # dictionary managers, the serialized scope records other dependencies. It
+    # Wider than their originating_sources: the serialized global_scope is the
+    # serializer's record of the names the guard tree needs. Alongside order roots, it
     # carries a DUPLICATE_INPUT's source_b and a cpp-form SHAPE_ENV guard's
     # shape_env_sources. A SHAPE_ENV guard installed as a Python lambda reads
     # its G['NAME'] operands from the same scope, and none of them reaches
@@ -711,8 +712,8 @@ class AOTCompiledFunction:
     # ", or pass ... a guard_globals= scope", so every reason must end in
     # "; <imperative advice>" for the two verb phrases to read as parallel.
     _forward_not_resolved_reason: str | None = None
-    # Whether rebuilding or checking the retained tree needs a user global.
-    # Arms the live-value pick and deserialize's fallback warning at load.
+    # Whether rebuilding or checking the retained tree needs a user global. False until a load
+    # decides it. Arms the live-value pick, and deserialize's fallback warning.
     _has_global_guards: bool = dataclasses.field(init=False, default=False)
     # The globals a kept guard's own source IS (not one reached only through a
     # sub-path of it), armed only for a supplied live scope. _serve re-takes
@@ -776,7 +777,8 @@ class AOTCompiledFunction:
             recorded_globals = _recorded_guard_globals(guards_state) - {builtins_key}
             # Dynamo's own __import_* aliases are not user globals: a rebuilt
             # scope carries every recorded one freshly imported, so a guard
-            # rooted at one resolves there without a captured-global warning.
+            # rooted at one resolves there and neither half of the warning the
+            # fallback path logs applies to it.
             aliases = set(self._artifacts.runtime_env.import_sources)
             self._has_global_guards = bool(
                 recorded_globals - aliases - output_graph.constant_result_names
@@ -858,8 +860,8 @@ class AOTCompiledFunction:
         from .utils import CleanupHook
 
         output_graph = guards_state.output_graph
-        # A scope lacking a required name can fail while rebuilding or checking
-        # the tree, so the whole recorded set gates the aliases
+        # Rebuilding or checking the retained tree may require a global lookup
+        # G[...], whichever channel reads it, so that whole set gates the aliases
         # and the unnamed-scope key: the same set the arming in __post_init__
         # starts from, before it subtracts the aliases, which a seeding must
         # not. Only a caller-supplied scope can be missing one --

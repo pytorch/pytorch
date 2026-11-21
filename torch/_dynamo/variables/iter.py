@@ -327,6 +327,22 @@ class IteratorVariable(VariableTracker):
         return self
 
 
+class FormatIteratorVariable(IteratorVariable):
+    def __init__(self, iterator: Any) -> None:
+        super().__init__()
+        self.iterator = iterator
+
+    def python_type(self) -> type:
+        return type(self.iterator)
+
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        try:
+            item = next(self.iterator)
+        except (StopIteration, ValueError) as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
+        return VariableTracker.build(tx, item)
+
+
 class ChainVariable(IteratorVariable):
     """
     Represents itertools.chain(*iterables) — yields one item per tp_iternext_impl call.
@@ -992,7 +1008,9 @@ class DictViewIterator(IteratorVariable):
             DictViewVariable,
             DunderDictVariable,
         )
+        from .misc import PythonModuleVariable
         from .sets import BaseSetVariable
+        from .user_defined import UserDefinedClassVariable
 
         owner = self.owner
         if owner is None:
@@ -1004,8 +1022,19 @@ class DictViewIterator(IteratorVariable):
         side_effects = codegen.tx.output.side_effects
         if container.source and (
             side_effects.is_modified(container)
-            or isinstance(container, DunderDictVariable)
-            and side_effects.has_pending_mutation(container.items.item)
+            or (
+                isinstance(container, DunderDictVariable)
+                and side_effects.has_pending_mutation(container.items.item)
+            )
+            or (
+                # Another input can alias the namespace on a cache hit.
+                container.python_type() is dict
+                and any(
+                    isinstance(var, (PythonModuleVariable, UserDefinedClassVariable))
+                    for var, attrs in side_effects.store_attr_mutations.items()
+                    if attrs
+                )
+            )
         ):
             return super().reconstruct(codegen)
         if len(container.items) != self._initial_size:
