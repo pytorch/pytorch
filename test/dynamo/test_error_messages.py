@@ -376,7 +376,7 @@ Failed to trace builtin operator
   Hint: If you are attempting to call a logging function (e.g. `print`), you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.
   Hint: Please report an issue to PyTorch.
 
-  Developer debug context: builtin print [<class 'torch._dynamo.variables.constant.ConstantVariable'>] False
+  Developer debug context: builtin print [<class 'torch._dynamo.variables.constant.StrConstantVariable'>] False
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0059.html
 
