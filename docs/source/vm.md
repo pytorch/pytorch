@@ -391,14 +391,21 @@ end runs Python code (a `__del__`, a weak reference with a callback), the
 code runs at the binding, in front of what the function reads behind it.
 What was made of the graph binds the variable when it has run, behind every
 read. So the engine looks, on every call and before anything of it runs, at
-what the call would let go of that way. Each such object has to end without
-Python code running: neither it nor anything it refers to has a finalizer,
-or a weak reference that is told of its end (the entry of a weak dictionary
-or of a weak set, which only takes itself out, is none). Or it has to stay
-alive: a parameter of the function or another value of it holds it, the
-function keeps it, or it has more references than the call lets go of. A
-call for which neither can be shown runs the operations of the function as
-they are:
+what the call would let go of that way, as it is at that call: nothing is
+remembered from one call to the next. An object that has a reference
+besides those the call lets go of stays alive, whatever it is and whatever
+it refers to, and so does one that the function still holds when the graph
+has run. The others end, and each has to end without Python code running:
+its class has no finalizer, no weak reference is told of its end (the entry
+of a weak dictionary or of a weak set, which only takes itself out, is
+none), and what it refers to is looked at in the same way, as a garbage
+collector looks at a set of objects. So a list that a slice made of a list
+of layers ends quietly, since the layers stay. A tensor that requires a
+gradient and ends is taken to end with Python code, since what its history
+holds (a hook, what a `torch.autograd.Function` kept for its backward) is
+not to be seen; of another tensor that ends, its attributes and the hooks
+on it are looked at. A call for which that cannot be shown runs the
+operations of the function as they are:
 
 ```python
 class Ends:
@@ -431,11 +438,19 @@ got, expected = eight_calls(g), eight_calls(lets_go)
 all(torch.equal(a, b) for a, b in zip(got, expected)), STATE[0]  # (True, 1.5)
 ```
 
-What an object refers to is what it shows the garbage collector, up to 64
-objects (with more, the call runs the operations). What a tensor holds
-outside of that, in the nodes of its history, is not seen; objects in a
-reference cycle end when the collector runs, as they do in eager mode; and
-what a pass's own callable does is not looked at.
+What an object refers to is what it shows the garbage collector, and no
+more than 4,096 objects that end are looked at (with more, the call runs
+the operations). What a tensor that requires no gradient keeps alive
+outside of that is not seen: the buffer under `torch.from_numpy` or
+`torch.frombuffer`, what a DLPack capsule owns, a tensor that was assigned
+to its `.grad`. Objects in a reference cycle end when the collector runs,
+as they do in eager mode. What a pass's own callable does is not looked
+at: where it drops the other reference to an object that a variable of the
+function lets go of, the object ends when the callable has run. Once
+`torch.compile` has been used in a process, dynamo keeps a weak reference
+to every module that is made from then on and is told when it ends, so a
+call that lets go of such a module (a slice of an `nn.ModuleList` is a
+module of its own) runs the operations.
 
 Some kinds of calls are not exported: one whose operations write to what
 they are given, one with a tensor that carries a forward-mode gradient or is
@@ -575,6 +590,12 @@ What graphs do not do at this stage:
   down is not exported: a batch norm in training, which updates its running
   statistics, runs its operations on every call, and the same graph is
   exported for the calls in eval mode.
+- A graph does not take a call in which it would let go of the last
+  reference that Python has to a tensor which requires a gradient ("Passes
+  over graphs"), also where what the graph gives keeps the history of that
+  tensor alive: who else holds the nodes of a history cannot be asked. That
+  is a graph which starts in the middle of a function, takes a tensor that
+  the operations in front of it gave, and lets go of the variable it was in.
 - Sizes are fixed per export. Every size a graph is called with is a kind of
   call of its own, with a graph of its own, so a function that is called
   with many sizes uses up `max_variants`. Sizes of the tensors the graph

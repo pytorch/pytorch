@@ -4372,41 +4372,21 @@ impl Compiled {
         true
     }
 
-    /// Whether an object stays alive where a callable has run in place of
-    /// a path, whatever the path lets go of: a parameter of the frame that
-    /// the path does not bind anew holds it, or a register of the function
-    /// that does not die in the path. `frame` is the frame on top and
-    /// whether it is the function's own (inside a call that is inlined it
-    /// is that call's, and its variables are not the function's
-    /// parameters).
-    unsafe fn kept(&self, path: &Path, o: Obj, regs: &[Obj], frame: (Frame, bool)) -> bool {
-        let (frame, own) = frame;
-        if own && !frame.locals.is_null() {
-            for slot in 0..self.func.params.len() {
-                let bound = path.bound.iter().any(|(other, _)| *other as usize == slot);
-                if !bound && frame_owned(*frame.locals.add(slot)) == o {
-                    return true;
-                }
-            }
-        }
-        (0..self.func.nvalues as usize).any(|v| regs[v] == o && !path.dying().any(|other| other as usize == v))
-    }
-
-    /// Whether everything a path lets go of can be let go of where a
-    /// callable has run in its place. The instructions let go of a
-    /// reference in their place; with a callable that is behind everything
-    /// the path read, so an object whose end runs Python code must not end
-    /// by it. What a path lets go of that was there before it: what the
-    /// values that die in it hold, and what the variables of the frame
-    /// hold that it binds anew. Each such object dies without Python code
-    /// running, if it dies (`graph::dies_quietly`), or stays alive: a
-    /// parameter of the function or a register that does not die in the
-    /// path holds it (`kept`); the path leaves it, as it is or in a tuple
-    /// it builds, in a register or a variable of the function; or it has
-    /// more references than the path lets go of (`graph::outlives`). Asked
-    /// in front of the instructions of the path: its own values are not
-    /// there yet.
-    unsafe fn lets_all_go(&self, path: &Path, regs: &[Obj], frame: (Frame, bool)) -> bool {
+    /// The look at what a path lets go of where a callable has run in its
+    /// place, made in front of the instructions of the path, when nothing
+    /// of the call is the path's yet: what the values that die in the path
+    /// hold, and what the variables of the frame hold that it binds anew.
+    /// The instructions let go of a reference in their place; with a
+    /// callable that is behind everything the path read, so an object
+    /// whose end runs Python code must not end by it. No reference to
+    /// these objects is the path's yet, so the counts of references say
+    /// exactly who else holds them: an object with a reference besides
+    /// those the path lets go of stays alive, whatever it is and whatever
+    /// it refers to; one that the path leaves in a value or a variable of
+    /// the function stays, as it is or in a tuple the path builds; the
+    /// others end, and are looked at as they are at this call
+    /// (`graph::end_quietly`).
+    unsafe fn lets_go_early(&self, path: &Path, regs: &[Obj], frame: Frame) -> bool {
         let mut gone: Vec<Obj> = Vec::new();
         let mut take = |held: Obj| {
             if !held.is_null() && !capi::is_unboxed(held) {
@@ -4416,42 +4396,27 @@ impl Compiled {
         for v in path.dying() {
             take(reg(regs, v));
         }
-        if !frame.0.locals.is_null() {
+        if !frame.locals.is_null() {
             for (slot, _) in &path.bound {
-                take(frame_owned(*frame.0.locals.add(*slot as usize)));
+                take(frame_owned(*frame.locals.add(*slot as usize)));
             }
         }
-        let mut handed: Option<Vec<V>> = None;
-        let mut given: Option<Vec<Obj>> = None;
-        for (at, o) in gone.iter().enumerate() {
-            if gone[..at].contains(o) || graph::dies_quietly(*o) || self.kept(path, *o, regs, frame) {
-                continue;
-            }
-            // What the path leaves in a register of the function or binds
-            // to a variable, and the items of a tuple it builds that is
-            // such a value, are there when it has run.
-            let handed = handed.get_or_insert_with(|| {
-                let left = |inst: &&graph::PathInst| inst.dst != NONE && !path.dying().any(|other| other == inst.dst);
-                let mut handed: Vec<V> = path.body.iter().filter(left).map(|inst| inst.dst).collect();
-                handed.extend(path.bound.iter().map(|(_, made)| *made));
-                for inst in path.body.iter().rev() {
-                    if let (Op::BuildTuple(items), true) = (&inst.op, handed.contains(&inst.dst)) {
-                        handed.extend(items.iter().copied());
-                    }
-                }
-                handed
-            });
-            if path.inputs.iter().any(|v| reg(regs, *v) == *o && handed.contains(v)) {
-                continue;
-            }
-            let given = given.get_or_insert_with(|| path.inputs.iter().map(|v| reg(regs, *v)).collect::<Vec<Obj>>());
-            let dropped = gone.iter().filter(|other| *other == o).count() as isize;
-            if graph::outlives(*o, &[], given, dropped) {
-                continue;
-            }
-            return false;
+        if gone.is_empty() {
+            return true;
         }
-        true
+        // What the path leaves in a value of the function or binds to a
+        // variable, and the items of a tuple it builds that is such a
+        // value, are there when it has run.
+        let left = |inst: &&graph::PathInst| inst.dst != NONE && !path.dying().any(|other| other == inst.dst);
+        let mut handed: Vec<V> = path.body.iter().filter(left).map(|inst| inst.dst).collect();
+        handed.extend(path.bound.iter().map(|(_, made)| *made));
+        for inst in path.body.iter().rev() {
+            if let (Op::BuildTuple(items), true) = (&inst.op, handed.contains(&inst.dst)) {
+                handed.extend(items.iter().copied());
+            }
+        }
+        let stay: Vec<Obj> = path.inputs.iter().filter(|v| handed.contains(v)).map(|v| reg(regs, *v)).collect();
+        graph::end_quietly(&mut gone, &stay).is_ok()
     }
 
     /// Runs an exported form of a path in place of its instructions, if one
@@ -4488,8 +4453,9 @@ impl Compiled {
         }
         // What the path lets go of (what the values that die in it and the
         // variables it binds hold) must be something whose end runs no
-        // Python code, or stay alive.
-        if !self.lets_all_go(path, regs, (frames.top(), frames.depth == 0)) {
+        // Python code, or stay alive: looked at before anything of the
+        // call is the path's.
+        if !self.lets_go_early(path, regs, frames.top()) {
             return Some(PathEnd::Miss);
         }
         if !self.run_stage(site, path, Stage::Before, regs, api) {
