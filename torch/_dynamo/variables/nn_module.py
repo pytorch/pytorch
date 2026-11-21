@@ -61,6 +61,7 @@ from ..source import (
     UnspecializedNNModuleSource,
 )
 from ..utils import (
+    forward_hook_attrs,
     get_custom_getattr,
     get_fake_value,
     is_lazy_module,
@@ -68,6 +69,7 @@ from ..utils import (
     is_safe_constant,
     istensor,
     istype,
+    module_hook_attrs,
     nnmodule_has_hooks,
     object_has_getattribute,
     proxy_args_kwargs,
@@ -78,12 +80,36 @@ from ..utils import (
 )
 from .base import Method, typestr, ValueMutationNew, VariableTracker
 from .functions import invoke_and_store_as_constant
+from .hashable import HashableTracker
 from .lazy import LazyVariableTracker
 from .user_defined import can_guard_class_function_code, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+
+def _build_hooks_dict(
+    hooks: dict[Any, Any],
+    items: dict[HashableTracker, VariableTracker],
+    source: Source | None,
+    *,
+    lazy_ids: bool,
+    flags: bool,
+) -> VariableTracker:
+    if lazy_ids:
+        if isinstance(hooks, collections.OrderedDict):
+            if flags:
+                return variables.NNModuleHookFlagsOrderedDictVariable(
+                    items, source=source
+                )  # noqa: RVT001
+            return variables.NNModuleHooksOrderedDictVariable(items, source=source)  # noqa: RVT001
+        if flags:
+            return variables.NNModuleHookFlagsDictVariable(items, source=source)  # noqa: RVT001
+        return variables.NNModuleHooksDictVariable(items, source=source)  # noqa: RVT001
+    if isinstance(hooks, collections.OrderedDict):
+        return variables.OrderedDictVariable(items, source=source)
+    return variables.ConstDictVariable(items, source=source)
 
 
 def initialize_lazy_module(
@@ -1450,7 +1476,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 globals_vt = tx.nn_modules_globals_vt
 
                 def _hooks_dict_len(obj: VariableTracker, attr: str) -> int:
-                    vt = obj.tp_getattro_impl(tx, attr)
+                    vt = (
+                        self.tp_getattro_impl(tx, attr, _track_empty_hooks=False)
+                        if obj is self
+                        else obj.tp_getattro_impl(tx, attr)
+                    )
                     vt = vt.realize() if hasattr(vt, "realize") else vt
                     return vt.len()  # type: ignore[union-attr]
 
@@ -1625,7 +1655,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         return None
 
     def tp_getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        *,
+        _track_empty_hooks: bool = True,
     ) -> VariableTracker:
         from .builder import _dict_input_snapshot
 
@@ -1652,18 +1686,26 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             )
 
         # Allow skipping of empty hook dict guards on inbuilt nn modules
-        if name in (
-            "_backward_hooks",
-            "_backward_pre_hooks",
-            "_forward_hooks_with_kwargs",
-            "_forward_hooks",
-            "_forward_pre_hooks_with_kwargs",
-            "_forward_pre_hooks",
-        ):
+        if name in module_hook_attrs:
+            tracer = tx.output.current_tracer
+            if self.source is not None and tracer.parent is not None:
+                # These custom trackers bypass VariableBuilder's source recording,
+                # which nested-region reuse needs to collect their guards.
+                tracer.traced_sources.update(
+                    (self.source, AttrSource(self.source, name))
+                )
             # For empty hooks, make an EMPTY_NN_MODULE_HOOKS_DICT. This allows us to control the installation of empty
             # hooks guard via skip_nnmodule_hook_guards
             if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
                 hooks_dict = getattr(self.value, name)
+                hooks_type = type(hooks_dict)
+                if hooks_type is not dict and hooks_type is not collections.OrderedDict:
+                    # The ordinary builder preserves subclass mapping protocols.
+                    return super().tp_getattro_impl(tx, name)
+                if self.source is not None and hooks_dict in tx.output.side_effects:
+                    return VariableTracker.build(
+                        tx, hooks_dict, source=AttrSource(self.source, name)
+                    )
                 if isinstance(hooks_dict, dict) and len(hooks_dict) == 0:
                     hooks_source = (
                         AttrSource(self.source, name) if self.source else None
@@ -1674,27 +1716,26 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                                 GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
                             )
                         )
-                    hooks_vt_cls = (
-                        variables.OrderedDictVariable
-                        if isinstance(hooks_dict, collections.OrderedDict)
-                        else variables.ConstDictVariable
+                    lazy_ids = hooks_source is not None
+                    if lazy_ids and not torch._dynamo.config.skip_nnmodule_hook_guards:
+                        install_guard(hooks_source.make_guard(GuardBuilder.TYPE_MATCH))
+                    result = _build_hooks_dict(
+                        hooks_dict,
+                        {},
+                        hooks_source,
+                        lazy_ids=lazy_ids,
+                        flags=name.endswith(("with_kwargs", "always_called")),
                     )
-                    return hooks_vt_cls({}, source=hooks_source)
+                    # The private length probe cannot expose or mutate this tracker.
+                    if hooks_source is not None and _track_empty_hooks:
+                        return tx.output.side_effects.track_mutable(hooks_dict, result)
+                    return result
 
-        # For non-empty hook dicts, one way is to just fallback to VariableTracker.build() and create a ConstDictVariable.
-        # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
-        # different nn module instances, because the key keeps changing (look more into RemovableHandle to understand why
-        # key changes - also related https://github.com/pytorch/pytorch/issues/125836). Here, we carefully craft a
-        # NNModuleHooksDictVariable (a subclass of ConstDictVariable) to avoid any guard on the keys.
+        # Hook IDs vary across modules: https://github.com/pytorch/pytorch/issues/125836.
+        # Keep IDs lazy for dispatch reuse; observations read or guard the runtime value.
         if (
             self.source
-            and name
-            in (
-                "_forward_pre_hooks_with_kwargs",
-                "_forward_pre_hooks",
-                "_forward_hooks_with_kwargs",
-                "_forward_hooks",
-            )
+            and name in forward_hook_attrs
             and not tx.output.side_effects.has_pending_mutation_of_attr(self, name)
         ):
             hooks_dict = getattr(self.value, name)
@@ -1704,13 +1745,18 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
             def build_key_value(
                 i: int, k: Any, v: Any
-            ) -> tuple[VariableTracker, VariableTracker]:
-                # Make key sourceless to avoid any guard on it
-                key = VariableTracker.build(tx, k)
-
-                # Instead of using dict[key] to access the value, use a dict[dict.keys()[index]] to access the
-                # value. This removes the reliance on the actual key value.
+            ) -> tuple[HashableTracker, VariableTracker]:
+                # Read runtime hook IDs lazily; specialize observations such as repr(id).
                 source_key = ConstDictKeySource(hooks_dict_source, i)
+                # Internal hashing keeps IDs dynamic; explicit user hashing guards them.
+                key_vt = LazyVariableTracker.create(k, source_key, tx=tx)
+                key = (
+                    HashableTracker.lazy_int_key(key_vt)
+                    if type(k) is int
+                    else HashableTracker(key_vt)
+                )
+
+                # Read values by storage position so equivalent modules can reuse graphs.
                 source_value = DictGetItemSource(hooks_dict_source, source_key)
                 value = LazyVariableTracker.create(v, source_value, tx=tx)
                 return key, value
@@ -1719,8 +1765,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(hooks_dict)
             )
 
-            # noqa: RVT001
-            return variables.NNModuleHooksDictVariable(result, source=hooks_dict_source)
+            result_vt = _build_hooks_dict(
+                hooks_dict,
+                result,
+                hooks_dict_source,
+                lazy_ids=True,
+                flags=name.endswith(("with_kwargs", "always_called")),
+            )
+            return tx.output.side_effects.track_mutable(hooks_dict, result_vt)
         return super().tp_getattro_impl(tx, name)
 
     def manually_trace_nn_module_getattr(

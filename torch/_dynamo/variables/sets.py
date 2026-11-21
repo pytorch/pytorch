@@ -294,6 +294,9 @@ class BaseSetVariable(VariableTracker):
             raise_observed_exception(type(exc), tx, args=list(exc.args))
         return VariableTracker.build(tx, res)
 
+    def materialize_keys(self) -> dict[HashableTracker, VariableTracker]:
+        return self.items
+
     def _iter_operand_keys(
         self, tx: "InstructionTranslatorBase", other: VariableTracker
     ) -> "Iterator[HashableTracker]":
@@ -309,8 +312,9 @@ class BaseSetVariable(VariableTracker):
         if isinstance(other, ConstDictVariable):
             other.install_dict_order_guard(tx)
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
-            guard_key_collisions(self.items, other.items)
-            yield from other.items.keys()
+            storage = other.materialize_keys()
+            guard_key_collisions(self.items, storage)
+            yield from storage
             return
 
         for item in lazily_unpack(tx, other):
@@ -327,7 +331,7 @@ class BaseSetVariable(VariableTracker):
         if isinstance(other, ConstDictVariable):
             other.install_dict_order_guard(tx)
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
-            keys = list(other.items.keys())
+            keys = list(other.materialize_keys())
         else:
             keys = [HashableTracker(x) for x in unpack_iterable(tx, other)]
         guard_key_collisions(self.items, keys)
@@ -1472,7 +1476,7 @@ class DictKeySetVariable(BaseSetVariable):
         if isinstance(vt, ConstDictVariable):
             vt.install_dict_order_guard(tx)
         if isinstance(vt, (BaseSetVariable, ConstDictVariable)):
-            items: list[Any] = list(vt.items.keys())
+            items: list[Any] = list(vt.materialize_keys())
         else:
             items = unpack_iterable(tx, vt)
         return SetVariable(items, mutation_type=ValueMutationNew())

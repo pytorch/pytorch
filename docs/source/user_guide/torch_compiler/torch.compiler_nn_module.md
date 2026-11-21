@@ -43,13 +43,9 @@ currently trigger a graph-break so that the affected modules run outside of dyna
 introduce a significant performance regression, and additional work is required to improve this support.
 
 **skip_nnmodule_hook_guards**
-By default, `torch._dynamo.config.skip_nnmodule_hook_guards` is set to True, meaning no guards will be installed
-on each nn.Module hook dictionary, improving runtime by reducing guard execution time, at the cost of not noticing
-if any hook dict is changed after compilation.
+When a module has no hooks, Dynamo can call `forward` directly. The default `torch._dynamo.config.skip_nnmodule_hook_guards=True` lets this shortcut skip checks that empty builtin local hook registries stay empty. Set it to `False` to detect newly added local hooks. A global hook added after taking the shortcut can go undetected with either setting.
 
-If you want to be able to remove or modify hooks after compilation and have `torch.compile` react appropriately
-(by recompiling), then you need to set `skip_nnmodule_hook_guards=False` and expect a runtime penalty for the added
-guards.
+When Dynamo traces hook dispatch, it guards the callbacks and flag membership it uses. Adding a pre-hook to a module with an existing forward hook can therefore trigger recompilation with either setting. The default skips type checks on builtin global registries and hook IDs used for flag membership. Dynamo guards a registry's type when user code observes it.
 
 TODO: confirm if backward/pre_backward hooks are working or not and document accordingly
 
