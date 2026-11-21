@@ -6,7 +6,7 @@ import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, overload, TypeAlias, Union
+from typing import Any, Literal, overload, TypeAlias, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -307,6 +307,7 @@ class CustomOpDef:
         self._abstract_fn: Callable | None = None
         self._setup_context_fn: Callable | None = None
         self._backward_fn: Callable | None = None
+        self._non_differentiable = False
         self._torch_dispatch_fns: dict[type, Callable] = {}
         self._vmap_fn: Callable | None = None
         self._autocast_dtype: dict[str, _dtype | None] = {}
@@ -459,6 +460,8 @@ class CustomOpDef:
                     result,
                     get_module,
                 )
+            if self._non_differentiable:
+                result = autograd._detach_outputs(result)
             return result
 
         return backend_impl
@@ -637,9 +640,12 @@ class CustomOpDef:
             if torch_dispatch_class not in self._torch_dispatch_fns:
 
                 def inner(*args, **kwargs):
-                    return self._torch_dispatch_fns[torch_dispatch_class](
+                    result = self._torch_dispatch_fns[torch_dispatch_class](
                         *args, **kwargs
                     )
+                    if self._non_differentiable:
+                        result = autograd._detach_outputs(result)
+                    return result
 
                 self._lib._register_torch_dispatch_rule(
                     self._name, torch_dispatch_class, inner
@@ -654,15 +660,14 @@ class CustomOpDef:
 
     def register_autograd(
         self,
-        backward: Callable,
+        backward: Callable | Literal["non-differentiable"],
         /,
         *,
         setup_context: Callable | None = None,
     ) -> None:
-        r"""Register a backward formula for this custom op.
+        r"""Register a backward formula or declare this custom op non-differentiable.
 
-        In order for an operator to work with autograd, you need to register
-        a backward formula:
+        For a differentiable operator, register a backward formula:
         1. You must tell us how to compute gradients during the backward pass
         by providing us a "backward" function.
         2. If you need any values from the forward to compute gradients, you can
@@ -701,6 +706,20 @@ class CustomOpDef:
         If you need different autograd behavior on different devices, then we
         recommend creating two different custom operators, one for each device
         that needs different behavior, and switching between them at runtime.
+
+        Pass ``"non-differentiable"`` instead of a backward callable to declare
+        that outputs are detached and have no ``grad_fn``, even when the inputs
+        require gradients or the kernel explicitly enables output gradients.
+        ``setup_context`` must be ``None``.
+        This mode requires a non-mutating operator with at least one return
+        and no aliased outputs.
+        Registering a backward callable again restores differentiable behavior.
+        Enabling this mode does not remove the formula from existing graphs.
+        Python kernels and rules registered through this object also detach
+        outputs when no autograd keys are present. Direct low-level kernel
+        overrides must return detached outputs themselves in those calls.
+        Register the desired mode before compiling or exporting functions that
+        use the operator.
 
         Examples:
             >>> import torch
@@ -747,23 +766,51 @@ class CustomOpDef:
             >>> y = numpy_mul(x, val=3.14)
             >>> (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
             >>> assert torch.allclose(grad_x, torch.full_like(x, 3.14))
+            >>>
+            >>> @torch.library.custom_op("mylib::nondiff_clone", mutates_args=())
+            >>> def nondiff_clone(x: Tensor) -> Tensor:
+            >>>     return x.clone()
+            >>>
+            >>> nondiff_clone.register_autograd("non-differentiable")
+            >>> nondiff_clone(torch.randn(3, requires_grad=True)).requires_grad
+            False
 
         """
+        if isinstance(backward, str):
+            autograd._validate_non_differentiable(backward, setup_context)
+            backward_fn = None
+            non_differentiable = True
+        else:
+            backward_fn = backward
+            non_differentiable = False
         schema = self._opoverload._schema
         if utils.is_out(self._opoverload):
             raise RuntimeError(
                 f"Cannot register autograd formula for operator tagged with "
                 f"torch.Tag.out: {self}. Out variants do not support autograd."
             )
-        if not utils.is_functional_schema(schema, allow_valid_view=True):
+        if not utils.is_functional_schema(
+            schema, allow_valid_view=not non_differentiable
+        ):
+            if non_differentiable:
+                raise RuntimeError(
+                    "Non-differentiable registration requires a non-mutating "
+                    "operator with at least one return and without aliased "
+                    f"outputs, but got {schema}."
+                )
             raise RuntimeError(
                 f"Cannot register autograd formula for non-functional operator "
                 f"{self} with schema {schema}. Please create "
                 f"a functional operator and register an autograd formula for that."
             )
 
-        self._backward_fn = backward
-        self._setup_context_fn = setup_context
+        self._non_differentiable = non_differentiable
+        if not non_differentiable:
+            self._backward_fn = backward_fn
+            self._setup_context_fn = setup_context
+        if torch.compiler.is_dynamo_compiling():
+            # Flush registration state before tracing the next operator call.
+            torch._dynamo.graph_break()
 
     def _register_to_dispatcher(self, tags: Sequence[_C.Tag]) -> None:
         schema_str = self._name + self._schema
@@ -809,7 +856,10 @@ class CustomOpDef:
                     f"Please use `{self._init_fn.__name__}.register_fake` to add an "
                     f"fake impl."
                 )
-            return self._abstract_fn(*args, **kwargs)
+            result = self._abstract_fn(*args, **kwargs)
+            if self._non_differentiable:
+                result = autograd._detach_outputs(result)
+            return result
 
         self._lib._register_fake(self._name, fake_impl, _stacklevel=5)
 
@@ -970,7 +1020,14 @@ class CustomOpDef:
 
         def register(func):
             need_register = self._vmap_fn is None
-            self._vmap_fn = func
+
+            def wrapped_vmap(*args, **kwargs):
+                result = func(*args, **kwargs)
+                if self._non_differentiable:
+                    result = autograd._detach_outputs(result)
+                return result
+
+            self._vmap_fn = wrapped_vmap
 
             if need_register:
 
