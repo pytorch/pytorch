@@ -318,6 +318,60 @@ def mark_warmup_incomplete() -> None:
         manager.mark_warmup_incomplete()
 
 
+# Registry of externally-managed CUDA MemPools that are tracked.
+# Keyed by device index -> {pool_id: MemPool}; holds pools alive while registered.
+_registered_external: dict[int, dict[tuple[int, int], torch.cuda.MemPool]] = {}
+
+
+def _mempool_device_index(device: int | torch.device | None) -> int:
+    if device is None:
+        return torch.cuda.current_device()
+    if isinstance(device, torch.device):
+        return device.index if device.index is not None else torch.cuda.current_device()
+    return device
+
+
+def register_external_mem_pool(
+    pool: torch.cuda.MemPool,
+    device: int | torch.device | None = None,
+) -> None:
+    """Register ``pool`` so cudagraph_trees manages it like its private pool.
+
+    Allocations from a registered pool made inside a cudagraph-captured region are
+    tracked and checkpointed instead of being reported as leaks. Registering the
+    same pool again overwrites the prior entry.
+
+    Note: registering a pool creates a strong reference! The corresponding
+    ``deregister_external_mem_pool`` can be used to remove that reference.
+    """
+    dev = _mempool_device_index(device)
+    _registered_external.setdefault(dev, {})[pool.id] = pool
+
+
+def deregister_external_mem_pool(
+    pool: torch.cuda.MemPool, device: int | torch.device | None = None
+) -> None:
+    dev = _mempool_device_index(device)
+    pools = _registered_external.get(dev)
+    if pools is not None:
+        pools.pop(pool.id, None)
+        if not pools:
+            del _registered_external[dev]
+
+
+def registered_external_pool_ids(device: int) -> list[tuple[int, int]]:
+    return list(_registered_external.get(device, {}))
+
+
+def is_registered_external(device: int, pool_id: tuple[int, int]) -> bool:
+    return pool_id in _registered_external.get(device, {})
+
+
+def _managed_pool_ids(device: int, primary: tuple[int, int]) -> list[tuple[int, int]]:
+    "Primary capture pool first, then any registered external pools for the device."
+    return [primary] + [p for p in registered_external_pool_ids(device) if p != primary]
+
+
 def mark_running_backward(device_index: int) -> None:
     """Tell the device's manager that a backward runs, if there is a manager.
 
@@ -793,6 +847,8 @@ class CUDAWarmupNode:
         self.stream = stream
         self.already_warm = already_warm
         self.id = id
+        # Private capture pool plus any registered external pools; validated together.
+        self.managed_pools = _managed_pool_ids(device_index, cuda_graphs_pool)
 
     @functools.cached_property
     def path_user_visible_storage_groups(
@@ -823,7 +879,7 @@ class CUDAWarmupNode:
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
             refs = list(self.path_live_weakrefs())
-            check_memory_pool(self.device_index, self.cuda_graphs_pool, refs)
+            check_memory_pool(self.device_index, self.managed_pools, refs)
 
         graph_interface = tree_backend.get_graph_interface()
         with (
@@ -876,7 +932,7 @@ class CUDAWarmupNode:
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
             out_refs = list(self.path_live_weakrefs())
-            check_memory_pool(self.device_index, self.cuda_graphs_pool, out_refs)
+            check_memory_pool(self.device_index, self.managed_pools, out_refs)
 
         return out
 
@@ -1015,6 +1071,10 @@ class CUDAGraphNode:
         self._parent = weakref.ref(parent) if parent is not None else None
         # reference to the shared memory pool for the entire cuda graphs tree
         self.cuda_graphs_pool = cuda_graphs_pool
+        # All pools whose allocations this node manages: the private capture pool
+        # (index 0, handed to CUDA graph capture) plus any registered external
+        # pools for this device. Lifecycle bookkeeping loops over all of them.
+        self.managed_pools = _managed_pool_ids(self.device, cuda_graphs_pool)
 
         # A single wrapped function may be recorded multiple times if memory patterns or
         # invariants change from one execution to the next
@@ -1204,7 +1264,10 @@ class CUDAGraphNode:
 
         # initialized below in _record
 
-        self.checkpointed_caching_state: tree_backend.AllocatorState | None = None
+        # Checkpointed allocator state per managed pool (pool_id -> state).
+        self.checkpointed_caching_states: dict[
+            tuple[int, int], tree_backend.AllocatorState
+        ] = {}
 
         # Output Storage Alias information, can be:
         # - A new, unaliased storage, or the output is None
@@ -1549,7 +1612,7 @@ class CUDAGraphNode:
                 and i not in self.wrapped_function.static_input_idxs
                 and elem.untyped_storage().data_ptr() != 0
             ]
-            check_memory_pool(self.device, self.cuda_graphs_pool, memory)
+            check_memory_pool(self.device, self.managed_pools, memory)
 
         with (
             preserve_rng_state(
@@ -1673,11 +1736,11 @@ class CUDAGraphNode:
                 self.tensor_weakrefs.append(TensorWeakRef(out))
 
         self.recorded_liveness_after_graph = self._get_liveness(self.path_weakrefs)
-        self.checkpointed_caching_state = (
-            tree_backend.get_allocator_interface().get_checkpoint_state(
-                self.device, self.cuda_graphs_pool
-            )
-        )
+        allocator = tree_backend.get_allocator_interface()
+        self.checkpointed_caching_states = {
+            pool_id: allocator.get_checkpoint_state(self.device, pool_id)
+            for pool_id in self.managed_pools
+        }
 
         # now, get liveness with outputs added
         for depth in range(len(self.path_weakrefs)):
@@ -1688,7 +1751,7 @@ class CUDAGraphNode:
         self.debug_check_invariants_after_invocation()
         if config.triton.slow_path_cudagraph_asserts:
             check_memory_pool(
-                self.device, self.cuda_graphs_pool, list(self.path_live_weakrefs())
+                self.device, self.managed_pools, list(self.path_live_weakrefs())
             )
 
     def _mark_prior_graph_output_as_aliased(self, index: PathOutputIndex) -> None:
@@ -1911,7 +1974,9 @@ class CUDAGraphNode:
 
         nodes = list(self._path_from_root)
 
-        live_blocks = get_block_addrs(self.cuda_graphs_pool)
+        live_blocks = [
+            addr for pool_id in self.managed_pools for addr in get_block_addrs(pool_id)
+        ]
 
         live_storage_data_ptrs = OrderedSet[Any]()
         live_storage_weak_ptrs = OrderedSet[Any]()
@@ -2279,10 +2344,15 @@ def format_tb(frames: list[dict[str, Any]]) -> str:
 
 def check_memory_pool(
     device: int,
-    pool_id: tuple[int, int],
+    pool_ids: list[tuple[int, int]],
     live_storages_ptrs: list[StorageWeakRefWrapper],
 ) -> None:
-    """Validate cudagraph pool allocations against tracked live storages and surface leaks."""
+    """Validate managed-pool allocations vs tracked live storages, surfacing leaks.
+
+    ``pool_ids`` is the set of pools cudagraph_trees manages together (the private
+    capture pool plus any registered external pools); a tracked live storage is
+    valid if it lives in any one of them.
+    """
     if not all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs):
         raise AssertionError(
             "expected all live_storages_ptrs to be StorageWeakRefWrapper"
@@ -2292,9 +2362,12 @@ def check_memory_pool(
     }
 
     # check if there is a divergence first, then do the expensive snapshot call after
-    # we know it will error
+    # we know it will error. The fast path checks a single pool exactly, so it only
+    # applies when there is one managed pool.
     allocator = tree_backend.get_allocator_interface()
-    if allocator.check_pool_live_allocations(device, pool_id, unique_storages):
+    if len(pool_ids) == 1 and allocator.check_pool_live_allocations(
+        device, pool_ids[0], unique_storages
+    ):
         return
 
     # at this point we are past the fast-path. we have seen rare cases where a dead tensor is dead,
@@ -2302,26 +2375,32 @@ def check_memory_pool(
     gc.collect()
     torch.accelerator.synchronize()
 
-    segments = get_cudagraph_segments(pool_id)
-
     allocated_not_in_live_storages = {}
 
-    for segment in segments:
-        addr = segment["address"]
-        for block in segment["blocks"]:
-            if block["state"] == "active_allocated":
-                if addr not in unique_storages:
-                    allocated_not_in_live_storages[addr] = block
-                else:
-                    unique_storages.remove(addr)
+    # pool_ids[0] is the private capture pool, which is exclusive to cudagraphs so
+    # every live block in it must be a tracked output. Registered external pools
+    # (the rest) are shared with the caller and may hold allocations that are not
+    # cudagraph outputs, so we only use them to satisfy tracked storages, not to
+    # flag leaks.
+    for i, pool_id in enumerate(pool_ids):
+        is_exclusive_pool = i == 0
+        for segment in get_cudagraph_segments(pool_id):
+            addr = segment["address"]
+            for block in segment["blocks"]:
+                if block["state"] == "active_allocated":
+                    if addr in unique_storages:
+                        unique_storages.remove(addr)
+                    elif is_exclusive_pool:
+                        allocated_not_in_live_storages[addr] = block
 
-            addr = tree_backend.DataPtr(addr + block["size"])
+                addr = tree_backend.DataPtr(addr + block["size"])
 
     torch._check(
         len(unique_storages) == 0,
         lambda: (
-            f"These storage data ptrs are not allocated in pool {pool_id} but should be: {unique_storages}. "
-            f"This could be a bug in inductor aliasing tracking or in a custom op's meta function. Please file an issue."
+            f"These storage data ptrs are not allocated in pool(s) {pool_ids} "
+            f"but should be: {unique_storages}. This could be a bug in inductor "
+            f"aliasing tracking or a custom op's meta function. Please file an issue."
         ),
     )
 
@@ -3442,10 +3521,10 @@ class CUDAGraphTreeManager:
             self.debug_checkpointing_counter,
         )
 
-        state = self.current_node.checkpointed_caching_state
+        states = self.current_node.checkpointed_caching_states
         device = self.current_node.device
-        if not (state is not None and device is not None):
-            raise AssertionError("expected state and device to not be None")
+        if not (states and device is not None):
+            raise AssertionError("expected states and device to not be None")
 
         # currently we deallocate on instead of allowing stale recordings
         stale_storages: list[tree_backend.StorageImplHandle] = []
@@ -3462,21 +3541,31 @@ class CUDAGraphTreeManager:
         ]
         ptrs_to_deallocate = self.current_node.data_ptrs_dead_since_invocation()
         allocator = tree_backend.get_allocator_interface()
-        allocator.set_checkpoint_pool_state(
-            device,
-            state,
-            stale_storages,
-            live_storages_weak_refs,
-        )
+        # Restore each managed pool's allocator state. setCheckpointPoolState only
+        # touches the pool its state was captured from, and addStorageDeleterFns
+        # re-attaches deleters only to storages whose data_ptr the restore
+        # re-allocated, so passing the full live-storage list to each call is safe.
+        for pool_id in self.current_node.managed_pools:
+            state = states.get(pool_id)
+            if state is None:
+                continue
+            allocator.set_checkpoint_pool_state(
+                device,
+                state,
+                stale_storages,
+                live_storages_weak_refs,
+            )
 
         # NB: deduplicate aliased outputs
         for ptr in OrderedSet(ptrs_to_deallocate):
             allocator.raw_delete(tree_backend.DataPtr(ptr))
 
-        # Now the live blocks should be exactly equal to the live storages in private pool
+        # Now the live blocks should be exactly equal to the live storages in the pools
         if config.triton.slow_path_cudagraph_asserts:
             check_memory_pool(
-                self.device_index, self.cuda_graphs_thread_pool, live_storages_wrappers
+                self.device_index,
+                self.current_node.managed_pools,
+                live_storages_wrappers,
             )
             for wrapper in live_storages_wrappers:
                 storage_ptr = wrapper()
