@@ -23,7 +23,8 @@ use std::sync::Arc;
 #[pyfunction]
 pub fn init(capsule: &Bound<'_, PyCapsule>) -> PyResult<()> {
     let api = capsule.pointer_checked(Some(c"torch._C._cfg_c_api"))?.as_ptr() as *mut TcfgApi;
-    if unsafe { (*api).version } != TCFG_API_VERSION {
+    let version = unsafe { (*api).version };
+    if version != TCFG_API_VERSION && version != capi::TCFG_API_VERSION_BACKWARD {
         return Err(PyRuntimeError::new_err(
             "torch._C and the torch.vm runtime were built from different sources",
         ));
@@ -676,6 +677,14 @@ impl CfgFunction {
                         one.set_item("hits", form.hits.load(Ordering::Relaxed))?;
                         if let Some(reason) = &form.closed {
                             one.set_item("reason", reason.clone())?;
+                        }
+                        // What derives the backward of the form, where its
+                        // inputs need a gradient (`Graphs(backward=True)`).
+                        if let Some(callable) = &form.callable {
+                            let held = unsafe { Bound::<PyAny>::from_borrowed_ptr(py, callable.as_ptr()) };
+                            if let Ok(state) = held.getattr("state") {
+                                one.set_item("backward", state)?;
+                            }
                         }
                         listed.append(one)?;
                     }
