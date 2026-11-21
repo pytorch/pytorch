@@ -4140,6 +4140,8 @@ class UntypedStorageVariable(VariableTracker):
 
 
 class DataPtrVariable(VariableTracker):
+    _cpython_type = int
+
     _DATA_PTR_PRESERVING_TARGETS = {
         ("call_method", "detach"),
         ("call_function", torch.ops.aten.detach.default),

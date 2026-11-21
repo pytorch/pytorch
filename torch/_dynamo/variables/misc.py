@@ -2187,6 +2187,7 @@ class StringFormatVariable(VariableTracker):
     Represents a call to str.format(), we delay calling format until after the graph.
     """
 
+    _cpython_type = str
     _nonvar_fields = {"format_string", *VariableTracker._nonvar_fields}
 
     def python_type(self) -> type:
@@ -3011,6 +3012,8 @@ class RandomVariable(VariableTracker):
 
 
 class WeakRefVariable(VariableTracker):
+    _cpython_type = weakref.ref
+
     @staticmethod
     def create(
         referent_vt: VariableTracker, callback_vt: VariableTracker, **options: Any
