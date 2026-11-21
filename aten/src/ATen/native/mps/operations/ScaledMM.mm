@@ -25,10 +25,79 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/ScaledMM_metallib.h>
 #endif
 
-const std::array<scaled::ScaleKernelDispatchEntry, 2> scale_kernel_dispatch = {{
+const std::array<scaled::ScaleKernelDispatchEntry, 5> scale_kernel_dispatch = {{
     {"tensorwise_tensorwise", scaled::check_tensorwise_recipe, scaled::ScaledGemmImplementation::TENSORWISE_TENSORWISE},
     {"rowwise_rowwise", scaled::check_rowwise_recipe, scaled::ScaledGemmImplementation::ROWWISE_ROWWISE},
+    {"mxfp8_mxfp8", scaled::check_mxfp8_recipe, scaled::ScaledGemmImplementation::MXFP8_MXFP8},
+    {"nvfp4_nvfp4", scaled::check_nvfp4_recipe, scaled::ScaledGemmImplementation::NVFP4_NVFP4},
+    {"nvfp4_nvfp4_single_scale",
+     scaled::check_nvfp4_recipe_single_scale,
+     scaled::ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE},
 }};
+
+// Block-scaled recipes decode their operands while staging the tiles, so A must be row-major and B column-major (both
+// K-contiguous, like cuBLASLt) and the scales unswizzled [rows, K / block]. The validator has checked the scale shapes.
+void scaled_mm_blockwise_out(const Tensor& mat_a,
+                             const Tensor& mat_b,
+                             ArrayRef<Tensor> scale_a,
+                             ArrayRef<Tensor> scale_b,
+                             scaled::ScaledGemmImplementation gemm_impl,
+                             const std::optional<Tensor>& bias,
+                             int64_t k,
+                             const Tensor& out) {
+  TORCH_CHECK_VALUE(mat_a.stride(1) == 1 && mat_b.stride(0) == 1,
+                    "MPS block-scaled _scaled_mm_v2 expects a row-major mat_a and a column-major mat_b, got strides ",
+                    mat_a.strides(),
+                    " and ",
+                    mat_b.strides());
+  TORCH_CHECK_TYPE(out.scalar_type() != kFloat8_e4m3fn, "MPS block-scaled _scaled_mm_v2 does not support fp8 output");
+  const bool nvfp4 = gemm_impl != scaled::ScaledGemmImplementation::MXFP8_MXFP8;
+  const bool two_level = gemm_impl == scaled::ScaledGemmImplementation::NVFP4_NVFP4;
+  const auto tensor_scale = [&](ArrayRef<Tensor> scales) {
+    return two_level ? std::make_optional(scales[1]) : std::nullopt;
+  };
+  const ScaledMMParams<> params{
+      .m = c10::safe_conv<uint32_t>(mat_a.size(0), "mat_a.size(0)"),
+      .n = c10::safe_conv<uint32_t>(mat_b.size(1), "mat_b.size(1)"),
+      .k = c10::safe_conv<uint32_t>(k, "K"),
+      .a_row_stride = mat_a.stride(0),
+      .a_col_stride = mat_a.stride(1),
+      .b_row_stride = mat_b.stride(0),
+      .b_col_stride = mat_b.stride(1),
+      .out_row_stride = out.stride(0),
+      .out_col_stride = out.stride(1),
+      .rowwise = false,
+      .has_tensor_scales = two_level,
+      .has_bias = bias.has_value(),
+      .bias_bfloat16 = bias.has_value() && bias->scalar_type() == kBFloat16,
+  };
+  const auto kernel_name =
+      fmt::format("scaled_mm_{}_{}", nvfp4 ? "nvfp4" : "mxfp8", scalarToMetalTypeString(out.scalar_type()));
+  auto pso = lib.getPipelineStateForFunc(kernel_name);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, kernel_name, {mat_a, mat_b}, stream);
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder,
+                  mat_a,
+                  mat_b,
+                  out,
+                  scale_a[0],
+                  scale_b[0],
+                  tensor_scale(scale_a),
+                  tensor_scale(scale_b),
+                  bias,
+                  params);
+      [encoder dispatchThreadgroups:MTLSizeMake(c10::metal::ceil_div<int64_t>(params.n, scaled_mm_tile),
+                                                c10::metal::ceil_div<int64_t>(params.m, scaled_mm_tile),
+                                                1)
+              threadsPerThreadgroup:MTLSizeMake(scaled_mm_threads, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+}
 
 } // namespace
 } // namespace mps
@@ -52,10 +121,12 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
   const auto m = mat_a.size(0);
   const auto n = mat_b.size(1);
   const auto k = mat_a.size(1);
-  TORCH_CHECK_TYPE(
-      mat_a.scalar_type() == kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3fn matrix got ", mat_a.scalar_type());
-  TORCH_CHECK_TYPE(
-      mat_b.scalar_type() == kFloat8_e4m3fn, "Expected mat_b to be Float8_e4m3fn matrix got ", mat_b.scalar_type());
+  TORCH_CHECK_TYPE(mat_a.scalar_type() == kFloat8_e4m3fn || mat_a.scalar_type() == kFloat4_e2m1fn_x2,
+                   "Expected mat_a to be Float8_e4m3fn or Float4_e2m1fn_x2 matrix got ",
+                   mat_a.scalar_type());
+  TORCH_CHECK_TYPE(mat_b.scalar_type() == kFloat8_e4m3fn || mat_b.scalar_type() == kFloat4_e2m1fn_x2,
+                   "Expected mat_b to be Float8_e4m3fn or Float4_e2m1fn_x2 matrix got ",
+                   mat_b.scalar_type());
   const auto dtype = out.scalar_type();
   TORCH_CHECK_TYPE(dtype == kFloat || dtype == kHalf || dtype == kBFloat16 || dtype == kFloat8_e4m3fn,
                    "MPS _scaled_mm_v2 supports Float, Half, BFloat16 and Float8_e4m3fn outputs, got ",
@@ -83,10 +154,14 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
                                                        swizzle_b_enum);
   TORCH_CHECK_VALUE(
       gemm_impl != scaled::ScaledGemmImplementation::NONE,
-      "MPS _scaled_mm_v2 only supports TensorWise or RowWise scaling with one Float scale per operand, got recipe_a=",
+      "MPS _scaled_mm_v2 supports TensorWise or RowWise scaling with one Float scale per operand, MXFP8 and NVFP4, "
+      "got recipe_a=",
       scale_recipe_a,
       " and recipe_b=",
       scale_recipe_b);
+  const bool blockwise = gemm_impl == scaled::ScaledGemmImplementation::MXFP8_MXFP8 ||
+      gemm_impl == scaled::ScaledGemmImplementation::NVFP4_NVFP4 ||
+      gemm_impl == scaled::ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE;
   const auto& scale_a = scale_a_vec[0];
   const auto& scale_b = scale_b_vec[0];
   const bool rowwise = gemm_impl == scaled::ScaledGemmImplementation::ROWWISE_ROWWISE;
@@ -131,6 +206,13 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
   if (out.numel() == 0) {
     return;
   }
+  if (blockwise) {
+    const auto bias_vec = bias.has_value() ? std::make_optional(bias->contiguous().view({n})) : std::nullopt;
+    // Float4_e2m1fn_x2 packs two values along K
+    const auto k_unpacked = mat_a.scalar_type() == kFloat4_e2m1fn_x2 ? 2 * k : k;
+    scaled_mm_blockwise_out(mat_a, mat_b, scale_a_ref, scale_b_ref, gemm_impl, bias_vec, k_unpacked, out);
+    return;
+  }
   TORCH_CHECK_VALUE(k % scaled_mm_alignment == 0 && n % scaled_mm_alignment == 0,
                     "Expected K and N to be divisible by ",
                     scaled_mm_alignment,
@@ -167,6 +249,7 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
       .out_row_stride = out.stride(0),
       .out_col_stride = out.stride(1),
       .rowwise = rowwise,
+      .has_tensor_scales = true,
       .has_bias = bias.has_value(),
       .bias_bfloat16 = bias.has_value() && bias->scalar_type() == kBFloat16,
   };
