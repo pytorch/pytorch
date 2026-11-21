@@ -394,12 +394,11 @@ FLEX_ATTENTION_TEMPLATE = r"""
   static const bool amx_ok = at::cpu::init_amx();
   bool use_amx_overlap = amx_ok
       && need_pack
-      && std::is_same_v<scalar_t, at::BFloat16>
       && (headSize % 32 == 0)
       && (headSize_v % 32 == 0)
       && (kvSplitSize % 32 == 0);
 {%- else %}
-  // Not compiled with -mamx-*, so no AMX code was emitted below.
+  // No AMX code was emitted below for this ISA and dtype.
   constexpr bool use_amx_overlap = false;
 {%- endif %}
 
@@ -1344,8 +1343,13 @@ class CppFlexAttentionTemplate(CppTemplate):
             else None
         )
         self.other_ptr_data = {}
+        self.input_dtype = self.input_nodes[0].get_dtype()
         # Gate every AMX region on the ISA inductor will compile with.
-        self.amx_supported = isinstance(pick_vec_isa(), VecAMX)
+        vec_isa = pick_vec_isa()
+        self.amx_supported = isinstance(vec_isa, VecAMX) and (
+            self.input_dtype == torch.bfloat16
+            or (self.input_dtype == torch.float16 and vec_isa.is_amx_fp16_supported())
+        )
 
     def update_kernel_args(self, kernel_args):
         kernel_args.update(
@@ -1598,7 +1602,6 @@ class CppFlexAttentionTemplate(CppTemplate):
         key = kernel.permute(self.input_nodes[1], [0, 2, 1, 3])
         value = kernel.permute(self.input_nodes[2], [0, 2, 1, 3])
         self.accumulate_dtype = torch.float
-        self.input_dtype = query.layout.dtype
 
         num_threads = parallel_num_threads()
         if not isinstance(self.output_node, ir.IRNode):
@@ -1667,7 +1670,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             return ""
         from .cpp_flex_attention_amx import codegen_flex_attention_amx_helpers
 
-        return codegen_flex_attention_amx_helpers(kernel_name)
+        return codegen_flex_attention_amx_helpers(kernel_name, self.input_dtype)
 
     def codegen_allocate_buffer(self, buffer_name: str, buffer_dtype, buffer_size):
         return self._template_from_string(ALLOCATE_BUFFER).render(

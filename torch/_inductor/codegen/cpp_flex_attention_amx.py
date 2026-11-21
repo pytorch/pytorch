@@ -5,13 +5,16 @@ row counts (16 and 32) are separate specializations with hardcoded tile indices
 that follow ``AMXState``'s slot order (C tiles, then A, then B).
 """
 
+import torch
+
+
 # The C++ is a Jinja template only to substitute the kernel-name prefix so the
 # symbols do not collide across multiple compiled kernels in one process.
 FLEX_ATTENTION_AMX_HELPERS = r"""
-// AMX bf16 accumulator block. C[NROWS,32] (+)= A[NROWS,K] @ Bp[K,32] (VNNI2).
+// AMX bf16/fp16 accumulator block. C[NROWS,32] (+)= A[NROWS,K] @ Bp[K,32] (VNNI2).
 //
-// A hardware tile is at most 16 rows x 64 bytes. bf16 is 2 bytes, so one tile
-// holds 16 rows x 32 bf16 elements. This block covers a 32x32 output by using
+// A hardware tile is at most 16 rows x 64 bytes. bf16 and fp16 are 2 bytes, so
+// one tile holds 16 rows x 32 elements. This block covers a 32x32 output by using
 // a 2x2 grid of C tiles fed by 2 A tiles (32 rows) and 2 B tiles (32 columns).
 template <bool accum, typename CB>
 inline void {{kernel_name}}_amx_block32(
@@ -19,7 +22,7 @@ inline void {{kernel_name}}_amx_block32(
     const uint16_t* A, const uint16_t* B, float* C,
     int64_t K, int64_t lda, int64_t ldb, int64_t ldc, CB cb) {
   auto load_cfg = [](const amx_tilecfg& c) { _tile_loadconfig(&c); };
-  // rows=16, colsb=64 bytes (=32 bf16 K per step); 2x2 grid -> 4 C tiles, 2 A, 2 B.
+  // rows=16, colsb=64 bytes (=32 K elements per step); 2x2 grid -> 4 C tiles, 2 A, 2 B.
   amx_state.configure(16, 64, 2, 2, load_cfg);
   if constexpr (accum) {
     // Preload C so the tdp results add onto the running P@V (across kv blocks).
@@ -44,17 +47,17 @@ inline void {{kernel_name}}_amx_block32(
       _mm_prefetch(reinterpret_cast<const char*>(Bp + 32), _MM_HINT_T0);
       _mm_prefetch(reinterpret_cast<const char*>(Bp + 64), _MM_HINT_T0);
     }
-    // A is row-major bf16: row stride is lda elements.
+    // A is row-major: row stride is lda elements.
     _tile_loadd(4, Ak, lda * sizeof(uint16_t));
     // B is VNNI2-packed [K/2, N, 2], so one packed row spans 2 logical K rows ->
     // stride ldb*2. The +32 offset is the next 16 N columns (16 N * 2 VNNI).
     _tile_loadd(6, Bk, ldb * 2 * sizeof(uint16_t));
     _tile_loadd(7, Bk + 32, ldb * 2 * sizeof(uint16_t));
-    _tile_dpbf16ps(0, 4, 6);  // C[top-left]     = A[top]    @ B[left]
+    {{tile_dp}}(0, 4, 6);  // C[top-left]     = A[top]    @ B[left]
     _tile_loadd(5, Ak + 16 * lda, lda * sizeof(uint16_t));  // A rows 16-31
-    _tile_dpbf16ps(1, 4, 7);  // C[top-right]    = A[top]    @ B[right]
-    _tile_dpbf16ps(2, 5, 6);  // C[bottom-left]  = A[bottom] @ B[left]
-    _tile_dpbf16ps(3, 5, 7);  // C[bottom-right] = A[bottom] @ B[right]
+    {{tile_dp}}(1, 4, 7);  // C[top-right]    = A[top]    @ B[right]
+    {{tile_dp}}(2, 5, 6);  // C[bottom-left]  = A[bottom] @ B[left]
+    {{tile_dp}}(3, 5, 7);  // C[bottom-right] = A[bottom] @ B[right]
     cb();
   }
   _tile_stored(0, C, ldc * sizeof(float));
@@ -92,9 +95,9 @@ inline void {{kernel_name}}_amx_block16(
     _tile_loadd(2, A + k, lda * sizeof(uint16_t));
     // VNNI2 packing: packed-row stride ldb*2; +32 = next 16 N cols (16 N * 2 VNNI).
     _tile_loadd(3, Bk, ldb * 2 * sizeof(uint16_t));
-    _tile_dpbf16ps(0, 2, 3);  // C[left]  = A @ B[left]
+    {{tile_dp}}(0, 2, 3);  // C[left]  = A @ B[left]
     _tile_loadd(4, Bk + 32, ldb * 2 * sizeof(uint16_t));
-    _tile_dpbf16ps(1, 2, 4);  // C[right] = A @ B[right]
+    {{tile_dp}}(1, 2, 4);  // C[right] = A @ B[right]
     cb();
   }
   _tile_stored(0, C, ldc * sizeof(float));
@@ -138,10 +141,11 @@ inline void {{kernel_name}}_amx_gemm(
 """
 
 
-def codegen_flex_attention_amx_helpers(kernel_name: str) -> str:
-    """Render the AMX/AVX interleaving helpers for the given kernel-name prefix."""
+def codegen_flex_attention_amx_helpers(kernel_name: str, dtype: torch.dtype) -> str:
+    """Render the AMX/AVX interleaving helpers for a kernel-name prefix and dtype."""
     from .common import KernelTemplate
 
+    tile_dp = {torch.bfloat16: "_tile_dpbf16ps", torch.float16: "_tile_dpfp16ps"}[dtype]
     return KernelTemplate._template_from_string(FLEX_ATTENTION_AMX_HELPERS).render(
-        dict(kernel_name=kernel_name)
+        dict(kernel_name=kernel_name, tile_dp=tile_dp)
     )
