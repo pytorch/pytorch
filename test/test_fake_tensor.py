@@ -96,6 +96,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TemporaryFileName,
     TEST_ACCELERATOR,
+    TEST_PRIVATEUSE1_DEVICE_TYPE,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
@@ -208,6 +209,46 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.checkMetaProps(z, expected)
             self.assertTrue(is_fake_tensor(z))
             self.assertIs(maybe_get_fake_mode(z), mode)
+
+    @parametrize("op_name", ["addcdiv", "addcmul"])
+    @parametrize("inplace", [False, True])
+    @parametrize(
+        "input_devices,scalar_device",
+        [
+            (
+                (f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:0",),
+                f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:1",
+            ),
+            (
+                (
+                    f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:0",
+                    f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:1",
+                ),
+                f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:0",
+            ),
+            (("cpu",), f"{TEST_PRIVATEUSE1_DEVICE_TYPE}:0"),
+            (("cpu",), "meta"),
+            (("cuda:0",), "cuda:0"),
+            (("meta",), "meta"),
+        ],
+    )
+    def test_foreach_pointwise_tensor_scalar_device_mismatch(
+        self,
+        op_name: str,
+        inplace: bool,
+        input_devices: tuple[str, ...],
+        scalar_device: str,
+    ) -> None:
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("propagate_real_tensors requires real accelerator tensors")
+        with FakeTensorMode():
+            inputs = [torch.empty(2, 3, device=device) for device in input_devices]
+            scalars = torch.empty(len(inputs), device=scalar_device)
+            message = f"Expected scalars to be on CPU, got {scalar_device} instead."
+            with self.assertRaisesRegex(RuntimeError, re.escape(message)):
+                getattr(aten, f"_foreach_{op_name}{'_' if inplace else ''}").Tensor(
+                    self=inputs, tensor1=inputs, tensor2=inputs, scalars=scalars
+                )
 
     def test_sparse_compressed_tensor_creation(self):
         def csr():
