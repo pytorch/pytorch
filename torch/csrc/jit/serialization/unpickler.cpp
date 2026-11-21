@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/csrc/utils/byte_order.h>
+#include <bit>
 #include <string>
 #include <utility>
 
@@ -219,24 +220,8 @@ IValue Unpickler::parse_ivalue() {
 }
 
 double Unpickler::readFloat() {
-  AT_ASSERT(sizeof(double) == 8);
-  double big_endian = read<double>();
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-  double little_endian = 0;
-
-  // Pickle floats are big endian, so reverse the bytes
-  auto big_endian_ptr = reinterpret_cast<const char*>(&big_endian);
-  std::reverse_copy(
-      big_endian_ptr,
-      big_endian_ptr + sizeof(big_endian),
-      reinterpret_cast<char*>(&little_endian));
-
-  return little_endian;
-#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-  return big_endian;
-#else
-#error Unexpected or undefined __BYTE_ORDER__
-#endif
+  // Pickle stores doubles big-endian.
+  return std::bit_cast<double>(from_be64(read<uint64_t>()));
 }
 
 void Unpickler::run() {
