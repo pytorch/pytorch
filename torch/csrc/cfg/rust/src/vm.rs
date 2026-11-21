@@ -159,7 +159,18 @@ struct SettledBlocks {
     /// whether they took a noticeable part of it (`below`).
     watched: std::cell::Cell<bool>,
     below: std::cell::Cell<bool>,
+    /// For a function with a graph that is exported for nothing but its
+    /// backward and has its path from calls that needed none
+    /// (`GraphSite::dormant`): after how many more calls with gradients
+    /// enabled such graphs are taken down again, and after how many they
+    /// were the last time. (0, _) where there is no such graph.
+    dormant: std::cell::Cell<(u32, u32)>,
 }
+
+/// A graph that waits for a call whose tensors need a gradient is taken
+/// down again by the first call with gradients enabled, and then by every
+/// second, fourth, ... such call, to every one in this many at most.
+const DORMANT_GAP: u32 = 4096;
 
 /// Whether a callee is worth running compiled is measured, not assumed: the
 /// generic tier is slower than the interpreter on plain Python, so a callee
@@ -1970,6 +1981,7 @@ impl Compiled {
                 trial: std::cell::Cell::new(Trial::start(PLAN_EPOCH.load(Ordering::Relaxed))),
                 watched: std::cell::Cell::new(false),
                 below: std::cell::Cell::new(false),
+                dormant: std::cell::Cell::new((0, 1)),
             },
             generic,
             state: Shared::new(state),
@@ -4799,7 +4811,7 @@ impl Compiled {
     /// of what it was given and its other arguments. An operator with a
     /// kernel of its own says so in its tags. One that is made of others
     /// is run once more, on tensors of the same sizes and dtypes that hold
-    /// nothing (`torch.vm._export.sized`): what needs to know what a
+    /// nothing (`asks::sized`): what needs to know what a
     /// tensor holds to size its result cannot run there. `asked` is None
     /// where that is not asked and taken to be so, false where it cannot
     /// be asked and is taken not to be.
@@ -4885,15 +4897,9 @@ impl Compiled {
             ffi::PyList_Append(operands, if held.is_null() { ffi::Py_None() } else { held });
         }
         let _nobody = Hooked::nobody();
-        let module = ffi::PyImport_ImportModule(c"torch.vm._export".as_ptr());
-        let said = if module.is_null() {
-            null_mut()
-        } else {
-            ffi::PyObject_CallMethod(module, c"sized".as_ptr(), c"sOOOO".as_ptr(), kind.as_ptr(), head, operands, kwnames, result)
-        };
-        let sized = !said.is_null() && ffi::PyObject_IsTrue(said) == 1;
+        let sized = crate::asks::sized(kind.to_str().unwrap_or(""), head, operands, kwnames, result);
         ffi::PyErr_Clear();
-        for held in [head, operands, kwnames, module, said] {
+        for held in [head, operands, kwnames] {
             xdecref(held);
         }
         sized
@@ -4901,7 +4907,7 @@ impl Compiled {
 
     /// Why a recorded run with writes in place is not exported, if what
     /// autograd saved of its operations is not what it was, or cannot be
-    /// shown to be (asked of `torch.vm._export.saved_changed`): a tensor
+    /// shown to be (`asks::saved_changed`): a tensor
     /// that an operation saved for its derivative and that a later one
     /// wrote to in place makes eager raise when it goes backward.
     unsafe fn saved_changed(&self, path: &Path, rec: &graph::Recording) -> Option<String> {
@@ -4913,17 +4919,9 @@ impl Compiled {
             }
         }
         let _nobody = Hooked::nobody();
-        let module = ffi::PyImport_ImportModule(c"torch.vm._export".as_ptr());
-        let said = if module.is_null() { null_mut() } else { ffi::PyObject_CallMethod(module, c"saved_changed".as_ptr(), c"O".as_ptr(), results) };
-        let why = if said.is_null() || ffi::PyUnicode_Check(said) == 0 {
-            Some("what autograd saved could not be asked for".to_string())
-        } else {
-            Some(pyffi::str_to_string(said)).filter(|why| !why.is_empty())
-        };
+        let why = crate::asks::saved_changed(results);
         ffi::PyErr_Clear();
-        for held in [results, module, said] {
-            xdecref(held);
-        }
+        xdecref(results);
         why
     }
 
@@ -8410,6 +8408,9 @@ impl Compiled {
         let finished = path.provisional || path.operators.len() < site.min_ops || !site.exports();
         if finished {
             site.install(path, None);
+            if site.dormant() && self.settled.dormant.get().0 == 0 {
+                self.settled.dormant.set((1, 1));
+            }
             return PathEnd::Landed(landing);
         }
         let mut described = path.describe(&site.name, &t.rec, api);
@@ -8503,6 +8504,37 @@ impl Compiled {
         result
     }
 
+    /// A call comes to a function with a graph that waits for a call whose
+    /// tensors need a gradient (`GraphSite::dormant`). Whether a call is
+    /// one is seen where a path is taken down: with gradients enabled the
+    /// graph is taken down again, by this call or by one of the next (see
+    /// `DORMANT_GAP`). What the graph was taken down by before does not
+    /// matter: calls without gradients are not counted.
+    #[cold]
+    unsafe fn wake(&self, api: &TcfgApi) {
+        if (api.call_modes)() & 1 == 0 {
+            return;
+        }
+        let (left, gap) = self.settled.dormant.get();
+        if left > 1 {
+            self.settled.dormant.set((left - 1, gap));
+            return;
+        }
+        let mut found = false;
+        for (b, bs) in self.state.borrow().blocks.iter().enumerate() {
+            for (_, site) in &bs.graphs {
+                if site.wake() {
+                    found = true;
+                    // The code that enters the graph runs again.
+                    let unsettled = Settled { code: std::ptr::null(), ..self.settled.blocks[b].get() };
+                    self.settled.blocks[b].set(unsettled);
+                }
+            }
+        }
+        let gap = (gap * 2).min(DORMANT_GAP);
+        self.settled.dormant.set(if found { (gap, gap) } else { (0, 1) });
+    }
+
     /// Runs the function: from its first block, or from where a path that
     /// was taken down through this call of it left off (`start`).
     unsafe fn exec_blocks(&self, regs: &mut [Obj], frames: &mut Frames, start: Option<PathEnd>) -> Obj {
@@ -8510,6 +8542,9 @@ impl Compiled {
         let func = &self.func;
         if self.options.specialize {
             self.settled.calls.set(self.settled.calls.get() + 1);
+        }
+        if let (true, None, Some(api)) = (self.settled.dormant.get().0 != 0, &start, api) {
+            self.wake(api);
         }
         let serial = self.settled.calls.get();
         let mut cur: usize = 0;

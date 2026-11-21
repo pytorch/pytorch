@@ -155,7 +155,6 @@ pub struct TcfgNodeInfo {
 
 pub const TCFG_NODE_PYTHON: u32 = 1;
 pub const TCFG_NODE_LEAF: u32 = 2;
-pub const TCFG_NODE_HOOKED: u32 = 4;
 pub const TCFG_RUN_BELOW_AUTOGRAD: u32 = 1;
 pub const TCFG_RUN_ON_TAPE: u32 = 2;
 
