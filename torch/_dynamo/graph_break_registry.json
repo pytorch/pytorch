@@ -3770,6 +3770,14 @@
   ],
   "GB9352": [
     {
+      "Gb_type": "Data-dependent uint64 tensor element in torch.Size",
+      "Context": "torch.uint64 tensor-backed size",
+      "Explanation": "Dynamo cannot safely validate that a data-dependent torch.uint64 value fits in torch.Size's signed int64 range.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
       "Gb_type": "Data-dependent uint64 torch.Size element in torch._C._infer_size",
       "Context": "torch.uint64 tensor-backed size",
       "Explanation": "Dynamo cannot safely validate that a data-dependent torch.uint64 value fits in torch.Size's signed int64 range.",

@@ -7314,6 +7314,95 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(same(ref, res))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_torch_size_from_tensor(self):
+        def fn(x, shape):
+            return x.reshape(torch.Size(shape))
+
+        x = torch.randn(256)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        for shape in (torch.tensor([4, 64]), torch.tensor([8, 32])):
+            self.assertEqual(opt_fn(x, shape), fn(x, shape))
+        self.assertEqual(cnts.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=False)
+    def test_torch_size_from_tensor_graph_break(self):
+        def fn(x, shape):
+            return x.reshape(torch.Size(shape)) + 1
+
+        x = torch.randn(256)
+        shape = torch.tensor([4, 64])
+        counters.clear()
+        opt_fn = torch.compile(fn, backend="eager")
+
+        self.assertEqual(opt_fn(x, shape), fn(x, shape))
+        self.assertTrue(
+            any("Tensor.item()" in reason for reason in counters["graph_break"])
+        )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=False)
+    def test_torch_size_from_constant_tensor(self):
+        def fn(x):
+            return x.reshape(torch.Size([torch.tensor(4), 64]))
+
+        x = torch.randn(256)
+        counters.clear()
+        opt_fn = torch.compile(fn, backend="eager")
+
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=False)
+    def test_torch_size_from_constant_uint64_tensor(self):
+        def small():
+            return torch.Size([torch.tensor(4, dtype=torch.uint64)])
+
+        def large():
+            try:
+                return torch.Size([torch.tensor(2**63, dtype=torch.uint64)])
+            except TypeError as e:
+                return str(e)
+
+        for fn in (small, large):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(), fn())
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize(
+        "shape",
+        [
+            subtest(torch.tensor([4.0, 64.0]), name="float"),
+            subtest(torch.tensor([[4, 64]]), name="rows"),
+            subtest(torch.tensor([True]), name="bool"),
+            subtest([torch.nn.Parameter(torch.tensor(1.0))], name="parameter"),
+        ],
+    )
+    def test_torch_size_from_tensor_matches_eager(self, shape):
+        def fn(shape):
+            try:
+                return torch.Size(shape)
+            except TypeError as e:
+                return str(e)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        self.assertEqual(opt_fn(shape), fn(shape))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_infer_size_int_of_float_tensor_overflow(self):
+        def fn(t):
+            try:
+                return torch._C._infer_size(torch.Size([int(t)]), torch.Size([1]))
+            except ValueError as e:
+                return str(e)
+
+        t = torch.tensor(1e30)
+        opt_fn = torch.compile(fn, backend="eager")
+
+        self.assertEqual(opt_fn(t), fn(t))
+
     def test_stride_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
 

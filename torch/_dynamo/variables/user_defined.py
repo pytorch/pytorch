@@ -1998,7 +1998,25 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .lists import SizeVariable
 
             tup = SourcelessBuilder.create(tx, tuple).call_function(tx, args, kwargs)
-            return SizeVariable(tup.items)  # type: ignore[missing-attribute]
+            # Tensor items, e.g. the 0-d tensors produced by torch.Size(tensor),
+            # are converted with __index__ as THPSize_pynew does. Python
+            # scalars and numpy arrays are TensorVariables in Dynamo too, but
+            # they have their own __index__, so they are left unchanged.
+            items = [
+                item.torch_size_item(tx, i)
+                if isinstance(item, variables.TensorVariable)
+                and not isinstance(
+                    item,
+                    (
+                        variables.UnspecializedPythonVariable,
+                        variables.FakeItemVariable,
+                        variables.NumpyNdarrayVariable,
+                    ),
+                )
+                else item
+                for i, item in enumerate(tup.items)  # type: ignore[missing-attribute]
+            ]
+            return SizeVariable(items)
         elif is_pydantic_dataclass_cls(self.value):
             # Pydantic populates dataclass fields through an external validator,
             # so tracing through the constructor misses the instance mutations.
