@@ -2218,13 +2218,16 @@ the autograd engine, both sides choose one way: benchmark mode is off and
 deterministic mode is on for that long ("Limits").
 
 With no pass over graphs in the list no graph leaves the engine for this:
-the engine hands such a graph to itself. A graph starts as one that the
-engine only runs (`"built"`). The first call that comes to it with
-gradients enabled and a tensor that needs one makes it a graph that is
-taken down for its backward: its path is taken down again at the next call
-(a path that something stands for goes further than one that is only
-reported: through an operation that draws random numbers, say), and from
-then on it is `"compiled"`, with a form per kind of call.
+the engine hands such a graph to itself, and no Python code of `torch.vm`
+runs while a graph is taken down, proven or run, or while its backward
+runs (`torch.vm._export`, which makes the `torch.fx` graph that a pass is
+handed, is imported only for a list with a pass over graphs). A graph
+starts as one that the engine only runs (`"built"`). The first call that
+comes to it with gradients enabled and a tensor that needs one makes it a
+graph that is taken down for its backward: its path is taken down again at
+the next call (a path that something stands for goes further than one that
+is only reported: through an operation that draws random numbers, say),
+and from then on it is `"compiled"`, with a form per kind of call.
 
 What the calls before were does not matter. A graph that has its path from
 calls without gradients (a model that is evaluated under `torch.no_grad()`
