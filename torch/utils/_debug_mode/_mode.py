@@ -67,6 +67,7 @@ from torch.utils._debug_mode._utils import (
     TensorIdTracker,
 )
 from torch.utils._python_dispatch import (
+    _disable_current_modes,
     _get_current_dispatch_mode,
     _get_current_dispatch_mode_stack,
     TorchDispatchMode,
@@ -81,6 +82,7 @@ from torch.utils._pytree import (
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.device_interface import DeviceInterface
     from torch.distributed._tools.mod_tracker import ModTracker
 
 
@@ -608,9 +610,23 @@ class DebugMode(TorchDispatchMode):
         self._record_call(call)
 
     def record_triton_kernel(
-        self, kernel_name: str, kwargs: dict[str, Any]
+        self,
+        kernel_name: str,
+        kwargs: dict[str, Any],
+        *,
+        stream: int | None = None,
+        device_index: int | None = None,
+        device_interface: "DeviceInterface | None" = None,
     ) -> _TritonKernelCall:
-        call = _TritonKernelCall(kernel_name, kwargs, self.call_depth + 1)
+        call = _TritonKernelCall(
+            kernel_name,
+            kwargs,
+            self.call_depth + 1,
+            stream=stream,
+            device_index=device_index,
+        )
+        if _utils._TRITON_HASH_CALLS is not None:
+            call._check_hash_stream(device_interface)
         call.stringify_args(self.record_tensor_attributes)
         self.operators.append(call)
         return call
@@ -729,7 +745,10 @@ class DebugMode(TorchDispatchMode):
     @staticmethod
     @contextlib.contextmanager
     def log_tensor_hashes(
-        hash_fn: Callable | str | list[str] = "norm", hash_inputs: bool = False
+        hash_fn: Callable | str | list[str] = "norm",
+        hash_inputs: bool = False,
+        *,
+        defer_scalar: bool = False,
     ):
         """
         Installs hook for tensor hash logging.
@@ -743,7 +762,27 @@ class DebugMode(TorchDispatchMode):
         hash_inputs: if True, also hashes tensors in (args, kwargs), storing them in "input_hash".
         Input hashes are captured before the operation executes, so they reflect the state before
         any in-place mutations.
+        defer_scalar: if True, built-in hashes are computed on the current stream without
+        autograd, and their scalar tensors are converted to Python values on their producing
+        streams when this context exits. Logs contain hash tensors until then. Custom hash
+        callables are not supported with this option. Triton kernels must launch on the current
+        device stream, with all tensor arguments on the launch device; this is checked before
+        input hashing and launch. Their per-kernel device synchronization is skipped while
+        this option is enabled.
+        Hash contexts cannot be nested when defer_scalar is enabled.
         """
+
+        if _utils._TRITON_OUTPUT_HASH_FN is not None and (
+            defer_scalar or _utils._TRITON_HASH_CALLS is not None
+        ):
+            raise RuntimeError(
+                "defer_scalar=True does not support nested log_tensor_hashes contexts"
+            )
+        if defer_scalar and callable(hash_fn):
+            raise ValueError("defer_scalar only supports built-in hash functions")
+
+        pending_calls = []
+        hash_streams = {}
 
         def hash_fn_option(hash_type):
             if not isinstance(hash_type, str) or hash_type not in [
@@ -754,7 +793,8 @@ class DebugMode(TorchDispatchMode):
                     f"hash_type must be 'norm' or 'hash_tensor', got {hash_type!r}"
                 )
             return functools.partial(
-                norm_hash_fn if hash_type == "norm" else hash_tensor_fn, use_scalar=True
+                norm_hash_fn if hash_type == "norm" else hash_tensor_fn,
+                use_scalar=not defer_scalar,
             )
 
         if callable(hash_fn):
@@ -769,6 +809,27 @@ class DebugMode(TorchDispatchMode):
                 f"log_tensor_hashes() expected hash_fn to be callable, str, or list[str], but found {type(hash_fn)}"
             )
 
+        if defer_scalar:
+            tensor_hash_fn = fn
+
+            def capture_stream(tensor):
+                if tensor.device.type != "cpu":
+                    hash_streams[id(tensor)] = torch.accelerator.current_stream(
+                        tensor.device
+                    )
+                return tensor
+
+            def fn(tensor):
+                with torch.no_grad():
+                    return tree_map_only(
+                        torch.Tensor, capture_stream, tensor_hash_fn(tensor)
+                    )
+
+        def materialize(tensor):
+            stream = hash_streams.get(id(tensor))
+            with stream if stream is not None else contextlib.nullcontext():
+                return tensor.item()
+
         def _tree_hash(obj):
             return tree_map(
                 lambda x: fn(x) if isinstance(x, torch.Tensor) else None, obj
@@ -778,6 +839,9 @@ class DebugMode(TorchDispatchMode):
             """Pre-hook to capture input hashes before operation executes"""
             if "empty" in str(func) or "profiler" in str(func):
                 return None
+
+            if defer_scalar:
+                pending_calls.append(call)
 
             if hash_inputs:
                 # Capture input hashes before the operation
@@ -798,7 +862,9 @@ class DebugMode(TorchDispatchMode):
                 return None
             return out
 
+        _old_triton_hash_calls = _utils._TRITON_HASH_CALLS
         try:
+            _utils._TRITON_HASH_CALLS = pending_calls if defer_scalar else None
             if hash_inputs:
                 _old_input_hfn = _utils._TRITON_INPUT_HASH_FN
                 _utils._TRITON_INPUT_HASH_FN = fn
@@ -806,13 +872,31 @@ class DebugMode(TorchDispatchMode):
             _utils._TRITON_OUTPUT_HASH_FN = fn
             with DebugMode.dispatch_hooks(
                 log_hook=_dispatch_post_hook,
-                pre_log_hook=_dispatch_pre_log_hook if hash_inputs else None,
+                pre_log_hook=_dispatch_pre_log_hook
+                if hash_inputs or defer_scalar
+                else None,
             ):
                 yield
         finally:
+            _utils._TRITON_HASH_CALLS = _old_triton_hash_calls
             if hash_inputs:
                 _utils._TRITON_INPUT_HASH_FN = _old_input_hfn  # type: ignore[assignment]
             _utils._TRITON_OUTPUT_HASH_FN = _old_output_hfn
+            with torch._C.DisableTorchFunction(), _disable_current_modes():
+                for call in pending_calls:
+                    if call.log is not None:
+                        for key in ("hash", "input_hash"):
+                            if key in call.log:
+                                call.log[key] = tree_map_only(
+                                    torch.Tensor, materialize, call.log[key]
+                                )
+                    if isinstance(call, _TritonKernelCall):
+                        call.pre_hashes = tree_map_only(
+                            torch.Tensor, materialize, call.pre_hashes
+                        )
+                        call.post_hashes = tree_map_only(
+                            torch.Tensor, materialize, call.post_hashes
+                        )
 
     @staticmethod
     @contextlib.contextmanager
