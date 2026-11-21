@@ -244,9 +244,6 @@ void do_prepare_static_quant(
   auto src_data_type = (alowp_kind == u8s8)
       ? dnnl::memory::data_type::u8
       : dnnl::memory::data_type::s8;
-  std::vector<int64_t> src_strides = (ndims == 3)
-      ? std::vector<int64_t>({src_dims[1] * src_dims[2], src_dims[1], 1})
-      : std::vector<int64_t>({src_dims[1], 1});
   src_desc = ITensor::desc(
       src_dims, src_data_type, dnnl::memory::format_tag::any);
   for (auto& s : src_scales_in) {

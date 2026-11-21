@@ -13,7 +13,8 @@ namespace at::native::mkldnn {
 
 // Ported from ideep::conv_deconv_utils::prepare_parameters.
 // Common logic to prepare parameters for conv/deconv
-// quantization version
+// quantization version. Also used for fp32 when scales and zero points are
+// empty.
 void prepare_parameters(
     const ITensor& src,
     const ITensor& weights,
@@ -69,7 +70,7 @@ void prepare_parameters(
       dst_data_type = dst.get_data_type();
     } else if (dst_scales.empty() || dst_scales == DEF_SCALE) {
       dst_data_type = dnnl::memory::data_type::f32;
-    } else if (attr.non_negitive_output()) {
+    } else if (attr.non_negative_output()) {
       dst_data_type = dnnl::memory::data_type::u8;
     } else {
       dst_data_type = dnnl::memory::data_type::s8;
@@ -850,7 +851,7 @@ void compute_dispatch(
 }
 
 // Ported from ideep::convolution_forward::compute_dispatch.
-// For int8
+// For int8. Also used for fp32 when scales and zero points are empty.
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void compute_dispatch(
     const ITensor& src,
