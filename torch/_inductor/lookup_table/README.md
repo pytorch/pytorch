@@ -116,9 +116,12 @@ Components:
 
 - **device_name** (optional): GPU device identifier (e.g., `"NVIDIA H100"`)
 
-  - Obtained from `torch.cuda.get_device_properties().gcnArchName`
+  - Obtained from `torch.cuda.get_device_properties().gcnArchName` on CUDA and
+    `torch.xpu.get_device_properties().name` on XPU
   - Enables device-specific optimizations
-  - When omitted, creates device-agnostic entries that work across hardware
+  - When omitted, creates device-agnostic entries that work across hardware,
+    including across vendors: a device-agnostic entry tuned on CUDA also applies
+    on XPU. Use device-specific keys to keep a shared table vendor-specific
 
 - **input_key**: Tensor configuration representation from `KernelInputs.key`
 
@@ -238,6 +241,7 @@ When source hash checking is enabled:
 ### Key Generation
 
 - Device key: Uses `torch.cuda.get_device_properties().gcnArchName` (e.g., "NVIDIA H100")
+  on CUDA and `torch.xpu.get_device_properties().name` on XPU
 - Input key: Generated from `KernelInputs.key` containing tensor properties
 
 ### Entry Points
@@ -250,4 +254,6 @@ The system is accessed through:
 ### Error Handling
 
 - Validates config dictionaries contain required `template_id` field
-- Gracefully handles non-CUDA devices by returning empty results
+- Gracefully handles devices other than CUDA and XPU, and machines with no
+  accelerator (`torch.accelerator.is_available()` is False), by returning empty
+  results
