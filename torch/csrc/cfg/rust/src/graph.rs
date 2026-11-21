@@ -98,6 +98,8 @@ pub enum Assert {
     /// The number is this one: the place of an item that the path takes
     /// out of a list it filled itself.
     Equals(PathValue, PyObj),
+    /// What an `__instancecheck__` returned is True or False.
+    Flag(PathValue),
     /// The value is this very object: a function, a class or a module
     /// that something computed behind the callable is computed with, and
     /// is to come out the same.
@@ -126,6 +128,7 @@ impl Assert {
             | Assert::Sequence(v, ..)
             | Assert::Keys(v, _)
             | Assert::Equals(v, _)
+            | Assert::Flag(v)
             | Assert::Is(v, _)
             | Assert::Same(v, _)
             | Assert::Apart(v, ..) => *v,
@@ -452,9 +455,8 @@ pub fn timed() -> bool {
 /// block that had not been profiled.
 const MAX_PROVISIONAL: u32 = 3;
 
-/// How many operations a graph ends its paths in front of because they
-/// turned out to be none of a graph when they had run
-/// (`GraphSite::shunned`).
+/// How many operations with several results a graph ends its paths in front
+/// of because what they gave was needed whole (`GraphSite::shunned`).
 const MAX_SHUNNED: usize = 8;
 
 /// A graph: the paths from one operation of a block on.
@@ -503,10 +505,12 @@ pub struct GraphSite {
     asks: AtomicU32,
     /// Operations, each by its function and its place in the code of it,
     /// that a path of this graph took and that turned out to be none of
-    /// a graph when they had run, with the reason: one that changed the
-    /// sizes of a tensor from outside or whether it requires a gradient (a
-    /// form is for the tensors as a call hands them over). The path was
-    /// taken down again and ends in front of such an operation.
+    /// a graph when they had run, with the reason: one with several
+    /// results whose value was needed whole behind the path (a graph gives
+    /// back the items), one that changed the sizes of a tensor from
+    /// outside or whether it requires a gradient (a form is for the
+    /// tensors as a call hands them over). The path was taken down again
+    /// and ends in front of such an operation.
     pub shunned: Shared<Vec<(*const crate::vm::Compiled, u32, &'static str)>>,
 }
 
@@ -1758,10 +1762,13 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
             let name = CLASS.get_or_init(|| PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__class__".as_ptr())));
             // A class whose instances `type` itself tells; any class tells
             // what is exactly of it without being asked.
+            // (The class of a class may be its own, in C, and still ask as
+            // `type` does: `torch.Tensor`.)
+            let asks = |meta: *mut ffi::PyTypeObject| pyffi::_PyType_Lookup(meta, specials().instancecheck.as_ptr());
             let class = |o: Obj| {
                 !capi::is_unboxed(o)
                     && ffi::PyType_Check(o) != 0
-                    && (ffi::Py_TYPE(o) == std::ptr::addr_of_mut!(ffi::PyType_Type)
+                    && (asks(ffi::Py_TYPE(o)) == asks(std::ptr::addr_of_mut!(ffi::PyType_Type))
                         || (!capi::is_unboxed(args[0]) && ffi::Py_TYPE(args[0]) as Obj == o))
             };
             let classes = |o: Obj| {
@@ -1813,6 +1820,7 @@ pub struct Specials {
     pub get: PyObj,
     pub getattr: PyObj,
     pub setattr: PyObj,
+    pub instancecheck: PyObj,
     pub getattribute: PyObj,
 }
 
@@ -1826,6 +1834,7 @@ pub unsafe fn specials() -> &'static Specials {
         get: name(c"__get__"),
         getattr: name(c"__getattr__"),
         setattr: name(c"__setattr__"),
+        instancecheck: name(c"__instancecheck__"),
         getattribute: name(c"__getattribute__"),
     })
 }
@@ -1840,6 +1849,29 @@ pub unsafe fn special(o: Obj, name: &PyObj) -> Obj {
     }
     let found = pyffi::_PyType_Lookup(ffi::Py_TYPE(o), name.as_ptr());
     if !found.is_null() && ffi::PyFunction_Check(found) != 0 { found } else { null_mut() }
+}
+
+/// The Python function that `isinstance(obj, class)` comes down to: the
+/// `__instancecheck__` of the class of the class, where that is a class
+/// defined in Python (`isinstance(3, torch.Tensor)`) and the object is not
+/// exactly of the class, which the interpreter answers itself. Null for
+/// anything else. Borrowed.
+pub unsafe fn instance_check(object: Obj, class: Obj) -> Obj {
+    let plain = |o: Obj| !o.is_null() && !capi::is_unboxed(o);
+    if !plain(object) || !plain(class) || ffi::PyType_Check(class) == 0 || ffi::Py_TYPE(object) as Obj == class {
+        return null_mut();
+    }
+    let meta = ffi::Py_TYPE(class);
+    if is_static(meta) {
+        return null_mut();
+    }
+    let found = pyffi::_PyType_Lookup(meta, specials().instancecheck.as_ptr());
+    if !found.is_null() && ffi::PyFunction_Check(found) != 0 { found } else { null_mut() }
+}
+
+/// Whether a callee is the builtin `isinstance`.
+pub unsafe fn is_isinstance(callee: Obj) -> bool {
+    !callee.is_null() && builtin_named(Builtin::IsInstance) == callee as usize
 }
 
 /// Whether the attributes of an object are looked up as `object` or a
@@ -2524,6 +2556,15 @@ impl Path {
             // not exported.
             closed = Some("its operations write to what they are given".to_string());
         }
+        // What an operation with several results gave is taken apart in
+        // the graph: whole, it is not what a compiler would give back.
+        let whole = |v: &PathValue| {
+            let held = rec.value(*v);
+            !held.is_null() && !capi::is_unboxed(held) && (ffi::PyTuple_Check(held) != 0 || ffi::PyList_Check(held) != 0)
+        };
+        if closed.is_none() && self.outputs.iter().any(whole) {
+            closed = Some("what an operation with several results gave leaves the graph whole".to_string());
+        }
         let outputs = list_of(self.outputs.iter().map(|v| ffi::PyLong_FromLong(*v as _)).collect());
         let exits = list_of(
             self.exits
@@ -2859,6 +2900,18 @@ impl Path {
                         Op::BuildTuple(vs) | Op::BuildList(vs) => {
                             let taken = gather(&mut operand, &free(vs))?;
                             vec![text(if matches!(op, Op::BuildTuple(_)) { "tuple" } else { "list" }), taken]
+                        }
+                        Op::Unpack(v, _) => vec![text("same"), operand(*v, None)?],
+                        Op::TupleGet(t, i) => vec![text("item"), operand(*t, None)?, const_ref(number(*i as i64))],
+                        Op::GetItem(v, at) => {
+                            let taken = gather(&mut operand, &[(*v, None), (*at, int)])?;
+                            let (v, at) = (ffi::PyList_GET_ITEM(taken, 0), ffi::PyList_GET_ITEM(taken, 1));
+                            let node = vec![text("item"), new_ref(v), new_ref(at)];
+                            ffi::Py_DECREF(taken);
+                            node
+                        }
+                        Op::LoadAttr(v, name) => {
+                            vec![text("attr"), operand(*v, None)?, new_ref(func.consts[*name as usize].as_ptr())]
                         }
                         Op::BuildSlice(a, b, c) => {
                             let parts = gather(&mut operand, &free(&[*a, *b]))?;
@@ -4354,6 +4407,11 @@ pub fn computed(op: &Op, defs: &[Def], int: impl Fn(PathValue) -> bool) -> bool 
         Op::Unary(UnaryKind::Neg, a) => fits(a),
         Op::BuildTuple(vs) | Op::BuildList(vs) => vs.iter().all(held),
         Op::BuildSlice(a, b, c) => [a, b, c].into_iter().all(|v| *v == NONE || held(v)),
+        // What an operation with several results gave, taken apart: the
+        // tuple it is, and an item of it.
+        Op::Unpack(v, _) => defs[*v as usize].node,
+        Op::TupleGet(t, _) => defs[*t as usize].node || defs[*t as usize].graph,
+        Op::GetItem(v, at) => defs[*v as usize].node && !defs[*at as usize].late && int(*at),
         _ => false,
     }
 }
