@@ -48,7 +48,9 @@ pub struct CallShortcut {
 /// For an instance whose class has `function` as its `__getattr__` (and the
 /// default `__getattribute__`), an attribute that the normal lookup does not
 /// find is an entry of one of these dicts of the instance's dict, looked at in
-/// this order; if it is in none, `function` is called after all.
+/// this order; if it is in none, `function` is called after all, and then
+/// raises AttributeError without changing anything (`graph::quiet_absent`
+/// relies on that for `hasattr`).
 pub struct GetattrShortcut {
     pub function: PyObj,
     pub dicts: Vec<PyObj>,
