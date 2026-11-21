@@ -414,8 +414,21 @@ void CuptiActivityApi::enableCuptiActivities(
     if (activity == CUDA_RUNTIME) {
       CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_RUNTIME));
 #if (CUDART_VERSION >= 12050)
+      // Disabling an API's records also drops its external correlation, which
+      // links GPU work to CPU ops. Only disable frequent runtime and driver
+      // APIs that don't launch GPU work.
       CUPTI_CALL(cuptiActivityEnableRuntimeApi(
           CUPTI_RUNTIME_TRACE_CBID_cudaGetDevice_v3020, 0));
+      CUPTI_CALL(cuptiActivityEnableRuntimeApi(
+          CUPTI_RUNTIME_TRACE_CBID_cudaSetDevice_v3020, 0));
+      CUPTI_CALL(cuptiActivityEnableRuntimeApi(
+          CUPTI_RUNTIME_TRACE_CBID_cudaGetLastError_v3020, 0));
+      CUPTI_CALL(cuptiActivityEnableRuntimeApi(
+          CUPTI_RUNTIME_TRACE_CBID_cudaEventCreate_v3020, 0));
+      CUPTI_CALL(cuptiActivityEnableRuntimeApi(
+          CUPTI_RUNTIME_TRACE_CBID_cudaEventCreateWithFlags_v3020, 0));
+      CUPTI_CALL(cuptiActivityEnableRuntimeApi(
+          CUPTI_RUNTIME_TRACE_CBID_cudaEventDestroy_v3020, 0));
 #endif
     }
     if (activity == CUDA_DRIVER) {
@@ -427,6 +440,13 @@ void CuptiActivityApi::enableCuptiActivities(
           CUPTI_DRIVER_TRACE_CBID_cuDevicePrimaryCtxGetState, 0));
       CUPTI_CALL(cuptiActivityEnableDriverApi(
           CUPTI_DRIVER_TRACE_CBID_cuCtxGetCurrent, 0));
+      CUPTI_CALL(cuptiActivityEnableDriverApi(
+          CUPTI_DRIVER_TRACE_CBID_cuKernelGetFunction, 0));
+      CUPTI_CALL(cuptiActivityEnableDriverApi(
+          CUPTI_DRIVER_TRACE_CBID_cuKernelGetName, 0));
+      CUPTI_CALL(cuptiActivityEnableDriverApi(
+          CUPTI_DRIVER_TRACE_CBID_cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags,
+          0));
 #endif
     }
     if (activity == OVERHEAD) {

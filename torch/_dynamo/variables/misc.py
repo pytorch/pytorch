@@ -66,6 +66,7 @@ from ..source import (
 from ..utils import (
     check_positional,
     check_unspec_or_constant_args,
+    is_wrapper_or_member_descriptor,
     istype,
     no_keywords,
     proxy_args_kwargs,
@@ -190,7 +191,7 @@ class SuperVariable(VariableTracker):
             # objvar itself is a type (e.g. `super(Base, cls)` or
             # `super(Base, list)`); as_python_constant() works uniformly here
             # since objvar must be a type-representing VariableTracker
-            # (UserDefinedClassVariable, BaseBuiltinVariable, ...), unlike
+            # (UserDefinedClassVariable, TypeVariable, ...), unlike
             # `.value` which only some of those define.
             type_to_use = self.objvar.as_python_constant()
             type_to_use_source = self.objvar.source
@@ -273,6 +274,9 @@ class SuperVariable(VariableTracker):
         inner_fn, source = self._resolved_getattr_and_source(tx, name)
         if self.objvar is None:
             raise AssertionError("super() requires objvar to be set for method calls")
+        if is_wrapper_or_member_descriptor(inner_fn) and inner_fn.__objclass__ is dict:
+            if isinstance(self.objvar, variables.ConstDictVariable):
+                self.objvar.check_base_dict_mutation(tx, inner_fn.__name__)
         # This essentially simulates CPython's `super_getattro`:
         # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L11138-L11168
         # where `inner_fn` is the VT for `res = _super_lookup_descr(...)`.
@@ -411,8 +415,10 @@ class SuperVariable(VariableTracker):
         elif is_standard_setattr(inner_fn) and isinstance(
             self.objvar, UserDefinedObjectVariable
         ):
-            # type: ignore[arg-type]
-            return self.objvar.method_setattr_standard(tx, *args, **kwargs)
+            from .object_protocol import object_generic_setattr
+
+            no_keywords(tx, "wrapper __setattr__", kwargs)
+            return object_generic_setattr(tx, self.objvar, *args)
         elif inner_fn is object.__delattr__:
             attr = args[0]
             try:
@@ -452,10 +458,6 @@ class SuperVariable(VariableTracker):
             and self.objvar._base_methods is not None
             and inner_fn in self.objvar._base_methods
         ):
-            if inner_fn is dict.__init__ and isinstance(
-                self.objvar, variables.ConstDictVariable
-            ):
-                self.objvar.check_base_dict_mutation(tx, name)
             return self.objvar.call_base_method(tx, name, args, kwargs)
         elif inner_fn is object.__getattribute__:
             attr_name = args[0].value  # type: ignore[attr-defined]
