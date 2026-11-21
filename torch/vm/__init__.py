@@ -486,10 +486,12 @@ def vm(
     block, whole, found, settings, over_graph = _plan(passes)
     runtime = _load_runtime()
     export = None
-    if over_graph:
-        # Only a pass over graphs has the engine hand a graph to Python.
+    derives = found is not None and found.backward
+    if over_graph or derives:
+        # Only a pass over graphs has the engine hand a graph to Python, or
+        # the graph pass asked to derive the backward of its graphs.
         _export = importlib.import_module("torch.vm._export")
-        export = _export.exporter(tuple(over_graph), runtime)
+        export = _export.exporter(tuple(over_graph), runtime, derives)
     try:
         return runtime.compile(
             fn,
@@ -524,7 +526,9 @@ def regions(fn: Any) -> list[dict[str, Any]]:
     first operation, which is its name whether its path starts there or
     with the function), ``state``, ``ops`` (how many operations the path
     that ran last has) and ``operators`` (which, as the dispatcher names
-    them), ``inputs`` and ``outputs`` (how many values it takes and gives),
+    them), ``inputs`` and ``outputs`` (how many values it takes and gives)
+    and ``held`` (how many of those it gives something can still hold when
+    the function goes on: the others are only looked at, for a size or a type),
     ``branches`` (how many branches and loop tests it goes through) and
     ``calls`` (how many calls of Python functions it goes into), ``within``
     (only for a graph of a called function whose operations a graph of a
@@ -545,8 +549,13 @@ def regions(fn: Any) -> list[dict[str, Any]]:
     ``forms`` lists the kinds of calls the graph was recorded for, the one
     that ran last first: per kind its ``checks`` (what a call has to be like
     to be one of the kind, as text: the tensors with their types and sizes,
-    and the values the operations take), its ``hits``, and the ``reason`` if
-    calls of the kind are not exported. And one dict per instruction or run
+    and the values the operations take), its ``hits``, the ``reason`` if
+    calls of the kind are not exported, and with
+    ``passes.Graphs(backward=True)``, for a kind whose tensors need a
+    gradient, ``backward``: ``"the engine's backward"``, ``"in parts"``
+    (the graph is cut where it reads a tensor it gives, and each part has a
+    backward of its own), ``"being taken down"``, or ``"eager's tape: "`` and
+    why. And one dict per instruction or run
     of instructions with tensor work that is in no graph, with ``state``
     ``"vm"``, the ``reason``, and for one instruction its ``text``.
 

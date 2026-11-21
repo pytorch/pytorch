@@ -8568,7 +8568,8 @@ impl Compiled {
             live.insert(*slot);
         }
         let landing = went;
-        let path = Path::of(&mut t, root, land, resume, &live, ends, afresh_path);
+        let returns = cut.is_none() && !afresh && pc == c.insts.len() && matches!(c.term, Term::Return(_));
+        let path = Path::of(&mut t, root, land, resume, &live, ends, afresh_path, returns);
         if graph::debug() {
             let (steps, ops) = (path.body.len(), path.operators.len());
             eprintln!("torch.vm graph {}: a path of {} instructions, {} operations, ends at {:?}: {}", site.name, steps, ops, land, path.ends);

@@ -52,9 +52,9 @@ torch.vm.regions(g)
 # [{'where': 'f (block 0)[2]', 'state': 'built', 'ops': 6,
 #   'operators': ['aten::matmul', 'aten::tanh', 'aten::sum',
 #   'aten::mul.Tensor', 'aten::mean', 'aten::add.Tensor'], 'inputs': 2,
-#   'outputs': 1, 'branches': 0, 'calls': 0, 'paths': 1, 'ends': [(0, 12)],
-#   'why': 'the function returns', 'variants': 0, 'hits': 0, 'misses': 1,
-#   'exports': 0, 'version': 1, 'forms': []}]
+#   'outputs': 1, 'held': 1, 'branches': 0, 'calls': 0, 'paths': 1,
+#   'ends': [(0, 12)], 'why': 'the function returns', 'variants': 0,
+#   'hits': 0, 'misses': 1, 'exports': 0, 'version': 1, 'forms': []}]
 ```
 
 `where` names the function, the block, and the instruction of the first
@@ -63,8 +63,10 @@ operation of the graph, whether its path starts there or with the function
 the graph itself. `ops` and `operators` are the operations of the path that
 was taken down last, and `inputs` and `outputs` how many values that path
 takes from the code in front of it (here `x` and `w`) and how many the code
-behind it reads. `ends` is the block and the instruction the function goes
-on at behind the path, and `why` what ends the path there. `misses` counts
+behind it reads, `held` how many of those something can still hold when the
+function goes on ("Gradients" has what that decides). `ends` is the block
+and the instruction the function goes on at behind the path, and `why` what
+ends the path there. `misses` counts
 the calls that came to the graph and ran its instructions, the one the path
 was taken down from among them. What was left out of the graphs of a block
 that has tensor work on both sides of it is listed too, with the state
@@ -2069,6 +2071,183 @@ same, [(found["ops"], found["why"]) for found in torch.vm.regions(g) if "ops" in
 torch.equal(g(x, True), has_cells(x, True))  # True: where the inner function is made, the instructions make it
 ```
 
+### Gradients
+
+A graph whose tensors need a gradient runs on eager's tape, unless the list
+says otherwise. With `Graphs()` alone the operations of the graph run as
+they are, and each records what eager records; with a pass of one's own
+behind it, what the pass returns runs on the tape; `AOTAutograd()` and
+`Inductor()` have AOTAutograd derive a backward of the graph and compile it
+("AOTAutograd and Inductor").
+
+`Graphs(backward=True)` has the engine derive the backward of a graph
+itself, from what eager does. For its first calls such a graph still runs
+on eager's tape, and each of those calls is taken down: the kernels the
+forward ran, and, right behind the forward, the kernels that eager's own
+autograd nodes run when they are called one after the other, latest first,
+as the autograd engine calls them. What the nodes gave is compared, bit for
+bit, with what the autograd engine gives for the same tape. Once two calls
+came out as the same operations, the graph runs without a tape: its forward
+is one program below autograd, which keeps what the backward reads, and its
+results go through one node, `GraphBackward`, whose edges go where the
+gradients of the inputs go. Each result has a node of its own in front of
+that one, which hands on the gradient that reaches the result: a hook on a
+result, and what `retain_grad()` keeps of it, are called where a gradient
+reaches that result, and not where the graph's node runs for another.
+When gradients arrive, the graph's node runs the backward for the
+results that came with one (the backward for all of them is what was taken
+down; the one for some of them is made of it) and hands each input its
+contributions one by one, in eager's order, so the autograd engine adds
+them up as it does for eager:
+
+```python
+def two(x, w, b):
+    h = (x @ w + b).tanh()
+    return (h * h.exp()).sum(), h.relu().mean()
+
+
+def backward_of(g):
+    forms = [form for found in torch.vm.regions(g) for form in found.get("forms", ())]
+    return [form.get("backward") for form in forms]
+
+
+derives = (*torch.vm.DEFAULT_PASSES, P.Graphs(backward=True))
+g = torch.vm(two, passes=derives)
+w, b = torch.randn(4, 4, requires_grad=True), torch.randn(4, requires_grad=True)
+nodes, says = [], []
+for _ in range(6):
+    x = torch.randn(3, 4)
+    first, second = g(x, w, b)
+    nodes.append(type(first.grad_fn).__name__)
+    says.append(backward_of(g))
+nodes[:4]  # ['SumBackward0', 'SumBackward0', 'SumBackward0', 'SumBackward0']
+nodes[4:]  # ['GraphBackward', 'GraphBackward']
+says[1], says[3]  # (['being taken down'], ["the engine's backward"])
+node = first.grad_fn.next_functions[0][0]
+second.grad_fn.next_functions[0][0] is node, len(node.next_functions)  # (True, 2)
+mine = torch.autograd.grad(first * 2 + second, (w, b))
+eagers = two(x, w, b)
+theirs = torch.autograd.grad(eagers[0] * 2 + eagers[1], (w, b))
+[torch.equal(ours, other) for ours, other in zip(mine, theirs)]  # [True, True]
+torch.vm.is_exact(derives)  # True
+```
+
+The gradients are eager's bit for bit, whichever results come with a
+gradient: the kernels are eager's, in eager's order, and `torch.vm.is_exact`
+stays true for such a list. A second backward of one call raises what eager
+raises, and so does a backward behind a write in place to a tensor it needs
+(an input, a result, what a result is a view of), with eager's text: the
+tensor it names is the first one that eager's nodes would find changed, and
+the node it names is the one eager names.
+Hooks on results and on inputs run as they do for eager. A result that is a
+view is eager's view, made on the tape behind the node.
+
+A graph that gives a tensor and also computes something of it (a hidden
+state and the loss computed of it) is cut in front of the first operation
+that reads the tensor, and so is one that reads a view which it gives. Each
+part has a node of its own, and the part that reads the tensor takes it as
+an input like any other, so the gradient of what is computed of the tensor
+comes to it through its own gradient function, as in eager mode:
+`torch.autograd.grad` at the tensor, `retain_grad()` and a hook on it see
+and change what eager's would. That holds for whatever the caller can hold
+of the graph when the call goes on: what the function returns, by itself or
+in a tuple, a list or a dict, what it stores into an object, and what a
+variable holds. A tensor that is only asked for its sizes or its type
+behind the graph is gone by then and is no reason to cut (`regions()` has
+how many of the tensors a graph gives are `held`), and neither is a read of
+a tensor before the graph last wrote to it in place. Such a form is `"in
+parts"`; it is taken down twice, and then each part twice:
+
+```python
+def keeps(x, w, b):
+    h = (x @ w + b).tanh()
+    return h, (h * h.exp()).sum()
+
+
+cut = torch.vm(keeps, passes=derives)
+for _ in range(9):
+    h, loss = cut(x, w, b)
+backward_of(cut)  # ['in parts']
+behind = loss.grad_fn.next_functions[0][0]  # the node of the part that reads `h`
+h.grad_fn in [node for node, _ in behind.next_functions]  # True
+(at_h,) = torch.autograd.grad(loss, [h])
+eager_h, eager_loss = keeps(x, w, b)
+torch.equal(at_h, torch.autograd.grad(eager_loss, [eager_h])[0])  # True
+```
+
+What a graph gives is at the version eager's is at (`_version`), the
+statistics of a batch norm included. A backward for some of the inputs
+(`torch.autograd.grad(loss, [w])`, `backward(inputs=[w])`) runs the nodes
+of eager's that lead to those inputs and no others, as the autograd engine
+runs them: the gradients are the same bits, the work for the other inputs
+is not done, and a tensor that only the other nodes kept is not looked at.
+
+With `torch.backends.cudnn.benchmark` on, cuDNN picks the algorithm of a
+convolution by what it measured and remembers what it picked per thread, so
+eager's own bits depend on the thread a node runs on and on what was
+measured there. "Bit for bit" then means the same kernels with the same
+arguments in the same order: the backward of a graph runs on the autograd
+engine's thread, where eager's nodes would, and chooses as the caller set
+it. While a graph is taken down and what its nodes gave is compared with
+the autograd engine, both sides choose one way: benchmark mode is off and
+deterministic mode is on for that long ("Limits").
+
+`regions()` says for every form of a graph whose tensors need a gradient
+what derives its backward, as `backward`: `"being taken down"`, `"the
+engine's backward"`, `"in parts"`, or `"eager's tape: "` and why. A graph
+keeps eager's tape for good where it cannot be taken down to operations
+that are the same at every call:
+
+- an operation of the forward or of the backward looks at what a tensor
+  holds, or gives a tensor whose size depends on it (`masked_select`,
+  `nonzero`, `item`; the backward of a product, which looks for zeros);
+- a node of the backward is written in Python (a custom
+  `autograd.Function`, a backward hook of a module, a checkpoint);
+- a tensor is made a leaf inside the graph (`requires_grad_()`), an input
+  is written to in place with a gradient through the write, or a result is a
+  view that the graph cannot make again behind its node;
+- an input has a hook or `retain_grad()` while the graph is taken down:
+  comparing with the autograd engine would run the hook;
+- two calls did not come out as the same operations, or what the nodes gave
+  is not what the autograd engine gives.
+
+```python
+def picks(x, w, b):
+    return (x @ w + b).tanh().masked_select(x > 0).sum(), (x @ w).mean()
+
+
+g = torch.vm(picks, passes=derives)
+for _ in range(5):
+    first, second = g(x, w, b)
+type(first.grad_fn).__name__  # 'SumBackward0'
+backward_of(g)  # ["eager's tape: aten::masked_select looks at what a tensor holds"]
+```
+
+A call under anomaly mode, under a transform of `torch.func`, with a
+forward-mode level or with saved-tensor hooks runs on eager's tape, that
+call only; so does one under `torch.no_grad()`, which needs no backward.
+
+Two backwards are not served by the backward that was taken down: one that
+is to be differentiated again (`create_graph=True`), and one for some of
+the results of a node of eager's that was handed gradients for all of them
+when the graph was taken down (the two halves of a `chunk`), or whose
+kernels, which are those of the backward for all the results, do not fit
+the gradients that come for those results alone (a `view` in front of which
+the gradients of two results meet). For these the
+node runs the graph once more, on the tape, from its inputs, and calls
+eager's nodes for it. The gradient that a backward with `create_graph=True`
+gives is eager's bit for bit. A second backward through that gradient goes
+through this copy of the forward where eager's goes through the forward
+itself, and the gradients that meet there are not always added in eager's
+order: what it leaves is eager's value, and not always its last bit (the
+tests hold it to 1e-5). A graph that draws random numbers or writes to a
+tensor from outside cannot run once more, and neither can one an input of
+which was written to in place since the call: it raises there and says
+which of the two backwards it was asked for.
+
+With a pass over graphs behind `Graphs(backward=True)` nothing of this
+happens yet: the graph is handed to the pass as it is without `backward`.
+
 ### The order of the list
 
 - `Graphs()` can stand anywhere among the passes over a block. It looks at a
@@ -2268,6 +2447,48 @@ What graphs do not do at this stage:
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported.
+- With the engine's backward ("Gradients") the state behind a backward that
+  raises is not eager's. Eager raises at the node that needs the tensor that
+  was written to in place, and has by then added up the gradient of every
+  leaf whose nodes all ran before that one; the node of a graph raises
+  before it gives anything, so no input of the graph has a gradient of that
+  backward. The error and its text are eager's.
+- A backward that is to be differentiated again, or one for some results of
+  a node of eager's with several, runs the graph once more on the tape: a
+  graph that draws random numbers or writes to a tensor from outside raises
+  for it, where eager computes it, and so does one an input of which was
+  written to in place since the call (eager kept what it needs of it).
+- With `Graphs(backward=True)` and no pass over graphs, the first call of a
+  graph that is handed over decides for all: if no tensor of it needs a
+  gradient (a call under `torch.no_grad()`, plain tensors), the operations
+  of the graph run as they are from then on, on eager's tape where a later
+  call needs a gradient, and no backward is derived for it. The results and
+  the gradients are eager's either way.
+- While the backward of a graph is taken down and compared with the
+  autograd engine, cuDNN's benchmark mode is off and its deterministic mode
+  is on. The two settings are the process's: a convolution that another
+  thread runs in that time runs that way too. They are as the caller set
+  them again when the call returns.
+- Where AOTAutograd derives the backward of a graph (with a compiling pass
+  in the list), the gradient at a tensor that the graph gives and also
+  computes something of is what `torch.compile` gives and not eager's: one
+  compiled function has the gradient of both, so nothing of it arrives at
+  the tensor. `torch.autograd.grad(loss, [hidden])` says the tensor was not
+  used, `hidden.retain_grad()` keeps nothing, and a hook on `hidden` is
+  handed None and changes nothing of what reaches the inputs. The engine's
+  own backward cuts such a graph at the tensor ("Gradients").
+- A warning that a kernel gives is given at every call, as in eager. One
+  that the Python side of an operation gives (`x.T` of a tensor with three
+  dimensions, `torch.tensor` of a tensor), or an operator that is made of
+  other operators (an attention on a GPU, where torch is built without the
+  fused attention kernels), is given by the calls that run the function's
+  instructions: a call that the programs of the engine's backward or the
+  callable of a pass run gives none, and the call in which a graph is taken
+  down a second time or exported gives the first kind twice.
+- A loss behind a write is no part of the graph with the engine's backward
+  either: a training graph still ends in front of a loss that can fail
+  behind a batch norm's write to its statistics ("Writes"), and the nodes of
+  the loss stand in front of `GraphBackward` on eager's tape.
 
 ## API Reference
 

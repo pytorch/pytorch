@@ -8,6 +8,7 @@
 //! specialized block is described as graphs (`graph`).
 
 mod analysis;
+mod backward;
 mod bytecode;
 mod capi;
 mod chunks;
@@ -50,5 +51,7 @@ fn _cfg_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pyapi::Replay>()?;
     m.add_class::<shapes::ShapeGuard>()?;
     m.add_class::<joint::Joint>()?;
+    m.add_class::<backward::Staged>()?;
+    m.add_function(wrap_pyfunction!(backward::backward_forms, m)?)?;
     Ok(())
 }

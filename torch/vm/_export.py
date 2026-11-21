@@ -359,15 +359,27 @@ def _callable(gm: torch.fx.GraphModule) -> Callable[..., Any]:
 
 
 def build(
-    description: dict[str, Any], passes: tuple[Any, ...], runtime: Any
+    description: dict[str, Any],
+    passes: tuple[Any, ...],
+    runtime: Any,
+    backward: bool = False,
 ) -> tuple[Callable[..., Any], list[tuple[int, Any]]] | str:
     """What the passes over a graph make of the graph the engine describes:
     the callable that takes the tensors of the graph and returns a tuple of
     the values it gives, and the guards the passes brought, as (which input,
     check). Or, as a str, why there is none: a pass raised, or returned what
     is no graph of these inputs."""
-    gm = graph_module(description)
     inputs = description["inputs"]
+    asked = backward and not passes and torch.is_grad_enabled()
+    if asked and any(tensor.requires_grad for tensor in inputs):
+        # A graph whose inputs need a gradient gets its backward from the
+        # engine (``backward.rs``), which runs the graph itself, as it
+        # describes it. With a pass over graphs in the list the graph is
+        # the pass's.
+        return runtime.Staged(description), []
+    if not passes:
+        return "no pass over graphs: the operations run as they are"
+    gm = graph_module(description)
     types = [_types.type_of_value(tensor) for tensor in inputs]
     guards: list[tuple[int, Any]] = []
     for pass_ in passes:
@@ -408,12 +420,15 @@ def build(
     return _callable(gm), guards
 
 
-def exporter(passes: tuple[Any, ...], runtime: Any) -> Callable[[dict[str, Any]], Any]:
+def exporter(
+    passes: tuple[Any, ...], runtime: Any, backward: bool = False
+) -> Callable[[dict[str, Any]], Any]:
     """What the engine is given to export its graphs with: called with the
     description of a graph, it returns what :func:`build` returns for these
-    passes."""
+    passes. With ``backward``, a graph whose inputs need a gradient gets its
+    backward from the engine."""
 
     def export(description: dict[str, Any]) -> Any:
-        return build(description, passes, runtime)
+        return build(description, passes, runtime, backward)
 
     return export
