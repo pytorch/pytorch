@@ -919,6 +919,23 @@ def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
         )
 
     typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[dumpable_context]
+    # treespec_dumps writes a namedtuple node for a class registered with
+    # _register_namedtuple, which need not be a namedtuple, and for a tuple
+    # subclass with string _fields: today for a namedtuple class registered with
+    # register_pytree_node, and in older releases for any such tuple subclass.
+    if typ is namedtuple or not (
+        SUPPORTED_SERIALIZED_TYPES[typ].from_dumpable_context is _namedtuple_deserialize
+        or (
+            isinstance(typ, type)
+            and issubclass(typ, tuple)
+            and isinstance(getattr(typ, "_fields", None), tuple)
+            and all(type(field) is str for field in typ._fields)
+        )
+    ):
+        raise NotImplementedError(
+            f"Can't deserialize a namedtuple TreeSpec: its serialized name "
+            f"{dumpable_context} does not name a namedtuple class."
+        )
     return typ
 
 
