@@ -535,7 +535,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 "MODULE_MATCH": 1,
                 "CLASS_MATCH": class_matches,
                 "ID_MATCH": id_matches,
-                "FUNCTION_CODE_MATCH": 4,
+                "FUNCTION_CODE_MATCH": 6,
             },
         )
         self.assertEqual(control_counts - counts, {})
