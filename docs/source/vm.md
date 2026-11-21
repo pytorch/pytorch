@@ -1971,6 +1971,43 @@ that is not training drops nothing and draws nothing, and is an operation
 like any other, with `Graphs()` alone as well ("Writes" has what one that
 drops is).
 
+### Generator expressions that are gone over where they are made
+
+`tuple(p.tanh() for p in pieces)` and `list(...)` of a generator expression
+are part of a path where the expression takes nothing of the function
+around it but what it goes over (it has no closure). The generator is never
+run: the path goes into its code, with what it goes over as its argument,
+and what the code gives is appended to a list the path made, which is what
+`list` gives and what `tuple` makes a tuple of. A tensor that goes through
+such an expression is still the value of the graph it was, and how many
+values the expression gave is a count of the path, checked like the times
+round a loop. Where the path does not go on in the code (it raises, or does
+what no path does), the code has run to its end as the interpreter runs it
+and the path ends in front of the call. What a loop takes out of a tuple
+that the path built, also the loop of such an expression, is what the tuple
+was built of:
+
+```python
+def over(x):
+    y = (x.sin() + 1).cos()
+    pieces = (y, y * 2, y * 3)
+    parts = tuple(p.tanh() for p in pieces)
+    return (parts[0] + parts[1] + parts[2]).exp()
+
+
+g = torch.vm(over, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(6):
+    same = torch.equal(g(v), over(v))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["why"]  # (True, 11, 'the function returns')
+```
+
+A generator expression with a closure (`tuple(y * s for s in scales)` reads
+`y` of the function around it through a cell) is not part of a path, nor is
+one that something else than `tuple` or `list` goes over (`sum`, `all`,
+`any`, `set`), nor a generator function: a path ends where the function of
+such a generator is made.
+
 ### Methods read off a tensor, and what a call spreads
 
 `y.to(device)` is a call of a method by its name. Where the code reads the
@@ -2681,7 +2718,9 @@ What graphs do not do at this stage:
   does not make objects of ("Objects a path makes": a named tuple, a class
   with a `__setattr__` of its own or made of `dict`, as the output objects
   of the transformer models are), `functools.partial`, making an inner
-  function or a lambda, a `with` block, and library code a path is not
+  function, a lambda or a generator expression other than one without a
+  closure under `tuple` or `list` ("Generator expressions that are gone over
+  where they are made"), a `with` block, and library code a path is not
   known to be able to call (`inspect.signature`). These are what the paths
   of transformer models end at ("Models").
 - A call with `*` or `**` is an operation only where the operator it runs

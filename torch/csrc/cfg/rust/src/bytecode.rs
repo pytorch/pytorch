@@ -118,6 +118,10 @@ pub enum Bc {
     FormatSimple,
     FormatWithSpec,
     LoadSpecial,
+    /// What the code of a generator has and no other: where it hands the
+    /// generator to its caller, and where it gives a value.
+    ReturnGenerator,
+    YieldValue,
     /// WITH_EXCEPT_START of 3.14: `__exit__` is on the stack the way CALL
     /// finds a callable, with the place for `self` on top of it.
     WithExceptStartCall,
@@ -204,6 +208,8 @@ fn bc_from_name(name: &str, v314: bool) -> Bc {
         "KW_NAMES" => Bc::KwNames,
         "CALL_FUNCTION_EX" => Bc::CallFunctionEx,
         "CALL_INTRINSIC_1" => Bc::CallIntrinsic1,
+        "RETURN_GENERATOR" => Bc::ReturnGenerator,
+        "YIELD_VALUE" => Bc::YieldValue,
         "GET_ITER" => Bc::GetIter,
         "FOR_ITER" => Bc::ForIter,
         "JUMP_FORWARD" => Bc::JumpForward,
