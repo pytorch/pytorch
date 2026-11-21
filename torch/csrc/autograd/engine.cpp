@@ -1112,10 +1112,40 @@ void validate_outputs(
   validate_outputs_impl(input_metadata, grads, format_error);
 }
 
+namespace {
+// Describes the shape, dtype and device of each gradient. Never reads tensor
+// data, so it does not synchronize.
+std::string describe_grads(const variable_list& grads) {
+  std::ostringstream ss;
+  ss << "[";
+  for (const auto i : c10::irange(grads.size())) {
+    if (i > 0) {
+      ss << ", ";
+    }
+    const auto& grad = grads[i];
+    if (!grad.defined()) {
+      ss << "undefined";
+    } else if (
+        grad.is_nested() && !grad.unsafeGetTensorImpl()->is_python_dispatch()) {
+      ss << "(nested tensor, dtype=" << grad.scalar_type()
+         << ", device=" << grad.device() << ")";
+    } else {
+      ss << "(shape=" << grad.sym_sizes() << ", dtype=" << grad.scalar_type()
+         << ", device=" << grad.device() << ")";
+    }
+  }
+  ss << "]";
+  return ss.str();
+}
+} // namespace
+
+// If grad_outputs_description is not null, it receives the description of the
+// gradients passed to `func` (after pre-hooks), which are consumed by the call.
 static variable_list call_function(
     std::shared_ptr<GraphTask>& graph_task,
     Node* func,
-    InputBuffer& inputBuffer) {
+    InputBuffer& inputBuffer,
+    std::string* grad_outputs_description) {
   const bool previous_input_grad_buffer_exposed =
       std::exchange(input_grad_buffer_exposed, false);
   auto restore_input_grad_buffer_exposure =
@@ -1127,6 +1157,9 @@ static variable_list call_function(
   auto inputs =
       call_tensor_pre_hooks(fn, InputBuffer::variables(std::move(inputBuffer)));
   inputs = call_pre_hooks(fn, std::move(inputs));
+  if (grad_outputs_description != nullptr) {
+    *grad_outputs_description = describe_grads(inputs);
+  }
   if (!graph_task->keep_graph_) {
     fn.will_release_variables();
   }
@@ -1278,7 +1311,15 @@ void Engine::evaluate_function(
     }
   }
 
-  auto outputs = call_function(graph_task, func, inputs);
+  std::string grad_outputs_description;
+  const bool check_nan =
+      AnomalyMode::is_enabled() && AnomalyMode::should_check_nan();
+  const bool describe_grad_outputs = check_nan && func->num_outputs() > 0;
+  auto outputs = call_function(
+      graph_task,
+      func,
+      inputs,
+      describe_grad_outputs ? &grad_outputs_description : nullptr);
 
   auto& fn = *func;
   if (!graph_task->keep_graph_) {
@@ -1296,7 +1337,7 @@ void Engine::evaluate_function(
     return;
   }
 
-  if (AnomalyMode::is_enabled() && AnomalyMode::should_check_nan()) {
+  if (check_nan) {
     AutoGradMode grad_mode(false);
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
@@ -1307,7 +1348,10 @@ void Engine::evaluate_function(
           fn.name(),
           "' returned nan values in its ",
           i,
-          "th output.");
+          "th output.\n  grad_outputs (inputs of the backward function): ",
+          grad_outputs_description,
+          "\n  grad_inputs (outputs of the backward function): ",
+          describe_grads(outputs));
     }
   }
 

@@ -5738,6 +5738,7 @@ xfail_divergence_from_eager = {
     "test_anomaly_mode_no_check_nan",  # different error messages
     "test_anomaly_grad_warnings",  # different error messages
     "test_anomaly_detect_nan",  # fake tensor errors on NaN
+    "test_anomaly_detect_nan_reports_grad_metadata",  # anomaly NaN error message different
     "test_once_differentiable",  # different node name: CompiledFunctionBackward
     "test_function",  # different node name: CompiledFunctionBackward
     "test_inplace_on_view_backward",  # different node name: CompiledFunctionBackward
