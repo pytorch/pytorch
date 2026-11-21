@@ -3234,6 +3234,25 @@ class GraphBackward final : public torch::autograd::Node {
   bool freed_ = false;
 };
 
+// What a root of a graph has as its gradient function: it hands the gradient
+// that reaches the root on to the node of the graph, to the place the root
+// has among what that node takes. A hook on the root, and what keeps its
+// gradient, are this node's, so they are called where a gradient reaches
+// the root, and not where the node of the graph runs for another root: two
+// results of eager's that are computed apart have nodes apart.
+class GraphRoot final : public torch::autograd::Node {
+ public:
+  std::string name() const override {
+    return "GraphBackward";
+  }
+
+ protected:
+  torch::autograd::variable_list apply(
+      torch::autograd::variable_list&& grads) override {
+    return std::move(grads);
+  }
+};
+
 // state is the node's from the call on, also when the call fails: release is
 // called for it when the node dies.
 int32_t graphNode(
@@ -3265,7 +3284,11 @@ int32_t graphNode(
         !t.requires_grad() && !t.is_view(),
         "torch.vm: a root is a tensor that was made below the autograd keys "
         "and is no view");
-    torch::autograd::set_history(t, base);
+    const c10::intrusive_ptr<torch::autograd::Node> front =
+        c10::make_intrusive<GraphRoot>();
+    front->add_next_edge(
+        torch::autograd::Edge(base, node->add_input_metadata(t)));
+    torch::autograd::set_history(t, front);
   }
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
@@ -3362,6 +3385,7 @@ void initCfgBindings(PyObject* module) {
   Py_INCREF(&graph_backward_type);
   torch::autograd::registerCppFunction(
       typeid(GraphBackward), &graph_backward_type);
+  torch::autograd::registerCppFunction(typeid(GraphRoot), &graph_backward_type);
 
   m.def("_cfg_c_api", []() {
     // PyCapsule_New takes a non-const pointer; the table is only read.
