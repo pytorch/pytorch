@@ -194,9 +194,11 @@ What ends a path:
 
 - a call that the path does not go into ("Paths across calls" below says
   which), or of something that is no operation, like `print`;
-- an operation that writes to a tensor from outside the path or draws random
-  numbers, and one with several results (`x.chunk(2)`, `torch.max(x, 0)`):
-  see "Writes" below;
+- an operation with several results (`x.chunk(2)`, `torch.max(x, 0)`);
+- behind an operation that writes to a tensor from outside the path or draws
+  random numbers: whatever a form would have to check behind what was made
+  of the graph, and such an operation behind a check of that kind ("Writes"
+  below); with `Graphs()` alone, an operation that draws random numbers;
 - a store into an object that would run Python code, and a read of a list
   or a dict that a store of the path changed ("Stores into objects");
 - a number read from a tensor (`x.item()`, `float(x)`), and with it a branch
@@ -700,7 +702,8 @@ The states `torch.vm.regions` reports of a graph:
   RuntimeError: not today`) or returned something that is no graph of the
   same inputs, what was made of the graph raised the first time it was
   called (`the compiled graph failed: ...`), in which case the operations
-  ran in its place, or something between its operations could run Python
+  ran in its place (or, for a graph that writes to a tensor from outside,
+  the call raised: "Writes"), or something between its operations could run Python
   code (below). Or every kind of call it has seen is one that is not
   exported (`a tensor of the call carries a forward-mode gradient`). The
   entries for what is in no graph have this state too.
@@ -1139,11 +1142,11 @@ with torch.no_grad():
 same, found["state"], found["ops"], found["hits"]  # (True, 'compiled', 6, 5)
 ```
 
-A write to a tensor that comes from outside the path ends the path in front
-of it: an argument of the function or a view of one, a buffer or a parameter
-of a module, the running statistics of a batch norm in training mode. The
-instructions of the function do such a write, once, where the function has
-it, and the next graph starts behind it:
+A write to a tensor that comes from outside the path is an operation of the
+graph as well: to an argument of the function or a view of one, to a buffer
+of a module, to a parameter under `torch.no_grad()`, and what a batch norm
+in training mode does to its running statistics. The graph has such a write
+as the function wrote it, to one of its inputs:
 
 ```python
 def outside(x, buffer):
@@ -1152,17 +1155,366 @@ def outside(x, buffer):
     return (y + buffer).exp().tanh().cos().sum()
 
 
-g = torch.vm(outside, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+g = torch.vm(outside, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), show))
 mine, theirs = torch.zeros(()), torch.zeros(())
 for _ in range(6):
     same = torch.equal(g(x, mine), outside(x, theirs))
+same, torch.equal(mine, theirs), mine._version == theirs._version  # (True, True, True)
+[(found["ops"], found["why"]) for found in torch.vm.regions(g) if "ops" in found]
+# [(11, 'the function returns')]
+print(shown[-1][0])
+# def forward(self, x, buffer):
+#     sin_default = torch.ops.aten.sin.default(x);  x = None
+#     mul_tensor = torch.ops.aten.mul.Tensor(sin_default, 2);  sin_default = None
+#     add_tensor = torch.ops.aten.add.Tensor(mul_tensor, 1, alpha = 1);  mul_tensor = None
+#     cos_default = torch.ops.aten.cos.default(add_tensor);  add_tensor = None
+#     mean_default = torch.ops.aten.mean.default(cos_default, dtype = None)
+#     add__tensor = torch.ops.aten.add_.Tensor(buffer, mean_default, alpha = 1);  mean_default = add__tensor = None
+#     add_tensor_1 = torch.ops.aten.add.Tensor(cos_default, buffer, alpha = 1);  cos_default = buffer = None
+#     exp_default = torch.ops.aten.exp.default(add_tensor_1);  add_tensor_1 = None
+#     tanh_default = torch.ops.aten.tanh.default(exp_default);  exp_default = None
+#     cos_default_1 = torch.ops.aten.cos.default(tanh_default);  tanh_default = None
+#     sum_default = torch.ops.aten.sum.default(cos_default_1, dtype = None);  cos_default_1 = None
+#     return (sum_default,)
+```
+
+A pass that returns the graph has it run on the kernels of eager mode, so
+the write is eager's, the version counter of the tensor included. With
+`AOTAutograd()` and `Inductor()` the tensor holds what eager mode leaves in
+it when the call returns. What they made writes a tensor back once, behind
+the operations, and the engine moves its version counter on to where the
+operations of the function leave it, so the counter is eager's with all
+three. The running statistics of a batch norm are the one difference:
+eager's kernel writes them without moving their counters, and what a
+compiler made moves them.
+
+What such a graph wrote cannot be taken back, and the graph cannot be run a
+second time for the same call. Everything else that a path does is undone by
+not being shown: where a check fails behind what was made of the graph, its
+results are dropped and the instructions of the function run. A write to an
+argument has happened. So nothing may fail behind such a write. A path that
+has one ends in front of whatever a form would have to check behind what was
+made of the graph, and a path that already has such a check does not take a
+write to a tensor from outside, and ends in front of it:
+
+- a branch, the end of a loop or a guard of the code on a value that the
+  graph computes;
+- an instruction that runs behind the graph and is not known to succeed;
+- a store into an object that the graph gives (an attribute of a tensor it
+  computed), which is done behind the graph;
+- a read of what a write changes of a tensor from in front of the graph: its
+  `_version`, its `grad_fn`, `is_leaf`, whatever its class computes for a
+  name. Its sizes, dtype, device and `requires_grad` are read in front of
+  the graph, since no write of a path changes those (below).
+
+The operations of the graph must not fail either. A form is for exact sizes
+and dtypes, so what is left to fail at a later call is an operation that
+fails for what a tensor holds: an index that is out of range, a division of
+whole numbers by zero. A path that writes to a tensor from outside holds
+only operations that cannot: views; the operators that work on each element
+by itself and those that reduce, which say so in their tags (on whole
+numbers only those of them that cannot fail there); and the kernels of
+layers and of putting tensors together that the engine keeps a list of
+(convolutions, `linear`, the norms, the pools, `cat`, `softmax`, `where`
+and the like). It ends in front of the first operation that is not known to
+be one of these, an index by a tensor, `gather`, `embedding` and
+`cross_entropy` among them, and a path that already holds such an operation
+does not take a write to a tensor from outside. What stands behind the end
+of the path runs by itself, or starts the next graph, and raises what eager
+mode raises, with everything as eager mode leaves it:
+
+```python
+import copy
+
+
+class Counts(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+        self.register_buffer("total", torch.zeros(()))
+
+    def forward(self, x, index):
+        y = (x.sin() * 2 + 1).cos()
+        self.calls += 1
+        self.total.add_(y.mean())
+        return y[index].exp().sum() + self.total
+
+
+def outcome(call, index):
+    try:
+        return float(call(rows, index))
+    except Exception as error:
+        return type(error).__name__
+
+
+model = Counts().eval()
+reference = copy.deepcopy(model)
+g = torch.vm(model, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), P.AOTAutograd()))
+rows, good, bad = torch.randn(4, 4), torch.tensor([0, 2]), torch.tensor([1, 7])
+went = []
+with torch.no_grad():
+    for index in [good] * 6 + [bad, good]:
+        went.append((outcome(g, index), outcome(reference, index)))
+all(ours == theirs or abs(ours - theirs) < 1e-4 for ours, theirs in went), went[6]
+# (True, ('IndexError', 'IndexError'))
+model.calls, reference.calls, torch.allclose(model.total, reference.total)  # (8, 8, True)
+[(found["ops"], found["why"]) for found in torch.vm.regions(g) if "ops" in found]
+# [(6, 'can fail for what its tensors hold, on a path that writes to a tensor from outside')]
+```
+
+What is the same in every call that a form is for is no such check. A form
+is for exact sizes of what the graph is given, and the sizes of what the
+graph computes follow from those, so `y.dim()`, `y.shape[0] > 2`, a loop over
+`range(y.shape[1])` and the checks that `nn.BatchNorm2d` makes of its input
+stand behind a write. Such a check is decided when the path is taken down
+and is not run again with what was made of the graph, so the graph does not
+give back the tensor it looks at. Sizes that depend on what the tensors
+hold (`y[y > 0]`, `torch.nonzero(y)`) are not of that kind. An operator with
+a kernel of its own says in its tags whether its sizes do. One that is made
+of other operators (`torch.argwhere`, `torch.where` with one argument,
+`repeat_interleave` with a tensor of counts) has no tag that says it: where
+graphs are exported, such an operator is run once more when its call is
+taken down, on tensors of the same sizes and dtypes that hold nothing, and
+its sizes are taken to follow from those of what it is given only if it
+runs there and gives the same sizes (and the same dtypes, unless the call
+is under autocast, which does not cast tensors that hold nothing). A branch
+on a size that does not is a check of every call:
+
+```python
+def weighs(x):
+    y = (x.sin() * 2 + 1).cos()
+    if torch.argwhere(y > 0).shape[0] > 6:
+        return (y * 2).exp().tanh().sum()
+    return (y * 3).exp().tanh().sum() - 1
+
+
+g = torch.vm(weighs, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+all(torch.equal(g(sign * x), weighs(sign * x)) for sign in (1, 1, 1, 1, 1, -1, 3, -1, 1))  # True
+```
+
+Behind a write to a tensor from outside there is no such check, and the path
+ends in front of the operation, which is one that is not known to be unable
+to fail:
+
+```python
+def picks(x, buffer):
+    y = (x.sin() * 2 + 1).cos()
+    buffer.add_(y.mean())
+    kept = y[y > 0]
+    if kept.shape[0] > 4:
+        kept = kept * 2
+    return kept.exp().sum() + buffer
+
+
+g = torch.vm(picks, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+mine, theirs = torch.zeros(()), torch.zeros(())
+for sign in (1, 1, 1, -1, -1, 1, 1, -1):
+    same = torch.equal(g(sign * x, mine), picks(sign * x, theirs))
 same, torch.equal(mine, theirs)  # (True, True)
 [(found["ops"], found["why"]) for found in torch.vm.regions(g) if "ops" in found]
-# [(5, 'aten::add_.Tensor writes to an argument'), (5, 'the function returns')]
+# [(7, 'can fail for what its tensors hold, on a path that writes to a tensor from outside'),
+#  (4, 'the function returns')]
+```
+
+An operation of a graph may also take such a value where the instructions
+compute it behind the graph, from the sizes of a tensor the graph gives:
+the graph is made with the value of the call it was exported from, and the
+form checks behind the graph that it came out the same. That holds for what
+a form can compare (a number, a text, a tuple or a list of them); a tensor
+that is made behind the graph is no such value, and an operation that takes
+one ends the path.
+
+```python
+def reshapes(x):
+    y = (x.sin() * 2 + 1).cos()
+    rows, columns = y.shape
+    return y.view(rows * columns).exp().tanh().sum()
+
+
+g = torch.vm(reshapes, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), show))
+for _ in range(6):
+    same = torch.equal(g(x), reshapes(x))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["why"]  # (True, 8, 'the function returns')
+"aten.view.default(cos_default, [16])" in shown[-1][0]  # True
+```
+
+A graph without such writes whose callable raises the first time it is
+called is given up, and the instructions of the function run in its place:
+the call returns what eager mode returns. With a write to a tensor from
+outside in the graph there is no such second run, since the instructions
+would write again what the callable may have written already. What the
+callable raises goes out of the call, and where that was its first run the
+graph is given up, so that the calls after it run the instructions:
+
+```python
+def raising(gm, input_types):
+    def fails(tensor):
+        raise RuntimeError("what was made of the graph does not run")
+
+    first = next(node for node in gm.graph.nodes if node.op == "placeholder")
+    last = next(node for node in gm.graph.nodes if node.op == "output")
+    with gm.graph.inserting_before(last):
+        gm.graph.call_function(fails, (first,))
+    gm.recompile()
+    return gm
+
+
+g = torch.vm(outside, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), raising))
+mine, theirs = torch.zeros(()), torch.zeros(())
+went = []
+for _ in range(5):
+    try:
+        out = g(x, mine)
+        went.append("returned")
+    except RuntimeError as error:
+        went.append("raised")
+    expected = outside(x, theirs)
+went  # ['returned', 'returned', 'raised', 'returned', 'returned']
+torch.equal(mine, theirs)  # True: the graph had written, once, before it raised
+found = torch.vm.regions(g)[0]
+found["state"], found["reason"]
+# ('vm', 'the compiled graph failed: RuntimeError: what was made of the graph does not run')
+```
+
+What a compiler makes of writes to its inputs depends on which of them
+share memory, and where: it writes a view of an input back to the place the
+view had when it compiled. A form of a path that writes to tensors from
+outside is therefore for tensors that lie in memory as those it was
+exported for did: which of them have one storage, and where in it each of
+those starts (their sizes and strides are the form's anyway). A tensor with
+its second row, the same tensor with its third row, and two tensors of
+their own are three forms, and `regions` says of each how its tensors lie:
+
+```python
+def shares(x, part):
+    y = (x.sin() * 2).cos()
+    part.mul_(2)
+    x.add_(y)
+    return (x * part.sum()).tanh().exp() + y
+
+
+g = torch.vm(shares, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), P.AOTAutograd()))
+same = []
+for row in (1, 1, 1, 1, 2, 2, 2, None, None, None, 1, 2):
+    bases = [torch.arange(12.0).reshape(3, 4) / 7 for _ in range(2)]
+    parts = [torch.ones(4) if row is None else base[row] for base in bases]
+    got, expected = g(bases[0], parts[0]), shares(bases[1], parts[1])
+    same.append(torch.allclose(got, expected) and torch.equal(bases[0], bases[1]))
+all(same)  # True
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+found["ops"], found["exports"]  # (10, 3)
+sorted(form["checks"][-1] for form in found["forms"])
+# ['no two tensors share memory', 'share memory: %x.1 at 0, %part.2 at 4', 'share memory: %x.1 at 0, %part.2 at 8']
+```
+
+A write that changes the sizes of a tensor from outside, or whether it
+requires a gradient (`buffer.t_()`, a buffer that is written with a value
+that requires one), is no operation of a path: a form is for the tensors as
+a call hands them over, and what is made of a graph is compiled for those.
+That shows when the operation has run. The path is taken down again and
+ends in front of it, the operation runs by itself, and the next graph starts
+behind it:
+
+```python
+def turns(x, buffer):
+    y = (x.sin() * 2 + 1).cos()
+    buffer.t_()
+    return (y.sum() + buffer.sum()).exp().tanh() * buffer.shape[0]
+
+
+g = torch.vm(turns, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(8):
+    mine, theirs = torch.arange(6.0).reshape(2, 3), torch.arange(6.0).reshape(2, 3)
+    same = torch.equal(g(x, mine), turns(x, theirs))
+same, mine.shape == theirs.shape  # (True, True)
+[(found["ops"], found["exports"], found["why"]) for found in torch.vm.regions(g) if "ops" in found]
+# [(4, 1, 'changes the sizes of a tensor from outside, or whether it requires a gradient'), (6, 1, 'the function returns')]
+```
+
+An operation that draws random numbers is under the same rule, since the
+state of the generator cannot be taken back either. With `Graphs()` alone
+such an operation ends a path, the instructions draw, and every number is
+eager's. With a pass over graphs in the list it is an operation of the
+graph, in the order of the function. A pass that returns the graph has it
+run on the kernels of eager mode, so with the same seed the numbers are
+eager's too, and so are those of `AOTAutograd()`, which runs the kernel of
+the draw as it is. What `Inductor()` makes of a dropout draws other numbers.
+`torch.vm.is_exact` is false for every list with a compiler in it:
+
+```python
+def drops(x):
+    y = (x.sin() * 2 + 1).cos()
+    return (torch.nn.functional.dropout(y, 0.5) + 1).exp().tanh()
+
+
+def drawn(passes):
+    g = torch.vm(drops, passes=passes)
+    torch.manual_seed(3)
+    ours = [g(x) for _ in range(6)]
+    torch.manual_seed(3)
+    theirs = [drops(x) for _ in range(6)]
+    graphs = [(found["ops"], found["why"]) for found in torch.vm.regions(g) if "ops" in found]
+    return [torch.allclose(a, b) for a, b in zip(ours, theirs)], graphs
+
+
+alone = (*torch.vm.DEFAULT_PASSES, P.Graphs())
+drawn(alone)
+# ([True, True, True, True, True, True], [(4, 'in dropout: aten::dropout draws random numbers')])
+drawn((*alone, keep))  # ([True, True, True, True, True, True], [(8, 'the function returns')])
+drawn((*alone, P.AOTAutograd()))  # ([True, True, True, True, True, True], [(8, 'the function returns')])
+drawn((*alone, P.Inductor()))  # ([True, True, False, False, False, False], [(8, 'the function returns')])
+torch.vm.is_exact(alone), torch.vm.is_exact((*alone, P.AOTAutograd())), torch.vm.is_exact((*alone, P.Inductor()))
+# (True, False, False)
+```
+
+With these the forward of a model in training mode is a graph: a batch norm
+writes its statistics and counts its batches in it, a dropout draws in it.
+Going backward and the step of the optimizer are as before; with
+`AOTAutograd()` or `Inductor()` what the forward returns has the compiled
+backward as its `grad_fn`. A loss that the same function computes is not in
+that graph: `cross_entropy` can fail for what its labels hold, so the path
+ends in front of it, and the loss is computed behind the graph.
+
+```python
+import copy
+
+
+class Small(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 8, 3, padding=1)
+        self.norm = torch.nn.BatchNorm2d(8)
+        self.fc = torch.nn.Linear(8 * 8 * 8, 4)
+
+    def forward(self, x):
+        y = torch.relu(self.norm(self.conv(x)))
+        return self.fc(torch.flatten(y, 1))
+
+
+model = Small().train()
+reference = copy.deepcopy(model)
+g = torch.vm(model, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+images, labels = torch.randn(8, 3, 8, 8), torch.randint(0, 4, (8,))
+losses = []
+for net, fn in ((model, g), (reference, reference)):
+    optimizer = torch.optim.SGD(net.parameters(), lr=0.1)
+    for _ in range(8):
+        optimizer.zero_grad()
+        loss = torch.nn.functional.cross_entropy(fn(images), labels)
+        loss.backward()
+        optimizer.step()
+        losses.append(loss.item())
+losses[:8] == losses[8:]  # True
+state = reference.state_dict()
+all(torch.equal(value, state[name]) for name, value in model.state_dict().items())  # True
+int(model.norm.num_batches_tracked)  # 8
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+found["ops"], found["hits"], found["why"]  # (6, 6, 'the function returns')
 ```
 
 An operation with several results (`x.chunk(2)`, `torch.max(x, 0)`) ends a
-path in the same way. A write that a path takes as an operation is
+path. A write that a path takes as an operation is
 not among what `regions` lists as left out.
 
 ### Stores into objects
@@ -1179,7 +1531,10 @@ path ends, all of them, in the order of the function, and behind every check
 of the path and of the form. So nothing is stored for a call that the path
 turns out not to be for: that call runs the instructions, which do the
 stores themselves. The same holds where what was made of the graph raises:
-the instructions run, do the stores in front of what raises, and raise.
+the instructions run, do the stores in front of what raises, and raise. A
+graph that writes to a tensor from outside is the exception ("Writes"): what
+was made of it is not run a second time, what it raises goes out, and the
+stores of that call are not done.
 
 A read of what a store of the path put there, behind the store, is given the
 stored value (`self.n = k` and then `self.n`). What is stored is not one of
@@ -1336,13 +1691,16 @@ What graphs do not do at this stage:
 - A path per way. A function whose calls go many ways through it has a path
   and an export for each, and they share the `max_variants` of the graph.
   So does a loop that goes round another number of times on every call.
-- No writes outside a path. A write to a tensor from outside the path and
-  an operation with several results end a path
-  ("Writes"), and a call whose operations turn out to have written to what
-  the graph was given is not exported. A batch norm in training mode writes
-  its running statistics after every convolution, so a training step is run
-  by the instructions for the most part, and the same model has its graphs
-  in eval mode.
+- Nothing may fail behind a write to a tensor from outside the path
+  ("Writes"). A path with such a write, or with a draw of random numbers,
+  ends in front of a branch on what a tensor of the graph holds and of a
+  size that depends on it, and in front of the first operation that is not
+  known to be unable to fail for what its tensors hold (an index by a
+  tensor, `gather`, `embedding`, `cross_entropy`): the forward of a model in
+  training mode with batch norms and its loss computed in the same function
+  is a graph up to the loss. A graph with such a write has no second run
+  where what was made of it raises. An operation with several results ends
+  a path.
 - What a path reads behind a store of its own into an object is checked at
   every call to go through another dict or list than the store changes, a
   check per store ("Stores into objects"); a read through what a store
