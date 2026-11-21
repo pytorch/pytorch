@@ -1016,6 +1016,77 @@ class TestMkldnn(TestCase):
         self._test_batch_norm_base(dim=2, channels=C, input=x)
         self._test_batch_norm_train_base(dim=2, channels=C, input=x)
 
+    @parametrize("dim", [2, 3])
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    @parametrize("weight_layout", ["contiguous", "strided", "mkldnn"])
+    @parametrize("bias_layout", ["contiguous", "strided", "mkldnn"])
+    def test_batch_norm_affine_layouts(self, dim, dtype, weight_layout, bias_layout):
+        if dtype == torch.bfloat16 and (IS_WINDOWS or not torch.ops.mkldnn._is_mkldnn_bf16_supported()):
+            self.skipTest("CPU does not support this BF16 BatchNorm configuration")
+
+        shape = (2, 4) + (2,) * dim
+        x = torch.arange(8 * 2 ** dim, dtype=torch.float32).reshape(shape).div(10).to(dtype)
+        weight = torch.tensor([1., 10., 2., 20., 3., 30., 4., 40.])[::2]
+        bias = torch.tensor([0.5, 10., -1., 20., 2., 30., -0.25, 40.])[::2]
+        if weight_layout == "contiguous":
+            weight = weight.contiguous()
+        elif weight_layout == "mkldnn":
+            weight = weight.to_mkldnn()
+        if bias_layout == "contiguous":
+            bias = bias.contiguous()
+        elif bias_layout == "mkldnn":
+            bias = bias.to_mkldnn()
+        if weight_layout == "strided":
+            self.assertFalse(weight.is_contiguous())
+        if bias_layout == "strided":
+            self.assertFalse(bias.is_contiguous())
+
+        weight_ref = torch.tensor([1., 2., 3., 4.])
+        bias_ref = torch.tensor([0.5, -1., 2., -0.25])
+        mean, var = torch.zeros(4), torch.ones(4)
+        expected = F.batch_norm(x, mean, var, weight_ref, bias_ref, training=False)
+        actual = F.batch_norm(x.to_mkldnn(), mean, var, weight, bias, training=False)
+        self.assertTrue(actual.is_mkldnn)
+        self.assertEqual(actual.to_dense(), expected)
+        self.assertEqual(weight.to_dense() if weight.is_mkldnn else weight, weight_ref)
+        self.assertEqual(bias.to_dense() if bias.is_mkldnn else bias, bias_ref)
+
+    @parametrize("strided_weight", [False, True])
+    @parametrize("strided_bias", [False, True])
+    @parametrize("track_running_stats", [False, True])
+    def test_batch_norm_strided_affine_training(self, strided_weight, strided_bias, track_running_stats):
+        x = torch.randn(2, 4, 3, 3, dtype=torch.float32, requires_grad=True)
+        mkldnn_x = x.detach().to_mkldnn().requires_grad_()
+        weight = torch.tensor([1., 10., 2., 20., 3., 30., 4., 40.])[::2]
+        bias = torch.tensor([0.5, 10., -1., 20., 2., 30., -0.25, 40.])[::2]
+        weight = (weight if strided_weight else weight.contiguous()).detach().requires_grad_()
+        bias = (bias if strided_bias else bias.contiguous()).detach().requires_grad_()
+        weight_ref = weight.detach().clone().requires_grad_()
+        bias_ref = bias.detach().clone().requires_grad_()
+        mean = torch.zeros(4) if track_running_stats else None
+        var = torch.ones(4) if track_running_stats else None
+        mkldnn_mean = mean.clone() if track_running_stats else None
+        mkldnn_var = var.clone() if track_running_stats else None
+
+        expected = F.batch_norm(x, mean, var, weight_ref, bias_ref, training=True)
+        actual = F.batch_norm(mkldnn_x, mkldnn_mean, mkldnn_var, weight, bias, training=True)
+        self.assertTrue(actual.is_mkldnn)
+        actual = actual.to_dense()
+        self.assertEqual(actual, expected)
+        grad = torch.randn_like(expected)
+        expected.backward(grad)
+        actual.backward(grad)
+        self.assertEqual(mkldnn_x.grad.to_dense(), x.grad, atol=1e-5, rtol=1e-5)
+        self.assertEqual(weight.grad, weight_ref.grad, atol=1e-5, rtol=1e-5)
+        self.assertEqual(bias.grad, bias_ref.grad, atol=1e-5, rtol=1e-5)
+        self.assertEqual(weight, weight_ref)
+        self.assertEqual(bias, bias_ref)
+        self.assertEqual(weight.stride(), (2,) if strided_weight else (1,))
+        self.assertEqual(bias.stride(), (2,) if strided_bias else (1,))
+        if track_running_stats:
+            self.assertEqual(mkldnn_mean, mean)
+            self.assertEqual(mkldnn_var, var)
+
     def test_batch_norm_3d(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 100, (1,)).item()
