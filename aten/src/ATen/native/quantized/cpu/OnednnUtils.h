@@ -377,7 +377,7 @@ inline at::native::mkldnn::Attr create_attr_by_post_op(
     if (unary_post_op == "none") {
       return at::native::mkldnn::Attr::fuse_binary(dnnl::algorithm::binary_add, input1_desc);
     } else if (unary_post_op == "relu") {
-      ideep::post_ops po;
+      dnnl::post_ops po;
       po.append_binary(dnnl::algorithm::binary_add, input1_desc);
       po.append_eltwise(dnnl::algorithm::eltwise_relu, 0, 0);
       return at::native::mkldnn::Attr::attr_post_ops(po);
