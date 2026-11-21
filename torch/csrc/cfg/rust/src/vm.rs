@@ -3778,7 +3778,7 @@ impl Compiled {
                         ffi::PyObject_GetAttrString(held, c"fget".as_ptr())
                     }
                     Part::Index(i) => {
-                        let plain = ffi::PyTuple_CheckExact(held) != 0 || ffi::PyList_CheckExact(held) != 0;
+                        let plain = graph::is_row(held);
                         let there = plain && ffi::PyObject_Size(held) > *i as isize;
                         let found = if there { graph::sequence_item(held, *i as isize) } else { null_mut() };
                         ffi::Py_XINCREF(found);
@@ -4915,10 +4915,15 @@ impl Compiled {
             // Onto a list, or into a dict, that the path made.
             Op::ListExtend(l, more) => {
                 let plain = |o: Obj| !o.is_null() && !capi::is_unboxed(o);
-                plain(at(*l))
-                    && plain(at(*more))
-                    && ffi::PyList_CheckExact(at(*l)) != 0
-                    && (ffi::PyList_CheckExact(at(*more)) != 0 || ffi::PyTuple_CheckExact(at(*more)) != 0)
+                plain(at(*l)) && plain(at(*more)) && ffi::PyList_CheckExact(at(*l)) != 0 && graph::is_row(at(*more))
+            }
+            // Turning plain values into text, and putting texts together.
+            Op::Format { val, spec, .. } => {
+                let text = |v: V| !at(v).is_null() && !capi::is_unboxed(at(v)) && ffi::PyUnicode_CheckExact(at(v)) != 0;
+                graph::quiet_text(at(*val)) && (*spec == NONE || text(*spec))
+            }
+            Op::BuildString(vs) => {
+                vs.iter().all(|v| !at(*v).is_null() && !capi::is_unboxed(at(*v)) && ffi::PyUnicode_CheckExact(at(*v)) != 0)
             }
             Op::DictMerge(d, more, _) => graph::quiet_merge(at(*d), at(*more)),
             Op::ImportName { name, fromlist, level } => {
@@ -4928,7 +4933,7 @@ impl Compiled {
             Op::BuildMap(vs) => vs.iter().step_by(2).all(|k| !at(*k).is_null() && graph::is_plain_key(at(*k))),
             Op::MapAdd(_, k, _) => !at(*k).is_null() && graph::is_plain_key(at(*k)),
             Op::GetIter(v) => !at(*v).is_null() && graph::quiet_iter(at(*v)).is_some(),
-            Op::Binary(_, a, b) => [a, b].iter().all(|v| !at(**v).is_null() && graph::is_number(at(**v))),
+            Op::Binary(kind, a, b) => graph::quiet_binary(*kind, at(*a), at(*b)),
             Op::Unary(UnaryKind::Not, a) | Op::ToBool(a) => !at(*a).is_null() && graph::quiet_truth(at(*a)),
             Op::Unary(_, a) => !at(*a).is_null() && graph::is_number(at(*a)),
             Op::Compare(_, a, b) => !at(*a).is_null() && !at(*b).is_null() && graph::quiet_compare(at(*a), at(*b)),
@@ -6061,9 +6066,7 @@ impl Compiled {
             // A dropout that is told not to drop anything draws nothing:
             // the form is checked for that operand, as for any number.
             Op::Dispatch(d) if d.slot.traits() == capi::SITE_RANDOM && d.slot.len() > 0 => {
-                const DROPOUTS: [&str; 4] =
-                    ["aten::dropout", "aten::feature_dropout", "aten::alpha_dropout", "aten::feature_alpha_dropout"];
-                let dropout = d.slot.operator().is_some_and(|name| DROPOUTS.contains(&name.as_str()));
+                let dropout = d.slot.operator().is_some_and(|name| graph::DROPOUTS.contains(&name.as_str()));
                 let idle = d.operands.last().is_some_and(|train| reg(regs, *train) == ffi::Py_False());
                 // One that draws is an operation where the graph is made
                 // something of (what that is draws in its place; a pass
@@ -6313,7 +6316,10 @@ impl Compiled {
                     | Op::GetLen(_)
                     | Op::Unpack(..)
                     | Op::GetIter(_)
-                    | Op::IterNext(_) => true,
+                    | Op::IterNext(_)
+                    | Op::ListToTuple(_)
+                    | Op::Format { .. }
+                    | Op::BuildString(_) => true,
                     Op::Call { .. } | Op::CallMethod { .. } => kind == Kind::Pure,
                     Op::LoadAttr(_, name) => {
                         let name = pyffi::str_to_string(self.func.consts[*name as usize].as_ptr());
@@ -6323,8 +6329,10 @@ impl Compiled {
                 };
                 // What cannot fail is not made the same by checks: it is
                 // if what it is made of is.
+                // A list, a tuple or a slice of nothing but such values is
+                // one too, wherever it is made.
                 let free = graph::infallible(op);
-                late && follows && if free { pins.is_empty() } else { every }
+                follows && if graph::container(op) { pins.is_empty() } else { late && if free { pins.is_empty() } else { every } }
             }
         };
         if fixed && kind != Kind::Node {
@@ -6562,9 +6570,13 @@ impl Compiled {
         if let Op::ListAppend(into, ..) | Op::MapAdd(into, ..) | Op::ListExtend(into, _) | Op::DictMerge(into, ..) = &renamed {
             // What is read of a list or a dict that holds what an operation
             // gave is read behind the graph.
-            let mut late = false;
-            graph::reads(&renamed, |v| late |= t.defs[v as usize].late);
+            let (mut late, mut fixed) = (false, true);
+            graph::reads(&renamed, |v| {
+                late |= t.defs[v as usize].late;
+                fixed &= v == *into || t.defs[v as usize].fixed;
+            });
             t.defs[*into as usize].late |= late;
+            t.defs[*into as usize].fixed &= fixed;
         }
         t.push(renamed, dst, kind, inst.bc);
         kill(t, regs);

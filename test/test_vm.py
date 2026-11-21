@@ -6696,6 +6696,30 @@ def graph_outer(x):
     return graph_inner(x)
 
 
+def graph_says(x, scale):
+    y = (x.sin() * scale).cos()
+    torch._assert(y.ndim == 2, f"expected 2D input (got {y.ndim}D input)")
+    rows = "%d rows" % y.shape[0]  # noqa: UP031
+    note = f"{y.dtype} {tuple(y.shape)!r} {scale:.3f} " + rows
+    if not note.startswith("torch"):
+        raise ValueError(note)
+    return (y * 2).tanh().exp() + len(note)
+
+
+def graph_prints(x):
+    y = (x.sin() + 1).cos()
+    note = f"{y.sum()}"
+    return (y * 2).tanh().exp() + len(note)
+
+
+def graph_shapes(x):
+    y = (x.sin() + 1).cos()
+    halves = (*y.shape[:-1], 2, -1)
+    again = y.shape[:-1] + (y.shape[-1] // 2, 2)
+    flat = [1] * (y.dim() - 1) + [-1]
+    return (y.view(halves) * 2).tanh().exp().view(again) + y.reshape(flat).sum()
+
+
 class GraphDoubles:
     """What is read of it is twice what was stored."""
 
@@ -6707,6 +6731,12 @@ def graph_reads_what_it_stored(x, doubles):
     y = (x.sin() + 1).cos()
     doubles.scale = 1.5
     return (y * doubles.scale).tanh().exp()
+
+
+def graph_grows_a_list(x, shape):
+    y = (x.sin() + 1).cos()
+    shape += [2]
+    return (y.view(shape) * 2).tanh().exp() + len(shape)
 
 
 class GraphMidwayIndex:
@@ -6954,6 +6984,24 @@ def graph_asks_for_operators(x, a, b):
     total = a
     total += 2.0
     return (y * total).tanh().exp(), a == 3, 1.0 in a, list(range(a)), not a
+
+
+class GraphGuarded2d(torch.nn.Module):
+    """A layer as libraries of vision models have them: a convolution, a
+    norm that checks what it is given with a message, an activation that
+    writes."""
+
+    def __init__(self, channels):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(channels, channels, 3, padding=1, bias=False)
+        self.bn = torch.nn.BatchNorm2d(channels)
+        self.act = torch.nn.ReLU6(inplace=True)
+        self.drop = torch.nn.Dropout(0.2)
+
+    def forward(self, x):
+        y = self.conv(x)
+        torch._assert(y.ndim == 4, f"expected 4D input (got {y.ndim}D input)")
+        return self.drop(self.act(self.bn(y))) + x
 
 
 def graph_parts(x, k):
@@ -9979,6 +10027,70 @@ class TestVmGraphResults(TestCase):
             expected = graph_reads_what_it_stored(x, GraphDoubles())
             self.assertEqual(stores(x, doubles), expected, atol=0, rtol=0)
 
+    # --- what the plain values of a function compute is part of a path
+
+    def whole_graph(self, fn, args, ops, behind=None):
+        """`fn` under torch.vm with a pass that returns the graph (or
+        `behind`): its results against eager, and that one graph of `ops`
+        operations runs up to where the function returns."""
+
+        def keep(gm, input_types):
+            return gm
+
+        passes = (*DEFAULT, P.Graphs(), behind or keep)
+        compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+        exact = dict(atol=0, rtol=0) if behind is None else dict(rtol=1e-4, atol=1e-5)
+        for _ in range(6):
+            self.assertEqual(compiled(*args), fn(*args), **exact)
+        found = [g for g in torch.vm.regions(compiled) if "ops" in g]
+        ran = [(g["ops"], g["why"]) for g in found if "within" not in g and g["hits"]]
+        self.assertEqual(ran, [(ops, "the function returns")])
+        return compiled
+
+    def test_text_made_of_plain_values_is_part_of_a_path(self, device):
+        x = torch.randn(3, 4, device=device)
+        # An assert with a message that is formatted, a text put together
+        # from a dtype, sizes and a number, a method of a text.
+        compiled = self.whole_graph(graph_says, (x, 2.0), 7)
+        # The message is eager's where the assert fails.
+        message = r"expected 2D input \(got 3D input\)"
+        with self.assertRaisesRegex(AssertionError, message):
+            compiled(torch.randn(2, 3, 4, device=device), 2.0)
+        self.assertEqual(compiled(x, 3.0), graph_says(x, 3.0), atol=0, rtol=0)
+        self.whole_graph(graph_says, (x, 2.0), 7, P.Inductor())
+        # What a tensor holds is not text the path makes: it ends there.
+        passes = (*DEFAULT, P.Graphs(min_ops=2))
+        compiled = torch.vm(graph_prints, passes=passes, fallback=False)
+        for _ in range(4):
+            self.assertEqual(compiled(x), graph_prints(x), atol=0, rtol=0)
+        ops = [g["ops"] for g in torch.vm.regions(compiled) if "ops" in g]
+        self.assertEqual(ops, [4, 4])
+
+    def test_sequences_made_of_sizes_are_part_of_a_path(self, device):
+        x = torch.randn(3, 4, device=device)
+        compiled = self.whole_graph(graph_shapes, (x,), 11)
+        # Other sizes are another form of the same graph.
+        wide = torch.randn(5, 6, device=device)
+        deep = torch.randn(2, 3, 8, device=device)
+        for other in (wide, deep, x):
+            self.assertEqual(compiled(other), graph_shapes(other), atol=0, rtol=0)
+        self.whole_graph(graph_shapes, (x,), 11, P.Inductor())
+
+    def test_a_list_that_is_added_to_in_place_is_changed_once(self, device):
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(3, 4, device=device)
+        passes = (*DEFAULT, P.Graphs(), keep)
+        compiled = torch.vm(graph_grows_a_list, passes=passes, fallback=False)
+        # `shape += [2]` changes a list of the caller: no instruction of a
+        # path, which could run once more where the path gives up.
+        for given in ([3, 2], [3, 2], [3, 2], [3, 2], [6, 1], [3, 2], [6, 1], [1, 6]):
+            mine = list(given)
+            expected = graph_grows_a_list(x, list(given))
+            self.assertEqual(compiled(x, mine), expected, atol=0, rtol=0)
+            self.assertEqual(mine, [*given, 2])
+
     def same_as_eager(self, fn, make, calls=4):
         """`fn` under torch.vm, with `Graphs()` alone and with a pass that
         returns the graph, each on arguments that `make` makes anew for
@@ -10102,6 +10214,45 @@ class TestVmGraphResults(TestCase):
         # goes into these, and each is asked once.
         for n in (1, 2, 0):
             same(fn, lambda: (x, GraphAnswers(n), GraphAnswers(1)))
+
+    def test_a_layer_that_checks_its_input_with_a_message_is_one_graph(self, device):
+        def keep(gm, input_types):
+            return gm
+
+        torch.manual_seed(0)
+        layers = (GraphGuarded2d(4), GraphGuarded2d(4))
+        model = torch.nn.Sequential(*layers).eval().to(device)
+        x = torch.randn(2, 4, 8, 8, device=device)
+        with torch.no_grad():
+            compiled = self.whole_graph(model, (x,), 10)
+        # A dropout that drops nothing is an operation with the engine's
+        # own graphs too, and nothing is said to draw random numbers.
+        alone = torch.vm(model, passes=(*DEFAULT, P.Graphs()), fallback=False)
+        with torch.no_grad():
+            for _ in range(4):
+                self.assertEqual(alone(x), model(x), atol=0, rtol=0)
+        regions = torch.vm.regions(alone)
+        ops = [g["ops"] for g in regions if "ops" in g and "within" not in g]
+        self.assertEqual(ops, [10])
+        self.assertEqual([r["reason"] for r in regions if "ops" not in r], [])
+        # One that drops is one where graphs are exported, and none of a
+        # graph that the engine only reports.
+        model.train()
+        passes = (*DEFAULT, P.Graphs(), keep)
+        compiled = torch.vm(model, passes=passes, fallback=False, demote=False)
+        reference = copy.deepcopy(model)
+        for at in range(6):
+            torch.manual_seed(at)
+            got = compiled(x)
+            torch.manual_seed(at)
+            self.assertEqual(got, reference(x), atol=0, rtol=0)
+        for name, value in reference.state_dict().items():
+            self.assertEqual(model.state_dict()[name], value, msg=name, atol=0, rtol=0)
+        alone = torch.vm(model, passes=(*DEFAULT, P.Graphs()), fallback=False)
+        for _ in range(4):
+            alone(x)
+        left = [r["reason"] for r in torch.vm.regions(alone) if "ops" not in r]
+        self.assertIn("aten::dropout draws random numbers", left)
 
     def test_what_a_path_lets_go_of_ends_where_the_instructions_end_it(self, device):
         # A store replaces what was there, and a variable that is bound
