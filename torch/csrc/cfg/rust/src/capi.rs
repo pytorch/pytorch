@@ -27,10 +27,7 @@ pub const TCFG_ALLOW_SKIP_AUTOGRAD: u32 = 1;
 
 pub const TCFG_UNBOXED_RESULT: u32 = 1;
 
-pub const TCFG_API_VERSION: u32 = 15;
-/// The version that has what the backward of a graph is derived with
-/// (`TcfgBackwardApi`) behind the entries of version 15.
-pub const TCFG_API_VERSION_BACKWARD: u32 = 16;
+pub const TCFG_API_VERSION: u32 = 17;
 
 #[repr(C)]
 pub struct TcfgPyOp {
@@ -160,12 +157,12 @@ pub const TCFG_RUN_ON_TAPE: u32 = 2;
 
 /// What the node of a graph calls when it is handed gradients, and when
 /// what a backward kept is let go (see cfg.h).
-pub type Backward = unsafe extern "C" fn(*mut std::ffi::c_void, *const Obj, u32, *mut Obj, u32, u32) -> i32;
+pub type Backward = unsafe extern "C" fn(*mut std::ffi::c_void, *const Obj, u32, *mut Obj, u32, *const u8, u32) -> i32;
 pub type Release = unsafe extern "C" fn(*mut std::ffi::c_void, i32);
 
-/// The entries of version 16, which follow those of `TcfgApi` in the table:
-/// the tape, eager's nodes, operators by their schema, straight-line
-/// programs, and the node of a graph (see cfg.h).
+/// The entries that follow those of `TcfgApi` in the table: the tape,
+/// eager's nodes, operators by their schema, straight-line programs, the
+/// node of a graph, and what is asked at every call (see cfg.h).
 #[repr(C)]
 pub struct TcfgBackwardApi {
     pub tape_begin: unsafe extern "C" fn(),
@@ -181,16 +178,15 @@ pub struct TcfgBackwardApi {
     pub program_run:
         unsafe extern "C" fn(*mut std::ffi::c_void, *const Obj, *const u32, u32, *const u32, u32, u32) -> Obj,
     pub graph_node: unsafe extern "C" fn(Obj, Obj, *mut std::ffi::c_void, Backward, Release) -> i32,
+    pub frame_count_kernel: Option<unsafe extern "C" fn() -> u64>,
+    pub grad_enabled: unsafe extern "C" fn() -> u32,
 }
 
-/// The entries of version 16, where the table of torch._C has them.
+/// Those entries, once the table of torch._C was handed over.
 pub fn backward_api() -> Option<&'static TcfgBackwardApi> {
     let api = api()?;
-    if api.version < TCFG_API_VERSION_BACKWARD {
-        return None;
-    }
-    // The table is one struct of pointers: the entries of version 16 start
-    // where those of version 15 end.
+    // The table is one struct of pointers: they start where those of
+    // `TcfgApi` end.
     let behind = unsafe { (api as *const TcfgApi).add(1) } as *const TcfgBackwardApi;
     Some(unsafe { &*behind })
 }
