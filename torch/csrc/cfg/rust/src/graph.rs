@@ -676,6 +676,25 @@ impl GraphSite {
         }
     }
 
+    /// Whether the graph is exported for nothing but its backward and has
+    /// its path from calls none of whose tensors needed a gradient: it is
+    /// exported once a call that needs one is taken down.
+    pub fn dormant(&self) -> bool {
+        self.derives
+            && !self.grads.load(Ordering::Relaxed)
+            && matches!(*self.state.borrow(), GraphState::Built)
+            && self.variants.borrow().first().is_some_and(|path| !path.provisional)
+    }
+
+    /// Has such a graph take the next call that comes to it down again.
+    pub fn wake(&self) -> bool {
+        let dormant = self.dormant();
+        if dormant {
+            self.again.store(true, Ordering::Relaxed);
+        }
+        dormant
+    }
+
     /// Takes a path that was taken down, with the form that was made of the
     /// run if one was: a path it has already gets the form. A path that is
     /// not final (see `Path::provisional`) is taken a few times at most.
