@@ -16,11 +16,8 @@ from torch._inductor.exc import CUDACompileError, XPUCompileError
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
-from torch.testing._internal.triton_utils import (
-    requires_gpu_and_triton,
-    requires_xpu_and_triton,
-)
+from torch.testing._internal.common_utils import HardwareClassification, TEST_WITH_ROCM
+from torch.testing._internal.inductor_utils import requires_triton
 
 
 def _has_rocm_compiler():
@@ -120,9 +117,9 @@ def _call_saxpy(dll, device_type, n, a, x, y):
 
 
 class TestGPUCodeCache(InductorTestCase):
-    @requires_gpu_and_triton
-    def test_gpu_load(self):
-        device = self.device_type
+    @requires_triton()
+    def test_gpu_load(self, device):
+        device = torch.device(device).type
         if not _has_gpu_codecache_compiler(device):
             raise unittest.SkipTest("requires nvcc, ROCm, or SYCL compiler")
         source_code = _source_code(device)
@@ -153,9 +150,9 @@ class TestGPUCodeCache(InductorTestCase):
             _call_saxpy(dll_wrapper, device, 10, a, x, y)
             torch.testing.assert_close(y, expected_y)
 
-    @requires_gpu_and_triton
-    def test_compilation_error(self):
-        device = self.device_type
+    @requires_triton()
+    def test_compilation_error(self, device):
+        device = torch.device(device).type
         if not _has_gpu_codecache_compiler(device):
             raise unittest.SkipTest("requires nvcc, ROCm, or SYCL compiler")
         with fresh_cache():
@@ -164,9 +161,9 @@ class TestGPUCodeCache(InductorTestCase):
             with self.assertRaises(_compile_error(device)):
                 codecache.compile(error_source_code, "o")
 
-    @requires_gpu_and_triton
-    def test_async_compile(self):
-        device = self.device_type
+    @requires_triton()
+    def test_async_compile(self, device):
+        device = torch.device(device).type
         if not _has_gpu_codecache_compiler(device):
             raise unittest.SkipTest("requires nvcc, ROCm, or SYCL compiler")
         source_code = _source_code(device)
@@ -189,14 +186,25 @@ class TestGPUCodeCache(InductorTestCase):
             torch.testing.assert_close(y, expected_y)
 
 
+class TestCUDACodeCache(TestGPUCodeCache):
+    hw_classification = HardwareClassification.CUDA
+
+
+class TestXPUCodeCache(TestGPUCodeCache):
+    hw_classification = HardwareClassification.XPU
+
+
+instantiate_device_type_tests(TestCUDACodeCache, globals(), only_for="cuda")
 instantiate_device_type_tests(
-    TestGPUCodeCache, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+    TestXPUCodeCache, globals(), allow_xpu=True, only_for="xpu"
 )
 
 
-@requires_xpu_and_triton
+@requires_triton()
 class TestXPUCodeCacheClear(InductorTestCase):
-    def test_cache_hit(self):
+    hw_classification = HardwareClassification.XPU
+
+    def test_cache_hit(self, device):
         if not icpx_exist(_sycl_compiler()):
             raise unittest.SkipTest("requires SYCL compiler")
         with fresh_cache():
@@ -210,7 +218,7 @@ class TestXPUCodeCacheClear(InductorTestCase):
             self.assertEqual(so_hash1, so_hash2)
             self.assertIs(dll_wrapper1, dll_wrapper2)
 
-    def test_cache_clear_clears_dll_cache(self):
+    def test_cache_clear_clears_dll_cache(self, device):
         self.addCleanup(XPUCodeCache.cache_clear)
         XPUCodeCache.dll_cache["fake_path.so"] = mock.MagicMock()
         self.assertGreater(len(XPUCodeCache.dll_cache), 0)
@@ -223,7 +231,7 @@ class TestXPUCodeCacheClear(InductorTestCase):
             "dll_cache should be empty after cache_clear()",
         )
 
-    def test_cache_clear_clears_parent_cache(self):
+    def test_cache_clear_clears_parent_cache(self, device):
         self.addCleanup(XPUCodeCache.cache_clear)
         XPUCodeCache.cache["fake_key"] = mock.MagicMock()
         self.assertGreater(len(XPUCodeCache.cache), 0)
@@ -236,6 +244,10 @@ class TestXPUCodeCacheClear(InductorTestCase):
             "cache should be empty after cache_clear()",
         )
 
+
+instantiate_device_type_tests(
+    TestXPUCodeCacheClear, globals(), allow_xpu=True, only_for="xpu"
+)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
