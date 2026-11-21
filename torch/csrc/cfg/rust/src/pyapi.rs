@@ -618,6 +618,7 @@ impl CfgFunction {
                         .collect();
                     let closed = forms.iter().find_map(|(_, form)| form.closed.clone());
                     let (state, reason) = match &*site.state.borrow() {
+                        _ if site.gave_way() => ("vm", Some(crate::graph::GAVE_WAY_REASON.to_string())),
                         GraphState::GivenUp(reason) if compiled > 0 => ("compiled", Some(reason.clone())),
                         GraphState::GivenUp(reason) => ("vm", Some(reason.clone())),
                         GraphState::Waiting if compiled > 0 => ("compiled", None),
@@ -681,7 +682,7 @@ impl CfgFunction {
                 for entry in &version.left {
                     // What a path of a graph of the block goes through, or
                     // takes as an operation, is not left out.
-                    let taken = version.graphs.iter().any(|site| {
+                    let taken = version.graphs.iter().filter(|site| !site.gave_way()).any(|site| {
                         site.paths().iter().any(|path| {
                             let behind = path.land.0 != b || (entry.lo as usize) < path.land.1;
                             path.root.0 == b && path.root.1 <= entry.lo as usize && behind && path.operators.len() >= site.min_ops
@@ -706,7 +707,10 @@ impl CfgFunction {
     fn held(&self) -> Vec<(*const Compiled, u32, Arc<Compiled>, Arc<GraphSite>)> {
         let mut held = Vec::new();
         for (cf, _, _, site) in self.graph_sites() {
-            if matches!(*site.state.borrow(), GraphState::GivenUp(_) | GraphState::Small(_)) || site.outer().is_some() {
+            // A graph that gave way runs nothing: its operations are those
+            // of the graphs that start further on and of the functions it
+            // went into.
+            if matches!(*site.state.borrow(), GraphState::GivenUp(_) | GraphState::Small(_)) || site.outer().is_some() || site.gave_way() {
                 continue;
             }
             for path in site.paths().iter().filter(|path| path.operators.len() >= site.min_ops) {
