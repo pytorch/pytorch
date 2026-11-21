@@ -668,7 +668,7 @@ def lookup_spec_from_dynamo_source(
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
-    if not isinstance(value, types.BuiltinMethodType):
+    if not issubclass(type(value), types.BuiltinMethodType):
         return None
 
     method_self = value.__self__
@@ -1318,6 +1318,9 @@ class VariableBuilder:
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
             CustomClassObjectVariable,
+            UserFunctionVariable,
+            SkipFunctionVariable,
+            PolyfilledFunctionVariable,
         }
 
     def get_source(self) -> Source:
@@ -1923,7 +1926,7 @@ class VariableBuilder:
             obj_vt = VariableTracker.build(self.tx, random_self, obj_source)
             return GetAttrVariable(obj_vt, value.__name__, py_type=type(value))
         elif (
-            isinstance(value, types.BuiltinMethodType)
+            issubclass(type(value), types.BuiltinMethodType)
             and isinstance(value.__self__, random.Random)
             and RandomVariable.is_supported_random_obj(value.__self__)
             and value in UserDefinedObjectVariable._supported_random_functions()
@@ -2854,7 +2857,8 @@ class VariableBuilder:
             and type(value) not in common_constant_types
         ):
             self.install_guards(GuardBuilder.CONSTANT_SUBCLASS_MATCH)
-            result = UserDefinedConstantVariable(value, source=self.source)
+            vt_cls = UserDefinedConstantVariable.cls_for(type(value))
+            result = vt_cls(value, source=self.source)
         elif is_generic_ctx_manager_cls(type(value)):
             # A generic context manager built inside the compiled region (via
             # SideEffects.get_variable_cls) must wrap the same way when it is
@@ -4754,7 +4758,7 @@ def handle_traced_output(
         return EventVariable(proxy, example_value, None, **options)
     elif proxy.node.target == "query" and proxy.node.op == "call_method":
         set_example_value(proxy.node, example_value)
-        return ConstantVariable(example_value, **options)
+        return ConstantVariable.create(example_value, **options)
     elif (
         example_value is not None
         and isinstance(example_value, torch.Event)
@@ -6116,7 +6120,7 @@ class SourcelessBuilder:
             type, Callable[[InstructionTranslatorBase, Any], VariableTracker]
         ] = {}
         for t in common_constant_types:
-            handlers[t] = lambda tx, value: ConstantVariable(value)
+            handlers[t] = lambda tx, value: ConstantVariable.create(value)
         handlers[set] = lambda tx, value: SetVariable(
             [create(tx, x) for x in value], mutation_type=ValueMutationNew()
         )

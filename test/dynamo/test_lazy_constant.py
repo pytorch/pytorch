@@ -8,7 +8,7 @@ from unittest import mock
 import torch
 import torch._dynamo
 from torch._dynamo.comptime import comptime
-from torch._dynamo.source import ConstantSource
+from torch._dynamo.source import ConstantSource, LocalSource
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter, same
 from torch._dynamo.variables.base import SourceLocation, VariableTracker
@@ -233,6 +233,24 @@ class LazyCacheTests(TestCase):
 
 class LazyConstantVariableTests(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_lazy_hashability_uses_actual_type(self):
+        class Key:
+            __class__ = type(len)
+
+        lazy = LazyVariableTracker.create(Key(), LocalSource("key"))
+        self.assertFalse(lazy.is_hashable_lazy())
+        self.assertFalse(lazy.is_realized())
+
+        def read(x, mapping):
+            return x + mapping["used"], tuple(mapping)
+
+        key = Key()
+        x, mapping = torch.ones(1), {"used": 2, (key,): 3}
+        compiled = torch.compile(read, backend="eager", fullgraph=True)
+        result, keys = compiled(x, mapping)
+        self.assertEqual(result, x + 2)
+        self.assertIs(keys[1][0], key)
 
     def _assert_compile_count(self, fn, arg_sets, expected_frames):
         counter = CompileCounter()
