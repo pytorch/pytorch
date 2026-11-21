@@ -200,6 +200,10 @@ pub enum Op {
     TensorSize { t: V, dim: i64 },
     TensorDim(V),
     Guard(Box<GuardOp>),
+    /// In front of the instructions of a graph that is exported: runs what
+    /// was made of the graph in place of them when it holds for the values
+    /// of the call, and otherwise does nothing (see `Compiled::enter_graph`).
+    Graph(Arc<GraphSite>),
 }
 
 /// A call of a post-dispatch kernel. `operands` feed the prepared call sites
@@ -301,7 +305,8 @@ impl Op {
             | Op::FrameEnter(_)
             | Op::FrameLeave
             | Op::CaughtLasti
-            | Op::CaughtException => {}
+            | Op::CaughtException
+            | Op::Graph(_) => {}
             Op::MakeFunction { code, defaults, kwdefaults, annotations, annotate, closure } => {
                 f(*code);
                 for v in [defaults, kwdefaults, annotations, annotate, closure] {
@@ -435,6 +440,7 @@ impl Op {
                 | Op::CallObject(..)
                 | Op::Locals(..)
                 | Op::Dispatch(_)
+                | Op::Graph(_)
         )
     }
 
@@ -857,6 +863,7 @@ impl Function {
             Op::TensorSize { t, dim } => format!("tensor_size {} {}", n(t), dim),
             Op::TensorDim(t) => format!("tensor_dim {}", n(t)),
             Op::Guard(g) => format!("guard {}    ; else resume generic at {}", self.guard_repr(&g.cond), g.resume),
+            Op::Graph(site) => format!("graph {}", site.describe()),
         }
     }
 

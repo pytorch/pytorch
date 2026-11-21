@@ -241,9 +241,10 @@ pub struct Unit {
     /// for a block that keeps failing its guards, so that it settles on code
     /// that holds for every input.
     pub speculate: bool,
-    /// The graphs the graph pass made of the unit, each with its path, and
-    /// what it left out of them.
-    pub graphs: Vec<(Arc<GraphSite>, Path)>,
+    /// The graphs the graph pass made of the unit, each with its path and
+    /// the position of the path's first instruction in `insts`, and what it
+    /// left out of them.
+    pub graphs: Vec<(Arc<GraphSite>, Path, usize)>,
     pub left: Vec<Left>,
 }
 
@@ -944,8 +945,12 @@ pub fn finalize(unit: Unit, cf: &Compiled, id: u32) -> Result<BlockCode, String>
         return Err(format!("{} is needed after the block but not defined", func.value_name(v)));
     }
     let term_kills = crate::analysis::compute_kills(&mut insts, &unit.term, &analysis.live_out[b]);
+    // A path releases what its instructions release.
     let mut graphs = Vec::with_capacity(unit.graphs.len());
-    for (site, path) in unit.graphs {
+    for (site, mut path, first) in unit.graphs {
+        for (step, inst) in path.body.iter_mut().zip(&insts[first..]) {
+            step.kills = inst.kills.clone();
+        }
         site.install(path, id);
         graphs.push(site);
     }

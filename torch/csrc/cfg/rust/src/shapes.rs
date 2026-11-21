@@ -1,22 +1,24 @@
-//! The sizes a compiled region is called with.
+//! The sizes a form of a graph is for.
 //!
 //! A block of the VM has versions, each with the guards it was specialized
-//! under (`GuardCond`), and runs the first one whose guards hold. A region
-//! that a graph backend compiled has variants in the same way, and what they
-//! are guarded on is mostly sizes: of the tensors the region is handed, and
-//! the integers it is handed next to them. Both are ordinary values of the
-//! program, so one call's worth of them is a row of numbers (`tensor_key`),
-//! and the condition under which a graph holds is an expression over that
-//! row (`ShapeGuard`): every number is what it was when the graph was made,
-//! except the ones the graph leaves open, which only have to satisfy what
-//! its trace branched on.
+//! under (`GuardCond`), and runs the first one whose guards hold. A graph
+//! that was exported has forms in the same way (`graph::Exported`), and what
+//! a form is for is mostly sizes: of the tensors the graph is handed. They
+//! are ordinary values of the program, so one call's worth of them is a row
+//! of numbers (`tensor_key`, `key_of`), and the condition under which a form
+//! holds is an expression over that row (`ShapeGuard`): every number is what
+//! it was when the form was made (`ShapeGuard::exact`). A guard can also
+//! leave numbers open, which then only have to satisfy its conditions.
 
 use crate::capi::{self, TcfgTensorInfo};
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyList, PyTuple};
 
-/// What a list of tensors is like, for the key of a region's variants:
+type Obj = *mut ffi::PyObject;
+
+/// What a list of tensors is like, for the key of a graph's forms:
 ///
 /// - their kinds: rank, element type, device, `requires_grad`, dispatch keys
 ///   and whether they have strides, as bytes that only compare equal for
@@ -34,28 +36,17 @@ pub fn tensor_key<'py>(
     let api = capi::api()
         .ok_or_else(|| PyRuntimeError::new_err("torch.vm is not initialized"))?;
     let count = tensors.len();
-    let mut kinds: Vec<u8> = Vec::with_capacity(count * 24);
+    let mut kinds: Vec<u8> = Vec::with_capacity(count * KIND_BYTES);
     let mut numbers: Vec<i64> = Vec::with_capacity(count * 8 + ints.len());
     let mut offsets: Vec<i64> = Vec::with_capacity(count);
     for tensor in tensors.iter() {
-        let mut info = TcfgTensorInfo::empty();
-        if unsafe { (api.tensor_info)(tensor.as_ptr(), &mut info) } == 0 {
-            return Err(PyTypeError::new_err("tensor_key takes plain tensors"));
-        }
-        let rank = info.ndim as usize;
-        let strided = !info.strides.is_null();
-        kinds.extend_from_slice(&info.ndim.to_ne_bytes());
-        kinds.extend_from_slice(&info.dtype.to_ne_bytes());
-        kinds.extend_from_slice(&info.device.to_ne_bytes());
-        kinds.extend_from_slice(&(info.requires_grad | (strided as i32) << 1).to_ne_bytes());
-        kinds.extend_from_slice(&info.key_set.to_ne_bytes());
-        unsafe {
-            numbers.extend_from_slice(std::slice::from_raw_parts(info.sizes, rank));
-            if strided {
-                numbers.extend_from_slice(std::slice::from_raw_parts(info.strides, rank));
+        match unsafe { key_of(api, tensor.as_ptr(), &mut numbers) } {
+            Some((kind, offset)) => {
+                kinds.extend_from_slice(&kind);
+                offsets.push(offset);
             }
+            None => return Err(PyTypeError::new_err("tensor_key takes plain tensors")),
         }
-        offsets.push(info.storage_offset);
     }
     for value in ints.iter() {
         numbers.push(value.extract::<i64>()?);
@@ -68,6 +59,34 @@ pub fn tensor_key<'py>(
         PyBytes::new(py, bytes(&numbers)),
         PyBytes::new(py, bytes(&offsets)),
     ))
+}
+
+/// How many bytes say what kind a tensor is.
+pub const KIND_BYTES: usize = 24;
+
+/// What `tensor_key` says of one tensor, which may have no Python object:
+/// its kind and its storage offset, with its sizes and then its strides
+/// appended to `numbers`. None for what is no plain tensor.
+pub unsafe fn key_of(api: &capi::TcfgApi, tensor: Obj, numbers: &mut Vec<i64>) -> Option<([u8; KIND_BYTES], i64)> {
+    let mut info = TcfgTensorInfo::empty();
+    if (api.tensor_info)(tensor, &mut info) == 0 {
+        return None;
+    }
+    let rank = info.ndim as usize;
+    let strided = !info.strides.is_null();
+    let mut kind = [0u8; KIND_BYTES];
+    kind[0..4].copy_from_slice(&info.ndim.to_ne_bytes());
+    kind[4..8].copy_from_slice(&info.dtype.to_ne_bytes());
+    kind[8..12].copy_from_slice(&info.device.to_ne_bytes());
+    kind[12..16].copy_from_slice(&(info.requires_grad | (strided as i32) << 1).to_ne_bytes());
+    kind[16..24].copy_from_slice(&info.key_set.to_ne_bytes());
+    if rank > 0 {
+        numbers.extend_from_slice(std::slice::from_raw_parts(info.sizes, rank));
+        if strided {
+            numbers.extend_from_slice(std::slice::from_raw_parts(info.strides, rank));
+        }
+    }
+    Some((kind, info.storage_offset))
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -267,7 +286,35 @@ impl ShapeGuard {
 
     /// Whether the graph holds for a call with these numbers and offsets.
     fn holds(&self, numbers: &Bound<'_, PyBytes>, offsets: &Bound<'_, PyBytes>) -> bool {
-        let (numbers, offsets) = (numbers.as_bytes(), offsets.as_bytes());
+        self.holds_for(numbers.as_bytes(), offsets.as_bytes())
+    }
+
+    /// How many of the numbers are left open.
+    #[getter]
+    fn open(&self) -> usize {
+        self.open.iter().filter(|open| **open).count()
+    }
+}
+
+fn bytes_of(row: &[i64]) -> &[u8] {
+    unsafe { std::slice::from_raw_parts(row.as_ptr() as *const u8, std::mem::size_of_val(row)) }
+}
+
+impl ShapeGuard {
+    /// The guard of a graph that leaves nothing open: it holds for the
+    /// numbers it was made on.
+    pub fn exact(numbers: &[i64]) -> ShapeGuard {
+        let made_on = bytes_of(numbers).to_vec();
+        ShapeGuard { open: vec![false; numbers.len()], made_on, offsets: 0, conditions: Vec::new() }
+    }
+
+    /// Whether the graph holds for a call with these numbers (and no
+    /// storage offsets).
+    pub fn holds_numbers(&self, numbers: &[i64]) -> bool {
+        self.holds_for(bytes_of(numbers), &[])
+    }
+
+    fn holds_for(&self, numbers: &[u8], offsets: &[u8]) -> bool {
         if numbers.len() != self.made_on.len() || offsets.len() != self.offsets * 8 {
             return false;
         }
@@ -278,11 +325,5 @@ impl ShapeGuard {
             }
         }
         self.conditions.iter().all(|c| matches!(c.eval(numbers, offsets), Some(v) if v != 0))
-    }
-
-    /// How many of the numbers are left open.
-    #[getter]
-    fn open(&self) -> usize {
-        self.open.iter().filter(|open| **open).count()
     }
 }
