@@ -248,6 +248,15 @@ def _process_output_file(
         input_files_data: Dictionary mapping input file paths to their metadata
     """
 
+    # Only open the input files that hold a tensor of this output file: a sharded
+    # save writes one file per (rank, output file), and every remote open costs a
+    # metadata request.
+    fqns = output_data.fqn_data.keys()
+    input_files_data = {
+        f: data
+        for f, data in input_files_data.items()
+        if not fqns.isdisjoint(data.metadata)
+    }
     header = _build_header(output_data)
     sorted_tensors = sorted(
         output_data.fqn_data.items(), key=lambda x: x[1].offset_in_file

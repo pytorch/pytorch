@@ -7,6 +7,8 @@ import shutil
 import tempfile
 import unittest
 import uuid
+from collections import Counter
+from unittest.mock import patch
 
 import fsspec
 from fsspec.implementations.local import LocalFileSystem
@@ -242,6 +244,37 @@ class TestConsolidateOnFsspec(_MemoryFsTestCase):
 
         data = self._read_bytes(f"{self.root}/model-00001-of-00001.safetensors")
         self.assertEqual(load(data), {"w": self.w, "b": self.b})
+
+    def test_consolidate_opens_only_shards_of_each_output(self) -> None:
+        from safetensors.torch import load
+
+        self._write_remote_shards()
+        opened = []
+        create_stream = _FileSystem.create_stream
+
+        def spy(fs, path, mode):
+            if mode == "rb":
+                opened.append(os.path.basename(path))
+            return create_stream(fs, path, mode)
+
+        # b is only in shard 1, w is in both, and nothing holds missing.
+        with (
+            patch.object(_FileSystem, "create_stream", spy),
+            self.assertWarnsRegex(UserWarning, r"^Skipping 1 tensor\(s\)"),
+        ):
+            consolidate_safetensors_files(
+                input_dir=f"{self.root}/sharded",
+                output_dir=self.root,
+                fqn_to_index_mapping={"b": 1, "w": 2, "missing": 3},
+            )
+
+        # One header read per shard, then one open per output file that needs it.
+        shard1, shard2 = sorted(self.shards)
+        self.assertEqual(Counter(opened), {shard1: 3, shard2: 2})
+        files = [f"{self.root}/model-0000{i}-of-00003.safetensors" for i in (1, 2, 3)]
+        self.assertEqual(load(self._read_bytes(files[0])), {"b": self.b})
+        self.assertEqual(load(self._read_bytes(files[1])), {"w": self.w})
+        self.assertEqual(load(self._read_bytes(files[2])), {})
 
     def test_local_and_remote_outputs_are_identical(self) -> None:
         local_in = os.path.join(self.temp_dir, "sharded")
