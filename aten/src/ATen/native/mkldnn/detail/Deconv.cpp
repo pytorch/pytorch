@@ -1,5 +1,5 @@
-#include <ATen/native/mkldnn/detail/Conv.h>
 #include <ATen/native/mkldnn/detail/Deconv.h>
+#include <ATen/native/mkldnn/detail/Conv.h>
 #include <ATen/native/mkldnn/Utils.h>
 
 #if AT_MKLDNN_ENABLED()
@@ -16,29 +16,6 @@ namespace {
 // Ported from ideep::deconv_forward_params.
 struct deconv_forward_params {
   deconv_forward_params() {}
-
-  deconv_forward_params(
-      dnnl::deconvolution_forward::primitive_desc&& pd,
-      dnnl::deconvolution_forward&& primitive,
-      int groups,
-      ideep::attr_t&& op_attr)
-      : pd(std::move(pd)),
-        primitive(std::move(primitive)),
-        groups(groups),
-        op_attr(std::move(op_attr)),
-        bias_attr(ideep::attr_t()) {}
-
-  deconv_forward_params(
-      dnnl::deconvolution_forward::primitive_desc&& pd,
-      dnnl::deconvolution_forward&& primitive,
-      int groups,
-      ideep::attr_t&& op_attr,
-      ideep::attr_t&& bias_attr)
-      : pd(std::move(pd)),
-        primitive(std::move(primitive)),
-        groups(groups),
-        op_attr(std::move(op_attr)),
-        bias_attr(std::move(bias_attr)) {}
 
   dnnl::deconvolution_forward::primitive_desc pd;
   dnnl::deconvolution_forward primitive;
@@ -676,11 +653,6 @@ void convolution_transpose_backward_data_compute_v3(
   auto weights_ = weights.make_grouped_weights(groups, true);
   auto dilates_ = ideep::utils::get_compatible_dilates(dilates);
 
-  // bool is_nhwc = diff_dst.get_desc().is_nhwc();
-  // bool is_ndhwc = diff_dst.get_desc().is_ndhwc();
-  // auto format_tag = is_nhwc ? tag::nhwc : (is_ndhwc ? tag::ndhwc : tag::any);
-  // auto diff_dst_desc = diff_dst.get_desc().to_format(format_tag);
-  // auto weights_desc = weights_.get_desc().to_format_any();
   auto format_tag = dnnl::memory::format_tag::any;
   auto ndims = diff_dst.get_desc().get_dims().size();
   if (ndims == 4) {
