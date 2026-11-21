@@ -44,6 +44,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/tensor_iterator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test_parallel.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/thread_init_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/tunableop_execution_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/type_ptr_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/type_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/undefined_tensor_test.cpp
@@ -79,6 +80,8 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_scan_utils_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_allocatorTraceTracker_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_stream_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_tunableop_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_tunableop_legacy_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_vectorized_test.cu)
 if(CAFFE2_USE_CUDNN)
   list(APPEND ATen_CUDA_TEST_SRCS

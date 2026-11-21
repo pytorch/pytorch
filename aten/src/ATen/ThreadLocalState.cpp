@@ -1,4 +1,5 @@
 #include <ATen/ThreadLocalState.h>
+#include <atomic>
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE) && !defined(BUILD_LITE_INTERPRETER)
 #include <ATen/autocast_mode.h>
@@ -13,11 +14,38 @@
 
 namespace at {
 
+namespace {
+std::atomic<bool> managed_tunableop{false};
+thread_local TunableOpBinding tunableop_binding;
+} // namespace
+
+void InitializeManagedTunableOp() {
+  managed_tunableop.store(true, std::memory_order_release);
+}
+
+bool IsManagedTunableOp() {
+  return managed_tunableop.load(std::memory_order_acquire);
+}
+
+const TunableOpBinding& GetTunableOpBinding() {
+  return tunableop_binding;
+}
+
+void SetTunableOpBinding(TunableOpBinding binding) {
+  tunableop_binding = std::move(binding);
+}
+
+TunableOpBinding DisabledTunableOpBinding() {
+  static const auto disabled = std::make_shared<const TunableOpExecutionBinding>();
+  return disabled;
+}
+
 ThreadLocalState::ThreadLocalState()
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
       fake_tensor_mode_state_(c10::impl::FakeTensorModeTLS::get_state()),
       in_kernel_invocation_state_(c10::impl::FakeTensorModeTLS::in_kernel_invocation()),
       debug_info_(c10::ThreadLocalDebugInfo::current()),
+      tunableop_binding_(GetTunableOpBinding()),
       rf_tls_(at::get_record_function_tls_()), functorch_tls_(functorch::getCopyOfFuncTorchTLS()),
       autograd_tls_(c10::AutogradState::get_tls_state()),
       graph_exec_group_state_(c10::GraphExecGroupState::get_tls_state()),
@@ -75,6 +103,7 @@ void ThreadLocalState::setThreadLocalState(
   at::set_dtensor_allow_implicit_replication(state.dtensor_allow_implicit_replication_);
 
   c10::ThreadLocalDebugInfo::_forceCurrentDebugInfo(state.debug_info_);
+  SetTunableOpBinding(state.tunableop_binding_);
 
   c10::impl::_force_tls_local_dispatch_key_set(state.dispatch_key_);
 
