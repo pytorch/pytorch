@@ -1034,6 +1034,7 @@ class DeviceCachingAllocator {
       stats.reserved_bytes[stat_type].increase(mapped_range.size);
     });
 
+    stats.num_device_alloc++;
     record_trace(
         TraceEntry::SEGMENT_MAP,
         reinterpret_cast<size_t>(mapped_range.ptr),
@@ -1180,6 +1181,7 @@ class DeviceCachingAllocator {
     });
     TORCH_INTERNAL_ASSERT(p.block != nullptr && p.block->ptr != nullptr);
 
+    stats.num_device_alloc++;
     record_trace(
         TraceEntry::SEGMENT_ALLOC,
         reinterpret_cast<size_t>(p.block->ptr),
@@ -1196,6 +1198,8 @@ class DeviceCachingAllocator {
   void synchronize_and_free_events(
       const std::shared_ptr<GatheredContext>& context,
       PrivatePool* pool = nullptr) {
+    stats.num_sync_all_streams++;
+
     // This function syncs (event.wait()), so graph capture must not be
     // underway.
     TORCH_INTERNAL_ASSERT(!is_capture_context());
@@ -1252,6 +1256,7 @@ class DeviceCachingAllocator {
      */
     TORCH_INTERNAL_ASSERT(!block->expandable_segment);
 
+    stats.num_device_free++;
     record_trace(
         TraceEntry::SEGMENT_FREE,
         reinterpret_cast<size_t>(block->ptr),
@@ -1338,6 +1343,7 @@ class DeviceCachingAllocator {
       block->pool->owner_PrivatePool->allocation_count--;
     }
 
+    stats.num_device_free++;
     record_trace(
         TraceEntry::SEGMENT_UNMAP,
         reinterpret_cast<size_t>(unmapped.ptr),
@@ -1941,6 +1947,9 @@ class DeviceCachingAllocator {
       stats.requested_bytes[statType].reset_accumulated();
     }
     stats.num_alloc_retries = 0;
+    stats.num_sync_all_streams = 0;
+    stats.num_device_alloc = 0;
+    stats.num_device_free = 0;
   }
 
   void resetPeakStats() {
