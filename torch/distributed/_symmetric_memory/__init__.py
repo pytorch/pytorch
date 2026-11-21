@@ -629,7 +629,7 @@ def _check_and_verify_fp8_all_gather_scale_mode(
         return _ScaleMode.UNSCALED
     elif recipe == ScalingType.TensorWise and scale.numel() == 1:
         return _ScaleMode.TENSOR_WISE
-    elif recipe == ScalingType.RowWise and scale.shape[-1] == 1:
+    elif recipe == ScalingType.RowWise and scale.dim() > 0 and scale.shape[-1] == 1:
         if scale.shape[:-1] == shard.shape[:-1]:
             return _ScaleMode.ROW_WISE_SHARDED
         if list(scale.shape[:-1]) == full_shape[:-1]:
