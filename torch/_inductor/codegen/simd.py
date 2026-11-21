@@ -1198,8 +1198,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # kernel inputs and outputs are not set yet, we'd need a deeper refactor
         # to do it this way
 
-        if len(index.atoms(sympy.ceiling)):
-            for a in index.atoms(sympy.ceiling):
+        if len(index.atoms(sympy.ceiling, FloorDiv)):
+            for a in index.atoms(sympy.ceiling, FloorDiv):
                 # for nested exprs, atoms yields top level first (?)
                 # so if everything goes fine, lower level replacements will come up empty
                 symbols = a.free_symbols
@@ -1207,7 +1207,14 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     symbol_is_type(s, (SymT.SIZE, SymT.PRECOMPUTED_SIZE))
                     for s in symbols
                 ):
-                    replacements = {a: V.graph.sizevars.lookup_precomputed_size(a)}
+                    sizevars = V.graph.sizevars
+                    # ps symbols are nonnegative, so a nonpositive atom is hoisted negated
+                    if sizevars.statically_known_geq(a, 0):
+                        replacements = {a: sizevars.lookup_precomputed_size(a)}
+                    elif sizevars.statically_known_leq(a, 0):
+                        replacements = {a: -sizevars.lookup_precomputed_size(-a)}
+                    else:
+                        continue
                     index = sympy_subs(index, replacements)
 
         simp_index = self.simplify_indexing(index)
