@@ -1869,10 +1869,13 @@ torch.equal(g(x, [w[:1]], 2, 6), hands_on(x, [w[:1]], 2, 6))  # True: other item
 ```
 
 A call with `*` is an operation only where the operator it runs enters no
-Python code. On a GPU that is not so for `bmm`, and for what comes down to
-it (`matmul` of two stacks of matrices), whose CUDA kernel is entered
-through a Python function (`torch._native`): a path ends in front of such a
-call of them, where a call that is written out goes on.
+Python code. What a kernel enters by itself is not such code. On a GPU the
+kernel of `bmm`, and of what comes down to it (`matmul` of two stacks of
+matrices), is chosen at every call by a Python function of torch's own
+(the router of the operator, in `torch._native`), and an operator that
+warns has the `warnings` module make and show its message: those frames
+are the kernel's, and a call of such an operator with `*` is an operation
+like one that is written out.
 
 ### What a call names with a dict, and what gives back what it was handed
 
@@ -1883,9 +1886,10 @@ random numbers only at a rate (`scaled_dot_product_attention` with its
 other, with the rate checked at every call; at another rate it is one under
 the rule of "Writes", as every operation that only draws now is, whether it
 is a call site or not. A call with `**` is an operation under the condition
-of one with `*`, that the operator it runs enters no Python code: on a GPU
-the attention comes down to `bmm` where torch is built without the fused
-attention kernels, and a path then ends in front of a call of it with `**`.
+of one with `*`, that the operator it runs enters no Python code: an
+attention that comes down to `bmm` on a GPU, where torch is built without
+the fused attention kernels, is an operation there too, since the router
+of `bmm` is its kernel's.
 `contiguous` of a tensor that is contiguous runs no
 kernel and gives the tensor back; it is the operation all the same, which
 copies where the tensor of another call is laid out otherwise. A tuple that
@@ -2097,11 +2101,19 @@ graphs. A second backward of one call raises what eager raises, and so
 does a backward behind a write in place to a tensor it needs (an input, a
 result, what a result is a view of), with eager's text: the tensor it names
 is the first one that eager's nodes would find changed, and the node it
-names is the one eager names ("Limits" has the exceptions). Hooks on
-results and on inputs run as they do for eager. A result that is a view is
-eager's view, made on the tape behind the node. A graph that reads a view
-which it also gives as a result is cut in two in front of that read, each
-part with a node of its own.
+names is the one eager names. Hooks on
+results and on inputs run as they do for eager, but for a result that
+another result of the graph is computed of ("Limits"). A result that is a
+view is eager's view, made on the tape behind the node. A graph that reads
+a view which it also gives as a result is cut in two in front of that read,
+each part with a node of its own.
+
+What a graph gives is at the version eager's is at (`_version`), the
+statistics of a batch norm included. A backward for some of the inputs
+(`torch.autograd.grad(loss, [w])`, `backward(inputs=[w])`) runs the nodes
+of eager's that lead to those inputs and no others, as the autograd engine
+runs them: the gradients are the same bits, the work for the other inputs
+is not done, and a tensor that only the other nodes kept is not looked at.
 
 With `torch.backends.cudnn.benchmark` on, cuDNN picks the algorithm of a
 convolution by what it measured and remembers what it picked per thread, so
@@ -2449,21 +2461,18 @@ mode (forward, loss, backward and update together), since a dropout that
 drops and an attention with a dropout rate are operations only where
 nothing that can fail has been taken down in front of them ("Writes").
 
-With the models on a GPU (one H100, counted the same way) the timm models,
-the vision transformer and hf_DistilBert have the graphs of the table above.
-The models that call `scaled_dot_product_attention` with `**` have fewer of
-their operations in graphs there, in the build of torch they were counted
-with, which has no fused attention kernels: the attention comes down to
-`bmm`, whose CUDA kernel is entered through a Python function, so the call
-is no operation ("What a call names with a dict"), and the graph of a layer
-ends in front of it and another starts behind it:
-
-| model, on a GPU | graphs that run | runs of a graph in a call | operations of a call in them |
-|---|---|---|---|
-| DistillGPT2 | 5 | 15 | 189 of 253 |
-| MobileBertForMaskedLM | 7 | 170 | 1127 of 1274 |
-| whisper-tiny | 6 | 30 | 173 of 389 |
-| Qwen3-0.6B (HuggingFace) | 4 | 31 | 2097 of 2217 |
+With the models on a GPU (one H100, counted the same way) every model of
+the table above has the graphs it has there, with the same number of runs
+in a call and the same operations in them; the profiler counts a few more
+operations in a call of eager mode for three of them (253 for DistillGPT2,
+1274 for MobileBertForMaskedLM, 389 for whisper-tiny). That holds for the
+models that call `scaled_dot_product_attention` with `**` as well, in the
+build of torch they were counted with, which has no fused attention
+kernels: the attention comes down to `bmm` there, whose CUDA kernel is
+chosen by the router of the operator, and the frames of the router are the
+kernel's ("What a call names with a dict"). Qwen3-0.6B (HuggingFace) was
+counted on a GPU only: 4 graphs that run 31 times in a call, with 2097 of
+the about 2217 operations of a call in them.
 
 The outputs are eager's bit for bit there as well. With a GPU present
 `torch.cuda.is_current_stream_capturing()`, which the mask code of a
@@ -2504,10 +2513,10 @@ What graphs do not do at this stage:
   to call (`inspect.signature`). These are what the paths of transformer
   models end at ("Models").
 - A call with `*` or `**` is an operation only where the operator it runs
-  enters no Python code. On a GPU the kernel of `bmm` is entered through a
-  Python function, so such a call of `bmm`, or of what comes down to it,
-  ends a path ("Methods read off a tensor, and what a call spreads";
-  "Models" has what that costs a transformer).
+  enters no Python code ("Methods read off a tensor, and what a call
+  spreads"). The router of an operator whose kernel is chosen in Python and
+  what shows a warning that a kernel gave are known by name and are the
+  kernel's; any other Python code that a kernel runs ends a path.
 - An operation that draws random numbers is one of a path only where
   nothing that can fail has been taken down in front of it ("Writes"). In
   the layers of a transformer in training mode that is seldom so, and their
@@ -2527,15 +2536,7 @@ What graphs do not do at this stage:
   was written to in place, and has by then added up the gradient of every
   leaf whose nodes all ran before that one; the node of a graph raises
   before it gives anything, so no input of the graph has a gradient of that
-  backward. The error and its text are eager's, with two exceptions. An
-  operation whose kernel writes to its own result (`aminmax` on the CPU)
-  leaves that result at another version than eager does, and the text has
-  those versions (`is at version 3; expected version 2` where eager says 1
-  and 0). And a backward that is asked for some inputs only
-  (`torch.autograd.grad(loss, [w])`, `backward(inputs=...)`) runs the whole
-  backward of a graph, where eager runs the nodes on the way to those
-  inputs: the gradients are the same, but a tensor that only the other
-  nodes kept and that was written to in place raises here and not in eager.
+  backward. The error and its text are eager's.
 - A backward that is to be differentiated again, or one for some results of
   a node of eager's with several, runs the graph once more on the tape: a
   graph that draws random numbers or writes to a tensor from outside raises
@@ -2546,6 +2547,25 @@ What graphs do not do at this stage:
   is on. The two settings are the process's: a convolution that another
   thread runs in that time runs that way too. They are as the caller set
   them again when the call returns.
+- With the engine's backward the results of a graph share one node, so the
+  gradient at a result that another result of the graph is computed of (a
+  function that returns its logits and the loss it computed of them) is not
+  eager's: what arrives at such a result is what its uses behind the call
+  give, without what the other result gives through it.
+  `torch.autograd.grad(loss, [logits])` raises for a tensor that was not
+  used, `logits.retain_grad()` leaves `logits.grad` at None, and a hook on
+  `logits` is called with None, or with the gradient of the uses behind the
+  call alone; a hook there that changes the gradient does not change what
+  the inputs get. The gradients of the inputs are eager's otherwise, and on
+  eager's tape (`Graphs(backward=False)`) all of it is.
+- A warning that a kernel gives is given at every call, as in eager. One
+  that the Python side of an operation gives (`x.T` of a tensor with three
+  dimensions, `torch.tensor` of a tensor), or an operator that is made of
+  other operators (an attention on a GPU, where torch is built without the
+  fused attention kernels), is given by the calls that run the function's
+  instructions: a call that the programs of the engine's backward or the
+  callable of a pass run gives none, and the call in which a graph is taken
+  down a second time or exported gives the first kind twice.
 - A loss behind a write is no part of the graph with the engine's backward
   either: a training graph still ends in front of a loss that can fail
   behind a batch norm's write to its statistics ("Writes"), and the nodes of
