@@ -337,12 +337,16 @@ def _plan(
                 "is given the graphs that Graphs makes, so it goes behind it"
             )
     compiling = [one for one in over_graph if getattr(one, "compiles", False)]
-    if len(compiling) > 1:
+    # AOTAutograd() in front of Inductor() is one way to compile: AOTAutograd
+    # derives the backward of a graph and Inductor compiles both.
+    names = [getattr(one, "engine", None) for one in compiling]
+    both = names == ["aot_autograd", "inductor"] and over_graph[-2:] == compiling
+    if len(compiling) > 1 and not both:
         raise ValueError(
             f"passes has {said(compiling[0])} and {said(compiling[1])}: a graph is "
             "compiled once, by the last pass over it"
         )
-    if compiling and over_graph[-1] is not compiling[0]:
+    if compiling and not both and over_graph[-1] is not compiling[0]:
         raise ValueError(
             f"passes has {said(over_graph[-1])} behind {said(compiling[0])}: what a "
             "pass that compiles a graph returns is run, not rewritten, so it is the "
