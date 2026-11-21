@@ -1374,6 +1374,40 @@ class TestFullyShardSingleRank(FSDPTestMultiThread):
                 self.assertEqual(param.grad.to_local(), ref_param.grad.to_local())
 
     @skip_if_lt_x_gpu(1)
+    def test_single_rank_adds_without_copy(self):
+        # bf16 gradients add into fp32 sharded gradients without a copy once
+        # those exist, unless a division needs the copy
+        self.run_subtests(
+            {"divide_factor": [None, 3.0]},
+            self._test_single_rank_adds_without_copy,
+        )
+
+    def _test_single_rank_adds_without_copy(self, divide_factor: float | None):
+        model, ref_model = self._init_models(
+            mesh=self._shard_mesh(),
+            mp_policy=MixedPrecisionPolicy(torch.bfloat16, torch.float32),
+        )
+        for module in (model, ref_model):
+            for submodule in (module[0], module[2]):
+                if divide_factor is not None:
+                    submodule.set_gradient_divide_factor(divide_factor)
+        num_copies = []
+        for _ in range(2):
+            inp = torch.randn(4, 16, device=device, dtype=torch.bfloat16)
+            for module in (model, ref_model):
+                loss = module(inp).sum()
+                with _RecordFuncs() as funcs:
+                    loss.backward()
+                if module is model:
+                    num_copies.append(funcs.count(torch.ops.aten._to_copy.default))
+        # One copy per weight and bias, then none when adding directly
+        self.assertEqual(num_copies, [4, 4 if divide_factor else 0])
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            if ref_param.grad is not None:
+                grad, ref_grad = param.grad.to_local(), ref_param.grad.to_local()
+                self.assertEqual(grad, ref_grad, atol=0, rtol=0)
+
+    @skip_if_lt_x_gpu(1)
     def test_single_rank_hook_reads_grad_before_free(self):
         # A hook that reads the gradient late on the reduce-scatter stream and
         # then drops it, as an optimizer step in backward does, reads the same
