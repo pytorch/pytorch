@@ -1400,23 +1400,6 @@ def get_allocator_backend() -> str:
     return torch._C._cuda_getAllocatorBackend()
 
 
-_ALLOC_FN = ctypes.CFUNCTYPE(
-    ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
-)
-_FREE_FN = ctypes.CFUNCTYPE(
-    None, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
-)
-
-
-def _as_ptr_int(ptr: Any) -> int:
-    if ptr is None:
-        return 0
-    value = getattr(ptr, "value", ptr)
-    if value is None:
-        return 0
-    return int(value)
-
-
 def _make_locality_allocation_prop(
     driver: Any, device_id: int, locality_domain_id: int
 ) -> Any:
@@ -1438,12 +1421,11 @@ def _make_device_access_desc(driver: Any, device_id: int) -> Any:
     return desc
 
 
-class _LocalizedAllocatorOwner:
-    """Python callbacks require serialized allocator activity across all threads.
+class _LocalizedSegmentAllocator:
+    """Allocates and frees the localized segments a ``LocalizedAllocator`` pool requests.
 
-    The native allocator can hold its mutex while acquiring the GIL for these
-    callbacks. Another thread holding the GIL in an allocator-state query can
-    therefore deadlock; a Python lock here cannot fix that lock inversion.
+    This object and its native allocator reference each other, so both live for the
+    process. It must not reference a ``LocalizedAllocator``, which would then too.
     """
 
     def __init__(self, locality_domain_id: int, device_id: int) -> None:
@@ -1467,27 +1449,21 @@ class _LocalizedAllocatorOwner:
         self._make_allocation_prop = _make_locality_allocation_prop
         self._make_access_desc = _make_device_access_desc
         self._log_error = logging.getLogger(__name__).error
-        self._alloc_cb = _ALLOC_FN(self._alloc_callback)
-        self._free_cb = _FREE_FN(self._free_callback)
-        alloc_ptr = ctypes.cast(self._alloc_cb, ctypes.c_void_p).value
-        free_ptr = ctypes.cast(self._free_cb, ctypes.c_void_p).value
-        if alloc_ptr is None or free_ptr is None:
-            raise RuntimeError("Failed to create localized allocator callbacks")
-        self.alloc_ptr = alloc_ptr
-        self.free_ptr = free_ptr
         self._context = self._check_result(
             # pyrefly: ignore [missing-attribute]
             self._driver.cuDevicePrimaryCtxRetain(device_id)
         )
+        # Pools share this native allocator and never drop its last reference: the
+        # caching allocator destroys pools under its mutex, and destroying the
+        # callbacks takes the GIL, which a thread waiting for the mutex can hold.
+        self.cuda_allocator = torch._C._cuda_createPythonAllocator(
+            self._alloc_callback, self._free_callback
+        )
 
     def _alloc_callback(self, size: int, device: int, stream: int | None) -> int:
-        try:
-            if self._is_finalizing():
-                return 0
-            return self.allocate(size, device, stream)
-        except BaseException as error:
-            self._report_errors([("allocation", error)])
+        if self._is_finalizing():
             return 0
+        return self.allocate(size, device, stream)
 
     def _free_callback(
         self, ptr: int | None, size: int, device: int, stream: int | None
@@ -1526,9 +1502,6 @@ class _LocalizedAllocatorOwner:
             errors.append((operation.__name__, error))
             return False
 
-    def cuda_allocator(self) -> _cuda_CUDAAllocator:
-        return torch._C._cuda_customAllocator(self.alloc_ptr, self.free_ptr)
-
     def allocate(self, size: int, device_id: int, stream: int | None) -> int:
         if size == 0:
             return 0
@@ -1555,7 +1528,14 @@ class _LocalizedAllocatorOwner:
         mapped = False
         try:
             # pyrefly: ignore [missing-attribute]
-            handle = check(drv.cuMemCreate(padded_size, prop, 0))
+            err, created = drv.cuMemCreate(padded_size, prop, 0)
+            # As in the caching allocator, only out-of-memory is a failed allocation
+            # (it frees cached blocks and retries); other CUDA errors raise.
+            # pyrefly: ignore [missing-attribute]
+            if err == drv.CUresult.CUDA_ERROR_OUT_OF_MEMORY:
+                return 0
+            check((err,))
+            handle = created
             ptr = int(
                 check(
                     # pyrefly: ignore [missing-attribute]
@@ -1777,9 +1757,8 @@ class MemPool(_MemPool):
         return snapshot
 
 
-# Native pools retain only callback addresses, not the Python callback owners.
-# Reuse one owner per device/domain; a native reference also pins it through shutdown.
-_LOCALITY_ALLOCATORS: dict[tuple[int, int], _LocalizedAllocatorOwner] = {}
+# Reuse one segment allocator per device/domain.
+_LOCALITY_ALLOCATORS: dict[tuple[int, int], _LocalizedSegmentAllocator] = {}
 
 
 class LocalizedAllocator(_CUDAAllocator):
@@ -1795,13 +1774,6 @@ class LocalizedAllocator(_CUDAAllocator):
         device (torch.device or int, optional): Owning CUDA device.
             Defaults to the current device.
 
-    .. warning::
-        Concurrent allocator activity is unsupported. Allocation, freeing, and
-        allocator-state queries (including ``MemPool.use_count()``) from other
-        threads must not overlap use of this allocator. Native allocator
-        callbacks acquire the GIL while holding the allocator mutex, which can
-        deadlock with a thread holding the GIL while waiting for that mutex.
-
     .. note::
         Use this allocator only on its owning device; access from other devices
         is not supported. Callback owners are retained for the process lifetime,
@@ -1809,6 +1781,8 @@ class LocalizedAllocator(_CUDAAllocator):
         One owner and primary-context reference per device/domain are deliberately
         retained, including during interpreter shutdown.
         Releasing physical memory waits for its allocation stream.
+        Running out of device memory fails the allocation, so the caching
+        allocator can free cached memory and retry; other CUDA errors raise.
         Freeing is best-effort: failures are logged, not raised. Memory that
         cannot safely be unmapped is left for the driver to reclaim at exit.
     """
@@ -1823,16 +1797,11 @@ class LocalizedAllocator(_CUDAAllocator):
         device_id = _get_device_index(device, optional=True)
         key = (device_id, locality_domain_id)
         if key not in _LOCALITY_ALLOCATORS:
-            owner = _LocalizedAllocatorOwner(locality_domain_id, device_id)
-            # Deliberately retain one owner/context per device/domain until process exit.
-            # A Python cache alone can be cleared before the last native pool teardown.
-            incref = ctypes.pythonapi.Py_IncRef
-            incref.argtypes = [ctypes.py_object]
-            incref.restype = None
-            incref(owner)
-            _LOCALITY_ALLOCATORS[key] = owner
+            _LOCALITY_ALLOCATORS[key] = _LocalizedSegmentAllocator(
+                locality_domain_id, device_id
+            )
         self._localized_allocator = _LOCALITY_ALLOCATORS[key]
-        super().__init__(self._localized_allocator.cuda_allocator())
+        super().__init__(self._localized_allocator.cuda_allocator)
 
     @property
     def locality_domain_id(self) -> int:
