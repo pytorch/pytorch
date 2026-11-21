@@ -699,7 +699,7 @@ class BaseListVariable(VariableTracker):
         key_fn_var = kwargs.pop("key", ConstantVariable.create(None))
         reverse = kwargs.pop(
             "reverse", ConstantVariable.create(False)
-        ).as_python_constant()
+        ).guard_as_python_constant()
         if len(kwargs) != 0:
             raise_args_mismatch(tx, "sort", "0 kwargs", f"{len(kwargs)} kwargs")
 
@@ -1126,7 +1126,7 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
                 [iterator, args[0]],
                 {"not_found_msg": ConstantVariable.create(self._index_not_found_msg)},
             )
-        x = specialize_symnode(args[0]).as_python_constant()
+        x = specialize_symnode(args[0]).guard_as_python_constant()
         start, stop, step = self.start(), self.stop(), self.step()
         in_range = (start <= x < stop) if step > 0 else (stop < x <= start)
         if in_range and ((x - start) % step) == 0:
@@ -2847,6 +2847,22 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._bytearray_constant_method(tx, args, kwargs, "replace")
 
+    def bytearray_removeprefix(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "removeprefix")
+
+    def bytearray_removesuffix(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "removesuffix")
+
     def bytearray_translate(
         self,
         tx: "InstructionTranslatorBase",
@@ -2928,6 +2944,8 @@ class ByteArrayVariable(VariableTracker):
         "capitalize": Method(bytearray_capitalize),
         "swapcase": Method(bytearray_swapcase),
         "replace": Method(bytearray_replace),
+        "removeprefix": Method(bytearray_removeprefix),
+        "removesuffix": Method(bytearray_removesuffix),
         "translate": Method(bytearray_translate),
         "center": Method(bytearray_center),
         "ljust": Method(bytearray_ljust),

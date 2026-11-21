@@ -672,9 +672,8 @@ def _guard_source_globals(output_graph: "OutputGraphGuardsState") -> set[str]:
 
 def _recorded_guard_globals(guards_state: "GuardsState") -> set[str]:
     """Global names required to rebuild or check the retained guard tree."""
-    # Wider than their originating_sources: the serialized global_scope is the
-    # serializer's record of the names the guard tree needs. Alongside order roots, it
-    # carries a DUPLICATE_INPUT's source_b and a cpp-form SHAPE_ENV guard's
+    # Alongside guards' originating sources and dictionary order roots, the
+    # serialized global_scope carries DUPLICATE_INPUT's source_b and C++ SHAPE_ENV's
     # shape_env_sources. A SHAPE_ENV guard installed as a Python lambda reads
     # its G['NAME'] operands from the same scope, and none of them reaches
     # global_scope -- shape_env_sources is filled from the cpp code parts alone
@@ -2425,10 +2424,9 @@ class AOTCompiledModel:
         namespace (the module's dispatch otherwise, ``torch.compile(mod).forward``,
         included), or the target a Dynamo wrapper is seen through to does not
         resolve itself. In these cases the artifact uses its saved global scope.
-        A guard on a saved global cannot see later rebindings, and a guard on a
-        missing name fails. Some dictionaries supply only the order of their
-        keys for rebuilding guards. Loading warns when the artifact requires a
-        global name from this scope and explains why a live scope was unavailable.
+        Guards on saved globals cannot see later rebinding or changes to live
+        dictionary key order. A guard on a missing name fails. Loading warns when
+        an artifact needs a global name and explains why the live scope was unavailable.
 
         The function ``model.forward`` resolves to is the one bound as ``forward``
         seen through Dynamo's own wrappers -- the ones ``torch.compile``,
@@ -2511,10 +2509,9 @@ class AOTCompiledModel:
             log.warning(
                 "no live guard scope could be resolved from model.forward, so "
                 "global names required by this artifact resolve against the scope "
-                "rebuilt from the serialized bytecode instead. Some dictionaries "
-                "supply only the order of their keys for rebuilding guards. "
-                "A runtime guard on a captured global cannot detect rebinding; "
-                "one on a name absent from that scope cannot be satisfied, so "
+                "rebuilt from the serialized bytecode instead. Guards on saved globals "
+                "cannot detect later rebinding or changes to live dictionary key order. "
+                "A guard on a name absent from that scope cannot be satisfied, so "
                 "the call will report no match. %s.",
                 forward_not_resolved_reason,
             )
