@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
     from torch._dynamo.output_graph import OutputReturnInfo
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
     from torch.export._trace import _DynamicShapesInput
     from torch.fx import Node
     from torch.fx.node import Argument, Target
@@ -259,7 +259,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         flat_args_dynamic_dims: list[set[int]],
         graph_input_order: dict[int, int],
         graph_output_map: dict[int, OutputReturnInfo],
-        fake_mode: FakeTensorMode | None = None,
+        fake_mode: FakeTensorMode | CppFakeTensorMode | None = None,
         graph_inputs: dict[int, Source | None] | None = None,
     ) -> None:
         super().__init__(module)
@@ -447,7 +447,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 def _suggest_or_raise_constraint_violation(
     module_to_trace: torch.nn.Module,
     orig_callable: Callable[..., Any],
-    fake_mode: FakeTensorMode | None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None,
     graph_capture_output: CaptureOutput,
     args: Any,
     kwargs: Any,

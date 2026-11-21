@@ -68,7 +68,8 @@ __global__ void convert_indices_from_coo_to_csr_cuda_kernel(output_t* data_out, 
 template <typename input_t, typename output_t>
 void convert_indices_from_coo_to_csr_cuda(const Tensor& result, const Tensor& input, const int64_t size) {
   int64_t numel = input.numel();
-  const input_t* data_in = input.const_data_ptr<input_t>();
+  const auto input_ = input.expect_contiguous();
+  const input_t* data_in = input_->const_data_ptr<input_t>();
   output_t* data_out = result.mutable_data_ptr<output_t>();
 
   if (numel == 0) {
@@ -338,6 +339,10 @@ Tensor& add_out_sparse_compressed_cuda(
 
     if (only_sparse_compressed_add_trivial_cases(self, other, alpha, out)) {
       return out;
+    }
+
+    if (at::sparse_csr::has_noncontiguous_values(out)) {
+      return at::sparse_csr::run_on_contiguous_clone(out, [&](Tensor& r) { add_out_sparse_compressed_cuda(self, other, alpha, r); });
     }
 
     // csrgeam2 must not read from storage that out is written to and

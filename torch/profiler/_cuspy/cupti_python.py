@@ -159,7 +159,11 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
         ]
         lib.cuptiActivityEnable_v2.restype = ctypes.c_int
     if hasattr(lib, "cuptiActivityDisable_v2"):
-        lib.cuptiActivityDisable_v2.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        lib.cuptiActivityDisable_v2.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_void_p,
+        ]
         lib.cuptiActivityDisable_v2.restype = ctypes.c_int
     if hasattr(lib, "cuptiGetTimestamp_v2"):
         lib.cuptiGetTimestamp_v2.argtypes = [
@@ -415,17 +419,22 @@ class _PyLibCupti:
             == CUPTI_SUCCESS
         )
 
-    def disarm_approx_timestamp_callback(self, sub_handle: int) -> None:
-        """Restore CUPTI's default CPU timer for this subscriber (callback_addr=0), the
-        inverse of arm_approx_timestamp_callback -- called before unsubscribe so a following
-        consumer isn't left with our callback."""
+    def disarm_approx_timestamp_callback(self, sub_handle: int) -> bool:
+        """Restore CUPTI's default CPU timer; return whether removal succeeded.
+
+        Teardown may ignore failure before unsubscribing. A live configuration
+        change must check this result before interpreting records on another clock.
+        """
         val = ctypes.c_void_p(None)
         size = ctypes.c_size_t(ctypes.sizeof(ctypes.c_void_p))
-        self._lib.cuptiActivitySetAttribute_v2(
-            ctypes.c_void_p(sub_handle),
-            ActivityAttr.TIMESTAMP_CALLBACK,
-            ctypes.byref(size),
-            ctypes.byref(val),
+        return (
+            self._lib.cuptiActivitySetAttribute_v2(
+                ctypes.c_void_p(sub_handle),
+                ActivityAttr.TIMESTAMP_CALLBACK,
+                ctypes.byref(size),
+                ctypes.byref(val),
+            )
+            == CUPTI_SUCCESS
         )
 
     def activity_flush_all(self, *, forced: bool = False) -> None:
@@ -467,29 +476,25 @@ class _PyLibCupti:
             "cuptiActivityEnableHWTrace",
         )
 
-    def activity_enable_hes(self) -> None:
-        """Turn on HES (hardware event) timestamps process-wide through
-        CUPTI_ACTIVITY_ATTR_ENABLE_HES, the v2 form of cuptiActivityEnableHWTrace. Must be
-        set before any subscriber enables an activity kind. libcupti 13.5 rejects
-        user-defined records (CUPTI_ERROR_NOT_COMPATIBLE) once HES was turned on through
-        cuptiActivityEnableHWTrace, but not through this attribute. Falls back to
-        cuptiActivityEnableHWTrace when the attribute is unavailable or rejected, so an
-        unsupported platform still reports CUPTI_ERROR_NOT_SUPPORTED."""
-        attr = getattr(ActivityAttr, "ENABLE_HES", None)
-        set_attribute = getattr(self._lib, "cuptiActivitySetAttribute_v2", None)
-        if attr is not None and set_attribute is not None:
-            enabled = ctypes.c_uint8(1)
-            size = ctypes.c_size_t(1)
-            rc = set_attribute(None, attr, ctypes.byref(size), ctypes.byref(enabled))
-            if rc == CUPTI_SUCCESS:
-                return
-            logger.warning(
-                "cuptiActivitySetAttribute_v2(ENABLE_HES) failed with %s; falling back "
-                "to cuptiActivityEnableHWTrace, after which libcupti >= 13.5 rejects "
-                "user-defined records",
-                self._result_string(rc),
-            )
-        self.activity_enable_hw_trace(True)
+    def activity_enable_hes(self, sub_handle: int, *, enabled: bool = True) -> None:
+        """Set HES on the subscriber that will collect user-defined records.
+
+        Enable this before CUDA driver initialization and before enabling activity kinds.
+        The global cuptiActivityEnableHWTrace API cannot be mixed with UDR, even as
+        a fallback; preserve the subscriber-scoped attribute's error instead.
+        Disabling is used only to roll back failed early initialization.
+        """
+        value = ctypes.c_uint8(1 if enabled else 0)
+        size = ctypes.c_size_t(1)
+        self._check(
+            self._lib.cuptiActivitySetAttribute_v2(
+                ctypes.c_void_p(sub_handle),
+                ActivityAttr.ENABLE_HES,
+                ctypes.byref(size),
+                ctypes.byref(value),
+            ),
+            "cuptiActivitySetAttribute_v2(ENABLE_HES)",
+        )
 
     def finalize(self) -> None:
         """cuptiFinalize -- detach and release ALL of CUPTI process-wide. This is a
@@ -571,14 +576,18 @@ class _PyLibCupti:
             ),
             "cuptiActivitySetAttribute_v2",
         )
-        self._check(
-            self._lib.cuptiActivityRegisterCallbacks_v2(
-                ctypes.c_void_p(sub_handle),
-                ctypes.c_void_p(request_addr),
-                ctypes.c_void_p(complete_addr),
-            ),
-            "cuptiActivityRegisterCallbacks_v2",
-        )
+        try:
+            self._check(
+                self._lib.cuptiActivityRegisterCallbacks_v2(
+                    ctypes.c_void_p(sub_handle),
+                    ctypes.c_void_p(request_addr),
+                    ctypes.c_void_p(complete_addr),
+                ),
+                "cuptiActivityRegisterCallbacks_v2",
+            )
+        except Exception:
+            self.disarm_user_defined_records(sub_handle)
+            raise
 
     def disarm_user_defined_records(self, sub_handle: int) -> None:
         """Turn user-defined records back off for the subscription (the inverse of
@@ -696,7 +705,7 @@ class _PyLibCupti:
 
     def activity_disable(self, sub_handle: int, kind: ActivityKind) -> None:
         self._check(
-            self._lib.cuptiActivityDisable_v2(ctypes.c_void_p(sub_handle), kind),
+            self._lib.cuptiActivityDisable_v2(ctypes.c_void_p(sub_handle), kind, None),
             "cuptiActivityDisable_v2",
         )
 

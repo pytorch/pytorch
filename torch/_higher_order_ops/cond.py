@@ -17,6 +17,7 @@ from torch._C._functorch import (
 )
 from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
+    _fake_mode_handler,
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
     create_bw_fn,
@@ -413,6 +414,9 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
     for true_out, false_out in zip(flat_true_outs, flat_false_outs):
         merged_outs.append(_merge_output(true_out, false_out, mode))
     return pytree.tree_unflatten(merged_outs, true_out_spec)
+
+
+cond_op.py_impl(DispatchKey.Fake)(_fake_mode_handler(cond_fake_tensor_mode))
 
 
 def check_tensor_meta_match(

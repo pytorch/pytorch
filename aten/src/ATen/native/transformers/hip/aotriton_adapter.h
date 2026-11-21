@@ -9,6 +9,10 @@
 #include <aotriton/config.h>
 #include <aotriton/flash.h>
 #include <ATen/native/transformers/hip/aotriton_versions.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <c10/util/Exception.h>
+#include <cstdint>
+#include <limits>
 #include <tuple>
 #include <optional>
 
@@ -182,7 +186,102 @@ constexpr aotriton::v3::flash::VarlenBits mk_varlen_bits_seqused_k()
     .kmode = mk_varlen_mode(VarlenLength::INDIVIDUAL, VarlenPosition::ARRAY),
   };
 }
+
+#if AOTRITON_PRINCIPAL_DIAGONAL_API
+// Numeric windows are shifted per sequence by (seqlen_k - seqlen_q), i.e.
+// measured from the bottom-right diagonal. Sentinel windows are not shifted.
+constexpr aotriton::v3::flash::VarlenBits with_bottom_right_diagonal(aotriton::v3::flash::VarlenBits bits)
+{
+  bits.principal_diagonal_choice = aotriton::v3::flash::VarlenPrincipalDiagonal::BOTTOM_RIGHT;
+  return bits;
+}
+#endif // AOTRITON_PRINCIPAL_DIAGONAL_API
 #endif // AOTRITON_VARLEN_BITS_API
+
+// Places a numeric window, measured from the bottom-right diagonal of each
+// sequence (d = seqlen_k - seqlen_q), in AOTriton's terms. Dense calls shift it
+// on the host; varlen callers keep it and set principal_diagonal_choice (see
+// with_bottom_right_diagonal), because d differs per sequence. Without that API
+// (AOTriton < 0.15) the window stays measured from the top-left diagonal.
+inline std::tuple<int, int>
+bottom_right_window(int window_left,
+                    int window_right,
+                    int max_seqlen_q,
+                    int max_seqlen_k,
+                    bool is_varlen) {
+#if AOTRITON_PRINCIPAL_DIAGONAL_API
+  if (!is_varlen) {
+    const int diag = max_seqlen_k - max_seqlen_q;
+    return std::make_tuple(window_left - diag, window_right + diag);
+  }
+#endif
+  return std::make_tuple(window_left, window_right);
+}
+
+// The mem-efficient API's window_size is a number of keys ending at the causal
+// diagonal: key j is visible to query i iff i + d - window_size < j <= i + d,
+// where d = 0 (top-left) or seqlen_k - seqlen_q (bottom-right). AOTriton windows
+// are inclusive: (window_size - 1, 0) around that diagonal. This is not FA2's
+// window, so it skips calculate_swa's normalization; varlen callers must
+// additionally set with_bottom_right_diagonal on VarlenBits.
+inline std::tuple<int, int>
+mem_eff_window_aot(int64_t window_size,
+                   bool bottom_right,
+                   int64_t max_seqlen_q,
+                   int64_t max_seqlen_k,
+                   bool is_varlen) {
+  TORCH_CHECK(window_size > 0 && window_size <= std::numeric_limits<int>::max(),
+              "window_size must be positive and fit in int32");
+  const int window_left = static_cast<int>(window_size - 1);
+  if (!bottom_right) {
+    return std::make_tuple(window_left, 0);
+  }
+#if !AOTRITON_PRINCIPAL_DIAGONAL_API
+  // bottom_right_window cannot place the window there; do not silently fall
+  // back to a top-left window.
+  TORCH_CHECK(false,
+              "window_size with a bottom-right causal mask requires AOTriton >= 0.15");
+#endif
+  return bottom_right_window(window_left,
+                             0,
+                             static_cast<int>(max_seqlen_q),
+                             static_cast<int>(max_seqlen_k),
+                             is_varlen);
+}
+
+// Applies the mem-efficient API's window_size, if set and positive, to
+// attn_fwd_params or attn_bwd_params. Call after the causal window sentinels
+// and, for varlen, varlen_bits have been set: both are overridden here.
+template <typename Params>
+void mem_eff_apply_window(Params& params,
+                          std::optional<int64_t> window_size,
+                          int64_t custom_mask_type,
+                          int64_t max_seqlen_q,
+                          int64_t max_seqlen_k,
+                          bool is_varlen) {
+  if (!window_size.has_value() || *window_size <= 0) {
+    return;
+  }
+#if AOTRITON_V3_API
+  TORCH_CHECK(static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) != custom_mask_type,
+              "window_size requires a causal custom_mask_type");
+  const bool bottom_right =
+      static_cast<int64_t>(sdp::CustomMaskType::CausalFromBottomRight) == custom_mask_type;
+  std::tie(params.window_left, params.window_right) =
+      mem_eff_window_aot(*window_size,
+                         bottom_right,
+                         max_seqlen_q,
+                         max_seqlen_k,
+                         is_varlen);
+#if AOTRITON_PRINCIPAL_DIAGONAL_API
+  if (bottom_right && is_varlen) {
+    params.varlen_bits = with_bottom_right_diagonal(params.varlen_bits);
+  }
+#endif
+#else
+  TORCH_CHECK(false, "window_size requires AOTriton >= 0.10");
+#endif
+}
 
 #if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 11)
 
@@ -245,23 +344,6 @@ auto mklazy_fp32zeros(LazyTensorContext* cookie)
 {
   return mklazy_common<kRank, true>(cookie);
 }
-
-inline auto parse_window_size(std::optional<int64_t> window_size_left,
-                              std::optional<int64_t> window_size_right)
-{
-  const int fa_left = window_size_left.value_or(-1);
-  const int fa_right = window_size_right.value_or(-1);
-  auto get_window_value = [](const int window) -> std::optional<int64_t> {
-    if (window < 0) {
-      return std::nullopt;
-    }
-    return window;
-  };
-  const auto window_left = get_window_value(fa_left);
-  const auto window_right = get_window_value(fa_right);
-  return std::make_tuple(window_left, window_right);
-}
-
 
 #endif  // >= 0.11
 

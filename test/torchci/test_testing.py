@@ -49,13 +49,15 @@ _PYTEST_SUITE = _TEST_DIR / "junit_xml_testdata/pytest_suite.py"
 _REPORT_TESTDATA = Path(__file__).resolve().parent / "testdata"
 # Run the fixture as the default config: drop the job's CI / PYTORCH_TEST_* /
 # PYTEST_ADDOPTS settings and a PYTHONPATH whose repo root would shadow the
-# installed torch, and don't write bytecode into test/.
+# installed torch, and don't write bytecode into test/. These tests pin how
+# skipped tests are reported, so keep test/conftest.py's collection pruner from
+# deselecting the mark-skipped fixtures.
 _CHILD_ENV = {
     k: v
     for k, v in os.environ.items()
     if k not in ("PYTHONPATH", "CI", "PYTEST_ADDOPTS")
     and not k.startswith("PYTORCH_TEST_")
-} | {"PYTHONDONTWRITEBYTECODE": "1"}
+} | {"PYTHONDONTWRITEBYTECODE": "1", "PYTEST_ADDOPTS": "-p no:prune_skips_plugin"}
 
 # The fixture's run context, which the report records, without the job's device
 # filter (XPU and CUDA jobs set PYTORCH_TESTING_DEVICE_ONLY_FOR).
@@ -589,8 +591,8 @@ class TestReportEnablement(TestCase):
             # Other repos' CI, such as forks' and out-of-tree backends', writes none.
             (True, "someone/pytorch", None, None),
             (True, "pytorch/pytorch", None, ci_dir),
-            # XPU builds write none.
-            (True, "pytorch/pytorch", "20250101", None),
+            # XPU builds too (test_capture_xpu_device_count).
+            (True, "pytorch/pytorch", "20250101", ci_dir),
         ):
             with (
                 unittest.mock.patch.object(run_test_module, "IS_CI", is_ci),
@@ -1190,6 +1192,50 @@ class TestReportHelpers(TestCase):
         ) as probe:
             environment.capture()
         probe.assert_not_called()
+
+    @skipIfTorchDynamo("Dynamo calls the patched torch.xpu functions while tracing")
+    @parametrize("zes_count", [subtest(2, name="sysman"), subtest(-1, name="runtime")])
+    def test_capture_xpu_device_count(self, zes_count):
+        # The writer's only XPU device query is torch.xpu.device_count(), which
+        # common_utils' TEST_XPU already made, so it can't poison fork where that
+        # didn't: the runtime count, which poisons fork, runs only when Level Zero
+        # Sysman can't count. It never initializes XPU.
+        environment = importlib.import_module(
+            "torch.testing._internal.torchci.environment"
+        )
+        name = "Intel(R) Data Center GPU Max 1100"
+        check_output = subprocess.check_output
+
+        def xpu_smi(args, *rest, **kwargs):
+            if args[:1] == ["xpu-smi"]:
+                return json.dumps({"device_list": [{"device_name": name}]})
+            return check_output(args, *rest, **kwargs)
+
+        runtime_count = unittest.mock.Mock(return_value=2)
+        lazy_init = unittest.mock.Mock()
+        with (
+            unittest.mock.patch.object(
+                environment, "_accelerator", return_value=("xpu", "20250101")
+            ),
+            unittest.mock.patch.multiple(
+                torch.xpu,
+                _initialized=False,
+                _cached_device_count=None,
+                _lazy_init=lazy_init,
+            ),
+            unittest.mock.patch.object(torch.xpu, "_is_compiled", return_value=True),
+            unittest.mock.patch.object(
+                torch.xpu, "_device_count_zes", return_value=zes_count
+            ),
+            unittest.mock.patch.object(
+                torch._C, "_xpu_getDeviceCount", runtime_count, create=True
+            ),
+            unittest.mock.patch.object(subprocess, "check_output", xpu_smi),
+        ):
+            captured = environment.capture()
+        self.assertEqual((captured.device_count, captured.device_name), (2, name))
+        self.assertEqual(runtime_count.call_count, 0 if zes_count >= 0 else 1)
+        lazy_init.assert_not_called()
 
     def test_rocm_version(self):
         environment = importlib.import_module(

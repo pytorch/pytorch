@@ -127,31 +127,20 @@ if dist.is_gloo_available():
     )
 
 
-C10D_BACKENDS = (
+C10D_BACKENDS: tuple[BackendConfig, ...] = (
     BackendConfig(
         "gloo",
         "cpu",
         supports_bitwise_reductions=True,
         supports_work_sequence_number=True,
+        supports_work_result=True,
     ),
     BackendConfig(
         "python-gloo",
         "cpu",
         supports_bitwise_reductions=True,
         supports_work_sequence_number=True,
-    ),
-    BackendConfig(
-        "nccl-legacy",
-        "cuda",
-        supports_coalescing=True,
-        supports_dropped_p2p_work=True,
-        supports_collectives_timing=True,
-        supports_work_sequence_number=True,
         supports_work_result=True,
-        supports_gather_single=True,
-        supports_uneven_all_gather=True,
-        float8_dtypes=FLOAT8_DTYPES,
-        premul_sum_dtypes=(torch.float16, torch.float32, torch.float64),
     ),
     BackendConfig(
         "nccl2",
