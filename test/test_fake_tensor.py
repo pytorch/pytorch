@@ -209,6 +209,28 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             self.assertTrue(is_fake_tensor(z))
             self.assertIs(maybe_get_fake_mode(z), mode)
 
+    @parametrize("shape", [(2, 2, 1, 2), (2, 2, 1, 1, 2), (2, 2, 1, 1, 1, 2)])
+    def test_reshape_preserves_eager_singleton_strides(self, shape):
+        def expanded_view(x):
+            cols = x.shape[1]
+            return x.as_strided((2, 2, 1, 1, 2), (cols, 0, cols + 1, 2, 1), 1)
+
+        x = torch.empty(4, 8, dtype=torch.complex64)
+        eager = expanded_view(x).reshape(shape)
+        eager_clone_strides = eager.clone().stride()
+        shape_env = ShapeEnv()
+        with torch._subclasses.fake_tensor.FakeTensorMode(shape_env=shape_env) as mode:
+            fake = expanded_view(mode.from_tensor(x, static_shapes=False))
+            guards = tuple(shape_env.guards)
+            result = fake.reshape(shape)
+            self.assertEqual(tuple(shape_env.guards), guards)
+            self.assertIsInstance(result.stride(0), torch.SymInt)
+            self.assertEqual(result.stride(0).node.expr, fake.stride(0).node.expr)
+            self.assertEqual(result.stride()[1:], eager.stride()[1:])
+            self.assertTrue(torch._C._is_alias_of(fake, result))
+            self.assertEqual(result.storage_offset(), eager.storage_offset())
+            self.assertEqual(result.clone().stride(), eager_clone_strides)
+
     def test_sparse_compressed_tensor_creation(self):
         def csr():
             crow = torch.tensor([0, 2, 4])
