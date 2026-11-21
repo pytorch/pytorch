@@ -20,7 +20,7 @@ stride and padding.
 A graph starts at the first operation of such a run, and one starts with the
 function. From there the engine takes a path down while a call runs:
 the instructions of the function in the order that call runs them, through
-the branches as they go,
+the branches as they go and round the loops as often as they go round,
 up to the first instruction that can be no part of a graph. A path of fewer
 than `min_ops` operations (4 unless the pass is made with another number) is
 no graph.
@@ -124,8 +124,50 @@ the function goes on behind it, once for paths that end at the same place.
 The first call that goes a new way runs a block for the first time, which
 the engine watches as it watches every block, and the path is taken down at
 the call after it.
-A `while` loop on a count is its iterations one after the other, with the
-test of the loop as a branch each time round.
+
+A loop is its iterations one after the other: a path goes round a loop over
+a list, a tuple or a `range` as often as the call does (and round a `while`
+loop on a count), with the test of the loop as a branch each time round. The
+number of times round is no input of the graph: it is the path. The calls of
+`len`, `range`, `enumerate`, `zip` and `isinstance` that such loops are
+written with are part of a path.
+
+```python
+def loop(x, n):
+    y = x.sin()
+    for i in range(n):
+        y = y * 0.5 + i
+    return y.cos().sum()
+
+
+g = torch.vm(loop, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs()))
+for _ in range(3):
+    same = torch.equal(g(x, 3), loop(x, 3))
+(found,) = torch.vm.regions(g)
+found["ops"], found["branches"]  # (9, 4): sin, three times round, cos and sum; four tests of the loop
+```
+
+A list that the function makes and fills by appending is the path's own, so
+a path that starts with the function goes on through the loop that fills it,
+and the operation that is handed the list takes the values that were
+appended:
+
+```python
+def collect(xs):
+    out = []
+    for x in xs:
+        out.append(x.sin() * 2)
+    return torch.cat(out).tanh().sum()
+
+
+g = torch.vm(collect, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs()))
+xs = [torch.randn(3) for _ in range(3)]
+for _ in range(3):
+    same = torch.equal(g(xs), collect(xs))
+(found,) = torch.vm.regions(g)
+found["where"], found["ops"], found["inputs"]  # ('collect (block 3)[4]', 9, 1)
+found["operators"][-3:]  # ['aten::cat', 'aten::tanh', 'aten::sum']
+```
 
 What ends a path:
 
@@ -138,8 +180,6 @@ What ends a path:
   on the data of a tensor;
 - an instruction that could run Python code on the values of this call: a
   read of an attribute that is a property, an iterator that is unpacked;
-- a `for` loop: neither `range` nor taking the iterator of a value is part
-  of a path;
 - in a function with a `try`, a read or a write of a variable that one of
   its handlers may read: such a function keeps them where the handlers find
   them;
@@ -274,8 +314,10 @@ torch.vm.regions(g)[0]["operators"][5:8]
 
 Every path of a graph is exported by itself. The graph a pass is given has
 the operations of one way through the function and no branch,
+a loop as many times as the call went round,
 and it takes as inputs only what its operations take: a flag that a branch
 is on is none.
+A variable of a loop names one input per time round (`x`, `x_2`, `x_3`).
 On a later call the engine first runs what the path has in front of its
 operations (the reads, the arithmetic on numbers), on registers of the
 path's own, and checks that the branches go the way they went. Then what was
@@ -720,9 +762,10 @@ torch.vm(f, passes=(*default, keep, P.Inductor())).passes
 What graphs do not do at this stage:
 
 - One function. A graph does not go on through a call of a Python function,
-  as said above, and a `for` loop ends a path.
+  as said above.
 - A path per way. A function whose calls go many ways through it has a path
   and an export for each, and they share the `max_variants` of the graph.
+  So does a loop that goes round another number of times on every call.
 - No effects. An operation that writes to one of its arguments is in no
   graph, and a call whose operations turn out to write when they are taken
   down is not exported: a batch norm in training, which updates its running
