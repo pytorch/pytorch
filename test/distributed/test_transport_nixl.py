@@ -453,14 +453,20 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
             self.assertEqual(first._agent.released, 0)
         first.close()
 
-    def test_ordinary_transfers_do_not_use_cuda_streams(self):
+    def test_ordinary_transfers_do_not_use_streams(self):
         first, second, memory, remote = self.registered_pair()
         with patch.object(
-            first, "_cuda_stream", side_effect=AssertionError("used a CUDA stream")
+            first, "_stream_ordering", side_effect=AssertionError("used a stream")
         ):
             self.assertEqual(first.write(memory.to_view(), remote), 0)
             first.read(memory.to_mutable_view(), remote, async_op=True).wait()
-        self.assertFalse(first._cuda_streams)
+        self.assertFalse(first._streams)
+
+    def test_stream_transfer_rejects_non_cuda_stream(self):
+        first, second, memory, remote = self.registered_pair()
+        with self.assertRaisesRegex(RuntimeError, "require a CUDA stream, got cpu"):
+            first.write_stream(memory.to_view(), remote, stream=torch.Stream("cpu"))
+        self.assertFalse(first._streams)
 
     def test_native_setup_runs_on_calling_thread(self):
         first, second = self.make_transport_pair()

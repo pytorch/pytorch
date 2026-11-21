@@ -47,8 +47,9 @@ types are rejected. Tensor contents and native handles are never serialized.
 
 ## CUDA streams
 
-`read_stream` and `write_stream` order a transfer on `stream`, or the
-current CUDA stream if `None`. The transfer starts after prior work on the
+`read_stream` and `write_stream` order a transfer on `stream`, or
+`torch.accelerator.current_stream()` if `None`. Only CUDA streams are
+supported. The transfer starts after prior work on the
 stream; later work waits for it to complete. Calls return after enqueueing and
 no kernel runs while the transfer is in flight.
 

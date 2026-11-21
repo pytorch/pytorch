@@ -1,10 +1,13 @@
-"""Order host-driven transport operations on CUDA streams.
+"""Order host-driven transport operations on accelerator streams.
 
 A host callback enqueued on the stream schedules the transfer on a shared
 asyncio loop, which awaits it and signals a pinned completion flag. A stream memory wait
 holds later stream work until that flag is set, so no kernel occupies SMs while
 the transfer runs. The callback itself never blocks: CUDA forbids CUDA calls
 from host callbacks, and blocking on native CUDA work can deadlock graph replay.
+
+Only the host function launch and stream memory wait are device specific; they
+use the CUDA driver.
 """
 
 from __future__ import annotations
@@ -43,7 +46,7 @@ def _driver() -> ctypes.CDLL:
     global _libcuda
     if _libcuda is None:
         if sys.platform != "linux":
-            raise RuntimeError("CUDA stream transfers require Linux")
+            raise RuntimeError("stream transfers require Linux")
         # cuLaunchHostFunc is called directly: callback userdata owned by
         # binding libraries may be released after a captured node first runs.
         lib = ctypes.CDLL("libcuda.so.1")
@@ -85,10 +88,14 @@ def _fatal(message: str, error: BaseException) -> None:
     os._exit(1)
 
 
-class _CudaStreamOrdering:
-    """Orders transfers on one CUDA stream and owns their callbacks."""
+class _StreamOrdering:
+    """Orders transfers on one accelerator stream and owns their callbacks."""
 
-    def __init__(self, stream: torch.cuda.Stream) -> None:
+    def __init__(self, stream: torch.Stream) -> None:
+        # Use the stream's device module, not torch.accelerator, which may name
+        # another backend (e.g. PrivateUse1) in the same process.
+        self._device_module = torch.get_device_module(stream.device)
+        self._handle = stream.native_handle
         driver = _driver()
         ordering = ctypes.c_int()
         _check(
@@ -103,7 +110,7 @@ class _CudaStreamOrdering:
         # remote writes without an explicit flush.
         if ordering.value < _CU_GPU_DIRECT_RDMA_WRITES_ORDERING_OWNER:
             raise RuntimeError(
-                "CUDA stream transfers require native GPUDirect RDMA write ordering"
+                "stream transfers require native GPUDirect RDMA write ordering"
             )
         self._driver = driver
         self._loop = _event_loop()
@@ -117,7 +124,7 @@ class _CudaStreamOrdering:
         # them, not merely the completion of their transfer.
         # Entries are (retired event, view, slot, keepalive); captured entries
         # have no event and are released only on close.
-        self._retained: list[tuple[torch.cuda.Event | None, Any, int, Any]] = []
+        self._retained: list[tuple[torch.Event | None, Any, int, Any]] = []
 
     def _flag(self, slot: int) -> ctypes.c_uint32:
         return ctypes.c_uint32.from_address(self._flags.data_ptr() + slot * 4)
@@ -142,28 +149,29 @@ class _CudaStreamOrdering:
     def enqueue(
         self, submit: Callable[[], Coroutine[Any, Any, None]], view: Any
     ) -> None:
-        with self._lock, torch.cuda.stream(self._stream):
+        # The legacy default stream handle (0) resolves to the current device.
+        with self._lock, self._device_module.device(self._stream.device_index):
             if self._closed:
                 raise RuntimeError("transport is closed")
-            capturing = torch.cuda.is_current_stream_capturing()
+            capturing = self._stream.is_capturing()
             if not capturing:
                 self._reap()
             if not self._free_slots:
                 raise RuntimeError(
-                    "too many pending CUDA stream transfers; synchronize the stream"
+                    "too many pending stream transfers; synchronize the stream"
                 )
             slot = self._free_slots.pop()
             flag = self._flag(slot)
             flag.value = 0
 
-            device = self._stream.device
+            device = self._stream.device_index
 
             async def transfer() -> None:
                 try:
-                    torch.cuda.set_device(device)
+                    self._device_module.set_device(device)
                     await submit()
                 except BaseException as error:
-                    _fatal("CUDA stream transfer failed", error)
+                    _fatal("stream transfer failed", error)
                 flag.value = 1
 
             def start() -> None:
@@ -178,13 +186,11 @@ class _CudaStreamOrdering:
                     flag.value = 0
                     self._loop.call_soon_threadsafe(start)
                 except BaseException as error:
-                    _fatal("CUDA stream transfer callback failed", error)
+                    _fatal("stream transfer callback failed", error)
 
             try:
                 _check(
-                    self._driver.cuLaunchHostFunc(
-                        self._stream.cuda_stream, callback, None
-                    ),
+                    self._driver.cuLaunchHostFunc(self._handle, callback, None),
                     "cuLaunchHostFunc",
                 )
             except BaseException:
@@ -193,7 +199,7 @@ class _CudaStreamOrdering:
             try:
                 _check(
                     self._driver.cuStreamWaitValue32_v2(
-                        self._stream.cuda_stream,
+                        self._handle,
                         self._flags.data_ptr() + slot * 4,
                         1,
                         _CU_STREAM_WAIT_VALUE_GEQ,
@@ -201,10 +207,10 @@ class _CudaStreamOrdering:
                     "cuStreamWaitValue32",
                 )
             except BaseException as error:
-                _fatal("CUDA stream transfer completion wait failed", error)
+                _fatal("stream transfer completion wait failed", error)
             retired = None
             if not capturing:
-                retired = torch.cuda.Event()
+                retired = torch.Event(self._stream.device)
                 retired.record(self._stream)
             self._retained.append((retired, view, slot, callback))
 
@@ -212,7 +218,7 @@ class _CudaStreamOrdering:
         with self._lock:
             if self._closed:
                 return
-            torch.cuda.synchronize(self._stream.device)
+            self._device_module.synchronize(self._stream.device_index)
             _closed_captures.extend(
                 item[3] for item in self._retained if item[0] is None
             )
