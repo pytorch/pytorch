@@ -2,8 +2,7 @@
 name: periodic-rocm-mi300
 
 on:
-  schedule:
-    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
+  workflow_call:
   push:
     tags:
       - ciflow/periodic-rocm-mi300/*
@@ -12,7 +11,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}-periodic-rocm-mi300
   cancel-in-progress: true
 
 permissions:
@@ -29,6 +28,8 @@ jobs:
   target-determination:
     name: before-test
     uses: ./.github/workflows/target_determination.yml
+    with:
+      artifact-suffix: -periodic-rocm-mi300
     needs: llm-td
 
   get-label-type:
@@ -68,6 +69,7 @@ jobs:
       - linux-noble-rocm-py3_11-build
       - target-determination
     with:
+      td-artifact-suffix: -periodic-rocm-mi300
       build-environment: ${{ needs.linux-noble-rocm-py3_11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-rocm-py3_11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-py3_11-build.outputs.test-matrix }}

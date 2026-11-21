@@ -3,6 +3,15 @@ name: target-determination
 
 on:
   workflow_call:
+    inputs:
+      artifact-suffix:
+        required: false
+        type: string
+        default: ""
+        description: |
+          Appended verbatim to the TD artifact names (td_results<suffix> on S3,
+          td_results<suffix>.json on GHA), e.g. "-rocm-mi300". Set it when several
+          callers share one run so their uploads don't collide.
 
 permissions:
   id-token: write
@@ -96,7 +105,7 @@ jobs:
         # Skipped on fork PRs (no S3 creds); the GHA-native upload below is the fallback.
         if: steps.td.outcome == 'success' && steps.aws-creds.outcome == 'success'
         with:
-          name: td_results
+          name: td_results${{ inputs.artifact-suffix }}
           retention-days: 1
           if-no-files-found: error
           path: td_results.json
@@ -105,7 +114,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: steps.td.outcome == 'success'
         with:
-          name: td_results.json
+          name: td_results${{ inputs.artifact-suffix }}.json
           retention-days: 1
           if-no-files-found: error
           path: td_results.json

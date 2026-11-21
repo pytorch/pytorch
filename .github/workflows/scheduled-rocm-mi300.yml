@@ -1,0 +1,35 @@
+# Owner(s): ["module: rocm"]
+name: scheduled-rocm-mi300
+
+on:
+  schedule:
+    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
+  workflow_dispatch:
+  # TEMPORARY, remove before merge: exercises the workflow_call path on the PR.
+  push:
+    tags:
+      - ciflow/trunk/*
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  # Job ids prefix the child job names, so DISABLED/UNSTABLE job issues match titles
+  # like "scheduled-rocm-mi300 / <job id>[ / test (<config>)]". A title that includes the
+  # build environment, as HUD proposes, is ignored by filter_test_configs.py.
+  default:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/rocm-mi300.yml
+    secrets: inherit
+
+  distributed:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/periodic-rocm-mi300.yml
+    secrets: inherit
+
+  inductor:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/inductor-rocm-mi300.yml
+    secrets: inherit
