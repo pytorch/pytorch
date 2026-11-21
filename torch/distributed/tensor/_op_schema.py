@@ -660,6 +660,64 @@ class OpSchema:
         self._recompute_comparison_key()
 
 
+class _CachedSpecPlaceholder:
+    """
+    Stands in for a DTensorSpec in a mesh-free cached OpSchema skeleton.
+    A distinct type rather than None because None is a legal args_schema value.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "<spec>"
+
+
+_SPEC_PLACEHOLDER = _CachedSpecPlaceholder()
+
+_SchemaSkeleton = tuple[OpOverload, ArgsType, KwargsType, RuntimeSchemaInfo | None]
+
+
+def _split_schema_for_cache(
+    schema: OpSchema,
+) -> tuple[_SchemaSkeleton, list[DTensorSpec]] | None:
+    """Split into a skeleton holding no DTensorSpec, plus the specs in walk order.
+
+    Returns None when the schema holds specs the walk cannot reach (inside an
+    OpStrategy), in which case the caller must not cache it.
+    """
+    specs: list[DTensorSpec] = []
+
+    def take(spec: DTensorSpec) -> _CachedSpecPlaceholder:
+        specs.append(spec)
+        return _SPEC_PLACEHOLDER
+
+    args_sk, kwargs_sk = tree_map_only(
+        DTensorSpec, take, (schema.args_schema, schema.kwargs_schema)
+    )
+
+    if any(isinstance(leaf, OpStrategy) for leaf in tree_leaves((args_sk, kwargs_sk))):
+        return None
+
+    return (schema.op, args_sk, kwargs_sk, schema.schema_info), specs
+
+
+def _rebuild_schema_from_cache(
+    skeleton: _SchemaSkeleton, specs: Sequence[DTensorSpec]
+) -> OpSchema:
+    op, args_sk, kwargs_sk, schema_info = skeleton
+    remaining = iter(specs)
+
+    def put(_: _CachedSpecPlaceholder) -> DTensorSpec:
+        return next(remaining)
+
+    args_schema, kwargs_schema = tree_map_only(
+        _CachedSpecPlaceholder, put, (args_sk, kwargs_sk)
+    )
+    if next(remaining, None) is not None:
+        raise AssertionError("more cached specs than placeholder in skeleton.")
+    return OpSchema(op, tuple(args_schema), kwargs_schema, schema_info=schema_info)
+
+
 @dataclass
 class OutputSharding:
     """

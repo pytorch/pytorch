@@ -1802,7 +1802,7 @@ def _device_mesh_reconstruct_fn(
 
     # Dispatch through the custom op with proxy mode active so that
     # meta["val"] is set and the result is tracked in opaque_tracker.
-    return torch.ops.device_mesh._get_submesh(ancestor_proxy, mesh_dims)
+    return torch.ops.device_mesh._get_submesh.default(ancestor_proxy, mesh_dims)
 
 
 def _register_distributed_opaque_types():
