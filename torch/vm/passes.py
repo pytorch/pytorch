@@ -15,6 +15,7 @@ __all__ = [
     "BuiltinPass",
     "DCE",
     "Fold",
+    "Graphs",
     "Inline",
     "MethodCalls",
     "ModuleShortcuts",
@@ -88,6 +89,40 @@ class ModuleShortcuts(BuiltinPass):
 
     engine: ClassVar[str] = "shortcuts"
     kind: ClassVar[str] = "cfg"
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class Graphs(BuiltinPass):
+    """Makes graphs of the tensor work of each basic block.
+
+    A graph is a run of the operations of a block that the engine calls
+    directly (:class:`ResolveDispatch`), with what sits between them: reads of
+    globals and attributes, constants, arithmetic on sizes. It ends in front
+    of everything else: a call of a Python function, an operation that writes
+    to one of its arguments or draws random numbers, a number read from a
+    tensor. ``torch.vm.regions(fn)`` reports the graphs, and what was left out
+    of them with the reason.
+
+    The engine runs a graph itself: the same kernels, on the same values, in
+    the same order, on the autograd tape of eager mode. With this pass alone a
+    function computes what it computes without it, bit for bit.
+
+    Args:
+        min_ops: a run with fewer operations than this is no graph, and is not
+            reported as one.
+    """
+
+    engine: ClassVar[str] = "graphs"
+
+    min_ops: int = 4
+
+    def __post_init__(self) -> None:
+        given = self.min_ops
+        if isinstance(given, bool) or not isinstance(given, int):
+            kind = type(given).__name__
+            raise TypeError(f"Graphs takes min_ops as a number, not {kind}")
+        if given < 1:
+            raise ValueError(f"Graphs(min_ops={given}): at least 1")
 
 
 @dataclasses.dataclass(frozen=True, repr=False)

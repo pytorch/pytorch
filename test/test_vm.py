@@ -5016,12 +5016,54 @@ def graph_facts(x, probe, fn):
     return z.sum() + k + w.sum()
 
 
+def graph_poly(x):
+    return x.sin().cos() * 2 + x
+
+
+def graph_two(x):
+    y = x.sin().cos() * 2 + x
+    print(end="")
+    return (y.tanh() * y).exp().sum() - y.mean()
+
+
+def graph_written(x):
+    y = x.sin() * 2 + 1
+    y.add_(1)
+    return (y.cos() * y - y.tanh()).sum()
+
+
+def graph_mixed(x, w):
+    return torch.tanh(x @ w).sum() + (x * 2).mean()
+
+
+class GraphNet(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 8, 3, padding=1)
+        self.bn = torch.nn.BatchNorm2d(8)
+        self.fc = torch.nn.Linear(8, 5)
+
+    def forward(self, x):
+        x = torch.relu(self.bn(self.conv(x * 2)))
+        return self.fc(x.mean((2, 3)))
+
+
+GRAPHS = (*DEFAULT, P.Graphs())
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphs(TestCase):
     """The graphs the engine makes of the tensor work of a block, and the
     passes over them."""
 
     hw_classification = HardwareClassification.GENERIC
+
+    def graphs(self, fn, state=None):
+        found = [r for r in torch.vm.regions(fn) if "ops" in r]
+        return [r for r in found if state is None or r["state"] == state]
+
+    def left(self, fn):
+        return [r["reason"] for r in torch.vm.regions(fn) if "ops" not in r]
 
     def test_what_an_instruction_did_is_taken_down(self):
         compiled = torch.vm(graph_facts, fallback=False)
@@ -5108,6 +5150,95 @@ class TestVmGraphs(TestCase):
         positive = x.sum() > 0
         truth = made("unary", lambda: bool(positive), (positive,))[1]
         self.assertEqual(truth.info()["returns"], "bool")
+
+    def test_a_block_is_one_graph(self):
+        compiled = torch.vm(graph_poly, passes=GRAPHS, fallback=False)
+        for _ in range(4):
+            x = torch.randn(5)
+            self.assertEqual(compiled(x), graph_poly(x), atol=0, rtol=0)
+        (graph,) = torch.vm.regions(compiled)
+        self.assertEqual(graph["state"], "built")
+        self.assertTrue(graph["where"].startswith("graph_poly (block 0)["))
+        operators = ["aten::sin", "aten::cos", "aten::mul.Tensor", "aten::add.Tensor"]
+        self.assertEqual((graph["ops"], graph["operators"]), (4, operators))
+        # Without the pass there are no graphs.
+        plain = torch.vm(graph_poly, fallback=False)
+        plain(torch.randn(5))
+        self.assertEqual(torch.vm.regions(plain), [])
+
+    def test_what_is_no_part_of_a_graph_ends_it(self):
+        compiled = torch.vm(graph_two, passes=GRAPHS, fallback=False)
+        x = torch.randn(6)
+        for _ in range(3):
+            self.assertEqual(compiled(x), graph_two(x), atol=0, rtol=0)
+        self.assertEqual([g["ops"] for g in self.graphs(compiled)], [4, 6])
+        self.assertEqual(self.left(compiled), ["a call that runs no kernel"])
+        (left,) = [r for r in torch.vm.regions(compiled) if r["state"] == "vm"]
+        self.assertIn("call ", left["text"])
+        # An operation that writes to its argument is in no graph, and a
+        # run of fewer operations than min_ops is none.
+        written = torch.vm(graph_written, passes=GRAPHS, fallback=False)
+        for _ in range(3):
+            self.assertEqual(written(x), graph_written(x), atol=0, rtol=0)
+        self.assertEqual([g["ops"] for g in self.graphs(written)], [5])
+        reasons = self.left(written)
+        self.assertIn("aten::add_.Tensor writes to an argument", reasons)
+        self.assertIn("3 operations, fewer than min_ops (4)", reasons)
+        small = (*DEFAULT, P.Graphs(min_ops=2))
+        written = torch.vm(graph_written, passes=small, fallback=False)
+        written(x)
+        self.assertEqual([g["ops"] for g in self.graphs(written)], [3, 5])
+        self.assertEqual(len(self.left(written)), 1)
+
+    def test_the_graphs_of_what_a_function_calls_are_reported(self):
+        torch.manual_seed(0)
+        model = GraphNet().eval()
+
+        def infer(model, x):
+            return model(x)
+
+        passes = (*DEFAULT, P.Graphs(min_ops=1))
+        compiled = torch.vm(infer, passes=passes, fallback=False)
+        x = torch.randn(2, 3, 6, 6)
+        with torch.no_grad():
+            for _ in range(4):
+                self.assertEqual(compiled(model, x), model(x), atol=0, rtol=0)
+        operators = [op for g in self.graphs(compiled) for op in g["operators"]]
+        for expected in ("aten::conv2d", "aten::batch_norm", "aten::linear"):
+            self.assertIn(expected, operators)
+        where = {g["where"].split(" (")[0] for g in self.graphs(compiled)}
+        self.assertIn("GraphNet.forward", where)
+        # A call of a Python function is in no graph: its blocks have theirs.
+        self.assertIn("calls Conv2d.forward", self.left(compiled))
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmGraphResults(TestCase):
+    """What a function computes with graphs: with those the engine runs
+    itself, and with what a pass made of them."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def step(self, fn, x, w):
+        out = fn(x, w)
+        return out, torch.autograd.grad(out, (x, w))
+
+    def test_the_engine_runs_a_graph_with_the_results_of_eager_mode(self, device):
+        compiled = torch.vm(graph_mixed, passes=GRAPHS, fallback=False)
+        for _ in range(5):
+            x = torch.randn(4, 8, device=device, requires_grad=True)
+            w = torch.randn(8, 8, device=device, requires_grad=True)
+            out, grads = self.step(compiled, x, w)
+            expected = self.step(graph_mixed, x, w)
+            self.assertEqual(out, expected[0], atol=0, rtol=0)
+            self.assertEqual(grads, expected[1], atol=0, rtol=0)
+            # On the tape of eager mode: the node of the last operation.
+            self.assertEqual(type(out.grad_fn).__name__, "AddBackward0")
+        (graph,) = torch.vm.regions(compiled)
+        self.assertEqual((graph["state"], graph["ops"]), ("built", 6))
+
+
+instantiate_device_type_tests(TestVmGraphResults, globals())
 
 
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")

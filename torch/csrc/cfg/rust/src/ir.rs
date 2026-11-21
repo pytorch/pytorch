@@ -10,6 +10,7 @@
 //! between them a matter of picking an instruction index.
 
 use crate::capi::SiteSlot;
+use crate::graph::{GraphSite, Left};
 use crate::pyffi::{self, PyObj};
 use std::fmt::Write;
 use std::sync::Arc;
@@ -599,6 +600,10 @@ pub struct BlockCode {
     pub entry_guards: Vec<GuardCond>,
     /// Version number, for specialized code; 0 for generic code.
     pub id: u32,
+    /// The graphs the graph pass made of a specialized version, and what it
+    /// left out of them.
+    pub graphs: Vec<Arc<GraphSite>>,
+    pub left: Vec<Left>,
 }
 
 #[derive(Clone)]
