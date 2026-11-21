@@ -153,6 +153,48 @@ class TestCuTeDSLGroupedGemm(InductorTestCase):
         self.assertEqual(c_compiled.dtype, dtype)
         torch.testing.assert_close(c_eager, c_compiled)
 
+    @parametrize("M_sizes", ((504, 8), (8, 504), (128, 0, 128)))
+    @parametrize("layout_B", ("n_contiguous", "k_contiguous"))
+    def test_grouped_gemm_descriptor_seed_layouts(
+        self, M_sizes: tuple[int, ...], layout_B: str
+    ):
+        device = "cuda"
+        dtype = torch.bfloat16
+        G = len(M_sizes)
+        K, N = 128, 128
+        sum_M = sum(M_sizes)
+
+        A = torch.randn(sum_M, K, device=device, dtype=dtype)
+        if layout_B == "k_contiguous":
+            # grouped_mm receives (G, K, N); after Inductor's transpose the
+            # K dimension is contiguous, matching torchtitan's weight view.
+            B = torch.randn(G, N, K, device=device, dtype=dtype).transpose(1, 2)
+        else:
+            B = torch.randn(G, K, N, device=device, dtype=dtype)
+        offsets = torch.tensor(
+            [sum(M_sizes[: i + 1]) for i in range(G)],
+            dtype=torch.int32,
+            device=device,
+        )
+
+        def grouped_gemm_fn(A_packed, B_batched, offs):
+            return F.grouped_mm(A_packed, B_batched, offs=offs)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTEDSL",
+                "test_configs.autotune_choice_name_regex": "cutedsl",
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            compiled = torch.compile(
+                grouped_gemm_fn, backend="inductor", dynamic=False
+            )
+            torch.testing.assert_close(
+                grouped_gemm_fn(A, B, offsets), compiled(A, B, offsets)
+            )
+
 
 if __name__ == "__main__":
     run_tests()
