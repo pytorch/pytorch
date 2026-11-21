@@ -805,15 +805,18 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     ``out_dtypes``, and ``use_fast_accum`` corresponds to the entry at the
     same position in ``Bs`` and is forwarded to ``aten._scaled_mm_v2``.
 
-    ``recipe_a``/``recipe_b`` are ``torch.nn.functional.ScalingType`` values
-    and ``swizzle_a``/``swizzle_b`` are ``torch.nn.functional.SwizzleType``
-    values, as in ``aten._scaled_mm_v2``. ``recipe_b`` applies to every entry
-    of ``Bs``. The recipes must be both ``TensorWise`` or both ``RowWise``.
-    With ``RowWise``, ``A_scale`` may be sharded like ``A_shard`` or cover the
-    fully gathered tensor. The exact dtype, scale-layout, and accelerator
-    requirements are those of ``aten._scaled_mm_v2``. This is a specialized compiler fusion target; support
-    for a particular FP8 format or shape must be checked on the target
-    accelerator.
+    ``recipe_a``/``recipe_b`` are the integer values of
+    ``torch.nn.functional.ScalingType`` members and ``swizzle_a``/``swizzle_b``
+    those of ``torch.nn.functional.SwizzleType`` members (e.g.
+    ``ScalingType.RowWise.value``), as in ``aten._scaled_mm_v2``. ``recipe_b``
+    applies to every entry of ``Bs``. The recipes must be both ``TensorWise``
+    or both ``RowWise``. With ``RowWise``, ``A_scale`` may be sharded like
+    ``A_shard`` or cover the fully gathered tensor.
+
+    The exact dtype, scale-layout, and accelerator requirements are those of
+    ``aten._scaled_mm_v2``. This is a specialized compiler fusion target;
+    support for a particular FP8 format or shape must be checked on the
+    target accelerator.
 
     :returns: The gathered ``A`` and the list of scaled-matmul results.
 
