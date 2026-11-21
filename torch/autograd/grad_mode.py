@@ -43,9 +43,10 @@ class no_grad(_NoParamDecoratorContextManager):
         more information on how they compare.
 
     .. note::
-        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`,
+        including :func:`torch.func.jacfwd` and :func:`torch.func.jvp`.
         If you want to disable forward AD for a computation, you can unpack
-        your dual tensors.
+        your dual tensors or use :meth:`torch.Tensor.detach`.
 
     Example::
         >>> # xdoctest: +SKIP
