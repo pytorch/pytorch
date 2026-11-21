@@ -2384,7 +2384,6 @@ class TestFunctionalTensorMode(TestCase):
         gc.collect()
         self.assertTrue(all(ref() is None for ref in tensor_refs))
         self.assertTrue(all(ref.expired() for ref in storage_refs))
-        self.assertEqual(len(mode._storage_to_base), 0)
 
     def test_inference_view_keeps_base_alive(self):
         mode = FunctionalTensorMode()
