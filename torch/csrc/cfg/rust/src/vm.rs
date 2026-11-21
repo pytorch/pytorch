@@ -4549,6 +4549,99 @@ impl Compiled {
         Staged::Done
     }
 
+    /// Whether an object stays alive where a path lands, whatever the path
+    /// lets go of: a parameter of the frame that the path does not bind
+    /// anew holds it, or a register of the function that the path neither
+    /// writes nor clears. `frame` is the frame on top and whether it is
+    /// the function's own (inside a call that is inlined it is that
+    /// call's, and its variables are not the function's parameters).
+    unsafe fn kept(&self, path: &Path, o: Obj, regs: &[Obj], frame: (Frame, bool)) -> bool {
+        let (frame, own) = frame;
+        if own && !frame.locals.is_null() {
+            for slot in 0..self.func.params.len() {
+                let bound = path.bound.iter().any(|(other, _)| *other as usize == slot);
+                if !bound && frame_owned(*frame.locals.add(slot)) == o {
+                    return true;
+                }
+            }
+        }
+        (0..self.func.nvalues as usize).any(|v| {
+            regs[v] == o && !path.clears.contains(&(v as V)) && !path.writes.iter().any(|(_, to)| *to as usize == v)
+        })
+    }
+
+    /// Whether everything a path lets go of where it lands can be let go
+    /// of there. The instructions let go of a reference in their place; a
+    /// path does where it lands, behind everything it read, so an object
+    /// whose end runs Python code must not end by it. What a path lets go
+    /// of that was there before it ran: what the registers of the
+    /// function hold that it overwrites or clears, and what the variables
+    /// of the frame hold that it binds anew. Each such object dies without
+    /// Python code running, if it dies (`graph::dies_quietly`), or stays
+    /// alive: a parameter or an untouched register of the function holds
+    /// it (`kept`); the path hands it on, as it is or in a tuple it
+    /// builds, to a register or a variable of the function; or it has
+    /// more references than the path lets go of and may itself hold
+    /// (`graph::outlives`).
+    unsafe fn lets_all_go(&self, path: &Path, own: &[Obj], regs: &[Obj], frame: (Frame, bool)) -> bool {
+        let mut gone: Vec<Obj> = Vec::new();
+        let mut take = |held: Obj| {
+            if !held.is_null() && !capi::is_unboxed(held) {
+                gone.push(held);
+            }
+        };
+        for v in &path.clears {
+            take(reg(regs, *v));
+        }
+        for (made, v) in &path.writes {
+            if reg(regs, *v) != reg(own, *made) {
+                take(reg(regs, *v));
+            }
+        }
+        if !frame.0.locals.is_null() {
+            for (slot, _) in &path.bound {
+                take(frame_owned(*frame.0.locals.add(*slot as usize)));
+            }
+        }
+        let mut handed: Option<Vec<PathValue>> = None;
+        let mut given: Option<Vec<Obj>> = None;
+        for (at, o) in gone.iter().enumerate() {
+            if gone[..at].contains(o) || graph::dies_quietly(*o) || self.kept(path, *o, regs, frame) {
+                continue;
+            }
+            // What the path writes to a register of the function or binds
+            // to a variable, and the items of a tuple it builds that is
+            // such a value, are there when it has landed.
+            let handed = handed.get_or_insert_with(|| {
+                let mut handed: Vec<PathValue> = path.writes.iter().map(|(made, _)| *made).collect();
+                handed.extend(path.bound.iter().map(|(_, made)| *made));
+                for inst in path.body.iter().rev() {
+                    if let (Op::BuildTuple(items), true) = (&inst.op, handed.contains(&inst.dst)) {
+                        handed.extend(items.iter().copied());
+                    }
+                }
+                handed
+            });
+            if path.inputs.iter().any(|(v, made)| reg(regs, *v) == *o && handed.contains(made)) {
+                continue;
+            }
+            let given = given.get_or_insert_with(|| path.inputs.iter().map(|(_, made)| reg(own, *made)).collect::<Vec<Obj>>());
+            let dropped = gone.iter().filter(|other| *other == o).count() as isize;
+            if graph::outlives(*o, own, given, dropped) {
+                continue;
+            }
+            if graph::debug() {
+                eprintln!(
+                    "torch.vm graph: a path of {} is not for this call: where it lands it would let go of an object of the class {}, whose end may run Python code",
+                    self.func.qualname,
+                    pyffi::type_name(*o)
+                );
+            }
+            return false;
+        }
+        true
+    }
+
     /// Runs a path in place of the instructions it was taken down from, if
     /// it is the one this call takes and one of its exported forms is for
     /// the values of the call. On registers of its own, which get the values
@@ -4641,6 +4734,13 @@ impl Compiled {
             leave(own);
             return Ran::Miss;
         };
+        // What the path lets go of where it lands (what the registers and
+        // the variables of the function hold and it overwrites) must be
+        // something whose end runs no Python code, or stay alive.
+        if !self.lets_all_go(path, &own, regs, (frames.top(), frames.depth == 0)) {
+            leave(own);
+            return Ran::Other;
+        }
         let args: Vec<Obj> = exported.args.iter().map(|place| place.at(&own)).collect();
         let bc = path.body[0].bc;
         frames.top().at(bc & OFFSET_MASK);
