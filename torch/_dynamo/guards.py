@@ -135,6 +135,7 @@ from torch._subclasses.fake_tensor import (
     _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS,
     FakeTensor,
     is_fake_tensor,
+    maybe_get_fake_constant,
     maybe_get_fake_dispatch_keys,
     maybe_get_fake_pytype,
 )
@@ -369,16 +370,13 @@ def _native_method_metadata(
 
 def _native_method_matches(value: object, expected: NativeMethodMetadata) -> bool:
     if expected.receiver_id is not None:
-        owner = expected.receiver
-        name = expected.name
-        if type(value) is not types.BuiltinMethodType or value.__name__ != name:
-            return False
-        receiver = value.__self__
         # Metadata only binds descriptors on immutable builtin classes.
         return (
-            type(receiver) is owner
+            type(value) is types.BuiltinMethodType
+            and value.__name__ == expected.name
+            and type(receiver := value.__self__) is expected.receiver
             and id(receiver) == expected.receiver_id
-            and value == getattr(owner, name).__get__(receiver)
+            and value == getattr(expected.receiver, expected.name).__get__(receiver)
         )
     # The type check first: == would otherwise run the new value's __eq__.
     return (
@@ -405,6 +403,17 @@ def _method_identity_guards_filtered(
     return context is not None and context.is_aot_capture
 
 
+def _untracked_method_identity(context: str) -> NoReturn:
+    unimplemented(
+        gb_type="Builtin method operation requires identity guards",
+        context=context,
+        explanation="Dynamo cannot preserve the identity needed by this operation when identity guards are skipped or filtered.",
+        hints=[
+            "Perform the operation outside the compiled function or use a capture mode that retains identity guards."
+        ],
+    )
+
+
 def install_builtin_method_guard(
     tx: InstructionTranslatorBase, source: Source, value: object = None
 ) -> None:
@@ -416,12 +425,7 @@ def install_builtin_method_guard(
         create = functools.partial(GuardBuilder.NATIVE_METHOD_MATCH, expected=expected)
         install_guard(source.make_guard(create))
     elif filtered:
-        unimplemented(
-            gb_type="Prebound builtin method requires identity guards",
-            context=source.name,
-            explanation="Dynamo cannot track this prebound builtin method when its identity guard can be skipped or filtered.",
-            hints=["Bind the builtin method inside the compiled function."],
-        )
+        _untracked_method_identity(f"binding prebound builtin method {source.name}")
     else:
         install_guard(source.make_guard(GuardBuilder.ID_MATCH))
 
@@ -4874,6 +4878,7 @@ _FAKE_TENSOR_OWNED_ATTRIBUTES = (
     _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS
     | {
         "_fake_device",
+        "_fake_pytype",
         "fake_mode",
         "constant",
         "pytype",
@@ -4974,8 +4979,6 @@ class GuardsStatePickler(FunctionPicklerBase):
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
-        self.fake_mode = torch._subclasses.FakeTensorMode()
-        self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
         # The plain tuples an EQUALS_MATCH reads whole, by id; see the Note
         # above _keep. Required, because omitting it would carry no plain
@@ -5066,14 +5069,15 @@ class GuardsStatePickler(FunctionPicklerBase):
         grad: torch.Tensor,
     ) -> torch.Tensor:
         fake_mode = torch._subclasses.FakeTensorMode()
-        tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
-        ret = tensor_converter.from_meta_and_device(
+        ret = fake_mode.fake_tensor_converter.from_meta_and_device(
             fake_mode,
             meta_tensor,
             device,
             pytype,
             torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
         )
+        # Guard replay reads this metadata after dropping the user's attribute.
+        object.__setattr__(ret, "constant", maybe_get_fake_constant(ret))
         # A .grad the guards never read is pruned to the _Missing sentinel on
         # the way in (only a training capture has one to prune at all); it was
         # not guarded on, so the rebuilt tensor does not need it, but assigning
@@ -5590,12 +5594,12 @@ class GuardsStatePickler(FunctionPicklerBase):
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
-                default = torch.nn.Parameter if is_param else torch.Tensor
-                pytype = obj.pytype or default
+                pytype = torch.nn.Parameter if is_param else torch.Tensor
             elif is_fake and is_param and pytype is torch.Tensor:
                 # A C++ fake's own type is the real type, but a C++ fake
                 # Parameter can be a plain Tensor carrying the marker.
                 pytype = torch.nn.Parameter
+            pytype = maybe_get_fake_pytype(obj) or pytype
             # A fake answers empty_like with another fake (a Python fake through
             # its own __torch_dispatch__, whether or not its FakeTensorMode is
             # active), and that fake would drag the mode and its converters into
