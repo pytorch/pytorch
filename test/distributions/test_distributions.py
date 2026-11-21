@@ -117,7 +117,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     preserves_device_selection,
-    skipCUDAIf,
     skipMPS,
     skipXPUIf,
 )
