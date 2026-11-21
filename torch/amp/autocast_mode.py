@@ -214,6 +214,7 @@ class autocast:
         dtype(torch_dtype, optional):  Data type for ops run in autocast. It uses the default value
             (``torch.float16`` for CUDA and ``torch.bfloat16`` for CPU), given by
             :func:`~torch.get_autocast_dtype`, if :attr:`dtype` is ``None``.
+            ``torch.float32`` is also accepted as the target dtype on all devices.
             Default: ``None``
         cache_enabled(bool, optional):  Whether the weight cache inside autocast should be enabled.
             Default: ``True``
@@ -245,8 +246,7 @@ class autocast:
                 f"User specified an unsupported autocast device_type '{self.device}'"
             )
 
-        device_supported_dtypes = [torch.bfloat16, torch.float16]
-
+        device_supported_dtypes = [torch.bfloat16, torch.float16, torch.float32]
         self.custom_backend_name = torch._C._get_privateuse1_backend_name()
         if self.device == self.custom_backend_name:
             necessary_funcs = [
