@@ -358,6 +358,73 @@ def _callable(gm: torch.fx.GraphModule) -> Callable[..., Any]:
     return called.compiled if isinstance(called, _Compiled) else called.forward
 
 
+def plain(passes: tuple[Any, ...]) -> Callable[..., Callable[..., Any]]:
+    """What the engine is given to hand the passes over graphs one of the two
+    graphs of a form whose backward it derived (its forward, or the backward
+    for the results that came with a gradient). It is called with the
+    operations, as the engine's joint graph describes them (per operation
+    the operator, its arguments, its keyword arguments, where what it gives
+    goes, whether it gives one tensor, and its name), the values the graph
+    takes and those it gives, and tensors like those it will be handed;
+    it makes the ``GraphModule``, applies the passes, and returns what the
+    engine then calls. There is nothing to derive in such a graph: its
+    tensors need no gradient."""
+
+    def of(arg: tuple[str, Any], values: dict[int, Any]) -> Any:
+        kind, value = arg
+        if kind == "v":
+            return values[value]
+        if kind in ("l", "t"):
+            items = [of(item, values) for item in value]
+            return items if kind == "l" else tuple(items)
+        return value
+
+    def make(
+        ops: list[Any],
+        takes: list[int],
+        gives: list[int],
+        examples: tuple[torch.Tensor, ...],
+    ) -> Callable[..., Any]:
+        graph = torch.fx.Graph()
+        values: dict[int, Any] = {}
+        for value in takes:
+            values[value] = graph.placeholder(f"value_{value}")
+        for function, args, kwargs, results, single, name in ops:
+            given = [of(arg, values) for arg in args]
+            named = {key: of(arg, values) for key, arg in kwargs.items()}
+            if callable(function):
+                target = function
+            else:
+                # A kernel the engine took down: its operator, with the
+                # arguments that the operator takes by name only by name.
+                op, _, overload = name.partition(".")
+                target = _overload(op, overload)
+                pairs = list(zip(target._schema.arguments, given))
+                named.update({arg.name: item for arg, item in pairs if arg.kwarg_only})
+                given = [item for arg, item in pairs if not arg.kwarg_only]
+            node = graph.call_function(target, tuple(given), named)
+            for place, value in results:
+                item = (operator.getitem, (node, place))
+                values[value] = node if single else graph.call_function(*item)
+        graph.output(tuple(values[value] for value in gives))
+        made = torch.fx.GraphModule(torch.nn.Module(), graph)
+        types = [_types.type_of_value(tensor) for tensor in examples]
+        for pass_ in passes:
+            _state.examples = list(examples)
+            try:
+                made = pass_(made, types)
+            finally:
+                _state.examples = None
+            if _types.guards_of(made):
+                what = "an input of a graph of the engine's backward"
+                raise ValueError(f"a pass asks for a check of {what}")
+            made.meta.pop(_types._GUARDS, None)
+            made.recompile()
+        return _callable(made)
+
+    return make
+
+
 def build(
     description: dict[str, Any],
     passes: tuple[Any, ...],
@@ -370,13 +437,16 @@ def build(
     check). Or, as a str, why there is none: a pass raised, or returned what
     is no graph of these inputs."""
     inputs = description["inputs"]
-    asked = backward and not passes and torch.is_grad_enabled()
+    asked = backward and torch.is_grad_enabled()
     if asked and any(tensor.requires_grad for tensor in inputs):
         # A graph whose inputs need a gradient gets its backward from the
-        # engine (``backward.rs``), which runs the graph itself, as it
-        # describes it. With a pass over graphs in the list the graph is
-        # the pass's.
-        return runtime.Staged(description), []
+        # engine (``backward.rs``), unless AOTAutograd is asked for by name.
+        # The engine runs the graph itself, as it describes it; with passes
+        # over graphs it hands them its two graphs when it has them.
+        from . import passes as listed
+
+        if not any(isinstance(pass_, listed.AOTAutograd) for pass_ in passes):
+            return runtime.Staged(description, plain(passes) if passes else None), []
     if not passes:
         return "no pass over graphs: the operations run as they are"
     gm = graph_module(description)

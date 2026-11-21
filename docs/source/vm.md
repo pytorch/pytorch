@@ -2245,8 +2245,41 @@ tensor from outside cannot run once more, and neither can one an input of
 which was written to in place since the call: it raises there and says
 which of the two backwards it was asked for.
 
-With a pass over graphs behind `Graphs(backward=True)` nothing of this
-happens yet: the graph is handed to the pass as it is without `backward`.
+A pass over graphs behind `Graphs(backward=True)` is handed two plain
+graphs for such a form, once it has the engine's backward: the forward,
+which gives the results and what it keeps, and the backward for the results
+that came with a gradient, which takes what was kept and the gradients (a
+backward for other results is another graph, handed over when it is first
+asked for). Their tensors need no gradient, so there is nothing left to
+derive: `Inductor()` compiles two graphs, and AOTAutograd derives nothing.
+What a compiler makes of the kernels is not what eager runs, so with one the
+gradients are eager's to the last bits only. A pass that asks for a check
+of an input of such a graph is refused, and the form keeps eager's tape
+with what the pass raised as the reason. `AOTAutograd()` in the list is the
+user asking for its derivation: the graph is then handed to it as it is
+without `backward`.
+
+```python
+taken = []
+
+
+def count(gm, input_types):
+    calls = [node for node in gm.graph.nodes if node.op == "call_function"]
+    taken.append((len(input_types), len(calls)))
+    return gm
+
+
+g = torch.vm(two, passes=(*derives, count))
+for _ in range(5):
+    first, second = g(torch.randn(3, 4), w, b)
+(first + second).backward()
+taken  # [(3, 8), (4, 17)]: the forward, and the backward for both results
+type(first.grad_fn).__name__  # 'GraphBackward'
+g = torch.vm(two, passes=(*derives, P.AOTAutograd()))
+for _ in range(5):
+    first, second = g(torch.randn(3, 4), w, b)
+type(first.grad_fn).__name__  # 'CompiledFunctionBackward'
+```
 
 ### The order of the list
 
@@ -2470,13 +2503,14 @@ What graphs do not do at this stage:
   thread runs in that time runs that way too. They are as the caller set
   them again when the call returns.
 - Where AOTAutograd derives the backward of a graph (with a compiling pass
-  in the list), the gradient at a tensor that the graph gives and also
-  computes something of is what `torch.compile` gives and not eager's: one
-  compiled function has the gradient of both, so nothing of it arrives at
-  the tensor. `torch.autograd.grad(loss, [hidden])` says the tensor was not
-  used, `hidden.retain_grad()` keeps nothing, and a hook on `hidden` is
-  handed None and changes nothing of what reaches the inputs. The engine's
-  own backward cuts such a graph at the tensor ("Gradients").
+  in the list and without `backward=True`), the gradient at a tensor that
+  the graph gives and also computes something of is what `torch.compile`
+  gives and not eager's: one compiled function has the gradient of both, so
+  nothing of it arrives at the tensor. `torch.autograd.grad(loss, [hidden])`
+  says the tensor was not used, `hidden.retain_grad()` keeps nothing, and a
+  hook on `hidden` is handed None and changes nothing of what reaches the
+  inputs. The engine's own backward cuts such a graph at the tensor
+  ("Gradients").
 - A warning that a kernel gives is given at every call, as in eager. One
   that the Python side of an operation gives (`x.T` of a tensor with three
   dimensions, `torch.tensor` of a tensor), or an operator that is made of

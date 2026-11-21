@@ -14,6 +14,10 @@
 //! below the autograd keys and gives its results one node (`GraphBackward`,
 //! in cfg.cpp), which runs the backward program for the results that come
 //! with a gradient. A form that cannot be taken down keeps eager's tape.
+//!
+//! What Python still does for this is the export boundary: where the list
+//! of passes has a pass over graphs, the two programs are made
+//! `torch.fx` graphs for the passes (`torch/vm/_export.py`).
 
 use crate::capi::{self, TcfgBackwardApi, TcfgNodeInfo, TcfgTensorInfo, TCFG_NODE_LEAF, TCFG_NODE_PYTHON, TCFG_RUN_BELOW_AUTOGRAD, TCFG_RUN_ON_TAPE};
 use crate::joint::{Joint, Value};
@@ -425,6 +429,32 @@ impl Drop for Program {
     fn drop(&mut self) {
         if let Some(api) = capi::backward_api() {
             unsafe { (api.program_free)(self.raw) };
+        }
+    }
+}
+
+/// What runs one of the two graphs of a form: the engine's program, or what
+/// the passes over graphs made of it.
+enum Runner {
+    Program(Program),
+    Made(Py<PyAny>, usize),
+}
+
+impl Runner {
+    fn run<'py>(&self, py: Python<'py>, inputs: &[Bound<'py, PyAny>]) -> PyResult<Vec<Bound<'py, PyAny>>> {
+        match self {
+            Runner::Program(program) => program.run(py, inputs, TCFG_RUN_BELOW_AUTOGRAD),
+            Runner::Made(callable, count) => {
+                // A pass is handed tensors that need no gradient, and what
+                // it made runs without one: nothing is left to derive.
+                let _mode = GradMode::set(py, false)?;
+                let given = callable.bind(py).call1(PyTuple::new(py, inputs)?)?;
+                let given: Vec<Bound<'py, PyAny>> = given.try_iter()?.flatten().collect();
+                if given.len() != *count {
+                    return Err(PyRuntimeError::new_err("what a pass made of a graph of the engine's backward does not give its values"));
+                }
+                Ok(given)
+            }
         }
     }
 }
@@ -1609,7 +1639,7 @@ fn ordered(nodes: &Nodes<'_>, readers: &HashMap<usize, Vec<Node<'_>>>) -> Result
 
 /// The backward for one set of roots that come with a gradient.
 struct Back {
-    run: Program,
+    run: Runner,
     /// Which contribution each value it gives is.
     slots: Vec<u32>,
     /// The values of the forward it takes, in the order it takes them.
@@ -1646,7 +1676,7 @@ struct Plan {
     inputs: u32,
     /// The values the forward gives, and where each is in what it gives.
     gives: HashMap<Value, usize>,
-    forward: Program,
+    forward: Runner,
     /// The values the forward keeps for the backwards.
     saved: Vec<Value>,
     /// Of those, what is checked for writes at a backward.
@@ -1672,10 +1702,31 @@ struct Plan {
     /// that are asked for (none where all are): the backward, or why there
     /// is none.
     backs: Mutex<HashMap<(Vec<bool>, Vec<bool>), Result<Arc<Back>, String>>>,
+    export: Option<Py<PyAny>>,
+}
+
+/// Makes a program of operations, or with passes over graphs what the passes
+/// make of them: `takes` are the values the operations are handed (as
+/// `examples`), `gives` those they return.
+fn runner<'py>(py: Python<'py>, export: &Option<Py<PyAny>>, ops: &Bound<'py, PyAny>, values: u32, takes: Vec<Value>, gives: Vec<Value>, examples: &[Bound<'py, PyAny>]) -> Result<Runner, Stop> {
+    let Some(export) = export else {
+        return Ok(Runner::Program(Program::new(ops, values, takes, gives)?));
+    };
+    let _mode = GradMode::set(py, false)?;
+    let detached: Vec<Bound<'py, PyAny>> = examples.iter().map(|tensor| tensor.call_method0("detach")).collect::<PyResult<_>>()?;
+    match export.bind(py).call1((ops, takes, gives.clone(), PyTuple::new(py, detached)?)) {
+        Ok(made) => Ok(Runner::Made(made.unbind(), gives.len())),
+        // What a pass raises is a reason like any other.
+        Err(error) => {
+            let kind = error.get_type(py).name().map(|name| name.to_string()).unwrap_or_default();
+            let text = format!("{kind}: {}", error.value(py));
+            refused(text.lines().next().unwrap_or("").chars().take(200).collect::<String>())
+        }
+    }
 }
 
 impl Plan {
-    fn new(py: Python<'_>, graph: Arc<Graph>, taken: Taken) -> Result<Plan, Stop> {
+    fn new<'py>(py: Python<'py>, graph: Arc<Graph>, taken: Taken, export: Option<Py<PyAny>>, feeds: &[Bound<'py, PyAny>]) -> Result<Plan, Stop> {
         let Taken { joint, ran, marks, targets, shape, .. } = taken;
         let described = joint.describe(py)?;
         let part = |name: &str| described.get_item(name)?.ok_or_else(|| PyRuntimeError::new_err("torch.vm: the joint graph does not say what it should"));
@@ -1728,7 +1779,7 @@ impl Plan {
         let all: Vec<usize> = (0..joint.forward_len()).collect();
         let ops = joint.described_forward(py, &all)?;
         let takes: Vec<Value> = (0..inputs).collect();
-        let forward = Program::new(ops.as_any(), joint.values(), takes, gives.clone())?;
+        let forward = runner(py, &export, ops.as_any(), joint.values(), takes, gives.clone(), feeds)?;
         Ok(Plan {
             graph,
             joint,
@@ -1747,17 +1798,18 @@ impl Plan {
             behind,
             marks,
             backs: Mutex::new(HashMap::new()),
+            export,
         })
     }
 
     /// The backward for the roots that came with a gradient, made when it
     /// is first asked for of the backward that was taken down.
-    fn back(&self, py: Python<'_>, pattern: &[bool], needed: &[bool]) -> Result<Arc<Back>, Stop> {
+    fn back<'py>(&self, py: Python<'py>, pattern: &[bool], needed: &[bool], saved: &[Bound<'py, PyAny>], grads: &[Bound<'py, PyAny>]) -> Result<Arc<Back>, Stop> {
         let key = (pattern.to_vec(), needed.to_vec());
         if let Some(known) = self.backs.lock().unwrap().get(&key) {
             return known.clone().map_err(Stop::Refused);
         }
-        let made = self.make(py, pattern, needed);
+        let made = self.make(py, pattern, needed, saved, grads);
         let kept = match &made {
             Ok(back) => Ok(back.clone()),
             Err(Stop::Refused(why)) => Err(why.clone()),
@@ -1767,16 +1819,21 @@ impl Plan {
         made
     }
 
-    fn make(&self, py: Python<'_>, pattern: &[bool], needed: &[bool]) -> Result<Arc<Back>, Stop> {
+    fn make<'py>(&self, py: Python<'py>, pattern: &[bool], needed: &[bool], saved: &[Bound<'py, PyAny>], grads: &[Bound<'py, PyAny>]) -> Result<Arc<Back>, Stop> {
         let mut whole = pattern.to_vec();
         whole.resize(self.joint.results_len(), false);
         let asked = (!needed.is_empty()).then_some(needed);
         let (ops, incoming, gives, takes) = joint_says(py, self.joint.part_program(py, &whole, asked))?;
-        if takes.iter().any(|value| !self.saved.contains(value)) {
-            return Err(Stop::Raised(PyRuntimeError::new_err("torch.vm: a backward reads what the forward did not keep")));
+        let mut examples: Vec<Bound<'py, PyAny>> = Vec::new();
+        for value in &takes {
+            let Some(at) = self.saved.iter().position(|kept| kept == value) else {
+                return Err(Stop::Raised(PyRuntimeError::new_err("torch.vm: a backward reads what the forward did not keep")));
+            };
+            examples.push(saved[at].clone());
         }
+        examples.extend(grads.iter().cloned());
         let all: Vec<Value> = takes.iter().chain(&incoming).copied().collect();
-        let run = Program::new(ops.as_any(), self.joint.values(), all, gives.iter().map(|(_, value)| *value).collect())?;
+        let run = runner(py, &self.export, ops.as_any(), self.joint.values(), all, gives.iter().map(|(_, value)| *value).collect(), &examples)?;
         Ok(Arc::new(Back { run, slots: gives.iter().map(|(slot, _)| *slot).collect(), takes }))
     }
 
@@ -1934,7 +1991,7 @@ impl Kept {
         }
         let given: Vec<Bound<'py, PyAny>> = grads.iter().flatten().cloned().collect();
         let saved: Vec<Bound<'py, PyAny>> = self.held(py).into_iter().map(|(tensor, _)| tensor).collect();
-        let back = match self.plan.back(py, &pattern, needed) {
+        let back = match self.plan.back(py, &pattern, needed, &saved, &given) {
             Ok(back) => back,
             Err(Stop::Refused(why)) => return self.again(py, grads, out, false, &why),
             Err(Stop::Cut(_)) => return self.again(py, grads, out, false, "the graph is cut"),
@@ -1946,7 +2003,7 @@ impl Kept {
             inputs.push(saved[at].clone());
         }
         inputs.extend(given);
-        let ran = match back.run.run(py, &inputs, TCFG_RUN_BELOW_AUTOGRAD) {
+        let ran = match back.run.run(py, &inputs) {
             Ok(ran) => ran,
             // The backward for all the roots was compared with the autograd
             // engine's: what it raises is raised. One for some of them was
@@ -2068,7 +2125,7 @@ impl Plan {
     /// One call of the form: the forward below the autograd keys, the node,
     /// the views behind it, and what the form gives.
     fn call<'py>(self: &Arc<Plan>, py: Python<'py>, feeds: &[Bound<'py, PyAny>]) -> PyResult<Vec<Bound<'py, PyAny>>> {
-        let made = self.forward.run(py, feeds, TCFG_RUN_BELOW_AUTOGRAD)?;
+        let made = self.forward.run(py, feeds)?;
         let tensor = |value: Value| -> PyResult<Bound<'py, PyAny>> {
             if value < self.inputs {
                 return Ok(feeds[value as usize].clone());
@@ -2162,7 +2219,7 @@ struct Parts {
 }
 
 impl Parts {
-    fn new(py: Python<'_>, graph: Arc<Graph>, taken: Taken) -> PyResult<Parts> {
+    fn new(py: Python<'_>, graph: Arc<Graph>, taken: Taken, export: &Option<Py<PyAny>>) -> PyResult<Parts> {
         let Taken { joint, ran, marks, cut, held, .. } = taken;
         let cut = cut.expect("a form that is cut");
         let (behind, _) = graph.behind(&ran);
@@ -2189,7 +2246,7 @@ impl Parts {
             gives.sort_unstable();
             let reached = gives.iter().map(|value| held.contains(value)).collect();
             let part = Graph::kernels(&joint.described_forward(py, &chosen)?, takes.clone(), gives.clone(), reached)?;
-            parts.push((Form::new(Arc::new(part)), takes, gives));
+            parts.push((Form::new(py, Arc::new(part), export), takes, gives));
         }
         Ok(Parts { graph, parts, inputs, values: joint.values(), behind, marks })
     }
@@ -2234,6 +2291,7 @@ enum State {
 /// once two of them came out the same, the forward program and the node.
 pub struct Form {
     graph: Arc<Graph>,
+    export: Option<Py<PyAny>>,
     state: Mutex<State>,
     calls: AtomicU64,
     /// The bytes the backwards read, and those the forward keeps.
@@ -2244,8 +2302,9 @@ pub struct Form {
 static FORMS: Mutex<Vec<Weak<Form>>> = Mutex::new(Vec::new());
 
 impl Form {
-    fn new(graph: Arc<Graph>) -> Arc<Form> {
-        let form = Arc::new(Form { graph, state: Mutex::new(State::Learning(Vec::new())), calls: AtomicU64::new(0), bytes: Mutex::new((0, 0)) });
+    fn new(py: Python<'_>, graph: Arc<Graph>, export: &Option<Py<PyAny>>) -> Arc<Form> {
+        let export = export.as_ref().map(|export| export.clone_ref(py));
+        let form = Arc::new(Form { graph, export, state: Mutex::new(State::Learning(Vec::new())), calls: AtomicU64::new(0), bytes: Mutex::new((0, 0)) });
         let mut forms = FORMS.lock().unwrap();
         forms.retain(|form| form.strong_count() > 0);
         forms.push(Arc::downgrade(&form));
@@ -2309,13 +2368,14 @@ impl Form {
         };
         let next = match first.same(py, &second) {
             Some(why) => State::Refused(why),
-            None if first.cut.is_some() => match Parts::new(py, self.graph.clone(), first) {
+            None if first.cut.is_some() => match Parts::new(py, self.graph.clone(), first, &self.export) {
                 Ok(parts) => State::Cut(Arc::new(parts)),
                 Err(error) => State::Refused(error.value(py).to_string()),
             },
             None => {
                 *self.bytes.lock().unwrap() = first.joint.cut(true);
-                match Plan::new(py, self.graph.clone(), first) {
+                let export = self.export.as_ref().map(|export| export.clone_ref(py));
+                match Plan::new(py, self.graph.clone(), first, export, feeds) {
                     Ok(plan) => State::Proven(Arc::new(plan)),
                     Err(Stop::Refused(why)) => State::Refused(why),
                     Err(Stop::Cut(_)) => State::Refused("the graph is cut".to_string()),
@@ -2338,11 +2398,15 @@ pub struct Staged {
 #[pymethods]
 impl Staged {
     /// `description` is what the engine describes a graph with for the
-    /// exporter.
+    /// exporter; `export`, where the list of passes has a pass over graphs,
+    /// is called with operations, the values they take and give, and
+    /// tensors like those they will be handed, and returns what the passes
+    /// made of the operations.
     #[new]
-    fn new(py: Python<'_>, description: &Bound<'_, PyDict>) -> PyResult<Staged> {
+    #[pyo3(signature = (description, export=None))]
+    fn new(py: Python<'_>, description: &Bound<'_, PyDict>, export: Option<Py<PyAny>>) -> PyResult<Staged> {
         let graph = Graph::described(py, description)?;
-        Ok(Staged { form: Form::new(Arc::new(graph)) })
+        Ok(Staged { form: Form::new(py, Arc::new(graph), &export) })
     }
 
     #[pyo3(signature = (*feeds))]
