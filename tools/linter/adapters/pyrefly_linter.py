@@ -5,6 +5,7 @@
 #   "numpy==2.1.0 ; python_version >= '3.12' and python_version <= '3.13'",
 #   "numpy==2.3.4 ; python_version >= '3.14'",
 #   "expecttest==0.3.0",
+#   "onnx-ir==0.1.16",
 #   "pyrefly==0.58.0",
 #   "sympy==1.13.3",
 #   "spmd_types==0.2.1",
