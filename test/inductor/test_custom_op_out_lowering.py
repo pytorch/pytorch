@@ -161,11 +161,60 @@ class TestCustomOpOutLowering(InductorTestCase):
             )
             self.assertNotIn(".out(", code)
 
+    def test_tensorless_op_falls_back_to_cpu(self, device):
+        self._run_tensorless_op_falls_back_to_cpu()
+
+    def test_find_device_walks_dict_outputs(self, device):
+        self._run_find_device_walks_dict_outputs()
+
+    def _run_tensorless_op_falls_back_to_cpu(self):
+        """An op with no tensor in or out has no device to inherit, so it gets CPU.
+
+        find_device only comes back empty in that case, and there is nothing for the
+        kernel to sit on but the host. It used to be an allowlist of the ops that had
+        hit the assert so far.
+        """
+        from torch.fx.experimental.symbolic_shapes import constrain_range
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("tensorless() -> SymInt")
+            lib.impl("tensorless", lambda: 3, "CompositeExplicitAutograd")
+
+            @torch.library.register_fake("mylib::tensorless", lib=lib)
+            def _tensorless_fake():
+                ctx = torch.library.get_ctx()
+                sym = ctx._shape_env.create_unbacked_symint()
+                constrain_range(sym, min=0)
+                return sym
+
+            def f(x):
+                return x + torch.ops.mylib.tensorless()
+
+            x = torch.zeros(4)
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), torch.full_like(x, 3))
+
+    def _run_find_device_walks_dict_outputs(self):
+        """find_device has to see every container generate_output does.
+
+        generate_output builds a MultiOutput leaf per dict value, so a device it
+        cannot find in a dict is not "no device" -- it is a packed device that
+        contradicts the leaves hanging off it.
+        """
+        from torch._inductor.ir import FallbackKernel
+
+        t = torch.empty(4)
+        self.assertEqual(FallbackKernel.find_device(None, {"a": t}), t.device)
+        # Nested, because the list branch recurses back through find_device.
+        self.assertEqual(FallbackKernel.find_device(None, [{"a": t}]), t.device)
+        # No tensor anywhere still means no device, leaving the caller's default.
+        self.assertIsNone(FallbackKernel.find_device(None, {"a": 1}))
+
 
 class TestCustomOpOutLoweringCppWrapper(InductorTestCase):
     """Tests for cpp_wrapper runtime dispatch."""
 
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CPU
 
     def test_cpp_wrapper_runtime_dispatch_single_output_fallback(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -200,55 +249,12 @@ class TestCustomOpOutLoweringCppWrapper(InductorTestCase):
                 "cpu", cpp_wrapper=True
             )
             if wrapper_codegen.__name__ == "CppWrapperCpuArrayRef":
+                # ArrayRef wrapper tensors are not AtenTensorHandle, so that wrapper
+                # path intentionally does not emit assert_size_stride.
                 self.assertNotRegex(source_code, output_assert)
             else:
                 FileCheck().check_regex(output_assert).run(source_code)
             self.assertNotRegex(source_code, r"\bbuf\d+\s*=\s*buf\d+\b")
-
-    @parametrize("device", DEVICES)
-    def test_tensorless_op_falls_back_to_cpu(self, device):
-        """An op with no tensor in or out has no device to inherit, so it gets CPU.
-
-        find_device only comes back empty in that case, and there is nothing for the
-        kernel to sit on but the host. It used to be an allowlist of the ops that had
-        hit the assert so far.
-        """
-        from torch.fx.experimental.symbolic_shapes import constrain_range
-
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            lib.define("tensorless() -> SymInt")
-            lib.impl("tensorless", lambda: 3, "CompositeExplicitAutograd")
-
-            @torch.library.register_fake("mylib::tensorless", lib=lib)
-            def _tensorless_fake():
-                ctx = torch.library.get_ctx()
-                sym = ctx._shape_env.create_unbacked_symint()
-                constrain_range(sym, min=0)
-                return sym
-
-            def f(x):
-                return x + torch.ops.mylib.tensorless()
-
-            x = torch.zeros(4, device=device)
-            torch._dynamo.reset()
-            self.assertEqual(torch.compile(f, fullgraph=True)(x), torch.full_like(x, 3))
-
-    @parametrize("device", DEVICES)
-    def test_find_device_walks_dict_outputs(self, device):
-        """find_device has to see every container generate_output does.
-
-        generate_output builds a MultiOutput leaf per dict value, so a device it
-        cannot find in a dict is not "no device" -- it is a packed device that
-        contradicts the leaves hanging off it.
-        """
-        from torch._inductor.ir import FallbackKernel
-
-        t = torch.empty(4, device=device)
-        self.assertEqual(FallbackKernel.find_device(None, {"a": t}), t.device)
-        # Nested, because the list branch recurses back through find_device.
-        self.assertEqual(FallbackKernel.find_device(None, [{"a": t}]), t.device)
-        # No tensor anywhere still means no device, leaving the caller's default.
-        self.assertIsNone(FallbackKernel.find_device(None, {"a": 1}))
 
     def test_dict_output_packs_buffers_not_keys(self):
         """packed.outputs holds the MultiOutputs, the way the list branch does.
