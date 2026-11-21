@@ -6671,6 +6671,27 @@ def graph_remembers(x, w):
     return (z * 2).sin().cos().tanh()
 
 
+class GraphPooled(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 4, 3, padding=1)
+        self.pool = torch.nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = torch.nn.Linear(4, 2)
+
+    def forward(self, x):
+        return self.fc(torch.flatten(self.pool(torch.relu(self.conv(x))), 1))
+
+
+def graph_grid(a, b):
+    rows, columns = torch.meshgrid(a.sin(), b.cos())
+    return (rows * columns).tanh().exp() + 1
+
+
+def graph_grid_named(a, b):
+    rows, columns = torch.meshgrid(a.sin(), b.cos(), indexing="ij")
+    return (rows * columns).tanh().exp() + 1
+
+
 def graph_outer(x):
     return graph_inner(x)
 
@@ -6988,6 +7009,16 @@ def graph_probed(x, n):
         y = y * 2
     count = int(random.random())
     return (y + count).sin().cos().tanh().exp()
+
+
+def graph_sized(x, y):
+    a = (x.sin() + 1).cos()
+    if a.shape != y.shape:
+        raise ValueError("sizes")
+    b = (a * y).tanh()
+    if b.shape == (2, 3):
+        b = b + 1
+    return b.exp()
 
 
 def graph_children(model, x):
@@ -9275,6 +9306,29 @@ print(json.dumps(found))
         found = (graph["ops"], graph["state"], graph["exports"], graph["hits"])
         self.assertEqual(found, (5, "compiled", 1, 10))
 
+    def test_a_comparison_of_sizes_is_part_of_a_path(self):
+        def keep(gm, input_types):
+            return gm
+
+        passes = (*DEFAULT, P.Graphs(), keep)
+        compiled = torch.vm(graph_sized, passes=passes, fallback=False)
+        x, y = torch.randn(2, 3), torch.randn(2, 3)
+        for _ in range(6):
+            self.assertEqual(compiled(x, y), graph_sized(x, y), atol=0, rtol=0)
+        (graph,) = self.graphs(compiled)
+        found = (graph["ops"], graph["why"], graph["exports"])
+        self.assertEqual(found, (7, "the function returns", 1))
+        # Other sizes are another form, and where the function raises for
+        # them it raises.
+        x, y = torch.randn(4, 3), torch.randn(4, 3)
+        for _ in range(3):
+            self.assertEqual(compiled(x, y), graph_sized(x, y), atol=0, rtol=0)
+        for _ in range(3):
+            with self.assertRaisesRegex(ValueError, "sizes"):
+                compiled(x, torch.randn(4, 1))
+        x, y = torch.randn(2, 3), torch.randn(2, 3)
+        self.assertEqual(compiled(x, y), graph_sized(x, y), atol=0, rtol=0)
+
     def test_what_a_path_takes_is_not_reported_as_left_out(self):
         def keep(gm, input_types):
             return gm
@@ -9555,6 +9609,45 @@ print(json.dumps(found))
                 forms = [form for g in self.graphs(compiled) for form in g["forms"]]
                 closed = [form["reason"] for form in forms if "reason" in form]
                 self.assertEqual(closed, [reason] if reason else [])
+
+    def test_a_pool_to_one_cell_and_a_meshgrid_are_operations_of_a_small_graph(self):
+        def keep(gm, input_types):
+            return gm
+
+        torch.manual_seed(0)
+        model = GraphPooled().eval()
+        compiled = torch.vm(model, passes=(*DEFAULT, P.Graphs(), keep), fallback=False)
+        x = torch.randn(2, 3, 8, 8)
+        with torch.no_grad():
+            for _ in range(6):
+                self.assertEqual(compiled(x), model(x), atol=0, rtol=0)
+        (graph,) = [g for g in self.graphs(compiled) if g["hits"]]
+        layers = ["conv2d", "relu", "adaptive_avg_pool2d", "flatten.using_ints"]
+        wanted = [f"aten::{name}" for name in (*layers, "linear")]
+        self.assertEqual(graph["operators"], wanted)
+        self.assertEqual(graph["why"], "the function returns")
+        # `torch.meshgrid` warns once in a process when it is called
+        # without `indexing`; the call that warns runs Python code, which
+        # the profile would take down for the instruction. Not here.
+        a, b = torch.randn(3), torch.randn(5)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            expected = graph_grid(a, b)
+        passes = (*DEFAULT, P.Graphs(), keep)
+        compiled = torch.vm(graph_grid, passes=passes, fallback=False)
+        for _ in range(6):
+            self.assertEqual(compiled(a, b), expected, atol=0, rtol=0)
+        (graph,) = [g for g in self.graphs(compiled) if g["hits"]]
+        self.assertEqual((graph["ops"], graph["why"]), (7, "the function returns"))
+        self.assertIn("aten::meshgrid", graph["operators"])
+        # With `indexing` the C function is called with a `**kwargs` that
+        # is not empty, which no path goes through: it ends in front.
+        passes = (*DEFAULT, P.Graphs(min_ops=2), keep)
+        compiled = torch.vm(graph_grid_named, passes=passes, fallback=False)
+        for _ in range(6):
+            self.assertEqual(compiled(a, b), graph_grid_named(a, b), atol=0, rtol=0)
+        operators = [name for g in self.graphs(compiled) for name in g["operators"]]
+        self.assertNotIn("aten::meshgrid", operators)
 
 
 GRAPH_END_STATE = [0.5]
