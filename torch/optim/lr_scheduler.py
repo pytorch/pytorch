@@ -2095,6 +2095,9 @@ class CyclicLR(LRScheduler):
     @override
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """Load the scheduler's state."""
+        # Copy the state dict so that popping ``_scale_fn_custom`` does not
+        # mutate the caller's dict, which must stay loadable more than once.
+        state_dict = dict(state_dict)
         fn = state_dict.pop("_scale_fn_custom")
         super().load_state_dict(state_dict)
         if fn is not None:
