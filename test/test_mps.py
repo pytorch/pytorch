@@ -16147,6 +16147,31 @@ class TestMetalLibrary(TestCaseMPS):
             self.assertEqual(destination, source.permute(2, 3, 4, 1, 0))
 
 
+class TestMemoryBudget(TestCaseMPS):
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(torch.mps.set_memory_budget, 0)
+
+    def test_set_and_get(self):
+        for budget in (2 * 1024**3, *range(10**9, 10**9 + 100)):
+            torch.mps.set_memory_budget(budget)
+            self.assertEqual(torch.mps.get_memory_budget(), budget)
+        torch.mps.set_memory_budget(0)
+        self.assertEqual(torch.mps.get_memory_budget(), 0)
+
+    def test_invalid_budget(self):
+        with self.assertRaises(TypeError):
+            torch.mps.set_memory_budget(1.5e9)
+        with self.assertRaises(ValueError):
+            torch.mps.set_memory_budget(-1)
+
+    def test_budget_is_enforced(self):
+        torch.mps.empty_cache()
+        torch.mps.set_memory_budget(torch.mps.driver_allocated_memory() + 64 * 1024**2)
+        with self.assertRaisesRegex(RuntimeError, "out of memory"):
+            torch.empty(128 * 1024**2, dtype=torch.uint8, device="mps")
+
+
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
