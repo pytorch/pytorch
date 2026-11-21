@@ -3681,12 +3681,12 @@ class PythonWrapperCodegen(CodeGen):
         """
         captured: list[Line] = []
         outer_lines, self.lines = self.lines, captured
-        self._capturing_lines = True
+        outer_capturing, self._capturing_lines = self._capturing_lines, True
         try:
             yield captured
         finally:
             self.lines = outer_lines
-            self._capturing_lines = False
+            self._capturing_lines = outer_capturing
         for line in captured:
             if isinstance(line, (MemoryPlanningLine, FreeLine)):
                 raise AssertionError(f"cannot capture a memory-planning line: {line}")

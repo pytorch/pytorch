@@ -228,22 +228,24 @@ class SIMDKernelFeatures:
 
         from .simd import SIMDScheduling
 
+        # Fused address expressions can overflow int32 even when numel/storage_size
+        # are within range. Check them first: can_use_32bit_indexing installs a size
+        # guard when it says yes, which is useless if int64 is needed anyway.
+        if self.any_index_expr_overflows_int32():
+            return torch.int64
         if SIMDScheduling.can_use_32bit_indexing(
             total_numel, self._index_dtype_buffers()
         ):
-            # Fused address expressions can overflow int32 even when
-            # numel/storage_size are within range, so check them directly.
-            if self.any_index_expr_overflows_int32():
-                return torch.int64
             return torch.int32
         return torch.int64
 
     @cache_on_self
     def int32_index_conditions(self) -> list[sympy.Expr] | None:
         """Conditions under which int32 indexing is valid for this kernel, without
-        installing guards. Empty if int32 is always valid; None if it never is or
-        the current size hints already exceed it (the default policy then uses
-        int64 without a guard)."""
+        installing guards. Empty if int32 is provably valid; None if a fused index
+        expression may overflow it, or a size provably or by its current hint
+        exceeds it. In both cases select_index_dtype picks the same dtype without a
+        guard, so a single kernel suffices."""
         from .simd import SIMDScheduling
 
         if self.any_index_expr_overflows_int32():
@@ -265,13 +267,16 @@ class SIMDKernelFeatures:
             ):
                 return None
             unproven.append(size)
-        # Drop sizes bounded by another one, e.g. a row count by the full numel.
+        # Drop sizes bounded by another one, e.g. a row count by the full numel. Of
+        # sizes provably equal to each other, keep the first.
         largest = [
             size
-            for size in unproven
+            for i, size in enumerate(unproven)
             if not any(
-                other is not size and sizevars.statically_known_leq(size, other)
-                for other in unproven
+                j != i
+                and sizevars.statically_known_leq(size, other)
+                and (j < i or not sizevars.statically_known_leq(other, size))
+                for j, other in enumerate(unproven)
             )
         ]
         return [sympy.Le(size, int_max) for size in largest]

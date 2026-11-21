@@ -4702,21 +4702,34 @@ class SIMDScheduling(BaseScheduling):
         a single kernel with a size guard."""
         from .triton import TritonScheduling
 
-        return (
-            config.dual_index_dtype
+        if not config.dual_index_dtype:
+            return False
+        skipped_for = (
             # ConditionalMultiKernel emits Triton launches.
-            and isinstance(self, TritonScheduling)
+            "a non-Triton backend"
+            if not isinstance(self, TritonScheduling)
             # TODO: remove to cover all kernels, with tests for them.
-            and kernel_features.is_reduction()
+            else "a non-reduction kernel"
+            if not kernel_features.is_reduction()
             # TODO: support the cpp and FX wrappers (they cannot emit the conditional
             # launch yet).
-            and not V.graph.cpp_wrapper
-            and not config.fx_wrapper
-            # TODO: support compile-time autotuning (needed with the cpp wrapper, where it
+            else "the cpp wrapper"
+            if V.graph.cpp_wrapper
+            else "the FX wrapper"
+            if config.fx_wrapper
+            # TODO: support compile-time autotuning (needed for AOTInductor, where it
             # is on by default): its block launches every captured kernel without
             # checking the branch conditions.
-            and not config.triton.autotune_at_compile_time
+            else "triton.autotune_at_compile_time"
+            if config.triton.autotune_at_compile_time
+            # The user asked for int32 indexing (with a guard).
+            else "config.assume_32bit_indexing"
+            if config.assume_32bit_indexing
+            else None
         )
+        if skipped_for is not None:
+            log.debug("dual_index_dtype: single kernel for %s", skipped_for)
+        return skipped_for is None
 
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
         """
@@ -4724,8 +4737,8 @@ class SIMDScheduling(BaseScheduling):
         SchedulerNodes in codegen order (node_schedule) and its sizes; every kernel
         built below computes all of them, and one is launched. In three steps:
 
-        1. Build (_create_node_schedule_kernel): pick the tiling, create the kernel
-           codegen objects (one, or a multi-kernel wrapping several leaf kernels) and
+        1. Build (_create_node_schedule_kernel), with the tiling picked once: create
+           the kernel codegen objects (one, or a multi-kernel wrapping several leaf kernels) and
            generate each leaf's body into them. Nothing is rendered or written to the
            wrapper, so this can run more than once; the dual index dtype path builds
            an int32 and an int64 kernel and wraps them in a ConditionalMultiKernel.
@@ -4738,18 +4751,24 @@ class SIMDScheduling(BaseScheduling):
            write the launch of the kernel from step 1.
         """
         node_schedule = kernel_features.node_schedule
+        tiling_and_scores = self.get_tiling_and_scores(
+            node_schedule,
+            kernel_features.numel,
+            kernel_features.reduction_numel,
+            kernel_features.coalesce_analysis,
+        )
 
         final_kernel: SIMDKernel | MultiKernelBase
-        # int32_index_conditions is empty when int32 is provable and None when it is
-        # never valid; either way a single kernel suffices.
+        # Empty or None conditions: select_index_dtype picks int32 or int64 without a
+        # guard, so a single kernel suffices.
         if self._should_build_int32_and_int64(kernel_features) and (
             int32_conditions := kernel_features.int32_index_conditions()
         ):
             int32_kernel = self._create_node_schedule_kernel(
-                kernel_features, torch.int32
+                kernel_features, tiling_and_scores, torch.int32
             )
             int64_kernel = self._create_node_schedule_kernel(
-                kernel_features, torch.int64
+                kernel_features, tiling_and_scores, torch.int64
             )
             final_kernel = ConditionalMultiKernel(
                 [
@@ -4758,7 +4777,9 @@ class SIMDScheduling(BaseScheduling):
                 ]
             )
         else:
-            final_kernel = self._create_node_schedule_kernel(kernel_features)
+            final_kernel = self._create_node_schedule_kernel(
+                kernel_features, tiling_and_scores
+            )
         kernels = leaf_kernels(final_kernel)
         self._define_node_schedule_kernels(kernels, node_schedule)
 
@@ -4802,11 +4823,13 @@ class SIMDScheduling(BaseScheduling):
     def _create_node_schedule_kernel(
         self,
         kernel_features: SIMDKernelFeatures,
+        tiling_and_scores: tuple[dict[str, sympy.Expr], dict[str, sympy.Expr] | None],
         index_dtype: torch.dtype | None = None,
     ) -> SIMDKernel | MultiKernelBase:
-        """Build step of codegen_node_schedule: pick the tiling, create the kernel
-        codegen objects (one kernel, or a multi-kernel over several leaf kernels) and
-        replay the nodes into each leaf, filling its loads, compute and stores.
+        """Build step of codegen_node_schedule: with the given tiling, create the
+        kernel codegen objects (one kernel, or a multi-kernel over several leaf
+        kernels) and replay the nodes into each leaf, filling its loads, compute and
+        stores.
 
         Returns the kernel to launch. Its leaves have no source or name yet
         (_define_node_schedule_kernels adds them). Nothing is written to the wrapper
@@ -4814,12 +4837,7 @@ class SIMDScheduling(BaseScheduling):
         index_dtype forces the index dtype instead of deriving it (and its guard)
         from the sizes.
         """
-        tiling, tiling_score = self.get_tiling_and_scores(
-            kernel_features.node_schedule,
-            kernel_features.numel,
-            kernel_features.reduction_numel,
-            kernel_features.coalesce_analysis,
-        )
+        tiling, tiling_score = tiling_and_scores
         kernel_kwargs: dict[str, Any] = {
             "features": kernel_features,
             "tiling_scores": tiling_score,

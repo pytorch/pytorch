@@ -4,6 +4,7 @@ import importlib
 import math
 import operator
 import os
+import re
 import sys
 import unittest
 from functools import partial
@@ -253,6 +254,33 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
                 DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes_cuda
             )
         )
+
+
+def _dual_dispatch_dtypes(code):
+    """Index dtypes of the kernels launched under the `if` and the `else` of the
+    dual index dtype dispatch in generated wrapper code, e.g. ({"i32"}, {"i64"})."""
+    # Each kernel's source has its Triton signature right before its `def`.
+    kernel_dtype = {
+        name: "i64" if "numel': 'i64'" in signature else "i32"
+        for signature, name in re.findall(
+            r"triton_meta=\{'signature': \{(.*?)\}.*?\ndef (\w+)\(", code, re.DOTALL
+        )
+    }
+    multi_kernels = {
+        name: re.findall(r"\w+", subs)
+        for name, subs in re.findall(
+            r"(\w+) = async_compile\.multi_kernel\('\w+', \[(.*?)\]", code, re.DOTALL
+        )
+    }
+
+    def dtypes(launched):
+        return {kernel_dtype[k] for k in multi_kernels.get(launched, [launched])}
+
+    dispatch = re.search(
+        r"if [^\n]*<= \d+:\n(?:.*\n)*?\s*(\w+)\.run\((?:.*\n)*?\s*else:\n(?:.*\n)*?\s*(\w+)\.run\(",
+        code,
+    )
+    return dtypes(dispatch[1]), dtypes(dispatch[2])
 
 
 class TestInductorDynamic(DynamicShapesTestCase):
@@ -850,14 +878,15 @@ class TestInductorDynamic(DynamicShapesTestCase):
                 self.assertEqual(compiled(y), fn(y))
         self.assertEqual(counter.frame_count, 1)
 
-        FileCheck().check("'r0_numel': 'i32'").check("'r0_numel': 'i64'").check(
-            "<= 65536:"
-        ).check(".run(").check("else:").check(".run(").run(code)
+        self.assertEqual(_dual_dispatch_dtypes(code), ({"i32"}, {"i64"}))
+        if cooperative:
+            self.assertIn("RSPLIT", code)
         (entry,) = _debug_get_cache_entry_list(fn.__code__)
         self.assertNotIn("2147483647", str(entry.guard_manager))
 
     @onlyOn(GPU_TYPE)
-    @largeTensorTest("6GB", device=GPU_TYPE)
+    @serialTest()
+    @largeTensorTest("3GB", device=GPU_TYPE)  # measured peak: 2.25 GiB
     @parametrize("dual", [False, True])
     def test_dual_index_dtype_past_int32(self, device, dual):
         def fn(x):
@@ -872,7 +901,9 @@ class TestInductorDynamic(DynamicShapesTestCase):
             big = torch.randint(
                 -3, 3, (2**16 + 1, 2**15), dtype=torch.int8, device=device
             )
-            self.assertEqual(compiled(big), fn(big))
+            # In chunks: eager sum upcasts int8 to int64, 16 GiB for all of big.
+            expected = torch.cat([chunk.sum(-1) for chunk in big.split(2**10)])
+            self.assertEqual(compiled(big), expected)
         # Without dual kernels, the int32 kernel's size guard fails and recompiles.
         self.assertEqual(counter.frame_count, 1 if dual else 2)
 
@@ -906,9 +937,10 @@ class TestInductorDynamic(DynamicShapesTestCase):
                 y = torch.randn(rows, 512, device=device)
                 self.assertEqual(compiled(y), fn(y))
 
-        FileCheck().check("<= 65536:").check("multi_kernel_").check(".run(").check(
-            "else:"
-        ).check("multi_kernel_").check(".run(").run(code)
+        FileCheck().check("<= 65536:").check("multi_kernel_").check("else:").check(
+            "multi_kernel_"
+        ).run(code)
+        self.assertEqual(_dual_dispatch_dtypes(code), ({"i32"}, {"i64"}))
         (entry,) = _debug_get_cache_entry_list(fn.__code__)
         self.assertNotIn("2147483647", str(entry.guard_manager))
 

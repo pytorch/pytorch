@@ -208,8 +208,8 @@ class DispatchedMultiKernel(MultiKernelBase):
     A multi-kernel launched through a run-time dispatcher: the wrapper defines
     `multi_kernel_0 = async_compile.<kind>("multi_kernel_0", ...)` (written when
     kernel_name is first read) and launches `multi_kernel_0.run(...)`, and the
-    dispatcher picks the sub-kernel. Subclasses choose the dispatcher through how
-    they register in kernel_name.
+    dispatcher picks the sub-kernel. Subclasses choose the dispatcher by overriding
+    write_dispatcher.
     """
 
     @functools.cached_property
@@ -663,6 +663,8 @@ class ConditionalMultiKernel(MultiKernelBase):
 
     @property
     def kernel_name(self) -> str:
+        # There is no dispatcher object to name, so this names the first (fastest)
+        # choice; the wrapper comment, profiling scope and provenance tracing use it.
         return self.kernels[0].kernel_name
 
     def call_kernel(self, kernel_name):
@@ -677,6 +679,8 @@ class ConditionalMultiKernel(MultiKernelBase):
         """
         from .wrapper import ConditionalKernelDispatchLine
 
+        if kernel_name != self.kernel_name:
+            raise AssertionError(f"expected {self.kernel_name}, got {kernel_name}")
         wrapper = V.graph.wrapper_code
         leaves = self.leaf_kernels()
         workspaces = leaves[0].args.workspace_args
