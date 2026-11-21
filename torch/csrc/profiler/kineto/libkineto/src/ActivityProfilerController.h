@@ -70,6 +70,7 @@ class ActivityProfilerController : public ConfigLoader::ConfigHandler {
   // These API are used for Synchronous Tracing.
   void syncPrepareTrace(const Config& config);
   void syncToggleCollectionDynamic(const bool enable);
+  void syncStopCollection();
   void syncStartTrace();
   std::unique_ptr<ActivityTraceInterface> syncStopTrace();
 

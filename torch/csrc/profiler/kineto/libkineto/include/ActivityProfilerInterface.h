@@ -64,6 +64,10 @@ class ActivityProfilerInterface {
   // Toggle GPU tracing as a trace is running to omit certain parts of a graph
   virtual void toggleCollectionDynamic([[maybe_unused]] const bool enable) {}
 
+  // Stop collecting and end the trace now, leaving the processing to a later
+  // stopTrace().
+  virtual void stopCollection() {}
+
   // Start recording, potentially reusing any buffers allocated since
   // prepareTrace was called.
   virtual void startTrace() {}

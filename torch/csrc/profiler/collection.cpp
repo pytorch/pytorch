@@ -1019,10 +1019,13 @@ void passEventsToKineto(
   for (const auto i : c10::irange(results.size())) {
     const auto& e = results[i];
     // Here we are essentially setting the duration to -1 if the event never
-    // ends. This way Kineto will extend the event to the end of the trace. This
-    // is useful so that we can still have 0 duration events if necessary
-    // without extension
-    int64_t act_end_time = std::max(e->endTimeNS(), e->start_time_ns_ - 1);
+    // ends, or ends after the trace, as one running at an early stop can. This
+    // way Kineto will extend the event to the end of the trace. This is useful
+    // so that we can still have 0 duration events if necessary without
+    // extension
+    int64_t act_end_time = e->endTimeNS() > static_cast<int64_t>(end_time_ns)
+        ? e->start_time_ns_ - 1
+        : std::max(e->endTimeNS(), e->start_time_ns_ - 1);
     std::string name = e->name();
     if (!e->overload_name().empty()) {
       name = fmt::format("{}.{}", e->name(), e->overload_name());

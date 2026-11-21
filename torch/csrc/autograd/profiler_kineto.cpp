@@ -1,5 +1,6 @@
 #include <fmt/format.h>
 #include <cstring>
+#include <optional>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/csrc/autograd/profiler_kineto.h>
 
@@ -176,9 +177,10 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
     recordQueue.stop();
   }
 
+  // The trace ends at stopped_at if collection stopped early, otherwise now.
   std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>
-  finalizeTrace() {
-    auto end_time = getTimeNs();
+  finalizeTrace(std::optional<int64_t> stopped_at = std::nullopt) {
+    auto end_time = stopped_at.value_or(getTimeNs());
     recordQueue.stop();
 
     std::lock_guard<std::mutex> guard(state_mutex_);
@@ -213,8 +215,9 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
         eventTree.push_back(e);
       }
 
-      // Unfinished events automatically have end time set to trace end time
-      if (!e->finished_) {
+      // Unfinished events automatically have end time set to trace end time.
+      // So do events that ended after an early stop.
+      if (!e->finished_ || e->endTimeNS() > trace_end_ns) {
         e->visit(c10::overloaded(
             [trace_end_ns](ExtraFields<EventType::TorchOp>& i) {
               i.end_time_ns_ = trace_end_ns;
@@ -833,6 +836,20 @@ void enableProfilerWithEventPostProcess(
   }
 }
 
+namespace {
+// A session stopProfilerCollection() stopped, until disableProfiler()
+// finalizes its trace.
+struct StoppedSession {
+  std::shared_ptr<ProfilerStateBase> state;
+  int64_t stoppedAt;
+};
+
+std::optional<StoppedSession>& stoppedSession() {
+  static std::optional<StoppedSession> session;
+  return session;
+}
+} // namespace
+
 void enableProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities,
@@ -845,6 +862,8 @@ void enableProfiler(
       !already_enabled,
       "Profiler is already enabled",
       (config.global() ? "." : " on this thread."));
+  // A session stopped early but never disabled is dropped.
+  stoppedSession().reset();
 
   // Handle external tracer states - these use their own tracing callbacks
   if (isExternalTracerState(config.state)) {
@@ -914,7 +933,10 @@ void disableProfilerInChildThread() {
   state_ptr->removeCallback();
 }
 
-std::unique_ptr<ProfilerResult> disableProfiler() {
+namespace {
+// Pops and stops the current session, the first half of disableProfiler().
+// Returns nullptr if there is no trace left to finalize.
+std::shared_ptr<ProfilerStateBase> stopProfilerState() {
   // releasing to inform child threads to stop profiling
   profilerStateInfo() = nullptr;
 
@@ -939,7 +961,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
     if (auto state_ptr = ProfilerStateBase::pop()) {
       state_ptr->removeCallback();
     }
-    return std::make_unique<ProfilerResult>();
+    return nullptr;
   }
 
   auto state_ptr = ProfilerStateBase::pop();
@@ -947,19 +969,56 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
     LOG(WARNING)
         << "disableProfiler called but no active profiling session found. "
         << "This can happen if profiling was cancelled during warmup.";
-    return std::make_unique<ProfilerResult>();
+    return nullptr;
   }
-  const auto& config = state_ptr->config();
   TORCH_CHECK(
-      isValidDisableState(config.state),
+      isValidDisableState(state_ptr->config().state),
       "Can't disable Kineto profiler: config is not in a valid disable state");
 
   state_ptr->removeCallback();
+  return state_ptr;
+}
+} // namespace
+
+void stopProfilerCollection() {
+  std::shared_ptr<ProfilerStateBase> global_state =
+      ProfilerStateBase::getGlobal();
+  ProfilerStateBase* state =
+      global_state ? global_state.get() : ProfilerStateBase::getTLS();
+  TORCH_CHECK(
+      state != nullptr && state->profilerType() == ActiveProfilerType::KINETO,
+      "Stopping collection requires an active Kineto profiler");
+  auto state_ptr = stopProfilerState();
+  if (!state_ptr) {
+    return;
+  }
+  std::static_pointer_cast<KinetoThreadLocalState>(state_ptr)
+      ->recordQueue.stop();
+  // Stamped once no event can start, and before Kineto stops, so Kineto's
+  // window holds the whole trace.
+  stoppedSession() = StoppedSession{std::move(state_ptr), getTimeNs()};
+  torch::profiler::impl::kineto::stopCollection();
+}
+
+std::unique_ptr<ProfilerResult> disableProfiler() {
+  std::shared_ptr<ProfilerStateBase> state_ptr;
+  std::optional<int64_t> stopped_at;
+  if (auto& stopped = stoppedSession()) {
+    state_ptr = std::move(stopped->state);
+    stopped_at = stopped->stoppedAt;
+    stopped.reset();
+  } else {
+    state_ptr = stopProfilerState();
+  }
+  if (!state_ptr) {
+    return std::make_unique<ProfilerResult>();
+  }
+  const auto& config = state_ptr->config();
 
   // Traces are converged via libkineto automatically for ondemand flow
   if (config.global()) {
     (void)std::static_pointer_cast<KinetoThreadLocalState>(state_ptr)
-        ->finalizeTrace();
+        ->finalizeTrace(stopped_at);
     return std::make_unique<ProfilerResult>();
   }
 
@@ -974,7 +1033,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   if (isKinetoCompatibleState(config.state)) {
     auto kineto_state_ptr =
         std::static_pointer_cast<KinetoThreadLocalState>(state_ptr);
-    auto trace = kineto_state_ptr->finalizeTrace();
+    auto trace = kineto_state_ptr->finalizeTrace(stopped_at);
     result = std::make_unique<ProfilerResult>(
         kineto_state_ptr->startTime,
         std::move(kineto_state_ptr->kinetoEvents),

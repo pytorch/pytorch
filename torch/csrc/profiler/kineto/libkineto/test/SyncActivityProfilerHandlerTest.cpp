@@ -9,9 +9,14 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <memory>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include "include/Config.h"
+#include "include/IActivityProfiler.h"
+#include "include/time_since_epoch.h"
 #include "src/GenericActivityProfiler.h"
 #include "src/SyncActivityProfilerHandler.h"
 
@@ -43,6 +48,10 @@ class GpuHookCounter : public GenericActivityProfiler {
 
   bool toggledOn() const {
     return toggleState_.load();
+  }
+
+  int64_t windowEnd() const {
+    return captureWindowEndTime_;
   }
 
   int bufferSizeCalls{0};
@@ -204,4 +213,119 @@ TEST(SyncActivityProfilerHandler, EveryTraceStartsToggledOn) {
   EXPECT_TRUE(profiler.toggledOn());
   handler.startTrace();
   handler.stopTrace();
+}
+
+namespace {
+
+// A child session that records the calls the profiler makes to it.
+class RecordingSession : public IActivityProfilerSession {
+ public:
+  explicit RecordingSession(std::vector<std::string>& calls) : calls_(calls) {}
+  void start() override {}
+  void stop() override {
+    calls_.emplace_back("stop");
+  }
+  std::vector<std::string> errors() override {
+    return {};
+  }
+  void processTrace(ActivityLogger& /*logger*/) override {
+    calls_.emplace_back("process");
+  }
+  std::unique_ptr<DeviceInfo> getDeviceInfo() override {
+    return nullptr;
+  }
+  std::vector<ResourceInfo> getResourceInfos() override {
+    return {};
+  }
+  std::unique_ptr<CpuTraceBuffer> getTraceBuffer() override {
+    return nullptr;
+  }
+  void toggleCollectionDynamic(bool enable) override {
+    calls_.emplace_back(enable ? "toggle on" : "toggle off");
+  }
+
+ private:
+  std::vector<std::string>& calls_;
+};
+
+class RecordingProfiler : public IActivityProfiler {
+ public:
+  explicit RecordingProfiler(std::vector<std::string>& calls) : calls_(calls) {}
+  const std::string& name() const override {
+    return name_;
+  }
+  const std::set<ActivityType>& availableActivities() const override {
+    return activities_;
+  }
+  std::unique_ptr<IActivityProfilerSession> configure(
+      const std::set<ActivityType>& /*activityTypes*/,
+      const Config& /*config*/) override {
+    return std::make_unique<RecordingSession>(calls_);
+  }
+  std::unique_ptr<IActivityProfilerSession> configure(
+      int64_t /*tsMs*/,
+      int64_t /*durationMs*/,
+      const std::set<ActivityType>& activityTypes,
+      const Config& config) override {
+    return configure(activityTypes, config);
+  }
+
+ private:
+  const std::string name_{"RecordingProfiler"};
+  const std::set<ActivityType> activities_;
+  std::vector<std::string>& calls_;
+};
+
+} // namespace
+
+TEST(SyncActivityProfilerHandler, StopCollectionEndsTraceBeforeProcessing) {
+  GpuHookCounter profiler;
+  std::vector<std::string> calls;
+  profiler.addChildActivityProfiler(std::make_unique<RecordingProfiler>(calls));
+  SyncActivityProfilerHandler handler(profiler);
+
+  prepareTrace(handler, "");
+  handler.startTrace();
+  handler.stopCollection();
+  const int64_t stopped = libkineto::timeSinceEpoch(system_clock::now());
+  EXPECT_EQ(profiler.disableCalls, 1);
+  EXPECT_EQ(profiler.processCalls, 0);
+
+  // Collection stays stopped: a toggle does nothing, and stopTrace() only
+  // processes.
+  std::this_thread::sleep_for(milliseconds(10));
+  handler.stopCollection();
+  handler.toggleCollectionDynamic(true);
+  EXPECT_FALSE(profiler.toggledOn());
+  handler.stopTrace();
+
+  EXPECT_EQ(profiler.disableCalls, 1);
+  EXPECT_EQ(profiler.processCalls, 1);
+  EXPECT_LE(profiler.windowEnd(), stopped);
+  const std::vector<std::string> expected{"stop", "process"};
+  EXPECT_EQ(calls, expected);
+  EXPECT_FALSE(handler.isSyncActive());
+}
+
+TEST(SyncActivityProfilerHandler, CancelAfterStopCollectionStopsOnce) {
+  GpuHookCounter profiler;
+  std::vector<std::string> calls;
+  profiler.addChildActivityProfiler(std::make_unique<RecordingProfiler>(calls));
+  SyncActivityProfilerHandler handler(profiler);
+
+  prepareTrace(handler, "");
+  handler.startTrace();
+  handler.stopCollection();
+  handler.cancel();
+  EXPECT_FALSE(handler.isSyncActive());
+  EXPECT_EQ(profiler.disableCalls, 1);
+  EXPECT_EQ(calls, std::vector<std::string>{"stop"});
+
+  // The next trace stops and processes as usual.
+  calls.clear();
+  prepareTrace(handler, "");
+  handler.startTrace();
+  handler.stopTrace();
+  const std::vector<std::string> expected{"stop", "process"};
+  EXPECT_EQ(calls, expected);
 }
