@@ -23,6 +23,7 @@ from torch._higher_order_ops.partitioner import (
 )
 from torch._higher_order_ops.utils import (
     _batch_dims_as_last_for_scan,
+    _fake_mode_handler,
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
     _move_batch_dims_to_last_for_scan,
@@ -96,7 +97,8 @@ def _build_empty_output_for_length_zero(
     combine_fn: Callable, init: pytree.PyTree
 ) -> pytree.PyTree:
     """Probe combine_fn(init, None) to learn the output structure for length==0."""
-    fake_mode = detect_fake_mode(pytree.tree_leaves(init)) or FakeTensorMode()
+    leaves = pytree.tree_leaves(init)
+    fake_mode = detect_fake_mode(leaves) or FakeTensorMode()
     with fake_mode:
         fake_init = pytree.tree_map(
             lambda t: fake_mode.from_tensor(t)
@@ -985,7 +987,8 @@ class ScanAutogradImpl:
 
             grad_fw_outputs = (*grad_carry, *grad_y)
 
-            flat_out = self.hop_partitioned_graph.bw_gm(
+            # Interpret bw_gm so the nodes traced from it keep their meta.
+            flat_out = _maybe_run_with_interpreter(self.hop_partitioned_graph.bw_gm)(
                 *fw_intermediates,
                 *grad_fw_outputs,
             )
@@ -1125,6 +1128,9 @@ def scan_fake_tensor_mode(
             ),
         )
         return out
+
+
+scan_op.py_impl(DispatchKey.Fake)(_fake_mode_handler(scan_fake_tensor_mode))
 
 
 @scan_op.py_functionalize_impl

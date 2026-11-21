@@ -76,7 +76,7 @@ void record_stream_any_impl(Variable& var, const c10::Stream& stream) {
 
   const auto guard = c10::impl::VirtualGuardImpl(device_of(var).value().type());
 
-  if (C10_UNLIKELY(at::isBatchedTensor(var))) {
+  if (at::isBatchedTensor(var)) [[unlikely]] {
     auto* impl = at::maybeGetBatchedImpl(var);
     if (impl) {
       guard.recordDataPtrOnStream(impl->value().storage().data_ptr(), stream);
@@ -365,9 +365,8 @@ void InputBuffer::add(
   // Non-accelerator case
   //
   if (!is_accelerator) {
-    if (C10_UNLIKELY(
-            direct_accumulation_threads_ != nullptr &&
-            direct_accumulation_threads_[pos].has_value())) {
+    if (direct_accumulation_threads_ != nullptr &&
+        direct_accumulation_threads_[pos].has_value()) [[unlikely]] {
       // See Note [Direct accumulation thread and stream safety].
       validate_direct_accumulation(
           pos,
@@ -410,9 +409,8 @@ void InputBuffer::add(
   }
 
   TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream);
-  if (C10_UNLIKELY(
-          direct_accumulation_threads_ != nullptr &&
-          direct_accumulation_threads_[pos].has_value())) {
+  if (direct_accumulation_threads_ != nullptr &&
+      direct_accumulation_threads_[pos].has_value()) [[unlikely]] {
     // See Note [Direct accumulation thread and stream safety].
     validate_direct_accumulation(
         pos,

@@ -950,8 +950,6 @@ def generate_tensor_like_override_tests(cls):
                 return None
             elif arg_type == "ScalarType":
                 return torch.float32
-            elif arg_type == "c10::string_view":
-                return ""
             elif arg_type in ("std::string_view", "::std::string_view"):
                 return ""
             elif arg_type == "SymInt":
@@ -1462,6 +1460,20 @@ class TestTorchFunctionWarning(TestCase):
         result2 = torch.abs(b)
         self.assertEqual(result1, torch.tensor(99.0))
         self.assertEqual(result2, torch.tensor(99.0))
+
+class TestTestingOverrides(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_signatures_match_docs(self):
+        # See https://github.com/pytorch/pytorch/issues/81323
+        overrides = get_testing_overrides()
+        expected = {
+            torch.Tensor.size: "(self, dim=None)",
+            torch.Tensor.permute: "(self, *dims)",
+            torch.permute: "(input, dims)",
+        }
+        for func, signature in expected.items():
+            self.assertEqual(str(inspect.signature(overrides[func])), signature)
 
 class TestDisabledUserWarnings(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -2060,7 +2072,7 @@ TensorBase.add: (<class 'torch.testing._internal.common_subclass.RedispatchTenso
 class TestTorchFunctionRedispatchOpsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @ops(op_db)
+    @ops([op for op in op_db if not op.has_nondeterministic_output])
     @skipOps({
         # Disabled due to CI failures; see #190241
         skip("nn.functional.conv_transpose3d", dtypes=(torch.float16, torch.bfloat16, torch.complex32)),
