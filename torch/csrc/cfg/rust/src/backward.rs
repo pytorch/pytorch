@@ -25,7 +25,7 @@ use crate::pyffi::Obj;
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyCapsule, PyDict, PyList, PyTuple};
+use pyo3::types::{PyCapsule, PyDict, PyList, PyTuple, PyWeakrefMethods, PyWeakrefReference};
 use std::collections::{HashMap, HashSet};
 use std::ffi::{c_void, CStr};
 use std::os::raw::c_char;
@@ -70,11 +70,11 @@ fn refused<T>(why: impl Into<String>) -> Result<T, Stop> {
 static TORCH: PyOnceLock<Py<PyModule>> = PyOnceLock::new();
 static TENSOR: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
 
-fn torch(py: Python<'_>) -> PyResult<&Bound<'_, PyModule>> {
+pub(crate) fn torch(py: Python<'_>) -> PyResult<&Bound<'_, PyModule>> {
     Ok(TORCH.get_or_try_init(py, || PyModule::import(py, "torch").map(Bound::unbind))?.bind(py))
 }
 
-fn is_tensor(obj: &Bound<'_, PyAny>) -> bool {
+pub(crate) fn is_tensor(obj: &Bound<'_, PyAny>) -> bool {
     let py = obj.py();
     let Ok(class) = TENSOR.get_or_try_init(py, || torch(py)?.getattr("Tensor").map(Bound::unbind)) else {
         return false;
@@ -109,6 +109,14 @@ fn key(obj: &Bound<'_, PyAny>) -> usize {
     obj.as_ptr() as usize
 }
 
+/// Whether a value is a device or a dtype.
+fn kind_of(value: &Bound<'_, PyAny>) -> bool {
+    let Ok(torch) = torch(value.py()) else {
+        return false;
+    };
+    ["device", "dtype"].iter().any(|name| torch.getattr(*name).and_then(|class| value.is_instance(&class)).unwrap_or(false))
+}
+
 /// The tensors in a value: itself, or those of a tuple or list, in order.
 fn tensors_in<'py>(value: &Bound<'py, PyAny>, into: &mut Vec<Bound<'py, PyAny>>) {
     if is_tensor(value) {
@@ -139,13 +147,13 @@ fn same_bits(a: &Bound<'_, PyAny>, b: &Bound<'_, PyAny>) -> PyResult<bool> {
 }
 
 /// Sets the grad mode of the thread until it is dropped.
-struct GradMode<'py> {
+pub(crate) struct GradMode<'py> {
     torch: &'py Bound<'py, PyModule>,
     before: bool,
 }
 
 impl<'py> GradMode<'py> {
-    fn set(py: Python<'py>, enabled: bool) -> PyResult<GradMode<'py>> {
+    pub(crate) fn set(py: Python<'py>, enabled: bool) -> PyResult<GradMode<'py>> {
         let torch = torch(py)?;
         let before: bool = torch.call_method0("is_grad_enabled")?.extract()?;
         torch.getattr("_C")?.call_method1("_set_grad_enabled", (enabled,))?;
@@ -337,7 +345,11 @@ impl<'py> Node<'py> {
         if unsafe { (bapi()?.node_info)(obj.as_ptr(), &mut found) } == 0 {
             return Err(PyTypeError::new_err("what a gradient goes to is no node of autograd"));
         }
-        let name = unsafe { CStr::from_ptr(found.name) }.to_string_lossy().into_owned();
+        let name = if found.flags & TCFG_NODE_PYTHON != 0 {
+            obj.get_type().name()?.to_string()
+        } else {
+            unsafe { CStr::from_ptr(found.name) }.to_string_lossy().into_owned()
+        };
         Ok(Node { obj, name, sequence: found.sequence_nr, inputs: found.n_inputs, edges: found.n_edges, flags: found.flags })
     }
 
@@ -591,14 +603,22 @@ impl Step {
         !matches!(self.kind, Kind::Aten(..) | Kind::Call(..) | Kind::GetItem(..) | Kind::SetItem(..) | Kind::Kernel(..))
     }
 
-    /// Whether the step takes nothing the graph computed or was handed.
-    fn constant(&self) -> bool {
-        self.reads().is_empty()
-    }
-
-    /// The function a call calls, and what it is called with.
+    /// The function a call calls, and what it is called with: for a call
+    /// of the form's graph, and for an operation of a joint graph that is
+    /// a call and no operator.
     #[allow(clippy::type_complexity)]
     fn called<'py>(&self, py: Python<'py>, values: &[Option<Py<PyAny>>]) -> PyResult<Option<(Bound<'py, PyAny>, Bound<'py, PyTuple>, Bound<'py, PyDict>)>> {
+        if let Kind::Kernel(op, args, kwargs, _, _) = &self.kind {
+            if op.bind(py).is_instance_of::<PyCapsule>() {
+                return Ok(None);
+            }
+            let given: Vec<Bound<'py, PyAny>> = args.iter().map(|item| item.get(py, values)).collect::<PyResult<_>>()?;
+            let named = PyDict::new(py);
+            for (name, arg) in kwargs {
+                named.set_item(name, arg.get(py, values)?)?;
+            }
+            return Ok(Some((op.bind(py).clone(), PyTuple::new(py, given)?, named)));
+        }
         let Kind::Call(callee, method, taken, kwnames) = &self.kind else {
             return Ok(None);
         };
@@ -697,11 +717,60 @@ impl Step {
     }
 }
 
+/// The operator a call site calls, and its arguments as the site has them:
+/// by name for those the operator takes by name only.
+#[allow(clippy::type_complexity)]
+fn site_of<'py>(py: Python<'py>, site: &Bound<'py, PyAny>) -> PyResult<(Bound<'py, PyAny>, Vec<(Option<String>, SiteArg)>)> {
+    let (name, overload): (String, String) = (site.get_item("op")?.extract()?, site.get_item("overload")?.extract()?);
+    let (namespace, op) = name.split_once("::").unwrap_or(("aten", &name));
+    let overload = if overload.is_empty() { "default" } else { &overload };
+    let target = torch(py)?.getattr("ops")?.getattr(namespace)?.getattr(op)?.getattr(overload)?;
+    let mut args = Vec::new();
+    for arg in site.get_item("args")?.try_iter()? {
+        let arg = arg?;
+        let (name, keyword_only, source): (String, bool, String) = (arg.get_item(0)?.extract()?, arg.get_item(1)?.extract()?, arg.get_item(2)?.extract()?);
+        let payload = arg.get_item(3)?;
+        let found = match source.as_str() {
+            "operand" => SiteArg::Operand(payload.get_item(0)?.extract()?, payload.get_item(1)?.extract::<String>().is_ok_and(|how| how == "int_as_list")),
+            "packed" => SiteArg::Packed(payload.extract()?),
+            _ => SiteArg::Const(payload.unbind()),
+        };
+        args.push((keyword_only.then_some(name), found));
+    }
+    Ok((target, args))
+}
+
+/// Calls the operator of a call site, as `site_export` describes one, with
+/// `operand(k)` for the k-th value the site takes.
+pub(crate) fn site_call<'py>(py: Python<'py>, site: &Bound<'py, PyAny>, operand: &dyn Fn(usize) -> PyResult<Bound<'py, PyAny>>) -> PyResult<Bound<'py, PyAny>> {
+    let (target, args) = site_of(py, site)?;
+    let mut positional = Vec::new();
+    let kwargs = PyDict::new(py);
+    for (name, arg) in &args {
+        let value = match arg {
+            SiteArg::Operand(at, listed) => {
+                let value = operand(*at)?;
+                if *listed {
+                    PyList::new(py, [value])?.into_any()
+                } else {
+                    value
+                }
+            }
+            SiteArg::Packed(which) => PyList::new(py, which.iter().map(|at| operand(*at)).collect::<PyResult<Vec<_>>>()?)?.into_any(),
+            SiteArg::Const(held) => held.bind(py).clone(),
+        };
+        match name {
+            Some(name) => kwargs.set_item(name, value)?,
+            None => positional.push(value),
+        }
+    }
+    target.call(PyTuple::new(py, positional)?, Some(&kwargs))
+}
+
 impl Graph {
     /// The graph the engine describes for the exporter.
     fn described(py: Python<'_>, description: &Bound<'_, PyDict>) -> PyResult<Graph> {
         let need = |name: &str| description.get_item(name)?.ok_or_else(|| PyValueError::new_err(format!("the description of a graph has no {name}")));
-        let ops = torch(py)?.getattr("ops")?;
         let mut steps = Vec::new();
         for node in need("nodes")?.try_iter()? {
             let node = node?;
@@ -710,23 +779,7 @@ impl Graph {
             let value = |at: usize| -> PyResult<Option<u32>> { Ok(Some(part(at)?.extract()?)) };
             let step = match kind.as_str() {
                 "aten" => {
-                    let site = part(1)?;
-                    let (name, overload): (String, String) = (site.get_item("op")?.extract()?, site.get_item("overload")?.extract()?);
-                    let (namespace, op) = name.split_once("::").unwrap_or(("aten", &name));
-                    let overload = if overload.is_empty() { "default" } else { &overload };
-                    let target = ops.getattr(namespace)?.getattr(op)?.getattr(overload)?;
-                    let mut args = Vec::new();
-                    for arg in site.get_item("args")?.try_iter()? {
-                        let arg = arg?;
-                        let (name, keyword_only, source): (String, bool, String) = (arg.get_item(0)?.extract()?, arg.get_item(1)?.extract()?, arg.get_item(2)?.extract()?);
-                        let payload = arg.get_item(3)?;
-                        let found = match source.as_str() {
-                            "operand" => SiteArg::Operand(payload.get_item(0)?.extract()?, payload.get_item(1)?.extract::<String>().is_ok_and(|how| how == "int_as_list")),
-                            "packed" => SiteArg::Packed(payload.extract()?),
-                            _ => SiteArg::Const(payload.unbind()),
-                        };
-                        args.push((keyword_only.then_some(name), found));
-                    }
+                    let (target, args) = site_of(py, &part(1)?)?;
                     Step { kind: Kind::Aten(target.unbind(), args, operands(&part(2)?)?), value: value(3)? }
                 }
                 "call" => Step { kind: Kind::Call(Some(operand(&part(1)?)?), None, operands(&part(2)?)?, names(&part(3)?)?), value: value(4)? },
@@ -1229,6 +1282,9 @@ fn take_down<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>]) -
     let before: Vec<(bool, Option<(usize, u32)>)> =
         feeds.iter().zip(&held).map(|(feed, node)| (requires_grad(feed), node.as_ref().map(|(node, input)| (node.key(), *input)))).collect();
     let mut ran = Vec::new();
+    // The values that are the same at every call of the form: what is made
+    // of constants only, and the device and the dtype of a tensor.
+    let mut fixed: HashSet<u32> = HashSet::new();
     let mut events: Vec<Event<'py>> = Vec::new();
     let mut why: Option<String> = None;
     let none = PyDict::new(py);
@@ -1237,6 +1293,16 @@ fn take_down<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>]) -
         step.run(py, &mut values)?;
         let records = tape.end(py)?;
         ran.push(!records.is_empty());
+        if let Some(value) = step.value {
+            let same = match step.kind {
+                Kind::Tuple(..) | Kind::List(..) | Kind::Slice(..) | Kind::Same(..) | Kind::Neg(..) | Kind::Binary(..) => step.reads().iter().all(|read| fixed.contains(read)),
+                Kind::Attr(..) => values[value as usize].as_ref().is_some_and(|held| kind_of(held.bind(py))),
+                _ => false,
+            };
+            if same && records.is_empty() {
+                fixed.insert(value);
+            }
+        }
         if why.is_some() || records.is_empty() {
             continue;
         }
@@ -1245,14 +1311,20 @@ fn take_down<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>]) -
             continue;
         }
         let mut given = Vec::new();
-        if let Some(value) = step.value.and_then(|value| values[value as usize].as_ref()) {
-            tensors_in(value.bind(py), &mut given);
+        for value in step.gives() {
+            if let Some(held) = &values[value as usize] {
+                tensors_in(held.bind(py), &mut given);
+            }
         }
         // A tensor that an operation makes of what is no tensor
-        // (torch.tensor of numbers) is filled where no kernel runs: the
-        // operation itself is the one of the forward that gives it.
-        if step.constant() && given.len() == 1 && matches!(step.kind, Kind::Call(..)) {
-            let (function, args, kwargs) = step.called(py, &values)?.expect("a call");
+        // (torch.tensor of numbers, on the device and of the dtype of a
+        // tensor of the graph) is filled where no kernel runs: the
+        // operation itself, with what it was called with, is the one of
+        // the forward that gives it. Two runs must have called it with the
+        // same, and what it takes of the graph is the same at every call
+        // of the form (`fixed`).
+        let called = if step.reads().iter().all(|value| fixed.contains(value)) && given.len() == 1 { step.called(py, &values)? } else { None };
+        if let Some((function, args, kwargs)) = called {
             let name = function.getattr("__name__").and_then(|name| name.extract::<String>()).unwrap_or_else(|_| "made".to_string());
             let random = records.iter().any(|record| record.random);
             if let Err(error) = joint.forward(&function, &format!("python::{name}"), &args, &kwargs, &given[0], Vec::new(), random) {
@@ -1262,7 +1334,17 @@ fn take_down<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>]) -
         }
         for record in records {
             if record.base() == "lift_fresh" {
-                why = Some("an operation makes a tensor of what is no tensor, with tensors of the graph".to_string());
+                let name = match &step.kind {
+                    Kind::Call(..) => step.called(py, &values)?.and_then(|(function, _, _)| function.getattr("__name__").or_else(|_| function.get_type().getattr("__name__")).ok()),
+                    Kind::Aten(target, ..) => target.bind(py).getattr("__name__").ok(),
+                    _ => None,
+                };
+                let name = name.and_then(|name| name.extract::<String>().ok()).unwrap_or_else(|| match step.kind {
+                    Kind::GetItem(..) => "an index".to_string(),
+                    Kind::SetItem(..) => "a store by an index".to_string(),
+                    _ => "an operation".to_string(),
+                });
+                why = Some(format!("{name} makes a tensor of what is no tensor, and takes what is not the same at every call"));
                 break;
             }
             let written: Vec<Bound<'py, PyAny>> = record.written.iter().filter_map(|at| record.args.get_item(*at).ok()).filter(is_tensor).collect();
@@ -1336,13 +1418,6 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
     let mut flags = vec![true; nodes.roots.len()];
     flags.extend(vec![false; rest.len()]);
     joint_says(py, joint.results(nodes.roots.iter().chain(&rest).cloned().collect(), flags.clone()))?;
-    for tensor in feeds.iter().chain(&nodes.roots) {
-        if let Some((node, input)) = Node::of_tensor(tensor)? {
-            if node.flags & TCFG_NODE_LEAF == 0 {
-                joint_says(py, joint.producer(tensor, node.name.clone(), input))?;
-            }
-        }
-    }
     let cast = Cast::now(py)?;
     if !nodes.roots.is_empty() {
         // A backward runs under the autocast of the thread that asks for
@@ -1398,6 +1473,34 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
                 nodes.proven(py, feeds, &roots, &given, &nodes.sums(py, &part)?)?;
             }
         }
+    }
+    // Eager's node of every value the backwards read, and which node of
+    // the backward it is: what eager names where the value was written to
+    // in place before a backward.
+    let numbers: HashMap<usize, u32> = nodes.order.iter().enumerate().map(|(at, node)| (node.key(), at as u32)).collect();
+    for value in joint.read() {
+        let Some(tensor) = joint.tensor(py, value) else {
+            continue;
+        };
+        if let Some((node, output)) = Node::of_tensor(&tensor)? {
+            if node.flags & TCFG_NODE_LEAF == 0 {
+                joint.made_by(value, node.name.clone(), output, numbers.get(&node.key()).copied());
+            }
+        }
+    }
+    // What each node kept of the forward, in the order it looks at it when
+    // it runs: by the names it keeps it under.
+    for (number, node) in nodes.order.iter().enumerate() {
+        let mut kept: Vec<Value> = Vec::new();
+        for name in crate::asks::saved_names(py, &node.obj)? {
+            let Ok(held) = node.obj.getattr(name.as_str()) else {
+                continue;
+            };
+            let mut found = Vec::new();
+            tensors_in(&held, &mut found);
+            kept.extend(found.iter().filter_map(|tensor| joint.value(tensor)));
+        }
+        joint.kept_by(number as u32, kept);
     }
     joint.finish();
     Ok(Taken { joint, ran, marks, targets: nodes.targets.clone(), shape, cut: None, cast })
@@ -1577,6 +1680,28 @@ struct Back {
     takes: Vec<Value>,
 }
 
+/// A value the forward keeps in memory the caller can get at, for eager's
+/// text where it was written to in place before a backward.
+struct Named {
+    /// Where it is in what the forward keeps.
+    at: usize,
+    /// Eager's node that gave it when the form was taken down, and which
+    /// of that node's results it is.
+    name: Option<String>,
+    output: u32,
+    held: Held,
+}
+
+/// What of a call a value is.
+enum Held {
+    Feed(usize),
+    Root(usize),
+    /// A result that is no root.
+    Result,
+    /// A view, made in the graph, of an input or of a result.
+    View,
+}
+
 struct Plan {
     graph: Arc<Graph>,
     joint: Joint,
@@ -1588,9 +1713,15 @@ struct Plan {
     forward: Runner,
     /// The values the forward keeps for the backwards.
     saved: Vec<Value>,
-    /// Of those, what is checked for writes at a backward, with eager's
-    /// node and result number for the text.
-    checked: HashMap<Value, (Option<String>, u32)>,
+    /// Of those, what is checked for writes at a backward.
+    checked: HashMap<Value, Named>,
+    /// The roots among them.
+    watched: Vec<usize>,
+    /// Per way of running a backward and set of roots that come with a
+    /// gradient: what eager's nodes look at, in the order the nodes run,
+    /// each with whether the node that looks at it first is the one that
+    /// gave it.
+    looked: Mutex<HashMap<(u32, Vec<bool>), Arc<Vec<(Value, bool)>>>>,
     /// Whether the forward can run again: it draws no random numbers and
     /// writes to no tensor from outside.
     again: bool,
@@ -1635,6 +1766,24 @@ impl Plan {
         let inputs: u32 = part("inputs")?.extract()?;
         let saved: Vec<Value> = part("saved")?.extract()?;
         let checked: Vec<(Value, Option<String>, u32)> = part("checked")?.extract()?;
+        let results: Vec<Value> = part("results")?.extract()?;
+        let mut named: HashMap<Value, Named> = HashMap::new();
+        for (value, name, output) in checked {
+            let held = if value < inputs {
+                Held::Feed(value as usize)
+            } else if let Some(root) = shape.roots.iter().position(|root| *root == value) {
+                Held::Root(root)
+            } else if results.contains(&value) {
+                Held::Result
+            } else {
+                Held::View
+            };
+            if let Some(at) = saved.iter().position(|kept| *kept == value) {
+                named.insert(value, Named { at, name, output, held });
+            }
+        }
+        let mut watched: Vec<usize> = named.values().filter_map(|named| if let Held::Root(root) = named.held { Some(root) } else { None }).collect();
+        watched.sort_unstable();
         let again = !(part("draws")?.extract::<bool>()? || part("writes")?.extract::<bool>()?);
         let (behind, _) = graph.behind(&ran);
         // Behind its roots the forward gives what is kept and is no input,
@@ -1671,7 +1820,9 @@ impl Plan {
             gives: gives.into_iter().enumerate().map(|(at, value)| (value, at)).collect(),
             forward,
             saved,
-            checked: checked.into_iter().map(|(value, name, output)| (value, (name, output))).collect(),
+            checked: named,
+            watched,
+            looked: Mutex::new(HashMap::new()),
             again,
             outer,
             behind,
@@ -1716,6 +1867,19 @@ impl Plan {
         Ok(Arc::new(Back { run, slots: gives.iter().map(|(slot, _)| *slot).collect(), takes }))
     }
 
+    /// What eager's nodes look at when a backward for these roots runs.
+    fn looked_at(&self, way: u32, pattern: &[bool]) -> Arc<Vec<(Value, bool)>> {
+        let key = (way, pattern.to_vec());
+        if let Some(known) = self.looked.lock().unwrap().get(&key) {
+            return known.clone();
+        }
+        let mut whole = pattern.to_vec();
+        whole.resize(self.joint.results_len(), false);
+        let found = Arc::new(self.joint.looked_at(&whole, way));
+        self.looked.lock().unwrap().insert(key, found.clone());
+        found
+    }
+
     /// The roots, of the results of another run on the tape.
     fn roots_of<'py>(&self, results: &[Bound<'py, PyAny>]) -> PyResult<Vec<Bound<'py, PyAny>>> {
         let mut roots = Vec::new();
@@ -1736,10 +1900,13 @@ struct Kept {
     /// What the forward kept, with the version each tensor was at; let go
     /// when a backward that does not retain the graph has run.
     saved: Mutex<Vec<(Py<PyAny>, u64)>>,
+    /// The roots that are checked for writes (`Plan::watched`), each for
+    /// as long as it lives: the node must not hold what holds the node.
+    roots: Vec<Py<PyWeakrefReference>>,
 }
 
 /// Eager's text for a tensor that is needed for a backward and was written
-/// to in place.
+/// to in place: `producer` is the node it names, and which of its results.
 fn modified(tensor: &Bound<'_, PyAny>, producer: &(Option<String>, u32), expected: u64) -> PyResult<String> {
     let kind: String = tensor.call_method0("type")?.extract()?;
     let sizes: Vec<i64> = tensor.getattr("shape")?.extract()?;
@@ -1760,24 +1927,71 @@ fn modified(tensor: &Bound<'_, PyAny>, producer: &(Option<String>, u32), expecte
     Ok(text + " Hint: enable anomaly detection to find the operation that failed to compute its gradient, with torch.autograd.set_detect_anomaly(True, check_nan=False).")
 }
 
+/// What eager raises for a tensor that a node kept as one of its operands
+/// and that has no node any more.
+const DETACHED: &str = "Trying to use a saved tensor that has been detached in-place, i.e. with .detach_().This is not supported, please use out-of-place `.detach()` instead";
+
 impl Kept {
-    /// Raises what eager raises where a tensor a backward needs was written
-    /// to in place behind the forward.
-    fn unwritten<'py>(&self, py: Python<'py>, read: Option<&[Value]>) -> PyResult<Vec<Bound<'py, PyAny>>> {
-        // Not held while Python is asked something: another thread could
-        // wait for it with the GIL.
-        let saved: Vec<(Py<PyAny>, u64)> = self.saved.lock().unwrap().iter().map(|(tensor, at)| (tensor.clone_ref(py), *at)).collect();
-        let mut tensors = Vec::new();
-        for ((tensor, expected), value) in saved.iter().zip(&self.plan.saved) {
-            let tensor = tensor.bind(py);
-            if let Some(producer) = self.plan.checked.get(value) {
-                if read.is_none_or(|read| read.contains(value)) && version(tensor) != *expected {
-                    return Err(PyRuntimeError::new_err(modified(tensor, producer, *expected)?));
-                }
+    /// What the forward kept, with the version each tensor was at. The lock
+    /// is not held while Python is asked something: another thread could
+    /// wait for it with the GIL.
+    fn held<'py>(&self, py: Python<'py>) -> Vec<(Bound<'py, PyAny>, u64)> {
+        self.saved.lock().unwrap().iter().map(|(tensor, at)| (tensor.bind(py).clone(), *at)).collect()
+    }
+
+    /// The tensor a caller has of a value that is checked, if it lives.
+    fn live<'py>(&self, py: Python<'py>, named: &Named) -> Option<Bound<'py, PyAny>> {
+        match named.held {
+            Held::Feed(at) => Some(self.feeds[at].bind(py).clone()),
+            Held::Root(root) => {
+                let at = self.plan.watched.iter().position(|watched| *watched == root)?;
+                self.roots[at].bind(py).upgrade()
             }
-            tensors.push(tensor.clone());
+            Held::Result | Held::View => None,
         }
-        Ok(tensors)
+    }
+
+    /// The node eager names for a value that a node of the backward kept as
+    /// one of its operands: the node the tensor has now.
+    fn names(&self, py: Python<'_>, named: &Named) -> PyResult<Option<String>> {
+        let Some(live) = self.live(py, named) else {
+            // Eager makes a view whose memory was written to a node anew.
+            let view = matches!(named.held, Held::View);
+            return Ok(named.name.as_ref().map(|name| if view { "AsStridedBackward0".to_string() } else { name.clone() }));
+        };
+        Ok(match Node::of_tensor(&live)? {
+            Some((node, _)) if node.flags & TCFG_NODE_LEAF != 0 => None,
+            // The node of a graph stands for the nodes of its operations.
+            Some((node, _)) if node.name == "GraphBackward" => named.name.clone().or(Some(node.name)),
+            Some((node, _)) => Some(node.name),
+            None => None,
+        })
+    }
+
+    /// Raises what eager raises where a tensor a backward needs was written
+    /// to in place behind the forward, for a backward that runs this way
+    /// for these roots.
+    fn unwritten(&self, py: Python<'_>, way: u32, pattern: &[bool]) -> PyResult<()> {
+        let saved = self.held(py);
+        for (value, gave) in self.plan.looked_at(way, pattern).iter() {
+            let Some(named) = self.plan.checked.get(value) else {
+                continue;
+            };
+            let Some((tensor, expected)) = saved.get(named.at) else {
+                continue;
+            };
+            if !*gave && matches!(named.held, Held::Root(_)) && self.live(py, named).is_some_and(|live| !requires_grad(&live)) {
+                return Err(PyRuntimeError::new_err(DETACHED));
+            }
+            if version(tensor) != *expected {
+                // A node names itself for what it kept of its own result,
+                // and for an operand the node that the tensor has by now,
+                // always as its first result.
+                let producer = if *gave { (named.name.clone(), named.output) } else { (self.names(py, named)?, 0) };
+                return Err(PyRuntimeError::new_err(modified(tensor, &producer, *expected)?));
+            }
+        }
+        Ok(())
     }
 
     fn backward<'py>(&self, py: Python<'py>, grads: &[Option<Bound<'py, PyAny>>], twice: bool) -> PyResult<Vec<Option<Bound<'py, PyAny>>>> {
@@ -1785,7 +1999,9 @@ impl Kept {
         if grads.iter().all(Option::is_none) {
             return Ok(out);
         }
+        let pattern: Vec<bool> = grads.iter().map(Option::is_some).collect();
         if twice {
+            self.unwritten(py, 0, &pattern)?;
             return self.again(py, grads, out, true, "");
         }
         // The backward that was taken down as this thread runs one: with
@@ -1796,18 +2012,18 @@ impl Kept {
         } else if cast.same(&self.plan.cast) {
             1
         } else {
+            self.unwritten(py, 0, &pattern)?;
             return self.again(py, grads, out, false, "the backward runs under an autocast that the forward did not run under");
         };
-        let pattern: Vec<bool> = grads.iter().map(Option::is_some).collect();
+        self.unwritten(py, way, &pattern)?;
         let given: Vec<Bound<'py, PyAny>> = grads.iter().flatten().cloned().collect();
-        let saved = self.unwritten(py, Some(&[]))?;
+        let saved: Vec<Bound<'py, PyAny>> = self.held(py).into_iter().map(|(tensor, _)| tensor).collect();
         let back = match self.plan.back(py, way, &pattern, &saved, &given) {
             Ok(back) => back,
             Err(Stop::Refused(why)) => return self.again(py, grads, out, false, &why),
             Err(Stop::Cut(_)) => return self.again(py, grads, out, false, "the graph is cut"),
             Err(Stop::Raised(error)) => return Err(error),
         };
-        self.unwritten(py, Some(&back.takes))?;
         let mut inputs: Vec<Bound<'py, PyAny>> = Vec::new();
         for value in &back.takes {
             let at = self.plan.saved.iter().position(|kept| kept == value).expect("kept");
@@ -1826,7 +2042,6 @@ impl Kept {
     /// the tape, from the inputs, and eager's nodes are called for it as
     /// when the form was taken down.
     fn again<'py>(&self, py: Python<'py>, grads: &[Option<Bound<'py, PyAny>>], mut out: Vec<Option<Bound<'py, PyAny>>>, twice: bool, why: &str) -> PyResult<Vec<Option<Bound<'py, PyAny>>>> {
-        self.unwritten(py, None)?;
         let asked = if twice { "was asked for with create_graph=True".to_string() } else { format!("is for results that came with a gradient as never before ({why})") };
         if !self.plan.again {
             return Err(PyRuntimeError::new_err(format!(
@@ -1946,7 +2161,14 @@ impl Plan {
                 let at = version(&kept);
                 saved.push((kept.unbind(), at));
             }
-            let kept = Kept { plan: self.clone(), feeds: feeds.iter().map(|feed| feed.clone().unbind()).collect(), fed: feeds.iter().map(version).collect(), saved: Mutex::new(saved) };
+            let weak: Vec<Py<PyWeakrefReference>> = self.watched.iter().map(|at| PyWeakrefReference::new(&roots[*at]).map(Bound::unbind)).collect::<PyResult<_>>()?;
+            let kept = Kept {
+                plan: self.clone(),
+                feeds: feeds.iter().map(|feed| feed.clone().unbind()).collect(),
+                fed: feeds.iter().map(version).collect(),
+                saved: Mutex::new(saved),
+                roots: weak,
+            };
             let targets = PyTuple::new(py, self.targets.iter().map(|at| &feeds[*at as usize]))?;
             let state = Box::into_raw(Box::new(kept)) as *mut c_void;
             // The state is the node's from here on, also when the call fails.
