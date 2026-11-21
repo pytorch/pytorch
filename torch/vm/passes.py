@@ -166,6 +166,18 @@ class Graphs(BuiltinPass):
             a forward graph and a backward graph with nothing left to
             derive. A graph that cannot be taken down (an operation of its
             backward looks at what a tensor holds, say) keeps eager's tape.
+            A graph that gives a tensor and also computes something of it
+            (a hidden state and a loss, say) is cut in front of the first
+            operation that reads the tensor, into parts with a node each:
+            the gradient of what is computed of the tensor then comes to it
+            through its own gradient function, as in eager mode, so asking
+            for the gradient at it (``torch.autograd.grad``,
+            ``retain_grad``) and a hook on it see and change what eager's
+            would. This holds for whatever the caller can hold of the graph
+            when the call goes on: what the function returns, in a tuple, a
+            list or a dict or by itself, what it stores into an object and
+            what a variable holds; not for a tensor that is only asked for
+            its sizes or its type.
             With ``False`` every such graph keeps eager's tape: a pass of
             one's own over graphs is handed the one graph with tensors
             that need a gradient, as with :class:`AOTAutograd` in the list,
@@ -229,6 +241,16 @@ class AOTAutograd(BuiltinPass):
     most, but for this one in front of :class:`Inductor`, which then
     compiles what this one traced. ``torch._functorch.aot_autograd`` is
     imported when the pass first runs.
+
+    The gradients are what ``torch.compile`` gives, which is not eager's
+    where a graph gives a tensor and also computes something of it (a
+    hidden state and a loss): the one compiled function has the gradient
+    of both, so nothing of the loss arrives at the tensor's own gradient
+    function. ``torch.autograd.grad(loss, [hidden])`` then says the tensor
+    was not used, ``retain_grad`` keeps nothing, and a hook on the tensor
+    is handed None and changes nothing of what reaches the inputs. Without
+    this pass in the list the engine's own backward cuts such a graph at
+    the tensor (:class:`Graphs`), and all of that is eager's.
     """
 
     engine: ClassVar[str] = "aot_autograd"
