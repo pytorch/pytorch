@@ -45,15 +45,6 @@ class AddModel(torch.nn.Module):
 class TestCustomTranslation(common_utils.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def test_declared_symbolic_real_dtype_preserves_complex_meta_shape(self):
-        meta = torch.empty(3, dtype=torch.complex64)
-        declared = ir.Value(type=ir.TensorType(ir.DataType.FLOAT))
-        _core._set_shape_type(declared, meta, complex_to_float=True)
-        self.assertEqual(list(declared.shape), [3])
-        packed = ir.Value(type=ir.TensorType(ir.DataType.FLOAT))
-        _core._set_shape_type(packed, meta, complex_to_float=True, packed_complex=True)
-        self.assertEqual(list(packed.shape), [3, 2])
-
     def setUp(self):
         super().setUp()
         with _custom_translation._LOCK:

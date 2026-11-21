@@ -18,7 +18,9 @@ from torch.onnx._internal.exporter._torchlib._tensor_typing import (
     TensorType,
     TTensor,
 )
-from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
+from torch.onnx._internal.exporter._torchlib._torchlib_registry import (
+    _legacy_onnx_impl as onnx_impl,
+)
 
 
 @onnx_impl(torch.sym_float, trace_only=True)
