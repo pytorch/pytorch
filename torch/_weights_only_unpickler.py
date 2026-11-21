@@ -216,8 +216,15 @@ def _get_allowed_globals():
             rc[f"{ts.__module__}.{ts.__name__}"] = torch.serialization.StorageType(
                 ts.__name__
             )
-        else:
-            rc[f"{ts.__module__}.{ts.__name__}"] = ts
+        # NOTE: TypedStorage and UntypedStorage are intentionally NOT added to
+        # the allowlist.  They must only be constructed via the BINPERSID
+        # (persistent_load) path that reads the underlying bytes from the zip
+        # archive or the legacy .tar storage blob.  Allowing them to be
+        # instantiated through GLOBAL+NEWOBJ would let an attacker craft a
+        # pickle that calls `TypedStorage(...)` / `UntypedStorage(nbytes)`
+        # directly, allocating uninitialized host memory and then wrap it
+        # into a tensor, leaking the contents of the process heap
+        # (see https://github.com/pytorch/pytorch/issues/204323).
     # Quantization specific
     for qt in [
         torch.per_tensor_affine,
