@@ -23,6 +23,7 @@ from .stubs import *  # noqa: F403
 ObserverOrFakeQuantize = TypeAliasType(
     "ObserverOrFakeQuantize", ObserverBase | FakeQuantizeBase
 )
+QConfigAny = TypeAliasType("QConfigAny", QConfig | None)
 
 
 __all__ = [
