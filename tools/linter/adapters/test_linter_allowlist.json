@@ -494,7 +494,6 @@
   "test/package/test_resources.py",
   "test/package/test_save_load.py",
   "test/profiler/test_cuspy.py",
-  "test/profiler/test_execution_trace.py",
   "test/profiler/test_profiler_tree.py",
   "test/profiler/test_xpu_scope_profiler.py",
   "test/python_native/test_aot_manifest.py",
