@@ -126,13 +126,10 @@ class _Missing:
         return _Missing()
 
 
-# The one persistent id a guards state may carry: a guards-state pickler emits it
-# for a pruned value that the C pickler saves by type (an exact builtin
-# container) without ever consulting reducer_override, and _GuardsStateUnpickler
-# turns it back into _Missing. Any other persistent id in a guards state is a
-# bug. An artifact is only ever read by the torch that wrote it (SystemInfo's
-# check_compatibility runs before load_guards_state), so no reader from before
-# this id existed sees one.
+# The C pickler bypasses reducer_override for exact builtin containers.
+# The string identifies a discarded container. A dictionary persistent ID is a
+# memoized snapshot with every key and _Missing in each pruned value slot.
+# Package loads check SystemInfo compatibility before decoding either form.
 _PRUNED_VALUE_PID = "pruned"
 
 
@@ -513,7 +510,9 @@ class _GuardsStateUnpickler(pickle.Unpickler):
         # by id elsewhere, and one artifact's sentinel has no business in another.
         self._pruned = _Missing(_PRUNED_VALUE_PID)
 
-    def persistent_load(self, pid: str) -> _Missing:
+    def persistent_load(self, pid: str | dict[Any, Any]) -> _Missing | dict[Any, Any]:
+        if type(pid) is dict:
+            return pid  # pickle has already rebuilt the dictionary snapshot
         if pid != _PRUNED_VALUE_PID:
             raise pickle.UnpicklingError(f"unknown guards state persistent id {pid!r}")
         return self._pruned
