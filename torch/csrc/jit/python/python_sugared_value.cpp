@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/python/python_sugared_value.h>
 
 #include <ATen/core/interned_strings.h>
+#include <c10/util/irange.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
@@ -339,7 +340,7 @@ SugaredValuePtr ModuleValue::getitem(
       auto idx_str = ivalue->toStringRef();
       auto keys_iter = sd->keys_;
       auto module_values_iter = sd->modules_;
-      for (size_t i = 0; i < keys_iter->tup_.size(); ++i) {
+      for (const auto i : c10::irange(keys_iter->tup_.size())) {
         auto key = keys_iter->tup_.at(i);
         auto key_str = toIValue(key->asValue(loc, m))->toStringRef();
         if (key_str == idx_str) {
@@ -408,7 +409,7 @@ void recurseThroughNestedModules(
   auto module_dict = self->getSugaredDict(loc, m);
   auto keys_iter = module_dict->keys_;
   auto module_values_iter = module_dict->modules_;
-  for (size_t i = 0; i < keys_iter->tup_.size(); ++i) {
+  for (const auto i : c10::irange(keys_iter->tup_.size())) {
     std::shared_ptr<SugaredValue> module_sugared_value =
         module_values_iter->tup_.at(i);
     auto module_value =

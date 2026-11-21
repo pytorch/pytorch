@@ -124,7 +124,7 @@ static bool isValidIdentifierChar(char c, size_t pos) {
 // replaces all invalid characters with underscore
 std::string sanitizeName(const std::string& input_name) {
   std::stringstream sanitized_name;
-  for (size_t i = 0; i < input_name.size(); ++i) {
+  for (const auto i : c10::irange(input_name.size())) {
     if (isValidIdentifierChar(input_name[i], i)) {
       sanitized_name << input_name[i];
     } else {
@@ -1697,7 +1697,7 @@ std::vector<ForPtr> LoopNest::distributeLoop(
 
   // Create loops for all the remaining blocks.
   // Add all the new loops to the parent block.
-  for (size_t i = 1; i < new_loop_bodies.size(); ++i) {
+  for (const auto i : c10::irange(1, new_loop_bodies.size())) {
     auto new_loop = loop->cloneWithNewBody(new_loop_bodies[i]);
     root_block->insert_stmt_after(new_loop, new_loops.back());
     new_loops.push_back(new_loop);
@@ -1763,7 +1763,7 @@ static bool areIndicesLoopIndependent(
   if (expr_list1.size() != expr_list2.size()) {
     return false;
   }
-  for (size_t i = 0; i < expr_list1.size(); ++i) {
+  for (const auto i : c10::irange(expr_list1.size())) {
     const auto& expr1 = expr_list1[i];
     const auto& expr2 = expr_list2[i];
     if (doesExprContainAnyVar(expr1, outer_loop_vars) ||
@@ -1948,7 +1948,7 @@ bool LoopNest::fuseLoops(const std::vector<ForPtr>& loops, ForPtr* fused) {
   const auto& first_loop = loops.front();
   auto first_loop_start = IRSimplifier::simplify(first_loop->start());
   auto first_loop_stop = IRSimplifier::simplify(first_loop->stop());
-  for (size_t i = 1; i < loops.size(); ++i) {
+  for (const auto i : c10::irange(1, loops.size())) {
     const auto& curr_loop = loops[i];
     auto curr_loop_start = IRSimplifier::simplify(curr_loop->start());
     auto curr_loop_stop = IRSimplifier::simplify(curr_loop->stop());
@@ -2130,7 +2130,7 @@ void LoopNest::reorderAxis(const ForPtr& a, const ForPtr& b) {
 }
 
 static bool isTrivialPermutation(const std::vector<size_t>& permutation) {
-  for (size_t i = 0; i < permutation.size(); ++i) {
+  for (const auto i : c10::irange(permutation.size())) {
     if (permutation[i] != i) {
       return false;
     }
@@ -2169,7 +2169,7 @@ std::vector<ForPtr> LoopNest::reorder(
 
   // Reorder the loops according to the permutation.
   std::vector<ForPtr> result(loops.size());
-  for (size_t i = 0; i < loops.size(); ++i) {
+  for (const auto i : c10::irange(loops.size())) {
     result[i] = loops[permutation[i]];
   }
 
@@ -2288,7 +2288,7 @@ void LoopNest::fullUnroll(const ForPtr& f, StmtPtr* unrolled) {
   std::vector<StmtPtr> unrolled_stmts;
   int start_val = immediateAs<int>(start_expr);
   int stop_val = immediateAs<int>(stop_expr);
-  for (int current = start_val; current < stop_val; ++current) {
+  for (const auto current : c10::irange(start_val, stop_val)) {
     for (const auto& stmt : f->body()->stmts()) {
       unrolled_stmts.push_back(SubstituteInClone(
           stmt, {{f->var(), getImmediateByType(f->var()->dtype(), current)}}));
@@ -2351,7 +2351,7 @@ std::vector<ForPtr> LoopNest::getLoopStmtsInLoopNest(
   std::vector<ForPtr> loops(num);
   ForPtr curr_for = f;
   loops[0] = curr_for;
-  for (size_t i = 1; i < num; ++i) {
+  for (const auto i : c10::irange(1, num)) {
     TORCH_INTERNAL_ASSERT(
         curr_for->body()->nstmts() == 1,
         buildErrorMessage("Expected a single stmt in the loop body."));
@@ -2492,7 +2492,7 @@ void LoopNest::compressBuffer(const BufPtr& buf, const StmtPtr& stmt) {
         indices.size() == dims.size(),
         buildErrorMessage(
             "Expected ranks to match in compressBuffer in the fuser."));
-    for (size_t i = 0; i < indices.size(); ++i) {
+    for (const auto i : c10::irange(indices.size())) {
       auto index_vars = NodeFinder<Var>::find(indices[i]);
       for (const auto& iv : index_vars) {
         if (!loop_vars.contains(iv)) {
@@ -2538,7 +2538,7 @@ void LoopNest::compressBuffer(const BufPtr& buf, const StmtPtr& stmt) {
         buildErrorMessage(
             "Expected ranks to match in compressBuffer in the fuser."));
     std::vector<ExprPtr> new_indices(indices);
-    for (size_t i = 0; i < dims.size(); ++i) {
+    for (const auto i : c10::irange(dims.size())) {
       if (dims[i]) {
         new_indices[i] = immLike(indices[i], 0);
       }
@@ -2831,7 +2831,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
   std::vector<ExprPtr> new_loop_vars_expr;
 
   // Determine the size of the cache, and create a loop var for each dimension.
-  for (size_t i = 0; i < info.start.size(); ++i) {
+  for (const auto i : c10::irange(info.start.size())) {
     ExprPtr dim = IRSimplifier::simplify(alloc<Add>(
         alloc<Sub>(info.stop[i], info.start[i]), immLike(info.stop[i], 1)));
 

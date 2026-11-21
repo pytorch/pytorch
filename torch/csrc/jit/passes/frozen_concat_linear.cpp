@@ -10,6 +10,7 @@
 #include <ATen/ops/cat.h>
 #endif
 
+#include <c10/util/irange.h>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -138,7 +139,7 @@ class ConcatLinearLayers {
     if (tensor_a.dim() != tensor_b.dim()) {
       return false;
     }
-    for (int64_t i = 1; i < tensor_a.dim(); i++) {
+    for (const auto i : c10::irange(1, tensor_a.dim())) {
       if (tensor_a.size(i) != tensor_b.size(i)) {
         return false;
       }

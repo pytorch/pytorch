@@ -81,7 +81,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         TORCH_CHECK(
             num_outputs == elems.size(),
             "Number of outputs must match number of tuple elements.")
-        for (size_t i = 0; i < num_outputs; ++i) {
+        for (const auto i : c10::irange(num_outputs)) {
           p_node->Output(i) = elems[i];
         }
       };
@@ -609,7 +609,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
 
         const auto& expected_types = node->tys(attr::types);
 
-        for (size_t i = 0; i < num_inputs; i++) {
+        for (const auto i : c10::irange(num_inputs)) {
           p_node->Output(i) = p_node->Input(i);
         }
 

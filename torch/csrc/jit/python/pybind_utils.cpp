@@ -308,7 +308,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
             int64_t value = py::cast<int64_t>(obj);
             c10::List<int64_t> repeated;
             repeated.reserve(*N);
-            for (int i = 0; i < *N; ++i) {
+            for ([[maybe_unused]] const auto _ : c10::irange(*N)) {
               repeated.push_back(value);
             }
             return repeated;
@@ -366,7 +366,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
             double value = py::cast<double>(obj);
             c10::List<double> repeated;
             repeated.reserve(*N);
-            for (int i = 0; i < *N; ++i) {
+            for ([[maybe_unused]] const auto _ : c10::irange(*N)) {
               repeated.push_back(value);
             }
             return repeated;

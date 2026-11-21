@@ -338,7 +338,7 @@ struct ExitTransformer {
 
     // Set the new if to have the same outputs of the original block,
     // then replace the original block outputs with new if's outputs
-    for (size_t i = 0; i < block->outputs().size(); ++i) {
+    for (const auto i : c10::irange(block->outputs().size())) {
       exit_block->registerOutput(exit_block_vals.at(i));
       guard_block->registerOutput(block->outputs().at(i));
       new_if->addOutput()->setType(block->outputs().at(i)->type());
