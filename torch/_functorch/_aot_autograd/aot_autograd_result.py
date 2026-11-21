@@ -629,6 +629,13 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         # here so the existing post-compile wrapper stack can keep its compile-time
         # AOTConfig annotations.
         runtime_aot_config = cast(AOTConfig, aot_config)
+        for wrapper in self.dispatch_wrappers:
+            if bypass_reason := wrapper.cache_entry_bypass_reason(
+                args, runtime_aot_config
+            ):
+                from .autograd_cache import BypassAOTAutogradCache
+
+                raise BypassAOTAutogradCache(bypass_reason)
         with dynamo_timed("AOTAutogradCache.inductor_load"):
             compiled_fw_func, compiled_bw_func, needs_autograd = (
                 self._load_and_post_compile(args, fx_config)

@@ -1371,6 +1371,12 @@ class CompilerWrapper:
         """
         return flat_fn, flat_args, flat_args_descs, fw_metadata
 
+    def cache_entry_bypass_reason(
+        self, flat_args: Sequence[FxValue], aot_config: AOTConfig
+    ) -> str | None:
+        """Return why this cached wrapper cannot serve the current inputs."""
+        return None
+
     def post_compile(
         self,
         compiled_fn: Callable[_P, _R],
