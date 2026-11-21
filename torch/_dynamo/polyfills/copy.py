@@ -23,11 +23,10 @@ def reduce_ex_user_defined_object(obj: T, protocol: int, /) -> tuple:  # type: i
     Mirrors CPython's reduce_newobj (Objects/typeobject.c): builds the __new__
     arguments from __getnewargs_ex__/__getnewargs__, selects
     copyreg.__newobj_ex__ vs __newobj__ based on whether kwargs are present, and
-    computes the pickle state (__getstate__ if overridden, else __dict__ if the
-    object has one, else None). copy._reconstruct rebuilds the object via
-    cls.__new__(cls, *args) and applies the state. List subclasses supply
-    iter(obj) as listitems, while dict subclasses supply iter(obj.items()) as
-    dictitems; copy._reconstruct consumes them to restore container contents.
+    computes the pickle state (__getstate__ if overridden, else the instance
+    dictionary and slot state). copy._reconstruct rebuilds the object via
+    cls.__new__(cls, *args), applies the state, and restores list/dict
+    subclasses through listitems and dictitems.
 
     This must not assume the object has a __dict__: tuple/slots objects such as
     namedtuples have __slots__ = () and no __dict__, and reduce to
@@ -68,6 +67,20 @@ def reduce_ex_user_defined_object(obj: T, protocol: int, /) -> tuple:  # type: i
             state = obj.__dict__
         except AttributeError:
             state = None
+        else:
+            if not state:
+                state = None
+
+        slotstate: dict[str, object] = {}
+        for name in copyreg._slotnames(cls):  # type: ignore[attr-defined]
+            try:
+                value = getattr(obj, name)
+            except AttributeError:
+                pass
+            else:
+                slotstate[name] = value
+        if slotstate:
+            state = (state, slotstate)
 
     listitems = iter(obj) if isinstance(obj, list) else None
     dictitems = iter(obj.items()) if isinstance(obj, dict) else None
