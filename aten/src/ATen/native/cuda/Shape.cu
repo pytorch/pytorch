@@ -55,8 +55,22 @@ template<typename T>
 inline std::tuple<dim3, dim3> getCatGridRocm(unsigned int max_elements_per_tensor,
   ptrdiff_t nTensors) {
   constexpr unsigned int threads_per_block = 256;
-  constexpr unsigned int elements_per_thread = 8;
   constexpr unsigned int max_tb_per_sm = 32;
+
+  // 4 elements per thread measures faster than the historical 8 at small output
+  // sizes, but the two ROCm architectures measured disagree above ~2M elements,
+  // where gfx1250 regresses. The threshold is the intersection of the two win
+  // regions.
+  constexpr unsigned int small_output_elements_per_thread = 4;
+  constexpr unsigned int large_output_elements_per_thread = 8;
+  constexpr uint64_t small_output_threshold = 2ull * 1024 * 1024;
+
+  const uint64_t total_output_elements =
+      static_cast<uint64_t>(max_elements_per_tensor) * static_cast<uint64_t>(nTensors);
+  const unsigned int elements_per_thread =
+      total_output_elements <= small_output_threshold
+          ? small_output_elements_per_thread
+          : large_output_elements_per_thread;
 
   unsigned int max_threads = ceil_div(max_elements_per_tensor, elements_per_thread);
   unsigned int thread_blocks = ceil_div(max_threads, threads_per_block);
