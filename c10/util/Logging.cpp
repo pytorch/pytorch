@@ -394,21 +394,26 @@ C10_DEFINE_int(
     google::GLOG_WARNING,
     "The minimum log level that caffe2 will output.");
 
-// Google glog's api does not have an external function that allows one to check
-// if glog is initialized or not. It does have an internal function - so we are
-// declaring it here. This is a hack but has been used by a bunch of others too
-// (e.g. Torch).
+// glog >= 0.6 (the first release defining GLOG_EXPORT) has a public
+// google::IsGoogleLoggingInitialized(). Older glog's api does not have an
+// external function that allows one to check if glog is initialized or not. It
+// does have an internal function - so we are declaring it here. This is a hack
+// but has been used by a bunch of others too (e.g. Torch).
+#if !defined(GLOG_EXPORT)
 namespace google {
 namespace glog_internal_namespace_ {
 bool IsGoogleLoggingInitialized();
 } // namespace glog_internal_namespace_
 } // namespace google
+#endif
 
 namespace c10 {
 namespace {
 
 void initGoogleLogging(char const* name) {
-#if !defined(_MSC_VER)
+#if defined(GLOG_EXPORT)
+  if (!::google::IsGoogleLoggingInitialized())
+#elif !defined(_MSC_VER)
   // This trick can only be used on UNIX platforms
   if (!::google::glog_internal_namespace_::IsGoogleLoggingInitialized())
 #endif
@@ -461,7 +466,7 @@ void UpdateLoggingLevelsFromFlags() {
 
 void ShowLogInfoToStderr() {
   FLAGS_logtostderr = 1;
-  FLAGS_minloglevel = std::min(FLAGS_minloglevel, google::GLOG_INFO);
+  FLAGS_minloglevel = std::min<int>(FLAGS_minloglevel, google::GLOG_INFO);
 }
 } // namespace c10
 
