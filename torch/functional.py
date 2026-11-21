@@ -444,6 +444,7 @@ else:
             tensors of size :math:`S_0 \ldots S_{N-1}``, then the
             output will also have :math:`N` tensors, where each tensor
             is of shape :math:`(S_0, ..., S_{N-1})`.
+            An empty input returns an empty tuple.
 
         Example::
 
