@@ -302,11 +302,6 @@ struct LoadCaches(Vec<std::cell::Cell<LoadCache>>);
 unsafe impl Send for LoadCaches {}
 unsafe impl Sync for LoadCaches {}
 
-#[inline(always)]
-unsafe fn dict_version(dict: Obj) -> u64 {
-    (*(dict as *mut ffi::PyDictObject)).ma_version_tag
-}
-
 /// Lowers a Python function to the graph the VM runs.
 pub fn lower(
     py: pyo3::Python<'_>,
@@ -868,8 +863,8 @@ unsafe fn tick() -> bool {
         std::sync::atomic::AtomicPtr::new(null_mut());
     let mut nothing = NOTHING.load(Ordering::Relaxed);
     if nothing.is_null() {
-        let py = pyo3::Python::assume_gil_acquired();
-        match py.eval_bound("lambda: None", None, None) {
+        let py = pyo3::Python::assume_attached();
+        match py.eval(c"lambda: None", None, None) {
             Ok(function) => {
                 nothing = function.into_ptr();
                 NOTHING.store(nothing, Ordering::Relaxed);
@@ -1968,7 +1963,7 @@ impl Compiled {
             callees.left.borrow_mut().insert(code as usize, PyObj::from_borrowed(code));
             return DEMOTED;
         }
-        let py = pyo3::Python::assume_gil_acquired();
+        let py = pyo3::Python::assume_attached();
         let bound = pyo3::Bound::from_borrowed_ptr(py, func);
         let _nobody = Hooked::nobody();
         match lower(py, &callees.table, &bound, &self.options) {
@@ -2428,7 +2423,7 @@ impl Compiled {
                 let cache = self.global_cache.0.get_unchecked(*name as usize);
                 let cached = cache.get();
                 let versions =
-                    (dict_version(f.globals.as_ptr()), dict_version(f.builtins.as_ptr()));
+                    (pyffi::dict_version(f.globals.as_ptr()), pyffi::dict_version(f.builtins.as_ptr()));
                 if (cached.version, cached.builtins_version) == versions {
                     return Ok(new_ref(cached.value));
                 }
@@ -2740,7 +2735,7 @@ impl Compiled {
                     if !dict.is_null() {
                         let cache = self.module_attr_cache.0.get_unchecked(*name as usize);
                         let cached = cache.get();
-                        let version = dict_version(dict);
+                        let version = pyffi::dict_version(dict);
                         if cached.owner == obj && cached.version == version {
                             return Ok(new_ref(cached.value));
                         }
@@ -3747,7 +3742,7 @@ impl Compiled {
             Err(err) => {
                 // A failing pass must not take the program down with it: the
                 // block simply stays generic.
-                let msg = pyo3::Python::with_gil(|py| err.value_bound(py).to_string());
+                let msg = pyo3::Python::attach(|py| err.value(py).to_string());
                 Err(format!("pass failed: {}", msg))
             }
         };
