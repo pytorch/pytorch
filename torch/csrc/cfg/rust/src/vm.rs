@@ -5368,10 +5368,17 @@ impl Compiled {
         }
         ended.sort_unstable();
         ended.dedup();
+        // The function may be on its way out with an exception (a call
+        // that raised has let go of what it held): the look asks things
+        // of objects, and leaves what was raised as it is.
+        let raised = ffi::PyErr_GetRaisedException();
         let found = {
             let mut kept = graph::Kept { kept: &t.rec.kept, defs: &t.defs };
             graph::end_quietly(&mut [], &[], &ended, Some(&mut kept))
         };
+        if !raised.is_null() {
+            ffi::PyErr_SetRaisedException(raised);
+        }
         let Err(found) = found else {
             return false;
         };
