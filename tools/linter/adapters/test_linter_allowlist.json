@@ -115,7 +115,6 @@
   "test/distributed/fsdp/test_fsdp_multiple_wrapping.py",
   "test/distributed/fsdp/test_fsdp_optim_state.py",
   "test/distributed/fsdp/test_fsdp_overlap.py",
-  "test/distributed/fsdp/test_fsdp_pure_fp16.py",
   "test/distributed/fsdp/test_fsdp_sharded_grad_scaler.py",
   "test/distributed/fsdp/test_fsdp_state_dict.py",
   "test/distributed/fsdp/test_fsdp_tp_integration.py",
