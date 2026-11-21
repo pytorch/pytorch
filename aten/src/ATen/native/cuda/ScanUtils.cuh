@@ -3,6 +3,7 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/EmptyTensor.h>
 
 #include <c10/util/Load.h>
 #include <limits>
@@ -288,6 +289,57 @@ __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, const scalar_t *src
   }
 }
 
+/* Fold or scan fixed-size segments of an outer dimension of a tensor.
+ *
+ * tensor_kernel_scan_outer_dim walks every slice along the scanned dimension with one thread.
+ * Here each slice is cut into num_segs segments of seg_len elements and a thread walks a
+ * single segment, so that a long dimension is spread over many threads.
+ *
+ * totals_ has one element per segment, laid out as (num_orows, num_segs, num_irows).
+ * - scan == false: write the fold of each segment to totals_.
+ * - scan == true: totals_ holds the inclusive scan of those folds along the segment axis.
+ *   Write the inclusive scan of src_ to tgt_.
+ */
+template<typename scalar_t, bool scan, class BinaryOp>
+__global__ void tensor_kernel_scan_outer_dim_segments(
+    scalar_t *tgt_, const scalar_t *src_, scalar_t *totals_,
+    const uint32_t num_orows, const uint32_t num_irows, const uint32_t row_size,
+    const uint32_t seg_len, const uint32_t num_segs,
+    const scalar_t init, BinaryOp binary_op)
+{
+  const size_t num_totals = static_cast<size_t>(num_orows) * num_segs * num_irows;
+  const size_t stride = static_cast<size_t>(gridDim.x) * blockDim.x;
+  for (size_t i = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x; i < num_totals; i += stride) {
+    const uint32_t irow = i % num_irows;
+    const uint32_t seg = i / num_irows % num_segs;
+    const uint32_t orow = i / num_irows / num_segs;
+    const uint32_t start = seg * seg_len;
+    const uint32_t len = std::min(seg_len, row_size - start);
+    const size_t offset = (static_cast<size_t>(orow) * row_size + start) * num_irows + irow;
+    const scalar_t *src = src_ + offset;
+    scalar_t acc = init;
+
+    if constexpr (scan) {
+      scalar_t *tgt = tgt_ + offset;
+      // The fold of all the segments before this one.
+      const scalar_t carry = seg == 0 ? init : totals_[i - num_irows];
+      for (uint32_t col = 0; col < len; ++col) {
+        acc = binary_op(acc, c10::load(src));
+        *tgt = seg == 0 ? acc : binary_op(carry, acc);
+
+        src += num_irows;
+        tgt += num_irows;
+      }
+    } else {
+      for (uint32_t col = 0; col < len; ++col) {
+        acc = binary_op(acc, c10::load(src));
+        src += num_irows;
+      }
+      totals_[i] = acc;
+    }
+  }
+}
+
 /* Perform an inclusive scan along the innermost dimension of a tensor.
  *
  * - num_rows is the size of the flattened outer dimensions;
@@ -408,6 +460,40 @@ __host__ void scan_outer_dim(const TensorBase& self, const TensorBase& result,
   check_fits_in_unsigned(num_irows, "num_irows");
   check_fits_in_unsigned(num_orows, "num_orows");
   check_fits_in_unsigned(row_size, "row_size");
+
+  // The kernel below walks each slice along `dim` with one thread, so it takes time
+  // proportional to row_size however idle the rest of the GPU is. When there are too few
+  // slices to keep the GPU busy, cut them into segments instead: fold every segment, scan
+  // those folds (recursively, there are row_size / seg_len of them per slice), then scan
+  // every segment starting from the fold of the segments before it. That reads `self`
+  // twice, so the single pass below wins once it has enough slices, and a larger GPU needs
+  // more of them. It also wins on slices that span little memory, which it walks from cache.
+  const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  // Distance in memory between consecutive elements of a slice.
+  const int64_t stride_bytes = num_irows * static_cast<int64_t>(sizeof(scalar_t));
+  if (row_size >= 512 && row_size * stride_bytes >= 16384 && num_orows * stride_bytes <= 512 * num_sms) {
+    // Longer segments write `result` more slowly when num_irows is small.
+    constexpr int64_t seg_len = 16;
+    const int64_t num_segs = ceil_div(row_size, seg_len);
+    const auto totals = at::detail::empty_cuda(
+      {num_orows, num_segs, num_irows}, self.scalar_type(), self.device(), std::nullopt);
+    const dim3 seg_threads(512);
+    const int64_t max_seg_grid = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
+    const dim3 seg_grid(std::min(max_seg_grid, ceil_div(totals.numel(), int64_t{seg_threads.x})));
+    tensor_kernel_scan_outer_dim_segments<scalar_t, false>
+    <<<seg_grid, seg_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+      nullptr, self.const_data_ptr<scalar_t>(), totals.mutable_data_ptr<scalar_t>(),
+      num_orows, num_irows, row_size, seg_len, num_segs, init, binary_op);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    scan_outer_dim<scalar_t>(totals, totals, 1, init, binary_op);
+    tensor_kernel_scan_outer_dim_segments<scalar_t, true>
+    <<<seg_grid, seg_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+      result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(), totals.mutable_data_ptr<scalar_t>(),
+      num_orows, num_irows, row_size, seg_len, num_segs, init, binary_op);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    return;
+  }
+
   if (static_cast<size_t>(num_irows) * num_orows * row_size <= UINT_MAX) {
   tensor_kernel_scan_outer_dim<scalar_t, uint32_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
