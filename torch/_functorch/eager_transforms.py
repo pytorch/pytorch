@@ -1767,8 +1767,8 @@ def functionalize(
             " Valid options are:\n"
             "     remove='mutations': all inplace and out= operators will be removed from the program, and replaced"
             " with their out-of-place equivalents.\n"
-            "     remove='mutations_and_views': In addition to the above, all aliasing operators {view} will be"
-            " replaced with their non-aliasing counterparts, {view}_copy.\n"
+            "     remove='mutations_and_views': In addition to the above, all aliasing (view) operators will be"
+            " replaced with their non-aliasing counterparts (the corresponding _copy operators).\n"
         )
 
     @_wraps_without_dynamo_attrs(func)
