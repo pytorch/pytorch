@@ -5,6 +5,7 @@
 #ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
+#include <c10/util/ArrayRef.h>
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/safe_numerics.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -1040,12 +1041,12 @@ void Unpickler::rebuildTensor(bool quantized, bool has_explicit_dtype) {
       // Rows may be padded to whole bytes, see `get_sub_byte_tensor_size`
       size_t padded_nbytes = itemsize;
       if (!size.empty()) {
-        const int64_t bytes_per_row =
-            at::ceil_div_safe(static_cast<size_t>(size.back()), dtype_itemsize);
+        const size_t bytes_per_row =
+            at::ceil_div_safe(static_cast<size_t>(size.back()), element_per_byte);
         padded_nbytes = bytes_per_row;
-        for (const auto s : IntArrayRef(size).slice(0, size.size() - 1)) {
+        for (const auto s : c10::IntArrayRef(size).slice(0, size.size() - 1)) {
           size_overflow |= c10::mul_overflows(
-              padded_bytes, static_cast<size_t>(s), &padded_nbytes);
+              padded_nbytes, static_cast<size_t>(s), &padded_nbytes);
         }
       }
       required_nbytes = std::max(padded_nbytes, flat_nbytes);
