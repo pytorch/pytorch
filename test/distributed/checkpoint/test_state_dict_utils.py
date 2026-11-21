@@ -22,7 +22,10 @@ from torch.distributed._state_dict_utils import (
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -31,7 +34,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
-    skip_if_lt_x_gpu,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -39,11 +41,14 @@ from torch.testing._internal.two_tensor import TwoTensor
 
 
 class TestStateDictUtils(DTensorContinuousTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     world_size = min(4, torch.accelerator.device_count())
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_gather_state_dict_dtensor(self):
+    def test_gather_state_dict_dtensor(self, device):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         torch.random.manual_seed(dist.get_rank())
@@ -56,11 +61,12 @@ class TestStateDictUtils(DTensorContinuousTestBase):
             dist_tensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
         self.assertEqual(expected_gathered_dtensor, gathered_state_dict["dtensor"])
-        self.assertEqual(gathered_state_dict["dtensor"].device.type, self.device_type)
+        self.assertEqual(gathered_state_dict["dtensor"].device.type, device_type)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_gather_with_cpu_and_ranks_only(self):
+    def test_gather_with_cpu_and_ranks_only(self, device):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         torch.random.manual_seed(dist.get_rank())
@@ -76,16 +82,15 @@ class TestStateDictUtils(DTensorContinuousTestBase):
         )
         if dist.get_rank() in (0, 2):
             self.assertEqual(expected_gathered_dtensor, gathered_state_dict["dtensor"])
-            self.assertNotEqual(
-                gathered_state_dict["dtensor"].device.type, self.device_type
-            )
+            self.assertNotEqual(gathered_state_dict["dtensor"].device.type, device_type)
         else:
             self.assertEqual(gathered_state_dict, {})
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_cpu_and_ranks_only(self):
-        device = torch.device(self.device_type)
+    def test_cpu_and_ranks_only(self, device):
+        device_type = torch.device(device).type
+        device = torch.device(device_type)
         state_dict = {
             "tensor1": torch.arange(10, device=device),
             "tensor2": torch.ones(10, device=device),
@@ -94,7 +99,7 @@ class TestStateDictUtils(DTensorContinuousTestBase):
         cpu_state_dict = _offload_state_dict_to_cpu(state_dict, ranks_only=(0, 2))
         if dist.get_rank() in (0, 2):
             for v in cpu_state_dict.values():
-                self.assertNotEqual(v.device.type, self.device_type)
+                self.assertNotEqual(v.device.type, device_type)
             self.assertEqual(cpu_state_dict["tensor1"], torch.arange(10))
             self.assertEqual(cpu_state_dict["tensor2"], torch.ones(10))
         else:
@@ -102,7 +107,9 @@ class TestStateDictUtils(DTensorContinuousTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_complicated_dict(self):
+    def test_complicated_dict(self, device):
+        device_type = torch.device(device).type
+
         def create_dtensor():
             device_mesh = self.build_device_mesh()
             shard_spec = [Shard(0)]
@@ -118,28 +125,29 @@ class TestStateDictUtils(DTensorContinuousTestBase):
         for _ in range(10):
             tensor, dtensor = create_dtensor()
             ltensor.append(tensor)
-            ltensor.append(torch.ones(10, device=torch.device(self.device_type)))
+            ltensor.append(torch.ones(10, device=torch.device(device_type)))
             ldtensor.append(dtensor)
-            ldtensor.append(torch.ones(10, device=torch.device(self.device_type)))
+            ldtensor.append(torch.ones(10, device=torch.device(device_type)))
 
         tensor, dtensor = create_dtensor()
         dist_state_dict = {
             "local": dtensor,
             "list": ldtensor,
-            "arange": torch.arange(10, device=torch.device(self.device_type)),
+            "arange": torch.arange(10, device=torch.device(device_type)),
         }
         state_dict = {
             "local": tensor,
             "list": ltensor,
-            "arange": torch.arange(10, device=torch.device(self.device_type)),
+            "arange": torch.arange(10, device=torch.device(device_type)),
         }
         self.assertEqual(state_dict, _gather_state_dict(dist_state_dict))
 
     @with_comms
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_XPU, "XPU does not support pin_memory from cudart")
-    def test_create_cpu_state_dict(self):
-        device = torch.device(self.device_type)
+    def test_create_cpu_state_dict(self, device):
+        device_type = torch.device(device).type
+        device = torch.device(device_type)
         rank = dist.get_rank()
         # Scale tensors based on world size
         # to fit in the tensor shards accurately.
@@ -159,7 +167,7 @@ class TestStateDictUtils(DTensorContinuousTestBase):
                         metadata=ShardMetadata(
                             shard_offsets=[5 * rank, 0],
                             shard_sizes=[5, 10],
-                            placement=f"rank:{rank}/{self.device_type}:{rank}",
+                            placement=f"rank:{rank}/{device_type}:{rank}",
                         ),
                     )
                 ],
@@ -169,7 +177,7 @@ class TestStateDictUtils(DTensorContinuousTestBase):
                 torch.arange(50 * scale_factor, device=device).reshape(
                     5 * scale_factor, 10
                 ),
-                init_device_mesh(self.device_type, mesh_shape=(self.world_size,)),
+                init_device_mesh(device_type, mesh_shape=(self.world_size,)),
                 [Shard(0)],
             ),
             "non_tensor_bytes_io": copy.deepcopy(buffer),
@@ -251,11 +259,12 @@ class TestStateDictUtils(DTensorContinuousTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_state_dict_util_distribute_tensors(self):
+    def test_state_dict_util_distribute_tensors(self, device):
+        device_type = torch.device(device).type
         even_tensor = torch.randn(self.world_size, 2)
         uneven_tensor = torch.randn(1, 2)
 
-        mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
+        mesh = init_device_mesh(device_type, mesh_shape=(self.world_size,))
         even_dtensor = distribute_tensor(
             torch.randn(self.world_size, 2), mesh, [Shard(0)]
         )
@@ -269,7 +278,7 @@ class TestStateDictUtils(DTensorContinuousTestBase):
         ref_local_state_dict = copy.deepcopy(local_state_dict)
         keys = ["even", "uneven"]
 
-        _distribute_tensors(local_state_dict, keys, self.device_type)
+        _distribute_tensors(local_state_dict, keys, device_type)
         for local_v, ref_v in zip(
             local_state_dict.values(), ref_local_state_dict.values()
         ):
@@ -282,11 +291,12 @@ class TestStateDictUtils(DTensorContinuousTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_cpu_offload_for_dtensor(self):
-        device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
+    def test_cpu_offload_for_dtensor(self, device):
+        device_type = torch.device(device).type
+        device_mesh = init_device_mesh(device_type, mesh_shape=(self.world_size,))
         sd = {
             "k": DTensor.from_local(
-                torch.ones(8, 8, device=self.device_type), device_mesh, [Shard(0)]
+                torch.ones(8, 8, device=device_type), device_mesh, [Shard(0)]
             )
         }
         cpu_sd = _create_cpu_state_dict(sd)
@@ -310,6 +320,8 @@ class TestStateDictUtils(DTensorContinuousTestBase):
 
 
 class TestCreateCpuStateDictStorageOffset(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         dist.init_process_group(backend="fake", rank=0, world_size=1, store=FakeStore())
@@ -341,7 +353,8 @@ class TestCreateCpuStateDictStorageOffset(TestCase):
 
 
 instantiate_parametrized_tests(TestCreateCpuStateDictStorageOffset)
-
-
+instantiate_device_type_tests(
+    TestStateDictUtils, globals(), except_for="cpu", allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()
