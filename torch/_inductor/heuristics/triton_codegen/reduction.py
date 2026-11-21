@@ -857,16 +857,8 @@ class XPUReductionHeuristic(ReductionHeuristic):
     ) -> list[Config]:
         from torch._inductor.runtime.triton_heuristics import triton_config_reduction
 
-        # TODO(Intel): CUDA uses num_warps = 1 to disable shared memory.
-        # We apply different configurations from #168335.
-        # We currently let cost model in Triton to decide whether to use
-        # shared memory.
-        loads_and_stores = inductor_meta.get("num_load", 0) + inductor_meta.get(
-            "num_store", 0
-        )
-        x_block = 8
-        if xnumel // x_block < 128 or loads_and_stores >= 5:
-            x_block = 1
+        # XBLOCK=8 vs 1 depends on rnumel and register pressure in ways a static
+        # rule has not captured. let autotune pick the best one to avoid regression.
         return [
             triton_config_reduction(
                 size_hints,
@@ -878,4 +870,5 @@ class XPUReductionHeuristic(ReductionHeuristic):
                 reduction_hint=None,
                 warp_size=warp_size,
             )
+            for x_block in (8, 1)
         ]
