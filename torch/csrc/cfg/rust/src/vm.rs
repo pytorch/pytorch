@@ -8511,8 +8511,8 @@ impl Compiled {
     /// `DORMANT_GAP`). What the graph was taken down by before does not
     /// matter: calls without gradients are not counted.
     #[cold]
-    unsafe fn wake(&self, api: &TcfgApi) {
-        if (api.call_modes)() & 1 == 0 {
+    unsafe fn wake(&self) {
+        if capi::backward_api().is_none_or(|api| (api.grad_enabled)() == 0) {
             return;
         }
         let (left, gap) = self.settled.dormant.get();
@@ -8543,8 +8543,8 @@ impl Compiled {
         if self.options.specialize {
             self.settled.calls.set(self.settled.calls.get() + 1);
         }
-        if let (true, None, Some(api)) = (self.settled.dormant.get().0 != 0, &start, api) {
-            self.wake(api);
+        if self.settled.dormant.get().0 != 0 && start.is_none() {
+            self.wake();
         }
         let serial = self.settled.calls.get();
         let mut cur: usize = 0;
