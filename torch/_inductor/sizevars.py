@@ -1256,6 +1256,13 @@ class SizeVarAllocator:
             self.optimization_hint_with_override(e, hint_override) for e in exprs
         )
 
+    def optimization_hint_at(self, expr: Expr | int, hint: int) -> int:
+        """optimization_hint_with_override, but setting each free symbol to 'hint'."""
+        expr = sympy.sympify(expr)
+        return self.optimization_hint(
+            sympy_subs(expr, dict.fromkeys(expr.free_symbols, hint))
+        )
+
     def guarding_hints_or_throw(
         self,
         exprs: Iterable[Expr | int],

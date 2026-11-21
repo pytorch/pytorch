@@ -23,10 +23,7 @@ import torch._logging
 import torch.utils._pytree as pytree
 from torch._inductor import metrics
 from torch._inductor.ir import MultiTemplateBuffer
-from torch.fx.experimental.symbolic_shapes import (
-    free_unbacked_symbols,
-    has_free_symbols,
-)
+from torch.fx.experimental.symbolic_shapes import free_symbols, free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
@@ -4716,25 +4713,60 @@ class SIMDScheduling(BaseScheduling):
             "tiling_scores": tiling_score,
         }
         kernels = self.create_kernel_choices(kernel_features, [tiling], kernel_kwargs)
-        kernels_by_hint: dict[int, SIMDKernel] = {}
+        for kernel in kernels:
+            self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+        kernels_by_shape: dict[tuple[tuple[int, ...], ...], SIMDKernel] = {}
         if (
             self.supports_multi_kernel_hints
             and config.multi_kernel_hints
+            and not V.graph.cpp_wrapper
             and len(kernels) == 1
-            and has_free_symbols(
-                (kernel_features.numel, kernel_features.reduction_numel)
-            )
         ):
-            # hint_override only changes size_hints, so each call yields one kernel.
-            kernels_by_hint = {
-                hint: self.create_kernel_choices(
+            # Tensor arguments exist only after codegen, so the first kernel supplies
+            # the shapes the keys are built from.
+            _, _, signature, _ = kernels[0].args.python_argdefs()
+            shapes = [
+                V.graph.get_buffer(arg.buffer).get_size()
+                for arg in signature
+                if isinstance(arg, TensorArg)
+            ]
+            numels = (kernel_features.numel, kernel_features.reduction_numel)
+            # With one dynamic symbol every hint gets its own key, and no numel
+            # like s0 - s1 collapses when its symbols are set to the hint.
+            symbols = free_symbols(numels)
+            hints: list[int] = []
+            if len(symbols) == 1 and free_symbols(shapes) == symbols:
+                # Skip a hint that empties a numel like s0 - 1024, or that grows one like
+                # s0**4 (duck sizing) past both int32 and the size this graph was traced at.
+                limits = [
+                    max(2**31 - 1, V.graph.sizevars.optimization_hint(n)) for n in numels
+                ]
+                hints = [
+                    hint
+                    for hint in config.multi_kernel_hints
+                    if all(
+                        0 < V.graph.sizevars.optimization_hint_at(n, hint) <= limit
+                        for n, limit in zip(numels, limits)
+                    )
+                ]
+            for hint in hints:
+                # hint_override only changes size_hints, so this is one kernel.
+                (kernel,) = self.create_kernel_choices(
                     kernel_features, [tiling], {**kernel_kwargs, "hint_override": hint}
-                )[0]
-                for hint in config.multi_kernel_hints
-            }
-            kernels = list(kernels_by_hint.values())
-        for kernel in kernels:
-            self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+                )
+                self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+                key = tuple(
+                    tuple(
+                        V.graph.sizevars.optimization_hint_at(s, hint) for s in shape
+                    )
+                    for shape in shapes
+                )
+                kernels_by_shape[key] = kernel
+            if kernels_by_shape:
+                kernels = list(kernels_by_shape.values())
+                # The first kernel is replaced by the hinted ones and never emitted.
+                # pyrefly: ignore [bad-assignment]
+                metrics.generated_kernel_count -= 1
         MultiKernel.merge_workspaces_inplace(kernels)
 
         # Collect config_patches from operations (e.g., decomposition ops with
@@ -4751,19 +4783,8 @@ class SIMDScheduling(BaseScheduling):
         del kernel
 
         final_kernel: SIMDKernel | MultiKernel
-        if kernels_by_hint:
-            _, _, signature, _ = kernels[0].args.python_argdefs()
-            shapes = tuple(
-                tuple(V.graph.get_buffer(arg.buffer).get_size())
-                for arg in signature
-                if isinstance(arg, TensorArg)
-            )
-            final_kernel = SizeHintMultiKernel(
-                {
-                    self._make_shape_cache_key(shapes, hint): kernel
-                    for hint, kernel in kernels_by_hint.items()
-                }
-            )
+        if kernels_by_shape:
+            final_kernel = SizeHintMultiKernel(kernels_by_shape)
         elif len(kernels) > 1:
             final_kernel = MultiKernel(kernels)
         else:
@@ -5029,11 +5050,12 @@ class SIMDScheduling(BaseScheduling):
         )
 
     def _make_shape_cache_key(
-        self, shapes: tuple[tuple[sympy.Expr | int, ...], ...], hint: int
+        self, node: MultiTemplateBuffer, hint: int
     ) -> tuple[tuple[int, ...], ...]:
         """
         Returns cache key for hint-based multi-graph; key is tuple of shapes with hint filled in.
         """
+        shapes = self._get_multikernel_shapes(node)
         return tuple(
             tuple(
                 hint
@@ -5113,9 +5135,7 @@ class SIMDScheduling(BaseScheduling):
                     shape_cache_key = (
                         None
                         if size_hint is None
-                        else self._make_shape_cache_key(
-                            self._get_multikernel_shapes(template_node.node), size_hint
-                        )
+                        else self._make_shape_cache_key(template_node.node, size_hint)
                     )
                     # pyrefly: ignore [unsupported-operation]
                     kernels[shape_cache_key] = kernel

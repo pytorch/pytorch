@@ -9,7 +9,8 @@ from types import SimpleNamespace
 import torch
 from torch import nn
 from torch._dynamo.testing import reset_rng_state
-from torch._inductor import config, test_operators
+from torch._dynamo.utils import counters
+from torch._inductor import config, metrics, test_operators
 from torch._inductor.codegen.multi_kernel import MultiKernelCall
 from torch._inductor.runtime.benchmarking import set_gpu_benchmark_lock_context
 from torch._inductor.test_case import TestCase
@@ -323,24 +324,53 @@ class MultiKernelTest(TestCase):
     @parametrize("reduction", (False, True))
     def test_size_hint_multi_kernel_pointwise_reduction(self, reduction):
         def f(x):
-            y = x.relu() + 1
-            return y.sum(-1) if reduction else y
+            if reduction:
+                return (x.relu() + 1).sum(-1)
+            return x.view(-1).relu() + 1
 
         compiled_fn = torch.compile(f)
         x = torch.randn(4096, 1024, device=GPU_TYPE)
         torch._dynamo.mark_dynamic(x, 0)
+        metrics.reset()
         act, (wrapper_code,) = run_and_get_code(compiled_fn, x)
         self.assertEqual(f(x), act)
+        self.assertEqual(metrics.generated_kernel_count, len(config.multi_kernel_hints))
         small = torch.randn(64, 1024, device=GPU_TYPE)
         self.assertEqual(f(small), compiled_fn(small))
 
-        self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
-        # One kernel per multi_kernel_hints entry, with size_hints at that row count.
-        check = FileCheck()
-        for hint in config.multi_kernel_hints:
-            size_hints = {"x": hint, "r0_": 1024} if reduction else {"x": hint * 1024}
-            check.check(f"size_hints={size_hints!r}")
-        check.run(wrapper_code)
+        # A warm start rebuilds the dispatch from the FX graph cache.
+        torch._dynamo.reset()
+        counters.clear()
+        torch._dynamo.mark_dynamic(small, 0)
+        self.assertEqual(f(small), torch.compile(f)(small))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+        # Each hint's kernel is tuned and keyed at the shapes with that many rows.
+        tuned, keyed = FileCheck(), FileCheck().check("size_hint_multi_kernel(")
+        for rows in config.multi_kernel_hints:
+            if reduction:
+                size_hints, out_shape = {"x": rows, "r0_": 1024}, (rows,)
+            else:
+                size_hints, out_shape = {"x": rows * 1024}, (rows * 1024,)
+            tuned.check(f"size_hints={size_hints!r}")
+            keyed.check(f"{((rows, 1024), out_shape)!r}:")
+        tuned.run(wrapper_code)
+        keyed.run(wrapper_code)
+
+    @requires_triton()
+    @config.patch("triton.multi_kernel", 0)
+    def test_size_hint_multi_kernel_skips_two_dynamic_symbols(self):
+        def f(x, y):
+            return x[y.shape[0] :].relu() + 1
+
+        x = torch.randn(4096, 1024, device=GPU_TYPE)
+        y = torch.randn(1024, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(y, 0)
+        act, (wrapper_code,) = run_and_get_code(torch.compile(f), x, y)
+        self.assertEqual(f(x, y), act)
+        # A numel like s0 - s1 has no meaningful value with both symbols at one hint.
+        self.assertFalse(_contains_size_hint_multi_kernel_code(wrapper_code))
 
     @parametrize("force_kernel", (0, 1))
     @unittest.mock.patch.dict(

@@ -7749,20 +7749,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if isinstance(arg, int):
                     args.append(str(arg))
                 elif isinstance(arg, SymbolicCallArg):
-                    args.append(str(self._hint_with_override(arg.inner_expr)))
+                    hint = V.graph.sizevars.optimization_hint_with_override(
+                        arg.inner_expr,
+                        hint_override=self.hint_override,
+                    )
+                    args.append(str(hint))
                 elif isinstance(arg, sympy.Expr):
-                    args.append(str(self._hint_with_override(arg)))
+                    hint = V.graph.sizevars.optimization_hint_with_override(
+                        arg,
+                        hint_override=self.hint_override,
+                    )
+                    args.append(str(hint))
                 else:
                     raise ValueError(f"Unsupported numel argument type: {type(arg)}")
         return args
-
-    def _hint_with_override(self, expr: sympy.Expr) -> int:
-        """Hint for ``expr`` with every symbol in it at ``hint_override``."""
-        if self.hint_override is not None:
-            expr = sympy_subs(
-                expr, dict.fromkeys(expr.free_symbols, self.hint_override)
-            )
-        return V.graph.sizevars.optimization_hint(expr)
 
     def codegen_kernel_benchmark(self, num_gb: float | None) -> IndentedBuffer:
         """
@@ -8233,7 +8233,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if prefix_is_reduction(prefix) and not self.inside_reduction:
                 continue
 
-            size_hints[prefix] = next_power_of_2(self._hint_with_override(numel))
+            if self.hint_override is None:
+                numel_hint = V.graph.sizevars.optimization_hint(numel)
+            else:
+                numel_hint = V.graph.sizevars.optimization_hint_at(
+                    numel, self.hint_override
+                )
+            size_hint = next_power_of_2(int(numel_hint))
+            size_hints[prefix] = size_hint
 
         if name is None:
             code.splice(self.gen_common_triton_imports())
