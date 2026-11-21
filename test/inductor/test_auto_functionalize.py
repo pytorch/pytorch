@@ -14,6 +14,7 @@ from torch import Tensor
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import try_use_slice
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -2268,6 +2269,819 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             expected = f(dout, weight, 8)
             got = torch.compile(f, fullgraph=True, dynamic=True)(dout, weight, 8)
             self.assertEqual(got, expected)
+
+
+class AutoFunctionalizeViewTests(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @inductor_config.patch(enable_auto_functionalized_v2=False)
+    @parametrize(
+        "kind",
+        [
+            "view",
+            "strided",
+            "dynamic",
+            "plain",
+            "explicit",
+            "unmatched",
+            "derived",
+            "layout",
+            "layout_dynamic",
+            "manual",
+        ],
+    )
+    def test_pattern_replacement_preserves_view_metadata(self, device, kind):
+        import operator
+
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized
+        from torch._inductor.pattern_matcher import (
+            CallFunction,
+            FailedMatch,
+            fwd_only,
+            KeywordArg,
+            PatternMatcherPass,
+            register_replacement,
+        )
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("partial(Tensor(a!) out, int amount) -> ()")
+            lib.define("replacement(Tensor(a!) destination, int amount) -> ()")
+
+            def partial(out, amount):
+                out[:-2].add_(amount)
+                out[-1:].add_(2 * amount)
+
+            def partial_fake(out, amount):
+                return None
+
+            for name in ("partial", "replacement"):
+                lib.impl(name, partial, "CompositeExplicitAutograd")
+                torch.library.register_fake("mylib::" + name, partial_fake, lib=lib)
+
+            original = torch.ops.mylib.partial.default
+            replacement_op = torch.ops.mylib.replacement.default
+
+            def pattern(out):
+                return auto_functionalized(original, out=out, amount=100)[1]
+
+            def replacement(out):
+                if kind == "derived":
+                    out = out.flip((0,)).flip((0,))
+                result = auto_functionalized(
+                    replacement_op, destination=out, amount=100
+                )[1]
+                if kind in ("layout", "layout_dynamic", "manual"):
+                    return result.as_strided(
+                        result.size(), result.stride(), result.storage_offset()
+                    )
+                return result
+
+            patterns = PatternMatcherPass()
+            register_replacement(
+                pattern,
+                replacement,
+                [torch.empty(6, 8, device=device)],
+                fwd_only,
+                patterns,
+            )
+            counts = []
+
+            def custom_pass(graph):
+                before = list(
+                    graph.find_nodes(op="call_function", target=auto_functionalized)
+                )
+                self.assertEqual(len(before), 1)
+                metadata = before[0].args[1] if len(before[0].args) == 2 else None
+                output_layout = (
+                    before[0].meta["val"][1].stride(),
+                    before[0].meta["val"][1].storage_offset(),
+                )
+                if kind in (
+                    "view",
+                    "strided",
+                    "dynamic",
+                    "unmatched",
+                    "derived",
+                    "layout",
+                    "layout_dynamic",
+                    "manual",
+                ):
+                    self.assertIsNotNone(metadata)
+                else:
+                    self.assertIsNone(metadata)
+                if kind == "manual":
+                    legacy_pattern = CallFunction(
+                        operator.getitem,
+                        CallFunction(
+                            auto_functionalized,
+                            original,
+                            out=KeywordArg("out"),
+                            amount=100,
+                        ),
+                        1,
+                    )
+                    output = next(n for n in before[0].users if n.args[1] == 1)
+                    match = legacy_pattern.match(output)
+                    self.assertTrue(match)
+                    with self.assertRaisesRegex(FailedMatch, "register_replacement"):
+                        match.replace_by_example(replacement, [before[0].kwargs["out"]])
+                    counts.append(0)
+                else:
+                    counts.append(patterns.apply(graph))
+                after = list(
+                    graph.find_nodes(op="call_function", target=auto_functionalized)
+                )
+                self.assertEqual(len(after), 1)
+                if kind != "derived":
+                    self.assertEqual(
+                        (
+                            after[0].meta["val"][1].stride(),
+                            after[0].meta["val"][1].storage_offset(),
+                        ),
+                        output_layout,
+                    )
+                if kind in ("unmatched", "manual", "derived"):
+                    self.assertIs(after[0].args[0], original)
+                    self.assertEqual(after[0].args[1], metadata)
+                else:
+                    self.assertIs(after[0].args[0], replacement_op)
+                    if metadata is None or kind == "derived":
+                        self.assertEqual(len(after[0].args), 1)
+                    else:
+                        self.assertEqual(
+                            after[0].args[1], {"destination": metadata["out"]}
+                        )
+                graph.lint()
+
+            def f(x):
+                base = x + 10
+                if kind == "explicit":
+                    return pattern(base)
+                view = (
+                    base
+                    if kind == "plain"
+                    else base[2:, :: 2 if kind == "strided" else 1]
+                )
+                original(view, 101 if kind == "unmatched" else 100)
+                return base, view
+
+            with inductor_config.patch(post_grad_custom_post_pass=custom_pass):
+                compiled = torch.compile(
+                    f,
+                    fullgraph=True,
+                    dynamic=kind in ("dynamic", "layout_dynamic", "manual"),
+                )
+                for rows in (
+                    [8, 10] if kind in ("dynamic", "layout_dynamic", "manual") else [8]
+                ):
+                    for offset in (1, 100):
+                        x = torch.arange(
+                            offset,
+                            offset + rows * 8,
+                            device=device,
+                            dtype=torch.float32,
+                        ).reshape(rows, 8)
+                        self.assertEqual(compiled(x), f(x), atol=0, rtol=0)
+            self.assertTrue(counts)
+            self.assertEqual(
+                counts,
+                [int(kind not in ("unmatched", "manual", "derived"))] * len(counts),
+            )
+
+    @inductor_config.patch(enable_auto_functionalized_v2=False)
+    @parametrize("kind", ["legacy", "explicit_metadata", "varargs"])
+    @parametrize("with_metadata", [False, True])
+    def test_graph_handler_view_metadata(self, device, kind, with_metadata):
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized
+        from torch._inductor.pattern_matcher import (
+            CallFunction,
+            CallFunctionVarArgs,
+            KeywordArg,
+            PatternMatcherPass,
+            register_graph_pattern,
+        )
+        from torch._subclasses.functional_tensor import (
+            dispatch_functionalize,
+            FunctionalTensorMode,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+
+            def partial(out):
+                out[:2].add_(100)
+
+            for name in ("partial", "replacement"):
+                lib.define(f"{name}(Tensor(a!) out) -> ()")
+                lib.impl(name, partial, "CompositeExplicitAutograd")
+                torch.library.register_fake(f"mylib::{name}", lambda out: None, lib=lib)
+            op = torch.ops.mylib.partial.default
+            replacement_op = torch.ops.mylib.replacement.default
+
+            def fn(x):
+                base = x + 10
+                out = base[1:, ::2] if with_metadata else base
+                op(out)
+                return base, out, base[:, 1::2]
+
+            x = torch.arange(48, device=device, dtype=torch.float32).reshape(6, 8)
+            gm = make_fx(
+                dispatch_functionalize(fn, mode=FunctionalTensorMode()),
+                tracing_mode="fake",
+            )(x)
+            original_hop = next(
+                iter(
+                    gm.graph.find_nodes(op="call_function", target=auto_functionalized)
+                )
+            )
+            original_args = original_hop.args
+            self.assertEqual(len(original_args), 2 if with_metadata else 1)
+            if kind == "varargs":
+                pattern = CallFunctionVarArgs(auto_functionalized)
+            else:
+                pattern_args = (
+                    (op, KeywordArg("view_metadata"))
+                    if kind == "explicit_metadata"
+                    else (op,)
+                )
+                pattern = CallFunction(
+                    auto_functionalized, *pattern_args, out=KeywordArg("out")
+                )
+            patterns = PatternMatcherPass()
+            calls = []
+
+            @register_graph_pattern(pattern, pass_dict=patterns)
+            def handler(match, *args, **kwargs):
+                calls.append(True)
+                if kind == "varargs":
+                    self.assertIs(args[0], op)
+                    hop_args = (replacement_op, *args[1:])
+                else:
+                    metadata = kwargs.pop("view_metadata", None)
+                    hop_args = (
+                        (replacement_op, metadata) if metadata else (replacement_op,)
+                    )
+                old = match.output_node()
+                new = match.graph.call_function(auto_functionalized, hop_args, kwargs)
+                new.meta = old.meta.copy()
+                old.replace_all_uses_with(new)
+                match.erase_nodes()
+
+            expected_count = int(
+                kind == "varargs"
+                or (kind == "explicit_metadata" and with_metadata)
+                or (kind == "legacy" and not with_metadata)
+            )
+            self.assertEqual(patterns.apply(gm.graph), expected_count)
+            self.assertEqual(len(calls), expected_count)
+            gm.graph.lint()
+            gm.recompile()
+            hop = next(
+                iter(
+                    gm.graph.find_nodes(op="call_function", target=auto_functionalized)
+                )
+            )
+            self.assertIs(hop.args[0], replacement_op if expected_count else op)
+            self.assertEqual(hop.args[1:], original_args[1:])
+            for offset in (0, 100):
+                inp = x + offset
+                self.assertEqual(gm(inp), fn(inp), atol=0, rtol=0)
+                self.assertEqual(inp, x + offset)
+
+    @parametrize("kind", ["graph_handler", "external_metadata_user"])
+    def test_pattern_replacement_rejects_unowned_view_metadata(self, device, kind):
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized
+        from torch._inductor.pattern_matcher import (
+            CallFunction,
+            fwd_only,
+            KeywordArg,
+            PatternMatcherPass,
+            register_graph_pattern,
+            register_replacement,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("partial(Tensor(a!) out) -> ()")
+
+            @torch.library.impl(lib, "partial", "CompositeExplicitAutograd")
+            def partial(out):
+                out[:2].add_(100)
+
+            @torch.library.register_fake("mylib::partial", lib=lib)
+            def partial_fake(out):
+                return None
+
+            op = torch.ops.mylib.partial.default
+
+            def pattern(x):
+                base = x + 10
+                return auto_functionalized(op, out=base[2:])[1]
+
+            def replacement(x):
+                view = (x + 10)[2:]
+                return torch.cat((view[:2] + 100, view[2:]))
+
+            def fn(x, other):
+                base = x + 10
+                metadata = {"out": (base, (6,), (1,), 2)}
+                result = auto_functionalized(op, metadata, out=base[2:])[1]
+                if kind == "external_metadata_user":
+                    return result, auto_functionalized(op, metadata, out=other)[1]
+                return result
+
+            x = torch.arange(8, device=device, dtype=torch.float32)
+            other = (x + 10)[2:]
+            patterns = PatternMatcherPass()
+            if kind == "graph_handler":
+
+                @register_graph_pattern(
+                    CallFunction(auto_functionalized, op, out=KeywordArg("out")),
+                    pass_dict=patterns,
+                )
+                def handler(match, out):
+                    self.fail("A legacy graph handler must not discard view metadata")
+
+            else:
+                register_replacement(pattern, replacement, [x], fwd_only, patterns)
+            gm = make_fx(fn)(x, other)
+            gm.graph.eliminate_dead_code()
+            gm.recompile()
+            before = gm.code
+            self.assertEqual(patterns.apply(gm.graph), 0)
+            gm.graph.lint()
+            gm.recompile()
+            self.assertEqual(gm.code, before)
+            self.assertEqual(gm(x, other), fn(x, other), atol=0, rtol=0)
+
+    @inductor_config.patch(enable_auto_functionalized_v2=False)
+    @parametrize("gap", [1, 2])
+    @parametrize("inference", [False, True])
+    @parametrize("dynamic", [False, True])
+    def test_mutated_intermediate_view(self, device, gap, inference, dynamic):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("partial(Tensor(a!) out) -> ()")
+
+            @torch.library.impl(lib, "partial", "CompositeExplicitAutograd")
+            def partial(out):
+                # Leave a late row untouched so an incorrect prefill is observable.
+                out[:-2].add_(1000)
+                out[-1:].add_(2000)
+
+            @torch.library.register_fake("mylib::partial", lib=lib)
+            def partial_fake(out):
+                return None
+
+            def f(x):
+                base = x + 10
+                view = base[2:, ::gap]
+                torch.ops.mylib.partial(view)
+                # The base must remain live to prevent eliminating the view clone.
+                return base, view
+
+            with torch.inference_mode(inference):
+                compiled = torch.compile(f, fullgraph=True, dynamic=dynamic)
+                for rows in [8, 10] if dynamic else [8]:
+                    for offset in (1, 100):
+                        x = torch.arange(
+                            offset,
+                            offset + rows * 8,
+                            device=device,
+                            dtype=torch.float32,
+                        ).reshape(rows, 8)
+                        self.assertEqual(compiled(x), f(x), atol=0, rtol=0)
+
+    @inductor_config.patch(enable_auto_functionalized_v2=False)
+    @parametrize("kind", ["slice", "set"])
+    @parametrize("gap", [1, 2])
+    @parametrize("inference", [False, True])
+    def test_mutated_input_view(self, device, kind, gap, inference):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("partial(Tensor(a!) out) -> ()")
+
+            @torch.library.impl(lib, "partial", "CompositeExplicitAutograd")
+            def partial(out):
+                out[:-2].add_(1000)
+                out[-1:].add_(2000)
+
+            @torch.library.register_fake("mylib::partial", lib=lib)
+            def partial_fake(out):
+                return None
+
+            def f(view):
+                before = view + 1
+                torch.ops.mylib.partial(view)
+                return before, view
+
+            def make_input():
+                base = torch.arange(1, 65, device=device, dtype=torch.float32)
+                view = base.reshape(8, 8)[2:, ::gap]
+                if kind == "set":
+                    view = torch.empty(0, device=device).set_(
+                        base.untyped_storage(),
+                        view.storage_offset(),
+                        view.size(),
+                        view.stride(),
+                    )
+                return base, view
+
+            with torch.inference_mode(inference):
+                expected_base, expected_view = make_input()
+                actual_base, actual_view = make_input()
+                expected = f(expected_view)
+                actual = torch.compile(f, fullgraph=True)(actual_view)
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+                self.assertEqual(actual_base, expected_base, atol=0, rtol=0)
+
+    @inductor_config.patch(enable_auto_functionalized_v2=False)
+    @parametrize("kind", ["slice", "set"])
+    @parametrize("inference", [False, True])
+    @parametrize("dynamic", [False, True])
+    @parametrize("fixed_extent", [False, True])
+    def test_mutated_view_past_input_extent(
+        self, device, kind, inference, dynamic, fixed_extent
+    ):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("partial(Tensor(a!) out) -> ()")
+
+            @torch.library.impl(lib, "partial", "CompositeExplicitAutograd")
+            def partial(out):
+                # Mutate within the input; the expanded view reads the rest.
+                out[:2].add_(100)
+
+            @torch.library.register_fake("mylib::partial", lib=lib)
+            def partial_fake(out):
+                return None
+
+            def f(x):
+                size = 8 if fixed_extent else 2 * x.size(0)
+                view = x.as_strided((size,), (1,), 0)
+                torch.ops.mylib.partial(view)
+                return x, view
+
+            def make_input(size, offset):
+                owner = torch.arange(
+                    offset, offset + 2 * size, device=device, dtype=torch.float32
+                )
+                if kind == "slice":
+                    x = owner[:size]
+                else:
+                    x = torch.empty(0, device=device).set_(
+                        owner.untyped_storage(), 0, (size,), (1,)
+                    )
+                return owner, x
+
+            with torch.inference_mode(inference):
+                compiled = torch.compile(f, fullgraph=True, dynamic=dynamic)
+                for size in [4, 10, 6] if dynamic else [4]:
+                    for offset in [0, 20]:
+                        expected_owner, expected_x = make_input(size, offset)
+                        actual_owner, actual_x = make_input(size, offset)
+                        self.assertEqual(
+                            compiled(actual_x), f(expected_x), atol=0, rtol=0
+                        )
+                        self.assertEqual(actual_owner, expected_owner, atol=0, rtol=0)
+
+    @inductor_config.patch(enable_auto_functionalized_v2=False)
+    @parametrize("inference", [False, True])
+    def test_mutated_disjoint_views_shared_base(self, device, inference):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("partial(Tensor(a!) left, Tensor(b!) right) -> ()")
+
+            @torch.library.impl(lib, "partial", "CompositeExplicitAutograd")
+            def partial(left, right):
+                left[:1].add_(100)
+                right[-1:].add_(200)
+
+            @torch.library.register_fake("mylib::partial", lib=lib)
+            def partial_fake(left, right):
+                return None
+
+            def f(x):
+                base = x + 10
+                left, right = base[1:4], base[5:8]
+                torch.ops.mylib.partial(left, right)
+                return base, left, right
+
+            with torch.inference_mode(inference):
+                compiled = torch.compile(f, fullgraph=True)
+                for offset in [0, 20]:
+                    x = torch.arange(
+                        offset, offset + 10, device=device, dtype=torch.float32
+                    )
+                    self.assertEqual(compiled(x), f(x), atol=0, rtol=0)
+
+    def test_v1_mutable_op_keyword(self, device):
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("update(Tensor(a!) out) -> ()")
+            lib.define("collide(Tensor(a!) _mutable_op, Tensor _tensor_bases) -> ()")
+
+            @torch.library.impl(lib, "update", "CompositeExplicitAutograd")
+            def update(out):
+                out.add_(1)
+
+            @torch.library.impl(lib, "collide", "CompositeExplicitAutograd")
+            def collide(_mutable_op, _tensor_bases):
+                _mutable_op.add_(_tensor_bases)
+
+            op = torch.ops.mylib.update.default
+            x = torch.arange(8, dtype=torch.float32, device=device)
+            self.assertEqual(auto_functionalized(_mutable_op=op, out=x)[1], x + 1)
+            v = x[1:5]
+            metadata = {"_mutable_op": (x, v.size(), v.stride(), v.storage_offset())}
+            actual = auto_functionalized(
+                torch.ops.mylib.collide.default,
+                metadata,
+                _mutable_op=v,
+                _tensor_bases=v,
+            )[1]
+            self.assertEqual(actual, v + v)
+
+    @parametrize(
+        "start,stop,step,extent", [(1, 5, 1, 5), (3, 12, 2, 12), (10, 10, 1, 0)]
+    )
+    def test_view_metadata_clone_extent(self, device, start, stop, step, extent):
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("partial(Tensor(a!) out) -> ()")
+
+            @torch.library.impl(lib, "partial", "CompositeExplicitAutograd")
+            def partial(out):
+                out[:1].add_(100)
+
+            base = torch.arange(1024, dtype=torch.float32, device=device)
+            view = base[start:stop:step]
+            metadata = {"out": (base, view.size(), view.stride(), start)}
+            op = torch.ops.mylib.partial.default
+            clone = auto_functionalized(op, metadata, out=view)[1]
+            expected_bytes = extent * base.element_size()
+            self.assertEqual(clone.untyped_storage().nbytes(), expected_bytes)
+            self.assertEqual(clone.size(), view.size())
+            self.assertEqual(clone.stride(), view.stride())
+            self.assertEqual(clone.storage_offset(), start)
+            expected = base[:extent].clone()
+            expected[start:stop:step][:1].add_(100)
+            self.assertEqual(clone.as_strided((extent,), (1,), 0), expected)
+            self.assertEqual(base, torch.arange(1024, dtype=base.dtype, device=device))
+
+    @parametrize("case", ["separate", "prefix", "alias", "view", "detached", "sparse"])
+    def test_pattern_refresh_preserves_observable_storage(self, device, case):
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized
+        from torch._inductor.pattern_matcher import (
+            fwd_only,
+            PatternMatcherPass,
+            register_replacement,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("update(Tensor(a!) out) -> ()")
+            lib.define("inspect_storage(Tensor x, Tensor y) -> Tensor")
+
+            @torch.library.impl(lib, "update", "CompositeExplicitAutograd")
+            def update(out):
+                out.add_(1)
+
+            @torch.library.register_fake("mylib::update", lib=lib)
+            def update_fake(out):
+                return None
+
+            def storage_value(x, y):
+                if case in ("view", "detached"):
+                    return int(x._is_view())
+                if case == "sparse":
+                    return int(y.layout == torch.sparse_coo)
+                return x.untyped_storage().nbytes() + int(torch._C._is_alias_of(x, y))
+
+            @torch.library.impl(lib, "inspect_storage", "CompositeExplicitAutograd")
+            def inspect_storage(x, y):
+                return x.new_full((), storage_value(x, y))
+
+            @torch.library.register_fake("mylib::inspect_storage", lib=lib)
+            def inspect_storage_fake(x, y):
+                return x.new_empty(())
+
+            op = torch.ops.mylib.update.default
+            inspect_op = torch.ops.mylib.inspect_storage.default
+
+            def search(x, y):
+                return auto_functionalized(op, out=x)[1] + inspect_op(x, y)
+
+            def replacement(x, y):
+                return auto_functionalized(op, out=x)[1] + storage_value(x, y)
+
+            def fn(owner, other):
+                base = owner[:12] if case == "prefix" else owner
+                v = base[1:5]
+                if case == "detached":
+                    v = other
+                y = v.view(4) if case == "alias" else other
+                if case == "detached":
+                    y = torch.empty_like(v)
+                metadata = {"out": (base, v.size(), v.stride(), v.storage_offset())}
+                return auto_functionalized(op, metadata, out=v)[1] + inspect_op(v, y)
+
+            other = torch.empty(4, device=device)
+            owner = torch.arange(64, dtype=other.dtype, device=device)
+            patterns = PatternMatcherPass()
+            register_replacement(
+                search, replacement, [other, other.clone()], fwd_only, patterns
+            )
+            if case == "sparse":
+                other = other.to_sparse()
+            elif case == "detached":
+                other = owner[1:5].detach()
+            gm = make_fx(fn, tracing_mode="fake")(owner, other)
+            gm.graph.eliminate_dead_code()
+            self.assertEqual(patterns.apply(gm.graph), int(case == "separate"))
+            gm.graph.lint()
+            gm.recompile()
+            self.assertEqual(gm(owner, other), fn(owner, other))
+
+    @parametrize("fake", [False, True])
+    def test_view_metadata_rejects_short_base(self, device, fake):
+        from contextlib import nullcontext
+
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("partial(Tensor(a!) out) -> ()")
+
+            @torch.library.impl(lib, "partial", "CompositeExplicitAutograd")
+            def partial(out):
+                out[:2].add_(100)
+
+            @torch.library.register_fake("mylib::partial", lib=lib)
+            def partial_fake(out):
+                return None
+
+            with FakeTensorMode() if fake else nullcontext():
+                view = torch.empty(8, device=device)
+                metadata = {"out": (view[:4], view.size(), view.stride(), 0)}
+                with self.assertRaisesRegex(
+                    RuntimeError, "base spans 4 elements but x addresses 8"
+                ):
+                    auto_functionalized(
+                        torch.ops.mylib.partial.default, metadata, out=view
+                    )
+
+    @inductor_config.patch(enable_auto_functionalized_v2=False)
+    @parametrize("kind", ["real", "complex", "reinterpret", "conjugate", "negative"])
+    @parametrize("inference", [False, True])
+    def test_mutated_view_dtype_and_bits(self, device, kind, inference):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("partial(Tensor(a!) out) -> ()")
+
+            @torch.library.impl(lib, "partial", "CompositeExplicitAutograd")
+            def partial(out):
+                out[:-2].add_(1001 if out.is_conj() else 1000)
+                out[-1:].add_(2001 if out.is_neg() else 2000)
+
+            # The implementation uses ATen operations that support view bits.
+            lib.impl("partial", torch.library.fallthrough_kernel, "Conjugate")
+            lib.impl("partial", torch.library.fallthrough_kernel, "Negative")
+
+            @torch.library.register_fake("mylib::partial", lib=lib)
+            def partial_fake(out):
+                return None
+
+            def f(x):
+                base = x + 10
+                if kind == "real":
+                    view = torch.view_as_real(base)
+                elif kind == "complex":
+                    view = torch.view_as_complex(base)
+                elif kind == "reinterpret":
+                    view = base.view(torch.int32)
+                elif kind == "conjugate":
+                    view = base.conj()
+                else:
+                    view = torch._neg_view(base)
+                view = view[2:, ::2]
+                torch.ops.mylib.partial(view)
+                return base, view
+
+            with torch.inference_mode(inference):
+                x = torch.arange(1, 129, device=device, dtype=torch.float32)
+                if kind == "complex":
+                    x = x.reshape(8, 8, 2)
+                else:
+                    x = x.reshape(8, 16)
+                    if kind in ("real", "conjugate"):
+                        x = x.to(torch.complex64) * (1 + 1j)
+                expected = f(x)
+                compiled = torch.compile(f, fullgraph=True)
+                if kind in ("conjugate", "negative"):
+                    with self.assertRaisesRegex(
+                        torch._dynamo.exc.BackendCompilerFailed,
+                        "V1 auto-functionalization cannot preserve conjugate or negative view bits",
+                    ):
+                        compiled(x)
+                else:
+                    self.assertEqual(compiled(x), expected, atol=0, rtol=0)
+
+    @inductor_config.patch(enable_auto_functionalized_v2=False)
+    @parametrize("inference", [False, True])
+    def test_mutated_dtype_view_with_unaligned_base(self, device, inference):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("partial(Tensor(a!) out) -> ()")
+
+            @torch.library.impl(lib, "partial", "CompositeExplicitAutograd")
+            def partial(out):
+                out[:-2].add_(1000)
+                out[-1:].add_(2000)
+
+            @torch.library.register_fake("mylib::partial", lib=lib)
+            def partial_fake(out):
+                return None
+
+            def f(x):
+                base = x + 10
+                view = torch.view_as_complex(base[:-1].reshape(8, 4, 2))[2:, ::2]
+                torch.ops.mylib.partial(view)
+                return base, view
+
+            with torch.inference_mode(inference):
+                x = torch.arange(1, 66, device=device, dtype=torch.float32)
+                self.assertEqual(
+                    torch.compile(f, fullgraph=True)(x), f(x), atol=0, rtol=0
+                )
+
+    def test_view_metadata_functionalize(self, device):
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized
+        from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("partial(Tensor(a!) out) -> ()")
+
+            @torch.library.impl(lib, "partial", "CompositeExplicitAutograd")
+            def partial(out):
+                out[:-2].add_(1000)
+                out[-1:].add_(2000)
+
+            @torch.library.register_fake("mylib::partial", lib=lib)
+            def partial_fake(out):
+                return None
+
+            def f(x):
+                base = x + 10
+                view = base[2:, ::2]
+                metadata = {
+                    "out": (base, view.size(), view.stride(), view.storage_offset())
+                }
+                return auto_functionalized(
+                    torch.ops.mylib.partial.default, metadata, out=view
+                )
+
+            x = torch.arange(1, 65, device=device, dtype=torch.float32).reshape(8, 8)
+            graph = make_fx(PythonFunctionalizeAPI().functionalize(f))(x)
+            self.assertEqual(graph(x), f(x), atol=0, rtol=0)
+
+    @inductor_config.patch(enable_auto_functionalized_v2=False)
+    @parametrize("optional", [False, True])
+    @parametrize("inference", [False, True])
+    def test_mutated_view_list_optional_and_defaults(self, device, optional, inference):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "partial(Tensor(a!) _tensor_bases, Tensor(b!)[] others, "
+                "Tensor(c!)? optional=None, int increment=1000) -> ()"
+            )
+
+            @torch.library.impl(lib, "partial", "CompositeExplicitAutograd")
+            def partial(_tensor_bases, others, optional=None, increment=1000):
+                for out in [_tensor_bases, *others, optional]:
+                    if out is not None:
+                        out[:-2].add_(increment)
+                        out[-1:].add_(2 * increment)
+
+            @torch.library.register_fake("mylib::partial", lib=lib)
+            def partial_fake(_tensor_bases, others, optional=None, increment=1000):
+                return None
+
+            def f(x):
+                a, b, c, d = x + 10, x + 20, x + 30, x + 40
+                views = [a[2:, ::2], b, c[2:]]
+                if optional:
+                    torch.ops.mylib.partial(views[0], views[1:], d[2:, ::2])
+                else:
+                    torch.ops.mylib.partial(views[0], views[1:])
+                return a, b, c, d, views
+
+            with torch.inference_mode(inference):
+                x = torch.arange(1, 65, device=device, dtype=torch.float32).reshape(
+                    8, 8
+                )
+                self.assertEqual(
+                    torch.compile(f, fullgraph=True)(x), f(x), atol=0, rtol=0
+                )
+
+
+instantiate_device_type_tests(AutoFunctionalizeViewTests, globals())
 
 
 instantiate_parametrized_tests(AutoFunctionalizeTests)
