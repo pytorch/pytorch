@@ -734,6 +734,48 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             module.register_forward_hook(hook)
             self.assertEqual(compiled(x, module), fn(x, module))
 
+    @parametrize("operation", [operator.eq, operator.ne])
+    def test_hook_dict_self_comparison_no_recompile(self, operation):
+        def fn(x, module):
+            hooks = module._forward_hooks
+            return x + operation(hooks, hooks)
+
+        compiled, counter = self.compile_counted(fn)
+        x = torch.ones(2)
+        for _ in range(2):
+            module = torch.nn.Identity()
+            module.register_forward_hook(identity_forward_hook)
+            self.assertEqual(compiled(x, module), fn(x, module))
+            self.assertEqual(counter.frame_count, 1)
+
+    @parametrize(
+        "operation",
+        [
+            operator.eq,
+            operator.ne,
+            lambda a, b: dict.__eq__(a, b),
+            lambda a, b: dict.__ne__(a, b),
+        ],
+    )
+    @parametrize("initially_equal", [False, True])
+    def test_hook_dict_comparison_guards_keys(self, operation, initially_equal):
+        def fn(x, left, right):
+            return x + operation(left._forward_hooks, right._forward_hooks)
+
+        left = torch.nn.Identity()
+        left.register_forward_hook(identity_forward_hook)
+        right = torch.nn.Identity()
+        compiled, counter = self.compile_counted(fn)
+        x = torch.ones(2)
+        for frames, equal in enumerate((initially_equal, not initially_equal), 1):
+            if equal:
+                right._forward_hooks = left._forward_hooks.copy()
+            else:
+                right._forward_hooks.clear()
+                right.register_forward_hook(identity_forward_hook)
+            self.assertEqual(compiled(x, left, right), fn(x, left, right))
+            self.assertEqual(counter.frame_count, frames)
+
     def test_hook_dict_move_to_end_guard_keys(self):
         def hook(module, args, output):
             return output + 1

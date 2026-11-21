@@ -8334,7 +8334,7 @@ class GraphModule(torch.nn.Module):
 
     @parametrize(
         "op",
-        ["lookup", "merge", "compare", "insert", "add", "subtract"]
+        ["lookup", "merge", "compare", "dict_compare", "insert", "add", "subtract"]
         + ["union", "intersection", "difference", "multi_union", "frozen_multi_union"]
         + ["remove", "discard", "pop", "clear"],
     )
@@ -8364,6 +8364,8 @@ class GraphModule(torch.nn.Module):
             if op in ("multi_union", "frozen_multi_union"):
                 kind = frozenset if op == "frozen_multi_union" else set
                 return x + len(kind().union({key}, {method}))
+            if op == "dict_compare":
+                return x + ({method: 1} == {key: 1})
             left, right = {method}, {key}
             if op in ("remove", "discard", "pop", "clear"):
                 before = method in right
