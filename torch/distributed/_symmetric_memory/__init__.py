@@ -972,6 +972,14 @@ def _fused_all_gather_matmul(
             A_shard, Bs, gather_dim, group_name, return_A=return_A
         )
 
+    if _should_use_flydsl_all_gather_matmul(A_shard, Bs, gather_dim, group_name):
+        from torch.distributed._symmetric_memory import _fused_flydsl
+
+        with torch.profiler.record_function("fused_all_gather_matmul"):
+            return _fused_flydsl.all_gather_matmul(
+                A_shard, Bs, gather_dim, group_name, return_A=return_A
+            )
+
     if _should_use_fused_all_gather_matmul_native(A_shard, Bs, gather_dim, group_name):
         group = c10d._resolve_process_group(group_name)
         leading_dims = list(A_shard.shape[:-1])
@@ -998,6 +1006,43 @@ def _fused_all_gather_matmul(
             group_name,
             return_A,
         )
+
+
+def _flydsl_async_tp_enabled() -> bool:
+    # Opt-in FlyDSL kernels for the fused AsyncTP ops on ROCm gfx950 (_fused_flydsl.py), read on every call. Set it
+    # alike on every rank of a group: the kernels rendezvous, so all ranks must take the same branch.
+    return (
+        "TORCH_SYMM_MEM_ENABLE_FLYDSL_ASYNC_TP" in os.environ
+        and torch.version.hip is not None
+        and os.getenv("TORCH_DISABLE_NATIVE_JIT", "0") != "1"
+    )
+
+
+def _should_use_flydsl_all_gather_matmul(
+    A_shard: torch.Tensor,
+    Bs: list[torch.Tensor],
+    gather_dim: int,
+    group_name: c10d.GroupName,
+) -> bool:
+    if not _flydsl_async_tp_enabled():
+        return False
+    from torch.distributed._symmetric_memory import _fused_flydsl
+
+    return _fused_flydsl.ag_supported(A_shard, Bs, gather_dim, group_name)
+
+
+def _should_use_flydsl_matmul_reduce_scatter(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    reduce_op: str,
+    scatter_dim: int,
+    group_name: c10d.GroupName,
+) -> bool:
+    if not _flydsl_async_tp_enabled():
+        return False
+    from torch.distributed._symmetric_memory import _fused_flydsl
+
+    return _fused_flydsl.rs_supported(A, B, reduce_op, scatter_dim, group_name)
 
 
 # Each 256-row M tile of the ROCm _async_input_mm waits on one chunk's signal,
@@ -1414,6 +1459,15 @@ def _fused_matmul_reduce_scatter(
         )
 
     with torch.profiler.record_function("fused_matmul_reduce_scatter"):
+        if _should_use_flydsl_matmul_reduce_scatter(
+            A, B, reduce_op, scatter_dim, group_name
+        ):
+            from torch.distributed._symmetric_memory import _fused_flydsl
+
+            return _fused_flydsl.matmul_reduce_scatter(
+                A, B, reduce_op, scatter_dim, group_name
+            )
+
         return _fused_matmul_reduce_scatter_impl(
             mm_out_op=torch.ops.aten.mm.out,
             A=A,
