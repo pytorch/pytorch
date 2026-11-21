@@ -54,7 +54,7 @@ class PointwiseHeuristic(CodegenConfigHeuristics):
                 tile_hint,
                 inductor_meta,
             )
-        if n == 3:
+        if n >= 3:
             return self._configs_3d(
                 size_hints, bs, hinted_configs, triton_config_fn, inductor_meta
             )

@@ -7987,13 +7987,12 @@ from user code:
                 return x + len(tuple(AOT_IMPLICIT_ORDER_ROOT)) + hasattr(self, member)
 
         module = Module()
-        original = module.mapping if member == "mapping" else module._parameters
-        AOT_IMPLICIT_ORDER_ROOT = original
+        AOT_IMPLICIT_ORDER_ROOT = (
+            module.mapping if member == "mapping" else module._parameters
+        )
 
         def guard_filter(entries):
-            return [
-                entry.guard_type in ("HASATTR", "TENSOR_MATCH") for entry in entries
-            ]
+            return [e.guard_type in ("HASATTR", "TENSOR_MATCH") for e in entries]
 
         x = torch.ones(1)
         model, state = self._capture_filtered_module(module, guard_filter, x)
@@ -8005,24 +8004,20 @@ from user code:
         self.assertIn("AOT_IMPLICIT_ORDER_ROOT", state.global_scope)
         self.assertEqual(model(x), x + 3)
         changed = Module()
+        loaded = self._load_filtered_module(model._save_aot_compiled_module(), changed)
+        self.assertEqual(loaded(x), x + 3)
         if member == "mapping":
             changed.mapping["c"] = 3
         else:
             changed._parameters = dict(reversed(tuple(changed._parameters.items())))
             # This filter keeps only the parameter guard's global alias.
             self.assertEqual(captured(changed, x), changed(x))
+            self.assertEqual(loaded(x), changed(x))
             AOT_IMPLICIT_ORDER_ROOT = changed._parameters
         with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
             captured(changed, x)
-        AOT_IMPLICIT_ORDER_ROOT = original
-        data = model._save_aot_compiled_module()
-        loaded = self._load_filtered_module(data, Module())
-        self.assertEqual(loaded(x), x + 3)
-        invalid = self._load_filtered_module(data, changed)
-        if member == "weight":
-            AOT_IMPLICIT_ORDER_ROOT = changed._parameters
         with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
-            invalid(x)
+            loaded(x)
 
     @parametrize("retain_order", [False, True])
     def test_aot_compile_module_captured_global_is_not_read_live(self, retain_order):
@@ -8078,10 +8073,8 @@ from user code:
             mod.forward = functools.partial(KeyOrderGlobalModule.forward, mod)
             with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
                 fallback = AOTCompiledModel.deserialize(mod, data)
-            self.assertIn(
-                "Some dictionaries supply only the order of their keys",
-                "\n".join(logs.output),
-            )
+            self.assertIn("live dictionary key order", "\n".join(logs.output))
+            AOT_KEY_ORDER_GLOBAL["a"] = AOT_KEY_ORDER_GLOBAL.pop("a")
             self.assertEqual(fallback(x), expected)
 
     @parametrize("mapping_type", [dict, set])

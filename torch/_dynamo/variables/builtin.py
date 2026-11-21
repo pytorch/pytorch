@@ -24,7 +24,6 @@ import abc
 import ast
 import builtins
 import contextlib
-import enum
 import functools
 import gc
 import inspect
@@ -59,7 +58,7 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
-    DictGetItemSource,
+    get_item_source_base,
     GetItemSource,
     GlobalSource,
     is_constant_source,
@@ -1688,7 +1687,7 @@ class BuiltinVariable(TypeVariable):
                 ) -> VariableTracker | None:
                     # Reconstructed constants cannot establish identity in a reusable region.
                     if fn in (operator.is_, operator.is_not):
-                        if tx.output.current_tracer.tracks_lexical_sources:
+                        if tx.output.current_tracer.in_nested_compile_region:
                             return None
                     if check_unspec_or_constant_args(args, kwargs):
                         try:
@@ -3442,46 +3441,44 @@ class BuiltinVariable(TypeVariable):
     ) -> VariableTracker | None:
         value = args[0] if args else None
         effects = tx.output.side_effects
-        mutated = False
+        writes = effects.store_attr_mutations
         expanding = tx.f_code is polyfills.builtins._expand_format.__code__
-        if expanding and isinstance(value, (TensorVariable, SymNodeVariable)):
-            return StringFormatVariable.create(tx, "{0:{1}}", args, kwargs)
-        if not any(
-            isinstance(value, UserDefinedObjectVariable) and value.is_python_constant()
-            for value in itertools.chain(args, kwargs.values())
-        ):
-            if not any(
-                "__format__" in attrs
-                and isinstance(cls, variables.UserDefinedClassVariable)
-                for cls, attrs in effects.store_attr_mutations.items()
-            ):
+        if self.fn is str.format:
+            if expanding or value is None or value.python_type() is not str:
                 return None
-            if expanding and self.fn is format:
-                if not isinstance(value, UserDefinedObjectVariable):
-                    return StringFormatVariable.create(tx, "{0:{1}}", args, kwargs)
-                mutated = True
-            elif self.fn is not str.format or expanding:
-                return None
-        if self.fn is str.format and value is not None and value.python_type() is str:
-            from .builder import SourcelessBuilder
+            if any(
+                isinstance(v, UserDefinedObjectVariable) and v.is_python_constant()
+                for v in itertools.chain(args[1:], kwargs.values())
+            ) or any("__format__" in attrs for attrs in writes.values()):
+                from .builder import SourcelessBuilder
 
-            build = SourcelessBuilder.create_internal_user_function
-            return build(polyfills.builtins.str_format).call_function(tx, args, kwargs)
-        if kwargs or len(args) not in (1, 2) or self.fn is not format:
-            return super().call_function(tx, args, kwargs)
+                build = SourcelessBuilder.create_internal_user_function
+                fn = build(polyfills.builtins.str_format)
+                return fn.call_function(tx, args, kwargs)
+            return None
+        if kwargs or len(args) not in (1, 2):
+            return None
         spec = args[1] if len(args) == 2 else ConstantVariable.create("")
+        if expanding and isinstance(
+            value, (TensorVariable, SymNodeVariable, StringFormatVariable)
+        ):
+            return StringFormatVariable.create(tx, "{0:{1}}", [value, spec], {})
         if isinstance(value, UserDefinedObjectVariable) and spec.python_type() is str:
             cls_type = value.python_type()
-            if not mutated and effects.store_attr_mutations:
-                mutated = any(
-                    cls in effects and effects[cls] in effects.store_attr_mutations
-                    for cls in get_type_mro_no_user_code(cls_type)
-                )
+            slots = {"__format__", "__str__", "__float__"}
+            mutated = bool(writes) and any(
+                cls in effects and slots.intersection(writes.get(effects[cls], ()))
+                for cls in get_type_mro_no_user_code(cls_type)
+            )
             lookup = value.lookup_class_mro_attr
             formatter = None if mutated else lookup("__format__")
-            if formatter is enum.Enum.__format__:
+            if isinstance(formatter, types.FunctionType):
                 return value.SLOT1(tx, "__format__", spec)
-            for base in (int, float, str):
+            if not mutated and not value.is_python_constant():
+                if expanding:
+                    return StringFormatVariable.create(tx, "{0:{1}}", [value, spec], {})
+                return None
+            for base in (int, float, str, object):
                 if formatter is not base.__format__ or value.cls_source is None:
                     continue
                 text = spec.guard_as_python_constant()
@@ -3496,7 +3493,13 @@ class BuiltinVariable(TypeVariable):
                     if source is None:
                         break
                     install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
-                    if name == "__str__" and lookup(name) is not base.__repr__:
+                    if (
+                        name == "__str__"
+                        and (impl := lookup(name)) is not base.__repr__
+                    ):
+                        is_native = torch._C._dynamo.utils.is_instancemethod
+                        if impl is str.__str__ or (base is object and is_native(impl)):
+                            continue
                         return generic_str(tx, value)
                     if name == "__float__" and lookup(name) is not int.__float__:
                         break
@@ -3508,7 +3511,7 @@ class BuiltinVariable(TypeVariable):
                 explanation="Dynamo cannot safely specialize this object's formatting behavior.",
                 hints=["Format this value outside the compiled region."],
             )
-        return super().call_function(tx, args, kwargs)
+        return None
 
     def call_format(
         self,
@@ -3552,8 +3555,8 @@ class BuiltinVariable(TypeVariable):
                 arg, (ConstDictVariable, ListVariable)
             ):
                 scope = None
-            elif real_id is not None and isinstance(arg.source, DictGetItemSource):
-                scope = arg.source.base
+            elif real_id is not None and arg.source is not None:
+                scope = get_item_source_base(arg.source)
             else:
                 return result
             with contextlib.suppress(NotImplementedError):

@@ -1008,9 +1008,7 @@ class DictViewIterator(IteratorVariable):
             DictViewVariable,
             DunderDictVariable,
         )
-        from .misc import PythonModuleVariable
         from .sets import BaseSetVariable
-        from .user_defined import UserDefinedClassVariable
 
         owner = self.owner
         if owner is None:
@@ -1027,12 +1025,11 @@ class DictViewIterator(IteratorVariable):
                 and side_effects.has_pending_mutation(container.items.item)
             )
             or (
-                # Another input can alias the namespace on a cache hit.
+                # A dict input can alias an instance namespace or the globals on a cache hit.
                 container.python_type() is dict
                 and any(
-                    isinstance(var, (PythonModuleVariable, UserDefinedClassVariable))
+                    attrs and not isinstance(var, variables.CellVariable)
                     for var, attrs in side_effects.store_attr_mutations.items()
-                    if attrs
                 )
             )
         ):
