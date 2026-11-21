@@ -3,6 +3,7 @@ import unittest
 
 from torch._inductor import config
 from torch._inductor.test_case import run_tests
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import HAS_CPU, TRITON_HAS_CPU
 
 
@@ -51,7 +52,7 @@ if HAS_CPU and TRITON_HAS_CPU:
             }
         )
         class SweepInputsCpuTritonTest(test_torchinductor.SweepInputsCpuTest):
-            pass
+            hw_classification = HardwareClassification.CPU
 
     @unittest.skip(_CPU_TRITON_SKIP_REASON)
     @config.patch(
@@ -62,6 +63,8 @@ if HAS_CPU and TRITON_HAS_CPU:
         }
     )
     class CpuTritonTests(test_torchinductor.TestCase):
+        hw_classification = HardwareClassification.CPU
+
         common = test_torchinductor.check_model
         device = "cpu"
 
