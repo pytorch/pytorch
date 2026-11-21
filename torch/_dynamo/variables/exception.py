@@ -9,9 +9,10 @@ Key classes include:
 - FrameSummaryVariable: Tracks frame summary objects
 """
 
+import sys
 import traceback
 import types
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, NoReturn, TYPE_CHECKING, Union
 
 from torch._dynamo.variables.base import MutationType
 from torch._guards import Source
@@ -94,7 +95,21 @@ class FrameVariable(VariableTracker):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
-    tp_getset = {"f_back": GetSet(_get_f_back, readonly_setter)}
+    def _get_f_locals(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # Before 3.13, f_locals is a dict snapshot that does not write back.
+        if sys.version_info < (3, 13):
+            unimplemented(
+                gb_type="Unsupported generator frame f_locals",
+                context=f"Python {sys.version_info[:2]}",
+                explanation="f_locals is only modeled on Python 3.13+.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return FrameLocalsProxyVariable(self)  # noqa: RVT001
+
+    tp_getset = {
+        "f_back": GetSet(_get_f_back, readonly_setter),
+        "f_locals": GetSet(_get_f_locals, readonly_setter),
+    }
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -107,6 +122,102 @@ class FrameVariable(VariableTracker):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         return super().tp_getattro_impl(tx, name)
+
+
+class FrameLocalsProxyVariable(VariableTracker):
+    # PyFrameLocalsProxy_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/frameobject.c#L749
+    # Only item assignment is modeled; other operations graph break.
+    # Not exposed in `types`; only a function frame's f_locals is a proxy, on 3.13+.
+    _cpython_type = (
+        # pyrefly: ignore [missing-attribute]
+        type((x for x in ()).gi_frame.f_locals) if sys.version_info >= (3, 13) else None
+    )
+
+    def __init__(self, frame: FrameVariable, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.frame = frame
+
+    def python_type(self) -> type:
+        if not isinstance(self._cpython_type, type):
+            raise AssertionError("FrameLocalsProxyVariable is only built on 3.13+")
+        return self._cpython_type
+
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/frameobject.c#L154
+        code = self.frame.inline_tracer.f_code
+        name = key.as_python_constant() if key.is_python_constant() else None
+        if (
+            value is None
+            or not isinstance(name, str)
+            or name not in code.co_varnames
+            or name in code.co_cellvars
+        ):
+            if value is None:
+                op = "delete"
+            elif name in code.co_cellvars + code.co_freevars:
+                op = "cell variable"
+            else:
+                op = "not a local variable"
+            unimplemented(
+                gb_type="Unsupported generator frame f_locals write",
+                context=f"f_locals[{key.debug_repr()}]: {op}",
+                explanation="Dynamo only models assigning a plain local variable "
+                "through a generator frame's f_locals.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        # Mirrors check_allowed_side_effect: a HOP traces every branch, and a
+        # generator being reconstructed is run to exhaustion.
+        tracer = tx.output.current_tracer
+        if tracer.parent is not None or tracer.is_reconstructing_generator:
+            unimplemented(
+                gb_type="Generator frame f_locals write in a subgraph",
+                context=f"f_locals[{key.debug_repr()}]",
+                explanation="Writing a generator's locals inside a higher-order op "
+                "or while reconstructing a generator is not supported.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        # Dynamo stores a comprehension's ".N" argument as "implicitN".
+        if name.startswith("."):
+            name = name.replace(".", "implicit")
+        self.frame.inline_tracer.symbolic_locals[name] = value
+        return ConstantVariable.create(None)
+
+    # FrameLocalsProxy fills these slots too, and the VariableTracker defaults
+    # would answer as a plain object instead of graph breaking.
+    def _unmodeled(self, op: str) -> NoReturn:
+        unimplemented(
+            gb_type="Unsupported generator frame f_locals operation",
+            context=f"f_locals {op}",
+            explanation=f"Dynamo does not model {op} on a generator frame's f_locals.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._unmodeled("repr")
+
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        self._unmodeled("hash")
+
+    def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._unmodeled("len")
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        self._unmodeled("|")
+
+    def nb_inplace_or_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> VariableTracker:
+        self._unmodeled("|=")
 
 
 class TracebackVariable(VariableTracker):

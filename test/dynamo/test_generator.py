@@ -8,7 +8,7 @@ from collections import OrderedDict
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import UncapturedHigherOrderOpError, Unsupported
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
@@ -2278,6 +2278,20 @@ class TestGeneratorCoroutine(GeneratorTestsBase):
         next(g)
         self.assertIsNone(g.gi_frame.f_back)
 
+    @unittest.skipIf(sys.version_info < (3, 13), "f_locals writes back since 3.13")
+    @make_dynamo_test
+    def test_gi_frame_f_locals_write(self):
+        def gen(it):
+            yield from it
+
+        g = gen(range(3))
+        g.gi_frame.f_locals["it"] = [7, 8]
+        self.assertEqual(list(g), [7, 8])
+
+        g = (x for x in range(3))
+        g.gi_frame.f_locals[".0"] = [7, 8]
+        self.assertEqual(list(g), [7, 8])
+
     def test_gi_frame_unmodeled_graph_break(self):
         def f():
             yield
@@ -2295,6 +2309,62 @@ class TestGeneratorCoroutine(GeneratorTestsBase):
             torch.compile(f_back_after_close, backend="eager", fullgraph=True)()
         with self.assertRaisesRegex(Unsupported, "generator frame attribute"):
             torch.compile(f_trace, backend="eager", fullgraph=True)()
+
+    @unittest.skipIf(sys.version_info < (3, 13), "f_locals writes back since 3.13")
+    def test_gi_frame_f_locals_unmodeled_graph_break(self):
+        def gen(it):
+            yield from it
+
+        def cell_gen(it):
+            def inner():
+                return it
+
+            yield from inner()
+
+        def delete():
+            del gen(range(3)).gi_frame.f_locals["it"]
+
+        def not_a_local():
+            gen(range(3)).gi_frame.f_locals["y"] = 1
+
+        def cell_var():
+            cell_gen(range(3)).gi_frame.f_locals["it"] = [1]
+
+        def inplace_or():
+            p = gen(range(3)).gi_frame.f_locals
+            p |= {}
+
+        # The error message quotes the failing source line, so keep each expected
+        # message off the lines that run the case.
+        writes = {"delete": delete, "not_a_local": not_a_local, "cell_var": cell_var}
+        cases = {
+            "f_locals write": writes,
+            "f_locals operation": {
+                "repr": lambda: repr(gen(range(3)).gi_frame.f_locals),
+                "hash": lambda: hash(gen(range(3)).gi_frame.f_locals),
+                "len": lambda: len(gen(range(3)).gi_frame.f_locals),
+                "or": lambda: gen(range(3)).gi_frame.f_locals | {},
+                "inplace_or": inplace_or,
+            },
+        }
+        for msg, fns in cases.items():
+            for name, fn in fns.items():
+                with self.subTest(name):
+                    with self.assertRaisesRegex(Unsupported, msg):
+                        torch.compile(fn, backend="eager", fullgraph=True)()
+
+        def write_in_cond():
+            g = gen(range(3))
+
+            def true_fn(x):
+                g.gi_frame.f_locals["it"] = [7]
+                return x + 1
+
+            x = torch.ones(2)
+            return torch.cond(x.sum() > 0, true_fn, lambda x: x - 1, (x,))
+
+        with self.assertRaisesRegex(UncapturedHigherOrderOpError, "in a subgraph"):
+            torch.compile(write_in_cond, backend="eager", fullgraph=True)()
 
     @make_dynamo_test
     def test_generator_exit_not_caught_by_except_exception(self):
