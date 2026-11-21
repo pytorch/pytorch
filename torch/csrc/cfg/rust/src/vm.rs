@@ -4909,6 +4909,194 @@ impl Compiled {
         Staged::Done
     }
 
+    /// What a store of a path lets go of where it is done: the value it
+    /// replaces (borrowed), or null where it replaces nothing. `at` gives
+    /// what the operands of the instruction hold. Err where that cannot
+    /// be told.
+    unsafe fn replaced(&self, op: &Op, at: &dyn Fn(V) -> Obj, api: &TcfgApi) -> Result<Obj, ()> {
+        let found = |dict: Obj, key: Obj| {
+            let held = if dict.is_null() { null_mut() } else { ffi::PyDict_GetItemWithError(dict, key) };
+            ffi::PyErr_Clear();
+            held
+        };
+        match op {
+            Op::StoreAttr { obj, name, val } => {
+                let name = self.func.consts[*name as usize].as_ptr();
+                let (object, value) = (at(*obj), at(*val));
+                let value = if value.is_null() { ffi::Py_None() } else { value };
+                match graph::store_kind(object, name, value, api) {
+                    Some(graph::Store::Plain) => {
+                        let slot = pyffi::_PyObject_GetDictPtr(object);
+                        Ok(if slot.is_null() { null_mut() } else { found(*slot, name) })
+                    }
+                    Some(graph::Store::Buffer(buffers)) => Ok(found(buffers, name)),
+                    None => Err(()),
+                }
+            }
+            Op::SetItem { obj, key, .. } => {
+                let (held, place) = (at(*obj), at(*key));
+                if held.is_null() || place.is_null() || capi::is_unboxed(held) || capi::is_unboxed(place) {
+                    return Err(());
+                }
+                if ffi::PyDict_CheckExact(held) != 0 {
+                    return Ok(found(held, place));
+                }
+                if ffi::PyList_CheckExact(held) == 0 || ffi::PyLong_CheckExact(place) == 0 {
+                    return Err(());
+                }
+                let (asked, count) = (ffi::PyLong_AsSsize_t(place), ffi::PyList_GET_SIZE(held));
+                let index = if asked < 0 { asked + count } else { asked };
+                // An item that an earlier store of the path puts there is
+                // not there yet.
+                if (0..count).contains(&index) { Ok(ffi::PyList_GET_ITEM(held, index)) } else { Err(()) }
+            }
+            _ => Ok(null_mut()),
+        }
+    }
+
+    /// Whether an object stays alive where a path lands, whatever the path
+    /// lets go of: a parameter of the frame that the path does not bind
+    /// anew holds it, or a register of the function that the path neither
+    /// writes nor clears. `frame` is the frame on top and whether it is
+    /// the function's own (inside a call that is inlined it is that
+    /// call's, and its variables are not the function's parameters).
+    unsafe fn kept(&self, path: &Path, o: Obj, regs: &[Obj], frame: (Frame, bool)) -> bool {
+        let (frame, own) = frame;
+        if own && !frame.locals.is_null() {
+            for slot in 0..self.func.params.len() {
+                let bound = path.bound.iter().any(|(other, _)| *other as usize == slot);
+                if !bound && frame_owned(*frame.locals.add(slot)) == o {
+                    return true;
+                }
+            }
+        }
+        (0..self.func.nvalues as usize).any(|v| {
+            regs[v] == o && !path.clears.contains(&(v as V)) && !path.writes.iter().any(|(_, to)| *to as usize == v)
+        })
+    }
+
+    /// Whether everything a path lets go of where it lands can be let go
+    /// of there. The instructions let go of a reference in their place; a
+    /// path does where it lands, behind everything it read, so an object
+    /// whose end runs Python code must not end by it. What a path lets go
+    /// of that was there before it ran: what its stores replace (for all
+    /// of them where the path has `landed`, else for those whose object is
+    /// there in front of the callable), what the registers of the
+    /// function hold that it overwrites or clears, and what the variables
+    /// of the frame hold that it binds anew. Each such object dies without
+    /// Python code running, if it dies (`graph::dies_quietly`), or stays
+    /// alive: a parameter or an untouched register of the function holds
+    /// it (`kept`); the path hands it on, as it is or in a tuple it
+    /// builds, to a register or a variable of the function; or it has
+    /// more references than the path lets go of and may itself hold
+    /// (`graph::outlives`).
+    unsafe fn lets_all_go(&self, path: &Path, own: &[Obj], regs: &[Obj], frame: (Frame, bool), landed: bool, api: &TcfgApi) -> bool {
+        let mut gone: Vec<Obj> = Vec::new();
+        let mut take = |held: Obj| {
+            if !held.is_null() && !capi::is_unboxed(held) {
+                gone.push(held);
+            }
+        };
+        // How many items the stores in front of one put behind the end
+        // of a list: an item among those is one the path put there, and
+        // replacing it lets go of nothing that was there before.
+        let mut grown: Vec<(Obj, isize)> = Vec::new();
+        let stores: &[graph::PathInst] = if path.effects { &path.body } else { &[] };
+        for inst in stores.iter().filter(|inst| inst.stage == Stage::Landing) {
+            let owner = &*path.owners[inst.owner as usize];
+            let at = |v: V| reg(own, v);
+            match &inst.op {
+                Op::ListAppend(list, _) if !at(*list).is_null() => grown.push((at(*list), 1)),
+                Op::ListExtend(list, more) if !at(*list).is_null() && !at(*more).is_null() && !capi::is_unboxed(at(*more)) => {
+                    grown.push((at(*list), ffi::PyObject_Size(at(*more)).max(0)));
+                }
+                Op::StoreAttr { obj, .. } | Op::SetItem { obj, .. } => {
+                    let held = at(*obj);
+                    let key = matches!(&inst.op, Op::SetItem { key, .. } if at(*key).is_null());
+                    if held.is_null() || key {
+                        // What the graph gives: looked at where the path lands.
+                        if landed {
+                            return false;
+                        }
+                        continue;
+                    }
+                    if let Op::SetItem { key, .. } = &inst.op {
+                        let place = at(*key);
+                        if !capi::is_unboxed(held) && ffi::PyList_CheckExact(held) != 0 && !capi::is_unboxed(place) && ffi::PyLong_CheckExact(place) != 0 {
+                            let more: isize = grown.iter().filter(|(other, _)| *other == held).map(|(_, n)| *n).sum();
+                            let (asked, has) = (ffi::PyLong_AsSsize_t(place), ffi::PyList_GET_SIZE(held));
+                            let index = if asked < 0 { asked + has + more } else { asked };
+                            if (has..has + more).contains(&index) {
+                                continue;
+                            }
+                        }
+                    }
+                    // Putting back the object that is there lets go of nothing
+                    // (`buffer += 1` stores what the write gave back).
+                    let (Op::StoreAttr { val, .. } | Op::SetItem { val, .. }) = &inst.op else {
+                        continue;
+                    };
+                    match owner.replaced(&inst.op, &at, api) {
+                        Ok(held) if held == at(*val) => {}
+                        Ok(held) => take(held),
+                        Err(()) => return false,
+                    }
+                }
+                _ => {}
+            }
+        }
+        for v in &path.clears {
+            take(reg(regs, *v));
+        }
+        for (made, v) in &path.writes {
+            if reg(regs, *v) != reg(own, *made) {
+                take(reg(regs, *v));
+            }
+        }
+        if !frame.0.locals.is_null() {
+            for (slot, _) in &path.bound {
+                take(frame_owned(*frame.0.locals.add(*slot as usize)));
+            }
+        }
+        let mut handed: Option<Vec<PathValue>> = None;
+        let mut given: Option<Vec<Obj>> = None;
+        for (at, o) in gone.iter().enumerate() {
+            if gone[..at].contains(o) || graph::dies_quietly(*o) || self.kept(path, *o, regs, frame) {
+                continue;
+            }
+            // What the path writes to a register of the function or binds
+            // to a variable, and the items of a tuple it builds that is
+            // such a value, are there when it has landed.
+            let handed = handed.get_or_insert_with(|| {
+                let mut handed: Vec<PathValue> = path.writes.iter().map(|(made, _)| *made).collect();
+                handed.extend(path.bound.iter().map(|(_, made)| *made));
+                for inst in path.body.iter().rev() {
+                    if let (Op::BuildTuple(items), true) = (&inst.op, handed.contains(&inst.dst)) {
+                        handed.extend(items.iter().copied());
+                    }
+                }
+                handed
+            });
+            if path.inputs.iter().any(|(v, made)| reg(regs, *v) == *o && handed.contains(made)) {
+                continue;
+            }
+            let given = given.get_or_insert_with(|| path.inputs.iter().map(|(_, made)| reg(own, *made)).collect::<Vec<Obj>>());
+            let dropped = gone.iter().filter(|other| *other == o).count() as isize;
+            if graph::outlives(*o, own, given, dropped) {
+                continue;
+            }
+            if graph::debug() {
+                eprintln!(
+                    "torch.vm graph: a path of {} is not for this call: where it lands it would let go of an object of the class {}, whose end may run Python code",
+                    self.func.qualname,
+                    pyffi::type_name(*o)
+                );
+            }
+            return false;
+        }
+        true
+    }
+
     /// Whether the stores of a path can be done without Python code
     /// running, on the registers of the path: all of them (`landed`), or
     /// those whose object is there in front of the callable.
@@ -5096,6 +5284,13 @@ impl Compiled {
         // done without Python code running is shown first: here for those
         // into objects that are there already, so that the callable does
         // not run for nothing.
+        // What the path lets go of where it lands (what the registers and
+        // the variables of the function hold and it overwrites) must be
+        // something whose end runs no Python code, or stay alive.
+        if !self.lets_all_go(path, &own, regs, (frames.top(), frames.depth == 0), false, api) {
+            leave(own);
+            return Ran::Other;
+        }
         if path.effects && !self.effects_ready(path, &own, false, api) {
             leave(own);
             return Ran::Other;
@@ -5203,7 +5398,7 @@ impl Compiled {
         }
         if path.effects {
             // Nothing is stored unless everything can be.
-            if !self.effects_ready(path, &own, true, api) {
+            if !self.lets_all_go(path, &own, regs, (frames.top(), frames.depth == 0), true, api) || !self.effects_ready(path, &own, true, api) {
                 leave(own);
                 return Ran::Other;
             }
