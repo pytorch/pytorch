@@ -748,13 +748,20 @@ const Tensor& resize_sparse_csr_(
     std::optional<MemoryFormat> optional_memory_format) {
   check_size_nonnegative(size);
   TORCH_CHECK(size.size() >= 2, "torch.resize_: Only batched sparse CSR matrices are supported, but got size ", size);
+  const auto nnz = self._nnz();
   TORCH_CHECK(
-      self.size(-1) <= size[size.size() - 1],
-      "torch.resize_: Resizing columns of sparse CSR tensors to a smaller value is not supported. ",
+      nnz == 0 || self.size(-1) <= size[size.size() - 1],
+      "torch.resize_: Resizing columns of non-empty sparse CSR tensors to a smaller value is not supported. ",
       "The original number of columns is ",
       self.size(-1),
       " while the requested new number of columns is ", size[size.size() - 1], ".");
-  get_sparse_csr_impl(self)->resize_(self._nnz(), size);
+  TORCH_CHECK(
+      nnz == 0 || self.size(-2) <= size[size.size() - 2],
+      "torch.resize_: Resizing rows of non-empty sparse CSR tensors to a smaller value is not supported. ",
+      "The original number of rows is ",
+      self.size(-2),
+      " while the requested new number of rows is ", size[size.size() - 2], ".");
+  get_sparse_csr_impl(self)->resize_(nnz, size);
   return self;
 }
 
