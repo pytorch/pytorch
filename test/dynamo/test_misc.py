@@ -5730,6 +5730,16 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNot(d.b, obj.b)  # deep copy clones the list
         self.assertEqual(d.b, obj.b)
 
+    def test_reduce_ex_own_override_not_deferred(self):
+        # bytearray defines its own __reduce_ex__, which gives bytes for
+        # protocol 3 and up, while its __reduce__ gives the latin-1 form.
+        def fn(b):
+            return b.__reduce_ex__(4), b.__reduce_ex__(2)
+
+        b = bytearray(b"ab")
+        cfn = torch.compile(fn, fullgraph=True, backend="eager")
+        self.assertEqual(cfn(b), fn(b))
+
     def test_deepcopy_set(self):
         MY_SET = {1, 2, 3}
 
