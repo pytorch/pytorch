@@ -140,9 +140,9 @@ class Graphs(BuiltinPass):
     Args:
         min_ops: a run with fewer operations than this is no graph: it is not
             reported as one, and not exported.
-        max_variants: how many times a graph is exported, once per kind of
-            call, before the calls of further kinds run its operations as
-            they are.
+        max_variants: how many exported forms a graph has, one per kind of
+            call; the form that ran last is tried first. The calls of
+            further kinds run its operations as they are.
     """
 
     engine: ClassVar[str] = "graphs"

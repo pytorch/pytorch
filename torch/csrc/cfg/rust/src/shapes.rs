@@ -314,6 +314,11 @@ impl ShapeGuard {
         self.holds_for(bytes_of(numbers), &[])
     }
 
+    /// The numbers the graph was made on.
+    pub fn made_on(&self) -> Vec<i64> {
+        (0..self.made_on.len() / 8).map(|index| number(&self.made_on, index)).collect()
+    }
+
     fn holds_for(&self, numbers: &[u8], offsets: &[u8]) -> bool {
         if numbers.len() != self.made_on.len() || offsets.len() != self.offsets * 8 {
             return false;
