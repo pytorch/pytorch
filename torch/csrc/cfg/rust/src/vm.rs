@@ -4765,7 +4765,7 @@ impl Compiled {
         function: Obj,
         api: &TcfgApi,
     ) -> Staged {
-        for inst in path.body.iter().filter(|inst| inst.stage == stage) {
+        for inst in path.staged(stage) {
             let owner = &*path.owners[inst.owner as usize];
             if let Some(assert) = &inst.assert {
                 let holds = match assert {
@@ -4856,20 +4856,98 @@ impl Compiled {
         })
     }
 
-    /// Whether everything a path lets go of where it lands can be let go
-    /// of there. The instructions let go of a reference in their place; a
-    /// path does where it lands, behind everything it read, so an object
-    /// whose end runs Python code must not end by it. What a path lets go
-    /// of that was there before it ran: what the registers of the
-    /// function hold that it overwrites or clears, and what the variables
-    /// of the frame hold that it binds anew. Each such object dies without
-    /// Python code running, if it dies (`graph::dies_quietly`), or stays
-    /// alive: a parameter or an untouched register of the function holds
-    /// it (`kept`); the path hands it on, as it is or in a tuple it
-    /// builds, to a register or a variable of the function; or it has
-    /// more references than the path lets go of and may itself hold
-    /// (`graph::outlives`).
-    unsafe fn lets_all_go(&self, path: &Path, own: &[Obj], regs: &[Obj], frame: (Frame, bool)) -> bool {
+    /// What an instruction lets go of when it runs while a path is taken
+    /// down, added to `suspects`: what the registers it clears hold, what
+    /// the register it writes holds, and what a variable it binds holds.
+    /// True where one of them is held by
+    /// nothing but what is let go of here and is not kept by the trace:
+    /// it ends for good, and may take the last reference of the function
+    /// to something the trace keeps with it.
+    unsafe fn lets_go(&self, t: &Trace, inst: &Inst, regs: &[Obj], frame: Frame, suspects: &mut Vec<Obj>) -> bool {
+        let from = suspects.len();
+        let mut take = |held: Obj| {
+            if !held.is_null() && !capi::is_unboxed(held) {
+                suspects.push(held);
+            }
+        };
+        for v in &inst.kills {
+            take(reg(regs, *v));
+        }
+        if inst.dst != NONE {
+            take(reg(regs, inst.dst));
+        }
+        if let (Op::StoreLocal(slot, _), false) = (&inst.op, frame.locals.is_null()) {
+            take(frame_owned(*frame.locals.add(*slot as usize)));
+        }
+        Self::ends_for_good(t, &suspects[from..])
+    }
+
+    /// Whether one of the objects that are about to be let go of is kept
+    /// by nothing else, not by the trace either, and refers to others.
+    unsafe fn ends_for_good(t: &Trace, gone: &[Obj]) -> bool {
+        gone.iter().any(|o| {
+            let dropped = gone.iter().filter(|other| *other == o).count() as isize;
+            !t.rec.kept.contains_key(&(*o as usize)) && ffi::Py_REFCNT(*o) <= dropped && (*ffi::Py_TYPE(*o)).tp_traverse.is_some()
+        })
+    }
+
+    /// Asked where a function has let go of references while a path is
+    /// taken down (`suspects`: the objects; `sweep`: one of them ended
+    /// and may have taken further references with it). An object that
+    /// the trace keeps, and that nothing else holds anymore, has ended
+    /// for the function: it lives on only until the trace is let go of.
+    /// Where the end of such an object may run Python code
+    /// (`graph::end_quietly`, with the references of the trace counted
+    /// out), that code has to run here, where the instructions end the
+    /// object: the trace lets go of all it keeps, nothing is made of this
+    /// run, and the path ends behind the instruction. True where that
+    /// was done.
+    unsafe fn overdue(&self, t: &mut Trace, suspects: &mut Vec<Obj>, sweep: bool) -> bool {
+        if t.abandoned.is_some() {
+            suspects.clear();
+            return true;
+        }
+        let alone = |o: Obj, t: &Trace| t.rec.kept.get(&(o as usize)).is_some_and(|(count, _)| ffi::Py_REFCNT(o) <= *count);
+        let mut ended: Vec<Obj> = if sweep {
+            t.rec.kept.keys().map(|o| *o as Obj).filter(|o| alone(*o, t)).collect()
+        } else {
+            suspects.iter().copied().filter(|o| alone(*o, t)).collect()
+        };
+        suspects.clear();
+        if ended.is_empty() {
+            return false;
+        }
+        ended.sort_unstable();
+        ended.dedup();
+        let found = {
+            let mut kept = graph::Kept { kept: &t.rec.kept, defs: &t.defs };
+            graph::end_quietly(&mut [], &[], &ended, Some(&mut kept))
+        };
+        let Err(found) = found else {
+            return false;
+        };
+        let class = if found.is_null() { "of which there are too many to look at".to_string() } else { format!("of the class {}", pyffi::type_name(found)) };
+        let why = format!("the function lets go of an object {} whose end may run Python code", class);
+        if graph::debug() {
+            eprintln!("torch.vm graph: a path of {} is not taken down in this call: {}", self.func.qualname, why);
+        }
+        t.abandon(why);
+        true
+    }
+
+    /// The first look at what a path lets go of where it lands, before it
+    /// has taken anything of the call: what the registers of the function
+    /// hold that it overwrites or clears, and what the variables of the
+    /// frame hold that it binds anew. No reference to these objects is the
+    /// path's yet, so the counts of references say exactly who else holds
+    /// them: an object with a reference besides those the path lets go of
+    /// stays alive, whatever it is and whatever it refers to; one the
+    /// path hands on stays (`Path::handed`); the others end, and are
+    /// looked at as they are at this call (`graph::end_quietly`). The
+    /// instructions of the path and the callable let go of nothing that
+    /// was there before them, so what is found here holds where the path
+    /// lands.
+    unsafe fn lets_go_early(&self, path: &Path, regs: &[Obj], frame: Frame) -> bool {
         let mut gone: Vec<Obj> = Vec::new();
         let mut take = |held: Obj| {
             if !held.is_null() && !capi::is_unboxed(held) {
@@ -4879,53 +4957,92 @@ impl Compiled {
         for v in &path.clears {
             take(reg(regs, *v));
         }
+        for (_, v) in &path.writes {
+            take(reg(regs, *v));
+        }
+        if !frame.locals.is_null() {
+            for (slot, _) in &path.bound {
+                take(frame_owned(*frame.locals.add(*slot as usize)));
+            }
+        }
+        if gone.is_empty() {
+            return true;
+        }
+        let stay: Vec<Obj> = path.handed.iter().map(|v| reg(regs, *v)).collect();
+        graph::end_quietly(&mut gone, &stay, &[], None).is_ok()
+    }
+
+    /// Whether everything a path lets go of where it lands can be let go
+    /// of there. The instructions let go of a reference in their place; a
+    /// path does where it lands, behind everything it read, so an object
+    /// whose end runs Python code must not end by it. What a path lets go
+    /// of that was there before it ran: what the registers of the
+    /// function hold that it overwrites or clears, and what the variables
+    /// of the frame hold that it binds anew. They were looked at before
+    /// the path took anything (`early`: what `lets_go_early` said). Where
+    /// that look said no (it takes a register that the path writes for
+    /// one that is let go of, also where the path writes back what was
+    /// there), everything is looked at once more, on the registers of the
+    /// path: each object dies quietly, or stays alive because a parameter
+    /// or an untouched register of the function holds it (`kept`) or the
+    /// path hands it on (`Path::handed`); what is left is counted with
+    /// the references the path itself holds (`graph::end_quietly`,
+    /// `graph::Scan`).
+    unsafe fn lets_all_go(&self, path: &Path, own: &[Obj], regs: &[Obj], frame: (Frame, bool), early: bool) -> bool {
+        let mut gone: Vec<Obj> = Vec::new();
+        let take = |gone: &mut Vec<Obj>, held: Obj| {
+            if !held.is_null() && !capi::is_unboxed(held) {
+                gone.push(held);
+            }
+        };
+        if early {
+            return true;
+        }
+        for v in &path.clears {
+            take(&mut gone, reg(regs, *v));
+        }
         for (made, v) in &path.writes {
             if reg(regs, *v) != reg(own, *made) {
-                take(reg(regs, *v));
+                take(&mut gone, reg(regs, *v));
             }
         }
         if !frame.0.locals.is_null() {
             for (slot, _) in &path.bound {
-                take(frame_owned(*frame.0.locals.add(*slot as usize)));
+                take(&mut gone, frame_owned(*frame.0.locals.add(*slot as usize)));
             }
         }
-        let mut handed: Option<Vec<PathValue>> = None;
-        let mut given: Option<Vec<Obj>> = None;
+        // The objects that the cheap proofs say nothing of: not known to
+        // end quietly with all they refer to, not kept by a parameter or
+        // a register of the function, not handed on by the path.
+        let mut open: Vec<Obj> = Vec::new();
         for (at, o) in gone.iter().enumerate() {
-            if gone[..at].contains(o) || graph::dies_quietly(*o) || self.kept(path, *o, regs, frame) {
-                continue;
+            let known = gone[..at].contains(o)
+                || graph::dies_quietly(*o)
+                || self.kept(path, *o, regs, frame)
+                || path.handed.iter().any(|v| reg(regs, *v) == *o);
+            if !known {
+                open.push(*o);
             }
-            // What the path writes to a register of the function or binds
-            // to a variable, and the items of a tuple it builds that is
-            // such a value, are there when it has landed.
-            let handed = handed.get_or_insert_with(|| {
-                let mut handed: Vec<PathValue> = path.writes.iter().map(|(made, _)| *made).collect();
-                handed.extend(path.bound.iter().map(|(_, made)| *made));
-                for inst in path.body.iter().rev() {
-                    if let (Op::BuildTuple(items), true) = (&inst.op, handed.contains(&inst.dst)) {
-                        handed.extend(items.iter().copied());
-                    }
-                }
-                handed
-            });
-            if path.inputs.iter().any(|(v, made)| reg(regs, *v) == *o && handed.contains(made)) {
-                continue;
-            }
-            let given = given.get_or_insert_with(|| path.inputs.iter().map(|(_, made)| reg(own, *made)).collect::<Vec<Obj>>());
-            let dropped = gone.iter().filter(|other| *other == o).count() as isize;
-            if graph::outlives(*o, own, given, dropped) {
-                continue;
-            }
-            if graph::debug() {
-                eprintln!(
-                    "torch.vm graph: a path of {} is not for this call: where it lands it would let go of an object of the class {}, whose end may run Python code",
-                    self.func.qualname,
-                    pyffi::type_name(*o)
-                );
-            }
-            return false;
         }
-        true
+        if open.is_empty() {
+            return true;
+        }
+        // Those are looked at together, with the references the path
+        // itself holds counted. Every reference that is let go of
+        // counts; what the cheap proofs covered ends quietly with all it
+        // refers to, or not at all, whatever else ends.
+        let given: Vec<Obj> = path.inputs.iter().map(|(_, made)| reg(own, *made)).collect();
+        let stay: Vec<Obj> = gone.iter().copied().filter(|o| !open.contains(o)).collect();
+        let mut scan = graph::Scan::new(own, &given);
+        let fine = graph::end_quietly(&mut gone, &stay, &[], Some(&mut scan));
+        if let (Err(found), true) = (fine, graph::debug()) {
+            eprintln!(
+                "torch.vm graph: a path of {} is not for this call: where it lands it would let go of an object of the class {}, whose end may run Python code",
+                self.func.qualname,
+                pyffi::type_name(if found.is_null() { open[0] } else { found })
+            );
+        }
+        fine.is_ok()
     }
 
     /// Runs a path in place of the instructions it was taken down from, if
@@ -4952,6 +5069,9 @@ impl Compiled {
         if !path.exported.borrow().iter().any(|exported| of_world(exported)) {
             return Ran::Other;
         }
+        // What the path lets go of where it lands is looked at before it
+        // holds anything itself.
+        let early = self.lets_go_early(path, regs, frames.top());
         let mut own = path.registers.borrow_mut().pop().unwrap_or_else(|| vec![null_mut(); path.nregs]);
         for (v, made) in &path.inputs {
             let held = reg(regs, *v);
@@ -5033,9 +5153,22 @@ impl Compiled {
         // What the path lets go of where it lands (what the registers and
         // the variables of the function hold and it overwrites) must be
         // something whose end runs no Python code, or stay alive.
-        if !self.lets_all_go(path, &own, regs, (frames.top(), frames.depth == 0)) {
+        if !self.lets_all_go(path, &own, regs, (frames.top(), frames.depth == 0), early) {
+            // The path is the one this call takes, and cannot be run for
+            // it: no other is looked for or taken down, the instructions
+            // run. A graph that this happens to call after call gives way
+            // to the graphs inside it.
+            site.turned_down();
+            if site.gave_way() {
+                // The graphs of the function that were part of this one
+                // have something to do again: the blocks are looked at
+                // anew, for the code that enters them.
+                for slot in &self.settled.blocks {
+                    slot.set(Settled { code: std::ptr::null(), ..slot.get() });
+                }
+            }
             leave(own);
-            return Ran::Other;
+            return Ran::Miss;
         }
         let args: Vec<Obj> = exported.args.iter().map(|place| place.at(&own)).collect();
         let bc = path.body[0].bc;
@@ -6319,8 +6452,19 @@ impl Compiled {
         while below.depth > 0 {
             c.leave(&mut below);
         }
+        // What the call held ends with it, also where the trace keeps it.
+        let mut suspects: Vec<Obj> = inner.iter().copied().filter(|held| !held.is_null() && !capi::is_unboxed(*held)).collect();
+        if !frame.locals.is_null() {
+            let variables = (0..cf.params.len()).map(|slot| frame_owned(*frame.locals.add(slot)));
+            suspects.extend(variables.filter(|held| !held.is_null() && !capi::is_unboxed(*held)));
+        }
+        let sweep = Self::ends_for_good(t, &suspects);
         let result = c.returned(frame, result);
         done(inner);
+        if self.overdue(t, &mut suspects, sweep) {
+            let reason = t.abandoned.clone().unwrap_or_default();
+            return if result.is_null() { Followed::Raised } else { Followed::Left(result, format!("in {}: {}", cf.name, reason)) };
+        }
         match back {
             Ok(value) if !result.is_null() => {
                 t.leave();
@@ -6459,13 +6603,22 @@ impl Compiled {
         };
         guards(t, regs, &*code, (&(*code).insts).get(pc).map_or(func.blocks[b].term_bc, |inst| inst.bc));
         t.shape.extend([b as u32, (*code).id, pc as u32]);
+        let mut suspects: Vec<Obj> = Vec::new();
         loop {
             let c = &*code;
             while pc < c.insts.len() {
                 if t.body.len() >= MAX_PATH_STEPS {
                     return ended(b, code, pc, "the path is as long as a path may be");
                 }
-                match self.record_inst(t, site, b, c, pc, regs, frames, api) {
+                // What the function lets go of here must end here, also
+                // where the trace keeps it.
+                let sweep = self.lets_go(t, &c.insts[pc], regs, frames.top(), &mut suspects);
+                let taken = self.record_inst(t, site, b, c, pc, regs, frames, api);
+                if matches!(taken, Taken::Went) && self.overdue(t, &mut suspects, sweep) {
+                    let reason = t.abandoned.clone().unwrap_or_default();
+                    return Walked::Left { block: b, code, call: pc, reason };
+                }
+                match taken {
                     Taken::Went => pc += 1,
                     Taken::Ends(reason) => return Walked::Ended { block: b, code, pc, afresh: false, reason },
                     Taken::Raised => return Walked::Raised(b, c.insts[pc].bc),
@@ -6484,6 +6637,7 @@ impl Compiled {
                         for v in &inst.kills {
                             capi::release(take(regs, *v));
                         }
+                        self.overdue(t, &mut suspects, sweep);
                         return Walked::Left { block: b, code, call: pc, reason };
                     }
                 }
@@ -6522,12 +6676,15 @@ impl Compiled {
                 return ended(b, code, pc, "a called function branches on what the path does not have");
             }
             // The edge, as the block loop takes it.
+            let pi = func.blocks[next].preds.iter().position(|p| *p as usize == b).unwrap_or(0);
+            let moves = &self.analysis.edge_moves[next][pi];
+            let cleared = c.term_kills.iter().chain(&self.analysis.edge_kills[next][pi]).chain(moves.iter().map(|(dst, _)| dst));
+            suspects.extend(cleared.map(|v| reg(regs, *v)).filter(|held| !held.is_null() && !capi::is_unboxed(*held)));
+            let sweep = Self::ends_for_good(t, &suspects);
             for v in &c.term_kills {
                 capi::release(take(regs, *v));
                 t.kill(*v);
             }
-            let pi = func.blocks[next].preds.iter().position(|p| *p as usize == b).unwrap_or(0);
-            let moves = &self.analysis.edge_moves[next][pi];
             let moved: Vec<(Obj, PathValue)> = moves
                 .iter()
                 .map(|(_, src)| {
@@ -6546,6 +6703,10 @@ impl Compiled {
             }
             b = next;
             let (found, mode) = self.select(b, regs, Some(api));
+            if self.overdue(t, &mut suspects, sweep) {
+                let reason = t.abandoned.clone().unwrap_or_default();
+                return Walked::Ended { block: b, code: found, pc: 0, afresh: true, reason };
+            }
             if mode == Mode::Profile {
                 return Walked::Ended { block: b, code: found, pc: 0, afresh: true, reason: NOT_PROFILED.to_string() };
             }
@@ -6597,6 +6758,19 @@ impl Compiled {
             Walked::Deopt(block, at) => return PathEnd::Deopt(block, at),
             Walked::Returned(..) => unreachable!("the function a path starts in is not left by it"),
         };
+        if t.abandoned.is_some() {
+            // The function let go of an object whose end may run Python
+            // code, which the trace kept: nothing is made of this run.
+            // The call was one the graph could not take, as a call is
+            // that a path is turned down for.
+            site.turned_down();
+            if site.gave_way() {
+                for slot in &self.settled.blocks {
+                    slot.set(Settled { code: std::ptr::null(), ..slot.get() });
+                }
+            }
+            return PathEnd::Landed(went);
+        }
         // Where the path ends: there, or in front of the call that the
         // trace is still in, or that is inlined around where it is.
         let cut = t.mark.as_ref().map(|mark| (mark.at, mark.frames > 0));
@@ -6628,7 +6802,24 @@ impl Compiled {
         let path = Path::of(&mut t, root, land, resume, &live, ends, afresh_path);
         if graph::debug() {
             let (steps, ops) = (path.body.len(), path.operators.len());
-            eprintln!("torch.vm graph {}: a path of {} instructions, {} operations, ends at {:?}: {}", site.name, steps, ops, land, path.ends);
+            eprintln!(
+                "torch.vm graph {}: a path of {} instructions, {} operations ({} in front of what stands for them, {} behind; {} registers), ends at {:?}: {}",
+                site.name,
+                steps,
+                ops,
+                path.stages[0].len(),
+                path.stages[1].len(),
+                path.nregs,
+                land,
+                path.ends
+            );
+            if std::env::var_os("TORCH_VM_GRAPH_DEBUG").is_some_and(|v| v == "2") {
+                for inst in path.staged(Stage::Before).chain(path.staged(Stage::After)) {
+                    let owner = &*path.owners[inst.owner as usize];
+                    let what = if inst.assert.is_some() { "check" } else { "run" };
+                    eprintln!("    {:?} {} in {}: %{} = {}", inst.stage, what, owner.func.qualname, inst.dst, owner.func.op_repr(&inst.op));
+                }
+            }
         }
         let finished = path.provisional || path.operators.len() < site.min_ops || site.exporter.is_none();
         if finished {
