@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/headeronly/macros/Macros.h>
+#include <cmath>
 #include <limits>
 #include <type_traits>
 
@@ -13,6 +14,9 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 #endif
 
 namespace c10 {
+
+struct Half;
+struct BFloat16;
 
 /// Returns true if x < 0
 /// NOTE: Will fail on an unsigned custom type
@@ -97,4 +101,29 @@ using c10::is_negative;
 using c10::less_than_lowest;
 using c10::signs_differ;
 using c10::signum;
+
+/// Returns true if the sign bit of x is set (true for -0.0 and -NaN
+/// Non-builtin types are evaluated on their value converted to float
+template <typename T>
+C10_HOST_DEVICE inline bool _signbit(T x) {
+  if constexpr (std::is_integral_v<T>) {
+    return c10::is_negative(x);
+  } else if constexpr (std::is_floating_point_v<T>) {
+#if defined(__CUDACC__) || defined(__HIPCC__)
+    return ::signbit(x);
+#else
+    return std::signbit(x);
+#endif
+  } else if constexpr (
+      std::is_same_v<T, c10::Half> || std::is_same_v<T, c10::BFloat16>) {
+    // Read the bit directly: device Half->float conversion canonicalizes NaN
+    return (x.x & 0x8000) != 0;
+  } else {
+    return _signbit(static_cast<float>(x));
+  }
+}
 HIDDEN_NAMESPACE_END(torch, headeronly)
+
+namespace c10 {
+using torch::headeronly::_signbit;
+} // namespace c10
