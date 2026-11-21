@@ -1908,16 +1908,6 @@
       ]
     }
   ],
-  "GB7711": [
-    {
-      "Gb_type": "slot-wrapper comparison with undecidable identity",
-      "Context": "{self} {op} {other}",
-      "Explanation": "Dynamo cannot determine the receiver identities of these slot wrappers.",
-      "Hints": [
-        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
-      ]
-    }
-  ],
   "GB0111": [
     {
       "Gb_type": "TypeError from user code",
@@ -3360,9 +3350,9 @@
     {
       "Gb_type": "Builtin method operation requires identity guards",
       "Context": "context",
-      "Explanation": "Dynamo cannot preserve the identity needed by this operation when identity guards are skipped or filtered.",
+      "Explanation": "Dynamo cannot establish the stable receiver identity required by this operation.",
       "Hints": [
-        "Perform the operation outside the compiled function or use a capture mode that retains identity guards."
+        "Bind on a stable receiver and retain its identity guards."
       ]
     }
   ],
@@ -3722,17 +3712,6 @@
       "Context": "invalid args to {self_handler}: {args} {kwargs}",
       "Explanation": "Encountered TypeError when trying to handle op {fn.__name__}",
       "Hints": [
-        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
-      ]
-    }
-  ],
-  "GB8644": [
-    {
-      "Gb_type": "builtin method identity with unstable receiver",
-      "Context": "receiver: {obj}",
-      "Explanation": "Dynamo cannot preserve builtin method identity without a stable receiver. Resuming with a reconstructed copy can change its hash or comparisons.",
-      "Hints": [
-        "Bind the method on an input or another stable object.",
         "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
       ]
     }
@@ -5529,17 +5508,15 @@
       ]
     }
   ],
-  "GB9746": [
+  "GB1943": [
     {
       "Gb_type": "Unsupported OrderedDict instance state",
       "Context": "OrderedDict.{name}",
       "Explanation": "Dynamo cannot trace {name} on an OrderedDict with nonempty or potentially modified instance attributes.",
       "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+        "Move the copy or attribute lookup outside compiled code."
       ]
-    }
-  ],
-  "GB1943": [
+    },
     {
       "Gb_type": "Copying an OrderedDict with instance attributes",
       "Context": "OrderedDict.__reduce_ex__",
@@ -7613,7 +7590,7 @@
     {
       "Gb_type": "Legacy deepcopy memo requires identity guards",
       "Context": "copy.deepcopy",
-      "Explanation": "A seeded deepcopy memo can override a mapping key by its process-local ID.",
+      "Explanation": "The deepcopy memo may already contain a replacement for this mapping key. Checking this requires a guard on the key's identity.",
       "Hints": [
         "Copy the mapping outside the captured region."
       ]

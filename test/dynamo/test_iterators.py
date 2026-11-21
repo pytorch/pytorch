@@ -9,6 +9,7 @@ from collections import deque, OrderedDict
 
 import torch
 import torch._dynamo.test_case
+from torch._dynamo.exc import Unsupported
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -254,6 +255,13 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             next(iterator)
         self.assertEqual(actual.exception.args, expected.exception.args)
 
+    def _assert_iterator_reconstruction_fallback(self, fn, *args):
+        with self.assertRaisesRegex(
+            Unsupported, r"sourceless variable \w*Iterator\(\)"
+        ) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        self.assertEqual(cm.exception.gb_type, "Reconstruction failure")
+
     @parametrize("kind", ["instance", "class", "module"])
     def test_escape_namespace_iterator_after_attribute_write(self, kind):
         class Box:
@@ -266,27 +274,42 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         obj = {"instance": Box(), "class": Box, "module": types.ModuleType("mod")}[kind]
         obj.first = 1
         expected_keys = [*vars(obj), "second"]
-        result, keys = torch.compile(fn, backend="eager")(torch.zeros(1), obj)
+        x = torch.zeros(1)
+        self._assert_iterator_reconstruction_fallback(fn, x, obj)
+        result, keys = torch.compile(fn, backend="eager")(x, obj)
         self.assertEqual(result, torch.ones(1))
         self.assertEqual(obj.second, 2)
         self.assertEqual(list(keys), expected_keys)
 
-    def test_escape_iterator_aliasing_module_dict(self):
+    @parametrize("kind", ["module", "instance", "globals"])
+    def test_escape_iterator_aliasing_namespace(self, kind):
+        class Box:
+            pass
+
         def fn(x, mod, namespace):
             mod.second = 2
             return x + 1, iter(namespace)
 
-        mod = types.ModuleType("mod")
-        x = torch.ones(1)
-        compiled = torch.compile(fn, backend="eager")
+        def write_global(x, mod, namespace):
+            global second
+            second = 2
+            return x + 1, iter(namespace)
+
+        mod = Box() if kind == "instance" else types.ModuleType("mod")
         namespace = vars(mod)
-        for mapping in (namespace.copy(), namespace):
-            expected = list(mapping)
-            if mapping is namespace:
-                expected.append("second")
+        if kind == "globals":
+            namespace["__builtins__"] = __builtins__
+            fn = types.FunctionType(write_global.__code__, namespace)
+        x = torch.ones(1)
+        mappings = namespace.copy(), namespace
+        # Ordinary fallback skips this frame on later calls. Check both strict traces first.
+        for mapping in mappings:
+            self._assert_iterator_reconstruction_fallback(fn, x, mod, mapping)
+        compiled = torch.compile(fn, backend="eager")
+        for mapping in mappings:
             result, keys = compiled(x, mod, mapping)
             self.assertEqual(result, x + 1)
-            self.assertEqual(list(keys), expected)
+            self.assertEqual(list(keys), list(mapping))
             del mod.second
 
     @parametrize("factory", [dict, OrderedDict, set])
@@ -300,6 +323,7 @@ class TestIterators(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(1)
         owner = factory({1: 1, 2: 2})
+        self._assert_iterator_reconstruction_fallback(fn, x, owner)
         result, iterator = torch.compile(fn, backend="eager")(x, owner)
         self.assertEqual(result, x + 1)
         self.assertIn(3, owner)
