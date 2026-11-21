@@ -5,6 +5,9 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ideep.hpp>
+#include <ATen/native/mkldnn/detail/Conv.h>
+#include <ATen/native/mkldnn/detail/Deconv.h>
+#include <ATen/native/mkldnn/detail/Matmul.h>
 #if !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
@@ -40,13 +43,13 @@ struct PrimitiveCache {
   }
 };
 
-using LinearParams = ideep::matmul_forward_params;
+using LinearParams = at::native::mkldnn::matmul_forward_params;
 using Conv = dnnl::convolution_forward;
 using ConvDesc = dnnl::convolution_forward::primitive_desc;
-using ConvParams = ideep::convolution_forward_params;
+using ConvParams = at::native::mkldnn::convolution_forward_params;
 using Deconv = dnnl::deconvolution_forward;
 using DeconvDesc = dnnl::deconvolution_forward::primitive_desc;
-using DeconvParams = ideep::deconv_forward_params;
+using DeconvParams = at::native::mkldnn::deconv_forward_params;
 
 struct LinearPrimitiveCache : PrimitiveCache {
   LinearPrimitiveCache() = default;
