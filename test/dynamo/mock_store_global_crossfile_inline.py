@@ -57,6 +57,17 @@ def store_read_delete_store_read_value_fn(x):
     return y + z
 
 
+rebind_value = 1
+
+
+def delete_store_other_then_rebind_fn():
+    global rebind_value, rebind_other_value
+    del rebind_value
+    rebind_other_value = 2
+    rebind_value = 3
+    return rebind_value
+
+
 flip_value = 1
 
 
