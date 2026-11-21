@@ -2432,7 +2432,7 @@ fn role(unit: &Unit, cx: &PassCx, i: usize) -> Role {
         Op::LoadAttr(..) | Op::GetItem(..) | Op::Contains(..) | Op::GetLen(_) | Op::Unpack(..) if quiet => {
             Some(Kind::Read)
         }
-        Op::Hold(_) | Op::StoreLocal(..) => Some(Kind::Residual),
+        Op::Hold(_) | Op::StoreLocal(..) | Op::LoadSlot(_) | Op::StoreSlot(..) => Some(Kind::Residual),
         _ => None,
     };
     match kind {
@@ -2880,7 +2880,7 @@ impl Trace {
     }
 
     /// A value of the function becomes the one another is: a variable of an
-    /// edge.
+    /// edge, or a slot.
     pub fn rename(&mut self, v: V, to: PathValue) {
         self.map[v as usize] = to;
         self.held[v as usize] = if to == UNDEF { Held::Empty } else { Held::Value(to) };
