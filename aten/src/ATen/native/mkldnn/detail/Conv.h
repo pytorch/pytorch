@@ -40,7 +40,8 @@ void prepare_parameters(
 // Ported from ideep::conv_deconv_utils::prepare_parameters (shared with
 // detail/Deconv.cpp).
 // Common logic to prepare parameters for conv/deconv
-// quantization version
+// quantization version. Also used for fp32 when scales and zero points are
+// empty.
 void prepare_parameters(
     const ideep::tensor& src,
     const ideep::tensor& weights,
@@ -295,8 +296,8 @@ void convolution_backward_weights_compute_v2(
     const ideep::attr_t& attr = ideep::attr_t());
 
 // Ported from ideep::convolution_forward::prepare.
-// Prepare for int8 with bias
-// This one does not have `is_channels_last` argument for compatibility
+// Prepare params for int8 conv. Bias is not used if it is empty.
+// Channels-last is inferred from the src and weights descriptors.
 void convolution_forward_prepare(
     convolution_forward_params& param,
     const ideep::tensor& src,
@@ -320,14 +321,14 @@ void convolution_forward_prepare(
     const ideep::lowp_kind alowp_kind = ideep::u8s8);
 
 // Ported from ideep::convolution_forward::compute (pre-prepared params).
-// Conv computation with pre-prepared params, with bias
+// Conv computation with params from convolution_forward_prepare
 //   param: pd, primitive, groups ...
-// for both fp32 and int8
 // reorder as true means reorder might needed for src/weight/bias/dst as
 // adapt to oneDNN recommended memory format or your simply not sure, set
 // to false if src/weight/bias/dst are pre-reorded or no reorder needed as
 // you know for sure
-template <bool reorder_src = true, bool reorder_weight = true>
+// Only <false, false> is instantiated.
+template <bool reorder_src, bool reorder_weight>
 void convolution_forward_compute(
     const convolution_forward_params& param,
     const ideep::tensor& src,
@@ -336,8 +337,9 @@ void convolution_forward_compute(
     ideep::tensor& dst);
 
 // Ported from ideep::convolution_forward::compute (int8 2-in-1).
-// 2-in-1 compute for int8 without bias
-// This one does not have `is_channels_last` argument for compatibility
+// 2-in-1 compute for int8. Bias is not used if it is empty.
+// Always passes is_channels_last = true, unlike convolution_forward_prepare,
+// which infers it from src and weights.
 template <bool reorder_src = true, bool reorder_weight = true>
 void convolution_forward_compute(
     const ideep::tensor& src,
