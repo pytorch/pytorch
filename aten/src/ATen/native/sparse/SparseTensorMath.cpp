@@ -592,7 +592,8 @@ static void add_dense_sparse_worker_non_hybrid_cpu(Tensor& r, const Scalar& valu
   }
   at::parallel_for(0, sparse._nnz(), 0, [&](int64_t start, int64_t end) {
     for (const auto k: c10::irange(start, end)) {
-      int64_t index = r.storage_offset();
+      // r_ptr already accounts for storage_offset(); index is relative to r_ptr.
+      int64_t index = 0;
       for (auto d: c10::irange(sparse_dim)) {
         index += result_stride[d] * indices_accessor[d][k];
       }
