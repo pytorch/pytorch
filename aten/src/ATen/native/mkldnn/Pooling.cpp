@@ -193,6 +193,7 @@ Tensor mkldnn_adaptive_avg_pool2d_backward(
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/Pooling.h>
 
 namespace at::native {
 
@@ -269,7 +270,7 @@ static Tensor _mkldnn_pooling(
   }
 
   ideep::tensor y;
-  ideep::pooling_forward::compute(
+  mkldnn::pooling_forward(
       x,
       {output_sizes.cbegin(), output_sizes.cend()},
       y,
@@ -341,7 +342,7 @@ static Tensor _mkldnn_pooling_backward(
   const ideep::tensor& y = itensor_from_mkldnn(output);
   const ideep::tensor& x = itensor_from_mkldnn(input);
   ideep::tensor gradx;
-  ideep::pooling_backward::compute(
+  mkldnn::pooling_backward(
       grady,
       y,
       x,

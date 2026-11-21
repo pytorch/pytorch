@@ -2847,6 +2847,22 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._bytearray_constant_method(tx, args, kwargs, "replace")
 
+    def bytearray_removeprefix(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "removeprefix")
+
+    def bytearray_removesuffix(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "removesuffix")
+
     def bytearray_translate(
         self,
         tx: "InstructionTranslatorBase",
@@ -2928,6 +2944,8 @@ class ByteArrayVariable(VariableTracker):
         "capitalize": Method(bytearray_capitalize),
         "swapcase": Method(bytearray_swapcase),
         "replace": Method(bytearray_replace),
+        "removeprefix": Method(bytearray_removeprefix),
+        "removesuffix": Method(bytearray_removesuffix),
         "translate": Method(bytearray_translate),
         "center": Method(bytearray_center),
         "ljust": Method(bytearray_ljust),
