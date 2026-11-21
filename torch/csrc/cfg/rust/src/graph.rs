@@ -78,8 +78,10 @@ pub enum Assert {
     /// A guard of the code the path was taken down from.
     Guard(GuardCond),
     /// A Python function that runs as this compiled function when it is
-    /// called: what a call that the path goes into enters.
-    Enters(PathValue, *const Compiled),
+    /// called, and has this many defaults for its last parameters: what a
+    /// call that the path goes into enters, and how it binds what it is
+    /// not handed.
+    Enters(PathValue, *const Compiled, usize),
     /// What an `__iter__` returned is an iterator, what a `__len__`
     /// returned is a count: the interpreter raises for anything else.
     Iterator(PathValue),
@@ -124,7 +126,7 @@ impl Assert {
         match self {
             Assert::Truth(v, _)
             | Assert::Null(v, _)
-            | Assert::Enters(v, _)
+            | Assert::Enters(v, ..)
             | Assert::Iterator(v)
             | Assert::Count(v)
             | Assert::Absent(v, _)
@@ -1400,6 +1402,43 @@ unsafe fn weak_containers() -> Vec<Remover> {
     found
 }
 
+/// Whether an object is hashed without Python code running: a number, a
+/// text, None, bytes; an object whose class has the hash of `object` (the
+/// slot is `object`'s: a class with a `__hash__` of its own has another);
+/// an exact tuple of such.
+#[cfg(not(Py_3_13))]
+unsafe fn hashed_in_c(o: Obj, depth: usize) -> bool {
+    if o.is_null() || capi::is_unboxed(o) {
+        return false;
+    }
+    if is_plain(o) || ffi::PyBytes_CheckExact(o) != 0 {
+        return true;
+    }
+    if ffi::PyTuple_CheckExact(o) != 0 {
+        return depth < 4 && (0..ffi::PyTuple_GET_SIZE(o)).all(|i| hashed_in_c(ffi::PyTuple_GET_ITEM(o, i), depth + 1));
+    }
+    let object = std::ptr::addr_of!(ffi::PyBaseObject_Type);
+    (*ffi::Py_TYPE(o)).tp_hash.map(|own| own as usize) == (*object).tp_hash.map(|own| own as usize)
+}
+
+/// Whether a key is one of the keys of a dict, by identity, and the dict
+/// keeps no other key under the same hash: looking the key up, or taking
+/// its entry out, compares it with no other key.
+#[cfg(not(Py_3_13))]
+unsafe fn alone_under_its_hash(dict: Obj, key: Obj) -> bool {
+    let (mut at, mut other, mut value, mut hash) = (0, null_mut(), null_mut(), 0);
+    let mut hashes: Vec<ffi::Py_hash_t> = Vec::new();
+    let mut own = None;
+    while pyffi::_PyDict_Next(dict, &mut at, &mut other, &mut value, &mut hash) != 0 {
+        if other == key {
+            own = Some(hash);
+        } else {
+            hashes.push(hash);
+        }
+    }
+    own.is_some_and(|own| !hashes.contains(&own))
+}
+
 /// For the function by which a dictionary that keeps its values under the
 /// identities of its keys takes an entry out: the dictionary and the
 /// identity, which are the variables `self` and `idx` of the method the
@@ -1541,7 +1580,7 @@ unsafe fn weakly_watched(o: Obj, more: &mut Vec<PyObj>) -> bool {
                 }
             }
             1 => {
-                if !dict(data) {
+                if !dict(data) || ffi::PyDict_Size(data) > 65536 {
                     return true;
                 }
                 let key = ffi::PyObject_GetAttrString(reference, c"key".as_ptr());
@@ -1549,7 +1588,19 @@ unsafe fn weakly_watched(o: Obj, more: &mut Vec<PyObj>) -> bool {
                     ffi::PyErr_Clear();
                     return true;
                 }
-                more.push(PyObj::from_owned(key));
+                let key = PyObj::from_owned(key);
+                // The entry is taken out by its key, which is hashed for
+                // that and compared with every key the dict keeps under
+                // the same hash: in C, or the user's code runs.
+                if !hashed_in_c(key.as_ptr(), 0) || !alone_under_its_hash(data, key.as_ptr()) {
+                    return true;
+                }
+                // What goes with the entry is every reference it holds:
+                // the key, and the weak reference, which holds the key
+                // once more (`KeyedRef.key`) and ends with the entry where
+                // nothing else holds it.
+                more.push(key);
+                more.push(PyObj::from_borrowed(reference));
             }
             _ => {
                 if !set(data) {
@@ -2811,6 +2862,34 @@ pub unsafe fn quiet_absent(obj: Obj, name: Obj) -> bool {
         && ffi::PyModule_Check(obj) == 0
         && crate::shortcuts::has_getattr(ffi::Py_TYPE(obj))
         && !crate::shortcuts::finds(obj, name)
+}
+
+/// Whether the lookup of `object` finds nothing under a name of an object,
+/// and finds that out without running Python code: the class has nothing
+/// under the name, and the object keeps what it has under texts. What
+/// `object.__getattribute__(obj, name)` then does is raise AttributeError.
+pub unsafe fn generic_absent(obj: Obj, name: Obj) -> bool {
+    let plain = |o: Obj| !o.is_null() && !capi::is_unboxed(o);
+    if !plain(obj) || ffi::PyType_Check(obj) != 0 || !plain(name) || ffi::PyUnicode_CheckExact(name) == 0 {
+        return false;
+    }
+    if !pyffi::_PyType_Lookup(ffi::Py_TYPE(obj), name).is_null() {
+        return false;
+    }
+    let slot = pyffi::_PyObject_GetDictPtr(obj);
+    slot.is_null() || (*slot).is_null() || (pyffi::text_keys(*slot) && ffi::PyDict_GetItemWithError(*slot, name).is_null())
+}
+
+/// Whether an object whose attributes are read as `object` reads them,
+/// with no function of its class asked behind that, has nothing under a
+/// name: reading it raises AttributeError and does nothing else.
+pub unsafe fn plainly_absent(obj: Obj, name: Obj) -> bool {
+    if obj.is_null() || capi::is_unboxed(obj) || ffi::PyModule_Check(obj) != 0 {
+        return false;
+    }
+    let object = std::ptr::addr_of!(ffi::PyBaseObject_Type);
+    let generic = (*ffi::Py_TYPE(obj)).tp_getattro.map(|own| own as usize) == (*object).tp_getattro.map(|own| own as usize);
+    generic && generic_absent(obj, name)
 }
 
 /// For what `object.__getattribute__` is when it is bound to an object
@@ -4462,6 +4541,19 @@ pub fn infallible(op: &Op) -> bool {
     )
 }
 
+/// Whether an instruction of a path that gives what nothing uses can be
+/// left out of a run: it cannot fail whatever it is given, or it is a part
+/// of how a call binds its arguments that the checks of the call stand for
+/// (`Assert::Enters`, `Assert::Sequence`, `Assert::Keys`). Not a default
+/// by its name or a variable of an outer function, which may not be there.
+fn idle(op: &Op) -> bool {
+    match op {
+        Op::Part(Part::Cell(_) | Part::KwDefault(_), _) => false,
+        Op::Part(..) => true,
+        op => infallible(op),
+    }
+}
+
 /// A list, a tuple or a slice that the instructions make.
 pub fn container(op: &Op) -> bool {
     matches!(op, Op::BuildTuple(_) | Op::BuildList(_) | Op::BuildSlice(..))
@@ -5659,6 +5751,15 @@ impl Path {
             let held = values[v as usize];
             !held.is_null() && unsafe { checkable(held) || (!capi::is_unboxed(held) && ffi::PyType_Check(held) != 0) }
         };
+        // A method of the interpreter's, read off a tensor that an
+        // operation of the graph gave and bound to it.
+        let method_of_result = |op: &Op, dst: PathValue| match op {
+            Op::LoadAttr(of, _) if dst != NONE && defs[*of as usize].node => {
+                let (held, tensor) = (values[dst as usize], values[*of as usize]);
+                !held.is_null() && unsafe { ffi::PyCFunction_Check(held) != 0 && (*(held as *mut ffi::PyCFunctionObject)).m_self == tensor }
+            }
+            _ => false,
+        };
         // The values that are no tensors and that the graph computes.
         let mut wanted = vec![false; nregs];
         let (mut outputs, mut exits) = (Vec::new(), Vec::new());
@@ -5778,6 +5879,17 @@ impl Path {
                     Stage::Inside
                 }
                 _ if needed => uses(&inst.op, &mut need),
+                // What nothing uses is left out of a run only where it
+                // cannot fail: anything else is what shows that the call
+                // gets this far (an attribute that is read for nothing
+                // and may be gone, a call whose answer is dropped), and
+                // a call in which it raises is not the path's. What is
+                // computed behind the graph and is the same in every call
+                // the form is for did not fail when the path was taken
+                // down, and does the same again.
+                // Nor is a method that was read off a tensor the graph
+                // gives, which the operation that calls it stands for.
+                _ if !idle(&inst.op) && !(def.late && def.fixed) && !method_of_result(&inst.op, dst) => uses(&inst.op, &mut need),
                 _ => Stage::Skipped,
             };
             // What is put into something the path made is held where that
