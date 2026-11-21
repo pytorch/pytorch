@@ -425,16 +425,13 @@ pub struct Function {
 
     pub globals: PyObj,
     pub builtins: PyObj,
-    pub closure: Option<PyObj>,
-    /// Names of the variables the closure's cells hold.
+    /// Names of the variables the cells of the function's closure hold.
     pub freevars: Vec<String>,
     /// The register a caught exception is handed to its handler in, or NONE
     /// for a function without handlers.
     pub exc_reg: V,
     /// The frame slots (see `Op::LoadSlot`).
     pub slots: Vec<V>,
-    pub defaults: Option<PyObj>,
-    pub kwdefaults: Option<PyObj>,
     pub argcount: usize,
     pub posonlyargcount: usize,
     pub kwonlyargcount: usize,
