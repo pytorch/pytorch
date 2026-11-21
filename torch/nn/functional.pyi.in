@@ -176,6 +176,7 @@ def cross_entropy(
     reduce: bool | None = ...,
     reduction: str = ...,
     label_smoothing: float = ...,
+    dim: int | None = ...,
 ) -> Tensor: ...
 
 __all__ += ["cross_entropy"]
