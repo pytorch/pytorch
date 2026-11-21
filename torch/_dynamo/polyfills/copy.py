@@ -80,7 +80,5 @@ _legacy_deepcopy_atomic = getattr(copy, "_deepcopy_atomic", None)
 
 
 def is_deepcopy_atomic(item: Any) -> bool:
-    dispatch = copy._deepcopy_dispatch  # pyrefly: ignore[missing-attribute]
-    return (
-        type(dispatch) is dict and dispatch.get(type(item)) is _legacy_deepcopy_atomic
-    )
+    table = copy._deepcopy_dispatch  # pyrefly: ignore[missing-attribute]
+    return type(table) is dict and table.get(type(item)) is _legacy_deepcopy_atomic
