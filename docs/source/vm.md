@@ -2049,8 +2049,12 @@ as the autograd engine calls them. What the nodes gave is compared, bit for
 bit, with what the autograd engine gives for the same tape. Once two calls
 came out as the same operations, the graph runs without a tape: its forward
 is one program below autograd, which keeps what the backward reads, and its
-results share one node, `GraphBackward`, whose edges go where the gradients
-of the inputs go. When gradients arrive, the node runs the backward for the
+results go through one node, `GraphBackward`, whose edges go where the
+gradients of the inputs go. Each result has a node of its own in front of
+that one, which hands on the gradient that reaches the result: a hook on a
+result, and what `retain_grad()` keeps of it, are called where a gradient
+reaches that result, and not where the graph's node runs for another.
+When gradients arrive, the graph's node runs the backward for the
 results that came with one (the backward for all of them is what was taken
 down; the one for some of them is made of it) and hands each input its
 contributions one by one, in eager's order, so the autograd engine adds
@@ -2081,7 +2085,8 @@ nodes[:5]  # ['SumBackward0', 'SumBackward0', 'SumBackward0', 'SumBackward0', 'S
 nodes[5:]  # ['GraphBackward', 'GraphBackward']
 says[2], says[4]  # (['being taken down'], ["the engine's backward"])
 states[:3]  # ['built', 'waiting', 'compiled']
-first.grad_fn is second.grad_fn, len(first.grad_fn.next_functions)  # (True, 2)
+node = first.grad_fn.next_functions[0][0]
+second.grad_fn.next_functions[0][0] is node, len(node.next_functions)  # (True, 2)
 mine = torch.autograd.grad(first * 2 + second, (w, b))
 eagers = two(x, w, b)
 theirs = torch.autograd.grad(eagers[0] * 2 + eagers[1], (w, b))
@@ -2100,9 +2105,8 @@ does a backward behind a write in place to a tensor it needs (an input, a
 result, what a result is a view of), with eager's text: the tensor it names
 is the first one that eager's nodes would find changed, and the node it
 names is the one eager names. Hooks on
-results and on inputs run as they do for eager where a gradient comes to
-them ("Limits" has what a hook sees where none does). A result that is a
-view is eager's view, made on the tape behind the node.
+results and on inputs run as they do for eager. A result that is a view is
+eager's view, made on the tape behind the node.
 
 A graph that gives a tensor and also computes something of it (a hidden
 state and the loss computed of it) is cut in front of the first operation
@@ -2130,7 +2134,8 @@ cut = torch.vm(keeps, passes=derives)
 for _ in range(9):
     h, loss = cut(x, w, b)
 backward_of(cut)  # ['in parts']
-h.grad_fn is loss.grad_fn, loss.grad_fn.next_functions[0][0] is h.grad_fn  # (False, True)
+behind = loss.grad_fn.next_functions[0][0]  # the node of the part that reads `h`
+h.grad_fn in [node for node, _ in behind.next_functions]  # True
 (at_h,) = torch.autograd.grad(loss, [h])
 eager_h, eager_loss = keeps(x, w, b)
 torch.equal(at_h, torch.autograd.grad(eager_loss, [eager_h])[0])  # True
@@ -2575,12 +2580,6 @@ What graphs do not do at this stage:
   is on. The two settings are the process's: a convolution that another
   thread runs in that time runs that way too. They are as the caller set
   them again when the call returns.
-- With the engine's backward a hook on a result of a graph is called with
-  None in a backward that brings no gradient to that result but brings one
-  to another result of the same node (two losses of one graph, and the
-  backward of the second): the node runs, and eager, where each result has
-  a node of its own, does not call the hook. A hook that takes None for a
-  gradient sees nothing else that is not eager's.
 - Where AOTAutograd derives the backward of a graph (with `AOTAutograd()` in
   the list), the gradient at a tensor that the graph gives and also computes
   something of is what `torch.compile` gives and not eager's: one compiled
