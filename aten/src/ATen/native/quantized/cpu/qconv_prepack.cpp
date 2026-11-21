@@ -370,7 +370,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
   auto padding_l = padding.vec();
   auto padding_r = padding.vec();
   auto dilates = dilation.vec();
-  auto op_attr = ideep::attr_t();
+  auto op_attr = at::native::mkldnn::Attr();
   std::vector<int32_t> wgt_zero_points;
   std::vector<float> wgt_scales;
   const int output_channels = transpose ? weight.size(1) * groups
@@ -556,7 +556,7 @@ at::Tensor _qconv_prepack_onednn(
   auto padding_l = padding.vec();
   auto padding_r = padding.vec();
   auto dilates = dilation.vec();
-  auto op_attr = ideep::attr_t();
+  auto op_attr = at::native::mkldnn::Attr();
 
   std::vector<float> weights_scales(weight_scales.numel());
 
