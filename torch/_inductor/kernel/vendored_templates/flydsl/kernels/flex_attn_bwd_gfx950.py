@@ -21,8 +21,22 @@ from .flex_attn_bwd_utils import (
     MASK_TRAVERSAL_BLOCK_LIST,
     MASK_TRAVERSAL_DIRECT_RANGE,
     MASK_TRAVERSAL_UNMASKED,
+    capture_grad_reduction_shape,
+    capture_grad_workspace_shape,
+    CAPTURE_GRAD_FULL,
+    PIPELINE_PRODUCER_WAVES,
 )
-from .flex_attn_utils import make_global_view, make_mask_buffers, make_mask_evaluator
+from .flex_attn_utils import (
+    make_capture_buffers,
+    make_global_view,
+    make_mask_buffers,
+    make_mask_evaluator,
+    make_score_evaluator,
+    score_additive_bias_slot,
+    score_gradient_is_unit,
+    score_program_may_be_negative_infinite,
+    store_element,
+)
 
 
 _LOG2E = 1.4426950408889634
@@ -30,6 +44,71 @@ _LOG2E = 1.4426950408889634
 
 def _f32(x):
     return fx.Float32(x)
+
+
+def _first_loop_result(results):
+    # A loop carrying one value yields it bare rather than as a sequence.
+    return results[0] if isinstance(results, (list, tuple)) else results
+
+
+def _make_capture_reduce_kernel(
+    *, workspace_shape, reduced_shape, batch_size, num_heads
+):
+    """Sum a capture workspace's partial rows (and unindexed batch/head) in order.
+
+    One wave owns one output element: each lane adds a fixed strided subset of
+    the partials, then a fixed xor tree combines lanes, so the result does not
+    depend on scheduling or compilation.
+    """
+    batch_heads, partial_rows, columns = workspace_shape
+    if batch_heads != batch_size * num_heads:
+        raise ValueError("capture workspace must lead with batch * heads")
+    out_batch, out_heads, out_columns = reduced_shape
+    if out_columns != columns:
+        raise ValueError("capture reduction must keep the workspace columns")
+    reduced_batch = batch_size // out_batch
+    reduced_heads = num_heads // out_heads
+    reduction = reduced_batch * reduced_heads * partial_rows
+    outputs = out_batch * out_heads * columns
+    waves_per_block = 4
+
+    @flyc.kernel
+    def capture_reduce_kernel(workspace: fx.Tensor, reduced: fx.Tensor):
+        tid = fx.Int32(fx.thread_idx.x)
+        lane = tid % fx.Int32(64)
+        output_index = fx.Int32(fx.block_idx.x) * fx.Int32(waves_per_block) + tid // (
+            fx.Int32(64)
+        )
+        valid_output = output_index < fx.Int32(outputs)
+        safe_output = valid_output.select(output_index, fx.Int32(0))
+        column = safe_output % fx.Int32(columns)
+        head_out = safe_output // fx.Int32(columns) % fx.Int32(out_heads)
+        batch_out = safe_output // fx.Int32(columns * out_heads)
+        source = fx.get_iter(workspace)
+        results = [fx.Float32(0.0)]
+        for step, state in range(
+            fx.Int32(0), fx.Int32((reduction + 63) // 64), fx.Int32(1), init=results
+        ):
+            item = fx.Int32(step) * fx.Int32(64) + lane
+            valid = item < fx.Int32(reduction)
+            item = valid.select(item, fx.Int32(0))
+            row = item % fx.Int32(partial_rows)
+            pair = item // fx.Int32(partial_rows)
+            head = head_out + pair % fx.Int32(reduced_heads)
+            batch = batch_out + pair // fx.Int32(reduced_heads)
+            address = (
+                (batch * fx.Int32(num_heads) + head) * fx.Int32(partial_rows) + row
+            ) * fx.Int32(columns) + column
+            partial = valid.select(fx.Float32(source[address]), fx.Float32(0.0))
+            results = yield [fx.Float32(state[0]) + partial]
+        total = fx.Float32(_first_loop_result(results))
+        for offset in (32, 16, 8, 4, 2, 1):
+            total = total + fx.Float32(fx.gpu.shuffle_xor(total, offset, 64))
+        if valid_output & (lane == fx.Int32(0)):
+            store_element(fx.get_iter(reduced), output_index, total)
+
+    grid = (outputs + waves_per_block - 1) // waves_per_block
+    return capture_reduce_kernel, grid
 
 
 def build_flex_attn_bwd_module(
@@ -51,6 +130,12 @@ def build_flex_attn_bwd_module(
     mask_program_output=0,
     mask_buffer_shapes=(),
     mask_buffer_strides=(),
+    score_program=(),
+    score_program_output=0,
+    score_buffer_shapes=(),
+    score_buffer_strides=(),
+    capture_grads=(),
+    capture_reductions=(),
     block_mask_is_dense=False,
     q_stride=None,
     k_stride=None,
@@ -91,12 +176,36 @@ def build_flex_attn_bwd_module(
         raise ValueError("MHA backward BlockMask head dimension must be 1 or num_heads")
     if len(mask_buffer_shapes) != len(mask_buffer_strides):
         raise ValueError("Mask buffer shape/stride descriptors must match")
-    if len(mask_buffer_shapes) > 4:
-        raise ValueError("FlyDSL backward supports at most four mask buffers")
+    if len(score_buffer_shapes) != len(score_buffer_strides):
+        raise ValueError("Score buffer shape/stride descriptors must match")
+    if len(mask_buffer_shapes) + len(score_buffer_shapes) > 4:
+        raise ValueError("FlyDSL backward supports at most four captured buffers")
     mask_program = tuple(mask_program)
     mask_program_output = int(mask_program_output)
     mask_buffer_shapes = tuple(tuple(shape) for shape in mask_buffer_shapes)
     mask_buffer_strides = tuple(tuple(stride) for stride in mask_buffer_strides)
+    score_program = tuple(score_program)
+    score_program_output = int(score_program_output)
+    # The identity score_mod lowers to an empty program returning the score slot.
+    has_score_mod = bool(score_program) or score_program_output != 0
+    # Additive biases need no derivative chain; only some mods can empty a row.
+    score_unit_gradient = has_score_mod and score_gradient_is_unit(
+        score_program, score_program_output
+    )
+    score_negative_infinity = has_score_mod and score_program_may_be_negative_infinite(
+        score_program
+    )
+    # Trainable captures need the general path for their load derivatives.
+    score_bias_slot = (
+        score_additive_bias_slot(score_program, score_program_output)
+        if has_score_mod and not capture_grads
+        else None
+    )
+    score_buffer_strides = tuple(tuple(stride) for stride in score_buffer_strides)
+    score_buffer_sizes = tuple(
+        1 + sum((size - 1) * stride for (size, stride) in zip(shape, strides))
+        for (shape, strides) in zip(score_buffer_shapes, score_buffer_strides)
+    )
     mask_traversal, direct_range_kind = classify_mask_traversal(
         mask_program,
         mask_program_output,
@@ -116,10 +225,19 @@ def build_flex_attn_bwd_module(
         and direct_range_kind != DIRECT_RANGE_CAUSAL
     ):
         raise ValueError(f"unsupported direct range {direct_range_kind}")
+    capture_grads = tuple(
+        (str(kind), int(slot), int(sign)) for kind, slot, sign in capture_grads
+    )
+    if len(capture_grads) > 2:
+        raise ValueError("FlyDSL backward supports at most two trainable captures")
+    if capture_grads and mask_traversal != MASK_TRAVERSAL_BLOCK_LIST:
+        raise ValueError("trainable score_mod captures require block-list traversal")
+    if len(capture_reductions) != len(capture_grads):
+        raise ValueError("every trainable capture needs a reduction descriptor")
     unmasked_traversal = mask_traversal == MASK_TRAVERSAL_UNMASKED
     direct_range_traversal = mask_traversal == MASK_TRAVERSAL_DIRECT_RANGE
     block_list_traversal = mask_traversal == MASK_TRAVERSAL_BLOCK_LIST
-    num_waves = 6 if block_list_traversal else 8
+    num_waves = PIPELINE_PRODUCER_WAVES + 2 if block_list_traversal else 8
     key_groups = 2
     producer_waves = num_waves - 2
     key_rows = producer_waves * key_groups * 16
@@ -214,6 +332,12 @@ def build_flex_attn_bwd_module(
     while _s < lanes_per_row:
         delta_shuffle_offsets.append(_s)
         _s *= 2
+
+    def zigzag_slot(owner):
+        # Owner -> dQ slot; matches the pipeline kernel's alternating rounds.
+        position = owner % fx.Int32(dq_partitions)
+        forward = owner // fx.Int32(dq_partitions) % fx.Int32(2) == fx.Int32(0)
+        return forward.select(position, fx.Int32(dq_partitions - 1) - position)
 
     @fx.struct
     class MaskFlags:
@@ -369,8 +493,9 @@ def build_flex_attn_bwd_module(
                     fx.Int64(batch_head) * fx.Int64(sequence_length) + fx.Int64(row)
                 ] = row_sum
 
+        # Block lists track first writes per slot in the compute kernel instead.
         if const_expr(
-            (unmasked_traversal or block_list_traversal)
+            unmasked_traversal
             and dq_partitions < (sequence_length + key_rows - 1) // key_rows
         ):
             zero_elements = 16 // dq_workspace_bytes
@@ -462,6 +587,27 @@ def build_flex_attn_bwd_module(
                     fx.get_iter(full_counts)[owner_index] = num_full
 
     fused_grid = (sequence_length + key_rows - 1) // key_rows
+    # Full captures are written in place; the others reduce their partials.
+    capture_reducers = [
+        None
+        if kind == CAPTURE_GRAD_FULL
+        else _make_capture_reduce_kernel(
+            workspace_shape=capture_grad_workspace_shape(
+                kind, batch_heads, sequence_length, dq_partitions, ()
+            ),
+            reduced_shape=capture_grad_reduction_shape(
+                kind,
+                batch_size,
+                num_heads,
+                sequence_length,
+                *capture_reductions[index],
+            ),
+            batch_size=batch_size,
+            num_heads=num_heads,
+        )
+        for index, (kind, _, _) in enumerate(capture_grads)
+    ]
+    capture_reducers += [None] * (2 - len(capture_reducers))
     compute_num_threads = num_waves * 64
     if block_list_traversal:
         compute_kernel = make_pipeline_kernel(locals(), _f32, bwd_exp2)
@@ -498,6 +644,8 @@ def build_flex_attn_bwd_module(
             mask_buffer_1: fx.Tensor,
             mask_buffer_2: fx.Tensor,
             mask_buffer_3: fx.Tensor,
+            capture_grad_0: fx.Tensor,
+            capture_grad_1: fx.Tensor,
         ):
             batch_head = fx.Int32(fx.block_idx.z) * fx.Int32(cta_head_group) + fx.Int32(
                 fx.block_idx.x
@@ -616,6 +764,24 @@ def build_flex_attn_bwd_module(
                     mask_buffer_strides,
                     masks,
                     load_i32,
+                    batch,
+                    head,
+                )
+                # Score captures follow the mask captures in the buffer slots.
+                evaluate_score = make_score_evaluator(
+                    score_program,
+                    score_program_output,
+                    score_buffer_strides,
+                    make_capture_buffers(
+                        make_global_view,
+                        score_buffer_sizes,
+                        mask_buffer_count,
+                        mask_buffer_0,
+                        mask_buffer_1,
+                        mask_buffer_2,
+                        mask_buffer_3,
+                    ),
+                    lambda view, index: fx.get_iter(view)[index],
                     batch,
                     head,
                 )
@@ -1160,6 +1326,11 @@ def build_flex_attn_bwd_module(
                                 )
                                 if const_expr(not lse_in_log2):
                                     lse_value = lse_value * _f32(1.4426950408889634)
+                                if const_expr(score_negative_infinity):
+                                    # score_mod may empty a row with -inf scores.
+                                    lse_value = (
+                                        lse_value == _f32(float("-inf"))
+                                    ).select(_f32(0.0), lse_value)
                                 lse_values.append(lse_value)
                         if const_expr(step + 1 < qk_head_dim // 32):
                             next_keys = [
@@ -1203,6 +1374,7 @@ def build_flex_attn_bwd_module(
                         for group in fx.range_constexpr(key_groups)
                     ]
                     grad_output_operand = load_score(dopointer, dolayout, 1)
+                    score_gradients = [[] for _ in fx.range_constexpr(key_groups)]
                     for group in fx.range_constexpr(key_groups):
                         score_values = fx.Vector(scores[group].load())
                         values = []
@@ -1210,24 +1382,52 @@ def build_flex_attn_bwd_module(
                             local_row = fx.Int32(fx.get_scalar(ccoords[element]))
                             position = query_tile * fx.Int32(16) + local_row
                             lse = lse_values[element]
-                            probability = bwd_exp2(
-                                _f32(
+                            if const_expr(score_bias_slot is not None):
+                                # score + bias: fold bias into the exponent.
+                                bias = evaluate_score.slot(
+                                    score_bias_slot,
+                                    evaluate_score.prepare(
+                                        position, key_pos + fx.Int32(group * 16)
+                                    ),
+                                )
+                                exponent = _f32(
+                                    fx.math.fma(
+                                        _f32(score_values[element]),
+                                        _f32(scale_log2),
+                                        fx.math.fma(bias, _f32(_LOG2E), -lse),
+                                    )
+                                )
+                            elif const_expr(has_score_mod):
+                                modified, gradient = evaluate_score(
+                                    _f32(score_values[element]) * _f32(softmax_scale),
+                                    position,
+                                    key_pos + fx.Int32(group * 16),
+                                    with_gradient=True,
+                                )
+                                score_gradients[group].append(gradient)
+                                exponent = _f32(
+                                    fx.math.fma(modified, _f32(_LOG2E), -lse)
+                                )
+                            else:
+                                exponent = _f32(
                                     fx.math.fma(
                                         _f32(score_values[element]),
                                         _f32(scale_log2),
                                         -lse,
                                     )
                                 )
-                            )
+                            # Mask the exponent, not the probability: masked
+                            # scores with large biases would overflow to inf.
                             if masked:
-                                probability = evaluate_mask(
+                                exponent = evaluate_mask(
                                     position, key_pos + fx.Int32(group * 16)
-                                ).select(probability, _f32(0.0))
+                                ).select(exponent, _f32(float("-inf")))
                             if const_expr(not direct_range_traversal):
-                                probability = (
+                                exponent = (
                                     key_pos + fx.Int32(group * 16)
                                     < fx.Int32(sequence_length)
-                                ).select(probability, _f32(0.0))
+                                ).select(exponent, _f32(float("-inf")))
+                            probability = bwd_exp2(exponent)
                             values.append(probability)
                         probabilities[group].store(
                             fx.Vector.from_elements(values, fx.Float32).ir_value()
@@ -1275,10 +1475,18 @@ def build_flex_attn_bwd_module(
                                     + local_row
                                 )
                             )
-                            ds_values.append(
-                                _f32(probability_values[element])
-                                * (_f32(dp_values[element]) - delta_value)
+                            probability = _f32(probability_values[element])
+                            ds_value = probability * (
+                                _f32(dp_values[element]) - delta_value
                             )
+                            if const_expr(has_score_mod and not score_unit_gradient):
+                                # Chain through score_mod; skip zero-probability
+                                # entries whose derivative may be non-finite.
+                                ds_value = (probability == _f32(0.0)).select(
+                                    _f32(0.0),
+                                    ds_value * score_gradients[group][element],
+                                )
+                            ds_values.append(ds_value)
                         ps[group].store(probability_values.to(fx.BFloat16).ir_value())
                         ds_vector = fx.Vector.from_elements(ds_values, fx.Float32).to(
                             fx.BFloat16
@@ -1623,9 +1831,6 @@ def build_flex_attn_bwd_module(
             (dq_partitions * sequence_length * qk_head_dim * workspace_head_group, 1),
         )
         lane = tid % fx.Int32(64)
-        wave = tid // fx.Int32(64)
-        query_base = query_tile * fx.Int32(64) + wave * fx.Int32(16)
-        row_base = lane // fx.Int32(16) * fx.Int32(4)
         load = fx.make_copy_atom(dq_copy_op(), dq_workspace_dtype)
         store = fx.make_copy_atom(fx.rocdl.BufferCopy64b(), fx.BFloat16)
         packed_source = fx.logical_divide(
@@ -1641,10 +1846,6 @@ def build_flex_attn_bwd_module(
             ),
             fx.make_layout(4, 1),
         )
-        fragments = [
-            fx.make_rmem_tensor(4, fx.Float32)
-            for _ in fx.range_constexpr(qk_head_dim // 16)
-        ]
         active_slots = fx.Int32(-1)
         if const_expr(block_list_traversal and dq_partitions <= 32):
             mask_batch = fx.Int32(0) if const_expr(block_mask_batch == 1) else batch
@@ -1652,91 +1853,89 @@ def build_flex_attn_bwd_module(
             mask_group = mask_batch * fx.Int32(block_mask_heads) + mask_head
             query_block = query_tile // fx.Int32(sparse_q_block_size // 64)
             mask_index = mask_group * fx.Int32(num_sparse_blocks) + query_block
+            # Lanes read the block lists in parallel; an OR tree merges slots.
             active_slots = fx.Int32(0)
-            count = fx.Int32(fx.get_iter(kv_num_blocks)[mask_index])
-            for item in range(count):
-                key_block = fx.Int32(
-                    fx.get_iter(kv_indices)[
-                        mask_index * fx.Int32(max_partial_blocks_limit) + item
-                    ]
+            for counts, indices, capacity in (
+                (kv_num_blocks, kv_indices, max_partial_blocks_limit),
+                (full_kv_num_blocks, full_kv_indices, max_full_blocks_limit),
+            ):
+                count = fx.Int32(fx.get_iter(counts)[mask_index])
+                for step in fx.range_constexpr((capacity + 63) // 64):
+                    item = lane + fx.Int32(step * 64)
+                    present = item < count
+                    key_block = fx.Int32(
+                        fx.get_iter(indices)[
+                            mask_index * fx.Int32(capacity)
+                            + present.select(item, fx.Int32(0))
+                        ]
+                    )
+                    active_slots = active_slots | present.select(
+                        fx.Int32(1) << zigzag_slot(key_block), fx.Int32(0)
+                    )
+            for offset in (32, 16, 8, 4, 2, 1):
+                active_slots = active_slots | fx.Int32(
+                    fx.gpu.shuffle_xor(active_slots, offset, 64)
                 )
-                slot = key_block % fx.Int32(dq_partitions)
-                active_slots = active_slots | (fx.Int32(1) << slot)
-            count = fx.Int32(fx.get_iter(full_kv_num_blocks)[mask_index])
-            for item in range(count):
-                key_block = fx.Int32(
-                    fx.get_iter(full_kv_indices)[
-                        mask_index * fx.Int32(max_full_blocks_limit) + item
-                    ]
-                )
-                slot = key_block % fx.Int32(dq_partitions)
-                active_slots = active_slots | (fx.Int32(1) << slot)
-        if const_expr(block_list_traversal):
-            for accumulator in fragments:
-                accumulator.fill(0)
+        # Thread t reads 16-byte packs t, t + 256, ... of the CTA's 64 rows, so
+        # each load instruction covers 1 KiB of contiguous workspace.
+        packs_per_tile = 4 * qk_head_dim
+        packs_per_thread = 16 * qk_head_dim // 256
+        totals = []
+        rows = []
+        columns = []
+        for step in fx.range_constexpr(packs_per_thread):
+            pack = tid + fx.Int32(step * 256)
+            tile = pack // fx.Int32(packs_per_tile)
+            within = pack % fx.Int32(packs_per_tile)
+            rows.append(
+                query_tile * fx.Int32(64) + tile * fx.Int32(16) + within % fx.Int32(16)
+            )
+            columns.append(
+                within // fx.Int32(64) * fx.Int32(16)
+                + within % fx.Int32(64) // fx.Int32(16) * fx.Int32(4)
+            )
+            totals.append(fx.Vector.filled(4, 0.0, fx.Float32))
         for owner in fx.range_constexpr(dq_partitions):
             valid_owner = fx.Int32(1)
             if const_expr(block_list_traversal and dq_partitions <= 32):
                 valid_owner = (active_slots & fx.Int32(1 << owner)) != fx.Int32(0)
-            if const_expr(direct_range_traversal and owner > 0):
-                valid_owner = query_base >= fx.Int32(owner * key_rows)
             if valid_owner:
                 loaded = []
-                for block in fx.range_constexpr(qk_head_dim // 64):
-                    column = lane % fx.Int32(16) * fx.Int32(4) + fx.Int32(block * 64)
-                    workspace_offset = (
-                        query_base
-                        * fx.Int32(dq_partitions * qk_head_dim * workspace_head_group)
-                        + batch_head
-                        % fx.Int32(workspace_head_group)
-                        * fx.Int32(16 * qk_head_dim)
-                        + column // fx.Int32(16) * fx.Int32(256)
-                        + (
-                            column % fx.Int32(16) // fx.Int32(4) * fx.Int32(16)
-                            + row_base
-                        )
-                        * fx.Int32(4)
+                for step in fx.range_constexpr(packs_per_thread):
+                    pack = tid + fx.Int32(step * 256)
+                    tile_row = query_tile * fx.Int32(4) + pack // fx.Int32(
+                        packs_per_tile
                     )
-                    workspace_offset = workspace_offset + owner * fx.Int32(
-                        16 * qk_head_dim * workspace_head_group
+                    source_pack = (
+                        (tile_row * fx.Int32(dq_partitions) + fx.Int32(owner))
+                        * fx.Int32(workspace_head_group)
+                        + batch_head % fx.Int32(workspace_head_group)
+                    ) * fx.Int32(packs_per_tile) + pack % fx.Int32(packs_per_tile)
+                    fragment = fx.make_rmem_tensor(4, dq_workspace_dtype)
+                    fx.copy(
+                        load, fx.slice(packed_source, (None, source_pack)), fragment
                     )
-                    for row in fx.range_constexpr(4):
-                        fragment = fx.make_rmem_tensor(4, dq_workspace_dtype)
-                        fx.copy(
-                            load,
-                            fx.slice(
-                                packed_source,
-                                (None, workspace_offset // fx.Int32(4) + fx.Int32(row)),
-                            ),
-                            fragment,
+                    loaded.append(fragment)
+                for step in fx.range_constexpr(packs_per_thread):
+                    partial = fx.Vector(loaded[step].load()).to(fx.Float32)
+                    if const_expr(direct_range_traversal and owner > 0):
+                        # Direct-range slots hold only rows at or past the owner.
+                        tile_start = rows[step] // fx.Int32(16) * fx.Int32(16)
+                        partial = (tile_start >= fx.Int32(owner * key_rows)).select(
+                            partial, fx.Vector.filled(4, 0.0, fx.Float32)
                         )
-                        loaded.append(fragment)
-                for index in fx.range_constexpr(qk_head_dim // 16):
-                    accumulator = fragments[index]
-                    if const_expr(owner == 0):
-                        accumulator.store(
-                            fx.Vector(loaded[index].load()).to(fx.Float32).ir_value()
-                        )
-                    else:
-                        accumulator.store(
-                            (
-                                fx.Vector(accumulator.load())
-                                + fx.Vector(loaded[index].load()).to(fx.Float32)
-                            ).ir_value()
-                        )
-        for block in fx.range_constexpr(qk_head_dim // 64):
-            column = lane % fx.Int32(16) * fx.Int32(4) + fx.Int32(block * 64)
-            for row in fx.range_constexpr(4):
-                fragment = fragments[block * 4 + row]
-                output = fx.make_rmem_tensor(4, fx.BFloat16)
-                output.store(fx.Vector(fragment.load()).to(fx.BFloat16).ir_value())
-                destination = fx.logical_divide(
-                    fx.slice(view, (query_base + row_base + fx.Int32(row), None)),
-                    fx.make_layout(4, 1),
-                )
-                fx.copy(
-                    store, output, fx.slice(destination, (None, column // fx.Int32(4)))
-                )
+                    totals[step] = fx.Vector(totals[step]) + partial
+        for step in fx.range_constexpr(packs_per_thread):
+            output = fx.make_rmem_tensor(4, fx.BFloat16)
+            output.store(fx.Vector(totals[step]).to(fx.BFloat16).ir_value())
+            destination = fx.logical_divide(
+                fx.slice(view, (rows[step], None)), fx.make_layout(4, 1)
+            )
+            fx.copy(
+                store,
+                output,
+                fx.slice(destination, (None, columns[step] // fx.Int32(4))),
+            )
 
     @flyc.jit
     def _launch(
@@ -1763,6 +1962,10 @@ def build_flex_attn_bwd_module(
         mask_buffer_2: fx.Tensor,
         mask_buffer_3: fx.Tensor,
         grad_query_workspace: fx.Tensor,
+        capture_grad_0: fx.Tensor,
+        capture_grad_1: fx.Tensor,
+        capture_reduced_0: fx.Tensor,
+        capture_reduced_1: fx.Tensor,
         stream: fx.Stream = fx.Stream(None),
     ):
         delta_kernel(
@@ -1802,6 +2005,8 @@ def build_flex_attn_bwd_module(
             mask_buffer_1,
             mask_buffer_2,
             mask_buffer_3,
+            capture_grad_0,
+            capture_grad_1,
         ).launch(
             value_attrs=compute_attrs,
             grid=(cta_head_group, dq_partitions, batch_heads // cta_head_group),
@@ -1820,6 +2025,14 @@ def build_flex_attn_bwd_module(
             block=(256, 1, 1),
             stream=stream,
         )
+        if const_expr(capture_reducers[0] is not None):
+            capture_reducers[0][0](capture_grad_0, capture_reduced_0).launch(
+                grid=(capture_reducers[0][1], 1, 1), block=(256, 1, 1), stream=stream
+            )
+        if const_expr(capture_reducers[1] is not None):
+            capture_reducers[1][0](capture_grad_1, capture_reduced_1).launch(
+                grid=(capture_reducers[1][1], 1, 1), block=(256, 1, 1), stream=stream
+            )
 
     if not block_list_traversal:
         _launch.compile_hints["waves_per_eu"] = 1
