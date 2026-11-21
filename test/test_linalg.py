@@ -6848,6 +6848,42 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                                r"Expected result.size\(0\) to be 17 but got 16",
                                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 31).int()))
 
+    @onlyCPU
+    @dtypes(torch.bfloat16)
+    @parametrize("k", [0, 1, 7, 8, 9, 15, 16, 17, 24, 31, 32, 33, 100])
+    @parametrize("shape", [(1, 1), (2, 3), (5, 5), (8, 16)])
+    @parametrize("layout", ["contiguous", "offset", "strided"])
+    def test_weight_int8pack_mm_cpu_unaligned(self, device, dtype, k, shape, layout):
+        if torch.backends.cpu.get_cpu_capability() not in ("AVX2", "AVX512"):
+            self.skipTest("Tests the x86 vectorized BF16 kernels")
+        m, n = shape
+        offset = int(layout != "contiguous")
+        stride = k + (3 if layout == "strided" else 0)
+        # Nonzero padding makes an accidental vector tail read affect the result.
+        a_storage = torch.full((m * stride + offset + 32,), 4, device=device, dtype=dtype)
+        a = a_storage.as_strided((m, k), (stride, 1), offset)
+        a.fill_(1)
+        b_storage = torch.full((n * k + offset + 32,), 3, device=device, dtype=torch.int8)
+        b = b_storage[offset:offset + n * k].view(n, k)
+        b.fill_(1)
+        scales = torch.ones(n, device=device, dtype=dtype)
+        result = torch._weight_int8pack_mm(a, b, scales)
+        self.assertEqual(result, torch.full((m, n), k, device=device, dtype=dtype), atol=0, rtol=0)
+
+    @onlyCPU
+    @dtypes(torch.bfloat16)
+    def test_weight_int8pack_mm_cpu_tail_scales(self, device, dtype):
+        if torch.backends.cpu.get_cpu_capability() not in ("AVX2", "AVX512"):
+            self.skipTest("Tests the x86 vectorized BF16 kernels")
+        k = 17
+        a = torch.arange(1, 2 * k + 1, device=device, dtype=dtype).reshape(2, k)
+        b = (torch.arange(3 * k, device=device, dtype=torch.int8) % 5 - 2).reshape(3, k)
+        scales = torch.tensor([0.5, 2.0, 4.0], device=device, dtype=dtype)
+
+        result = torch._weight_int8pack_mm(a, b, scales)
+        expected = ((a.float() @ b.float().T) * scales.float()).to(dtype)
+        self.assertEqual(result, expected, atol=0, rtol=0)
+
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyNativeDeviceTypes
