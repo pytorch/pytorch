@@ -3486,22 +3486,25 @@ class BaseSchedulerNode:
         def try_size_hint(s: sympy.Expr) -> int:
             return V.graph.sizevars.optimization_hint(s, fallback=0)
 
-        if isinstance(self, SchedulerNode):
-            node_numel = try_size_hint(
-                sympy_product(self.get_ranges()[0])
-                * sympy_product(self.get_ranges()[1]),
+        def iter_numel(node: SchedulerNode) -> int:
+            return try_size_hint(
+                sympy_product(node.get_ranges()[0])
+                * sympy_product(node.get_ranges()[1]),
             )
+
+        if isinstance(self, SchedulerNode):
+            node_numel = iter_numel(self)
         else:
-            node_numel = int(1e9)
-        buf_accesses = collections.defaultdict(list)
-
-        if include_reads:
-            for dep in self.read_writes.reads:
-                buf_accesses[dep.name].append(dep)
-
-        if include_writes:
-            for dep in self.read_writes.writes:
-                buf_accesses[dep.name].append(dep)
+            # A fused kernel accesses at most as many elements per dep as its
+            # largest loop; a fixed cap would truncate large buffers.
+            loops = [iter_numel(n) for n in self.get_nodes() if isinstance(n, SchedulerNode)]
+            node_numel = max(loops, default=0) or int(1e9)
+        read_counts: collections.Counter[str] = collections.Counter(
+            dep.name for dep in self.read_writes.reads
+        )
+        write_counts: collections.Counter[str] = collections.Counter(
+            dep.name for dep in self.read_writes.writes
+        )
 
         reads = (
             OrderedSet(dep.name for dep in self.read_writes.reads)
@@ -3529,7 +3532,11 @@ class BaseSchedulerNode:
         buf_byte_accesses: dict[str, int] = {}
 
         for buf_name in reads | writes:
-            buf_accessed_elems = sum(node_numel for dep in buf_accesses[buf_name])
+            # Reads and writes of one buffer (e.g. in-place) are separate traffic.
+            accessed_elems = (
+                node_numel * read_counts[buf_name] if buf_name in reads else 0,
+                node_numel * write_counts[buf_name] if buf_name in writes else 0,
+            )
             buf: ir.Buffer | ir.TensorBox | ir.TorchBindObject
             if buf_name in V.graph.name_to_buffer:
                 buf = V.graph.name_to_buffer[buf_name]
@@ -3574,8 +3581,8 @@ class BaseSchedulerNode:
                     )
                 else:
                     buf_elems = try_size_hint(sympy_product(buf.get_size()))
-                    return get_dtype_size(buf.get_dtype()) * min(
-                        buf_accessed_elems, buf_elems
+                    return get_dtype_size(buf.get_dtype()) * sum(
+                        min(n, buf_elems) for n in accessed_elems
                     )
 
             buf_bytes = get_buf_bytes(buf)
