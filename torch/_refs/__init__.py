@@ -5757,20 +5757,21 @@ def linspace(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    if isinstance(start, TensorLikeType):
+    def upcast(x: NumberType | TensorLikeType) -> NumberType | TensorLikeType:
+        if not isinstance(x, TensorLikeType):
+            return x
         torch._check(
-            start.dim() == 0,
+            x.dim() == 0,
             lambda: "linspace only supports 0-dimensional start and end tensors",
         )
-        start = _maybe_convert_to_dtype(start, highest_precision_float(device))
-    if isinstance(end, TensorLikeType):
-        torch._check(
-            end.dim() == 0,
-            lambda: "linspace only supports 0-dimensional start and end tensors",
-        )
-        end = _maybe_convert_to_dtype(end, highest_precision_float(device))
+        upcast_dtype = highest_precision_float(device)
+        if utils.is_complex_dtype(x.dtype):
+            upcast_dtype = utils.corresponding_complex_dtype(upcast_dtype)
+        return _maybe_convert_to_dtype(x, upcast_dtype)
 
-    if builtins.any(isinstance(arg, complex) for arg in (start, end, steps)):
+    start, end = upcast(start), upcast(end)
+
+    if builtins.any(map(utils.is_complex_number_or_tensor, (start, end, steps))):
         default_complex_dtype = utils.corresponding_complex_dtype(
             torch.get_default_dtype()
         )
