@@ -15,6 +15,18 @@
 ```
 
 ```{eval-rst}
+.. autofunction:: torch.vm.swap
+```
+
+```{eval-rst}
+.. autofunction:: torch.vm.fuse_checked
+```
+
+```{eval-rst}
+.. autoexception:: torch.vm.Mismatch
+```
+
+```{eval-rst}
 .. autofunction:: torch.vm.memory
 ```
 

@@ -481,7 +481,9 @@ impl Region {
         Ok(unit.dump(cx.func()))
     }
 
-    /// The instructions as dicts with keys index, op, dst, uses and text.
+    /// The instructions as dicts with keys index, op, dst, uses and text;
+    /// replayable; and kernel, the operator an instruction was
+    /// seen to be exactly one call of (`aten::mul.Tensor`), or None.
     fn instructions(&self, py: Python<'_>) -> PyResult<PyObject> {
         let (unit, cx) = self.parts()?;
         let func = cx.func();
@@ -497,6 +499,8 @@ impl Region {
             d.set_item("uses", uses)?;
             d.set_item("text", text)?;
             d.set_item("replayable", u.origin as usize == i && u.inst.op.is_replayable())?;
+            let slot = cx.slots.get(u.origin as usize).and_then(|slot| slot.as_ref());
+            d.set_item("kernel", slot.and_then(|slot| unsafe { slot.operator() }))?;
             out.append(d)?;
         }
         Ok(out.into_any().unbind())
