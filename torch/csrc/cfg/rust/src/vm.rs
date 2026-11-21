@@ -6149,7 +6149,7 @@ impl Compiled {
                         t.pinned.push(v);
                     }
                 } else if graph::checkable(held) {
-                    t.check(Assert::Equals(v, PyObj::from_borrowed(held)), inst.bc);
+                    t.check(Assert::Equals(v, graph::frozen(held)), inst.bc);
                 } else {
                     t.check(Assert::Is(v, PyObj::from_borrowed(held)), inst.bc);
                 }

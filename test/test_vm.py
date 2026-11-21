@@ -9133,6 +9133,48 @@ print(json.dumps(found))
 
     # --- what the report says
 
+    def test_a_training_graph_is_the_same_graph_under_autocast(self):
+        # Autocast casts the first convolution's result. That the sizes of
+        # the result follow from the sizes of what the convolution took is
+        # asked on tensors that hold nothing, which autocast does not cast:
+        # the dtypes are not compared there. Without that the count of a
+        # batch norm, a write to a tensor from outside behind a check that
+        # was taken for one that can fail, ended the graph.
+        class Net(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(4, 8, 3, padding=1)
+                self.norm = torch.nn.BatchNorm2d(8)
+                self.head = torch.nn.Linear(8 * 8 * 8, 5)
+
+            def forward(self, x):
+                h = torch.relu(self.norm(self.conv(x)))
+                return self.head(torch.flatten(h, 1))
+
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(4, 4, 8, 8)
+        found = []
+        for cast in (False, True):
+            torch.manual_seed(1)
+            model = Net().train()
+            reference = copy.deepcopy(model)
+            passes = (*DEFAULT, P.Graphs(), keep)
+            compiled = torch.vm(model, passes=passes, fallback=False, demote=False)
+            under = torch.autocast("cpu", dtype=torch.bfloat16, enabled=cast)
+            with torch.no_grad(), under:
+                for _ in range(6):
+                    self.assertEqual(compiled(x), reference(x), atol=0, rtol=0)
+            for name, value in reference.state_dict().items():
+                self.assertEqual(model.state_dict()[name], value, msg=name)
+            graphs = self.graphs(compiled, "compiled")
+            found.append([(g["ops"], g["why"], g["operators"]) for g in graphs])
+        ((ops, why, operators),) = found[0]
+        self.assertEqual((ops, why), (6, "the function returns"))
+        self.assertIn("aten::add_.Tensor", operators)
+        self.assertEqual(found[1], found[0])
+
     def test_a_graph_has_one_name_and_the_report_counts_nothing_twice(self):
         def keep(gm, input_types):
             return gm
