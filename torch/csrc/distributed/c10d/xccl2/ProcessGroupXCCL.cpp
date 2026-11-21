@@ -934,6 +934,922 @@ c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::reduceImpl(
   return work;
 }
 
+c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::all_gather(
+    const std::vector<at::Tensor>& tensor_list,
+    const at::Tensor& tensor,
+    bool async_op,
+    std::chrono::milliseconds timeout) {
+  checkInitialized();
+  checkAndAbortIfTimedOutOrError();
+  ensureTensorContiguous(tensor);
+
+  TORCH_CHECK(
+      tensor_list.size() == static_cast<size_t>(comm_size_),
+      "tensor_list size must equal comm_size for all_gather");
+
+  // Sizes may differ per rank (the all_gather_v case); only this rank's slot
+  // has to match what we contribute.
+  bool uneven = false;
+  for (const auto& t : tensor_list) {
+    ensureTensorContiguous(t);
+    uneven = uneven || t.numel() != tensor.numel();
+  }
+
+  TORCH_CHECK(
+      tensor_list[rank_].numel() == tensor.numel(),
+      "all_gather: output tensor size at this rank must match input tensor "
+      "size");
+
+  checkTensorDevice(tensor);
+  checkTensorsDevice(tensor_list);
+  checkSameDtype(tensor, tensor_list);
+
+  TracingGuard tracingGuard(
+      name_,
+      comm_size_,
+      "all_gather",
+      rank_,
+      sequence_number_,
+      tensor_list,
+      {tensor});
+
+  c10::xpu::XPUStream stream = getOperationStream(async_op);
+
+  auto work = async_op ? createWork(stream, timeout, tensor)
+                       : createWork(stream, timeout);
+
+  work->recordStart("all_gather");
+
+  if (uneven) {
+    // oneCCL has no all_gatherv, so an uneven gather is issued as one grouped
+    // broadcast per rank.
+    XCCL_CHECK(
+        xccl_api_,
+        xccl_api_->groupStart(),
+        "XCCL groupStart failed in all_gather");
+
+    for (int i = 0; i < comm_size_; ++i) {
+      const at::Tensor& output = tensor_list[i];
+      // oneCCL wants a valid send buffer on every rank, so non-root ranks
+      // point at their own output; only the root's data is broadcast.
+      const at::Tensor& input = (i == rank_) ? tensor : output;
+
+      if (output.numel() == 0) [[unlikely]] {
+        continue;
+      }
+
+      onecclResult_t result = xccl_api_->broadcast(
+          input.data_ptr(),
+          output.data_ptr(),
+          output.numel(),
+          getXcclDataType(output),
+          i,
+          xccl_comm_,
+          stream);
+      if (result != onecclSuccess) [[unlikely]] {
+        XCCL_CHECK_IGNORE(
+            xccl_api_,
+            xccl_api_->groupEnd(),
+            "XCCL groupEnd failed while unwinding all_gather");
+        throw XCCLException(
+            *xccl_api_, "XCCL broadcast failed in all_gather", result);
+      }
+    }
+
+    XCCL_CHECK(
+        xccl_api_, xccl_api_->groupEnd(), "XCCL groupEnd failed in all_gather");
+  } else {
+    at::Tensor output_flattened = createFlattenedTensor(tensor_list, stream);
+
+    XCCL_CHECK(
+        xccl_api_,
+        xccl_api_->allGather(
+            tensor.data_ptr(),
+            output_flattened.data_ptr(),
+            tensor.numel(),
+            getXcclDataType(tensor),
+            xccl_comm_,
+            stream),
+        "XCCL allGather failed in all_gather");
+
+    if (output_flattened.numel() != 0) [[likely]] {
+      copyFlattenedTensorToTensors(output_flattened, tensor_list, stream);
+    }
+  }
+
+  work->recordEnd();
+
+  enqueueWork(work, stream);
+
+  return work;
+}
+
+c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::allGatherSingleImpl(
+    at::Tensor& output,
+    const at::Tensor& input,
+    bool async_op,
+    std::chrono::milliseconds timeout) {
+  checkInitialized();
+  checkAndAbortIfTimedOutOrError();
+  ensureTensorContiguous(output);
+  ensureTensorContiguous(input);
+  checkTensorDevice(output);
+  checkTensorDevice(input);
+  checkSameDtype(input, output);
+
+  TORCH_CHECK(
+      output.numel() == input.numel() * comm_size_,
+      "Output tensor size must be input_size * comm_size for allGatherSingleImpl");
+
+  TracingGuard tracingGuard(
+      name_,
+      comm_size_,
+      "allGatherSingleImpl",
+      rank_,
+      sequence_number_,
+      input,
+      output);
+
+  c10::xpu::XPUStream stream = getOperationStream(async_op);
+
+  auto work = async_op ? createWork(stream, timeout, input)
+                       : createWork(stream, timeout);
+
+  work->recordStart("allGatherSingleImpl");
+
+  XCCL_CHECK(
+      xccl_api_,
+      xccl_api_->allGather(
+          input.data_ptr(),
+          output.data_ptr(),
+          input.numel(),
+          getXcclDataType(input),
+          xccl_comm_,
+          stream),
+      "XCCL allGather failed in allGatherSingleImpl");
+
+  work->recordEnd();
+
+  enqueueWork(work, stream);
+
+  return work;
+}
+
+c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::reduce_scatter(
+    at::Tensor& output,
+    const std::vector<at::Tensor>& input_list,
+    const ::c10d::ReduceOp& op,
+    bool async_op,
+    std::chrono::milliseconds timeout) {
+  checkInitialized();
+  checkAndAbortIfTimedOutOrError();
+  ensureTensorContiguous(output);
+  checkReduceOpDtype(output, op);
+
+  TORCH_CHECK(
+      input_list.size() == static_cast<size_t>(comm_size_),
+      "reduce_scatter: input_list size must equal comm_size");
+
+  bool uneven = false;
+  for (const auto& t : input_list) {
+    ensureTensorContiguous(t);
+    uneven = uneven || t.numel() != output.numel();
+  }
+
+  TORCH_CHECK(
+      input_list[rank_].numel() == output.numel(),
+      "reduce_scatter: input tensor size at this rank must match output "
+      "tensor size");
+
+  checkTensorDevice(output);
+  checkTensorsDevice(input_list);
+  checkSameDtype(output, input_list);
+
+  TracingGuard tracingGuard(
+      name_,
+      comm_size_,
+      "reduce_scatter",
+      rank_,
+      sequence_number_,
+      input_list,
+      {output});
+
+  c10::xpu::XPUStream stream = getOperationStream(async_op);
+
+  auto work = async_op ? createWork(stream, timeout, input_list)
+                       : createWork(stream, timeout);
+
+  work->recordStart("reduce_scatter");
+
+  if (!uneven && output.numel() == 0) [[unlikely]] {
+    work->recordEnd();
+    enqueueWork(work, stream);
+    return work;
+  }
+
+  const auto [maybe_scaled_input_list, maybe_new_op] =
+      getMaybeScaledInputsAndNewOp(input_list, op, stream);
+
+  if (uneven) {
+    // oneCCL has no reduce_scatterv, so an uneven scatter is issued as one
+    // grouped reduce per rank.
+    XCCL_CHECK(
+        xccl_api_,
+        xccl_api_->groupStart(),
+        "XCCL groupStart failed in reduce_scatter");
+
+    for (int i = 0; i < comm_size_; ++i) {
+      const auto& input_tensor = maybe_scaled_input_list[i];
+      if (input_tensor.numel() == 0) [[unlikely]] {
+        continue;
+      }
+      const auto dataType = getXcclDataType(input_tensor);
+      // oneCCL hangs when a non-root rank passes a null receive buffer, so
+      // non-root ranks point at their own input; oneCCL only writes on root.
+      void* recv_ptr =
+          (i == rank_) ? output.data_ptr() : input_tensor.data_ptr();
+      onecclResult_t result = xccl_api_->reduce(
+          input_tensor.data_ptr(),
+          recv_ptr,
+          input_tensor.numel(),
+          dataType,
+          getXcclReduceOp(maybe_new_op, xccl_comm_, input_tensor),
+          i,
+          xccl_comm_,
+          stream);
+      if (result != onecclSuccess) [[unlikely]] {
+        XCCL_CHECK_IGNORE(
+            xccl_api_,
+            xccl_api_->groupEnd(),
+            "XCCL groupEnd failed during error cleanup after reduce failure in reduce_scatter");
+        throw XCCLException(
+            *xccl_api_, "XCCL reduce failed in reduce_scatter", result);
+      }
+    }
+
+    XCCL_CHECK(
+        xccl_api_,
+        xccl_api_->groupEnd(),
+        "XCCL groupEnd failed in reduce_scatter");
+  } else {
+    at::Tensor input_flattened = createFlattenedTensor(
+        maybe_scaled_input_list, stream, /*copy_data=*/true);
+
+    const auto dataType = getXcclDataType(output);
+
+    XCCL_CHECK(
+        xccl_api_,
+        xccl_api_->reduceScatter(
+            input_flattened.data_ptr(),
+            output.data_ptr(),
+            output.numel(),
+            dataType,
+            getXcclReduceOp(maybe_new_op, xccl_comm_, output),
+            xccl_comm_,
+            stream),
+        "XCCL reduceScatter failed in reduce_scatter");
+  }
+
+  if (op == ::c10d::ReduceOp::AVG) {
+    c10::StreamGuard guard(stream);
+    output.div_(comm_size_, avgRoundingMode(output));
+  }
+
+  work->recordEnd();
+
+  enqueueWork(work, stream);
+
+  return work;
+}
+
+c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::reduceScatterSingleImpl(
+    at::Tensor& output,
+    const at::Tensor& input,
+    const ::c10d::ReduceOp& op,
+    bool async_op,
+    std::chrono::milliseconds timeout) {
+  checkInitialized();
+  checkAndAbortIfTimedOutOrError();
+  ensureTensorContiguous(output);
+  ensureTensorContiguous(input);
+  checkTensorDevice(output);
+  checkTensorDevice(input);
+  checkSameDtype(input, output);
+  checkReduceOpDtype(output, op);
+
+  TORCH_CHECK(
+      input.numel() == output.numel() * comm_size_,
+      "Input tensor size must be output_size * comm_size for reduceScatterSingleImpl");
+
+  TracingGuard tracingGuard(
+      name_,
+      comm_size_,
+      "reduceScatterSingleImpl",
+      rank_,
+      sequence_number_,
+      input,
+      output);
+
+  c10::xpu::XPUStream stream = getOperationStream(async_op);
+
+  auto work = async_op ? createWork(stream, timeout, input)
+                       : createWork(stream, timeout);
+
+  work->recordStart("reduceScatterSingleImpl");
+
+  const auto [maybe_scaled_input, maybe_new_op] =
+      getMaybeScaledInputsAndNewOp(input, op, stream);
+
+  const auto dataType = getXcclDataType(maybe_scaled_input);
+  XCCL_CHECK(
+      xccl_api_,
+      xccl_api_->reduceScatter(
+          maybe_scaled_input.data_ptr(),
+          output.data_ptr(),
+          output.numel(),
+          dataType,
+          getXcclReduceOp(maybe_new_op, xccl_comm_, maybe_scaled_input),
+          xccl_comm_,
+          stream),
+      "XCCL reduceScatter failed in reduceScatterSingleImpl");
+
+  if (op == ::c10d::ReduceOp::AVG) {
+    c10::StreamGuard guard(stream);
+    output.div_(comm_size_, avgRoundingMode(output));
+  }
+
+  work->recordEnd();
+
+  enqueueWork(work, stream);
+
+  return work;
+}
+
+c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::allToAllSingleImpl(
+    at::Tensor& output,
+    const at::Tensor& input,
+    bool async_op,
+    std::chrono::milliseconds timeout) {
+  checkInitialized();
+  checkAndAbortIfTimedOutOrError();
+  ensureTensorContiguous(output);
+  ensureTensorContiguous(input);
+  checkTensorDevice(output);
+  checkTensorDevice(input);
+  checkSameDtype(input, output);
+
+  TORCH_CHECK(
+      input.numel() == output.numel(),
+      "Input and output tensors must have same size for allToAllSingleImpl");
+
+  TORCH_CHECK(
+      input.numel() % comm_size_ == 0,
+      "Tensor size must be divisible by comm_size for allToAllSingleImpl");
+
+  TracingGuard tracingGuard(
+      name_,
+      comm_size_,
+      "allToAllSingleImpl",
+      rank_,
+      sequence_number_,
+      input,
+      output);
+
+  c10::xpu::XPUStream stream = getOperationStream(async_op);
+
+  auto work = async_op ? createWork(stream, timeout, input)
+                       : createWork(stream, timeout);
+
+  work->recordStart("allToAllSingleImpl");
+
+  size_t chunk_size = input.numel() / comm_size_;
+  const auto dataType = getXcclDataType(input);
+
+  XCCL_CHECK(
+      xccl_api_,
+      xccl_api_->allToAll(
+          input.data_ptr(),
+          output.data_ptr(),
+          chunk_size,
+          dataType,
+          xccl_comm_,
+          stream),
+      "XCCL allToAll failed in allToAllSingleImpl");
+
+  work->recordEnd();
+
+  enqueueWork(work, stream);
+
+  return work;
+}
+
+c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::all_to_all_v_single(
+    at::Tensor& output,
+    const at::Tensor& input,
+    const std::vector<uint64_t>& output_split_sizes,
+    const std::vector<uint64_t>& input_split_sizes,
+    bool async_op,
+    std::chrono::milliseconds timeout) {
+  checkInitialized();
+  checkAndAbortIfTimedOutOrError();
+  ensureTensorContiguous(output);
+  ensureTensorContiguous(input);
+  checkTensorDevice(output);
+  checkTensorDevice(input);
+  checkSameDtype(input, output);
+
+  TORCH_CHECK(
+      input_split_sizes.size() == static_cast<size_t>(comm_size_),
+      "input_split_sizes length must equal comm_size for all_to_all_v_single");
+
+  TORCH_CHECK(
+      output_split_sizes.size() == static_cast<size_t>(comm_size_),
+      "output_split_sizes length must equal comm_size for all_to_all_v_single");
+
+  // Validate that split sizes sum does not exceed tensor dimensions
+  uint64_t input_total = 0;
+  uint64_t output_total = 0;
+  for (int i = 0; i < comm_size_; ++i) {
+    input_total += input_split_sizes[i];
+    output_total += output_split_sizes[i];
+  }
+
+  TORCH_CHECK(
+      input_total <= static_cast<uint64_t>(input.size(0)),
+      "Sum of input_split_sizes exceeds input tensor size for all_to_all_v_single");
+
+  TORCH_CHECK(
+      output_total <= static_cast<uint64_t>(output.size(0)),
+      "Sum of output_split_sizes exceeds output tensor size for all_to_all_v_single");
+
+  TracingGuard tracingGuard(
+      name_,
+      comm_size_,
+      "all_to_all_v_single",
+      rank_,
+      sequence_number_,
+      input,
+      output);
+
+  c10::xpu::XPUStream stream = getOperationStream(async_op);
+  auto work = async_op ? createWork(stream, timeout, input)
+                       : createWork(stream, timeout);
+
+  work->recordStart("all_to_all_v_single");
+
+  std::vector<size_t> sendcounts(comm_size_);
+  std::vector<size_t> recvcounts(comm_size_);
+  std::vector<size_t> senddispls(comm_size_);
+  std::vector<size_t> recvdispls(comm_size_);
+
+  // Calculate the number of elements per slice along the first dimension
+  // For a tensor with shape [N, D1, D2, ..., Dk], each slice of size S along
+  // dim 0 contains S * D1 * D2 * ... * Dk elements
+  // Use input tensor for send counts and output tensor for recv counts
+  size_t send_elements_per_slice =
+      input.numel() ? input.numel() / input.size(0) : 0;
+  size_t recv_elements_per_slice =
+      output.numel() ? output.numel() / output.size(0) : 0;
+  const auto dataType = getXcclDataType(input);
+  const size_t type_size = wordSize(dataType);
+
+  size_t sendoffset = 0;
+  size_t recvoffset = 0;
+  // Row offsets along dim 0, used to build the self-copy views below.
+  std::vector<int64_t> sendrows(comm_size_);
+  std::vector<int64_t> recvrows(comm_size_);
+  int64_t sendrow = 0;
+  int64_t recvrow = 0;
+  for (int i = 0; i < comm_size_; ++i) {
+    sendcounts[i] = input_split_sizes[i] * send_elements_per_slice;
+    recvcounts[i] = output_split_sizes[i] * recv_elements_per_slice;
+    senddispls[i] = sendoffset;
+    recvdispls[i] = recvoffset;
+    sendoffset += sendcounts[i];
+    recvoffset += recvcounts[i];
+    sendrows[i] = sendrow;
+    recvrows[i] = recvrow;
+    sendrow += static_cast<int64_t>(input_split_sizes[i]);
+    recvrow += static_cast<int64_t>(output_split_sizes[i]);
+  }
+
+  char* sptr = static_cast<char*>(input.data_ptr());
+  char* rptr = static_cast<char*>(output.data_ptr());
+
+  XCCL_CHECK(
+      xccl_api_,
+      xccl_api_->groupStart(),
+      "XCCL groupStart failed in all_to_all_v_single");
+
+  for (int i = 0; i < comm_size_; ++i) {
+    if (sendcounts[i] == 0 && recvcounts[i] == 0) [[unlikely]] {
+      continue;
+    }
+    if (sendcounts[i] > 0) {
+      if (i == rank_) {
+        // Own contribution never goes on the wire; copy it locally.
+        c10::StreamGuard guard(stream);
+        output
+            .slice(
+                0,
+                recvrows[i],
+                recvrows[i] + static_cast<int64_t>(output_split_sizes[i]))
+            .copy_(
+                input.slice(
+                    0,
+                    sendrows[i],
+                    sendrows[i] + static_cast<int64_t>(input_split_sizes[i])),
+                /*non_blocking=*/true);
+        continue;
+      } else {
+        onecclResult_t result = xccl_api_->send(
+            sptr + senddispls[i] * type_size,
+            sendcounts[i],
+            dataType,
+            i,
+            xccl_comm_,
+            stream);
+        if (result != onecclSuccess) [[unlikely]] {
+          XCCL_CHECK_IGNORE(
+              xccl_api_,
+              xccl_api_->groupEnd(),
+              "XCCL groupEnd failed during error cleanup after send failure in all_to_all_v_single");
+          throw XCCLException(
+              *xccl_api_, "XCCL send failed in all_to_all_v_single", result);
+        }
+      }
+    }
+
+    if (recvcounts[i] > 0) {
+      onecclResult_t result = xccl_api_->recv(
+          rptr + recvdispls[i] * type_size,
+          recvcounts[i],
+          dataType,
+          i,
+          xccl_comm_,
+          stream);
+      if (result != onecclSuccess) [[unlikely]] {
+        XCCL_CHECK_IGNORE(
+            xccl_api_,
+            xccl_api_->groupEnd(),
+            "XCCL groupEnd failed during error cleanup after recv failure in all_to_all_v_single");
+        throw XCCLException(
+            *xccl_api_, "XCCL recv failed in all_to_all_v_single", result);
+      }
+    }
+  }
+
+  XCCL_CHECK(
+      xccl_api_,
+      xccl_api_->groupEnd(),
+      "XCCL groupEnd failed in all_to_all_v_single");
+
+  work->recordEnd();
+
+  enqueueWork(work, stream);
+
+  return work;
+}
+
+c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::all_to_all(
+    const std::vector<at::Tensor>& output_tensor_list,
+    const std::vector<at::Tensor>& input_tensor_list,
+    bool async_op,
+    std::chrono::milliseconds timeout) {
+  checkInitialized();
+  checkAndAbortIfTimedOutOrError();
+
+  TORCH_CHECK(
+      output_tensor_list.size() == static_cast<size_t>(comm_size_) &&
+          input_tensor_list.size() == static_cast<size_t>(comm_size_),
+      "Tensor list sizes must equal comm_size for all_to_all");
+
+  for (int i = 0; i < comm_size_; ++i) {
+    ensureTensorContiguous(input_tensor_list[i]);
+    ensureTensorContiguous(output_tensor_list[i]);
+  }
+
+  checkTensorsDevice(input_tensor_list);
+  checkTensorsDevice(output_tensor_list);
+
+  TracingGuard tracingGuard(
+      name_,
+      comm_size_,
+      "all_to_all",
+      rank_,
+      sequence_number_,
+      input_tensor_list,
+      output_tensor_list);
+
+  c10::xpu::XPUStream stream = getOperationStream(async_op);
+  auto work = async_op ? createWork(stream, timeout, input_tensor_list)
+                       : createWork(stream, timeout);
+
+  work->recordStart("all_to_all");
+
+  XCCL_CHECK(
+      xccl_api_,
+      xccl_api_->groupStart(),
+      "XCCL groupStart failed in all_to_all");
+
+  for (int i = 0; i < comm_size_; ++i) {
+    if (input_tensor_list[i].numel() == 0) [[unlikely]] {
+      continue;
+    }
+    if (i == rank_) {
+      // Own contribution never goes on the wire; copy it locally.
+      c10::StreamGuard guard(stream);
+      output_tensor_list[i].copy_(input_tensor_list[i], /*non_blocking=*/true);
+      continue;
+    } else {
+      onecclResult_t result = xccl_api_->send(
+          input_tensor_list[i].data_ptr(),
+          input_tensor_list[i].numel(),
+          getXcclDataType(input_tensor_list[i]),
+          i,
+          xccl_comm_,
+          stream);
+      if (result != onecclSuccess) [[unlikely]] {
+        XCCL_CHECK_IGNORE(
+            xccl_api_,
+            xccl_api_->groupEnd(),
+            "XCCL groupEnd failed during error cleanup after send failure in all_to_all");
+        throw XCCLException(
+            *xccl_api_, "XCCL send failed in all_to_all", result);
+      }
+    }
+
+    onecclResult_t result = xccl_api_->recv(
+        output_tensor_list[i].data_ptr(),
+        output_tensor_list[i].numel(),
+        getXcclDataType(output_tensor_list[i]),
+        i,
+        xccl_comm_,
+        stream);
+    if (result != onecclSuccess) [[unlikely]] {
+      XCCL_CHECK_IGNORE(
+          xccl_api_,
+          xccl_api_->groupEnd(),
+          "XCCL groupEnd failed during error cleanup after recv failure in all_to_all");
+      throw XCCLException(*xccl_api_, "XCCL recv failed in all_to_all", result);
+    }
+  }
+
+  XCCL_CHECK(
+      xccl_api_, xccl_api_->groupEnd(), "XCCL groupEnd failed in all_to_all");
+
+  work->recordEnd();
+
+  enqueueWork(work, stream);
+
+  return work;
+}
+
+c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::barrierImpl(
+    bool async_op,
+    std::chrono::milliseconds timeout) {
+  checkInitialized();
+  checkAndAbortIfTimedOutOrError();
+
+  TracingGuard tracingGuard(
+      name_, comm_size_, "barrier", rank_, sequence_number_);
+
+  c10::xpu::XPUStream stream = getOperationStream(async_op);
+  auto work = createWork(stream, timeout);
+
+  work->recordStart("barrier");
+
+  XCCL_CHECK(
+      xccl_api_,
+      xccl_api_->allReduce(
+          barrier_buffer_.get(),
+          barrier_buffer_.get(),
+          1,
+          onecclFloat32,
+          onecclSum,
+          xccl_comm_,
+          stream),
+      "XCCL barrier failed");
+
+  work->recordEnd();
+
+  enqueueWork(work, stream);
+
+  return work;
+}
+
+c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::scatterImpl(
+    at::Tensor& output_tensor,
+    const std::vector<at::Tensor>& input_tensor_list,
+    int root,
+    bool async_op,
+    std::chrono::milliseconds timeout) {
+  checkInitialized();
+  checkAndAbortIfTimedOutOrError();
+  ensureTensorContiguous(output_tensor);
+  checkTensorDevice(output_tensor);
+
+  // Only the root rank needs valid tensors
+  if (rank_ == root) {
+    TORCH_CHECK(
+        input_tensor_list.size() == static_cast<size_t>(comm_size_),
+        "input_tensor_list must equal comm_size for scatter");
+
+    for (const auto& t : input_tensor_list) {
+      ensureTensorContiguous(t);
+      TORCH_CHECK(
+          t.numel() == output_tensor.numel(),
+          "All input tensors must have same size as output tensor");
+    }
+
+    checkTensorsDevice(input_tensor_list);
+    checkSameDtype(output_tensor, input_tensor_list);
+  }
+
+  TracingGuard tracingGuard(
+      name_,
+      comm_size_,
+      "scatter",
+      root,
+      sequence_number_,
+      input_tensor_list,
+      {output_tensor});
+
+  c10::xpu::XPUStream stream = getOperationStream(async_op);
+  std::vector<at::Tensor> input_tensors;
+  if (async_op && rank_ == root) {
+    input_tensors = input_tensor_list;
+  }
+  auto work = createWork(stream, timeout, input_tensors);
+
+  work->recordStart("scatter");
+
+  // Grouped to avoid a oneCCL hang; see
+  // https://github.com/uxlfoundation/oneCCL/issues/193.
+  XCCL_CHECK(
+      xccl_api_, xccl_api_->groupStart(), "XCCL groupStart failed in scatter");
+
+  if (rank_ == root) {
+    for (int i = 0; i < comm_size_; ++i) {
+      if (i != root) {
+        onecclResult_t result = xccl_api_->send(
+            input_tensor_list[i].data_ptr(),
+            input_tensor_list[i].numel(),
+            getXcclDataType(input_tensor_list[i]),
+            i,
+            xccl_comm_,
+            stream);
+        if (result != onecclSuccess) [[unlikely]] {
+          XCCL_CHECK_IGNORE(
+              xccl_api_,
+              xccl_api_->groupEnd(),
+              "XCCL groupEnd failed during error cleanup after send failure in scatter");
+          throw XCCLException(
+              *xccl_api_, "XCCL send failed in scatter", result);
+        }
+      }
+    }
+
+    // Root's own chunk never goes on the wire; copy it locally.
+    {
+      c10::StreamGuard guard(stream);
+      output_tensor.copy_(input_tensor_list[root], /*non_blocking=*/true);
+    }
+  } else {
+    onecclResult_t result = xccl_api_->recv(
+        output_tensor.data_ptr(),
+        output_tensor.numel(),
+        getXcclDataType(output_tensor),
+        root,
+        xccl_comm_,
+        stream);
+    if (result != onecclSuccess) [[unlikely]] {
+      XCCL_CHECK_IGNORE(
+          xccl_api_,
+          xccl_api_->groupEnd(),
+          "XCCL groupEnd failed during error cleanup after recv failure in scatter");
+      throw XCCLException(*xccl_api_, "XCCL recv failed in scatter", result);
+    }
+  }
+
+  XCCL_CHECK(
+      xccl_api_, xccl_api_->groupEnd(), "XCCL groupEnd failed in scatter");
+
+  work->recordEnd();
+
+  enqueueWork(work, stream);
+
+  return work;
+}
+
+c10::intrusive_ptr<WorkXCCL> ProcessGroupXCCL::gatherImpl(
+    const std::vector<at::Tensor>& output_tensor_list,
+    const at::Tensor& input_tensor,
+    int root,
+    bool async_op,
+    std::chrono::milliseconds timeout) {
+  checkInitialized();
+  checkAndAbortIfTimedOutOrError();
+  ensureTensorContiguous(input_tensor);
+  checkTensorDevice(input_tensor);
+
+  // Only the root rank needs valid output tensors
+  if (rank_ == root) {
+    TORCH_CHECK(
+        output_tensor_list.size() == static_cast<size_t>(comm_size_),
+        "output_tensor_list size (" +
+            std::to_string(output_tensor_list.size()) +
+            ") must equal comm_size (" + std::to_string(comm_size_) +
+            ") for gather operation");
+
+    for (size_t i = 0; i < output_tensor_list.size(); ++i) {
+      const auto& t = output_tensor_list[i];
+      ensureTensorContiguous(t);
+      TORCH_CHECK(
+          t.numel() == input_tensor.numel(),
+          "Output tensor at index " + std::to_string(i) + " has size " +
+              std::to_string(t.numel()) + " but expected " +
+              std::to_string(input_tensor.numel()) + " to match input tensor");
+    }
+
+    checkTensorsDevice(output_tensor_list);
+    checkSameDtype(input_tensor, output_tensor_list);
+  }
+
+  TracingGuard tracingGuard(
+      name_,
+      comm_size_,
+      "gather",
+      root,
+      sequence_number_,
+      {input_tensor},
+      output_tensor_list);
+
+  c10::xpu::XPUStream stream = getOperationStream(async_op);
+
+  auto work = async_op ? createWork(stream, timeout, input_tensor)
+                       : createWork(stream, timeout);
+
+  work->recordStart("gather");
+
+  // Grouped to avoid a oneCCL hang; see
+  // https://github.com/uxlfoundation/oneCCL/issues/193.
+  XCCL_CHECK(
+      xccl_api_, xccl_api_->groupStart(), "XCCL groupStart failed in gather");
+
+  if (rank_ == root) {
+    for (int peer_rank = 0; peer_rank < comm_size_; ++peer_rank) {
+      if (peer_rank != root) {
+        const auto& peer_tensor = output_tensor_list[peer_rank];
+        onecclResult_t result = xccl_api_->recv(
+            peer_tensor.data_ptr(),
+            peer_tensor.numel(),
+            getXcclDataType(peer_tensor),
+            peer_rank,
+            xccl_comm_,
+            stream);
+        if (result != onecclSuccess) [[unlikely]] {
+          XCCL_CHECK_IGNORE(
+              xccl_api_,
+              xccl_api_->groupEnd(),
+              "XCCL groupEnd failed during error cleanup after recv failure in gather");
+          throw XCCLException(*xccl_api_, "XCCL recv failed in gather", result);
+        }
+      }
+    }
+
+    // Root's own chunk never goes on the wire; copy it locally.
+    {
+      c10::StreamGuard guard(stream);
+      output_tensor_list[root].copy_(input_tensor, /*non_blocking=*/true);
+    }
+  } else {
+    onecclResult_t result = xccl_api_->send(
+        input_tensor.data_ptr(),
+        input_tensor.numel(),
+        getXcclDataType(input_tensor),
+        root,
+        xccl_comm_,
+        stream);
+    if (result != onecclSuccess) [[unlikely]] {
+      XCCL_CHECK_IGNORE(
+          xccl_api_,
+          xccl_api_->groupEnd(),
+          "XCCL groupEnd failed during error cleanup after send failure in gather");
+      throw XCCLException(*xccl_api_, "XCCL send failed in gather", result);
+    }
+  }
+
+  XCCL_CHECK(
+      xccl_api_, xccl_api_->groupEnd(), "XCCL groupEnd failed in gather");
+
+  work->recordEnd();
+
+  enqueueWork(work, stream);
+
+  return work;
+}
+
 } // namespace c10d::xccl2
 
 #endif // USE_C10D_XCCL
