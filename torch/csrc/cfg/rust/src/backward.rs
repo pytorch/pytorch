@@ -176,6 +176,50 @@ impl Drop for GradMode<'_> {
     }
 }
 
+/// How many backwards are being taken down with cuDNN's choice of
+/// algorithms set aside, and what its two settings were.
+static STEADY: Mutex<(u32, bool, bool)> = Mutex::new((0, false, false));
+
+/// While it lives, cuDNN chooses its algorithms the same way on every
+/// thread: its benchmark mode is off and its deterministic mode is on. In
+/// benchmark mode cuDNN picks the algorithm of a convolution by what it
+/// measured, and remembers what it picked, per thread: what a node gives on
+/// the thread that takes a form down is then not, bit for bit, what the
+/// autograd engine's thread gives for the same tape, though both are
+/// right. The settings are the process's, so they are set for all threads
+/// while a backward is taken down and compared; the kernels that the two
+/// graphs run afterwards choose as the caller set it, on the threads
+/// eager's would run on.
+struct Steady<'py> {
+    c: Bound<'py, PyAny>,
+}
+
+impl<'py> Steady<'py> {
+    fn hold(py: Python<'py>) -> PyResult<Steady<'py>> {
+        let c = torch(py)?.getattr("_C")?;
+        let mut held = STEADY.lock().unwrap();
+        if held.0 == 0 {
+            held.1 = c.call_method0("_get_cudnn_benchmark")?.extract()?;
+            held.2 = c.call_method0("_get_cudnn_deterministic")?.extract()?;
+            c.call_method1("_set_cudnn_benchmark", (false,))?;
+            c.call_method1("_set_cudnn_deterministic", (true,))?;
+        }
+        held.0 += 1;
+        Ok(Steady { c })
+    }
+}
+
+impl Drop for Steady<'_> {
+    fn drop(&mut self) {
+        let mut held = STEADY.lock().unwrap();
+        held.0 -= 1;
+        if held.0 == 0 {
+            let _ = self.c.call_method1("_set_cudnn_benchmark", (held.1,));
+            let _ = self.c.call_method1("_set_cudnn_deterministic", (held.2,));
+        }
+    }
+}
+
 /// Why this call runs on eager's tape, if something is on that the engine's
 /// backward does not serve: looked at at every call of a form.
 fn needs_tape(py: Python<'_>) -> PyResult<Option<&'static str>> {
@@ -1300,6 +1344,7 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
     flags.extend(vec![false; rest.len()]);
     joint_says(py, joint.results(nodes.roots.iter().chain(&rest).cloned().collect(), flags.clone()))?;
     if !nodes.roots.is_empty() {
+        let _steady = Steady::hold(py)?;
         // What is taken down for all the roots is used for some of them: a
         // node that is handed nothing must give nothing.
         for node in &nodes.order {
@@ -1337,7 +1382,14 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
             let all: Vec<Value> = takes.iter().chain(&incoming).copied().collect();
             let program = Program::new(ops.as_any(), joint.values(), all, gives.iter().map(|(_, value)| *value).collect())?;
             let mode = GradMode::set(py, false)?;
-            let run = program.run(py, &inputs, TCFG_RUN_BELOW_AUTOGRAD)?;
+            // The kernels were those for the gradients of all the
+            // roots: for some of them one may not fit (a view of what
+            // is a sum there and something else here). Such a backward
+            // is not the graph's: it is found out again where it is
+            // asked for, and eager's nodes run for it.
+            let Ok(run) = program.run(py, &inputs, TCFG_RUN_BELOW_AUTOGRAD) else {
+                continue;
+            };
             drop(mode);
             let part: Vec<(u32, Bound<'py, PyAny>)> = gives.iter().map(|(slot, _)| *slot).zip(run).collect();
             let roots: Vec<Bound<'py, PyAny>> = chosen.iter().map(|at| nodes.roots[*at].clone()).collect();
@@ -1586,8 +1638,9 @@ struct Plan {
     saved: Vec<Value>,
     /// Of those, what is checked for writes at a backward.
     checked: HashMap<Value, Named>,
-    /// The roots among them.
+    /// The roots among them, and the inputs.
     watched: Vec<usize>,
+    operands: Vec<usize>,
     /// Per set of roots that come with a gradient: what eager's nodes look
     /// at, in the order the nodes run, each with whether the node that
     /// looks at it first is the one that gave it.
@@ -1652,6 +1705,8 @@ impl Plan {
         }
         let mut watched: Vec<usize> = named.values().filter_map(|named| if let Held::Root(root) = named.held { Some(root) } else { None }).collect();
         watched.sort_unstable();
+        let mut operands: Vec<usize> = named.values().filter_map(|named| if let Held::Feed(feed) = named.held { Some(feed) } else { None }).collect();
+        operands.sort_unstable();
         let again = !(part("draws")?.extract::<bool>()? || part("writes")?.extract::<bool>()?);
         let (behind, _) = graph.behind(&ran);
         // Behind its roots the forward gives what is kept and is no input,
@@ -1690,6 +1745,7 @@ impl Plan {
             saved,
             checked: named,
             watched,
+            operands,
             looked: Mutex::new(HashMap::new()),
             again,
             outer,
@@ -1768,6 +1824,10 @@ struct Kept {
     /// The roots that are checked for writes (`Plan::watched`), each for
     /// as long as it lives: the node must not hold what holds the node.
     roots: Vec<Py<PyWeakrefReference>>,
+    /// The inputs that are checked for writes (`Plan::operands`) and that
+    /// another operation made: one that has no node any more at a backward
+    /// was detached in place.
+    grown: Vec<usize>,
 }
 
 /// Eager's text for a tensor that is needed for a backward and was written
@@ -1844,7 +1904,15 @@ impl Kept {
             let Some((tensor, expected)) = saved.get(named.at) else {
                 continue;
             };
-            if !*gave && matches!(named.held, Held::Root(_)) && self.live(py, named).is_some_and(|live| !requires_grad(&live)) {
+            // A tensor that a node kept as an operand and that an operation
+            // made has that operation's node: without one it was detached
+            // in place, which eager does not go on from.
+            let detached = match named.held {
+                Held::Root(_) => self.live(py, named).is_some_and(|live| !requires_grad(&live)),
+                Held::Feed(feed) => self.grown.contains(&feed) && !requires_grad(self.feeds[feed].bind(py)),
+                Held::Result | Held::View => false,
+            };
+            if !*gave && detached {
                 return Err(PyRuntimeError::new_err(DETACHED));
             }
             if version(tensor) != *expected {
@@ -1882,7 +1950,20 @@ impl Kept {
             inputs.push(saved[at].clone());
         }
         inputs.extend(given);
-        for (slot, grad) in back.slots.iter().zip(back.run.run(py, &inputs)?) {
+        let ran = match back.run.run(py, &inputs) {
+            Ok(ran) => ran,
+            // The backward for all the roots was compared with the autograd
+            // engine's: what it raises is raised. One for some of them was
+            // made of that one, with kernels that need not fit what comes
+            // in here: eager's nodes run in its place, from now on.
+            Err(error) if pattern.iter().all(|came| *came) => return Err(error),
+            Err(error) => {
+                let why = format!("its kernels do not fit: {}", error.value(py).to_string().lines().next().unwrap_or(""));
+                self.plan.backs.lock().unwrap().insert(pattern.clone(), Err(why.clone()));
+                return self.again(py, grads, out, false, &why);
+            }
+        };
+        for (slot, grad) in back.slots.iter().zip(ran) {
             out[*slot as usize] = Some(grad);
         }
         Ok(out)
@@ -2012,12 +2093,17 @@ impl Plan {
                 saved.push((kept.unbind(), at));
             }
             let weak: Vec<Py<PyWeakrefReference>> = self.watched.iter().map(|at| PyWeakrefReference::new(&roots[*at]).map(Bound::unbind)).collect::<PyResult<_>>()?;
+            let made = |feed: &usize| -> bool {
+                let feed = &feeds[*feed];
+                requires_grad(feed) && !feed.getattr("is_leaf").and_then(|leaf| leaf.is_truthy()).unwrap_or(true)
+            };
             let kept = Kept {
                 plan: self.clone(),
                 feeds: feeds.iter().map(|feed| feed.clone().unbind()).collect(),
                 fed: feeds.iter().map(version).collect(),
                 saved: Mutex::new(saved),
                 roots: weak,
+                grown: self.operands.iter().copied().filter(made).collect(),
             };
             let targets = PyTuple::new(py, self.targets.iter().map(|at| &feeds[*at as usize]))?;
             let state = Box::into_raw(Box::new(kept)) as *mut c_void;
