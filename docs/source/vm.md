@@ -283,10 +283,26 @@ instructions of the function, and so is a function of torch that graphs do
 not start in.
 The same goes for what the interpreter calls for an object without a call
 being written: its `__iter__` where a `for` goes over it (an `nn.Sequential`
-or an `nn.ModuleList`, also through `enumerate`, `zip`, `list` and `tuple`),
+or an `nn.ModuleList`, also through `iter`, `enumerate` and `zip`),
 its `__len__`, its `__getitem__`, and where an attribute is read, the getter
 of a property, the `__get__` of a descriptor whose class is written in
 Python, or the `__getattr__` of the class for a name that is not there.
+`list(x)` and `tuple(x)` ask the object for its `__len__` or its
+`__length_hint__` as well, once they have its iterator, so a path goes into
+the `__iter__` for them only where the class has neither, which it checks
+at every call: of a module container, or of a tensor, they end the path in
+front of the call.
+
+The instruction that such a function runs for gives what the interpreter
+makes of what the function returned: `for` and `iter` raise `TypeError` for
+what is no iterator, `len` gives the `__index__` of what `__len__` returned
+as an `int` and raises for a negative one, and a read whose property or
+descriptor raised `AttributeError` asks the `__getattr__` of the class, if
+it has one. A path goes on behind the function only where what it returned
+is that already (an iterator, an `int` that is not negative), which it
+checks at every call. For anything else, and where the path ends inside
+the function, which then runs on to its end as instructions (below), the
+instruction gives the interpreter's answer and the path ends in front of it.
 
 ```python
 class Block(torch.nn.Module):
@@ -753,7 +769,15 @@ was exported for. That is right only for what runs no Python code. So the
 engine looks at each of them on every call before it runs it: an attribute
 that is found without a property, a descriptor or a `__getattr__` written in
 Python, an item of a list, a tuple or a dict under a number or a str,
-arithmetic on exact numbers. A call in which one of them could run Python
+arithmetic on exact numbers. A dict or a set compares the key that is looked
+up with every key it holds under the same hash, and a key of a class with an
+`__eq__` does that in Python. So a lookup in a dict or a set
+(`d[k]`, `k in d`, `d.get(k)`) runs no Python code only while every key in it is
+a number, a str or None, or a tuple of them: a dict that has only ever been
+given strs for keys is known to hold no other (CPython 3.13 and below say so
+of a dict; under 3.14 it counts as any other), any other dict and any set is
+looked through where it holds at most 32 keys, and is taken to run Python
+code where it holds more. A call in which one of these could run Python
 code runs the operations of the function as they are, every read once and
 where the function has it, and after three such calls in a row the graph is
 left to the engine:
