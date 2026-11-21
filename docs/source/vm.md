@@ -1836,6 +1836,12 @@ same, found["ops"], found["why"]  # (True, 9, 'the function returns')
 torch.equal(g(x, [w[:1]], 2, 6), hands_on(x, [w[:1]], 2, 6))  # True: other items are another form
 ```
 
+A call with `*` is an operation only where the operator it runs enters no
+Python code. On a GPU that is not so for `bmm`, and for what comes down to
+it (`matmul` of two stacks of matrices), whose CUDA kernel is entered
+through a Python function (`torch._native`): a path ends in front of such a
+call of them, where a call that is written out goes on.
+
 ### The order of the list
 
 - `Graphs()` can stand anywhere among the passes over a block. It looks at a
