@@ -76,7 +76,7 @@ def is_hashable(x: VariableTracker) -> bool:
     return x.is_hashable()
 
 
-def _guard_lazy_key(vt: variables.LazyVariableTracker) -> bool:
+def _guard_lazy_key(vt: "variables.LazyVariableTracker") -> bool:
     if isinstance(vt.source, ConstDictKeySource):
         return True
     from ..symbolic_convert import InstructionTranslator

@@ -403,14 +403,14 @@ def _method_identity_guards_filtered(
     return context is not None and context.is_aot_capture
 
 
-def _untracked_method_identity(context: str) -> NoReturn:
+def _untracked_method_identity(context: str, *, skip_frame: bool = False) -> NoReturn:
     unimplemented(
         gb_type="Builtin method operation requires identity guards",
         context=context,
-        explanation="Dynamo cannot preserve the identity needed by this operation when identity guards are skipped or filtered.",
-        hints=[
-            "Perform the operation outside the compiled function or use a capture mode that retains identity guards."
-        ],
+        explanation="Dynamo cannot establish the stable receiver identity required by this operation.",
+        hints=["Bind on a stable receiver and retain its identity guards."],
+        skip_frame=skip_frame,
+        preserve_skip_frame_after_inline=skip_frame,
     )
 
 
