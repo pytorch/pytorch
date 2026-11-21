@@ -775,6 +775,53 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         self.assertTrue(is_called)
         out.sum().backward()
 
+    def test_aot_joint_graph_canonicalized_before_partitioner(self):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._dynamo.backends.debugging import boxed_nop
+        from torch._functorch.partitioners import default_partition
+
+        events = []
+
+        def scramble_names(gm, _joint_inputs):
+            events.append("joint_custom_pass")
+            for ordinal, node in enumerate(
+                node for node in gm.graph.nodes if node.op != "placeholder"
+            ):
+                node.name = f"late_joint_pass_{ordinal}"
+            return gm
+
+        def partition_fn(gm, joint_inputs, **kwargs):
+            events.append("partition")
+            self.assertFalse(
+                any(
+                    node.name.startswith("late_joint_pass_")
+                    for node in gm.graph.nodes
+                    if node.op != "placeholder"
+                )
+            )
+            return default_partition(gm, joint_inputs, **kwargs)
+
+        backend = aot_autograd(
+            fw_compiler=boxed_nop,
+            bw_compiler=boxed_nop,
+            partition_fn=partition_fn,
+        )
+
+        def fn(x):
+            return x.sin().sum()
+
+        x = torch.randn(8, requires_grad=True)
+        with (
+            torch._dynamo.config.patch(canonicalize_output_graph_node_order=True),
+            torch._functorch.config.patch(
+                joint_custom_pass=scramble_names,
+                _sync_decision_cross_ranks=True,
+            ),
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(x).backward()
+
+        self.assertEqual(events, ["joint_custom_pass", "partition"])
+
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     @patch("torch._functorch.config.check_custom_op_aliasing", False)
