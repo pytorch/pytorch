@@ -2122,7 +2122,9 @@ class TestEventComparisonDevice(torch._dynamo.test_case.TestCase):
             self.assertEqual(result, expected)
 
 
-instantiate_device_type_tests(TestEventComparisonDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestEventComparisonDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
