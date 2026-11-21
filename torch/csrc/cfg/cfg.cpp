@@ -40,8 +40,10 @@
 #endif
 
 #include <cmath>
+#include <condition_variable>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -2549,6 +2551,61 @@ PyObject* nodeNext(PyObject* obj, uint32_t edge, uint32_t* input_nr) {
   END_HANDLE_TH_ERRORS
 }
 
+// A thread that calls eager's nodes for a thread on which a backward is
+// running: one per such thread, kept, so that the nodes it makes (where a
+// backward is differentiated again) are numbered on with those of the
+// thread it works for. The autograd engine runs nodes by those numbers.
+class NodeCaller {
+ public:
+  NodeCaller() : thread_([this] { loop(); }) {}
+
+  ~NodeCaller() {
+    {
+      const std::lock_guard<std::mutex> lock(mutex_);
+      stop_ = true;
+    }
+    wake_.notify_all();
+    thread_.join();
+  }
+
+  // Runs work on the thread and waits for it.
+  void run(const std::function<void()>& work) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    work_ = &work;
+    wake_.notify_all();
+    wake_.wait(lock, [this] { return work_ == nullptr; });
+  }
+
+ private:
+  void loop() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    for (;;) {
+      wake_.wait(lock, [this] { return stop_ || work_ != nullptr; });
+      if (stop_) {
+        return;
+      }
+      (*work_)();
+      work_ = nullptr;
+      wake_.notify_all();
+    }
+  }
+
+  std::mutex mutex_;
+  std::condition_variable wake_;
+  const std::function<void()>* work_ = nullptr;
+  bool stop_ = false;
+  std::thread thread_;
+};
+
+thread_local std::unique_ptr<NodeCaller> tls_node_caller;
+
+// Brings the numbering of the nodes of this thread up to a number.
+void numberFrom(uint64_t number) {
+  while (at::sequence_number::peek() < number) {
+    at::sequence_number::get_and_increment();
+  }
+}
+
 PyObject* nodeCall(PyObject* obj, PyObject* grads, uint32_t flags) {
   HANDLE_TH_ERRORS
   auto* raw = nodePtr(obj);
@@ -2585,21 +2642,29 @@ PyObject* nodeCall(PyObject* obj, PyObject* grads, uint32_t flags) {
           return "Function " + node->name() + " returned an " + msg;
         });
   };
-  if (torch::autograd::get_current_graph_task_id() == -1) {
+  const auto* wanted = torch::autograd::get_current_graph_task_exec_info();
+  if (wanted == nullptr || wanted->empty()) {
     pybind11::gil_scoped_release no_gil;
     run();
   } else {
-    // A backward is running on this thread. A node asks the backward of its
-    // thread which of its gradients are wanted (task_should_compute_output)
-    // and computes none that one does not know of: the node is called on a
-    // thread where no backward runs, as this thread is otherwise.
+    // A backward for some inputs only is running on this thread. A node
+    // asks the backward of its thread which of its gradients are wanted
+    // (task_should_compute_output) and computes none that one does not
+    // know of: the node is called on a thread where no backward runs, as
+    // this thread is otherwise.
     const at::ThreadLocalState state;
     TapeSink* tape = tls_tapes.empty() ? nullptr : tls_tapes.back().get();
     std::exception_ptr failed;
+    if (!tls_node_caller) {
+      tls_node_caller = std::make_unique<NodeCaller>();
+    }
+    const uint64_t number = at::sequence_number::peek();
+    uint64_t reached = number;
     {
       pybind11::gil_scoped_release no_gil;
-      std::thread worker([&]() {
+      tls_node_caller->run([&]() {
         const at::ThreadLocalStateGuard guard(state);
+        numberFrom(number);
         c10::DispatchCaptureSink* before =
             tape != nullptr ? c10::setDispatchCaptureSink(tape) : nullptr;
         try {
@@ -2610,9 +2675,10 @@ PyObject* nodeCall(PyObject* obj, PyObject* grads, uint32_t flags) {
         if (tape != nullptr) {
           c10::setDispatchCaptureSink(before);
         }
+        reached = at::sequence_number::peek();
       });
-      worker.join();
     }
+    numberFrom(reached);
     if (failed) {
       std::rethrow_exception(failed);
     }
@@ -2676,10 +2742,14 @@ struct RunGuards {
     }
     if ((flags & TCFG_RUN_BELOW_AUTOGRAD) != 0) {
       below.emplace();
+      // What the tape gave is what autocast made of an operation: it is
+      // not cast again.
+      uncast.emplace(c10::autocast_dispatch_keyset);
     }
   }
   std::optional<at::AutoGradMode> grad;
   std::optional<at::AutoDispatchBelowAutograd> below;
+  std::optional<c10::impl::ExcludeDispatchKeyGuard> uncast;
 };
 
 PyObject* stackResult(torch::jit::Stack& stack) {
