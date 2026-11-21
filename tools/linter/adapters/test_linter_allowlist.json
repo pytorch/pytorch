@@ -339,7 +339,6 @@
   "test/inductor/test_compile_options.py",
   "test/inductor/test_compile_subprocess.py",
   "test/inductor/test_compile_to_python.py",
-  "test/inductor/test_compile_worker.py",
   "test/inductor/test_compiled_autograd.py",
   "test/inductor/test_compiled_optimizers.py",
   "test/inductor/test_config.py",
