@@ -3030,7 +3030,11 @@ def object_generic_setattr_str(
                         "reload it from.",
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
-            if obj.is_tensor() or isinstance(obj, variables.PythonModuleVariable):
+            if (
+                type(obj) is variables.OrderedDictVariable
+                or obj.is_tensor()
+                or isinstance(obj, variables.PythonModuleVariable)
+            ):
                 # handle_traced_output leaves aliased Tensor outputs untracked
                 # (repeated objects, returned inputs): replaying onto them as
                 # new objects would be wrong.

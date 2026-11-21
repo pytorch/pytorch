@@ -900,7 +900,10 @@ class GuardManagerWrapper:
                 node.mark_tag_safe_root()
 
     def populate_diff_guard_manager(self) -> None:
-        self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
+        if self.diff_guard_root is not self.root:
+            self.diff_guard_root = self.clone_with_chosen_sources(
+                self.diff_guard_sources
+            )
 
         # Ensure that C++ side points to the updated diff guard manager.  A new
         # GuardManagerWrapper is not cached yet, so this does nothing and the
@@ -2734,6 +2737,9 @@ class GuardBuilder(GuardBuilderBase):
         )
 
         base_manager = self.get_guard_manager_from_source(source)
+        # An exact dict has no instance attributes and its manager checks its type.
+        if isinstance(base_manager, DictGuardManager) and type(self.get(guard)) is dict:
+            return
         if val:
             # Just install a getattr manager. GetAttrGuardAccessor itself
             # acts as hasattr guard.
@@ -3072,6 +3078,21 @@ class GuardBuilder(GuardBuilderBase):
 
         self.get_guard_manager(guard).add_none_match_guard(
             get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    @unsupported_guard_check_spec
+    def DEEPCOPY_MEMO_CONTAINS_ID(
+        self, guard: Guard, tokens: tuple[int, ...], present: bool
+    ) -> None:
+        # Memo tokens may come from arbitrary input computations.
+        self.guard_manager.diff_guard_root = self.guard_manager.root
+        excluded = frozenset(tokens)
+        code = [f"(id({self.arg_ref(guard)}) in {tokens!r}) == {present}"]
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_lambda_guard(
+            lambda value: (id(value) in excluded) == present,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
         )
 
     @register_guard_check_spec(
@@ -5413,8 +5434,12 @@ class GuardsStatePickler(FunctionPicklerBase):
         return get_type_dict_no_user_code(owner)[name]
 
     @classmethod
-    def _unpickle_dict_keys(cls, elems: list[Any]) -> Any:
-        return dict.fromkeys(elems).keys()
+    def _unpickle_dict_keys(cls, owner: dict[Any, Any], ordered: bool) -> Any:
+        if ordered:
+            return collections.OrderedDict.keys(
+                cast(collections.OrderedDict[Any, Any], owner)
+            )
+        return dict.keys(owner)
 
     @classmethod
     def _restore_ordered_dict_state(
@@ -6201,8 +6226,11 @@ class GuardsStatePickler(FunctionPicklerBase):
             if item is not NotImplemented and step is not NotImplemented:
                 return type(self)._unpickle_count_iter, (item, step)
 
+        elif isinstance(obj, torch._dynamo.utils.odict_keys):
+            return type(self)._unpickle_dict_keys, (gc.get_referents(obj)[0], True)
+
         elif isinstance(obj, torch._dynamo.utils.dict_keys):
-            return type(self)._unpickle_dict_keys, (list(obj),)
+            return type(self)._unpickle_dict_keys, (gc.get_referents(obj)[0], False)
 
         elif isinstance(
             obj, torch._ops.OpOverloadPacket
@@ -6639,6 +6667,15 @@ def pickle_guards_state(
         for value in state.output_graph.local_scope.values():
             if issubclass(type(value), dict):
                 required_dicts[id(value)] = cast(dict[Any, Any], value)
+        for value in tuple(guard_tree_values.values()):
+            if isinstance(
+                value, (torch._dynamo.utils.dict_keys, torch._dynamo.utils.odict_keys)
+            ):
+                owner = gc.get_referents(value)[0]
+                required_dicts[id(owner)] = owner
+                guard_tree_values[id(owner)] = owner
+        # Rebuilding implicit managers requires dictionary structure, not every value.
+        # Register all aliased/nested containers before pruning their unused entries.
         pickler = GuardsStatePickler(
             guard_tree_values,
             {},
@@ -6959,7 +6996,9 @@ class CheckFunctionManager:
             ):
                 continue
             elif (
-                guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+                guard_type == "DEEPCOPY_MEMO_CONTAINS_ID"
+                or guard_type
+                in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
             ):
                 raise torch._dynamo.exc.PackageError(
                     f"{guard_type} guard cannot be serialized."

@@ -958,14 +958,20 @@ class DictViewIterator(IteratorVariable):
     }
 
     view_type: str = "keys"
+    linked_order = False
 
     def __init__(
         self,
         items: dict[HashableTracker, VariableTracker],
+        *,
+        view_type: str,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        if self.view_type == "keys":
+        self.view_type = view_type
+        if not self.linked_order and isinstance(items, dict):
+            self._iter = iter(getattr(dict, self.view_type)(items))
+        elif self.view_type == "keys":
             self._iter = iter(items)
         elif self.view_type == "values":
             self._iter = iter(items.values())  # type: ignore[bad-assignment]
@@ -978,9 +984,10 @@ class DictViewIterator(IteratorVariable):
 
     @classmethod
     def create(
-        cls, items: dict[HashableTracker, VariableTracker]
+        cls, items: dict[HashableTracker, VariableTracker], *, ordered: bool = False
     ) -> "DictViewIterator":
-        return cls(items)
+        iterator_cls = OrderedDictIterator if ordered else cls
+        return iterator_cls(items, view_type=cls.view_type)
 
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # dictiter_iternextitem: https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L5538-L5578
@@ -1052,7 +1059,8 @@ class DictItemsIterator(DictViewIterator):
 _ORDERED_DICT_ITERATOR_TYPE = type(iter(collections.OrderedDict().items()))
 
 
-class OrderedDictItemsIterator(DictViewIterator):
+class OrderedDictIterator(DictViewIterator):
+    linked_order = True
     _cpython_type = _ORDERED_DICT_ITERATOR_TYPE
     view_type = "items"
 
