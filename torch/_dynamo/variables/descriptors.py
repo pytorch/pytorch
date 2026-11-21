@@ -316,17 +316,7 @@ def _bound_method_receiver(
         return tx.output.resolve_source_value(obj.source)
     receiver = obj.get_real_python_backed_value()
     if receiver is NO_SUCH_SUBOBJ or receiver is not obj.get_real_python_backed_value():
-        unimplemented(
-            gb_type="builtin method identity with unstable receiver",
-            context=f"receiver: {obj}",
-            explanation="Dynamo cannot preserve builtin method identity without a stable receiver. Resuming with a reconstructed copy can change its hash or comparisons.",
-            hints=[
-                "Bind the method on an input or another stable object.",
-                *graph_break_hints.DIFFICULT,
-            ],
-            skip_frame=True,
-            preserve_skip_frame_after_inline=True,
-        )
+        _untracked_method_identity(f"unstable receiver: {obj}", skip_frame=True)
     return receiver
 
 
@@ -480,11 +470,8 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
 
                 same = vt_identity_compare(left, right)
                 if same is None:
-                    unimplemented(
-                        gb_type="slot-wrapper comparison with undecidable identity",
-                        context=f"{self} {op} {other}",
-                        explanation="Dynamo cannot determine the receiver identities of these slot wrappers.",
-                        hints=[*graph_break_hints.DIFFICULT],
+                    _untracked_method_identity(
+                        f"undecidable slot-wrapper identity: {self} {op} {other}"
                     )
                 equal = same.as_python_constant()
         return ConstantVariable.create(equal if op == "__eq__" else not equal)
