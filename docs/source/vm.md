@@ -53,9 +53,9 @@ torch.vm.regions(g)
 # [{'where': 'f (block 0)[2]', 'state': 'built', 'ops': 6,
 #   'operators': ['aten::matmul', 'aten::tanh', 'aten::sum',
 #   'aten::mul.Tensor', 'aten::mean', 'aten::add.Tensor'], 'inputs': 2,
-#   'outputs': 1, 'branches': 0, 'calls': 0, 'paths': 1, 'ends': [(0, 12)],
-#   'why': 'the function returns', 'variants': 0, 'hits': 0, 'misses': 2,
-#   'exports': 0, 'version': 1, 'forms': []}]
+#   'outputs': 1, 'held': 1, 'branches': 0, 'calls': 0, 'paths': 1,
+#   'ends': [(0, 12)], 'why': 'the function returns', 'variants': 0,
+#   'hits': 0, 'misses': 2, 'exports': 0, 'version': 1, 'forms': []}]
 ```
 
 `where` names the function, the block, and the instruction of the first
@@ -64,8 +64,10 @@ operation of the graph, whether its path starts there or with the function
 the graph itself. `ops` and `operators` are the operations of the path that
 was taken down last, and `inputs` and `outputs` how many values that path
 takes from the code in front of it (here `x` and `w`) and how many the code
-behind it reads. `ends` is the block and the instruction the function goes
-on at behind the path, and `why` what ends the path there. `misses` counts
+behind it reads, `held` how many of those something can still hold when the
+function goes on ("Gradients" has what that decides). `ends` is the block
+and the instruction the function goes on at behind the path, and `why` what
+ends the path there. `misses` counts
 the calls that came to the graph and ran its instructions, the one the path
 was taken down from among them. What was left out of the graphs of a block
 that has tensor work on both sides of it is listed too, with the state
@@ -2098,11 +2100,41 @@ does a backward behind a write in place to a tensor it needs (an input, a
 result, what a result is a view of), with eager's text: the tensor it names
 is the first one that eager's nodes would find changed, and the node it
 names is the one eager names. Hooks on
-results and on inputs run as they do for eager, but for a result that
-another result of the graph is computed of ("Limits"). A result that is a
-view is eager's view, made on the tape behind the node. A graph that reads
-a view which it also gives as a result is cut in two in front of that read,
-each part with a node of its own.
+results and on inputs run as they do for eager where a gradient comes to
+them ("Limits" has what a hook sees where none does). A result that is a
+view is eager's view, made on the tape behind the node.
+
+A graph that gives a tensor and also computes something of it (a hidden
+state and the loss computed of it) is cut in front of the first operation
+that reads the tensor, and so is one that reads a view which it gives. Each
+part has a node of its own, and the part that reads the tensor takes it as
+an input like any other, so the gradient of what is computed of the tensor
+comes to it through its own gradient function, as in eager mode:
+`torch.autograd.grad` at the tensor, `retain_grad()` and a hook on it see
+and change what eager's would. That holds for whatever the caller can hold
+of the graph when the call goes on: what the function returns, by itself or
+in a tuple, a list or a dict, what it stores into an object, and what a
+variable holds. A tensor that is only asked for its sizes or its type
+behind the graph is gone by then and is no reason to cut (`regions()` has
+how many of the tensors a graph gives are `held`), and neither is a read of
+a tensor before the graph last wrote to it in place. Such a form is `"in
+parts"`; it is taken down twice, and then each part twice:
+
+```python
+def keeps(x, w, b):
+    h = (x @ w + b).tanh()
+    return h, (h * h.exp()).sum()
+
+
+cut = torch.vm(keeps, passes=derives)
+for _ in range(9):
+    h, loss = cut(x, w, b)
+backward_of(cut)  # ['in parts']
+h.grad_fn is loss.grad_fn, loss.grad_fn.next_functions[0][0] is h.grad_fn  # (False, True)
+(at_h,) = torch.autograd.grad(loss, [h])
+eager_h, eager_loss = keeps(x, w, b)
+torch.equal(at_h, torch.autograd.grad(eager_loss, [eager_h])[0])  # True
+```
 
 What a graph gives is at the version eager's is at (`_version`), the
 statistics of a batch norm included. A backward for some of the inputs
@@ -2539,17 +2571,20 @@ What graphs do not do at this stage:
   is on. The two settings are the process's: a convolution that another
   thread runs in that time runs that way too. They are as the caller set
   them again when the call returns.
-- With the engine's backward the results of a graph share one node, so the
-  gradient at a result that another result of the graph is computed of (a
-  function that returns its logits and the loss it computed of them) is not
-  eager's: what arrives at such a result is what its uses behind the call
-  give, without what the other result gives through it.
-  `torch.autograd.grad(loss, [logits])` raises for a tensor that was not
-  used, `logits.retain_grad()` leaves `logits.grad` at None, and a hook on
-  `logits` is called with None, or with the gradient of the uses behind the
-  call alone; a hook there that changes the gradient does not change what
-  the inputs get. The gradients of the inputs are eager's otherwise, and on
-  eager's tape (`Graphs(backward=False)`) all of it is.
+- With the engine's backward a hook on a result of a graph is called with
+  None in a backward that brings no gradient to that result but brings one
+  to another result of the same node (two losses of one graph, and the
+  backward of the second): the node runs, and eager, where each result has
+  a node of its own, does not call the hook. A hook that takes None for a
+  gradient sees nothing else that is not eager's.
+- Where AOTAutograd derives the backward of a graph (with `AOTAutograd()` in
+  the list), the gradient at a tensor that the graph gives and also computes
+  something of is what `torch.compile` gives and not eager's: one compiled
+  function has the gradient of both, so nothing of it arrives at the tensor.
+  `torch.autograd.grad(loss, [hidden])` says the tensor was not used,
+  `hidden.retain_grad()` keeps nothing, and a hook on `hidden` is handed
+  None and changes nothing of what reaches the inputs. The engine's own
+  backward cuts such a graph at the tensor ("Gradients").
 - A warning that a kernel gives is given at every call, as in eager. One
   that the Python side of an operation gives (`x.T` of a tensor with three
   dimensions, `torch.tensor` of a tensor), or an operator that is made of
