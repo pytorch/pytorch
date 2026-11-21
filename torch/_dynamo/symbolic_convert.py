@@ -4520,7 +4520,7 @@ class InstructionTranslatorBase(
             self, "{:" + fmt_spec.as_python_constant() + "}"
         )
 
-        format_fn = VariableTracker.build(self, str.format)
+        format_fn = SourcelessBuilder.create_internal_builtin(str.format)
         self.call_function(format_fn, [fmt_var, value], {})
 
     @break_graph_if_unsupported(

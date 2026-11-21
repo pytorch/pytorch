@@ -1682,13 +1682,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if isinstance(arg, variables.ConstDictVariable):
                     arg.install_dict_order_guard(tx)
             # constant fold
-            return VariableTracker.build(
+            result = VariableTracker.build(
                 tx,
                 self.as_python_constant()(  # type: ignore[operator]
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 ),
             )
+            if (
+                isinstance(result, UserDefinedObjectVariable)
+                and isinstance(result.value, enum.Enum)
+                and type(result.value) is self.value
+            ):
+                result.cls_source = self.source
+            return result
         elif self.value is torch.nn.CrossEntropyLoss:
             return self._call_cross_entropy_loss(tx, args, kwargs)
         elif self.value is contextlib.nullcontext:
@@ -2416,7 +2423,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         value: object,
         *,
         value_type: type | None = None,
-        cls_source: TypeSource | None = None,
+        cls_source: Source | None = None,
         base_cls_vt: VariableTracker | None = None,
         init_args: list[VariableTracker] | None = None,
         **kwargs: Any,
@@ -4539,7 +4546,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 from .constant import FakeIdVariable
 
                 if isinstance(result, FakeIdVariable):
-                    return result.as_python_constant(), True
+                    return result.value, True
                 if isinstance(result, variables.SymNodeVariable):
                     return _normalize_custom_hash(int(result.evaluate_expr())), False
                 # CPython's slot_tp_hash validates PyLong_Check(res):
