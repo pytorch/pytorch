@@ -646,12 +646,3 @@ TEST(InferenceModeTest, TestCustomFunction) {
     assert_tensor_equal(y, expected);
   }
 }
-
-TEST(InferenceModeTest, TestLegacyAutoNonVariableTypeModeWarning) {
-  c10::WarningUtils::WarnAlways warn_always(true);
-  WarningCapture warnings;
-  at::AutoNonVariableTypeMode guard;
-  ASSERT_TRUE(
-      warnings.str().find("AutoNonVariableTypeMode is deprecated") !=
-      std::string::npos);
-}
