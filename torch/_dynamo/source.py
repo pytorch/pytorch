@@ -1457,6 +1457,9 @@ class ShapeEnvSource(Source):
 @dataclass_with_cached_hash(frozen=True)
 class CurrentStreamSource(Source):
     device: device_type
+    # Distinguishes separate queries of one device; guards and
+    # reconstruction use only `device`.
+    query_id: int | None = None
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -1541,6 +1544,13 @@ def is_from_closure_source(source: Source) -> bool:
     if isinstance(source, ChainedSource):
         return is_from_closure_source(source.base)
     return False
+
+
+def get_item_source_base(source: Source) -> Source:
+    """Find the owner retaining a chain of dictionary and sequence items."""
+    while isinstance(source, (DictGetItemSource, GetItemSource)):
+        source = source.base
+    return source
 
 
 @functools.lru_cache
