@@ -27,6 +27,10 @@
 ```
 
 ```{eval-rst}
+.. autofunction:: torch.vm.load_passes
+```
+
+```{eval-rst}
 .. autofunction:: torch.vm.memory
 ```
 
