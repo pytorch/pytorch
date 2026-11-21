@@ -10010,6 +10010,45 @@ def graph_end_variable(x, keep=None):
     return (torch.tanh(h) * 2 - 1).sum() + GRAPH_END_STATE[0], held
 
 
+def graph_end_deleted(x, keep=None):
+    # The variable is deleted inside the path: the check that it is bound
+    # reads it, so a call that takes the path down keeps it.
+    held = GRAPH_END_HELD.pop()
+    h = torch.relu(x) + 1
+    h = h * GRAPH_END_STATE[0]
+    del held
+    h = h + GRAPH_END_STATE[0]
+    return (torch.tanh(h) * 2 - 1).sum() + GRAPH_END_STATE[0]
+
+
+def graph_end_in_no_variable(x, keep=None):
+    # What `pop` gave is in no variable: it goes into the tuple and ends
+    # with it, when the item behind it has been taken out.
+    h = (GRAPH_END_HELD.pop(), torch.relu(x) + 1)[1]
+    h = h * GRAPH_END_STATE[0]
+    h = h + GRAPH_END_STATE[0]
+    return (torch.tanh(h) * 2 - 1).sum() + GRAPH_END_STATE[0]
+
+
+class GraphEndFunction(torch.autograd.Function):
+    # What it keeps for its backward ends with the history of its result.
+    @staticmethod
+    def forward(ctx, t):
+        ctx.held = GraphEnds()
+        return t * 2
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad * 2
+
+
+def graph_runs_to_the_return(compiled):
+    # How often the graphs that end where the function returns have run.
+    listed = torch.vm.regions(compiled)
+    graphs = [g for g in listed if "ops" in g and "within" not in g]
+    return sum(g["hits"] for g in graphs if g["why"] == "the function returns")
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -10776,6 +10815,236 @@ class TestVmGraphResults(TestCase):
                     name = f"{fn.__name__} {what} {behind} {graded}"
                     self.assertEqual(got, expected, msg=name)
         empty()
+
+    def test_a_path_lets_go_of_what_holds_what_stays(self, device):
+        # What a path lets go of may be the last reference to an object
+        # that holds others which stay alive: a list that a slice makes of
+        # a list of layers, a bound method of one of them. Its end runs no
+        # Python code, though it refers to more than is looked through for
+        # a finalizer: what it holds has other references and stays. A
+        # path is for such a call. (A slice of an `nn.ModuleList` is a
+        # module of its own; one that is made after `torch.compile` was
+        # used has a weak reference that dynamo is told by.)
+        def keep(gm, input_types):
+            return gm
+
+        layers = [torch.nn.Linear(4, 4) for _ in range(8)]
+        fn = graph_end_variable
+        for make in (lambda: layers[2:8], lambda: layers[0].forward):
+            for behind in ((), (keep,)):
+                passes = (*DEFAULT, P.Graphs(), *behind)
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                found = []
+                for run in (compiled, fn):
+                    del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+                    GRAPH_END_STATE[0] = 0.5
+                    given = []
+                    for at in range(12):
+                        GRAPH_END_HELD.append(make())
+                        torch.manual_seed(at)
+                        x = torch.randn(3, 4, device=device)
+                        given.append((run(x)[0], len(GRAPH_END_LOG)))
+                    found.append(given)
+                self.assertEqual(found[0], found[1], atol=0, rtol=0)
+                if behind:
+                    (graph,) = [g for g in torch.vm.regions(compiled) if "ops" in g]
+                    self.assertGreaterEqual(graph["hits"], 8)
+        del GRAPH_END_HELD[:]
+
+    def test_what_a_path_lets_go_of_is_looked_at_at_every_call(self, device):
+        # Whether a path may let go of an object is decided at every call,
+        # on the object as it is then: nothing of an earlier call is
+        # remembered. An object that was let go of quietly, or stayed
+        # alive, for sixteen calls, and then: its class has a `__del__`;
+        # the list has an item with one and the caller no longer keeps
+        # it; a weak reference with a callback was made to it and the
+        # caller no longer keeps it; the caller no longer keeps an object
+        # with a `__del__`. From there on the instructions run and the
+        # end is where they have it. An object with a `__del__` that the
+        # caller keeps throughout is let go of by the path at every call.
+        def keep(gm, input_types):
+            return gm
+
+        def ender(self):
+            GRAPH_END_LOG.append("the end of an object")
+            GRAPH_END_STATE[0] += 1.0
+
+        def calls(run, what, graded, boxed):
+            GRAPH_END_BOX.item = None
+            del GRAPH_END_HELD[:], GRAPH_END_REFS[:], GRAPH_END_LOG[:]
+            GRAPH_END_STATE[0] = 0.5
+            later = type("GraphEndsLater", (), {})
+            first = {"class": type(None), "item": list, "weak": GraphEndWatched}
+            same = first.get(what, GraphEnds)()
+            if what == "item":
+                same.append(GraphEndWatched())
+            fresh = {"item": list, "weak": GraphEndWatched, "count": GraphEnds}
+            found = []
+            for at in range(24):
+                if what == "class":
+                    if at == 16:
+                        later.__del__ = ender
+                    given = later()
+                elif what == "kept" or at < 16:
+                    given = same
+                else:
+                    # At the sixteenth call the object of all the calls
+                    # before, then a new one at each.
+                    given = same if at == 16 else fresh[what]()
+                    same = None
+                    if what == "item":
+                        given.append(GraphEnds())
+                    if what == "weak":
+                        GRAPH_END_REFS.append(weakref.ref(given, graph_end_callback))
+                if boxed:
+                    GRAPH_END_BOX.item = given
+                else:
+                    GRAPH_END_HELD.append(given)
+                del given
+                torch.manual_seed(at)
+                x = torch.randn(3, 4, device=device, requires_grad=graded)
+                out = run(x)
+                out = out[0] if isinstance(out, tuple) else out
+                if graded:
+                    out.backward()
+                found.append((out.item(), len(GRAPH_END_LOG), GRAPH_END_STATE[0]))
+                del GRAPH_END_HELD[:]
+            del same
+            GRAPH_END_BOX.item = None
+            return found
+
+        for fn in (graph_end_variable, graph_end_attribute):
+            boxed = fn is graph_end_attribute
+            for what in ("class", "item", "weak", "count", "kept"):
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{fn.__name__} {what} {behind} {graded}"
+                    got = calls(compiled, what, graded, boxed)
+                    expected = calls(fn, what, graded, boxed)
+                    self.assertEqual(got, expected, msg=msg)
+                    if behind or graded:
+                        # The calls before the change are the path's, and
+                        # so are all where nothing changes.
+                        ran = graph_runs_to_the_return(compiled)
+                        least, most = (20, 24) if what == "kept" else (12, 16)
+                        self.assertGreaterEqual(ran, least, msg=msg)
+                        self.assertLessEqual(ran, most, msg=msg)
+        del GRAPH_END_HELD[:], GRAPH_END_REFS[:], GRAPH_END_LOG[:]
+        GRAPH_END_STATE[0] = 0.5
+
+    def test_what_a_tensor_holds_out_of_sight_ends_in_its_place(self, device):
+        # A tensor holds more than it shows: the hooks on it are held by
+        # its history as well, and the history holds what functions
+        # written in Python kept for their backward. A tensor that
+        # requires a gradient is therefore let go of by a path only where
+        # it stays alive, and what a tensor shows (the dict of its hooks,
+        # its attributes) is looked into whatever its count of references
+        # says.
+        def keep(gm, input_types):
+            return gm
+
+        def plant(what):
+            if what == "hooked":
+                made = torch.ones(2, device=device, requires_grad=True) * 2
+                made.register_hook(lambda grad, held=GraphEnds(): grad)
+            elif what == "function":
+                leaf = torch.ones(2, device=device, requires_grad=True)
+                made = GraphEndFunction.apply(leaf)
+            else:
+                made = torch.ones(2, device=device)
+                made.held = GraphEnds()
+            return made
+
+        def calls(run, what, kept, graded, boxed):
+            GRAPH_END_BOX.item = None
+            del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+            GRAPH_END_STATE[0] = 0.5
+            found = []
+            for at in range(12):
+                made = plant(what) if at in (7, 10) else 0
+                if boxed:
+                    GRAPH_END_BOX.item = made
+                else:
+                    GRAPH_END_HELD.append(made)
+                if not kept:
+                    del made
+                torch.manual_seed(at)
+                x = torch.randn(3, 4, device=device, requires_grad=graded)
+                out = run(x)
+                out = out[0] if isinstance(out, tuple) else out
+                if graded:
+                    out.backward()
+                found.append((out.item(), len(GRAPH_END_LOG), GRAPH_END_STATE[0]))
+                del GRAPH_END_HELD[:]
+                made = None
+            GRAPH_END_BOX.item = None
+            return found
+
+        def check(fn, what, kept, behind, graded):
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            msg = f"{fn.__name__} {what} kept {kept} {behind} {graded}"
+            boxed = fn is graph_end_attribute
+            got = calls(compiled, what, kept, graded, boxed)
+            expected = calls(fn, what, kept, graded, boxed)
+            self.assertEqual(got, expected, msg=msg)
+            if kept and (behind or graded):
+                # The caller keeps the tensor: every call is the path's.
+                ran = graph_runs_to_the_return(compiled)
+                self.assertGreaterEqual(ran, 6, msg=msg)
+
+        plain = (graph_end_attribute, graph_end_variable, graph_end_deleted)
+        for fn in plain:
+            for what in ("hooked", "function", "attribute"):
+                for kept in (False, True):
+                    for behind, graded in (((), False), ((keep,), False), ((), True)):
+                        check(fn, what, kept, behind, graded)
+        del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+        GRAPH_END_STATE[0] = 0.5
+
+    def test_a_call_that_takes_a_path_down_ends_objects_in_their_place(self, device):
+        # A call in which a path is taken down keeps what the path reads
+        # until the run is described. An object that the function lets
+        # go of in such a call (a variable that is deleted, which the
+        # check that it is bound has read; a tuple the function made and
+        # dropped) ends where the instructions end it all the same:
+        # where its end may run Python code, the path is not taken down
+        # in that call. Another object ends outside the function at the
+        # same calls and changes what the forms were made for, so that
+        # those are calls no form is for.
+        def keep(gm, input_types):
+            return gm
+
+        def calls(run, planted, graded):
+            del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+            GRAPH_END_STATE[0] = 0.5
+            elsewhere, found = None, []
+            for at in range(14):
+                GRAPH_END_HELD.append(GraphEnds() if at in planted else 0)
+                if at in planted:
+                    elsewhere = GraphEnds()
+                torch.manual_seed(at)
+                x = torch.randn(3, 4, device=device, requires_grad=graded)
+                out = run(x)
+                if graded:
+                    out.backward()
+                found.append((out.item(), len(GRAPH_END_LOG), GRAPH_END_STATE[0]))
+                del GRAPH_END_HELD[:]
+            del elsewhere
+            return found
+
+        for fn in (graph_end_deleted, graph_end_in_no_variable):
+            for planted in ((7, 10), (7, 8), (5, 7, 10), (7, 10, 12, 13)):
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{fn.__name__} {planted} {behind} {graded}"
+                    got = calls(compiled, planted, graded)
+                    expected = calls(fn, planted, graded)
+                    self.assertEqual(got, expected, msg=msg)
+        del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+        GRAPH_END_STATE[0] = 0.5
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
