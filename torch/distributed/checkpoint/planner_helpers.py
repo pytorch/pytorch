@@ -59,6 +59,14 @@ def _compare_save_plans(plan: SavePlan, other_plan: SavePlan) -> bool:
     if plan.usable != other_plan.usable:
         return False
 
+    # Both the plans should have the same planner_data. For
+    # DefaultSavePlanner, this carries the flatten mapping that is
+    # merged into the checkpoint metadata, so plans with different
+    # planner_data are not interchangeable even if their write items
+    # are identical.
+    if plan.planner_data != other_plan.planner_data:
+        return False
+
     # Both the plans should have the same number of items
     if len(plan.items) != len(other_plan.items):
         return False
