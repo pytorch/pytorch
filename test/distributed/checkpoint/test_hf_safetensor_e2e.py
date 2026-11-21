@@ -566,6 +566,18 @@ class TestSingleRankSaveLoad(TestCase):
             state_dict[f"{fqn}_blocks"], expected.reshape(experts, rows, cols)
         )
 
+        # Empty-state-dict loads allocate their destination from the metadata,
+        # so the result must come back dequantized in target_dtype, not uint8.
+        expected = expected.reshape(experts, rows, cols)
+        for dtype in (torch.float32, torch.bfloat16):
+            loaded = _load_state_dict_from_keys(
+                storage_reader=QuantizedHuggingFaceStorageReader(
+                    path=self.temp_dir, target_dtype=dtype
+                ),
+            )[f"{fqn}_blocks"]
+            self.assertEqual(loaded.dtype, dtype)
+            torch.testing.assert_close(loaded, expected.to(dtype), rtol=0, atol=0)
+
 
 class TestCompressedTensorsMXFP4ShardedLoad(DTensorTestBase):
     @with_comms

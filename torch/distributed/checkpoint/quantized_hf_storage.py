@@ -90,6 +90,7 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                     # Update the metadata with the size after dequantization.
                     # Metadata used by planner to slice state dict.
                     tensor_metadata.size = dequantized_size
+                    tensor_metadata.properties.dtype = self.target_dtype
                     self._tensor_full_shapes[fqn] = dequantized_size
 
                     # The planner intersects read requests with the chunks, so they
