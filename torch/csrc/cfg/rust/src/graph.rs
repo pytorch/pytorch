@@ -959,6 +959,278 @@ pub unsafe fn quiet_keys(dict: Obj) -> bool {
     true
 }
 
+/// A weak reference as the interpreter lays it out: only looked into on the
+/// versions whose layout this is.
+#[cfg(not(Py_3_13))]
+#[repr(C)]
+struct WeakRef {
+    ob_base: ffi::PyObject,
+    wr_object: Obj,
+    wr_callback: Obj,
+    hash: ffi::Py_hash_t,
+    wr_prev: *mut WeakRef,
+    wr_next: *mut WeakRef,
+}
+
+/// The code of the functions that the weak containers give their weak
+/// references to call when what they refer to ends, each with what the
+/// container keeps by the reference: 0 for a dictionary whose keys are the
+/// references (`weakref.WeakKeyDictionary`, torch's `WeakIdKeyDictionary`),
+/// 1 for one whose values are (`weakref.WeakValueDictionary`), 2 for a set
+/// (`weakref.WeakSet`). Such a function takes the entry out of its
+/// container and does nothing else. Found by looking (the functions are
+/// defined inside `__init__` of the classes), without running anything.
+#[cfg(not(Py_3_13))]
+unsafe fn weak_containers() -> Vec<(usize, u8)> {
+    const CLASSES: [(&std::ffi::CStr, &std::ffi::CStr, u8); 4] = [
+        (c"torch.utils.weak", c"WeakIdKeyDictionary", 0),
+        (c"weakref", c"WeakKeyDictionary", 0),
+        (c"weakref", c"WeakValueDictionary", 1),
+        (c"_weakrefset", c"WeakSet", 2),
+    ];
+    static FOUND: std::sync::OnceLock<Vec<(usize, u8)>> = std::sync::OnceLock::new();
+    if let Some(found) = FOUND.get() {
+        return found.clone();
+    }
+    let init = PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__init__".as_ptr()));
+    let (mut found, mut all) = (Vec::new(), true);
+    for (module, class, kind) in CLASSES {
+        let module = ffi::PyDict_GetItemString(ffi::PyImport_GetModuleDict(), module.as_ptr());
+        let class = if module.is_null() || ffi::PyModule_Check(module) == 0 {
+            null_mut()
+        } else {
+            ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), class.as_ptr())
+        };
+        let made = if class.is_null() || ffi::PyType_Check(class) == 0 {
+            null_mut()
+        } else {
+            pyffi::_PyType_Lookup(class as *mut ffi::PyTypeObject, init.as_ptr())
+        };
+        if made.is_null() || ffi::PyFunction_Check(made) == 0 {
+            all = false;
+            continue;
+        }
+        let consts = ffi::PyObject_GetAttrString(ffi::PyFunction_GetCode(made), c"co_consts".as_ptr());
+        let count = if consts.is_null() || ffi::PyTuple_Check(consts) == 0 { 0 } else { ffi::PyTuple_GET_SIZE(consts) };
+        for i in 0..count {
+            let inner = ffi::PyTuple_GET_ITEM(consts, i);
+            if ffi::PyCode_Check(inner) == 0 {
+                continue;
+            }
+            let name = ffi::PyObject_GetAttrString(inner, c"co_name".as_ptr());
+            let text = if name.is_null() { String::new() } else { pyffi::str_to_string(name) };
+            xdecref(name);
+            if text == "remove" || text == "_remove" {
+                // Kept for good: it is compared by where it is.
+                ffi::Py_INCREF(inner);
+                found.push((inner as usize, kind));
+            }
+        }
+        xdecref(consts);
+    }
+    ffi::PyErr_Clear();
+    if all {
+        let _ = FOUND.set(found.clone());
+    }
+    found
+}
+
+/// What ends with an object besides itself because of the weak references
+/// to it, added to `more`: for a weak reference that a weak container
+/// keeps (`weak_containers`), what goes with the entry that the container
+/// takes out (the value under the reference, the key of a value). False
+/// where a weak reference has anything else to call when the object ends.
+#[cfg(not(Py_3_13))]
+unsafe fn weakly_watched(o: Obj, more: &mut Vec<PyObj>) -> bool {
+    let offset = (*ffi::Py_TYPE(o)).tp_weaklistoffset;
+    if offset == 0 {
+        return false;
+    }
+    let mut known: Option<Vec<(usize, u8)>> = None;
+    let mut at = *((o as *mut u8).offset(offset) as *mut *mut WeakRef);
+    while !at.is_null() {
+        let callback = (*at).wr_callback;
+        let reference = at as Obj;
+        at = (*at).wr_next;
+        if callback.is_null() {
+            continue;
+        }
+        if ffi::PyFunction_Check(callback) == 0 {
+            return true;
+        }
+        let code = ffi::PyFunction_GetCode(callback) as usize;
+        let known = known.get_or_insert_with(|| weak_containers());
+        let Some((_, kind)) = known.iter().find(|(other, _)| *other == code) else {
+            return true;
+        };
+        // The container, through the weak reference to it that the
+        // function has as a default, and what it keeps its entries in.
+        let defaults = ffi::PyFunction_GetDefaults(callback);
+        let to_it = if defaults.is_null() || ffi::PyTuple_GET_SIZE(defaults) == 0 { null_mut() } else { ffi::PyTuple_GET_ITEM(defaults, 0) };
+        if to_it.is_null() || ffi::PyWeakref_Check(to_it) == 0 {
+            return true;
+        }
+        let container = ffi::PyWeakref_GetObject(to_it);
+        if container.is_null() || container == ffi::Py_None() {
+            continue;
+        }
+        match kind {
+            0 => {
+                let slot = pyffi::_PyObject_GetDictPtr(container);
+                let data = if slot.is_null() || (*slot).is_null() { null_mut() } else { ffi::PyDict_GetItemString(*slot, c"data".as_ptr()) };
+                if data.is_null() || ffi::PyDict_CheckExact(data) == 0 || ffi::PyDict_Size(data) > 65536 {
+                    return true;
+                }
+                let (mut place, mut key, mut value) = (0, null_mut(), null_mut());
+                while ffi::PyDict_Next(data, &mut place, &mut key, &mut value) != 0 {
+                    if key == reference {
+                        more.push(PyObj::from_borrowed(value));
+                    }
+                }
+            }
+            1 => {
+                let key = ffi::PyObject_GetAttrString(reference, c"key".as_ptr());
+                if key.is_null() {
+                    ffi::PyErr_Clear();
+                    return true;
+                }
+                more.push(PyObj::from_owned(key));
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Whether there is a weak reference to the object: one may have
+/// something to call when the object dies.
+#[cfg(Py_3_13)]
+unsafe fn weakly_watched(o: Obj, _more: &mut Vec<PyObj>) -> bool {
+    let offset = (*ffi::Py_TYPE(o)).tp_weaklistoffset;
+    offset != 0 && !(*((o as *mut u8).offset(offset) as *mut Obj)).is_null()
+}
+
+unsafe extern "C" fn every_referent(o: Obj, arg: *mut std::ffi::c_void) -> std::ffi::c_int {
+    let seen = &mut *(arg as *mut Vec<Obj>);
+    if !o.is_null() {
+        seen.push(o);
+    }
+    0
+}
+
+/// Whether letting go of a reference to an object runs no Python code even
+/// if it is the last one, as far as that can be shown by looking: neither
+/// the object nor anything it refers to, and so may take with it, is of a
+/// class with a finalizer (`__del__`, a generator's, a file's) or has a
+/// weak reference with a callback, other than the one by which a weak
+/// dictionary or a weak set takes its entry out (what goes with that
+/// entry is looked at like what the object refers to). At most 64 objects
+/// are looked at; with more, the answer is no. A class is not looked into: it does not die
+/// where a reference to it is let go of (its own order of classes refers to
+/// it). What an object holds outside of what it shows the garbage
+/// collector (the history of a tensor in C++) is not seen.
+pub unsafe fn dies_quietly(o: Obj) -> bool {
+    const LOOKED_AT: usize = 64;
+    if o.is_null() || capi::is_unboxed(o) {
+        return true;
+    }
+    let mut seen: Vec<Obj> = vec![o];
+    let mut found: Vec<Obj> = Vec::new();
+    // What a weak container lets go of with its entry: kept while looked at.
+    let mut more: Vec<PyObj> = Vec::new();
+    let mut at = 0;
+    while at < seen.len() {
+        let held = seen[at];
+        at += 1;
+        if ffi::PyType_Check(held) != 0 || is_plain(held) || ffi::PyBytes_CheckExact(held) != 0 {
+            continue;
+        }
+        let ty = ffi::Py_TYPE(held);
+        found.clear();
+        let before = more.len();
+        if (*ty).tp_finalize.is_some() || (*ty).tp_del.is_some() || weakly_watched(held, &mut more) {
+            return false;
+        }
+        found.extend(more[before..].iter().map(|other| other.as_ptr()));
+        if let Some(traverse) = (*ty).tp_traverse {
+            traverse(held, every_referent, &mut found as *mut Vec<Obj> as *mut std::ffi::c_void);
+        }
+        for other in &found {
+            if !seen.contains(other) {
+                if seen.len() >= LOOKED_AT {
+                    return false;
+                }
+                seen.push(*other);
+            }
+        }
+    }
+    true
+}
+
+/// Whether an object is of a class of the interpreter itself that holds
+/// references to what it is made of or goes over: a tuple, a list, a dict,
+/// a set, a slice, a cell, a bound method, an iterator, a view. Not a
+/// function (it holds the globals of its module), a class or a module.
+unsafe fn holds_others(o: Obj) -> bool {
+    let ty = ffi::Py_TYPE(o);
+    (*ty).tp_traverse.is_some()
+        && is_static(ty)
+        && ffi::PyType_Check(o) == 0
+        && ffi::PyModule_Check(o) == 0
+        && ffi::PyFunction_Check(o) == 0
+        && ffi::PyCode_Check(o) == 0
+}
+
+/// Whether an object stays alive when a path lands and leaves: `dropped`
+/// of the references to it that were there before the path ran are let go
+/// of where the path lands, and when it leaves, so is every reference the
+/// path itself holds. Those are counted, with whatever else may be one:
+/// the registers of the path that hold the object (`own`), and what the
+/// values in those registers refer to where a value may be something the
+/// path made (a container or an iterator of the interpreter's own
+/// classes, and what such a one holds inside), but not what the function
+/// had before the path (`given`). If the object has more references than
+/// that, one of them is somebody else's, and it stays. False where there
+/// is too much to look at, or containers are more than four deep inside
+/// one another.
+pub unsafe fn outlives(o: Obj, own: &[Obj], given: &[Obj], dropped: isize) -> bool {
+    const LOOKED_AT: usize = 4096;
+    let mut slots: Vec<Obj> = own.iter().copied().filter(|held| !held.is_null() && !capi::is_unboxed(*held)).collect();
+    let mut held = slots.iter().filter(|other| **other == o).count() as isize;
+    slots.sort_unstable();
+    slots.dedup();
+    let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    let mut work: Vec<(Obj, u32)> = Vec::new();
+    for other in &slots {
+        if *other != o && !given.contains(other) && holds_others(*other) {
+            work.push((*other, 0));
+        }
+    }
+    let mut found: Vec<Obj> = Vec::new();
+    while let Some((at, depth)) = work.pop() {
+        if seen.len() >= LOOKED_AT {
+            return false;
+        }
+        seen.insert(at as usize);
+        let Some(traverse) = (*ffi::Py_TYPE(at)).tp_traverse else {
+            continue;
+        };
+        found.clear();
+        traverse(at, every_referent, &mut found as *mut Vec<Obj> as *mut std::ffi::c_void);
+        for other in &found {
+            if *other == o {
+                held += 1;
+            } else if slots.binary_search(other).is_err() && holds_others(*other) && !seen.contains(&(*other as usize)) {
+                if depth >= 4 {
+                    return false;
+                }
+                work.push((*other, depth + 1));
+            }
+        }
+    }
+    ffi::Py_REFCNT(o) - held - dropped >= 1
+}
+
 /// The same for a set: a small one that holds nothing but plain values.
 unsafe fn quiet_members(set: Obj) -> bool {
     const SCANNED: isize = 32;
