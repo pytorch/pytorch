@@ -14,6 +14,8 @@ from ._internal import (
     getArtifactLogger,
     hide_warnings,
     LazyString,
+    register_log_env_var,
+    register_log_init_callback,
     set_logs,
     trace_structured,
     warning_once,
