@@ -10112,6 +10112,161 @@ class GraphEndTensor(torch.Tensor):
             GRAPH_END_STATE[0] += 1.0
 
 
+class GraphKeyHashed:
+    # A key whose hash is computed by this code, which is heard once it
+    # is told to be.
+    heard = False
+
+    def __hash__(self):
+        if GraphKeyHashed.heard:
+            graph_weak_told()
+        return 7
+
+
+class GraphKeyCompared:
+    # Two keys with one hash: looking one up compares it with the other.
+    heard = False
+
+    def __init__(self, tag):
+        self.tag = tag
+
+    def __hash__(self):
+        return 11
+
+    def __eq__(self, other):
+        if GraphKeyCompared.heard:
+            graph_weak_told()
+        return self is other
+
+
+class GraphUnusedPlain:
+    pass
+
+
+class GraphUnusedAsked:
+    # A class that reads its attributes in a function of its own.
+    def __getattribute__(self, key):
+        return super().__getattribute__(key)
+
+
+GRAPH_UNUSED_LOG = []
+
+
+def graph_unused_told(self):
+    GRAPH_UNUSED_LOG.append(("read", len(GRAPH_UNUSED_LOG)))
+    return 1
+
+
+# Functions with an instruction between their operations whose value
+# nothing uses, and which raises (or goes another way) once what it reads
+# is gone.
+def graph_unused_attribute(obj, x):
+    h = torch.relu(x) + 1
+    obj.extra
+    h = torch.tanh(h * 2 - 3) * 2 + 1
+    return torch.relu(h) + h
+
+
+def graph_unused_item(obj, x):
+    h = torch.relu(x) + 1
+    obj.table["extra"]
+    h = torch.tanh(h * 2 - 3) * 2 + 1
+    return torch.relu(h) + h
+
+
+def graph_unused_place(obj, x):
+    h = torch.relu(x) + 1
+    obj.row[2]
+    h = torch.tanh(h * 2 - 3) * 2 + 1
+    return torch.relu(h) + h
+
+
+def graph_unused_pair(obj, x):
+    h = torch.relu(x) + 1
+    first, second = obj.row[:2] if obj.extra else obj.row
+    h = torch.tanh(h * 2 - 3) * 2 + 1
+    return torch.relu(h) + h
+
+
+def graph_unused_quotient(obj, x):
+    h = torch.relu(x) + 1
+    1 / obj.number
+    h = torch.tanh(h * 2 - 3) * 2 + 1
+    return torch.relu(h) + h
+
+
+def graph_unused_global(obj, x):
+    h = torch.relu(x) + 1
+    GRAPH_UNUSED_NAME
+    h = torch.tanh(h * 2 - 3) * 2 + 1
+    return torch.relu(h) + h
+
+
+def graph_unused_count(obj, x):
+    h = torch.relu(x) + 1
+    len(obj.extra)
+    h = torch.tanh(h * 2 - 3) * 2 + 1
+    return torch.relu(h) + h
+
+
+GRAPH_UNUSED_NAME = 1
+
+
+def graph_unused_whether(obj, x):
+    h = torch.relu(x) + 1
+    if hasattr(obj, "extra"):
+        h = h - 5
+    h = torch.tanh(h * 2 - 3) * 2 + 1
+    return torch.relu(h) + h
+
+
+def graph_free_variable():
+    scale = 2.0
+
+    def inner(h):
+        scale
+        return h * 3
+
+    def take():
+        nonlocal scale
+        del scale
+
+    def put():
+        nonlocal scale
+        scale = 2.0
+
+    return inner, take, put
+
+
+GRAPH_FREE = graph_free_variable()
+
+
+def graph_unused_free(obj, x):
+    h = torch.relu(x) + 1
+    h = GRAPH_FREE[0](h) * 2 - 3
+    return torch.tanh(h) + h
+
+
+def graph_defaulted(h, a=1.0, b=2.0):
+    return h * a
+
+
+def graph_defaulted_by_name(h, *, a=1.0, b=2.0):
+    return h * a
+
+
+def graph_default_moves(x):
+    h = torch.relu(x) + 1
+    h = graph_defaulted(h) * 2 - 3
+    return torch.tanh(h) + h
+
+
+def graph_default_by_name_goes(x):
+    h = torch.relu(x) + 1
+    h = graph_defaulted_by_name(h) * 2 - 3
+    return torch.tanh(h) + h
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -11286,6 +11441,236 @@ class TestVmGraphResults(TestCase):
                         check(fn, what, kept, behind, graded)
         del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
         GRAPH_END_STATE[0] = 0.5
+
+    def test_every_reference_that_goes_with_a_weak_entry_is_counted(self, device):
+        # A path lets go of the last reference to a value of a
+        # `weakref.WeakValueDictionary`. The entry goes with it, and the
+        # entry holds its key twice: as the key of the dict and as the
+        # `key` of the weak reference, which ends with the entry. A key
+        # that nothing else holds ends there, and where it has a `__del__`
+        # (itself, or an item of a tuple that is the key) that runs where
+        # the instructions let go of the value. Taking the entry out also
+        # hashes the key, and compares it with a key the dict keeps under
+        # the same hash: code of the user's where the class of the key
+        # says so. Every call is eager's: the result, what was logged,
+        # the state that the ends change, how many entries are left.
+        def keep(gm, input_types):
+            return gm
+
+        def heard(told):
+            GraphKeyHashed.heard = GraphKeyCompared.heard = told
+
+        def key(what, at):
+            if what in ("an end", "a tuple"):
+                return GraphEnds() if what == "an end" else (1, GraphEnds())
+            if what in ("hashed", "a tuple hashed"):
+                return GraphKeyHashed() if what == "hashed" else (1, GraphKeyHashed())
+            return GraphKeyCompared(at) if what == "compared" else "k"
+
+        def calls(run, what, graded, boxed):
+            GRAPH_END_BOX.item = None
+            del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+            GRAPH_END_STATE[0] = 0.5
+            heard(False)
+            noted, found, other = weakref.WeakValueDictionary(), [], GraphEndWatched()
+            for at in range(12):
+                made = 0
+                if at in (7, 10):
+                    made = GraphEndWatched()
+                    if what == "compared":
+                        noted[GraphKeyCompared(-at)] = other
+                    noted[key(what, at)] = made
+                    heard(True)
+                if boxed:
+                    GRAPH_END_BOX.item = made
+                else:
+                    GRAPH_END_HELD.append(made)
+                del made
+                torch.manual_seed(at)
+                x = torch.randn(3, 4, device=device, requires_grad=graded)
+                out = run(x)
+                out = out[0] if isinstance(out, tuple) else out
+                if graded:
+                    out.backward()
+                heard(False)
+                ended = (list(GRAPH_END_LOG), GRAPH_END_STATE[0])
+                found.append((out.item(), *ended, len(noted.data)))
+                del GRAPH_END_HELD[:]
+            GRAPH_END_BOX.item = None
+            return found
+
+        kinds = ("a text", "an end", "a tuple", "hashed", "a tuple hashed")
+        for fn in (graph_end_variable, graph_end_attribute, graph_end_deleted):
+            boxed = fn is graph_end_attribute
+            for what in (*kinds, "compared"):
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{fn.__name__} {what} {behind} {graded}"
+                    got = calls(compiled, what, graded, boxed)
+                    expected = calls(fn, what, graded, boxed)
+                    self.assertEqual(got, expected, msg=msg)
+                    if behind and what == "a text":
+                        # Every call behind the first two is the path's,
+                        # those in which the value ends included.
+                        listed = torch.vm.regions(compiled)
+                        graphs = [g for g in listed if "ops" in g]
+                        ran = sum(g["hits"] for g in graphs if "within" not in g)
+                        self.assertGreaterEqual(ran, 10, msg=msg)
+        del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+        GRAPH_END_STATE[0] = 0.5
+
+    def test_an_instruction_that_nothing_uses_stays_where_it_can_fail(self, device):
+        # An instruction of a path that gives what nothing uses is left out
+        # of a run only if it cannot fail: an attribute, an item, a global
+        # or a variable of an outer function that is read for nothing, a
+        # division, an unpacking, a `len`, and the read that `hasattr`
+        # made through a `__getattribute__` of the class show that the
+        # call gets as far as the path does. What they read is there for
+        # ten calls, gone for ten (eager raises, or takes the other way),
+        # and back for ten; every call is eager's: the result, or what is
+        # raised.
+        def keep(gm, input_types):
+            return gm
+
+        def one(fn, obj, x):
+            try:
+                return fn(obj, x)
+            except Exception as error:
+                return type(error).__name__
+
+        def there(obj):
+            obj.extra, obj.table, obj.row, obj.number = [1], {"extra": 1}, [1, 2, 3], 1
+            globals()["GRAPH_UNUSED_NAME"] = 1
+            GRAPH_FREE[2]()
+
+        def gone(obj):
+            del obj.extra, obj.table["extra"], obj.row[1:]
+            del globals()["GRAPH_UNUSED_NAME"]
+            GRAPH_FREE[1]()
+
+        def nothing(obj):
+            obj.extra, obj.number = 0, 0
+
+        cases = [
+            (graph_unused_attribute, GraphUnusedPlain, gone, "AttributeError"),
+            (graph_unused_item, GraphUnusedPlain, gone, "KeyError"),
+            (graph_unused_place, GraphUnusedPlain, gone, "IndexError"),
+            (graph_unused_pair, GraphUnusedPlain, nothing, "ValueError"),
+            (graph_unused_quotient, GraphUnusedPlain, nothing, "ZeroDivisionError"),
+            (graph_unused_count, GraphUnusedPlain, nothing, "TypeError"),
+            (graph_unused_global, GraphUnusedPlain, gone, "NameError"),
+            (graph_unused_free, GraphUnusedPlain, gone, "NameError"),
+            (graph_unused_attribute, GraphUnusedAsked, gone, "AttributeError"),
+            (graph_unused_whether, GraphUnusedAsked, gone, None),
+        ]
+        x = torch.randn(3, 4, device=device)
+        try:
+            for behind in ((), (keep,)):
+                for fn, cls, change, raised in cases:
+                    obj = cls()
+                    there(obj)
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{fn.__name__}, {cls.__name__}, with a pass: {bool(behind)}"
+                    for at in range(30):
+                        if at == 10:
+                            change(obj)
+                        if at == 20:
+                            there(obj)
+                        got, expected = one(compiled, obj, x), one(fn, obj, x)
+                        said = f"{msg}, call {at}: {got}, {expected}"
+                        self.assertEqual(type(got), type(expected), msg=said)
+                        self.assertEqual(got, expected, atol=0, rtol=0, msg=said)
+                        if raised is not None:
+                            absent = 10 <= at < 20
+                            self.assertEqual(expected == raised, absent, msg=said)
+                    if behind:
+                        # What was made of the graph ran while everything
+                        # was there (and again later, unless an instruction
+                        # that could not be shown to run no Python code
+                        # had the graph given up meanwhile).
+                        listed = torch.vm.regions(compiled)
+                        graphs = [g for g in listed if "ops" in g and "within" not in g]
+                        ran = sum(g["hits"] for g in graphs)
+                        self.assertGreaterEqual(ran, 6, msg=f"{msg}: {graphs}")
+            # What is read for nothing comes to run Python code (the class
+            # gets a property under the name): it runs at every call, where
+            # the instructions run it.
+            fn = graph_unused_attribute
+            for behind in ((), (keep,)):
+                obj = GraphUnusedPlain()
+                there(obj)
+                passes = (*DEFAULT, P.Graphs(), *behind)
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                seen = []
+                for run in (compiled, fn):
+                    del GRAPH_UNUSED_LOG[:]
+                    obj.extra = [1]
+                    given = []
+                    for at in range(24):
+                        if at == 12:
+                            del obj.extra
+                            GraphUnusedPlain.extra = property(graph_unused_told)
+                        given.append((run(obj, x), list(GRAPH_UNUSED_LOG)))
+                    del GraphUnusedPlain.extra
+                    seen.append(given)
+                for got, expected in zip(*seen):
+                    self.assertEqual(got[1], expected[1])
+                    self.assertEqual(got[0], expected[0], atol=0, rtol=0)
+        finally:
+            globals()["GRAPH_UNUSED_NAME"] = 1
+            GRAPH_FREE[2]()
+            if "extra" in vars(GraphUnusedPlain):
+                del GraphUnusedPlain.extra
+            del GRAPH_UNUSED_LOG[:]
+
+    def test_a_function_a_path_went_into_binds_what_it_is_not_handed(self, device):
+        # The defaults of a function that a path went into are read at
+        # every call, and how many there are is checked: with fewer, the
+        # default of the last parameter is that of another one and a
+        # parameter has none, for which eager raises; a default by its
+        # name that is taken away is missed although the function never
+        # uses it. Every call is eager's: the result, or what is raised.
+        def keep(gm, input_types):
+            return gm
+
+        def one(fn, x):
+            try:
+                return fn(x)
+            except Exception as error:
+                return type(error).__name__
+
+        def put(defaults):
+            graph_defaulted.__defaults__ = defaults[0]
+            graph_defaulted_by_name.__kwdefaults__ = defaults[1]
+
+        x = torch.randn(3, 4, device=device)
+        whole = ((1.0, 2.0), {"a": 1.0, "b": 2.0})
+        fewer, other = ((1.0,), {"a": 1.0}), ((3.0, 4.0), {"a": 3.0, "b": 4.0})
+        schedule = [whole, fewer, other, whole]
+        try:
+            for behind in ((), (keep,)):
+                for fn in (graph_default_moves, graph_default_by_name_goes):
+                    put(whole)
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    raised = 0
+                    for at in range(40):
+                        put(schedule[at // 10])
+                        got, expected = one(compiled, x), one(fn, x)
+                        said = f"{fn.__name__}, call {at}: {got}, {expected}"
+                        self.assertEqual(type(got), type(expected), msg=said)
+                        self.assertEqual(got, expected, atol=0, rtol=0, msg=said)
+                        raised += expected == "TypeError"
+                    self.assertEqual(raised, 10)
+                    if behind:
+                        listed = torch.vm.regions(compiled)
+                        graphs = [g for g in listed if "ops" in g and "within" not in g]
+                        ran = sum(g["hits"] for g in graphs)
+                        self.assertGreaterEqual(ran, 15, msg=str(graphs))
+        finally:
+            put(whole)
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
