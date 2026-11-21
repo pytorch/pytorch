@@ -5913,7 +5913,6 @@ class TestFakeTensorPreferDeviceType(TestCase):
     ):
         # Synthetic accelerator indices must not initialize GPU contexts.
         with (
-            patch("torch._subclasses.fake_tensor.init_gpu_context", lambda _: None),
             patch(
                 "torch._subclasses.fake_tensor._avoid_device_init", return_value=True
             ),
