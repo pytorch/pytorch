@@ -2509,6 +2509,22 @@ impl Staged {
     }
 }
 
+/// What the VM is handed for a graph whose backward the engine derives,
+/// where the list has no pass over graphs: made of the description of the
+/// graph, without Python.
+pub unsafe fn staged(description: Obj) -> Result<crate::pyffi::PyObj, String> {
+    let py = Python::assume_attached();
+    let made = || -> PyResult<Py<Staged>> {
+        let described = Bound::<PyAny>::from_borrowed_ptr(py, description);
+        let described = described.cast::<PyDict>().map_err(|_| PyTypeError::new_err("the description of a graph is a dict"))?;
+        Py::new(py, Staged::new(py, described, None)?)
+    };
+    match made() {
+        Ok(form) => Ok(crate::pyffi::PyObj::from_owned(form.into_ptr())),
+        Err(error) => Err(format!("the engine's backward: {}", error.value(py))),
+    }
+}
+
 /// What every staged form that is alive runs on, how often it was called
 /// since this was last asked with `reset`, and the bytes its backwards read
 /// and its forward keeps.
