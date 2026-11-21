@@ -1015,6 +1015,13 @@ class _SetKeyCoercionMixin:
 class SetTests(_SetBase, _SetKeyCoercionMixin, _BaseSetTests):
     thetype = set
 
+    @make_dynamo_test
+    def test_isdisjoint_cyclic_operand(self):
+        cycle = []
+        cycle.append(cycle)
+        self.assertFalse({1}.isdisjoint([1, cycle]))
+        self.assertRaises(TypeError, {1}.isdisjoint, [2, cycle])
+
     def test_in_frozenset(self):
         super().test_in_frozenset()
 
