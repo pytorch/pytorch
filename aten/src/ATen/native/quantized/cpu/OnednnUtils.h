@@ -6,6 +6,7 @@
 #include <ATen/native/quantized/PackedParams.h>
 #include <ideep.hpp>
 #include <ATen/native/mkldnn/detail/Conv.h>
+#include <ATen/native/mkldnn/detail/Deconv.h>
 #if !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
@@ -47,7 +48,7 @@ using ConvDesc = dnnl::convolution_forward::primitive_desc;
 using ConvParams = at::native::mkldnn::convolution_forward_params;
 using Deconv = dnnl::deconvolution_forward;
 using DeconvDesc = dnnl::deconvolution_forward::primitive_desc;
-using DeconvParams = ideep::deconv_forward_params;
+using DeconvParams = at::native::mkldnn::deconv_forward_params;
 
 struct LinearPrimitiveCache : PrimitiveCache {
   LinearPrimitiveCache() = default;
