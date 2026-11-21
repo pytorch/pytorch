@@ -386,6 +386,33 @@ pub unsafe fn finds(obj: Obj, name: Obj) -> bool {
     false
 }
 
+/// What one of the dicts of a getattr shortcut has under the name, for an
+/// object of a type that has such a shortcut (see `finds`): borrowed, or
+/// null.
+pub unsafe fn found(obj: Obj, name: Obj) -> Obj {
+    let which = getattr_shortcut(ffi::Py_TYPE(obj));
+    let shortcut = registry().borrow().getattrs.get(which.wrapping_sub(1)).copied();
+    let dict = instance_dict(obj);
+    let (Some(shortcut), false) = (shortcut, dict.is_null()) else {
+        return null_mut();
+    };
+    for key in &shortcut.dicts {
+        let entries = ffi::PyDict_GetItemWithError(dict, key.as_ptr());
+        if entries.is_null() {
+            continue;
+        }
+        if ffi::PyDict_Check(entries) == 0 {
+            break;
+        }
+        let held = ffi::PyDict_GetItemWithError(entries, name);
+        if !held.is_null() {
+            return held;
+        }
+    }
+    ffi::PyErr_Clear();
+    null_mut()
+}
+
 /// `getattr(obj, name)` through a getattr shortcut. Returns a new reference;
 /// null without an error if no shortcut applies to the type of `obj`, null
 /// with an error if the lookup raised.
