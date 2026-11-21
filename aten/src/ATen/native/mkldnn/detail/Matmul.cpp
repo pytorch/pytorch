@@ -18,10 +18,10 @@ namespace {
 template <bool with_bias>
 void do_prepare(
     matmul_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst,
     const float dst_coeff = 1.0f,
     const float sum_coeff = 1.0f, // for post-op sum
     const Attr& attr = Attr(),
@@ -32,7 +32,7 @@ void do_prepare(
       "Invalid dims in src or weights");
 #endif
 
-  ideep::tensor::desc src_desc, weights_desc, bias_desc;
+  ITensor::desc src_desc, weights_desc, bias_desc;
   Attr& op_attr = param.op_attr;
   op_attr = attr;
   auto dst_data_type = dnnl::memory::data_type::f32;
@@ -84,7 +84,7 @@ void do_prepare(
   // for aarch64 ACL backend with fixed format kernels, the weights are
   // always in blocked layout, so, set the descriptor to tag::any for the backend
   // to decide the format
-  weights_desc = ideep::tensor::desc(
+  weights_desc = ITensor::desc(
       weights.get_dims(), wei_data_type, dnnl::memory::format_tag::any);
 #else
   // For fp32 matmul, weight (2nd input) is usually not in blocked layout
@@ -92,7 +92,7 @@ void do_prepare(
   // Should use tag::any to query blocked layout if there is perf gain later
   weights_desc = weights.get_desc().is_plain()
       ? weights.get_desc().to_type(wei_data_type)
-      : ideep::tensor::desc(
+      : ITensor::desc(
             weights.get_dims(), wei_data_type, dnnl::memory::format_tag::any);
 #endif
 
@@ -138,7 +138,7 @@ void do_prepare(
   /* rely on tensor descriptor class to se the format appropriately
    * based on the tensor dimensions.
    */
-  ideep::tensor::desc dst_desc = ideep::tensor::desc(dst_dims, dst_data_type);
+  ITensor::desc dst_desc = ITensor::desc(dst_dims, dst_data_type);
   if (!dst.is_empty()) {
     dst_desc = dst.get_desc().to_type(dst_data_type);
   }
@@ -177,12 +177,12 @@ void do_prepare(
 #endif
   if (param.op_attr.has_scales()) {
     if (!param.all_scales) {
-      param.all_scales.reset(new std::unordered_map<int, ideep::tensor>);
+      param.all_scales.reset(new std::unordered_map<int, ITensor>);
     }
     for (auto& arg_scale_pair : param.op_attr.get_all_scales()) {
       int dnnl_arg = arg_scale_pair.first;
       const std::vector<float>& scale = arg_scale_pair.second.first;
-      ideep::tensor scales_m(scale);
+      ITensor scales_m(scale);
       param.all_scales->insert({dnnl_arg, scales_m});
     }
   }
@@ -193,10 +193,10 @@ void do_prepare(
 template <bool with_bias>
 void do_prepare_static_quant(
     matmul_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst,
     const std::vector<float>& src_scales,
     const std::vector<float>& weights_scales,
     const std::vector<float>& dst_scales,
@@ -213,7 +213,7 @@ void do_prepare_static_quant(
       "Invalid dims in src or weights");
 #endif
 
-  ideep::tensor::desc src_desc, weights_desc, bias_desc;
+  ITensor::desc src_desc, weights_desc, bias_desc;
   Attr& op_attr = param.op_attr;
   Attr& src_attr = param.src_attr;
   Attr& weights_attr = param.weights_attr;
@@ -247,7 +247,7 @@ void do_prepare_static_quant(
   std::vector<int64_t> src_strides = (ndims == 3)
       ? std::vector<int64_t>({src_dims[1] * src_dims[2], src_dims[1], 1})
       : std::vector<int64_t>({src_dims[1], 1});
-  src_desc = ideep::tensor::desc(
+  src_desc = ITensor::desc(
       src_dims, src_data_type, dnnl::memory::format_tag::any);
   for (auto& s : src_scales_in) {
     s = 1.0 / s;
@@ -364,7 +364,7 @@ void do_prepare_static_quant(
 
   dst_data_type =
       dst_type == dnnl::memory::data_type::undef ? dst_data_type : dst_type;
-  ideep::tensor::desc dst_desc = ideep::tensor::desc(
+  ITensor::desc dst_desc = ITensor::desc(
       dst_dims, dst_data_type, dnnl::memory::format_tag::any);
   if (!dst.is_empty()) {
     dst_desc = dst.get_desc().to_type(dst_data_type);
@@ -403,23 +403,23 @@ void do_prepare_static_quant(
 #endif
   if (param.op_attr.has_scales()) {
     if (!param.all_scales) {
-      param.all_scales.reset(new std::unordered_map<int, ideep::tensor>);
+      param.all_scales.reset(new std::unordered_map<int, ITensor>);
     }
     for (auto& arg_scale_pair : param.op_attr.get_all_scales()) {
       int dnnl_arg = arg_scale_pair.first;
       const std::vector<float>& scale = arg_scale_pair.second.first;
-      ideep::tensor scales_m(scale);
+      ITensor scales_m(scale);
       param.all_scales->insert({dnnl_arg, scales_m});
     }
   }
   if (param.op_attr.has_zero_points()) {
     if (!param.all_zero_points) {
-      param.all_zero_points.reset(new std::unordered_map<int, ideep::tensor>);
+      param.all_zero_points.reset(new std::unordered_map<int, ITensor>);
     }
     for (auto& arg_zp_pair : param.op_attr.get_all_zero_points()) {
       int dnnl_arg = arg_zp_pair.first;
       const std::vector<int32_t>& zp = arg_zp_pair.second.first;
-      ideep::tensor zp_m(zp);
+      ITensor zp_m(zp);
       param.all_zero_points->insert({dnnl_arg, zp_m});
     }
   }
@@ -430,10 +430,10 @@ void do_prepare_static_quant(
 template <bool with_bias>
 void do_prepare_dynamic_quant(
     matmul_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst,
     const std::vector<float>& weights_scales,
     const float sum_coeff = 1.0f, // for post-op sum
     const Attr& attr = Attr(),
@@ -460,7 +460,7 @@ void do_prepare_dynamic_quant(
       "Failed to allocate memory for parameters");
 #endif
 
-  ideep::tensor::desc& src_desc = param.dq_param_ptr->src_desc;
+  ITensor::desc& src_desc = param.dq_param_ptr->src_desc;
   Attr& op_attr = param.op_attr;
   Attr src_attr;
 
@@ -478,7 +478,7 @@ void do_prepare_dynamic_quant(
   std::vector<int64_t> src_strides = (ndims == 3)
       ? std::vector<int64_t>({src_dims[1] * src_dims[2], src_dims[1], 1})
       : std::vector<int64_t>({src_dims[1], 1});
-  src_desc = ideep::tensor::desc(src_dims, src_data_type, src_strides);
+  src_desc = ITensor::desc(src_dims, src_data_type, src_strides);
 
   // Post-ops
   auto pops = attr.get_post_ops();
@@ -524,12 +524,12 @@ void do_prepare_dynamic_quant(
   std::vector<int64_t> dst_strides = (ndims == 3)
       ? std::vector<int64_t>({dst_dims[2] * dst_dims[1], dst_dims[1], 1})
       : std::vector<int64_t>({dst_dims[1], 1});
-  ideep::tensor::desc dst_desc =
-      ideep::tensor::desc(dst_dims, dst_type, dst_strides);
+  ITensor::desc dst_desc =
+      ITensor::desc(dst_dims, dst_type, dst_strides);
   if (!dst.is_empty()) {
     dst_desc = dst.get_desc().to_type(dst_type);
   }
-  ideep::tensor::desc bias_desc;
+  ITensor::desc bias_desc;
   if (with_bias) {
     dnnl::memory::format_tag bia_tag = bias.get_dims().size() == 2
         ? dnnl::memory::format_tag::ab
@@ -583,12 +583,12 @@ void do_prepare_dynamic_quant(
 
   if (param.op_attr.has_scales()) {
     if (!param.all_scales) {
-      param.all_scales.reset(new std::unordered_map<int, ideep::tensor>);
+      param.all_scales.reset(new std::unordered_map<int, ITensor>);
     }
     for (auto& arg_scale_pair : param.op_attr.get_all_scales()) {
       int dnnl_arg = arg_scale_pair.first;
       const std::vector<float>& scale = arg_scale_pair.second.first;
-      ideep::tensor scales_m(scale);
+      ITensor scales_m(scale);
       param.all_scales->insert({dnnl_arg, scales_m});
     }
   }
@@ -602,10 +602,10 @@ void do_prepare_dynamic_quant(
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void do_compute(
     const matmul_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst) {
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst) {
   auto& pd = param.pd;
   auto& primitive = param.primitive;
   auto& op_attr = param.op_attr;
@@ -622,7 +622,7 @@ void do_compute(
   auto& expected_weights = reorder_weight
       ? weights.reorder_if_differ_in(expected_wei_desc, weights_attr)
       : weights;
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  ITensor scratchpad(pd.scratchpad_desc());
 
   std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, expected_src});
@@ -634,19 +634,19 @@ void do_compute(
   if (param.all_scales && !param.all_scales->empty()) {
     for (auto& arg_scale_pair : *param.all_scales) {
       int dnnl_arg = arg_scale_pair.first;
-      ideep::tensor& scales_m = arg_scale_pair.second;
+      ITensor& scales_m = arg_scale_pair.second;
       args.insert({DNNL_ARG_ATTR_SCALES | dnnl_arg, scales_m});
     }
   }
   if (param.all_zero_points && !param.all_zero_points->empty()) {
     for (auto& arg_zp_pair : *param.all_zero_points) {
       int dnnl_arg = arg_zp_pair.first;
-      ideep::tensor& zp_m = arg_zp_pair.second;
+      ITensor& zp_m = arg_zp_pair.second;
       args.insert({DNNL_ARG_ATTR_ZERO_POINTS | dnnl_arg, zp_m});
     }
   }
   if (reorder_src) {
-    ideep::tensor expected_dst;
+    ITensor expected_dst;
     if (dst.is_empty() || dst.get_desc() != expected_dst_desc) {
       // If dst buffer are not given by user or user given dst buffer are not
       // under expected format
@@ -683,10 +683,10 @@ void do_compute(
 template <bool with_bias, bool reorder_weight = true>
 void do_compute_dynamic_quant(
     const matmul_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst,
     const std::vector<float>& src_scales,
     const std::vector<int32_t>& src_zero_points,
     const float dst_coeff = 1.0f) {
@@ -721,10 +721,10 @@ void do_compute_dynamic_quant(
     s = 1.0 / s;
   }
   int src_scale_size = src_scales_in.size();
-  ideep::tensor::desc src_scales_desc = {
+  ITensor::desc src_scales_desc = {
       {src_scale_size}, dnnl::memory::data_type::f32, {scale_zp_stride}};
   const auto& engine = ideep::engine::cpu_engine();
-  ideep::tensor src_scales_m(
+  ITensor src_scales_m(
       src_scales_desc,
       reinterpret_cast<float*>(src_scales_in.data()),
       engine);
@@ -740,15 +740,15 @@ void do_compute_dynamic_quant(
       src_zero_point_size == 1 ? dnnl_success : dnnl_invalid_arguments,
       "DNNL only support 1-dim zero_point");
 #endif
-  ideep::tensor::desc src_zero_point_desc = {
+  ITensor::desc src_zero_point_desc = {
       {src_zero_point_size}, dnnl::memory::data_type::s32, {scale_zp_stride}};
-  ideep::tensor src_zero_point_m(
+  ITensor src_zero_point_m(
       src_zero_point_desc,
       reinterpret_cast<int32_t*>(src_zero_point.data()),
       engine);
 
   // Reroder src (f32 -> u8)
-  ideep::tensor expected_src(expected_src_desc);
+  ITensor expected_src(expected_src_desc);
   src_reorder.execute(
       ideep::stream::default_stream(),
       {{DNNL_ARG_FROM, src},
@@ -760,9 +760,9 @@ void do_compute_dynamic_quant(
   auto& expected_weights = reorder_weight
       ? weights.reorder_if_differ_in(pd.weights_desc(), weights_attr)
       : weights;
-  ideep::tensor& expected_dst = dst;
+  ITensor& expected_dst = dst;
 
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  ITensor scratchpad(pd.scratchpad_desc());
 
   std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, expected_src});
@@ -775,14 +775,14 @@ void do_compute_dynamic_quant(
   if (param.all_scales && !param.all_scales->empty()) {
     for (auto& arg_scale_pair : *param.all_scales) {
       int dnnl_arg = arg_scale_pair.first;
-      ideep::tensor& scales_m = arg_scale_pair.second;
+      ITensor& scales_m = arg_scale_pair.second;
       args.insert({DNNL_ARG_ATTR_SCALES | dnnl_arg, scales_m});
     }
   }
   if (param.all_zero_points && !param.all_zero_points->empty()) {
     for (auto& arg_zp_pair : *param.all_zero_points) {
       int dnnl_arg = arg_zp_pair.first;
-      ideep::tensor& zp_m = arg_zp_pair.second;
+      ITensor& zp_m = arg_zp_pair.second;
       args.insert({DNNL_ARG_ATTR_ZERO_POINTS | dnnl_arg, zp_m});
     }
   }
@@ -798,10 +798,10 @@ void do_compute_dynamic_quant(
 // Supports fp32, static int8 and dynamic int8
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void compute_impl(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst,
     const std::vector<float>& src_scales = std::vector<float>(),
     const std::vector<float>& weights_scales = std::vector<float>(),
     const std::vector<float>& dst_scales = std::vector<float>(),
@@ -869,10 +869,10 @@ void compute_impl(
 
 template <bool reorder_src, bool reorder_weight>
 void matmul_forward_compute(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst,
     const std::vector<float>& src_scales,
     const std::vector<float>& weights_scales,
     const std::vector<float>& dst_scales,
@@ -921,10 +921,10 @@ void matmul_forward_compute(
 template <bool is_dynamic>
 void matmul_forward_prepare(
     matmul_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst,
     const std::vector<float>& src_scales,
     const std::vector<float>& weights_scales,
     const std::vector<float>& dst_scales,
@@ -1003,10 +1003,10 @@ void matmul_forward_prepare(
 template <bool reorder_src, bool reorder_weight>
 void matmul_forward_compute(
     const matmul_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst) {
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst) {
   if (bias.is_empty()) {
     do_compute</*with_bias=*/false, reorder_src, reorder_weight>(
         param, src, weights, bias, dst);
@@ -1019,10 +1019,10 @@ void matmul_forward_compute(
 template <bool reorder_weight>
 void matmul_forward_compute(
     const matmul_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst,
+    const ITensor& src,
+    const ITensor& weights,
+    const ITensor& bias,
+    ITensor& dst,
     const std::vector<float>& src_scales,
     const std::vector<int32_t>& src_zero_points,
     const float dst_coeff) {
@@ -1036,14 +1036,14 @@ void matmul_forward_compute(
 }
 
 void matmul_forward(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    ideep::tensor& dst,
+    const ITensor& src,
+    const ITensor& weights,
+    ITensor& dst,
     const float dst_coeff,
     const float sum_coeff,
     const Attr& attr) {
   // Consider fp32 only for IPEX
-  static ideep::tensor dummy_bias;
+  static ITensor dummy_bias;
   static ideep::lowp_kind dummy_lowp_kind = ideep::u8s8;
   compute_impl</*with_bias=*/false, /*reorder_src*/ true, /*reorder_weight*/ true>(
       src,
@@ -1062,7 +1062,7 @@ void matmul_forward(
       dummy_lowp_kind);
 }
 
-ideep::tensor::desc matmul_forward_expected_weights_desc(
+ITensor::desc matmul_forward_expected_weights_desc(
     const dnnl::memory::dims& weights_dims,
     const dnnl::memory::dims& src_dims,
     dnnl::memory::data_type dtype,
@@ -1085,24 +1085,24 @@ ideep::tensor::desc matmul_forward_expected_weights_desc(
                                            : dnnl_invalid_arguments,
       "Invalid dims for data and weights");
 #endif
-  ideep::tensor::desc x_desc(
+  ITensor::desc x_desc(
       x_dims,
       x_dtype,
       ndims == 2 ? dnnl::memory::format_tag::ab
                  : dnnl::memory::format_tag::abc);
-  ideep::tensor::desc y_desc(
+  ITensor::desc y_desc(
       y_dims,
       y_dtype,
       ndims == 2 ? dnnl::memory::format_tag::ab
                  : dnnl::memory::format_tag::abc);
-  ideep::tensor::desc weights_desc(
+  ITensor::desc weights_desc(
       weights_dims, dtype, dnnl::memory::format_tag::any);
   auto pd = dnnl::matmul::primitive_desc(
       ideep::engine::cpu_engine(), x_desc, weights_desc, y_desc, attr);
   return pd.weights_desc();
 }
 
-ideep::tensor::desc matmul_forward_expected_weights_desc(
+ITensor::desc matmul_forward_expected_weights_desc(
     const dnnl::memory::dims& weights_dims,
     const dnnl::memory::dims& src_dims,
     dnnl::memory::data_type dtype,
@@ -1117,10 +1117,10 @@ ideep::tensor::desc matmul_forward_expected_weights_desc(
 }
 
 template void matmul_forward_compute<true, true>(
-    const ideep::tensor&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    ideep::tensor&,
+    const ITensor&,
+    const ITensor&,
+    const ITensor&,
+    ITensor&,
     const std::vector<float>&,
     const std::vector<float>&,
     const std::vector<float>&,
@@ -1134,10 +1134,10 @@ template void matmul_forward_compute<true, true>(
 
 template void matmul_forward_prepare<false>(
     matmul_forward_params&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    ideep::tensor&,
+    const ITensor&,
+    const ITensor&,
+    const ITensor&,
+    ITensor&,
     const std::vector<float>&,
     const std::vector<float>&,
     const std::vector<float>&,
@@ -1151,10 +1151,10 @@ template void matmul_forward_prepare<false>(
 
 template void matmul_forward_prepare<true>(
     matmul_forward_params&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    ideep::tensor&,
+    const ITensor&,
+    const ITensor&,
+    const ITensor&,
+    ITensor&,
     const std::vector<float>&,
     const std::vector<float>&,
     const std::vector<float>&,
@@ -1168,17 +1168,17 @@ template void matmul_forward_prepare<true>(
 
 template void matmul_forward_compute<false, false>(
     const matmul_forward_params&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    ideep::tensor&);
+    const ITensor&,
+    const ITensor&,
+    const ITensor&,
+    ITensor&);
 
 template void matmul_forward_compute<true>(
     const matmul_forward_params&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    ideep::tensor&,
+    const ITensor&,
+    const ITensor&,
+    const ITensor&,
+    ITensor&,
     const std::vector<float>&,
     const std::vector<int32_t>&,
     const float);
