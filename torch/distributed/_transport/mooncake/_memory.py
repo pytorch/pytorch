@@ -40,6 +40,10 @@ class MooncakeRemoteBuffer(_WireDescriptor):
     device_id: int
     memory_type: str
 
+    @property
+    def peer_id(self) -> str:
+        return self.endpoint
+
     def slice(self, offset: int | None = None, length: int | None = None) -> Self:
         offset, length = _subrange(self.length, offset, length, "remote buffer")
         return replace(self, address=self.address + offset, length=length)
