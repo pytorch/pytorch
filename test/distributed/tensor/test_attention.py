@@ -902,6 +902,7 @@ class TestSharding(DTensorTestBase):
             mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
         )
 
+        fused_backends = []
         for backend in backends:
             with sdpa_kernel(backend):
                 dtype = torch.bfloat16
@@ -917,6 +918,15 @@ class TestSharding(DTensorTestBase):
                 v = torch.randn(
                     B, nheads, seq_len, dim, device=self.device_type, dtype=dtype
                 )
+                # A platform may advertise a backend it only emulates: XPU has no
+                # memory-efficient kernel and resolves EFFICIENT_ATTENTION to math.
+                # Math is a decomposition rather than one fused op, so there is no
+                # SDPA op whose strategy withholds Shard(2), and DTensor reaches a
+                # (correct) Shard(2) output by redistributing the intermediates.
+                # The CP-only restriction asserted below therefore does not apply.
+                if torch._fused_sdp_choice(q, k, v) != backend.value:
+                    continue
+                fused_backends.append(backend)
                 q_dt = distribute_tensor(q, device_mesh, [Shard(2)])
                 k_dt = distribute_tensor(k, device_mesh, [Shard(2)])
                 v_dt = distribute_tensor(v, device_mesh, [Shard(2)])
@@ -938,6 +948,9 @@ class TestSharding(DTensorTestBase):
                 )
                 # The output should be replicated or sharded on batch head dimensions.
                 self.assertIn(out.placements[0], [Replicate(), Shard(0), Shard(1)])
+
+        if not fused_backends:
+            self.skipTest("no SDPA backend here dispatches to a fused attention op")
 
 
 class TestContextParallelStyle(DTensorContinuousTestBase):
