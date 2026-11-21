@@ -310,6 +310,7 @@ class TestPublicBindings(TestCase):
         # do not get imported by public code.
         # DO NOT add public modules here.
         private_allowlist = {
+            "torch._nccl_ep",  # Loaded by torch.distributed._token_switch._import_nccl_ep.
             "torch._inductor.codegen.cutlass.cuda_kernel",
             "torch._native.flydsl.intrinsics",  # depends on flydsl
             # TODO(#133647): Remove the onnx._internal entries after
@@ -456,6 +457,7 @@ class TestPublicBindings(TestCase):
                 "torch._native.ops.linear_cross_entropy.fused_grad_logits_kernel",
                 "torch._native.ops.norm.rmsnorm_kernels",
                 "torch._native.ops.polar.",
+                "torch._native.ops.quantize_tensor.blockscaled_tma.",
                 "torch._native.ops.reductions.kernel_general",
                 "torch._native.ops.reductions.kernel_rowtile",
                 "torch._native.ops.reductions.tile",

@@ -37,11 +37,13 @@ from torch.nn.parallel.distributed import _MixedPrecision
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
+    MultiThreadedTestCase,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     _restore_fp32_precision,
     _snapshot_fp32_precision,
+    add_skip_condition,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
@@ -49,8 +51,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     retry_on_connect_failures,
     run_tests,
+    skip_reason_at_collection,
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_XPU,
     TestCase,
 )
 from torch.utils.checkpoint import checkpoint
@@ -89,6 +91,168 @@ def tearDownModule():
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
+@instantiate_parametrized_tests
+class TestDistributedSkipPruning(TestCase):
+    @parametrize(
+        "harness",
+        [MultiProcessTestCase, MultiThreadedTestCase, MultiProcContinuousTest],
+        name_fn=lambda cls: cls.__name__,
+    )
+    @parametrize("class_mark", [False, True])
+    @parametrize("skip", [False, True])
+    def test_static_marks(self, harness, class_mark, skip):
+        calls = []
+
+        class Harness(harness):
+            def setUp(self):
+                raise AssertionError(
+                    "a statically skipped test must not launch workers"
+                )
+
+            def test_probe(self):
+                calls.append("body")
+
+        if class_mark:
+            Harness = unittest.skipIf(skip, "existing class skip")(Harness)
+        else:
+            Harness.test_probe = unittest.skipIf(skip, "existing method skip")(
+                Harness.test_probe
+            )
+        fn = Harness.test_probe
+        reason = "existing class skip" if class_mark else "existing method skip"
+        self.assertEqual(
+            skip_reason_at_collection(Harness, fn, "test_probe"),
+            reason if skip else None,
+        )
+        case = Harness("test_probe")
+        if skip:
+            result = unittest.TestResult()
+            unittest.TestCase.run(case, result)
+            self.assertEqual([message for _, message in result.skipped], [reason])
+            self.assertEqual(result.errors, [])
+            self.assertEqual(result.failures, [])
+            self.assertEqual(calls, [])
+        else:
+            fn(case)
+            self.assertEqual(calls, ["body"])
+
+    @parametrize(
+        "harness",
+        [MultiProcessTestCase, MultiThreadedTestCase, MultiProcContinuousTest],
+        name_fn=lambda cls: cls.__name__,
+    )
+    def test_worker_conditions_remain_at_runtime(self, harness):
+        calls = []
+
+        class Harness(harness):
+            def test_probe(self):
+                raise unittest.SkipTest("worker condition")
+
+        def condition(cls):
+            calls.append("predicate")
+            return True
+
+        add_skip_condition(Harness.test_probe, condition, "worker condition")
+        self.assertIsNone(
+            skip_reason_at_collection(Harness, Harness.test_probe, "test_probe")
+        )
+        self.assertEqual(calls, [])
+
+    @parametrize(
+        "harness",
+        [MultiProcessTestCase, MultiThreadedTestCase, MultiProcContinuousTest],
+        name_fn=lambda cls: cls.__name__,
+    )
+    @parametrize(
+        "override",
+        [
+            "constructor",
+            "cooperative_constructor",
+            "binder",
+            "wrapped_binder",
+            "policy",
+            "runner",
+            "dispatch",
+            "id",
+            "equality",
+        ],
+    )
+    def test_custom_execution_remains_unpruned(self, harness, override):
+        class Harness(harness):
+            @unittest.skip("original skip")
+            def test_probe(self):
+                pass
+
+        class Initializer(TestCase):
+            def __init__(self, methodName="runTest"):
+                super().__init__(methodName)
+                self.test_probe = lambda: None
+
+        if override == "cooperative_constructor":
+
+            class Dynamic(Harness, Initializer):
+                pass
+        else:
+
+            class Dynamic(Harness):
+                pass
+
+            if override == "constructor":
+
+                def initialize(self, methodName="runTest"):
+                    harness.__init__(self, methodName)
+                    self.test_probe = lambda: None
+
+                Dynamic.__init__ = initialize
+            elif override == "id":
+
+                def identifier(self):
+                    self.test_probe = lambda: None
+                    return "changed test"
+
+                Dynamic.id = identifier
+            elif override == "equality":
+
+                def equality(self, *args):
+                    self.test_probe = lambda: None
+
+                Dynamic.addTypeEqualityFunc = equality
+            elif override in ("runner", "dispatch"):
+
+                def run(self, result):
+                    result.startTest(self)
+                    result.addSuccess(self)
+                    result.stopTest(self)
+
+                if override == "runner":
+                    Dynamic.run = run
+                else:
+                    Dynamic._run_custom = run
+            else:
+                binder_name = (
+                    "wrap_method_with_policy"
+                    if override == "policy"
+                    else (
+                        "_worker_run_main_wait"
+                        if harness is MultiProcContinuousTest
+                        else "join_or_run"
+                    )
+                )
+
+                def binder(self, fn):
+                    return lambda: None
+
+                if override == "wrapped_binder":
+                    from functools import wraps
+
+                    binder = wraps(getattr(harness, binder_name))(binder)
+                setattr(Dynamic, binder_name, binder)
+
+        self.assertIsNone(
+            skip_reason_at_collection(Dynamic, Dynamic.test_probe, "test_probe")
+        )
 
 
 class MultiProcContinuousSkipTest(MultiProcContinuousTest):
@@ -266,8 +430,11 @@ class BackendEntryPointTest(TestCase):
             "ENTRYPOINT_TEST": hasattr(dist.Backend, "ENTRYPOINT_TEST"),
             "NCCL-LEGACY": hasattr(dist.Backend, "NCCL-LEGACY"),
         }
+        self._fr_self_recording = c10d._FR_SELF_RECORDING_BACKENDS.copy()
 
     def tearDown(self):
+        c10d._FR_SELF_RECORDING_BACKENDS.clear()
+        c10d._FR_SELF_RECORDING_BACKENDS.update(self._fr_self_recording)
         dist.Backend._plugins = self._plugins
         dist.Backend.backend_list = self._backend_list
         dist.Backend.backend_capability = self._backend_capability
@@ -410,29 +577,41 @@ class BackendEntryPointTest(TestCase):
             out.split(), ["False", "False", "torch.distributed._backends.fake"]
         )
 
-    @parametrize("backend", ["nccl", "nccl-legacy", "nccl2", "nccl-lazy"])
+    @parametrize("backend", ["nccl", "nccl2", "nccl-lazy"])
     def test_nccl_backend_default_timeout(self, backend):
         timeout = timedelta(seconds=1)
         with unittest.mock.patch.object(c10d, "default_pg_nccl_timeout", timeout):
             self.assertEqual(c10d._get_default_timeout(backend), timeout)
 
+    @parametrize("legacy_default", [False, True])
     @parametrize("nccl2_override", [None, "0", "1"])
-    def test_nccl_backend_registration(self, nccl2_override):
+    def test_nccl_backend_registration(self, nccl2_override, legacy_default):
+        # legacy_default=True is the internal entry point, which keeps legacy
+        # unless TORCH_DIST_USE_NCCL2=1.
+        register = (
+            c10d._register_builtin_nccl_as_legacy
+            if legacy_default
+            else c10d._register_builtin_nccl_backend
+        )
         with unittest.mock.patch.dict(os.environ):
             if nccl2_override is None:
                 os.environ.pop("TORCH_DIST_USE_NCCL2", None)
             else:
                 os.environ["TORCH_DIST_USE_NCCL2"] = nccl2_override
-            c10d._register_builtin_nccl_backend()
+            register()
 
-        expected_creator = (
-            c10d._create_nccl_process_group
-            if nccl2_override == "0"
-            else c10d._create_nccl2_process_group
+        wants_legacy = nccl2_override == "0" or (
+            legacy_default and nccl2_override is None
         )
+        is_legacy = wants_legacy and c10d._NCCL_LEGACY_AVAILABLE
         self.assertIs(
             dist.Backend._plugins["NCCL"].creator_fn,
-            expected_creator,
+            c10d._create_nccl_process_group
+            if is_legacy
+            else c10d._create_nccl2_process_group,
+        )
+        self.assertEqual(
+            dist.Backend.NCCL in c10d._FR_SELF_RECORDING_BACKENDS, is_legacy
         )
         self.assertEqual(
             dist.Backend.backend_type_map["nccl"],
@@ -453,19 +632,6 @@ class BackendEntryPointTest(TestCase):
         ):
             os.environ.pop("LOCAL_RANK", None)
             self.assertEqual(c10d._nccl2_device(opts), torch.device("cuda:3"))
-
-    def test_nccl_legacy_backend_registration(self):
-        c10d._register_builtin_nccl_legacy_backend()
-
-        self.assertIs(
-            dist.Backend._plugins["NCCL-LEGACY"].creator_fn,
-            c10d._create_nccl_process_group,
-        )
-        self.assertEqual(dist.Backend.backend_capability["nccl-legacy"], ["cuda"])
-        self.assertEqual(
-            dist.Backend.backend_type_map["nccl-legacy"],
-            dist.ProcessGroup.BackendType.CUSTOM,
-        )
 
 
 instantiate_parametrized_tests(BackendEntryPointTest)
@@ -2701,6 +2867,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # Ensure backend config can be created with the following arguments
         backend_config_strings_and_expected_values = [
             (dist.Backend.GLOO, "cpu:gloo,cuda:gloo"),
+            (dist.Backend.XCCL, "xpu:xccl"),
             (dist.Backend.NCCL, "cuda:nccl"),
             (dist.Backend.MPI, "cpu:mpi,cuda:mpi"),
             (dist.Backend.UCC, "cpu:ucc,cuda:ucc"),
@@ -2711,19 +2878,11 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             ("cpu:dummy,cuda:nccl", "cpu:dummy,cuda:nccl"),
             ("cpu:gloo,cuda:dummy", "cpu:gloo,cuda:dummy"),
             ("cpu:gloo,cuda:nccl", "cpu:gloo,cuda:nccl"),
+            ("cpu:dummy,xpu:dummy", "cpu:dummy,xpu:dummy"),
+            ("cpu:dummy,xpu:xccl", "cpu:dummy,xpu:xccl"),
+            ("cpu:gloo,xpu:dummy", "cpu:gloo,xpu:dummy"),
+            ("cpu:gloo,xpu:xccl", "cpu:gloo,xpu:xccl"),
         ]
-
-        if TEST_XPU:
-            # Override backend_config_strings_and_expected_values for Intel GPU.
-            backend_config_strings_and_expected_values[4:10] = [
-                (dist.Backend.DUMMY, dummy_backend_config),
-                ("DUMMY", dummy_backend_config),
-                ("dummy", dummy_backend_config),
-                ("cpu:dummy,xpu:dummy", "cpu:dummy,xpu:dummy"),
-                ("cpu:dummy,xpu:xccl", "cpu:dummy,xpu:xccl"),
-                ("cpu:gloo,xpu:dummy", "cpu:gloo,xpu:dummy"),
-                ("cpu:gloo,xpu:xccl", "cpu:gloo,xpu:xccl"),
-            ]
 
         for config_str, expected_value in backend_config_strings_and_expected_values:
             with self.subTest(config_str):
@@ -2757,6 +2916,9 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             _parse_backend_string("NCCL", available_devices=all_devices),
             {"cuda": "nccl"},
         )
+        for backend_str in ("xccl", "XCCL"):
+            parsed = _parse_backend_string(backend_str, available_devices=all_devices)
+            self.assertEqual(parsed, {"xpu": "xccl"})
         # gloo is the default for both cpu and mps in default_device_backend_map.
         self.assertEqual(
             _parse_backend_string("gloo", available_devices=all_devices),
@@ -2774,6 +2936,9 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             ),
             {"cpu": "gloo", "cuda": "nccl"},
         )
+        for backend_str in ("cpu:gloo,xpu:xccl", "CPU:GLOO , XPU:XCCL"):
+            parsed = _parse_backend_string(backend_str, available_devices=all_devices)
+            self.assertEqual(parsed, {"cpu": "gloo", "xpu": "xccl"})
         # Unknown device types in merged form are accepted (no validation here).
         self.assertEqual(
             _parse_backend_string("xpu:nccl", available_devices=all_devices),

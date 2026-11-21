@@ -39,6 +39,16 @@ TEST(OpenRegActivityProfilerTest, AsyncConfigureReturnsNonNullSession) {
   EXPECT_NE(session, nullptr);
 }
 
+TEST(OpenRegActivityProfilerTest, DeviceTracingDisabledReturnsNoSession) {
+  OpenRegActivityProfiler profiler;
+  libkineto::Config config;
+  ASSERT_TRUE(config.parse("DEVICE_TRACING_ENABLED=false"));
+  EXPECT_EQ(profiler.configure({}, config), nullptr);
+  EXPECT_EQ(
+      profiler.configure(/*ts_ms=*/0, /*duration_ms=*/1000, {}, config),
+      nullptr);
+}
+
 class OpenRegSessionTest : public ::testing::Test {
  protected:
   void SetUp() override {
