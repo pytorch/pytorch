@@ -6870,6 +6870,17 @@ def graph_attends(q, mask, rate, **kwargs):
     return (out * 2).tanh().exp()
 
 
+def graph_attends_plainly(q, rate):
+    y = (q.sin() + 1).cos()
+    if q.is_cuda and torch.cuda.is_current_stream_capturing():
+        return y
+    out = torch.nn.functional.scaled_dot_product_attention(y, y, y)
+    if rate is not None:
+        again = torch.nn.functional.scaled_dot_product_attention(y, y, y, None, rate)
+        out = out + again
+    return (out * 2).tanh().exp()
+
+
 def graph_gives_two(y, **kwargs):
     left, right = y.split(2, dim=-1)
     out = (left * right).transpose(0, 1).contiguous()
@@ -10486,6 +10497,32 @@ class TestVmGraphResults(TestCase):
             expected = attends(q, mask, 0.5)
             torch.manual_seed(3)
             self.assertEqual(compiled(q, mask, 0.5), expected, atol=0, rtol=0)
+
+    def test_an_attention_at_no_rate_and_a_question_to_cuda_end_no_graph(self, device):
+        q = torch.randn(2, 2, 5, 4, device=device)
+        # An attention draws random numbers at a rate only: one that is
+        # given none, or zero, is an operation like any other, also of a
+        # graph that the VM runs itself. Whether the stream is captured
+        # into a CUDA graph is asked of torch's state and runs nothing.
+        fn, passes = graph_attends_plainly, (*DEFAULT, P.Graphs())
+        for rate, ops in ((None, 7), (0.0, 9)):
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            for _ in range(6):
+                self.assertEqual(compiled(q, rate), fn(q, rate), atol=0, rtol=0)
+            graphs = [g for g in torch.vm.regions(compiled) if "ops" in g]
+            found = [(g["state"], g["ops"], g["why"]) for g in graphs]
+            self.assertEqual(found, [("built", ops, "the function returns")])
+        # One that drops draws, and ends a graph that nothing stands for.
+        compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+        for _ in range(6):
+            torch.manual_seed(3)
+            expected = fn(q, 0.5)
+            torch.manual_seed(3)
+            self.assertEqual(compiled(q, 0.5), expected, atol=0, rtol=0)
+        graphs = [g for g in torch.vm.regions(compiled) if "ops" in g]
+        draws = "aten::scaled_dot_product_attention draws random numbers"
+        found = [(g["ops"], g["why"]) for g in graphs]
+        self.assertEqual(found, [(4, draws), (4, "the function returns")])
 
     def test_what_a_function_gives_back_in_a_tuple_is_what_the_graph_gave(self, device):
         x = torch.randn(3, 4, device=device)
