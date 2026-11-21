@@ -246,10 +246,51 @@ def _kl_binomial_binomial(p, q):
 
 @register_kl(Categorical, Categorical)
 def _kl_categorical_categorical(p, q):
+    log_ratio = q.logits - p.logits
+
+    # Near equality, summing p * (log(p) - log(q)) cancels first-order
+    # terms and can return a negative KL. For normalized distributions,
+    #
+    #   KL(p || q) = sum(p * (exp(s) - 1 - s)),  s = log(q) - log(p).
+    #
+    # Each summand is nonnegative. Evaluate the remainder using a series
+    # near zero to avoid cancellation within expm1(s) - s. See
+    # https://arxiv.org/abs/2611.18511 (Section 4.1).
+    #
+    # The remainder identity relies on normalized probabilities; retain
+    # the existing behavior for zero-probability or distant distributions.
+    finite = torch.isfinite(log_ratio)
+    near = (
+        finite.all(dim=-1)
+        & (log_ratio.abs() < 0.25).all(dim=-1)
+        & (p.probs > 0).all(dim=-1)
+        & (q.probs > 0).all(dim=-1)
+    )
+
+    # Bound inputs to the unused branch, too: torch.where evaluates both.
+    s = torch.where(finite, log_ratio, 0).clamp(-0.25, 0.25)
+    remainder_series = s.square() * (
+        0.5
+        + s * (
+            0.16666666666666666
+            + s
+            * (
+                0.041666666666666664
+                + s
+                * (
+                    0.008333333333333333
+                    + s * (0.001388888888888889 + s * 0.0001984126984126984)
+                )
+            )
+        )
+    )
+    remainder = torch.where(s.abs() < 0.125, remainder_series, torch.expm1(s) - s)
+    stable = (p.probs * remainder).sum(dim=-1)
+
     t = p.probs * (p.logits - q.logits)
     t[(q.probs == 0).expand_as(t)] = inf
     t[(p.probs == 0).expand_as(t)] = 0
-    return t.sum(-1)
+    return torch.where(near, stable, t.sum(-1))
 
 
 @register_kl(ContinuousBernoulli, ContinuousBernoulli)

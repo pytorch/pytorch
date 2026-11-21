@@ -5930,6 +5930,37 @@ class TestKLDevice(DistributionsTestCase):
             (Uniform(-1, 2), ContinuousBernoulli(0.75)),
         ]
 
+    def test_categorical_kl_near_equal(self):
+        # KL is quadratic near equality. The direct sum of log differences
+        # suffers first-order cancellation in float32 (arXiv:2611.18511).
+        logits = torch.tensor([-0.2, 0.1, 0.3], dtype=torch.float32)
+        p = Categorical(logits=logits)
+        for delta in (1e-3, 1e-4, 1e-5):
+            other = logits.clone()
+            other[1] += delta
+            result = kl_divergence(p, Categorical(logits=other))
+            reference = kl_divergence(
+                Categorical(logits=logits.double()),
+                Categorical(logits=other.double()),
+            )
+            self.assertGreaterEqual(result.item(), 0)
+            self.assertLess(abs(result.item() - reference.item()), 5e-10)
+
+        self.assertEqual(kl_divergence(p, p), torch.zeros(()))
+
+    def test_categorical_kl_near_equal_gradient(self):
+        logits = torch.tensor([-0.2, 0.1, 0.3], dtype=torch.float64)
+        other = (logits + torch.tensor([0.0, 1e-3, 0.0])).requires_grad_()
+        loss = kl_divergence(Categorical(logits=logits), Categorical(logits=other))
+        grad = torch.autograd.grad(loss, other)[0]
+        expected = Categorical(logits=other).probs - Categorical(logits=logits).probs
+        self.assertEqual(grad, expected, atol=1e-10, rtol=1e-6)
+
+    def test_categorical_kl_disjoint_support(self):
+        p = Categorical(probs=torch.tensor([1.0, 0.0]))
+        q = Categorical(probs=torch.tensor([0.0, 1.0]))
+        self.assertTrue(torch.isinf(kl_divergence(p, q)))
+
     def test_kl_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for (p, _), (_, q) in self.finite_examples:
