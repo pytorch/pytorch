@@ -484,6 +484,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizerContinuo
             s2.step()
             self.assertEqual(x, x2)
 
+    @skip_if_no_gpu
     def test_sharding(self):
         """
         Check ZeroRedundancyOptimizer's parameter sharding at construction
@@ -505,6 +506,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizerContinuo
             sum(sizes),
         )
 
+    @skip_if_no_gpu
     def test_add_param_group(self):
         """Check that ZeroRedundancyOptimizer properly handles adding a new
         parameter group a posteriori and that all ranks get a shard of the
