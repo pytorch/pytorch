@@ -1944,31 +1944,6 @@ class DequeVariable(BaseListVariable):  # noqa: RVT001
             mutation_type=ValueMutationNew(),
         )
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__setattr__":
-            # deque has no __dict__, so every attribute write raises. A name
-            # backed by a getset descriptor (maxlen) is read-only; anything else
-            # is simply absent.
-            attr_name = args[0].as_python_constant()
-            if self.lookup_tp_getset_member(attr_name) is not None:
-                msg = (
-                    f"attribute '{attr_name}' of 'collections.deque' objects "
-                    "is not writable"
-                )
-            else:
-                msg = (
-                    f"'collections.deque' object has no attribute '{attr_name}' "
-                    "and no __dict__ for setting new attributes"
-                )
-            raise_observed_exception(AttributeError, tx, args=[msg])
-        return super().call_method(tx, name, args, kwargs)
-
     def tp_init_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -2793,7 +2768,7 @@ class ByteArrayVariable(VariableTracker):
             item = item.realize()
             if isinstance(item, ByteArrayVariable):
                 parts.append(item.data)
-            elif istype(item, ConstantVariable):
+            elif ConstantVariable.is_constant_vt(item):
                 # Not UserDefinedConstantVariable: a str or int subclass may
                 # define __buffer__, which must not run at trace time.
                 parts.append(item.as_python_constant())
@@ -2817,9 +2792,10 @@ class ByteArrayVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        # upper(), lower() and title() are METH_NOARGS: Method.__call__
-        # enforces arity before this handler runs, so args/kwargs are
-        # always empty here (same no-arg pattern as list_copy).
+        # upper(), lower(), title(), capitalize() and swapcase() are
+        # METH_NOARGS: Method.__call__ enforces arity before this handler
+        # runs, so args/kwargs are always empty here (same no-arg pattern as
+        # list_copy).
         result = getattr(self.data, method_name)()
         return VariableTracker.build(tx, result)
 
@@ -2846,6 +2822,22 @@ class ByteArrayVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
         return self._bytearray_case_method(tx, "title", args, kwargs)
+
+    def bytearray_capitalize(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "capitalize", args, kwargs)
+
+    def bytearray_swapcase(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "swapcase", args, kwargs)
 
     def bytearray_replace(
         self,
@@ -2933,6 +2925,8 @@ class ByteArrayVariable(VariableTracker):
         "upper": Method(bytearray_upper),
         "lower": Method(bytearray_lower),
         "title": Method(bytearray_title),
+        "capitalize": Method(bytearray_capitalize),
+        "swapcase": Method(bytearray_swapcase),
         "replace": Method(bytearray_replace),
         "translate": Method(bytearray_translate),
         "center": Method(bytearray_center),
@@ -3733,6 +3727,20 @@ class ListReverseIteratorVariable(IteratorVariable):
         self.index += len(remaining)
         self.it_index = -1
         return remaining
+
+    def length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3999-L4009
+        remaining = self.it_index + 1
+        if self.is_exhausted or remaining > len(self.source_seq.items):  # type: ignore[attr-defined]
+            remaining = 0
+        return ConstantVariable.create(remaining)
+
+    tp_methods = {"__length_hint__": Method(length_hint)}
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.is_exhausted or self.it_index != len(self.source_seq.items) - 1:  # type: ignore[attr-defined]
