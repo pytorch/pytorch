@@ -500,6 +500,13 @@ class PackedSequenceTest(_PackedSequenceTestMixin, TestCase):
             packed = rnn_utils.pack_padded_sequence(
                 torch.randn([0, 1, 10]), torch.randn([11, 14, 14, 2]), True
             )
+        for enforce_sorted in (True, False):
+            with self.assertRaisesRegex(RuntimeError, "at most the sequence length"):
+                rnn_utils.pack_padded_sequence(
+                    torch.randn(5, 3, 4), [6, 3, 1], enforce_sorted=enforce_sorted
+                )
+        with self.assertRaisesRegex(RuntimeError, r"dimension 1, size 5"):
+            rnn_utils.pack_padded_sequence(torch.randn(3, 5, 4), [6, 3, 1], True)
 
     def test_empty_packed_sequence(self):
         """

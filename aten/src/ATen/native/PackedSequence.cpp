@@ -56,6 +56,11 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
                "requirement if you do not need ONNX exportability.");
     }
   }
+  // lengths is sorted, so lengths[0] is the longest sequence.
+  TORCH_CHECK(lengths[0] <= input.size(0),
+           "Length of all samples has to be at most the sequence length of the "
+           "input (dimension ", batch_first ? 1 : 0, ", size ", input.size(0),
+           "), but found an element in 'lengths' that is ", lengths[0]);
 
   std::vector<at::Tensor> steps;
   steps.reserve(batch_size);
