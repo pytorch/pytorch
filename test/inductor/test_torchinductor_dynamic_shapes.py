@@ -4,9 +4,12 @@ import importlib
 import math
 import operator
 import os
+import re
 import sys
 import unittest
 from functools import partial
+
+import sympy
 
 import torch
 import torch.library
@@ -24,6 +27,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCPU,
     onlyOn,
 )
@@ -250,6 +254,33 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
                 DynamicShapesGPUTests.test_randint_distribution_dynamic_shapes_cuda
             )
         )
+
+
+def _dual_dispatch_dtypes(code):
+    """Index dtypes of the kernels launched under the `if` and the `else` of the
+    dual index dtype dispatch in generated wrapper code, e.g. ({"i32"}, {"i64"})."""
+    # Each kernel's source has its Triton signature right before its `def`.
+    kernel_dtype = {
+        name: "i64" if "numel': 'i64'" in signature else "i32"
+        for signature, name in re.findall(
+            r"triton_meta=\{'signature': \{(.*?)\}.*?\ndef (\w+)\(", code, re.DOTALL
+        )
+    }
+    multi_kernels = {
+        name: re.findall(r"\w+", subs)
+        for name, subs in re.findall(
+            r"(\w+) = async_compile\.multi_kernel\('\w+', \[(.*?)\]", code, re.DOTALL
+        )
+    }
+
+    def dtypes(launched):
+        return {kernel_dtype[k] for k in multi_kernels.get(launched, [launched])}
+
+    dispatch = re.search(
+        r"if [^\n]*<= \d+:\n(?:.*\n)*?\s*(\w+)\.run\((?:.*\n)*?\s*else:\n(?:.*\n)*?\s*(\w+)\.run\(",
+        code,
+    )
+    return dtypes(dispatch[1]), dtypes(dispatch[2])
 
 
 class TestInductorDynamic(DynamicShapesTestCase):
@@ -809,6 +840,122 @@ class TestInductorDynamic(DynamicShapesTestCase):
         guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
         self.assertEqual("<= 2147483647" in guards, not avoid_guards)
         self.assertEqual("'xnumel': 'i64'" in code, avoid_guards)
+
+    @onlyOn(GPU_TYPE)
+    @parametrize("cooperative", [False, True])
+    def test_dual_index_dtype_reductions(self, device, cooperative):
+        from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
+
+        def fn(x):
+            return x.sum(-1), x.argmax(-1), torch.softmax(x, -1)
+
+        # Lower the int32 bound so that inputs above 64K elements run the int64 kernel.
+        int32_index_conditions = SIMDKernelFeatures.int32_index_conditions
+
+        def lowered_bound(self):
+            conds = int32_index_conditions(self)
+            return conds and [sympy.Le(cond.lhs, 64 * 1024) for cond in conds]
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+        with (
+            config.patch(
+                {
+                    "dual_index_dtype": True,
+                    "triton.force_cooperative_reductions": cooperative,
+                }
+            ),
+            unittest.mock.patch.object(
+                SIMDKernelFeatures, "int32_index_conditions", lowered_bound
+            ),
+        ):
+            x = torch.randn(64, 512, device=device)
+            actual, (code, *_) = run_and_get_code(compiled, x)
+            self.assertEqual(actual, fn(x))
+            # Both sides of the bound, in either order, without recompiling.
+            for shape in [(512, 512), (3, 7), (300, 1000), (64, 512)]:
+                y = torch.randn(shape, device=device)
+                self.assertEqual(compiled(y), fn(y))
+        self.assertEqual(counter.frame_count, 1)
+
+        self.assertEqual(_dual_dispatch_dtypes(code), ({"i32"}, {"i64"}))
+        if cooperative:
+            self.assertIn("RSPLIT", code)
+        (entry,) = _debug_get_cache_entry_list(fn.__code__)
+        self.assertNotIn("2147483647", str(entry.guard_manager))
+
+    @onlyOn(GPU_TYPE)
+    @serialTest()
+    @largeTensorTest("3GB", device=GPU_TYPE)  # measured peak: 2.25 GiB
+    @parametrize("dual", [False, True])
+    def test_dual_index_dtype_past_int32(self, device, dual):
+        def fn(x):
+            return x.sum(-1)
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+        with config.patch(dual_index_dtype=dual):
+            x = torch.randint(-3, 3, (64, 2**15), dtype=torch.int8, device=device)
+            self.assertEqual(compiled(x), fn(x))
+            # 2**31 + 2**15 elements: past the int32 range.
+            big = torch.randint(
+                -3, 3, (2**16 + 1, 2**15), dtype=torch.int8, device=device
+            )
+            # In chunks: eager sum upcasts int8 to int64, 16 GiB for all of big.
+            expected = torch.cat([chunk.sum(-1) for chunk in big.split(2**10)])
+            self.assertEqual(compiled(big), expected)
+        # Without dual kernels, the int32 kernel's size guard fails and recompiles.
+        self.assertEqual(counter.frame_count, 1 if dual else 2)
+
+    @onlyOn(GPU_TYPE)
+    def test_dual_index_dtype_multi_kernel(self, device):
+        from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
+
+        def fn(x):
+            return x.sum(-1), x.argmax(-1)
+
+        int32_index_conditions = SIMDKernelFeatures.int32_index_conditions
+
+        def lowered_bound(self):
+            conds = int32_index_conditions(self)
+            return conds and [sympy.Le(cond.lhs, 64 * 1024) for cond in conds]
+
+        # A static reduction size keeps the reduction persistent, so multi_kernel
+        # adds a looped variant on each side of the int32/int64 dispatch.
+        compiled = torch.compile(fn)
+        with (
+            config.patch({"dual_index_dtype": True, "triton.multi_kernel": 1}),
+            unittest.mock.patch.object(
+                SIMDKernelFeatures, "int32_index_conditions", lowered_bound
+            ),
+        ):
+            x = torch.randn(64, 512, device=device)
+            torch._dynamo.mark_dynamic(x, 0)
+            actual, (code, *_) = run_and_get_code(compiled, x)
+            self.assertEqual(actual, fn(x))
+            for rows in [256, 3]:
+                y = torch.randn(rows, 512, device=device)
+                self.assertEqual(compiled(y), fn(y))
+
+        FileCheck().check("<= 65536:").check("multi_kernel_").check("else:").check(
+            "multi_kernel_"
+        ).run(code)
+        self.assertEqual(_dual_dispatch_dtypes(code), ({"i32"}, {"i64"}))
+        (entry,) = _debug_get_cache_entry_list(fn.__code__)
+        self.assertNotIn("2147483647", str(entry.guard_manager))
+
+    @onlyOn(GPU_TYPE)
+    def test_dual_index_dtype_keeps_pointwise_guard(self, device):
+        def fn(x):
+            return x * 2 + 1
+
+        x = torch.randn(8, 1152, device=device)
+        with config.patch(dual_index_dtype=True):
+            actual, (code, *_) = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        self.assertEqual(actual, fn(x))
+        guards = str(_debug_get_cache_entry_list(fn.__code__)[0].guard_manager)
+        self.assertIn("<= 2147483647", guards)
+        self.assertNotIn("'xnumel': 'i64'", code)
 
     @onlyOn(GPU_TYPE)
     @torch._dynamo.config.patch(
