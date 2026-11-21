@@ -15,6 +15,7 @@ from torch.distributed._tools.ilp_utils import (
 from torch.distributed._tools.mem_tracker import _ModState, MemTracker
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.distributed._tools.sac_estimator import SACEstimator, SACStats
+from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -135,7 +136,15 @@ class TestSACILP(TestCase):
         return sac_estimator
 
     def _collect_module_info_with_fake_tensor_mode(self) -> ModuleInfo:
-        with FakeTensorMode():
+        # Pin the SDPA backend for the same reason setUp pins self.gpu_type:
+        # the activation memory the estimators see depends on which fused
+        # attention kernel the accelerator offers for this model's non-zero
+        # dropout_p -- CUDA picks flash, XPU has none and falls back to math,
+        # which saves the whole (bsz, n_heads, seq, seq) score matrix and more
+        # than doubles the estimate. The math decomposition is device-agnostic,
+        # so pinning it makes the memory budgets below mean the same thing on
+        # every accelerator.
+        with sdpa_kernel([SDPBackend.MATH]), FakeTensorMode():
             model, optimizer, inp = self._init_model_input_optimizer()
             mem_tracker = self._run_and_get_memTracker(model, optimizer, inp)
             runtime_estimator = self._run_and_get_runtime_estimator(
@@ -161,7 +170,9 @@ class TestSACILP(TestCase):
         mod_info = self._collect_module_info_with_fake_tensor_mode()
         g = parse_module_info(mod_info)
 
-        memory_budget = 1.6
+        # Under the pinned math-SDPA profile the ILP is infeasible below
+        # ~2.0 GiB and stops needing AC above ~6.0 GiB.
+        memory_budget = 3.0
         budget_bytes = round(memory_budget * (2**30))
 
         baseline_peak_mem, _ = get_peak_memory_runtime_baseline(g)
@@ -205,7 +216,7 @@ class TestSACILP(TestCase):
         mod_info = self._collect_module_info_with_fake_tensor_mode()
         g = parse_module_info(mod_info)
         ac_decisions, recomputation_time, peak_mem = sac_milp(
-            g, memory_budget=2.4, world_size=4
+            g, memory_budget=7.0, world_size=4
         )
         self.assertDictEqual(ac_decisions, {})
         self.assertEqual(recomputation_time, 0)
