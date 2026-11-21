@@ -116,8 +116,10 @@ class Graphs(BuiltinPass):
     not in the rest of the library.
 
     The engine runs a graph itself: the same kernels, on the same values, in
-    the same order, on the autograd tape of eager mode. With this pass alone a
-    function computes what it computes without it, bit for bit.
+    the same order. With this pass alone a function computes what it computes
+    without it, bit for bit, and leaves the gradients that eager leaves: the
+    engine derives the backward of a graph whose tensors need a gradient
+    (``backward``).
 
     A graph leaves the engine only for a pass over graphs, which stands behind
     this one in the list: a function ``pass_(gm, input_types) -> gm`` of
@@ -159,17 +161,22 @@ class Graphs(BuiltinPass):
             what eager's own autograd nodes run when they are called behind
             it. Once two calls came out the same, and what the nodes gave
             was what the autograd engine gives, the graph runs without a
-            tape and its results have one node; a pass over graphs then gets
+            tape and its results have one node (``GraphBackward``), whose
+            gradients are eager's bit for bit; a pass over graphs then gets
             a forward graph and a backward graph with nothing left to
             derive. A graph that cannot be taken down (an operation of its
             backward looks at what a tensor holds, say) keeps eager's tape.
+            With ``False`` every such graph keeps eager's tape: a pass of
+            one's own over graphs is handed the one graph with tensors
+            that need a gradient, as with :class:`AOTAutograd` in the list,
+            and :class:`Inductor` by itself is not handed it.
     """
 
     engine: ClassVar[str] = "graphs"
 
     min_ops: int = 4
     max_variants: int = 8
-    backward: bool = False
+    backward: bool = True
 
     def __post_init__(self) -> None:
         for name, least in (("min_ops", 1), ("max_variants", 0)):
@@ -196,8 +203,9 @@ class AOTAutograd(BuiltinPass):
     and returns a graph whose forward calls what it compiled. It compiles
     for the tensors of the call the graph was exported on. A pass that
     compiles is the last pass over a graph in the list, and there is one at
-    most. ``torch._functorch.aot_autograd`` is imported when the pass first
-    runs.
+    most, but for this one in front of :class:`Inductor`, which then
+    compiles what this one traced. ``torch._functorch.aot_autograd`` is
+    imported when the pass first runs.
     """
 
     engine: ClassVar[str] = "aot_autograd"
@@ -226,8 +234,12 @@ class AOTAutograd(BuiltinPass):
 
 @dataclasses.dataclass(frozen=True, repr=False)
 class Inductor(BuiltinPass):
-    """A pass over a graph: Inductor compiles the graph, and with gradients
-    enabled its backward, which AOTAutograd traces for it.
+    """A pass over a graph: Inductor compiles the graph. A graph whose
+    tensors need a gradient reaches it as two graphs whose tensors need
+    none, its forward and its backward, which the engine derived
+    (:class:`Graphs`): nothing is traced for a derivative. With
+    :class:`AOTAutograd` in front of it in the list, AOTAutograd derives the
+    backward instead, and Inductor compiles what it traced.
 
     This is the pass that makes a function faster than its kernels allow, and
     one that may change its numerics: what a graph compiler makes of the
@@ -235,8 +247,9 @@ class Inductor(BuiltinPass):
     graph is, ``pass_(gm, input_types)``, and returns a graph whose forward
     calls what it compiled. It compiles for the tensors of the call the graph
     was exported on. A pass that compiles is the last pass over a graph in
-    the list, and there is one at most. ``torch._inductor`` is imported when
-    the pass first runs.
+    the list, and there is one at most, but for :class:`AOTAutograd` in
+    front of this one. ``torch._inductor`` is imported when the pass first
+    runs.
     """
 
     engine: ClassVar[str] = "inductor"
