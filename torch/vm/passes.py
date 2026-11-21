@@ -107,22 +107,52 @@ class Graphs(BuiltinPass):
     the same order, on the autograd tape of eager mode. With this pass alone a
     function computes what it computes without it, bit for bit.
 
+    A graph leaves the engine only for a pass over graphs, which stands behind
+    this one in the list: a function ``pass_(gm, input_types) -> gm`` of
+    one's own. The graph is then
+    exported as a ``torch.fx.GraphModule`` of the operators the function
+    called (``torch.ops.aten.linear.default``, not what a kernel decomposes
+    into), for the tensors of one call of it. The passes are applied in the
+    order of the list, and what the last one returns runs in place of the
+    operations for every call whose tensors have the dtypes, devices, sizes,
+    strides and ``requires_grad`` of that one, with the same modes, and with
+    the same numbers and objects where the operations take any. Another call
+    is exported in its turn; so is a call under another dtype of autocast,
+    or with deterministic algorithms asked for. A call under a torch
+    function mode, a dispatch mode or a transform of ``torch.func`` runs the
+    operations as they are, so that those see them. With a pass over graphs
+    in the list and this pass missing, it is taken to be there, in front of
+    the first of them.
+
+    What an operation takes of the values the function reads (a number kept
+    by a module, a global, a variable of an enclosing function) is checked
+    on every call, where the graph takes it: a call that finds another
+    value is not run by what was exported for the old one. What the
+    function does between its operations runs in front of what was exported
+    or behind it only where that runs no Python code; a read that would call
+    a property or a ``__getattr__`` leaves the graph to the engine.
+
     Args:
-        min_ops: a run with fewer operations than this is no graph, and is not
-            reported as one.
+        min_ops: a run with fewer operations than this is no graph: it is not
+            reported as one, and not exported.
+        max_variants: how many times a graph is exported, once per kind of
+            call, before the calls of further kinds run its operations as
+            they are.
     """
 
     engine: ClassVar[str] = "graphs"
 
     min_ops: int = 4
+    max_variants: int = 8
 
     def __post_init__(self) -> None:
-        given = self.min_ops
-        if isinstance(given, bool) or not isinstance(given, int):
-            kind = type(given).__name__
-            raise TypeError(f"Graphs takes min_ops as a number, not {kind}")
-        if given < 1:
-            raise ValueError(f"Graphs(min_ops={given}): at least 1")
+        for name, least in (("min_ops", 1), ("max_variants", 0)):
+            given = getattr(self, name)
+            if isinstance(given, bool) or not isinstance(given, int):
+                kind = type(given).__name__
+                raise TypeError(f"Graphs takes {name} as a number, not {kind}")
+            if given < least:
+                raise ValueError(f"Graphs({name}={given}): at least {least}")
 
 
 @dataclasses.dataclass(frozen=True, repr=False)
