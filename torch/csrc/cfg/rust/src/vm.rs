@@ -44,8 +44,10 @@ pub struct Options {
     pub unboxed: bool,
     /// Inline calls of functions of the same module.
     pub inline: bool,
-    /// Unroll loops over a small constant range.
+    /// Unroll loops over a small constant range, of at most this many
+    /// iterations.
     pub unroll: bool,
+    pub max_trip_count: i64,
     /// Compile the Python functions that compiled code calls.
     pub callees: bool,
     /// Take the registered shortcuts through library code (see shortcuts.rs).
@@ -70,6 +72,7 @@ impl Default for Options {
             unboxed: true,
             inline: true,
             unroll: true,
+            max_trip_count: unroll::MAX_TRIP_COUNT,
             callees: true,
             shortcuts: true,
             demote: true,
@@ -354,7 +357,7 @@ pub fn lower(
         inline::inline_calls(py, table, &mut function, &func.getattr("__code__")?);
     }
     if options.unroll {
-        function.unrolled = unroll::unroll_loops(&mut function);
+        function.unrolled = unroll::unroll_loops(&mut function, options.max_trip_count);
     }
     Ok(function)
 }
