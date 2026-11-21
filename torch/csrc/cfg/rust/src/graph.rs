@@ -866,9 +866,56 @@ unsafe fn is_plain_container(o: Obj) -> bool {
             || (ffi::PyTuple_Check(o) != 0 && is_static(ffi::Py_TYPE(o))))
 }
 
+/// Whether a plain key is looked up in a dict, or put into it, without a
+/// key of the dict being compared with it in Python code (a key of a class
+/// with an `__eq__`, whose hash is that of the plain one): every key the
+/// dict has is plain. A dict that has taken nothing but texts says so
+/// itself (`pyffi::text_keys`); any other is gone through, if it is small.
+pub unsafe fn quiet_keys(dict: Obj) -> bool {
+    const SCANNED: isize = 32;
+    if pyffi::text_keys(dict) {
+        return true;
+    }
+    if ffi::PyDict_Size(dict) > SCANNED {
+        return false;
+    }
+    let (mut at, mut key, mut value) = (0, null_mut(), null_mut());
+    while ffi::PyDict_Next(dict, &mut at, &mut key, &mut value) != 0 {
+        if !is_plain_key(key) {
+            return false;
+        }
+    }
+    true
+}
+
+/// The same for a set: a small one that holds nothing but plain values.
+unsafe fn quiet_members(set: Obj) -> bool {
+    const SCANNED: isize = 32;
+    if ffi::PySet_Size(set) > SCANNED {
+        return false;
+    }
+    let members = ffi::PyObject_GetIter(set);
+    if members.is_null() {
+        ffi::PyErr_Clear();
+        return false;
+    }
+    let mut plain = true;
+    loop {
+        let member = ffi::PyIter_Next(members);
+        if member.is_null() {
+            break;
+        }
+        plain &= is_plain_key(member);
+        ffi::Py_DECREF(member);
+    }
+    ffi::PyErr_Clear();
+    ffi::Py_DECREF(members);
+    plain
+}
+
 /// Whether `container[key]` runs no Python code.
 pub unsafe fn quiet_item(container: Obj, key: Obj) -> bool {
-    is_plain_container(container) && is_plain_key(key)
+    is_plain_container(container) && is_plain_key(key) && (ffi::PyDict_Check(container) == 0 || quiet_keys(container))
 }
 
 /// Whether the entries of one dict go into another without Python code
@@ -930,8 +977,11 @@ pub unsafe fn quiet_contains(item: Obj, container: Obj) -> bool {
     if capi::is_unboxed(item) || capi::is_unboxed(container) || !is_plain(item) {
         return false;
     }
-    if is_plain_dict(container) || ffi::PyAnySet_CheckExact(container) != 0 {
-        return true;
+    if is_plain_dict(container) {
+        return quiet_keys(container);
+    }
+    if ffi::PyAnySet_CheckExact(container) != 0 {
+        return quiet_members(container);
     }
     if ffi::PyUnicode_CheckExact(container) != 0 {
         return ffi::PyUnicode_CheckExact(item) != 0;
@@ -1188,7 +1238,7 @@ pub unsafe fn pure_method(recv: Obj, name: Obj, args: &[Obj], api: &TcfgApi) -> 
     }
     match name.as_str() {
         "keys" | "values" | "items" => args.is_empty(),
-        "get" => (1..=2).contains(&args.len()) && is_plain_key(args[0]),
+        "get" => (1..=2).contains(&args.len()) && is_plain_key(args[0]) && quiet_keys(recv),
         _ => false,
     }
 }
