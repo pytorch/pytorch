@@ -544,7 +544,13 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
     The ``wrap_triton`` API wraps a triton kernel into a callable that
     can actually be traced into a graph.
 
-    Please use this API together with :func:`torch.library.triton_op`.
+    Use this API inside :func:`torch.library.triton_op`; see its docstring
+    for an example. For eager execution or ``torch.compile`` you can skip
+    both and call the triton kernel directly. Calling ``wrap_triton`` outside
+    ``triton_op`` works, but each eager call goes through higher-order-op
+    dispatch, and ``torch.export`` records a triton higher-order-op node
+    instead of a custom-op node. The example below calls it standalone only
+    to show what ``make_fx`` captures.
 
     Examples:
 
@@ -590,11 +596,12 @@ def wrap_triton(triton_kernel: Callable, /) -> Any:
         >>> #     empty_like = torch.ops.aten.empty_like.default(x_1, pin_memory = False)
         >>> #     triton_kernel_wrapper_mutation_proxy = triton_kernel_wrapper_mutation(
         >>> #         kernel_idx = 0, constant_args_idx = 0,
-        >>> #         grid = [(1, 1, 1)], kwargs = {
+        >>> #         grid = [(1, 1, 1)], tma_descriptor_metadata = {}, kwargs = {
         >>> #             'in_ptr0': x_1, 'in_ptr1': y_1, 'out_ptr': empty_like,
         >>> #             'n_elements': 3, 'BLOCK_SIZE': 16
         >>> #         })
         >>> #     return empty_like
+        >>> assert torch.allclose(gm(x, y), x + y)
 
     """
     from triton.runtime.autotuner import Autotuner
