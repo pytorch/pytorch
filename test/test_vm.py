@@ -6881,6 +6881,15 @@ def graph_attends_plainly(q, rate):
     return (out * 2).tanh().exp()
 
 
+def graph_imports(x):
+    y = (x.sin() + 1).cos()
+    import torch.fx
+
+    if isinstance(y, torch.fx.Proxy):
+        return y
+    return (y * 2).tanh().exp()
+
+
 def graph_gives_two(y, **kwargs):
     left, right = y.split(2, dim=-1)
     out = (left * right).transpose(0, 1).contiguous()
@@ -10523,6 +10532,14 @@ class TestVmGraphResults(TestCase):
         draws = "aten::scaled_dot_product_attention draws random numbers"
         found = [(g["ops"], g["why"]) for g in graphs]
         self.assertEqual(found, [(4, draws), (4, "the function returns")])
+
+    def test_an_import_of_a_module_that_was_imported_does_not_end_a_graph(self, device):
+        # `import a.b` of what was imported before looks the module and its
+        # outermost package up and runs nothing: libraries ask this way
+        # whether a tensor is a proxy of a tracer.
+        x = torch.randn(3, 4, device=device)
+        compiled = self.whole_graph(graph_imports, (x,), 6)
+        self.assertEqual(compiled(x * 2), graph_imports(x * 2), atol=0, rtol=0)
 
     def test_what_a_function_gives_back_in_a_tuple_is_what_the_graph_gave(self, device):
         x = torch.randn(3, 4, device=device)
