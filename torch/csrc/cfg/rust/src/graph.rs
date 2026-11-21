@@ -328,13 +328,57 @@ pub struct Path {
     pub exported: Shared<Vec<Arc<Exported>>>,
     /// Register files for the calls that run it, kept from one to the next.
     pub registers: Shared<Vec<Vec<Obj>>>,
+    /// Which instructions of `body` run in front of the callable and
+    /// behind it, in order (`Path::staged`).
+    pub stages: [Vec<u32>; 2],
+    /// The values of the function that the path takes and hands on: it
+    /// writes them to a value of the function or binds a variable to
+    /// them, as they are or as an item of a tuple it builds. What such a
+    /// value holds is held by the function when the path has landed.
+    pub handed: Vec<V>,
 }
 
 // The registers are empty between calls, and only touched with the GIL held.
 unsafe impl Send for Path {}
 unsafe impl Sync for Path {}
 
+/// The instructions of a path by the stage they run in (`Path::stages`).
+pub fn stages_of(body: &[PathInst]) -> [Vec<u32>; 2] {
+    let mut stages = [Vec::new(), Vec::new()];
+    for (at, inst) in body.iter().enumerate() {
+        match inst.stage {
+            Stage::Before => stages[0].push(at as u32),
+            Stage::After => stages[1].push(at as u32),
+            Stage::Inside | Stage::Skipped => {}
+        }
+    }
+    stages
+}
+
+/// The values of the function that a path hands on (`Path::handed`).
+fn handed_of(inputs: &[(V, PathValue)], body: &[PathInst], writes: &[(PathValue, V)], bound: &[(u32, PathValue)]) -> Vec<V> {
+    let mut handed: std::collections::HashSet<PathValue> = writes.iter().map(|(made, _)| *made).collect();
+    handed.extend(bound.iter().map(|(_, made)| *made));
+    for inst in body.iter().rev() {
+        if let (Op::BuildTuple(items), true) = (&inst.op, handed.contains(&inst.dst)) {
+            handed.extend(items.iter().copied());
+        }
+    }
+    inputs.iter().filter(|(_, made)| handed.contains(made)).map(|(v, _)| *v).collect()
+}
+
 impl Path {
+    /// The instructions that run in one stage: in front of the callable or
+    /// behind it.
+    pub fn staged(&self, stage: Stage) -> impl Iterator<Item = &PathInst> + '_ {
+        let at = match stage {
+            Stage::Before => 0,
+            Stage::After => 1,
+            Stage::Inside | Stage::Skipped => unreachable!("no instruction runs in this stage"),
+        };
+        self.stages[at].iter().map(|k| &self.body[*k as usize])
+    }
+
     /// How many kinds of calls have something that runs in place of the
     /// nodes.
     pub fn compiled(&self) -> usize {
@@ -372,6 +416,12 @@ pub struct Left {
 /// callable or behind it could run Python code before the graph is left to
 /// the VM.
 const MAX_UNSURE: u32 = 3;
+/// How many calls in a row may find that a graph cannot take them for
+/// what its path lets go of (a path that is turned down where it would
+/// land, a path that is not taken down to its end) before the graph
+/// gives way to the graphs inside it. A call that runs a path of the
+/// graph starts the count anew; one that takes a path down does not.
+const MAX_TURNED: u32 = 3;
 
 /// How many exported forms that differ in nothing but numbers, and of
 /// which none ever ran again, say that the numbers are new on every call.
@@ -380,6 +430,9 @@ const MAX_UNSURE: u32 = 3;
 const EVER_NEW: usize = 3;
 
 pub const EVER_NEW_REASON: &str = "its inputs take ever new values";
+
+/// What is said of a graph that gave way (`GraphSite::gave_way`).
+pub const GAVE_WAY_REASON: &str = "where its path lands it would let go of an object whose end may run Python code";
 
 /// How many calls in a row with the same numbers reopen a kind of call that
 /// was closed for numbers that are new every time.
@@ -429,6 +482,10 @@ pub struct GraphSite {
     pub min_ops: usize,
     pub max_variants: usize,
     unsure: AtomicU32,
+    /// How many calls in a row a path of the graph was turned down for
+    /// what it would let go of where it lands; from `MAX_TURNED` on the
+    /// graph has given way (`gave_way`).
+    turned: AtomicU32,
     provisional: AtomicU32,
     /// How many times it was handed to the exporter, and how many calls
     /// ran what was made of it and how many ran its instructions.
@@ -467,6 +524,7 @@ impl GraphSite {
             min_ops: graphs.min_ops,
             max_variants: graphs.max_variants,
             unsure: AtomicU32::new(0),
+            turned: AtomicU32::new(0),
             provisional: AtomicU32::new(0),
             exports: AtomicU64::new(0),
             hits: AtomicU64::new(0),
@@ -550,13 +608,28 @@ impl GraphSite {
     /// and is not tried again on a part of it.
     pub fn outer(&self) -> Option<Arc<GraphSite>> {
         let outer = self.within.borrow().upgrade()?;
-        let there = !matches!(*outer.state.borrow(), GraphState::Small(_));
+        let there = !matches!(*outer.state.borrow(), GraphState::Small(_)) && !outer.gave_way();
         there.then_some(outer)
     }
 
     /// Whether `Op::Graph` has anything to do for it.
     pub fn runs(&self) -> bool {
-        self.outer().is_none() && (self.records() || self.forms() != (0, 0))
+        self.outer().is_none() && !self.gave_way() && (self.records() || self.forms() != (0, 0))
+    }
+
+    /// A path of the graph was turned down for what it would let go of
+    /// where it lands (an object whose end may run Python code), or was
+    /// not taken down to its end for such an object. Where that happens
+    /// `MAX_TURNED` calls in a row, the graph gives way: it is not
+    /// entered again, and the graphs that start further on, which were
+    /// part of it, are their own again.
+    pub fn turned_down(&self) {
+        self.turned.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Whether the graph has given way (`turned_down`).
+    pub fn gave_way(&self) -> bool {
+        self.turned.load(Ordering::Relaxed) >= MAX_TURNED
     }
 
     pub fn give_up(&self, reason: String) {
@@ -617,6 +690,9 @@ impl GraphSite {
 
     pub fn sure(&self) {
         self.unsure.store(0, Ordering::Relaxed);
+        if !self.gave_way() {
+            self.turned.store(0, Ordering::Relaxed);
+        }
     }
 
     /// Whether a run that is about to be exported is one more of a kind of
@@ -1144,10 +1220,57 @@ unsafe extern "C" fn every_referent(o: Obj, arg: *mut std::ffi::c_void) -> std::
     0
 }
 
+/// Whether an object is a tensor whose end may let go of what cannot be
+/// looked at from here: one that requires a gradient. Such a tensor has a
+/// history, or is a leaf that gradients are accumulated in, and what
+/// that holds (the nodes of the history with the hooks on them and the
+/// Python objects that functions written in Python saved, the hooks of
+/// the tensor) is held from C++ and ends with the tensor where nothing
+/// else holds it.
+pub unsafe fn holds_unseen(o: Obj) -> bool {
+    let mut info = TcfgTensorInfo::empty();
+    capi::api().is_some_and(|api| (api.tensor_info)(o, &mut info) != 0 && info.requires_grad != 0)
+}
+
+/// Whether the end of an object runs code of its class: a `__del__`, or
+/// what the interpreter's own classes do at the end of their objects (a
+/// file is closed, a generator that waits at a `yield` is closed, which
+/// runs what it has left to run). A generator that was never started, or
+/// that ran to its end, has nothing to run.
+unsafe fn finalized(o: Obj) -> bool {
+    let ty = ffi::Py_TYPE(o);
+    if (*ty).tp_del.is_some() {
+        return true;
+    }
+    if (*ty).tp_finalize.is_none() {
+        return false;
+    }
+    if ffi::PyGen_CheckExact(o) == 0 {
+        return true;
+    }
+    let rests = |name: &std::ffi::CStr| {
+        let said = ffi::PyObject_GetAttrString(o, name.as_ptr());
+        let rests = said == ffi::Py_False();
+        if said.is_null() {
+            ffi::PyErr_Clear();
+        }
+        xdecref(said);
+        rests
+    };
+    !(rests(c"gi_suspended") && rests(c"gi_running"))
+}
+
+/// Whether an object is a tensor (of any class of tensors).
+unsafe fn is_tensor(o: Obj) -> bool {
+    let mut info = TcfgTensorInfo::empty();
+    capi::api().is_some_and(|api| (api.tensor_info)(o, &mut info) != 0)
+}
+
 /// Whether letting go of a reference to an object runs no Python code even
 /// if it is the last one, as far as that can be shown by looking: neither
 /// the object nor anything it refers to, and so may take with it, is of a
-/// class with a finalizer (`__del__`, a generator's, a file's) or has a
+/// class with a finalizer (`__del__`, a generator's, a file's), is a
+/// tensor that requires a gradient (`holds_unseen`), or has a
 /// weak reference with a callback, other than the one by which a weak
 /// dictionary or a weak set takes its entry out (what goes with that
 /// entry is looked at like what the object refers to). At most 64 objects
@@ -1174,7 +1297,7 @@ pub unsafe fn dies_quietly(o: Obj) -> bool {
         let ty = ffi::Py_TYPE(held);
         found.clear();
         let before = more.len();
-        if (*ty).tp_finalize.is_some() || (*ty).tp_del.is_some() || weakly_watched(held, &mut more) {
+        if finalized(held) || weakly_watched(held, &mut more) || holds_unseen(held) {
             return false;
         }
         found.extend(more[before..].iter().map(|other| other.as_ptr()));
@@ -1207,54 +1330,258 @@ unsafe fn holds_others(o: Obj) -> bool {
         && ffi::PyCode_Check(o) == 0
 }
 
-/// Whether an object stays alive when a path lands and leaves: `dropped`
-/// of the references to it that were there before the path ran are let go
-/// of where the path lands, and when it leaves, so is every reference the
-/// path itself holds. Those are counted, with whatever else may be one:
-/// the registers of the path that hold the object (`own`), and what the
-/// values in those registers refer to where a value may be something the
-/// path made (a container or an iterator of the interpreter's own
-/// classes, and what such a one holds inside), but not what the function
-/// had before the path (`given`). If the object has more references than
-/// that, one of them is somebody else's, and it stays. False where there
-/// is too much to look at, or containers are more than four deep inside
-/// one another.
-pub unsafe fn outlives(o: Obj, own: &[Obj], given: &[Obj], dropped: isize) -> bool {
-    const LOOKED_AT: usize = 4096;
-    let mut slots: Vec<Obj> = own.iter().copied().filter(|held| !held.is_null() && !capi::is_unboxed(*held)).collect();
-    let mut held = slots.iter().filter(|other| **other == o).count() as isize;
-    slots.sort_unstable();
-    slots.dedup();
-    let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
-    let mut work: Vec<(Obj, u32)> = Vec::new();
-    for other in &slots {
-        if *other != o && !given.contains(other) && holds_others(*other) {
-            work.push((*other, 0));
+/// Who holds references that are not the function's while a path is run
+/// or taken down, and so go when that is over: for each of `asked`, no
+/// fewer than those references (None where that cannot be told); and
+/// whether an object is a tensor that an operation of the path made.
+pub trait Holds {
+    unsafe fn held(&mut self, asked: &[Obj]) -> Option<Vec<isize>>;
+    unsafe fn made(&mut self, o: Obj) -> bool;
+}
+
+impl Holds for Scan<'_> {
+    unsafe fn held(&mut self, asked: &[Obj]) -> Option<Vec<isize>> {
+        Scan::held(self, asked)
+    }
+
+    unsafe fn made(&mut self, _o: Obj) -> bool {
+        false
+    }
+}
+
+/// What a trace keeps of a run (`Recording::kept`), with the values of
+/// the path that an operation gave.
+pub struct Kept<'a> {
+    pub kept: &'a HashMap<usize, (isize, PathValue)>,
+    pub defs: &'a [Def],
+}
+
+impl Holds for Kept<'_> {
+    unsafe fn held(&mut self, asked: &[Obj]) -> Option<Vec<isize>> {
+        Some(asked.iter().map(|o| self.kept.get(&(*o as usize)).map_or(0, |(count, _)| *count)).collect())
+    }
+
+    unsafe fn made(&mut self, o: Obj) -> bool {
+        self.kept.get(&(o as usize)).is_some_and(|(_, first)| self.defs.get(*first as usize).is_some_and(|def| def.node))
+    }
+}
+
+/// The values of a path, for counting the references the path itself may
+/// hold to an object: the registers of the path (`own`), and what the
+/// function had before the path (`given`: such a value is not the path's).
+pub struct Scan<'a> {
+    own: &'a [Obj],
+    given: &'a [Obj],
+    /// What the registers hold, in order of where it is, once looked at.
+    slots: Option<Vec<Obj>>,
+    /// The values that may be something the path made and that hold
+    /// references: containers, iterators and bound methods of the
+    /// interpreter's own classes.
+    temps: Vec<Obj>,
+}
+
+impl<'a> Scan<'a> {
+    pub fn new(own: &'a [Obj], given: &'a [Obj]) -> Scan<'a> {
+        Scan { own, given, slots: None, temps: Vec::new() }
+    }
+
+    /// For each of `asked`, no fewer than the references the path itself
+    /// holds to it: the registers that hold it, and every reference to it
+    /// from a value that may be something the path made, or from what
+    /// such a value holds inside. None where there is too much to look at
+    /// (4096 objects, or containers more than four deep inside one
+    /// another).
+    pub unsafe fn held(&mut self, asked: &[Obj]) -> Option<Vec<isize>> {
+        const LOOKED_AT: usize = 4096;
+        if self.slots.is_none() {
+            let mut slots: Vec<Obj> = self.own.iter().copied().filter(|held| !held.is_null() && !capi::is_unboxed(*held)).collect();
+            slots.sort_unstable();
+            let mut temps = slots.clone();
+            temps.dedup();
+            temps.retain(|other| !self.given.contains(other) && holds_others(*other));
+            self.temps = temps;
+            self.slots = Some(slots);
+        }
+        let slots = self.slots.as_ref().expect("just made");
+        let mut counts: Vec<isize> = asked
+            .iter()
+            .map(|o| (slots.partition_point(|other| *other <= *o) - slots.partition_point(|other| *other < *o)) as isize)
+            .collect();
+        let index: HashMap<usize, usize> = asked.iter().enumerate().map(|(i, o)| (*o as usize, i)).collect();
+        let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut work: Vec<(Obj, u32)> = self.temps.iter().map(|other| (*other, 0)).collect();
+        let mut found: Vec<Obj> = Vec::new();
+        while let Some((at, depth)) = work.pop() {
+            if seen.len() >= LOOKED_AT {
+                return None;
+            }
+            seen.insert(at as usize);
+            let Some(traverse) = (*ffi::Py_TYPE(at)).tp_traverse else {
+                continue;
+            };
+            found.clear();
+            traverse(at, every_referent, &mut found as *mut Vec<Obj> as *mut std::ffi::c_void);
+            for other in &found {
+                if let Some(i) = index.get(&(*other as usize)) {
+                    counts[*i] += 1;
+                } else if slots.binary_search(other).is_err() && holds_others(*other) && !seen.contains(&(*other as usize)) {
+                    if depth >= 4 {
+                        return None;
+                    }
+                    work.push((*other, depth + 1));
+                }
+            }
+        }
+        Some(counts)
+    }
+}
+
+/// Whether the objects that a path lets go of where it lands (`gone`, each
+/// as often as the path lets go of a reference to it; put in order here)
+/// end without Python code running, as far as they end at all. Looked at
+/// as the garbage collector looks at a set of objects: an object ends if
+/// its count of references is no larger than the references to it that
+/// the path lets go of, those from objects that end, and those the path
+/// itself holds (`scan`; none where the path has taken nothing of the
+/// call yet: every reference is then somebody else's or one that is let
+/// go of); else one of its references is somebody else's and it stays,
+/// with everything it refers to, and is not looked into. `stay` are
+/// objects that are known to stay, `more` further objects to look at, of
+/// which no reference is let go of. What ends must be of a class without a
+/// finalizer and have no weak reference with a callback other than a weak
+/// container's own (`weakly_watched`); what it refers to, and what a weak
+/// container lets go of with its entry, is looked at in the same way.
+/// Nothing of this is remembered from one call to the next: which
+/// objects are let go of, how many references each has, what class it is
+/// of and what that class does at the end of an object, the weak
+/// references to it and what it refers to are all read at the call. Err
+/// with the object whose end may run Python code, or with null where
+/// there is too much to look at (4096 objects that end, or `Scan::held`
+/// says so).
+pub unsafe fn end_quietly(gone: &mut [Obj], stay: &[Obj], more: &[Obj], mut scan: Option<&mut dyn Holds>) -> Result<(), Obj> {
+    const ENDING: usize = 4096;
+    gone.sort_unstable();
+    // The distinct objects, each with how often it is let go of.
+    let runs = |gone: &[Obj]| {
+        let mut runs: Vec<(Obj, isize)> = Vec::new();
+        for o in gone {
+            match runs.last_mut() {
+                Some((last, count)) if *last == *o => *count += 1,
+                _ => runs.push((*o, 1)),
+            }
+        }
+        runs
+    };
+    // A number, a text or None refers to nothing and ends quietly.
+    let ends_alone = |o: Obj| is_plain(o) || ffi::PyBytes_CheckExact(o) != 0;
+    if scan.is_none() {
+        // The common case, without keeping anything: every object has a
+        // reference besides those that are let go of, so nothing ends.
+        let (mut at, mut all) = (0, true);
+        while at < gone.len() && all {
+            let o = gone[at];
+            let count = gone[at..].iter().take_while(|other| **other == o).count();
+            all = ffi::Py_REFCNT(o) > count as isize || ends_alone(o) || stay.contains(&o);
+            at += count;
+        }
+        if all {
+            return Ok(());
         }
     }
-    let mut found: Vec<Obj> = Vec::new();
-    while let Some((at, depth)) = work.pop() {
-        if seen.len() >= LOOKED_AT {
-            return false;
+    // Per object that was reached: the references to it that are neither
+    // the path's nor let go of by it (counted once, when it is reached),
+    // how many of those are from objects that end, and whether it ends.
+    struct Reached {
+        others: isize,
+        inside: isize,
+        ends: bool,
+        /// It goes with a tensor that ends, whatever its count says.
+        with: bool,
+    }
+    let mut reached: HashMap<usize, Reached> = HashMap::new();
+    // Those that were reached and not counted yet, and those whose count
+    // is to be compared again.
+    let mut fresh: Vec<(Obj, isize)> = Vec::new();
+    let mut touched: Vec<Obj> = Vec::new();
+    let nothing = more.iter().filter(|o| gone.binary_search(o).is_err()).map(|o| (*o, 0));
+    for (o, count) in runs(gone).into_iter().chain(nothing) {
+        if !ends_alone(o) && !stay.contains(&o) && !reached.contains_key(&(o as usize)) {
+            reached.insert(o as usize, Reached { others: 0, inside: 0, ends: false, with: false });
+            fresh.push((o, count));
+            touched.push(o);
         }
-        seen.insert(at as usize);
-        let Some(traverse) = (*ffi::Py_TYPE(at)).tp_traverse else {
-            continue;
-        };
-        found.clear();
-        traverse(at, every_referent, &mut found as *mut Vec<Obj> as *mut std::ffi::c_void);
-        for other in &found {
-            if *other == o {
-                held += 1;
-            } else if slots.binary_search(other).is_err() && holds_others(*other) && !seen.contains(&(*other as usize)) {
-                if depth >= 4 {
-                    return false;
+    }
+    // What a weak container lets go of with its entry is kept here while
+    // it is looked at: those references are not anybody's.
+    let mut more: Vec<PyObj> = Vec::new();
+    let mut found: Vec<Obj> = Vec::new();
+    let mut ended = 0;
+    loop {
+        if !fresh.is_empty() {
+            let asked: Vec<Obj> = fresh.iter().map(|(o, _)| *o).collect();
+            let held = match scan.as_deref_mut() {
+                Some(scan) => scan.held(&asked).ok_or(null_mut::<ffi::PyObject>())?,
+                None => vec![0; asked.len()],
+            };
+            for ((o, dropped), held) in fresh.drain(..).zip(held) {
+                let kept_here = more.iter().filter(|other| other.as_ptr() == o).count() as isize;
+                let entry = reached.get_mut(&(o as usize)).expect("it was reached");
+                entry.others = ffi::Py_REFCNT(o) - kept_here - held - dropped;
+            }
+        }
+        let mut ending: Vec<Obj> = Vec::new();
+        for o in touched.drain(..) {
+            let entry = reached.get_mut(&(o as usize)).expect("it was reached");
+            if !entry.ends && (entry.with || entry.others - entry.inside < 1) {
+                entry.ends = true;
+                ending.push(o);
+            }
+        }
+        if ending.is_empty() {
+            return Ok(());
+        }
+        for o in ending {
+            ended += 1;
+            if ended > ENDING {
+                return Err(null_mut());
+            }
+            let ty = ffi::Py_TYPE(o);
+            found.clear();
+            let before = more.len();
+            if finalized(o) || weakly_watched(o, &mut more) {
+                return Err(o);
+            }
+            // A tensor that requires a gradient ends with what C++ holds
+            // for it, which cannot be looked at: unless the operations of
+            // the path made it, whose history is theirs.
+            let tensor = is_tensor(o);
+            if tensor && holds_unseen(o) && !scan.as_deref_mut().is_some_and(|scan| scan.made(o)) {
+                return Err(o);
+            }
+            found.extend(more[before..].iter().map(|other| other.as_ptr()));
+            if let Some(traverse) = (*ty).tp_traverse {
+                traverse(o, every_referent, &mut found as *mut Vec<Obj> as *mut std::ffi::c_void);
+            }
+            for other in &found {
+                // A class does not end where a reference to it is let go of.
+                if ffi::PyType_Check(*other) != 0 || ends_alone(*other) || stay.contains(other) {
+                    continue;
                 }
-                work.push((*other, depth + 1));
+                let entry = reached.entry(*other as usize).or_insert_with(|| {
+                    let dropped = gone.partition_point(|o| *o <= *other) - gone.partition_point(|o| *o < *other);
+                    fresh.push((*other, dropped as isize));
+                    Reached { others: 0, inside: 0, ends: false, with: false }
+                });
+                entry.inside += 1;
+                // What a tensor shows of itself (its attributes, the
+                // hooks on it) may be held from C++ as well, by what
+                // ends with the tensor: it is looked at whatever its
+                // count of references says.
+                entry.with |= tensor;
+                touched.push(*other);
             }
         }
     }
-    ffi::Py_REFCNT(o) - held - dropped >= 1
 }
 
 /// The same for a set: a small one that holds nothing but plain values.
@@ -1981,6 +2308,10 @@ pub fn pure_operator(name: &str) -> bool {
 /// (dtype, device, requires_grad, sizes: an owned tuple).
 pub struct Recording {
     pub values: Vec<Obj>,
+    /// Per object among `values`: how many of them it is (each is a
+    /// reference the trace holds beyond those of the function), and the
+    /// first value it is.
+    pub kept: HashMap<usize, (isize, PathValue)>,
     /// The site is null for an operation that is no call site.
     pub nodes: Vec<(*mut TcfgSite, Obj)>,
     /// Why the run cannot be described, once something says so.
@@ -3294,6 +3625,8 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
         resume: None,
         nregs: 0,
         inputs,
+        stages: stages_of(&body),
+        handed: Vec::new(),
         body,
         feeds,
         outputs,
@@ -3397,6 +3730,8 @@ pub struct Trace {
     /// A called function read a value that the path does not have: the
     /// trace is of no use from there on.
     pub lost: bool,
+    /// The trace was let go of (`abandon`), and why.
+    pub abandoned: Option<String>,
     /// The path ends where a later one will go on: at a block, or a call
     /// of a function, that the tiers have not decided on yet.
     pub provisional: bool,
@@ -3415,7 +3750,8 @@ impl Trace {
             bound: Vec::new(),
             operators: Vec::new(),
             shape: Vec::new(),
-            rec: Recording { values: vec![null_mut()], nodes: Vec::new(), failed: None, wrote: false },
+            rec: Recording { values: vec![null_mut()], kept: HashMap::new(), nodes: Vec::new(), failed: None, wrote: false },
+            abandoned: None,
             mark: None,
             inplace: false,
             first: None,
@@ -3467,6 +3803,9 @@ impl Trace {
         self.defs.push(def);
         self.source.push((self.owner(), NONE));
         self.rec.values.push(kept);
+        if !kept.is_null() && !capi::is_unboxed(kept) {
+            self.rec.kept.entry(kept as usize).or_insert((0, made)).0 += 1;
+        }
         made
     }
 
@@ -3493,6 +3832,23 @@ impl Trace {
         if self.outermost() {
             self.held[v as usize] = Held::Empty;
         }
+    }
+
+    /// Lets go of every reference the trace holds to the values of the
+    /// run. A trace keeps what its instructions gave and took, so that
+    /// the run can be described when it has ended; an object that the
+    /// function has let go of is alive by that alone. Where the end of
+    /// such an object may run Python code, it has to end where the
+    /// function let go of it: the trace gives up what it holds, there,
+    /// and nothing is made of this run.
+    pub unsafe fn abandon(&mut self, why: String) {
+        // What the trace reads of its values from here on finds None.
+        for kept in self.rec.values.iter_mut().filter(|kept| !kept.is_null()) {
+            let held = std::mem::replace(kept, new_ref(ffi::Py_None()));
+            if capi::is_unboxed(held) { capi::release(held) } else { xdecref(held) }
+        }
+        self.rec.kept.clear();
+        self.abandoned = Some(why);
     }
 
     pub fn push(&mut self, op: Op, dst: PathValue, kind: Kind, bc: u32) {
@@ -3589,6 +3945,12 @@ impl Trace {
         self.defs.truncate(mark.values);
         self.source.truncate(mark.values);
         for kept in self.rec.values.drain(mark.values..) {
+            if let Some(count) = self.rec.kept.get_mut(&(kept as usize)) {
+                count.0 -= 1;
+                if count.0 == 0 {
+                    self.rec.kept.remove(&(kept as usize));
+                }
+            }
             xdecref(kept);
         }
         for (_, meta) in self.rec.nodes.drain(mark.nodes..) {
@@ -3727,6 +4089,8 @@ impl Path {
             provisional: false,
             exported: Shared::new(Vec::new()),
             registers: Shared::new(Vec::new()),
+            stages: Default::default(),
+            handed: Vec::new(),
         }
     }
 
@@ -3888,6 +4252,8 @@ impl Path {
             land,
             resume,
             nregs,
+            stages: stages_of(&trace.body),
+            handed: handed_of(&trace.inputs, &trace.body, &writes, &bound),
             inputs: trace.inputs.clone(),
             body: std::mem::take(&mut trace.body),
             feeds,
