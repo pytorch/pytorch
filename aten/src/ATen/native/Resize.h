@@ -41,16 +41,9 @@ TORCH_API void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes);
 TORCH_API void resize_bytes_meta(StorageImpl* storage, c10::SymInt size_bytes);
 TORCH_API void resize_bytes_nocuda(const Storage& storage, const c10::SymInt& size_bytes);
 
+// Caller must skip zero-numel requested shapes (see _resize_impl_). Checking
+// self->numel() here is incorrect when storage is resized before metadata.
 inline void maybe_resize_storage_cpu(TensorImpl* self, size_t new_size_bytes) {
-  // It does not make sense to try to resize a storage
-  // to hold 0 elements, and this can break
-  // if storage_offset is positive but
-  // new_size is 0, so just bail in that case
-  // (same comment is in cuda/Resize.h)
-  if (self->numel() == 0) {
-    return;
-  }
-
   const Storage& storage = self->unsafe_storage();
   if (!storage) {
     auto new_storage = c10::make_intrusive<StorageImpl>(
