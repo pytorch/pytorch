@@ -20,7 +20,10 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.utils import _p_assert
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipXPUIf,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     AlwaysWrapNestedWrappedModule,
@@ -43,6 +46,7 @@ from torch.testing._internal.common_utils import (
     TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
 )
+from torch.testing._internal.common_xpu import Xe2_Or_Later
 
 
 if not dist.is_available():
@@ -178,6 +182,7 @@ class TestParityWithDDP(FSDPTest):
             sharding_strategy=sharding_strategy,
         )
 
+    @skipXPUIf(not Xe2_Or_Later, "torch.xpu._sleep is not supported before Xe2")
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_delayed_optim_step(
@@ -200,6 +205,7 @@ class TestParityWithDDP(FSDPTest):
             init_kwargs={"delay_after_loss_ms": 50},
         )
 
+    @skipXPUIf(not Xe2_Or_Later, "torch.xpu._sleep is not supported before Xe2")
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_delayed_reduce_scatter(
@@ -248,6 +254,7 @@ class TestParityWithDDP(FSDPTest):
     @unittest.skipIf(
         TEST_HPU, "HPU doesn't has HW sleep API support (like CUDA), skipping"
     )
+    @skipXPUIf(not Xe2_Or_Later, "torch.xpu._sleep is not supported before Xe2")
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_mixture_of_experts_with_delay_before_free(
