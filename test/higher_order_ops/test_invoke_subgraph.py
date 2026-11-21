@@ -416,11 +416,12 @@ class TestInvokeSubgraphCompile(TestCase):
         ):
             torch.compile(fn, backend=backend, fullgraph=True)(x, y).sum().backward()
 
-        def has_invoke_subgraph(gm):
+        def has_invoke_subgraph(fx_g):
+            graph = fx_g if isinstance(fx_g, torch.fx.Graph) else fx_g.graph
             return any(
                 node.op == "call_function"
                 and node.target is torch.ops.higher_order.invoke_subgraph
-                for node in gm.graph.nodes
+                for node in graph.nodes
             )
 
         self.assertTrue(any(map(has_invoke_subgraph, canonicalized_graphs)))
