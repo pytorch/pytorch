@@ -4518,6 +4518,12 @@ impl Compiled {
                     checked(held)
                 }
                 op if self.quiet(own, op, api) => self.exec_op(own, op),
+                // An attribute that the path read is not there at this
+                // call, and `object` says so itself: the read raises and
+                // does nothing else, where the instructions get to it.
+                Op::LoadAttr(of, name) if graph::plainly_absent(reg(own, *of), self.func.consts[*name as usize].as_ptr()) => {
+                    return Staged::Failed;
+                }
                 op => {
                     let text = self.func.op_repr(op);
                     site.unsure(text.split_whitespace().next().unwrap_or("an instruction"));
