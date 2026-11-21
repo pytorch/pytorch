@@ -430,6 +430,7 @@ impl CfgFunction {
         out.set_item("compiled_callees", compiled)?;
         out.set_item("interpreted_callees", interpreted)?;
         out.set_item("demoted_callees", cf.callees.demoted())?;
+        out.set_item("sampling_callees", cf.callees.sampling())?;
         out.set_item("demoted", cf.is_demoted())?;
         out.set_item("measuring", cf.is_measuring())?;
         out.set_item("log", state.log.clone())?;
