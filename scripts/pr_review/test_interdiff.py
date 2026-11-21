@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -185,6 +186,94 @@ class TestInterdiff(unittest.TestCase):
         self.assertIn("+2-pr", out.read_text())
         interdiff.main([*args, "--max-bytes", "10"])
         self.assertEqual(out.read_text(), interdiff.NOTE_TOO_LARGE)
+
+    def since_approval(self, previous: str, base: str, max_bytes: str) -> str:
+        """main() as the workflow runs it for a.txt; the file it writes."""
+        files, out, step = Path("files.z"), Path("out.txt"), Path("step_output")
+        files.write_bytes(b"a.txt\0")
+        step.write_text("")
+        args = ["--since", "approval", "--previous", previous, "--previous-base"]
+        args += [self.b0, "--base", base, "--files", str(files), "--out", str(out)]
+        interdiff.main([*args, "--max-bytes", max_bytes, "--output", str(step)])
+        return out.read_text()
+
+    def test_since_approval_names_the_approval_in_every_note(self):
+        v2 = self.repo.commit(self.v1, {"a.txt": "1-pr\n2-pr\n3\n"})
+        self.checkout(v2)
+        step, notes = Path("step_output"), interdiff.APPROVAL_NOTES
+
+        def write(previous, max_bytes="100000"):
+            return self.since_approval(previous, self.b0, max_bytes)
+
+        text = write(self.v1)
+        self.assertTrue(text.startswith(notes["header"].format(sha=self.v1)), text)
+        self.assertIn("+2-pr", text)
+        # Only a file that limits the review to the changes since exports the
+        # approved commit for the publisher.
+        self.assertEqual(step.read_text(), f"approved_sha={self.v1}\n")
+        self.assertEqual(write(""), notes["none"])
+        self.assertEqual(step.read_text(), "")
+        self.assertEqual(write(v2), notes["same"])
+        self.assertEqual(step.read_text(), "")
+        self.assertEqual(write(self.v1, "10"), notes["too_large"])
+        self.assertEqual(step.read_text(), "")
+        narrowing = {"header", "base_only"}
+        for key, note in notes.items():
+            self.assertEqual(
+                interdiff.narrows(note.format(sha=self.v1)), key in narrowing, key
+            )
+        self.assertEqual(set(notes), set(interdiff.REVIEW_NOTES))
+        for key, note in notes.items():
+            self.assertNotIn("automated review", note, key)
+
+    def test_since_approval_says_when_the_base_moved(self):
+        r = self.repo
+        # Upstream changes the PR's file and another one; the author rebases.
+        b1 = r.commit(self.b0, {"a.txt": "1\n2\n3-up\n", "b.txt": "x-up\n"})
+        # Committed before the scratch files below, which `commit` would add.
+        base_only = r.commit(b1, {"a.txt": "1-pr\n2\n3-up\n"})
+        changed = r.commit(b1, {"a.txt": "1-pr\n2-pr\n3-up\n"})
+        step, notes = Path("step_output"), interdiff.APPROVAL_NOTES
+
+        def write(previous, max_bytes="100000"):
+            return self.since_approval(previous, b1, max_bytes)
+
+        moved = interdiff.BASE_MOVED.format(old=self.b0, new=b1, listing="")
+        listed = interdiff.BASE_MOVED.format(
+            old=self.b0, new=b1, listing=interdiff.BASE_LISTED
+        )
+        unlisted = interdiff.BASE_MOVED.format(
+            old=self.b0, new=b1, listing=interdiff.BASE_UNLISTED
+        )
+        # The base alone changed the PR's file: the approval still covers it.
+        self.checkout(base_only)
+        self.assertEqual(
+            write(self.v1),
+            notes["base_only"].format(sha=self.v1) + listed + "#   a.txt\n#   b.txt\n",
+        )
+        self.assertEqual(step.read_text(), f"approved_sha={self.v1}\n")
+        # The author changed it too: the note follows the author's changes.
+        self.checkout(changed)
+        text = write(self.v1)
+        self.assertTrue(text.startswith(notes["header"].format(sha=self.v1)), text)
+        changes, _, note = text.partition(listed)
+        self.assertIn("+2-pr", changes)
+        self.assertEqual(note, "#   a.txt\n#   b.txt\n")
+        with mock.patch.object(interdiff, "BASE_MAX_FILES", 1):
+            self.assertTrue(write(self.v1).endswith("#   a.txt\n#   ...and 1 more\n"))
+        # Without room for the list, the note alone; without room for that,
+        # the size note, which blocks as usual.
+        size = len(changes.encode())
+        self.assertEqual(write(self.v1, str(size + len(unlisted))), changes + unlisted)
+        self.assertEqual(write(self.v1, str(size + 10)), notes["too_large"])
+        self.assertEqual(step.read_text(), "")
+        # A name from the base is data: it cannot add a line.
+        evil = r.commit(b1, {"x\n# y": "z\n"})
+        self.checkout(evil)
+        self.assertIn("#   x\\n# y\n", interdiff.base_moved("t", self.b0, evil, 10**6))
+        # A note that does not narrow the review never says it.
+        self.assertNotIn(moved.strip(), write(""))
+        self.assertNotIn("base moved", interdiff.REVIEW_NOTES["header"])
 
     def test_main_reads_the_repo_it_is_given(self):
         # As in the workflow: run from elsewhere with --repo pointing at the PR's working copy.
