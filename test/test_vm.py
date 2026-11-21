@@ -4364,6 +4364,30 @@ class TestVmDemotion(TestCase):
             self.assertEqual(compiled(300), demote_python(300))
         self.assertTrue(compiled.stats()["demoted"])
 
+    def test_a_measurement_waits_for_the_device(self):
+        # What a graph starts on a GPU is not done when the call returns, so
+        # the time of a call that is measured ends when a builtin that waits
+        # for the device has returned. Here it is one that can be counted.
+        torch.vm._load_runtime()
+        waits = list(range(10000))
+        cfg_rs.trial_settles(waits.pop)
+        self.addCleanup(cfg_rs.trial_settles, None)
+        compiled = torch.vm(demote_python, fallback=False, demote=True)
+        for _ in range(200):
+            self.assertEqual(compiled(300), demote_python(300))
+        self.assertTrue(compiled.stats()["demoted"])
+        measured = 10000 - len(waits)
+        # Before and after each call that was timed, and not before the ones
+        # that warm up.
+        self.assertGreaterEqual(measured, 8)
+        self.assertEqual(measured % 2, 0)
+        # Once it is decided, nothing waits.
+        for _ in range(20):
+            compiled(300)
+        self.assertEqual(10000 - len(waits), measured)
+        with self.assertRaisesRegex(TypeError, "builtin"):
+            cfg_rs.trial_settles(lambda: None)
+
     def test_measurement_is_reported(self):
         compiled = torch.vm(demote_python, fallback=False, demote=True)
         self.assertTrue(compiled.stats()["measuring"])

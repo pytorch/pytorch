@@ -816,6 +816,22 @@ pub fn unsettled() {
     vm::unsettled();
 }
 
+/// Has the measurement of a function against the interpreter wait, with
+/// `settle()`, for the devices that run what it started: see
+/// `TRIAL_SETTLE`. `settle` must be a builtin, which runs without a frame
+/// for the hook to be offered; None for no waiting.
+#[pyfunction]
+pub fn trial_settles(settle: &Bound<'_, PyAny>) -> PyResult<()> {
+    if settle.is_none() {
+        vm::trial_settles(null_mut());
+    } else if unsafe { ffi::PyCFunction_Check(settle.as_ptr()) } == 0 {
+        return Err(pyo3::exceptions::PyTypeError::new_err("trial_settles takes a builtin"));
+    } else {
+        vm::trial_settles(settle.as_ptr());
+    }
+    Ok(())
+}
+
 #[pyfunction]
 pub fn plan_changed() {
     vm::plan_changed();
