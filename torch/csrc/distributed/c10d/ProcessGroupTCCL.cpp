@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupTCCLDetail.hpp>
 #include <torch/csrc/distributed/c10d/TCCLUtils.hpp>
 
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/util/thread_name.h>
 
@@ -68,7 +69,11 @@ at::Tensor mpsSharedCpuView(const at::Tensor& mpsTensor) {
 uint32_t mpsEventRecord() {
   auto& hooks = at::detail::getMPSHooks();
   uint32_t eid = hooks.acquireEvent(false);
-  hooks.recordEvent(eid);
+  // Main has several MPS streams; signal on the caller's current one, where
+  // the work this collective waits for was encoded.
+  const auto stream = c10::impl::getDeviceGuardImpl(c10::DeviceType::MPS)
+                          ->getStream(c10::Device(c10::DeviceType::MPS, 0));
+  hooks.recordEvent(eid, stream.id());
   return eid;
 }
 
