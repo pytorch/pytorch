@@ -14,10 +14,14 @@ struct TORCH_API resize__ViewMeta : public ViewMeta {
   resize__ViewMeta(const SerializableTuple& tpl)
       : resize__ViewMeta(std::get<0>(tpl), std::get<1>(tpl)) {}
 
-  resize__ViewMeta(bool reapply_views, const std::vector<int64_t>& size)
+  resize__ViewMeta(
+      bool reapply_views,
+      const std::vector<int64_t>& size,
+      bool can_coalesce = false)
       : ViewMeta(/*has_symbolic_inputs=*/false),
         reapply_views(reapply_views),
-        size(size) {}
+        size(size),
+        can_coalesce(can_coalesce) {}
 
   Tensor forward(const Tensor& base) override;
   Tensor reverse(const Tensor& base, const Tensor& mutated_view) override;
@@ -28,6 +32,8 @@ struct TORCH_API resize__ViewMeta : public ViewMeta {
 
   bool reapply_views;
   std::vector<int64_t> size;
+  // Resizes with a noncontiguous result cannot be replayed from the size alone.
+  bool can_coalesce;
 };
 
 // `ViewMeta` implementation for `_unsafe_view` operation.
