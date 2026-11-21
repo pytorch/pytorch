@@ -507,8 +507,10 @@ def _fused_sgd(
         all(t is None for t in momentum_buffer_list) and not no_momentum_buffer
     )
     if is_first_step:
+        # zeros_like so a GradScaler-skipped first step cannot leave uninitialized
+        # momentum in optimizer state for the next real step (#201615).
         for i, g in enumerate(grads):
-            momentum_buffer_list[i] = torch.empty_like(g)
+            momentum_buffer_list[i] = torch.zeros_like(g)
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, momentum_buffer_list],  # type: ignore[list-item]
         with_indices=False,
