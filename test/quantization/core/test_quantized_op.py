@@ -55,6 +55,8 @@ from torch.testing._internal.common_quantized import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     IS_ARM64,
     IS_FBCODE,
     IS_MACOS,
@@ -3478,6 +3480,67 @@ class TestQuantizedOps(TestCase):
                 )
             y_ref = y_ref.to(out_dtype)
             self.assertEqual(y, y_ref, msg=lambda msg: f"{msg}\n{y} vs {y_ref}")
+
+
+@instantiate_parametrized_tests
+class TestQuantizedBatchNormEmpty(TestCase):
+    @skipIfNoFBGEMM
+    @parametrize("shape, memory_format", [
+        ((2, 3), torch.contiguous_format),
+        ((2, 3, 4), torch.contiguous_format),
+        ((2, 3, 4, 5), torch.contiguous_format),
+        ((2, 3, 4, 5), torch.channels_last),
+        ((2, 3, 4, 5, 6), torch.contiguous_format),
+        ((2, 3, 4, 5, 6), torch.channels_last_3d),
+    ])
+    @parametrize("empty_axis", [0, -1])
+    @parametrize("dtype", [torch.qint8, torch.quint8])
+    @parametrize("relu", [False, True])
+    @parametrize("generic", [False, True])
+    def test_batch_norm_empty_qparams(self, shape, memory_format, empty_axis, dtype, relu, generic):
+        shape = list(shape)
+        shape[empty_axis] = 0
+        qx = torch.quantize_per_tensor(torch.empty(shape), 0.3, 7, dtype)
+        qx = qx.contiguous(memory_format=memory_format)
+        channels = shape[1]
+        name = "batch_norm" if generic else f"batch_norm{max(1, len(shape) - 2)}d"
+        if relu:
+            name += "_relu"
+        with override_quantized_engine("fbgemm"):
+            out = getattr(torch.ops.quantized, name)(
+                qx, torch.ones(channels), torch.zeros(channels),
+                torch.zeros(channels), torch.ones(channels), 1e-5, 0.2, 5
+            )
+        self.assertEqual(out.shape, qx.shape)
+        self.assertEqual(out.dtype, dtype)
+        self.assertEqual(out.q_scale(), 0.2)
+        self.assertEqual(out.q_zero_point(), 5)
+        self.assertTrue(out.is_contiguous(memory_format=memory_format))
+        self.assertEqual(qx.q_scale(), 0.3)
+        self.assertEqual(qx.q_zero_point(), 7)
+
+    @skipIfNoONEDNN
+    @parametrize("empty_axis", [0, 2])
+    @parametrize("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize("output_dtype", [torch.uint8, torch.float32, torch.bfloat16, torch.float16])
+    def test_onednn_batch_norm_empty_dtype(self, empty_axis, memory_format, output_dtype):
+        shape = [2, 3, 4, 5]
+        shape[empty_axis] = 0
+        qx = torch.empty(shape, dtype=torch.uint8).contiguous(memory_format=memory_format)
+        scale, zero_point = (0.2, 5) if output_dtype == torch.uint8 else (1.0, 0)
+        out = torch.ops.onednn.qbatch_norm2d(
+            qx, 0.3, 7, torch.ones(3), torch.zeros(3), torch.zeros(3), torch.ones(3),
+            1e-5, scale, zero_point, output_dtype
+        )
+        self.assertEqual(out.shape, qx.shape)
+        self.assertEqual(out.dtype, output_dtype)
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        if output_dtype != torch.uint8:
+            with self.assertRaisesRegex(RuntimeError, "output scale and zero point should be 1 and 0"):
+                torch.ops.onednn.qbatch_norm2d(
+                    qx, 0.3, 7, torch.ones(3), torch.zeros(3), torch.zeros(3), torch.ones(3),
+                    1e-5, 0.2, 5, output_dtype
+                )
 
 
 class TestQuantizedMaxPool2dPT2EDevice(TestCase):
