@@ -586,6 +586,10 @@ impl Region {
         // end: the values from before the range, and the ones it gives.
         let mut defined: Vec<V> = Vec::new();
         let mut held: Vec<V> = Vec::new();
+        // The variables the range binds are bound once it is done: to what
+        // they were bound to last, if that is from before the range or one
+        // of the values it gives, and to nothing otherwise.
+        let mut bound: Vec<(u32, V)> = Vec::new();
         for u in &unit.insts[start..end] {
             if let Op::Hold(values) = &u.inst.op {
                 for v in values {
@@ -593,6 +597,11 @@ impl Region {
                         held.push(*v);
                     }
                 }
+            }
+            if let Op::StoreLocal(slot, v) = &u.inst.op {
+                bound.retain(|(other, _)| other != slot);
+                let given = !defined.contains(v) || outputs.contains(v);
+                bound.push((*slot, if given { *v } else { UNDEF }));
             }
             if u.inst.dst != NONE {
                 defined.push(u.inst.dst);
@@ -614,6 +623,13 @@ impl Region {
         if !held.is_empty() {
             fused.push(crate::spec::UInst {
                 inst: Inst { dst: NONE, op: Op::Hold(held), bc, kills: Vec::new() },
+                origin: NONE,
+                removable: false,
+            });
+        }
+        for (slot, v) in bound {
+            fused.push(crate::spec::UInst {
+                inst: Inst { dst: NONE, op: Op::StoreLocal(slot, v), bc, kills: Vec::new() },
                 origin: NONE,
                 removable: false,
             });

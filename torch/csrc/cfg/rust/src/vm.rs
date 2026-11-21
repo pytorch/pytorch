@@ -465,23 +465,26 @@ impl Args {
 }
 
 /// The interpreter frame a compiled function runs under. The VM keeps its
-/// instruction pointer on the bytecode of the instruction it executes; the
-/// locals of the frame stay empty, since they live in the VM's registers.
+/// instruction pointer on the bytecode of the instruction it executes, and
+/// its variables what the function binds them to (see `Op::StoreLocal`); the
+/// values the function computes with live in the VM's registers.
 #[derive(Clone, Copy)]
 struct Frame {
     /// Null where frames are not supported.
     ptr: *mut std::ffi::c_void,
     instr: *mut *mut u16,
     code: *mut u16,
+    /// The variables of the frame: an owned reference or null each.
+    locals: *mut Obj,
 }
 
 impl Frame {
-    const NONE: Frame = Frame { ptr: null_mut(), instr: null_mut(), code: null_mut() };
+    const NONE: Frame = Frame { ptr: null_mut(), instr: null_mut(), code: null_mut(), locals: null_mut() };
 
     unsafe fn push(function: Obj) -> Result<Frame, ()> {
         let mut frame = Frame::NONE;
         if let Some(push) = capi::api().and_then(|api| api.frame_push) {
-            frame.ptr = push(function, &mut frame.instr, &mut frame.code);
+            frame.ptr = push(function, &mut frame.instr, &mut frame.code, &mut frame.locals);
             if frame.ptr.is_null() {
                 return Err(());
             }
@@ -489,13 +492,10 @@ impl Frame {
         Ok(frame)
     }
 
-    /// `kept` (consumed, may be null) goes on living with the frame object,
-    /// if there is one that outlives the frame.
-    unsafe fn pop(self, kept: Obj) {
-        if self.ptr.is_null() {
-            xdecref(kept);
-        } else {
-            (capi::api().unwrap_unchecked().frame_pop.unwrap_unchecked())(self.ptr, kept);
+    /// A frame object that outlives the frame takes its variables with it.
+    unsafe fn pop(self) {
+        if !self.ptr.is_null() {
+            (capi::api().unwrap_unchecked().frame_pop.unwrap_unchecked())(self.ptr);
         }
     }
 
@@ -575,11 +575,25 @@ impl Frames {
             return;
         }
         if self.depth < Frames::CAPACITY {
-            self.frames[self.depth].pop(null_mut());
+            self.frames[self.depth].pop();
         }
         self.depth -= 1;
     }
 }
+
+/// The variables of frames that are bound to a tensor without a Python
+/// object (see `Compiled::obj`): the frame, the variable's place in it, which
+/// is empty meanwhile, and a reference to the tensor. Each gets its object,
+/// and the frame the object, before anything runs that can look at a frame:
+/// a call, an exception, a signal check. So there are none whenever the
+/// function is not the one that is running.
+struct Unbound {
+    list: std::cell::RefCell<Vec<(*mut std::ffi::c_void, *mut Obj, Obj)>>,
+    any: std::cell::Cell<bool>,
+}
+
+unsafe impl Send for Unbound {}
+unsafe impl Sync for Unbound {}
 
 /// `match_keys` of ceval.c: the values `map` has for `keys`, as a tuple; None
 /// if it lacks one of them; null with an error set if looking raised.
@@ -894,6 +908,7 @@ pub struct Compiled {
     pub options: Options,
     pub pipeline: Arc<Pipeline>,
     frames: Shared<Vec<Vec<Obj>>>,
+    unbound: Unbound,
     /// Kernel results that were kept unboxed, and how many of those got a
     /// Python object after all.
     pub unboxed_results: AtomicU64,
@@ -1081,6 +1096,96 @@ impl Compiled {
         boxed
     }
 
+    /// Binds a variable of `frame` to the content of a register, or unbinds
+    /// it for an empty one (see `Op::StoreLocal`). A tensor without a Python
+    /// object does not get one for this: the variable stays unbound until
+    /// `bind` runs.
+    #[inline(always)]
+    unsafe fn store_local(&self, frame: Frame, slot: u32, o: Obj) {
+        if frame.locals.is_null() {
+            return;
+        }
+        let place = frame.locals.add(slot as usize);
+        if self.unbound.any.get() {
+            self.forget(|entry| entry.1 == place);
+        }
+        let bound = if capi::is_unboxed(o) {
+            self.wait(frame, place, o);
+            null_mut()
+        } else {
+            ffi::Py_XINCREF(o);
+            o
+        };
+        // The slot first: letting go of what it held can run a finalizer.
+        xdecref(std::mem::replace(&mut *place, bound));
+    }
+
+    #[inline(never)]
+    unsafe fn wait(&self, frame: Frame, place: *mut Obj, tensor: Obj) {
+        capi::retain(tensor);
+        self.unbound.list.borrow_mut().push((frame.ptr, place, tensor));
+        self.unbound.any.set(true);
+    }
+
+    /// Gives the tensors that variables are bound to their Python objects,
+    /// and the frames the objects. Leaves the error indicator as it is.
+    #[cold]
+    unsafe fn bind(&self) {
+        let list = std::mem::take(&mut *self.unbound.list.borrow_mut());
+        self.unbound.any.set(false);
+        let raised = ffi::PyErr_GetRaisedException();
+        let api = capi::api().unwrap_unchecked();
+        for (_, place, tensor) in list {
+            // Consumes the reference.
+            let boxed = (api.tensor_box)(tensor);
+            if boxed.is_null() {
+                ffi::PyErr_Clear();
+            } else {
+                xdecref(std::mem::replace(&mut *place, boxed));
+            }
+        }
+        if !raised.is_null() {
+            ffi::PyErr_SetRaisedException(raised);
+        }
+    }
+
+    /// Lets go of the tensors of the variables `which` picks, which stay
+    /// unbound.
+    #[cold]
+    unsafe fn forget(&self, which: impl Fn(&(*mut std::ffi::c_void, *mut Obj, Obj)) -> bool) {
+        let mut list = self.unbound.list.borrow_mut();
+        let mut i = 0;
+        while i < list.len() {
+            if which(&list[i]) {
+                capi::release(list.swap_remove(i).2);
+            } else {
+                i += 1;
+            }
+        }
+        self.unbound.any.set(!list.is_empty());
+    }
+
+    /// For a frame that is about to be popped. What holds on to the frame
+    /// (the traceback of an exception, as a rule) finds its variables bound.
+    #[inline(always)]
+    unsafe fn settle(&self, frame: Frame) {
+        if self.unbound.any.get() {
+            if frame.held() {
+                self.bind();
+            } else {
+                self.forget(|entry| entry.0 == frame.ptr);
+            }
+        }
+    }
+
+    /// Pops the frame of the inlined function that is running.
+    unsafe fn leave(&self, frames: &mut Frames) {
+        if frames.depth > 0 {
+            self.settle(frames.top());
+        }
+        frames.leave();
+    }
+
     pub fn new(
         mut func: Function,
         options: Options,
@@ -1182,6 +1287,7 @@ impl Compiled {
             options,
             pipeline,
             frames: Shared::new(Vec::new()),
+            unbound: Unbound { list: std::cell::RefCell::new(Vec::new()), any: std::cell::Cell::new(false) },
             unboxed_results: AtomicU64::new(0),
             boxed_later: AtomicU64::new(0),
         }
@@ -1389,33 +1495,26 @@ impl Compiled {
         let result = match self.bind_args(&mut regs, function, &args, kwargs) {
             Ok(()) => match Frame::push(function) {
                 Ok(frame) => {
-                    let result = self.exec(&mut regs, frame);
-                    // The traceback of an exception that leaves the function
-                    // refers to its frame, and through it the interpreter
-                    // keeps the locals alive: so do the registers here.
-                    let mut kept = null_mut();
-                    if result.is_null() && frame.held() {
-                        // The values that were bound to a variable, not the
-                        // temporaries: the exception itself is one of those,
-                        // and would be kept by its own traceback.
-                        let live: Vec<Obj> = regs[..nregs - 1]
-                            .iter()
-                            .zip(&self.func.value_names)
-                            .filter(|(o, name)| {
-                                name.is_some() && !o.is_null() && !capi::is_unboxed(**o)
-                            })
-                            .map(|(o, _)| *o)
-                            .collect();
-                        kept = ffi::PyTuple_New(live.len() as isize);
-                        for (i, o) in live.iter().enumerate() {
-                            if !kept.is_null() {
-                                ffi::PyTuple_SET_ITEM(kept, i as isize, new_ref(*o));
+                    // The frame starts out with the arguments, as the
+                    // interpreter's does; the function binds the rest.
+                    if !frame.locals.is_null() {
+                        for (slot, v) in self.func.params.iter().enumerate() {
+                            let o = reg(&regs, *v);
+                            if !o.is_null() {
+                                *frame.locals.add(slot) = new_ref(o);
                             }
                         }
                     }
+                    let result = self.exec(&mut regs, frame);
+                    // The traceback of an exception that leaves the function
+                    // refers to its frame, which takes its variables along.
+                    self.settle(frame);
+                    if self.unbound.any.get() {
+                        self.forget(|_| true);
+                    }
                     // Before the registers are released, as the interpreter
                     // unlinks a frame before it clears its locals.
-                    frame.pop(kept);
+                    frame.pop();
                     result
                 }
                 Err(()) => null_mut(),
@@ -1494,6 +1593,10 @@ impl Compiled {
     /// position within the line.
     unsafe fn fail(&self, frames: &mut Frames, bc: u32) -> Obj {
         let mut bc = bc;
+        // The traceback takes the frames along, and they their variables.
+        if self.unbound.any.get() {
+            self.bind();
+        }
         loop {
             let origin = (bc >> ORIGIN_SHIFT) as usize;
             let frame = frames.top();
@@ -1510,7 +1613,7 @@ impl Compiled {
             if origin == 0 {
                 break;
             }
-            frames.leave();
+            self.leave(frames);
             bc = self.func.origins[origin].call_bc;
         }
         null_mut()
@@ -1690,8 +1793,9 @@ impl Compiled {
         let mut inputs: Vec<V> = Vec::new();
         for inst in &insts[lo..hi] {
             // A hold names values that may not exist yet (a local before its
-            // first assignment), so it does not make a value an input.
-            if !matches!(inst.op, Op::Hold(_)) {
+            // first assignment), so it does not make a value an input; nor
+            // does binding a variable, which is done after the range.
+            if !matches!(inst.op, Op::Hold(_) | Op::StoreLocal(..)) {
                 inst.op.for_each_use(|v| {
                     if v != UNDEF && v != NONE && !defined.contains(&v) && !inputs.contains(&v) {
                         inputs.push(v);
@@ -1758,6 +1862,11 @@ impl Compiled {
             }
             if outer.is_some() && inst.bc >> ORIGIN_SHIFT == origin {
                 frame.at(inst.bc & OFFSET_MASK);
+                // On the values of the call itself the variables are bound
+                // as the function would bind them; a trace has stand-ins.
+                if let (Op::StoreLocal(slot, v), false) = (&inst.op, traced) {
+                    self.store_local(frame, *slot, reg(&regs, *v));
+                }
             }
             match self.exec_op(&mut regs, &inst.op) {
                 Ok(obj) => {
@@ -2209,8 +2318,8 @@ impl Compiled {
                 }
                 Ok(names)
             }
-            // The block loop runs these two; it has the frames.
-            Op::Hold(_) | Op::FrameEnter(_) | Op::FrameLeave => Ok(null_mut()),
+            // The block loop runs the last three; it has the frames.
+            Op::Hold(_) | Op::FrameEnter(_) | Op::FrameLeave | Op::StoreLocal(..) => Ok(null_mut()),
             Op::CaughtLasti => Ok(new_ref(ffi::Py_None())),
             Op::LoadSlot(slot) => {
                 let o = reg(regs, *slot);
@@ -3194,6 +3303,10 @@ impl Compiled {
             }
         }
         let misses = slot.misses.fetch_add(1, Ordering::Relaxed);
+        // The generic operation can be a call of anything.
+        if self.unbound.any.get() {
+            self.bind();
+        }
         if n < self.options.max_site_variants && misses < MAX_CAPTURE_ATTEMPTS as u64 * 4 {
             let (result, site, _) = self.capture_exec(regs, fallback, slot.kind, api);
             if !site.is_null() {
@@ -3405,7 +3518,7 @@ impl Compiled {
         // Every path out of an inlined function pops its frame; this is for
         // the one that was not thought of.
         while frames.depth > 0 {
-            frames.leave();
+            self.leave(&mut frames);
         }
         result
     }
@@ -3466,9 +3579,15 @@ impl Compiled {
                 }
                 if cur <= pred {
                     back_edges = back_edges.wrapping_add(1);
-                    if back_edges & 63 == 0 && !tick() {
-                        self.fail(frames, block.bc_start);
-                        raised!('blocks, cur);
+                    if back_edges & 63 == 0 {
+                        // A signal handler or a finalizer can run here.
+                        if self.unbound.any.get() {
+                            self.bind();
+                        }
+                        if !tick() {
+                            self.fail(frames, block.bc_start);
+                            raised!('blocks, cur);
+                        }
                     }
                 }
             }
@@ -3495,22 +3614,33 @@ impl Compiled {
                             Op::CallObject(..) => {
                                 let frame = frames.top();
                                 frame.at(inst.bc & OFFSET_MASK);
+                                if self.unbound.any.get() {
+                                    self.bind();
+                                }
                                 let outer = REGION_FRAME.with(|f| f.replace(frame));
                                 let result = self.exec_op(regs, &inst.op);
                                 REGION_FRAME.with(|f| f.set(outer));
                                 result
+                            }
+                            Op::StoreLocal(slot, v) => {
+                                self.store_local(frames.top(), *slot, reg(regs, *v));
+                                Ok(null_mut())
                             }
                             Op::FrameEnter(function) => {
                                 let function = func.consts.get_unchecked(*function as usize).as_ptr();
                                 frames.enter(function).map(|()| null_mut())
                             }
                             Op::FrameLeave => {
-                                frames.leave();
+                                self.leave(frames);
                                 Ok(null_mut())
                             }
                             Op::CaughtLasti => Ok(frames.top().lasti()),
                             op => {
                                 frames.top().at(inst.bc & OFFSET_MASK);
+                                // What is called can look at the frames.
+                                if self.unbound.any.get() && op.is_call() && !matches!(op, Op::Dispatch(_)) {
+                                    self.bind();
+                                }
                                 if mode == Mode::Profile {
                                     self.exec_profiled(cur, pc, inst, regs, api.unwrap())
                                 } else {
