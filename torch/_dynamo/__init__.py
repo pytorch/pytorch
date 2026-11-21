@@ -22,7 +22,7 @@ from . import (
     resume_execution,
 )
 from .backends.registry import list_backends, lookup_backend, register_backend
-from .callback import callback_handler, on_compile_end, on_compile_start
+from .callback import callback_handler, on_compile_end, on_compile_start, on_reset
 from .code_context import code_context
 from .convert_frame import replay
 from .decorators import (
@@ -207,6 +207,8 @@ def reset() -> None:
         cudagraph_trees = sys.modules.get("torch._inductor.cudagraph_trees")
         if cudagraph_trees is not None:
             cudagraph_trees.reset_cudagraph_trees()
+
+        callback_handler.run_reset_callbacks()
 
 
 def reset_code_caches() -> None:
