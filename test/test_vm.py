@@ -4631,6 +4631,26 @@ class TestVmDemotion(TestCase):
         self.assertFalse(stats["measuring"])
         self.assertEqual(stats["demoted_callees"], ["demote_python"])
 
+    def test_the_callees_that_are_being_measured_are_listed(self):
+        # While a callee is measured against the interpreter, each call of
+        # it is drawn to run rewritten or in the interpreter, and
+        # `sampling_callees` names it; once nothing is measured anymore
+        # the list is empty.
+        compiled = torch.vm(
+            demote_tensor_caller, fallback=False, demote=True, passes=without(P.Inline)
+        )
+        x = torch.ones(2)
+        named = set()
+        for _ in range(600):
+            compiled(300, x)
+            stats = compiled.stats()
+            named.update(stats["sampling_callees"])
+            if not stats["measuring"]:
+                break
+        self.assertLessEqual(named, {"demote_python"})
+        if not stats["measuring"]:
+            self.assertEqual(stats["sampling_callees"], [])
+
     @slowTest
     def test_slow_function_is_measured_with_fewer_calls(self):
         # Over a second per call: three calls to warm up and two of each
