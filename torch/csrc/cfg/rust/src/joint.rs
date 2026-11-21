@@ -103,10 +103,10 @@ struct Meta {
     bytes: u64,
     /// Where the memory it is in starts: what is written to there changes it.
     storage: usize,
-    /// For a value the caller of the function can get at (an input, a
-    /// result): eager's node that gave it and which of its results it is,
-    /// for eager's text where it was written to before the backward.
+    /// Whether the caller of the function can get at it: an input, a result.
     reachable: bool,
+    /// Eager's node that gave it and which of its results it is, for
+    /// eager's text where it was written to before the backward.
     producer: Option<(String, u32)>,
 }
 
@@ -124,6 +124,8 @@ struct Back {
     owners: Vec<u32>,
     /// Per node of eager's: the gradients it was handed.
     handed: Vec<Vec<Value>>,
+    /// The nodes that ran, in the order they ran.
+    called: Vec<u32>,
     /// Per contribution, in eager's order: which one it is (the caller
     /// numbers them over all backwards), and the value.
     gives: Vec<(u32, Value)>,
@@ -406,7 +408,15 @@ impl Joint {
             }
         }
         let partly = || refused("a node of eager's would be handed some of its gradients and not others, which was not taken down".to_string());
-        // Per node: whether it runs here.
+        // Whether a node runs here: it is handed what it was handed.
+        let handed = |part: &Part<'_>, missing: &HashSet<Value>, owner: u32| -> PyResult<bool> {
+            let handed = back.handed.get(owner as usize).ok_or_else(partly)?;
+            let gone = handed.iter().filter(|v| missing.contains(part.alias.get(*v).unwrap_or(*v))).count();
+            if gone != 0 && gone != handed.len() {
+                return Err(partly());
+            }
+            Ok(gone == 0)
+        };
         let mut runs: HashMap<u32, bool> = HashMap::new();
         for (at, op) in back.ops.iter().enumerate() {
             let owner = back.owners[at];
@@ -437,19 +447,22 @@ impl Joint {
             let run = match runs.get(&owner) {
                 Some(run) => *run,
                 None => {
-                    let handed = back.handed.get(owner as usize).ok_or_else(partly)?;
-                    let gone = handed.iter().filter(|v| missing.contains(part.alias.get(*v).unwrap_or(*v))).count();
-                    if gone != 0 && gone != handed.len() {
-                        return Err(partly());
-                    }
-                    runs.insert(owner, gone == 0);
-                    gone == 0
+                    let run = handed(&part, &missing, owner)?;
+                    runs.insert(owner, run);
+                    run
                 }
             };
             if run {
                 part.ops.push(at);
             } else {
                 missing.extend(op.results.iter().copied());
+            }
+        }
+        // A node that ran no operation runs like the others: if it is
+        // handed what it was handed.
+        for owner in &back.called {
+            if !runs.contains_key(owner) {
+                handed(&part, &missing, *owner)?;
             }
         }
         for (slot, value) in &back.gives {
@@ -496,10 +509,31 @@ impl Joint {
         Ok((part.pattern.clone(), part.incoming.clone(), PyList::new(py, all)?, part.gives.clone()).into_pyobject(py)?.into_any())
     }
 
+    /// The values of the forward that the backwards read.
+    pub(crate) fn read(&self) -> Vec<Value> {
+        let mut read: Vec<Value> = Vec::new();
+        for back in &self.backs {
+            back.ops.iter().for_each(|op| self.reads(op, &mut read));
+            read.extend(back.gives.iter().map(|(_, value)| *value));
+        }
+        read.retain(|v| matches!(self.metas[*v as usize].kind, Kind::Input(_) | Kind::Forward(_)));
+        read.sort_unstable();
+        read.dedup();
+        read
+    }
+
+    /// The memory the caller of the function can get at: where the inputs
+    /// and the results are.
+    fn outside(&self) -> HashSet<usize> {
+        self.metas.iter().filter(|meta| meta.reachable).map(|meta| meta.storage).collect()
+    }
+
     /// Whether a backward may run a forward operation again: it is one of
-    /// `AGAIN`, gives one tensor, and nothing behind it in the forward wrote
+    /// `AGAIN`, gives one tensor, takes nothing in memory the caller can
+    /// get at (`outside`: what is written there behind the forward is not
+    /// what the forward read), and nothing behind it in the forward wrote
     /// to the memory of what it takes.
-    fn runs_again(&self, at: usize) -> bool {
+    fn runs_again(&self, at: usize, outside: &HashSet<usize>) -> bool {
         let op = &self.forward[at];
         let base = op.name.split("::").last().unwrap_or("").split('.').next().unwrap_or("");
         if !AGAIN.contains(&base) || !op.single || !op.writes.is_empty() || op.random {
@@ -508,6 +542,9 @@ impl Joint {
         let mut taken = Vec::new();
         self.reads(op, &mut taken);
         let storages: HashSet<usize> = taken.iter().map(|v| self.metas[*v as usize].storage).collect();
+        if storages.iter().any(|storage| outside.contains(storage)) {
+            return false;
+        }
         let written = |later: &Op| later.writes.iter().any(|v| storages.contains(&self.metas[*v as usize].storage));
         !self.forward[at + 1..].iter().any(written)
     }
@@ -620,14 +657,6 @@ impl Joint {
         Ok(())
     }
 
-    /// Eager's node for an input or a result, and which of its results the
-    /// tensor is.
-    pub fn producer(&mut self, tensor: &Bound<'_, PyAny>, name: String, output: u32) -> PyResult<()> {
-        let value = self.find(tensor).ok_or_else(|| refused("no value of the graph".to_string()))?;
-        self.metas[value as usize].producer = Some((name, output));
-        Ok(())
-    }
-
     /// Which value of the graph a tensor is, while the run is taken down.
     pub fn value(&self, tensor: &Bound<'_, PyAny>) -> Option<Value> {
         self.find(tensor)
@@ -645,7 +674,7 @@ impl Joint {
             values.push(self.define(tensor, Kind::Incoming(*at), "an incoming gradient")?);
         }
         let (ops, owners, handed, gives) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-        self.backs.push(Back { pattern, incoming: values, ops, owners, handed, gives });
+        self.backs.push(Back { pattern, incoming: values, ops, owners, handed, called: Vec::new(), gives });
         self.open = true;
         (self.owner, self.before) = (NOBODY, NOBODY);
         Ok(())
@@ -663,6 +692,7 @@ impl Joint {
             back.handed.resize(index as usize + 1, Vec::new());
         }
         back.handed[index as usize] = values;
+        back.called.push(index);
         self.owner = index;
         Ok(())
     }
@@ -752,18 +782,14 @@ impl Joint {
     /// Decides what the forward keeps for the backwards. Without `least`:
     /// every forward value a backward reads. With it: the set of the fewest
     /// bytes from which the backwards can compute what they read, by
-    /// running forward operations again (`runs_again`). What the caller can
-    /// get at is kept if and only if a backward reads it, as eager keeps
-    /// it: it is what is checked for writes at the backward. Returns the
-    /// bytes of what the backwards read and of what is kept.
+    /// running forward operations again (`runs_again`). What is in memory
+    /// the caller can get at is kept if and only if a backward reads it,
+    /// as eager keeps it: it is what is checked for writes at the
+    /// backward. Returns the bytes of what the backwards read and of what
+    /// is kept.
     pub fn cut(&mut self, least: bool) -> (u64, u64) {
-        let mut read: Vec<Value> = Vec::new();
-        for back in &self.backs {
-            back.ops.iter().for_each(|op| self.reads(op, &mut read));
-            read.extend(back.gives.iter().map(|(_, value)| *value).filter(|v| matches!(self.metas[*v as usize].kind, Kind::Input(_) | Kind::Forward(_))));
-        }
-        read.sort_unstable();
-        read.dedup();
+        let read = self.read();
+        let outside = self.outside();
         let bytes = |values: &[Value]| values.iter().map(|v| self.metas[*v as usize].bytes).sum::<u64>();
         let all = bytes(&read);
         if !least {
@@ -784,10 +810,11 @@ impl Joint {
             let meta = &self.metas[*v as usize];
             // What the caller can get at and no backward reads is not kept:
             // eager does not check it, and it may be written to.
-            let weight = if meta.reachable && !reads.contains(v) { NEVER } else { meta.bytes.max(1) };
+            let reached = outside.contains(&meta.storage);
+            let weight = if reached && !reads.contains(v) { NEVER } else { meta.bytes.max(1) };
             edges.push((into(*v), outof(*v), weight));
             let made = match meta.kind {
-                Kind::Forward(at) if !meta.reachable && self.runs_again(at as usize) => Some(at as usize),
+                Kind::Forward(at) if !reached && self.runs_again(at as usize, &outside) => Some(at as usize),
                 _ => None,
             };
             match made {
@@ -834,22 +861,15 @@ impl Joint {
         made.set_item("saved", self.saved.clone())?;
         // What is kept in memory the caller can get at (an input, a result,
         // what shares their memory) is checked for writes, with the node
-        // eager names for it.
-        let mut reached: HashMap<usize, Option<(String, u32)>> = HashMap::new();
-        for meta in self.metas.iter().filter(|meta| meta.reachable) {
-            let known = reached.entry(meta.storage).or_insert(None);
-            if known.is_none() {
-                *known = meta.producer.clone();
-            }
-        }
+        // that gave it.
+        let outside = self.outside();
         let checked: Vec<(Value, Option<String>, u32)> = self
             .saved
             .iter()
-            .filter(|v| reached.contains_key(&self.metas[**v as usize].storage))
+            .filter(|v| outside.contains(&self.metas[**v as usize].storage))
             .map(|v| {
-                let meta = &self.metas[*v as usize];
-                let producer = if meta.reachable { meta.producer.clone() } else { reached[&meta.storage].clone() };
-                (*v, producer.as_ref().map(|(name, _)| name.clone()), producer.map_or(0, |(_, output)| output))
+                let producer = &self.metas[*v as usize].producer;
+                (*v, producer.as_ref().map(|(name, _)| name.clone()), producer.as_ref().map_or(0, |(_, output)| *output))
             })
             .collect();
         made.set_item("checked", checked)?;
