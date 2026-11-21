@@ -105,21 +105,51 @@ import torch
 
 from . import _shortcuts, passes
 from ._passes import fuse_checked, Mismatch, swap
+from ._types import (
+    Aligned,
+    Check,
+    Contiguous,
+    Device,
+    Dim,
+    Dtype,
+    guard,
+    Interval,
+    IntType,
+    materialize,
+    Stride,
+    TensorType,
+    Type,
+    type_of,
+)
 from .passes import BuiltinPass, Graphs, Inline, Unroll
 
 
 __all__ = [
+    "Aligned",
+    "Check",
+    "Contiguous",
     "DEFAULT_PASSES",
+    "Device",
+    "Dim",
+    "Dtype",
+    "IntType",
+    "Interval",
     "Mismatch",
+    "Stride",
+    "TensorType",
+    "Type",
     "Unsupported",
     "fuse_checked",
+    "guard",
     "is_available",
     "is_exact",
     "load_passes",
+    "materialize",
     "memory",
     "passes",
     "regions",
     "swap",
+    "type_of",
     "vm",
 ]
 
