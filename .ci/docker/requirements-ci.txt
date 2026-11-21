@@ -443,7 +443,7 @@ nccl4py==0.5.0 ; platform_system == "Linux" and (platform_machine == "x86_64" or
 #Pinned versions: 0.5.0
 #test that import: distributed/test_c10d_nccl4py.py distributed/test_c10d_nccl2.py distributed/test_collective_config.py
 
-setuptools-git-versioning==2.1.0
+setuptools-git-versioning==3.2.0
 # scikit-build (non-core) is consumed by the FBGEMM / torchrec builds noted
 # below, not by PyTorch itself; PyTorch uses scikit-build-core. Keep both
 # pinned independently.
