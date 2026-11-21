@@ -16,16 +16,14 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_devtype
+from torch.testing._internal.common_distributed import requires_world_size
+from torch.testing._internal.common_fsdp import DISTRIBUTED_BACKEND, FSDPTestContinuous
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
-    TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
-
-device_type = torch.device(get_devtype())
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -61,14 +59,48 @@ class ModelUnusedInput(nn.Module):
         return torch.concat([x, y, z, learnable_input])
 
 
-class TestFSDPFineTune(FSDPTestContinuous):
-    """Tests fine-tuning cases where some parameters are frozen."""
+class FineTuneTestBase(FSDPTestContinuous):
+    """Device-agnostic base.
 
-    NUM_LINEARS = 6
+    FSDPTestContinuous inherits the module-level ``DEVICE_TYPE`` /
+    ``DEVICE_COUNT`` / ``DISTRIBUTED_BACKEND`` globals from ``common_fsdp``,
+    which only recognize cuda/hpu/xpu. Override the device-resolution hooks so
+    the test runs on any accelerator (incl. out-of-tree PrivateUse1 backends)
+    once instantiated via ``instantiate_device_type_tests``. Mirrors the
+    ``DTensorPPTestBase`` pattern in PR #192051: the intermediate base holds
+    ``backend_str`` so the device-specific generated class inherits it rather
+    than ports it (a ported classmethod cannot see the variant's device_type).
+    """
+
+    @classmethod
+    def _resolved_device_type(cls) -> str:
+        dt = cls.device_type
+        if dt == "privateuse1":
+            dt = torch._C._get_privateuse1_backend_name()
+        return dt
+
+    @classmethod
+    def backend_str(cls) -> str:
+        try:
+            return dist.get_default_backend_for_device(cls._resolved_device_type())
+        except ValueError:
+            # Devices without a registered default backend (e.g. ``hpu`` unless
+            # the vendor extension registers ``hccl`` via ``register_backend``):
+            # fall back to the historical ``common_fsdp`` ``DISTRIBUTED_BACKEND``
+            # ("hccl" on HPU), preserving the pre-refactor behavior.
+            return DISTRIBUTED_BACKEND
 
     @property
     def world_size(self) -> int:
-        return min(_get_device_module(self.device_type).device_count(), 2)
+        return min(2, _get_device_module(self.device_type).device_count())
+
+
+class TestFSDPFineTune(FineTuneTestBase):
+    """Tests fine-tuning cases where some parameters are frozen."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    NUM_LINEARS = 6
 
     def _init_seq_module(self, device) -> nn.Module:
         torch.manual_seed(42)
@@ -88,7 +120,7 @@ class TestFSDPFineTune(FSDPTestContinuous):
                 for param in seq[i * 2].parameters(recurse=True):
                     param.requires_grad = requires_grad
 
-    @skip_if_lt_x_gpu(2)
+    @requires_world_size(2)
     def test_backward_reshard_hooks(self, device):
         """
         Tests that the post-backward reshard happens even for flat parameters
@@ -96,7 +128,6 @@ class TestFSDPFineTune(FSDPTestContinuous):
         """
         self.run_subtests(
             {
-                "device_id": [device],
                 "sharding_strategy": [
                     ShardingStrategy.FULL_SHARD,
                     ShardingStrategy.SHARD_GRAD_OP,
@@ -107,16 +138,18 @@ class TestFSDPFineTune(FSDPTestContinuous):
                 "unfreeze_params": [False, True],
             },
             self._test_backward_reshard_hooks,
+            device=device,
         )
 
     def _test_backward_reshard_hooks(
         self,
-        device_id,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
         inp_requires_grad: bool,
         unfreeze_params: bool,
+        device,
     ):
+        device_type = torch.device(device).type
         seq = self._init_seq_module(device_type)
         policy = ModuleWrapPolicy({nn.Linear})
         fsdp_kwargs = {"device_id": device_type}
@@ -213,8 +246,8 @@ class TestFSDPFineTune(FSDPTestContinuous):
 
         return TestModule()
 
-    @skip_if_lt_x_gpu(2)
-    def test_hooks_multi_traversal(self):
+    @requires_world_size(2)
+    def test_hooks_multi_traversal(self, device):
         """
         Tests that the hooks do reshard / unshard correctly in the case of same
         parameters being used multiple times during forward pass.
@@ -231,6 +264,7 @@ class TestFSDPFineTune(FSDPTestContinuous):
                 "forward_prefetch": [False, True],
             },
             self._test_hooks_multi_traversal,
+            device=device,
         )
 
     def _test_hooks_multi_traversal(
@@ -239,8 +273,10 @@ class TestFSDPFineTune(FSDPTestContinuous):
         use_orig_params: bool,
         inp_requires_grad: bool,
         forward_prefetch: bool,
+        device,
     ):
-        seq = self._init_multi_traversal_module(device_type.type)
+        device_type = torch.device(device).type
+        seq = self._init_multi_traversal_module(device_type)
         policy = ModuleWrapPolicy({nn.Linear})
         fsdp_kwargs = {"device_id": device_type}
         fsdp_seq = FSDP(
@@ -269,8 +305,8 @@ class TestFSDPFineTune(FSDPTestContinuous):
             torch.testing.assert_close(losses[0], losses[1])
             losses.clear()
 
-    @skip_if_lt_x_gpu(2)
-    def test_parity_with_ddp(self):
+    @requires_world_size(2)
+    def test_parity_with_ddp(self, device):
         """
         Tests parity with DDP when mixing flat parameters that require and do
         not require gradients.
@@ -285,13 +321,16 @@ class TestFSDPFineTune(FSDPTestContinuous):
                 "use_orig_params": [False, True],
             },
             self._test_parity_with_ddp,
+            device=device,
         )
 
     def _test_parity_with_ddp(
         self,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
+        device,
     ):
+        device_type = torch.device(device).type
         seq = self._init_seq_module(device_type)
         policy = ModuleWrapPolicy({nn.Linear})
         fsdp_kwargs = {"device_id": device_type}
@@ -308,20 +347,20 @@ class TestFSDPFineTune(FSDPTestContinuous):
         torch.manual_seed(self.rank + 1)
         losses = []
         for _ in range(6):
-            inp = torch.randn((8, 5), device=device_type.type)
+            inp = torch.randn((8, 5), device=device_type)
             for seq, optim in ((fsdp_seq, fsdp_optim), (ddp_seq, ddp_optim)):
                 loss = seq(inp).sum()
                 losses.append(loss)
                 loss.backward()
                 optim.step()
                 optim.zero_grad()
-            if TEST_CUDA:
+            if device_type == "cuda":
                 torch.testing.assert_close(losses[0], losses[1])
             else:
                 torch.testing.assert_close(losses[0], losses[1], atol=1e-03, rtol=1e-03)
             losses.clear()
 
-    @skip_if_lt_x_gpu(2)
+    @requires_world_size(2)
     def test_parity_with_non_frozen_fsdp(self, device):
         """
         For frozen modules with unused input, reshard could happen without unshard
@@ -330,7 +369,6 @@ class TestFSDPFineTune(FSDPTestContinuous):
         """
         self.run_subtests(
             {
-                "device_id": [device],
                 "sharding_strategy": [
                     ShardingStrategy.FULL_SHARD,
                     ShardingStrategy.SHARD_GRAD_OP,
@@ -351,17 +389,19 @@ class TestFSDPFineTune(FSDPTestContinuous):
                 ],
             },
             self._test_parity_with_non_frozen_fsdp,
+            device=device,
         )
 
     def _test_parity_with_non_frozen_fsdp(
         self,
-        device_id,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
         offload_params: bool,
         mixed_precision: MixedPrecision,
         backward_prefetch: BackwardPrefetch,
+        device,
     ):
+        device_type = torch.device(device).type
         torch.manual_seed(42)
         model = ModelUnusedInput(freeze=True).to(device_type)
         torch.manual_seed(42)
@@ -404,9 +444,8 @@ class TestFSDPFineTune(FSDPTestContinuous):
                     self.assertEqual(param, ref_param)
 
 
-devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
-    TestFSDPFineTune, globals(), only_for=devices, allow_xpu=True
+    TestFSDPFineTune, globals(), except_for="cpu", allow_xpu=True
 )
 if __name__ == "__main__":
     run_tests()
