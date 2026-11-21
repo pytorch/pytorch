@@ -82,6 +82,14 @@ struct Builder<'a> {
     nconsts: u32,
     /// Locals kept in frame slots instead of SSA values, and their slots.
     slots: HashMap<u32, V>,
+    /// Loads of the globals `locals`, `vars` and `dir`: called without
+    /// arguments they ask for the function's variables (see `Op::Locals`).
+    frame_readers: HashSet<V>,
+    /// The locals that are cells, and the names of the closure's variables.
+    cell_locals: HashSet<u32>,
+    freevars: Vec<String>,
+    /// Indices of those three names among the names of the code.
+    reads_frame: &'a HashSet<u32>,
     /// Instructions for the start of the entry block.
     prologue: Vec<Inst>,
 }
@@ -407,6 +415,9 @@ impl<'a> Builder<'a> {
                         stack.push(NULLMARK);
                     }
                     let v = emit!(off, Op::LoadGlobal(self.names_base + (arg >> 1)));
+                    if self.reads_frame.contains(&(arg >> 1)) {
+                        self.frame_readers.insert(v);
+                    }
                     stack.push(v);
                 }
                 Bc::StoreGlobal => {
@@ -722,7 +733,26 @@ impl<'a> Builder<'a> {
                         args.insert(0, second);
                         first
                     };
-                    let v = emit!(off, Op::Call { callee, args, kwnames });
+                    let v = if args.is_empty() && kwnames == NONE && self.frame_readers.contains(&callee) {
+                        let mut entries: Vec<(u32, V, bool)> = Vec::new();
+                        for local in 0..self.nlocals as u32 {
+                            let value = match self.slots.get(&local).copied() {
+                                Some(slot) => emit!(off, Op::LoadSlot(slot)),
+                                None => self.read_var(local, b),
+                            };
+                            if value != UNDEF {
+                                let name = self.varname_const(local)?;
+                                entries.push((name, value, self.cell_locals.contains(&local)));
+                            }
+                        }
+                        for i in 0..self.freevars.len() as u32 {
+                            let name = self.name_const(&self.freevars[i as usize].clone());
+                            entries.push((name, emit!(off, Op::LoadClosure(i)), true));
+                        }
+                        emit!(off, Op::Locals(callee, entries))
+                    } else {
+                        emit!(off, Op::Call { callee, args, kwnames })
+                    };
                     kwnames = NONE;
                     stack.push(v);
                 }
@@ -1151,15 +1181,31 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         consts.push(unsafe { PyObj::from_borrowed(n.as_ptr()) });
     }
     // A compiled function keeps its locals in registers, not in its frame, so
-    // what reads them through the frame would not find them. Where compiled
-    // functions have no frame at all, that goes for its globals and for
-    // walking the stack too.
+    // what reads them through the frame would not find them: `eval` and
+    // `exec` are not supported, and `locals`, `vars` and `dir` only where
+    // they are called on the spot (see `Op::Locals`). That is about the
+    // globals of these names; an attribute may be called what it likes.
+    // Where compiled functions have no frame at all, their globals and
+    // walking the stack are out of reach too.
     let names: Vec<String> = names_tuple.extract()?;
-    for name in ["locals", "vars", "dir", "eval", "exec"] {
-        if names.iter().any(|n| n == name) {
+    let global_loads: HashSet<u32> = instrs
+        .iter()
+        .filter_map(|i| match i.op {
+            Bc::LoadGlobal => Some(i.arg >> 1),
+            _ => None,
+        })
+        .collect();
+    let loads_global = |name: &str| names.iter().position(|n| n == name).filter(|i| global_loads.contains(&(*i as u32)));
+    for name in ["eval", "exec"] {
+        if loads_global(name).is_some() {
             return unsupported(format!("{}() reads the local variables of the frame", name));
         }
     }
+    let reads_frame: HashSet<u32> =
+        ["locals", "vars", "dir"].iter().filter_map(|name| loads_global(name)).map(|i| i as u32).collect();
+    let cell_locals: HashSet<u32> =
+        instrs.iter().filter(|i| i.op == Bc::MakeCell).map(|i| i.arg).collect();
+    let freevars: Vec<String> = code.getattr("co_freevars")?.extract()?;
     if !crate::capi::has_frames() {
         for name in ["globals", "_getframe", "currentframe"] {
             if names.iter().any(|n| n == name) {
@@ -1230,6 +1276,10 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
             extra_consts: Vec::new(),
             nconsts,
             slots: HashMap::new(),
+            frame_readers: HashSet::new(),
+            cell_locals: cell_locals.clone(),
+            freevars: freevars.clone(),
+            reads_frame: &reads_frame,
             prologue: Vec::new(),
         };
         let undef = builder.new_value();
@@ -1348,6 +1398,38 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         blocks[block].phis.push(Phi { dst: *phi, srcs });
     }
     remove_dead_phis(&mut blocks, builder.forward.len());
+
+    // Called from anywhere but where it is named, one of those builtins
+    // would look for the variables in the frame.
+    if !builder.frame_readers.is_empty() {
+        let readers = &builder.frame_readers;
+        let mut escapes = false;
+        for block in &blocks {
+            escapes |= block.phis.iter().any(|phi| phi.srcs.iter().any(|v| readers.contains(v)));
+            for inst in &block.insts {
+                match &inst.op {
+                    Op::Locals(_, entries) => {
+                        escapes |= entries.iter().any(|(_, v, _)| readers.contains(v))
+                    }
+                    Op::Call { callee, args, kwnames } => {
+                        escapes |= args.iter().any(|v| readers.contains(v))
+                            || (readers.contains(callee) && args.is_empty() && *kwnames == NONE)
+                    }
+                    op => op.for_each_use(|v| escapes |= readers.contains(&v)),
+                }
+            }
+            let mut term = block.term.clone();
+            rewrite_term_uses(&mut term, &mut |v| {
+                escapes |= readers.contains(&v);
+                Ok(v)
+            })?;
+        }
+        if escapes {
+            return unsupported(
+                "locals, vars or dir is not called where it is named, and reads the local variables of the frame",
+            );
+        }
+    }
 
     let mut all_consts = consts;
     all_consts.extend(builder.extra_consts.drain(..));
@@ -1505,6 +1587,12 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         Op::MatchClass { subject, class, names, .. } => r!(subject, class, names),
         Op::CallObject(_, args) => {
             for v in args.iter_mut() {
+                r!(v);
+            }
+        }
+        Op::Locals(callee, entries) => {
+            r!(callee);
+            for (_, v, _) in entries.iter_mut() {
                 r!(v);
             }
         }

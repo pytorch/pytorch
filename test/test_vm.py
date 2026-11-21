@@ -2786,6 +2786,63 @@ def frame_unbound_local(flag):
     return value
 
 
+def frame_locals(a, flag):
+    if flag:
+        late = a + 1
+    return locals()
+
+
+def frame_locals_with_cells(a):
+    b = a * 2
+
+    def inner():
+        return a + b
+
+    return {k: v for k, v in locals().items() if k != "inner"}, inner()
+
+
+def frame_locals_of_a_closure(free):
+    def uses_free(x):
+        y = x + free
+        return locals()
+
+    return uses_free
+
+
+def frame_names(a, b):
+    c = a + b
+    return dir(), c
+
+
+def frame_vars(a, obj):
+    b = a + 1
+    return vars(), sorted(vars(obj)), "scale" in dir(obj), b
+
+
+def frame_locals_in_a_comprehension(n):
+    return [sorted(locals()) for i in range(n)]
+
+
+def frame_locals_in_a_handler(a):
+    try:
+        b = a + 1
+        raise ValueError("x")
+    except ValueError:
+        c = 2
+        caught = sorted(locals())
+    return caught, sorted(locals())
+
+
+def frame_locals_after_del(a):
+    b = a + 1
+    del b
+    return locals()
+
+
+def frame_case_name(f, args):
+    return f"{f.__name__}_{args[-1] if type(args[-1]) in (bool, int) else ''}"
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmFrames(TestCase):
     """A compiled function runs under a frame of the interpreter, with its locals in registers."""
@@ -2793,24 +2850,81 @@ class TestVmFrames(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_function_that_reads_its_frame_is_not_compiled(self):
-        def uses_locals(a, b):
-            return sorted(locals())
-
         def uses_eval(a):
             return eval("a + 1")
 
-        for f, args, name in (
-            (uses_locals, (1, 2), "locals"),
-            (uses_eval, (1,), "eval"),
+        def passes_locals_on(a, b):
+            read = locals
+            return sorted(read())
+
+        for f, args, why in (
+            (uses_eval, (1,), r"eval\(\) reads the local variables of the frame"),
+            (passes_locals_on, (1, 2), "locals, vars or dir is not called where"),
         ):
-            with self.assertRaisesRegex(
-                torch.vm.Unsupported,
-                name + r"\(\) reads the local variables of the frame",
-            ):
+            with self.assertRaisesRegex(torch.vm.Unsupported, why):
                 torch.vm(f, fallback=False)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 self.assertEqual(torch.vm(f)(*args), f(*args))
+
+    @parametrize(
+        "f,args",
+        (
+            (frame_locals, (1, True)),
+            (frame_locals, (1, False)),
+            (frame_locals_with_cells, (3,)),
+            (frame_locals_of_a_closure(10), (1,)),
+            (frame_names, (1, 2)),
+            (frame_vars, (5, FrameChild())),
+            (frame_locals_in_a_comprehension, (2,)),
+            (frame_locals_in_a_handler, (1,)),
+            (frame_locals_after_del, (1,)),
+        ),
+        name_fn=frame_case_name,
+    )
+    def test_locals_vars_and_dir_see_the_variables(self, f, args):
+        # The variables are in registers, cells and frame slots; the builtins
+        # would look for them in the frame.
+        compiled = torch.vm(f, fallback=False)
+        for _ in range(3):
+            self.assertEqual(compiled(*args), f(*args))
+
+    def test_locals_holds_tensors_of_specialized_code(self):
+        def f(x, y):
+            z = x + y
+            w = z * 2
+            return locals()
+
+        compiled = torch.vm(f, fallback=False)
+        x, y = torch.ones(2), torch.full((2,), 3.0)
+        for _ in range(5):
+            got = compiled(x, y)
+        self.assertEqual(list(got), ["x", "y", "z", "w"])
+        self.assertEqual(got, f(x, y))
+        self.assertIn("locals %", compiled.dump())
+
+    def test_global_called_locals_that_is_something_else_is_called(self):
+        def f(a):
+            return locals()
+
+        compiled = torch.vm(f, fallback=False)
+        self.assertEqual(compiled(1), {"a": 1})
+        f.__globals__["locals"] = lambda: "not the builtin"
+        try:
+            self.assertEqual(compiled(1), "not the builtin")
+        finally:
+            del f.__globals__["locals"]
+        self.assertEqual(compiled(1), {"a": 1})
+
+    def test_attribute_named_like_a_builtin_that_reads_the_frame(self):
+        # `model.eval()` is not `eval()`.
+        def f(model, x):
+            model.eval()
+            return model(x)
+
+        model, x = torch.nn.Linear(2, 2), torch.ones(2)
+        compiled = torch.vm(f, fallback=False)
+        self.assertEqual(compiled(model, x), f(model, x))
 
     @parametrize("inline", (False, True))
     def test_the_stack_shows_compiled_functions(self, inline):
@@ -2927,7 +3041,7 @@ class TestVmFrames(TestCase):
 
     def test_callee_that_reads_its_frame_runs_in_the_interpreter(self):
         def fmt(name, value):
-            return "{name}={value}".format(**locals())
+            return eval("'{}={}'.format(name, value)")
 
         def f(obj, x):
             return fmt("x", x), obj.scale(x)
