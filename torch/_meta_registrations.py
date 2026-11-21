@@ -1063,6 +1063,65 @@ def meta__cslt_sparse_mm(
     return dense_B.new_empty(output_shape, dtype=out_dtype)
 
 
+# From TORCH_PRECOMPUTE_META_FUNC(index_reduce) and index_func_meta_impl in
+# aten/src/ATen/native/TensorAdvancedIndexing.cpp
+def index_reduce_meta_impl(self, dim, index, source, reduce):
+    torch._check(
+        reduce in ("prod", "mean", "amax", "amin"),
+        lambda: "index_reduce(): Expected reduce to be one of prod, mean, amax or "
+        f"amin but got {reduce}.",
+    )
+    dim = maybe_wrap_dim(dim, self.dim())
+    torch._check_index(
+        index.dim() <= 1,
+        lambda: "index_reduce_(): Index is supposed to be a vector, but got dim: "
+        f"{index.dim()} with type: {index.dtype} and size: {list(index.shape)}",
+    )
+    torch._check(
+        index.dtype in (torch.long, torch.int),
+        lambda: "index_reduce_(): Expected dtype int32/int64 for index but got: "
+        f"{index.dtype}",
+    )
+    torch._check(
+        self.dtype == source.dtype,
+        lambda: f"index_reduce_(): self ({self.dtype}) and source ({source.dtype}) "
+        "must have the same scalar type",
+    )
+    torch._check(
+        dim == 0 or dim < source.dim(),
+        lambda: f"index_reduce_(): Indexing dim {dim} is out of bounds of the source "
+        f"tensor with dim {source.dim()}",
+    )
+    num_indices = 1 if source.dim() == 0 else source.size(dim)
+    torch._check(
+        index.numel() == num_indices,
+        lambda: f"index_reduce_(): Number of indices ({index.numel()}) should be "
+        f"equal to source.size(dim): ({num_indices}), for dim: {dim}",
+    )
+
+    def shape_mismatch():
+        return (
+            "source tensor shape must match self tensor shape, excluding the "
+            f"specified dimension. Got self.shape = {list(self.shape)} "
+            f"source.shape = {list(source.shape)}"
+        )
+
+    self_sizes = list(self.shape)
+    source_sizes = list(source.shape)
+    # A scalar self or source is compared whole, so a scalar only matches a scalar.
+    if self.dim() != 0 and source.dim() != 0:
+        del self_sizes[dim], source_sizes[dim]
+    torch._check(len(self_sizes) == len(source_sizes), shape_mismatch)
+    for self_size, source_size in zip(self_sizes, source_sizes):
+        torch._check(self_size == source_size, shape_mismatch)
+    torch._check(
+        self.device == source.device and self.device == index.device,
+        lambda: "index_reduce_(): self, index and source expected to be in the same "
+        f"device, but got (self) {self.device}, (index) {index.device}, and "
+        f"(source) {source.device}",
+    )
+
+
 @register_meta(aten.index_reduce.default)
 def meta_index_reduce(
     self: Tensor,
@@ -1073,6 +1132,7 @@ def meta_index_reduce(
     *,
     include_self: bool = True,
 ) -> Tensor:
+    index_reduce_meta_impl(self, dim, index, source, reduce)
     return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
@@ -1086,6 +1146,7 @@ def meta_index_reduce_(
     *,
     include_self: bool = True,
 ) -> Tensor:
+    index_reduce_meta_impl(self, dim, index, source, reduce)
     return self
 
 
