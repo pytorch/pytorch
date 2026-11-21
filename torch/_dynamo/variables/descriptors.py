@@ -541,8 +541,6 @@ class MethodDescriptorVariable(DescriptorVariable):
         name, objclass = self.descriptor.__name__, self.descriptor.__objclass__
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         obj = obj.realize()
-        if objclass is dict and isinstance(obj, variables.ConstDictVariable):
-            obj.check_base_dict_mutation(tx, name)
         if isinstance(obj, variables.ConstDictVariable):
             result = obj.call_method_descriptor(tx, self.descriptor, rest, kwargs)
             if result is not None:

@@ -341,9 +341,8 @@ class MethodFlags(IntFlag):
 
 
 def _check_method_arity(
-    vt: VariableTracker,
     tx: InstructionTranslatorBase,
-    name: str,
+    qualname: str,
     flags: MethodFlags,
     args: Any,
     kwargs: Any,
@@ -352,7 +351,6 @@ def _check_method_arity(
     # raising the same TypeErrors CPython raises for builtin methods. Shared by
     # Method and callers that run the handler directly (e.g. tensor.py).
     n = len(args)
-    qualname = f"{vt.python_type_name()}.{name}"
     if kwargs and not (flags & MethodFlags.KEYWORDS):
         raise_type_error(tx, f"{qualname}() takes no keyword arguments")
     if flags & (MethodFlags.NOARGS | MethodFlags.O):
@@ -421,7 +419,7 @@ class Method:
         kwargs: Any,
     ) -> VariableTracker | None:
         flags = _derive_method_flags(vt, name)
-        _check_method_arity(vt, tx, name, flags, args, kwargs)
+        _check_method_arity(tx, f"{vt.python_type_name()}.{name}", flags, args, kwargs)
         return self.handler(vt, tx, args, kwargs)
 
 
