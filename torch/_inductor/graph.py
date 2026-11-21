@@ -3322,6 +3322,15 @@ class GraphLowering(torch.fx.Interpreter):
             and buffer.get_size() == []
         )
 
+    def output_names_set(self) -> frozenset[str]:
+        """``get_output_names()`` as a set, cached while ``graph_outputs`` is unchanged
+        (it is final once lowering ends, before codegen asks)."""
+        key = (id(self.graph_outputs), len(self.graph_outputs))
+        if getattr(self, "_output_names_key", None) != key:
+            self._output_names_set = frozenset(self.get_output_names())
+            self._output_names_key = key
+        return self._output_names_set
+
     def is_unspec_arg(self, name: str) -> bool:
         # dynamo wraps unspec variable as 0d CPU tensor,
         # need to convert to scalar during codegen (triton only)
