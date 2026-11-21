@@ -307,6 +307,48 @@ class StructuredTraceTest(TestCase):
         finally:
             shutil.rmtree(out, ignore_errors=True)
 
+    def test_graph_break_structured_trace_dedup(self):
+        def fn(x):
+            if x.sum().item() > 0:
+                x = x + 1
+            if x.mean().item() > 0:
+                x = x + 2
+            return x
+
+        torch.compile(fn, backend="eager")(torch.randn(3, 3))
+
+        artifacts = [
+            line
+            for line in self.buffer.getvalue().splitlines()
+            if "dynamo_graph_break_reason" in line
+        ]
+        self.assertEqual(len(artifacts), 2)
+
+        def f2(a, b):
+            c = a + b
+            print("break")
+            return a + b + c
+
+        @torch.compile(backend="eager")
+        def f1(a, b):
+            try:
+                return f2(a, b)
+            finally:
+                pass
+
+        self.buffer.seek(0)
+        self.buffer.truncate(0)
+        torch._dynamo.reset()
+        with torch._dynamo.config.patch(verbose=True):
+            f1(torch.randn(10), torch.randn(10))
+
+        artifacts = [
+            line
+            for line in self.buffer.getvalue().splitlines()
+            if "dynamo_graph_break_reason" in line
+        ]
+        self.assertEqual(len(artifacts), 1)
+
     def test_compile_id_serialization_deserialization(self):
         cid = torch._guards.CompileId(
             frame_id=1,
