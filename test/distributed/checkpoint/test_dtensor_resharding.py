@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: distributed"]
+import itertools
 import logging
 from typing import Any
 
@@ -19,6 +20,7 @@ from torch.distributed.checkpoint.planner import (
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard, zeros
 from torch.distributed.tensor._shards_wrapper import LocalShardsWrapper
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -174,6 +176,53 @@ class TestDTensorReshardPlacementChange(DTensorContinuousTestBase):
             self.assertEqual(
                 state_dict_to_save["dtensor"].to_local(),
                 state_dict_to_load["dtensor"].to_local(),
+            )
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @with_temp_dir
+    def test_strided_shard_reshard_placement_change(self) -> None:
+        # With _StridedShard, a rank can hold several separate chunks of the
+        # global tensor, or none: with 3 rows and [_StridedShard(0, split_factor=2),
+        # Shard(0)], rank 3 holds nothing.
+        placements = [
+            [_StridedShard(0, split_factor=2), Replicate()],
+            [_StridedShard(0, split_factor=2), Shard(0)],
+            [_StridedShard(0, split_factor=3), _StridedShard(1, split_factor=2)],
+            [Shard(0), Shard(1)],
+            [Replicate(), Replicate()],
+        ]
+        mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        for global_tensor, original_placement, new_placement in itertools.product(
+            [torch.arange(42.0).view(7, 6), torch.arange(6.0).view(3, 2)],
+            placements,
+            placements,
+        ):
+            dtensor = distribute_tensor(
+                global_tensor, mesh, original_placement, src_data_rank=None
+            )
+            dist_cp.save(
+                state_dict={"dtensor": dtensor},
+                storage_writer=dist_cp.FileSystemWriter(path=self.temp_dir),
+            )
+            expected = distribute_tensor(
+                global_tensor, mesh, new_placement, src_data_rank=None
+            ).to_local()
+            loaded = DTensor.from_local(
+                torch.zeros_like(expected),
+                mesh,
+                new_placement,
+                shape=global_tensor.shape,
+                stride=global_tensor.stride(),
+            )
+            dist_cp.load(
+                state_dict={"dtensor": loaded},
+                storage_reader=dist_cp.FileSystemReader(self.temp_dir),
+            )
+            self.assertEqual(
+                loaded.to_local(),
+                expected,
+                msg=f"{original_placement=} {new_placement=}",
             )
 
 

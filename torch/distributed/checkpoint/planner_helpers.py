@@ -11,7 +11,7 @@ from torch._utils import _get_device_module
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.tensor import DTensor
-from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
+from torch.distributed.tensor._utils import compute_local_shape_and_chunks
 
 from .metadata import (
     BytesStorageMetadata,
@@ -33,6 +33,7 @@ from .planner import (
 from .protocol import (
     _copy_checkpointable_tensor_metadata,
     _get_checkpointable_tensor_chunks,
+    _get_checkpointable_tensor_shard,
     _is_checkpointable_tensor,
     CheckpointableTensor,
 )
@@ -181,23 +182,42 @@ def _sharded_tensor_metadata(
     )
 
 
-def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
-    sizes, offsets = compute_local_shape_and_global_offset(
+def _dtensor_as_checkpointable_tensor(tensor: DTensor) -> CheckpointableTensor:
+    """
+    A view of the local tensor with the ``CheckpointableTensor`` fields of each
+    non-empty chunk of the global tensor it holds. The fields go on a view so that
+    they don't stay on the DTensor's local tensor.
+    """
+    _, global_offsets, local_offsets, local_sizes = compute_local_shape_and_chunks(
         tensor.shape, tensor.device_mesh, tensor.placements
     )
-    sizes, offsets = torch.Size(sizes), torch.Size(offsets)
+    chunks = list(zip(global_offsets, local_offsets, local_sizes))
+    # An empty chunk inside another rank's chunk fails the overlap check of the
+    # global plan. A tensor with no elements keeps one, so that it is still saved.
+    if tensor.numel() > 0:
+        chunks = [chunk for chunk in chunks if 0 not in chunk[2]]
+    else:
+        chunks = chunks[:1]
+    local_tensor = tensor.to_local()
+    view = local_tensor.view_as(local_tensor)
+    setattr(view, "global_shape", tuple(tensor.shape))  # noqa: B010
+    setattr(view, "global_offsets", tuple(chunk[0] for chunk in chunks))  # noqa: B010
+    setattr(view, "local_offsets", tuple(chunk[1] for chunk in chunks))  # noqa: B010
+    setattr(view, "local_sizes", tuple(chunk[2] for chunk in chunks))  # noqa: B010
+    return cast(CheckpointableTensor, view)
 
-    return WriteItem(
-        index=MetadataIndex(fqn, offsets),
-        type=WriteItemType.SHARD,
-        tensor_data=TensorWriteData(
-            chunk=ChunkStorageMetadata(
-                offsets=offsets,
-                sizes=sizes,
-            ),
-            properties=TensorProperties.create_from_tensor(tensor.to_local()),
-            size=tensor.size(),
-        ),
+
+def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> list[WriteItem]:
+    """One ``WriteItem`` per chunk of the global tensor that the local tensor holds."""
+    return _get_checkpointable_tensor_write_items(
+        fqn, _dtensor_as_checkpointable_tensor(tensor)
+    )
+
+
+def _get_dtensor_chunk(tensor: DTensor, index: MetadataIndex) -> torch.Tensor:
+    """The part of the local tensor that holds the chunk at ``index.offset``."""
+    return _get_checkpointable_tensor_shard(
+        _dtensor_as_checkpointable_tensor(tensor), index
     )
 
 
@@ -405,7 +425,7 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
     requests = []
     for fqn, obj in state_dict.items():
         if isinstance(obj, DTensor):
-            requests.append(_create_write_items_for_dtensor(fqn, obj))
+            requests.extend(_create_write_items_for_dtensor(fqn, obj))
         elif isinstance(obj, ShardedTensor):
             requests.extend(
                 _create_write_item_for_shard(fqn, obj, shard_md)
@@ -437,17 +457,6 @@ def _create_write_items(fqn: str, object: Any) -> list[WriteItem]:
         return [_create_write_item_for_tensor(fqn, object)]
     else:
         return [_create_write_item_for_bytesio(fqn, object)]
-
-
-def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
-    sizes, offsets = compute_local_shape_and_global_offset(
-        tensor.shape, tensor.device_mesh, tensor.placements
-    )
-    sizes, offsets = torch.Size(sizes), torch.Size(offsets)
-    return ChunkStorageMetadata(
-        offsets=offsets,
-        sizes=sizes,
-    )
 
 
 def _create_chunk_list(tensor: torch.Tensor) -> list[ChunkStorageMetadata]:
