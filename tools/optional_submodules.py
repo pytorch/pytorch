@@ -1,6 +1,11 @@
+from __future__ import annotations
+
 import os
+import re
+import sys
+import time
 from pathlib import Path
-from subprocess import check_call
+from subprocess import CalledProcessError, check_call, PIPE, run
 
 
 repo_root = Path(__file__).absolute().parent.parent
@@ -12,17 +17,71 @@ def _read_file(path: Path) -> str:
         return f.read().strip()
 
 
+# Transient failures worth retrying, matched against git's stderr (English, see
+# _clone): gitlab.com's load page, HTTP 429/5xx, and signatures of a transfer that
+# broke while reading. Connection-setup failures, connect timeouts and permanent
+# errors (missing tag, other 4xx, DNS) fail at once. Examples are in the tests.
+_TRANSIENT_CLONE_ERROR = re.compile(
+    r"unable to handle this request due to load"
+    r"|The requested URL returned error: (?:429|5\d\d)"
+    r"|RPC failed; (?:curl (?:18|56)\b|curl 92\b[^\n]*(?:CANCEL|INTERNAL_ERROR))"
+    r"|early EOF|unexpected disconnect|GnuTLS recv error"
+    r"|SSL_read: (?:Connection reset|SSL_ERROR_SYSCALL)"
+    r"|Operation too slow",
+    re.IGNORECASE,
+)
+
+
+# Abort a transfer under 1000 bytes/s for 60 s, so a stalled clone fails and is retried.
+_LOW_SPEED_ARGS = ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=60"]
+
+
+def _is_transient_clone_error(stderr: str) -> bool:
+    return _TRANSIENT_CLONE_ERROR.search(stderr) is not None
+
+
+def _clone(
+    cmd: list[str],
+    /,
+    *,
+    cwd: Path | None = None,
+    attempts: int = 8,
+    backoff: int = 10,
+    max_delay: int = 60,
+) -> None:
+    # git has no retry setting for `clone`, so retry here. stderr is captured to
+    # match it and keep it on the exception, so git's output appears when an
+    # attempt ends.
+    if attempts < 1:
+        raise ValueError(f"attempts must be at least 1, got {attempts}")
+    for attempt in range(1, attempts + 1):
+        # C locale so the messages match as English; errors="replace" so non-ASCII
+        # output cannot raise UnicodeDecodeError.
+        result = run(
+            cmd,
+            cwd=cwd,
+            stderr=PIPE,
+            text=True,
+            errors="replace",
+            env={**os.environ, "LC_ALL": "C"},
+        )
+        if result.stderr:
+            print(result.stderr, end="", file=sys.stderr, flush=True)
+        if result.returncode == 0:
+            return
+        if attempt == attempts or not _is_transient_clone_error(result.stderr):
+            raise CalledProcessError(result.returncode, cmd, stderr=result.stderr)
+        delay = min(backoff * 2 ** (attempt - 1), max_delay)
+        print(
+            f"-- Clone failed (attempt {attempt}/{attempts}), retry in {delay}s",
+            flush=True,
+        )
+        time.sleep(delay)
+
+
 def _checkout_by_tag(repo: str, tag: str) -> None:
-    check_call(
-        [
-            "git",
-            "clone",
-            "--depth",
-            "1",
-            "--branch",
-            tag,
-            repo,
-        ],
+    _clone(
+        ["git", *_LOW_SPEED_ARGS, "clone", "--depth", "1", "--branch", tag, repo],
         cwd=third_party_path,
     )
 
@@ -57,9 +116,10 @@ def checkout_nccl_ep() -> None:
     print(f"-- Checkout nccl-extensions revision: {revision}")
     source_dir = third_party_path / "nccl-extensions"
     if not source_dir.exists():
-        check_call(
+        _clone(
             [
                 "git",
+                *_LOW_SPEED_ARGS,
                 "clone",
                 "--no-checkout",
                 "https://github.com/NVIDIA/nccl-extensions.git",
@@ -78,8 +138,6 @@ def checkout_eigen() -> None:
 
 
 if __name__ == "__main__":
-    import sys
-
     if len(sys.argv) == 1:
         # If no arguments are given checkout all optional dependency
         checkout_nccl()

@@ -275,6 +275,8 @@ class SymbolicStreamState:
         from ..source import CurrentStreamSource
 
         cur_stack: list[StreamVariable] = []
+        self.current_stream_source: CurrentStreamSource | None = None
+        self._query_counter: int = 0
         if torch.accelerator.is_available():
             from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
 
@@ -284,6 +286,7 @@ class SymbolicStreamState:
                 # Reconstruct the stream relative to each rank's current device.
                 device = torch.device(device.type)
             source = CurrentStreamSource(device)
+            self.current_stream_source = source
             # Register the current stream so it gets index 0 (each OutputGraph
             # starts with an empty registry).  The inductor wrapper updates this
             # entry at runtime so cudagraph capture uses the capture stream
@@ -305,13 +308,48 @@ class SymbolicStreamState:
     def exit_stream(self) -> None:
         self.cur_stream_stack.pop()
 
-    def cur_stream(self, device: torch.device | None = None) -> "StreamVariable":
-        mark_current_stream_used()
+    def cur_stream(
+        self,
+        device: torch.device | None = None,
+        *,
+        tx: "InstructionTranslatorBase",
+    ) -> "StreamVariable":
         if device is not None:
+            if device.index is None:
+                # An indexless device means the tracked device's current stream.
+                mark_current_stream_used()
+                return self.cur_stream_stack[-1]
+            # Peek so the lazy seed is not realized.
             for stream in reversed(self.cur_stream_stack):
-                if stream.device == device:
+                if isinstance(stream, LazyVariableTracker) and not stream.is_realized():
+                    value = stream.peek_value()
+                else:
+                    value = stream.value
+                if value.device == device:
+                    mark_current_stream_used()
                     return stream
+            from torch.fx.experimental.proxy_tensor import _coor_enabled
 
+            if _coor_enabled():
+                # As with explicit-index Stream constructors, the index
+                # names a GPU that is wrong on every other rank.
+                from ..exc import CompileOnOneRankUnsupported
+
+                raise CompileOnOneRankUnsupported(
+                    "current_stream with an explicit device index under "
+                    "compile_on_one_rank: the index names a specific GPU, "
+                    "but the compiled artifact runs on every rank."
+                )
+            from .builder import VariableBuilder
+
+            # Eager returns a fresh stream object per query.
+            source = CurrentStreamSource(device, query_id=self._query_counter)
+            self._query_counter += 1
+            stream = VariableBuilder(tx, source)(
+                torch.accelerator.current_stream(device)
+            )
+            return stream  # pyrefly: ignore[bad-return]
+        mark_current_stream_used()
         return self.cur_stream_stack[-1]
 
     def tracked_device_type(self) -> str | None:
@@ -343,6 +381,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     _reenter_after_graph_break = False
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def create(
         tx: "InstructionTranslatorBase",
         stream_to_enter: "StreamVariable",
@@ -493,6 +532,9 @@ class StreamVariable(StreamContextVariable):
         event_arg = args[0]
         if not isinstance(event_arg, EventVariable):
             raise AssertionError(f"Expected EventVariable, got {type(event_arg)}")
+        tx.output.note_stream_waited_on_event(
+            self.value, event_arg.value, self.source is not None
+        )
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.wait_event,
@@ -510,6 +552,9 @@ class StreamVariable(StreamContextVariable):
         other_stream = args[0]
         if not isinstance(other_stream, StreamVariable):
             raise AssertionError(f"Expected StreamVariable, got {type(other_stream)}")
+        tx.output.note_stream_waited_on_stream(
+            self.value, other_stream.value, self.source is not None
+        )
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.wait_stream,
@@ -557,12 +602,26 @@ class StreamVariable(StreamContextVariable):
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
-        tx.output.check_event_record_after_input_mutation(id(self.value))
         if args and isinstance(args[0], EventVariable):
             event_var = args[0]
             event = event_var.value
             event_index = event_var.user_object_index
+            tx.output.check_event_record_after_input_mutation(
+                self.value,
+                event_value=event,
+                event_has_source=event_var.source is not None,
+            )
+            tx.output.note_event_recorded_on_stream(
+                event, self.value, event_var.source is not None
+            )
         else:
+            # The real record_event() runs first because we need the
+            # event object to exist before we can register it. Safe to run
+            # ahead of both checks below: each is passed a literal False for
+            # its has-source argument, and that argument is the only thing
+            # gating their immediate raises (otherwise they just record the
+            # deferred violation and return) -- so neither can raise before
+            # record_event() has already run.
             event = self.value.record_event()
             event_index = register_graph_created_object(
                 event,
@@ -570,6 +629,10 @@ class StreamVariable(StreamContextVariable):
                     TupleVariable([]), ConstDictVariable({})
                 ),
             )
+            tx.output.check_event_record_after_input_mutation(
+                self.value, event_value=event, event_has_source=False
+            )
+            tx.output.note_event_recorded_on_stream(event, self.value, False)
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.record_event,
@@ -670,7 +733,9 @@ class StreamVariable(StreamContextVariable):
 
     @staticmethod
     def make_construct_in_graph_stream_fn(
-        args: TupleVariable, kwargs: ConstDictVariable
+        args: TupleVariable,
+        kwargs: ConstDictVariable,
+        stream_cls: type[torch.Stream] = torch.Stream,
     ) -> Callable[[int, "PyCodegen"], None]:
         def fn(index: int, codegen: "PyCodegen") -> None:
             codegen.add_push_null(
@@ -686,7 +751,8 @@ class StreamVariable(StreamContextVariable):
             )
             codegen(args)
             codegen(kwargs)
-            codegen.extend_output(create_call_function(2, False))
+            codegen.append_output(codegen.create_load_const(stream_cls))
+            codegen.extend_output(create_call_function(3, False))
             codegen.extend_output(create_call_function(1, False))
 
         return fn
@@ -744,13 +810,6 @@ class EventVariable(VariableTracker):
         self.value = value
         self.user_object_index = user_object_index
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def python_type(self) -> type:
         return type(self.value)
 
@@ -763,7 +822,19 @@ class EventVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        _, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
+        stream_arg, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
+        # A no-arg wait() resolves to the ambient current stream, which
+        # SymbolicStreamState deliberately keeps as an unrealized
+        # LazyVariableTracker; reading .value would realize it and install a
+        # guard.  Only the object identity is needed here, and peek_value()
+        # returns the same object -- same trick as cur_stream_id().
+        if isinstance(stream_arg, LazyVariableTracker) and not stream_arg.is_realized():
+            stream_value = stream_arg.peek_value()
+        else:
+            stream_value = stream_arg.value
+        tx.output.note_stream_waited_on_event(
+            stream_value, self.value, stream_arg.source is not None
+        )
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.wait_event,
@@ -782,7 +853,14 @@ class EventVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         stream_arg, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
-        tx.output.check_event_record_after_input_mutation(id(stream_arg.value))
+        tx.output.check_event_record_after_input_mutation(
+            stream_arg.value,
+            event_value=self.value,
+            event_has_source=self.source is not None,
+        )
+        tx.output.note_event_recorded_on_stream(
+            self.value, stream_arg.value, self.source is not None
+        )
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.record_event,
@@ -880,14 +958,16 @@ class EventVariable(VariableTracker):
             stream_arg = kwargs.get("stream")
 
         if not stream_arg:
-            stream_var = tx.symbolic_stream_state.cur_stream()
+            stream_var = tx.symbolic_stream_state.cur_stream(tx=tx)
             return stream_var, stream_var.user_object_index  # type: ignore[return-value]
 
         return stream_arg, stream_arg.user_object_index  # type: ignore[return-value]
 
     @staticmethod
     def make_construct_in_graph_event_fn(
-        args: TupleVariable, kwargs: ConstDictVariable
+        args: TupleVariable,
+        kwargs: ConstDictVariable,
+        event_cls: type[torch.Event] = torch.Event,
     ) -> Callable[[int, "PyCodegen"], None]:
         def fn(index: int, codegen: "PyCodegen") -> None:
             codegen.add_push_null(
@@ -903,7 +983,8 @@ class EventVariable(VariableTracker):
             )
             codegen(args)
             codegen(kwargs)
-            codegen.extend_output(create_call_function(2, False))
+            codegen.append_output(codegen.create_load_const(event_cls))
+            codegen.extend_output(create_call_function(3, False))
             codegen.extend_output(create_call_function(1, False))
 
         return fn

@@ -4,8 +4,8 @@ from __future__ import annotations
 import operator
 from collections import abc as container_abcs, OrderedDict
 from itertools import chain, islice
-from typing import Any, overload, TYPE_CHECKING, TypeVar
-from typing_extensions import deprecated, Self
+from typing import Any, overload, Self, TYPE_CHECKING, TypeVar
+from typing_extensions import deprecated
 
 import torch
 from torch._jit_internal import _copy_to_script_wrapper
@@ -505,8 +505,6 @@ class ModuleList(Module):
             self.add_module(str(offset + i), module)
         return self
 
-    # remove forward altogether to fallback on Module's _forward_unimplemented
-
 
 class ModuleDict(Module):
     r"""Holds submodules in a dictionary.
@@ -645,8 +643,6 @@ class ModuleDict(Module):
                 # modules can be Mapping (what it's typed at), or a list: [(name1, module1), (name2, module2)]
                 # that's too cumbersome to type correctly with overloads, so we add an ignore here
                 self[m[0]] = m[1]  # type: ignore[assignment]
-
-    # remove forward altogether to fallback on Module's _forward_unimplemented
 
 
 class ParameterList(Module):

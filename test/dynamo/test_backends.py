@@ -15,6 +15,7 @@ from torch._dynamo.testing import same
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyHPU,
+    preserves_device_selection,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -50,6 +51,11 @@ class Conv_Bn_Relu(torch.nn.Module):
 
 
 class TestOptimizations(torch._dynamo.test_case.TestCase):
+    setUp = preserves_device_selection(torch._dynamo.test_case.TestCase.setUp)
+    setUpClass = classmethod(
+        preserves_device_selection(torch._dynamo.test_case.TestCase.setUpClass.__func__)
+    )
+
     def test_example_inputs(self):
         def fn(a, bc, d):
             b, c = bc

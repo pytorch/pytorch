@@ -234,6 +234,8 @@ class TORCH_API NCCLDevCommManager {
   // manager's device. Last-write-wins so a successor PG can replace the
   // entry before the prior PG's destructor runs (e.g. restart-after-error).
   // Producers must retire their entry before invalidating the communicator.
+  // Producers without that retirement protocol can leave entries for
+  // destroyed communicators here.
   void register_comm(const std::string& group_name, ncclComm_t comm) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto registered_comm = group_to_comm_.find(group_name);
@@ -249,7 +251,8 @@ class TORCH_API NCCLDevCommManager {
     //
     // Identity is the pointer alone, so a successor at a recycled `ncclComm_t`
     // address looks like a re-registration and skips the eviction. Producers
-    // that retire before invalidating their comm rule that out.
+    // that retire before invalidating their comm rule that out. Producers
+    // without that protocol can still leave a destroyed comm registered.
     if (registered_comm != group_to_comm_.end() &&
         registered_comm->second != comm) {
       devcomm_registry_.erase(group_name);
@@ -309,7 +312,9 @@ class TORCH_API NCCLDevCommManager {
   // These devcomms request none, but a comm that enabled GIN elsewhere attaches
   // contexts to them anyway, so this holds for single-node symmetric memory.
   //
-  // Producers should use an identity-safe overload for delayed teardown.
+  // The key-only overload removes the current entry. Its caller must ensure
+  // that the group name has not been rebound. Delayed teardown that may meet
+  // a successor should use an identity-safe overload instead.
   void unregister_comm(const std::string& group_name) {
     std::lock_guard<std::mutex> lock(mutex_);
     group_to_comm_.erase(group_name);
@@ -382,9 +387,9 @@ class TORCH_API NCCLDevCommManager {
       // communicator. This is important to ensure no kernels are still using
       // the device communicator when we destroy it.
       C10_CUDA_CHECK(cudaDeviceSynchronize());
-      // See `unregister_comm` for why retirement does not need
-      // `ncclDevCommDestroy`. Remaining entries belong to live communicators;
-      // producers must retire them before invalidating their communicator.
+      // Fallback path; see `unregister_comm` for why retirement does not need
+      // `ncclDevCommDestroy`. A producer without retirement before invalidation
+      // can leave entries for destroyed communicators here.
       for (auto& [group_name, group_map] : devcomm_registry_) {
         // Find the host communicator for the group.
         // Device communicators need the host communicator for destruction.

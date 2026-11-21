@@ -37,8 +37,6 @@ if(ANDROID_ABI)
   set(USE_VULKAN ON)
   set(libtorch_include_DIR ${pytorch_android_DIR}/libtorch_include/${ANDROID_ABI})
   set(BUILD_SUBDIR ${ANDROID_ABI})
-elseif(BUILD_LIBTORCH_WITH_JNI)
-  # Don't need LIBTORCH_HOME if we're building from within PyTorch.
 else()
   # Building against a pre-built libtorch.
   if(NOT LIBTORCH_HOME)
@@ -110,7 +108,6 @@ if(ANDROID_ABI)
   import_static_lib(libtorch)
   import_static_lib(libtorch_cpu)
   import_static_lib(libc10)
-  import_static_lib(libnnpack)
   import_static_lib(libXNNPACK)
   import_static_lib(libmicrokernels-prod)
   import_static_lib(libpytorch_qnnpack)
@@ -128,7 +125,6 @@ if(ANDROID_ABI)
       libtorch_cpu
       -Wl,--no-whole-archive
       libc10
-      libnnpack
       libXNNPACK
       libmicrokernels-prod
       libpytorch_qnnpack
@@ -146,10 +142,6 @@ else()
       c10
       cpuinfo
   )
-
-  if(USE_NNPACK)
-    list(APPEND pytorch_jni_LIBS nnpack)
-  endif()
 
   if(USE_XNNPACK)
     list(APPEND pytorch_jni_LIBS XNNPACK)

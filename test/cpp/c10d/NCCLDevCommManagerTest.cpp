@@ -372,6 +372,8 @@ TEST(NCCLDevCommManagerTest, IdentitySafeUnregisterPreservesSuccessor) {
 
   manager.unregister_comm(group_name, successor_comm);
   EXPECT_THROW(manager.get_comm(group_name), c10::Error);
+  EXPECT_FALSE(manager.comm_registration_is_live(
+      group_name, successor_comm, successor_generation));
 
   EXPECT_EQ(ncclCommDestroy(first_comm), ncclSuccess);
   EXPECT_EQ(ncclCommDestroy(successor_comm), ncclSuccess);

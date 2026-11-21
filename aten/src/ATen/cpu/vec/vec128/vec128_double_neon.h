@@ -171,6 +171,11 @@ class Vectorized<double> {
     result[1] = f(values[1], second.values[1]);
     return result;
   }
+  // A NaN (all bits set) where mask is true, this otherwise.
+  Vectorized<double> or_nan_if(const Vectorized<double>& mask) const {
+    return vreinterpretq_f64_u64(
+        vorrq_u64(vreinterpretq_u64_f64(values), vreinterpretq_u64_f64(mask)));
+  }
   Vectorized<double> abs() const {
     return vabsq_f64(values);
   }

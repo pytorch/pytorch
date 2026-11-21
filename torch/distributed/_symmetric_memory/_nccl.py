@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-from typing_extensions import Self
+from typing import Self, TYPE_CHECKING
 
 import torch
 
@@ -23,6 +22,11 @@ class NcclCommRegistration:
     removes the entry so a successor producer can register cleanly under the
     same ``group_name``.
 
+    Release all windowed symmetric-memory tensors and retained handles on all
+    participating ranks before dropping this registration. Otherwise late
+    cleanup can leave their windows registered until communicator teardown.
+    Unregister the old registration before publishing a same-name replacement.
+
     The comm's lifetime is *not* owned by this object; the registration only
     publishes a borrowed pointer. Optionally a strong reference to the source
     comm object is held so a stray ``del comm`` cannot dangle the registered
@@ -41,7 +45,7 @@ class NcclCommRegistration:
         self._active = True
 
     def unregister(self) -> None:
-        """Remove the registration. Idempotent."""
+        """Remove the registration after releasing its windowed buffers. Idempotent."""
         if not self._active:
             return
         # Imported lazily: only present in NCCL builds with symmetric-memory
@@ -77,8 +81,8 @@ def register_external_nccl_comm(
     Publish an externally-owned ``ncclComm_t`` into PyTorch's symmetric memory
     registry under ``group_name``.
 
-    This lets producers that are not a ``ProcessGroupNCCL`` (e.g. torchcomms
-    backends) supply the host NCCL communicator that
+    This lets producers that are not a ``ProcessGroupNCCL`` (e.g. external
+    communicator libraries) supply the host NCCL communicator that
     :func:`rendezvous` needs, without symmetric memory having to
     ``dynamic_cast`` to a specific process-group implementation. After this
     call, ``rendezvous(tensor, group=group_name)`` on a tensor in a process
@@ -87,7 +91,7 @@ def register_external_nccl_comm(
     Args:
         group_name (str): the process-group name to register the comm under.
         comm_ptr (int): the host ``ncclComm_t`` as an opaque integer pointer
-            (e.g. from ``torchcomms`` ``get_nccl_comm_ptr()``).
+            (e.g. from the producing library).
         device (`torch.device` or str): the CUDA device the comm belongs to.
         comm (object, optional): the source comm object. When provided, a
             strong reference is held by the returned registration so the comm
@@ -97,6 +101,12 @@ def register_external_nccl_comm(
         NcclCommRegistration: keep this alive for as long as symmetric memory
         should use this comm; drop it (or call ``unregister()``) to remove the
         registration.
+
+    .. note::
+        Keep the returned registration alive until all associated windowed
+        tensors and retained handles are released on every rank. Removing a
+        registration does not itself destroy the communicator; late window
+        cleanup can be deferred until that communicator is torn down.
 
     .. note::
         This is only available in NCCL builds with symmetric-memory device

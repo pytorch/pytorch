@@ -26,16 +26,11 @@ from _common import write_env_exports
 
 # macOS arm64 build flags.
 # USE_DISTRIBUTED=1 needs libuv, built as part of the tensorpipe submodule.
-# MKLDNN is off on Apple silicon.
 MACOS_BUILD_ENV: dict[str, str] = {
-    "TH_BINARY_BUILD": "1",
     "INSTALL_TEST": "0",
     "MACOSX_DEPLOYMENT_TARGET": "14.0",
     "USE_DISTRIBUTED": "1",
-    "USE_MKLDNN": "OFF",
     "BUILD_TEST": "OFF",
-    "USE_PYTORCH_METAL_EXPORT": "1",
-    "USE_COREML_DELEGATE": "1",
 }
 
 OMP_PREFIX = Path("/opt/llvm-openmp")

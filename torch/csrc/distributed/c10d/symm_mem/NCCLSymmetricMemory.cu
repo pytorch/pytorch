@@ -7,7 +7,6 @@
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
-#include <torch/csrc/distributed/c10d/debug.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
@@ -369,23 +368,26 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     }
     c10::cuda::CUDAGuard guard(device_idx_);
     if (combined_win_ != nullptr) {
-#ifdef USE_ROCM
       // Deregister only while this exact registration, pointer and generation,
       // is live: a retired comm may already be freed, and a successor may sit
       // at the same address.
-      // Relaxed: the destructor may run during HIP capture, and RCCL's
-      // ncclCommWindowDeregister leaves the calling thread in Relaxed mode;
-      // the guard restores the caller's mode on exit.
-      // TODO: drop this guard once RCCL restores the caller's capture thread
-      // mode.
+      // This is a sequential retirement check, not a pin against concurrent
+      // communicator abort/destroy. Callers must serialize teardown.
       auto& manager = NCCLDevCommManager::get(
           c10::Device(c10::DeviceType::CUDA, device_idx_));
       if (manager.comm_registration_is_live(
               group_name_, comm_, comm_generation_)) {
         ncclResult_t res;
         {
+#ifdef USE_ROCM
+          // Relaxed: the destructor may run during HIP capture, and RCCL's
+          // ncclCommWindowDeregister leaves the calling thread in Relaxed mode;
+          // the guard restores the caller's mode on exit.
+          // TODO: drop this guard once RCCL restores the caller's capture thread
+          // mode.
           c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard{
               cudaStreamCaptureModeRelaxed};
+#endif
           res = ncclCommWindowDeregister(comm_, combined_win_);
         }
         if (res != ncclSuccess) {
@@ -393,26 +395,6 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
                        << ncclGetErrorString(res);
         }
       }
-#else
-      auto& manager = NCCLDevCommManager::get(
-          c10::Device(c10::DeviceType::CUDA, device_idx_));
-      if (manager.comm_registration_is_live(
-              group_name_, comm_, comm_generation_)) {
-        auto res = ncclCommWindowDeregister(comm_, combined_win_);
-        if (debug_level() >= DebugLevel::Info) {
-          LOG(INFO) << "NCCL symmetric-memory window cleanup: group="
-                    << group_name_ << ", action=deregister, result="
-                    << static_cast<int>(res);
-        }
-        if (res != ncclSuccess) {
-          LOG(WARNING) << "ncclCommWindowDeregister failed: "
-                       << ncclGetErrorString(res);
-        }
-      } else if (debug_level() >= DebugLevel::Info) {
-        LOG(INFO) << "NCCL symmetric-memory window cleanup: group=" << group_name_
-                  << ", action=skip-retired";
-      }
-#endif
     }
     if (buffers_dev_ != nullptr) {
       c10::cuda::CUDACachingAllocator::raw_delete(buffers_dev_);
