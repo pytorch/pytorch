@@ -28,6 +28,9 @@ pub const TCFG_ALLOW_SKIP_AUTOGRAD: u32 = 1;
 pub const TCFG_UNBOXED_RESULT: u32 = 1;
 
 pub const TCFG_API_VERSION: u32 = 15;
+/// The version that has what the backward of a graph is derived with
+/// (`TcfgBackwardApi`) behind the entries of version 15.
+pub const TCFG_API_VERSION_BACKWARD: u32 = 16;
 
 #[repr(C)]
 pub struct TcfgPyOp {
@@ -138,6 +141,59 @@ pub struct TcfgApi {
     pub dispatch_keys: unsafe extern "C" fn(*mut u64, *mut u64),
     pub frame_count: Option<unsafe extern "C" fn() -> u64>,
     pub tensor_forward_grad: unsafe extern "C" fn(Obj) -> i32,
+}
+
+/// A node of the autograd graph (see cfg.h).
+#[repr(C)]
+pub struct TcfgNodeInfo {
+    pub name: *const c_char,
+    pub sequence_nr: u64,
+    pub n_inputs: u32,
+    pub n_edges: u32,
+    pub flags: u32,
+}
+
+pub const TCFG_NODE_PYTHON: u32 = 1;
+pub const TCFG_NODE_LEAF: u32 = 2;
+pub const TCFG_NODE_HOOKED: u32 = 4;
+pub const TCFG_RUN_BELOW_AUTOGRAD: u32 = 1;
+pub const TCFG_RUN_ON_TAPE: u32 = 2;
+
+/// What the node of a graph calls when it is handed gradients, and when
+/// what a backward kept is let go (see cfg.h).
+pub type Backward = unsafe extern "C" fn(*mut std::ffi::c_void, *const Obj, u32, *mut Obj, u32, u32) -> i32;
+pub type Release = unsafe extern "C" fn(*mut std::ffi::c_void, i32);
+
+/// The entries of version 16, which follow those of `TcfgApi` in the table:
+/// the tape, eager's nodes, operators by their schema, straight-line
+/// programs, and the node of a graph (see cfg.h).
+#[repr(C)]
+pub struct TcfgBackwardApi {
+    pub tape_begin: unsafe extern "C" fn(),
+    pub tape_end: unsafe extern "C" fn() -> Obj,
+    pub node_of: unsafe extern "C" fn(Obj, *mut u32) -> Obj,
+    pub node_info: unsafe extern "C" fn(Obj, *mut TcfgNodeInfo) -> i32,
+    pub node_next: unsafe extern "C" fn(Obj, u32, *mut u32) -> Obj,
+    pub node_call: unsafe extern "C" fn(Obj, Obj, u32) -> Obj,
+    pub op_find: unsafe extern "C" fn(*const c_char, *const c_char) -> Obj,
+    pub op_call: unsafe extern "C" fn(Obj, Obj, u32) -> Obj,
+    pub program_new: unsafe extern "C" fn(Obj, u32, *mut c_char, usize) -> *mut std::ffi::c_void,
+    pub program_free: unsafe extern "C" fn(*mut std::ffi::c_void),
+    pub program_run:
+        unsafe extern "C" fn(*mut std::ffi::c_void, *const Obj, *const u32, u32, *const u32, u32, u32) -> Obj,
+    pub graph_node: unsafe extern "C" fn(Obj, Obj, *mut std::ffi::c_void, Backward, Release) -> i32,
+}
+
+/// The entries of version 16, where the table of torch._C has them.
+pub fn backward_api() -> Option<&'static TcfgBackwardApi> {
+    let api = api()?;
+    if api.version < TCFG_API_VERSION_BACKWARD {
+        return None;
+    }
+    // The table is one struct of pointers: the entries of version 16 start
+    // where those of version 15 end.
+    let behind = unsafe { (api as *const TcfgApi).add(1) } as *const TcfgBackwardApi;
+    Some(unsafe { &*behind })
 }
 
 /// Whether compiled functions run under an interpreter frame of their own.
