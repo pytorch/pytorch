@@ -14,7 +14,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     onlyCUDA,
     skipCUDAIfNotRocm,
-    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -30,7 +29,6 @@ class TestBmmOuterProductDevice(TestCase):
         self.assertEqual(torch.bmm(a, b), a @ b, **kwargs)
 
     @onlyAccelerator
-    @skipXPUIf(True, "https://github.com/pytorch/pytorch/issues/180318")
     def test_shapes(self, device):
         shapes = [
             (4, 8, 16),
