@@ -2129,6 +2129,21 @@ class TestConvolutionNNDevice(NNTestCase):
         expected = F.conv1d(x.cpu().double(), w.cpu().double(), b.cpu().double(), *args)
         self.assertEqual(F.conv1d(x, w, b, *args), expected, exact_dtype=False)
 
+    @parametrize_test("dim", [1, 2, 3])
+    def test_conv_weight_grad_large_batch(self, device, dim):
+        # batch >= 2**16 gave a wrong weight grad on MPS (#96225); integer inputs keep the grad exact
+        conv = getattr(F, f"conv{dim}d")
+        x = torch.randint(-2, 3, (2**16 + 1, 2, *[4] * dim), device=device).float()
+        w = torch.randint(-2, 3, (3, 2, *[3] * dim), device=device).float()
+        w.requires_grad_()
+        out = conv(x, w)
+        grad = torch.randint_like(out, -2, 3)
+        (grad_w,) = torch.autograd.grad(out, w, grad)
+        w_ref = w.detach().cpu().double().requires_grad_()
+        out_ref = conv(x.cpu().double(), w_ref)
+        (expected,) = torch.autograd.grad(out_ref, w_ref, grad.cpu().double())
+        self.assertEqual(grad_w, expected, exact_dtype=False)
+
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
     @parametrize_test("mode", ("valid", "same"))
