@@ -4,6 +4,7 @@ Utils for caching the outputs of AOTAutograd
 
 from __future__ import annotations
 
+import base64
 import collections
 import contextlib
 import dataclasses
@@ -46,6 +47,7 @@ from torch._inductor.codecache import (
     FxGraphCachePickler,
     FxGraphHashDetails,
     GuardedCache,
+    sha256_hash,
     write_atomic,
 )
 from torch._inductor.custom_graph_pass import (
@@ -1296,7 +1298,26 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 counters["aot_autograd"]["autograd_cache_hit"] += 1
                 cache_state = "hit"
                 cache_event_time = time.time_ns()
-                cache_info.update(AOTAutogradCache._record_time_saved(entry))
+                forward_time_saved = entry.forward_time_taken_ns // 1e6
+                backward_time_saved = entry.backward_time_taken_ns // 1e6
+                cache_info.update(
+                    {
+                        "forward_time_saved_ms": forward_time_saved,
+                        "backward_time_saved_ms": backward_time_saved,
+                        "time_saved_ms": forward_time_saved + backward_time_saved,
+                    }
+                )
+                time_saved_ns = (
+                    entry.forward_time_taken_ns + entry.backward_time_taken_ns
+                )
+                # TODO: should we use the same field for remote cache time saved for both
+                # FXGraphCache and AOTAutogradCache?
+                # get_metrics_context().increment(...)
+                if (
+                    ephemeral_increase
+                    := add_ephemeral_timeout_increase_for_distributed(time_saved_ns)
+                ) != 0:
+                    cache_info["ephemeral_timeout_increase"] = ephemeral_increase
 
         if compiled_fn is None and cache_state is None:
             log.info("AOTAutograd cache miss for key %s", cache_key)
@@ -1324,48 +1345,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 "components": debug_lines,
             }
         )
-        AOTAutogradCache._log_cache_event(
-            cache_state, cache_event_time, cache_info, local, remote
-        )
-        return compiled_fn, aot_config
-
-    @staticmethod
-    def _record_time_saved(
-        entry: GenericAOTAutogradResult[Any, Any],
-    ) -> dict[str, Any]:
-        """
-        Grant the distributed NCCL timeout increase for a final cache hit and
-        return its cache_info fields: the compile time saved and the increase, if
-        any. Call once per hit, only after the hit is final; each call bumps the
-        timeout again.
-        """
-        forward_time_saved = entry.forward_time_taken_ns // 1e6
-        backward_time_saved = entry.backward_time_taken_ns // 1e6
-        info: dict[str, Any] = {
-            "forward_time_saved_ms": forward_time_saved,
-            "backward_time_saved_ms": backward_time_saved,
-            "time_saved_ms": forward_time_saved + backward_time_saved,
-        }
-        time_saved_ns = entry.forward_time_taken_ns + entry.backward_time_taken_ns
-        # TODO: should we use the same field for remote cache time saved for both
-        # FXGraphCache and AOTAutogradCache?
-        # get_metrics_context().increment(...)
-        ephemeral_increase = add_ephemeral_timeout_increase_for_distributed(
-            time_saved_ns
-        )
-        if ephemeral_increase != 0:
-            info["ephemeral_timeout_increase"] = ephemeral_increase
-        return info
-
-    @staticmethod
-    def _log_cache_event(
-        cache_state: str | None,
-        cache_event_time: int,
-        cache_info: dict[str, Any],
-        local: bool,
-        remote: bool,
-    ) -> None:
-        """Report the outcome of try_load to the chromium event log and tlparse."""
         if chromium_event_log_active():
             CompileEventLogger.instant(
                 f"autograd_cache_{cache_state}",
@@ -1391,6 +1370,8 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             },
             payload_fn=lambda: json.dumps(cache_info),
         )
+
+        return compiled_fn, aot_config
 
     @classmethod
     def generate_guards_expression(
@@ -1497,37 +1478,49 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             CacheArtifactRecorder(
                 AOTAutogradCacheArtifact.type(), key
             ).record_if_present(pickled_content)
-            if pickled_content is not None:
-                if (
-                    should_bundle_autograd_cache()
-                    and aot_config is not None
-                    and aot_config.precompile_backend_id is not None
-                ):
-                    # NB: We don't want to use the cached aot_config.precompile_backend_id
-                    # 1. because we set it to None on save 2. even if we didn't, this new run
-                    # that cache hit has a *new* backend id associated with it.
-                    PrecompileContext.record_artifact(
-                        BundledAOTAutogradCacheArtifact(
-                            aot_config.precompile_backend_id, entry
-                        ),
-                    )
+            if entry is not None:
+                AOTAutogradCache._record_precompile_artifact(entry, aot_config)
         except Exception as e:
             log.info("AOTAutograd cache unable to load compiled graph: %s", e)
             if config.strict_autograd_cache:
                 raise e
-        if entry is not None:
-            if pickled_content is None:
-                raise AssertionError(
-                    "pickled_content must not be None when entry is not None"
-                )
-            return (entry, pickled_content)
-        else:
+        if entry is None:
             return None
+        if pickled_content is None:
+            raise AssertionError(
+                "pickled_content must not be None when entry is not None"
+            )
+        return (entry, pickled_content)
+
+    @staticmethod
+    def _record_precompile_artifact(
+        entry: GenericAOTAutogradResult[Any, Any], aot_config: AOTConfig | None
+    ) -> None:
+        """
+        On a cache hit while bundling for precompile, record the entry under the
+        current run's precompile backend id.
+        """
+        if (
+            should_bundle_autograd_cache()
+            and aot_config is not None
+            and aot_config.precompile_backend_id is not None
+        ):
+            # NB: We don't want to use the cached aot_config.precompile_backend_id
+            # 1. because we set it to None on save 2. even if we didn't, this new run
+            # that cache hit has a *new* backend id associated with it.
+            PrecompileContext.record_artifact(
+                BundledAOTAutogradCacheArtifact(aot_config.precompile_backend_id, entry)
+            )
 
     @staticmethod
     def _write_to_local_cache(key: str, content: bytes) -> None:
         """Write an entry to the local cache."""
-        path = AOTAutogradCache._local_entry_path(key, content)
+        subdir = AOTAutogradCache._get_tmp_dir_for_key(key)
+
+        # Use a hash of the serialized entry to get a unique file
+        # name. The specific name doesn't matter since a lookup involves
+        # iterating over all entries in the parent subdir.
+        path = os.path.join(subdir, sha256_hash(content))
         log.info("Writing AOTAutograd cache entry to %s", path)
         write_atomic(path, content, make_dirs=True)
 
@@ -1636,7 +1629,11 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 time_taken_ms = int(
                     (entry.forward_time_taken_ns + entry.backward_time_taken_ns) // 1e6
                 )
-                AOTAutogradCache._put_remote(remote_cache, key, content, time_taken_ms)
+                cache_data: JsonDataTy = {
+                    "data": base64.b64encode(content).decode("ascii"),
+                    "time_taken_ms": time_taken_ms,
+                }
+                remote_cache.put(key, cache_data)
 
     @staticmethod
     @functools.cache
@@ -1673,26 +1670,9 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         serialized_bw_module: SerializedGraphModule | None,
         min_cut_info_str: str | None,
     ) -> GenericAOTAutogradResult[Any, Any]:
-        common_fields: dict[str, Any] = dict(
-            aot_joint_graph_str=aot_joint_graph_str,
-            aot_forward_graph_str=aot_forward_graph_str,
-            aot_backward_graph_str=aot_backward_graph_str,
-            min_cut_info_str=min_cut_info_str,
-            runtime_metadata=runtime_metadata,
-            dispatch_wrappers=dispatch_wrappers,
-            maybe_subclass_meta=maybe_subclass_meta,
-            num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
-            indices_of_inps_to_detach=indices_of_inps_to_detach,
-            forward_time_taken_ns=forward_time_taken_ns,
-            backward_time_taken_ns=backward_time_taken_ns,
-            sanitized_aot_config=sanitized_aot_config,
-            guards_expr=guards_expr,
-            serialized_bw_module=serialized_bw_module,
-        )
-
         if should_bundle_autograd_cache():
-            # Bundled entries store the OutputCode itself. Unwrap the wrappers
-            # added during aotdispatch; they get reapplied on cache load.
+            # Helper function to unwrap all the wrappers we added during aotdispatch
+            # They get reapplied on cache load
             def unwrap_output_code(obj: object) -> OutputCode:
                 while hasattr(obj, "__wrapped__"):
                     obj = obj.__wrapped__
@@ -1700,55 +1680,84 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                     raise AssertionError(f"expected OutputCode, got {type(obj)}")
                 return obj
 
-            bundled_compiled_forward = BundledCompiledForward(
-                unwrap_output_code(compiled_fw_func)
-            )
+            compiled_fw_graph = unwrap_output_code(compiled_fw_func)
+            bundled_compiled_forward = BundledCompiledForward(compiled_fw_graph)
             bundled_compiled_backward = None
             if compiled_bw_func is not None:
                 if backward_state_indices is None:
                     raise AssertionError("backward_state_indices must not be None")
                 if num_symints_saved_for_bw is None:
                     raise AssertionError("num_symints_saved_for_bw must not be None")
+                compiled_bw_graph = unwrap_output_code(compiled_bw_func)
                 bundled_compiled_backward = BundledCompiledBackward(
-                    unwrap_output_code(compiled_bw_func),
-                    backward_state_indices,
-                    num_symints_saved_for_bw,
+                    compiled_bw_graph, backward_state_indices, num_symints_saved_for_bw
                 )
+
             return BundledAOTAutogradResult(
                 compiled_fw=bundled_compiled_forward,
                 compiled_bw=bundled_compiled_backward,
-                **common_fields,
+                aot_joint_graph_str=aot_joint_graph_str,
+                aot_forward_graph_str=aot_forward_graph_str,
+                aot_backward_graph_str=aot_backward_graph_str,
+                min_cut_info_str=min_cut_info_str,
+                runtime_metadata=runtime_metadata,
+                dispatch_wrappers=dispatch_wrappers,
+                maybe_subclass_meta=maybe_subclass_meta,
+                num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
+                indices_of_inps_to_detach=indices_of_inps_to_detach,
+                forward_time_taken_ns=forward_time_taken_ns,
+                backward_time_taken_ns=backward_time_taken_ns,
+                sanitized_aot_config=sanitized_aot_config,
+                guards_expr=guards_expr,
+                serialized_bw_module=serialized_bw_module,
             )
 
-        # Unbundled entries store only the FxGraphCache keys of the compiled graphs.
-        fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
-        fw_debug_lines = getattr(compiled_fw_func, "_fx_graph_cache_debug_lines", [])
-        if fw_key is None:
-            raise AssertionError("fw_key must not be None")
-        compiled_forward = CompiledForward(
-            fx_graph_cache_info=(fw_key, fw_debug_lines),
-            fx_graph_guard_expr=getattr(compiled_fw_func, "guards_expr", None),
-        )
-        compiled_backward = None
-        if compiled_bw_func is not None:
-            bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
-            bw_debug_lines = getattr(
-                compiled_bw_func, "_fx_graph_cache_debug_lines", []
+        else:
+            fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
+            fw_debug_lines = getattr(
+                compiled_fw_func, "_fx_graph_cache_debug_lines", []
             )
-            if bw_key is None:
-                raise AssertionError("bw_key must not be None")
-            if backward_state_indices is None:
-                raise AssertionError("backward_state_indices must not be None")
-            if num_symints_saved_for_bw is None:
-                raise AssertionError("num_symints_saved_for_bw must not be None")
-            compiled_backward = CompiledBackward(
-                fx_graph_cache_info=(bw_key, bw_debug_lines),
-                fx_graph_guard_expr=getattr(compiled_bw_func, "guards_expr", None),
-                backward_state_indices=backward_state_indices,
-                num_symints_saved_for_bw_=num_symints_saved_for_bw,
+
+            if fw_key is None:
+                raise AssertionError("fw_key must not be None")
+            compiled_forward = CompiledForward(
+                fx_graph_cache_info=(fw_key, fw_debug_lines),
+                fx_graph_guard_expr=getattr(compiled_fw_func, "guards_expr", None),
             )
-        return AOTAutogradResult(
-            compiled_fw=compiled_forward,
-            compiled_bw=compiled_backward,
-            **common_fields,
-        )
+            compiled_backward = None
+            if compiled_bw_func is not None:
+                bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
+                bw_debug_lines = getattr(
+                    compiled_bw_func, "_fx_graph_cache_debug_lines", []
+                )
+                if bw_key is None:
+                    raise AssertionError("bw_key must not be None")
+                if backward_state_indices is None:
+                    raise AssertionError("backward_state_indices must not be None")
+                if num_symints_saved_for_bw is None:
+                    raise AssertionError("num_symints_saved_for_bw must not be None")
+                compiled_backward = CompiledBackward(
+                    fx_graph_cache_info=(bw_key, bw_debug_lines),
+                    fx_graph_guard_expr=getattr(compiled_bw_func, "guards_expr", None),
+                    backward_state_indices=backward_state_indices,
+                    num_symints_saved_for_bw_=num_symints_saved_for_bw,
+                )
+
+            return AOTAutogradResult(
+                compiled_fw=compiled_forward,
+                compiled_bw=compiled_backward,
+                aot_joint_graph_str=aot_joint_graph_str,
+                aot_forward_graph_str=aot_forward_graph_str,
+                aot_backward_graph_str=aot_backward_graph_str,
+                min_cut_info_str=min_cut_info_str,
+                runtime_metadata=runtime_metadata,
+                dispatch_wrappers=dispatch_wrappers,
+                maybe_subclass_meta=maybe_subclass_meta,
+                num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
+                indices_of_inps_to_detach=indices_of_inps_to_detach,
+                forward_time_taken_ns=forward_time_taken_ns,
+                backward_time_taken_ns=backward_time_taken_ns,
+                sanitized_aot_config=sanitized_aot_config,
+                guards_expr=guards_expr,
+                serialized_bw_module=serialized_bw_module,
+            )
