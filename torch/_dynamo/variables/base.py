@@ -41,7 +41,7 @@ from ..current_scope_id import current_scope_id
 from ..exc import raise_attribute_error, raise_type_error, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import check_positional, format_source_range, istype
+from ..utils import check_num_args, check_positional, format_source_range, istype
 
 
 # Stands in for the %p address object_repr/slot_tp_repr print: the real address
@@ -332,7 +332,7 @@ class NO_SUCH_SUBOBJ:
 class MethodFlags(IntFlag):
     """Calling convention for a `Method` handler, mirroring CPython's
     PyMethodDef ml_flags. `call_method` enforces arity from these before
-    invoking the handler, centralizing the raise_args_mismatch boilerplate."""
+    invoking the handler, centralizing the arity-check boilerplate."""
 
     VARARGS = 1  # any positional args; kwargs rejected unless KEYWORDS is set
     KEYWORDS = 2  # kwargs allowed (combine with VARARGS)
@@ -648,8 +648,7 @@ def _wrap_unaryfunc(
 ) -> VariableTracker:
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 0:
-        raise_type_error(tx, f"expected 0 arguments, got {len(args)}")
+    check_num_args(tx, args, 0)
     return func(self, tx)
 
 
@@ -662,8 +661,7 @@ def _wrap_hashfunc(
 ) -> VariableTracker:
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 0:
-        raise_type_error(tx, f"expected 0 arguments, got {len(args)}")
+    check_num_args(tx, args, 0)
     from .builder import SourcelessBuilder
     from .constant import ConstantVariable, FakeValueKind
 
@@ -693,8 +691,7 @@ def _wrap_binaryfunc(
 ) -> VariableTracker:
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
     other = args[0]
     return func(self, tx, other)
 
@@ -709,8 +706,7 @@ def _wrap_binaryfunc_r(
     # Reflected binary op (``__radd__``): same impl, operands from the right.
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
     other = args[0]
     return func(self, tx, other, reverse=True)
 
@@ -725,8 +721,7 @@ def _wrap_ternaryfunc(
     # __pow__ is binary or ternary: ``x.__pow__(y)`` or ``x.__pow__(y, z)`` (mod).
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) not in (1, 2):
-        raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
+    check_positional(tx, "", len(args), 1, 2)
     z = args[1] if len(args) == 2 else None
     return func(self, tx, args[0], z)
 
@@ -741,8 +736,7 @@ def _wrap_ternaryfunc_r(
     # Reflected __rpow__: operands from the right.
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) not in (1, 2):
-        raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
+    check_positional(tx, "", len(args), 1, 2)
     z = args[1] if len(args) == 2 else None
     return func(self, tx, args[0], z, reverse=True)
 
@@ -758,8 +752,7 @@ def _wrap_sq_setitem(
         raise_type_error(tx, "this method takes no keyword arguments")
     from .object_protocol import getindex
 
-    if len(args) != 2:
-        raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
+    check_positional(tx, "", len(args), 2, 2)
     [arg, value] = args
     i = getindex(tx, self, arg)
     return func(self, tx, i, value)
@@ -776,8 +769,7 @@ def _wrap_sq_item(
         raise_type_error(tx, "this method takes no keyword arguments")
     from .object_protocol import getindex
 
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
 
     [arg] = args
     i = getindex(tx, self, arg)
@@ -795,8 +787,7 @@ def _wrap_indexargfunc(
         raise_type_error(tx, "this method takes no keyword arguments")
     from .object_protocol import pynumber_as_ssize_t
 
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_positional(tx, "", len(args), 1, 1)
 
     [o] = args
     i = pynumber_as_ssize_t(tx, o, err=OverflowError)
@@ -812,8 +803,7 @@ def _wrap_objobjargproc(
 ) -> VariableTracker:
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 2:
-        raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
+    check_positional(tx, "", len(args), 2, 2)
     [key, value] = args
     return func(self, tx, key, value)
 
@@ -827,8 +817,7 @@ def _wrap_delitem(
 ) -> VariableTracker:
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
     [key] = args
     return func(self, tx, key, None)
 
@@ -844,8 +833,7 @@ def _wrap_sq_delitem(
         raise_type_error(tx, "this method takes no keyword arguments")
     from .object_protocol import getindex
 
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
     [arg] = args
     i = getindex(tx, self, arg)
     return func(self, tx, i, None)
@@ -861,8 +849,7 @@ def _wrap_objobjproc(
     # sq_contains via __contains__: one arg, impl returns a bool.
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
     [other] = args
     return func(self, tx, other)
 
@@ -889,8 +876,7 @@ def _make_richcmp(
     ) -> VariableTracker:
         if kwargs:
             raise_type_error(tx, "this method takes no keyword arguments")
-        if len(args) != 1:
-            raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+        check_num_args(tx, args, 1)
         return func(self, tx, args[0], op)
 
     return wrapper
@@ -952,8 +938,7 @@ def _wrap_setattr(
     # tp_setattro via __setattr__: (name, value).
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 2:
-        raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
+    check_positional(tx, "", len(args), 2, 2)
     if not issubclass(args[0].python_type(), str):
         raise_type_error(
             tx, f"attribute name must be string, not '{args[0].python_type_name()}'"
@@ -971,8 +956,7 @@ def _wrap_delattr(
     # tp_setattro via __delattr__: (name,).
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
     if not issubclass(args[0].python_type(), str):
         raise_type_error(
             tx, f"attribute name must be string, not '{args[0].python_type_name()}'"
@@ -990,8 +974,7 @@ def _wrap_getattro(
     # tp_getattro via __getattribute__: impl takes the attribute name as a str.
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
     name = args[0].as_python_constant()
     if not isinstance(name, str):
         raise_type_error(
@@ -1012,9 +995,7 @@ def _wrap_descr_get(
 
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-
-    check_positional(tx, "__get__", len(args), 1, 2)
-
+    check_positional(tx, "", len(args), 1, 2)
     obj = args[0]
     owner = args[1] if len(args) > 1 else ConstantVariable.create(None)
     # wrap_descr_get treats None as absent for both arguments and rejects the
@@ -1034,8 +1015,7 @@ def _wrap_descr_set(
     # tp_descr_set via __set__(obj, value): 2 args.
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 2:
-        raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
+    check_positional(tx, "", len(args), 2, 2)
     return func(self, tx, args[0], args[1])
 
 
@@ -1050,8 +1030,7 @@ def _wrap_descr_delete(
     # passes value==NULL to the shared tp_descr_set slot).
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
     return func(self, tx, args[0], None)
 
 
