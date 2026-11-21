@@ -169,6 +169,8 @@ struct Trial {
     phase: u8,
     /// The value of PLAN_EPOCH the measurement started under.
     epoch: u32,
+    /// The value of ENTRY_CALLS when the callee was first measured.
+    born: u32,
     calls: u32,
     compiled_best: u64,
     compiled_samples: u8,
@@ -202,6 +204,7 @@ impl Trial {
         Trial {
             phase: TRIAL_WARMUP,
             epoch,
+            born: ENTRY_CALLS.load(Ordering::Relaxed) as u32,
             calls: 0,
             compiled_best: u64::MAX,
             compiled_samples: 0,
@@ -242,6 +245,14 @@ fn trial_calls(ns: u64, least: u32, most: u32) -> u32 {
 }
 /// A callee whose measurement never gets quiet enough stays compiled.
 const TRIAL_MAX_CALLS: u32 = 400;
+/// How many calls there have been of the functions that were given to be
+/// compiled (not of what they call).
+static ENTRY_CALLS: AtomicU64 = AtomicU64::new(0);
+/// A measurement that is over within this many of them started while what
+/// is below it was still being compiled, and starts again: a callee of a
+/// loop is called `TRIAL_MAX_CALLS` times before the first call of the
+/// function it is in returns.
+const TRIAL_YOUNG_ENTRIES: u32 = 16;
 /// How much faster the interpreter has to be: 1/32, about 3%.
 const TRIAL_MARGIN_SHIFT: u32 = 5;
 
@@ -2330,6 +2341,7 @@ impl Compiled {
         if !self.options.demote {
             return call();
         }
+        ENTRY_CALLS.fetch_add(1, Ordering::Relaxed);
         let phase = self.settled.trial.get().phase;
         if phase == TRIAL_COMPILED {
             // The clock is read for a call only if something below the one
@@ -2435,7 +2447,7 @@ impl Compiled {
         }
         let epoch = PLAN_EPOCH.load(Ordering::Relaxed);
         if trial.epoch != epoch {
-            trial = Trial::start(epoch);
+            trial = Trial { born: trial.born, ..Trial::start(epoch) };
         }
         trial.calls += 1;
         slot.set(trial);
@@ -2529,7 +2541,14 @@ impl Compiled {
                 recent.set((code as usize, globals as usize, DEMOTED));
             }
         } else if trial.calls >= TRIAL_MAX_CALLS {
-            trial.phase = TRIAL_COMPILED;
+            // Still open: something below was compiled or measured during
+            // every one of its calls.
+            let age = (ENTRY_CALLS.load(Ordering::Relaxed) as u32).wrapping_sub(trial.born);
+            if age < TRIAL_YOUNG_ENTRIES {
+                trial = Trial { born: trial.born, ..Trial::start(epoch) };
+            } else {
+                trial.phase = TRIAL_COMPILED;
+            }
         }
         slot.set(trial);
         result
