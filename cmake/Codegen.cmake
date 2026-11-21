@@ -131,7 +131,7 @@ if(INTERN_BUILD_ATEN_OPS)
         endif()
         # We will need to gate against CUDA version, sm_121a was introduced in CUDA 12.9
         if("${_arch}" STREQUAL "121a" AND CUDA_VERSION VERSION_GREATER_EQUAL 12.9)
-          if(_existing_arch_flags MATCHES ".*compute_120.*")
+          if(_existing_arch_flags MATCHES ".*compute_12[01].*")
             list(APPEND _file_compile_flags "-gencode;arch=compute_121a,code=sm_121a")
           endif()
         endif()
