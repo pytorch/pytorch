@@ -817,16 +817,16 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   auto K = input.size(dim - 1), M = input.numel() / K, N = w.get_dim(1);
   auto input_dims = {M, K};
   auto input_data_type = is_input_qint8 ? dnnl::memory::data_type::s8 : dnnl::memory::data_type::u8;
-  auto input_desc = ideep::tensor::desc(input_dims, input_data_type);
-  ideep::attr_t op_attr = ideep::attr_t();
+  auto input_desc = at::native::mkldnn::ITensor::desc(input_dims, input_data_type);
+  at::native::mkldnn::Attr op_attr = at::native::mkldnn::Attr();
   if (post_op == Relu) {
-    op_attr = ideep::attr_t::fuse_relu();
+    op_attr = at::native::mkldnn::Attr::fuse_relu();
   } else if (post_op == LeakyRelu) {
-    op_attr = ideep::attr_t::fuse_relu(/*scale=*/1.0f, /*alpha=*/post_op_args.get(0).to<double>());
+    op_attr = at::native::mkldnn::Attr::fuse_relu(/*scale=*/1.0f, /*alpha=*/post_op_args.get(0).to<double>());
   } else if (post_op == Tanh) {
-    op_attr = ideep::attr_t::fuse_tanh();
+    op_attr = at::native::mkldnn::Attr::fuse_tanh();
   }
-  ideep::tensor x(input_desc, input_contig->data_ptr());
+  at::native::mkldnn::ITensor x(input_desc, input_contig->data_ptr());
   auto dst_dims = {M, N};
   double input_scale = input.q_scale();
   int64_t input_zero_point = input.q_zero_point();
@@ -848,7 +848,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   }
   auto output_ideep_data_type = is_input_qint8 ? dnnl::memory::data_type::s8 : dnnl::memory::data_type::u8;
   auto ideep_lowp_kind = is_input_qint8 ? ideep::s8s8 : ideep::u8s8;
-  ideep::tensor y({dst_dims, output_ideep_data_type,
+  at::native::mkldnn::ITensor y({dst_dims, output_ideep_data_type,
                    {output.strides().cbegin(), output.strides().cend()}},
                   output.data_ptr());
   bool with_bias = bias_.has_value();
@@ -859,7 +859,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
       bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
     }
   }
-  const auto& b = with_bias ? bias_.value() : ideep::tensor();
+  const auto& b = with_bias ? bias_.value() : at::native::mkldnn::ITensor();
   // Primitive cache is initialized when called for the first time
   // and won't be updated afterwards.
   int num_threads = at::get_num_threads();
@@ -870,14 +870,14 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
       // Prepacking does not know the output dtype. Select the layout for this
       // invocation before preparing the cached primitive.
       auto expected_w = w.reorder_if_differ_in(
-          ideep::matmul_forward::expected_weights_desc(
+          at::native::mkldnn::matmul_forward_expected_weights_desc(
               w.get_dims(), input_dims, w.get_data_type(), input_data_type,
               output_ideep_data_type, op_attr));
 #else
       auto& expected_w = w;
 #endif
       LinearParams params;
-      ideep::matmul_forward::prepare</*is_dynamic=*/false>(
+      at::native::mkldnn::matmul_forward_prepare</*is_dynamic=*/false>(
           params, x, expected_w, b, y,
           src_scales, weights_scales, dst_scales,
           src_zero_point, dst_zero_point, 1.0f, 1.0f, op_attr,
@@ -888,9 +888,9 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   });
   if (get_cache().hit(cache_key)) {
     LinearParams& params = get_cache().get_param();
-    ideep::matmul_forward::compute<false, false>(params, x, w, b, y);
+    at::native::mkldnn::matmul_forward_compute<false, false>(params, x, w, b, y);
   } else {
-    ideep::matmul_forward::compute(x, w, b, y, src_scales, weights_scales,
+    at::native::mkldnn::matmul_forward_compute(x, w, b, y, src_scales, weights_scales,
                                    dst_scales, src_zero_point, dst_zero_point,
                                    1.0f, 1.0f, op_attr,
                                    output_ideep_data_type,
@@ -1084,7 +1084,7 @@ static at::Tensor linear_int8_with_onednn_weight(
     const std::string_view& unary_post_op, // e.g. "none", "relu"
     torch::List<std::optional<at::Scalar>>& unary_post_op_args,
     std::string_view& unary_post_op_algorithm) {
-  using ideep::tensor;
+  using tensor = at::native::mkldnn::ITensor;
   const int64_t dim = input.dim();
   TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte || input.scalar_type() == c10::ScalarType::Char || input.scalar_type() == c10::ScalarType::Float8_e4m3fn,
       "qlinear with mkldnn tensor: data type of input should be uint8, int8 or float8_e4m3fn.");
