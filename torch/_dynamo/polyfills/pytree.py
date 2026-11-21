@@ -6,7 +6,7 @@ Python polyfills for torch.utils.pytree
 
 from __future__ import annotations
 
-from collections import deque
+from collections import defaultdict, deque, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING, TypeVar
 
@@ -24,9 +24,9 @@ from optree import (
     structseq_fields,
 )
 
+import torch
 import torch.utils._cxx_pytree as cxx_pytree  # noqa: F401  # load the C++ extension module
 import torch.utils._pytree as python_pytree
-from torch.utils._pytree import BUILTIN_TYPES, STANDARD_DICT_TYPES
 
 from ..decorators import substitute_in_graph
 
@@ -64,6 +64,20 @@ __all__ = [
 _T = TypeVar("_T")
 _KT = TypeVar("_KT")
 _VT = TypeVar("_VT")
+
+
+if not torch._has_frozendict:
+    BUILTIN_TYPES = frozenset(
+        {tuple, list, dict, namedtuple, OrderedDict, defaultdict, deque}
+    )
+else:
+    BUILTIN_TYPES = frozenset(
+        node_type
+        for node_type in python_pytree.BUILTIN_TYPES
+        if (handler := optree.register_pytree_node.get(node_type)) is not None
+        and handler.kind != optree.PyTreeKind.CUSTOM
+    )
+STANDARD_DICT_TYPES = python_pytree.STANDARD_DICT_TYPES & BUILTIN_TYPES
 
 
 @substitute_in_graph(
