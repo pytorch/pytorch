@@ -25,6 +25,7 @@ from torch.testing._internal.optests import (
     aot_autograd_check,
     autograd_registration_check,
     fake_check,
+    symbolic_fake_check,
 )
 
 
@@ -99,6 +100,22 @@ def safe_fake_check(
     return fake_check(op, args, kwargs)
 
 
+def safe_symbolic_fake_check(
+    op: torch._ops.OpOverload,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    *,
+    copy_inputs: bool = True,
+    rtol: float | None = None,
+    atol: float | None = None,
+) -> None:
+    if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
+        return None
+    if copy_inputs:
+        args, kwargs = deepcopy_tensors((args, kwargs))
+    return symbolic_fake_check(op, args, kwargs)
+
+
 def safe_aot_autograd_check(
     op: torch._ops.OpOverload,
     args: tuple[Any, ...],
@@ -162,6 +179,12 @@ ALL_TEST_UTILS = {
     ),
 }
 
+EXPERIMENTAL_TEST_UTILS = {
+    "test_symbolic_faketensor": safe_symbolic_fake_check,
+}
+
+SUPPORTED_TEST_UTILS = ALL_TEST_UTILS | EXPERIMENTAL_TEST_UTILS
+
 GDOC = "https://docs.google.com/document/d/1Pj5HRZvdOq3xpFpbEjUZp2hBovhy7Wnxw14m6lF2154/edit"
 
 DEFAULT_TEST_UTILS = [
@@ -191,10 +214,12 @@ def generate_opcheck_tests(
     that intercepts ``op(*args, **kwargs)`` calls and invokes
     ``test_util(op, *args, **kwargs)``, where ``op`` is an operator.
 
-    The test_util that we support are in ALL_TEST_UTILS. They are:
+    The supported test utilities are:
     - test_schema: This runs SchemaCheckMode.
     - test_autograd_registration: This runs autograd_registration_check.
     - test_faketensor: This runs CrossRefFakeMode.
+    - test_symbolic_faketensor: Experimental. This checks that explicit
+        Meta/Fake kernels do not specialize symbolic Tensor input sizes.
     - test_aot_dispatch_static: This runs aot_autograd_check, which:
         checks that the outputs (and gradients, if they are computable)
         are the same under eager-mode PyTorch and using AOTAutograd.
@@ -296,7 +321,7 @@ def generate_opcheck_tests(
             )
         setattr(testcase, new_method_name, new_method)
 
-    test_utils = {name: ALL_TEST_UTILS[name] for name in test_utils}
+    test_utils = {name: SUPPORTED_TEST_UTILS[name] for name in test_utils}
     for attr in test_methods:
         for prefix, tester in test_utils.items():
             construct_method(attr, prefix, tester)
@@ -333,6 +358,7 @@ def generate_tag_tests(testcase, failures_dict, additional_decorators):
             # We're about to delete the following test after Ed's PR
             # to specialize on C++ .size() calls
             if "test_aot_dispatch_static" not in test
+            and not any(test_util in test for test_util in EXPERIMENTAL_TEST_UTILS)
             and status_dict["status"] == "xfail"
         ]
         definitely_not_pt2_compliant = len(xfailed_tests) > 0
@@ -587,7 +613,7 @@ class OpCheckMode(TorchFunctionMode):
             # or if we're in a torch.compile block. Just ignore these
             # since we can't handle them and reporting them as failures
             # is too noisy.
-            pass
+            return
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
@@ -682,16 +708,16 @@ def opcheck(
     if isinstance(test_utils, str):
         test_utils = (test_utils,)
     if not isinstance(test_utils, (tuple, list)) or not set(test_utils).issubset(
-        ALL_TEST_UTILS.keys()
+        SUPPORTED_TEST_UTILS.keys()
     ):
         raise ValueError(
             f"opcheck(op, ..., test_utils={test_utils}), expected test_utils "
-            f"to be subset of {tuple(ALL_TEST_UTILS.keys())} but it was not"
+            f"to be subset of {tuple(SUPPORTED_TEST_UTILS.keys())} but it was not"
         )
 
     results_dict = {}
     for test_util in test_utils:
-        tester = ALL_TEST_UTILS[test_util]
+        tester = SUPPORTED_TEST_UTILS[test_util]
         try:
             tester(op, args, kwargs, rtol=rtol, atol=atol)
             results_dict[test_util] = "SUCCESS"
