@@ -269,6 +269,10 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
   // Bias
   std::optional<ideep::tensor> onednn_bias{std::nullopt};
   if (bias.has_value()) {
+    TORCH_CHECK(
+        bias->scalar_type() == at::kFloat,
+        "quantized::linear_prepack (onednn): bias must have dtype torch.float32");
+    bias = bias->contiguous();
     auto& b = bias.value();
     auto bias_size = b.sizes().vec();
     bias_size.insert(bias_size.begin(), 1);

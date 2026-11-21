@@ -60,6 +60,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_PPC,
     IS_SANDCASTLE,
+    parametrize,
     raise_on_run_directly,
     TestCase,
 )
@@ -4205,6 +4206,53 @@ class TestDynamicQuantizedOps(TestCase):
                 ref.relu_()
 
             self.assertEqual(out, ref)
+
+
+class TestOnednnLinearBiasDevice(TestCase):
+    @skipIfNoONEDNN
+    @parametrize("layout", ["contiguous", "offset", "strided", "expanded"])
+    @parametrize("channelwise", [False, True])
+    @parametrize("relu", [False, True])
+    @parametrize("zero_weights", [False, True])
+    def test_linear_bias_layout(self, device, layout, channelwise, relu, zero_weights):
+        storage = torch.arange(8, dtype=torch.float32, device=device) - 2
+        if layout == "strided":
+            bias = storage[1:7:2]
+        elif layout == "expanded":
+            bias = storage[1:2].expand(3)
+        elif layout == "offset":
+            bias = storage[1:4]
+        else:
+            bias = storage[:3].clone()
+        expected_bias = bias.clone()
+        x = torch.quantize_per_tensor(torch.ones(2, 4, device=device), 0.5, 3, torch.quint8)
+        weight = torch.zeros(3, 4, device=device) if zero_weights else torch.arange(12, device=device).reshape(3, 4).float() * 0.5
+        if channelwise:
+            weight = torch.quantize_per_channel(weight, torch.full((3,), 0.5), torch.zeros(3, dtype=torch.int64), 0, torch.qint8)
+        else:
+            weight = torch.quantize_per_tensor(weight, 0.5, 0, torch.qint8)
+        reference = F.linear(x.dequantize(), weight.dequantize(), expected_bias)
+        if relu:
+            reference = reference.relu()
+        expected = torch.quantize_per_tensor(reference, 0.25, 20, torch.quint8)
+        with override_quantized_engine("onednn"):
+            packed = torch.ops.quantized.linear_prepack(weight, bias)
+            del bias, storage
+            op = torch.ops.quantized.linear_relu if relu else torch.ops.quantized.linear
+            for _ in range(2):
+                actual = op(x, packed, 0.25, 20)
+                self.assertEqual(actual, expected)
+            _, unpacked_bias = torch.ops.quantized.linear_unpack(packed)
+            self.assertEqual(unpacked_bias, expected_bias)
+            self.assertTrue(unpacked_bias.is_contiguous())
+
+    @skipIfNoONEDNN
+    @parametrize("dtype", [torch.float64, torch.float16, torch.int32, torch.int64])
+    def test_linear_bias_dtype(self, device, dtype):
+        weight = torch.quantize_per_tensor(torch.zeros(3, 4), 0.5, 0, torch.qint8)
+        with override_quantized_engine("onednn"):
+            with self.assertRaisesRegex(RuntimeError, "bias must have dtype torch.float32"):
+                torch.ops.quantized.linear_prepack(weight, torch.zeros(3, dtype=dtype))
 
 
 class TestQuantizedLinear(TestCase):
@@ -9791,6 +9839,7 @@ class TestQuantizedWithMinMax(TestCase):
                         )
 
 
+instantiate_device_type_tests(TestOnednnLinearBiasDevice, globals(), only_for="cpu")
 instantiate_device_type_tests(TestQuantizedMaxPool2dPT2EDevice, globals(), only_for=("cpu", "xpu"), allow_xpu=True)
 
 if __name__ == "__main__":
