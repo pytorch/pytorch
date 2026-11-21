@@ -28,7 +28,7 @@ namespace at::native {
 
 static MemoryFormat group_norm_memory_format(const Tensor& input) {
   return (input.device().is_cpu() || input.device().is_cuda() ||
-          input.device().is_privateuseone())
+          input.device().is_xpu() || input.device().is_privateuseone())
       ? input.suggest_memory_format()
       : MemoryFormat::Contiguous;
 }
