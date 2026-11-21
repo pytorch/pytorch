@@ -20,8 +20,11 @@ from torch._inductor.lowering import make_fallback, make_pointwise, register_low
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import ops
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
+from torch.testing._internal.common_utils import parametrize, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -375,6 +378,103 @@ class TestJaggedAtenLowerings(InductorTestCase):
                     code, "torch.ops.aten._padded_dense_to_jagged_forward.default("
                 )
             )
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16, torch.int32, torch.int64)
+    @parametrize("values_ndim", (1, 2))
+    @parametrize("dynamic", (False, True))
+    def test_jagged_to_padded_dtype(self, device, dtype, values_ndim, dynamic):
+        values = torch.arange(33, device=device, dtype=torch.int64).reshape(11, 3)
+        if dtype == torch.int64:
+            values = values + 2**40 + 1
+        values = values.to(dtype)
+        if values_ndim == 1:
+            values = values[:, 0]
+        offsets = torch.tensor([0, 2, 2, 8, 11], device=device)
+
+        def fn(values, offsets):
+            return torch.ops.aten._jagged_to_padded_dense_forward(
+                values + 1, [offsets], [4], -1.0
+            )
+
+        expected = fn(values, offsets)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=dynamic), values, offsets
+        )
+        self.assertEqual(actual.dtype, dtype)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        native_call = "torch.ops.aten._jagged_to_padded_dense_forward.default("
+        fused = values_ndim == 2 and has_backend_feature(
+            torch.device(device), BackendFeature.INDIRECT_INDEXING
+        )
+        self.assertEqual(_has_aten_fallback_call(code, native_call), not fused)
+
+    @dtypes(torch.int32, torch.int64)
+    @parametrize("padding", (float("nan"), float("inf"), -float("inf"), float(2**63)))
+    def test_jagged_to_padded_integer_padding_fallback(self, device, dtype, padding):
+        self._check_jagged_padding_fallback(device, dtype, padding)
+
+    @dtypes(torch.bool)
+    def test_jagged_to_padded_boolean_padding_fallback(self, device, dtype):
+        self._check_jagged_padding_fallback(device, dtype, -float("inf"))
+
+    def _check_jagged_padding_fallback(self, device, dtype, padding):
+        values = torch.arange(33, device=device, dtype=torch.int64).reshape(11, 3)
+        values = values.to(dtype)
+        offsets = torch.tensor([0, 2, 2, 8, 11], device=device)
+
+        def fn(values, offsets):
+            values = values.logical_not() if dtype == torch.bool else values + 1
+            return torch.ops.aten._jagged_to_padded_dense_forward(
+                values, [offsets], [4], padding
+            )
+
+        expected = fn(values, offsets)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=False), values, offsets
+        )
+        self.assertEqual(actual.dtype, dtype)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertTrue(
+            _has_aten_fallback_call(
+                code, "torch.ops.aten._jagged_to_padded_dense_forward.default("
+            )
+        )
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("midpoint", (False, True))
+    @parametrize("dynamic", (False, True))
+    def test_jagged_to_padded_padding_consumers(self, device, dtype, midpoint, dynamic):
+        values = torch.arange(33, device=device, dtype=dtype).reshape(11, 3)
+        offsets = torch.tensor([0, 2, 2, 8, 11], device=device)
+
+        def fractional_fn(values, offsets):
+            padded = torch.ops.aten._jagged_to_padded_dense_forward(
+                values + 1, [offsets], [4], 0.1
+            )
+            return padded > 0.1, padded == 0.1
+
+        def midpoint_fn(values, offsets):
+            # CUDA rounds double through float32 before converting to half.
+            padded = torch.ops.aten._jagged_to_padded_dense_forward(
+                values + 1, [offsets], [4], 1 + 2**-11 + 2**-25
+            )
+            return padded > 1.0, padded == 1.0
+
+        fn = midpoint_fn if midpoint else fractional_fn
+        expected = fn(values, offsets)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=dynamic), values, offsets
+        )
+        self.assertEqual(actual, expected)
+        fused = has_backend_feature(
+            torch.device(device), BackendFeature.INDIRECT_INDEXING
+        )
+        self.assertEqual(
+            _has_aten_fallback_call(
+                code, "torch.ops.aten._jagged_to_padded_dense_forward.default("
+            ),
+            not fused,
+        )
 
 
 class TestJaggedOutOfTreeBackend(InductorTestCase):

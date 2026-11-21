@@ -1,8 +1,12 @@
 # mypy: allow-untyped-defs
 
+import math
+
 import sympy
 
 import torch
+from torch._prims_common import dtype_to_type, is_integer_dtype
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 
 from .codegen.common import BackendFeature
 from .ir import Pointwise, TensorBox
@@ -108,11 +112,14 @@ def jagged_idx_to_dense_idx(
 
 
 def register_jagged_ops():
+    """Register jagged conversions with pointwise lowerings and native fallbacks."""
     # Avoid circular import by importing here
     from .lowering import fallback_handler, is_integer_type, register_lowering
 
     # pyre-ignore[56]
-    @register_lowering(torch.ops.aten._jagged_to_padded_dense_forward.default)
+    @register_lowering(
+        torch.ops.aten._jagged_to_padded_dense_forward.default, type_promotion_kind=None
+    )
     def _jagged_to_padded_dense_forward(
         jagged_values: TensorBox,
         jagged_offsets: list[TensorBox],
@@ -124,11 +131,22 @@ def register_jagged_ops():
 
         jagged_values_size = jagged_values.get_size()
 
+        integer_padding_supported = True
+        if dtype == torch.bool:
+            integer_padding_supported = math.isfinite(padding_value)
+        elif is_integer_dtype(dtype):
+            bounds = torch.iinfo(dtype)
+            # Preserve native conversion for nonfinite or out-of-range padding.
+            integer_padding_supported = math.isfinite(padding_value) and (
+                bounds.min <= int(padding_value) <= bounds.max
+            )
+
         # only handle the common case of a single jagged dimension
         # The fused kernel needs indirect_indexing + masked; backends that
         # can't codegen those (e.g. Pallas) must fall back.
         if (
-            len(jagged_offsets) != 1
+            not integer_padding_supported
+            or len(jagged_offsets) != 1
             or not V.graph.has_feature(jagged_values, BackendFeature.INDIRECT_INDEXING)
             or device != jagged_offsets[0].get_device()
             or len(jagged_values_size) != 2
@@ -155,6 +173,20 @@ def register_jagged_ops():
         jagged_len = jagged_values_size[0]
 
         output_size = [batch_size, max_seq_len, embedding_len]
+        padding = dtype_to_type(dtype)(padding_value)
+        if dtype in (torch.float16, torch.bfloat16):
+            # CUDA converts through float32; ARM CPU can convert directly to half.
+            # Round before fusion so consumers observe the output dtype's value.
+            with unset_fake_temporarily():
+                padding = (
+                    torch.tensor(
+                        padding_value,
+                        dtype=dtype if device.type == "cpu" else torch.float32,
+                        device="cpu",
+                    )
+                    .to(dtype)
+                    .item()
+                )
 
         values_loader = jagged_values.make_loader()
         offsets_loader = offsets.make_loader()
@@ -175,7 +207,7 @@ def register_jagged_ops():
                     end_idx,
                 ),
                 lambda: values_loader([jagged_idx, emb_idx]),
-                padding_value,
+                padding,
             )
 
         return Pointwise.create(
