@@ -360,8 +360,7 @@ class ComboKernel(Kernel):
         )
         too_many_dynamic = (
             is_dynamic
-            and partition_state.cur_dynamic_count
-            >= ComboKernel.MAX_DYNAMIC_SUBKERNELS
+            and partition_state.cur_dynamic_count >= ComboKernel.MAX_DYNAMIC_SUBKERNELS
         )
         if too_many_args or too_many_dynamic:
             partition_state.partitions.append(partition_state.cur_partition)
