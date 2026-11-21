@@ -1465,6 +1465,40 @@ class TestVmPasses(TestCase):
         with self.assertRaisesRegex(IndexError, "outside the range"):
             replay.io(lo, hi + 100)
 
+    def test_values_needed_and_values_read_behind_a_block(self):
+        handles = []
+
+        def grab(region):
+            if not handles:
+                end = len(region.instructions())
+                handles.append((region.replayer(0, end), end))
+            return False
+
+        def f(xs, flag):
+            total = 0
+            for x in xs:
+                total = total + x
+            if flag:
+                total = total * 2
+            return total
+
+        passes = [P.Inline(), P.ModuleShortcuts(), grab]
+        compiled = torch.vm(f, passes=passes, fallback=False)
+        self.assertEqual(compiled([1, 2, 3], True), 12)
+        ((replay, end),) = handles
+        # The first block takes the list, and makes the sum and the iterator.
+        (xs,), made = replay.io(0, end)
+        self.assertEqual(len(made), 2)
+        needed, read = replay.live(0, end), replay.live(0, end, True)
+        self.assertLessEqual(set(made), set(read))
+        self.assertLess(set(read), set(needed))
+        # The list is kept alive to the end of the function, as the frame of
+        # the interpreter would keep it, and nothing reads it again.
+        self.assertIn(xs, needed)
+        self.assertNotIn(xs, read)
+        with self.assertRaisesRegex(IndexError, "no such instruction"):
+            replay.live(0, end + 1)
+
     def test_settle_specializes_the_block_again(self):
         seen = []
 

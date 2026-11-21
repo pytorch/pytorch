@@ -826,6 +826,11 @@ pub struct Compiled {
     /// Per handler block: the registers that survive entering it, which are
     /// what it reads and the frame slots.
     handler_keep: Vec<Option<analysis::BitSet>>,
+    /// The values that are live at the instructions.
+    live: Shared<HashMap<(usize, usize), Arc<analysis::BitSet>>>,
+    /// The function without what its holds name, and its liveness: made
+    /// when `read_at` is first asked.
+    reads: std::sync::OnceLock<(Function, Analysis)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1071,6 +1076,8 @@ impl Compiled {
         Compiled {
             callees,
             handler_keep,
+            live: Shared::new(HashMap::new()),
+            reads: std::sync::OnceLock::new(),
             global_cache: empty(),
             module_attr_cache: empty(),
             plain_name,
@@ -1565,6 +1572,35 @@ impl Compiled {
     /// The value that no instruction of the function defines.
     pub fn scratch(&self) -> V {
         self.func.nvalues - 1
+    }
+
+    /// The values that are needed from instruction `index` of a block on.
+    pub fn live_at(&self, block: usize, index: usize) -> Arc<analysis::BitSet> {
+        if let Some(live) = self.live.borrow().get(&(block, index)) {
+            return live.clone();
+        }
+        let live = Arc::new(self.analysis.live_before(&self.func, block, index));
+        self.live.borrow_mut().insert((block, index), live.clone());
+        live
+    }
+
+    /// The values that an instruction from `index` of a block on reads: the
+    /// ones that are needed there less those that are only kept alive (see
+    /// `Op::Hold`), which matters to something that would have to make them.
+    pub fn read_at(&self, block: usize, index: usize) -> analysis::BitSet {
+        let (func, analysis) = self.reads.get_or_init(|| {
+            let mut func = self.func.clone();
+            for found in func.blocks.iter_mut() {
+                for inst in found.insts.iter_mut() {
+                    if let Op::Hold(values) = &mut inst.op {
+                        values.clear();
+                    }
+                }
+            }
+            let analysis = analysis::analyze(&func);
+            (func, analysis)
+        });
+        analysis.live_before(func, block, index)
     }
 
     /// The values a range of the generic instructions of a block takes from

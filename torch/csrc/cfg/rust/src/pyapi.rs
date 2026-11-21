@@ -699,6 +699,25 @@ impl Replay {
         }
     }
 
+    // What follows is about the function as a whole, for code that goes
+    // on from the range into other blocks.
+
+    /// The values that are needed from instruction `index` of a block on;
+    /// with `read`, only those that an instruction reads, not the ones that
+    /// are merely kept alive to the end of their scope.
+    #[pyo3(signature = (block, index, read=false))]
+    fn live(&self, block: usize, index: usize, read: bool) -> PyResult<Vec<V>> {
+        let compiled = self.compiled()?;
+        let fits = compiled.func.blocks.get(block).is_some_and(|found| index <= found.insts.len());
+        if !fits {
+            return Err(PyIndexError::new_err("no such instruction"));
+        }
+        if read {
+            return Ok(compiled.read_at(block, index).iter().collect());
+        }
+        Ok(compiled.live_at(block, index).iter().collect())
+    }
+
     /// Leaves `note` on the block for the pass and has the block specialized
     /// again, with that note, before this returns.
     fn settle(&self, note: &Bound<'_, PyAny>) -> PyResult<()> {
