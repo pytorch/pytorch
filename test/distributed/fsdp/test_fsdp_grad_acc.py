@@ -13,6 +13,10 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     BackwardPrefetch,
     ShardingStrategy,
 )
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
@@ -21,7 +25,7 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -38,8 +42,6 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 @dataclass
@@ -84,12 +86,15 @@ class TestGradAcc(FSDPTestContinuous):
     """Tests ``FullyShardedDataParallel``'s gradient accumulation via both its
     ``no_sync()`` context manager and without the context manager."""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
 
     def _test_grad_acc(
         self,
+        device_id,
         batch_dim: int,
         configs: list[_GradAccConfig],
         cpu_offload: CPUOffload,
@@ -135,7 +140,7 @@ class TestGradAcc(FSDPTestContinuous):
             deterministic=True,
             add_bn=False,  # disable BN since the test uses varying batch sizes
         )
-        device = torch.device(device_type)
+        device = torch.device(device_id).type
         optim = torch.optim.SGD(
             fsdp_model.parameters(),
             lr=0.01,
@@ -231,6 +236,7 @@ class TestGradAcc(FSDPTestContinuous):
             ],
         }
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "configs",
@@ -254,6 +260,7 @@ class TestGradAcc(FSDPTestContinuous):
     @parametrize("use_orig_params", [False, True])
     def test_grad_acc(
         self,
+        device,
         configs: _GradAccConfigs,
         use_orig_params: bool,
     ):
@@ -271,15 +278,18 @@ class TestGradAcc(FSDPTestContinuous):
         self.run_subtests(
             subtest_config,
             self._test_grad_acc,
+            device_id=device,
             batch_dim=1,
             configs=configs.configs,
             use_orig_params=use_orig_params,
         )
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(2)
     @parametrize("use_orig_params", [False, True])
     def test_grad_acc_cpu_offload(
         self,
+        device,
         use_orig_params: bool,
     ):
         """
@@ -296,13 +306,14 @@ class TestGradAcc(FSDPTestContinuous):
         self.run_subtests(
             subtest_config,
             self._test_grad_acc,
+            device_id=device,
             batch_dim=1,
             configs=configs.configs,
             use_orig_params=use_orig_params,
         )
 
 
-instantiate_parametrized_tests(TestGradAcc)
+instantiate_device_type_tests(TestGradAcc, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
