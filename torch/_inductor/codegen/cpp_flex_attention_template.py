@@ -364,8 +364,9 @@ extern "C"
 
 FLEX_ATTENTION_TEMPLATE = r"""
   bool need_pack = false;
+{%- if not use_blas_gemm %}
   // Whether pack is needed for BFloat16/Half
-  if (is_reduced_type) {
+  if constexpr (is_reduced_type) {
     // check platform ability
     need_pack = std::is_same_v<scalar_t, at::BFloat16> ? at::native::cpublas::could_pack(at::kBFloat16)
                                                        : at::native::cpublas::could_pack(at::kHalf);
@@ -382,6 +383,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
       need_pack = gemm_size_per_thread / pack_size >= 4;
     }
   }
+{%- endif %}
   // Pad is needed for packing when K is not even
   bool headSize_even = headSize % 2 == 0;
   int64_t eheadSize = need_pack && !headSize_even ? headSize + 1: headSize;
@@ -413,7 +415,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
       /* qk_sum */ qSplitSize +
       /* dst    */ eqSplitSize * headSize_v;
 
-  // Buffers to store accum results, padding query and transpose/packing key/value
+  // Buffers to store accum results
   {{template.codegen_allocate_buffer("buf_data", "accum_t", "num_thread*_size_per_thread")}}
   {{template.codegen_allocate_buffer("buf_reduced_data", "scalar_t", "num_thread*eqSplitSize*ekvSplitSize")}}
 {%- if amx_supported %}
@@ -421,6 +423,8 @@ FLEX_ATTENTION_TEMPLATE = r"""
   int64_t qk_data2_size = use_amx_overlap ? num_thread*eqSplitSize*kvSplitSize : 0;
   {{template.codegen_allocate_buffer("qk_data2_data", "accum_t", "qk_data2_size")}}
 {%- endif %}
+{%- if not use_blas_gemm %}
+  // Buffers for padding query and transpose/packing key/value
   {{template.codegen_allocate_buffer("key_reorder_ptr", "scalar_t", "batchSize_k*num_head_k*eheadSize*kvSize")}}
   {{template.codegen_allocate_buffer("value_reorder_ptr", "scalar_t", "batchSize_k*num_head_k*kv_padding_size*headSize_v")}}
   {{template.codegen_allocate_buffer("transpose_buffer_ptr", "scalar_t", "num_thread*kvSplitSize*headSize")}}
@@ -472,6 +476,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
       }
     });
   }
+{%- endif %}
   // Attention loop below
   at::parallel_for(0, batchSize * num_head * qSlice, 1, [&](int64_t begin, int64_t end) {
     int64_t i = 0, j = 0, k = 0;
@@ -486,9 +491,13 @@ FLEX_ATTENTION_TEMPLATE = r"""
         is_reduced_type
             ? buf_reduced_data + ompIdx * eqSplitSize * ekvSplitSize
             : nullptr;
+{%- if not use_blas_gemm %}
     scalar_t* query_t_padding_ptr = (!headSize_even && need_pack)
             ? query_padding_ptr + ompIdx * eqSplitSize * eheadSize
             : nullptr;
+{%- else %}
+    scalar_t* query_t_padding_ptr = nullptr;
+{%- endif %}
 {%- if amx_supported %}
     // amx_state is released at the end of each q-block so it never carries a stale tile config across a
     // brgemm fallback (tail case).
@@ -680,10 +689,27 @@ FLEX_ATTENTION_TEMPLATE = r"""
         } else if (!need_pack) {
           auto k_addr =
               k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
+          auto q_addr =
+              q_data + i * qStrideB + j * qStrideH + m * qStrideM;
 
+{%- if use_blas_gemm %}
+          at::native::cpublas::gemm(
+              at::native::TransposeType::Transpose,
+              at::native::TransposeType::NoTranspose,
+              cur_kvSplitSize,
+              cur_qSplitSize,
+              headSize,
+              static_cast<accum_t>(1),
+              k_addr,
+              kStrideN,
+              q_addr,
+              qStrideM,
+              static_cast<accum_t>(0),
+              qk_data,
+              cur_kvSplitSize);
+{%- else %}
           {{kernel.kernel_name}}_kernel_micro_gemm_transpose_b<static_cast<bool>(false)>(
-              q_data + i * qStrideB + j * qStrideH +
-                  m * qStrideM,
+              q_addr,
               k_addr,
               qk_data,
               cur_qSplitSize,
@@ -692,24 +718,30 @@ FLEX_ATTENTION_TEMPLATE = r"""
               qStrideM,
               kStrideN,
               cur_kvSplitSize);
+{%- endif %}
 
-        } else {
-          at::native::cpublas::brgemm(
-              cur_qSplitSize,
-              cur_kvSplitSize,
-              eheadSize,
-              headSize_even ? qStrideM : eheadSize,
-              cur_kvSplitSize,
-              cur_kvSplitSize,
-              false,
-              !headSize_even
-                  ? query_t_padding_ptr
-                  : q_data + i * qStrideB + j * qStrideH + m * qStrideM,
-              key_reorder_ptr + i_kv * num_head_k * eheadSize * kvSize +
-                  j_kv * eheadSize * kvSize + n * eheadSize,
-              qk_data,
-              need_pack);
         }
+{%- if not use_blas_gemm %}
+        else {
+          if constexpr (is_reduced_type) {
+            at::native::cpublas::brgemm(
+                cur_qSplitSize,
+                cur_kvSplitSize,
+                eheadSize,
+                headSize_even ? qStrideM : eheadSize,
+                cur_kvSplitSize,
+                cur_kvSplitSize,
+                false,
+                !headSize_even
+                    ? query_t_padding_ptr
+                    : q_data + i * qStrideB + j * qStrideH + m * qStrideM,
+                key_reorder_ptr + i_kv * num_head_k * eheadSize * kvSize +
+                    j_kv * eheadSize * kvSize + n * eheadSize,
+                qk_data,
+                need_pack);
+          }
+        }
+{%- endif %}
 
         {{kernel.kernel_name}}_mul_scale_kernel<accum_t>(qk_data, scaling_factor, cur_qSplitSize*cur_kvSplitSize);
 
@@ -782,6 +814,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
                 v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
             // Fallback Half brgemm is slower than micro gemm
             if (!std::is_same_v<scalar_t, at::Half>) {
+              // On AArch64, brgemm falls back to gemm because the oneDNN ukernel path is x86-only.
               at::native::cpublas::brgemm(
                     cur_qSplitSize,
                     headSize_v,
@@ -819,7 +852,9 @@ FLEX_ATTENTION_TEMPLATE = r"""
                   headSize_v);
               }
             }
-          } else {
+          }
+{%- if not use_blas_gemm %}
+          else {
             int64_t psize = n / kvSplitSize * ekvSplitSize;
             at::native::cpublas::brgemm(
                 cur_qSplitSize,
@@ -836,6 +871,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
                 dst_data,
                 need_pack);
           }
+{%- endif %}
         }  // end else (non-AMX softmax + P@V)
       }  // end for n_idx (KV blocks)
 
@@ -971,7 +1007,7 @@ FLEX_DECODING_TEMPLATE = r"""
       // Initialize logits
       {{kernel.kernel_name}}_fill_stub(logits,
             static_cast<accum_t>(0), PARTITION_SIZE);
-      if (is_reduced_type) {
+      if constexpr (is_reduced_type) {
         {{kernel.kernel_name}}_fill_stub(logits_reduced,
             static_cast<scalar_t>(0), PARTITION_SIZE);
       }
@@ -1008,9 +1044,27 @@ FLEX_DECODING_TEMPLATE = r"""
 
         auto k_addr =
             k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
+        auto q_addr =
+            q_data + i * qStrideB + j * qStrideH;
 
+{%- if use_blas_gemm %}
+        at::native::cpublas::gemm(
+            at::native::TransposeType::Transpose,
+            at::native::TransposeType::NoTranspose,
+            cur_kvSplitSize,
+            cur_qSplitSize,
+            headSize,
+            static_cast<accum_t>(1),
+            k_addr,
+            kStrideN,
+            q_addr,
+            qStrideM,
+            static_cast<accum_t>(0),
+            logits + token_num,
+            cur_kvSplitSize);
+{%- else %}
         {{kernel.kernel_name}}_kernel_micro_gemm_transpose_b<false>(
-            q_data + i * qStrideB + j * qStrideH,
+            q_addr,
             k_addr,
             logits + token_num,
             cur_qSplitSize,
@@ -1019,6 +1073,7 @@ FLEX_DECODING_TEMPLATE = r"""
             qStrideM,
             kStrideN,
             cur_kvSplitSize);
+{%- endif %}
 
         {{kernel.kernel_name}}_mul_scale_kernel<accum_t>(logits + token_num, scaling_factor, cur_qSplitSize*cur_kvSplitSize);
 
@@ -1344,6 +1399,8 @@ class CppFlexAttentionTemplate(CppTemplate):
             else None
         )
         self.other_ptr_data = {}
+        # Use BLAS because oneDNN BRGEMM ukernels are not yet supported on AArch64.
+        self.use_blas_gemm = torch.cpu._is_aarch64()
         # Gate every AMX region on the ISA inductor will compile with.
         self.amx_supported = isinstance(pick_vec_isa(), VecAMX)
 
@@ -1636,6 +1693,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             mask_buf_idx=self.mask_buf_idx,
             partition_size=self.partition_size,
             amx_supported=self.amx_supported,
+            use_blas_gemm=self.use_blas_gemm,
         )
         with contextlib.ExitStack() as stack:
             for buf in self.fake_buffers:
@@ -1686,17 +1744,20 @@ class CppFlexAttentionTemplate(CppTemplate):
         from torch._inductor.codegen.cpp_micro_gemm import CppMicroGemmFP32Vec
         from torch._inductor.virtualized import V
 
-        micro_gemm_trans = CppMicroGemmFP32Vec(
-            kernel_name + "_kernel_micro_gemm_transpose_b",
-            self.input_dtype,
-            self.input_dtype,
-            self.accumulate_dtype,
-            self.accumulate_dtype,
-            GemmBlocking(1, 16, 1),
-            1,
-            True,
-            True,
-        )
+        micro_gemm_trans: CppMicroGemmFP32Vec | None = None
+        code_trans = ""
+        if not self.use_blas_gemm:
+            micro_gemm_trans = CppMicroGemmFP32Vec(
+                kernel_name + "_kernel_micro_gemm_transpose_b",
+                self.input_dtype,
+                self.input_dtype,
+                self.accumulate_dtype,
+                self.accumulate_dtype,
+                GemmBlocking(1, 16, 1),
+                1,
+                True,
+                True,
+            )
 
         micro_gemm = CppMicroGemmFP32Vec(
             kernel_name + "_kernel_micro_gemm",
@@ -1712,7 +1773,8 @@ class CppFlexAttentionTemplate(CppTemplate):
 
         with V.set_graph_handler(V.graph):
             kernel = CppTemplateKernel("cpp_micro_gemm", parallel_num_threads())
-            code_trans = micro_gemm_trans.codegen_define(kernel)
+            if micro_gemm_trans is not None:
+                code_trans = micro_gemm_trans.codegen_define(kernel)
             code = micro_gemm.codegen_define(kernel)
         return code + code_trans
 
