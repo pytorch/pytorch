@@ -10800,6 +10800,15 @@ def back_kept_apart(x, w, b):
     return (x @ w).tanh(), (b * 2).sum()
 
 
+def back_apart(x, w, b):
+    return (x @ w).tanh().sum(), (b * 2).sum()
+
+
+def back_copied(x, w, b):
+    h = (x @ w + b).tanh()
+    return h.clone(), (h * h.exp()).sum()
+
+
 def back_writes_input(x, w, b):
     w.mul_(2)
     return (x @ w + b).tanh().sum(), b.sum()
@@ -11681,6 +11690,54 @@ class TestVmGraphBackward(TestCase):
                         self.alike(found[0], found[1])
                     said = f"{fn.__name__}, {use.__name__}"
                     self.assertEqual(self.states(), states, said)
+
+    def test_a_hook_on_a_result_that_no_gradient_reaches_is_not_called(self, device):
+        # Two results of a function, a hook on one (and its gradient
+        # kept), a backward of the other. In eager mode the one has a node
+        # of its own, which does not run: the hook is not called, also not
+        # with None, and nothing is kept. So it is for what a graph gives:
+        # each result has a node of its own in front of the node of the
+        # graph.
+        def looked(first, second):
+            seen = []
+
+            def look(grad):
+                seen.append(None if grad is None else grad.clone())
+
+            first.register_hook(look)
+            first.retain_grad()
+            second.sum().backward()
+            return seen, first.grad
+
+        def changed(first, second):
+            first.register_hook(lambda grad: grad * 2)
+            second.sum().backward()
+            return None
+
+        def both(first, second):
+            seen = []
+            first.register_hook(lambda grad: seen.append(grad.clone()) or grad * 2)
+            second.register_hook(lambda grad: seen.append(grad.clone()))
+            (first.sum() + second.sum()).backward()
+            return seen
+
+        for fn in (back_pair, back_apart, back_copied):
+            for use in (looked, changed, both):
+                for swap in (False, True):
+                    compiled = self.staged(fn)
+                    for at in range(10):
+                        found = []
+                        for run in (compiled, fn):
+                            torch.manual_seed(at)
+                            x = torch.randn(3, 4, device=device)
+                            w = torch.randn(4, 4, device=device, requires_grad=True)
+                            b = torch.randn(4, device=device, requires_grad=True)
+                            first, second = run(x, w, b)
+                            if swap:
+                                first, second = second, first
+                            found.append((use(first, second), w.grad, b.grad))
+                        self.alike(found[0], found[1])
+                    self.assertIn("the engine's backward", self.states())
 
     def test_a_result_that_is_only_looked_at_is_no_reason_to_cut_a_graph(self, device):
         # The graph gives the tensor so that its sizes and its type can be
