@@ -125,6 +125,7 @@ static PyObject* THPStorage_shareFilename(
     // Replace the old data_ptr and allocator with the new ones
     storage.set_data_ptr(std::move(new_storage.mutable_data_ptr()));
     storage.unsafeGetStorageImpl()->set_allocator(new_storage.allocator());
+    storage.unsafeGetStorageImpl()->set_resizable(false);
 
     ctx = THManagedMapAllocator::fromDataPtr(storage.data_ptr());
     AT_ASSERT(ctx);
@@ -222,6 +223,7 @@ static PyObject* THPStorage_shareFd(PyObject* self, PyObject* /*noargs*/) {
     // Replace the old data_ptr and allocator with the new ones
     storage.set_data_ptr(std::move(new_storage.mutable_data_ptr()));
     storage.unsafeGetStorageImpl()->set_allocator(new_storage.allocator());
+    storage.unsafeGetStorageImpl()->set_resizable(false);
 
     ctx = at::MapAllocator::fromDataPtr(storage.data_ptr());
     AT_ASSERT(ctx);

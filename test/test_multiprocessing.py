@@ -855,6 +855,42 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         t = torch.tensor([])
         t.share_memory_()
 
+    def _test_shared_resize(self):
+        t = torch.arange(6, dtype=torch.int8)
+        t.share_memory_()
+        self.assertTrue(t.is_shared())
+        self.assertFalse(t.untyped_storage().resizable())
+        t.resize_(3)
+        self.assertEqual(t, torch.arange(3, dtype=torch.int8))
+        t.resize_(6)
+        self.assertEqual(t, torch.arange(6, dtype=torch.int8))
+        with self.assertRaisesRegex(
+            RuntimeError, "Trying to resize storage that is not resizable"
+        ):
+            t.resize_(7)
+        for size in (0, 7):
+            with self.subTest(size=size):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Trying to resize storage that is not resizable"
+                ):
+                    t.untyped_storage().resize_(size)
+
+    @unittest.skipUnless(
+        "file_descriptor" in mp.get_all_sharing_strategies(),
+        "file descriptor sharing strategy is not supported",
+    )
+    def test_fd_shared_resize(self):
+        prev_strategy = mp.get_sharing_strategy()
+        mp.set_sharing_strategy("file_descriptor")
+        try:
+            self._test_shared_resize()
+        finally:
+            mp.set_sharing_strategy(prev_strategy)
+
+    def test_fs_shared_resize(self):
+        with fs_sharing():
+            self._test_shared_resize()
+
     def _test_is_shared(self):
         t = torch.randn(5, 5)
         self.assertFalse(t.is_shared())
