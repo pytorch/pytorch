@@ -228,8 +228,11 @@ impl Joint {
         };
         let value = self.metas.len() as Value;
         self.metas.push(Meta { kind, bytes, storage, reachable: false, producer: None });
-        self.by_object.insert(obj.as_ptr() as usize, value);
-        if bytes > 0 {
+        // What is found by where it is, is the tensor that was there first
+        // (a view with the sizes of what it is a view of is in the same
+        // place), as an operation that wrote to it left it.
+        let written = self.by_object.insert(obj.as_ptr() as usize, value).is_some();
+        if bytes > 0 && (written || !self.by_layout.contains_key(&layout)) {
             self.by_layout.insert(layout, value);
         }
         self.kept.push(obj.clone().unbind());
