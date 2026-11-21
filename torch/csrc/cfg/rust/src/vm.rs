@@ -1097,12 +1097,21 @@ thread_local! {
 /// What `exec_profiled` takes down in front of an instruction that can run
 /// code that is not the VM's, for the facts it finds behind it.
 struct Probe {
-    /// How many frames the interpreter has counted.
+    /// How many frames the interpreter has counted, and how many of them
+    /// were ones that a kernel enters by itself.
     frames: u64,
+    kernel_frames: u64,
     /// The tensors the instruction is given, each with its version counter.
     versions: Vec<(Obj, u64)>,
     /// For a call: what a call further up was waiting to learn of its callee.
     outer: Option<(bool, Option<(PyObj, CalleeKind)>)>,
+}
+
+/// How many frames that a kernel entered by itself (the router of an
+/// operator whose kernel is chosen in Python, what shows a warning) the
+/// interpreter has counted on this thread.
+unsafe fn kernel_frames() -> u64 {
+    capi::backward_api().and_then(|api| api.frame_count_kernel).map_or(0, |count| count())
 }
 
 impl Probe {
@@ -1123,13 +1132,16 @@ impl Probe {
         let versions = versions_of(&given, api);
         let call = matches!(op, Op::Call { .. } | Op::CallMethod { .. } | Op::CallEx { .. });
         let outer = call.then(|| (callees.callee_asked.replace(true), callees.callee_seen.take()));
-        Probe { frames: api.frame_count.map_or(0, |count| count()), versions, outer }
+        Probe { frames: api.frame_count.map_or(0, |count| count()), kernel_frames: kernel_frames(), versions, outer }
     }
 
     unsafe fn finish(self, callees: &Callees, facts: &mut InstFacts, api: &TcfgApi) {
         // Where the interpreter does not tell of its frames, one may have
-        // been entered.
-        facts.frames |= api.frame_count.is_none_or(|count| count() != self.frames);
+        // been entered. The frames that a kernel enters by itself (its
+        // router where its implementation is chosen in Python, what
+        // shows a warning it gave) are not Python code the instruction
+        // enters.
+        facts.frames |= api.frame_count.is_none_or(|count| count() - self.frames != kernel_frames() - self.kernel_frames);
         if let (Some(want), Some(_)) = (api.frame_want, api.frame_count) {
             want(-1);
         }

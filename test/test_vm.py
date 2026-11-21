@@ -10469,17 +10469,16 @@ class TestVmGraphResults(TestCase):
         mask = torch.ones(5, 5, dtype=torch.bool, device=device).tril()
 
         # An attention that drops nothing is an operation like any other.
-        # On a GPU it can come down to `bmm`, whose kernel there is entered
-        # through a Python function: a call with `**` that enters Python
-        # code is no operation, so only what the function gives is looked
-        # at there.
+        # On a GPU it can come down to `bmm`, whose kernel there is chosen
+        # by a Python function of torch's own (the router of the operator):
+        # its frames are the kernel's, not Python code that the call
+        # enters, and the call with `**` is an operation there too.
         def attends(q, mask, rate):
             return graph_attends(q, mask, rate, weight=w)
 
-        ops = 8 if torch.device(device).type == "cpu" else None
-        compiled = self.whole_graph(attends, (q, None, 0.0), ops)
+        compiled = self.whole_graph(attends, (q, None, 0.0), 8)
         self.assertEqual(compiled(q, mask, 0.0), attends(q, mask, 0.0), atol=0, rtol=0)
-        self.whole_graph(attends, (q, mask, 0.0), ops, P.Inductor())
+        self.whole_graph(attends, (q, mask, 0.0), 8, P.Inductor())
         # One that drops draws eager's numbers where the graph is run as
         # it is.
         for _ in range(3):
