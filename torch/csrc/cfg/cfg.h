@@ -97,7 +97,7 @@ struct TcfgTensorInfo {
 
 #define TCFG_NO_VERSION UINT64_MAX
 
-#define TCFG_API_VERSION 16
+#define TCFG_API_VERSION 17
 
 // A node of the autograd graph, as the engine reads it when it takes the
 // backward of a graph down (node_info).
@@ -117,17 +117,17 @@ enum : uint32_t {
   TCFG_NODE_PYTHON = 1,
   // Accumulates into the .grad of a leaf.
   TCFG_NODE_LEAF = 2,
-  // Has a hook of its own, or one of a tensor it gave.
-  TCFG_NODE_HOOKED = 4,
 };
 
 // How node_call, op_call and program_run run kernels. Without a flag
 // op_call and program_run run them as the thread is, and node_call with
 // gradients disabled, as the autograd engine calls a node.
 enum : uint32_t {
-  // With the autograd keys excluded: nothing is recorded on the tape, and
-  // the kernels that count writes and make views still run. The grad mode
-  // is left as it is.
+  // As the autograd kernel of an operator runs what is below it: with the
+  // autograd keys excluded, so that nothing is recorded on the tape. The
+  // kernel that counts a write or makes a view runs for an operator that
+  // has one; what the kernel of any other operator calls in turn counts no
+  // write and makes no view. The grad mode is left as it is.
   TCFG_RUN_BELOW_AUTOGRAD = 1,
   // With gradients enabled: eager can differentiate what ran.
   TCFG_RUN_ON_TAPE = 2,
@@ -136,15 +136,19 @@ enum : uint32_t {
 // What graph_node registers. The node of a graph calls it, with the GIL
 // held, when the autograd engine hands it gradients: grads has one entry per
 // root (borrowed; null where none came), outs room for one new reference per
-// contribution (left null where there is none). flags is TCFG_RUN_ON_TAPE
-// when the backward is to be differentiated again (create_graph). Returns 0,
-// or -1 with a Python error set, which the node throws.
+// contribution (left null where there is none), and needed says per
+// contribution whether the autograd engine asks for it: it does not where
+// the gradients of some tensors only are asked for and the contribution
+// goes to none of them. flags is TCFG_RUN_ON_TAPE when the backward is to
+// be differentiated again (create_graph). Returns 0, or -1 with a Python
+// error set, which the node throws.
 typedef int32_t (*TcfgBackward)(
     void* state,
     PyObject* const* grads,
     uint32_t n_grads,
     PyObject** outs,
     uint32_t n_outs,
+    const uint8_t* needed,
     uint32_t flags);
 // Called with the GIL held when the autograd engine lets go of what a
 // backward kept (dropped is 0: a backward that did not retain the graph has
@@ -397,6 +401,18 @@ struct TcfgApi {
       void* state,
       TcfgBackward backward,
       TcfgRelease release);
+
+  // Of the frames frame_count counts, those that a kernel enters by itself:
+  // the router of an operator whose kernel is chosen in Python
+  // (eager_router of torch/_native/registry.py) with what it calls, and
+  // what shows a warning that a kernel gave (the warnings module). Such a
+  // frame is not Python code that the caller of the operator enters, and
+  // is not offered to frame_hook. Null where frame_push is.
+  uint64_t (*frame_count_kernel)();
+
+  // Whether gradients are enabled on this thread: bit 0 of call_modes, for
+  // what asks for nothing else at every call.
+  uint32_t (*grad_enabled)();
 };
 
 } // extern "C"
