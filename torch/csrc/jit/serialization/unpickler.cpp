@@ -1041,8 +1041,8 @@ void Unpickler::rebuildTensor(bool quantized, bool has_explicit_dtype) {
       // Rows may be padded to whole bytes, see `get_sub_byte_tensor_size`
       size_t padded_nbytes = itemsize;
       if (!size.empty()) {
-        const size_t bytes_per_row =
-            at::ceil_div_safe(static_cast<size_t>(size.back()), element_per_byte);
+        const size_t bytes_per_row = at::ceil_div_safe(
+            static_cast<size_t>(size.back()), element_per_byte);
         padded_nbytes = bytes_per_row;
         for (const auto s : c10::IntArrayRef(size).slice(0, size.size() - 1)) {
           size_overflow |= c10::mul_overflows(
