@@ -72,6 +72,7 @@ tests = [
     test_ctx_manager.CtxManagerTests,
     test_functions.FunctionTests,
     test_misc.MiscTests,
+    test_misc.MiscTestsCUDA,
     test_repros.ReproTests,
     test_modules.NNModuleTests,
     test_export.ExportTests,
@@ -82,6 +83,7 @@ tests = [
     test_sdpa.TestSDPA,
 ]
 tests.extend(test_functions.get_function_device_test_classes())
+tests.extend(test_misc.get_misc_device_test_classes())
 for test in tests:
     make_dynamic_cls(test)
 del test
