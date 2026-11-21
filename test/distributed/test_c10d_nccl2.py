@@ -35,6 +35,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
+    requires_gloo,
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
@@ -768,6 +769,19 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
                 store.set(f"barrier_block_go_{i}", "1")
             torch.cuda.synchronize(self.device)
             self.assertTrue(work.is_completed())
+
+    @requires_nccl()
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_gloo_subgroup(self) -> None:
+        self.assertIsNotNone(dist.group.WORLD.bound_device_id)
+        pg = dist.new_group(backend="gloo")
+        self.assertIsNone(pg.bound_device_id)
+        t = torch.ones(4)
+        dist.all_reduce(t, group=pg)
+        dist.barrier(group=pg)
+        self.assertEqual(t, torch.full((4,), float(self.world_size)))
+        dist.destroy_process_group(pg)
 
 
 @instantiate_parametrized_tests
