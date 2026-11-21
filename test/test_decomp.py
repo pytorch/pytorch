@@ -37,6 +37,7 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     is_iterable_of_tensors,
+    periodic,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -622,6 +623,7 @@ class TestDecomp(TestCase):
     @skipIfCrossRef
     @skipOps(comprehensive_failures)
     @suppress_warnings
+    @periodic
     @ops(op_db)
     def test_comprehensive(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=True)
@@ -638,9 +640,9 @@ class TestDecomp(TestCase):
             self.assertEqual(ref, res)
 
             # .periodic overload, explicit periodic flag
-            for periodic in (True, False):
-                ref = torch.hann_window(n, periodic, device=device)
-                res = hann_window_periodic(n, periodic, device=device)
+            for is_periodic in (True, False):
+                ref = torch.hann_window(n, is_periodic, device=device)
+                res = hann_window_periodic(n, is_periodic, device=device)
                 self.assertEqual(ref, res)
 
         # dtype forwarding
