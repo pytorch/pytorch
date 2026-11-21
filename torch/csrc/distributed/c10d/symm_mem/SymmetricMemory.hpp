@@ -68,7 +68,9 @@ class TORCH_API SymmetricMemory : public torch::CustomClassHolder {
   virtual void** get_buffer_ptrs_dev() = 0;
   virtual void** get_signal_pad_ptrs_dev() = 0;
   virtual size_t get_buffer_size() = 0;
-  size_t get_signal_pad_size();
+  // The size of this allocation's signal pad, fixed when it was allocated. The
+  // default returns the current global size, for backends that don't record it.
+  virtual size_t get_signal_pad_size();
 
   virtual size_t get_offset() = 0;
 
@@ -231,10 +233,9 @@ TORCH_API std::optional<std::string> get_backend(c10::Device device);
 // Returns the user-configured size if set, otherwise returns the default size.
 TORCH_API size_t get_signal_pad_size();
 
-// Set the signal pad size for future symmetric memory allocations.
-// This must be called before any symmetric memory allocations are made.
-// The size should be proportional to the number of blocks the user launches
-// and the world size.
+// Set the signal pad size for future symmetric memory allocations; existing
+// allocations keep theirs. The size should be proportional to the number of
+// blocks the user launches and the world size.
 TORCH_API void set_signal_pad_size(size_t size);
 
 C10_EXPORT void register_mempool_allocator(

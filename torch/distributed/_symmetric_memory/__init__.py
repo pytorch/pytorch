@@ -1965,12 +1965,13 @@ def _check_lc_ag_out(
 
 def _check_lc_signal_pad_capacity(symm_mem: _SymmetricMemory) -> None:
     required_bytes = (_CE_MULTICAST_BARRIER_CHANNEL + 1) * symm_mem.world_size * 4
-    actual_bytes = _SymmetricMemory.signal_pad_size
+    pad = symm_mem.get_signal_pad(symm_mem.rank)
+    actual_bytes = pad.numel() * pad.element_size()
     if actual_bytes < required_bytes:
         raise RuntimeError(
             f"low_contention all-gather requires signal_pad_size >= "
             f"{required_bytes} bytes for world_size={symm_mem.world_size}, but "
-            f"the current size is {actual_bytes} bytes."
+            f"the output's pad has {actual_bytes} bytes."
         )
 
 
@@ -2434,9 +2435,10 @@ def set_signal_pad_size(size: int) -> None:
     symmetric memory. This function allows users to configure
     the signal pad size to be proportional to their workload requirements.
 
-    .. warning::
-        This must be called before any symmetric memory allocations are made.
-        The size cannot be changed after allocations have been performed.
+    .. note::
+        The size applies to allocations made after the call; existing
+        allocations keep the size they were made with. Every rank must use the
+        same size.
 
     Args:
         size (int): the signal pad size in bytes. The size should be

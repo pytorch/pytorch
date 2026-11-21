@@ -41,6 +41,7 @@ class TORCH_API NCCLSymmetricMemory : public SymmetricMemory {
   void** get_signal_pad_ptrs_dev() override;
 
   size_t get_buffer_size() override;
+  size_t get_signal_pad_size() override;
 
   std::string get_group_name() override;
 
