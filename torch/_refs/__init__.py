@@ -3574,17 +3574,12 @@ def _scalar_type_name(dtype: torch.dtype) -> str:
     return dtype_name[:1].upper() + dtype_name[1:]
 
 
-def _check_native_layer_norm_gpu_param_dtype(
+def _check_native_layer_norm_param_dtype(
     input: Tensor,
     normalized_ndim: int,
     weight: Tensor | None,
     bias: Tensor | None,
 ) -> None:
-    # CUDA and XPU kernels reject mismatched weight/bias dtypes once there is
-    # at least one row to normalize.
-    if input.device.type not in ("cuda", "xpu"):
-        return
-
     mismatched_dtype = None
     if weight is not None and weight.dtype != input.dtype:
         mismatched_dtype = weight.dtype
@@ -3592,6 +3587,25 @@ def _check_native_layer_norm_gpu_param_dtype(
         mismatched_dtype = bias.dtype
 
     if mismatched_dtype is None:
+        return
+
+    if input.device.type == "cpu":
+        # Mirrors check_mixed_data_type (ATen/native/cpu/mixed_data_type.h): a
+        # bf16/fp16 input may take fp32 params, even when there are no rows.
+        torch._check(
+            builtins.all(p is None or p.dtype == torch.float32 for p in (weight, bias)),
+            lambda: "mixed dtype (CPU): expect parameter to have scalar type of Float",
+        )
+        torch._check(
+            input.dtype in (torch.bfloat16, torch.float16),
+            lambda: "mixed dtype (CPU): all inputs must share same datatype.",
+        )
+        return
+
+    # CUDA and XPU kernels read the params at the input dtype once there is at
+    # least one row. MPS casts the params to the input dtype, and meta has no
+    # kernel to model, so both accept any mismatch.
+    if input.device.type not in ("cuda", "xpu"):
         return
 
     axis = input.ndim - normalized_ndim
@@ -3660,7 +3674,7 @@ def native_layer_norm(
         not input.is_complex(),
         lambda: "native_layer_norm does not support complex inputs",
     )
-    _check_native_layer_norm_gpu_param_dtype(input, normalized_ndim, weight, bias)
+    _check_native_layer_norm_param_dtype(input, normalized_ndim, weight, bias)
 
     input = contiguous(input)
     if weight is not None:
@@ -3680,7 +3694,13 @@ def native_layer_norm(
         out = out * weight + bias
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
-    if input.device.type in ["cpu", "mtia"]:
+    # layer_norm_cpu keeps mean/rstd in fp32 for a mixed-dtype call
+    # (param_scalar_type), which the check above only lets through as a bf16/fp16
+    # input with fp32 params.
+    cpu_mixed_type = input.device.type == "cpu" and builtins.any(
+        p is not None and p.dtype != input.dtype for p in (weight, bias)
+    )
+    if input.device.type in ["cpu", "mtia"] and not cpu_mixed_type:
         mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
         rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
     return (out, mean, rstd)
