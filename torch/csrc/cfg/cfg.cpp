@@ -2216,6 +2216,78 @@ int32_t hook_wanted = 0;
 thread_local _PyInterpreterFrame* hook_handing = nullptr;
 // How many frames the interpreter brought here on this thread.
 thread_local uint64_t hook_frames = 0;
+// Of those, the frames that a kernel enters by itself: the router of an
+// operator whose kernel is chosen in Python (torch/_native/registry.py) with
+// what the router calls, and what shows a warning that a kernel gave. And
+// how many such frames are running on this thread.
+thread_local uint64_t hook_kernel_frames = 0;
+thread_local int32_t hook_in_kernel = 0;
+
+// What the interpreter calls of the warnings module where a warning is given
+// from C: what makes the message, and what shows it. Found when the hook is
+// registered: looking for them runs Python code.
+PyCodeObject* hook_warning_made = nullptr;
+PyCodeObject* hook_warning_shown = nullptr;
+
+// The code of a function of a module, found by the names that lead to it;
+// null if there is none.
+PyCodeObject* codeOf(
+    const char* module,
+    std::initializer_list<const char*> names) {
+  PyObject* found = PyImport_ImportModule(module);
+  for (const char* name : names) {
+    if (found == nullptr) {
+      break;
+    }
+    PyObject* next = PyObject_GetAttrString(found, name);
+    Py_DECREF(found);
+    found = next;
+  }
+  PyObject* code =
+      found == nullptr ? nullptr : PyObject_GetAttrString(found, "__code__");
+  Py_XDECREF(found);
+  if (code == nullptr || !PyCode_Check(code)) {
+    PyErr_Clear();
+    Py_XDECREF(code);
+    return nullptr;
+  }
+  // Kept for good: it is compared with, never run.
+  return reinterpret_cast<PyCodeObject*>(code);
+}
+
+// Whether a frame is one that a kernel enters by itself. The dispatcher
+// calls the router of an operator (eager_router of torch/_native/registry.py)
+// as the operator's kernel, with the operator's arguments, and takes what it
+// returns as the operator's result: what it runs is the kernel, and which
+// implementation that is it decides at every call. A warning that a kernel
+// gives is made and shown by the warnings module, at the call that gives it,
+// whatever stands for the operator. Neither is Python code that the caller
+// of the operator enters.
+bool kernelFrame(PyCodeObject* code) {
+  static PyCodeObject* router = nullptr;
+  static PyObject* routes = PyUnicode_InternFromString("eager_router");
+  if (code == router || code == hook_warning_made ||
+      code == hook_warning_shown) {
+    return true;
+  }
+  if (router != nullptr || code->co_name != routes) {
+    return false;
+  }
+  const char* file = PyUnicode_AsUTF8(code->co_filename);
+  if (file == nullptr) {
+    PyErr_Clear();
+    return false;
+  }
+  const std::string path(file);
+  const std::string suffix = "torch/_native/registry.py";
+  if (path.size() < suffix.size() ||
+      path.compare(path.size() - suffix.size(), suffix.size(), suffix) != 0) {
+    return false;
+  }
+  Py_INCREF(code);
+  router = code;
+  return true;
+}
 // The interpreter the hook was registered in: the only one PyTorch runs in.
 PyInterpreterState* hook_interp = nullptr;
 
@@ -2240,6 +2312,15 @@ PyObject* evalFrame(
     return _PyEval_EvalFrameDefault(tstate, frame, throwflag);
   }
   hook_frames++;
+  // The frames of a kernel are the interpreter's: the VM is offered none.
+  const bool enters = kernelFrame(frameCode(frame));
+  if (enters || hook_in_kernel > 0) {
+    hook_kernel_frames++;
+    hook_in_kernel += enters ? 1 : 0;
+    PyObject* result = handOn(tstate, frame, throwflag);
+    hook_in_kernel -= enters ? 1 : 0;
+    return result;
+  }
   // Offered: the frame of a call of a function, before its first
   // instruction. Not the body of a class or a module, which has its
   // variables in a dict; not a generator or a coroutine, whose frame outlives
@@ -2267,6 +2348,8 @@ PyObject* evalFrame(
 void frameHook(TcfgTakeFrame take) {
   hook_take = take;
   hook_interp = PyInterpreterState_Get();
+  hook_warning_made = codeOf("warnings", {"WarningMessage", "__init__"});
+  hook_warning_shown = codeOf("warnings", {"_showwarnmsg"});
 }
 
 void frameWant(int32_t delta) {
@@ -2302,10 +2385,18 @@ PyObject* frameInterpret(void* frame) {
 uint64_t frameCount() {
   return hook_frames;
 }
+
+uint64_t frameCountKernel() {
+  return hook_kernel_frames;
+}
 #endif
 
 int32_t isTracing() {
   return torch::jit::tracer::isTracing();
+}
+
+uint32_t gradEnabled() {
+  return c10::GradMode::is_enabled() ? 1 : 0;
 }
 
 uint64_t callModes() {
@@ -2331,7 +2422,7 @@ void workspaceLeaveRaw(void* workspace, void* previous) {
 }
 
 // ---------------------------------------------------------------------------
-// The backward of a graph (API version 16): what the Rust runtime takes the
+// The backward of a graph: what the Rust runtime takes the
 // kernels of eager's autograd nodes down with, runs two straight-line graphs
 // with, and gives the results of a graph one node with.
 
@@ -2521,11 +2612,6 @@ int32_t nodeInfo(PyObject* obj, TcfgNodeInfo* out) {
   uint32_t flags = 0;
   if (dynamic_cast<torch::autograd::AccumulateGrad*>(node) != nullptr) {
     flags |= TCFG_NODE_LEAF;
-  }
-  if (!node->pre_hooks().empty() || !node->post_hooks().empty() ||
-      !node->tensor_pre_hooks().empty() ||
-      !node->retains_grad_hooks().empty()) {
-    flags |= TCFG_NODE_HOOKED;
   }
   *out = TcfgNodeInfo{
       name.c_str(),
@@ -2732,6 +2818,18 @@ c10::IValue argumentValue(
   return torch::jit::toIValue(obj, argument.type(), argument.N());
 }
 
+// Whether the autograd kernel of an operator runs what is below it with the
+// key that counts writes and makes views excluded too: it does for an
+// operator that neither writes to an argument nor gives a view (no kernel
+// for that key), so that what its kernel calls in turn leaves the version
+// of a tensor alone. An operator that is made of other operators has no
+// autograd kernel, and what it calls runs as it is called.
+bool belowViews(const c10::OperatorHandle& op) {
+  return op.schema().operator_name().name.rfind("aten::", 0) == 0 &&
+      !op.hasKernelForDispatchKey(c10::DispatchKey::ADInplaceOrView) &&
+      !op.hasKernelForDispatchKey(c10::DispatchKey::CompositeImplicitAutograd);
+}
+
 // How kernels run for the runtime: below the autograd keys (the grad mode
 // stays what it is: a view made there is a view like one of eager's), on the
 // tape with gradients enabled, or, without either flag, as the thread is.
@@ -2782,7 +2880,12 @@ PyObject* opCall(PyObject* obj, PyObject* args, uint32_t flags) {
   {
     pybind11::gil_scoped_release no_gil;
     const RunGuards guards(flags);
-    op.callBoxed(stack);
+    if ((flags & TCFG_RUN_BELOW_AUTOGRAD) != 0 && belowViews(op)) {
+      const at::AutoDispatchBelowADInplaceOrView below;
+      op.callBoxed(stack);
+    } else {
+      op.callBoxed(stack);
+    }
   }
   return stackResult(stack);
   END_HANDLE_TH_ERRORS
@@ -2810,6 +2913,8 @@ struct ProgramStep {
   // Where what the operator returned goes: (place, value).
   std::vector<std::pair<uint32_t, uint32_t>> gives;
   bool single = false;
+  // belowViews of the operator.
+  bool below_views = false;
 };
 
 struct Program {
@@ -2929,6 +3034,7 @@ void* programNew(
         continue;
       }
       step.op = operatorOf(named);
+      step.below_views = belowViews(*step.op);
       const auto& arguments = step.op->schema().arguments();
       TORCH_CHECK(py::len(args) <= arguments.size(), "too many arguments");
       for (size_t i = 0; i < arguments.size(); ++i) {
@@ -3020,7 +3126,12 @@ PyObject* programRun(
           stack.emplace_back(std::move(list));
         }
       }
-      step.op->callBoxed(stack);
+      if ((flags & TCFG_RUN_BELOW_AUTOGRAD) != 0 && step.below_views) {
+        const at::AutoDispatchBelowADInplaceOrView below;
+        step.op->callBoxed(stack);
+      } else {
+        step.op->callBoxed(stack);
+      }
       for (const auto& [place, value] : step.gives) {
         if (stack.size() == 1 && stack[0].isList() && !step.single) {
           values[value] = stack[0].toListRef().at(place);
@@ -3087,6 +3198,10 @@ class GraphBackward final : public torch::autograd::Node {
       }
     }
     std::vector<PyObject*> given(num_outputs(), nullptr);
+    std::vector<uint8_t> needed(given.size());
+    for (size_t i = 0; i < needed.size(); ++i) {
+      needed[i] = task_should_compute_output(i) ? 1 : 0;
+    }
     const uint32_t flags =
         c10::GradMode::is_enabled() ? uint32_t{TCFG_RUN_ON_TAPE} : 0U;
     const auto status = backward_(
@@ -3095,6 +3210,7 @@ class GraphBackward final : public torch::autograd::Node {
         static_cast<uint32_t>(handed.size()),
         given.data(),
         static_cast<uint32_t>(given.size()),
+        needed.data(),
         flags);
     torch::autograd::variable_list outputs(given.size());
     for (size_t i = 0; i < given.size(); ++i) {
@@ -3224,6 +3340,12 @@ const TcfgApi api_table = {
     &programFree,
     &programRun,
     &graphNode,
+#ifdef TCFG_HAS_FRAMES
+    &frameCountKernel,
+#else
+    nullptr,
+#endif
+    &gradEnabled,
 };
 
 } // namespace
