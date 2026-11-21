@@ -79,7 +79,7 @@ void matmul_forward_compute(
     const float sum_coeff = 1.0f,
     const Attr& attr = Attr(),
     const dnnl::memory::data_type dst_type = dnnl::memory::data_type::undef,
-    const ideep::lowp_kind alowp_kind = ideep::u8s8);
+    const lowp_kind alowp_kind = u8s8);
 
 // Ported from ideep::matmul_forward::prepare (int8, with bias).
 // Prepare for int8 op with bias. Bias is not used if it is empty.
@@ -100,7 +100,7 @@ void matmul_forward_prepare(
     const float sum_coeff = 1.0f, // for post-op sum
     const Attr& attr = Attr(),
     const dnnl::memory::data_type dst_type = dnnl::memory::data_type::u8,
-    const ideep::lowp_kind alowp_kind = ideep::u8s8);
+    const lowp_kind alowp_kind = u8s8);
 
 // Ported from ideep::matmul_forward::compute (pre-prepared params, with bias).
 // Compute for fp32 and static int8 (int8 * int8 -> int8)
