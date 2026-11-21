@@ -510,6 +510,10 @@ def _is_layout_preserving_view_copy_back(
 ) -> bool:
     return (
         src.meta["val"].dtype == dst.meta["val"].dtype
+        and src_base.meta["val"].is_conj() == mutated_arg.meta["val"].is_conj()
+        and src_base.meta["val"].is_neg() == mutated_arg.meta["val"].is_neg()
+        and src.meta["val"].is_conj() == dst.meta["val"].is_conj()
+        and src.meta["val"].is_neg() == dst.meta["val"].is_neg()
         and _same_size_stride_and_storage_offset(
             cast(torch.Tensor, src_base.meta["val"]),
             cast(torch.Tensor, mutated_arg.meta["val"]),
