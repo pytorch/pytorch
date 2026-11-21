@@ -3668,6 +3668,8 @@ pub fn infallible(op: &Op) -> bool {
             | Op::BuildList(_)
             | Op::BuildSlice(..)
             | Op::ListAppend(..)
+            | Op::MakeCell(_)
+            | Op::CellSet(..)
             | Op::TupleGet(..)
             | Op::IsNone(..)
             | Op::Is(..)
@@ -4634,6 +4636,8 @@ pub fn renamed(op: &Op, f: &mut impl FnMut(V) -> V) -> Option<Op> {
             Op::BuildSlice(parts[0], parts[1], if *c == NONE { NONE } else { all(&[*c])[0] })
         }
         Op::CellGet(a, n) => Op::CellGet(f(*a), *n),
+        Op::MakeCell(a) => Op::MakeCell(if *a == UNDEF { UNDEF } else { f(*a) }),
+        Op::CellSet(a, b) if *b != UNDEF => Op::CellSet(f(*a), f(*b)),
         Op::LoadAttr(a, n) => Op::LoadAttr(f(*a), *n),
         Op::Binary(k, a, b) => Op::Binary(*k, f(*a), f(*b)),
         Op::Unary(k, a) => Op::Unary(*k, f(*a)),
