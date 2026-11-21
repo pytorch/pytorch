@@ -988,13 +988,15 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
             inp = lowerings[aten.mul](beta, inp)
         return lowerings[aten.add](inp, product)
 
-    # MultiTemplateBuffer deps cover only inp_expanded, yet its ATen fallback reads input,
-    # so inp_expanded must view inp.
-    inp = realize_inputs(template_inp)
-    if not isinstance(inp, TensorBox):
-        inp = TensorBox(inp)
+    use_zero_inp = template_inp is not inp
+    inp = realize_inputs(inp)
+    template_inp = realize_inputs(template_inp) if use_zero_inp else inp
+    if not isinstance(template_inp, TensorBox):
+        template_inp = TensorBox(template_inp)
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
-    m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
+    m, n, k, layout, mat1, mat2, inp_expanded = mm_args(
+        mat1, mat2, template_inp, layout=layout
+    )
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "addmm"
 
@@ -1036,13 +1038,18 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
         )
         return node
 
+    # A MultiTemplateBuffer depends only on inp_expanded, so its ATen choices must read
+    # the buffer inp_expanded views.
+    kernel_inputs_aten = MMKernelInputs(
+        [template_inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+    )
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
 
     if use_aten_gemm_kernels():
         aten_templates: list[ExternKernelChoice | KernelTemplate] = [aten_addmm]
         if (
-            len(inp.get_size()) == 2
-            and inp.get_stride()[0] == 0
+            len(template_inp.get_size()) == 2
+            and template_inp.get_stride()[0] == 0
             and inductor_config.triton.autotune_cublasLt
             and not V.graph.cpp_wrapper  # bias_addmm only has a Python implementation
         ):
