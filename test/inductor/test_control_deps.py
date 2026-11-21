@@ -393,6 +393,61 @@ class TestControlDeps(InductorTestCase):
             torch.testing.assert_close(result, expected)
             torch.testing.assert_close(compiled_x, eager_x)
 
+    @config.patch(
+        {"enable_auto_functionalized_v2": True, "trace.provenance_tracking_level": 1}
+    )
+    def test_auto_functionalized_v2_as_control_deps_dependency(self):
+        with torch.library._scoped_library("control_deps_afv2_dep", "FRAGMENT") as lib:
+            lib.define(
+                "add_one_(Tensor(a!) x) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+            )
+
+            def add_one_impl(x):
+                x.add_(1.0)
+                return x.clone()
+
+            lib.impl("add_one_", add_one_impl, "CompositeExplicitAutograd")
+
+            @torch.library.register_fake("control_deps_afv2_dep::add_one_", lib=lib)
+            def add_one_fake(x):
+                return x.clone()
+
+            def fn(x):
+                y = x * 2
+                z = torch.ops.control_deps_afv2_dep.add_one_(x)
+                return z + y
+
+            def add_control_deps(graph):
+                from torch.utils._ordered_set import OrderedSet
+
+                (auto_func,) = graph.find_nodes(
+                    op="call_function",
+                    target=torch.ops.higher_order.auto_functionalized_v2,
+                )
+                (add,) = graph.find_nodes(
+                    op="call_function", target=torch.ops.aten.add.Tensor
+                )
+                # The packed auto_functionalized_v2 result becomes a direct
+                # control_deps dependency, next to its own getitem users.
+                torch._inductor.fx_passes.control_dependencies.preserve_node_ordering(
+                    graph, {add: OrderedSet([auto_func])}
+                )
+                return graph
+
+            x = torch.zeros(8)
+            compiled_x = x.clone()
+            eager_x = x.clone()
+
+            with config.patch(post_grad_custom_post_pass=add_control_deps):
+                result = torch.compile(fn, backend="inductor", fullgraph=True)(
+                    compiled_x
+                )
+
+            expected = fn(eager_x)
+            torch.testing.assert_close(result, expected)
+            torch.testing.assert_close(compiled_x, eager_x)
+
     @requires_gpu()
     def test_control_deps_with_triton_kernel(self):
         """Test control_deps with triton_kernel_wrapper_mutation."""
