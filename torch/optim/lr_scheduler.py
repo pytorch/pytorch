@@ -2251,11 +2251,12 @@ class CosineAnnealingWarmRestarts(LRScheduler):
                 if self.T_mult == 1:
                     self.T_cur = epoch % self.T_0
                 else:
-                    n = int(
-                        math.log(
-                            (epoch / self.T_0 * (self.T_mult - 1) + 1), self.T_mult
-                        )
-                    )
+                    # math.log rounds off at exact restart epochs (#203028)
+                    n = 0
+                    while epoch >= self.T_0 * (self.T_mult ** (n + 1) - 1) / (
+                        self.T_mult - 1
+                    ):
+                        n += 1
                     self.T_cur = epoch - self.T_0 * (self.T_mult**n - 1) / (
                         self.T_mult - 1
                     )
