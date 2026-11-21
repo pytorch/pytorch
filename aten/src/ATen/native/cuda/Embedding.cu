@@ -235,7 +235,7 @@ __global__ void renorm_kernel(
 
   // now we renormalize the blocks that need it
   if (sdata[0] > max_norm) {
-    auto factor = static_cast<scalar_t>(max_norm / (sdata[0] + 1e-7));
+    auto factor = static_cast<scalar_t>(max_norm / sdata[0]);
     for (int i = tid; i < dim; i += blockDim.x) {
       weights[base_index + i * weights_stride1] *= factor;
     }

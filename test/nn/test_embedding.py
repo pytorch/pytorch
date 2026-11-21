@@ -69,6 +69,23 @@ class TestEmbeddingNN(NNTestCase):
         self.assertEqual(output[1], output[2])
         self.assertTrue(output.data.norm(p=2, dim=1).le(1).all())
 
+    def test_embedding_max_norm_exact(self):
+        index = torch.tensor([0], dtype=torch.long)
+        for max_norm in (1.0, 1e-6):
+            weight = torch.tensor([[2 * max_norm, 0.0]], dtype=torch.double)
+            functional_weight = weight.clone()
+            output = F.embedding(index, functional_weight, max_norm=max_norm)
+            self.assertEqual(output[0].norm(), max_norm, atol=1e-12, rtol=0)
+
+            module = nn.Embedding(1, 2, max_norm=max_norm, dtype=torch.double)
+            module.weight.data.copy_(weight)
+            module(index)
+            self.assertEqual(module.weight.norm(dim=1)[0], max_norm, atol=1e-12, rtol=0)
+
+            bag_weight = weight.clone()
+            F.embedding_bag(index, bag_weight, max_norm=max_norm)
+            self.assertEqual(bag_weight.norm(dim=1)[0], max_norm, atol=1e-12, rtol=0)
+
     @parametrize_test(
         "dtype",
         (
@@ -1149,6 +1166,20 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         output = embedding(input)
         self.assertEqual(output[1], output[2])
         self.assertTrue(output.data.norm(p=2, dim=1).le(1).all())
+
+    @onlyAccelerator
+    @dtypes(torch.float, torch.double)
+    def test_embedding_max_norm_exact_device(self, device, dtype):
+        max_norm = 1e-6
+        weight = torch.tensor([[2 * max_norm, 0.0]], device=device, dtype=dtype)
+        index = torch.tensor([0], device=device, dtype=torch.long)
+        output = F.embedding(index, weight.clone(), max_norm=max_norm)
+        tolerance = 1e-8 if dtype == torch.float else 1e-12
+        self.assertEqual(output[0].norm(), max_norm, atol=tolerance, rtol=0)
+
+        bag_weight = weight.clone()
+        F.embedding_bag(index, bag_weight, max_norm=max_norm)
+        self.assertEqual(bag_weight.norm(dim=1)[0], max_norm, atol=tolerance, rtol=0)
 
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_embedding_bag_empty_input(self, device, dtypes):
