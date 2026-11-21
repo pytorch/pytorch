@@ -54,6 +54,8 @@ class GemmGfx950Param:
     m_waves: fx.Constexpr[int]
     n_waves: fx.Constexpr[int]
     group_m: fx.Constexpr[int]
+    # XCCs that BlockSwizzle spreads tile groups across.
+    num_xccs: fx.Constexpr[int]
     use_half_tile_interleaved: fx.Constexpr[bool]
     a_is_transposed: fx.Constexpr[bool]
     b_is_transposed: fx.Constexpr[bool]
@@ -128,6 +130,7 @@ def make_gemm_gfx950_param(
     has_k_tail: bool = False,
     *,
     out_dtype_id: int | None = None,
+    num_xccs: int = 8,  # full MI355X; Inductor passes the device's count
 ) -> GemmGfx950Param:
     # Keep the kernel implementation's internal block terminology unchanged.
     block_m, block_n, block_k = tile_m, tile_n, tile_k
@@ -151,6 +154,8 @@ def make_gemm_gfx950_param(
         raise ValueError("the workgroup cannot contain more than 16 waves")
     if group_m < 0:
         raise ValueError("group_m must be non-negative")
+    if num_xccs < 1:
+        raise ValueError("num_xccs must be positive")
     if out_dtype_id is None:
         out_dtype_id = GEMM_DTYPE_BF16 if is_mxfp else in_dtype_id
     if out_dtype_id not in (
@@ -339,6 +344,7 @@ def make_gemm_gfx950_param(
         m_waves=m_waves,
         n_waves=n_waves,
         group_m=group_m,
+        num_xccs=num_xccs,
         use_half_tile_interleaved=use_half_tile_interleaved,
         a_is_transposed=a_is_transposed,
         b_is_transposed=b_is_transposed,
@@ -385,7 +391,7 @@ def make_gemm_gfx950_kernel_name(param: GemmGfx950Param) -> str:
     )
     name += f"_w{param.m_waves}x{param.n_waves}x1"
     # Bias dtype is not part of the name; callers must keep it equal to out_dtype.
-    name += f"_gm{param.group_m}_bias{int(param.has_bias)}"
+    name += f"_gm{param.group_m}_xcc{param.num_xccs}_bias{int(param.has_bias)}"
     name += f"_ktail{int(param.has_k_tail)}"
     a_layout = "t" if param.a_is_transposed else "n"
     b_layout = "t" if param.b_is_transposed else "n"
@@ -865,7 +871,7 @@ def gemm_gfx950_kernel(
     num_pid_m = (m - 1) // block_m + 1
     num_pid_n = (n - 1) // block_n + 1
     block_swizzle = BlockSwizzle(
-        NUM_XCDS=8, NUM_PIDS_THRESHOLD=256, GROUP_M=param.group_m
+        NUM_XCDS=param.num_xccs, NUM_PIDS_THRESHOLD=256, GROUP_M=param.group_m
     )
     bid_m, bid_n = block_swizzle.swizzle(num_pid_m, num_pid_n, fx.block_idx.x)
     k_tiles = (k - 1) // block_k + 1
@@ -1218,7 +1224,7 @@ def gemm_hti_gfx950_kernel(
     num_pid_m = (m - 1) // block_m + 1
     num_pid_n = (n - 1) // block_n + 1
     bid_m, bid_n = BlockSwizzle(
-        NUM_XCDS=8, NUM_PIDS_THRESHOLD=256, GROUP_M=param.group_m
+        NUM_XCDS=param.num_xccs, NUM_PIDS_THRESHOLD=256, GROUP_M=param.group_m
     ).swizzle(num_pid_m, num_pid_n, fx.block_idx.x)
     k_tiles = (k - 1) // block_k + 1
     block_m_offset = bid_m * block_m

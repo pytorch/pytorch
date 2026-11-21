@@ -42,7 +42,7 @@ def _flydsl_mxfp8_wgrad(
             param = _mxfp8_wgrad_params.get(sc_pair)
             if param is None:
                 param = make_mxfp8_wgrad_param(
-                    GEMM_N, GEMM_K, GEMM_G, sc_pair=sc_pair, num_xcd=NUM_XCD
+                    GEMM_N, GEMM_K, GEMM_G, sc_pair=sc_pair, num_xcd=NUM_XCCS
                 )
                 _mxfp8_wgrad_params[sc_pair] = param
 
