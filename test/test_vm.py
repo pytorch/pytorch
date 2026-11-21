@@ -10776,6 +10776,23 @@ def back_halves_drop(x, w, b):
     return first.exp().sum(), second.sin().sum()
 
 
+def back_makes(x, w, b):
+    scale = torch.tensor([0.5, 2.0, 1.0, 3.0], device=x.device, dtype=x.dtype)
+    h = (x @ w + b).tanh() * scale
+    return h.sum(), h.exp().mean()
+
+
+def back_makes_sized(x, w, b):
+    h = (x @ w + b).tanh()
+    h = h * torch.tensor([h.shape[0], 2.0, 1.0, 3.0], device=x.device)
+    return h.sum(), h.exp().mean()
+
+
+def back_view_read_makes(x, w, b):
+    q = ((x @ w + b).tanh() * torch.tensor([0.5, 2.0, 1.0, 3.0], device=x.device)).t()
+    return q, (q * torch.tensor(2.0, dtype=x.dtype)).sum()
+
+
 def back_reader_keeps(x, a):
     h = (x @ a).tanh()
     return h, (h * h).sum() + (a * a).sum()
@@ -11111,6 +11128,39 @@ class TestVmGraphBackward(TestCase):
             graphs = torch.vm.regions(compiled)
             forms = [form for graph in graphs for form in graph.get("forms", ())]
             self.assertIn(states[0], [form.get("backward") for form in forms])
+
+    def test_a_tensor_made_of_numbers_is_an_operation_of_the_graph(self, device):
+        # torch.tensor fills memory where no kernel runs: the call is one
+        # operation of the forward, with what it was called with. A list of
+        # constants, and the device and the dtype of a tensor, are the same
+        # at every call of a form; the size of a tensor that the graph
+        # computed is not taken for that, and such a graph keeps the tape.
+        # A part of a form that was cut has the call as well.
+        expected = (
+            (back_makes, ["the engine's backward"]),
+            (back_makes_sized, None),
+            (back_view_read_makes, ["in parts"] + ["the engine's backward"] * 2),
+        )
+        for fn, states in expected:
+            compiled = self.staged(fn)
+            torch.manual_seed(0)
+            w = torch.randn(4, 4, device=device, requires_grad=True)
+            b = torch.randn(4, device=device, requires_grad=True)
+            for _ in range(8):
+                x = torch.randn(3, 4, device=device)
+                found = []
+                for run in (compiled, fn):
+                    w.grad = b.grad = None
+                    first, second = run(x, w, b)
+                    (first.exp().sum() + second.sum()).backward()
+                    found.append((first, second, w.grad.clone(), b.grad.clone()))
+                self.alike(found[0], found[1])
+            if states is not None:
+                self.assertEqual(self.states(), states)
+            else:
+                (state,) = self.states()
+                text = "eager's tape: tensor makes a tensor of what is no tensor"
+                self.assertIn(text, state)
 
     def test_a_result_that_is_a_view_is_eagers_view(self, device):
         def use(fn, x, w, b):
