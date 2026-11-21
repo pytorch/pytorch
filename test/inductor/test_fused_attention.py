@@ -36,7 +36,6 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CUDA_AND_TRITON,
     HAS_XPU_AND_TRITON,
-    RUN_CPU,
 )
 
 
@@ -162,7 +161,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                     ):
                         self.assertEqual(arg1.grad, arg2.grad, atol=atol, rtol=rtol)
 
-    def _test_sdpa_rewriter_1(self):
+    def _test_sdpa_rewriter_1(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
@@ -205,7 +206,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             )
 
     @torch._inductor.config.patch("freezing", True)
-    def _test_sdpa_rewriter_1_freezing(self):
+    def _test_sdpa_rewriter_1_freezing(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
@@ -232,7 +235,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                     check_train=False,
                 )
 
-    def _test_insignificant_strides(self):
+    def _test_insignificant_strides(self, device=None):
+        self.device = device if device is not None else self.device
         f32 = torch.float32
 
         # repro taken from https://github.com/pytorch/pytorch/issues/124289
@@ -309,11 +313,12 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         # dont compare philox_seed/offset
         torch.testing.assert_close(out_eager[0:2], out_c[0:2])
 
-    def _test_pattern_fails_with_reuse(self):
+    def _test_pattern_fails_with_reuse(self, device=None):
         """
         This test checks that the replacement is not done
         when an intermediate result is being used / returned downstream
         """
+        self.device = device if device is not None else self.device
 
         @torch.compile(fullgraph=True)
         def dot_prod_attention(
@@ -335,7 +340,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         _, (source_code,) = run_and_get_code(dot_prod_attention, *args)
         self.assertNotIn("aten._scaled_dot_product_efficient_attention", source_code)
 
-    def _test_sdpa_rewriter_2(self):
+    def _test_sdpa_rewriter_2(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
@@ -349,7 +356,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(dot_prod_attention)
         self._check_common(checkpoint_wrapper(dot_prod_attention))
 
-    def _test_sdpa_rewriter_3(self):
+    def _test_sdpa_rewriter_3(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, training: bool
         ) -> torch.Tensor:
@@ -365,7 +374,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             checkpoint_wrapper(dot_prod_attention), contains=False, has_dropout=True
         )
 
-    def _test_sdpa_rewriter_4(self):
+    def _test_sdpa_rewriter_4(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor,
             key: torch.Tensor,
@@ -384,7 +395,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             checkpoint_wrapper(dot_prod_attention), contains=False, has_dropout=True
         )
 
-    def _test_sdpa_rewriter_5(self):
+    def _test_sdpa_rewriter_5(self, device=None):
+        self.device = device if device is not None else self.device
+
         def sfdp_pattern_5_v1(query, key, value):
             attn_mask = torch.ones(
                 query.size(-2), key.size(-2), dtype=torch.bool, device=query.device
@@ -434,7 +447,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             contains=False,
         )
 
-    def _test_sdpa_rewriter_6(self):
+    def _test_sdpa_rewriter_6(self, device=None):
+        self.device = device if device is not None else self.device
+
         def sfdp_pattern_6(query, key, value, training):
             attn_mask = torch.ones(
                 query.size(-2), key.size(-2), dtype=torch.bool, device=query.device
@@ -475,7 +490,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             has_dropout=True,
         )
 
-    def _test_sdpa_rewriter_7(self):
+    def _test_sdpa_rewriter_7(self, device=None):
+        self.device = device if device is not None else self.device
         # MI200: the eager fp16 reference backward uses the bf16-intermediate
         # alt implementation and is the less accurate side (see
         # _test_sdpa_rewriter_1); measured max grad diff 2.7e-3.
@@ -559,7 +575,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             atol=atol,
         )
 
-    def _test_sdpa_rewriter_8(self):
+    def _test_sdpa_rewriter_8(self, device=None):
+        self.device = device if device is not None else self.device
         # MI200: the eager fp16 reference backward uses the bf16-intermediate
         # alt implementation and is the less accurate side (see
         # _test_sdpa_rewriter_1); measured max grad diff 2.7e-3.
@@ -616,7 +633,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             contains=False,
         )
 
-    def _test_sdpa_rewriter_9(self):
+    def _test_sdpa_rewriter_9(self, device=None):
+        self.device = device if device is not None else self.device
+
         def sfdp_pattern_9(query, key, value, training):
             q = query.permute(0, 2, 1, 3)
             k = key.permute(0, 2, 1, 3)
@@ -696,7 +715,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             atol=2e-3,
         )
 
-    def _test_sdpa_rewriter_10(self):
+    def _test_sdpa_rewriter_10(self, device=None):
+        self.device = device if device is not None else self.device
+
         def sfdp_pattern_10(query, key, value):
             q = query.permute(0, 2, 1, 3)
             k = key.permute(0, 2, 1, 3)
@@ -755,7 +776,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             contains=False,
         )
 
-    def _test_pattern_fails_with_tensor_factor(self):
+    def _test_pattern_fails_with_tensor_factor(self, device=None):
+        self.device = device if device is not None else self.device
+
         # https://github.com/pytorch/pytorch/issues/99124
         class Model(torch.nn.Module):
             def __init__(self, is_inv_factor):
@@ -787,7 +810,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 model, args1=args, contains=False, atol=1e-3, has_fuse_pattern=False
             )
 
-    def _test_pattern_fails_with_tensor_scale(self):
+    def _test_pattern_fails_with_tensor_scale(self, device=None):
+        self.device = device if device is not None else self.device
+
         # https://github.com/pytorch/pytorch/issues/191203
         def model(query, key, value, attn_mask, scale):
             # Dividing by scale makes the scale gradients very unstable
@@ -809,7 +834,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
         self.assertEqual(counters["inductor"]["fuse_attention"], 0)
 
-    def _test_pattern_fails_with_batch_permuted_key(self):
+    def _test_pattern_fails_with_batch_permuted_key(self, device=None):
+        self.device = device if device is not None else self.device
+
         # https://github.com/pytorch/pytorch/issues/195320
         def dot_prod_attention(query, key, value):
             # key arrives as (B, T, H, D); permute(0, 2, 3, 1) also moves
@@ -860,7 +887,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         self._check_common(negative_dims_dot_prod_attention, args1=make_args())
 
-    def _test_pattern_fails_with_non_last_dim_softmax(self):
+    def _test_pattern_fails_with_non_last_dim_softmax(self, device=None):
+        self.device = device if device is not None else self.device
+
         # https://github.com/pytorch/pytorch/issues/195320
         def dot_prod_attention(query, key, value):
             # softmax over dim=-2 is a different computation and must not
@@ -894,7 +923,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(positive_dim_dot_prod_attention, args1=make_args())
 
     @recover_orig_fp32_precision
-    def _test_pattern_fails_with_mismatched_view_grouping(self):
+    def _test_pattern_fails_with_mismatched_view_grouping(self, device=None):
+        self.device = device if device is not None else self.device
         if self.device == GPU_TYPE and TEST_WITH_ROCM:
             # setUp sets fp32_precision="tf32", which hipBLASLt honors as XF32 on
             # gfx942 and gfx950, degrading the eager bmm reference while the fused
@@ -947,7 +977,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=False,
         )
 
-    def _test_pattern_fails_with_lower_rank_inputs(self):
+    def _test_pattern_fails_with_lower_rank_inputs(self, device=None):
+        self.device = device if device is not None else self.device
         # Rank-3 inputs whose views mirror _sfdp_pattern_24's op structure
         # coarse-match the 4-D-traced pattern (its view sizes are wildcards),
         # so the match-time re-trace runs search_fn on them and indexes
@@ -980,7 +1011,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
         self.assertEqual(counters["inductor"]["fuse_attention"], 0)
 
-    def _test_sdpa_rewriter_stacked_layers_with_mask(self):
+    def _test_sdpa_rewriter_stacked_layers_with_mask(self, device=None):
+        self.device = device if device is not None else self.device
+
         # HF BERT shape: stacked attention layers share the batch dim.  Under
         # dynamic shapes the s0*heads size from matmul's reshape is one sym
         # node shared by every layer, so the retraced pattern must not pin it
@@ -1012,7 +1045,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         per_pattern = counters["inductor_pattern_matcher_per_pattern"]
         self.assertEqual(per_pattern["_sfdp_pattern_5_training"], 2)
 
-    def _test_pattern_fuses_with_symint_scale(self):
+    def _test_pattern_fuses_with_symint_scale(self, device=None):
+        self.device = device if device is not None else self.device
         # A SymInt scale is a scalar the fused kernel accepts. _check_common
         # only marks dim 0 dynamic, so the scale is taken from that dim.
         if self.use_static_shapes:
@@ -1046,7 +1080,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         "the scale is only symbolic under dynamic shapes",
     )
 
-    def _test_pattern_fuses_with_symint_scale_div(self):
+    def _test_pattern_fuses_with_symint_scale_div(self, device=None):
+        self.device = device if device is not None else self.device
         # Same SymInt scale, reaching the guard through _sfdp_extra_check
         # instead of _sfdp_params_check.
         if self.use_static_shapes:
@@ -1075,7 +1110,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         "the scale is only symbolic under dynamic shapes",
     )
 
-    def _test_pattern_fails_with_symfloat_scale(self):
+    def _test_pattern_fails_with_symfloat_scale(self, device=None):
+        self.device = device if device is not None else self.device
         # tensorify_python_scalars turns the SymFloat scale into a 0-d tensor
         # before the pattern check, so the fusion is skipped.
         # TODO: the scalar behind a tensorified SymFloat scale (e.g.
@@ -1108,7 +1144,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         "the scale is only symbolic under dynamic shapes",
     )
 
-    def _test_pattern_fails_with_zero_scale(self):
+    def _test_pattern_fails_with_zero_scale(self, device=None):
+        self.device = device if device is not None else self.device
+
         # https://github.com/pytorch/pytorch/issues/195591
         def model(query, key, value):
             scores = query @ key.transpose(-2, -1) / 0.0
@@ -1123,7 +1161,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(model, args1=args, contains=False, has_fuse_pattern=False)
         self.assertEqual(counters["inductor"]["fuse_attention"], 0)
 
-    def _test_pattern_fails_with_masked_zero_scale(self):
+    def _test_pattern_fails_with_masked_zero_scale(self, device=None):
+        self.device = device if device is not None else self.device
+
         # https://github.com/pytorch/pytorch/issues/195591
         def model(query, key, value, attn_mask):
             scores = query @ key.transpose(-2, -1) / 0.0 + attn_mask
@@ -1139,7 +1179,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(model, args1=args, contains=False, has_fuse_pattern=False)
         self.assertEqual(counters["inductor"]["fuse_attention"], 0)
 
-    def _test_pattern_fuses_with_mul_zero_scale(self):
+    def _test_pattern_fuses_with_mul_zero_scale(self, device=None):
+        self.device = device if device is not None else self.device
+
         def model(query, key, value):
             scores = query @ key.transpose(-2, -1) * 0.0
             return torch.softmax(scores, dim=-1) @ value
@@ -1160,7 +1202,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             },
         )
 
-    def _test_pattern_fails_with_unsupported_mask(self):
+    def _test_pattern_fails_with_unsupported_mask(self, device=None):
+        self.device = device if device is not None else self.device
         if not self.use_static_shapes:
             self.skipTest("Causes shape specialization. TODO: investigate")
 
@@ -1204,7 +1247,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         "Causes shape specialization. TODO: investigate",
     )
 
-    def _test_sdpa_rewriter_11(self):
+    def _test_sdpa_rewriter_11(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
@@ -1221,7 +1266,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         self._check_common(dot_prod_attention)
 
-    def _test_sdpa_rewriter_12(self):
+    def _test_sdpa_rewriter_12(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor,
             key: torch.Tensor,
@@ -1249,7 +1296,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             expected_fused_attention_patterns={True: "_sfdp_pattern_12_training"},
         )
 
-    def _test_sdpa_prev_13(self):
+    def _test_sdpa_prev_13(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
@@ -1265,7 +1314,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(dot_prod_attention, check_train=False)
         self._check_common(checkpoint_wrapper(dot_prod_attention), check_train=False)
 
-    def _test_sdpa_prev_14(self):
+    def _test_sdpa_prev_14(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
@@ -1280,7 +1331,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(dot_prod_attention, check_train=False)
         self._check_common(checkpoint_wrapper(dot_prod_attention), check_train=False)
 
-    def _test_sdpa_prev_15(self):
+    def _test_sdpa_prev_15(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
@@ -1298,7 +1351,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         self._check_common(dot_prod_attention, check_train=False)
 
-    def _test_sdpa_rewriter_13(self, dtype):
+    def _test_sdpa_rewriter_13(self, dtype, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor,
             key: torch.Tensor,
@@ -1329,7 +1384,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             rtol=1e-2,
         )
 
-    def _test_sdpa_rewriter_13_non_transpose_permute(self, dtype):
+    def _test_sdpa_rewriter_13_non_transpose_permute(self, dtype, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor,
             key: torch.Tensor,
@@ -1358,7 +1415,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
         self.assertEqual(counters["inductor"]["fuse_attention"], 0)
 
-    def _test_sdpa_rewriter_14(self):
+    def _test_sdpa_rewriter_14(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
@@ -1380,7 +1439,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         self._check_common(dot_prod_attention)
 
-    def _test_sdpa_rewriter_15(self):
+    def _test_sdpa_rewriter_15(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
@@ -1403,9 +1464,12 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
     def _test_sdpa_rewriter_16(
         self,
+        device=None,
         check_train=True,
         override_check_equal=False,
     ):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, training
         ) -> torch.Tensor:
@@ -1458,9 +1522,12 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
     def _test_sdpa_rewriter_16_fp32_mask(
         self,
+        device=None,
         check_train=True,
         override_check_equal=False,
     ):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, training
         ) -> torch.Tensor:
@@ -1508,7 +1575,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             override_check_equal=override_check_equal,
         )
 
-    def _test_sdpa_rewriter_17(self):
+    def _test_sdpa_rewriter_17(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, training
         ) -> torch.Tensor:
@@ -1535,7 +1604,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         self._check_common(dot_prod_attention, check_train=False, has_dropout=True)
 
-    def _test_sdpa_rewriter_18(self):
+    def _test_sdpa_rewriter_18(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor,
             key: torch.Tensor,
@@ -1647,7 +1718,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=False,
         )
 
-    def _test_sdpa_rewriter_19(self):
+    def _test_sdpa_rewriter_19(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor,
             key: torch.Tensor,
@@ -1733,7 +1806,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=False,
         )
 
-    def _test_sdpa_rewriter_20(self):
+    def _test_sdpa_rewriter_20(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, training
         ) -> torch.Tensor:
@@ -1761,7 +1836,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         self._check_common(dot_prod_attention, check_train=False, has_dropout=True)
 
-    def _test_sdpa_rewriter_21(self):
+    def _test_sdpa_rewriter_21(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor,
             key: torch.Tensor,
@@ -1800,7 +1877,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 rtol=rtol,
             )
 
-    def _test_sdpa_rewriter_22(self):
+    def _test_sdpa_rewriter_22(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor,
             key: torch.Tensor,
@@ -1841,7 +1920,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 contains=self.device == "cpu",
             )
 
-    def _test_sdpa_rewriter_23(self):
+    def _test_sdpa_rewriter_23(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor,
             key: torch.Tensor,
@@ -1870,7 +1951,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 check_train=False,
             )
 
-    def _test_sdpa_rewriter_24(self):
+    def _test_sdpa_rewriter_24(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor,
             key: torch.Tensor,
@@ -1908,7 +1991,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=False,
         )
 
-    def _test_sdpa_rewriter_25(self):
+    def _test_sdpa_rewriter_25(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor,
             key: torch.Tensor,
@@ -1943,10 +2028,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
 
     @torch._inductor.config.patch("cache_sdpa_constraint", True)
-    def _test_cache_sdpa_constraint_shared_kv_enabled(self):
+    def _test_cache_sdpa_constraint_shared_kv_enabled(self, device=None):
         """When cache_sdpa_constraint is True and the same tensor feeds both key
         and value in SDPA (PMA pattern), the constraint cache should deduplicate
         the buffer copy, producing fewer copy operations than when disabled."""
+        self.device = device if device is not None else self.device
 
         def pma_attention(query, kv):
             return torch.nn.functional.scaled_dot_product_attention(query, kv, kv)
@@ -1969,10 +2055,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         return copy_count_cached
 
     @torch._inductor.config.patch("cache_sdpa_constraint", False)
-    def _test_cache_sdpa_constraint_shared_kv_disabled(self):
+    def _test_cache_sdpa_constraint_shared_kv_disabled(self, device=None):
         """When cache_sdpa_constraint is False and the same tensor feeds both key
         and value in SDPA (PMA pattern), the constraint should create separate
         buffer copies, producing more copy operations than when enabled."""
+        self.device = device if device is not None else self.device
 
         def pma_attention(query, kv):
             return torch.nn.functional.scaled_dot_product_attention(query, kv, kv)
@@ -1994,17 +2081,20 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         copy_count_uncached = source_code.count("copy_")
         return copy_count_uncached
 
-    def _test_cache_sdpa_constraint_shared_kv(self):
+    def _test_cache_sdpa_constraint_shared_kv(self, device=None):
         """Verify that cache_sdpa_constraint=True produces no more copy_
         operations than cache_sdpa_constraint=False when the same tensor feeds
         both key and value in SDPA."""
+        self.device = device if device is not None else self.device
         copy_count_cached = self._test_cache_sdpa_constraint_shared_kv_enabled()
         copy_count_uncached = self._test_cache_sdpa_constraint_shared_kv_disabled()
         self.assertLessEqual(
             copy_count_cached,
             copy_count_uncached,
-            lambda msg: f"{msg}\nExpected caching to produce <= copy_ ops (got {copy_count_cached}) "
-            f"vs no caching ({copy_count_uncached})",
+            lambda msg: (
+                f"{msg}\nExpected caching to produce <= copy_ ops (got {copy_count_cached}) "
+                f"vs no caching ({copy_count_uncached})"
+            ),
         )
 
     def _test_sdpa_constraint_flexible_kv_layout(self):
@@ -2034,7 +2124,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         kv_strides = re.findall(r"empty_strided_\w+\(\(4, 1, 32, 64\), \((.*?)\)", code)
         self.assertEqual(kv_strides, ["2048, 2048, 64, 1"])
 
-    def _test_sdpa_rewriter_26(self):
+    def _test_sdpa_rewriter_26(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor,
             key: torch.Tensor,
@@ -2069,7 +2161,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=True,
         )
 
-    def _test_sdpa_rewriter_27(self):
+    def _test_sdpa_rewriter_27(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor,
             key: torch.Tensor,
@@ -2103,7 +2197,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=True,
         )
 
-    def _test_sdpa_rewriter_29(self):
+    def _test_sdpa_rewriter_29(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
@@ -2144,7 +2240,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 dot_prod_attention, args1=args_bs1, dtype=dtype, check_train=False
             )
 
-    def _test_sdpa_rewriter_30(self):
+    def _test_sdpa_rewriter_30(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
@@ -2182,7 +2280,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 dot_prod_attention, args1=args_bs1, dtype=dtype, check_train=False
             )
 
-    def _test_sdpa_rewriter_28(self):
+    def _test_sdpa_rewriter_28(self, device=None):
+        self.device = device if device is not None else self.device
+
         def dot_prod_attention(
             qkv: torch.Tensor,
             training: bool,
@@ -2378,6 +2478,7 @@ instantiate_device_type_tests(TestAttentionFusionDeviceRouting, globals())
 if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENTION):
 
     class SDPAPatternRewriterGpuTests(TestSDPAPatternRewriterTemplate):
+        hw_classification = HardwareClassification.ACCELERATOR
         device = GPU_TYPE
         test_sdpa_rewriter_1_gpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_1
         test_sdpa_rewriter_1_freezing = (
@@ -2557,131 +2658,134 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
                 torch.backends.cuda.matmul.fp32_precision = orig
 
     class SDPAPatternRewriterGpuDynamicTests(SDPAPatternRewriterGpuTests):
+        hw_classification = HardwareClassification.ACCELERATOR
         use_static_shapes = False
 
 
-if RUN_CPU:
-
-    class SDPAPatternRewriterCpuTests(TestSDPAPatternRewriterTemplate):
-        hw_classification = HardwareClassification.CPU
-        device = "cpu"
-        test_sdpa_rewriter_1_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_1
-        test_pattern_fails_with_reuse_cpu = (
-            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_reuse
-        )
-        test_sdpa_rewriter_2_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_2
-        test_sdpa_rewriter_5_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_5
-        test_pattern_fails_with_tensor_factor_cpu = (
-            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_factor
-        )
-        test_pattern_fails_with_tensor_scale_cpu = (
-            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_scale
-        )
-        test_pattern_fuses_with_symint_scale_cpu = (
-            TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_symint_scale
-        )
-        test_pattern_fuses_with_symint_scale_div_cpu = (
-            TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_symint_scale_div
-        )
-        test_pattern_fails_with_symfloat_scale_cpu = (
-            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_symfloat_scale
-        )
-        test_pattern_fails_with_zero_scale_cpu = (
-            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_zero_scale
-        )
-        test_pattern_fails_with_masked_zero_scale_cpu = (
-            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_masked_zero_scale
-        )
-        test_pattern_fuses_with_mul_zero_scale_cpu = (
-            TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_mul_zero_scale
-        )
-        test_pattern_fails_with_unsupported_mask_cpu = (
-            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_unsupported_mask
-        )
-        test_pattern_fails_with_batch_permuted_key_cpu = (
-            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_batch_permuted_key
-        )
-        test_pattern_fails_with_non_last_dim_softmax_cpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_non_last_dim_softmax
-        test_pattern_fails_with_mismatched_view_grouping_cpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_mismatched_view_grouping
-        test_pattern_fails_with_lower_rank_inputs_cpu = (
-            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_lower_rank_inputs
-        )
-        test_sdpa_rewriter_stacked_layers_with_mask_cpu = (
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_stacked_layers_with_mask
-        )
-        test_sdpa_rewriter_11_cpu = (
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_11
-        )
-        test_sdpa_rewriter_12_cpu = (
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_12
-        )
-        test_sdpa_prev_13_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_prev_13
-        test_sdpa_prev_14_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_prev_14
-        test_sdpa_prev_15_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_prev_15
-        test_sdpa_rewriter_13_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13, dtype=torch.float32
-        )
-        test_sdpa_rewriter_14_cpu = (
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_14
-        )
-        test_sdpa_rewriter_15_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_15
-        )
-        test_sdpa_rewriter_16_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16
-        )
-        test_sdpa_rewriter_16_fp32_mask_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16_fp32_mask
-        )
-        test_sdpa_rewriter_17_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_17
-        )
-        test_sdpa_rewriter_18_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_18
-        )
-        test_sdpa_rewriter_19_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_19
-        )
-        test_sdpa_rewriter_20_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_20
-        )
-        test_sdpa_rewriter_21_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_21
-        )
-        test_sdpa_rewriter_22_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_22
-        )
-        test_sdpa_rewriter_23_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_23
-        )
-        test_sdpa_rewriter_24_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_24
-        )
-        test_cache_sdpa_constraint_shared_kv_cpu = (
-            TestSDPAPatternRewriterTemplate._test_cache_sdpa_constraint_shared_kv
-        )
-        test_sdpa_rewriter_28_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_28
-        )
-        test_sdpa_rewriter_29_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_29
-        )
-        test_sdpa_rewriter_30_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_30
-        )
-
-    class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):
-        use_static_shapes = False
-
-    class SDPAPatternRewriterPatternGuardCpuTests(TestSDPAPatternRewriterTemplate):
-        hw_classification = HardwareClassification.CPU
-        device = "cpu"
-        test_sdpa_rewriter_13_non_transpose_permute_cpu = functools.partialmethod(
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13_non_transpose_permute,
-            dtype=torch.float32,
-        )
+class SDPAPatternRewriterCpuTests(TestSDPAPatternRewriterTemplate):
+    hw_classification = HardwareClassification.CPU
+    test_sdpa_rewriter_1_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_1
+    test_pattern_fails_with_reuse_cpu = (
+        TestSDPAPatternRewriterTemplate._test_pattern_fails_with_reuse
+    )
+    test_sdpa_rewriter_2_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_2
+    test_sdpa_rewriter_5_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_5
+    test_pattern_fails_with_tensor_factor_cpu = (
+        TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_factor
+    )
+    test_pattern_fails_with_tensor_scale_cpu = (
+        TestSDPAPatternRewriterTemplate._test_pattern_fails_with_tensor_scale
+    )
+    test_pattern_fuses_with_symint_scale_cpu = (
+        TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_symint_scale
+    )
+    test_pattern_fuses_with_symint_scale_div_cpu = (
+        TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_symint_scale_div
+    )
+    test_pattern_fails_with_symfloat_scale_cpu = (
+        TestSDPAPatternRewriterTemplate._test_pattern_fails_with_symfloat_scale
+    )
+    test_pattern_fails_with_zero_scale_cpu = (
+        TestSDPAPatternRewriterTemplate._test_pattern_fails_with_zero_scale
+    )
+    test_pattern_fails_with_masked_zero_scale_cpu = (
+        TestSDPAPatternRewriterTemplate._test_pattern_fails_with_masked_zero_scale
+    )
+    test_pattern_fuses_with_mul_zero_scale_cpu = (
+        TestSDPAPatternRewriterTemplate._test_pattern_fuses_with_mul_zero_scale
+    )
+    test_pattern_fails_with_unsupported_mask_cpu = (
+        TestSDPAPatternRewriterTemplate._test_pattern_fails_with_unsupported_mask
+    )
+    test_pattern_fails_with_batch_permuted_key_cpu = (
+        TestSDPAPatternRewriterTemplate._test_pattern_fails_with_batch_permuted_key
+    )
+    test_pattern_fails_with_non_last_dim_softmax_cpu = (
+        TestSDPAPatternRewriterTemplate._test_pattern_fails_with_non_last_dim_softmax
+    )
+    test_pattern_fails_with_mismatched_view_grouping_cpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_mismatched_view_grouping
+    test_pattern_fails_with_lower_rank_inputs_cpu = (
+        TestSDPAPatternRewriterTemplate._test_pattern_fails_with_lower_rank_inputs
+    )
+    test_sdpa_rewriter_stacked_layers_with_mask_cpu = (
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_stacked_layers_with_mask
+    )
+    test_sdpa_rewriter_11_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_11
+    test_sdpa_rewriter_12_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_12
+    test_sdpa_prev_13_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_prev_13
+    test_sdpa_prev_14_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_prev_14
+    test_sdpa_prev_15_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_prev_15
+    test_sdpa_rewriter_13_cpu = functools.partialmethod(
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13, dtype=torch.float32
+    )
+    test_sdpa_rewriter_14_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_14
+    test_sdpa_rewriter_15_cpu = functools.partialmethod(
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_15
+    )
+    test_sdpa_rewriter_16_cpu = functools.partialmethod(
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16
+    )
+    test_sdpa_rewriter_16_fp32_mask_cpu = functools.partialmethod(
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_16_fp32_mask
+    )
+    test_sdpa_rewriter_17_cpu = functools.partialmethod(
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_17
+    )
+    test_sdpa_rewriter_18_cpu = functools.partialmethod(
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_18
+    )
+    test_sdpa_rewriter_19_cpu = functools.partialmethod(
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_19
+    )
+    test_sdpa_rewriter_20_cpu = functools.partialmethod(
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_20
+    )
+    test_sdpa_rewriter_21_cpu = functools.partialmethod(
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_21
+    )
+    test_sdpa_rewriter_22_cpu = functools.partialmethod(
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_22
+    )
+    test_sdpa_rewriter_23_cpu = functools.partialmethod(
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_23
+    )
+    test_sdpa_rewriter_24_cpu = functools.partialmethod(
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_24
+    )
+    test_cache_sdpa_constraint_shared_kv_cpu = (
+        TestSDPAPatternRewriterTemplate._test_cache_sdpa_constraint_shared_kv
+    )
+    test_sdpa_rewriter_28_cpu = functools.partialmethod(
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_28
+    )
+    test_sdpa_rewriter_29_cpu = functools.partialmethod(
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_29
+    )
+    test_sdpa_rewriter_30_cpu = functools.partialmethod(
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_30
+    )
 
 
+class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):
+    hw_classification = HardwareClassification.CPU
+    use_static_shapes = False
+
+
+class SDPAPatternRewriterPatternGuardCpuTests(TestSDPAPatternRewriterTemplate):
+    hw_classification = HardwareClassification.CPU
+    test_sdpa_rewriter_13_non_transpose_permute_cpu = functools.partialmethod(
+        TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13_non_transpose_permute,
+        dtype=torch.float32,
+    )
+
+
+instantiate_device_type_tests(SDPAPatternRewriterCpuTests, globals(), only_for="cpu")
+instantiate_device_type_tests(
+    SDPAPatternRewriterCpuDynamicTests, globals(), only_for="cpu"
+)
+instantiate_device_type_tests(
+    SDPAPatternRewriterPatternGuardCpuTests, globals(), only_for="cpu"
+)
 if __name__ == "__main__":
     if IS_LINUX:
         run_tests()
