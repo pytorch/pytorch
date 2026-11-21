@@ -1616,21 +1616,14 @@ def load(
                 "please torch.save your checkpoint with this option in order to use mmap."
             )
         if weights_only:
-            try:
-                return _legacy_load(
-                    opened_file,
-                    map_location,
-                    _weights_only_unpickler,
-                    weights_only=True,
-                    **pickle_load_args,
-                )
-            except pickle.UnpicklingError as e:
-                raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
+            raise RuntimeError(
+                "Cannot use ``weights_only=True`` with files saved in the "
+                "legacy non-zipfile format. " + UNSAFE_MESSAGE
+            )
         return _legacy_load(
             opened_file,
             map_location,
             pickle_module,
-            weights_only=False,
             **pickle_load_args,
         )
 
@@ -1656,8 +1649,6 @@ def _legacy_load(
     f,
     map_location,
     pickle_module,
-    *,
-    weights_only=False,
     **pickle_load_args,
 ):
     deserialized_objects: dict[int, Any] = {}
@@ -1924,7 +1915,7 @@ def _legacy_load(
             if offset is not None:
                 offset = f.tell()
 
-    torch._utils._validate_loaded_sparse_tensors(weights_only=weights_only)
+    torch._utils._validate_loaded_sparse_tensors()
 
     return result
 
