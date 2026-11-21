@@ -4654,7 +4654,7 @@ impl Compiled {
             unsettled();
             return PathEnd::Miss;
         }
-        if site.exporter.is_none() && site.variants.borrow().is_empty() && self.asks(site, block) {
+        if !site.exports() && site.variants.borrow().is_empty() && self.asks(site, block) {
             // A graph that starts earlier in the function is taken down
             // again: this call goes a way its path does not, and may come
             // through here.
@@ -6025,7 +6025,7 @@ impl Compiled {
         // the graph for as long as nothing that can fail behind the
         // callable has been taken down: it cannot be taken back.
         let outside = std::cell::Cell::new(false);
-        let draws = site.exporter.is_some() && !t.fallible;
+        let draws = site.exports() && !t.fallible;
         let operators = self.operation(block, origin, inst, regs, api, &|v| owned(t, v), (!t.fallible).then_some(&outside), draws);
         if operators.is_none() {
             if let Some(taken) = self.record_call(t, site, (block, code as *const BlockCode, pc), regs, frames, api) {
@@ -6085,7 +6085,7 @@ impl Compiled {
                 // something of (what that is draws in its place; a pass
                 // that returns the graph draws eager's numbers), and like
                 // a write to a tensor from outside it cannot be taken back.
-                let draws = !(dropout && idle) && site.exporter.is_some() && !t.fallible;
+                let draws = !(dropout && idle) && site.exports() && !t.fallible;
                 outside.set(draws);
                 ((dropout && idle) || draws).then_some(Kind::Node)
             }
@@ -6581,7 +6581,7 @@ impl Compiled {
         // Asked only where graphs are exported (a path that is only
         // reported never runs in place of the instructions), and of a run
         // that is described (not under a mode, which would see it asked).
-        let asked = site.exporter.is_some().then_some(t.rec.failed.is_none());
+        let asked = site.exports().then_some(t.rec.failed.is_none());
         let fixed = fixed && (kind != Kind::Node || self.sized(inst, regs, picked, obj, operators.as_deref(), asked, api));
         // What a node gave: a tensor, or nothing that is read (a store, a
         // write whose result is dropped).
@@ -8390,7 +8390,24 @@ impl Compiled {
         if whole.is_some_and(|place| site.shun(place, "what an operation with several results gives is used whole")) || t.again {
             return PathEnd::Landed(landing);
         }
-        let finished = path.provisional || path.operators.len() < site.min_ops || site.exporter.is_none();
+        // Whether a tensor the path takes needs a gradient, with gradients
+        // enabled: the engine derives the backward of such a call.
+        let graded = world.0 & 1 != 0
+            && path.feeds.iter().any(|v| {
+                let held = t.rec.values[*v as usize];
+                let mut info = TcfgTensorInfo::empty();
+                !held.is_null() && (api.tensor_info)(held, &mut info) != 0 && info.requires_grad != 0
+            });
+        if site.derives && !site.exports() && graded {
+            // The first such call to a graph that is exported for nothing
+            // but its backward: its paths are taken down for that from
+            // here on, this one again at the next call (what a callable can
+            // stand for goes further than what is only reported: through
+            // an operation that draws random numbers, say).
+            site.needs_gradients();
+            return PathEnd::Landed(landing);
+        }
+        let finished = path.provisional || path.operators.len() < site.min_ops || !site.exports();
         if finished {
             site.install(path, None);
             return PathEnd::Landed(landing);
@@ -8412,6 +8429,10 @@ impl Compiled {
             }
         }
         let graph::Described { description, mut closed, checks, numbers, args, aliases, bumps } = described;
+        if closed.is_none() && site.derives && !graded {
+            // Nothing to derive, and no pass over graphs to hand it to.
+            closed = Some("no tensor of the call needs a gradient: its operations run as they are".to_string());
+        }
         if closed.is_none() && t.inplace {
             // What autograd kept of an operation was written to in place:
             // eager raises when it goes backward, and so must this call.
