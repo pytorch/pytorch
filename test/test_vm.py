@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import collections
+import collections.abc
 import copy
 import dis
 import functools
@@ -6696,6 +6697,540 @@ def graph_outer(x):
     return graph_inner(x)
 
 
+def graph_says(x, scale):
+    y = (x.sin() * scale).cos()
+    torch._assert(y.ndim == 2, f"expected 2D input (got {y.ndim}D input)")
+    rows = "%d rows" % y.shape[0]  # noqa: UP031
+    note = f"{y.dtype} {tuple(y.shape)!r} {scale:.3f} " + rows
+    if not note.startswith("torch"):
+        raise ValueError(note)
+    return (y * 2).tanh().exp() + len(note)
+
+
+def graph_prints(x):
+    y = (x.sin() + 1).cos()
+    note = f"{y.sum()}"
+    return (y * 2).tanh().exp() + len(note)
+
+
+def graph_shapes(x):
+    y = (x.sin() + 1).cos()
+    halves = (*y.shape[:-1], 2, -1)
+    again = y.shape[:-1] + (y.shape[-1] // 2, 2)
+    flat = [1] * (y.dim() - 1) + [-1]
+    return (y.view(halves) * 2).tanh().exp().view(again) + y.reshape(flat).sum()
+
+
+def graph_moves(x, w):
+    y = (x.sin() + 1).cos()
+    z = y.to(w.device).to(dtype=y.dtype)
+    z.add_(1)
+    y = y.to(w.dtype).to(dtype=torch.float32)
+    return (y * 2).tanh().exp()
+
+
+def graph_hands_on(x, pair, dims, *sizes):
+    y = (x.sin() + 1).cos()
+    shape = y.shape[:-1] + (2, 2)
+    y = y.view(*shape).reshape(*sizes)
+    return (torch.mul(y, *pair) * 2).tanh().exp() + torch.flatten(y, *dims).sum()
+
+
+class GraphLooksUp:
+    """A class that reads its attributes in a function of its own, which
+    goes to the one of the class behind it, which goes to `object`'s."""
+
+    def __getattribute__(self, key):
+        spec = super().__getattribute__("__dict__").get("_spec")
+        if spec is not None:
+            raise AttributeError(key)
+        return super().__getattribute__(key)
+
+
+class GraphSettings(GraphLooksUp):
+    renamed = {"width": "hidden"}
+
+    def __init__(self):
+        self.hidden = 2.0
+        self._kind = "plain"
+
+    @property
+    def kind(self):
+        return self._kind
+
+    def __getattribute__(self, key):
+        if key != "renamed" and key in super().__getattribute__("renamed"):
+            key = super().__getattribute__("renamed")[key]
+        return super().__getattribute__(key)
+
+
+class GraphSettingsWithDefault(GraphSettings):
+    def __getattr__(self, key):
+        return 3.0
+
+
+class GraphDoubles:
+    """What is read of it is twice what was stored."""
+
+    def __getattribute__(self, key):
+        return 2 * object.__getattribute__(self, key)
+
+
+def graph_reads_settings(x, settings):
+    y = (x.sin() + 1).cos()
+    if settings.kind == "plain":
+        y = y * settings.width
+    return (y * settings.hidden).tanh().exp()
+
+
+def graph_asks_settings(x, settings):
+    y = (x.sin() + 1).cos()
+    if hasattr(settings, "width"):
+        y = y * getattr(settings, "width")  # noqa: B009
+    if getattr(settings, "window", None) is not None:
+        y = y + 1
+    return (y * getattr(settings, "hidden", 1.0)).tanh().exp()
+
+
+class GraphKeepsKeys:
+    def __init__(self):
+        self.keys = None
+        self.updated = {}
+
+
+def graph_keeps_and_reads(x, settings, kept):
+    y = (x.sin() + 1).cos()
+    kept.keys = y
+    kept.updated[0] = True
+    if settings.kind == "plain":
+        y = y * settings.width
+    return (y * settings.hidden).tanh().exp()
+
+
+def graph_reads_what_it_stored(x, doubles):
+    y = (x.sin() + 1).cos()
+    doubles.scale = 1.5
+    return (y * doubles.scale).tanh().exp()
+
+
+class GraphRegistry(collections.abc.Mapping):
+    """A mapping whose `in` and `get` are Python functions."""
+
+    def __init__(self, entries):
+        self.entries = entries
+
+    def __getitem__(self, key):
+        return self.entries[key]
+
+    def __iter__(self):
+        return iter(self.entries)
+
+    def __len__(self):
+        return len(self.entries)
+
+    def scale(self, key, default):
+        if key != "one" and key not in self:
+            raise KeyError(key)
+        return super().get(key, default)
+
+
+def graph_asks_registry(x, registry, key):
+    y = (x.sin() + 1).cos()
+    if key in registry:
+        y = y * 2
+    return (y * registry.scale(key, 1.0)).tanh().exp()
+
+
+class GraphAffine(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(4, 4)
+        self.heads = 2
+
+    def forward(self, x):
+        return self.linear(x.sin()).cos()
+
+
+class GraphAffineTwice(GraphAffine):
+    def forward(self, x):
+        y = super().forward(x)
+        if hasattr(self, "groups") and self.groups > 1:
+            y = y + 1
+        halves = (*y.shape[:-1], -1, self.heads)
+        return (y.view(halves) * getattr(self, "scale", 2)).tanh().exp()
+
+
+def graph_attends(q, mask, rate, **kwargs):
+    y = (q.sin() + 1).cos()
+    named = {}
+    functional = torch.nn.functional
+    attend, causal = functional.scaled_dot_product_attention, mask is None
+    out = attend(y, y, y, attn_mask=mask, dropout_p=rate, is_causal=causal, **named)
+    out = functional.linear(*(out, kwargs["weight"]), **{"bias": None})  # noqa: PIE804
+    return (out * 2).tanh().exp()
+
+
+def graph_gives_two(y, **kwargs):
+    left, right = y.split(2, dim=-1)
+    out = (left * right).transpose(0, 1).contiguous()
+    return out, None
+
+
+def graph_takes_two(x):
+    y = (x.sin() + 1).cos()
+    out, nothing = graph_gives_two(y, scale=None)
+    out = out.reshape(*out.shape[:-1], -1).contiguous()
+    return (out * 2).tanh().exp()
+
+
+def graph_in_chunks(fn, size, x):
+    if size > 0:
+        return torch.cat(tuple(fn(part) for part in x.chunk(size)))
+    return fn(x)
+
+
+def graph_times_two(y):
+    return y * 2
+
+
+def graph_adds_up(y, scale, more):
+    total = y * scale
+    if more:
+
+        def bump():
+            nonlocal total
+            total = total + 1
+
+        bump()
+        total = total * 2
+    total = total + scale
+    return total
+
+
+def graph_has_cells(x, size, scale, more):
+    y = (x.sin() + 1).cos()
+    y = graph_in_chunks(graph_times_two, size, y)
+    return (graph_adds_up(y, scale, more) * 2).tanh().exp()
+
+
+def graph_grows_a_list(x, shape):
+    y = (x.sin() + 1).cos()
+    shape += [2]
+    return (y.view(shape) * 2).tanh().exp() + len(shape)
+
+
+def graph_keeps_or_copies(x):
+    y = (x.sin() + 1).cos()
+    z = y.contiguous()
+    z.add_(1)
+    return (z * y).tanh().exp()
+
+
+class GraphMidwayBag:
+    """`__contains__` gives a count, after something no path goes through."""
+
+    def __init__(self, items):
+        self.items = items
+
+    def __contains__(self, key):
+        id(self)
+        return self.items.count(key)
+
+
+class GraphMidwaySettings:
+    def __init__(self, window):
+        self.window = window
+
+    def __getattribute__(self, key):
+        id(self)
+        return super().__getattribute__(key)
+
+
+class GraphMidwayIndex:
+    def __index__(self):
+        return 4
+
+
+class GraphMidwaySized:
+    def __init__(self, count):
+        self.count = count
+
+    def __len__(self):
+        id(self)
+        return self.count
+
+
+class GraphMidwayAsked(type):
+    answer = True
+
+    def __instancecheck__(cls, obj):
+        id(cls)
+        return GraphMidwayAsked.answer
+
+
+class GraphMidwayKind(metaclass=GraphMidwayAsked):
+    pass
+
+
+class GraphMidwaySteps:
+    """An iterator that cannot be asked for an iterator."""
+
+    def __init__(self, items):
+        self.items = list(items)
+
+    def __next__(self):
+        if not self.items:
+            raise StopIteration
+        return self.items.pop(0)
+
+
+class GraphMidwayOver:
+    """Its `__iter__` gives what `given` makes; `log` says what was asked."""
+
+    def __init__(self, given, midway=True):
+        self.given = given
+        self.midway = midway
+        self.log = []
+
+    def __iter__(self):
+        self.log.append("iter")
+        if self.midway:
+            id(self)
+        return self.given()
+
+
+class GraphMidwayOverSized(GraphMidwayOver):
+    def __len__(self):
+        self.log.append("len")
+        return 2
+
+
+class GraphMidwayOverCalled(GraphMidwayOver):
+    def __call__(self):
+        self.log.append("call")
+        return 1.0
+
+
+class GraphFallsBack:
+    """A property that raises AttributeError, and a `__getattr__`."""
+
+    def __init__(self, missing):
+        self.missing = missing
+
+    @property
+    def scale(self):
+        if self.missing:
+            raise AttributeError("the property says no")
+        return 2.0
+
+    def __getattr__(self, name):
+        return 3.0
+
+
+class GraphFallsBackModule(torch.nn.Module):
+    def __init__(self, missing):
+        super().__init__()
+        self.missing = missing
+
+    @property
+    def scale(self):
+        if self.missing:
+            return self.nothing_of_that_name
+        return 2.0
+
+    def forward(self, x):
+        return ((x.sin() + 1).cos() * self.scale).tanh().exp()
+
+
+def graph_asks_a_bag(x, bag, key):
+    y = (x.sin() + 1).cos()
+    if key not in bag:
+        y = y + 1
+    if key in bag:
+        y = y * 2
+    return (y * 2).tanh().exp(), key in bag, key not in bag
+
+
+def graph_asks_midway_settings(x, settings):
+    y = (x.sin() + 1).cos()
+    if hasattr(settings, "window"):
+        y = y + 1
+    if hasattr(settings, "missing"):
+        y = y * 3
+    has, window = hasattr(settings, "window"), getattr(settings, "window", 5)
+    there = has, window, getattr(settings, "missing", 7)
+    return (y * 2).tanh().exp(), there
+
+
+def graph_counts_midway(x, sized):
+    y = (x.sin() + 1).cos()
+    count = len(sized)
+    return (y * 2).tanh().exp() + count, count, type(count).__name__
+
+
+def graph_is_of_a_midway_kind(x):
+    y = (x.sin() + 1).cos()
+    if isinstance(3, GraphMidwayKind):
+        y = y + 1
+    return (y * 2).tanh().exp(), isinstance(3, GraphMidwayKind)
+
+
+def graph_goes_over_midway(x, over, how):
+    y = (x.sin() + 1).cos()
+    made = None
+    if how == "for":
+        for step in over:
+            y = y + step
+    elif how == "list":
+        made = list(over)
+    elif how == "tuple":
+        made = tuple(over)
+    elif how == "zip":
+        made = list(zip(over, [5, 6]))
+    elif how == "enumerate":
+        made = list(enumerate(over, 3))
+    elif how == "iter":
+        made = list(iter(over))
+    else:
+        made = next(iter(over, 2.0))
+    return (y * 2).tanh().exp(), made
+
+
+def graph_reads_what_falls_back(x, obj):
+    y = (x.sin() + 1).cos()
+    return (y * obj.scale).tanh().exp(), obj.scale
+
+
+class GraphCollides:
+    """A key whose hash is that of "a", and that says when it is compared."""
+
+    def __init__(self):
+        self.log = []
+
+    def __hash__(self):
+        return hash("a")
+
+    def __eq__(self, other):
+        self.log.append("eq")
+        return False
+
+
+def graph_looks_up_a_key(x, table, members, asked, flag):
+    y = (x.sin() + 1).cos()
+    scale = table["a"]
+    there = "a" in table, "a" in members
+    got = table.get("a")
+    if flag:
+        y = y + 1
+    return (y * scale).tanh().exp(), there, got
+
+
+def graph_reads_a_table(x, table, members):
+    y = x.sin()
+    scale = table["a"]
+    there = "a" in table, "a" in members
+    return ((y + 1).cos() * scale).tanh().exp(), there
+
+
+class GraphAnswers:
+    """What the interpreter asks a class for an operator: each says so."""
+
+    def __init__(self, n):
+        self.n = n
+        self.log = []
+
+    def __bool__(self):
+        self.log.append("bool")
+        return self.n > 1
+
+    def __eq__(self, other):
+        self.log.append("eq")
+        if isinstance(other, int):
+            return other == 1 or NotImplemented
+        return self.n == other.n
+
+    def __lt__(self, other):
+        self.log.append("lt")
+        return NotImplemented
+
+    def __gt__(self, other):
+        self.log.append("gt")
+        return self.n > other.n
+
+    def __getitem__(self, at):
+        self.log.append("getitem")
+        if at > 1:
+            raise IndexError(at)
+        return float(at + self.n)
+
+    def __enter__(self):
+        self.log.append("enter")
+        return 2.0
+
+    def __exit__(self, kind, value, where):
+        self.log.append("exit")
+        return self.n > 1
+
+    def __index__(self):
+        self.log.append("index")
+        return 1
+
+    def __int__(self):
+        self.log.append("int")
+        return 2
+
+    def __float__(self):
+        self.log.append("float")
+        return 2.5
+
+    def __hash__(self):
+        self.log.append("hash")
+        return hash(1)
+
+    def __add__(self, other):
+        self.log.append("add")
+        return other + 1.5
+
+
+def graph_asks_for_operators(x, a, b):
+    y = (x.sin() + 1).cos()
+    if a:
+        y = y + 1
+    if a == b:
+        y = y * 2
+    if a < b:
+        y = y * 3
+    for item in a:
+        y = y + item
+    with a as scale:
+        y = y * scale
+        if a.n > 1:
+            raise ValueError("inside")
+        y = y + 1
+    y = y * [1.0, 2.0, 3.0][a] + int(a) + float(a) + {1: 4.0}[a]
+    total = a
+    total += 2.0
+    return (y * total).tanh().exp(), a == 3, 1.0 in a, list(range(a)), not a
+
+
+class GraphGuarded2d(torch.nn.Module):
+    """A layer as libraries of vision models have them: a convolution, a
+    norm that checks what it is given with a message, an activation that
+    writes."""
+
+    def __init__(self, channels):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(channels, channels, 3, padding=1, bias=False)
+        self.bn = torch.nn.BatchNorm2d(channels)
+        self.act = torch.nn.ReLU6(inplace=True)
+        self.drop = torch.nn.Dropout(0.2)
+
+    def forward(self, x):
+        y = self.conv(x)
+        torch._assert(y.ndim == 4, f"expected 4D input (got {y.ndim}D input)")
+        return self.drop(self.act(self.bn(y))) + x
+
+
 def graph_parts(x, k):
     a = (x.sin() + 1).cos().tanh().exp()
     # Two tensors, or none: an operation of a graph only where it gives
@@ -9582,6 +10117,432 @@ class TestVmGraphResults(TestCase):
             graph = max(found, key=lambda g: g["hits"])
             self.assertGreaterEqual(graph["hits"], 20)
             self.assertGreaterEqual(graph["ops"], 20)
+
+    def test_what_a_class_reads_itself_is_not_what_a_path_stored(self, device):
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(3, 4, device=device)
+        # A class that reads its attributes in a function of its own gives
+        # what that function gives, not what a path stored: such a read
+        # behind a store is no part of the path.
+        doubles = GraphDoubles()
+        passes = (*DEFAULT, P.Graphs(), keep)
+        stores = torch.vm(graph_reads_what_it_stored, passes=passes, fallback=False)
+        for _ in range(6):
+            expected = graph_reads_what_it_stored(x, GraphDoubles())
+            self.assertEqual(stores(x, doubles), expected, atol=0, rtol=0)
+
+    # --- what the plain values of a function compute is part of a path
+
+    def whole_graph(self, fn, args, ops, behind=None):
+        """`fn` under torch.vm with a pass that returns the graph (or
+        `behind`): its results against eager, and that one graph of `ops`
+        operations runs up to where the function returns."""
+
+        def keep(gm, input_types):
+            return gm
+
+        passes = (*DEFAULT, P.Graphs(), behind or keep)
+        compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+        exact = dict(atol=0, rtol=0) if behind is None else dict(rtol=1e-4, atol=1e-5)
+        for _ in range(6):
+            self.assertEqual(compiled(*args), fn(*args), **exact)
+        found = [g for g in torch.vm.regions(compiled) if "ops" in g]
+        ran = [(g["ops"], g["why"]) for g in found if "within" not in g and g["hits"]]
+        self.assertEqual(ran, [(ops, "the function returns")])
+        return compiled
+
+    def test_text_made_of_plain_values_is_part_of_a_path(self, device):
+        x = torch.randn(3, 4, device=device)
+        # An assert with a message that is formatted, a text put together
+        # from a dtype, sizes and a number, a method of a text.
+        compiled = self.whole_graph(graph_says, (x, 2.0), 7)
+        # The message is eager's where the assert fails.
+        message = r"expected 2D input \(got 3D input\)"
+        with self.assertRaisesRegex(AssertionError, message):
+            compiled(torch.randn(2, 3, 4, device=device), 2.0)
+        self.assertEqual(compiled(x, 3.0), graph_says(x, 3.0), atol=0, rtol=0)
+        self.whole_graph(graph_says, (x, 2.0), 7, P.Inductor())
+        # What a tensor holds is not text the path makes: it ends there.
+        passes = (*DEFAULT, P.Graphs(min_ops=2))
+        compiled = torch.vm(graph_prints, passes=passes, fallback=False)
+        for _ in range(4):
+            self.assertEqual(compiled(x), graph_prints(x), atol=0, rtol=0)
+        ops = [g["ops"] for g in torch.vm.regions(compiled) if "ops" in g]
+        self.assertEqual(ops, [4, 4])
+
+    def test_sequences_made_of_sizes_are_part_of_a_path(self, device):
+        x = torch.randn(3, 4, device=device)
+        compiled = self.whole_graph(graph_shapes, (x,), 11)
+        # Other sizes are another form of the same graph.
+        wide = torch.randn(5, 6, device=device)
+        deep = torch.randn(2, 3, 8, device=device)
+        for other in (wide, deep, x):
+            self.assertEqual(compiled(other), graph_shapes(other), atol=0, rtol=0)
+        self.whole_graph(graph_shapes, (x,), 11, P.Inductor())
+
+    def test_a_method_that_was_read_off_a_tensor_is_an_operation(self, device):
+        x = torch.randn(3, 4, device=device)
+        w = torch.randn(4, 4, device=device, dtype=torch.float64)
+        # `.to(...)` with a device, with a dtype and with a keyword; what
+        # it gives where nothing is to be done is the tensor itself, which
+        # the write after it shows.
+        compiled = self.whole_graph(graph_moves, (x, w), 11)
+        half = w.to(torch.float16)
+        self.assertEqual(compiled(x, half), graph_moves(x, half), atol=0, rtol=0)
+        self.whole_graph(graph_moves, (x, w), 11, P.Inductor())
+
+    def test_what_is_spread_into_a_call_is_handed_over_item_by_item(self, device):
+        x, w = torch.randn(3, 4, device=device), torch.randn(4, device=device)
+        # A tuple the path put together, the function's own `*sizes`, a
+        # tuple and a list from outside (one with a tensor in it).
+        first = (x, (w,), [0, -1], 3, 4)
+        compiled = self.whole_graph(graph_hands_on, first, 12)
+        # Other items, and another count of them, are other forms.
+        for args in ((x, [w[:1]], [0, 1], 2, 6), (x, (w[:1],), (0,), 12), first):
+            self.assertEqual(compiled(*args), graph_hands_on(*args), atol=0, rtol=0)
+        self.whole_graph(graph_hands_on, first, 12, P.Inductor())
+
+    def test_a_class_that_reads_its_attributes_in_a_function_of_its_own(self, device):
+        x = torch.randn(3, 4, device=device)
+        settings = GraphSettings()
+        # A `__getattribute__` written in Python, `super()` in it, what
+        # `object.__getattribute__` finds, a property behind it.
+        compiled = self.whole_graph(graph_reads_settings, (x, settings), 7)
+        # What it reads is read at every call.
+        other_names = {"width": "_kind", "hidden": "hidden"}
+        changes = [(settings, "hidden", 3.0), (settings, "_kind", "other")]
+        changes += [(GraphSettings, "renamed", other_names), (settings, "_kind", 5.0)]
+        for target, name, value in changes:
+            setattr(target, name, value)
+            for _ in range(2):
+                expected = graph_reads_settings(x, settings)
+                self.assertEqual(compiled(x, settings), expected, atol=0, rtol=0)
+        GraphSettings.renamed = {"width": "hidden"}
+        # With a `__getattr__` behind it, what it raises is not what the
+        # read raises: such a read is left to the interpreter.
+        other = GraphSettingsWithDefault()
+        passes = (*DEFAULT, P.Graphs())
+        left = torch.vm(graph_reads_settings, passes=passes, fallback=False)
+        for _ in range(6):
+            expected = graph_reads_settings(x, other)
+            self.assertEqual(left(x, other), expected, atol=0, rtol=0)
+        large = [g for g in torch.vm.regions(left) if "ops" in g and g["ops"] > 4]
+        self.assertEqual(large, [])
+
+    def test_a_class_that_reads_its_attributes_itself_behind_a_store(self, device):
+        x = torch.randn(3, 4, device=device)
+        settings, kept = GraphSettings(), GraphKeepsKeys()
+        # Stores into another object, then reads that go into the
+        # `__getattribute__` of a class: each thing that function reads is
+        # looked at behind the stores, and none of them is what was stored.
+        compiled = self.whole_graph(graph_keeps_and_reads, (x, settings, kept), 7)
+        self.assertEqual(kept.updated, {0: True})
+        # The same object in both places: what is read is what was stored.
+        both = GraphSettings()
+        both.updated = {}
+        for args in ((x, both, both), (x, settings, kept), (x, both, both)):
+            for _ in range(2):
+                expected = graph_keeps_and_reads(*args)
+                self.assertEqual(compiled(*args), expected, atol=0, rtol=0)
+        self.assertEqual(both.updated, {0: True})
+
+    def test_getattr_and_hasattr_of_a_class_that_reads_attributes_itself(self, device):
+        x = torch.randn(3, 4, device=device)
+        settings = GraphSettings()
+        settings.window = None
+        # `hasattr`, `getattr` and `getattr` with a default go into the
+        # `__getattribute__` of the class as a read does.
+        compiled = self.whole_graph(graph_asks_settings, (x, settings), 7)
+        # What is not there raises in that function, and the builtin
+        # makes its answer of it: the path ends there, with the answer.
+        changes = [lambda: delattr(settings, "window")]
+        changes += [lambda: setattr(settings, "window", 2)]
+        changes += [lambda: delattr(settings, "hidden")]
+        for change in changes:
+            change()
+            for _ in range(3):
+                expected = graph_asks_settings(x, settings)
+                self.assertEqual(compiled(x, settings), expected, atol=0, rtol=0)
+
+    def test_a_container_that_is_asked_in_python_is_asked_on_a_path(self, device):
+        x = torch.randn(3, 4, device=device)
+        registry = GraphRegistry({"one": 1.5, "two": 2.5})
+        # `in` and `not in` through `__contains__`, `super().get(...)`.
+        compiled = self.whole_graph(graph_asks_registry, (x, registry, "two"), 7)
+        expected = graph_asks_registry(x, registry, "one")
+        self.assertEqual(compiled(x, registry, "one"), expected, atol=0, rtol=0)
+        registry.entries = {"two": 4.0}
+        for key in ("one", "two"):
+            expected = graph_asks_registry(x, registry, key)
+            self.assertEqual(compiled(x, registry, key), expected, atol=0, rtol=0)
+        with self.assertRaises(KeyError):
+            compiled(x, registry, "three")
+
+    def test_a_layer_that_calls_the_class_behind_it_is_one_graph(self, device):
+        torch.manual_seed(0)
+        model = GraphAffineTwice().to(device)
+        x = torch.randn(3, 4, device=device)
+        # `super().forward(x)`, `hasattr` and `getattr` with a default for
+        # what a module does not have, a shape made of sizes and of a
+        # number the module holds.
+        compiled = self.whole_graph(model, (x,), 7)
+        for name, value in (("scale", 3.0), ("groups", 2), ("heads", 4)):
+            setattr(model, name, value)
+            for _ in range(2):
+                self.assertEqual(compiled(x), model(x), atol=0, rtol=0)
+        del model.groups
+        model.register_buffer("groups", torch.tensor(3, device=device))
+        self.assertEqual(compiled(x), model(x), atol=0, rtol=0)
+        self.whole_graph(GraphAffineTwice().to(device), (x,), 7, P.Inductor())
+
+    def test_what_a_call_names_with_a_dict_is_handed_over_by_name(self, device):
+        q, w = torch.randn(2, 2, 5, 4, device=device), torch.randn(4, 4, device=device)
+        mask = torch.ones(5, 5, dtype=torch.bool, device=device).tril()
+
+        # An attention that drops nothing is an operation like any other.
+        def attends(q, mask, rate):
+            return graph_attends(q, mask, rate, weight=w)
+
+        compiled = self.whole_graph(attends, (q, None, 0.0), 8)
+        self.assertEqual(compiled(q, mask, 0.0), attends(q, mask, 0.0), atol=0, rtol=0)
+        self.whole_graph(attends, (q, mask, 0.0), 8, P.Inductor())
+        # One that drops draws eager's numbers where the graph is run as
+        # it is.
+        for _ in range(3):
+            torch.manual_seed(3)
+            expected = attends(q, mask, 0.5)
+            torch.manual_seed(3)
+            self.assertEqual(compiled(q, mask, 0.5), expected, atol=0, rtol=0)
+
+    def test_what_a_function_gives_back_in_a_tuple_is_what_the_graph_gave(self, device):
+        x = torch.randn(3, 4, device=device)
+        # A method of a tensor that is written in Python (`split`), read
+        # off the tensor and called with a name; a tuple that is unpacked;
+        # `contiguous` of what is contiguous, which runs no kernel.
+        compiled = self.whole_graph(graph_takes_two, (x,), 12)
+        other = torch.randn(5, 4, device=device)
+        self.assertEqual(compiled(other), graph_takes_two(other), atol=0, rtol=0)
+        self.whole_graph(graph_takes_two, (x,), 12, P.Inductor())
+
+    def test_a_variable_that_an_inner_function_could_take(self, device):
+        x = torch.randn(4, 4, device=device)
+        # Functions with an inner function they do not come to: their
+        # variables are in cells, which are the path's own; one of them is
+        # stored into and read.
+        compiled = self.whole_graph(graph_has_cells, (x, 0, 2.0, False), 9)
+        # Where the inner function is made, the path ends in front of it.
+        made = ((x, 0, 3.0, True), (x, 2, 2.0, False), (x, 2, 3.0, True))
+        for args in (*made, (x, 0, 2.0, False)):
+            for _ in range(2):
+                expected = graph_has_cells(*args)
+                self.assertEqual(compiled(*args), expected, atol=0, rtol=0)
+        self.whole_graph(graph_has_cells, (x, 0, 2.0, False), 9, P.Inductor())
+
+    def test_a_list_that_is_added_to_in_place_is_changed_once(self, device):
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(3, 4, device=device)
+        passes = (*DEFAULT, P.Graphs(), keep)
+        compiled = torch.vm(graph_grows_a_list, passes=passes, fallback=False)
+        # `shape += [2]` changes a list of the caller: no instruction of a
+        # path, which could run once more where the path gives up.
+        for given in ([3, 2], [3, 2], [3, 2], [3, 2], [6, 1], [3, 2], [6, 1], [1, 6]):
+            mine = list(given)
+            expected = graph_grows_a_list(x, list(given))
+            self.assertEqual(compiled(x, mine), expected, atol=0, rtol=0)
+            self.assertEqual(mine, [*given, 2])
+
+    def test_contiguous_copies_where_a_tensor_is_not(self, device):
+        base = torch.randn(4, 4, device=device)
+        compiled = self.whole_graph(graph_keeps_or_copies, (base,), 8)
+        # The same sizes, laid out otherwise: `contiguous` copies, and the
+        # write is to the copy.
+        for x in (base.t(), base, base.t()):
+            self.assertEqual(compiled(x), graph_keeps_or_copies(x), atol=0, rtol=0)
+        passes = (*DEFAULT, P.Graphs(), P.Inductor())
+        behind = torch.vm(graph_keeps_or_copies, passes=passes, fallback=False)
+        for x in (base, base, base, base.t(), base, base.t()):
+            self.assertEqual(behind(x), graph_keeps_or_copies(x), rtol=1e-4, atol=1e-5)
+
+    def same_as_eager(self, fn, make, calls=4):
+        """`fn` under torch.vm, with `Graphs()` alone and with a pass that
+        returns the graph, each on arguments that `make` makes anew for
+        every call, against eager on others it makes: what is returned, or
+        what is raised and with which text, and what the arguments say was
+        asked of them (`log`)."""
+
+        def keep(gm, input_types):
+            return gm
+
+        def outcome(function, args):
+            try:
+                return function(*args)
+            except Exception as error:
+                return type(error).__name__, str(error)
+
+        def alike(got, expected):
+            self.assertIs(type(got), type(expected), f"{got!r} for {expected!r}")
+            if isinstance(expected, torch.Tensor):
+                self.assertEqual(got, expected, atol=0, rtol=0)
+            elif isinstance(expected, (tuple, list)):
+                self.assertEqual(len(got), len(expected))
+                for one, other in zip(got, expected):
+                    alike(one, other)
+            else:
+                self.assertEqual(got, expected)
+
+        for behind in ((), (keep,)):
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            for _ in range(calls):
+                mine, theirs = make(), make()
+                alike(outcome(compiled, mine), outcome(fn, theirs))
+                asked = [getattr(arg, "log", None) for arg in mine]
+                self.assertEqual(asked, [getattr(arg, "log", None) for arg in theirs])
+
+    def test_in_and_not_in_are_what_the_interpreter_makes_of_a_contains(self, device):
+        x, same = torch.randn(3, 4, device=device), self.same_as_eager
+        # A `__contains__` that the path leaves midway and that gives a
+        # count: `in` is whether that is true, `not in` whether it is not.
+        for items in (["a", "a"], ["b"], ["a"]):
+            same(graph_asks_a_bag, lambda: (x, GraphMidwayBag(list(items)), "a"))
+
+    def test_hasattr_is_whether_the_attribute_is_there(self, device):
+        x, same = torch.randn(3, 4, device=device), self.same_as_eager
+        # A `__getattribute__` that the path leaves midway: what it gives
+        # is there, whatever it is.
+        for window in (None, 0, 2.0, ""):
+            same(graph_asks_midway_settings, lambda: (x, GraphMidwaySettings(window)))
+
+    def test_len_is_the_index_of_what_a_len_gives(self, device):
+        x, same = torch.randn(3, 4, device=device), self.same_as_eager
+        # A bool and what has an `__index__` are counts as ints; a negative
+        # one and what is no number raise, as `len` raises.
+        for count in (True, GraphMidwayIndex(), 3, -1, "a", -(2**70), 2**70):
+            same(graph_counts_midway, lambda: (x, GraphMidwaySized(count)))
+
+    def test_isinstance_is_whether_what_was_returned_is_true(self, device):
+        x = torch.randn(3, 4, device=device)
+        for answer in ("yes", [], 1, 0, None):
+            GraphMidwayAsked.answer = answer
+            self.same_as_eager(graph_is_of_a_midway_kind, lambda: (x,))
+        GraphMidwayAsked.answer = True
+
+    def test_what_an_iter_gives_is_asked_as_the_interpreter_asks_it(self, device):
+        x, same = torch.randn(3, 4, device=device), self.same_as_eager
+        fn = graph_goes_over_midway
+        # What is no iterator raises; an iterator is not asked for an
+        # iterator again (one of these cannot be, one starts over if it
+        # is); whether the path comes back from the `__iter__` or not.
+        gives = (lambda: [1.0, 2.0], lambda: GraphMidwaySteps([1.0, 2.0]))
+        gives += (lambda: iter([1.0, 2.0]),)
+        for how in ("for", "list", "tuple", "zip", "enumerate", "iter"):
+            for given in gives:
+                for midway in (True, False):
+                    same(fn, lambda: (x, GraphMidwayOver(given, midway), how), calls=3)
+        # `list` and `tuple` ask what has a `__len__` for it; `iter` with a
+        # sentinel calls what it is given and does not go over it.
+        for how in ("list", "tuple"):
+            same(fn, lambda: (x, GraphMidwayOverSized(gives[2]), how))
+        same(fn, lambda: (x, GraphMidwayOverCalled(gives[2]), "sentinel"))
+
+    def test_a_property_that_raises_attribute_error_asks_getattr(self, device):
+        def call(module, x):
+            return module(x)
+
+        x, same = torch.randn(3, 4, device=device), self.same_as_eager
+        for missing in (True, False):
+            same(graph_reads_what_falls_back, lambda: (x, GraphFallsBack(missing)))
+            same(call, lambda: (GraphFallsBackModule(missing).to(device), x))
+
+    def test_a_key_that_is_compared_in_python_is_compared_once(self, device):
+        x = torch.randn(3, 4, device=device)
+        # A dict and a set with a key of a class that has an `__eq__` and the
+        # hash of the text that is looked up: looking the text up asks that
+        # key, so it is no instruction of a path, which could run once more
+        # where the path gives up behind it (the flag is another one then).
+        made = []
+
+        def make():
+            made.append(None)
+            key, flag = GraphCollides(), ((len(made) - 1) // 2) % 8 in (3, 5, 6)
+            return x, {key: 1.0, "a": 2.0}, {key, "a"}, key, flag
+
+        self.same_as_eager(graph_looks_up_a_key, make, calls=8)
+
+    def test_a_key_that_comes_to_be_compared_in_python_is_compared_once(self, device):
+        def keep(gm, input_types):
+            return gm
+
+        # The graph is found with a dict and a set of texts. Ones that then
+        # hold a key of a class with an `__eq__` and the hash of the text
+        # that is looked up ask that key: such a lookup is no instruction
+        # that runs out of its place, where it would run once more on a call
+        # that nothing was exported for (a tensor of another type).
+        passes = (*DEFAULT, P.Graphs(), keep)
+        fn = graph_reads_a_table
+        compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+        x = torch.randn(3, 4, device=device)
+        for _ in range(6):
+            compiled(x, {"b": 1.0, "a": 2.0}, {"b", "a"})
+        for other in (x, x.double(), x[0], x.long(), x):
+            mine, theirs = GraphCollides(), GraphCollides()
+            got, there = compiled(other, {mine: 1.0, "a": 2.0}, {mine, "a"})
+            expected = fn(other, {theirs: 1.0, "a": 2.0}, {theirs, "a"})
+            self.assertEqual(got, expected[0], atol=0, rtol=0)
+            self.assertEqual((there, mine.log), (expected[1], theirs.log))
+
+    def test_an_operator_that_a_class_answers_is_left_to_the_interpreter(self, device):
+        x, same = torch.randn(3, 4, device=device), self.same_as_eager
+        fn = graph_asks_for_operators
+        # `if`, `==` (with NotImplemented and the other side asked), `<`,
+        # `for` and `in` through `__getitem__`, `with`, an index, `int`,
+        # `float`, a key of a dict, `+=` through `__add__`, `not`: no path
+        # goes into these, and each is asked once.
+        for n in (1, 2, 0):
+            same(fn, lambda: (x, GraphAnswers(n), GraphAnswers(1)))
+
+    def test_a_layer_that_checks_its_input_with_a_message_is_one_graph(self, device):
+        def keep(gm, input_types):
+            return gm
+
+        torch.manual_seed(0)
+        layers = (GraphGuarded2d(4), GraphGuarded2d(4))
+        model = torch.nn.Sequential(*layers).eval().to(device)
+        x = torch.randn(2, 4, 8, 8, device=device)
+        with torch.no_grad():
+            compiled = self.whole_graph(model, (x,), 10)
+        # A dropout that drops nothing is an operation with the engine's
+        # own graphs too, and nothing is said to draw random numbers.
+        alone = torch.vm(model, passes=(*DEFAULT, P.Graphs()), fallback=False)
+        with torch.no_grad():
+            for _ in range(4):
+                self.assertEqual(alone(x), model(x), atol=0, rtol=0)
+        regions = torch.vm.regions(alone)
+        ops = [g["ops"] for g in regions if "ops" in g and "within" not in g]
+        self.assertEqual(ops, [10])
+        self.assertEqual([r["reason"] for r in regions if "ops" not in r], [])
+        # One that drops is one where graphs are exported, and none of a
+        # graph that the engine only reports.
+        model.train()
+        passes = (*DEFAULT, P.Graphs(), keep)
+        compiled = torch.vm(model, passes=passes, fallback=False, demote=False)
+        reference = copy.deepcopy(model)
+        for at in range(6):
+            torch.manual_seed(at)
+            got = compiled(x)
+            torch.manual_seed(at)
+            self.assertEqual(got, reference(x), atol=0, rtol=0)
+        for name, value in reference.state_dict().items():
+            self.assertEqual(model.state_dict()[name], value, msg=name, atol=0, rtol=0)
+        alone = torch.vm(model, passes=(*DEFAULT, P.Graphs()), fallback=False)
+        for _ in range(4):
+            alone(x)
+        left = [r["reason"] for r in torch.vm.regions(alone) if "ops" not in r]
+        self.assertIn("aten::dropout draws random numbers", left)
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
