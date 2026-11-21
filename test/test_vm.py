@@ -1627,6 +1627,34 @@ class TestVmPasses(TestCase):
         self.assertEqual(depths, [3, 0, 0])
         self.assertEqual(cfg_rs.profiling_depth(), 0)
 
+    def test_block_that_raises_every_time_is_specialized(self):
+        depths = []
+
+        class Missing:
+            def __getitem__(self, key):
+                depths.append(cfg_rs.profiling_depth())
+                raise KeyError(key)
+
+        def lookup(table, x):
+            try:
+                return table["scale"] * x
+            except KeyError:
+                return x + 1
+
+        compiled = torch.vm(lookup, fallback=False)
+        x = torch.ones(2)
+        for _ in range(5):
+            self.assertEqual(compiled(Missing(), x), x + 1)
+        # The block of the lookup never gets to its end. It is specialized
+        # from its second run, and what it calls is then no longer called
+        # from a block that is profiling.
+        self.assertEqual(block_stats(compiled, "profile_runs")[1], 1)
+        self.assertEqual(depths[2:], [0, 0, 0])
+        self.assertGreater(depths[0], 0)
+        # A run that gets to the end goes on from where the others raised.
+        self.assertEqual(compiled({"scale": 3.0}, x), x * 3)
+        self.assertEqual(compiled(Missing(), x), x + 1)
+
     def test_region_is_only_valid_during_the_pass(self):
         kept = []
 
