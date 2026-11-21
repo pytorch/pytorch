@@ -523,17 +523,28 @@ def regions(fn: Any) -> list[dict[str, Any]]:
     first operation), ``state``, ``ops`` (how many
     operations it has) and ``operators`` (which, as the dispatcher names
     them), ``inputs`` and ``outputs`` (how many values it takes and gives),
-    ``variants`` (how many times it was exported), and ``hits`` and
+    ``ends`` (the block and the instruction the function goes on at behind
+    it) and ``why`` (it ends there: what the instruction behind it is),
+    ``variants`` (how many exported forms it has), ``exports`` (how many
+    times it was handed to the passes over graphs), and ``hits`` and
     ``misses`` (the calls that ran what was made of it, and those that came
     to it and ran its operations). The ``state`` is ``"built"`` for a graph
     the engine runs itself; with a pass over graphs in the list, ``"waiting"``
     for one that is exported at its next call and ``"compiled"`` for one that
     what the passes returned runs in place of (with a ``reason`` if further
     kinds of calls are not exported); and ``"vm"`` for one that is not
-    exported, or not for the calls it has seen, with the ``reason``. And one
-    dict per instruction or run of instructions with tensor work that is in
-    no graph, with ``state`` ``"vm"``, the ``reason``, and for one
-    instruction its ``text``.
+    exported, or not for the calls it has seen, with the ``reason``.
+    ``forms`` lists the kinds of calls the graph was recorded for, the one
+    that ran last first: per kind its ``checks`` (what a call has to be like
+    to be one of the kind, as text: the tensors with their types and sizes,
+    and the values the operations take), its ``hits``, and the ``reason`` if
+    calls of the kind are not exported. And one dict per instruction or run
+    of instructions with tensor work that is in no graph, with ``state``
+    ``"vm"``, the ``reason``, and for one instruction its ``text``.
+
+    ``fn.stats()["graphs"]`` has the totals: ``built`` (graphs), ``exported``
+    (times one was handed to the passes), ``hits``, ``misses`` and
+    ``given_up`` (graphs that are not exported anymore).
     """
     fn = getattr(fn, "__func__", fn)
     graphs = getattr(fn, "graphs", None)
