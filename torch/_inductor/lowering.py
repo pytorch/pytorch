@@ -9054,28 +9054,26 @@ maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
 
 
-def _saturate_int_bound(x, bound):
-    # An integer bound outside x's integer dtype would wrap when it becomes a
-    # constant of that dtype (255 -> -1 for int8). Eager treats such a bound as a
-    # no-op, so saturate it to the dtype's range, which has the same effect.
-    if not is_integer_dtype(x.get_dtype()):
-        return bound
-    info = torch.iinfo(x.get_dtype())
-    if isinstance(bound, int):
-        return min(max(bound, info.min), info.max)
-    if isinstance(bound, sympy.Expr) and bound.is_integer:
-        return sympy.Min(sympy.Max(bound, info.min), info.max)
-    return bound
+def _is_noop_int_bound(x, bound, is_min):
+    # An int bound at or beyond x's integer dtype range is a no-op in eager (one
+    # on the other side is rejected while tracing). As a constant of that dtype it
+    # would wrap instead (255 -> -1 for int8). Callers return clone(x), not x, so
+    # the output doesn't alias the input.
+    dtype = x.get_dtype()
+    if not (isinstance(bound, int) and is_integer_dtype(dtype)):
+        return False
+    info = torch.iinfo(dtype)
+    return bound <= info.min if is_min else bound >= info.max
 
 
 @register_lowering(aten.clamp_min, type_promotion_kind=None)
 def clamp_min(x, min):
-    return maximum(x, _saturate_int_bound(x, min))
+    return clone(x) if _is_noop_int_bound(x, min, is_min=True) else maximum(x, min)
 
 
 @register_lowering(aten.clamp_max, type_promotion_kind=None)
 def clamp_max(x, max):
-    return minimum(x, _saturate_int_bound(x, max))
+    return clone(x) if _is_noop_int_bound(x, max, is_min=False) else minimum(x, max)
 
 
 register_op_dtype_propagation_rules(

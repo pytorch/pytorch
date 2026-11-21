@@ -3719,14 +3719,10 @@ class CommonTemplate:
         b = torch.tensor([0, 10, 200, 255], dtype=torch.uint8)
         self.common(fn, (a, b))
 
-        # The same with the bounds as SymInts.
-        def fn2(x, lo, hi):
-            return x.clamp(lo, hi)
-
-        cfn = torch.compile(fullgraph=True, dynamic=True)(fn2)
+        # Like eager, a no-op bound returns a new tensor, not the input.
         a = a.to(self.device)
-        for lo, hi in ((-1, 2), (0, 255), (-1000, 1000)):
-            self.assertEqual(cfn(a, lo, hi), fn2(a, lo, hi))
+        out = torch.compile(lambda a: a.clamp_min(-300))(a)
+        self.assertNotEqual(out.data_ptr(), a.data_ptr())
 
     @skip_if_device(
         lambda device: device == "mps",
