@@ -1260,7 +1260,7 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
         mapping = {key: 1}
         x = torch.ones(1)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "Reconstruction of FakeIdVariable"
+            torch._dynamo.exc.Unsupported, "Conversion of compile-time-only hash value"
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(x, mapping)
         torch._dynamo.reset()
@@ -1284,7 +1284,7 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
             return x + 1, hash(builtins.frozendict(a=wrap((time.time,))))
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "Reconstruction of FakeIdVariable"
+            torch._dynamo.exc.Unsupported, "Conversion of compile-time-only hash value"
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
 
