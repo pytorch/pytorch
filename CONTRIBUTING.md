@@ -47,6 +47,16 @@ aspects of contributing to PyTorch.
 - [Managing multiple build trees](#managing-multiple-build-trees)
 - [C++ development tips](#c-development-tips)
   - [Build only what you need](#build-only-what-you-need)
+  - [Build environment variable reference](#build-environment-variable-reference)
+    - [How to set them](#how-to-set-them)
+    - [What the annotations mean](#what-the-annotations-mean)
+    - [Everyday knobs](#everyday-knobs)
+    - [Feature toggles](#feature-toggles)
+    - [Architecture selection](#architecture-selection)
+    - [Library and backend selection](#library-and-backend-selection)
+    - [Library location hints](#library-location-hints)
+    - [Handled outside the forwarding module](#handled-outside-the-forwarding-module)
+    - [CMake-only options](#cmake-only-options)
   - [Profile build time](#profile-build-time)
   - [Code completion and IDE support](#code-completion-and-ide-support)
   - [Make no-op build fast](#make-no-op-build-fast)
@@ -286,7 +296,7 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
   4. The main step within `python -m pip install -e . -v --no-build-isolation` is the CMake build in the
     `build` directory (`ninja` by default). If you want to experiment with some environment variables, you
     can pass them into the command (see
-    [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake) for the environment variables the build forwards):
+    [Build environment variable reference](#build-environment-variable-reference) for the environment variables the build forwards):
       ```bash
       ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python -m pip install --no-build-isolation -v -e .
       ```
@@ -955,30 +965,9 @@ only interested in a specific component.
   rebuild only that test binary (without rerunning cmake). (Replace `ninja` with
   `make` if you don't have ninja installed).
 
-On the initial build, you can also speed things up by disabling the features you don't need. Common ones to know about are
-
-- `DEBUG=1` will enable debug builds (this should rarely be used) (-g -O0)
-- `REL_WITH_DEB_INFO=1` will enable debug symbols with optimizations (-g -O3)
-- `USE_DISTRIBUTED=0` will disable distributed (c10d, gloo, mpi, etc.) build.
-- `USE_MKLDNN=0` will disable using MKL-DNN.
-- `USE_CUDA=0` will disable compiling CUDA.
-- `BUILD_TEST=0` will disable building C++ test binaries.
-- `USE_FBGEMM=0` will disable using FBGEMM (quantized 8-bit server operators).
-- `USE_XNNPACK=0` will disable compiling with XNNPACK.
-- `USE_FLASH_ATTENTION=0` and `USE_MEM_EFF_ATTENTION=0` will disable compiling flash attention and memory efficient kernels respectively.
-- `BUILD_LAZY_TS_BACKEND=0` will disable the lazy TorchScript backend (Lazy Tensor Core).
-- `USE_PYTORCH_QNNPACK=0` will disable PyTorch's internal QNNPACK quantized kernels.
-- `USE_CPU_VECTORIZATION=0` will disable building vectorized CPU kernel variants (AVX2, AVX512, VSX, ZVECTOR, SVE). Only the scalar DEFAULT kernels are built. Fine for correctness/dispatch work; not for CPU benchmarking.
-- `USE_COLORIZE_OUTPUT=1` will colorize compiler output for easier reading.
-- `TORCH_NATIVE_AOT=0` will disable the native-AOT stage-2 step (exporting the DSL kernels and embedding them into `libtorch_cuda`; see `tools/native_aot/build_stage2.py`, whose module docstring lists these in the order they are checked). Stage 2 already skips itself when the platform is not Linux, when the built torch does not import or was built without CUDA, when no toolchain targets this backend, when CUDA is older than 13 or cannot be determined, when the interpreter has no published DSL wheel and none is installed, when `BUILD_SHARED_LIBS=OFF` leaves a static `torch_cuda` that cannot take the version script, when nothing declares kernels, and when no op declares a target compatible with a supported arch -- note that with `TORCH_CUDA_ARCH_LIST` unset it exports for whatever GPU is present, so a GPU compatible with a declared target does not hit that last one. Once it decides it *will* export, a missing DSL wheel is a hard error rather than a skip, so this is the switch to use when you want a build without the DSL toolchain installed.
-
-  Native-AOT export for supported Hopper and Blackwell targets requires Triton at
-  build time alongside CuTeDSL. Install the pinned Triton wheel with
-  `bash scripts/install_triton_wheel.sh`. Embedded Triton kernels do not require
-  the Triton Python package at runtime.
-
-The full list of build environment variables, what each one does, and how it reaches CMake is
-documented at the top of [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake).
+On the initial build, you can also speed things up by disabling the features you don't need.
+See [Build environment variable reference](#build-environment-variable-reference) below for the
+full set of toggles and what each one does.
 
 For example, a good default for the most minimal build is to add to your bashrc is:
 ```bash
@@ -997,13 +986,214 @@ BUILD_CONFIG USE_CUDA=1 pip install --no-build-isolation -v -e .
 BUILD_CONFIG USE_CUDA=1 USE_DISTRIBUTED=1 pip install --no-build-isolation -v -e .
 ```
 
-For subsequent builds (i.e., when `build/CMakeCache.txt` exists), an option
-that is no longer in the environment keeps the value the cache remembers from
-the first build, while a variable that is in the environment is re-applied on
-every build. Environment variables win over `-C` flags, `-C` flags win over
-`pyproject.toml`, and all three win over the cache. To change a cached option
-without setting its variable, run `ccmake build/`, run `cmake-gui build/`, or
-directly edit `build/CMakeCache.txt`.
+Build options persist in `build/CMakeCache.txt` between builds, with a wrinkle depending on how
+each one reaches CMake; see
+[How to set them](#how-to-set-them) below.
+
+### Build environment variable reference
+
+Build configuration is set through environment variables, which
+[`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake) forwards into the CMake cache.
+An environment variable reaches CMake, as a cache variable of the same name, if it
+
+- starts with `BUILD_`, `USE_`, or `CMAKE_`,
+- ends with `EXITCODE` or `EXITCODE__TRYRUN_OUTPUT`, or
+- appears in the `_ENV_ALIASES` or `_ENV_PASSTHROUGH` lists in that module.
+
+Anything else is not forwarded; set it as a CMake option with `-D` / `cmake.define` instead.
+
+#### How to set them
+
+Everything in this reference except the [CMake-only options](#cmake-only-options) is set as an
+environment variable on the build command:
+
+```bash
+USE_CUDA=0 BUILD_TEST=0 python -m pip install --no-build-isolation -v -e .
+```
+
+A forwarded variable overrides the cache on every configure, whichever of the three ways it is
+matched by. Environment variables win over `-C` flags (`-D` / `cmake.define`), `-C` flags win
+over `pyproject.toml`, and all three win over what `build/CMakeCache.txt` remembers from the last
+configure. To change one setting for a single command, put the variable in front of the command.
+
+A variable that is no longer in the environment keeps the value the cache remembers, so dropping
+it from the command line does not reset it. To change a cached option without setting its
+variable, run `ccmake build/` or `cmake-gui build/`, or edit `build/CMakeCache.txt` directly. To
+discard the cache and configure from scratch, like `cmake --fresh`, pass `-C cmake.fresh=true`:
+
+```bash
+python -m pip install --no-build-isolation -v -e . -C cmake.fresh=true
+```
+
+An alias applies only when its canonical name is not in the environment itself, and where several
+aliases name the same variable, the first one listed in `_ENV_ALIASES` wins. Variables a CMake
+module reads directly are read fresh on every configure, at the location noted in their entry.
+
+#### What the annotations mean
+
+Entries below note how each variable reaches CMake, which is what to check when one appears not
+to take effect:
+
+- **forwarded by prefix** -- matches the prefix rule above; set as a cache variable of the same
+  name, overriding the cache
+- **passthrough** -- does not match the prefix rule, but is listed in `_ENV_PASSTHROUGH` and
+  forwarded under the same name, overriding the cache
+- **alias** -- forwarded under a *different* CMake name, from `_ENV_ALIASES`, overriding the
+  cache unless the canonical name is set as well
+- **read from the environment** -- not forwarded at all; the named CMake module reads `$ENV{...}`
+  itself
+- **CMake-native**, or handled via `pyproject.toml` -- consumed by CMake or scikit-build-core
+  directly, not by the forwarding module
+
+#### Everyday knobs
+
+- `DEBUG=1` -- build with `-O0 -g`; mapped to the CMake build type by
+  `[[tool.scikit-build.overrides]]` in `pyproject.toml`
+- `REL_WITH_DEB_INFO=1` -- optimized build with `-g`, same mechanism as `DEBUG`
+- `MAX_JOBS` -- compile parallelism; aliased to `CMAKE_BUILD_PARALLEL_LEVEL` by
+  `[tool.scikit-build.env]` in `pyproject.toml`
+- `FLASH_ATTENTION_MAX_JOBS` -- max concurrent FlashAttention CUDA compilations; unset by
+  default, set by CUDA CI based on runner memory
+- `CC` / `CXX` / `CFLAGS` -- compiler and flags; read by CMake / scikit-build-core directly
+  (`CFLAGS` also applies to C++ unless `CXXFLAGS` is set)
+- `TORCH_CUDA_ARCH_LIST` -- CUDA arches to build for, e.g. `"8.0;9.0"`
+- `USE_COLORIZE_OUTPUT=1` -- colorize compiler output for easier reading
+- `CMAKE_GENERATOR=Ninja` -- select the build generator; ninja is the default when
+  available. This replaces the old `USE_NINJA` toggle
+
+#### Feature toggles
+
+Forwarded by prefix (`USE_*` / `BUILD_*`):
+
+- `USE_CUDA=0` -- disables the CUDA build
+- `USE_CUDNN=0` -- disables the cuDNN build
+- `USE_CUSPARSELT=0` -- disables the cuSPARSELt build
+- `USE_CUDSS=0` -- disables the cuDSS build
+- `USE_CUFILE=0` -- disables the cuFile build
+- `USE_FBGEMM=0` -- disables the FBGEMM build (quantized 8-bit server operators)
+- `USE_MSLK=0` -- disables the MSLK build
+- `USE_KINETO=0` -- disables libkineto profiling
+- `USE_NUMPY=0` -- disables the NumPy build
+- `USE_ITT=0` -- disables Intel(R) VTune ITT functionality
+- `USE_XNNPACK=0` -- disables the XNNPACK build
+- `USE_PYTORCH_QNNPACK=0` -- disables PyTorch's internal QNNPACK quantized kernels
+- `USE_DISTRIBUTED=0` -- disables the distributed (c10d, gloo, mpi, etc.) build
+- `USE_TENSORPIPE=0` -- disables the Tensorpipe backend
+- `USE_GLOO=0` -- disables the gloo backend
+- `USE_MPI=0` -- disables the MPI backend
+- `USE_SYSTEM_NCCL=0` -- use the submoduled nccl instead of system nccl
+- `USE_OPENMP=0` -- disables OpenMP parallelization
+- `USE_MKLDNN=0` -- disables MKLDNN
+- `USE_MKLDNN_ACL` -- enables the Compute Library backend for MKLDNN on Arm (`USE_MKLDNN` must
+  be explicitly enabled)
+- `USE_STATIC_MKL` -- prefer to link MKL statically (Unix only)
+- `USE_FLASH_ATTENTION=0` -- disables flash attention for scaled dot product attention
+- `USE_MEM_EFF_ATTENTION=0` -- disables memory efficient attention for SDPA
+- `USE_CPU_VECTORIZATION=0` -- disables vectorized CPU kernel variants (AVX2, AVX512, VSX,
+  ZVECTOR, SVE); only the scalar DEFAULT kernels are built. Fine for correctness/dispatch work,
+  not for CPU benchmarking
+- `USE_ROCM_KERNEL_ASSERT=1` -- enables kernel assert on ROCm
+- `USE_ROCM_CK_GEMM=1` -- builds the CK GEMM backend on ROCm
+- `USE_ROCM_CK_SDPA=1` -- builds the CK SDPA backend on ROCm
+- `USE_ROCM_CK_SDPA_GFX11=1` -- enables CK SDPA for targeted gfx11 architectures
+- `USE_ROCM_CK_SDPA_GFX12=1` -- enables CK SDPA for targeted gfx12 architectures
+- `USE_LAYERNORM_FAST_RECIPROCAL` -- fast reciprocals for layer norm (default on)
+- `USE_MIMALLOC` -- static-link mimalloc into c10 (default: Windows/AArch64)
+- `USE_CUSTOM_DEBINFO="a.cpp;b.cpp"` -- build debug info only for the listed files
+- `USE_SYSTEM_LIBS` -- use system-provided third-party libraries; expands to the individual
+  `USE_SYSTEM_*` toggles in CMake
+- `BUILD_TEST=0` -- disables the test build
+- `BUILD_BINARY` -- enables the extra `binaries/` build
+- `BUILD_LAZY_TS_BACKEND=0` -- disables the lazy TorchScript backend (Lazy Tensor Core)
+- `BUILD_LIBTORCH_WHL` -- builds `libtorch.so` and deps as a wheel
+- `BUILD_PYTHON_ONLY` -- builds the Python wheel against a separate `libtorch.so`
+
+#### Architecture selection
+
+Forwarded by prefix or read from the environment:
+
+- `TORCH_CUDA_ARCH_LIST` -- CUDA arches to build for, e.g. `"6.0;7.0"` (passthrough)
+- `TORCH_XPU_ARCH_LIST` -- XPU arches, e.g. `"ats-m150,lnl-m"` (passthrough)
+- `PYTORCH_ROCM_ARCH` -- AMD GPU targets, e.g. `"gfx900;gfx906"` (read from the environment in
+  `cmake/public/utils.cmake`)
+- `TORCH_CK_GEMM_ARCH_LIST` -- AMD GPU archs Composable Kernel GEMM is built and enabled for,
+  e.g. `"gfx90a;gfx942;gfx950"` (passthrough)
+
+#### Library and backend selection
+
+Passthrough or read from the environment:
+
+- `BLAS` -- `MKL`, `Eigen`, `ATLAS`, `FlexiBLAS`, or `OpenBLAS`; fails the build if the requested
+  BLAS is not found (passthrough)
+- `MKL_THREADING` -- MKL threading mode: `SEQ`, `TBB`, or `OMP` (default)
+- `MKLDNN_CPU_RUNTIME` -- MKL-DNN threading mode: `TBB` or `OMP` (default)
+- `ATEN_THREADING` -- `OMP` or `NATIVE` intra-/inter-op parallel backend
+- `ONNX_NAMESPACE` -- namespace for the ONNX built here
+- `ATEN_AVX512_256=TRUE` -- let ATen AVX2 kernels use 32 ymm registers (read from the environment
+  in `cmake/Codegen.cmake`)
+
+#### Library location hints
+
+Passthrough, alias, read from the environment, or CMake-native:
+
+- `CUDA_HOME` (Linux/macOS) / `CUDA_PATH` (Windows) -- CUDA install location
+- `CUDAHOSTCXX` -- host compiler for nvcc (alias)
+- `CUDA_NVCC_EXECUTABLE` -- nvcc to use (passthrough; CI points this at a cache)
+- `CUDNN_LIBRARY` / `CUDNN_INCLUDE_DIR` / `CUDNN_LIB_DIR` -- cuDNN location (`CUDNN_LIB_DIR` is
+  an alias for `CUDNN_LIBRARY`)
+- `MIOPEN_PATH` -- MIOpen install root (read from the environment in `LoadHIP.cmake`). Note that
+  the old `MIOPEN_LIB_DIR` / `MIOPEN_INCLUDE_DIR` / `MIOPEN_LIBRARY` environment variables are no
+  longer used
+- `NCCL_ROOT` / `NCCL_LIB_DIR` / `NCCL_INCLUDE_DIR` -- nccl location (read from the environment in
+  `cmake/Modules/FindNCCL.cmake`)
+- `ACL_ROOT_DIR` -- Arm Compute Library location (read from the environment in
+  `cmake/Modules/FindACL.cmake`)
+- `LIBRARY_PATH` / `LD_LIBRARY_PATH` -- searched for libraries (compiler/linker native)
+- `CAFFE2_CUSTOM_PROTOC_EXECUTABLE` -- host protoc to use instead of the one built from
+  `third_party/protobuf` (passthrough). Required when cross-compiling, where the built protoc
+  targets an architecture the build host cannot execute (see `cmake/ProtoBuf.cmake`)
+
+#### Handled outside the forwarding module
+
+See also the everyday knobs above, which are all handled via `pyproject.toml` or natively.
+
+- `TORCH_NATIVE_AOT=0` -- disables the native-AOT stage-2 step, which exports the DSL kernels and
+  embeds them into `libtorch_cuda`. Not forwarded: `tools/native_aot/build_stage2.py` and the
+  generated `build/native_aot/native_aot.cmake` both read the environment directly.
+
+  Stage 2 already skips itself if any of the following holds (the module docstring of
+  `tools/native_aot/build_stage2.py` lists them in the order they are checked):
+
+  - the platform is not Linux
+  - the built torch does not import or was built without CUDA
+  - no toolchain targets this backend
+  - CUDA is older than 13 or cannot be determined
+  - the interpreter has no published DSL wheel and none is installed
+  - `BUILD_SHARED_LIBS=OFF` leaves a static `torch_cuda` that cannot take the version script
+  - nothing declares kernels
+  - no op declares a target compatible with a supported arch. With `TORCH_CUDA_ARCH_LIST` unset
+    it exports for whatever GPU is present, so a GPU compatible with a declared target does not
+    hit this one
+
+  Once it decides it *will* export, a missing DSL wheel is a hard error rather than a skip, so
+  this is the switch to use when you want a build without the DSL toolchain installed.
+
+  Native-AOT export for supported Hopper and Blackwell targets requires Triton at
+  build time alongside CuTeDSL. Install the pinned Triton wheel with
+  `bash scripts/install_triton_wheel.sh`. Embedded Triton kernels do not require
+  the Triton Python package at runtime.
+- `PYTORCH_BUILD_VERSION` / `PYTORCH_BUILD_NUMBER` -- wheel version; consumed by the version
+  metadata provider (`tools/metadata`)
+
+#### CMake-only options
+
+These are CMake options, set with `-D` / `cmake.define`, not environment variables.
+
+- `DEBUG_CUDA` -- when compiling `DEBUG`, also build CUDA kernels with debug flags (may OOM
+  nvcc). This was always a CMake option; the `setup.py` comment that listed it as an environment
+  variable was inaccurate -- it was never forwarded
+- `CUDA_DEVICE_DEBUG` -- build CUDA device code with `-g -G` (read in `cmake/public/cuda.cmake`;
+  no effect on MSVC)
 
 ### Profile build time
 
