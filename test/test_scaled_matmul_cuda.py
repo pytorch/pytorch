@@ -5485,8 +5485,70 @@ print("tunableop_keys_ok")
                 output_dtype=torch.bfloat16,
             )
 
+
+class TestFP8MatmulMpsOnly(TestCase):
+
+    hw_classification = HardwareClassification.MPS
+
+    @parametrize("recipe", ["mxfp8", "nvfp4"])
+    @parametrize("layout", ["dense", "padded", "unaligned"])
+    @parametrize("mnk", [(1, 7, 2048), (3, 130, 1024), (4, 64, 512), (8, 100, 256), (64, 96, 2048)],
+                 name_fn=lambda mnk: f"{mnk[0]}_{mnk[1]}_{mnk[2]}")
+    def test_blockwise_mps_layouts(self, recipe, layout, mnk, device) -> None:
+        # MPS reads A row-major and B column-major with unswizzled scales; the leading
+        # strides may be padded or the data unaligned.
+        M, N, K = mnk
+        block = 16 if recipe == "nvfp4" else 32
+        packed = 2 if recipe == "nvfp4" else 1
+        dtype = torch.float4_e2m1fn_x2 if recipe == "nvfp4" else torch.float8_e4m3fn
+        scale_dtype = torch.float8_e4m3fn if recipe == "nvfp4" else torch.float8_e8m0fnu
+        pad = {"dense": 0, "padded": 32, "unaligned": 0}[layout]
+        offset = 1 if layout == "unaligned" else 0
+
+        def operand(rows):
+            codes = torch.randint(0, 256, (rows * (K // packed + pad) + offset,), dtype=torch.uint8)
+            if recipe == "mxfp8":
+                # avoid the NaN codes 0x7f and 0xff
+                codes = codes.view(torch.float8_e4m3fn).float().nan_to_num().to(torch.float8_e4m3fn).view(torch.uint8)
+            # take the views on the device too: copying a view to MPS makes it dense
+
+            def view(t):
+                return t[offset:].view(rows, K // packed + pad)[:, : K // packed].view(dtype)
+
+            return view(codes), view(codes.to(device))
+
+        def scales(rows):
+            if recipe == "nvfp4":
+                s = (torch.rand(rows, K // block) + 0.25).to(scale_dtype)
+            else:
+                s = torch.randint(118, 128, (rows, K // block), dtype=torch.uint8).view(scale_dtype)
+            return s, s.to(device)
+
+        def dequant(data, s):
+            if recipe == "nvfp4":
+                u8 = data.view(torch.uint8)
+                codes = torch.stack([u8 & 0xF, u8 >> 4], -1).flatten(-2)
+                values = _floatx_unpacked_to_f32(codes, 2, 1).double()
+            else:
+                values = data.double()
+            return (values.unflatten(-1, (-1, block)) * s.double().unsqueeze(-1)).flatten(-2)
+
+        (a, a_dev), (b, b_dev) = operand(M), operand(N)
+        (sa, sa_dev), (sb, sb_dev) = scales(M), scales(N)
+        recipe_enum = ScalingType.BlockWise1x16 if recipe == "nvfp4" else ScalingType.BlockWise1x32
+        out = torch._scaled_mm_v2(
+            a_dev, b_dev.t(), [sa_dev], [recipe_enum], [SwizzleType.NO_SWIZZLE],
+            [sb_dev], [recipe_enum], [SwizzleType.NO_SWIZZLE], None, torch.float32,
+        )
+        ref = dequant(a, sa) @ dequant(b, sb).t()
+        # float32 accumulation over K: measure the error against the output's magnitude
+        err = ((out.cpu().double() - ref).abs() / (ref.abs() + ref.abs().mean())).max().item()
+        self.assertLess(err, 1e-5)
+
+
 instantiate_device_type_tests(TestFP8MatmulDevice, globals(), allow_xpu=True, allow_mps=True)
 instantiate_device_type_tests(TestFP8MatmulCudaOnly, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestFP8MatmulMpsOnly, globals(), only_for=("mps",), allow_mps=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
