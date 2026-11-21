@@ -568,6 +568,42 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(b2.title(), self.type2test(b"They'Re Bill'S Friends"))
         self.assertRaises(TypeError, lambda: b.title(1))
 
+    @make_dynamo_test
+    def test_capitalize(self):
+        b = self.type2test(b"hELLO wORLD")
+        self.assertEqual(b.capitalize(), self.type2test(b"Hello world"))
+        # Non-ASCII bytes are unchanged (ASCII-only case mapping)
+        b2 = self.type2test(b"\xffABC")
+        self.assertEqual(b2.capitalize(), self.type2test(b"\xffabc"))
+        self.assertEqual(self.type2test().capitalize(), self.type2test())
+        # The result is a new object and the input is unchanged
+        self.assertIsNot(b.capitalize(), b)
+        self.assertEqual(b, self.type2test(b"hELLO wORLD"))
+        self.assertRaises(TypeError, lambda: b.capitalize(1))
+
+    @make_dynamo_test
+    def test_swapcase(self):
+        b = self.type2test(b"HeLLo cOmpUteRs")
+        self.assertEqual(b.swapcase(), self.type2test(b"hEllO CoMPuTErS"))
+        b2 = self.type2test(b"\xff\xfeAbC")
+        self.assertEqual(b2.swapcase(), self.type2test(b"\xff\xfeaBc"))
+        self.assertEqual(self.type2test().swapcase(), self.type2test())
+        self.assertIsNot(b.swapcase(), b)
+        self.assertEqual(b, self.type2test(b"HeLLo cOmpUteRs"))
+        self.assertRaises(TypeError, lambda: b.swapcase(1))
+
+    def test_input_bytearray_capitalize_swapcase(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.capitalize(), ba.swapcase()
+
+        ba = bytearray(b"hELLO wORLD")
+        self.assertEqual(
+            fn(ba),
+            (bytearray(b"Hello world"), bytearray(b"Hello World")),
+        )
+        self.assertEqual(ba, bytearray(b"hELLO wORLD"))
+
     def test_input_bytearray_upper_lower_title(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(ba):
@@ -1080,6 +1116,104 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             TypeError, "'bytes' object cannot be interpreted as an integer"
         ):
             b.replace(b"a", b"b", b"0")
+
+    @make_dynamo_test
+    def test_removeprefix(self):
+        b = self.type2test(b"spamspamspam")
+        self.assertEqual(b.removeprefix(b"spam"), b"spamspam")
+        self.assertEqual(b.removeprefix(b"spamspamspam"), b"")
+        self.assertEqual(b.removeprefix(b"python"), b"spamspamspam")
+        self.assertEqual(b.removeprefix(b"spider"), b"spamspamspam")
+        self.assertEqual(b.removeprefix(b""), b"spamspamspam")
+        self.assertEqual(b.removeprefix(bytearray(b"spam")), b"spamspam")
+        self.assertEqual(self.type2test(b"").removeprefix(b"a"), b"")
+        # Non-ASCII bytes are matched byte for byte
+        self.assertEqual(self.type2test(b"\xffabc").removeprefix(b"\xff"), b"abc")
+        self.assertEqual(b, b"spamspamspam")
+
+    @make_dynamo_test
+    def test_removesuffix(self):
+        b = self.type2test(b"spamspamspam")
+        self.assertEqual(b.removesuffix(b"spam"), b"spamspam")
+        self.assertEqual(b.removesuffix(b"spamspamspam"), b"")
+        self.assertEqual(b.removesuffix(b"python"), b"spamspamspam")
+        self.assertEqual(b.removesuffix(b"blam"), b"spamspamspam")
+        self.assertEqual(b.removesuffix(b""), b"spamspamspam")
+        self.assertEqual(b.removesuffix(bytearray(b"spam")), b"spamspam")
+        self.assertEqual(self.type2test(b"").removesuffix(b"a"), b"")
+        self.assertEqual(self.type2test(b"abc\xff").removesuffix(b"\xff"), b"abc")
+        self.assertEqual(b, b"spamspamspam")
+
+    @make_dynamo_test
+    def test_removeprefix_removesuffix_new_object(self):
+        # Even when nothing is removed, the result is a new bytearray
+        b = self.type2test(b"abc")
+        for result in (b.removeprefix(b"x"), b.removesuffix(b"x")):
+            self.assertIsInstance(result, self.type2test)
+            self.assertIsNot(result, b)
+            self.assertEqual(result, b"abc")
+
+    @make_dynamo_test
+    def test_removeprefix_removesuffix_errors(self):
+        b = self.type2test(b"hello")
+        for name in ("removeprefix", "removesuffix"):
+            method = getattr(b, name)
+            with self.assertRaisesRegex(
+                TypeError, r"takes exactly one argument \(0 given\)"
+            ):
+                method()
+            with self.assertRaisesRegex(
+                TypeError, r"takes exactly one argument \(2 given\)"
+            ):
+                method(b"he", b"l")
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method("he")
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method(42)
+            with self.assertRaisesRegex(TypeError, "a bytes-like object is required"):
+                method((b"he", b"l"))
+
+    def test_input_bytearray_removeprefix_removesuffix(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.removeprefix(b"he"), ba.removesuffix(b"llo")
+
+        ba = bytearray(b"hello")
+        prefix_result, suffix_result = fn(ba)
+        self.assertIs(type(prefix_result), bytearray)
+        self.assertIs(type(suffix_result), bytearray)
+        self.assertEqual(prefix_result, bytearray(b"llo"))
+        self.assertEqual(suffix_result, bytearray(b"he"))
+        self.assertEqual(ba, bytearray(b"hello"))
+
+    @parametrize("name", ["removeprefix", "removesuffix"])
+    def test_input_bytearray_removeprefix_removesuffix_mutate_result(self, name):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            out = getattr(ba, name)(b"x")
+            out[0] = ord("j")
+            return out
+
+        ba = bytearray(b"hello")
+        out = fn(ba)
+        self.assertIs(type(out), bytearray)
+        self.assertEqual(out, bytearray(b"jello"))
+        self.assertEqual(ba, bytearray(b"hello"))
+
+    @parametrize("buffer_type", [bytes, bytearray])
+    def test_maketrans(self, buffer_type):
+        def f(x, source, target):
+            return x + bytearray.maketrans(source, target)[ord("a")]
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.tensor(1)
+        source, target = buffer_type(b"a"), buffer_type(b"z")
+        self.assertEqual(compiled(x, source, target), f(x, source, target))
+
+    @make_dynamo_test
+    def test_maketrans_invalid_length(self):
+        with self.assertRaises(ValueError):
+            bytearray.maketrans(b"a", b"xy")
 
     @make_dynamo_test
     def test_translate(self):
