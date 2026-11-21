@@ -577,6 +577,15 @@ impl GraphSite {
         paths.insert(0, path);
     }
 
+    /// Whether the graph is being taken down again because its path ended
+    /// where a later one will go on: the graphs that start behind it, in
+    /// the function and in what it calls, wait for that.
+    pub fn pending(&self) -> bool {
+        let taken = self.provisional.load(Ordering::Relaxed);
+        let open = matches!(*self.state.borrow(), GraphState::Built | GraphState::Waiting);
+        open && taken > 0 && taken < MAX_PROVISIONAL && self.variants.borrow().is_empty()
+    }
+
     /// An instruction that would run out of its place for an exported form
     /// could not be shown to run no Python code. Where that goes on, the
     /// forms are dropped and the graph is left to the VM.

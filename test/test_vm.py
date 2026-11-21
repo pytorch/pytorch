@@ -6193,6 +6193,39 @@ class GraphModel(torch.nn.Module):
         return self.head(x.flatten(1))
 
 
+class GraphLayers(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList([torch.nn.Linear(8, 8) for _ in range(3)])
+        named = {"a": torch.nn.Linear(8, 8), "b": torch.nn.Tanh()}
+        self.named = torch.nn.ModuleDict(named)
+        self.drop = torch.nn.Dropout(0.5)
+
+    def forward(self, x):
+        for i, layer in enumerate(self.layers):
+            x = layer(x) * (i + 1)
+        for a, b in zip(self.layers, self.layers):
+            x = a(x) - b(x) + x
+        x = self.layers[1](x) + len(self.layers)
+        x = self.named["b"](self.named["a"](x))
+        return self.drop(x)
+
+
+class GraphPools(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 4, 3, padding=1)
+        self.pool = torch.nn.MaxPool2d(2)
+        self.norm = torch.nn.LayerNorm([4, 4, 4])
+
+    def forward(self, x):
+        functional = torch.nn.functional
+        y = self.pool(functional.relu(self.conv(x)))
+        y = functional.interpolate(self.norm(y), scale_factor=2.0, mode="nearest")
+        pooled = functional.max_pool2d(y, 3, stride=1, padding=1)
+        return pooled + functional.adaptive_avg_pool2d(y, 1)
+
+
 def graph_flips(x, more):
     y = x.sin() * 2
     dims = [0, 1, 2, *more]
@@ -6477,6 +6510,14 @@ def graph_asks_for_operators(x, a, b):
     total = a
     total += 2.0
     return (y * total).tanh().exp(), a == 3, 1.0 in a, list(range(a)), not a
+
+
+def graph_probed(x, n):
+    y = x + 1
+    if n > 2:
+        y = y * 2
+    count = int(random.random())
+    return (y + count).sin().cos().tanh().exp()
 
 
 def graph_children(model, x):
@@ -7782,6 +7823,29 @@ print(json.dumps(found))
         finally:
             GRAPH_TOOLS.k = 3.0
 
+    def test_a_model_is_one_graph(self):
+        torch.manual_seed(0)
+        x = torch.randn(2, 4, 8, 8)
+        with torch.no_grad():
+            # Modules that call modules, a Sequential, a loop over a ModuleList.
+            model = GraphModel().eval()
+            _, graph, _ = self.whole(model, (x,), 20)
+            self.assertEqual(graph["operators"].count("aten::conv2d"), 5)
+            # enumerate and zip over a ModuleList, an item of it, its length,
+            # a ModuleDict, a dropout that drops nothing.
+            _, graph, _ = self.whole(GraphLayers().eval(), (torch.randn(2, 8),), 23)
+            self.assertIn("aten::dropout", graph["operators"])
+            # Functions of torch.nn.functional that pick what they call.
+            _, graph, _ = self.whole(GraphPools().eval(), (torch.randn(2, 3, 8, 8),), 8)
+            self.assertEqual(graph["why"], "the function returns")
+            # And with a compiler behind the graphs.
+            passes = (*DEFAULT, P.Graphs(), P.Inductor())
+            compiled = torch.vm(model, passes=passes, fallback=False)
+            for _ in range(8):
+                self.assertEqual(compiled(x), model(x), rtol=1e-4, atol=1e-5)
+            (graph,) = [g for g in self.graphs(compiled) if g["hits"]]
+            self.assertEqual((graph["ops"], graph["exports"]), (20, 1))
+
     def test_what_changes_after_a_model_is_warm_is_followed(self):
         def changes(model, x):
             yield "weight in place", lambda: model.a.conv.weight.mul_(1.5), x
@@ -7978,6 +8042,31 @@ print(json.dumps(found))
         self.assertGreaterEqual(graph_of(compiled)["hits"], hits + 20 + 3)
         self.assertEqual(compiled.stats()["demoted_callees"], ["graph_counts"])
 
+    def test_the_graphs_of_what_is_called_wait_for_the_graph_of_the_caller(self):
+        exported = []
+
+        def keep(gm, input_types):
+            exported.append(len([n for n in gm.graph.nodes if n.op.startswith("call")]))
+            return gm
+
+        torch.manual_seed(0)
+        model = GraphModel().eval()
+        x = torch.randn(2, 4, 8, 8)
+        passes = (*DEFAULT, P.Graphs(min_ops=3), keep)
+        compiled = torch.vm(model, passes=passes, fallback=False)
+        with torch.no_grad():
+            for _ in range(10):
+                self.assertEqual(compiled(x), model(x), atol=0, rtol=0)
+        # The blocks have three operations each and are called first and
+        # most: no graph was made of one of them.
+        self.assertEqual(len(exported), 1)
+        graphs = self.graphs(compiled)
+        (whole,) = [g for g in graphs if g["hits"]]
+        self.assertEqual((whole["ops"], whole["exports"]), (20, 1))
+        inner = [g for g in graphs if g["where"].startswith("GraphStage.forward")]
+        counts = [(g["hits"], g["exports"]) for g in inner]
+        self.assertEqual(counts, [(0, 0)] * len(inner))
+
     # --- what the report says
 
     def test_a_graph_has_one_name_and_the_report_counts_nothing_twice(self):
@@ -8055,6 +8144,23 @@ print(json.dumps(found))
         (graph,) = self.graphs(compiled)
         self.assertEqual(len(exports), made + 1)
         self.assertGreaterEqual(graph["hits"], hits + 20)
+
+    def test_a_graph_that_turned_out_too_small_is_not_waited_for(self):
+        def keep(gm, input_types):
+            return gm
+
+        # The first graph is taken down again at the second call, which
+        # goes through a branch for the first time, and then has two
+        # operations: the graph behind it does not go on waiting for it.
+        passes = (*DEFAULT, P.Graphs(), keep)
+        compiled = torch.vm(graph_probed, passes=passes, fallback=False, demote=False)
+        x = torch.randn(4, 4)
+        self.assertEqual(compiled(x, 1), graph_probed(x, 1), atol=0, rtol=0)
+        for _ in range(12):
+            self.assertEqual(compiled(x, 5), graph_probed(x, 5), atol=0, rtol=0)
+        (graph,) = self.graphs(compiled)
+        found = (graph["ops"], graph["state"], graph["exports"], graph["hits"])
+        self.assertEqual(found, (5, "compiled", 1, 10))
 
     def test_why_a_graph_is_not_exported_is_said(self):
         def helper(gm):
