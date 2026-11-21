@@ -30,9 +30,14 @@ static const size_t kMaxScalarAlloc = (sizeof(int64_t)); // largest "scalar" all
 
 enum class HeapTier { SMALL, LARGE, XLARGE, OVERSIZE };
 
-inline HeapTier getHeapTier(size_t size, bool has_memory_pressure) {
+// A nonzero oversize_threshold_bytes lowers the OVERSIZE cutoff, so tensors that
+// would share a 1 GiB XLARGE heap get a right-sized heap of their own instead.
+// It is checked before kMinLargeAlloc so thresholds below 10 MB still apply.
+inline HeapTier getHeapTier(size_t size, bool has_memory_pressure, size_t oversize_threshold_bytes = 0) {
   if (size <= kMaxSmallAlloc) {
     return HeapTier::SMALL;
+  } else if (oversize_threshold_bytes > 0 && size >= oversize_threshold_bytes) {
+    return HeapTier::OVERSIZE;
   } else if (size < kMinLargeAlloc) {
     return HeapTier::LARGE;
   } else if (size < kXLargeHeap / 2 && !has_memory_pressure) {
@@ -137,6 +142,8 @@ struct AllocParams {
   // true if we exceed the low watermark limit. In this case
   // we apply strategies to relieve the pressure before allocation.
   bool has_memory_pressure = false;
+  // mps_large_alloc_threshold_mb, for HeapBlock::createHeapBlock()
+  size_t oversize_threshold_bytes = 0;
 };
 
 struct HeapBlock {
@@ -183,7 +190,7 @@ struct HeapBlock {
     const size_t size = params.size();
     MTLHeapDescriptor* d = [MTLHeapDescriptor new];
     if (d) {
-      switch (getHeapTier(size, params.has_memory_pressure)) {
+      switch (getHeapTier(size, params.has_memory_pressure, params.oversize_threshold_bytes)) {
         case HeapTier::SMALL:
           d.size = kSmallHeap;
           break;
