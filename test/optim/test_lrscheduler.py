@@ -477,6 +477,13 @@ class TestLRScheduler(TestCase):
         iters = 4
         with self.assertRaises(ValueError):
             LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
+    
+    def test_linearlr_nan_factors(self):
+        iters = 4
+        with self.assertRaises(ValueError):
+            LinearLR(self.opt, start_factor=float("nan"), total_iters=iters)
+        with self.assertRaises(ValueError):
+            LinearLR(self.opt, end_factor=float("nan"), total_iters=iters)
 
     def test_constantlr_with_epoch(self):
         # lr = 0.025     if epoch < 5
