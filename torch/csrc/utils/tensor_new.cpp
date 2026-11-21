@@ -1691,6 +1691,13 @@ bool isValidDLPackCapsule(PyObject* data) {
       PyCapsule_IsValid(data, at::DLPackTraits<DLManagedTensor>::capsule);
 }
 
+// Python's hasattr: only an AttributeError means the attribute is missing.
+bool has_attr(PyObject* obj, const char* name) {
+  int found = PyObject_HasAttrStringWithError(obj, name);
+  TORCH_CHECK_PYTHON(found >= 0);
+  return found == 1;
+}
+
 // Infers a ScalarType from a buffer-protocol object's declared format.
 // Only native byte order is supported because tensor_frombuffer reinterprets
 // bytes without byte-swapping; unsupported/ambiguous formats raise, asking for
@@ -1956,6 +1963,41 @@ Tensor asarray(
     tensor = tensor_fromDLPack(obj);
   }
 
+  // Check whether 'obj' exposes a '__dlpack__' method, preferring it over the
+  // buffer protocol so dtype, device, and shape come from the producer.
+  bool is_dlpack_import = false;
+  if (!tensor.defined() && has_attr(obj, "__dlpack__")) {
+    py::object from_dlpack =
+        py::module::import("torch").attr("utils").attr("dlpack").attr(
+            "from_dlpack");
+    // Without copy=False, the producer is allowed to export a copy. copy=True
+    // isn't passed on: CuPy, for one, refuses it for device memory.
+    auto copy_arg =
+        force_alias ? py::object(py::bool_(false)) : py::object(py::none());
+    try {
+      tensor = from_dlpack(py::handle(obj), py::arg("copy") = copy_arg)
+                   .cast<Tensor>();
+    } catch (py::error_already_set& e) {
+      // A producer that can only export a copy raises BufferError for
+      // copy=False, which the Array API reports as a ValueError. Other export
+      // failures raise BufferError too, so a copy is only suggested.
+      if (!force_alias || !e.matches(PyExc_BufferError)) {
+        throw;
+      }
+      py::raise_from(
+          e,
+          PyExc_ValueError,
+          c10::str(
+              "can't alias an object of type '",
+              Py_TYPE(obj)->tp_name,
+              "' into a tensor, because reading it through DLPack raised a BufferError. "
+              "If it can only export a copy, pass copy=None or copy=True.")
+              .c_str());
+      throw py::error_already_set();
+    }
+    is_dlpack_import = true;
+  }
+
   // Check whether 'obj' implements the buffer protocol
   if (!tensor.defined() && PyObject_CheckBuffer(obj) != 0) {
     // When no dtype is given, infer it from the buffer's declared format
@@ -1974,14 +2016,31 @@ Tensor asarray(
     // Given a defined tensor, we copy it if either we have to (copy=True) or
     // if we need to (copy=None) because of mismatched device or dtype.
     if (force_copy || needs_copying) {
-      if (wrong_device || wrong_dtype) {
-        tensor = tensor.to(
-            device.value_or(tensor.device()),
-            dtype.value_or(tensor.scalar_type()),
-            /*non_blocking=*/false,
-            /*copy=*/force_copy);
+      auto copy_tensor = [&]() {
+        if (wrong_device || wrong_dtype) {
+          return tensor.to(
+              device.value_or(tensor.device()),
+              dtype.value_or(tensor.scalar_type()),
+              /*non_blocking=*/false,
+              /*copy=*/force_copy);
+        }
+        return tensor.clone();
+      };
+      if (is_dlpack_import) {
+        // As in internal_new_from_data. The import holds its memory, and is
+        // only released once the GIL is back.
+        Tensor copied;
+        {
+          pybind11::gil_scoped_release no_gil;
+          maybe_initialize_device(device);
+          copied = copy_tensor();
+        }
+        tensor = std::move(copied);
       } else {
-        tensor = tensor.clone();
+        // With the GIL held: tensor_frombuffer doesn't hold the buffer's
+        // export, so releasing the GIL would let another thread resize the
+        // buffer mid-copy.
+        tensor = copy_tensor();
       }
     } else {
       // If we are not copying, we have to check whether we have the tensor
@@ -2000,6 +2059,15 @@ Tensor asarray(
           "' into dtype '",
           dtype.value(),
           "'.");
+      if (is_dlpack_import) {
+        // A traced factory call, as in internal_new_from_data, so that
+        // torch.jit.trace doesn't take the result for a constant.
+        tensor = tensor.to(
+            tensor.device(),
+            tensor.scalar_type(),
+            /*non_blocking=*/false,
+            /*copy=*/false);
+      }
       // If tensor is a NumPy Array view, we warn the user about non-writeable
       // arrays if this is the case.
       if (should_warn_numpy_not_writable) {
