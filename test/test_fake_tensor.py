@@ -1949,6 +1949,37 @@ def forward(self, x_1):
         self.assertIs(mod_copied.a, mod_copied.b)
         self.assertEqual(mod_copied.b.storage()._cdata, mod_copied.a.storage()._cdata)
 
+    @fake_tensor_modes
+    def test_deepcopy_real_tensor_in_fake_mode(self, mode_cls):
+        if (
+            mode_cls is CppFakeTensorMode
+            and torch._functorch.config.fake_tensor_propagate_real_tensors
+        ):
+            self.skipTest("C++ fake fallback does not support propagate_real_tensors")
+        x = torch.randn(3, device="cpu")
+        msg = "real tensor.*FakeTensorMode is active.*device cpu"
+        with mode_cls(), self.assertRaisesRegex(RuntimeError, msg):
+            copy.deepcopy(x)
+
+    @fake_tensor_modes
+    def test_deepcopy_real_tensor_in_fake_mode_no_dispatch(self, mode_cls):
+        x = torch.randn(3, device="cpu")
+        with mode_cls(), no_dispatch():
+            y = copy.deepcopy(x)
+        self.assertEqual(x, y)
+
+    @fake_tensor_modes
+    def test_deepcopy_real_tensor_in_fake_mode_real_ops_mode(self, mode_cls):
+        class RealOpsMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                with no_dispatch():
+                    return func(*args, **(kwargs or {}))
+
+        x = torch.randn(3, device="cpu")
+        with mode_cls(), RealOpsMode():
+            y = copy.deepcopy(x)
+        self.assertEqual(x, y)
+
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
