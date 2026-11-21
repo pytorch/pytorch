@@ -12,7 +12,6 @@ import warnings
 from enum import Enum
 from functools import cache
 from logging import info, warning
-from pathlib import Path
 from typing import Any, TYPE_CHECKING
 from urllib.request import Request, urlopen
 
@@ -71,8 +70,6 @@ def parse_args() -> Any:
     parser.add_argument(
         "--test-matrix", type=str, required=True, help="the original test matrix"
     )
-    parser.add_argument("--cpp-faketensor", action="store_true")
-    parser.add_argument("--tests-to-include", default="")
     parser.add_argument(
         "--selected-test-configs",
         type=str,
@@ -631,47 +628,6 @@ def enforce_lf_allowlist(
     return test_matrix
 
 
-def add_cpp_faketensor_configs(
-    test_matrix: dict[str, list[Any]],
-    job_name: str | None,
-    tests_to_include: str = "",
-) -> dict[str, list[Any]]:
-    selection = (
-        Path(__file__).resolve().parents[2] / ".ci/pytorch/cpp_faketensor_tests.json"
-    )
-    manifest = json.loads(selection.read_text()) if selection.exists() else None
-    configs = manifest["test_configs"] if manifest is not None else None
-    if manifest is not None and tests_to_include.strip():
-        files = {
-            selector.split("::")[0].removesuffix(".py")
-            for selector in manifest["tests"]
-        }
-        requested = {test.split(".", 1)[0] for test in tests_to_include.split()}
-        if files.isdisjoint(requested):
-            return test_matrix
-    entries = test_matrix.get("include", [])
-    if any("fake_tensor" in entry for entry in entries):
-        return test_matrix
-    cpp_entries = [
-        {**entry, "fake_tensor": "cpp"}
-        for entry in entries
-        if configs is None or entry.get("config") in configs
-    ]
-    if configs is not None:
-        if not job_name or any(
-            device in job_name.lower() for device in ("cuda", "rocm", "xpu", "tpu")
-        ):
-            return test_matrix
-        cpp_entries = [
-            {**entry, "config": "cpp_faketensor", "shard": 1, "num_shards": 1}
-            for entry in cpp_entries[:1]
-        ]
-    return {
-        **test_matrix,
-        "include": entries + cpp_entries,
-    }
-
-
 def main() -> None:
     args = parse_args()
     # Load the original test matrix set by the workflow. Its format, however,
@@ -684,11 +640,6 @@ def main() -> None:
         # We handle invalid test matrix gracefully by marking it as empty
         set_output("is-test-matrix-empty", True)
         sys.exit(0)
-
-    if args.cpp_faketensor:
-        test_matrix = add_cpp_faketensor_configs(
-            test_matrix, args.job_name, args.tests_to_include
-        )
 
     pr_number = args.pr_number
     tag = args.tag

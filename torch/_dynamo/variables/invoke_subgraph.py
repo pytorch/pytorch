@@ -105,8 +105,7 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #
 # Paired with an InvokeSubgraphReuseCondition containing:
 #   - input_checks: (tag, tensor_metadata) per input
-#   - guards, guard_on_key_order and lexical_sources: checks, dictionary order and scoped reads
-#   - tensor_sources, aliases and overlapping_args: captured tensors and alias constraints
+#   - guards, source dependencies, dictionary order and captured alias patterns
 #   - treespec: pytree structure of the args
 #   - traced_sources: sources accessed during the trace
 #
@@ -114,11 +113,10 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 # ==========================
 # On subsequent calls:
 #   1. Input structure match -- same treespec, tags, tensor metadata.
-#      Reject mutations of remapped sources read by the cached trace.
 #   2. Source replacement -- clone each guard's source with a replacement map
 #      (old: L['self'].layers[0].weight -> new: L['self'].layers[1].weight),
 #      then evaluate against the new source's runtime value.
-#   3. Validate aliases, remapped shapes and capture metadata before replaying guards.
+#   3. Reject mutations and validate aliases and capture metadata before replaying guards.
 #
 # A shared resolve_cache memoizes intermediate source resolution (e.g.
 # L['self'].layers is evaluated once and reused across all guards).
@@ -137,12 +135,9 @@ hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 #       Source is cloned with replacement map, resolved via
 #       VariableBuilder. Deduplicates via input_source_to_var.
 #
-#   LiftedBoundSymbol: reuse the explicit binding or rebuild the captured property.
 #   LiftedSyntheticObject(ctor_fn, ctor_args, ctor_arg_sources)
 #       Synthetic object (opaque type with SyntheticLocalSource).
 #       Reconstructed via synthetic_graph_input with cached constructor info.
-#
-# The winning match installs remapped guards and predicates and propagates key order and reads.
 #
 # SAFETY
 # ======
@@ -459,7 +454,6 @@ class LiftedBoundSymbol:
     unspec_variable_map or variable_tracker_cache. Using LiftedCapturedSource
     for these would resolve the source to a concrete Python int via
     source.get_value() instead of reusing the existing symbolic proxy.
-    The source, when read by the region, rebinds the symbol at the next call site.
     """
 
     expr: Any  # sympy.Expr
@@ -519,6 +513,7 @@ def is_reuse_eligible(
     It is possible that a subgraph is morally reusable but does not fall
     into the limited support that Dynamo has today. Current limitations:
       - Without a reuse hash, no side effects or builtin-method identity dependencies.
+      - Without a reuse hash, explicit operands must not alias lexical reads.
       - No sourceful variable accessed by the subgraph may have been
         mutated, because guards are snapshotted on source values at trace
         time — if the underlying object changed since then, the cached
@@ -743,11 +738,9 @@ def _project_source(
 ) -> Source | None:
     """Substitute original argument sources; replacements cannot trigger another substitution."""
     children: dict[str, Source] = {}
-    if isinstance(source, ChainedSource):
-        for attr in fields(source):
-            child = getattr(source, attr.name)
-            if not isinstance(child, Source):
-                continue
+    for attr in fields(source) if isinstance(source, ChainedSource) else ():
+        child = getattr(source, attr.name)
+        if isinstance(child, Source):
             value = roots[child] if child in roots else _project_source(child, roots)
             if value is None:
                 return None
@@ -758,9 +751,7 @@ def _project_source(
 
 @dataclass
 class SubgraphReuseMatch:
-    """Replay remapped guards on acceptance. Building a candidate can install ordinary guards,
-    register graph inputs and update PGO even when the candidate is rejected.
-    """
+    """Even rejected candidates can install guards, build graph inputs and update PGO."""
 
     entry: InvokeSubgraphReuseEntry
     source_replacement: dict[Source, Source]
@@ -808,11 +799,10 @@ class SubgraphReuseMatch:
             dim = prop() if source.idx is None else prop(source.idx)
         else:
             vt = self.build_capture(source)
-            dim = (
-                vt.sym_num
-                if isinstance(vt, SymNodeVariable)
-                else vt.as_python_constant()
-            )
+            if isinstance(vt, SymNodeVariable):
+                dim = vt.sym_num
+            else:
+                dim = vt.as_python_constant()
         raw = dim.node._expr if isinstance(dim, torch.SymInt) else sympy.Integer(dim)
         self.symbol_replacements[lifted.expr] = raw
         return raw
@@ -862,10 +852,8 @@ class SubgraphReuseMatch:
             and not example._has_symbolic_sizes_strides
             and source not in self.entry.lifted_capture_sources
         ):
-            static_shapes, _ = utils.tensor_always_has_static_shape(
-                value, True, new_source
-            )
-            context = _automatic_dynamic(value, tx, new_source, static_shapes)
+            static, _ = utils.tensor_always_has_static_shape(value, True, new_source)
+            context = _automatic_dynamic(value, tx, new_source, static)
             if isinstance(context, symbolic_shapes.StatelessSymbolicContext) and all(
                 dim is symbolic_shapes.DimDynamic.STATIC
                 for dim in context.dynamic_sizes
@@ -972,9 +960,8 @@ def is_reusable(
     (2) Check for mutations on the remapped traced_sources — if any source
         the subgraph read has been mutated since the original trace, the
         cached guards would evaluate against stale values.
-    (3) Use the match's source replacement mapping (old sources -> new sources) to
+    (3) Build a source replacement mapping (old sources → new sources) and
         re-evaluate the snapshotted guards under the new sources.
-        Check aliases, rebound symbols and capture metadata, then collect guards for stamp-out.
     """
     cached_entry = match.entry
     # Structural check: treespec must match first.
@@ -1435,7 +1422,7 @@ def stamp_out_subgraph(
     Sources in the cached entry are parameterized: they refer to the original
     call's sources and must be rewritten to the current call's sources via
     source replacement before we can look up or create the corresponding
-    graph placeholders. Replay guards, static metadata, order annotations and lexical dependencies.
+    graph placeholders.
     """
     from torch._dynamo.variables.higher_order_ops import add_call_function, make_attr
 

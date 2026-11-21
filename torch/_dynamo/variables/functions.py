@@ -511,26 +511,6 @@ class BaseUserFunctionVariable(VariableTracker):
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/funcobject.c
         return VariableTracker.build(tx, repr(self.as_python_constant()))
 
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name in ("__setattr__", "__delattr__"):
-            # Data descriptors from tp_getset/tp_members win over the instance
-            # dict, as in PyObject_GenericSetAttr.
-            value = args[1] if name == "__setattr__" else None
-            if args[0].is_python_constant():
-                entry = self.lookup_tp_getset_member(args[0].as_python_constant())
-                if entry is not None:
-                    out = entry.setter(self, tx, value)
-                    return out if out is not None else ConstantVariable.create(None)
-            dict_method = "__setitem__" if value is not None else "__delitem__"
-            return self.get_dict_vt(tx).call_method(tx, dict_method, list(args), {})
-        return super().call_method(tx, name, list(args), kwargs)
-
     def get_filename(self) -> str:
         return self.get_code().co_filename
 
@@ -670,9 +650,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def create_with_source(cls, value: Any, source: Any) -> "UserFunctionVariable":
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
         return cls(value, source=source)
-
-    def get_value_for_setattr(self) -> object | None:
-        return self.fn
 
     def __init__(
         self,
@@ -980,17 +957,21 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             and len(args) == 2
             and not kwargs
             and isinstance(source := args[0].source, ConstDictKeySource)
-            and type(item := args[0].realize()) is ConstantVariable
+            and ConstantVariable.is_constant_vt(item := args[0].realize())
             and type(memo := args[1].realize()) is variables.ConstDictVariable
         ):
             from ..polyfills.copy import is_deepcopy_atomic
             from .builder import SourcelessBuilder
 
             check = SourcelessBuilder.create_internal_user_function(is_deepcopy_atomic)
-            # IDs of live objects of a different type cannot match this key.
-            key_type = type(item.value)
-            origins = tx.output.deepcopy_id_types
-            keys = [k.vt for k in memo.items if origins.get(k.vt, key_type) is key_type]
+            # Input mapping keys and values coexist, including when a custom copier
+            # returns self and deepcopy skips its keepalive list.
+            item_type = type(item.value)
+            keys: list[VariableTracker] = []
+            for key in memo.items:
+                typ, scope = tx.output.deepcopy_id_types.get(key.vt, (item_type, None))
+                if typ is item_type or scope not in (None, source.base):
+                    keys.append(key.vt)
             if keys and (
                 not tx.output.is_root_tracer()
                 or _method_identity_guards_filtered(tx)
@@ -1002,18 +983,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     explanation="A seeded deepcopy memo can override a mapping key by its process-local ID.",
                     hints=["Copy the mapping outside the captured region."],
                 )
-            if all(
-                type(key) is ConstantVariable and type(key.value) is int for key in keys
-            ):
+            tokens = tuple(k.value for k in keys if ConstantVariable.is_constant_vt(k))
+            if len(tokens) == len(keys) and all(type(t) is int for t in tokens):
                 memo.install_dict_keys_match_guard()
-                tokens = tuple(key.value for key in keys)
                 hit = id(item.value) in tokens
                 if tokens:
-                    guard = functools.partial(
-                        GuardBuilder.DEEPCOPY_MEMO_CONTAINS_ID,
-                        tokens=tokens,
-                        present=hit,
-                    )
+                    builder = GuardBuilder.DEEPCOPY_MEMO_CONTAINS_ID
+                    guard = functools.partial(builder, tokens=tokens, present=hit)
                     install_guard(source.make_guard(guard))
                 if not hit and check.call_function(tx, [item], {}).as_python_constant():
                     return item
@@ -1653,6 +1629,20 @@ class LocalGeneratorObjectVariable(VariableTracker):
         # exits without yielding another value
         return self.gen_send_ex(tx, args[0], False)
 
+    def gen_close_iter(
+        self, tx: "InstructionTranslatorBase", yf: VariableTracker
+    ) -> None:
+        # https://github.com/python/cpython/blob/3.13/Objects/genobject.c (gen_close_iter)
+        # Only call yf.close() if it exists; e.g. tuple_iterator has no close().
+        if isinstance(yf, LocalGeneratorObjectVariable):
+            yf.call_method(tx, "close", [], {})
+            return
+        from .object_protocol import generic_getattr
+
+        meth = generic_getattr(tx, yf, "close", default=None)
+        if meth is not None:
+            meth.call_function(tx, [], {})
+
     def gen_close(
         self,
         tx: "InstructionTranslatorBase",
@@ -1685,7 +1675,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         if yf:
             with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
                 try:
-                    yf.call_method(tx, "close", [], {})
+                    self.gen_close_iter(tx, yf)
                 except ObservedException:
                     err = True
 
@@ -1754,9 +1744,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # CPython has an extra flag for handling async generators
             if pyerr_given_exception_match(arg, GeneratorExit):
                 try:
-                    # CPython uses gen_close_iter here
                     with tracer.temporarily_set_frame_state(FrameState.FRAME_EXECUTING):
-                        yf.call_method(tx, "close", [], {})
+                        self.gen_close_iter(tx, yf)
                 except ObservedException:
                     pass
                 return throw_here()
@@ -2895,12 +2884,6 @@ class SkipFunctionVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
         self.reason = reason
-
-    def get_value_for_setattr(self) -> object | None:
-        mod = getattr(self.value, "__module__", None) or ""
-        if mod == "torch" or mod.startswith(("torch.", "torch_")):
-            return None
-        return self.value
 
     def as_python_constant(self) -> Any:
         return self.value
@@ -4207,9 +4190,6 @@ class PolyfilledFunctionVariable(VariableTracker):
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
 
         return cls(value, source=source)
-
-    def get_value_for_setattr(self) -> object | None:
-        return self.fn
 
     def __init__(self, fn: _F, **kwargs: Any) -> None:
         super().__init__(**kwargs)
