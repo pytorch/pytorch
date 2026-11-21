@@ -232,25 +232,27 @@ struct nvfp4_format {
     return c10::metal::detail::fp8e4m3fn_to_fp32(s);
   }
   // The decode kernels read 32 values (two blocks, 16 bytes) per lane step and
-  // decode them without the 2^14 rebias, which apply_scales applies once per
-  // block. Masks put one nibble per 16-bit lane of a half2: magnitude into the
-  // exponent and mantissa, sign into bit 15. That permutes the values within
-  // each group of 8, which a dot product with an operand decoded the same way
-  // does not see.
+  // decode them without the 2^14 rebias, which apply_scales or scaled applies
+  // once per block. Masks put one nibble per 16-bit lane of a half2: magnitude
+  // into the exponent and mantissa, sign into bit 15. The lanes of word w
+  // shifted by 4 * s hold values 8 * w + s and 8 * w + s + 4.
   static constexpr constant uint chunk_bytes = 16;
-  static void decode_chunk(device const uchar* data, thread float* v) {
-    const auto raw = *reinterpret_cast<device const uint4*>(data);
+  static void decode_chunk(thread const uint4* raw, thread float* v) {
 #pragma unroll
     for (uint w = 0; w < 4; ++w) {
 #pragma unroll
       for (uint s = 0; s < 4; ++s) {
-        const uint n = (raw[w] >> (4 * s)) & 0x000f000f;
+        const uint n = (raw[0][w] >> (4 * s)) & 0x000f000f;
         const auto x = float2(
             as_type<half2>(((n & 0x00070007) << 9) | ((n & 0x00080008) << 12)));
-        v[8 * w + 2 * s] = x.x;
-        v[8 * w + 2 * s + 1] = x.y;
+        v[8 * w + s] = x.x;
+        v[8 * w + s + 4] = x.y;
       }
     }
+  }
+  // A value decode_chunk decoded times its block's scale
+  static float scaled(float value, uchar s) {
+    return value * (scale(s) * 16384.0f);
   }
   static float apply_scales(float dot, uchar a_scale, uchar b_scale) {
     return dot * (scale(a_scale) * 16384.0f) * (scale(b_scale) * 16384.0f);
@@ -271,8 +273,7 @@ struct mxfp8_format {
   // 32 values (one block, 32 bytes) per lane step, decoded at 1/256 of their
   // value by scaled_mm_decode_scaled; apply_scales makes up for it.
   static constexpr constant uint chunk_bytes = 32;
-  static void decode_chunk(device const uchar* data, thread float* v) {
-    const auto raw = reinterpret_cast<device const uint4*>(data);
+  static void decode_chunk(thread const uint4* raw, thread float* v) {
 #pragma unroll
     for (uint h = 0; h < 2; ++h) {
 #pragma unroll
@@ -284,6 +285,10 @@ struct mxfp8_format {
         }
       }
     }
+  }
+  // e8m0 biases its exponent by 127, and 2^8 undoes the decode's 1/256
+  static float scaled(float value, uchar s) {
+    return s == 0xff ? NAN : ldexp(value, int(s) - 127 + 8);
   }
   // Adds the scale exponents rather than multiplying the scales, which would
   // overflow for a large and a small scale whose product is representable.
@@ -297,6 +302,17 @@ struct mxfp8_format {
     return ldexp(dot, int(a_scale) + int(b_scale) - 2 * 127 + 2 * 8);
   }
 };
+
+// Decodes the chunk of F values starting at data, which must be 16-byte aligned
+template <typename F>
+inline void scaled_mm_decode_chunk(device const uchar* data, thread float* v) {
+  uint4 raw[F::chunk_bytes / 16];
+#pragma unroll
+  for (uint i = 0; i < F::chunk_bytes / 16; ++i) {
+    raw[i] = reinterpret_cast<device const uint4*>(data)[i];
+  }
+  F::decode_chunk(raw, v);
+}
 
 // Kernel buffers of the block-scaled recipes. A is row-major and B
 // column-major (both K-contiguous); scale_a and scale_b hold one scale per
@@ -526,11 +542,12 @@ kernel void scaled_mm_blockwise_few_rows(
   float accum[rows] = {};
   for (uint c = lane; c < p.k / chunk; c += c10::metal::simdgroup_size) {
     float bv[chunk];
-    F::decode_chunk(b_col + c * F::chunk_bytes, bv);
+    scaled_mm_decode_chunk<F>(b_col + c * F::chunk_bytes, bv);
 #pragma unroll
     for (uint r = 0; r < rows; ++r) {
       float av[chunk];
-      F::decode_chunk(a + r * p.a_row_stride + c * F::chunk_bytes, av);
+      scaled_mm_decode_chunk<F>(
+          a + r * p.a_row_stride + c * F::chunk_bytes, av);
 #pragma unroll
       for (uint j = 0; j < blocks; ++j) {
         float dot = 0;
@@ -606,39 +623,41 @@ inline void scaled_mm_store_accum(
 }
 
 // MPP counterpart of scaled_mm_accumulate and scaled_mm_store_tile: runs
-// matmul2d on the tiles load_tiles(k) stages for the K step starting at k, then
-// stores the threadgroup's output tile.
-template <typename S, typename T, typename LoadTiles>
+// matmul2d on the tile x tile_k operands aa and bb that load_tiles(k) stages
+// for the K step starting at k, then stores the threadgroup's output tile.
+template <
+    uint tile,
+    uint tile_k,
+    bool transpose_right,
+    typename TA,
+    typename TB,
+    typename T,
+    typename LoadTiles>
 inline void scaled_mm_mpp_run(
-    threadgroup S* a_tile,
-    threadgroup S* b_tile,
+    thread TA& aa,
+    thread TB& bb,
     uint row_start,
     uint col_start,
     thread const ScaledMMArgs<T>& args,
     constant ScaledMMParams<>& p,
     LoadTiles load_tiles) {
-  constexpr auto tile = scaled_mm_tile;
-  using tile_t = tensor<threadgroup S, extents<int, tile, tile>, tensor_inline>;
-  tile_t aa(a_tile, extents<int, tile, tile>());
-  tile_t bb(b_tile, extents<int, tile, tile>());
   constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
       tile,
       tile,
-      tile,
+      tile_k,
       false,
-      false,
+      transpose_right,
       false,
       mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate);
   mpp::tensor_ops::matmul2d<desc, execution_simdgroups<scaled_mm_simdgroups>>
       op;
-  auto accum =
-      op.template get_destination_cooperative_tensor<tile_t, tile_t, float>();
+  auto accum = op.template get_destination_cooperative_tensor<TA, TB, float>();
   for (uint16_t i = 0; i < accum.get_capacity(); ++i) {
     if (accum.is_valid_element(i)) {
       accum[i] = 0.0f;
     }
   }
-  for (uint k = 0; k < p.k; k += tile) {
+  for (uint k = 0; k < p.k; k += tile_k) {
     load_tiles(k);
     threadgroup_barrier(mem_flags::mem_threadgroup);
     op.run(aa, bb, accum);
@@ -662,12 +681,17 @@ kernel void scaled_mm_mpp(
   constexpr auto tile = scaled_mm_tile;
   threadgroup half a_tile[tile * tile];
   threadgroup half b_tile[tile * tile];
+  using tile_t =
+      tensor<threadgroup half, extents<int, tile, tile>, tensor_inline>;
+  tile_t aa(a_tile, extents<int, tile, tile>());
+  tile_t bb(b_tile, extents<int, tile, tile>());
   const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, a_tile, b_tile};
   const uint row_start = group.y * tile;
   const uint col_start = group.x * tile;
-  scaled_mm_mpp_run(a_tile, b_tile, row_start, col_start, args, p, [&](uint k) {
-    scaled_mm_load_tiles(args, p, row_start, col_start, k, tid);
-  });
+  scaled_mm_mpp_run<tile, tile, false>(
+      aa, bb, row_start, col_start, args, p, [&](uint k) {
+        scaled_mm_load_tiles(args, p, row_start, col_start, k, tid);
+      });
 }
 
 #define REGISTER_SCALED_MM_MPP_WITH_OUT_T(T)                                \
@@ -687,24 +711,107 @@ REGISTER_SCALED_MM_MPP_WITH_OUT_T(half);
 REGISTER_SCALED_MM_MPP_WITH_OUT_T(bfloat);
 REGISTER_SCALED_MM_MPP_WITH_OUT_T(float8_e4m3fn);
 
-// scaled_mm_blockwise with the MMA done by MPP on the decoded tiles
+// Stages step values per K step of one K-contiguous row of A or column of B,
+// scaled by their blocks' scales, with zeros past the operand's end. fetch
+// loads a whole step into registers ahead of store, which decodes it, so the
+// loads are in flight while the threadgroup multiplies the previous step.
+template <typename F, uint step, typename S>
+struct ScaledMMBlockwiseRowLoader {
+  static constexpr constant uint chunk = scaled_mm_blockwise_chunk;
+  device const uchar* data;
+  device const uchar* scales;
+  bool valid;
+  uint k_size;
+  uint4 raw[scaled_mm_blockwise_step_bytes / 16];
+  uchar s[step / F::block];
+
+  bool whole(uint k) const thread {
+    return valid && k + step <= k_size;
+  }
+
+  // k is a multiple of step, so a whole step is aligned for vector loads
+  void fetch(uint k) thread {
+    if (!whole(k)) {
+      return;
+    }
+    const auto src =
+        reinterpret_cast<device const uint4*>(data + k / F::values_per_byte);
+#pragma unroll
+    for (uint i = 0; i < scaled_mm_blockwise_step_bytes / 16; ++i) {
+      raw[i] = src[i];
+    }
+#pragma unroll
+    for (uint i = 0; i < step / F::block; ++i) {
+      s[i] = scales[k / F::block + i];
+    }
+  }
+
+  void store(uint k, threadgroup S* dst) const thread {
+    if (whole(k)) {
+#pragma unroll
+      for (uint c = 0; c < step / chunk; ++c) {
+        float v[chunk];
+        F::decode_chunk(raw + c * F::chunk_bytes / 16, v);
+#pragma unroll
+        for (uint i = 0; i < chunk; ++i) {
+          dst[c * chunk + i] =
+              S(F::scaled(v[i], s[(c * chunk + i) / F::block]));
+        }
+      }
+      return;
+    }
+    for (uint i = 0; i < step; ++i) {
+      const uint kk = k + i;
+      dst[i] = valid && kk < k_size
+          ? S(F::element(data, kk) * F::scale(scales[kk / F::block]))
+          : S(0);
+    }
+  }
+};
+
+// scaled_mm_blockwise with the MMA done by MPP on 64x64 output tiles. Each
+// thread decodes one row of A or column of B per K step with vector loads, so
+// the host routes only operands aligned for them here.
 template <typename T, typename F>
 [[max_total_threads_per_threadgroup(scaled_mm_threads)]]
 kernel void scaled_mm_blockwise_mpp(
     SCALED_MM_BLOCKWISE_BUFFERS,
     uint2 group [[threadgroup_position_in_grid]],
     uint tid [[thread_index_in_threadgroup]]) {
-  constexpr auto tile = scaled_mm_tile;
+  constexpr auto tile = scaled_mm_blockwise_tile;
+  constexpr uint step = scaled_mm_blockwise_step_bytes * F::values_per_byte;
   using S = typename F::stage_t;
-  threadgroup S a_tile[tile * tile];
-  threadgroup S b_tile[tile * tile];
+  // 16 bytes of padding per row spread the threads' row stores over the banks
+  constexpr int pitch = step + 16 / sizeof(S);
+  static_assert(
+      scaled_mm_threads == 2 * tile, "a thread per row of A and column of B");
+  threadgroup S a_tile[tile * pitch];
+  threadgroup S b_tile[tile * pitch];
   SCALED_MM_BLOCKWISE_ARGS;
   const uint row_start = group.y * tile;
   const uint col_start = group.x * tile;
-  scaled_mm_mpp_run(
-      a_tile, b_tile, row_start, col_start, args.store, p, [&](uint k) {
-        scaled_mm_blockwise_load_tiles<F>(
-            args, p, row_start, col_start, k, tid, a_tile, b_tile);
+  const bool is_b = tid >= tile;
+  const uint outer = (is_b ? col_start : row_start) + tid % tile;
+  const uint k_blocks = (p.k + F::block - 1) / F::block;
+  ScaledMMBlockwiseRowLoader<F, step, S> loader{
+      is_b ? args.b + outer * p.b_col_stride : args.a + outer * p.a_row_stride,
+      (is_b ? args.scale_b : args.scale_a) + ulong(outer) * k_blocks,
+      outer < (is_b ? p.n : p.m),
+      p.k,
+      {},
+      {}};
+  loader.fetch(0);
+  threadgroup S* dst = (is_b ? b_tile : a_tile) + tid % tile * pitch;
+  // Both tiles are K-contiguous, so B is the transposed right operand
+  using tile_t = tensor<threadgroup S, dextents<int32_t, 2>, tensor_inline>;
+  tile_t aa(
+      a_tile, dextents<int32_t, 2>(step, tile), array<int32_t, 2>{1, pitch});
+  tile_t bb(
+      b_tile, dextents<int32_t, 2>(step, tile), array<int32_t, 2>{1, pitch});
+  scaled_mm_mpp_run<tile, step, true>(
+      aa, bb, row_start, col_start, args.store, p, [&](uint k) {
+        loader.store(k, dst);
+        loader.fetch(k + step);
       });
 }
 

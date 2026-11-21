@@ -25,6 +25,10 @@ C10_METAL_CONSTEXPR uint32_t scaled_mm_nvfp4_block = 16;
 // K values each lane of the block-scaled few rows kernel decodes per step: one
 // MXFP8 block (32 bytes) or two NVFP4 blocks (16 bytes).
 C10_METAL_CONSTEXPR uint32_t scaled_mm_blockwise_chunk = 32;
+// Output tile of the block-scaled MPP kernel, and the bytes of each row of A
+// and column of B it decodes per K step: 64 NVFP4 or 32 MXFP8 values.
+C10_METAL_CONSTEXPR uint32_t scaled_mm_blockwise_tile = 64;
+C10_METAL_CONSTEXPR uint32_t scaled_mm_blockwise_step_bytes = 32;
 
 template <typename index_t = int64_t>
 struct ScaledMMParams {

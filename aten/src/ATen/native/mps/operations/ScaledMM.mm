@@ -85,12 +85,15 @@ void scaled_mm_blockwise_out(const Tensor& mat_a,
   const bool few_rows = params.m <= scaled_mm_few_rows_max && k % scaled_mm_blockwise_chunk == 0 &&
       is_aligned(mat_a, mat_a.stride(0), scaled_mm_few_rows_load_bytes) &&
       is_aligned(mat_b, mat_b.stride(1), scaled_mm_few_rows_load_bytes);
+  // The MPP kernel decodes rows of K with vector loads
+  const bool mpp = has_mpp() && is_aligned(mat_a, mat_a.stride(0), scaled_mm_alignment) &&
+      is_aligned(mat_b, mat_b.stride(1), scaled_mm_alignment);
   const auto type_str = scalarToMetalTypeString(out.scalar_type());
   const auto format = nvfp4 ? "nvfp4" : "mxfp8";
   const auto kernel_name = few_rows ? fmt::format("scaled_mm_few_rows_{}_{}_{}", format, params.m, type_str)
       : native                      ? fmt::format("scaled_mm_native_mxfp8_{}", type_str)
-                                    : fmt::format("scaled_mm_{}{}_{}", has_mpp() ? "mpp_" : "", format, type_str);
-  const auto tile = native ? scaled_mm_native_tile : scaled_mm_tile;
+                                    : fmt::format("scaled_mm_{}{}_{}", mpp ? "mpp_" : "", format, type_str);
+  const auto tile = native ? scaled_mm_native_tile : mpp ? scaled_mm_blockwise_tile : scaled_mm_tile;
   const auto groups = few_rows
       ? MTLSizeMake(c10::metal::ceil_div<int64_t>(params.n, scaled_mm_simdgroups), 1, 1)
       : MTLSizeMake(c10::metal::ceil_div<int64_t>(params.n, tile), c10::metal::ceil_div<int64_t>(params.m, tile), 1);
