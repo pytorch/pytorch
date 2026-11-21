@@ -378,6 +378,12 @@ pub struct Path {
     /// every call a form is for (`Def::fixed`), so a constant of the
     /// graph, which the form checks where it is computed.
     pub constants: Vec<PathValue>,
+    /// Per output: whether something can still hold it when the path has
+    /// landed (a variable or a value of the function, an object it was
+    /// stored into, a list or a tuple that is held). One that is only
+    /// looked at behind the callable, for its sizes or its kind, is gone
+    /// by then.
+    pub held: Vec<bool>,
     pub exported: Shared<Vec<Arc<Exported>>>,
     /// Register files for the calls that run it, kept from one to the next.
     pub registers: Shared<Vec<Vec<Obj>>>,
@@ -1232,8 +1238,10 @@ pub unsafe fn quiet_merge(into: Obj, more: Obj) -> bool {
 }
 
 /// Whether `import name` runs no Python code: the `__import__` of the
-/// interpreter is asked for a module that has no package around it and
-/// that was imported before, which it then only looks up.
+/// interpreter is asked for a module that was imported before, which it
+/// then only looks up. For a module in a package (`import a.b`) it looks
+/// up the module and then the outermost package, which is what the
+/// statement gives.
 pub unsafe fn quiet_import(builtins: Obj, name: Obj, fromlist: Obj, level: Obj) -> bool {
     let import = ffi::PyDict_GetItemString(builtins, c"__import__".as_ptr());
     let own = !import.is_null() && ffi::PyCFunction_Check(import) != 0 && {
@@ -1245,22 +1253,29 @@ pub unsafe fn quiet_import(builtins: Obj, name: Obj, fromlist: Obj, level: Obj) 
         && !level.is_null()
         && ffi::PyLong_CheckExact(level) != 0
         && ffi::PyLong_AsLong(level) == 0;
-    if !own || !whole || ffi::PyUnicode_CheckExact(name) == 0 || pyffi::str_to_string(name).contains('.') {
-        return false;
-    }
-    let module = ffi::PyDict_GetItemWithError(ffi::PyImport_GetModuleDict(), name);
-    if module.is_null() || ffi::PyModule_CheckExact(module) == 0 {
-        ffi::PyErr_Clear();
+    if !own || !whole || ffi::PyUnicode_CheckExact(name) == 0 {
         return false;
     }
     // One that is still being imported is waited for.
-    let spec = ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), c"__spec__".as_ptr());
-    let slot = if spec.is_null() { std::ptr::null_mut() } else { pyffi::_PyObject_GetDictPtr(spec) };
-    let done = !slot.is_null()
-        && !(*slot).is_null()
-        && ffi::PyDict_GetItemString(*slot, c"_initializing".as_ptr()) == ffi::Py_False();
-    ffi::PyErr_Clear();
-    done
+    let imported = |name: &str| {
+        let Ok(name) = std::ffi::CString::new(name) else {
+            return false;
+        };
+        let module = ffi::PyDict_GetItemString(ffi::PyImport_GetModuleDict(), name.as_ptr());
+        if module.is_null() || ffi::PyModule_CheckExact(module) == 0 {
+            ffi::PyErr_Clear();
+            return false;
+        }
+        let spec = ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), c"__spec__".as_ptr());
+        let slot = if spec.is_null() { std::ptr::null_mut() } else { pyffi::_PyObject_GetDictPtr(spec) };
+        let done = !slot.is_null()
+            && !(*slot).is_null()
+            && ffi::PyDict_GetItemString(*slot, c"_initializing".as_ptr()) == ffi::Py_False();
+        ffi::PyErr_Clear();
+        done
+    };
+    let name = pyffi::str_to_string(name);
+    imported(&name) && name.split('.').next().is_some_and(imported)
 }
 
 /// Whether `len(container)`, or unpacking it, runs no Python code.
@@ -1558,7 +1573,7 @@ unsafe fn quiet_modules() -> (usize, usize, usize) {
 /// an iterator, a `range`, an `enumerate`, a `zip`). `own` says of an
 /// argument whether the path made it: an iterator is only gone over then.
 pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, api: &TcfgApi) -> Option<bool> {
-    const ASKS: [&[u8]; 6] = [b"_has_torch_function", b"_get_", b"_is_", b"is_", b"get_", b"_has_"];
+    const ASKS: [&[u8]; 7] = [b"_has_torch_function", b"_get_", b"_is_", b"is_", b"get_", b"_has_", b"_cuda_is"];
     if callee.is_null() || capi::is_unboxed(callee) || args.iter().any(|o| o.is_null()) {
         return None;
     }
@@ -2529,6 +2544,8 @@ impl Path {
     ///     container the graph makes; an operand is ("v", value) or ("c",
     ///     object), a constant;
     ///   outputs: the values the callable returns, as a tuple in this order;
+    ///   held: per output, whether something can hold it when the path has
+    ///     landed (`Path::held`);
     ///   exits: integers it returns behind them, ("dim", tensor) or ("size",
     ///     tensor, dim) each.
     /// A run that cannot be exported is described by its checks alone: the
@@ -2622,6 +2639,7 @@ impl Path {
             closed = Some("what an operation with several results gave leaves the graph whole".to_string());
         }
         let outputs = list_of(self.outputs.iter().map(|v| ffi::PyLong_FromLong(*v as _)).collect());
+        let held = list_of(self.held.iter().map(|held| new_ref(if *held { ffi::Py_True() } else { ffi::Py_False() })).collect());
         let exits = list_of(
             self.exits
                 .iter()
@@ -2635,19 +2653,20 @@ impl Path {
         );
         let description = PyObj::from_owned(ffi::PyDict_New());
         let label = text(name);
-        let entries: [(&std::ffi::CStr, Obj); 7] = [
+        let entries: [(&std::ffi::CStr, Obj); 8] = [
             (c"where", label),
             (c"inputs", inputs.as_ptr()),
             (c"input_ids", ids.as_ptr()),
             (c"input_names", names.as_ptr()),
             (c"nodes", nodes.as_ptr()),
             (c"outputs", outputs),
+            (c"held", held),
             (c"exits", exits),
         ];
         for (key, value) in entries {
             ffi::PyDict_SetItemString(description.as_ptr(), key.as_ptr(), value);
         }
-        for made in [label, outputs, exits] {
+        for made in [label, outputs, held, exits] {
             ffi::Py_DECREF(made);
         }
         if !ffi::PyErr_Occurred().is_null() && closed.is_none() {
@@ -3790,6 +3809,7 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
         inputs,
         body,
         feeds,
+        held: vec![true; outputs.len()],
         outputs,
         exits,
         writes: Vec::new(),
@@ -4509,6 +4529,7 @@ impl Path {
             body: Vec::new(),
             feeds: Vec::new(),
             outputs: Vec::new(),
+            held: Vec::new(),
             exits: Vec::new(),
             writes: Vec::new(),
             clears: Vec::new(),
@@ -4545,6 +4566,7 @@ impl Path {
         live: &BitSet,
         ends: String,
         provisional: bool,
+        returns: bool,
     ) -> Path {
         let defs = &trace.defs;
         let nregs = defs.len();
@@ -4567,6 +4589,25 @@ impl Path {
         for inst in trace.body.iter().filter(|inst| inst.dst != NONE && container(&inst.op)) {
             built[inst.dst as usize] = true;
         }
+        // What can still be reached when the path has landed: what a value
+        // of the function holds then, what a variable of the frame is bound
+        // to last (unless the path lands where the function returns, and
+        // the frame is gone), what an effect stores, and what something
+        // that can be reached may hold of what it was made of.
+        let mut kept = vec![false; nregs];
+        writes.iter().for_each(|(made, _)| kept[*made as usize] = true);
+        for (at, (slot, v)) in trace.bound.iter().enumerate() {
+            if !returns && !trace.bound[at + 1..].iter().any(|(later, _)| later == slot) {
+                kept[*v as usize] = true;
+            }
+        }
+        let values = &trace.rec.values;
+        // What gives a number, a text, a size, a dtype or a class holds
+        // nothing of what it was given.
+        let plain = |v: PathValue| {
+            let held = values[v as usize];
+            !held.is_null() && unsafe { checkable(held) || (!capi::is_unboxed(held) && ffi::PyType_Check(held) != 0) }
+        };
         // The values that are no tensors and that the graph computes.
         let mut wanted = vec![false; nregs];
         let (mut outputs, mut exits) = (Vec::new(), Vec::new());
@@ -4685,9 +4726,22 @@ impl Path {
                 _ if needed => uses(&inst.op, &mut need),
                 _ => Stage::Skipped,
             };
+            // What is put into something the path made is held where that
+            // is, which may be anywhere; a check holds nothing.
+            let holds = match (inst.stage, inst.kind) {
+                (Stage::Landing, _) => true,
+                (Stage::Before | Stage::After, Kind::Residual) => true,
+                (Stage::Before | Stage::After, Kind::Check) => false,
+                (Stage::Before | Stage::After, _) => dst != NONE && kept[dst as usize] && !plain(dst),
+                _ => false,
+            };
+            if holds {
+                inst.op.for_each_use(|v| kept[v as usize] = true);
+            }
         }
         outputs.reverse();
         exits.reverse();
+        let held: Vec<bool> = outputs.iter().map(|v| kept[*v as usize]).collect();
         let effects = trace.body.iter().any(|inst| inst.stage == Stage::Landing);
         let constants = constants.into_inner();
         let mut feeds: Vec<PathValue> = Vec::new();
@@ -4739,6 +4793,7 @@ impl Path {
             mutates: trace.writes,
             pinned: std::mem::take(&mut trace.pinned),
             constants,
+            held,
             exported: Shared::new(Vec::new()),
             registers: Shared::new(Vec::new()),
         }
