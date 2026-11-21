@@ -21,7 +21,7 @@ import torch.backends.mkldnn
 from torch.testing import FileCheck
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, \
-    run_tests, gradcheck, gradgradcheck, IS_WINDOWS, \
+    run_tests, gradcheck, gradgradcheck, IS_WINDOWS, IS_ARM64, \
     skipIfTorchDynamo, xfailIfTorchDynamo, recover_orig_fp32_precision, \
     parametrize, instantiate_parametrized_tests, HardwareClassification
 from torch.testing._internal.common_device_type import (
@@ -384,7 +384,7 @@ class TestMkldnn(TestCase):
         self._test_conv_deconv_lower_precision_base(3, torch.nn.Conv3d, dtype=dtype)
         self._test_conv_deconv_lower_precision_base(3, torch.nn.ConvTranspose3d, dtype=dtype)
 
-    def _test_conv_deconv_nhwc_base(self, conv_module, weight_memory_format, dtype, prec=None):
+    def _test_conv_deconv_nhwc_base(self, conv_module, weight_memory_format, dtype, prec=None, stride=2):
         input_shapes = {2: (55, 55), 3: (14, 14, 14)}
         options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
         if conv_module in [torch.nn.Conv2d, torch.nn.ConvTranspose2d]:
@@ -406,7 +406,7 @@ class TestMkldnn(TestCase):
             conv1 = conv_module(in_channels=C,
                                 out_channels=M,
                                 kernel_size=3,
-                                stride=2,
+                                stride=stride,
                                 padding=1,
                                 dilation=dilation,
                                 bias=bias,
@@ -470,10 +470,11 @@ class TestMkldnn(TestCase):
 
     @reduced_f32_on_and_off()
     def test_conv_transpose_nhwc_fp32(self):
-        self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.float32)
-        self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.float32)
-        self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=torch.float32)
-        self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=torch.float32)
+        mkldnn_stride = 1 if IS_ARM64 else 2
+        self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.float32, stride=mkldnn_stride)
+        self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.float32, stride=mkldnn_stride)
+        self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=torch.float32, stride=mkldnn_stride)
+        self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=torch.float32, stride=mkldnn_stride)
 
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_conv_transpose_nhwc_lower_precision(self, dtype):
@@ -484,10 +485,11 @@ class TestMkldnn(TestCase):
             torch.float16: torch.ops.mkldnn._is_mkldnn_fp16_supported
         }
         if support_checks[dtype]():
-            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=dtype)
-            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=dtype)
-            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=dtype)
-            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=dtype)
+            mkldnn_stride = 1 if IS_ARM64 else 2
+            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=dtype, stride=mkldnn_stride)
+            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=dtype, stride=mkldnn_stride)
+            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=dtype, stride=mkldnn_stride)
+            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=dtype, stride=mkldnn_stride)
 
         # BF16/FP16 fallback implementations are divided into two parts col2im+gemm,
         # and the number of data type conversions in the middle is more than that of onednn's direct conv,
