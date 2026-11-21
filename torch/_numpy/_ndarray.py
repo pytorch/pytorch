@@ -480,7 +480,7 @@ class ndarray:
         if not copy:
             raise NotImplementedError(f"astype(..., copy={copy} is not implemented.")
         torch_dtype = _dtypes.dtype(dtype).torch_dtype
-        t = self.tensor.to(torch_dtype)
+        t = self.tensor.to(torch_dtype, copy=True)
         return ndarray(t)
 
     @normalizer
