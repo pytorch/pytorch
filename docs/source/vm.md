@@ -810,6 +810,58 @@ found = torch.vm.regions(g)[0]
 found["state"], found["reason"]  # ('vm', 'load_attr could run Python code')
 ```
 
+Where the function binds a variable anew between its operations, the variable
+lets go of what it held. If that was the last reference to an object whose
+end runs Python code (a `__del__`, a weak reference with a callback), the
+code runs at the binding, in front of what the function reads behind it.
+What was made of the graph binds the variable when it has run, behind every
+read. So the engine looks, on every call and before anything of it runs, at
+what the call would let go of that way. Each such object has to end without
+Python code running: neither it nor anything it refers to has a finalizer,
+or a weak reference that is told of its end (the entry of a weak dictionary
+or of a weak set, which only takes itself out, is none). Or it has to stay
+alive: a parameter of the function or another value of it holds it, the
+function keeps it, or it has more references than the call lets go of. A
+call for which neither can be shown runs the operations of the function as
+they are:
+
+```python
+class Ends:
+    def __del__(self):
+        STATE[0] += 1.0  # what the function reads behind the binding
+
+
+STATE, HELD = [0.5], []
+
+
+def lets_go(x):
+    held = HELD.pop()
+    y = (x.sin() + 1).cos() * STATE[0]
+    held = None  # the last reference to what `pop` gave
+    return (y + STATE[0]).tanh(), held
+
+
+def eight_calls(fn):
+    STATE[0] = 0.5
+    outs = []
+    for at in range(8):
+        HELD.append(Ends() if at == 6 else 0)
+        outs.append(fn(x)[0])
+    return outs
+
+
+g = torch.vm(lets_go, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+x = torch.randn(5)
+got, expected = eight_calls(g), eight_calls(lets_go)
+all(torch.equal(a, b) for a, b in zip(got, expected)), STATE[0]  # (True, 1.5)
+```
+
+What an object refers to is what it shows the garbage collector, up to 64
+objects (with more, the call runs the operations). What a tensor holds
+outside of that, in the nodes of its history, is not seen; objects in a
+reference cycle end when the collector runs, as they do in eager mode; and
+what a pass's own callable does is not looked at.
+
 Some kinds of calls are not exported: one whose operations write to what
 they are given, one with a tensor that carries a forward-mode gradient or is
 of a subclass of `torch.Tensor`, and one under a `TorchDispatchMode`, a
@@ -956,6 +1008,13 @@ What graphs do not do at this stage:
   itself ends it like any other: a model whose layers work in place
   (`nn.ReLU(inplace=True)`, `x += y`) has its paths end there, which for the
   models of the usual collections is after one to three operations.
+- In the call in which a path is taken down, a variable that the function
+  deletes inside the path (`del name`) is let go of where the path ends and
+  not at the `del`. Where it held the last reference to an object whose end
+  runs Python code, that code runs behind what the call reads behind the
+  `del`. A call that would run what was made of the path is turned down for
+  such an object ("Passes over graphs"), and is then one in which a path is
+  taken down again, for as long as the graph may get another form.
 - Sizes are fixed per export. Every size a graph is called with is a kind of
   call of its own, with a graph of its own, so a function that is called
   with many sizes uses up `max_variants`. Sizes of the tensors the graph
