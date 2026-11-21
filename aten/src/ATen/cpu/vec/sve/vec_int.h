@@ -17,7 +17,7 @@ inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_SVE256)
 
-#if defined(TORCH_INDUCTOR_PRECOMPILE_HEADERS) && defined(__GNUC__) && \
+#if defined(__GNUC__) && \
     !defined(__clang__) &&                                             \
     ((__GNUC__ == 14 && __GNUC_MINOR__ < 4) ||                         \
      (__GNUC__ == 15 && __GNUC_MINOR__ < 3))
@@ -25,6 +25,7 @@ inline namespace CPU_CAPABILITY {
 // (GCC PR target/123457). The fix is expected in GCC 14.4 and 15.3, and is
 // backported to only some 14.3 and 15.2 packages, so conservatively guard by
 // upstream minor version.
+// This workaround is applied to all SVE code, not just inductor precompiled headers.
 #define VEC_INT_SVE_GCC_PCH_ICE_WORKAROUND __attribute__((optimize("O0")))
 #else
 #define VEC_INT_SVE_GCC_PCH_ICE_WORKAROUND
