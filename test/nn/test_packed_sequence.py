@@ -535,6 +535,71 @@ class PackedSequenceTest(_PackedSequenceTestMixin, TestCase):
 class PackedSequenceTestDevice(_PackedSequenceTestMixin, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @parametrize_test("batch_first", (True, False))
+    @parametrize_test("enforce_sorted", (True, False))
+    @parametrize_test("lengths_as_tensor", (True, False))
+    @parametrize_test("max_length", (6, torch.iinfo(torch.int64).max))
+    def test_pack_padded_sequence_lengths_exceed_input(
+        self, device, batch_first, enforce_sorted, lengths_as_tensor, max_length
+    ):
+        padded = torch.ones(5, 3, 4, device=device)
+        if batch_first:
+            padded = padded.transpose(0, 1)
+        lengths = [max_length, 3, 1] if enforce_sorted else [max_length, 1, 3]
+        if lengths_as_tensor:
+            lengths = torch.tensor(lengths, dtype=torch.int64, device="cpu")
+        msg = f"max length {max_length} and input sequence length 5"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            rnn_utils.pack_padded_sequence(
+                padded, lengths, batch_first=batch_first, enforce_sorted=enforce_sorted
+            )
+
+    @parametrize_test("batch_first", (True, False))
+    @parametrize_test("sorted_lengths", (True, False))
+    def test_pack_padded_sequence_length_validation_native(
+        self, device, batch_first, sorted_lengths
+    ):
+        padded = torch.ones(5, 3, 4, device=device)
+        if batch_first:
+            padded = padded.transpose(0, 1)
+        lengths = torch.tensor(
+            [6, 3, 1] if sorted_lengths else [6, 1, 3],
+            dtype=torch.int64,
+            device="cpu",
+        )
+        msg = "max length 6 and input sequence length 5"
+        if not sorted_lengths:
+            msg = "must be sorted in decreasing order"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.ops.aten._pack_padded_sequence.default(padded, lengths, batch_first)
+
+    @parametrize_test("batch_first", (True, False))
+    @parametrize_test("enforce_sorted", (True, False))
+    @parametrize_test("lengths_as_tensor", (True, False))
+    @parametrize_test("max_length", (4, 5))
+    def test_pack_padded_sequence_length_boundary(
+        self, device, batch_first, enforce_sorted, lengths_as_tensor, max_length
+    ):
+        padded = torch.arange(60, dtype=torch.float32, device=device).reshape(5, 3, 4)
+        lengths = [max_length, 3, 1] if enforce_sorted else [max_length, 1, 3]
+        expected = padded[:max_length].clone()
+        for i, length in enumerate(lengths):
+            expected[length:, i] = 0
+        if batch_first:
+            padded = padded.transpose(0, 1)
+            expected = expected.transpose(0, 1)
+        if lengths_as_tensor:
+            lengths = torch.tensor(lengths, dtype=torch.int64, device="cpu")
+        packed = rnn_utils.pack_padded_sequence(
+            padded, lengths, batch_first=batch_first, enforce_sorted=enforce_sorted
+        )
+        unpacked, unpacked_lengths = rnn_utils.pad_packed_sequence(
+            packed, batch_first=batch_first
+        )
+        self.assertEqual(unpacked, expected)
+        self.assertEqual(unpacked_lengths, lengths)
+        self.assertEqual(packed.batch_sizes.sum().item(), packed.data.size(0))
+
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO and sys.version_info[:2] < (3, 13),
         "Frame Handling Difference between Python versions",

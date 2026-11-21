@@ -57,6 +57,10 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
     }
   }
 
+  TORCH_CHECK(lengths[0] <= input.size(0),
+           "`lengths` must not exceed the input sequence length, but got max length ",
+           lengths[0], " and input sequence length ", input.size(0));
+
   std::vector<at::Tensor> steps;
   steps.reserve(batch_size);
   at::Tensor batch_sizes_t = at::empty(lengths[0], _lengths.options());
