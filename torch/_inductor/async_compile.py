@@ -627,6 +627,7 @@ class AsyncCompile:
                 "static_launch_user_defined_triton_kernels": (
                     torch._inductor.config.static_launch_user_defined_triton_kernels
                 ),
+                "compile_iq_static_hooks": torch._inductor.config.compile_iq_static_hooks,
             }
 
             if len(torch._inductor.config.autotune_lookup_table) > 0:
