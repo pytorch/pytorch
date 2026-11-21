@@ -10731,6 +10731,22 @@ def back_halves_drop(x, w, b):
     return first.exp().sum(), second.sin().sum()
 
 
+def back_reader_keeps(x, a):
+    h = (x @ a).tanh()
+    return h, (h * h).sum() + (a * a).sum()
+
+
+def back_node_keeps(x, a):
+    h = (x @ a).tanh()
+    return h, (x @ a).exp().sum() + a.sum()
+
+
+def back_view_kept(x, a):
+    h = (x @ a).tanh()
+    v = h[0]
+    return h, (v * v).sum() + a.sum()
+
+
 class BackConvNet(torch.nn.Module):
     """A convnet as they are trained: batch norm, an activation in place, a
     max pool, a dropout, a loss."""
@@ -10757,15 +10773,13 @@ class TestVmGraphBackward(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def staged(self, fn, passes=()):
-        import torch._cfg_rs as runtime
-
+        runtime = torch.vm._load_runtime()
         runtime.backward_forms(True)
         passes = (*DEFAULT, P.Graphs(backward=True), *passes)
         return torch.vm(fn, passes=passes, fallback=False, demote=False)
 
     def states(self):
-        import torch._cfg_rs as runtime
-
+        runtime = torch.vm._load_runtime()
         return sorted(state for state, calls, _, _ in runtime.backward_forms() if calls)
 
     def proven(self, fn, device, drops=False):
@@ -10884,6 +10898,56 @@ class TestVmGraphBackward(TestCase):
             self.alike(got, expected)
             if text is not None:
                 self.assertIn(text, expected[0][1])
+
+    def test_a_tensor_written_before_a_backward_is_named_as_eager_names(self, device):
+        def method(result, made):
+            result.mul_(2)
+
+        def item(result, made):
+            with torch.no_grad():
+                result[0].zero_()
+
+        def operand(result, made):
+            with torch.no_grad():
+                made.mul_(2)
+
+        def detached(result, made):
+            result.detach_()
+
+        def raised(fn, write, at, alone):
+            torch.manual_seed(at)
+            x = torch.randn(3, 4, device=device)
+            w = torch.randn(4, 4, device=device, requires_grad=True)
+            # Another operation makes the input at every other call.
+            made = w * 2 if at % 2 else w + 2
+            result, total = fn(x, made)
+            write(result, made)
+            with self.assertRaises(RuntimeError) as caught:
+                (total if alone else total + result.sum()).backward()
+            return str(caught.exception)
+
+        # A node that kept a tensor as an operand names the node the tensor
+        # has by now, as its first result (for a view, the node eager makes
+        # anew); a node that kept its own result names itself. A tensor
+        # that lost its node is not looked at.
+        cases = (
+            (back_reader_keeps, method, False, "is output 0 of Mul,"),
+            (back_reader_keeps, item, False, "is output 0 of Tanh,"),
+            (back_reader_keeps, operand, False, "is output 0 of "),
+            (back_node_keeps, method, False, "is output 0 of Tanh,"),
+            (back_view_kept, method, False, "is output 0 of AsStrided,"),
+            (back_reader_keeps, detached, True, "detached in-place"),
+        )
+        for fn, write, alone, text in cases:
+            compiled = self.staged(fn)
+            for at in range(8):
+                got = raised(compiled, write, at, alone)
+                expected = raised(fn, write, at, alone)
+                self.assertEqual(got, expected)
+                self.assertIn(text, expected)
+                if write is operand:
+                    self.assertIn("of Mul," if at % 2 else "of Add,", expected)
+            self.assertEqual(self.states(), ["the engine's backward"])
 
     def test_hooks_on_results_and_inputs_run_as_eagers(self, device):
         def use(fn, x, w, b):
@@ -11269,8 +11333,7 @@ class TestVmGraphBackward(TestCase):
         self.assertEqual(names[-1], "GraphBackward")
 
     def test_the_forward_keeps_fewer_bytes_than_the_backward_reads(self, device):
-        import torch._cfg_rs as runtime
-
+        runtime = torch.vm._load_runtime()
         compiled, w, b = self.proven(back_pair, device)
         ((_, _, read, kept),) = [form for form in runtime.backward_forms() if form[1]]
         self.assertLess(kept, read)
