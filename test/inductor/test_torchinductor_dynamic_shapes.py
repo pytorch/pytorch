@@ -967,6 +967,25 @@ class TestInductorDynamic(DynamicShapesTestCase):
         ref = pad_same(x, (5, 5), (2, 2))
         self.assertEqual(res, ref, atol=0, rtol=0)
 
+    @onlyOn(GPU_TYPE)
+    def test_pad_to_multiple_hoists_size_floordiv(self, device):
+        def fn(x, block):
+            m, n = x.shape
+            padded = x.new_zeros(-(m // -block) * block, n)
+            padded[:m] = x
+            blocks = padded.view(-1, block, n)
+            scaled = blocks / blocks.abs().amax(dim=1, keepdim=True)
+            return scaled.view_as(padded)[:m].contiguous()
+
+        cfn = torch.compile(fn, dynamic=True)
+        x = torch.randn(1536, 512, device=device)
+        actual, (code, *_) = run_and_get_code(cfn, x, 128)
+        self.assertEqual(actual, fn(x, 128))
+        # The padded row count is computed once in the wrapper, not per element.
+        FileCheck().check_not("div_floor_integer").run(code)
+        x = torch.randn(576, 512, device=device)
+        self.assertEqual(cfn(x, 128), fn(x, 128))
+
     def test_slice_scatter(self, device):
         def fn(i):
             s3 = i.size(0)
