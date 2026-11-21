@@ -145,6 +145,12 @@ class LayerNorm(Module):
             and zeros (for biases). Default: ``True``
         bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
             :attr:`elementwise_affine` is ``True``). Default: ``True``
+        dim (int or list of ints, optional): the input dimension(s) to normalize over, one per
+            entry of :attr:`normalized_shape` (in the same order). If ``None`` (the default), the
+            last ``len(normalized_shape)`` dimensions are normalized. Use this to apply layer
+            normalization over a non-trailing axis, e.g. the channel axis of an ``(N, C, H, W)``
+            input, without permuting the tensor. Negative values are supported and are
+            recommended for inputs with an optional batch dimension. Default: ``None``
 
     Attributes:
         weight: the learnable weights of the module of shape
@@ -174,6 +180,10 @@ class LayerNorm(Module):
         >>> # as shown in the image below
         >>> layer_norm = nn.LayerNorm([C, H, W])
         >>> output = layer_norm(input)
+        >>>
+        >>> # Channels-only normalization of an (N, C, H, W) input, as used by ConvNeXt
+        >>> layer_norm = nn.LayerNorm(C, dim=1)
+        >>> output = layer_norm(input)  # same as permuting to (N, H, W, C), normalizing, and back
 
     .. image:: ../_static/img/nn/layer_norm.jpg
         :scale: 50 %
@@ -184,6 +194,7 @@ class LayerNorm(Module):
     normalized_shape: tuple[int, ...]
     eps: float
     elementwise_affine: bool
+    dim: list[int] | None
 
     def __init__(
         self,
@@ -193,6 +204,7 @@ class LayerNorm(Module):
         bias: bool = True,
         device=None,
         dtype=None,
+        dim: int | list[int] | tuple[int, ...] | None = None,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -202,6 +214,15 @@ class LayerNorm(Module):
         self.normalized_shape = tuple(normalized_shape)  # type: ignore[arg-type]
         self.eps = eps
         self.elementwise_affine = elementwise_affine
+        if dim is None:
+            self.dim = None
+        else:
+            self.dim = [dim] if isinstance(dim, numbers.Integral) else list(dim)  # type: ignore[list-item]
+            if len(self.dim) != len(self.normalized_shape):
+                raise ValueError(
+                    f"`dim` must name one dimension per entry of `normalized_shape`, "
+                    f"got dim={self.dim} for normalized_shape={self.normalized_shape}"
+                )
         if self.elementwise_affine:
             self.weight = Parameter(
                 torch.empty(self.normalized_shape, **factory_kwargs)
@@ -226,14 +247,17 @@ class LayerNorm(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         return F.layer_norm(
-            input, self.normalized_shape, self.weight, self.bias, self.eps
+            input, self.normalized_shape, self.weight, self.bias, self.eps, self.dim
         )
 
     def extra_repr(self) -> str:
-        return (
+        s = (
             "{normalized_shape}, eps={eps}, elementwise_affine={elementwise_affine}, "
             "bias={use_bias}".format(**self.__dict__, use_bias=self.bias is not None)
         )
+        if self.dim is not None:
+            s += f", dim={self.dim}"
+        return s
 
 
 class GroupNorm(Module):
