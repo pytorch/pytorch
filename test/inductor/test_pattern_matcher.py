@@ -48,7 +48,12 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
-from torch.testing._internal.common_device_type import skipCUDAIf
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+    onlyCUDA,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -4487,6 +4492,105 @@ class TestPatternMatcherLogging(LoggingTestCase):
             ]
             self.assertNotIn(torch.ops._test_pm.original_op.default, op_targets)
             self.assertIn(torch.ops._test_pm.replacement_op.default, op_targets)
+
+
+class TestAbsMaxPattern(TestCase):
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64, torch.int64)
+    @parametrize("dim", [0, -1])
+    @parametrize("keepdim", [False, True])
+    def test_abs_max_values(self, device, dtype, dim, keepdim):
+        def fn(x):
+            return x.abs().max(dim=dim, keepdim=keepdim).values
+
+        x = torch.randint(-32, 32, (16, 128), device=device, dtype=dtype)
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(actual, fn(x))
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+        if self.device_type == "cuda":
+            FileCheck().check_not("max_with_index").check_not("argmax").run(code)
+
+    def test_abs_max_special_values(self, device):
+        def fn(x):
+            return x.abs().max(dim=-1).values
+
+        nan, inf = float("nan"), float("inf")
+        data = [[-0.0, 0.0], [nan, -1.0], [1.0, nan], [-inf, inf]]
+        x = torch.tensor(data, device=device)
+        actual = torch.compile(fn, fullgraph=True)(x)
+        expected = fn(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(torch.signbit(actual[0]), torch.signbit(expected[0]))
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+
+    def test_abs_max_dynamic(self, device):
+        def fn(x):
+            return x.abs().max(dim=-1).values
+
+        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+        x = torch.randn(16, 128, device=device)
+        actual, (code,) = run_and_get_code(compiled, x)
+        self.assertEqual(actual, fn(x))
+        y = torch.randn(17, 193, device=device)
+        self.assertEqual(compiled(y), fn(y))
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+        if self.device_type == "cuda":
+            FileCheck().check_not("max_with_index").check_not("argmax").run(code)
+
+    def test_abs_max_shared_users(self, device):
+        def fn(x):
+            y = x.abs()
+            values = y.max(dim=-1).values
+            return y, values, values + 1
+
+        x = torch.randn(16, 128, device=device)
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(actual, fn(x))
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+        if self.device_type == "cuda":
+            FileCheck().check_not("max_with_index").check_not("argmax").run(code)
+
+    @parametrize("return_values", [False, True])
+    def test_abs_max_indices(self, device, return_values):
+        def fn(x):
+            result = x.abs().max(dim=-1)
+            return result if return_values else result.indices
+
+        x = torch.tensor([[-3.0, 3.0, 2.0], [1.0, -4.0, 4.0]], device=device)
+        actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(actual, fn(x))
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+
+    def test_abs_max_backward(self, device):
+        def fn(x):
+            return x.abs().max(dim=-1).values
+
+        x = torch.tensor(
+            [[-3.0, 3.0, 2.0], [1.0, -4.0, 4.0]], device=device, requires_grad=True
+        )
+        reference = x.detach().clone().requires_grad_()
+        actual = torch.compile(fn, fullgraph=True)(x)
+        expected = fn(reference)
+        self.assertEqual(actual, expected)
+        actual.sum().backward()
+        expected.sum().backward()
+        self.assertEqual(x.grad, reference.grad)
+
+    @onlyCUDA
+    @inductor_config.patch(strict_signed_zero=True)
+    @parametrize("use_abs", [False, True])
+    def test_max_signed_zero(self, device, use_abs):
+        def fn(x):
+            return (x.abs() if use_abs else x).max(dim=-1).values
+
+        x = torch.tensor([[-0.0, 0.0], [0.0, -0.0]], device=device)
+        actual = torch.compile(fn, fullgraph=True)(x)
+        expected = fn(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(torch.signbit(actual), torch.signbit(expected))
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], int(use_abs))
+
+
+instantiate_device_type_tests(TestAbsMaxPattern, globals(), only_for=("cpu", "cuda"))
 
 
 if __name__ == "__main__":
