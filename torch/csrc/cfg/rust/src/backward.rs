@@ -298,10 +298,10 @@ fn needs_tape(py: Python<'_>) -> PyResult<Option<&'static str>> {
 }
 
 // ---------------------------------------------------------------------------
-// The C API of version 16.
+// The C API, as far as a backward is derived with it.
 
 fn bapi() -> PyResult<&'static TcfgBackwardApi> {
-    capi::backward_api().ok_or_else(|| PyRuntimeError::new_err("torch._C has no C API of version 16: the backward of a graph needs it"))
+    capi::backward_api().ok_or_else(|| PyRuntimeError::new_err("torch.vm: the runtime was not handed the C API of torch._C"))
 }
 
 /// One kernel a tape saw.
@@ -1397,6 +1397,16 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
     };
     let nodes = Nodes::new(feeds, roots)?;
     ordered(&nodes, &readers)?;
+    // Where what each node gives goes: to another node of the graph, or
+    // to an input as one of the contributions.
+    let numbers: HashMap<usize, u32> = nodes.order.iter().enumerate().map(|(at, node)| (node.key(), at as u32)).collect();
+    for (number, leads) in nodes.next.iter().enumerate() {
+        let led = |(edge, lead): (usize, &Option<(usize, u32)>)| {
+            let slot = nodes.slots.get(&(number, edge as u32)).copied();
+            (if slot.is_some() { None } else { lead.and_then(|(key, _)| numbers.get(&key).copied()) }, slot)
+        };
+        joint.edges(number as u32, leads.iter().enumerate().map(led).collect());
+    }
     let rest: Vec<Bound<'py, PyAny>> = results.iter().filter(|result| !nodes.roots.iter().any(|root| root.is(*result))).cloned().collect();
     let mut flags = vec![true; nodes.roots.len()];
     flags.extend(vec![false; rest.len()]);
@@ -1436,7 +1446,7 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
                 let mut pattern: Vec<bool> = (0..many).map(|at| mask >> at & 1 == 1).collect();
                 let chosen: Vec<usize> = (0..many).filter(|at| pattern[*at]).collect();
                 pattern.extend(vec![false; rest.len()]);
-                let (ops, incoming, gives, takes) = match joint.part_program(py, &pattern, *way) {
+                let (ops, incoming, gives, takes) = match joint.part_program(py, &pattern, *way, None) {
                     Ok(found) => found,
                     Err(error) if error.is_instance_of::<PyValueError>(py) => continue,
                     Err(error) => return Err(Stop::Raised(error)),
@@ -1468,7 +1478,6 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
     // Eager's node of every value the backwards read, and which node of
     // the backward it is: what eager names where the value was written to
     // in place before a backward.
-    let numbers: HashMap<usize, u32> = nodes.order.iter().enumerate().map(|(at, node)| (node.key(), at as u32)).collect();
     for value in joint.read() {
         let Some(tensor) = joint.tensor(py, value) else {
             continue;
@@ -1713,7 +1722,7 @@ struct Plan {
     /// gradient: what eager's nodes look at, in the order the nodes run,
     /// each with whether the node that looks at it first is the one that
     /// gave it.
-    looked: Mutex<HashMap<(u32, Vec<bool>), Arc<Vec<(Value, bool)>>>>,
+    looked: Mutex<HashMap<(u32, Vec<bool>, Vec<bool>), Arc<Vec<(Value, bool)>>>>,
     /// Whether the forward can run again: it draws no random numbers and
     /// writes to no tensor from outside.
     again: bool,
@@ -1724,7 +1733,10 @@ struct Plan {
     /// and the values they take with what each is.
     behind: Vec<usize>,
     marks: Vec<(u32, Mark)>,
-    backs: Mutex<HashMap<(u32, Vec<bool>), Result<Arc<Back>, String>>>,
+    /// Per way of running a backward, set of roots that come with a
+    /// gradient and set of contributions that are asked for (none where
+    /// all are): the backward, or why there is none.
+    backs: Mutex<HashMap<(u32, Vec<bool>, Vec<bool>), Result<Arc<Back>, String>>>,
     export: Option<Py<PyAny>>,
     /// The autocast the forward ran under.
     cast: Cast,
@@ -1830,12 +1842,12 @@ impl Plan {
 
     /// The backward for the roots that came with a gradient, made when it
     /// is first asked for of the backward that was taken down.
-    fn back<'py>(&self, py: Python<'py>, way: u32, pattern: &[bool], saved: &[Bound<'py, PyAny>], grads: &[Bound<'py, PyAny>]) -> Result<Arc<Back>, Stop> {
-        let key = (way, pattern.to_vec());
+    fn back<'py>(&self, py: Python<'py>, way: u32, pattern: &[bool], needed: &[bool], saved: &[Bound<'py, PyAny>], grads: &[Bound<'py, PyAny>]) -> Result<Arc<Back>, Stop> {
+        let key = (way, pattern.to_vec(), needed.to_vec());
         if let Some(known) = self.backs.lock().unwrap().get(&key) {
             return known.clone().map_err(Stop::Refused);
         }
-        let made = self.make(py, way, pattern, saved, grads);
+        let made = self.make(py, way, pattern, needed, saved, grads);
         let kept = match &made {
             Ok(back) => Ok(back.clone()),
             Err(Stop::Refused(why)) => Err(why.clone()),
@@ -1845,10 +1857,11 @@ impl Plan {
         made
     }
 
-    fn make<'py>(&self, py: Python<'py>, way: u32, pattern: &[bool], saved: &[Bound<'py, PyAny>], grads: &[Bound<'py, PyAny>]) -> Result<Arc<Back>, Stop> {
+    fn make<'py>(&self, py: Python<'py>, way: u32, pattern: &[bool], needed: &[bool], saved: &[Bound<'py, PyAny>], grads: &[Bound<'py, PyAny>]) -> Result<Arc<Back>, Stop> {
         let mut whole = pattern.to_vec();
         whole.resize(self.joint.results_len(), false);
-        let (ops, incoming, gives, takes) = joint_says(py, self.joint.part_program(py, &whole, way))?;
+        let asked = (!needed.is_empty()).then_some(needed);
+        let (ops, incoming, gives, takes) = joint_says(py, self.joint.part_program(py, &whole, way, asked))?;
         let mut examples: Vec<Bound<'py, PyAny>> = Vec::new();
         for value in &takes {
             let Some(at) = self.saved.iter().position(|kept| kept == value) else {
@@ -1862,15 +1875,16 @@ impl Plan {
         Ok(Arc::new(Back { run, slots: gives.iter().map(|(slot, _)| *slot).collect(), takes }))
     }
 
-    /// What eager's nodes look at when a backward for these roots runs.
-    fn looked_at(&self, way: u32, pattern: &[bool]) -> Arc<Vec<(Value, bool)>> {
-        let key = (way, pattern.to_vec());
+    /// What eager's nodes look at when a backward for these roots and
+    /// these contributions (none: all of them) runs.
+    fn looked_at(&self, way: u32, pattern: &[bool], needed: &[bool]) -> Arc<Vec<(Value, bool)>> {
+        let key = (way, pattern.to_vec(), needed.to_vec());
         if let Some(known) = self.looked.lock().unwrap().get(&key) {
             return known.clone();
         }
         let mut whole = pattern.to_vec();
         whole.resize(self.joint.results_len(), false);
-        let found = Arc::new(self.joint.looked_at(&whole, way));
+        let found = Arc::new(self.joint.looked_at(&whole, way, (!needed.is_empty()).then_some(needed)));
         self.looked.lock().unwrap().insert(key, found.clone());
         found
     }
@@ -1969,10 +1983,10 @@ impl Kept {
 
     /// Raises what eager raises where a tensor a backward needs was written
     /// to in place behind the forward, for a backward that runs this way
-    /// for these roots.
-    fn unwritten(&self, py: Python<'_>, way: u32, pattern: &[bool]) -> PyResult<()> {
+    /// for these roots and these contributions.
+    fn unwritten(&self, py: Python<'_>, way: u32, pattern: &[bool], needed: &[bool]) -> PyResult<()> {
         let saved = self.held(py);
-        for (value, gave) in self.plan.looked_at(way, pattern).iter() {
+        for (value, gave) in self.plan.looked_at(way, pattern, needed).iter() {
             let Some(named) = self.plan.checked.get(value) else {
                 continue;
             };
@@ -2001,14 +2015,16 @@ impl Kept {
         Ok(())
     }
 
-    fn backward<'py>(&self, py: Python<'py>, grads: &[Option<Bound<'py, PyAny>>], twice: bool) -> PyResult<Vec<Option<Bound<'py, PyAny>>>> {
+    /// `needed` says per contribution whether the autograd engine asks for
+    /// it; where it asks for all, as a plain backward does, it is empty.
+    fn backward<'py>(&self, py: Python<'py>, grads: &[Option<Bound<'py, PyAny>>], needed: &[bool], twice: bool) -> PyResult<Vec<Option<Bound<'py, PyAny>>>> {
         let mut out: Vec<Option<Bound<'py, PyAny>>> = vec![None; self.plan.targets.len()];
         if grads.iter().all(Option::is_none) {
             return Ok(out);
         }
         let pattern: Vec<bool> = grads.iter().map(Option::is_some).collect();
         if twice {
-            self.unwritten(py, 0, &pattern)?;
+            self.unwritten(py, 0, &pattern, needed)?;
             return self.again(py, grads, out, true, "");
         }
         // The backward that was taken down as this thread runs one: with
@@ -2019,13 +2035,13 @@ impl Kept {
         } else if cast.same(&self.plan.cast) {
             1
         } else {
-            self.unwritten(py, 0, &pattern)?;
+            self.unwritten(py, 0, &pattern, needed)?;
             return self.again(py, grads, out, false, "the backward runs under an autocast that the forward did not run under");
         };
-        self.unwritten(py, way, &pattern)?;
+        self.unwritten(py, way, &pattern, needed)?;
         let given: Vec<Bound<'py, PyAny>> = grads.iter().flatten().cloned().collect();
         let saved: Vec<Bound<'py, PyAny>> = self.held(py).into_iter().map(|(tensor, _)| tensor).collect();
-        let back = match self.plan.back(py, way, &pattern, &saved, &given) {
+        let back = match self.plan.back(py, way, &pattern, needed, &saved, &given) {
             Ok(back) => back,
             Err(Stop::Refused(why)) => return self.again(py, grads, out, false, &why),
             Err(Stop::Cut(_)) => return self.again(py, grads, out, false, "the graph is cut"),
@@ -2043,10 +2059,10 @@ impl Kept {
             // engine's: what it raises is raised. One for some of them was
             // made of that one, with kernels that need not fit what comes
             // in here: eager's nodes run in its place, from now on.
-            Err(error) if pattern.iter().all(|came| *came) => return Err(error),
+            Err(error) if needed.is_empty() && pattern.iter().all(|came| *came) => return Err(error),
             Err(error) => {
                 let why = format!("its kernels do not fit: {}", error.value(py).to_string().lines().next().unwrap_or(""));
-                self.plan.backs.lock().unwrap().insert((way, pattern.clone()), Err(why.clone()));
+                self.plan.backs.lock().unwrap().insert((way, pattern.clone(), needed.to_vec()), Err(why.clone()));
                 return self.again(py, grads, out, false, &why);
             }
         };
@@ -2109,9 +2125,13 @@ impl Kept {
 }
 
 /// The node is handed gradients (it holds the GIL): one per root, null where
-/// none came. One new reference per contribution goes into `outs`.
-unsafe extern "C" fn node_backward(state: *mut c_void, grads: *const Obj, n_grads: u32, outs: *mut Obj, n_outs: u32, flags: u32) -> i32 {
+/// none came. One new reference per contribution goes into `outs`; `needed`
+/// says per contribution whether the autograd engine asks for it.
+unsafe extern "C" fn node_backward(state: *mut c_void, grads: *const Obj, n_grads: u32, outs: *mut Obj, n_outs: u32, needed: *const u8, flags: u32) -> i32 {
     let kept = &*(state as *const Kept);
+    let asked: Vec<bool> = (0..n_outs as usize).map(|at| *needed.add(at) != 0).collect();
+    // All of them, as a plain backward asks: the backward as it is.
+    let asked = if asked.iter().all(|needed| *needed) { Vec::new() } else { asked };
     Python::attach(|py| {
         let handed: Vec<Option<Bound<'_, PyAny>>> = (0..n_grads as usize)
             .map(|at| {
@@ -2119,7 +2139,7 @@ unsafe extern "C" fn node_backward(state: *mut c_void, grads: *const Obj, n_grad
                 (!grad.is_null()).then(|| Bound::<PyAny>::from_borrowed_ptr(py, grad))
             })
             .collect();
-        match kept.backward(py, &handed, flags & TCFG_RUN_ON_TAPE != 0) {
+        match kept.backward(py, &handed, &asked, flags & TCFG_RUN_ON_TAPE != 0) {
             Ok(given) if given.len() == n_outs as usize => {
                 for (at, item) in given.into_iter().enumerate() {
                     if let Some(item) = item {

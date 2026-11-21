@@ -10884,6 +10884,14 @@ def back_reads_input(a, w):
     return (a * a * w).tanh().exp().sum()
 
 
+def back_versions(x, w, b):
+    h = (x @ w + b).tanh()
+    low, high = torch.aminmax(h, dim=0)
+    top, _ = h.max(dim=1)
+    ordered, _ = h.sort(dim=1)
+    return low, high, top, ordered.cumsum(1), h.squeeze(), h
+
+
 def back_reader_keeps(x, a):
     h = (x @ a).tanh()
     return h, (h * h).sum() + (a * a).sum()
@@ -11433,6 +11441,79 @@ class TestVmGraphBackward(TestCase):
             # A form that is refused, and one that is proven.
             for fn in (back_multiplies, back_pair):
                 calls(self.staged(fn), fn)
+
+    def test_what_a_graph_gives_is_at_eagers_versions(self, device):
+        # The kernel of an operator may write to what it gives through the
+        # dispatcher (a reduction squeezes its result in place). Eager's
+        # autograd kernel runs it with the key that counts writes excluded,
+        # and so does the forward of a graph: a tensor it gives is at the
+        # version eager's is at, and so are the statistics of a batch norm.
+        compiled, w, b = self.proven(back_versions, device)
+        x = torch.randn(3, 4, device=device)
+        got, expected = compiled(x, w, b), back_versions(x, w, b)
+        self.alike(got, expected)
+        versions = [[tensor._version for tensor in given] for given in (got, expected)]
+        self.assertEqual(versions[0], versions[1])
+        torch.manual_seed(0)
+        nets = [BackConvNet().to(device), BackConvNet().to(device)]
+        nets[1].load_state_dict(nets[0].state_dict())
+        staged = self.staged(lambda net, x, y: net(x, y))
+        # How often each was written to before the calls is not the same
+        # for a module and one that was loaded with its state.
+        before = [[buffer._version for buffer in net.buffers()] for net in nets]
+        for at in range(8):
+            torch.manual_seed(at)
+            x = torch.randn(4, 3, 8, 8, device=device)
+            y = torch.randint(0, 5, (4,), device=device)
+            losses = [staged(nets[0], x, y), nets[1](x, y)]
+            self.assertEqual(losses[0]._version, losses[1]._version)
+            written = []
+            for net, start in zip(nets, before):
+                now = [buffer._version for buffer in net.buffers()]
+                written.append([version - was for version, was in zip(now, start)])
+            self.assertEqual(written[0], written[1])
+        self.assertEqual(self.states(), ["the engine's backward"])
+
+    def test_a_backward_for_some_inputs_runs_what_eager_runs(self, device):
+        compiled, w, b = self.proven(back_pair, device)
+        x = torch.randn(3, 4, device=device)
+        for inputs in ((w,), (b,), (w, b)):
+            for accumulated in (False, True):
+                found = []
+                for run in (compiled, back_pair):
+                    w.grad = b.grad = None
+                    first, second = run(x, w, b)
+                    if accumulated:
+                        (first + second).backward(inputs=list(inputs))
+                        left = [p.grad for p in (w, b)]
+                        found.append([None if g is None else g.clone() for g in left])
+                    else:
+                        found.append(list(torch.autograd.grad(first + second, inputs)))
+                self.alike(found[0], found[1])
+
+        # Where the gradients of some inputs are asked for, the autograd
+        # engine runs the nodes on the way to them and no others, and so
+        # does the node of a graph: a tensor that only another node kept
+        # and that was written to in place is not looked at.
+        def use(fn, at, some):
+            torch.manual_seed(at)
+            leaf = torch.randn(4, 4, device=device, requires_grad=True)
+            weight = torch.randn(4, 4, device=device, requires_grad=True)
+            made = leaf * 2
+            loss = fn(made, weight)
+            with torch.no_grad():
+                made[0].zero_()
+            if some:
+                return torch.autograd.grad(loss, [weight])
+            with self.assertRaises(RuntimeError) as caught:
+                loss.backward()
+            return str(caught.exception)
+
+        staged = self.staged(back_reads_input)
+        for at in range(8):
+            self.alike(use(staged, at, True), use(back_reads_input, at, True))
+            self.assertEqual(use(staged, at, False), use(back_reads_input, at, False))
+        self.assertEqual(self.states(), ["the engine's backward"])
 
     def test_a_result_that_is_a_view_is_eagers_view(self, device):
         def use(fn, x, w, b):
