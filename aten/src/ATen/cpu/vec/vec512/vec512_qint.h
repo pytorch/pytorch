@@ -11,6 +11,7 @@
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
 #include <c10/util/quint8.h>
+#include <torch/headeronly/util/Exception.h>
 
 #include <array>
 #include <cmath>
@@ -78,7 +79,7 @@ inline __m512i pack_saturate_and_clamp<int32_t>(
     int32_t min_val [[maybe_unused]],
     int32_t max_val [[maybe_unused]]) {
   // This function is for linkage only, will not be used
-  TORCH_CHECK(false, "pack_saturate_and_clamp<int32_t> is not supported");
+  STD_TORCH_CHECK(false, "pack_saturate_and_clamp<int32_t> is not supported");
   return __m512i{};
 }
 
