@@ -10898,7 +10898,13 @@ class TestVmGraphBackward(TestCase):
             return gw.detach()
 
         got, expected = self.both(back_pair, device, use)
-        self.alike(got, expected)
+        # The gradient that is differentiated again is eager's bit for bit.
+        # What the second backward leaves is computed by eager's own nodes
+        # for the forward run once more on the tape: the gradients that
+        # meet there are not always added in eager's order.
+        self.alike(got[0], expected[0])
+        for ours, eagers in zip(got[1], expected[1]):
+            self.assertEqual(ours, eagers, rtol=1e-5, atol=1e-6)
         # A graph that draws cannot be run again on the tape: it says so.
         got, expected = self.both(back_drops, device, use)
         self.assertEqual(got[0][0], "RuntimeError")
