@@ -10532,6 +10532,20 @@ class GraphEndTensor(torch.Tensor):
             GRAPH_END_STATE[0] += 1.0
 
 
+def graph_reads_again(x, at=0):
+    # The same globals and the same attributes of modules are read many
+    # times over; `GRAPH_READS` is a module at first and an object with
+    # the same attributes later.
+    h = torch.nn.functional.relu(x) + GRAPH_READS.functional.relu(x)
+    h = torch.nn.functional.tanh(h) * GRAPH_READS.functional.tanh(h)
+    h = torch.nn.functional.relu(h) + GRAPH_READS.functional.relu(h)
+    return torch.nn.functional.tanh(h) * GRAPH_READS.scale
+
+
+GRAPH_READS = torch.nn
+torch.nn.scale = 2.0
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -12161,6 +12175,42 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
         self.assertEqual(found["noted"], ["function"])
         self.assertTrue(found["same"])
         self.assertEqual(found["graphs"], [[4, "compiled", True]])
+
+    def test_a_read_in_front_of_a_graph_is_made_once(self, device):
+        # A global, and an attribute of a module, that a path reads more
+        # than once in front of what stands for its operations is read
+        # once per call: nothing changes between those reads. What is
+        # read is read at every call (a global that is bound anew between
+        # calls is followed), and where it is read of what is no module
+        # (an object with the same attributes), every read is made.
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(3, 4, device=device)
+        global GRAPH_READS
+        functional = torch.nn.functional
+        plain = types_module.SimpleNamespace(functional=functional, scale=2.0)
+        other = {"relu": functional.relu, "tanh": functional.sigmoid}
+        swapped = types_module.SimpleNamespace(scale=2.0)
+        swapped.functional = types_module.SimpleNamespace(**other)
+        fn = graph_reads_again
+        try:
+            for behind in ((), (keep,)):
+                passes = (*DEFAULT, P.Graphs(), *behind)
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                for read in (torch.nn, plain, swapped, torch.nn, plain):
+                    GRAPH_READS = read
+                    for at in range(8):
+                        self.assertEqual(compiled(x * at), fn(x * at), atol=0, rtol=0)
+                if behind:
+                    listed = torch.vm.regions(compiled)
+                    graphs = [g for g in listed if "ops" in g and "within" not in g]
+                    found = [(g["ops"], g["why"]) for g in graphs]
+                    expected = [(11, "the function returns")]
+                    self.assertEqual(found, expected, msg=str(graphs))
+                    self.assertGreaterEqual(graphs[0]["hits"], 30)
+        finally:
+            GRAPH_READS = torch.nn
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
