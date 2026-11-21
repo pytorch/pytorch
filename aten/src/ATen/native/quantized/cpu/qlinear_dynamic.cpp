@@ -528,7 +528,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   auto input_dims = input_reshaped.sizes().vec();
   auto input_data_type = dnnl::memory::data_type::f32;
   auto input_desc = ideep::tensor::desc(input_dims, input_data_type);
-  ideep::attr_t op_attr = ReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
+  at::native::mkldnn::Attr op_attr = ReluFused ? at::native::mkldnn::Attr::fuse_relu() : at::native::mkldnn::Attr();
   ideep::tensor x;
   x.init(input_desc, input_contig.data_ptr());
   // Find quantization parameters
@@ -694,7 +694,7 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
       tensor::desc(onednn_bias.value().get_dims(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::any) :
       empty_tensor_desc;
   // Get op attr for primitive
-  auto op_attr = relu_fused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
+  auto op_attr = relu_fused ? at::native::mkldnn::Attr::fuse_relu() : at::native::mkldnn::Attr();
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto engine = ideep::engine::cpu_engine();
   auto primitive_desc = with_bias ?

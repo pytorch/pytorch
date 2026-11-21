@@ -25,7 +25,7 @@ c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
     std::string attr) {
   auto it = fusion_attr_map.find(attr);
   TORCH_CHECK(it != fusion_attr_map.end(), "Fusion behavior undefined.");
-  ideep::attr_t op_attr = it->second;
+  Attr op_attr = it->second;
 
   return mkldnn::MkldnnConvOpContext::create_context(
       std::move(weight),
@@ -46,7 +46,7 @@ ContextConv create(
     const IntArrayRef dilation,
     const int64_t groups,
     const IntArrayRef input_size,
-    const ideep::attr_t& attr) {
+    const Attr& attr) {
   auto k = weight.ndimension();
   int64_t dim = k - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
@@ -101,7 +101,7 @@ static void _mkldnn_convolution_out(
     IntArrayRef dilation,
     IntArrayRef output_sizes,
     int64_t groups,
-    const ideep::attr_t& attr = ideep::attr_t()) {
+    const Attr& attr = Attr()) {
   if (b.has_value()) {
     mkldnn::convolution_forward_compute_v2(
         x,
@@ -150,7 +150,7 @@ static void mkldnn_convolution_out(
     IntArrayRef dilation,
     IntArrayRef output_sizes,
     int64_t groups,
-    const ideep::attr_t& attr = ideep::attr_t()) {
+    const Attr& attr = Attr()) {
   c10::MaybeOwned<Tensor> bias_maybe_owned =
       at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;

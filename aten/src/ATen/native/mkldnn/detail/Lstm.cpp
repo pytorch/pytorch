@@ -28,7 +28,7 @@ void lstm_forward_inference(
   auto weights_layer_desc = weights_layer.get_desc().to_format_any();
   auto weights_iter_desc = weights_iter.get_desc().to_format_any();
 
-  ideep::attr_t op_attr;
+  Attr op_attr;
   if (src_layer.get_data_type() == dnnl::memory::data_type::u8) {
     weights_layer_desc = ideep::tensor::desc(
         weights_layer.get_dims(),
@@ -106,7 +106,7 @@ lstm_forward_inference_expected_weights_desc(
   auto weights_layer_desc = weights_layer.get_desc().to_format_any();
   auto weights_iter_desc = weights_iter.get_desc().to_format_any();
 
-  ideep::attr_t op_attr;
+  Attr op_attr;
   if (src_layer.get_data_type() == dnnl::memory::data_type::u8) {
     weights_layer_desc = ideep::tensor::desc(
         weights_layer.get_dims(),
