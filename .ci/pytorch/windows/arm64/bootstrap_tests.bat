@@ -6,7 +6,9 @@ for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\
 where cl.exe
 
 :: create virtual environment
-python -m venv .venv
+if not defined DESIRED_PYTHON_EXE set DESIRED_PYTHON_EXE=python
+"%DESIRED_PYTHON_EXE%" -m venv .venv
+if errorlevel 1 exit /b 1
 echo * > .venv\.gitignore
 call .\.venv\Scripts\activate
 where python
