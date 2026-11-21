@@ -248,6 +248,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
             empty(0, device=device) for _ in range(2)
         )
 
+    kv_num_blocks = ir.ExternKernel.require_contiguous(kv_num_blocks)
+    kv_indices = ir.ExternKernel.require_contiguous(kv_indices)
+    if full_kv_num_blocks is not None:
+        full_kv_num_blocks = ir.ExternKernel.require_contiguous(full_kv_num_blocks)
+        full_kv_indices = ir.ExternKernel.require_contiguous(full_kv_indices)
+
     (
         query,
         key,
