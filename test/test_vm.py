@@ -6082,6 +6082,37 @@ def graph_rated(x, rate):
     return ((x.sin() * rate).cos() + rate).tanh().exp()
 
 
+class GraphCollides:
+    """A key whose hash is that of "a", and that says when it is compared."""
+
+    def __init__(self):
+        self.log = []
+
+    def __hash__(self):
+        return hash("a")
+
+    def __eq__(self, other):
+        self.log.append("eq")
+        return False
+
+
+def graph_looks_up_a_key(x, table, members, asked, flag):
+    y = (x.sin() + 1).cos()
+    scale = table["a"]
+    there = "a" in table, "a" in members
+    got = table.get("a")
+    if flag:
+        y = y + 1
+    return (y * scale).tanh().exp(), there, got
+
+
+def graph_reads_a_table(x, table, members):
+    y = x.sin()
+    scale = table["a"]
+    there = "a" in table, "a" in members
+    return ((y + 1).cos() * scale).tanh().exp(), there
+
+
 def graph_paths(case, device):
     """A function whose graph goes through its blocks, and calls of it."""
     make = functools.partial(torch.randn, device=device)
@@ -7661,6 +7692,79 @@ class TestVmGraphResults(TestCase):
             torch.use_deterministic_algorithms(False)
         (graph,) = [r for r in torch.vm.regions(compiled) if "ops" in r]
         self.assertEqual((graph["variants"], graph["exports"]), (4, 4))
+
+    def same_as_eager(self, fn, make, calls=4):
+        """`fn` under torch.vm, with `Graphs()` alone and with a pass that
+        returns the graph, each on arguments that `make` makes anew for
+        every call, against eager on others it makes: what is returned, or
+        what is raised and with which text, and what the arguments say was
+        asked of them (`log`)."""
+
+        def keep(gm, input_types):
+            return gm
+
+        def outcome(function, args):
+            try:
+                return function(*args)
+            except Exception as error:
+                return type(error).__name__, str(error)
+
+        def alike(got, expected):
+            self.assertIs(type(got), type(expected), f"{got!r} for {expected!r}")
+            if isinstance(expected, torch.Tensor):
+                self.assertEqual(got, expected, atol=0, rtol=0)
+            elif isinstance(expected, (tuple, list)):
+                self.assertEqual(len(got), len(expected))
+                for one, other in zip(got, expected):
+                    alike(one, other)
+            else:
+                self.assertEqual(got, expected)
+
+        for behind in ((), (keep,)):
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            for _ in range(calls):
+                mine, theirs = make(), make()
+                alike(outcome(compiled, mine), outcome(fn, theirs))
+                asked = [getattr(arg, "log", None) for arg in mine]
+                self.assertEqual(asked, [getattr(arg, "log", None) for arg in theirs])
+
+    def test_a_key_that_is_compared_in_python_is_compared_once(self, device):
+        x = torch.randn(3, 4, device=device)
+        # A dict and a set with a key of a class that has an `__eq__` and the
+        # hash of the text that is looked up: looking the text up asks that
+        # key, so it is no instruction of a path, which could run once more
+        # where the path gives up behind it (the flag is another one then).
+        made = []
+
+        def make():
+            made.append(None)
+            key, flag = GraphCollides(), ((len(made) - 1) // 2) % 8 in (3, 5, 6)
+            return x, {key: 1.0, "a": 2.0}, {key, "a"}, key, flag
+
+        self.same_as_eager(graph_looks_up_a_key, make, calls=8)
+
+    def test_a_key_that_comes_to_be_compared_in_python_is_compared_once(self, device):
+        def keep(gm, input_types):
+            return gm
+
+        # The graph is found with a dict and a set of texts. Ones that then
+        # hold a key of a class with an `__eq__` and the hash of the text
+        # that is looked up ask that key: such a lookup is no instruction
+        # that runs out of its place, where it would run once more on a call
+        # that nothing was exported for (a tensor of another type).
+        passes = (*DEFAULT, P.Graphs(), keep)
+        fn = graph_reads_a_table
+        compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+        x = torch.randn(3, 4, device=device)
+        for _ in range(6):
+            compiled(x, {"b": 1.0, "a": 2.0}, {"b", "a"})
+        for other in (x, x.double(), x[0], x.long(), x):
+            mine, theirs = GraphCollides(), GraphCollides()
+            got, there = compiled(other, {mine: 1.0, "a": 2.0}, {mine, "a"})
+            expected = fn(other, {theirs: 1.0, "a": 2.0}, {theirs, "a"})
+            self.assertEqual(got, expected[0], atol=0, rtol=0)
+            self.assertEqual((there, mine.log), (expected[1], theirs.log))
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
