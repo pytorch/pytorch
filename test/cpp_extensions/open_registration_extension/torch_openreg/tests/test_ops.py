@@ -684,5 +684,111 @@ class TestCustomAutogradFunctions(TestCase):
 instantiate_device_type_tests(TestFlexAttention, globals(), only_for="openreg")
 
 
+class TestStructuredCodegen(TestCase):
+    """maximum.out and minimum.out are registered for openreg through torchgen
+    (gen_backend_stubs) with structured: true + use_out_as_primary: true; see
+    csrc/aten/openreg_native_functions.yaml and csrc/aten/OpenRegStructured.cpp.
+    Both reuse aten's native meta and only provide impl(). These exercise the
+    generated structured wrappers end to end."""
+
+    def test_maximum_functional(self):
+        """Functional variant: out-as-primary allocates an out and reuses it."""
+        x = torch.tensor([1.0, 5.0, 3.0], device="openreg")
+        y = torch.tensor([4.0, 2.0, 6.0], device="openreg")
+        z = torch.maximum(x, y)
+        self.assertEqual(z.device.type, "openreg")
+        self.assertEqual(z.cpu(), torch.tensor([4.0, 5.0, 6.0]))
+
+    def test_maximum_out(self):
+        """Out variant: the wrapper redirects straight to the impl _out call."""
+        x = torch.tensor([1.0, 5.0, 3.0], device="openreg")
+        y = torch.tensor([4.0, 2.0, 6.0], device="openreg")
+        out = torch.empty(3, device="openreg")
+        ret = torch.maximum(x, y, out=out)
+        self.assertEqual(ret.cpu(), torch.tensor([4.0, 5.0, 6.0]))
+        self.assertEqual(out.cpu(), torch.tensor([4.0, 5.0, 6.0]))
+
+    def test_minimum_functional(self):
+        """Functional variant on a structured op: out-as-primary allocates an out
+        and reuses it. Broadcasting checks the native meta computed the shape."""
+        x = torch.tensor([[1.0, 5.0, 3.0]], device="openreg")  # (1, 3)
+        y = torch.tensor([[4.0], [2.0]], device="openreg")  # (2, 1)
+        z = torch.minimum(x, y)  # broadcasts to (2, 3)
+        self.assertEqual(z.device.type, "openreg")
+        self.assertEqual(z.shape, torch.Size([2, 3]))
+        self.assertEqual(z.cpu(), torch.tensor([[1.0, 4.0, 3.0], [1.0, 2.0, 2.0]]))
+
+    def test_minimum_out(self):
+        """Out variant: the wrapper drives op.meta() + op.impl()."""
+        x = torch.tensor([1.0, 5.0, 3.0], device="openreg")
+        y = torch.tensor([4.0, 2.0, 6.0], device="openreg")
+        out = torch.empty(3, device="openreg")
+        ret = torch.minimum(x, y, out=out)
+        self.assertEqual(ret.cpu(), torch.tensor([1.0, 2.0, 3.0]))
+        self.assertEqual(out.cpu(), torch.tensor([1.0, 2.0, 3.0]))
+
+    def test_div_out_as_primary_functional(self):
+        """Functional variant: allocates an out and reuses it (no temp-copy)."""
+        x = torch.tensor([6.0, 8.0], device="openreg")
+        y = torch.tensor([2.0, 4.0], device="openreg")
+        z = torch.div(x, y)
+        self.assertEqual(z.device.type, "openreg")
+        self.assertEqual(z.cpu(), torch.tensor([3.0, 2.0]))
+
+    def test_div_out_as_primary_out(self):
+        """Out variant: wrapper redirects straight to the backend div_out."""
+        x = torch.tensor([6.0, 8.0], device="openreg")
+        y = torch.tensor([2.0, 4.0], device="openreg")
+        out = torch.empty(2, device="openreg")
+        torch.div(x, y, out=out)
+        self.assertEqual(out.cpu(), torch.tensor([3.0, 2.0]))
+
+    def test_div_out_as_primary_inplace(self):
+        """Inplace variant: aten's composite runs meta(), then feeds self into div_out."""
+        x = torch.tensor([6.0, 8.0], device="openreg")
+        y = torch.tensor([2.0, 4.0], device="openreg")
+        x.div_(y)
+        self.assertEqual(x.cpu(), torch.tensor([3.0, 2.0]))
+
+    def test_div_inplace_matches_cpu_errors(self):
+        """div_ goes through aten's meta(), so invalid inplace calls raise as on CPU
+        instead of resizing self or silently casting into it."""
+        x = torch.ones(1, 3, device="openreg")
+        with self.assertRaisesRegex(RuntimeError, "doesn't match the broadcast shape"):
+            x.div_(torch.ones(2, 3, device="openreg"))
+        i = torch.ones(3, dtype=torch.long, device="openreg")
+        with self.assertRaisesRegex(
+            RuntimeError, "can't be cast to the desired output type"
+        ):
+            i.div_(torch.full((3,), 2.0, device="openreg"))
+
+    def test_angle_derived_functional(self):
+        """angle has no aten structured or composite kernel, so angle() is derived
+        from angle_out: the kernel allocates the undefined out with the real dtype."""
+        x = torch.tensor([1, -2, 3], device="openreg")
+        z = torch.angle(x)
+        self.assertEqual(z.device.type, "openreg")
+        self.assertEqual(z.dtype, torch.angle(x.cpu()).dtype)
+        self.assertEqual(z.cpu(), torch.angle(x.cpu()))
+
+    def test_generated_registrations(self):
+        """The CPU fallback would return the same values without these kernels, so
+        check the registrations directly: structured ops get every variant, plain
+        .out ops get the .out plus only what aten does not already provide."""
+        has = torch._C._dispatch_has_kernel_for_dispatch_key
+        for op in (
+            "aten::maximum",
+            "aten::maximum.out",
+            "aten::minimum",
+            "aten::minimum.out",
+            "aten::div.out",
+            "aten::angle",
+            "aten::angle.out",
+        ):
+            self.assertTrue(has(op, "PrivateUse1"), op)
+        for op in ("aten::div.Tensor", "aten::div_.Tensor"):
+            self.assertFalse(has(op, "PrivateUse1"), op)
+
+
 if __name__ == "__main__":
     run_tests()
