@@ -1397,6 +1397,7 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "MAPPING_KEYS_CHECK",
         "NATIVE_METHOD_MATCH",
         "NONE_MATCH",
+        "NOT_ALIASING",
         "NOT_NONE_MATCH",
         "NOT_PRESENT_IN_GENERIC_DICT",
         "NO_TANGENT_MATCH",
