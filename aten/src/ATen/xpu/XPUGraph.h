@@ -8,6 +8,8 @@
 #include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUGraphsC10Utils.h>
 #include <c10/xpu/XPUStream.h>
+#include <mutex>
+#include <vector>
 
 namespace at::xpu {
 
@@ -21,6 +23,7 @@ using xpuGraphExec_t = sycl::ext::oneapi::experimental::command_graph<
 
 struct TORCH_XPU_API XPUGraphImpl : public at::GraphImplInterface {
   XPUGraphImpl(const GraphImplArgs& args = {});
+  XPUGraphImpl(const GraphImplArgs& args, int64_t num_rng_states);
   ~XPUGraphImpl() override;
 
   C10_DISABLE_COPY_AND_ASSIGN(XPUGraphImpl);
@@ -35,12 +38,19 @@ struct TORCH_XPU_API XPUGraphImpl : public at::GraphImplInterface {
   void capture_end() override;
   void instantiate() override;
   void replay() override;
+  std::vector<at::Tensor> get_rng_state_buffers() const override;
   void reset() override;
   MempoolId_t pool() const override;
   void enable_debug_mode() override;
   void debug_dump(const std::string& debug_path) override;
   xpuGraph_t* raw_xpu_graph();
   xpuGraphExec_t* raw_xpu_graph_exec();
+
+ private:
+  friend struct at::XPUGeneratorState;
+
+  at::XPUGeneratorCaptureState* get_generator_capture_state(
+      at::XPUGeneratorState& state);
 
  protected:
   std::unique_ptr<xpuGraph_t> graph_;
@@ -53,9 +63,14 @@ struct TORCH_XPU_API XPUGraphImpl : public at::GraphImplInterface {
   MempoolId_t mempool_id_;
   at::xpu::XPUStream capture_stream_;
 
-  // GeneratorState and whole graph offset increments mapping
-  ska::flat_hash_map<c10::intrusive_ptr<at::XPUGeneratorState>, uint64_t>
-      captured_generator_states_;
+  struct CapturedGeneratorState {
+    c10::intrusive_ptr<at::XPUGeneratorCaptureState> capture_state;
+    c10::intrusive_ptr<at::XPUGeneratorState> generator_state;
+    uint64_t wholegraph_increment{0};
+  };
+  std::vector<CapturedGeneratorState> captured_generator_states_;
+  std::mutex captured_generator_states_mutex_;
+  int64_t num_rng_states_;
 
   static constexpr c10::DeviceIndex UNDEFINED_DEVICE = -1;
   c10::DeviceIndex capture_dev_{UNDEFINED_DEVICE};
@@ -64,10 +79,12 @@ struct TORCH_XPU_API XPUGraphImpl : public at::GraphImplInterface {
 };
 
 struct TORCH_XPU_API XPUGraph {
-  XPUGraph(bool keep_graph = false) {
+  XPUGraph(bool keep_graph = false) : XPUGraph(keep_graph, 8) {}
+
+  XPUGraph(bool keep_graph, int64_t num_rng_states) {
     GraphImplArgs args;
     args.keep_graph = keep_graph;
-    impl_ = std::make_unique<XPUGraphImpl>(args);
+    impl_ = std::make_unique<XPUGraphImpl>(args, num_rng_states);
   }
   ~XPUGraph() = default;
 
@@ -93,6 +110,9 @@ struct TORCH_XPU_API XPUGraph {
   }
   void replay() {
     impl_->replay();
+  }
+  std::vector<at::Tensor> get_rng_state_buffers() const {
+    return impl_->get_rng_state_buffers();
   }
   void reset() {
     impl_->reset();

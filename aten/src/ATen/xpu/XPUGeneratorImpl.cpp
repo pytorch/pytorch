@@ -5,12 +5,8 @@
 #include <ATen/xpu/XPUGraph.h>
 #include <ATen/xpu/XPUGraphsUtils.h>
 #include <c10/core/InferenceMode.h>
-#include <c10/core/StreamGuard.h>
 #include <c10/util/CallOnce.h>
-#include <c10/xpu/XPUCachingAllocator.h>
-#include <c10/xpu/XPUException.h>
 #include <c10/xpu/XPUFunctions.h>
-#include <memory>
 #include <vector>
 
 constexpr uint64_t PHILOX_ROUND_SIZE = 4;
@@ -79,48 +75,30 @@ c10::intrusive_ptr<XPUGeneratorState> XPUGeneratorState::clone() {
 void XPUGeneratorState::increase(uint64_t increment) {
   increment = ((increment + PHILOX_ROUND_SIZE - 1) / PHILOX_ROUND_SIZE) *
       PHILOX_ROUND_SIZE;
-  auto capture_id = at::xpu::currentStreamCaptureId();
-  if (capture_id.has_value()) {
-    get_capture_state(*capture_id, true)->increase(increment);
-  } else {
-    TORCH_INTERNAL_ASSERT(
-        philox_offset_per_thread_ % 4 == 0,
-        "RNG offset must be a multiple of 4.");
-    philox_offset_per_thread_ += increment;
-  }
+  TORCH_INTERNAL_ASSERT(
+      philox_offset_per_thread_ % 4 == 0,
+      "RNG offset must be a multiple of 4.");
+  philox_offset_per_thread_ += increment;
 }
 
-void XPUGeneratorCaptureState::initialize() {
+void XPUGeneratorCaptureState::initialize(c10::DeviceIndex device) {
   if (is_initialized()) {
     return;
   }
 
-  static auto& allocation_queues =
-      *new std::vector<std::unique_ptr<sycl::queue>>(c10::xpu::device_count());
-  static std::mutex allocation_mutex;
-  std::lock_guard<std::mutex> lock(allocation_mutex);
-  auto device = c10::xpu::current_device();
-  auto& queue = allocation_queues[device];
-  if (!queue) {
-    queue = std::make_unique<sycl::queue>(
-        c10::xpu::get_device_context(),
-        c10::xpu::get_raw_device(device),
-        c10::xpu::asyncHandler,
-        sycl::property_list{sycl::property::queue::in_order{}});
-  }
-  auto stream = c10::xpu::getStreamFromExternal(queue.get(), device);
-  c10::StreamGuard stream_guard(stream);
   c10::InferenceMode inference_guard(false);
-  auto options = at::TensorOptions().device(at::kXPU).dtype(at::kLong);
+  auto options =
+      at::TensorOptions().device(at::Device(at::kXPU, device)).dtype(at::kLong);
   seed_extragraph_ = at::empty({1}, options);
   offset_extragraph_ = at::empty({1}, options);
   seed_extragraph_.storage().unsafeGetStorageImpl()->set_resizable(false);
   offset_extragraph_.storage().unsafeGetStorageImpl()->set_resizable(false);
-  stream.synchronize();
   offset_intragraph_ = 0;
 }
 
 void XPUGeneratorCaptureState::increase(uint64_t increment) {
+  increment = ((increment + PHILOX_ROUND_SIZE - 1) / PHILOX_ROUND_SIZE) *
+      PHILOX_ROUND_SIZE;
   TORCH_INTERNAL_ASSERT(
       offset_intragraph_ % 4 == 0, "RNG offset must be a multiple of 4.");
   TORCH_INTERNAL_ASSERT(
@@ -141,72 +119,31 @@ void XPUGeneratorCaptureState::setup_for_replay(
   TORCH_INTERNAL_ASSERT(is_initialized(), "Capture state not initialized");
   seed_extragraph_.fill_(static_cast<int64_t>(seed));
   offset_extragraph_.fill_(static_cast<int64_t>(offset));
-  auto stream = c10::xpu::getCurrentXPUStream();
-  c10::xpu::XPUCachingAllocator::recordStream(
-      seed_extragraph_.storage().data_ptr(), stream);
-  c10::xpu::XPUCachingAllocator::recordStream(
-      offset_extragraph_.storage().data_ptr(), stream);
 }
 
 XPUGeneratorCaptureState* XPUGeneratorState::get_capture_state(
-    size_t capture_id,
-    bool create_if_not_found) {
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto it = capture_states_.find(capture_id);
-    if (it != capture_states_.end()) {
-      return it->second.get();
-    }
-    if (!create_if_not_found) {
-      return nullptr;
-    }
-  }
+    size_t capture_id) {
   auto* graph = xpu::get_graph_from_capture_id(capture_id);
   TORCH_CHECK(
       graph != nullptr,
       "RNG op during graph capture but could not find the XPUGraph object.");
-  auto capture_state = make_intrusive<XPUGeneratorCaptureState>();
-  capture_state->initialize();
-  graph->register_generator_state(
-      c10::intrusive_ptr<XPUGeneratorState>::reclaim_copy(this));
-  std::lock_guard<std::mutex> lock(mutex_);
-  auto result = capture_states_.emplace(capture_id, std::move(capture_state));
-  return result.first->second.get();
-}
-
-void XPUGeneratorState::remove_capture_state(size_t capture_id) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  capture_states_.erase(capture_id);
-}
-
-uint64_t XPUGeneratorState::capture_epilogue(size_t capture_id) {
-  auto* capture_state = get_capture_state(capture_id);
-  return capture_state ? capture_state->finalize() : 0;
+  return graph->get_generator_capture_state(*this);
 }
 
 void XPUGeneratorState::replay_prologue(
-    size_t capture_id,
+    XPUGeneratorCaptureState& capture_state,
     uint64_t wholegraph_increment) {
   at::xpu::assertNotCapturing(
       "Cannot prepare for replay during capturing stage.");
-  if (wholegraph_increment == 0) {
-    return;
-  }
   uint64_t replay_seed = 0;
   uint64_t replay_offset = 0;
-  c10::intrusive_ptr<XPUGeneratorCaptureState> capture_state;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto it = capture_states_.find(capture_id);
-    TORCH_INTERNAL_ASSERT(
-        it != capture_states_.end(),
-        "replay_prologue called but no capture state found for this capture_id");
-    capture_state = it->second;
     replay_seed = seed_;
     replay_offset = philox_offset_per_thread_;
     philox_offset_per_thread_ += wholegraph_increment;
   }
-  capture_state->setup_for_replay(replay_seed, replay_offset);
+  capture_state.setup_for_replay(replay_seed, replay_offset);
 }
 
 XPUGeneratorImpl::XPUGeneratorImpl(DeviceIndex device_index)
@@ -329,7 +266,7 @@ void XPUGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
     std::lock_guard<std::mutex> lock(state_->mutex_);
     state_->philox_offset_per_thread_ = offset;
   } else {
-    state_->get_capture_state(*capture_id, true)->offset_intragraph_ = offset;
+    state_->get_capture_state(*capture_id)->offset_intragraph_ = offset;
   }
 }
 
@@ -339,7 +276,7 @@ uint64_t XPUGeneratorImpl::philox_offset_per_thread() const {
     std::lock_guard<std::mutex> lock(state_->mutex_);
     return state_->philox_offset_per_thread_;
   } else {
-    return state_->get_capture_state(*capture_id, true)->offset_intragraph_;
+    return state_->get_capture_state(*capture_id)->offset_intragraph_;
   }
 }
 
@@ -358,9 +295,9 @@ void XPUGeneratorImpl::register_graph(xpu::XPUGraphImpl* graph) {
 PhiloxXpuState XPUGeneratorImpl::philox_xpu_state(uint64_t increment) {
   auto capture_id = at::xpu::currentStreamCaptureId();
   if (capture_id.has_value()) {
-    auto* capture_state = state_->get_capture_state(*capture_id, true);
+    auto* capture_state = state_->get_capture_state(*capture_id);
     uint64_t offset = capture_state->offset_intragraph_;
-    state_->increase(increment);
+    capture_state->increase(increment);
     return PhiloxXpuState(
         capture_state->seed_extragraph_.data_ptr<int64_t>(),
         capture_state->offset_extragraph_.data_ptr<int64_t>(),
@@ -371,6 +308,31 @@ PhiloxXpuState XPUGeneratorImpl::philox_xpu_state(uint64_t increment) {
     state_->increase(increment);
     return PhiloxXpuState(state_->seed_, offset);
   }
+}
+
+void XPUGeneratorImpl::philox_state(
+    uint64_t increment,
+    at::Tensor& seed,
+    at::Tensor& offset,
+    at::Tensor& intragraph_offset) {
+  const auto options = at::TensorOptions().dtype(at::kLong).device(at::kCPU);
+  auto capture_id = at::xpu::currentStreamCaptureId();
+  if (capture_id.has_value()) {
+    auto* capture_state = state_->get_capture_state(*capture_id);
+    uint64_t intragraph = capture_state->offset_intragraph_;
+    capture_state->increase(increment);
+    seed = at::Tensor(capture_state->seed_extragraph_).alias();
+    offset = at::Tensor(capture_state->offset_extragraph_).alias();
+    intragraph_offset =
+        at::full({1}, static_cast<int64_t>(intragraph), options);
+    return;
+  }
+  std::lock_guard<std::mutex> lock(state_->mutex_);
+  uint64_t current_offset = state_->philox_offset_per_thread_;
+  state_->increase(increment);
+  seed = at::full({1}, static_cast<int64_t>(state_->seed_), options);
+  offset = at::full({1}, static_cast<int64_t>(current_offset), options);
+  intragraph_offset = at::zeros({1}, options);
 }
 
 std::pair<uint64_t, uint64_t> XPUGeneratorImpl::philox_engine_inputs(

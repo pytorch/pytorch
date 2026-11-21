@@ -33,12 +33,34 @@ MempoolId_t graph_pool_handle() {
 }
 
 XPUGraphImpl::XPUGraphImpl(const GraphImplArgs& args)
+    : XPUGraphImpl(args, args.num_rng_states) {}
+
+XPUGraphImpl::XPUGraphImpl(const GraphImplArgs& args, int64_t num_rng_states)
     : capture_stream_(at::xpu::getCurrentXPUStream()),
-      keep_graph_(args.keep_graph) {}
+      num_rng_states_(num_rng_states),
+      keep_graph_(args.keep_graph) {
+  TORCH_CHECK(num_rng_states >= 0, "num_rng_states must be nonnegative.");
+}
 
 void XPUGraphImpl::register_generator_state(
-    c10::intrusive_ptr<at::XPUGeneratorState> state) {
-  captured_generator_states_[std::move(state)] = 0;
+    c10::intrusive_ptr<at::XPUGeneratorState>) {}
+
+at::XPUGeneratorCaptureState* XPUGraphImpl::get_generator_capture_state(
+    at::XPUGeneratorState& state) {
+  std::lock_guard<std::mutex> lock(captured_generator_states_mutex_);
+  for (auto& captured_state : captured_generator_states_) {
+    if (captured_state.generator_state.get() == &state) {
+      return captured_state.capture_state.get();
+    }
+    if (!captured_state.generator_state) {
+      captured_state.generator_state =
+          c10::intrusive_ptr<at::XPUGeneratorState>::reclaim_copy(&state);
+      return captured_state.capture_state.get();
+    }
+  }
+  TORCH_CHECK(
+      false,
+      "XPU graph RNG state limit exceeded. Increase num_rng_states when constructing XPUGraph.");
 }
 
 void XPUGraphImpl::register_generator_state(const at::Generator& generator) {
@@ -71,12 +93,20 @@ void XPUGraphImpl::capture_begin(
           static_cast<int>(capture_mode));
   }
   TORCH_CHECK(
-      !has_graph_exec_,
+      !has_graph_exec_ && !has_graph_ && !capture_ended_ && capture_id_ == 0,
       "This XPUGraph instance already owns a captured graph. "
-      "To capture a new graph, create a new instance.");
+      "To capture a new graph, call reset() or create a new instance.");
 
   capture_stream_ = at::xpu::getCurrentXPUStream();
   capture_dev_ = c10::xpu::current_device();
+
+  captured_generator_states_.clear();
+  captured_generator_states_.reserve(num_rng_states_);
+  for (int64_t state_index = 0; state_index < num_rng_states_; ++state_index) {
+    auto state = c10::make_intrusive<at::XPUGeneratorCaptureState>();
+    state->initialize(capture_dev_);
+    captured_generator_states_.push_back({std::move(state), nullptr});
+  }
 
   if (pool.first != 0 || pool.second != 0) {
     // Either value being nonzero means the user supplied a pool to share.
@@ -150,9 +180,13 @@ void XPUGraphImpl::capture_end() {
   c10::xpu::XPUCachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kXPU)->end_allocate_to_pool(mempool_id_);
 
-  for (auto& [generator_state, wholegraph_increments] :
-       captured_generator_states_) {
-    wholegraph_increments = generator_state->capture_epilogue(capture_id_);
+  while (!captured_generator_states_.empty() &&
+         !captured_generator_states_.back().generator_state) {
+    captured_generator_states_.pop_back();
+  }
+  for (auto& captured_state : captured_generator_states_) {
+    captured_state.wholegraph_increment =
+        captured_state.capture_state->finalize();
   }
 
   const bool graph_is_empty = graph_->empty();
@@ -203,21 +237,29 @@ void XPUGraphImpl::replay() {
   // capture
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
 
-  for (auto& [generator_state, wholegraph_increments] :
-       captured_generator_states_) {
-    generator_state->replay_prologue(capture_id_, wholegraph_increments);
+  for (auto& captured_state : captured_generator_states_) {
+    captured_state.generator_state->replay_prologue(
+        *captured_state.capture_state, captured_state.wholegraph_increment);
   }
 
   auto& queue = at::xpu::getCurrentXPUStream().queue();
   queue.ext_oneapi_graph(*graph_exec_);
 }
 
+std::vector<at::Tensor> XPUGraphImpl::get_rng_state_buffers() const {
+  TORCH_CHECK(
+      capture_ended_, "RNG buffers are available after successful capture.");
+  std::vector<at::Tensor> buffers;
+  buffers.reserve(2 * captured_generator_states_.size());
+  for (const auto& captured_state : captured_generator_states_) {
+    buffers.emplace_back(captured_state.capture_state->seed_extragraph_);
+    buffers.emplace_back(captured_state.capture_state->offset_extragraph_);
+  }
+  return buffers;
+}
+
 void XPUGraphImpl::reset() {
   if (capture_id_ != 0) {
-    for (auto& [generator_state, wholegraph_increments] :
-         captured_generator_states_) {
-      generator_state->remove_capture_state(capture_id_);
-    }
     std::lock_guard<std::mutex> lock(currently_capturing_graphs_mutex);
     currently_capturing_graphs.erase(capture_id_);
     capture_id_ = 0;
@@ -313,12 +355,21 @@ MempoolId_t graph_pool_handle() {
 }
 
 XPUGraphImpl::XPUGraphImpl(const GraphImplArgs& args)
+    : XPUGraphImpl(args, args.num_rng_states) {}
+
+XPUGraphImpl::XPUGraphImpl(const GraphImplArgs& args, int64_t num_rng_states)
     : capture_stream_(at::xpu::getCurrentXPUStream()),
+      num_rng_states_(num_rng_states),
       keep_graph_(args.keep_graph) {
   graph_compiler_version_error();
 }
 
 XPUGraphImpl::~XPUGraphImpl() = default;
+
+at::XPUGeneratorCaptureState* XPUGraphImpl::get_generator_capture_state(
+    at::XPUGeneratorState&) {
+  graph_compiler_version_error();
+}
 
 void XPUGraphImpl::register_generator_state(
     c10::intrusive_ptr<at::XPUGeneratorState>) {
@@ -342,6 +393,10 @@ void XPUGraphImpl::instantiate() {
 }
 
 void XPUGraphImpl::replay() {
+  graph_compiler_version_error();
+}
+
+std::vector<at::Tensor> XPUGraphImpl::get_rng_state_buffers() const {
   graph_compiler_version_error();
 }
 

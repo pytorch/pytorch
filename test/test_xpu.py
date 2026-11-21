@@ -3280,6 +3280,249 @@ class TestBlockStateAbsorption(TestCase):
 
 
 class TestXpuGraphRng(TestCase):
+    @parametrize("seed", [123, 2**64 - 1])
+    @parametrize("offset", [12, 2**63])
+    def test_philox_state_eager(self, device, seed, offset):
+        generator = torch.Generator(device=device).manual_seed(seed)
+        generator.set_offset(offset)
+        alias = generator.graphsafe_get_state()
+        for increment in (0, 1, 5):
+            seed_tensor, offset_tensor, intragraph = alias.philox_state(increment)
+            for tensor in (seed_tensor, offset_tensor, intragraph):
+                self.assertEqual(tensor.device.type, "cpu")
+                self.assertEqual(tensor.dtype, torch.int64)
+                self.assertEqual(tensor.shape, (1,))
+            self.assertEqual(seed_tensor.item() & (2**64 - 1), seed)
+            self.assertEqual(offset_tensor.item() & (2**64 - 1), offset)
+            self.assertEqual(intragraph.item(), 0)
+            offset += (increment + 3) // 4 * 4
+            self.assertEqual(generator.get_offset(), offset)
+
+    def test_philox_state_graph_capture(self, device):
+        generator = torch.Generator(device=device).manual_seed(123)
+        generator.set_offset(12)
+        graph = torch.xpu.XPUGraph(num_rng_states=1)
+        stream = torch.xpu.Stream()
+        output = torch.empty(1, device=device)
+        with torch.xpu.graph(graph, stream=stream):
+            seed_tensor, offset_tensor, first_intragraph = generator.philox_state(1)
+            _, _, second_intragraph = generator.philox_state(5)
+            output.copy_(seed_tensor)
+        torch.xpu.current_stream().wait_stream(stream)
+        self.assertEqual(first_intragraph.item(), 0)
+        self.assertEqual(second_intragraph.item(), 4)
+        self.assertEqual(first_intragraph.device.type, "cpu")
+        self.assertEqual(second_intragraph.device.type, "cpu")
+        for _ in range(2):
+            offset_before = generator.get_offset()
+            graph.replay()
+            self.assertEqual(seed_tensor.item(), 123)
+            self.assertEqual(offset_tensor.item(), offset_before)
+            self.assertEqual(generator.get_offset(), offset_before + 12)
+            self.assertEqual(output, torch.full_like(output, 123))
+        address = seed_tensor.data_ptr()
+        with self.assertRaisesRegex(RuntimeError, "not resizable"):
+            seed_tensor.resize_(64)
+        self.assertEqual(seed_tensor.data_ptr(), address)
+
+    @serialTest()
+    @parametrize(
+        "graph_cls",
+        [
+            subtest(torch.xpu.XPUGraph, name="xpu_graph"),
+            subtest(torch.accelerator.Graph, name="accelerator_graph"),
+        ],
+    )
+    @parametrize("num_rng_states", [0, 1, 9])
+    @parametrize("inference_mode", [False, True])
+    def test_graph_rng_preallocation(
+        self, device, num_rng_states, inference_mode, graph_cls
+    ):
+        output = torch.empty(128, device=device)
+        output.uniform_()
+        generator = torch.Generator(device=device)
+        reference_generator = generator.clone_state()
+        expected = torch.empty_like(output)
+        if num_rng_states:
+            expected.uniform_(generator=reference_generator)
+        else:
+            expected.fill_(1)
+        graph = graph_cls(num_rng_states=num_rng_states)
+        stream = torch.xpu.Stream()
+        torch.xpu.synchronize()
+        gc.collect()
+        torch.xpu.empty_cache()
+        stat = "active.all.current"
+        allocation_stat = "allocation.all.allocated"
+        baseline = torch.xpu.memory_stats()[stat]
+
+        with torch.inference_mode(inference_mode), torch.xpu.stream(stream):
+            graph.capture_begin()
+            try:
+                self.assertEqual(
+                    torch.xpu.memory_stats()[stat] - baseline, 2 * num_rng_states
+                )
+                allocations = torch.xpu.memory_stats()[allocation_stat]
+                if num_rng_states:
+                    output.uniform_(generator=generator)
+                else:
+                    with self.assertRaisesRegex(
+                        RuntimeError, "RNG state limit exceeded"
+                    ):
+                        output.uniform_(generator=generator)
+                    output.fill_(1)
+                self.assertEqual(torch.xpu.memory_stats()[allocation_stat], allocations)
+            finally:
+                graph.capture_end()
+
+        self.assertEqual(
+            torch.xpu.memory_stats()[stat] - baseline, 2 if num_rng_states else 0
+        )
+        torch.xpu.current_stream().wait_stream(stream)
+        graph.replay()
+        self.assertEqual(output, expected, atol=0, rtol=0)
+        self.assertEqual(generator.get_offset(), reference_generator.get_offset())
+        for segment in torch.xpu.memory.memory_snapshot():
+            if segment["segment_pool_id"] == graph.pool():
+                for block in segment["blocks"]:
+                    self.assertEqual(block["state"], "inactive")
+        graph.reset()
+        torch.xpu.synchronize()
+        torch.xpu.empty_cache()
+        self.assertEqual(torch.xpu.memory_stats()[stat], baseline)
+
+    @parametrize(
+        "graph_cls",
+        [
+            subtest(torch.xpu.XPUGraph, name="xpu_graph"),
+            subtest(torch.accelerator.Graph, name="accelerator_graph"),
+        ],
+    )
+    def test_graph_rng_state_identity_and_limit(self, device, graph_cls):
+        with self.assertRaisesRegex(RuntimeError, "num_rng_states must be nonnegative"):
+            graph_cls(num_rng_states=-1)
+
+        generator = torch.Generator(device=device)
+        first = generator.graphsafe_get_state().manual_seed(123)
+        first.set_offset(12)
+        alias = first.graphsafe_get_state()
+        second = first.clone_state().manual_seed(456)
+        second.set_offset(20)
+        third = first.clone_state()
+        graph = graph_cls(num_rng_states=2)
+        stream = torch.xpu.Stream()
+        output = torch.zeros(1, device=device)
+
+        stream.wait_stream(torch.xpu.current_stream())
+        with torch.xpu.stream(stream):
+            graph.capture_begin()
+            try:
+                generator.graphsafe_set_state(third)
+                generator.graphsafe_set_state(first)
+                first_pair = generator.philox_state(0)[:2]
+                alias_pair = alias.philox_state(0)[:2]
+                second_pair = second.philox_state(0)[:2]
+                with self.assertRaisesRegex(
+                    RuntimeError, "RNG state limit exceeded.*Increase num_rng_states"
+                ):
+                    third.philox_state(0)
+                same_pair = generator.philox_state(0)[:2]
+                output.add_(1)
+            finally:
+                graph.capture_end()
+
+        first_addresses = [tensor.data_ptr() for tensor in first_pair]
+        self.assertEqual(first_addresses, [tensor.data_ptr() for tensor in alias_pair])
+        self.assertEqual(first_addresses, [tensor.data_ptr() for tensor in same_pair])
+        second_addresses = [tensor.data_ptr() for tensor in second_pair]
+        self.assertEqual(len(set(first_addresses + second_addresses)), 4)
+
+        torch.xpu.current_stream().wait_stream(stream)
+        graph.replay()
+        torch.xpu.synchronize()
+        self.assertEqual([tensor.item() for tensor in first_pair], [123, 12])
+        self.assertEqual([tensor.item() for tensor in second_pair], [456, 20])
+        self.assertEqual([first.get_offset(), second.get_offset()], [12, 20])
+
+    @serialTest()
+    @parametrize(
+        "graph_cls",
+        [
+            subtest(torch.xpu.XPUGraph, name="xpu_graph"),
+            subtest(torch.accelerator.Graph, name="accelerator_graph"),
+        ],
+    )
+    @parametrize("destroy", [False, True])
+    @parametrize("keep_graph", [False, True])
+    def test_graph_rng_replay_sync_before_release(
+        self, device, graph_cls, destroy, keep_graph
+    ):
+        output = torch.empty(128, device=device)
+        output.uniform_()
+        capture_stream = torch.xpu.Stream()
+        replay_streams = [torch.xpu.Stream(), torch.xpu.Stream()]
+        torch.xpu.synchronize()
+        gc.collect()
+        torch.xpu.empty_cache()
+        stat = "active.all.current"
+        baseline = torch.xpu.memory_stats()[stat]
+        graph = graph_cls(keep_graph=keep_graph)
+        for cycle in range(2):
+            if cycle and destroy:
+                graph = graph_cls(keep_graph=keep_graph)
+            with torch.xpu.graph(graph, stream=capture_stream):
+                output.uniform_()
+            self.assertEqual(torch.xpu.memory_stats()[stat] - baseline, 2)
+            for stream in replay_streams:
+                stream.wait_stream(capture_stream)
+                with torch.xpu.stream(stream):
+                    graph.replay()
+                stream.synchronize()
+            with torch.xpu.stream(replay_streams[0]):
+                torch.xpu._sleep(200_000_000)
+                graph.replay()
+            replay_streams[1].wait_stream(replay_streams[0])
+            with torch.xpu.stream(replay_streams[1]):
+                graph.replay()
+            for stream in replay_streams:
+                self.assertFalse(stream.query())
+            if destroy:
+                del graph
+                gc.collect()
+            else:
+                graph.reset()
+            for stream in replay_streams:
+                self.assertTrue(stream.query())
+            self.assertEqual(torch.xpu.memory_stats()[stat], baseline)
+
+    def test_graph_rng_capture_with_pending_event(self, device):
+        script = f"""
+import torch
+
+torch.xpu.set_device({device!r})
+eager_stream = torch.xpu.current_stream()
+capture_stream = torch.xpu.Stream()
+pending = torch.empty(1, device="xpu")
+output = torch.empty(1, device="xpu")
+output.uniform_()
+torch.xpu.synchronize()
+graph = torch.xpu.XPUGraph()
+with torch.xpu.stream(capture_stream):
+    graph.capture_begin()
+    with torch.xpu.stream(eager_stream):
+        pending.record_stream(capture_stream)
+        pending.untyped_storage().resize_(0)
+    output.uniform_()
+    graph.capture_end()
+torch.xpu.current_stream().wait_stream(capture_stream)
+graph.replay()
+torch.xpu.synchronize()
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            subprocess.check_call(
+                [sys.executable, "-c", script], cwd=directory, timeout=120
+            )
+
     @parametrize("use_default_generator", [False, True])
     def test_graph_rng_overlapping_captures(self, device, use_default_generator):
         generator = (

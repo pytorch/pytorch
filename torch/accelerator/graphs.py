@@ -1,8 +1,30 @@
 import gc
+import weakref
 from typing import Literal, Self
 
 import torch
 from torch._C import _acceleratorGraph
+
+
+class _GraphRNGState:
+    def __init__(self) -> None:
+        self.buffers: list[torch.Tensor] = []
+        self.replay_streams: set[torch.Stream] = set()
+
+    def record_replay(self) -> None:
+        if self.buffers:
+            self.replay_streams.add(
+                torch.accelerator.current_stream(self.buffers[0].device)
+            )
+
+    def release(self) -> None:
+        for stream in self.replay_streams:
+            try:
+                stream.synchronize()
+            except Exception:
+                pass
+        self.replay_streams.clear()
+        self.buffers.clear()
 
 
 class Graph(_acceleratorGraph):
@@ -33,6 +55,10 @@ class Graph(_acceleratorGraph):
             ``"relaxed"``: the current thread is allowed to make potentially unsafe API calls, except
             for calls that inherently conflict with stream capture.
             Default: ``"default"``.
+        num_rng_states (int, optional): Number of RNG seed/offset pairs to
+            allocate before capture. Each distinct generator state used during
+            capture takes one pair. Exceeding this count raises an error.
+            Unused pairs are released after capture. Default: ``8``.
 
     Example::
 
@@ -55,8 +81,9 @@ class Graph(_acceleratorGraph):
         capture_error_mode: Literal[
             "default", "global", "thread_local", "relaxed"
         ] = "default",
+        num_rng_states: int = 8,
     ) -> Self:
-        return super().__new__(cls, keep_graph)
+        return super().__new__(cls, keep_graph, num_rng_states)
 
     def __init__(
         self,
@@ -66,8 +93,11 @@ class Graph(_acceleratorGraph):
         capture_error_mode: Literal[
             "default", "global", "thread_local", "relaxed"
         ] = "default",
+        num_rng_states: int = 8,
     ) -> None:
-        super().__init__(keep_graph)
+        super().__init__(keep_graph, num_rng_states)
+        self._rng_state = _GraphRNGState()
+        self._rng_state_finalizer = weakref.finalize(self, self._rng_state.release)
         self.graph_pool = pool
         self.capture_error_mode = capture_error_mode
 
@@ -90,6 +120,7 @@ class Graph(_acceleratorGraph):
         After this call, the graph can be replayed via ``replay``.
         """
         super().capture_end()
+        self._rng_state.buffers = self._get_rng_state_buffers()
 
     def instantiate(self) -> None:
         r"""
@@ -100,7 +131,12 @@ class Graph(_acceleratorGraph):
         super().instantiate()
 
     def replay(self) -> None:
-        r"""Replay the work captured by this graph."""
+        r"""Replay the work captured by this graph.
+
+        When replaying on a different stream, first make that stream wait for
+        any work queued on the capture stream before capture began.
+        """
+        self._rng_state.record_replay()
         super().replay()
 
     def reset(self) -> None:
@@ -109,8 +145,13 @@ class Graph(_acceleratorGraph):
 
         After this call, the graph can be recaptured. Set :attr:`graph_pool` or
         :attr:`capture_error_mode` beforehand to use different settings on the next capture.
+
+        Synchronizes replay streams before releasing retained RNG buffers.
         """
+        self._rng_state_finalizer()
         super().reset()
+        self._rng_state = _GraphRNGState()
+        self._rng_state_finalizer = weakref.finalize(self, self._rng_state.release)
 
     def pool(self) -> tuple[int, int]:
         r"""
