@@ -851,16 +851,24 @@ remembered from one call to the next. An object that has a reference
 besides those the call lets go of stays alive, whatever it is and whatever
 it refers to, and so does one that the function still holds when the graph
 has run. The others end, and each has to end without Python code running:
-its class has no finalizer, no weak reference is told of its end (the entry
-of a weak dictionary or of a weak set, which only takes itself out, is
-none), and what it refers to is looked at in the same way, as a garbage
-collector looks at a set of objects. So a list that a slice made of a list
-of layers ends quietly, since the layers stay. A tensor that requires a
-gradient and ends is taken to end with Python code, since what its history
-holds (a hook, what a `torch.autograd.Function` kept for its backward) is
-not to be seen; of another tensor that ends, its attributes and the hooks
-on it are looked at. A call for which that cannot be shown runs the
-operations of the function as they are:
+its class has no finalizer, no weak reference is told of its end, and what
+it refers to is looked at in the same way, as a garbage collector looks at
+a set of objects. So a list that a slice made of a list of layers ends
+quietly, since the layers stay. The entry of a weak container, which only
+takes itself out, is no such weak reference where the container is exactly
+a `WeakKeyDictionary`, a `WeakValueDictionary` or a `WeakSet` of `weakref`,
+torch's `WeakIdKeyDictionary`, or the dictionary in which dynamo notes
+every module that is made once `torch.compile` has been used; a container
+of a class derived from these, or written like them, is taken to run code.
+A tensor that ends has to be of the class `torch.Tensor` itself, require no
+gradient (what a history holds, a hook or what a `torch.autograd.Function`
+kept for its backward, is not to be seen) and have memory that is torch's
+own (a tensor over a numpy array, a buffer or a DLPack capsule keeps their
+owner alive); its attributes and its `.grad` are looked at. An object that
+shows the collector nothing (a capsule, a numpy array, a storage) is taken
+to end with Python code unless its class is known to hold nothing. A call
+for which that cannot be shown runs the operations of the function as they
+are:
 
 ```python
 class Ends:
@@ -895,17 +903,12 @@ all(torch.equal(a, b) for a, b in zip(got, expected)), STATE[0]  # (True, 1.5)
 
 What an object refers to is what it shows the garbage collector, and no
 more than 4,096 objects that end are looked at (with more, the call runs
-the operations). What a tensor that requires no gradient keeps alive
-outside of that is not seen: the buffer under `torch.from_numpy` or
-`torch.frombuffer`, what a DLPack capsule owns, a tensor that was assigned
-to its `.grad`. Objects in a reference cycle end when the collector runs,
-as they do in eager mode. What a pass's own callable does is not looked
-at: where it drops the other reference to an object that a variable of the
-function lets go of, the object ends when the callable has run. Once
-`torch.compile` has been used in a process, dynamo keeps a weak reference
-to every module that is made from then on and is told when it ends, so a
-call that lets go of such a module (a slice of an `nn.ModuleList` is a
-module of its own) runs the operations.
+the operations). Objects in a reference cycle end when the collector runs,
+as they do in eager mode. Not seen is what a tensor keeps alive through
+another tensor or through its storage: the base of a view, where the view
+is the last to hold it and an attribute was set on the base; the tangent of
+a dual tensor; an attribute set on a storage. What a pass's own callable
+does is not looked at ("Limits").
 
 A call in which a path is taken down holds on to what the path reads until
 the run has been described. Where the function lets go, in such a call, of
@@ -1757,6 +1760,17 @@ What graphs do not do at this stage:
   tensor alive: who else holds the nodes of a history cannot be asked. That
   is a graph which starts in the middle of a function, takes a tensor that
   the operations in front of it gave, and lets go of the variable it was in.
+- A path lets go of an object from outside it only where the end of the
+  object cannot run Python code, or the object stays alive. Whether it
+  stays alive is looked at in front of what stands for the graph: for a
+  variable that the path binds anew, an object whose other reference is
+  dropped while what a pass made of the graph runs (by that code itself, or
+  by another thread it waits for) ends where the path lands. A store looks
+  again where it lands.
+- Where the end of an object takes an entry out of a
+  `weakref.WeakValueDictionary`, the key of the entry goes too. A path lets
+  go of such an object also where the key ends with Python code (a
+  `__del__`), or is hashed or compared by code written in Python.
 - Sizes are fixed per export. Every size a graph is called with is a kind of
   call of its own, with a graph of its own, so a function that is called
   with many sizes uses up `max_variants`. Sizes of the tensors the graph
