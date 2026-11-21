@@ -98,6 +98,10 @@ pub enum Assert {
     /// The number is this one: the place of an item that the path takes
     /// out of a list it filled itself.
     Equals(PathValue, PyObj),
+    /// The value is this very object: a function, a class or a module
+    /// that something computed behind the callable is computed with, and
+    /// is to come out the same.
+    Is(PathValue, PyObj),
     /// Two values are one object: a read behind a store of the path, of
     /// the same object by another way, is given what was stored.
     Same(PathValue, PathValue),
@@ -122,6 +126,7 @@ impl Assert {
             | Assert::Sequence(v, ..)
             | Assert::Keys(v, _)
             | Assert::Equals(v, _)
+            | Assert::Is(v, _)
             | Assert::Same(v, _)
             | Assert::Apart(v, ..) => *v,
             Assert::Guard(cond) => cond.value(),
@@ -201,6 +206,9 @@ impl Place {
 pub struct Check {
     pub target: Place,
     pub cond: Cond,
+    /// What it is of is computed behind the callable, from the sizes of
+    /// what the graph gives (`Path::constants`): the check is made there.
+    pub late: bool,
 }
 
 pub enum Cond {
@@ -270,6 +278,14 @@ pub struct Exported {
     pub varying: Vec<Place>,
     pub last: Shared<Vec<PyObj>>,
     pub repeats: AtomicU32,
+    /// See `Described::aliases`. Empty for a path that writes to nothing
+    /// from outside.
+    pub aliases: Vec<(u32, i64)>,
+    /// See `Described::bumps`: what is made of the graph may write to a
+    /// tensor fewer times than the operations do (AOTAutograd writes an
+    /// input back once), and the counters are moved on to where the
+    /// operations leave them.
+    pub bumps: Vec<(u32, u64)>,
     pub closed: Option<String>,
     /// It has returned once. Until then, a call of it that raises is taken
     /// back: the instructions run instead.
@@ -345,6 +361,17 @@ pub struct Path {
     /// It has stores into objects from outside (`Kind::Effect`), which are
     /// done when it lands.
     pub effects: bool,
+    /// An operation of it writes to a tensor from outside (or draws random
+    /// numbers): the callable cannot be run a second time for a call, and
+    /// what it did cannot be taken back.
+    pub mutates: bool,
+    /// See `Trace::pinned`.
+    pub pinned: Vec<PathValue>,
+    /// What an operation of the graph takes that is computed behind the
+    /// callable, from the sizes of what the graph gives: the same in
+    /// every call a form is for (`Def::fixed`), so a constant of the
+    /// graph, which the form checks where it is computed.
+    pub constants: Vec<PathValue>,
     pub exported: Shared<Vec<Arc<Exported>>>,
     /// Register files for the calls that run it, kept from one to the next.
     pub registers: Shared<Vec<Vec<Obj>>>,
@@ -425,6 +452,11 @@ pub fn timed() -> bool {
 /// block that had not been profiled.
 const MAX_PROVISIONAL: u32 = 3;
 
+/// How many operations a graph ends its paths in front of because they
+/// turned out to be none of a graph when they had run
+/// (`GraphSite::shunned`).
+const MAX_SHUNNED: usize = 8;
+
 /// A graph: the paths from one operation of a block on.
 pub struct GraphSite {
     /// The function, the block, and the generic instructions of the block
@@ -469,6 +501,13 @@ pub struct GraphSite {
     /// asked for another path of this one (`asked`), and how many times.
     again: AtomicBool,
     asks: AtomicU32,
+    /// Operations, each by its function and its place in the code of it,
+    /// that a path of this graph took and that turned out to be none of
+    /// a graph when they had run, with the reason: one that changed the
+    /// sizes of a tensor from outside or whether it requires a gradient (a
+    /// form is for the tensors as a call hands them over). The path was
+    /// taken down again and ends in front of such an operation.
+    pub shunned: Shared<Vec<(*const crate::vm::Compiled, u32, &'static str)>>,
 }
 
 impl GraphSite {
@@ -494,7 +533,24 @@ impl GraphSite {
             within: Shared::new(std::sync::Weak::new()),
             missed: AtomicU64::new(u64::MAX),
             times: Default::default(),
+            shunned: Shared::new(Vec::new()),
         }
+    }
+
+    /// Has the paths of the graph end in front of an operation from now
+    /// on; false if they do already, or there are too many such.
+    pub fn shun(&self, place: (*const crate::vm::Compiled, u32), why: &'static str) -> bool {
+        let mut shunned = self.shunned.borrow_mut();
+        if shunned.len() >= MAX_SHUNNED || shunned.iter().any(|(of, at, _)| (*of, *at) == place) {
+            return false;
+        }
+        shunned.push((place.0, place.1, why));
+        true
+    }
+
+    /// Why the paths of the graph end in front of an operation, if they do.
+    pub fn shuns(&self, place: (*const crate::vm::Compiled, u32)) -> Option<&'static str> {
+        self.shunned.borrow().iter().find(|(of, at, _)| (*of, *at) == place).map(|(_, _, why)| *why)
     }
 
     /// The path that is reported: the one that ran last, or the run of the
@@ -734,9 +790,14 @@ const UPDATES_STATISTICS: [(&str, &str); 5] = [
     ("aten::instance_norm", "use_input_stats"),
 ];
 
+/// Whether an operator is one of `UPDATES_STATISTICS`.
+pub fn normalization(name: &str) -> bool {
+    UPDATES_STATISTICS.iter().any(|(op, _)| *op == overload_of(name).0)
+}
+
 /// Whether the call of a site, as `site_export` describes it and with the
 /// operands it had, is one of `UPDATES_STATISTICS` that updates statistics.
-unsafe fn updates_statistics(exported: Obj, operands: &[Obj]) -> bool {
+pub unsafe fn updates_statistics(exported: Obj, operands: &[Obj]) -> bool {
     let name = ffi::PyDict_GetItemString(exported, c"op".as_ptr());
     let args = ffi::PyDict_GetItemString(exported, c"args".as_ptr());
     if name.is_null() || args.is_null() {
@@ -769,6 +830,19 @@ unsafe fn updates_statistics(exported: Obj, operands: &[Obj]) -> bool {
     let (flag, statistics) = (value(flag), value("running_mean"));
     let off = !flag.is_null() && ffi::PyObject_IsTrue(flag) == 0;
     !(off || statistics == ffi::Py_None())
+}
+
+/// `raised_text` of an exception that stays raised.
+pub unsafe fn raised_text_kept() -> String {
+    let raised = ffi::PyErr_GetRaisedException();
+    if raised.is_null() {
+        return "unknown error".to_string();
+    }
+    ffi::Py_INCREF(raised);
+    ffi::PyErr_SetRaisedException(raised);
+    let text = raised_text();
+    ffi::PyErr_SetRaisedException(raised);
+    text
 }
 
 /// The error that is set, as one line of text; clears it.
@@ -1384,6 +1458,32 @@ pub unsafe fn quiet_truth(o: Obj) -> bool {
     !capi::is_unboxed(o) && (is_plain(o) || quiet_sized(o))
 }
 
+/// Moves the version counter of a tensor on by `count`, as that many writes
+/// to it in place would (`torch._C._increment_version`, which takes the
+/// tensors to do it for).
+pub unsafe fn move_version(tensor: Obj, count: u64) {
+    static BUMP: std::sync::OnceLock<Option<PyObj>> = std::sync::OnceLock::new();
+    let bump = BUMP.get_or_init(|| {
+        let module = ffi::PyImport_ImportModule(c"torch._C".as_ptr());
+        let found = if module.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(module, c"_increment_version".as_ptr()) };
+        xdecref(module);
+        ffi::PyErr_Clear();
+        (!found.is_null()).then(|| PyObj::from_owned(found))
+    });
+    let Some(bump) = bump else {
+        return;
+    };
+    let times = ffi::PyTuple_New(count as isize);
+    if !times.is_null() {
+        for i in 0..count as isize {
+            ffi::PyTuple_SET_ITEM(times, i, new_ref(tensor));
+        }
+        xdecref(ffi::PyObject_CallOneArg(bump.as_ptr(), times));
+        ffi::Py_DECREF(times);
+    }
+    ffi::PyErr_Clear();
+}
+
 /// Whether two values compare in C code: numbers, texts, or dtypes and
 /// devices.
 pub unsafe fn quiet_compare(a: Obj, b: Obj) -> bool {
@@ -1515,6 +1615,11 @@ unsafe fn builtin_named(which: Builtin) -> usize {
         found
     });
     found[BUILTINS.iter().position(|(_, other)| *other == which).unwrap()]
+}
+
+/// Whether a callee is the builtin `zip`.
+pub unsafe fn is_zip(callee: Obj) -> bool {
+    !callee.is_null() && builtin_named(Builtin::Zip) == callee as usize
 }
 
 /// Whether a callee is `getattr` or `hasattr`: a read of an attribute by
@@ -1984,6 +2089,148 @@ pub fn writes_first(name: &str) -> bool {
     writes
 }
 
+/// Whether the sizes of what an operator gives follow from the sizes of
+/// what it is given and its other arguments, and not from what the tensors
+/// hold (`aten::nonzero`, `aten::masked_select`, an index by a mask): its
+/// tags are asked once. They say it of an operator with a kernel of its
+/// own; one that is made of others (`composite_operator`) is asked by
+/// running it on tensors that hold nothing (`Compiled::sized`).
+pub fn shaped_operator(name: &str) -> bool {
+    static KNOWN: std::sync::OnceLock<Shared<HashMap<String, bool>>> = std::sync::OnceLock::new();
+    let known = KNOWN.get_or_init(|| Shared::new(HashMap::new()));
+    if let Some(shaped) = known.borrow().get(name) {
+        return *shaped;
+    }
+    let (qualified, overload) = overload_of(name);
+    let asked = |py: Python<'_>| -> PyResult<bool> {
+        let binding = py.import("torch._C")?;
+        let found = binding.call_method1("_get_operation_overload", (qualified, overload))?;
+        if found.is_none() {
+            return Ok(false);
+        }
+        let tags = py.import("torch")?.getattr("Tag")?;
+        let (dynamic, data) = (tags.getattr("dynamic_output_shape")?, tags.getattr("data_dependent_output")?);
+        Ok(!found.get_item(2)?.contains(dynamic)? && !found.get_item(2)?.contains(data)?)
+    };
+    let shaped = unsafe { asked(Python::assume_attached()).unwrap_or(false) };
+    unsafe { ffi::PyErr_Clear() };
+    known.borrow_mut().insert(name.to_string(), shaped);
+    shaped
+}
+
+/// Whether an operator has no kernel of its own and is made of other
+/// operators (`aten::conv2d`; `aten::argwhere`, which is `aten::nonzero`):
+/// its tags do not say what those do. What cannot be asked is taken to be
+/// one.
+pub fn composite_operator(name: &str) -> bool {
+    static KNOWN: std::sync::OnceLock<Shared<HashMap<String, bool>>> = std::sync::OnceLock::new();
+    let known = KNOWN.get_or_init(|| Shared::new(HashMap::new()));
+    if let Some(composite) = known.borrow().get(name) {
+        return *composite;
+    }
+    let asked = |py: Python<'_>| -> PyResult<bool> {
+        let has = py.import("torch._C")?.getattr("_dispatch_has_kernel_for_dispatch_key")?;
+        has.call1((name, "CompositeImplicitAutograd"))?.is_truthy()
+    };
+    let composite = unsafe { asked(Python::assume_attached()).unwrap_or(true) };
+    unsafe { ffi::PyErr_Clear() };
+    known.borrow_mut().insert(name.to_string(), composite);
+    composite
+}
+
+/// Whether an operator can fail for what its tensors hold, once it has run
+/// on tensors of the same sizes and dtypes with the same other arguments.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Total {
+    /// It cannot.
+    Always,
+    /// It cannot on floating point tensors (an integer division can).
+    Floats,
+    /// It can, or it is not known.
+    Never,
+}
+
+/// The kernels of layers and of putting tensors together that look at no
+/// value to decide whether to run: by the name of the operator, without
+/// the overload and the `_` of the variant that writes.
+const TOTAL: [&str; 137] = [
+    "conv1d", "conv2d", "conv3d", "conv_transpose1d", "conv_transpose2d", "conv_transpose3d", "convolution",
+    "_convolution", "linear", "matmul", "mm", "bmm", "addmm", "addbmm", "baddbmm", "addmv", "mv", "dot", "outer",
+    "einsum", "batch_norm", "layer_norm", "group_norm", "instance_norm", "native_batch_norm", "native_layer_norm",
+    "native_group_norm", "cudnn_batch_norm", "_batch_norm_impl_index", "max_pool1d", "max_pool2d", "max_pool3d",
+    "max_pool2d_with_indices", "avg_pool1d", "avg_pool2d", "avg_pool3d", "adaptive_avg_pool1d",
+    "adaptive_avg_pool2d", "adaptive_avg_pool3d", "adaptive_max_pool1d", "adaptive_max_pool2d",
+    "adaptive_max_pool3d", "_adaptive_avg_pool2d", "upsample_nearest1d", "upsample_nearest2d",
+    "upsample_nearest3d", "upsample_bilinear2d", "upsample_bicubic2d", "upsample_linear1d",
+    "upsample_trilinear3d", "pad", "constant_pad_nd", "dropout", "feature_dropout", "alpha_dropout",
+    "feature_alpha_dropout", "scaled_dot_product_attention", "softmax", "log_softmax", "_softmax", "_log_softmax",
+    "cat", "concat", "concatenate", "stack", "hstack", "vstack", "dstack", "clone", "contiguous", "to", "type_as",
+    "_to_copy", "copy", "detach", "alias", "zeros", "ones", "full", "empty", "zeros_like", "ones_like",
+    "full_like", "empty_like", "arange", "linspace", "eye", "scalar_tensor", "lift_fresh", "lift_fresh_copy",
+    "rand", "randn", "rand_like", "randn_like", "uniform", "expand", "expand_as", "repeat", "tile", "flip",
+    "roll", "tril", "triu", "flatten", "unflatten", "reshape", "view_as", "reshape_as", "chunk", "split",
+    "split_with_sizes", "unbind", "meshgrid", "broadcast_to", "fill", "zero", "masked_fill", "where", "clamp",
+    "clamp_min", "clamp_max", "lerp", "cumsum", "sort", "argsort", "topk", "max", "min", "relu6", "selu", "celu",
+    "prelu", "mse_loss", "l1_loss", "smooth_l1_loss", "huber_loss", "binary_cross_entropy_with_logits",
+];
+
+/// Of the operators that work on each element by itself: those that
+/// cannot fail on integers either.
+const WHOLE_NUMBERS: [&str; 23] = [
+    "add", "sub", "rsub", "mul", "neg", "abs", "eq", "ne", "lt", "le", "gt", "ge", "maximum", "minimum",
+    "logical_and", "logical_or", "logical_not", "logical_xor", "bitwise_and", "bitwise_or", "bitwise_xor",
+    "bitwise_not", "sign",
+];
+
+/// See `Total`. A view gives its argument seen another way and reads
+/// nothing of it (its schema says that it is one, or its tag that it
+/// makes its argument one); the operators that work element by element,
+/// and those that reduce, say so in their tags;
+/// the rest is the list above. `aten::as_strided` is a view that can fail
+/// for how much memory there is, which no form checks.
+pub fn total_operator(name: &str) -> Total {
+    static KNOWN: std::sync::OnceLock<Shared<HashMap<String, Total>>> = std::sync::OnceLock::new();
+    let known = KNOWN.get_or_init(|| Shared::new(HashMap::new()));
+    if let Some(total) = known.borrow().get(name) {
+        return *total;
+    }
+    let (qualified, overload) = overload_of(name);
+    let base = qualified.rsplit("::").next().unwrap_or(qualified);
+    let base = base.strip_suffix('_').filter(|rest| !rest.is_empty()).unwrap_or(base);
+    let asked = |py: Python<'_>| -> PyResult<Total> {
+        if base == "as_strided" {
+            return Ok(Total::Never);
+        }
+        if TOTAL.contains(&base) {
+            return Ok(Total::Always);
+        }
+        let binding = py.import("torch._C")?;
+        let schema = binding.call_method1("_get_schema", (qualified, overload))?;
+        for given in schema.getattr("returns")?.try_iter()? {
+            let alias = given?.getattr("alias_info")?;
+            if !alias.is_none() && !alias.getattr("is_write")?.is_truthy()? {
+                return Ok(Total::Always);
+            }
+        }
+        let found = binding.call_method1("_get_operation_overload", (qualified, overload))?;
+        if found.is_none() {
+            return Ok(Total::Never);
+        }
+        let (tags, tag) = (found.get_item(2)?, py.import("torch")?.getattr("Tag")?);
+        if tags.contains(tag.getattr("reduction")?)? || tags.contains(tag.getattr("inplace_view")?)? {
+            return Ok(Total::Always);
+        }
+        if tags.contains(tag.getattr("pointwise")?)? {
+            return Ok(if WHOLE_NUMBERS.contains(&base) { Total::Always } else { Total::Floats });
+        }
+        Ok(Total::Never)
+    };
+    let total = unsafe { asked(Python::assume_attached()).unwrap_or(Total::Never) };
+    unsafe { ffi::PyErr_Clear() };
+    known.borrow_mut().insert(name.to_string(), total);
+    total
+}
+
 /// Whether an operator, as the dispatcher names it (`aten::cat`,
 /// `aten::add_.Tensor`), neither writes to an argument nor draws random
 /// numbers: its schema and its tags are asked once.
@@ -2020,6 +2267,9 @@ pub fn pure_operator(name: &str) -> bool {
 /// (dtype, device, requires_grad, sizes: an owned tuple).
 pub struct Recording {
     pub values: Vec<Obj>,
+    /// Per value: the version counter of the tensor it was when the path
+    /// came to it (`TCFG_NO_VERSION` for what has none).
+    pub born: Vec<u64>,
     /// The site is null for an operation that is no call site.
     pub nodes: Vec<(*mut TcfgSite, Obj)>,
     /// Why the run cannot be described, once something says so.
@@ -2118,6 +2368,17 @@ pub struct Described {
     pub numbers: Vec<i64>,
     /// The tensors the callable is called with.
     pub args: Vec<Place>,
+    /// For a path that writes to tensors from outside: per tensor that is
+    /// checked, the first of them that has the same memory, and where in
+    /// that memory it starts if another has it too (`UNSHARED` if none
+    /// has). What a compiler makes of writes to its inputs is for inputs
+    /// that lie over one another exactly as these do (the sizes and
+    /// strides are the form's anyway), and for no others.
+    pub aliases: Vec<(u32, i64)>,
+    /// For such a path: the tensors the callable is called with (by their
+    /// place among them) that the operations wrote to in place, and by how
+    /// much the version counter of each moved in this run.
+    pub bumps: Vec<(u32, u64)>,
 }
 
 impl Path {
@@ -2209,7 +2470,9 @@ impl Path {
         // graph takes out of lists and tuples.
         let feeds = self.feeds.iter().enumerate().map(|(k, v)| (Place::of(*v), rec.value(*v), tensors[k]));
         let held = items.iter().map(|place| (*place, place.at(&rec.values), true));
-        let places: Vec<(Place, Obj, bool)> = feeds.chain(held).collect();
+        // And those that are only looked at behind the callable.
+        let pinned = self.pinned.iter().filter(|v| !self.feeds.contains(v)).map(|v| (Place::of(*v), rec.value(*v), false));
+        let places: Vec<(Place, Obj, bool)> = feeds.chain(held).chain(pinned).collect();
         // A run whose operations could not be followed says nothing of the
         // values they took: the form is then for calls that have a value of
         // the same class wherever this one has something that is no plain
@@ -2225,14 +2488,14 @@ impl Path {
                     && !constants.contains(&place.value)
                     && !checks.iter().any(|check| check.target == place);
                 if unsaid {
-                    checks.push(Check { target: place, cond: Cond::Type(PyObj::from_borrowed(ffi::Py_TYPE(tensor) as Obj)) });
+                    checks.push(Check { target: place, cond: Cond::Type(PyObj::from_borrowed(ffi::Py_TYPE(tensor) as Obj)), late: false });
                 }
                 continue;
             };
             if row.forward && taken && closed.is_none() {
                 closed = Some("a tensor of the call carries a forward-mode gradient".to_string());
             }
-            checks.push(Check { target: place, cond: Cond::Tensor(row) });
+            checks.push(Check { target: place, cond: Cond::Tensor(row), late: false });
             given.push(tensor);
             if !taken {
                 continue;
@@ -2295,7 +2558,19 @@ impl Path {
         }
         ffi::PyErr_Clear();
         let description = if closed.is_none() { Some(description) } else { None };
-        Described { description, closed, checks, numbers, args }
+        let aliases = if self.mutates { overlaps(&given, api) } else { Vec::new() };
+        let mut bumps: Vec<(u32, u64)> = Vec::new();
+        if self.mutates {
+            for (k, place) in args.iter().enumerate().filter(|(_, place)| place.item == NONE) {
+                let (held, born) = (rec.value(place.value), rec.born.get(place.value as usize).copied().unwrap_or(capi::TCFG_NO_VERSION));
+                let mut info = TcfgTensorInfo::empty();
+                let counted = !held.is_null() && (api.tensor_info)(held, &mut info) != 0 && info.version != capi::TCFG_NO_VERSION;
+                if counted && born != capi::TCFG_NO_VERSION && info.version > born {
+                    bumps.push((k as u32, info.version - born));
+                }
+            }
+        }
+        Described { description, closed, checks, numbers, args, aliases, bumps }
     }
 
     /// For a method call whose receiver the graph is given and that is no
@@ -2324,12 +2599,12 @@ impl Path {
             && (api.tensor_info)(ffi::PyCFunction_GetSelf(function), &mut info) != 0;
         if function.is_null() || ffi::PyCFunction_Check(function) == 0 || bound {
             xdecref(function);
-            checks.push(Check { target: Place::of(recv), cond: Cond::Type(PyObj::from_borrowed(ffi::Py_TYPE(value) as Obj)) });
+            checks.push(Check { target: Place::of(recv), cond: Cond::Type(PyObj::from_borrowed(ffi::Py_TYPE(value) as Obj)), late: false });
             return Some(Err(format!("an operation of the graph is a method of a {}", pyffi::type_name(value))));
         }
         let function = PyObj::from_owned(function);
         let found = const_ref(function.as_ptr());
-        checks.push(Check { target: Place::of(recv), cond: Cond::Has(PyObj::from_borrowed(name), function) });
+        checks.push(Check { target: Place::of(recv), cond: Cond::Has(PyObj::from_borrowed(name), function), late: false });
         Some(Ok(found))
     }
 
@@ -2366,7 +2641,8 @@ impl Path {
                 return Ok(value_ref(v));
             }
             let feed = self.feeds.iter().position(|f| *f == v);
-            let value = feed.map_or(null_mut(), |_| rec.value(v));
+            let late = self.constants.contains(&v);
+            let value = if feed.is_some() || late { rec.value(v) } else { null_mut() };
             if value.is_null() {
                 return Err("an operand of the graph has no value".to_string());
             }
@@ -2400,7 +2676,7 @@ impl Path {
                 let count = ffi::PyObject_Size(value);
                 let mut parts: Vec<Obj> = Vec::new();
                 let mut held = checks.borrow_mut();
-                held.push(Check { target: Place::of(v), cond: Cond::Sequence(ffi::Py_TYPE(value) as usize, count as usize) });
+                held.push(Check { target: Place::of(v), cond: Cond::Sequence(ffi::Py_TYPE(value) as usize, count as usize), late: false });
                 for i in 0..count {
                     let item = sequence_item(value, i);
                     let place = Place { value: v, item: i as u32 };
@@ -2410,10 +2686,10 @@ impl Path {
                     } else if checkable(item) {
                         let kept = frozen(item);
                         parts.push(const_ref(kept.as_ptr()));
-                        held.push(Check { target: place, cond: Cond::ValueEq(kept) });
+                        held.push(Check { target: place, cond: Cond::ValueEq(kept), late: false });
                     } else {
                         parts.into_iter().for_each(|o| ffi::Py_DECREF(o));
-                        held.push(Check { target: place, cond: Cond::Type(PyObj::from_borrowed(ffi::Py_TYPE(item) as Obj)) });
+                        held.push(Check { target: place, cond: Cond::Type(PyObj::from_borrowed(ffi::Py_TYPE(item) as Obj)), late: false });
                         return Err(format!("an operand of the graph holds a {}", pyffi::type_name(item)));
                     }
                 }
@@ -2422,12 +2698,17 @@ impl Path {
             }
             let v = Place::of(v);
             if !fits {
-                checks.borrow_mut().push(Check { target: v, cond: Cond::Type(PyObj::from_borrowed(ffi::Py_TYPE(value) as Obj)) });
+                checks.borrow_mut().push(Check { target: v, cond: Cond::Type(PyObj::from_borrowed(ffi::Py_TYPE(value) as Obj)), late: false });
                 return Err(format!("an operand of the graph is a {}", pyffi::type_name(value)));
             }
             let cond = match how {
                 "tensor" => {
-                    tensors[feed.unwrap()] = true;
+                    // One that is made behind the callable is nothing the
+                    // graph can be handed.
+                    let Some(feed) = feed else {
+                        return Err("an operand of the graph is a tensor that is made behind it".to_string());
+                    };
+                    tensors[feed] = true;
                     return Ok(value_ref(v.value));
                 }
                 "none" => return Ok(const_ref(value)),
@@ -2444,7 +2725,7 @@ impl Path {
                 c.target == v && std::mem::discriminant(&c.cond) == std::mem::discriminant(&cond)
             });
             if !known {
-                checks.borrow_mut().push(Check { target: v, cond });
+                checks.borrow_mut().push(Check { target: v, cond, late });
             }
             Ok(constant)
         };
@@ -2492,7 +2773,9 @@ impl Path {
                         .iter()
                         .map(|v| self.feeds.iter().position(|f| f == v).map_or(null_mut(), |_| rec.value(*v)))
                         .collect();
-                    *wrote |= updates_statistics(exported.as_ptr(), &given);
+                    // The statistics of a normalization are tensors from
+                    // outside: a path that may write to those has it.
+                    *wrote |= !self.mutates && updates_statistics(exported.as_ptr(), &given);
                     let guards = ffi::PyDict_GetItemString(exported.as_ptr(), c"guards".as_ptr());
                     let hows: Vec<String> = (0..d.operands.len())
                         .map(|k| {
@@ -2641,6 +2924,22 @@ impl Exported {
         let short = |o: &PyObj| named(o.as_ptr());
         let numbers = self.sizes.made_on();
         let mut at = 0;
+        // For a form of a path that writes to tensors from outside: which
+        // of its tensors share memory, and where each starts in it.
+        let tensors: Vec<&Check> = self.checks.iter().filter(|check| matches!(check.cond, Cond::Tensor(_))).collect();
+        let mut shared: Vec<String> = Vec::new();
+        for (k, (first, start)) in self.aliases.iter().enumerate() {
+            if *first as usize == k && *start != UNSHARED {
+                let lie = |(other, (of, start)): (usize, &(u32, i64))| {
+                    (*of as usize == k).then(|| format!("{} at {}", tensors.get(other).map_or(String::new(), |check| check.target.text(path)), start))
+                };
+                let all: Vec<String> = self.aliases.iter().enumerate().filter_map(lie).collect();
+                shared.push(format!("share memory: {}", all.join(", ")));
+            }
+        }
+        if !self.aliases.is_empty() && shared.is_empty() {
+            shared.push("no two tensors share memory".to_string());
+        }
         self.checks
             .iter()
             .map(|check| {
@@ -2667,6 +2966,7 @@ impl Exported {
                     }
                 }
             })
+            .chain(shared)
             .collect()
     }
 }
@@ -2812,6 +3112,14 @@ pub struct Def {
     /// is a view of): nothing outside the path has it, and an operation
     /// that writes to it is an operation of the graph.
     pub own: bool,
+    /// It is the same in every call that a form of the path is for: a
+    /// constant; a tensor an operation gave, as far as its sizes go (the
+    /// sizes of what a graph computes follow from those of what it is
+    /// given, which a form checks, unless an operator says otherwise:
+    /// `shaped_operator`); what is computed from the sizes of such
+    /// tensors and from constants. A check of such a value behind the
+    /// callable cannot fail.
+    pub fixed: bool,
 }
 
 /// The binary operators a graph computes on integers: + - * // %.
@@ -3009,6 +3317,27 @@ fn generic(unit: &Unit, cx: &PassCx, i: usize) -> bool {
         && found.operators.iter().all(|name| pure_operator(name))
 }
 
+/// What cannot fail and runs no Python code whatever it is given: behind
+/// the callable of a path that wrote to a tensor from outside, nothing
+/// else may run.
+pub fn infallible(op: &Op) -> bool {
+    matches!(
+        op,
+        Op::Const(_)
+            | Op::Object(_)
+            | Op::Hold(_)
+            | Op::BuildTuple(_)
+            | Op::BuildList(_)
+            | Op::BuildSlice(..)
+            | Op::ListAppend(..)
+            | Op::TupleGet(..)
+            | Op::IsNone(..)
+            | Op::Is(..)
+            | Op::TensorSize { .. }
+            | Op::TensorDim(_)
+    )
+}
+
 /// A list, a tuple or a slice that the instructions make.
 fn container(op: &Op) -> bool {
     matches!(op, Op::BuildTuple(_) | Op::BuildList(_) | Op::BuildSlice(..))
@@ -3148,7 +3477,7 @@ fn define(unit: &Unit, cx: &PassCx, roles: &[Role], defs: &mut HashMap<V, Def>, 
     }
     if inst.dst != NONE {
         let graph = late && !node && computes(&inst.op, defs, cx, unit);
-        defs.insert(inst.dst, Def { node, late, graph, made: false, own: false });
+        defs.insert(inst.dst, Def { node, late, graph, made: false, own: false, fixed: false });
     }
     true
 }
@@ -3350,6 +3679,9 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
         first: None,
         provisional: false,
         effects: false,
+        mutates: false,
+        pinned: Vec::new(),
+        constants: Vec::new(),
         exported: Shared::new(Vec::new()),
         registers: Shared::new(Vec::new()),
     }
@@ -3417,6 +3749,62 @@ pub unsafe fn apart(read: Obj, attributes: bool, target: Obj, keeps: Keeps) -> b
     let own = kept(read, Keeps::Attributes);
     let part = |name: &std::ffi::CStr| if own.is_null() { null_mut() } else { ffi::PyDict_GetItemString(own, name.as_ptr()) };
     ![own, part(c"_parameters"), part(c"_buffers"), part(c"_modules")].contains(&changed)
+}
+
+/// Whether what a tensor says of itself under a name is the same in front
+/// of a write to it and behind: its sizes, its dtype, its device, and
+/// whether it requires a gradient (a write that changes that, or the
+/// sizes, is no operation of a path). Its version counter, the function
+/// of autograd it came from and whatever else its class computes for a
+/// name are not; a method and what the object keeps under a name itself
+/// are nothing a write changes.
+pub unsafe fn settled_attribute(tensor: Obj, name: Obj) -> bool {
+    const SETTLED: [&str; 6] = ["shape", "ndim", "dtype", "device", "layout", "requires_grad"];
+    let text = pyffi::str_to_string(name);
+    if SETTLED.contains(&text.as_str()) || (text.starts_with("is_") && text != "is_leaf" && text != "is_inference") {
+        return true;
+    }
+    static TENSOR: std::sync::OnceLock<Option<PyObj>> = std::sync::OnceLock::new();
+    let class = if capi::is_unboxed(tensor) {
+        let found = TENSOR.get_or_init(|| {
+            let module = ffi::PyImport_ImportModule(c"torch".as_ptr());
+            let class = if module.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(module, c"Tensor".as_ptr()) };
+            xdecref(module);
+            ffi::PyErr_Clear();
+            (!class.is_null()).then(|| PyObj::from_owned(class))
+        });
+        match found {
+            Some(class) => class.as_ptr() as *mut ffi::PyTypeObject,
+            None => return false,
+        }
+    } else {
+        ffi::Py_TYPE(tensor)
+    };
+    let descr = pyffi::_PyType_Lookup(class, name);
+    descr.is_null() || (*ffi::Py_TYPE(descr)).tp_descr_set.is_none()
+}
+
+/// For a tensor that shares its memory with no other of those looked at.
+pub const UNSHARED: i64 = i64::MIN;
+
+/// Which of some tensors share memory, and how they lie in it: per tensor
+/// the first of them with the same memory, and where in it the tensor
+/// starts if another of them has that memory too.
+pub unsafe fn overlaps(tensors: &[Obj], api: &TcfgApi) -> Vec<(u32, i64)> {
+    let mut memory: Vec<(*const std::ffi::c_void, i64)> = Vec::new();
+    for tensor in tensors {
+        let mut info = TcfgTensorInfo::empty();
+        (api.tensor_info)(*tensor, &mut info);
+        memory.push((info.data, info.storage_offset));
+    }
+    let first = |at: usize| memory.iter().position(|other| !memory[at].0.is_null() && other.0 == memory[at].0).unwrap_or(at);
+    let firsts: Vec<usize> = (0..memory.len()).map(first).collect();
+    (0..memory.len())
+        .map(|at| {
+            let shared = firsts.iter().filter(|other| **other == firsts[at]).count() > 1;
+            (firsts[at] as u32, if shared { memory[at].1 } else { UNSHARED })
+        })
+        .collect()
 }
 
 /// A store that a path has taken down: the object as it was in the run
@@ -3548,7 +3936,8 @@ pub struct Mark {
     /// a call it went into.
     pub frames: usize,
     stores: usize,
-    inplace: bool,
+    flags: (bool, bool, bool),
+    pinned: usize,
     body: usize,
     values: usize,
     nodes: usize,
@@ -3590,10 +3979,25 @@ pub struct Trace {
     /// past; and what was already checked to be apart (`Assert::Apart`).
     pub stores: Vec<Stored>,
     pub apart: Vec<(PathValue, bool, PathValue, Keeps)>,
+    /// The run is no run to make a form of (an operation that is no part
+    /// of the path changed what kind of tensor one of its tensors is): the
+    /// path is taken down again at the next call.
+    pub again: bool,
+    /// An operation of the path writes to a tensor from outside it (or
+    /// draws random numbers): from there on nothing may be taken down
+    /// that can fail behind the callable, since the write cannot be taken
+    /// back. And the other way round: something that can fail behind the
+    /// callable is on the trace, so no such write may follow.
+    pub writes: bool,
+    pub fallible: bool,
     /// An operation of the path writes to a tensor in place.
     pub inplace: bool,
     /// See `Path::first`.
     pub first: Option<(usize, u32)>,
+    /// Tensors from outside the path that something computed behind the
+    /// callable depends on the kind of: a form checks them as it checks
+    /// the tensors its graph takes.
+    pub pinned: Vec<PathValue>,
     /// Per inlined call the trace is in, in its first function: how many
     /// variables were bound when it began. Those bound in it are of its
     /// frame, which is gone when it ends.
@@ -3619,12 +4023,16 @@ impl Trace {
             bound: Vec::new(),
             operators: Vec::new(),
             shape: Vec::new(),
-            rec: Recording { values: vec![null_mut()], nodes: Vec::new(), failed: None, wrote: false },
+            rec: Recording { values: vec![null_mut()], born: vec![capi::TCFG_NO_VERSION], nodes: Vec::new(), failed: None, wrote: false },
             mark: None,
             stores: Vec::new(),
             apart: Vec::new(),
+            again: false,
+            writes: false,
+            fallible: false,
             inplace: false,
             first: None,
+            pinned: Vec::new(),
             inlined: Vec::new(),
             lost: false,
             provisional: false,
@@ -3673,6 +4081,9 @@ impl Trace {
         self.defs.push(def);
         self.source.push((self.owner(), NONE));
         self.rec.values.push(kept);
+        let mut info = TcfgTensorInfo::empty();
+        let tensor = !kept.is_null() && capi::api().is_some_and(|api| unsafe { (api.tensor_info)(kept, &mut info) } != 0);
+        self.rec.born.push(if tensor { info.version } else { capi::TCFG_NO_VERSION });
         made
     }
 
@@ -3722,18 +4133,50 @@ impl Trace {
             }
             _ => {}
         }
+        // A check of what the graph gives is made behind the callable,
+        // and can fail there unless what it is of is the same whenever the
+        // form is for the call.
+        let unsure = |def: Def| def.late && !def.fixed;
+        let mut late = unsure(self.defs[assert.value() as usize]);
+        if let Assert::Same(_, other) | Assert::Apart(_, _, other, _) = &assert {
+            late |= unsure(self.defs[*other as usize]);
+        }
+        if late {
+            self.fails_late();
+        }
         self.push(Op::Hold(Vec::new()), NONE, Kind::Check, bc);
         self.body.last_mut().expect("just pushed").assert = Some(assert);
+    }
+
+    /// Something that can fail behind the callable is taken down. Where
+    /// the path has written to a tensor from outside by then, the run is
+    /// not exported: those who take such things down ask `writes` first,
+    /// and end the path in front of them.
+    pub fn fails_late(&mut self) {
+        self.fallible = true;
+        if self.writes && self.rec.failed.is_none() {
+            self.rec.failed = Some("a check behind a write to a tensor from outside the path".to_string());
+        }
     }
 
     /// What an instruction of the path gives, from what it takes: a value
     /// that depends on a node if one of those does, and that the graph
     /// computes if `computed` says so.
     pub fn derive(&mut self, op: Op, kind: Kind, made: bool, kept: Obj, bc: u32) -> PathValue {
+        self.derive_fixed(op, kind, made, kept, bc, false)
+    }
+
+    /// `derive` for what is the same in every call a form is for where
+    /// `fixed` says so (`Def::fixed`): a method of a tensor the graph gives.
+    pub fn derive_fixed(&mut self, op: Op, kind: Kind, made: bool, kept: Obj, bc: u32, fixed: bool) -> PathValue {
         let mut late = false;
         reads(&op, |v| late |= self.defs[v as usize].late);
         let graph = late && computed(&op, &self.defs, |_| false);
-        let dst = self.value(Def { node: false, late, graph, made, own: false }, kept);
+        let fixed = fixed || matches!(op, Op::Const(_) | Op::Object(_));
+        if late && !graph && !fixed && !infallible(&op) {
+            self.fails_late();
+        }
+        let dst = self.value(Def { node: false, late, graph, made, own: false, fixed }, kept);
         self.push(op, dst, kind, bc);
         dst
     }
@@ -3764,7 +4207,8 @@ impl Trace {
             at,
             frames,
             stores: self.stores.len(),
-            inplace: self.inplace,
+            flags: (self.writes, self.fallible, self.inplace),
+            pinned: self.pinned.len(),
             body: self.body.len(),
             values: self.defs.len(),
             nodes: self.rec.nodes.len(),
@@ -3795,10 +4239,11 @@ impl Trace {
         self.body.truncate(mark.body);
         self.stores.truncate(mark.stores);
         self.apart.clear();
-        self.inplace = mark.inplace;
+        (self.writes, self.fallible, self.inplace) = mark.flags;
         if self.operators.is_empty() {
             self.first = None;
         }
+        self.pinned.truncate(mark.pinned);
         self.defs.truncate(mark.values);
         self.source.truncate(mark.values);
         for kept in self.rec.values.drain(mark.values..) {
@@ -3940,6 +4385,9 @@ impl Path {
             first: None,
             provisional: false,
             effects: false,
+            mutates: false,
+            pinned: Vec::new(),
+            constants: Vec::new(),
             exported: Shared::new(Vec::new()),
             registers: Shared::new(Vec::new()),
         }
@@ -3985,6 +4433,7 @@ impl Path {
         let mut wanted = vec![false; nregs];
         let (mut outputs, mut exits) = (Vec::new(), Vec::new());
         let (mut branches, mut calls) = (0, 0);
+        let constants: std::cell::RefCell<Vec<PathValue>> = std::cell::RefCell::new(Vec::new());
         for inst in trace.body.iter_mut().rev() {
             let dst = inst.dst;
             let needed = dst != NONE && need[dst as usize];
@@ -3995,6 +4444,14 @@ impl Path {
             // rest is there in front of the callable.
             let takes = |op: &Op, wanted: &mut [bool], need: &mut [bool]| {
                 reads(op, |v| match defs[v as usize] {
+                    // Computed behind the callable and the same whenever
+                    // the form is for the call: a constant of the graph.
+                    taken if taken.late && taken.fixed && !taken.node && !taken.graph => {
+                        need[v as usize] = true;
+                        if !constants.borrow().contains(&v) {
+                            constants.borrow_mut().push(v);
+                        }
+                    }
                     taken if (taken.late && !taken.node) || built[v as usize] => wanted[v as usize] = true,
                     taken if !taken.late => need[v as usize] = true,
                     _ => {}
@@ -4020,6 +4477,13 @@ impl Path {
                     let assert = inst.assert.as_ref().expect("a check has what it checks");
                     let v = assert.value() as usize;
                     match assert {
+                        // What is the same in every call a form is for was
+                        // checked when the path was taken down: the tensor
+                        // it is computed from need not be given back for it.
+                        Assert::Truth(..) | Assert::Null(..) | Assert::Guard(_) if defs[v].late && defs[v].fixed => {
+                            branches += matches!(assert, Assert::Truth(..) | Assert::Null(..)) as usize;
+                            Stage::Skipped
+                        }
                         // A guard on what a node returns looks at what the
                         // graph says of it.
                         Assert::Guard(cond) if defs[v].node => {
@@ -4087,6 +4551,7 @@ impl Path {
         outputs.reverse();
         exits.reverse();
         let effects = trace.body.iter().any(|inst| inst.stage == Stage::Landing);
+        let constants = constants.into_inner();
         let mut feeds: Vec<PathValue> = Vec::new();
         for inst in trace.body.iter().filter(|inst| inst.kind == Kind::Node || inst.in_graph) {
             reads(&inst.op, |v| {
@@ -4133,6 +4598,9 @@ impl Path {
             first: trace.first,
             provisional,
             effects,
+            mutates: trace.writes,
+            pinned: std::mem::take(&mut trace.pinned),
+            constants,
             exported: Shared::new(Vec::new()),
             registers: Shared::new(Vec::new()),
         }

@@ -46,6 +46,92 @@ def _overload(name: str, overload: str) -> Any:
     return getattr(getattr(getattr(torch.ops, namespace), op), overload or "default")
 
 
+def _arguments(
+    site: dict[str, Any], operand: Callable[[int], Any]
+) -> tuple[list[Any], dict[str, Any]]:
+    """The arguments a kernel call was given, as the operator takes them:
+    ``operand(k)`` for the k-th value the call site takes, the constants of
+    the call for the rest."""
+    args: list[Any] = []
+    kwargs: dict[str, Any] = {}
+    for name, keyword_only, source, payload in site["args"]:
+        if source == "operand":
+            given = operand(payload[0])
+            if payload[1] == "int_as_list":
+                given = [given]
+        elif source == "packed":
+            given = [operand(k) for k in payload]
+        else:
+            given = payload
+        if keyword_only:
+            kwargs[name] = given
+        else:
+            args.append(given)
+    return args, kwargs
+
+
+def _hollow(value: Any) -> Any:
+    """A tensor of the same sizes and dtype that holds nothing (on the
+    ``meta`` device); a list or tuple with such tensors; anything else as
+    it is."""
+    if isinstance(value, torch.Tensor):
+        return torch.empty(value.shape, dtype=value.dtype, device="meta")
+    if type(value) in (list, tuple):
+        return type(value)(_hollow(item) for item in value)
+    return value
+
+
+def _sizes(value: Any, dtypes: bool) -> Any:
+    """The sizes of a tensor and, with ``dtypes``, its dtype; those of the
+    items of a list or tuple; None for what is neither."""
+    if isinstance(value, torch.Tensor):
+        return (tuple(value.shape), value.dtype if dtypes else None)
+    if isinstance(value, (list, tuple)):
+        return tuple(_sizes(item, dtypes) for item in value)
+    return None
+
+
+def sized(kind: str, head: Any, operands: list[Any], kwnames: Any, result: Any) -> bool:
+    """Whether the sizes of what an operation gave follow from the sizes of
+    the tensors it was given and from its other arguments. The operation is
+    run once more on tensors of those sizes and dtypes that hold nothing:
+    one that has to look at what a tensor holds to size its result
+    (``nonzero`` inside ``argwhere``, a count that is a tensor) cannot run
+    there, and neither can anything else this does not know how to ask, for
+    which the answer is no. The engine asks this of an operator that is
+    made of other operators, when it takes its call down: ``kind`` is
+    ``"site"`` for a kernel call (``head`` describes it), ``"call"`` for a
+    call of the function ``head``, ``"method"`` for a call of the method of
+    that name of the first operand, ``"item"`` for a subscript.
+
+    What it gives must have the dtypes of what the operation gave as well,
+    unless the thread is under autocast: autocast casts on the device of the
+    tensors of a call, and not where tensors hold nothing."""
+    dtypes = not torch._C._is_any_autocast_enabled()
+    wanted = _sizes(result, dtypes)
+    if wanted is None:
+        return False
+    hollow = [_hollow(operand) for operand in operands]
+    try:
+        with torch.no_grad():
+            if kind == "site":
+                args, kwargs = _arguments(head, lambda k: hollow[k])
+                found = _overload(head["op"], head["overload"])(*args, **kwargs)
+            elif kind == "item":
+                found = hollow[0][hollow[1]]
+            else:
+                named = len(kwnames or ())
+                positional = hollow[: len(hollow) - named]
+                kwargs = dict(zip(kwnames or (), hollow[len(positional) :]))
+                if kind == "method":
+                    found = getattr(positional[0], head)(*positional[1:], **kwargs)
+                else:
+                    found = head(*positional, **kwargs)
+    except Exception:
+        return False
+    return _sizes(found, dtypes) == wanted
+
+
 def graph_module(description: dict[str, Any]) -> torch.fx.GraphModule:
     """The graph the engine describes: a placeholder per tensor it takes, a
     call of the operator overload per kernel call with the arguments the
@@ -100,21 +186,7 @@ def graph_module(description: dict[str, Any]) -> torch.fx.GraphModule:
     for kind, *parts in description["nodes"]:
         if kind == "aten":
             site, operands, value, meta = parts
-            args: list[Any] = []
-            kwargs: dict[str, Any] = {}
-            for name, keyword_only, source, payload in site["args"]:
-                if source == "operand":
-                    given = of(operands[payload[0]])
-                    if payload[1] == "int_as_list":
-                        given = [given]
-                elif source == "packed":
-                    given = [of(operands[k]) for k in payload]
-                else:
-                    given = payload
-                if keyword_only:
-                    kwargs[name] = given
-                else:
-                    args.append(given)
+            args, kwargs = _arguments(site, lambda k: of(operands[k]))
             target = _overload(site["op"], site["overload"])
             node = graph.call_function(target, tuple(args), kwargs)
             values[value] = typed(node, meta)

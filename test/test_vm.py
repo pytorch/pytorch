@@ -4858,6 +4858,12 @@ def region_chain(x, y):
     return ((x + y).sin() * y).cos().exp().tanh()
 
 
+def region_frozen(model, x):
+    with torch.no_grad():
+        target = model(x)
+    return ((model(x * 2) - target) ** 2).mean()
+
+
 def region_loop(model, batches):
     total = None
     for x, scale in zip(batches, (1.0, 2.0, 3.0)):
@@ -5163,6 +5169,27 @@ class TestVmRegions(TestCase):
             compiled(model, x).sum().backward()
             self.assertEqual(model.conv.weight.grad is None, i >= 5)
             self.assertIsNotNone(model.fc.weight.grad)
+
+    def test_no_grad_section_is_not_differentiated(self):
+        torch.manual_seed(0)
+        model, reference = RegionNet().train(), RegionNet().train()
+        reference.load_state_dict(model.state_dict())
+        compiled = torch.vm(
+            region_frozen, passes=with_graphs("aot_eager"), fallback=False
+        )
+        for _ in range(8):
+            x = torch.randn(2, 3, 6, 6)
+            model.zero_grad()
+            reference.zero_grad()
+            loss, expected = compiled(model, x), region_frozen(reference, x)
+            loss.backward()
+            expected.backward()
+            self.assertEqual(loss, expected, atol=0, rtol=0)
+            self.assertEqual(
+                model.fc.weight.grad, reference.fc.weight.grad, atol=0, rtol=0
+            )
+        # With gradients off and with them on are two regions of the block.
+        self.assertEqual(len(self.compiled_regions(compiled)), 2)
 
     def test_loop_variable_before_its_first_assignment(self):
         # `out` and `total` do not exist on the first trip through the loop,
@@ -6463,6 +6490,33 @@ class GraphRebinds(torch.nn.Module):
         return self.act(y * self.weight).exp().sin()
 
 
+class GraphAverages(torch.nn.Module):
+    """Writes to its buffers and to what it is handed, between operations."""
+
+    def __init__(self):
+        super().__init__()
+        self.fc = torch.nn.Linear(4, 4)
+        self.register_buffer("ema", torch.zeros(4))
+        self.register_buffer("last", torch.zeros(3, 4))
+        self.register_buffer("steps", torch.zeros((), dtype=torch.long))
+
+    def forward(self, x):
+        y = (self.fc(x).sin() * 2).cos()
+        self.ema.mul_(0.9).add_(y.mean(0), alpha=0.1)
+        self.last[:] = y
+        self.steps += 1
+        x.add_(1)
+        return (y + self.ema).exp().tanh() + self.last.sum() + x
+
+
+def graph_shares(x, part):
+    # `part` may be a view of `x`.
+    y = (x.sin() * 2).cos()
+    part.mul_(2)
+    x.add_(y)
+    return (x * part.sum()).tanh().exp() + y
+
+
 def graph_saves(x):
     y = x.exp()
     y.add_(1)
@@ -6523,11 +6577,77 @@ def graph_dict_of(x, entries, b):
     return (y * 2).exp().tanh().sum(), b.n
 
 
+def graph_versions(x, buffer):
+    y = (x.sin() * 2 + 1).cos()
+    buffer.add_(y.mean())
+    return (y + buffer).exp().tanh().sum(), buffer._version
+
+
+def graph_turns(x, buffer):
+    y = (x.sin() * 2 + 1).cos()
+    buffer.t_()
+    return (y.sum() + buffer.sum()).exp().tanh() * buffer.shape[0], tuple(buffer.shape)
+
+
+def graph_learns(x, w, buffer):
+    y = (x.sin() * w + 1).cos()
+    buffer.mul_(0.9).add_(y.mean(0), alpha=0.1)
+    return (y + buffer).exp().tanh().sum(), buffer.requires_grad
+
+
+class GraphCounts(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+        self.seen = []
+        self.register_buffer("total", torch.zeros(()))
+
+    def forward(self, x, index):
+        y = (x.sin() * 2 + 1).cos()
+        self.calls += 1
+        self.total.add_(y.mean())
+        self.seen.append(self.calls)
+        return y[index].exp().sum() + self.total
+
+
+def graph_repeats(x, buffer):
+    y = (x.sin() * 2 + 1).cos()
+    buffer.add_(1)
+    more = y.repeat_interleave((y[:, 0] > 0).sum(), 0)
+    for _ in range(more.shape[0] // 4):
+        buffer.add_(1)
+    return more.sum() + buffer
+
+
+def graph_finds(x, buffer):
+    y = (x.sin() * 2 + 1).cos()
+    buffer.add_(1)
+    rows, columns = torch.where(y > 0)
+    if rows.shape[0] > 6:
+        buffer.add_(10)
+    return rows.sum() + buffer + y.sum()
+
+
+def graph_weighs(x):
+    y = (x.sin() * 2 + 1).cos()
+    where = torch.argwhere(y > 0)
+    if where.shape[0] > 6:
+        return (y * 2).exp().tanh().sum()
+    return (y * 3).exp().tanh().sum() - 1
+
+
 def graph_fills(x, fresh):
     y = (x.sin() * 2 + 1).cos()
     fresh.append(y.shape[0])
     fresh[0] = 7
     return (y * 2).exp().tanh().sum()
+
+
+def graph_notes(x, buffer):
+    y = (x.sin() * 2 + 1).cos()
+    buffer.add_(y.mean())
+    y.note = 3
+    return (y + buffer).exp().tanh().sum() * y.note
 
 
 def graph_remembers(x, w):
@@ -6791,6 +6911,16 @@ def graph_asks(x, y):
     return b + 1 if same else b - 1
 
 
+def graph_gathers(x):
+    outs = []
+    for k in range(3):
+        outs.append((x + k).sin())
+    total = x.cos()
+    for out in outs:
+        total = total + out
+    return total.tanh()
+
+
 def graph_probed(x, n):
     y = x + 1
     if n > 2:
@@ -6954,9 +7084,9 @@ class TestVmGraphs(TestCase):
         (left,) = [r for r in torch.vm.regions(compiled) if r["state"] == "vm"]
         self.assertIn("call ", left["text"])
         # An operation that writes to a tensor the function made itself is
-        # an operation of the graph (one that writes to what the function
-        # was given ends it: see
-        # test_a_write_to_a_tensor_from_outside_ends_the_path_and_is_done_once).
+        # an operation of the graph, and so is one that writes to what the
+        # function was given: see
+        # test_a_write_to_a_tensor_from_outside_is_done_once.
         written = torch.vm(graph_written, passes=GRAPHS, fallback=False)
         for _ in range(3):
             self.assertEqual(written(x), graph_written(x), atol=0, rtol=0)
@@ -7166,7 +7296,7 @@ print(json.dumps(found))
         self.assertEqual(compiled(strided), graph_poly(strided), atol=0, rtol=0)
         self.assertEqual(self.graphs(compiled)[0]["misses"], 7)
 
-    def test_a_call_whose_operations_write_is_not_exported(self):
+    def test_a_call_whose_operations_write_to_what_they_are_given(self):
         graphs = []
 
         def keep(gm, input_types):
@@ -7184,12 +7314,13 @@ print(json.dumps(found))
             # updates without their version counters moving.
             self.assertEqual(ours, theirs, atol=0, rtol=0)
         self.assertEqual(ours[0]._version, 0)
-        # Exported for the calls that do not train; the ones that do ran
-        # the operations, and were looked at once.
-        self.assertEqual(len(graphs), 1)
+        # Exported for the calls that train as well: the graph writes the
+        # statistics, which are tensors it is given.
+        self.assertEqual(len(graphs), 2)
         self.assertIn(torch.ops.aten.batch_norm.default, graphs[0])
+        self.assertIn(torch.ops.aten.batch_norm.default, graphs[1])
         (graph,) = self.graphs(compiled, "compiled")
-        self.assertEqual((graph["variants"], graph["hits"]), (1, 3))
+        self.assertEqual((graph["variants"], graph["hits"]), (2, 6))
 
     def test_what_a_dispatch_mode_is_to_see_is_not_run_as_a_graph(self):
         def sigmoid_for_tanh(gm, input_types):
@@ -7228,12 +7359,13 @@ print(json.dumps(found))
         targets = self.targets(graphs[0])
         self.assertIn(torch.ops.aten.sym_size.int, targets)
         self.assertIn(__import__("operator").mul, targets)
-        # The graph gives the sum, and the ranks the block checked of the
-        # two tensors it keeps to itself.
+        # The graph gives the sum. The ranks that the block checks of the
+        # two tensors the graph keeps to itself follow from the sizes of
+        # what it is given, which the form checks: they are not asked of
+        # the graph again.
         (given,) = [n.args[0] for n in graphs[0].graph.nodes if n.op == "output"]
         said = [node.target for node in given]
-        dim = torch.ops.aten.dim.default
-        self.assertEqual(said, [torch.ops.aten.add.Tensor, dim, dim])
+        self.assertEqual(said, [torch.ops.aten.add.Tensor])
 
     def test_a_pass_that_fails_leaves_the_graph_to_the_engine(self):
         def broken(gm, input_types):
@@ -8434,7 +8566,7 @@ print(json.dumps(found))
                     (graph,) = [g for g in self.graphs(compiled) if g["hits"]]
                     self.assertEqual(graph["exports"], 1)
 
-    def test_a_write_to_a_tensor_from_outside_ends_the_path_and_is_done_once(self):
+    def test_a_write_to_a_tensor_from_outside_is_done_once(self):
         def keep(gm, input_types):
             return gm
 
@@ -8463,11 +8595,11 @@ print(json.dumps(found))
             self.assertEqual(results[0], results[2], atol=0, rtol=0)
             self.assertEqual(results[1], results[3], atol=0, rtol=0)
         graphs = [g for g in self.graphs(compiled) if g["hits"]]
-        self.assertEqual([g["ops"] for g in graphs], [6, 6])
-        # The write to what the function made is in the graph, the one to
-        # what it was given ends it.
-        self.assertIn("aten::tanh_", graphs[0]["operators"])
-        self.assertIn("writes to an argument", graphs[0]["why"])
+        # The writes are operations of the graph: the one to what the
+        # function made, and the ones to what it was given.
+        self.assertEqual([g["ops"] for g in graphs], [15])
+        for written in ("aten::tanh_", "aten::add_.Tensor", "aten::mul_.Tensor"):
+            self.assertIn(written, graphs[0]["operators"])
         # Batch norm in training mode: the statistics after every call.
         torch.manual_seed(0)
         model, reference = GraphResNet().train(), None
@@ -8573,13 +8705,19 @@ print(json.dumps(found))
                     return torch.vm(net, passes=passes, fallback=False)
 
                 losses, state = steps(compiled, net, batches, targets)
-                close = dict(rtol=2e-3, atol=2e-4)
-                tolerance = dict(atol=0, rtol=0) if exact else close
+                if not exact:
+                    # What a compiler makes of a dropout draws its own
+                    # numbers (`is_exact` says so): the steps run, and are
+                    # not eager's.
+                    self.assertFalse(torch.vm.is_exact(passes))
+                    self.assertEqual(len(losses), len(eager))
+                    self.assertTrue(all(math.isfinite(loss) for loss in losses))
+                    continue
                 said = f"{type(net).__name__} {behind}"
-                self.assertEqual(losses, eager, msg=said, **tolerance)
+                self.assertEqual(losses, eager, msg=said, atol=0, rtol=0)
                 for name, value in expected.items():
                     what = f"{said} {name}"
-                    self.assertEqual(state[name], value, msg=what, **tolerance)
+                    self.assertEqual(state[name], value, msg=what, atol=0, rtol=0)
 
     # --- stores as effects of a path
 
@@ -8687,6 +8825,67 @@ print(json.dumps(found))
         # assigns neither is one graph.
         self.assertIn(8, [g["ops"] for g in self.graphs(compiled) if g["hits"]])
 
+    # --- writes to tensors from outside, training steps, several results
+
+    def test_writes_to_tensors_from_outside_are_operations_of_the_graph(self):
+        def keep(gm, input_types):
+            return gm
+
+        def versions(net):
+            return [b._version for b in net.buffers()]
+
+        def moved(net, before):
+            return [now - was for now, was in zip(versions(net), before)]
+
+        compilers = ((P.AOTAutograd(),), False), ((P.Inductor(),), False)
+        for behind, exact in (((keep,), True), *compilers):
+            tolerance = dict(atol=0, rtol=0) if exact else dict(rtol=1e-5, atol=1e-6)
+            torch.manual_seed(0)
+            model = GraphAverages().eval()
+            reference = copy.deepcopy(model)
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(model, passes=passes, fallback=False)
+            given = torch.randn(3, 4)
+            with torch.no_grad():
+                # Hits, and another dtype in between (a miss, another form).
+                for kind in ["float"] * 8 + ["double"] * 3 + ["float"] * 3:
+                    for net in (model, reference):
+                        cast = net.double if kind == "double" else net.float
+                        cast()
+                    typed = given.to(model.ema.dtype)
+                    mine, theirs = typed.clone(), typed.clone()
+                    before = versions(model), versions(reference)
+                    got, expected = compiled(mine), reference(theirs)
+                    self.assertEqual(got, expected, msg=kind, **tolerance)
+                    # What it was handed, and its buffers.
+                    self.assertEqual(mine, theirs, msg=kind, **tolerance)
+                    for name, value in reference.state_dict().items():
+                        what, held = f"{kind} {name}", model.state_dict()[name]
+                        self.assertEqual(held, value, msg=what, **tolerance)
+                    # The version counters end where eager's writes leave
+                    # them, also where what a compiler made of the graph
+                    # writes a tensor back once.
+                    counted = moved(model, before[0])
+                    eager = moved(reference, before[1])
+                    self.assertEqual(eager, [2, 1, 1])
+                    self.assertEqual(counted, eager, msg=kind)
+            graph = max(self.graphs(compiled), key=lambda g: g["hits"])
+            self.assertEqual((graph["ops"], graph["why"]), (16, "the function returns"))
+            self.assertGreaterEqual(graph["hits"], 8)
+            # Two tensors that share memory, and two that do not: a form
+            # each, and the writes go where eager's go.
+            compiled = torch.vm(graph_shares, passes=passes, fallback=False)
+            for shared in (True, True, True, True, False, False, False, True, False):
+                bases = [torch.arange(12.0).reshape(3, 4) / 7 for _ in range(2)]
+                parts = [base[1] if shared else torch.ones(4) for base in bases]
+                got = compiled(bases[0], parts[0])
+                expected = graph_shares(bases[1], parts[1])
+                self.assertEqual(got, expected, msg=str(shared), **tolerance)
+                self.assertEqual(bases[0], bases[1], msg=str(shared), **tolerance)
+                self.assertEqual(parts[0], parts[1], msg=str(shared), **tolerance)
+            (graph,) = [g for g in self.graphs(compiled) if g["hits"]]
+            self.assertEqual((graph["ops"], graph["exports"]), (10, 2))
+
     def test_a_write_to_what_autograd_saved_raises_as_in_eager(self):
         def keep(gm, input_types):
             return gm
@@ -8712,7 +8911,116 @@ print(json.dumps(found))
             ran = [g["ops"] for g in self.graphs(compiled) if g["hits"]]
             self.assertIn(6, ran)
 
+    def test_a_training_step_is_a_graph(self):
+        def keep(gm, input_types):
+            return gm
+
+        def step(fn, net, x, y, optimizer):
+            optimizer.zero_grad()
+            loss = torch.nn.functional.cross_entropy(fn(x).flatten(1)[:, :5], y)
+            loss.backward()
+            grads = [p.grad for p in net.parameters()]
+            gradients = [None if grad is None else grad.clone() for grad in grads]
+            optimizer.step()
+            return loss.item(), gradients
+
+        torch.manual_seed(0)
+        batches = [torch.randn(4, 4, 8, 8) for _ in range(30)]
+        targets = [torch.randint(0, 5, (4,)) for _ in range(30)]
+        compilers = ((P.AOTAutograd(),), False), ((P.Inductor(),), False)
+        for behind, exact in (((keep,), True), *compilers):
+            tolerance = dict(atol=0, rtol=0) if exact else dict(rtol=1e-4, atol=1e-5)
+            torch.manual_seed(1)
+            model = GraphResNet().train()
+            reference = copy.deepcopy(model)
+            # How many steps run the graph is counted below: nothing is
+            # left to the interpreter by measurement.
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(model, passes=passes, fallback=False, demote=False)
+            ours = torch.optim.SGD(model.parameters(), lr=0.05, momentum=0.9)
+            theirs = torch.optim.SGD(reference.parameters(), lr=0.05, momentum=0.9)
+            for at, (x, y) in enumerate(zip(batches, targets)):
+                if at == 20:
+                    # Part of the model stops learning: another form.
+                    for net in (model, reference):
+                        net.layer[0].conv1.weight.requires_grad_(False)
+                got = step(compiled, model, x, y, ours)
+                expected = step(reference, reference, x, y, theirs)
+                what = f"loss of step {at}"
+                self.assertEqual(got[0], expected[0], msg=what, **tolerance)
+                # The gradient of every parameter.
+                what = f"gradients of step {at}"
+                self.assertEqual(got[1], expected[1], msg=what, **tolerance)
+            for name, value in reference.state_dict().items():
+                self.assertEqual(model.state_dict()[name], value, msg=name, **tolerance)
+            # The forward of a training step is one graph: batch norm writes
+            # its statistics in it.
+            graph = max(self.graphs(compiled), key=lambda g: g["hits"])
+            self.assertEqual((graph["ops"], graph["why"]), (26, "the function returns"))
+            self.assertGreaterEqual(graph["hits"], 20)
+            self.assertIn("aten::add_.Tensor", graph["operators"])
+            # Without gradients, and in inference mode: forms of their own.
+            x = batches[0]
+            for mode in (torch.no_grad, torch.inference_mode):
+                for _ in range(3):
+                    with mode():
+                        got, expected = compiled(x), reference(x)
+                    self.assertEqual(got, expected, **tolerance)
+                    self.assertFalse(got.requires_grad)
+            for name, value in reference.state_dict().items():
+                self.assertEqual(model.state_dict()[name], value, msg=name, **tolerance)
+            # An input that requires a gradient, and going backward twice.
+            mine, other = x.clone().requires_grad_(), x.clone().requires_grad_()
+            for _ in range(3):
+                got, expected = compiled(mine).sum(), reference(other).sum()
+                for loss in (got, expected):
+                    loss.backward(retain_graph=True)
+                    loss.backward()
+                self.assertEqual(mine.grad, other.grad, **tolerance)
+
     # --- what the report says
+
+    def test_a_training_graph_is_the_same_graph_under_autocast(self):
+        # Autocast casts the first convolution's result. That the sizes of
+        # the result follow from the sizes of what the convolution took is
+        # asked on tensors that hold nothing, which autocast does not cast:
+        # the dtypes are not compared there. Without that the count of a
+        # batch norm, a write to a tensor from outside behind a check that
+        # was taken for one that can fail, ended the graph.
+        class Net(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(4, 8, 3, padding=1)
+                self.norm = torch.nn.BatchNorm2d(8)
+                self.head = torch.nn.Linear(8 * 8 * 8, 5)
+
+            def forward(self, x):
+                h = torch.relu(self.norm(self.conv(x)))
+                return self.head(torch.flatten(h, 1))
+
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(4, 4, 8, 8)
+        found = []
+        for cast in (False, True):
+            torch.manual_seed(1)
+            model = Net().train()
+            reference = copy.deepcopy(model)
+            passes = (*DEFAULT, P.Graphs(), keep)
+            compiled = torch.vm(model, passes=passes, fallback=False, demote=False)
+            under = torch.autocast("cpu", dtype=torch.bfloat16, enabled=cast)
+            with torch.no_grad(), under:
+                for _ in range(6):
+                    self.assertEqual(compiled(x), reference(x), atol=0, rtol=0)
+            for name, value in reference.state_dict().items():
+                self.assertEqual(model.state_dict()[name], value, msg=name)
+            graphs = self.graphs(compiled, "compiled")
+            found.append([(g["ops"], g["why"], g["operators"]) for g in graphs])
+        ((ops, why, operators),) = found[0]
+        self.assertEqual((ops, why), (6, "the function returns"))
+        self.assertIn("aten::add_.Tensor", operators)
+        self.assertEqual(found[1], found[0])
 
     def test_a_graph_has_one_name_and_the_report_counts_nothing_twice(self):
         def keep(gm, input_types):
@@ -8764,6 +9072,35 @@ print(json.dumps(found))
         self.assertGreater(graph["hits"], 0)
         self.assertEqual(compiled.stats()["graphs"]["built"], 1)
 
+    def test_a_check_that_a_form_decides_keeps_no_tensor_in_the_results(self):
+        kept = []
+
+        def keep(gm, input_types):
+            kept.append(gm)
+            return gm
+
+        torch.manual_seed(0)
+        layers = [torch.nn.Linear(4, 4), torch.nn.ReLU(), torch.nn.Linear(4, 4)]
+        model = torch.nn.Sequential(*layers, torch.nn.Tanh()).eval()
+        compiled = torch.vm(model, passes=(*DEFAULT, P.Graphs(), keep), fallback=False)
+        x = torch.randn(3, 4)
+        with torch.no_grad():
+            for _ in range(6):
+                self.assertEqual(compiled(x), model(x), atol=0, rtol=0)
+        # `F.relu` asks whether its argument overrides torch functions:
+        # for a tensor the graph gives, the answer follows from the form.
+        (given,) = [n.args[0] for n in kept[0].graph.nodes if n.op == "output"]
+        self.assertEqual([node.target for node in given], [torch.ops.aten.tanh.default])
+        # The weights are named by where they were read, and the values of
+        # a called function with the function.
+        placeholders = [n.target for n in kept[0].graph.nodes if n.op == "placeholder"]
+        self.assertEqual(placeholders[1:3], ["module_weight", "module_bias"])
+        (graph,) = [g for g in self.graphs(compiled) if g["hits"]]
+        checks = graph["forms"][0]["checks"]
+        self.assertIn("module.weight: float32[4, 4], requires_grad", checks)
+        called = [check for check in checks if check.startswith("Linear.forward:%")]
+        self.assertTrue(called, checks)
+
     def test_a_kind_of_call_is_open_again_once_its_numbers_stay(self):
         exports = []
 
@@ -8789,6 +9126,23 @@ print(json.dumps(found))
         (graph,) = self.graphs(compiled)
         self.assertEqual(len(exports), made + 1)
         self.assertGreaterEqual(graph["hits"], hits + 20)
+
+    def test_a_tensor_made_behind_a_graph_is_no_constant_of_it(self):
+        def keep(gm, input_types):
+            return gm
+
+        # A loop over a list of what the operations gave takes its items
+        # behind the graph: the path ends where an operation takes one.
+        x = torch.randn(4, 4)
+        for passes in ((keep,), (P.AOTAutograd(),)):
+            listed = (*DEFAULT, P.Graphs(), *passes)
+            compiled = torch.vm(graph_gathers, passes=listed, fallback=False)
+            for scale in (1.0, 2.0, 3.0, 4.0, 5.0, 6.0):
+                got, expected = compiled(x * scale), graph_gathers(x * scale)
+                self.assertEqual(got, expected, atol=0, rtol=0)
+            (graph,) = [g for g in self.graphs(compiled) if g["hits"]]
+            ends = "an operation takes what the graph cannot compute"
+            self.assertEqual((graph["ops"], graph["why"]), (7, ends))
 
     def test_a_graph_that_turned_out_too_small_is_not_waited_for(self):
         def keep(gm, input_types):
@@ -8865,6 +9219,31 @@ print(json.dumps(found))
                 said.append(value)
         return said
 
+    def test_a_form_of_a_path_that_writes_is_for_how_its_tensors_lie_in_memory(self):
+        def given(row):
+            def make():
+                base = torch.arange(24.0).reshape(6, 4) / 7
+                return (base[:3], torch.ones(4) if row is None else base[row])
+
+            return make
+
+        # A row of the first tensor, another row of it, a row of the same
+        # memory behind it, and a tensor of its own: a form each. What a
+        # compiler made for one writes where that one had the row.
+        rows = [1, 1, 1, 1, 2, 2, 4, 4, None, 1, 2, 4]
+        for behind in (P.AOTAutograd(), P.Inductor()):
+            calls = [given(row) for row in rows]
+            compiled = self.against_eager(graph_shares, calls, (behind,), exact=False)
+            (graph,) = self.graphs(compiled)
+            self.assertEqual(graph["exports"], 4)
+            self.assertGreaterEqual(graph["hits"], 6)
+            # The forms say how their tensors lie.
+            checks = [check for form in graph["forms"] for check in form["checks"]]
+            lie = sorted(check for check in checks if "memory" in check)
+            starts = [4 * row for row in (1, 2, 4)]
+            shared = [f"share memory: %x.1 at 0, %part.2 at {at}" for at in starts]
+            self.assertEqual(lie, sorted(["no two tensors share memory"] + shared))
+
     def test_a_read_behind_a_store_goes_past_it_only_where_that_is_checked(self):
         def keep(gm, input_types):
             return gm
@@ -8912,6 +9291,97 @@ print(json.dumps(found))
             self.assertEqual([g["ops"] for g in ran], [ops], msg=fn.__name__)
             self.assertGreaterEqual(ran[0]["hits"], 4, msg=fn.__name__)
 
+    def test_what_a_write_changes_of_a_tensor_is_not_read_in_front_of_it(self):
+        def keep(gm, input_types):
+            return gm
+
+        x, w = torch.randn(4, 4), torch.randn(4, requires_grad=True)
+        sizes = "changes the sizes of a tensor from outside"
+        kinds = ((keep, True), (P.AOTAutograd(), False), (P.Inductor(), False))
+        for behind, exact in kinds:
+            # The version counter: read behind the write, and what the
+            # write left it at.
+            calls = [lambda: (x, torch.zeros(()))] * 8
+            compiled = self.against_eager(graph_versions, calls, (behind,), exact)
+            ends = "reads of a tensor what a write of the graph may have changed"
+            self.assertEqual([g["why"] for g in self.graphs(compiled)], [ends])
+            # A write that changes the sizes of what it is handed, or makes
+            # it require a gradient, is no operation of a path: the graphs
+            # in front of it and behind it run.
+            turned = (graph_turns, lambda: (x, torch.arange(6.0).reshape(2, 3)))
+            learned = (graph_learns, lambda: (x, w, torch.zeros(4)))
+            for fn, make in (turned, learned):
+                compiled = self.against_eager(fn, [make] * 8, (behind,), exact)
+                graphs = self.graphs(compiled)
+                whys = [g["why"] for g in graphs]
+                self.assertIn(f"{sizes}, or whether it requires a gradient", whys)
+                exports = [g["exports"] for g in graphs]
+                self.assertEqual(exports, [1, 1], msg=fn.__name__)
+                self.assertTrue(all(g["hits"] >= 4 for g in graphs), msg=fn.__name__)
+
+    def test_a_call_that_raises_behind_a_write_leaves_what_eager_leaves(self):
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(4, 4)
+        good, bad = torch.tensor([0, 2]), torch.tensor([1, 7])
+        outside = "a path that writes to a tensor from outside"
+        kinds = ((keep, True), (P.AOTAutograd(), False), (P.Inductor(), False))
+        for behind, exact in kinds:
+            torch.manual_seed(1)
+            model = GraphCounts().eval()
+            reference = copy.deepcopy(model)
+            passes = (*DEFAULT, P.Graphs(), behind)
+            compiled = torch.vm(model, passes=passes, fallback=False, demote=False)
+            tolerance = dict(atol=0, rtol=0) if exact else dict(rtol=1e-4, atol=1e-5)
+            with torch.no_grad():
+                for at, index in enumerate([good] * 6 + [bad, good, bad, bad, good]):
+                    outcomes = []
+                    for call in (compiled, reference):
+                        try:
+                            outcomes.append(call(x, index))
+                        except Exception as e:
+                            outcomes.append(type(e).__name__)
+                    # The exception is eager's, and so is what the call
+                    # left: the counter, the list, the buffer.
+                    got, expected = outcomes
+                    self.assertEqual(got, expected, msg=f"call {at}", **tolerance)
+                    counted = (model.calls, model.seen)
+                    wanted = (reference.calls, reference.seen)
+                    self.assertEqual(counted, wanted, msg=f"call {at}")
+                    total, wanted = model.total, reference.total
+                    self.assertEqual(total, wanted, msg=f"call {at}", **tolerance)
+            # The index, which can be out of range at any call, is behind
+            # the graph that writes: that one cannot raise for it.
+            (graph,) = [g for g in self.graphs(compiled) if g["hits"]]
+            ends = f"can fail for what its tensors hold, on {outside}"
+            self.assertEqual(graph["why"], ends)
+            self.assertEqual((graph["ops"], graph["exports"]), (6, 1))
+            self.assertNotIn("aten::index.Tensor", graph["operators"])
+
+    def test_a_size_that_what_a_tensor_holds_decides_is_checked_at_every_call(self):
+        def keep(gm, input_types):
+            return gm
+
+        torch.manual_seed(0)
+        inputs = [torch.randn(4, 4) * scale for scale in (1, 1, 1, 1, 1, -1, 3, -1, 1)]
+        passes, exact = (*DEFAULT, P.Graphs(), keep), dict(atol=0, rtol=0)
+        # Behind a write to a tensor from outside, where a check cannot
+        # fail: the path ends in front of what the size decides.
+        for fn in (graph_repeats, graph_finds):
+            mine, theirs = torch.zeros(()), torch.zeros(())
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            for at, x in enumerate(inputs):
+                what = f"{fn.__name__} {at}"
+                got, expected = compiled(x, mine), fn(x, theirs)
+                self.assertEqual(got, expected, msg=what, **exact)
+                self.assertEqual(mine, theirs, msg=what, **exact)
+        # Without one: the branch on the size is a check of every call.
+        compiled = torch.vm(graph_weighs, passes=passes, fallback=False, demote=False)
+        for at, x in enumerate(inputs):
+            got, expected = compiled(x), graph_weighs(x)
+            self.assertEqual(got, expected, msg=f"call {at}", **exact)
+
     def test_stores_that_follow_from_one_another_are_exported_once(self):
         exported = []
 
@@ -8924,6 +9394,15 @@ print(json.dumps(found))
         compiled = self.against_eager(graph_fills, calls, (keep,))
         (graph,) = self.graphs(compiled)
         self.assertEqual((len(exported), graph["exports"], graph["hits"]), (1, 1, 10))
+        # A store into what the graph gives, behind a write to a tensor
+        # from outside: the path ends in front of it, and both graphs run.
+        calls = [lambda: (torch.ones(4, 4), torch.zeros(()))] * 8
+        compiled = self.against_eager(graph_notes, calls, (keep,))
+        ran = [g for g in self.graphs(compiled) if g["hits"] >= 5]
+        found = [(g["ops"], g["exports"], g["why"]) for g in ran]
+        outside = "behind a write to a tensor from outside"
+        ends = f"stores into what the graph gives, {outside}"
+        self.assertEqual(found, [(6, 1, ends), (5, 1, "the function returns")])
 
     def test_why_a_graph_is_not_exported_is_said(self):
         def helper(gm):
