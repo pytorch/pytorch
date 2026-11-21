@@ -13,6 +13,7 @@ from typing import Any
 import torch
 from torch._inductor import config
 from torch._inductor.utils import python_subprocess_env
+from torch._utils_internal import get_file_path
 
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -135,7 +136,7 @@ except OSError:
         loader path. macOS and Windows do not use this fast path; they
         ``import torch`` in the child instead (see ``_avx_py_load``).
         """
-        lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
+        lib_dir = os.path.join(get_file_path("torch"), "lib")
         env = python_subprocess_env()
         existing = env.get("LD_LIBRARY_PATH", "")
         env["LD_LIBRARY_PATH"] = (

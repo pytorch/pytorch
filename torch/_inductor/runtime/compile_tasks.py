@@ -10,7 +10,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, TYPE_CHECKING
 
-from torch._utils_internal import log_triton_builds
+from torch._utils_internal import get_file_path, log_triton_builds
 
 from ..utils import apply_subprocess_env, clear_caches
 
@@ -44,7 +44,7 @@ def _reload_python_module(
 def _set_triton_ptxas_path() -> None:
     if os.environ.get("TRITON_PTXAS_PATH") is not None:
         return
-    ptxas = Path(__file__).absolute().parents[2] / "bin" / "ptxas"
+    ptxas = Path(get_file_path("torch")) / "bin" / "ptxas"
     if not ptxas.exists():
         return
     if ptxas.is_file() and os.access(ptxas, os.X_OK):
