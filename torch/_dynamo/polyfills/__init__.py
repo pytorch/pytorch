@@ -274,14 +274,15 @@ def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     # PyObject_GetIter itself falls back to PySequence_GetItem when tp_iter is NULL.
     if hasattr(b, "__iter__"):
         for x in b:
-            if x == a:
+            if x is a or x == a:
                 return True
         return False
     if hasattr(b, "__getitem__"):
         i = 0
         while True:
             try:
-                if b.__getitem__(i) == a:
+                item = b.__getitem__(i)
+                if item is a or item == a:
                     return True
                 i += 1
             except IndexError:
