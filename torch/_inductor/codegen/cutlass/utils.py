@@ -139,9 +139,7 @@ def try_import_cutlass() -> bool:
                         raise AssertionError(
                             f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
                         )
-                    if os.path.realpath(os.readlink(dst_link)) != os.path.realpath(
-                        src_path,
-                    ):
+                    if not os.path.samefile(dst_link, src_path):
                         raise AssertionError(
                             f"Symlink at {dst_link} does not point to {src_path}"
                         )
