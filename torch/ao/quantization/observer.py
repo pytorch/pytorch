@@ -365,11 +365,36 @@ class UniformQuantizationObserverBase(ObserverBase):
         # to use this utility a massive pain and very gross. For now Im opting just to duplicate as this code
         # seems unlikely to change (last update over 1 year ago) and when torchscript is fully deprecated we can refactor.
         # TODO(jakeszwe, jerryzh168)
+        if not torch.jit.is_scripting() and torch.compiler.is_compiling():
+            return self._calculate_qparams_compiled(min_val, max_val)
         if not check_min_max_valid(min_val, max_val):
             return torch.tensor([1.0], device=min_val.device.type), torch.tensor(
                 [0], device=min_val.device.type
             )
 
+        scale, zero_point = self._scale_and_zero_point(min_val, max_val)
+        device = min_val.device
+
+        # For scalar values, cast them to Tensors of size 1 to keep the shape
+        # consistent with default values in FakeQuantize.
+        if len(scale.shape) == 0:
+            # TODO: switch to scale.item() after adding JIT support
+            scale = torch.tensor([float(scale)], dtype=scale.dtype, device=device)
+        if len(zero_point.shape) == 0:
+            # TODO: switch to zero_point.item() after adding JIT support
+            zero_point = torch.tensor(
+                [int(zero_point)], dtype=zero_point.dtype, device=device
+            )
+            if self.qscheme == torch.per_channel_affine_float_qparams:
+                zero_point = torch.tensor(
+                    [float(zero_point)], dtype=zero_point.dtype, device=device
+                )
+
+        return scale, zero_point
+
+    def _scale_and_zero_point(
+        self, min_val: torch.Tensor, max_val: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         quant_min, quant_max = self.quant_min, self.quant_max
         min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
         max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
@@ -408,23 +433,27 @@ class UniformQuantizationObserverBase(ObserverBase):
             scale = torch.max(scale, self.eps)
             zero_point = quant_min - torch.round(min_val_neg / scale).to(torch.int)
             zero_point = torch.clamp(zero_point, quant_min, quant_max)
-
-        # For scalar values, cast them to Tensors of size 1 to keep the shape
-        # consistent with default values in FakeQuantize.
-        if len(scale.shape) == 0:
-            # TODO: switch to scale.item() after adding JIT support
-            scale = torch.tensor([float(scale)], dtype=scale.dtype, device=device)
-        if len(zero_point.shape) == 0:
-            # TODO: switch to zero_point.item() after adding JIT support
-            zero_point = torch.tensor(
-                [int(zero_point)], dtype=zero_point.dtype, device=device
-            )
-            if self.qscheme == torch.per_channel_affine_float_qparams:
-                zero_point = torch.tensor(
-                    [float(zero_point)], dtype=zero_point.dtype, device=device
-                )
-
         return scale, zero_point
+
+    def _calculate_qparams_compiled(
+        self, min_val: torch.Tensor, max_val: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # check_min_max_valid and the float()/int() conversions of scalars in
+        # _calculate_qparams are data-dependent, so use tensor ops instead. Eager
+        # returns an int64 zero_point for a scalar that was never observed and the
+        # dtype of the computed one otherwise (int32 for per_tensor_affine); a dtype
+        # cannot depend on the data under compile, so this keeps the computed one.
+        if min_val.numel() == 0 or max_val.numel() == 0:
+            return torch.ones(1, device=min_val.device), torch.zeros(
+                1, dtype=torch.int64, device=min_val.device
+            )
+        scale, zero_point = self._scale_and_zero_point(min_val, max_val)
+        if min_val.dim() == 0:
+            # A scalar min/max that was never observed gives the default values.
+            observed = ~((min_val == float("inf")) & (max_val == float("-inf")))
+            scale = torch.where(observed, scale, torch.ones_like(scale))
+            zero_point = torch.where(observed, zero_point, torch.zeros_like(zero_point))
+        return scale.reshape(-1), zero_point.reshape(-1)
 
     @torch.jit.export
     def reset_min_max_vals(self):
@@ -570,7 +599,16 @@ class MinMaxObserver(UniformQuantizationObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):  # type: ignore[override]
-        r"""Calculates the quantization parameters."""
+        r"""Calculates the quantization parameters.
+
+        .. note::
+            Under :func:`torch.compile` and :func:`torch.export` this skips the
+            ``min_val > max_val`` assertion and the "must run observer" warning, so
+            statistics that are invalid or were never observed silently give the default or
+            wrong qparams instead of an error or a warning, and an observer that has not
+            observed anything returns a ``zero_point`` with the dtype of the computed one
+            (``torch.int32`` for ``torch.per_tensor_affine``) instead of ``torch.int64``.
+        """
         return self._calculate_qparams(self.min_val, self.max_val)
 
     @torch.jit.export
@@ -672,12 +710,21 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         x = x.to(self.min_val.dtype)
         min_val = self.min_val
         max_val = self.max_val
-        if min_val == float("inf") and max_val == float("-inf"):
-            min_val, max_val = torch.aminmax(x)
-        else:
-            min_val_cur, max_val_cur = torch.aminmax(x)
-            min_val = min_val + self.averaging_constant * (min_val_cur - min_val)
-            max_val = max_val + self.averaging_constant * (max_val_cur - max_val)
+        min_val_cur, max_val_cur = torch.aminmax(x)
+        # The first observation replaces the infinities the buffers start with. This is
+        # a where and not a branch on the buffers, so it does not synchronize with the
+        # device and can be traced.
+        uninitialized = (min_val == float("inf")) & (max_val == float("-inf"))
+        min_val = torch.where(
+            uninitialized,
+            min_val_cur,
+            min_val + self.averaging_constant * (min_val_cur - min_val),
+        )
+        max_val = torch.where(
+            uninitialized,
+            max_val_cur,
+            max_val + self.averaging_constant * (max_val_cur - max_val),
+        )
         self.min_val.copy_(min_val)
         self.max_val.copy_(max_val)
         return x_orig
@@ -760,6 +807,16 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
                 "Cannot reduce range for symmetric quantization for quint8"
             )
 
+    def _set_min_max(self, min_val, max_val):
+        # resize_ is a no-op for an unchanged shape, but it is not traceable on a
+        # module buffer, so only call it when the number of channels changes.
+        if self.min_val.shape != min_val.shape:
+            self.min_val.resize_(min_val.shape)
+        if self.max_val.shape != max_val.shape:
+            self.max_val.resize_(max_val.shape)
+        self.min_val.copy_(min_val)
+        self.max_val.copy_(max_val)
+
     def forward(self, x_orig):
         return self._forward(x_orig)
 
@@ -785,14 +842,19 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
             min_val_cur, max_val_cur = torch.aminmax(y, dim=1)
             min_val = torch.min(min_val_cur, min_val)
             max_val = torch.max(max_val_cur, max_val)
-        self.min_val.resize_(min_val.shape)
-        self.max_val.resize_(max_val.shape)
-        self.min_val.copy_(min_val)
-        self.max_val.copy_(max_val)
+        self._set_min_max(min_val, max_val)
         return x_orig
 
     @torch.jit.export
     def calculate_qparams(self):  # type: ignore[override]
+        r"""Calculates the quantization parameters.
+
+        .. note::
+            Under :func:`torch.compile` and :func:`torch.export` this skips the
+            ``min_val > max_val`` assertion and the "must run observer" warning, so
+            statistics that are invalid or were never observed silently give the default or
+            wrong qparams instead of an error or a warning.
+        """
         return self._calculate_qparams(self.min_val, self.max_val)
 
     def extra_repr(self):
@@ -977,10 +1039,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
             min_val_cur, max_val_cur = torch.aminmax(y, dim=1)
             min_val = min_val + self.averaging_constant * (min_val_cur - min_val)
             max_val = max_val + self.averaging_constant * (max_val_cur - max_val)
-        self.min_val.resize_(min_val.shape)
-        self.max_val.resize_(max_val.shape)
-        self.min_val.copy_(min_val)
-        self.max_val.copy_(max_val)
+        self._set_min_max(min_val, max_val)
         return x_orig
 
 
