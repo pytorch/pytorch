@@ -19,6 +19,7 @@
 #include <ATen/ops/zeros.h>
 
 #include <algorithm>
+#include <limits>
 #endif
 namespace at::native {
 
@@ -311,6 +312,16 @@ void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor
 
   auto n = vectors.size(-1);
   auto lda = std::max<int64_t>(1, n);
+
+  // Guard against matrices too large for 32-bit LAPACK interface
+  if (static_cast<int64_t>(lda) * n > static_cast<int64_t>(std::numeric_limits<int>::max())) {
+    TORCH_CHECK(
+        false,
+        "linalg.eigh: matrix of size ", n, "x", n,
+        " is too large for the 32-bit LAPACK interface. Use a smaller matrix "
+        "or build PyTorch with 64-bit LAPACK support.");
+  }
+
   auto batch_size = batchCount(vectors);
 
   auto vectors_stride = matrixStride(vectors);
