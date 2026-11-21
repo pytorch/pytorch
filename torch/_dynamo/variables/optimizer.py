@@ -21,7 +21,6 @@ optimizer-specific optimizations and safety guarantees.
 """
 
 import logging
-import weakref
 from collections.abc import Iterable
 from typing import Any, cast, TYPE_CHECKING
 
@@ -30,6 +29,7 @@ from torch._dynamo.variables.tensor import TensorVariable
 from torch._guards import Source
 from torch._logging import getArtifactLogger
 from torch.utils._pytree import tree_map_only
+from torch.utils.weak import WeakIdKeyDictionary
 
 from ..guards import GuardBuilder, install_guard
 from ..source import (
@@ -89,7 +89,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
     _nonvar_fields = {
         "grad_to_source",
         "tensor_to_source",
-        "static_tensor_names",
         *UserDefinedObjectVariable._nonvar_fields,
     }
 
@@ -97,7 +96,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
         self,
         value: torch.optim.Optimizer,
         grad_to_source: dict[Any, GradSource] | None = None,
-        static_tensor_names: set[str] | None = None,
         tensor_to_source: dict[torch.Tensor, Source] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -106,7 +104,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
         self.value: torch.optim.Optimizer = value
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}
-        self.static_tensor_names = static_tensor_names or set()
 
     def _init_group(
         self,
@@ -142,7 +139,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
             # if the optimizer object dies
             mangled_name = f"__optimizer_{id(self.value)}"
             tx.store_global_weakref_by_id(mangled_name, self.value)
-            self.create_finalizer(tx)
 
             # This is currently safe only because the only actual `ret_val`s returned
             # by the `_init_group` of existing optimizers are properties that are invariant
@@ -165,9 +161,13 @@ class OptimizerVariable(UserDefinedObjectVariable):
     def _get_param_groups(self, tx: "InstructionTranslatorBase") -> None:
         from ..decorators import mark_static_address
 
+        tensors = tx.output.optimizer_tensors.setdefault(
+            self.value, WeakIdKeyDictionary()
+        )
         for group in self.value.param_groups:
             for p in group["params"]:
                 mark_static_address(p, guard=True)
+                tensors[p] = None
 
         self._set_capturable(tx)
         return None
@@ -385,7 +385,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
             # mark these tensors as static for cudagraphs
             mark_static_address(tensor_value, guard=True)
             source = self.tensor_to_source[tensor_value]
-            self.static_tensor_names.add(tx.output.module_key_name(source.name))
         elif tensor_value in self.grad_to_source:
             source = self.grad_to_source[tensor_value]
         else:
@@ -394,7 +393,15 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
             global_name = tx.store_global_weakref_by_id(GLOBAL_KEY_PREFIX, tensor_value)
             source = GlobalWeakRefSource(global_name)
-            self.static_tensor_names.add(tx.output.module_key_name(source.name))
+
+        if (
+            tensor_value in self.tensor_to_source
+            or tensor_value not in self.grad_to_source
+        ):
+            tensors = tx.output.optimizer_tensors.setdefault(
+                self.value, WeakIdKeyDictionary()
+            )
+            tensors[tensor_value] = None
 
         return VariableTracker.build(tx, tensor_value, source)
 
@@ -420,25 +427,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
                     else:
                         source = arg.source and GetItemSource(arg.source, i)
                         arg.items.append(VariableTracker.build(tx, val, source))
-
-    def create_finalizer(self, tx: "InstructionTranslatorBase") -> None:
-        names_to_delete = self.static_tensor_names
-        value = self.value
-        tc = tx.output.tracing_context
-
-        def init_finalizer(gm: torch.fx.GraphModule) -> None:
-            def clear_static_tensor_refs() -> None:
-                for name in names_to_delete:
-                    gm._buffers.pop(name, None)
-                    gm._parameters.pop(name, None)
-                    if tc.params_flat:
-                        tc.params_flat.clear()
-                    if tc.params_flat_unwrap_subclasses:
-                        tc.params_flat_unwrap_subclasses.clear()
-
-            weakref.finalize(value, clear_static_tensor_refs)
-
-        tx.output.add_graph_finalizer(init_finalizer)
 
 
 class OptimizerCapturableVariable(VariableTracker):
