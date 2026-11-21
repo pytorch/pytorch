@@ -65,6 +65,7 @@ from torch.testing._internal.common_utils import (
     TEST_HPU,
     TEST_XPU,
 )
+from torch.testing._internal.common_xpu import get_xpu_codename, XPUCodename
 from torch.utils._triton import has_triton
 
 
@@ -658,9 +659,12 @@ class ModuleWithDelay(FSDPTestModel):
             if TEST_HPU:
                 time.sleep(self.delay_after_loss_ms / 1000)
             elif TEST_XPU:
-                torch.xpu._sleep(
-                    int(self.delay_after_loss_ms * get_cycles_per_ms("xpu"))
-                )
+                if get_xpu_codename() == XPUCodename.PVC:
+                    time.sleep(self.delay_after_loss_ms / 1000)
+                else:
+                    torch.xpu._sleep(
+                        int(self.delay_after_loss_ms * get_cycles_per_ms("xpu"))
+                    )
             elif TEST_CUDA:
                 torch.cuda._sleep(int(self.delay_after_loss_ms * get_cycles_per_ms()))
 
@@ -676,9 +680,15 @@ class ModuleWithDelay(FSDPTestModel):
                         int(self.delay_before_reduction_ms * get_cycles_per_ms())
                     )
                 elif TEST_XPU:
-                    torch.xpu._sleep(
-                        int(self.delay_before_reduction_ms * get_cycles_per_ms("xpu"))
-                    )
+                    if get_xpu_codename() == XPUCodename.PVC:
+                        time.sleep(self.delay_before_reduction_ms / 1000)
+                    else:
+                        torch.xpu._sleep(
+                            int(
+                                self.delay_before_reduction_ms
+                                * get_cycles_per_ms("xpu")
+                            )
+                        )
                 elif TEST_HPU:
                     time.sleep(self.delay_before_reduction_ms / 1000)
             return orig_reduce_scatter(*args, **kwargs)
@@ -819,9 +829,14 @@ class MixtureOfExperts(NestedWrappedModule):
                             int(self.delay_before_free_ms * get_cycles_per_ms())
                         )
                     elif TEST_XPU:
-                        torch.xpu._sleep(
-                            int(self.delay_before_free_ms * get_cycles_per_ms("xpu"))
-                        )
+                        if get_xpu_codename() == XPUCodename.PVC:
+                            time.sleep(self.delay_before_free_ms / 1000)
+                        else:
+                            torch.xpu._sleep(
+                                int(
+                                    self.delay_before_free_ms * get_cycles_per_ms("xpu")
+                                )
+                            )
                     elif TEST_HPU:
                         time.sleep(self.delay_before_free_ms / 1000)
 
