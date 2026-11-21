@@ -7,6 +7,7 @@ from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     TestCase,
@@ -399,7 +400,7 @@ class GraphModule(torch.nn.Module):
         where: "f32[4]" = torch.where(mask, l_end_tensors_0_, l_tensors_0_);  l_end_tensors_0_ = None
         where_1: "f32[4]" = torch.where(mask, l_end_tensors_1_, l_tensors_1_);  l_end_tensors_1_ = None
         where_2: "f32[]" = torch.where(mask, neg, l_weight_);  mask = neg = l_weight_ = None
-        _foreach_addcmul_ = torch._foreach_addcmul_([where, where_1], [where_2, where_2], (getitem, getitem_1));  where_2 = getitem = getitem_1 = _foreach_addcmul_ = None
+        _foreach_addcmul_ = torch._foreach_addcmul_([where, where_1], (getitem, getitem_1), [where_2, where_2]);  getitem = getitem_1 = where_2 = _foreach_addcmul_ = None
         copy_: "f32[4]" = l_tensors_0_.copy_(where);  l_tensors_0_ = where = copy_ = None
         copy__1: "f32[4]" = l_tensors_1_.copy_(where_1);  l_tensors_1_ = where_1 = copy__1 = None
         return ()
@@ -921,6 +922,29 @@ class TestDynamoDecompositionsCUDAOnly(TestCase):
         expected = fn(x.clone(), t1, t2, value)
         actual = torch.compile(fn, fullgraph=True)(x.clone(), t1, t2, value)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(expected, actual)
+
+    @parametrize("cpu_weight", [True, False])
+    @parametrize("backend", ["eager", "aot_eager"])
+    @torch._dynamo.config.patch(enable_dynamo_decompositions=True)
+    def test_foreach_lerp_inplace_cpu_scalar(self, device, cpu_weight, backend):
+        """Compiled _foreach_lerp_ takes the CPU scalars that eager takes: a CPU
+        0-dim weight with CUDA tensors (Adam with CPU Tensor betas), and a CPU
+        0-dim tensor in the lists with a CUDA weight.
+        """
+
+        def fn(tensors, end, weight):
+            torch._foreach_lerp_(tensors, end, weight)
+            return tensors
+
+        last = torch.randn(3, 5, device=device) if cpu_weight else torch.randn(())
+        tensors = [torch.randn(17, device=device), last]
+        end = [torch.randn_like(t) for t in tensors]
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        for w in (0.1, 0.7):
+            weight = torch.tensor(w, device="cpu" if cpu_weight else device)
+            expected = fn([t.clone() for t in tensors], end, weight)
+            actual = compiled([t.clone() for t in tensors], end, weight)
+            self.assertEqual(expected, actual)
 
 
 instantiate_device_type_tests(TestDynamoDecompositionsNumerics, globals())
