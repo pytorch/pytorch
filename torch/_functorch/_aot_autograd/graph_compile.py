@@ -93,6 +93,7 @@ from .schemas import (
     SubclassMeta,
     ViewAndMutationMeta,
 )
+from .streams import _SYNC_OPS, get_stream
 from .subclass_utils import (
     compute_inner_input_info_from_subclass_meta,
     compute_inner_mutated_inp_indices_from_subclass_meta,
@@ -1391,8 +1392,75 @@ def _materialize_fx_output_containers(x: Any) -> Any:
     return x
 
 
-# Inline Autograd saved_tensors_hooks into epilogue of forward graph
-# and prologue of backward graph.
+def _storage_refs(n: torch.fx.node.Argument) -> set[StorageWeakRef]:
+    if not isinstance(n, torch.fx.Node):
+        return set()
+    return {
+        StorageWeakRef(t.untyped_storage())
+        for t in pytree.tree_leaves(n.meta.get("val"))
+        if is_fake_tensor(t) and not is_sparse_any(t)
+    }
+
+
+def _pack_insert_points(
+    fw_g: torch.fx.Graph,
+    hooked: set[torch.fx.Node],
+    num_user_outs: int,
+) -> dict[torch.fx.Node, torch.fx.Node | None]:
+    """Maps each hooked saved tensor to the node its pack hook goes right after:
+    the last forward use of its storage, or None (right before the output node)
+    when the caller owns that storage."""
+    # The caller owns the storage of forward inputs, user outputs and saved
+    # tensors without a hook, so packing a tensor that shares it frees nothing.
+    pinned: set[StorageWeakRef] = set()
+    for i, out in enumerate(fw_g.output_node().args[0]):  # type: ignore[arg-type]
+        if i < num_user_outs or out not in hooked:
+            pinned |= _storage_refs(out)
+    order: dict[torch.fx.Node, int] = {}
+    # The last node that produces or reads each storage. Uses through any alias
+    # (views, split chunks, their bases) keep the storage alive.
+    last_use: dict[StorageWeakRef, torch.fx.Node] = {}
+    for n in fw_g.nodes:
+        order[n] = len(order)
+        if n.op == "output":
+            continue
+        refs = _storage_refs(n)
+        if n.op == "placeholder":
+            pinned |= refs
+        for inp in n.all_input_nodes:
+            refs |= _storage_refs(inp)
+        for ref in refs:
+            last_use[ref] = n
+    points: dict[torch.fx.Node, torch.fx.Node | None] = {}
+    for saved in hooked:
+        refs = _storage_refs(saved)
+        points[saved] = (
+            None
+            if not refs or refs & pinned
+            else max((last_use[r] for r in refs), key=order.__getitem__)
+        )
+    return points
+
+
+def _uses_streams(g: torch.fx.Graph) -> bool:
+    from torch._inductor.fx_passes.control_dependencies import control_deps
+
+    return any(
+        get_stream(n) is not None or n.target in _SYNC_OPS or n.target is control_deps
+        for n in g.nodes
+    )
+
+
+def _first_use(
+    users: list[torch.fx.Node], order: dict[torch.fx.Node, int]
+) -> torch.fx.Node | None:
+    uses = [u for u in users if u.op != "output"]
+    return min(uses, key=order.__getitem__) if uses else None
+
+
+# Inline Autograd saved_tensors_hooks into the forward and backward graphs:
+# each pack right after the last forward use of its saved tensor's storage,
+# each unpack right before the first backward use of its result.
 # This changes forward graph outputs and inputs.
 # Pack hook can return tensors, sym scalars, constants.
 # All tensors to save for backward will be grouped together at front.
@@ -1511,11 +1579,37 @@ def maybe_inline_graph_saved_tensors_hooks(
         structured_logs.append(f"allow_set:{allow_set}")
         structured_logs.append(f"exclude_set:{exclude_set}")
 
+    def _filtered_out(saved: torch.fx.Node) -> bool:
+        return ((allow_set is not None) and (saved.name not in allow_set)) or (
+            (exclude_set is not None) and (saved.name in exclude_set)
+        )
+
+    hooked: set[torch.fx.Node] = {
+        saved
+        # pyrefly: ignore [not-iterable]
+        for saved in fw_outs_saved_for_bw
+        if isinstance(saved, torch.fx.Node)
+        and not _filtered_out(saved)
+        and isinstance(saved.meta["val"], torch.Tensor)
+    }
+    # The stream passes insert cross-stream syncs before the hooks are inlined
+    # and do not revisit them, and inlined hook nodes carry no stream. Moving a
+    # hook across a sync could race with another stream, so a graph that uses
+    # streams keeps its hooks at the graph boundary.
+    pack_points = (
+        {}
+        if _uses_streams(fw_g)
+        else _pack_insert_points(fw_g, hooked, num_inner_fwd_outputs)
+    )
+    bw_uses_streams = _uses_streams(bw_g)
+    # A noop pack hook replaces its saved tensor with a renamed copy, which may
+    # be another pack's insertion point.
+    replaced: dict[torch.fx.Node, torch.fx.Node] = {}
+    bw_order = {n: i for i, n in enumerate(bw_g.nodes)}
+
     # pyrefly: ignore [not-iterable]
     for saved in fw_outs_saved_for_bw:
-        if ((allow_set is not None) and (saved.name not in allow_set)) or (  # type: ignore[union-attr]
-            (exclude_set is not None) and (saved.name in exclude_set)  # type: ignore[union-attr]
-        ):
+        if _filtered_out(saved):  # type: ignore[arg-type]
             if isinstance(saved.meta["val"], torch.Tensor):  # type: ignore[union-attr]
                 fw_outs_packed_tensors.append(saved)
             continue
@@ -1578,7 +1672,14 @@ def maybe_inline_graph_saved_tensors_hooks(
             )
         env = {pack_g_inputs[0]: saved}
         fw_pack_out_args = None
-        with fw_g.inserting_before(fw_out_n):
+        saved_n = saved
+        if not isinstance(saved_n, torch.fx.Node):
+            raise AssertionError(f"saved tensor must be a Node, got {type(saved_n)}")
+        # Pack right after the last forward use of the saved tensor's storage.
+        pack_after = pack_points.get(saved_n)
+        if pack_after is not None:
+            pack_after = replaced.get(pack_after, pack_after)
+        with fw_g.inserting_before(fw_out_n if pack_after is None else pack_after.next):
             for node in pack_g.nodes:
                 if node.op == "placeholder":
                     continue
@@ -1629,6 +1730,8 @@ def maybe_inline_graph_saved_tensors_hooks(
                 n.meta = copy.copy(_n.meta)
                 _n.replace_all_uses_with(n)
                 fw_g.erase_node(_n)
+                if _n is saved:
+                    replaced[saved_n] = n
             if isinstance(n.meta["val"], torch.Tensor):
                 fw_outs_packed_tensors.append(n)
             elif is_sym_node(n):
@@ -1705,9 +1808,14 @@ def maybe_inline_graph_saved_tensors_hooks(
                 # Inline values of non-Tensor, non-SymScalars
                 env[unp_in_n] = val
 
-        # Inserting unpack hook after placeholders.
+        # Unpack right before the first backward use of the saved tensor.
         bw_unpack_out_n = None
-        with bw_g.inserting_before(bw_g_inputs[-1].next):
+        unpack_before = (
+            None
+            if bw_uses_streams
+            else _first_use(original_bw_g_input_users, bw_order)
+        )
+        with bw_g.inserting_before(unpack_before or bw_g_inputs[-1].next):
             for node in unpack_g.nodes:
                 if node.op == "placeholder":
                     continue
