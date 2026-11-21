@@ -638,7 +638,6 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         *,
         view: "DictViewVariable | None" = None,
     ) -> None:
-        # The view selects native iteration order and which keys/values escape.
         if self.source and not is_constant_source(self.source):
             self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
@@ -685,8 +684,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         if tx.output.side_effects.is_modified(self):
             return
 
+        # Reuse a previous lookup result to avoid repeating key comparisons.
+        # None means the caller has not looked up the key yet.
         arg = key.vt
-        # Reuse a previous lookup result without repeating key comparisons.
         if key_present is None:
             value = self.items.get(key)
             key_present = (
@@ -1077,11 +1077,14 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
+        *,
+        is_ordered: bool = False,
     ) -> VariableTracker:
         # dict.__reversed__: reverse insertion-order key iterator.
         # Not a C-level slot, so it lives in tp_methods rather than call_method.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c (dict___reversed___impl)
-        return DictKeysVariable.create(self).dict_view_reversed(tx, args, kwargs)
+        keys = DictKeysVariable.create(self, is_ordered=is_ordered)
+        return keys.dict_view_reversed(tx, args, kwargs)
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L5252-L5273
     tp_methods = {
@@ -1263,8 +1266,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
             or result.as_python_constant() == (op == "__ne__")
         ):
             return result
-        # OrderedDict compares key order only after dict equality succeeds.
-        # Keep this outside dict.__eq__, whose descriptor ignores linked order.
+        # OrderedDict checks linked order after dict.__eq__ succeeds.
         self.install_dict_order_guard(tx)
         other.install_dict_order_guard(tx)
         left = variables.TupleVariable([key.vt for key in self.items])
@@ -1290,7 +1292,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         if type(self) is not OrderedDictVariable:
             return None
 
-        self._guard_empty_copy_state(tx)
+        self._guard_copy_state(tx, "__reduce_ex__")
         self.install_dict_order_guard(tx)
         # Only the live iterator needs the entries, which can include symbolic values.
         reduced = collections.OrderedDict().__reduce_ex__(args[0].as_python_constant())
@@ -1299,7 +1301,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
             + [OrderedDictIterator.create(self.items)]
         )
 
-    def _guard_empty_copy_state(self, tx: "InstructionTranslatorBase") -> None:
+    def _guard_copy_state(self, tx: "InstructionTranslatorBase", name: str) -> None:
         if self.source and not is_constant_source(self.source):
             instance_dict = AttrSource(self.source, "__dict__")
             effects = tx.output.side_effects
@@ -1313,10 +1315,10 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
                 for var in effects.id_to_variable.values()
             ):
                 unimplemented(
-                    gb_type="Copying an OrderedDict with instance attributes",
-                    context="OrderedDict.__reduce_ex__",
-                    explanation="The OrderedDict has instance attributes, or a pending dictionary write could have modified them. Dynamo cannot preserve this state when tracing the copy.",
-                    hints=["Copy the OrderedDict outside the compiled region."],
+                    gb_type="Unsupported OrderedDict instance state",
+                    context=f"OrderedDict.{name}",
+                    explanation=f"Dynamo cannot trace {name} on an OrderedDict with nonempty or potentially modified instance attributes.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
                 )
             install_guard(instance_dict.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
@@ -1324,7 +1326,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker | None:
         if type(self) is OrderedDictVariable and name == "__deepcopy__":
-            self._guard_empty_copy_state(tx)
+            self._guard_copy_state(tx, name)
             raise_observed_exception(
                 AttributeError,
                 tx,
@@ -1420,22 +1422,12 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         tx.output.side_effects.mutation(self)
         return variables.TupleVariable([k.vt, v])
 
-    def dict_reversed(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        keys = DictKeysVariable.create(self, is_ordered=True)
-        return keys.dict_view_reversed(tx, args, kwargs)
-
     def dict_copy(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self.install_dict_order_guard(tx)
         _check_ordered_dict_allocation(self, "copy")
         return ConstDictVariable.dict_copy(self, tx, args, kwargs)
 
@@ -1448,7 +1440,9 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         "keys": _ordered_view(ConstDictVariable.dict_keys),
         "values": _ordered_view(ConstDictVariable.dict_values),
         "items": _ordered_view(ConstDictVariable.dict_items),
-        "__reversed__": Method(dict_reversed),
+        "__reversed__": Method(
+            functools.partial(ConstDictVariable.dict_reversed, is_ordered=True)
+        ),
     }
 
     def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
@@ -1795,12 +1789,16 @@ class NNModuleHookFlagsDictVariable(NNModuleHooksDictVariable):
         if (
             isinstance(source, ConstDictKeySource)
             and isinstance(source.base, AttrSource)
-            and source.base.member in ("_forward_hooks", "_forward_pre_hooks")
             and self.source is not None
             and (
-                self.GLOBAL_FLAGS
-                or isinstance(self.source, AttrSource)
-                and source.base.base == self.source.base
+                source.base.member
+                in ("_global_forward_hooks", "_global_forward_pre_hooks")
+                or source.base.member in ("_forward_hooks", "_forward_pre_hooks")
+                and (
+                    self.GLOBAL_FLAGS
+                    or isinstance(self.source, AttrSource)
+                    and source.base.base == self.source.base
+                )
             )
             and not tx.output.side_effects.is_modified(self)
         ):
@@ -1985,6 +1983,18 @@ class DictViewVariable(VariableTracker):
             mutation_type=ValueMutationNew(),
         )
 
+    def isdisjoint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        return SourcelessBuilder.create(
+            tx, polyfills.dictview_isdisjoint
+        ).call_function(tx, [self, *args], kwargs)
+
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L6992-L6998
     tp_methods = {
         "__reversed__": Method(dict_view_reversed),
@@ -2086,20 +2096,8 @@ class DictKeysVariable(DictViewVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5998-L6005
         return ConstDictVariable.sq_contains_impl(self.dv_dict, tx, item)
 
-    def isdisjoint(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
-        return SourcelessBuilder.create(
-            tx, polyfills.dictview_isdisjoint
-        ).call_function(tx, [self, *args], kwargs)
-
     tp_methods = {
-        "isdisjoint": Method(isdisjoint),
+        "isdisjoint": Method(DictViewVariable.isdisjoint),
     }
 
     def tp_richcompare_impl(
@@ -2267,6 +2265,10 @@ class DictItemsVariable(DictViewVariable):
         return DictItemsIterator.create(
             self.dv_dict.items, ordered=self.is_ordered, owner=self
         )
+
+    tp_methods = {
+        "isdisjoint": Method(DictViewVariable.isdisjoint),
+    }
 
 
 kV = HashableTracker | str

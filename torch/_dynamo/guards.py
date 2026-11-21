@@ -141,6 +141,7 @@ from torch._subclasses.fake_tensor import (
     _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS,
     FakeTensor,
     is_fake_tensor,
+    maybe_get_fake_constant,
     maybe_get_fake_dispatch_keys,
     maybe_get_fake_pytype,
 )
@@ -375,16 +376,13 @@ def _native_method_metadata(
 
 def _native_method_matches(value: object, expected: NativeMethodMetadata) -> bool:
     if expected.receiver_id is not None:
-        owner = expected.receiver
-        name = expected.name
-        if type(value) is not types.BuiltinMethodType or value.__name__ != name:
-            return False
-        receiver = value.__self__
         # Metadata only binds descriptors on immutable builtin classes.
         return (
-            type(receiver) is owner
+            type(value) is types.BuiltinMethodType
+            and value.__name__ == expected.name
+            and type(receiver := value.__self__) is expected.receiver
             and id(receiver) == expected.receiver_id
-            and value == getattr(owner, name).__get__(receiver)
+            and value == getattr(expected.receiver, expected.name).__get__(receiver)
         )
     # The type check first: == would otherwise run the new value's __eq__.
     return (
@@ -411,6 +409,17 @@ def _method_identity_guards_filtered(
     return context is not None and context.is_aot_capture
 
 
+def _untracked_method_identity(context: str) -> NoReturn:
+    unimplemented(
+        gb_type="Builtin method operation requires identity guards",
+        context=context,
+        explanation="Dynamo cannot preserve the identity needed by this operation when identity guards are skipped or filtered.",
+        hints=[
+            "Perform the operation outside the compiled function or use a capture mode that retains identity guards."
+        ],
+    )
+
+
 def install_builtin_method_guard(
     tx: InstructionTranslatorBase, source: Source, value: object = None
 ) -> None:
@@ -422,12 +431,7 @@ def install_builtin_method_guard(
         create = functools.partial(GuardBuilder.NATIVE_METHOD_MATCH, expected=expected)
         install_guard(source.make_guard(create))
     elif filtered:
-        unimplemented(
-            gb_type="Prebound builtin method requires identity guards",
-            context=source.name,
-            explanation="Dynamo cannot track this prebound builtin method when its identity guard can be skipped or filtered.",
-            hints=["Bind the builtin method inside the compiled function."],
-        )
+        _untracked_method_identity(f"binding prebound builtin method {source.name}")
     else:
         install_guard(source.make_guard(GuardBuilder.ID_MATCH))
 
@@ -1622,11 +1626,7 @@ def _constant_subclass_base_value(value: object) -> Any:
     raise TypeError(f"Not a constant subclass: {type(value)}")
 
 
-def _nn_module_hook_membership(
-    values: tuple[Any, Any], hooks_name: str
-) -> tuple[bool, ...] | None:
-    module, flags = values
-    hooks = getattr(module, hooks_name, None)
+def _nn_module_hook_membership(hooks: Any, flags: Any) -> tuple[bool, ...] | None:
     if not issubclass(type(hooks), dict) or not issubclass(type(flags), dict):
         return None
     hooks = cast(dict[Any, Any], hooks)
@@ -1634,7 +1634,16 @@ def _nn_module_hook_membership(
         type(key) is not int for mapping in (hooks, flags) for key in dict.keys(mapping)
     ):
         return None
+    if dict.__len__(flags) == 0:
+        return (False,) * dict.__len__(hooks)
     return tuple(dict.__contains__(flags, key) for key in dict.keys(hooks))
+
+
+def _nn_module_hook_membership_from_sources(
+    values: tuple[Any, Any], hooks_name: str
+) -> tuple[bool, ...] | None:
+    module, flags = values
+    return _nn_module_hook_membership(getattr(module, hooks_name, None), flags)
 
 
 def _guard_create_fn_keyword(guard: Guard, name: str) -> Any:
@@ -3944,7 +3953,8 @@ class GuardBuilder(GuardBuilderBase):
                     self.check_fn_manager.additional_used_global_vars.add(name)
         refs = ", ".join(self.arg_ref(source.name) for source in sources)
         code = [f"___receiver_alias_pattern(({refs},)) == {aliases!r}"]
-        self._set_guard_export_info(guard, code)
+        name = guard.create_fn_name()
+        self._set_guard_export_info(guard, code, provided_func_name=name)
         install_object_alias_pattern_guard(
             [self.get_guard_manager_from_source(source) for source in sources],
             aliases,
@@ -3960,7 +3970,13 @@ class GuardBuilder(GuardBuilderBase):
         eval_fn=lambda values, expected: (values[0] is values[1]) == expected,
         get_extra_sources_fn=lambda g: (_guard_create_fn_keyword(g, "source_b"),),
     )
-    def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
+    def DUPLICATE_INPUT(
+        self, guard: Guard, source_b: Source, *, same: bool | None = None
+    ) -> None:
+        if same is not None:
+            pair = (guard.originating_source, source_b)
+            self.BUILTIN_METHOD_RECEIVER_ALIAS(guard, pair, (0, 0 if same else 1))
+            return
         if is_from_skip_guard_source(
             guard.originating_source
         ) or is_from_skip_guard_source(source_b):
@@ -4086,12 +4102,12 @@ class GuardBuilder(GuardBuilderBase):
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: (
             _guard_create_fn_keyword(guard, "hooks_name"),
-            _nn_module_hook_membership(
+            _nn_module_hook_membership_from_sources(
                 value, _guard_create_fn_keyword(guard, "hooks_name")
             ),
         ),
         eval_fn=lambda value, metadata: metadata[1] is not None
-        and _nn_module_hook_membership(value, metadata[0]) == metadata[1],
+        and _nn_module_hook_membership_from_sources(value, metadata[0]) == metadata[1],
         get_extra_sources_fn=lambda guard: (
             _guard_create_fn_keyword(guard, "flags_source"),
         ),
@@ -4102,6 +4118,7 @@ class GuardBuilder(GuardBuilderBase):
         hooks_name: str,
         flags_source: Source,
     ) -> None:
+        """Guard flag membership by each key's storage position in the hook registry."""
         hooks_source = AttrSource(guard.originating_source, hooks_name)
         flags = self.get(flags_source)
         if self.save_guards:
@@ -4111,7 +4128,7 @@ class GuardBuilder(GuardBuilderBase):
                 self.check_fn_manager.additional_used_global_vars.add(name)
         flags_ref = self.arg_ref(flags_source.name)
         hooks_ref = self.arg_ref(hooks_source.name)
-        if dict.__len__(flags) == 0:
+        if issubclass(type(flags), dict) and dict.__len__(flags) == 0:
             # Empty flags make every membership false, independent of hook IDs.
             # Keep the logical relation for nested reuse, but use a tag-safe leaf.
             code = f"dict.__len__({flags_ref}) == 0"
@@ -4125,9 +4142,11 @@ class GuardBuilder(GuardBuilderBase):
             )
             self._set_guard_export_info(guard, [code])
             return
-        membership = tuple(
-            dict.__contains__(flags, key) for key in dict.keys(self.get(hooks_source))
-        )
+        membership = _nn_module_hook_membership(self.get(hooks_source), flags)
+        if membership is None:
+            raise AssertionError(
+                "Expected hook and flag dictionaries with exact int keys"
+            )
         code = (
             f"tuple(dict.__contains__({flags_ref}, key) for key in "
             f"dict.keys({hooks_ref})) == {membership!r}"
@@ -5025,6 +5044,7 @@ _FAKE_TENSOR_OWNED_ATTRIBUTES = (
     _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS
     | {
         "_fake_device",
+        "_fake_pytype",
         "fake_mode",
         "constant",
         "pytype",
@@ -5229,8 +5249,6 @@ class GuardsStatePickler(FunctionPicklerBase):
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
-        self.fake_mode = torch._subclasses.FakeTensorMode()
-        self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
         # The plain tuples an EQUALS_MATCH reads whole, by id; see the Note
         # above _keep. Required, because omitting it would carry no plain
@@ -5264,7 +5282,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         self._whole_compared_values: dict[int, Any] = {}
         self._instance_policies: dict[int, _PickleState] = {}
         self._pruned_dictionary_ids: set[int] = set()
-        self._dict_snapshots: dict[int, _DictionaryItemsSnapshot] = {}
+        self._dict_snapshots: dict[int, _DictionaryItemsSnapshot | dict[Any, Any]] = {}
         self._dropped_state: set[int] = set()
         self._constructor_reductions: dict[int, tuple[object, Any]] = {}
         self._collect_required_state()
@@ -5322,10 +5340,13 @@ class GuardsStatePickler(FunctionPicklerBase):
         self._retain_required_state(stack)
 
     def _constructor_referents(self, value: Any) -> collections.abc.Iterable[Any]:
+        """Visit carried module attributes and the function or tensor reductions replayed at dump.
+        Meta tensors use native pickle. A missing or empty reduction is provisional until
+        constructor aliases are known, so it cannot be cached.
+        """
         typ = type(value)
         function = typ is types.FunctionType
         if function or (issubclass(typ, torch.Tensor) and self._keep(value)):
-            # A provisional pruning decision can change when a later constructor needs an alias.
             if id(value) in self.missing_values or id(value) in self.empty_values:
                 return ()
             if not function and value.device.type == "meta":
@@ -5378,14 +5399,15 @@ class GuardsStatePickler(FunctionPicklerBase):
         grad: torch.Tensor,
     ) -> torch.Tensor:
         fake_mode = torch._subclasses.FakeTensorMode()
-        tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
-        ret = tensor_converter.from_meta_and_device(
+        ret = fake_mode.fake_tensor_converter.from_meta_and_device(
             fake_mode,
             meta_tensor,
             device,
             pytype,
             torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
         )
+        # Guard replay reads this metadata after dropping the user's attribute.
+        object.__setattr__(ret, "constant", maybe_get_fake_constant(ret))
         # A .grad the guards never read is pruned to the _Missing sentinel on
         # the way in (only a training capture has one to prune at all); it was
         # not guarded on, so the rebuilt tensor does not need it, but assigning
@@ -5600,8 +5622,8 @@ class GuardsStatePickler(FunctionPicklerBase):
         global_scope: dict[str, Any],
         dictionaries: collections.abc.Collection[dict[Any, Any]],
     ) -> None:
-        """Register candidate dictionaries before pruning locals, which marks discarded roots.
-        Retain constructor dependencies reachable from the surviving roots before freezing slots.
+        """Keep dictionary keys first, then mark discarded local roots, skipping candidate slots.
+        Retain constructor dependencies reachable from surviving roots before freezing the slots.
         """
         value: Any
         for value in itertools.chain(self.guard_tree_values.values(), dictionaries):
@@ -5620,8 +5642,10 @@ class GuardsStatePickler(FunctionPicklerBase):
             )
         for value in dictionaries:
             if type(value) is dict:
-                self._dict_snapshots[id(value)] = _DictionaryItemsSnapshot(
-                    self._dictionary_items(value)
+                # Freeze slots before other reducers run. Rehash user keys only at load.
+                items = _DictionaryItemsSnapshot(self._dictionary_items(value))
+                self._dict_snapshots[id(value)] = (
+                    dict(items) if all(type(k) is str for k, _ in items) else items
                 )
 
     def _retain_dict_aliases(
@@ -5942,7 +5966,9 @@ class GuardsStatePickler(FunctionPicklerBase):
     # than as the sentinel. A dictionary snapshot already accounts for its slots.
     _PRUNED_CONTAINER_TYPES = frozenset({list, dict, set, bytearray})
 
-    def persistent_id(self, obj: object) -> _DictionaryItemsSnapshot | str | None:
+    def persistent_id(
+        self, obj: object
+    ) -> _DictionaryItemsSnapshot | dict[Any, Any] | str | None:
         # CPython bypasses reducer_override for an exact dict. All references
         # use the same snapshot, including back-references in its own items.
         if (
@@ -6089,12 +6115,12 @@ class GuardsStatePickler(FunctionPicklerBase):
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
-                default = torch.nn.Parameter if is_param else torch.Tensor
-                pytype = obj.pytype or default
+                pytype = torch.nn.Parameter if is_param else torch.Tensor
             elif is_fake and is_param and pytype is torch.Tensor:
                 # A C++ fake's own type is the real type, but a C++ fake
                 # Parameter can be a plain Tensor carrying the marker.
                 pytype = torch.nn.Parameter
+            pytype = maybe_get_fake_pytype(obj) or pytype
             # A fake answers empty_like with another fake (a Python fake through
             # its own __torch_dispatch__, whether or not its FakeTensorMode is
             # active), and that fake would drag the mode and its converters into
@@ -6634,6 +6660,7 @@ def pickle_guards_state(
 ) -> bytes:
     buf = io.BytesIO()
     guard_tree_values = dict(builder.guard_tree_values)
+
     # Anything raised while walking or dumping the state means a guarded value
     # cannot be serialized, which is a bypass (an error under
     # strict_precompile), never a compiler crash. A PackageError raised inside
@@ -6649,6 +6676,8 @@ def pickle_guards_state(
                 ]
             )
         ):
+            # Prune more values in AOT precompile when complex pickling
+            # structure is not needed.
             state.output_graph.guard_on_key_order = set()
             state.output_graph.global_scope = {}
         required_dicts: dict[int, dict[Any, Any]] = {}
@@ -8139,16 +8168,12 @@ def guard_mixed_scope_alias(left: Source, right: Source) -> None:
 def record_lexical_alias(
     reads: set[tuple[Source, int]], source: Source | None, canonical: Source | None
 ) -> None:
-    if not reads or source is None or canonical is None or source == canonical:
+    if source is None or canonical is None or source == canonical:
         return
-    scopes = {
-        scope
-        for read, scope in reads
-        if is_from_source(source, read) or is_from_source(canonical, read)
-    }
-    if scopes:
-        reads.update((s, scope) for s in (source, canonical) for scope in scopes)
-        guard_mixed_scope_alias(source, canonical)
+    guard_mixed_scope_alias(source, canonical)
+    for read, scope in reads.copy():
+        if is_from_source(source, read) or is_from_source(canonical, read):
+            reads.update(((source, scope), (canonical, scope)))
 
 
 def make_dupe_guard(
