@@ -9369,6 +9369,48 @@ print(json.dumps(found))
 
     # --- what the report says
 
+    def test_a_training_graph_is_the_same_graph_under_autocast(self):
+        # Autocast casts the first convolution's result. That the sizes of
+        # the result follow from the sizes of what the convolution took is
+        # asked on tensors that hold nothing, which autocast does not cast:
+        # the dtypes are not compared there. Without that the count of a
+        # batch norm, a write to a tensor from outside behind a check that
+        # was taken for one that can fail, ended the graph.
+        class Net(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(4, 8, 3, padding=1)
+                self.norm = torch.nn.BatchNorm2d(8)
+                self.head = torch.nn.Linear(8 * 8 * 8, 5)
+
+            def forward(self, x):
+                h = torch.relu(self.norm(self.conv(x)))
+                return self.head(torch.flatten(h, 1))
+
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(4, 4, 8, 8)
+        found = []
+        for cast in (False, True):
+            torch.manual_seed(1)
+            model = Net().train()
+            reference = copy.deepcopy(model)
+            passes = (*DEFAULT, P.Graphs(), keep)
+            compiled = torch.vm(model, passes=passes, fallback=False, demote=False)
+            under = torch.autocast("cpu", dtype=torch.bfloat16, enabled=cast)
+            with torch.no_grad(), under:
+                for _ in range(6):
+                    self.assertEqual(compiled(x), reference(x), atol=0, rtol=0)
+            for name, value in reference.state_dict().items():
+                self.assertEqual(model.state_dict()[name], value, msg=name)
+            graphs = self.graphs(compiled, "compiled")
+            found.append([(g["ops"], g["why"], g["operators"]) for g in graphs])
+        ((ops, why, operators),) = found[0]
+        self.assertEqual((ops, why), (6, "the function returns"))
+        self.assertIn("aten::add_.Tensor", operators)
+        self.assertEqual(found[1], found[0])
+
     def test_a_graph_has_one_name_and_the_report_counts_nothing_twice(self):
         def keep(gm, input_types):
             return gm
@@ -10793,6 +10835,75 @@ def back_view_read_makes(x, w, b):
     return q, (q * torch.tensor(2.0, dtype=x.dtype)).sum()
 
 
+def back_convolves(x, w0, w1, w2, w3):
+    h = torch.nn.functional.conv2d(x, w0, stride=2, padding=3).relu()
+    h = torch.nn.functional.conv2d(h, w1, stride=1, padding=1).relu()
+    h = torch.nn.functional.conv2d(h, w2, stride=2, padding=1).relu()
+    h = torch.nn.functional.conv2d(h, w3, stride=1, padding=1)
+    return h.mean(), h.tanh().mean()
+
+
+BACK_SCALES = [0.5, 2.0, 1.0, 3.0]
+BACK_KEPT = {"dims": [1, 0], "pads": [1, 1], "factor": [2.0, 2.0], "shape": [4, 3]}
+BACK_HELD = ([1.0, 2.0, 3.0, 4.0], BACK_KEPT)
+
+
+def back_holds_a_list(x, w, b):
+    scales = torch.tensor(BACK_SCALES, device=x.device, dtype=x.dtype)
+    h = (x @ w + b).tanh() * scales
+    return h.sum(), h.exp().mean()
+
+
+def back_holds_a_default(x, w, b, scales=BACK_SCALES):
+    h = (x @ w + b).tanh() * torch.as_tensor(scales, device=x.device)
+    return h.sum(), h.exp().mean()
+
+
+def back_holds_a_list_in_a_tuple(x, w, b):
+    h = (x @ w + b).tanh() * torch.tensor(BACK_HELD[0], device=x.device)
+    return h.sum(), h.exp().mean()
+
+
+def back_holds_dims(x, w, b):
+    h = (x @ w + b).tanh().permute(BACK_HELD[1]["dims"])
+    return h[0].exp().sum(), h.exp().mean()
+
+
+def back_holds_pads(x, w, b):
+    h = torch.nn.functional.pad((x @ w + b).tanh(), BACK_HELD[1]["pads"])
+    return h[:, 0].exp().sum(), h.exp().mean()
+
+
+def back_holds_a_factor(x, w, b):
+    h = (x @ w + b).tanh()[None, None]
+    h = torch.nn.functional.interpolate(h, scale_factor=BACK_HELD[1]["factor"])
+    return h.sum(), h.exp().mean()
+
+
+def back_holds_a_shape(x, w, b):
+    h = (x @ w + b).tanh().view(*BACK_HELD[1]["shape"])
+    return h.sum(0).exp().sum(), h.exp().mean()
+
+
+class BackHolds(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.scales = [0.5, 2.0, 1.0, 3.0]
+
+    def forward(self, x, w, b):
+        h = (x @ w + b).tanh() * torch.tensor(self.scales, device=x.device)
+        return h.sum(), h.exp().mean()
+
+
+def back_squeezes(x, w, b):
+    h = (x @ w + b).tanh()
+    return h.squeeze(), h
+
+
+def back_reads_input(a, w):
+    return (a * a * w).tanh().exp().sum()
+
+
 def back_reader_keeps(x, a):
     h = (x @ a).tanh()
     return h, (h * h).sum() + (a * a).sum()
@@ -11161,6 +11272,220 @@ class TestVmGraphBackward(TestCase):
                 (state,) = self.states()
                 text = "eager's tape: tensor makes a tensor of what is no tensor"
                 self.assertIn(text, state)
+
+    def test_a_training_graph_under_autocast_is_one_graph(self, device):
+        # Autocast casts the first convolution's result. That the sizes of
+        # the result follow from the sizes of what the convolution took is
+        # asked on tensors that hold nothing, which autocast does not cast:
+        # the dtypes are not compared there. Without that the count of a
+        # batch norm, a write to a tensor from outside behind a check that
+        # was taken for one that can fail, ended the graph.
+        kind = torch.device(device).type
+        torch.manual_seed(0)
+        nets = [BackConvNet().to(device), BackConvNet().to(device)]
+        nets[1].load_state_dict(nets[0].state_dict())
+        for net in nets:
+            net.drop.p = 0.0
+
+        def step(net, x, y):
+            with torch.autocast(kind):
+                return net(x, y)
+
+        compiled = self.staged(step)
+        cudnn = torch.backends.cudnn
+        # cuDNN picks its algorithms per thread in its benchmark mode: the
+        # backward is taken down with the mode set aside, and it is on again
+        # behind every call.
+        with cudnn.flags(benchmark=True, deterministic=False):
+            for at in range(8):
+                torch.manual_seed(at)
+                x = torch.randn(4, 3, 8, 8, device=device)
+                y = torch.randint(0, 5, (4,), device=device)
+                found = []
+                for run, net in ((compiled, nets[0]), (step, nets[1])):
+                    net.zero_grad()
+                    loss = run(net, x, y)
+                    loss.backward()
+                    grads = [p.grad.clone() for p in net.parameters()]
+                    found.append((loss, grads, [b.clone() for b in net.buffers()]))
+                self.alike(found[0], found[1])
+                self.assertEqual((cudnn.benchmark, cudnn.deterministic), (True, False))
+        graphs = [g for g in torch.vm.regions(compiled) if g["state"] == "compiled"]
+        graphs = [g for g in graphs if "within" not in g]
+        self.assertEqual(len(graphs), 1)
+        # The loss can fail for what its target holds, and the graph has
+        # written to the statistics by then: it is no operation of it.
+        names = graphs[0]["operators"]
+        operators = [name.split("::")[1].split(".")[0] for name in names]
+        expected = "conv2d add_ batch_norm relu_ max_pool2d dropout flatten linear"
+        self.assertEqual(operators, expected.split())
+        self.assertEqual(self.states(), ["the engine's backward"])
+
+    def test_a_backward_is_taken_down_whatever_cudnn_would_pick(self, device):
+        # In its benchmark mode cuDNN picks the algorithm of a convolution
+        # by what it measured, and remembers it, per thread: once eager has
+        # run, the thread a form is taken down on and the autograd engine's
+        # need not give the same bits. The comparison is made with cuDNN
+        # choosing one way on every thread, and the caller's settings are
+        # back behind every call.
+        torch.manual_seed(0)
+        shapes = ((64, 3, 7, 7), (64, 64, 3, 3), (128, 64, 3, 3), (128, 128, 3, 3))
+        made = [torch.randn(*shape, device=device) for shape in shapes]
+        weights = [weight.requires_grad_() for weight in made]
+        x = torch.randn(8, 3, 64, 64, device=device)
+        cudnn = torch.backends.cudnn
+
+        def step(fn):
+            for w in weights:
+                w.grad = None
+            first, second = fn(x, *weights)
+            (first + second).backward()
+            return first, second, [w.grad.clone() for w in weights]
+
+        with cudnn.flags(benchmark=True, deterministic=False):
+            for _ in range(3):
+                step(back_convolves)
+            compiled = self.staged(back_convolves)
+            for _ in range(8):
+                # Eager's own bits depend on the thread and on what cuDNN
+                # measured there: the values are compared.
+                got, expected = step(compiled), step(back_convolves)
+                self.assertEqual(got, expected, rtol=1e-4, atol=1e-6)
+                self.assertEqual((cudnn.benchmark, cudnn.deterministic), (True, False))
+        self.assertEqual(self.states(), ["the engine's backward"])
+
+    def test_what_is_taken_out_of_a_list_is_what_is_in_it_at_the_call(self, device):
+        # A list that lives outside the function is the same object at
+        # every call, whatever is in it: what a form has of it as a
+        # constant is checked by what is in it, against a copy.
+        module = BackHolds()
+        kinds = (
+            (back_holds_a_list, BACK_SCALES, 0, 5.0),
+            (back_holds_a_default, BACK_SCALES, 3, -1.0),
+            (back_holds_a_list_in_a_tuple, BACK_HELD[0], 1, 7.0),
+            (lambda x, w, b: module(x, w, b), module.scales, 2, 0.25),
+            (back_holds_dims, BACK_HELD[1]["dims"], slice(None), [0, 1]),
+            (back_holds_pads, BACK_HELD[1]["pads"], 0, 3),
+            (back_holds_a_factor, BACK_HELD[1]["factor"], 1, 1.0),
+            (back_holds_a_shape, BACK_HELD[1]["shape"], slice(None), [2, 6]),
+        )
+
+        def keep(gm, input_types):
+            return gm
+
+        def step(fn, x, w, b):
+            w.grad = b.grad = None
+            first, second = fn(x, w, b)
+            (first + second).backward()
+            return first, second, w.grad.clone(), b.grad.clone()
+
+        lists = [((), True), ((keep,), True)]
+        for at, (fn, held, key, value) in enumerate(kinds):
+            # A compiler has the numbers as constants: two kinds with it.
+            compiler = [((P.Inductor(),), False)] * (at in (0, 5))
+            for passes, exact in lists + compiler:
+                compiled = self.staged(fn, passes)
+                torch.manual_seed(0)
+                w = torch.randn(4, 4, device=device, requires_grad=True)
+                b = torch.randn(4, device=device, requires_grad=True)
+                before = held[key]
+                before = list(before) if isinstance(before, list) else before
+                try:
+                    for call in range(18):
+                        # Changed in place, and changed back.
+                        if call in (6, 12):
+                            held[key] = value if call == 6 else before
+                        x = torch.randn(3, 4, device=device)
+                        got, expected = step(compiled, x, w, b), step(fn, x, w, b)
+                        if exact:
+                            self.alike(got, expected)
+                        else:
+                            self.assertEqual(got, expected, rtol=1e-4, atol=1e-5)
+                finally:
+                    held[key] = before
+                graphs = torch.vm.regions(compiled)
+                forms = [form for graph in graphs for form in graph.get("forms", ())]
+                derived = [form.get("backward") for form in forms]
+                self.assertEqual(derived, ["the engine's backward"] * 2)
+
+    def test_an_input_that_was_detached_in_place_raises_what_eager_raises(self, device):
+        def raised(fn, at):
+            torch.manual_seed(at)
+            leaf = torch.randn(4, 4, device=device, requires_grad=True)
+            w = torch.randn(4, 4, device=device, requires_grad=True)
+            made = leaf * 2
+            loss = fn(made, w)
+            made.detach_()
+            with self.assertRaises(RuntimeError) as caught:
+                loss.backward()
+            return str(caught.exception)
+
+        compiled = self.staged(back_reads_input)
+        for at in range(8):
+            got, expected = raised(compiled, at), raised(back_reads_input, at)
+            self.assertEqual(got, expected)
+            self.assertIn("detached in-place", expected)
+        self.assertEqual(self.states(), ["the engine's backward"])
+
+    def test_a_backward_for_some_results_whose_kernels_do_not_fit(self, device):
+        # The backward of a view is a view of the gradient where the
+        # gradients of two results meet in front of it, and a copy where
+        # only the one comes that was spread out to its sizes: the kernels
+        # of the backward for both results do not fit the one for the
+        # first. Eager's nodes run for that one; the graph is not given up.
+        fn = back_holds_a_shape
+        compiled = self.staged(fn)
+        torch.manual_seed(0)
+        w = torch.randn(4, 4, device=device, requires_grad=True)
+        b = torch.randn(4, device=device, requires_grad=True)
+        for call in range(12):
+            x = torch.randn(3, 4, device=device)
+            found = []
+            for run in (compiled, fn):
+                w.grad = b.grad = None
+                first, second = run(x, w, b)
+                (first, second, first + second)[call % 3].backward()
+                found.append((first, second, w.grad.clone(), b.grad.clone()))
+            self.alike(found[0], found[1])
+        self.assertEqual(self.states(), ["the engine's backward"])
+        # A view with the sizes of what it is a view of is in the same
+        # place: what autograd kept of the result is the result.
+        compiled, w, b = self.proven(back_squeezes, device)
+        x = torch.randn(3, 4, device=device)
+        found = []
+        for run in (compiled, back_squeezes):
+            w.grad = b.grad = None
+            same, h = run(x, w, b)
+            (same.exp().sum() + h.sum()).backward()
+            found.append((same, h, same._base is h, w.grad.clone(), b.grad.clone()))
+        self.alike(found[0], found[1])
+
+    def test_cudnns_settings_are_the_callers_on_every_way_out(self, device):
+        torch.manual_seed(0)
+        w = torch.randn(4, 4, device=device, requires_grad=True)
+        b = torch.randn(4, device=device, requires_grad=True)
+        cudnn = torch.backends.cudnn
+
+        def calls(compiled, fn):
+            for _ in range(6):
+                x = torch.randn(3, 4, device=device)
+                self.alike(compiled(x, w, b), fn(x, w, b))
+                self.assertEqual((cudnn.benchmark, cudnn.deterministic), (True, False))
+
+        with cudnn.flags(benchmark=True, deterministic=False):
+            # The comparison with the autograd engine raises: the form is
+            # taken back, the instructions run, and the settings are back.
+            compiled = self.staged(back_pair)
+            with unittest.mock.patch.object(torch.autograd, "grad") as compared:
+                compared.side_effect = RuntimeError("stopped")
+                calls(compiled, back_pair)
+            graphs = torch.vm.regions(compiled)
+            reasons = [graph.get("reason", "") for graph in graphs]
+            stopped = ["RuntimeError: stopped" in reason for reason in reasons]
+            self.assertTrue(any(stopped), reasons)
+            # A form that is refused, and one that is proven.
+            for fn in (back_multiplies, back_pair):
+                calls(self.staged(fn), fn)
 
     def test_a_result_that_is_a_view_is_eagers_view(self, device):
         def use(fn, x, w, b):
