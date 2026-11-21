@@ -6720,6 +6720,21 @@ def graph_shapes(x):
     return (y.view(halves) * 2).tanh().exp().view(again) + y.reshape(flat).sum()
 
 
+def graph_moves(x, w):
+    y = (x.sin() + 1).cos()
+    z = y.to(w.device).to(dtype=y.dtype)
+    z.add_(1)
+    y = y.to(w.dtype).to(dtype=torch.float32)
+    return (y * 2).tanh().exp()
+
+
+def graph_hands_on(x, pair, dims, *sizes):
+    y = (x.sin() + 1).cos()
+    shape = y.shape[:-1] + (2, 2)
+    y = y.view(*shape).reshape(*sizes)
+    return (torch.mul(y, *pair) * 2).tanh().exp() + torch.flatten(y, *dims).sum()
+
+
 class GraphDoubles:
     """What is read of it is twice what was stored."""
 
@@ -10075,6 +10090,28 @@ class TestVmGraphResults(TestCase):
         for other in (wide, deep, x):
             self.assertEqual(compiled(other), graph_shapes(other), atol=0, rtol=0)
         self.whole_graph(graph_shapes, (x,), 11, P.Inductor())
+
+    def test_a_method_that_was_read_off_a_tensor_is_an_operation(self, device):
+        x = torch.randn(3, 4, device=device)
+        w = torch.randn(4, 4, device=device, dtype=torch.float64)
+        # `.to(...)` with a device, with a dtype and with a keyword; what
+        # it gives where nothing is to be done is the tensor itself, which
+        # the write after it shows.
+        compiled = self.whole_graph(graph_moves, (x, w), 11)
+        half = w.to(torch.float16)
+        self.assertEqual(compiled(x, half), graph_moves(x, half), atol=0, rtol=0)
+        self.whole_graph(graph_moves, (x, w), 11, P.Inductor())
+
+    def test_what_is_spread_into_a_call_is_handed_over_item_by_item(self, device):
+        x, w = torch.randn(3, 4, device=device), torch.randn(4, device=device)
+        # A tuple the path put together, the function's own `*sizes`, a
+        # tuple and a list from outside (one with a tensor in it).
+        first = (x, (w,), [0, -1], 3, 4)
+        compiled = self.whole_graph(graph_hands_on, first, 12)
+        # Other items, and another count of them, are other forms.
+        for args in ((x, [w[:1]], [0, 1], 2, 6), (x, (w[:1],), (0,), 12), first):
+            self.assertEqual(compiled(*args), graph_hands_on(*args), atol=0, rtol=0)
+        self.whole_graph(graph_hands_on, first, 12, P.Inductor())
 
     def test_a_list_that_is_added_to_in_place_is_changed_once(self, device):
         def keep(gm, input_types):
