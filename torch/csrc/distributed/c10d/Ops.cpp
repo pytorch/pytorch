@@ -94,6 +94,7 @@ namespace {
 IMPL_SEND(CPU)
 IMPL_SEND(CUDA)
 IMPL_SEND(PrivateUse1)
+IMPL_SEND(XPU)
 
 #define IMPL_RECV(DEV)                                                         \
   c10::intrusive_ptr<Work> recv_##DEV(                                         \
@@ -120,6 +121,7 @@ IMPL_SEND(PrivateUse1)
 IMPL_RECV(CPU)
 IMPL_RECV(CUDA)
 IMPL_RECV(PrivateUse1)
+IMPL_RECV(XPU)
 
 #define IMPL_RECV_ANY_SOURCE(DEV)                                       \
   c10::intrusive_ptr<Work> recv_any_source_##DEV(                       \
@@ -143,6 +145,7 @@ IMPL_RECV(PrivateUse1)
 IMPL_RECV_ANY_SOURCE(CPU)
 IMPL_RECV_ANY_SOURCE(CUDA)
 IMPL_RECV_ANY_SOURCE(PrivateUse1)
+IMPL_RECV_ANY_SOURCE(XPU)
 
 #define IMPL_REDUCE(DEV)                                        \
   c10::intrusive_ptr<Work> reduce_##DEV(                        \
@@ -175,6 +178,7 @@ IMPL_RECV_ANY_SOURCE(PrivateUse1)
 IMPL_REDUCE(CPU)
 IMPL_REDUCE(CUDA)
 IMPL_REDUCE(PrivateUse1)
+IMPL_REDUCE(XPU)
 
 #define IMPL_BROADCAST(DEV)                                               \
   std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>           \
@@ -207,6 +211,7 @@ IMPL_REDUCE(PrivateUse1)
 IMPL_BROADCAST(CPU)
 IMPL_BROADCAST(CUDA)
 IMPL_BROADCAST(PrivateUse1)
+IMPL_BROADCAST(XPU)
 
 // Return input tensors as output tensors to make inplace allreduce look like
 // a functional API, so that make_fx can correctly build the dependencies in
@@ -241,6 +246,7 @@ IMPL_BROADCAST(PrivateUse1)
 IMPL_ALLREDUCE(CPU)
 IMPL_ALLREDUCE(CUDA)
 IMPL_ALLREDUCE(PrivateUse1)
+IMPL_ALLREDUCE(XPU)
 
 #define IMPL_ALLREDUCE_COALESCED(DEV)                                \
   c10::intrusive_ptr<Work> allreduce_coalesced_##DEV(                \
@@ -268,6 +274,7 @@ IMPL_ALLREDUCE(PrivateUse1)
 IMPL_ALLREDUCE_COALESCED(CPU)
 IMPL_ALLREDUCE_COALESCED(CUDA)
 IMPL_ALLREDUCE_COALESCED(PrivateUse1)
+IMPL_ALLREDUCE_COALESCED(XPU)
 
 // Copy output tensors (not storage) so that this can be used in a functional
 // manner
@@ -307,6 +314,7 @@ IMPL_ALLREDUCE_COALESCED(PrivateUse1)
 IMPL_ALLGATHER(CPU)
 IMPL_ALLGATHER(CUDA)
 IMPL_ALLGATHER(PrivateUse1)
+IMPL_ALLGATHER(XPU)
 
 #define IMPL__ALLGATHER_BASE(DEV)                                              \
   std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_##DEV(      \
@@ -335,6 +343,7 @@ IMPL_ALLGATHER(PrivateUse1)
 IMPL__ALLGATHER_BASE(CPU)
 IMPL__ALLGATHER_BASE(CUDA)
 IMPL__ALLGATHER_BASE(PrivateUse1)
+IMPL__ALLGATHER_BASE(XPU)
 
 #define IMPL_ALLGATHER_COALESCED(DEV)                                      \
   c10::intrusive_ptr<Work> allgather_coalesced_##DEV(                      \
@@ -367,6 +376,7 @@ IMPL__ALLGATHER_BASE(PrivateUse1)
 IMPL_ALLGATHER_COALESCED(CPU)
 IMPL_ALLGATHER_COALESCED(CUDA)
 IMPL_ALLGATHER_COALESCED(PrivateUse1)
+IMPL_ALLGATHER_COALESCED(XPU)
 
 #define IMPL_ALLGATHER_INTO_TENSOR_COALESCED(DEV)                       \
   c10::intrusive_ptr<c10d::Work> allgather_into_tensor_coalesced_##DEV( \
@@ -400,6 +410,7 @@ IMPL_ALLGATHER_COALESCED(PrivateUse1)
 IMPL_ALLGATHER_INTO_TENSOR_COALESCED(CPU)
 IMPL_ALLGATHER_INTO_TENSOR_COALESCED(CUDA)
 IMPL_ALLGATHER_INTO_TENSOR_COALESCED(PrivateUse1)
+IMPL_ALLGATHER_INTO_TENSOR_COALESCED(XPU)
 
 #define IMPL_REDUCE_SCATTER(DEV)                                           \
   std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>            \
@@ -437,6 +448,7 @@ IMPL_ALLGATHER_INTO_TENSOR_COALESCED(PrivateUse1)
 IMPL_REDUCE_SCATTER(CPU)
 IMPL_REDUCE_SCATTER(CUDA)
 IMPL_REDUCE_SCATTER(PrivateUse1)
+IMPL_REDUCE_SCATTER(XPU)
 
 #define IMPL__REDUCE_SCATTER_BASE(DEV)                                         \
   std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _reduce_scatter_base_##DEV( \
@@ -471,6 +483,7 @@ IMPL_REDUCE_SCATTER(PrivateUse1)
 IMPL__REDUCE_SCATTER_BASE(CPU)
 IMPL__REDUCE_SCATTER_BASE(CUDA)
 IMPL__REDUCE_SCATTER_BASE(PrivateUse1)
+IMPL__REDUCE_SCATTER_BASE(XPU)
 
 #define IMPL_REDUCE_SCATTER_TENSOR_COALESCED(DEV)                       \
   c10::intrusive_ptr<c10d::Work> reduce_scatter_tensor_coalesced_##DEV( \
@@ -509,6 +522,7 @@ IMPL__REDUCE_SCATTER_BASE(PrivateUse1)
 IMPL_REDUCE_SCATTER_TENSOR_COALESCED(CPU)
 IMPL_REDUCE_SCATTER_TENSOR_COALESCED(CUDA)
 IMPL_REDUCE_SCATTER_TENSOR_COALESCED(PrivateUse1)
+IMPL_REDUCE_SCATTER_TENSOR_COALESCED(XPU)
 
 #define IMPL_GATHER(DEV)                                                   \
   c10::intrusive_ptr<Work> gather_##DEV(                                   \
@@ -544,6 +558,7 @@ IMPL_REDUCE_SCATTER_TENSOR_COALESCED(PrivateUse1)
 IMPL_GATHER(CPU)
 IMPL_GATHER(CUDA)
 IMPL_GATHER(PrivateUse1)
+IMPL_GATHER(XPU)
 
 #define IMPL_GATHER_INTO_TENSOR(DEV)                                          \
   std::tuple<at::Tensor, c10::intrusive_ptr<Work>> gather_into_tensor_##DEV(  \
@@ -574,6 +589,7 @@ IMPL_GATHER(PrivateUse1)
 IMPL_GATHER_INTO_TENSOR(CPU)
 IMPL_GATHER_INTO_TENSOR(CUDA)
 IMPL_GATHER_INTO_TENSOR(PrivateUse1)
+IMPL_GATHER_INTO_TENSOR(XPU)
 
 #define IMPL_SCATTER(DEV)                                                      \
   std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_##DEV( \
@@ -607,6 +623,7 @@ IMPL_GATHER_INTO_TENSOR(PrivateUse1)
 IMPL_SCATTER(CPU)
 IMPL_SCATTER(CUDA)
 IMPL_SCATTER(PrivateUse1)
+IMPL_SCATTER(XPU)
 
 #define IMPL_ALLTOALL(DEV)                                                \
   std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>           \
@@ -642,6 +659,7 @@ IMPL_SCATTER(PrivateUse1)
 IMPL_ALLTOALL(CPU)
 IMPL_ALLTOALL(CUDA)
 IMPL_ALLTOALL(PrivateUse1)
+IMPL_ALLTOALL(XPU)
 
 #define IMPL_ALLTOALL_BASE(DEV)                                 \
   c10::intrusive_ptr<Work> alltoall_base_##DEV(                 \
@@ -673,6 +691,7 @@ IMPL_ALLTOALL(PrivateUse1)
 IMPL_ALLTOALL_BASE(CPU)
 IMPL_ALLTOALL_BASE(CUDA)
 IMPL_ALLTOALL_BASE(PrivateUse1)
+IMPL_ALLTOALL_BASE(XPU)
 
 // NOLINTBEGIN(performance-unnecessary-value-param)
 #define IMPL_BARRIER(DEV)                                                     \
@@ -698,6 +717,7 @@ IMPL_ALLTOALL_BASE(PrivateUse1)
 IMPL_BARRIER(CPU)
 IMPL_BARRIER(CUDA)
 IMPL_BARRIER(PrivateUse1)
+IMPL_BARRIER(XPU)
 // NOLINTEND(performance-unnecessary-value-param)
 // NOLINTEND(cppcoreguidelines-pro-type-const-cast)
 
@@ -756,12 +776,13 @@ namespace {
   }
 
 // 1st level expansion
-#define REGISTER_C10D_OP(FUNC)  \
-  REGISTER_C10D_OP1(FUNC, CPU)  \
-  REGISTER_C10D_OP1(FUNC, CUDA) \
-  REGISTER_C10D_OP1(FUNC, PrivateUse1)
+#define REGISTER_C10D_OP(FUNC)         \
+  REGISTER_C10D_OP1(FUNC, CPU)         \
+  REGISTER_C10D_OP1(FUNC, CUDA)        \
+  REGISTER_C10D_OP1(FUNC, PrivateUse1) \
+  REGISTER_C10D_OP1(FUNC, XPU)
 
-// Now we start to register ops with the three device keys
+// Now we start to register ops with the four device keys
 
 REGISTER_C10D_OP(send)
 REGISTER_C10D_OP(recv_)
