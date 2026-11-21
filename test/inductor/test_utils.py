@@ -69,6 +69,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -76,7 +77,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.utils import _triton as triton_utils
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Identity
@@ -112,6 +112,8 @@ class _TestDeviceInfoTestCase(TestCase):
 
 
 class TestDeviceDramBandwidth(_TestDeviceInfoTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
 
@@ -252,6 +254,8 @@ class TestDeviceDramBandwidth(_TestDeviceInfoTestCase):
 
 @instantiate_parametrized_tests
 class TestFlopsFx(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("hint", [1, 2])
     @fx_config.patch(backed_size_oblivious=True)
     def test_flops_fx_does_not_specialize_dynamic_shapes(self, hint):
@@ -288,6 +292,8 @@ class TestFlopsFx(TestCase):
 
 @instantiate_parametrized_tests
 class TestCUDAGraphUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_initial_mempool_allocation_uses_backend_device(self):
         from torch._inductor import cudagraph_trees, graph_tree_backend as backend
 
@@ -416,25 +422,7 @@ class TestCUDAGraphUtils(TestCase):
 
 
 class TestUtils(TestCase):
-    @unittest.skipIf(torch.version.hip is not None, "SM threshold is not used on ROCm")
-    def test_is_big_gpu_min_sms_config(self):
-        # https://github.com/pytorch/pytorch/issues/201471
-        jetson_like = types.SimpleNamespace(multi_processor_count=20, major=8, minor=7)
-        # The result is cached per (device, threshold); make sure the mocked
-        # GPU neither reads a cached real result nor leaks into later tests.
-        inductor_utils._is_big_gpu.cache_clear()
-        self.addCleanup(inductor_utils._is_big_gpu.cache_clear)
-        with mock.patch.object(
-            inductor_utils.DeviceProperties, "create", return_value=jetson_like
-        ):
-            device = torch.device("cuda", 0)
-            # Default threshold (68) excludes a 20-SM GPU.
-            with inductor_config.patch(max_autotune_gemm_min_sms=None):
-                self.assertFalse(inductor_utils.is_big_gpu(device))
-            with inductor_config.patch(max_autotune_gemm_min_sms=16):
-                self.assertTrue(inductor_utils.is_big_gpu(device))
-            with inductor_config.patch(max_autotune_gemm_min_sms=21):
-                self.assertFalse(inductor_utils.is_big_gpu(device))
+    hw_classification = HardwareClassification.GENERIC
 
     def test_python_subprocess_env_prioritizes_loaded_torch(self):
         torch_package_root = os.path.dirname(
@@ -723,18 +711,63 @@ class TestUtils(TestCase):
             )
             self.assertEqual(flops, expected)
 
+
+class TestCudaUtils(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(torch.version.hip is not None, "SM threshold is not used on ROCm")
+    def test_is_big_gpu_min_sms_config(self):
+        # https://github.com/pytorch/pytorch/issues/201471
+        jetson_like = types.SimpleNamespace(multi_processor_count=20, major=8, minor=7)
+        # The result is cached per (device, threshold); make sure the mocked
+        # GPU neither reads a cached real result nor leaks into later tests.
+        inductor_utils._is_big_gpu.cache_clear()
+        self.addCleanup(inductor_utils._is_big_gpu.cache_clear)
+        with mock.patch.object(
+            inductor_utils.DeviceProperties, "create", return_value=jetson_like
+        ):
+            device = torch.device("cuda", 0)
+            # Default threshold (68) excludes a 20-SM GPU.
+            with inductor_config.patch(max_autotune_gemm_min_sms=None):
+                self.assertFalse(inductor_utils.is_big_gpu(device))
+            with inductor_config.patch(max_autotune_gemm_min_sms=16):
+                self.assertTrue(inductor_utils.is_big_gpu(device))
+            with inductor_config.patch(max_autotune_gemm_min_sms=21):
+                self.assertFalse(inductor_utils.is_big_gpu(device))
+
+    def setUp(self):
+        super().setUp()
+        _get_device_tflops.cache_clear()
+        self.addCleanup(_get_device_tflops.cache_clear)
+
+    def test_get_device_tflops_unavailable_cuda_returns_zero(self):
+        with (
+            mock.patch("torch._inductor.utils._get_device_info_key", return_value=None),
+            mock.patch("torch.cuda.is_available", return_value=False),
+            mock.patch("torch.cuda.get_device_capability") as get_capability,
+        ):
+            self.assertEqual(
+                get_device_tflops(torch.float32, device=torch.device("cuda")),
+                0.0,
+            )
+
+        get_capability.assert_not_called()
+
+
+class TestDeviceTflops(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @xfailIfNoAcceleratorTriton
-    @unittest.skipIf(
-        not torch.cuda.is_available() and not torch.xpu.is_available(),
-        "skip if no device",
-    )
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
-    def test_get_device_tflops(self, dtype):
-        ret = get_device_tflops(dtype)
+    def test_get_device_tflops(self, device, dtype):
+        ret = get_device_tflops(dtype, device=device)
         self.assertTrue(type(ret) is float)
 
 
+@unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
 class TestDeviceTflopsTritonFallback(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         _get_device_tflops.cache_clear()
@@ -744,7 +777,6 @@ class TestDeviceTflopsTritonFallback(TestCase):
         not triton_utils.has_triton_package(),
         "requires Triton",
     )
-    @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
     def test_get_device_tflops_triton_fallback_magnitude(self):
         # The Triton fallback feeds max_clock_rate() (MHz) into triton's tflops
         # helpers, which are dimensioned in kHz. Getting that wrong under-reports
@@ -756,11 +788,74 @@ class TestDeviceTflopsTritonFallback(TestCase):
             ret = get_device_tflops(torch.float16)
         self.assertGreater(ret, 10.0)
 
+    @unittest.skipIf(
+        not triton_utils.has_triton_package(),
+        "requires Triton",
+    )
+    def test_get_device_tflops_cuda_fallback_uses_device_index(self):
+        device = torch.device("cuda:1")
+        with (
+            mock.patch(
+                "torch._inductor.utils._get_device_info_key",
+                return_value=None,
+            ),
+            mock.patch("torch.cuda.get_device_capability", return_value=(8, 0)),
+            mock.patch(
+                "torch._inductor.utils.inspect.signature",
+                return_value=types.SimpleNamespace(parameters={"clock_rate": object()}),
+            ),
+            mock.patch(
+                "torch._utils_internal.max_clock_rate", return_value=123.0
+            ) as max_clock_rate,
+            mock.patch(
+                "triton.testing.get_max_tensorcore_tflops", return_value=456.0
+            ) as get_max_tensorcore_tflops,
+        ):
+            self.assertEqual(
+                get_device_tflops(torch.float16, device=device),
+                456.0,
+            )
 
-instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
+        max_clock_rate.assert_called_once_with(1)
+        get_max_tensorcore_tflops.assert_called_once_with(torch.float16, 123000.0, 1)
+
+    @unittest.skipIf(
+        not triton_utils.has_triton_package(),
+        "requires Triton",
+    )
+    def test_get_device_tflops_cuda_fallback_uses_current_device(self):
+        device = torch.device("cuda")
+        with (
+            mock.patch(
+                "torch._inductor.utils._get_device_info_key",
+                return_value=None,
+            ),
+            mock.patch("torch.cuda.get_device_capability", return_value=(8, 0)),
+            mock.patch("torch.cuda.current_device", return_value=1) as current_device,
+            mock.patch(
+                "torch._inductor.utils.inspect.signature",
+                return_value=types.SimpleNamespace(parameters={"clock_rate": object()}),
+            ),
+            mock.patch(
+                "torch._utils_internal.max_clock_rate", return_value=123.0
+            ) as max_clock_rate,
+            mock.patch(
+                "triton.testing.get_max_tensorcore_tflops", return_value=456.0
+            ) as get_max_tensorcore_tflops,
+        ):
+            self.assertEqual(
+                get_device_tflops(torch.float16, device=device),
+                456.0,
+            )
+
+        current_device.assert_called_once_with()
+        max_clock_rate.assert_called_once_with(1)
+        get_max_tensorcore_tflops.assert_called_once_with(torch.float16, 123000.0, 1)
 
 
 class TestLoadTemplate(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_load_template_uses_utf8(self):
         # load_template must decode templates as UTF-8 regardless of the ambient
         # locale. On a host whose default encoding is ascii, reading a template
@@ -793,6 +888,8 @@ class TestLoadTemplate(TestCase):
 
 
 class TestRuntimeEstimation(_TestDeviceInfoTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _get_device_tflops.cache_clear()
@@ -846,72 +943,6 @@ class TestRuntimeEstimation(_TestDeviceInfoTestCase):
             get_device_tflops(torch.bfloat16, device=self.device),
             321.0,
         )
-
-    @unittest.skipIf(
-        not triton_utils.has_triton_package(),
-        "requires Triton",
-    )
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_get_device_tflops_cuda_fallback_uses_device_index(self):
-        device = torch.device("cuda:1")
-        with (
-            mock.patch(
-                "torch._inductor.utils._get_device_info_key",
-                return_value=None,
-            ),
-            mock.patch("torch.cuda.get_device_capability", return_value=(8, 0)),
-            mock.patch(
-                "torch._inductor.utils.inspect.signature",
-                return_value=types.SimpleNamespace(parameters={"clock_rate": object()}),
-            ),
-            mock.patch(
-                "torch._utils_internal.max_clock_rate", return_value=123.0
-            ) as max_clock_rate,
-            mock.patch(
-                "triton.testing.get_max_tensorcore_tflops", return_value=456.0
-            ) as get_max_tensorcore_tflops,
-        ):
-            self.assertEqual(
-                get_device_tflops(torch.float16, device=device),
-                456.0,
-            )
-
-        max_clock_rate.assert_called_once_with(1)
-        get_max_tensorcore_tflops.assert_called_once_with(torch.float16, 123000.0, 1)
-
-    @unittest.skipIf(
-        not triton_utils.has_triton_package(),
-        "requires Triton",
-    )
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_get_device_tflops_cuda_fallback_uses_current_device(self):
-        device = torch.device("cuda")
-        with (
-            mock.patch(
-                "torch._inductor.utils._get_device_info_key",
-                return_value=None,
-            ),
-            mock.patch("torch.cuda.get_device_capability", return_value=(8, 0)),
-            mock.patch("torch.cuda.current_device", return_value=1) as current_device,
-            mock.patch(
-                "torch._inductor.utils.inspect.signature",
-                return_value=types.SimpleNamespace(parameters={"clock_rate": object()}),
-            ),
-            mock.patch(
-                "torch._utils_internal.max_clock_rate", return_value=123.0
-            ) as max_clock_rate,
-            mock.patch(
-                "triton.testing.get_max_tensorcore_tflops", return_value=456.0
-            ) as get_max_tensorcore_tflops,
-        ):
-            self.assertEqual(
-                get_device_tflops(torch.float16, device=device),
-                456.0,
-            )
-
-        current_device.assert_called_once_with()
-        max_clock_rate.assert_called_once_with(1)
-        get_max_tensorcore_tflops.assert_called_once_with(torch.float16, 123000.0, 1)
 
     def test_get_device_tflops_unindexed_device_tracks_current_device(self):
         device_interface = mock.Mock()
@@ -980,19 +1011,6 @@ class TestRuntimeEstimation(_TestDeviceInfoTestCase):
             )
 
         datasheet_tops.assert_not_called()
-
-    def test_get_device_tflops_unavailable_cuda_returns_zero(self):
-        with (
-            mock.patch("torch._inductor.utils._get_device_info_key", return_value=None),
-            mock.patch("torch.cuda.is_available", return_value=False),
-            mock.patch("torch.cuda.get_device_capability") as get_capability,
-        ):
-            self.assertEqual(
-                get_device_tflops(torch.float32, device=torch.device("cuda")),
-                0.0,
-            )
-
-        get_capability.assert_not_called()
 
     def test_flops_to_ns_gpu_type_takes_precedence_over_device(self):
         from torch.utils._runtime_estimation import flops_to_ns
@@ -1093,8 +1111,8 @@ class TestRuntimeEstimation(_TestDeviceInfoTestCase):
         get_tflops.assert_called_once_with(torch.float32, device=device)
 
 
-class TestFP4Support(TestCase):
-    """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
+class TestFP4ImportError(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_ensure_nv_universal_gemm_import_error(self):
         from torch._inductor import utils
@@ -1108,6 +1126,12 @@ class TestFP4Support(TestCase):
             ),
         ):
             self.assertFalse(utils.ensure_nv_universal_gemm_available())
+
+
+class TestFP4Support(TestCase):
+    """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
+
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(
         not (torch.cuda.is_available() and ensure_nv_universal_gemm_available()),
@@ -1131,6 +1155,22 @@ class TestFP4Support(TestCase):
         )
         self.assertEqual(result_fp32, cutlass.Float32)
 
+
+class TestRandStridedFP4(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_rand_strided_fp4(self, device):
+        from torch._dynamo.testing import rand_strided
+
+        t = rand_strided((16, 32), (32, 1), dtype=torch.float4_e2m1fn_x2, device=device)
+        self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
+        self.assertEqual(t.shape, (16, 32))
+        self.assertEqual(t.device, torch.device(device))
+
+
+class TestFP4SupportCPU(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_rand_strided_fp4(self):
         """rand_strided should produce valid FP4 tensors."""
         from torch._dynamo.testing import rand_strided
@@ -1140,22 +1180,11 @@ class TestFP4Support(TestCase):
         self.assertEqual(t.shape, (4, 8))
         self.assertEqual(t.stride(), (8, 1))
 
-    @unittest.skipIf(
-        not torch.cuda.is_available() and not torch.xpu.is_available(), "requires GPU"
-    )
-    def test_rand_strided_fp4_gpu(self):
-        from torch._dynamo.testing import rand_strided
-
-        t = rand_strided(
-            (16, 32), (32, 1), dtype=torch.float4_e2m1fn_x2, device=GPU_TYPE
-        )
-        self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
-        self.assertEqual(t.shape, (16, 32))
-        self.assertEqual(t.device.type, GPU_TYPE)
-
 
 class TestTritonTypeMapping(TestCase):
     """Tests for acc_type() dtype conversions."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_acc_type(self):
         from torch._inductor.kernel.mm_common import acc_type
@@ -1176,6 +1205,8 @@ class TestTritonTypeMapping(TestCase):
 
 @instantiate_parametrized_tests
 class TestFakeTensorUpdater(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def _get_faketensormode(
         graph: torch.fx.GraphModule,
@@ -2876,6 +2907,8 @@ def _make_triton_interface(*, available=True, capable=True, raise_exc=None):
 
 
 class TestHasTriton(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self):
         triton_utils.has_triton.cache_clear()
         super().tearDown()
@@ -3334,6 +3367,8 @@ class _GpuOnlyClassified(DeviceInterface):
 
 
 class TestDeviceClassification(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._registered = []
@@ -3519,6 +3554,8 @@ class TestScaleSwizzleInference(TestCase):
     `to_blocked` hands back the 32x8 buffer flattened.
     """
 
+    hw_classification = HardwareClassification.CUDA
+
     def _infer(
         self,
         mat_size,
@@ -3613,6 +3650,14 @@ class TestScaleSwizzleInference(TestCase):
         self.assertEqual(
             self._infer(mat_size, (1024,), mat_dtype, prefers_32_8=False), (None, None)
         )
+
+
+instantiate_device_type_tests(
+    TestDeviceTflops, globals(), except_for=("cpu",), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestRandStridedFP4, globals(), except_for=("cpu",), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
