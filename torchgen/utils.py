@@ -299,7 +299,7 @@ class FileManager:
             self.write_with_template(
                 file.with_stem(f"{file.stem}{shard_id}"),
                 template_fn,
-                lambda: shard,
+                lambda shard=shard: shard,
             )
 
         # filenames is used to track compiled files, but FooEverything.cpp isn't meant to be compiled
