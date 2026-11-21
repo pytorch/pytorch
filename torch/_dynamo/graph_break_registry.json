@@ -3054,6 +3054,16 @@
       ]
     }
   ],
+  "GB6023": [
+    {
+      "Gb_type": "Sourceless OSError subclass constructed with arguments",
+      "Context": "class={self.value}, args={args}",
+      "Explanation": "OSError parses its arguments in __new__, which Dynamo does not model.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0164": [
     {
       "Gb_type": "Unsupported tensor subclass overridden attribute access",
