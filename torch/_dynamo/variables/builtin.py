@@ -380,7 +380,7 @@ def _polyfills_dir() -> str:
     return os.path.dirname(polyfills.__file__)
 
 
-def _reads_context_var(source: Source) -> bool:
+def _reads_context_var(source: Source | None) -> bool:
     # A ContextVar value depends on the context the code runs in, so it can
     # differ between tracing and guard evaluation.
     while source is not None:

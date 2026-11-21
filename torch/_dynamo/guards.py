@@ -5997,7 +5997,7 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
             value = MISSING
             has_value = False
     # Relation guards (DUPLICATE_INPUT, NOT_ALIASING) also read source_b.
-    sources = [guard.originating_source]
+    sources: list[Source | None] = [guard.originating_source]
     if isinstance(guard.create_fn, functools.partial):
         sources.append(guard.create_fn.keywords.get("source_b"))
     is_global = any(get_global_source_name(s) is not None for s in sources)
