@@ -1304,6 +1304,7 @@ class MultiheadAttention(Module):
                 effect when ``need_weights=True``. Default: ``True`` (i.e. average weights across heads)
             is_causal: If specified, applies a causal mask as attention mask.
                 Default: ``False``.
+                An explicit ``attn_mask`` is required when ``is_causal=True``.
                 Warning:
                 ``is_causal`` provides a hint that ``attn_mask`` is the
                 causal mask. Providing incorrect hints can result in
@@ -1426,6 +1427,12 @@ class MultiheadAttention(Module):
                 why_not_fast_path = "we are running make_fx tracing"
                 fast_path_blocked_by_tracing = True
             if not why_not_fast_path:
+                if is_causal and attn_mask is None:
+                    raise RuntimeError(
+                        "Need attn_mask if specifying the is_causal hint. "
+                        "You may use the Transformer module method "
+                        "`generate_square_subsequent_mask` to create this mask."
+                    )
                 merged_mask, mask_type = self.merge_masks(
                     attn_mask, key_padding_mask, query
                 )
