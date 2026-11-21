@@ -2775,8 +2775,8 @@ _CUSTOM_OBJ = {"as_custom_obj": {"name": "obj0", "class_fqn": "a.b"}}
 
 def _set_in_spec(args_and_kwargs):
     def change(node):
-        node["inputs"][1]["arg"]["as_string"] = pytree.treespec_dumps(
-            pytree.tree_flatten(args_and_kwargs)[1]
+        node["inputs"][0]["arg"]["as_flat_apply_spec"]["in_spec"] = (
+            pytree.treespec_dumps(pytree.tree_flatten(args_and_kwargs)[1])
         )
 
     return change
@@ -2789,8 +2789,8 @@ def _set_escaped_enum_in_spec(node):
         RED = 0
 
     _set_in_spec((("name", {Color.RED: 0}), {}))(node)
-    spec = node["inputs"][1]["arg"]
-    spec["as_string"] = spec["as_string"].replace("__enum__", "\\\\u005f_enum__")
+    spec = node["inputs"][0]["arg"]["as_flat_apply_spec"]
+    spec["in_spec"] = spec["in_spec"].replace("__enum__", "\\\\u005f_enum__")
 
 
 def _set_last_input(**fields):
@@ -2803,7 +2803,7 @@ def _set_last_input(**fields):
 def _call_helper_directly(node):
     # The helper imports the module of its first input when the program runs,
     # also when a node calls it directly instead of through flat_apply.
-    node.update(target=_FLAT_APPLY_HELPER, inputs=node["inputs"][2:])
+    node.update(target=_FLAT_APPLY_HELPER, inputs=node["inputs"][1:])
     node["inputs"][0]["arg"]["as_string"] = "torch.utils.checkpoint.CheckpointFunction"
 
 
@@ -3570,12 +3570,8 @@ class TestPredispatchSerialization(TestCase):
             lambda node: node["inputs"].pop(0),
             "does not start with its function",
         ),
-        "only_function": (
-            lambda node: node.update(inputs=node["inputs"][:1]),
-            "does not start with its function",
-        ),
         "function_not_a_string": (
-            lambda node: node["inputs"][0]["arg"].update(as_operator=5),
+            lambda node: node["inputs"][0]["arg"]["as_flat_apply_spec"].update(func=5),
             "does not start with its function",
         ),
         "leaf_count": (
@@ -3608,7 +3604,7 @@ class TestPredispatchSerialization(TestCase):
         "custom_obj": (_set_last_input(arg=_CUSTOM_OBJ), "enum values and other"),
         # The helper gets its autograd class by name, as its first flat input.
         "class_name_not_str": (
-            lambda node: node["inputs"][2].update(arg={"as_int": 5}),
+            lambda node: node["inputs"][1].update(arg={"as_int": 5}),
             "5 is not a torch.autograd.Function",
         ),
         "keyword": (

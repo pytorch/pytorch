@@ -63,6 +63,7 @@ from .schema import (  # type: ignore[attr-defined]
     CustomObjArgument,
     Device,
     ExportedProgram,
+    FlatApplySpec,
     GradientToParameterSpec,
     GradientToUserInputSpec,
     Graph,
@@ -1529,10 +1530,10 @@ class GraphModuleSerializer(metaclass=Final):
     def serialize_flat_apply_inputs(self, node: torch.fx.Node) -> list[NamedArgument]:
         """
         Export passes flat_apply its function and its input spec as TreeSpec
-        graph attributes, which the schema cannot hold. They are saved as the
-        first two inputs instead: the function as ``as_operator`` with its
-        qualified name, and the input spec as ``as_string`` with the
-        ``treespec_dumps`` encoding. The remaining inputs are saved as usual.
+        graph attributes, which the schema cannot hold. They are saved together
+        as the first input instead, an ``as_flat_apply_spec`` with the
+        qualified name of the function and the ``treespec_dumps`` encoding of
+        the input spec. The remaining inputs are saved as usual.
         ``deserialize_flat_apply_inputs`` reverses this.
         """
         func, in_spec, *flat_args = node.args
@@ -1597,12 +1598,11 @@ class GraphModuleSerializer(metaclass=Final):
         return [
             NamedArgument(
                 name="",
-                arg=Argument.create(as_operator=func_name),
-                kind=ArgumentKind.POSITIONAL,
-            ),
-            NamedArgument(
-                name="",
-                arg=Argument.create(as_string=in_spec_str),
+                arg=Argument.create(
+                    as_flat_apply_spec=FlatApplySpec(
+                        func=func_name, in_spec=in_spec_str
+                    )
+                ),
                 kind=ArgumentKind.POSITIONAL,
             ),
             *flat_inputs,
@@ -3492,23 +3492,20 @@ class GraphModuleDeserializer(metaclass=Final):
         the input spec, and add both back to the graph as TreeSpec attributes.
         """
         inputs = serialized_node.inputs
-        if (
-            len(inputs) < 2
-            or inputs[0].arg.type != "as_operator"
-            or not isinstance(inputs[0].arg.as_operator, str)
+        flat_apply_spec = inputs[0].arg.value if inputs else None
+        if not (
+            isinstance(flat_apply_spec, FlatApplySpec)
+            and isinstance(flat_apply_spec.func, str)
         ):
             raise SerializeError(
                 f"flat_apply node {serialized_node.name} does not start with its "
                 "function and input spec"
             )
-        func_input, in_spec_input, *flat_inputs = inputs
-        func_name = func_input.arg.as_operator
+        func_name, flat_inputs = flat_apply_spec.func, inputs[1:]
         try:
             # Loading an enum or a defaultdict factory would import a module
             # that the file names.
-            in_spec = pytree._treespec_loads_without_imports(
-                in_spec_input.arg.as_string
-            )
+            in_spec = pytree._treespec_loads_without_imports(flat_apply_spec.in_spec)
         except Exception as e:
             raise SerializeError(
                 f"Cannot load the input spec of flat_apply node {serialized_node.name}: {e}"
@@ -4277,6 +4274,8 @@ def _canonicalize_graph(
         elif a.type == "as_strings":
             return None
         elif a.type == "as_complex":
+            return None
+        elif a.type == "as_flat_apply_spec":
             return None
         elif a.type == "as_sym_int":
             return a.as_sym_int
