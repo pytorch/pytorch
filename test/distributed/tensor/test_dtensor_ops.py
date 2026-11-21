@@ -416,13 +416,7 @@ OP_DB_WORLD_SIZE = 4
 DEVICE_TYPE = "cpu"
 
 
-class TestDTensorOps(TestCase):
-    __test__ = False
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        cls.__test__ = True
-
+class DTensorOpsMixin:
     @property
     def world_size(self) -> int:
         return OP_DB_WORLD_SIZE
@@ -690,7 +684,7 @@ class TestDTensorOps(TestCase):
             _ = torch.ops.aten.embedding.default(weight_dtensor, input_dtensor)
 
 
-class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
+class TestMultiThreadedDTensorOps(DTensorOpTestBase, DTensorOpsMixin):
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestMultiThreadedDTensorOps")
     _op_db_sample_lock = threading.Lock()
 
@@ -709,7 +703,7 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
         self.run_one_hot()
 
 
-class TestLocalDTensorOps(TestDTensorOps):
+class TestLocalDTensorOps(DTensorOpsMixin, TestCase):
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestLocalDTensorOps")
 
     def setUp(self) -> None:
@@ -871,7 +865,7 @@ ops_unbacked_dtensor_dde = {
 }
 
 
-class TestUnbackedDTensorOps(TestDTensorOps):
+class TestUnbackedDTensorOps(DTensorOpsMixin, TestCase):
     """
     Test suite for DTensor ops with unbacked symints.
 
@@ -1127,7 +1121,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
                 )
 
 
-class TestCompiledDTensorOps(TestDTensorOps):
+class TestCompiledDTensorOps(DTensorOpsMixin, TestCase):
     """
     Test DTensor ops compile successfully with aot_eager backend.
     Uses fake PG for speed - focuses on compilation, not output correctness.

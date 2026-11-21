@@ -137,6 +137,7 @@ class ShapeProp(torch.fx.Interpreter):
         super().__init__(gm)
         if fake_mode is None:
             fake_mode = detect_fake_mode()
+        self.fake_mode = fake_mode
         if fake_mode is not None:
             from torch._dynamo.utils import deepcopy_to_fake_tensor
 
@@ -150,10 +151,8 @@ class ShapeProp(torch.fx.Interpreter):
             #
             # See torch/_inductor/overrides.py for where this is called upstream of fusion.
             self.fake_module = deepcopy_to_fake_tensor(self.module, fake_mode)
-            self.fake_mode = fake_mode
         else:
             self.fake_module = None
-            self.fake_mode = None
 
         self.real_module = self.module
 

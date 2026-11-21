@@ -2,7 +2,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mps/kernels/Matmul.h>
-#include <c10/util/TypeCast.h>
+#include <c10/util/safe_conv.h>
 #include <algorithm>
 #include <limits>
 
@@ -11,15 +11,20 @@ namespace at::native::mps {
 // out = a * b for float32, float16 and bfloat16. out must not overlap a or b.
 void metal_mm_out(const Tensor& a, const Tensor& b, const Tensor& out);
 
+// Raises NotImplementedError for dtypes that have no matmul kernel on MPS
+// (bool and the barebones unsigned types), instead of failing the kernel
+// lookup.
+void check_matmul_dtype(ScalarType dtype, std::string_view op_name);
+
 template <typename idx_t>
 MatmulParams<idx_t> matmul_params(
     const Tensor& a,
     const Tensor& b,
     const Tensor& out) {
   return {
-      .m = c10::checked_convert<uint32_t>(a.size(-2), "a.size(-2)"),
-      .n = c10::checked_convert<uint32_t>(b.size(-1), "b.size(-1)"),
-      .k = c10::checked_convert<uint32_t>(
+      .m = c10::safe_conv<uint32_t>(a.size(-2), "left matrix row count"),
+      .n = c10::safe_conv<uint32_t>(b.size(-1), "right matrix column count"),
+      .k = c10::safe_conv<uint32_t>(
           std::min(a.size(-1), b.size(-2)), "contraction dimension"),
       .a_stride_m = static_cast<idx_t>(a.stride(-2)),
       .a_stride_k = static_cast<idx_t>(a.stride(-1)),

@@ -1563,7 +1563,7 @@ static void check_indexarray_range(
   for (const auto i : c10::irange(n)) {
     oob |= !(0 <= indices[i] && indices[i] < indexing_axis_dim);
   }
-  if (C10_UNLIKELY(oob != 0)) {
+  if (oob != 0) [[unlikely]] {
     report_index_out_of_bounds(indices, n, indexing_axis_dim);
   }
 }
@@ -3011,7 +3011,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
                     // Advance current index
                     int64_t k = ndim - 1;
                     ++local_idx[k];
-                    while (C10_UNLIKELY(local_idx[k] == local_sizes[k])) {
+                    while (local_idx[k] == local_sizes[k]) [[unlikely]] {
                       local_idx[k] = 0;
                       --k;
                       ++local_idx[k];

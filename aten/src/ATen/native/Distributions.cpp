@@ -572,12 +572,6 @@ Tensor& multinomial_out(const Tensor& self,
   int64_t n_categories = self.size(-1);
   TORCH_CHECK(with_replacement || (n_sample <= n_categories),
       "cannot sample n_sample > prob_dist.size(-1) samples without replacement");
-  // Since the index tensor is float, numCategories cannot exceed max
-  // float integer precision
-  TORCH_CHECK(
-      n_categories <= FLOAT32_MAX_CONSECUTIVE_INT,
-      "number of categories cannot exceed 2^24");
-
   if (self.dim() == 1) {
     result.resize_({n_sample});
   } else {
@@ -611,7 +605,12 @@ Tensor& multinomial_out(const Tensor& self,
     // s = argmax( p / (-log(eps)) ) where eps ~ U(0, 1).
     // We can also simplify the formula above by
     // s = argmax( p / q ) where q ~ Exp(1)
-    Tensor q = at::empty_like(self).exponential_(1, std::move(gen));
+    // q is float for half and bfloat16: in half, p / q overflows to inf whenever
+    // q < p / 65504, and bfloat16 rounding ties near-equal p / q; argmax breaks
+    // both kinds of tie toward low indices.
+    const auto self_type = self.scalar_type();
+    const auto q_type = self_type == kHalf || self_type == kBFloat16 ? kFloat : self_type;
+    Tensor q = at::empty_like(self, self.options().dtype(q_type)).exponential_(1, std::move(gen));
     // In theory the probability to generate 0 from exponential distribution is
     // 0. However, on CUDA side there is a protection to avoid 0s, but on CPU
     // side, there is a very low probability to generate 0 from
@@ -621,12 +620,18 @@ Tensor& multinomial_out(const Tensor& self,
     if (n_sample == 1) {
       at::argmax_out(result, q, /*dim=*/-1, /*keepdim=*/true);
     } else {
-      Tensor vals = at::empty(result.sizes(), self.options());
+      Tensor vals = at::empty(result.sizes(), q.options());
       at::topk_out(vals, result, q, n_sample);
     }
     return result;
   }
 
+  // The CPU and CUDA kernels search a double CDF past 2^24 categories; other
+  // backends (e.g. MPS) may search a float CDF, which cannot resolve that many.
+  TORCH_CHECK(
+      self.is_cpu() || self.is_cuda() || n_categories <= FLOAT32_MAX_CONSECUTIVE_INT,
+      "number of categories cannot exceed 2^24 when sampling with replacement on ",
+      self.device().type());
   multinomial_with_replacement_stub(
       result.device().type(), result, self, n_sample, gen);
   return result;
