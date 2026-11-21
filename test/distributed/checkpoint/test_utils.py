@@ -23,7 +23,9 @@ from torch.distributed.checkpoint.utils import (
     find_state_dict_object,
 )
 from torch.distributed.distributed_c10d import _object_to_tensor, _tensor_to_object
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -73,6 +75,8 @@ def create_sharded_tensor(rank, world_size, shards_per_rank):
 
 
 class TestMedatadaIndex(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_init_convert_offset(self):
         a = MetadataIndex("foo", [1, 2])
         b = MetadataIndex("foo", torch.Size([1, 2]))
@@ -143,6 +147,8 @@ class TestMedatadaIndex(TestCase):
 
 
 class TestWrapException(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_wrap_exception_serializable_via_object_to_tensor(self):
         """Verify _wrap_exception produces a result that _object_to_tensor can serialize.
 
@@ -181,6 +187,8 @@ class TestWrapException(TestCase):
 
 
 class TestReaderView(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         buffer = io.BytesIO(bytearray(range(ord("A"), ord("Z") + 1)))
@@ -238,6 +246,7 @@ class TestReaderView(TestCase):
 
 
 class TestDistWrapper(DTensorContinuousTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = min(4, torch.accelerator.device_count())
 
     @with_comms
@@ -343,6 +352,13 @@ class TestDistWrapper(DTensorContinuousTestBase):
         # No exception should be raised.
         dist_wrapper.barrier()
 
+
+instantiate_device_type_tests(
+    TestDistWrapper,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
