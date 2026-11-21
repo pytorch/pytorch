@@ -37,14 +37,16 @@ from torch._inductor.utils import IndentedBuffer
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     skipIfXpu,
     TEST_WITH_ROCM,
     TEST_XPU,
     xfailIfNoAcceleratorTriton,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON
 
 
 TEST_GPU = TEST_CUDA or TEST_XPU
@@ -2384,31 +2386,39 @@ class TestStreamOrderingStress(InductorTestCase):
         self._check_compiled_matches_eager(fn, x, w)
 
 
-@unittest.skipUnless(TEST_CUDA, "requires CUDA")
-@xfailIfNoAcceleratorTriton
 class TestGenericStreamCompile(InductorTestCase):
     """Tests for torch.compile with device-agnostic torch.Stream API."""
 
-    def test_generic_stream_basic(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        if self.device_type == "cuda" and not HAS_TRITON:
+            import pytest
+
+            pytest.xfail("Triton not available")
+
+    def test_generic_stream_basic(self, device):
         """Test compilation with torch.Stream (device-agnostic API)."""
         from torch._inductor.utils import run_and_get_code
 
         # Create stream outside compiled function
-        stream = torch.Stream("cuda")
+        stream = torch.Stream(device)
 
         def fn(x):
-            stream.wait_stream(torch.cuda.current_stream())
+            current = torch.accelerator.current_stream()
+            stream.wait_stream(current)
             with stream:
                 a = x * 2
                 b = a + 1
 
-            stream.synchronize()
+            current.wait_stream(stream)
             return b
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=device)
 
         expected = fn(x)
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn, fullgraph=True)
         result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
@@ -2416,35 +2426,30 @@ class TestGenericStreamCompile(InductorTestCase):
         # Verify stream context is present
         self.assertGreaterEqual(_count_generated_stream_contexts(code), 1)
 
-    def test_generic_stream_with_event(self):
+    def test_generic_stream_with_event(self, device):
         """Test compilation with torch.Stream and torch.Event."""
         from torch._inductor.utils import run_and_get_code
 
         # Create stream and event outside compiled function
-        stream = torch.Stream("cuda")
-        event = torch.Event("cuda")
-        cuda_stream = torch.cuda.Stream(
-            stream_id=stream.stream_id,
-            device_index=stream.device_index,
-            device_type=stream.device_type,
-        )
+        stream = torch.Stream(device)
+        event = torch.Event(device)
 
         def fn(x):
             # Work on default stream
             a = x * 2
             event.record()
 
-            with torch.cuda.stream(cuda_stream):
+            with stream:
                 event.wait()
                 b = a + 1
 
-            cuda_stream.synchronize()
+            torch.accelerator.current_stream().wait_stream(stream)
             return b
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=device)
 
         expected = fn(x)
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn, fullgraph=True)
         result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
@@ -2452,42 +2457,34 @@ class TestGenericStreamCompile(InductorTestCase):
         # Verify event operations survive compilation as custom ops
         self.assertIn("record_event", code)
 
-    def test_generic_stream_multiple(self):
+    def test_generic_stream_multiple(self, device):
         """Test compilation with multiple torch.Stream instances."""
         from torch._inductor.utils import run_and_get_code
 
         # Create streams and event outside compiled function
-        stream1 = torch.Stream("cuda")
-        stream2 = torch.Stream("cuda")
-        event = torch.Event("cuda")
-        cuda_stream1 = torch.cuda.Stream(
-            stream_id=stream1.stream_id,
-            device_index=stream1.device_index,
-            device_type=stream1.device_type,
-        )
-        cuda_stream2 = torch.cuda.Stream(
-            stream_id=stream2.stream_id,
-            device_index=stream2.device_index,
-            device_type=stream2.device_type,
-        )
+        stream1 = torch.Stream(device)
+        stream2 = torch.Stream(device)
+        event = torch.Event(device)
 
         def fn(x):
-            with torch.cuda.stream(cuda_stream1):
+            current = torch.accelerator.current_stream()
+            stream1.wait_stream(current)
+            with stream1:
                 a = x * 2
                 event.record()
 
-            with torch.cuda.stream(cuda_stream2):
+            with stream2:
                 event.wait()
                 b = a + 1
 
-            cuda_stream1.synchronize()
-            cuda_stream2.synchronize()
+            stream1.wait_stream(stream2)
+            current.wait_stream(stream2)
             return b
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=device)
 
         expected = fn(x)
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn, fullgraph=True)
         result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
@@ -2497,36 +2494,31 @@ class TestGenericStreamCompile(InductorTestCase):
         self.assertIn("record_event", code)
         self.assertIn("wait_event", code)
 
-    def test_generic_event_record_on_stream(self):
+    def test_generic_event_record_on_stream(self, device):
         """Test torch.Event.record() with explicit stream argument."""
         from torch._inductor.utils import run_and_get_code
 
         # Create stream and event outside compiled function
-        stream = torch.Stream("cuda")
-        event = torch.Event("cuda")
-        cuda_stream = torch.cuda.Stream(
-            stream_id=stream.stream_id,
-            device_index=stream.device_index,
-            device_type=stream.device_type,
-        )
+        stream = torch.Stream(device)
+        event = torch.Event(device)
 
         def fn(x):
-            cuda_stream.wait_stream(torch.cuda.current_stream())
-            with torch.cuda.stream(cuda_stream):
+            current = torch.accelerator.current_stream()
+            stream.wait_stream(current)
+            with stream:
                 a = x * 2
-                # Record event with explicit stream (using cuda_stream)
-                event.record(cuda_stream)
+                # Record event with explicit stream
+                event.record(stream)
 
             event.wait()
             b = a + 1
-
-            cuda_stream.synchronize()
+            stream.wait_stream(current)
             return b
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=device)
 
         expected = fn(x)
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn, fullgraph=True)
         result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
@@ -2584,6 +2576,44 @@ class TestStreamIdentity(InductorTestCase):
         self.assertEqual(len(matches), 2)
         self.assertNotEqual(matches[0], matches[1])
         self.assertNotIn("torch.cuda.Stream(device=", code)
+
+    def test_generic_event_records_on_wrapped_cuda_stream(self):
+        from torch._inductor.utils import run_and_get_code
+
+        stream = torch.Stream(device="cuda")
+        cuda_stream = torch.cuda.Stream(
+            stream_id=stream.stream_id,
+            device_index=stream.device_index,
+            device_type=stream.device_type,
+        )
+        self.assertEqual(cuda_stream.cuda_stream, stream.native_handle)
+        event = torch.Event(device="cuda")
+
+        def fn(x):
+            current = torch.cuda.current_stream()
+            cuda_stream.wait_stream(current)
+            with torch.cuda.stream(cuda_stream):
+                y = x + 1
+            event.record(cuda_stream)
+            event.wait()
+            result = y * 2
+            cuda_stream.wait_stream(current)
+            return result
+
+        x = torch.randn(1024, device="cuda")
+        expected = fn(x)
+        result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(result, expected)
+        self.assertRegex(
+            _extract_wrapper_body(code),
+            r"(?m)^( *)with stream1:\n(?:\1    .*\n)*\1    triton_kernel\.run\(",
+        )
+        (
+            FileCheck()
+            .check("torch.ops.streams.record_event")
+            .check("torch.ops.streams.wait_event")
+            .run(code)
+        )
 
 
 @xfailIfNoAcceleratorTriton
@@ -3136,7 +3166,12 @@ instantiate_parametrized_tests(TestWrapperCodegenStreams)
 instantiate_parametrized_tests(TestStreamCodegen)
 instantiate_parametrized_tests(TestUserStreamCompile)
 instantiate_parametrized_tests(TestStreamOrderingStress)
-instantiate_parametrized_tests(TestGenericStreamCompile)
+instantiate_device_type_tests(
+    TestGenericStreamCompile,
+    globals(),
+    only_for=("cuda", "mps"),
+    allow_mps=True,
+)
 instantiate_parametrized_tests(TestStreamIdentity)
 instantiate_parametrized_tests(TestPDLWithMultiStream)
 instantiate_parametrized_tests(TestAOTIUserStreams)
