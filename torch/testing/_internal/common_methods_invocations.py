@@ -1777,7 +1777,10 @@ def sample_inputs_multilabel_margin_loss(op_info, device, dtype, requires_grad, 
 
     inputs = (
         ([], make_target([], low=0, high=1), {}),
+        ([], make_target([], low=0, high=1), {"reduction": "none"}),
         ([S], make_target([S], low=0, high=S), {}),
+        ([S], make_target([S], low=0, high=S), {"reduction": "none"}),
+        ([1, S], make_target([1, S], low=0, high=S), {"reduction": "none"}),
         ([M, S], make_target([M, S], low=0, high=S), {}),
         ([M, S], make_target([M, S], low=0, high=S), {"reduction": "none"}),
         ([M, S], make_target([M, S], low=0, high=S), {"reduction": "mean"}),

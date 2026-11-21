@@ -5966,6 +5966,8 @@ def multilabel_margin_loss_forward(
         z = z.sum()
     else:
         z = z.sum(dim=(0, -1))
+        if len(orig_input_shape) < 2:
+            z = z.squeeze(0)
     # result
     is_target = is_target.to(input.dtype).reshape(orig_target_shape)
     return z, is_target
