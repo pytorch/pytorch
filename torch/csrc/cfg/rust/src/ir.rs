@@ -229,6 +229,15 @@ pub enum Part {
     /// default of a name.
     Default(u32),
     KwDefault(PyObj),
+    /// The class of the object.
+    Type,
+    /// What the class of the object has under a name, as it is there.
+    OfType(PyObj),
+    /// The same, for a name that is read as an attribute of the object and
+    /// comes down to it (`graph::data_descriptor`).
+    Descriptor(PyObj),
+    /// The function that reads a property.
+    Getter,
     /// An item of an exact tuple or list, an entry of an exact dict: what
     /// a call hands on with `*` and `**`.
     Index(u32),
