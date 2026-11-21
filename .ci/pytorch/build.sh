@@ -175,14 +175,6 @@ elif [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
   export USE_MKLDNN=0
 fi
 
-# Use special scripts for Android builds
-
-if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
-  export USE_VULKAN=1
-  # shellcheck disable=SC1091
-  source /var/lib/jenkins/vulkansdk/setup-env.sh
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # hcc used to run out of memory, silently exiting without stopping
   # the build process, leaving undefined symbols in the shared lib,

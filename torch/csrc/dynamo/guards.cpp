@@ -3115,23 +3115,22 @@ class OBJECT_ALIASING : public RelationalGuard {
             std::move(user_stack)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    if (_is_first_call) {
-      _first_tensor = value;
-      _is_first_call = false;
+    if (!_first_value) {
+      // An accessor may return a temporary whose address can be reused.
+      _first_value = py::reinterpret_borrow<py::object>(value);
       return true;
     }
-    return _first_tensor == value;
+    return _first_value.ptr() == value;
   }
 
   void reset_state() final {
-    _is_first_call = true;
+    _first_value = py::object();
   }
 
   std::shared_ptr<RelationalGuard> clone(RootGuardManager* root) override;
 
  private:
-  bool _is_first_call{true};
-  PyObject* _first_tensor{nullptr};
+  py::object _first_value;
 };
 
 /**
