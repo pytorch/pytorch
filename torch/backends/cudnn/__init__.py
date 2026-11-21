@@ -7,7 +7,6 @@ from typing import Optional
 
 import torch
 from torch.backends import (
-    __allow_nonbracketed_mutation,
     _FP32Precision,
     _get_fp32_precision_getter,
     _set_fp32_precision_setter,
@@ -196,22 +195,27 @@ def flags(
     fp32_precision="none",
     depthwise_kernel="auto",
 ):
-    with __allow_nonbracketed_mutation():
-        orig_flags = set_flags(
+    r"""Temporarily override cuDNN settings in the current thread.
+
+    Overrides propagate through PyTorch's worker thread state. Passing ``None``
+    leaves the current override or global default in effect. Exiting the context
+    restores the previous local overrides; module-level assignments still update
+    global defaults and persist after the context exits.
+    """
+    orig_flags = torch._C._get_cudnn_flags()
+    try:
+        torch._C._set_cudnn_flags(
             enabled,
             benchmark,
-            benchmark_limit,
+            benchmark_limit if is_available() else None,
             deterministic,
             allow_tf32,
             fp32_precision,
             depthwise_kernel,
         )
-    try:
         yield
     finally:
-        # recover the previous values
-        with __allow_nonbracketed_mutation():
-            set_flags(*orig_flags)
+        torch._C._restore_cudnn_flags(orig_flags)
 
 
 # The magic here is to allow us to intercept code like this:

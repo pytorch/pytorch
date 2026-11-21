@@ -2,6 +2,7 @@
 
 #include <ATen/BlasBackend.h>
 #include <ATen/CPUGeneratorImpl.h>
+#include <ATen/CuDNNFlags.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/LinalgBackend.h>
 #include <ATen/ROCmFABackend.h>
@@ -51,20 +52,6 @@ enum class CuBLASReductionOption : uint8_t {
 };
 enum class TORCH_API Float32Backend { GENERIC, CUDA, MKLDNN };
 enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL };
-// DEFAULT is an internal-only sentinel meaning "use legacy backend default
-// unless a parent setting overrides it". NONE means "explicitly set to
-// inherit/no-op". Append new values because Dynamo guards serialize this enum.
-enum class TORCH_API Float32Precision {
-  NONE,
-  IEEE,
-  TF32,
-  BF16,
-  DEFAULT,
-  BF16X9
-};
-
-enum class TORCH_API CuDNNDepthwiseKernel { AUTO, CUDNN, NATIVE };
-
 TORCH_API Float32Backend str2backend(const std::string& name);
 TORCH_API Float32Op str2op(const std::string& name);
 TORCH_API Float32Precision str2precision(const std::string& name);
