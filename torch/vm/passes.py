@@ -159,7 +159,7 @@ class Graphs(BuiltinPass):
             what eager's own autograd nodes run when they are called behind
             it. Once two calls came out the same, and what the nodes gave
             was what the autograd engine gives, the graph runs without a
-            tape and its results have one node. A graph that cannot be taken
+            tape and its results go through one node. A graph that cannot be taken
             down (an operation of its backward looks at what a tensor holds,
             say) keeps eager's tape.
             A graph that gives a tensor and also computes something of it
@@ -178,7 +178,7 @@ class Graphs(BuiltinPass):
             without ``backward``.
 
             Where it is not eager's: the ``grad_fn`` of what a graph gives
-            is the node of the graph. A backward that raises (a tensor it
+            is a node of the graph's. A backward that raises (a tensor it
             needs was written to in place) raises eager's error with
             eager's text, but before it has added anything to the ``.grad``
             of an input of the graph, where eager has by then added up the
