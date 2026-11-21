@@ -1211,10 +1211,8 @@ class TestTritonHeuristics(TestCase):
         on `>= (9, 5)` also matches gfx1030, gfx1100 and gfx1250 (MI450) and
         hands them tables measured on gfx950.
         """
-        import dataclasses
-
         from torch._inductor.heuristics.template.triton import ROCmConfigHeuristic
-        from torch._inductor.utils import get_default_kpack, rocm_gfx_arch
+        from torch._inductor.utils import rocm_gfx_arch
 
         heuristic = ROCmConfigHeuristic()
         dtype, head_dim = torch.float16, 128
@@ -1238,6 +1236,11 @@ class TestTritonHeuristics(TestCase):
                 patch(
                     "torch._inductor.heuristics.template.triton.rocm_gfx_arch",
                     lambda: arch,
+                ),
+                # the backward reads the current GPU's target by index
+                patch(
+                    "torch._inductor.heuristics.template.triton._rocm_native_device_arch_name",
+                    lambda device: arch,
                 ),
                 patch(
                     "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
@@ -1273,9 +1276,6 @@ class TestTritonHeuristics(TestCase):
                     tuned = table.get((dtype, head_dim, head_dim))
                     if tuned is None:
                         tuned = table.get((dtype, head_dim))
-                    if tuned is not None and path == "backward":
-                        # backward entries take the query device's kpack
-                        tuned = dataclasses.replace(tuned, kpack=get_default_kpack())
                     if tuned is None:
                         self.assertEqual(configs, fallback, msg=arch)
                     else:
@@ -1288,9 +1288,9 @@ class TestTritonHeuristics(TestCase):
         """gfx1250 has measured backward tiles for some 16-bit width pairs.
 
         The tiles were measured on gfx1250-strict, where the shared defaults
-        spill at these head dims and regressed the TDM backward. The entries are keyed by the (QK, V) width pair, so
-        every other pair, head dim and dtype keeps the shared fallback, since
-        only these cases were measured.
+        spill at these head dims and regressed the TDM backward. The entries are
+        keyed by the (QK, V) width pair, so every other pair, head dim and dtype
+        keeps the shared fallback, since only these cases were measured.
         """
         from torch._inductor.heuristics.template.triton import (
             ROCmConfigHeuristic,
@@ -1303,8 +1303,8 @@ class TestTritonHeuristics(TestCase):
         def configs_for(arch, head_dim, dtype, v_head_dim=None):
             with (
                 patch(
-                    "torch._inductor.heuristics.template.triton.rocm_gfx_arch",
-                    lambda: arch,
+                    "torch._inductor.heuristics.template.triton._rocm_native_device_arch_name",
+                    lambda device: arch,
                 ),
                 patch(
                     "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
@@ -1313,7 +1313,7 @@ class TestTritonHeuristics(TestCase):
             ):
                 return heuristic.get_flex_attn_bwd_configs(head_dim, dtype, v_head_dim)
 
-        # resolved for the device running the query, here the real one
+        # the default of the GPU that built the heuristic, here the only one
         kpack = get_default_kpack()
         tuned = {
             (64, None): ROCmFlexBwDConfig(32, 64, 64, 32, 1, 4, kpack=kpack),
@@ -1349,268 +1349,122 @@ class TestTritonHeuristics(TestCase):
 
     @runOnRocm
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_flex_bwd_tiles_follow_each_device_arch(self):
-        """Tile tables follow the current device's target, cached per device.
+    def test_flex_bwd_tiles_follow_query_device_arch(self):
+        """Backward tiles follow the query's GPU, in either visit order.
 
-        With GPUs of different targets in one process, the first lookup must
-        not decide the tiles for the other device, in either visit order.
+        With GPUs of different targets in one process, the lowering makes the
+        query's GPU current for the lookup, which reads that GPU's target, so
+        neither the calling GPU nor the first lookup decides the tiles. The GPU
+        switch is mocked, so this runs on one GPU.
         """
+        import contextlib
         from types import SimpleNamespace
 
         from torch._inductor.heuristics.template.triton import ROCmConfigHeuristic
-        from torch._inductor.utils import _rocm_gfx_arch_of_index
+        from torch._inductor.kernel.flex.flex_attention import _query_device_context
+        from torch._inductor.utils import _rocm_native_device_arch_name
 
         heuristic = ROCmConfigHeuristic()
         archs = {0: "gfx942:sramecc+:xnack-", 1: "gfx1250"}
+        # gfx942 has no backward table and keeps the shared head_dim 128 tiles
+        expected = {0: (64, 128, 128, 64), 1: (32, 128, 128, 32)}
         current = [0]
-        _rocm_gfx_arch_of_index.cache_clear()
-        self.addCleanup(_rocm_gfx_arch_of_index.cache_clear)
 
-        def configs_on(index):
-            current[0] = index
-            with (
-                patch("torch.cuda.current_device", lambda: current[0]),
-                patch(
-                    "torch.cuda.get_device_properties",
-                    lambda i: SimpleNamespace(gcnArchName=archs[i]),
-                ),
-                patch(
-                    "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
-                    lambda: False,
-                ),
-            ):
-                return heuristic.get_flex_attn_bwd_configs(128, torch.float16, 128)
+        def index_of(device):
+            # an unindexed "cuda" names the current GPU
+            index = torch.device(device).index
+            return current[0] if index is None else index
 
-        gfx1250 = heuristic.gfx1250_default_flex_bwd_config[(torch.float16, 128, 128)]
-        for order in ((0, 1), (1, 0)):
-            _rocm_gfx_arch_of_index.cache_clear()
-            seen = {index: configs_on(index) for index in order}
-            with self.subTest(order=order):
-                self.assertEqual(seen[1], [gfx1250])
-                self.assertNotIn(gfx1250, seen[0])
+        @contextlib.contextmanager
+        def switch_to(device):
+            previous, current[0] = current[0], torch.device(device).index
+            try:
+                yield
+            finally:
+                current[0] = previous
+
+        def tiles_for(query_index):
+            caller = 1 - query_index
+            current[0] = caller
+            with _query_device_context(torch.device("cuda", query_index)):
+                (conf,) = heuristic.get_flex_attn_bwd_configs(128, torch.float16, 128)
+            self.assertEqual(current[0], caller, "the caller's GPU is restored")
+            return (conf.block_m1, conf.block_n1, conf.block_m2, conf.block_n2)
+
+        _rocm_native_device_arch_name.cache_clear()
+        self.addCleanup(_rocm_native_device_arch_name.cache_clear)
+        with (
+            patch("torch.cuda.current_device", lambda: current[0]),
+            patch("torch.cuda.device", switch_to),
+            patch(
+                "torch.cuda.get_device_properties",
+                lambda d: SimpleNamespace(gcnArchName=archs[index_of(d)]),
+            ),
+            patch(
+                "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
+                lambda: False,
+            ),
+        ):
+            for order in ((0, 1), (1, 0)):
+                _rocm_native_device_arch_name.cache_clear()
+                with self.subTest(order=order):
+                    for index in order:
+                        self.assertEqual(tiles_for(index), expected[index])
 
     @runOnRocm
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_flex_bwd_gfx1250_config_independent_of_init_device(self):
-        """gfx1250's complete configs do not depend on the constructing GPU.
+    def test_flex_bwd_config_lookup_runs_on_query_device(self):
+        """The backward lowering looks up its configs with the query's GPU current.
 
-        The heuristic is a singleton built on whichever device is current
-        first. kpack is a Triton compile option whose default differs by
-        target, so configs built from the constructing device's default would
-        split the gfx1250 compile cache, and under max-autotune list the
-        measured tile twice. The per-target defaults are injected (gfx90a 2,
-        gfx1250 1, as upstream's get_default_kpack gives), so the check does
-        not depend on the build's kpack policy.
+        The test above checks the context and the lookup on their own; this one
+        checks that a real backward compilation enters the context, for the
+        query's device, around the lookup. The hooks observe this process, so
+        the backward must be lowered here: caches (remote ones included) are
+        disabled, and subprocess compilation is skipped.
         """
-        from torch._inductor.heuristics.template.triton import (
-            ROCmConfigHeuristic,
-            ROCmFlexBwDConfig,
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.compile_fx import fx_compile_mode, FxCompileMode
+
+        if fx_compile_mode == FxCompileMode.SUBPROCESS:
+            self.skipTest("the hooks cannot observe a subprocess compilation")
+        from torch._inductor.kernel.flex import flex_attention as flex_lowering
+        from torch.nn.attention.flex_attention import flex_attention
+
+        real_context = flex_lowering._query_device_context
+        real_lookup = InductorChoices.get_flex_attention_bwd_configs
+        entered, lookups, inside = [], [], [False]
+
+        @contextlib.contextmanager
+        def recording_context(device):
+            entered.append(device)
+            with real_context(device):
+                inside[0] = True
+                try:
+                    yield
+                finally:
+                    inside[0] = False
+
+        def recording_lookup(choices, *args, **kwargs):
+            lookups.append((inside[0], torch.cuda.current_device()))
+            return real_lookup(choices, *args, **kwargs)
+
+        q, k, v = (
+            torch.randn(1, 2, 128, 64, device=GPU_TYPE, requires_grad=True)
+            for _ in range(3)
         )
-
-        archs = {0: "gfx90a", 1: "gfx1250"}
-        current = [0]
-
-        def arch_of_current(device=None):
-            return archs[current[0] if device is None else device]
-
-        def build_on(index):
-            # A fresh instance, bypassing the singleton cache.
-            current[0] = index
-            heuristic = object.__new__(ROCmConfigHeuristic)
-            heuristic.__init__()
-            return heuristic
-
-        def configs_on(heuristic, index):
-            current[0] = index
-            return heuristic.get_flex_attn_bwd_configs(128, torch.float16, 128)
-
-        kpack_of = {"gfx90a": 2, "gfx1250": 1}
-
+        torch._dynamo.reset()
         with (
-            patch("torch._inductor.utils.rocm_gfx_arch", arch_of_current),
-            patch(
-                "torch._inductor.heuristics.template.triton.rocm_gfx_arch",
-                arch_of_current,
-            ),
-            patch(
-                "torch._inductor.heuristics.template.triton.get_default_kpack",
-                lambda block_k=16: kpack_of[arch_of_current()],
-            ),
-            patch(
-                "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
-                lambda: False,
+            fresh_cache(),
+            config.patch(force_disable_caches=True),
+            patch.object(flex_lowering, "_query_device_context", recording_context),
+            patch.object(
+                InductorChoices, "get_flex_attention_bwd_configs", recording_lookup
             ),
         ):
-            measured = ROCmFlexBwDConfig(32, 128, 128, 32, 1, 4, kpack=1)
-            fallbacks = []
-            for init_index in (0, 1):
-                heuristic = build_on(init_index)
-                with self.subTest(init=archs[init_index]):
-                    self.assertEqual(configs_on(heuristic, 1), [measured])
-                    fallbacks.append(configs_on(heuristic, 0))
-            # gfx90a gets the shared default with its own kpack either way.
-            self.assertEqual(fallbacks[0], fallbacks[1])
-            self.assertNotIn(measured, fallbacks[0])
+            torch.compile(flex_attention)(q, k, v).sum().backward()
 
-            # Max-autotune: the default candidate pool is built at
-            # construction, so compare the complete lists. The measured tile
-            # must appear once, with the gfx1250 kpack, whichever GPU built the
-            # heuristic. (The exhaustive pool enumerates kpack values itself.)
-            from torch._inductor import config as inductor_config
-
-            with inductor_config.patch(
-                max_autotune=True, max_autotune_flex_search_space="DEFAULT"
-            ):
-                lists = [configs_on(build_on(i), 1) for i in (0, 1)]
-            self.assertEqual(lists[0], lists[1])
-            self.assertEqual({c.kpack for c in lists[0]}, {1}, "gfx1250 kpack is 1")
-            self.assertEqual(len(lists[0]), len(set(map(repr, lists[0]))))
-            self.assertEqual(lists[0].count(measured), 1)
-
-    @runOnRocm
-    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
-    def test_flex_bwd_custom_configs_keep_explicit_kpack(self):
-        """Backward configs a subclass supplies keep their explicit kpack.
-
-        Only the stock configs take the query device's default; on one gfx90a
-        (default kpack 2), a subclass's kpack=1 and kpack=2 candidates and its
-        kpack=1 table entry must come back unchanged.
-        """
-        import dataclasses
-
-        from torch._inductor import config as inductor_config
-        from torch._inductor.heuristics.template.triton import (
-            ROCmConfigHeuristic,
-            ROCmFlexBwDConfig,
-        )
-
-        class Custom(ROCmConfigHeuristic):
-            def __init__(self):
-                super().__init__()
-                self.flex_attn_bwd_autotune_configs = [
-                    ROCmFlexBwDConfig(16, 32, 32, 16, 1, 4, kpack=1),
-                    ROCmFlexBwDConfig(16, 32, 32, 16, 1, 4, kpack=2),
-                ]
-                self.flex_bwd_config_by_arch = {
-                    **self.flex_bwd_config_by_arch,
-                    "gfx90a": {
-                        (torch.float16, 128): ROCmFlexBwDConfig(
-                            32, 64, 64, 32, 1, 4, kpack=1
-                        )
-                    },
-                }
-
-        heuristic = object.__new__(Custom)  # bypass the singleton cache
-        with (
-            patch(
-                "torch._inductor.heuristics.template.triton.rocm_gfx_arch",
-                lambda: "gfx90a",
-            ),
-            patch(
-                "torch._inductor.heuristics.template.triton.get_default_kpack",
-                lambda block_k=16: 2,
-            ),
-            patch(
-                "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
-                lambda: False,
-            ),
-        ):
-            heuristic.__init__()
-            table_entry = ROCmFlexBwDConfig(32, 64, 64, 32, 1, 4, kpack=1)
-            self.assertEqual(
-                heuristic.get_flex_attn_bwd_configs(128, torch.float16, 128),
-                [table_entry],
-            )
-            with inductor_config.patch(
-                max_autotune=True, max_autotune_flex_search_space="DEFAULT"
-            ):
-                configs = heuristic.get_flex_attn_bwd_configs(128, torch.float16, 128)
-            self.assertEqual(
-                configs,
-                [*heuristic.flex_attn_bwd_autotune_configs, table_entry],
-            )
-            self.assertEqual([c.kpack for c in configs], [1, 2, 1])
-
-        # An explicit kpack assigned in place to an inherited stock candidate
-        # wins too, as a candidate and as the table default.
-        class EditsStock(ROCmConfigHeuristic):
-            def __init__(self):
-                super().__init__()
-                self.edited = self.flex_attn_bwd_autotune_configs[0]
-                self.edited.kpack = 1
-                self.flex_bwd_config_by_arch = {
-                    **self.flex_bwd_config_by_arch,
-                    "gfx90a": {(torch.float16, 128): self.edited},
-                }
-
-        heuristic = object.__new__(EditsStock)
-        with (
-            patch(
-                "torch._inductor.heuristics.template.triton.rocm_gfx_arch",
-                lambda: "gfx90a",
-            ),
-            patch(
-                "torch._inductor.heuristics.template.triton.get_default_kpack",
-                lambda block_k=16: 2,
-            ),
-            patch(
-                "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
-                lambda: False,
-            ),
-        ):
-            heuristic.__init__()
-            edited = heuristic.edited
-            default = heuristic.get_flex_attn_bwd_configs(128, torch.float16, 128)
-            self.assertEqual([c.kpack for c in default], [1])
-            with inductor_config.patch(
-                max_autotune=True, max_autotune_flex_search_space="DEFAULT"
-            ):
-                configs = heuristic.get_flex_attn_bwd_configs(128, torch.float16, 128)
-            self.assertEqual(configs[0], edited)
-            self.assertEqual(configs[0].kpack, 1)
-            # the untouched stock candidates still follow the device default
-            self.assertEqual({c.kpack for c in configs[1:]}, {2})
-
-        # Copies of a stock candidate made with dataclasses.replace keep the
-        # kpack they request, as candidates and as the table default.
-        class CopiesStock(ROCmConfigHeuristic):
-            def __init__(self):
-                super().__init__()
-                stock = self.flex_attn_bwd_autotune_configs[0]
-                self.flex_attn_bwd_autotune_configs = [
-                    dataclasses.replace(stock, kpack=1),
-                    dataclasses.replace(stock, kpack=2),
-                ]
-                self.flex_bwd_config_by_arch = {
-                    **self.flex_bwd_config_by_arch,
-                    "gfx90a": {
-                        (torch.float16, 128): dataclasses.replace(stock, kpack=1)
-                    },
-                }
-
-        heuristic = object.__new__(CopiesStock)
-        with (
-            patch(
-                "torch._inductor.heuristics.template.triton.rocm_gfx_arch",
-                lambda: "gfx90a",
-            ),
-            patch(
-                "torch._inductor.heuristics.template.triton.get_default_kpack",
-                lambda block_k=16: 2,
-            ),
-            patch(
-                "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
-                lambda: False,
-            ),
-        ):
-            heuristic.__init__()
-            default = heuristic.get_flex_attn_bwd_configs(128, torch.float16, 128)
-            self.assertEqual([c.kpack for c in default], [1])
-            with inductor_config.patch(
-                max_autotune=True, max_autotune_flex_search_space="DEFAULT"
-            ):
-                configs = heuristic.get_flex_attn_bwd_configs(128, torch.float16, 128)
-            self.assertEqual([c.kpack for c in configs], [1, 2])
+        self.assertEqual(entered, [q.device])
+        self.assertEqual(lookups, [(True, q.device.index)])
 
     @unittest.skipIf(not torch.version.hip, "ROCm-specific MFMA config pruning")
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")

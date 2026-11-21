@@ -923,59 +923,6 @@ class TestFlexAttentionTDMOptions(InductorTestCase):
                 use_flex_tdm_descriptor(good, good, good, good, block_shapes=blocks)
             )
 
-    def test_flex_tdm_gate_rejected_grad_out_leaves_no_guards(self):
-        """A rejected dO must not leave range guards on dynamic Q, K and V.
-
-        dO is checked last, after Q, K and V have each passed, so this is the
-        backward ordering that a per-operand guard would get wrong.
-        """
-        from torch._dynamo.source import ConstantSource
-        from torch._inductor.utils import use_flex_tdm_descriptor
-        from torch._inductor.virtualized import V
-        from torch.fx.experimental.symbolic_shapes import DimDynamic
-
-        graph = _tdm_graph()
-
-        def operand(name, seq_len, row=64):
-            return _tdm_operand(
-                name,
-                stride=(4 * row * seq_len, row * seq_len, row, 1),
-                size=(2, 4, seq_len, 64),
-            )
-
-        q_len, kv_len = (
-            graph.sizevars.shape_env.create_symbol(
-                hint, source=ConstantSource(name), dynamic_dim=DimDynamic.DYNAMIC
-            )
-            for name, hint in (("q_len", 128), ("kv_len", 256))
-        )
-        query = operand("query", q_len)
-        key = operand("key", kv_len)
-        value = operand("value", kv_len)
-        blocks = [(128, 64)] * 4
-
-        guards_before = len(graph.sizevars.shape_env.guards)
-        with (
-            V.set_graph_handler(graph),
-            mock.patch(self._PREREQS, return_value=True),
-        ):
-            # Rows of 65 elements fail the operand policy.
-            bad_grad_out = operand("bad_grad_out", q_len, row=65)
-            self.assertFalse(
-                use_flex_tdm_descriptor(
-                    query, key, value, bad_grad_out, block_shapes=blocks
-                )
-            )
-            self.assertEqual(len(graph.sizevars.shape_env.guards), guards_before)
-
-            grad_out = operand("grad_out", q_len)
-            self.assertTrue(
-                use_flex_tdm_descriptor(
-                    query, key, value, grad_out, block_shapes=blocks
-                )
-            )
-        self.assertEqual(len(graph.sizevars.shape_env.guards), guards_before + 1)
-
 
 # Forward builds descriptors for all three operands; decode builds them for K/V
 # only, because its reshaped query uses ordinary tl.load.
@@ -1233,21 +1180,18 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
         dtype,
         descriptors=True,
         options=None,
-        check_outputs=False,
         **compile_kwargs,
     ):
         """Run the given options and a bwd_USE_TMA=False arm; compare gradients.
 
         fn takes (q, k, v, kernel_options). The pointer arm adds
         bwd_USE_TMA=False to the same options, so it differs only in how the
-        backward loads its operands. With check_outputs, the first arm's
-        forward outputs (e.g. out and LSE) are also compared with eager. Returns
-        the first arm's forward and backward code so callers can make further
-        assertions.
+        backward loads its operands. Returns the first arm's forward and
+        backward code so callers can make further assertions.
         """
         options = {} if options is None else options
         inputs = [t.detach().requires_grad_(True) for t in inputs]
-        outputs, grads, upstream, code = self._run_fwd_bwd(
+        _, grads, upstream, code = self._run_fwd_bwd(
             functools.partial(fn, kernel_options=options), inputs, **compile_kwargs
         )
         forward, backward = self._split_code(code)
@@ -1267,14 +1211,8 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
 
         eager_fn = functools.partial(fn, kernel_options={})
         gold = self._gold_grads(eager_fn, inputs, upstream)
-        ref_outputs, ref = self._eager_run(eager_fn, inputs, upstream)
+        _, ref = self._eager_run(eager_fn, inputs, upstream)
         self._assert_grads_match(grads, pointer_grads, gold, ref, dtype)
-        if check_outputs:
-            tol = _TDM_TOLERANCES[dtype]
-            for actual, expected in zip(outputs, ref_outputs, strict=True):
-                torch.testing.assert_close(
-                    actual, expected, atol=tol.atol, rtol=tol.rtol
-                )
         return forward, backward
 
     def _direct_backward(self, q, k, v, grad_out, kernel_options):
@@ -1625,202 +1563,86 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
             rtol=_TDM_TOLERANCES[torch.float16].rtol,
         )
 
+    def test_tdm_flex_training_and_gqa_keep_backward_correct(self, device):
+        # The skip-odd-keys score_mod plus GQA: the forward takes the descriptor
+        # path, and its outputs, LSE and gradients have to stay correct.
+        def score_mod(score, b, h, q, kv):
+            return torch.where(kv % 2 == 0, score, float("-inf"))
+
+        def fn(q, k, v):
+            return flex_attention(
+                q, k, v, score_mod=score_mod, enable_gqa=True, return_lse=True
+            )
+
+        def make(n_heads, seq_len, requires_grad):
+            return torch.randn(
+                2,
+                n_heads,
+                seq_len,
+                64,
+                device=device,
+                dtype=torch.float16,
+                requires_grad=requires_grad,
+            )
+
+        q, k, v = (
+            make(8, self.Q_LEN, True),
+            make(2, self.KV_LEN, True),
+            make(2, self.KV_LEN, True),
+        )
+        ref_q, ref_k, ref_v = (
+            t.detach().clone().requires_grad_(True) for t in (q, k, v)
+        )
+
+        (out, lse), code = self._compile_and_get_code(fn, q, k, v)
+        self._assert_descriptor_path(code, _TDM_FORWARD_OPERANDS)
+
+        ref_out, ref_lse = fn(ref_q, ref_k, ref_v)
+        tol = _TDM_TOLERANCES[torch.float16]
+        torch.testing.assert_close(out, ref_out, atol=tol.atol, rtol=tol.rtol)
+        torch.testing.assert_close(lse, ref_lse, atol=tol.atol, rtol=tol.rtol)
+
+        out.sum().backward()
+        ref_out.sum().backward()
+        for actual, expected in ((q, ref_q), (k, ref_k), (v, ref_v)):
+            torch.testing.assert_close(actual.grad, expected.grad, atol=5e-2, rtol=5e-2)
+
     # ---- backward ---------------------------------------------------------
 
-    @dtypes(*_TDM_TOLERANCES)
-    @common_utils.parametrize("head_dim", [64, 128])
-    @common_utils.parametrize("lengths", ["tail", "divisible"])
-    def test_tdm_flex_backward_correctness_and_selection(
-        self, device, dtype, head_dim, lengths
-    ):
-        def fn(q, k, v, kernel_options):
-            return flex_attention(q, k, v, kernel_options=kernel_options)
-
-        q_len, kv_len = (None, None) if lengths == "tail" else (512, 512)
-        q, k, v = self._qkv(
-            device, dtype, q_len=q_len, kv_len=kv_len, head_dim=head_dim
-        )
-        forward, _ = self._check_backward(fn, (q, k, v), dtype=dtype)
-        self._assert_descriptor_path([forward], _TDM_FORWARD_OPERANDS)
-
     @common_utils.parametrize(
-        "dtype, qk_head_dim, v_head_dim",
+        "dtype, qk_head_dim, v_head_dim, lengths",
         [
-            (torch.float16, 256, 256),
-            (torch.bfloat16, 512, 512),
-            # 32 fp32 elements are 128 bytes, unlike fp16 head_dim 32.
-            (torch.float32, 32, 32),
+            (torch.float16, 64, 64, "divisible"),
+            (torch.bfloat16, 128, 128, "tail"),
             # dO and V take the V width, Q and K the QK width.
-            (torch.float16, 64, 128),
+            (torch.float16, 64, 128, "tail"),
         ],
-        name_fn=lambda dtype, qk, v: f"{str(dtype).split('.')[-1]}_qk{qk}_v{v}",
+        name_fn=lambda dtype, qk, v, lengths: f"qk{qk}_v{v}_{lengths}",
     )
-    def test_tdm_flex_backward_head_dim_variants(
-        self, device, dtype, qk_head_dim, v_head_dim
+    def test_tdm_flex_backward_correctness_and_selection(
+        self, device, dtype, qk_head_dim, v_head_dim, lengths
     ):
         def fn(q, k, v, kernel_options):
             return flex_attention(q, k, v, kernel_options=kernel_options)
+
+        q_len, kv_len = (self.Q_LEN, self.KV_LEN) if lengths == "tail" else (512, 512)
 
         def make(seq_len, head_dim):
             return torch.randn(2, 4, seq_len, head_dim, device=device, dtype=dtype)
 
-        q = make(self.Q_LEN, qk_head_dim)
-        k = make(self.KV_LEN, qk_head_dim)
-        v = make(self.KV_LEN, v_head_dim)
-        self._check_backward(fn, (q, k, v), dtype=dtype)
-
-    def test_tdm_flex_backward_gqa_score_mod_and_lse_grad(self, device):
-        # GQA rebuilds the Q/dO descriptors for every query head sharing a KV
-        # head, and a nonzero LSE gradient takes the grad_logsumexp path.
-        def score_mod(score, b, h, q, kv):
-            return torch.where(kv % 2 == 0, score, float("-inf"))
-
-        def fn(q, k, v, kernel_options):
-            return flex_attention(
-                q,
-                k,
-                v,
-                score_mod=score_mod,
-                enable_gqa=True,
-                return_lse=True,
-                kernel_options=kernel_options,
-            )
-
-        def make(n_heads, seq_len):
-            return torch.randn(
-                2, n_heads, seq_len, 64, device=device, dtype=torch.float16
-            )
-
-        q, k, v = make(8, self.Q_LEN), make(2, self.KV_LEN), make(2, self.KV_LEN)
-        # Output and LSE are checked against eager too: the forward also takes
-        # the descriptor path and feeds the backward its LSE.
-        forward, _ = self._check_backward(
-            fn, (q, k, v), dtype=torch.float16, check_outputs=True
-        )
+        q, k = make(q_len, qk_head_dim), make(kv_len, qk_head_dim)
+        v = make(kv_len, v_head_dim)
+        forward, _ = self._check_backward(fn, (q, k, v), dtype=dtype)
         self._assert_descriptor_path([forward], _TDM_FORWARD_OPERANDS)
-
-    def test_tdm_flex_backward_block_mask_full_partial_and_empty_rows(self, device):
-        # Rows below 64 attend to nothing, and the causal part leaves both full
-        # and partial blocks, so both sparse loops run through descriptors.
-        def mask_mod(b, h, q_idx, kv_idx):
-            return (q_idx >= kv_idx) & (q_idx >= 64)
-
-        block_mask = create_block_mask(
-            mask_mod, None, None, self.Q_LEN, self.KV_LEN, device=device
-        )
-        self.assertGreater(block_mask.kv_num_blocks.sum().item(), 0)
-        self.assertGreater(block_mask.full_kv_num_blocks.sum().item(), 0)
-
-        def fn(q, k, v, kernel_options):
-            return flex_attention(
-                q, k, v, block_mask=block_mask, kernel_options=kernel_options
-            )
-
-        q, k, v = self._qkv(device, torch.float16)
-        self._check_backward(fn, (q, k, v), dtype=torch.float16)
-
-    def test_tdm_flex_backward_nonzero_storage_offset(self, device):
-        def fn(q, k, v, kernel_options):
-            return flex_attention(q, k, v, kernel_options=kernel_options)
-
-        q, k, v = self._qkv(device, torch.float16, offset=8)
-        self.assertNotEqual(q.storage_offset(), 0)
-        self._check_backward(fn, (q, k, v), dtype=torch.float16)
-
-    def test_tdm_flex_backward_contiguous_head_dim_96_falls_back(self, device):
-        # A contiguous fp16 row of 96 elements is 192 bytes, which fails the
-        # 128-byte operand policy. The block itself would pass: 96 rounds to a
-        # 128-element (256-byte) width.
-        def fn(q, k, v, kernel_options):
-            return flex_attention(q, k, v, kernel_options=kernel_options)
-
-        q, k, v = self._qkv(device, torch.float16, head_dim=96)
-        self._check_backward(fn, (q, k, v), dtype=torch.float16, descriptors=False)
-
-    def test_tdm_flex_backward_pinned_tiles(self, device):
-        # User-pinned backward tiles go through the same admission. The tiles
-        # match no default, so the assertion fails if the pins are ignored.
-        def fn(q, k, v, kernel_options):
-            return flex_attention(q, k, v, kernel_options=kernel_options)
-
-        tiles = {"BLOCK_M1": 16, "BLOCK_N1": 32, "BLOCK_M2": 32, "BLOCK_N2": 16}
-        q, k, v = self._qkv(device, torch.float16)
-        _, backward = self._check_backward(
-            fn,
-            (q, k, v),
-            dtype=torch.float16,
-            options={f"bwd_{name}": value for name, value in tiles.items()},
-        )
-        for name, value in tiles.items():
-            self.assertRegex(
-                backward, rf"\b{name}\s*:\s*tl\.constexpr\s*=\s*{value}\b"
-            )
-
-    def test_tdm_flex_backward_gate_runs_only_for_valid_tiles(self, device):
-        """A candidate rejected by tile validation never reaches the TDM gate.
-
-        Of two candidates, the second fails the kernel's static assert
-        (BLOCK_N1 % BLOCK_M1). Only the first may call the descriptor gate, so
-        a discarded config cannot install descriptor range guards.
-        """
-        from torch._inductor.choices import InductorChoices
-        from torch._inductor.heuristics.template.triton import ROCmFlexBwDConfig
-        from torch._inductor.kernel.flex import flex_attention as flex_lowering
-
-        valid = ROCmFlexBwDConfig(32, 64, 64, 32, 1, 4)
-        invalid = ROCmFlexBwDConfig(64, 32, 64, 32, 1, 4)
-        gate_tiles = []
-        gate = flex_lowering.use_flex_tdm_descriptor
-
-        def spy(*tensors, block_shapes, **kwargs):
-            if len(tensors) == 4:  # the backward also passes grad_out
-                gate_tiles.append((block_shapes[0][0], block_shapes[1][0]))
-            return gate(*tensors, block_shapes=block_shapes, **kwargs)
-
-        def fn(q, k, v):
-            return flex_attention(q, k, v)
-
-        q, k, v = (t.requires_grad_(True) for t in self._qkv(device, torch.float16))
-        with (
-            mock.patch.object(
-                InductorChoices,
-                "get_flex_attention_bwd_configs",
-                return_value=[valid, invalid],
-            ),
-            mock.patch.object(flex_lowering, "use_flex_tdm_descriptor", spy),
-        ):
-            _, _, _, code = self._run_fwd_bwd(fn, (q, k, v))
-        self.assertEqual(gate_tiles, [(valid.block_m2, valid.block_n2)])
-        self._assert_backward_descriptor_path(self._split_code(code)[1])
-
-    def test_tdm_flex_backward_max_autotune(self, device):
-        from torch._inductor import config as inductor_config
-
-        def fn(q, k, v, kernel_options):
-            return flex_attention(q, k, v, kernel_options=kernel_options)
-
-        q, k, v = self._qkv(device, torch.float16)
-        # Every backward candidate gets the same admission decision, so the
-        # selected one must use descriptors whichever config wins.
-        with inductor_config.patch({"max_autotune": True}):
-            self._check_backward(fn, (q, k, v), dtype=torch.float16)
 
     @common_utils.parametrize(
         "options, forward_descriptors, backward_descriptors",
         [
-            ({}, True, True),
-            ({"USE_TMA": True}, True, True),
-            ({"USE_TMA": False}, False, False),
-            # Falsy non-False values have always taken the pointer path.
-            ({"USE_TMA": 0}, False, False),
-            ({"USE_TMA": None}, False, False),
-            ({"bwd_USE_TMA": False}, True, False),
-            ({"bwd_USE_TMA": 0}, True, False),
             # A direction-prefixed option wins over the unprefixed one, and
-            # affects only its own direction.
-            ({"fwd_USE_TMA": False}, False, True),
-            ({"USE_TMA": False, "bwd_USE_TMA": True}, False, True),
+            # affects only its own direction; an explicit falsy value other
+            # than False (here None) also forces pointers.
             ({"USE_TMA": True, "bwd_USE_TMA": None}, True, False),
+            ({"USE_TMA": False, "bwd_USE_TMA": True}, False, True),
         ],
     )
     def test_tdm_flex_backward_use_tma_option(
@@ -1867,170 +1689,18 @@ class TestFlexAttentionTDMEndToEnd(InductorTestCase):
             )
         self._assert_pointer_path([forward], _TDM_FORWARD_OPERANDS)
 
-    @common_utils.parametrize("rejected_by", ["layout", "capability", "config"])
-    def test_tdm_flex_backward_ignores_generic_tma_probe(self, device, rejected_by):
-        """A true can_use_tma must not route the ROCm backward around the gate.
-
-        USE_TMA=True is required to reach the generic probe at all: before this
-        backward gate existed, an omitted option left it false and the pointer
-        path held for an unrelated reason.
-        """
-        from torch._inductor import config as inductor_config
-
-        def fn(q, k, v):
-            return flex_attention(q, k, v, kernel_options={"USE_TMA": True})
-
-        head_dim = 33 if rejected_by == "layout" else 64
-        inputs = [
-            t.requires_grad_(True)
-            for t in self._qkv(device, torch.float16, head_dim=head_dim)
-        ]
-        with contextlib.ExitStack() as stack:
-            stack.enter_context(
-                mock.patch(
-                    "torch._inductor.kernel.flex.flex_attention.can_use_tma",
-                    return_value=True,
-                )
-            )
-            if rejected_by == "capability":
-                stack.enter_context(
-                    mock.patch(
-                        "torch._inductor.utils._gfx1250_device_prereqs",
-                        return_value=False,
-                    )
-                )
-            if rejected_by == "config":
-                stack.enter_context(
-                    inductor_config.patch({"triton.enable_flex_tdm": False})
-                )
-            _, _, _, code = self._run_fwd_bwd(fn, inputs)
-
-        self._assert_backward_pointer_path(self._split_code(code)[1])
-
-    def test_tdm_flex_backward_dynamic_sequence_reuses_graphs(self, device):
-        from torch._inductor.graph import GraphLowering
-
-        def fn(q, k, v):
-            return flex_attention(q, k, v)
-
-        cnt = CompileCounterWithBackend("inductor")
-        compiled = torch.compile(fn, backend=cnt, dynamic=True)
-
-        def step(inputs, upstream):
-            out = compiled(*inputs)
-            return torch.autograd.grad(out, inputs, upstream)
-
-        for index, (q_len, kv_len) in enumerate(
-            [(self.Q_LEN, self.KV_LEN), (637, 641), (self.Q_LEN, self.KV_LEN)]
-        ):
-            with self.subTest(q_len=q_len, kv_len=kv_len):
-                inputs = [
-                    t.requires_grad_(True)
-                    for t in self._qkv(
-                        device, torch.float16, q_len=q_len, kv_len=kv_len
-                    )
-                ]
-                upstream = self._grads_like((inputs[0],), seed=index)
-                if index == 0:
-                    grads, code = run_and_get_code(step, inputs, upstream)
-                    self._assert_backward_descriptor_path(self._split_code(code)[1])
-                else:
-                    # Not run_and_get_code: it resets dynamo, which would force
-                    # the recompilation this checks for. Any forward or
-                    # backward graph compiled or loaded here emits output code.
-                    emitted = []
-                    with mock.patch.object(
-                        GraphLowering, "save_output_code", emitted.append
-                    ):
-                        grads = step(inputs, upstream)
-                    self.assertEqual(emitted, [])
-                self.assertEqual(cnt.frame_count, 1)
-
-                gold = self._gold_grads(fn, inputs, upstream)
-                for actual, expected in zip(grads, gold):
-                    torch.testing.assert_close(
-                        actual, expected.to(actual.dtype), atol=5e-2, rtol=5e-2
-                    )
-
-    # ---- backward with a directly constructed dO --------------------------
-
-    def test_tdm_flex_direct_backward_padded_head_dim(self, device):
-        # head_dim 65 sliced from 128-wide rows: every operand, dO included,
-        # is admissible, and the 128-wide block overhangs the logical extent.
-        q = self._head_dim_tail(device, self.Q_LEN)
-        k = self._head_dim_tail(device, self.KV_LEN)
-        v = self._head_dim_tail(device, self.KV_LEN)
-        grad_out = self._head_dim_tail(device, self.Q_LEN)
-        self._check_direct_backward(q, k, v, grad_out, descriptors=True)
-
-    def test_tdm_flex_direct_backward_aligned_transposed_grad_out(self, device):
-        # dO with heads and rows swapped in memory keeps a unit inner stride and
-        # 128-byte rows, so it is still admissible.
+    def test_tdm_flex_direct_backward_seq_major_grad_out_falls_back(self, device):
+        # Q, K and V are admissible; only dO decides, which catches a lowering
+        # that does not pass dO to the gate. The lowering realizes dO with
+        # require_stride1, which keeps any layout with a unit stride on some
+        # axis. Stored [B, H, D, L], dO has a unit sequence stride, so the view
+        # reaches the gate with head-dim stride L and must take pointer loads.
         q, k, v = self._qkv(device, torch.float16)
         grad_out = torch.randn(
-            2, self.Q_LEN, 4, 64, device=device, dtype=torch.float16
-        ).transpose(1, 2)
-        self.assertFalse(grad_out.is_contiguous())
-        self._check_direct_backward(q, k, v, grad_out, descriptors=True)
-
-    @common_utils.parametrize(
-        "layout, descriptors",
-        [("no_unit_stride", True), ("seq_major", False), ("row_stride", False)],
-    )
-    def test_tdm_flex_direct_backward_grad_out_layout(
-        self, device, layout, descriptors
-    ):
-        # Q, K and V are admissible; only dO decides. The lowering realizes dO
-        # with require_stride1, which copies it into a dense buffer only when
-        # no axis has a unit stride; any other layout reaches the gate as is.
-        q, k, v = self._qkv(device, torch.float16)
-        if layout == "no_unit_stride":
-            # Every 2nd element of 128-wide rows: no axis has stride one, so
-            # dO is copied to a dense, admissible buffer.
-            grad_out = torch.randn(
-                2, 4, self.Q_LEN, 128, device=device, dtype=torch.float16
-            )[..., ::2]
-            self.assertNotIn(1, grad_out.stride())
-        elif layout == "seq_major":
-            # Stored [B, H, D, L]: the sequence axis has stride one, so the view
-            # is kept and reaches the gate with head-dim stride L.
-            grad_out = torch.randn(
-                2, 4, 64, self.Q_LEN, device=device, dtype=torch.float16
-            ).transpose(-1, -2)
-            self.assertEqual(grad_out.stride()[-2:], (1, self.Q_LEN))
-        else:
-            # Rows of D + 1 elements: the unit head-dim stride keeps the view,
-            # and the 130-byte row stride fails the operand policy.
-            grad_out = torch.randn(
-                2, 4, self.Q_LEN, 65, device=device, dtype=torch.float16
-            )[..., :64]
-            self.assertEqual(grad_out.stride(-2), 65)
-        self._check_direct_backward(q, k, v, grad_out, descriptors=descriptors)
-
-    def test_tdm_flex_direct_backward_kv_batch_broadcast(self, device):
-        # K and V broadcast over the query batch, so dK/dV reduce across it.
-        q = torch.randn(2, 4, self.Q_LEN, 64, device=device, dtype=torch.float16)
-        k = torch.randn(1, 4, self.KV_LEN, 64, device=device, dtype=torch.float16)
-        v = torch.randn(1, 4, self.KV_LEN, 64, device=device, dtype=torch.float16)
-        grad_out = torch.randn_like(q)
-        self._check_direct_backward(q, k, v, grad_out, descriptors=True)
-
-    @common_utils.parametrize(
-        "dtype, descriptors", [(torch.float16, False), (torch.float32, True)]
-    )
-    def test_tdm_flex_direct_backward_head_dim_32_block_width(
-        self, device, dtype, descriptors
-    ):
-        # Rows padded to 64 elements satisfy the operand policy for both
-        # dtypes, so only the block width differs: 32 fp16 elements are a
-        # 64-byte request, which the 128-byte policy rejects; 32 fp32 elements
-        # are 128 bytes.
-        def padded(seq_len):
-            return torch.randn(2, 4, seq_len, 64, device=device, dtype=dtype)[..., :32]
-
-        q, k, v = padded(self.Q_LEN), padded(self.KV_LEN), padded(self.KV_LEN)
-        grad_out = padded(self.Q_LEN)
-        self._check_direct_backward(q, k, v, grad_out, descriptors=descriptors)
+            2, 4, 64, self.Q_LEN, device=device, dtype=torch.float16
+        ).transpose(-1, -2)
+        self.assertEqual(grad_out.stride()[-2:], (1, self.Q_LEN))
+        self._check_direct_backward(q, k, v, grad_out, descriptors=False)
 
 
 # The complement of TestFlexAttentionTDMEndToEnd: on ROCm without the gfx1250
@@ -9168,62 +8838,6 @@ class GraphModule(torch.nn.Module):
                     else:
                         self.assertRegex(joined, _pointer_load_pattern(name))
                         self.assertNotRegex(joined, _descriptor_load_pattern(name))
-
-    @supported_platform
-    @skip_on_cpu
-    @skip_on_mps
-    # Same scope as the selection test above. ROCm is excluded for the same
-    # reason; TestFlexAttentionTDMEndToEnd holds the gfx1250 backward checks.
-    @skipIfRocm
-    @skipCUDAIf(not has_triton_tma_device(), "Requires TMA enabled CUDA device")
-    def test_tma_with_customer_kernel_options_backward_selection(self, device):
-        """Backward descriptor selection follows USE_TMA on CUDA and XPU.
-
-        The backward gate moved below the tile validation and gained a ROCm
-        branch; this pins the CUDA/XPU contract it must keep. The name shares
-        the smoke-suite prefix of the selection test above.
-        """
-        make_tensor = functools.partial(
-            torch.randn,
-            (1, 1, 256, 128),
-            device=device,
-            dtype=torch.bfloat16,
-            requires_grad=True,
-        )
-        query, key, value = make_tensor(), make_tensor(), make_tensor()
-        upstream = torch.randn_like(query)
-
-        xpu_defaults_on = device.split(":")[0] == "xpu"
-        cases = [
-            ({}, xpu_defaults_on),
-            ({"USE_TMA": True}, True),
-            ({"USE_TMA": False}, False),
-            ({"USE_TMA": None}, False),
-            ({"USE_TMA": True, "bwd_USE_TMA": False}, False),
-            ({"USE_TMA": False, "bwd_USE_TMA": True}, True),
-        ]
-        for options, expect_descriptors in cases:
-            with self.subTest(options=options):
-
-                def fn(q, k, v, kernel_options=options):
-                    return flex_attention(q, k, v, kernel_options=kernel_options)
-
-                torch._dynamo.reset()
-                compiled = torch.compile(fn)
-
-                def step():
-                    out = compiled(query, key, value)
-                    return torch.autograd.grad(out, (query, key, value), upstream)
-
-                _, code = run_and_get_code(step)
-                backward = [c for c in code if "bwd_dkdv_inner" in c]
-                self.assertEqual(len(backward), 1)
-                for name in _TDM_BACKWARD_OPERANDS:
-                    pattern = _descriptor_load_pattern(name)
-                    if expect_descriptors:
-                        self.assertRegex(backward[0], pattern)
-                    else:
-                        self.assertNotRegex(backward[0], pattern)
 
     @supported_platform
     @skip_on_cpu

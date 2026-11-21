@@ -871,6 +871,26 @@ def process_joint_outputs(
     )
 
 
+def _query_device_context(
+    device: torch.device,
+) -> contextlib.AbstractContextManager[Any]:
+    """Make the query's GPU current on ROCm for the backward config lookup.
+
+    The ROCm backward tile tables are keyed by the gfx target of the current
+    GPU, while the lookup receives only the device type. With GPUs of different
+    targets in one process, the tiles then follow the GPU that runs the kernel,
+    as the descriptor gate does.
+    """
+    if (
+        torch.version.hip is not None
+        and device.type == "cuda"
+        and device.index is not None
+        and torch.cuda.is_available()
+    ):
+        return torch.cuda.device(device)
+    return contextlib.nullcontext()
+
+
 # TODO: We probably also need a layout constraint?
 @register_lowering(
     torch.ops.higher_order.flex_attention_backward, type_promotion_kind=None
@@ -1192,20 +1212,10 @@ def flex_attention_backward(*args, **kwargs):
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
     device = query.get_device()
-    # ROCm tile tables are keyed by the target that rocm_gfx_arch() reads from
-    # the current device, while the lookup below receives only the device type.
-    # Make the query's device current for it, so a process with GPUs of
-    # different targets tunes for the one that runs the kernel, as the
-    # descriptor gate below does.
-    select_device: contextlib.AbstractContextManager[Any] = (
-        torch.cuda.device(device)
-        if torch.version.hip is not None
-        and device.type == "cuda"
-        and device.index is not None
-        and torch.cuda.is_available()
-        else contextlib.nullcontext()
-    )
-    with select_device:
+    # ROCm reports device type "cuda"; it selects descriptors with its own gate
+    # after the tile checks below, and CUDA/XPU keep theirs before them.
+    is_rocm_cuda = torch.version.hip is not None and device.type == "cuda"
+    with _query_device_context(device):
         configs: list[FlexBwDConfig] = V.choices.get_flex_attention_bwd_configs(
             head_dim,
             dtype,
@@ -1268,6 +1278,13 @@ def flex_attention_backward(*args, **kwargs):
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
+        if not is_rocm_cuda:
+            # Intel GPU enables TMA by default
+            cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+
+            if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+                cur_kernel_options["USE_TMA"] = False
+
         # Shrink default tiles to fit smaller pow2 sparse block sizes;
         # user-pinned tiles and non-pow2 sparse sizes still error out below.
         block_m1, block_n1 = conf.block_m1, conf.block_n1
@@ -1319,20 +1336,18 @@ def flex_attention_backward(*args, **kwargs):
                 )
             continue
 
-        # Descriptor selection runs after the tile rejection above, as in the
-        # forward, so a config that is about to be discarded cannot install
-        # descriptor range bounds.
-        #
-        # A default of True means "absent": omission keeps automatic selection,
-        # while any explicit falsy value (False, 0, None) forces pointer loads.
-        tdm_requested = bool(cur_kernel_options.get("USE_TMA", True))
-
-        # ROCm reports device type "cuda", so route it exclusively; see the
-        # forward. dO is gated alongside Q, K and V because the template
-        # describes it with a unit head-dim stride, and realizing grad_out
-        # (require_stride1) keeps any layout that has a unit stride on some
-        # axis, so a transposed dO, unaligned rows or an offset can reach here.
-        if torch.version.hip is not None and query.get_device().type == "cuda":
+        # The ROCm descriptor selection runs after the tile rejection above, as
+        # in the forward, so a config that is about to be discarded cannot
+        # install descriptor range bounds. dO is gated alongside Q, K and V
+        # because the template describes it with a unit head-dim stride, and
+        # realizing grad_out (require_stride1) keeps any layout that has a unit
+        # stride on some axis, so a transposed dO, unaligned rows or an offset
+        # can reach here.
+        if is_rocm_cuda:
+            # A default of True means "absent": omission keeps automatic
+            # selection, while any explicit falsy value (False, 0, None) forces
+            # pointer loads.
+            tdm_requested = bool(cur_kernel_options.get("USE_TMA", True))
             # The dQ (BLOCK_M2/BLOCK_N2) and dK/dV (BLOCK_M1/BLOCK_N1) branches
             # request the same rounded head-dim widths, which is all the block
             # rules check, so one admission covers both.
@@ -1360,12 +1375,6 @@ def flex_attention_backward(*args, **kwargs):
                     ),
                 ],
             )
-        else:
-            # Intel GPU enables TMA by default
-            cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
-
-            if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
-                cur_kernel_options["USE_TMA"] = False
 
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:

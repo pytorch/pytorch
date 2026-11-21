@@ -3453,13 +3453,9 @@ def _rocm_native_device_arch_name(device: str) -> str:
     return torch.cuda.get_device_properties(device).gcnArchName
 
 
-def rocm_gfx_arch(device: int | None = None) -> str:
-    """Canonical gfx target of a device, e.g. "gfx950". Empty if not ROCm.
-
-    Reads the device with index ``device``, or the current device when it is
-    None. The result is cached per device index, so a process with GPUs of
-    different targets gets each one's own; select the device first (e.g. with
-    ``torch.cuda.device``) when a caller cannot pass the index.
+@functools.lru_cache
+def rocm_gfx_arch() -> str:
+    """Canonical gfx target of the current device, e.g. "gfx950". Empty if not ROCm.
 
     Prefer this over get_device_capability() for target-specific behaviour. On
     ROCm that call reports the gfx major/minor, which does not order by
@@ -3469,14 +3465,7 @@ def rocm_gfx_arch(device: int | None = None) -> str:
     """
     if not torch.version.hip or not torch.cuda.is_available():
         return ""
-    if device is None:
-        device = torch.cuda.current_device()
-    return _rocm_gfx_arch_of_index(device)
-
-
-@functools.cache
-def _rocm_gfx_arch_of_index(index: int) -> str:
-    return torch.cuda.get_device_properties(index).gcnArchName.split(":", 1)[0]
+    return _rocm_native_device_arch_name("cuda").split(":", 1)[0]
 
 
 def using_rocm_rdna3() -> bool:
