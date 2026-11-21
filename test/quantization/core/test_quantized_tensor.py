@@ -161,6 +161,26 @@ class TestQuantizedTensor(TestCase):
             storage[storage.nbytes() - 1] ^= 1
             self.assertFalse(torch.equal(a, b))
 
+    def test_quantize_per_tensor_complex_qparams(self):
+        x = torch.randn(2, 2)
+        real_scale = torch.tensor([0.5, 0.25])
+        real_zero_point = torch.tensor([0, 1], dtype=torch.int)
+        complex_scale = torch.tensor([1 + 2j, 1 + 2j])
+        complex_zero_point = torch.tensor([1 + 2j, 1 + 2j])
+        for scale, zero_point, name in (
+            (complex_scale, real_zero_point, "scale"),
+            (real_scale, complex_zero_point, "zero_point"),
+        ):
+            msg = f"{name} must be a real tensor"
+            with self.assertRaisesRegex(ValueError, msg):
+                torch.quantize_per_tensor(x, scale[:1], zero_point[:1], torch.qint8)
+            with self.assertRaisesRegex(ValueError, msg):
+                torch.quantize_per_tensor([x, x], scale, zero_point, torch.qint8)
+        with self.assertRaisesRegex(ValueError, "scale must be a real tensor"):
+            torch.quantize_per_tensor(x, torch.tensor([1 + 0j]), real_zero_point[:1], torch.qint8)
+        torch.quantize_per_tensor(x, real_scale[:1], real_zero_point[:1], torch.qint8)
+        torch.quantize_per_tensor([x, x], real_scale, real_zero_point, torch.qint8)
+
     def test_per_tensor_qtensor_to_memory_format(self):
         n = np.random.randint(1, 10)
         c = np.random.randint(2, 10)
