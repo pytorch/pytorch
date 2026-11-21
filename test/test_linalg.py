@@ -3642,7 +3642,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             Q.sum().abs().backward()
 
     # I don't know how much memory this test uses but on complex64 it needs at least 4GB
-    @largeTensorTest("4GB", device="cuda")
+    @largeTensorTest("4GB")
     @serialTest(TEST_CUDA)
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     @skipCPUIfNoLapack
