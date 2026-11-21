@@ -929,7 +929,9 @@ pub unsafe fn raised_text() -> String {
 /// Whether two values are the same as far as a kernel that is given them
 /// can tell: the same exact type, and equal numbers, texts, slices, dtypes
 /// and devices, or tuples or lists of such. 0.0 is not -0.0. Runs no Python
-/// code.
+/// code. A list, or what holds one, is the same as another by what is in
+/// it now, not by being that object: it can be changed in place (see
+/// `frozen`).
 pub unsafe fn same_value(a: Obj, b: Obj) -> bool {
     if ffi::Py_TYPE(a) != ffi::Py_TYPE(b) {
         return false;
@@ -937,7 +939,7 @@ pub unsafe fn same_value(a: Obj, b: Obj) -> bool {
     if ffi::PyFloat_CheckExact(a) != 0 {
         return ffi::PyFloat_AS_DOUBLE(a).to_bits() == ffi::PyFloat_AS_DOUBLE(b).to_bits();
     }
-    if a == b {
+    if a == b && !is_row(a) && ffi::PySlice_Check(a) == 0 {
         return true;
     }
     if ffi::PyLong_CheckExact(a) != 0 {
@@ -966,6 +968,47 @@ pub unsafe fn same_value(a: Obj, b: Obj) -> bool {
         return false;
     }
     (0..ffi::PyObject_Size(a)).all(|i| same_value(sequence_item(a, i), sequence_item(b, i)))
+}
+
+/// What a check keeps of a value to tell the value of a later call from
+/// it (`same_value`), and what a form has as a constant: the value itself
+/// or, for what can be changed in place (a list, and a tuple or a slice
+/// that holds one), a copy that nothing else has. A list that lives
+/// outside the function is the same object at every call whatever is in
+/// it.
+pub unsafe fn frozen(o: Obj) -> PyObj {
+    if capi::is_unboxed(o) {
+        return PyObj::from_borrowed(o);
+    }
+    if ffi::PySlice_Check(o) != 0 {
+        let parts: Vec<Obj> = [c"start", c"stop", c"step"].iter().map(|name| ffi::PyObject_GetAttrString(o, name.as_ptr())).collect();
+        let kept: Vec<PyObj> = parts.iter().map(|part| if part.is_null() { PyObj::from_borrowed(ffi::Py_None()) } else { frozen(*part) }).collect();
+        let same = parts.iter().zip(&kept).all(|(part, kept)| *part == kept.as_ptr());
+        parts.into_iter().for_each(|part| xdecref(part));
+        ffi::PyErr_Clear();
+        if same {
+            return PyObj::from_borrowed(o);
+        }
+        return PyObj::from_owned(ffi::PySlice_New(kept[0].as_ptr(), kept[1].as_ptr(), kept[2].as_ptr()));
+    }
+    if !is_row(o) {
+        return PyObj::from_borrowed(o);
+    }
+    let count = ffi::PyObject_Size(o);
+    let items: Vec<PyObj> = (0..count).map(|i| frozen(sequence_item(o, i))).collect();
+    let list = ffi::PyList_CheckExact(o) != 0;
+    if !list && (0..count).all(|i| items[i as usize].as_ptr() == sequence_item(o, i)) {
+        return PyObj::from_borrowed(o);
+    }
+    let copy = if list { ffi::PyList_New(count) } else { ffi::PyTuple_New(count) };
+    for (i, item) in items.iter().enumerate() {
+        if list {
+            ffi::PyList_SET_ITEM(copy, i as isize, new_ref(item.as_ptr()));
+        } else {
+            ffi::PyTuple_SET_ITEM(copy, i as isize, new_ref(item.as_ptr()));
+        }
+    }
+    PyObj::from_owned(copy)
 }
 
 /// A list or a tuple, or a tuple of a class that is defined in C and
@@ -2738,8 +2781,9 @@ impl Path {
                         parts.push(tuple_of(&[text("v"), ffi::PyLong_FromLongLong(item_id(items.len()))]));
                         items.push(place);
                     } else if checkable(item) {
-                        held.push(Check { target: place, cond: Cond::ValueEq(PyObj::from_borrowed(item)), late: false });
-                        parts.push(const_ref(item));
+                        let kept = frozen(item);
+                        parts.push(const_ref(kept.as_ptr()));
+                        held.push(Check { target: place, cond: Cond::ValueEq(kept), late: false });
                     } else {
                         parts.into_iter().for_each(|o| ffi::Py_DECREF(o));
                         held.push(Check { target: place, cond: Cond::Type(PyObj::from_borrowed(ffi::Py_TYPE(item) as Obj)), late: false });
@@ -2765,8 +2809,14 @@ impl Path {
                     return Ok(value_ref(v.value));
                 }
                 "none" => return Ok(const_ref(value)),
-                "int" | "exact" => Cond::ValueEq(PyObj::from_borrowed(value)),
+                "int" | "exact" => Cond::ValueEq(frozen(value)),
                 _ => Cond::Is(PyObj::from_borrowed(value)),
+            };
+            // What the graph has as the constant is what the check keeps:
+            // a list that is changed in place later is another value.
+            let constant = match &cond {
+                Cond::ValueEq(kept) => const_ref(kept.as_ptr()),
+                _ => const_ref(value),
             };
             let known = checks.borrow().iter().any(|c| {
                 c.target == v && std::mem::discriminant(&c.cond) == std::mem::discriminant(&cond)
@@ -2774,7 +2824,7 @@ impl Path {
             if !known {
                 checks.borrow_mut().push(Check { target: v, cond, late });
             }
-            Ok(const_ref(value))
+            Ok(constant)
         };
         // Some operands, as a list.
         type Taken<'a> = [(PathValue, Option<&'a str>)];
