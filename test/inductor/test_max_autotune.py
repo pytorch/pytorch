@@ -2799,6 +2799,10 @@ class TestMaxAutotune(TestCase):
             "max_autotune": True,
             "test_configs.max_mm_configs": 4,
             "max_autotune_gemm_backends": "TRITON",
+            # Isolate from batch_linear_lhs (on by default on XPU): the two
+            # matmuls share the dynamo tracker for repeated inputs and would
+            # otherwise fuse.
+            "post_grad_fusion_options": {},
         }
     )
     @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
@@ -2826,6 +2830,10 @@ class TestMaxAutotune(TestCase):
             "max_autotune": True,
             "test_configs.max_mm_configs": 4,
             "max_autotune_gemm_backends": "TRITON",
+            # Isolate from batch_linear_lhs (on by default on XPU): the two
+            # matmuls share the dynamo tracker for repeated inputs and would
+            # otherwise fuse.
+            "post_grad_fusion_options": {},
         }
     )
     @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
@@ -3056,6 +3064,9 @@ class TestMaxAutotune(TestCase):
             "max_autotune": True,
             "test_configs.max_mm_configs": 4,
             "max_autotune_gemm_backends": "ATEN, TRITON",
+            # Isolate from batch_linear_lhs (on by default on XPU); every mm
+            # here feeds an add, so this patch is belt-and-suspenders.
+            "post_grad_fusion_options": {},
         }
     )
     @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")

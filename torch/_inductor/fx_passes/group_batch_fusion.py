@@ -10,7 +10,11 @@ import torch
 from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._higher_order_ops.user_kernel_hop import is_user_kernel_functional_hop
 from torch._logging import trace_structured, warning_once
-from torch.fx.experimental.symbolic_shapes import free_symbols, statically_known_true
+from torch.fx.experimental.symbolic_shapes import (
+    find_symbol_binding_fx_nodes,
+    free_symbols,
+    statically_known_true,
+)
 from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.reinplace import _get_view_type, _is_view_op, _ViewType
@@ -19,6 +23,8 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..pattern_matcher import (
+    _common_custom_context,
+    _merge_custom_context,
     CallFunctionVarArgs,
     CallMethodVarArgs,
     get_arg_value,
@@ -542,6 +548,54 @@ class BatchLinearLHSFusion(BatchFusion):
         return value is not None and len(value.shape) == 2
 
     @staticmethod
+    def _section_symbols_are_bound(graph: torch.fx.Graph, section: object) -> bool:
+        symbols = free_symbols(section)
+        if not symbols:
+            return True
+        # Placeholder bindings: SymInt placeholders and unbacked bindings via
+        # the canonical helper, plus tensor inputs binding the dynamic shape
+        # and stride symbols of their values.
+        bound = OrderedSet(find_symbol_binding_fx_nodes(graph))
+        for node in graph.nodes:
+            if node.op != "placeholder":
+                continue
+            value = node.meta.get("val")
+            if isinstance(value, torch.Tensor):
+                bound |= free_symbols(list(value.shape))
+                bound |= free_symbols(list(value.stride()))
+        return symbols <= bound
+
+    @staticmethod
+    def _is_quantized_weight_conversion(node: torch.fx.Node) -> bool:
+        # Keep int8 weight-only quantization patterns for the WOQ matcher.
+        pending = [node]
+        seen = OrderedSet()
+        while pending:
+            cur = pending.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            target = cur.target
+            if target in (
+                torch.ops.prims.convert_element_type.default,
+                aten._to_copy.default,
+                aten.to.dtype,
+                aten.type_as.default,
+            ):
+                src = cur.args[0]
+                if isinstance(src, torch.fx.Node):
+                    value = src.meta.get("val")
+                    if isinstance(value, torch.Tensor) and not (
+                        value.dtype.is_floating_point or value.dtype.is_complex
+                    ):
+                        return True
+            if _is_view_op(target):
+                src = cur.args[0]
+                if isinstance(src, torch.fx.Node):
+                    pending.append(src)
+        return False
+
+    @staticmethod
     def _reaches_user_visible_output(
         node: torch.fx.Node, graph: torch.fx.Graph
     ) -> bool:
@@ -647,14 +701,36 @@ class BatchLinearLHSFusion(BatchFusion):
         return False
 
     def match(self, node: torch.fx.Node):
+        """
+        Return None to skip the fusion when the mms only feed cat(s) that go
+        straight to the graph output; otherwise fall through to the shared
+        device check and the base-class matching logic.
+        """
+        # The mms only feed cat(s). Keep the zero-copy cat-mm buffer reuse
+        # when each cat feeds the graph output directly; fusing here would
+        # lower to cat + split_with_sizes and add copy kernels around the
+        # strided splits. A cat with further consumers can still fuse: its
+        # split sections cancel with the downstream split_with_sizes.
+        if node.users and all(user.target is aten.cat.default for user in node.users):
+            if all(
+                cat_node.users and all(user.op == "output" for user in cat_node.users)
+                for cat_node in node.users
+            ):
+                return None
         devices = self.graph_search_options.get("devices")
         if devices is not None:
+            if isinstance(devices, str):
+                devices = (devices,)
             value = node.meta.get("val")
             if not (isinstance(value, torch.Tensor) and value.device.type in devices):
                 return None
         if CallFunctionVarArgs(aten.mm.default).match(node):
             input_m, weight_m = node.args
             bias_m = None
+            # Leave add(mm(...), bias) for the addmm pattern matcher. Any add
+            # user blocks the fusion here, including scalar adds.
+            if any(user.target is aten.add.Tensor for user in node.users):
+                return None
         elif CallFunctionVarArgs(aten.addmm.default).match(
             node
         ) and self._addmm_node_can_be_fused(node):
@@ -662,6 +738,9 @@ class BatchLinearLHSFusion(BatchFusion):
         else:
             return None
         if not self._is_input_2d(input_m) or not self._is_input_2d(weight_m):  # type: ignore[arg-type]
+            return None
+        # Leave int8 weight-only quantization patterns for the WOQ matcher.
+        if self._is_quantized_weight_conversion(weight_m):  # type: ignore[arg-type]
             return None
         # Replacing a mutated mm output with a split view can break autograd.
         if any(_is_mutable_node(user.target) for user in node.users):
@@ -679,6 +758,14 @@ class BatchLinearLHSFusion(BatchFusion):
         weight_val = weight_m.meta["val"]  # type: ignore[union-attr]
         if not statically_known_true(weight_val.shape[1] > 0):
             return None
+        if self.graph_search_options.get(
+            "static_widths_only", False
+        ) and not isinstance(weight_val.shape[1], int):
+            return None
+        # A symbolic split section must be bound by this graph's inputs;
+        # otherwise it is a free symbol in a body subgraph and cannot lower.
+        if not self._section_symbols_are_bound(node.graph, weight_val.shape[1]):
+            return None
         if bias_m is not None:
             if not isinstance(bias_m, torch.fx.Node):
                 return None
@@ -689,6 +776,7 @@ class BatchLinearLHSFusion(BatchFusion):
                 and statically_known_true(bias_val.shape[0] == weight_val.shape[1])
             ):
                 return None
+        custom = node.meta.get("custom", {})
         group_key = (
             "batch_linear_lhs",
             input_m,
@@ -696,6 +784,9 @@ class BatchLinearLHSFusion(BatchFusion):
             str(weight_val.dtype),
             str(weight_val.device),
             str(weight_val.shape[0]),
+            custom.get("stream", 0),
+            custom.get("mempool"),
+            custom.get("mempool_device"),
         )
         return group_key
 
@@ -723,10 +814,16 @@ class BatchLinearLHSFusion(BatchFusion):
             batch_biases.append(bias)
             split_sections.append(weight.meta["val"].shape[1])  # type: ignore[union-attr]
 
+        custom_context = _common_custom_context(batch_nodes)
+
+        def _copy_custom(new_node: torch.fx.Node) -> None:
+            _merge_custom_context(new_node.meta, custom_context)
+
         with graph.inserting_before(max(subset)):  # type: ignore[operator]
             cat_weights = graph.call_function(  # type: ignore[operator]
                 aten.cat.default, args=(batch_weights,), kwargs={"dim": 1}
             )
+            _copy_custom(cat_weights)
             cat_weights.meta["val"] = aten.cat(
                 [weight.meta["val"] for weight in batch_weights], dim=1
             )
@@ -734,6 +831,7 @@ class BatchLinearLHSFusion(BatchFusion):
                 cat_biases = graph.call_function(  # type: ignore[operator]
                     aten.cat.default, args=(batch_biases,), kwargs={"dim": 0}
                 )
+                _copy_custom(cat_biases)
                 cat_biases.meta["val"] = aten.cat(
                     [bias.meta["val"] for bias in batch_biases], dim=0
                 )
@@ -741,6 +839,7 @@ class BatchLinearLHSFusion(BatchFusion):
                     aten.addmm.default,
                     args=(cat_biases, batch_input, cat_weights),
                 )
+                _copy_custom(fused_lhs)
                 fused_lhs.meta["val"] = aten.addmm(
                     cat_biases.meta["val"],
                     batch_input.meta["val"],  # type: ignore[union-attr]
@@ -751,6 +850,7 @@ class BatchLinearLHSFusion(BatchFusion):
                     aten.mm.default,
                     args=(batch_input, cat_weights),
                 )
+                _copy_custom(fused_lhs)
                 fused_lhs.meta["val"] = aten.mm(
                     batch_input.meta["val"],  # type: ignore[union-attr]
                     cat_weights.meta["val"],
@@ -759,6 +859,7 @@ class BatchLinearLHSFusion(BatchFusion):
                 aten.split_with_sizes.default,
                 args=(fused_lhs, split_sections, 1),
             )
+            _copy_custom(fused_lhs_list)
             split_values = aten.split_with_sizes(
                 fused_lhs.meta["val"], split_sections, 1
             )
@@ -1910,6 +2011,19 @@ def generate_fusion_from_config(config_options: dict[str, Any], pre_grad=True):
     return fusions
 
 
+def _option_matches_graph_devices(
+    options: dict[str, Any], graph_devices: OrderedSet[str]
+) -> bool:
+    devices = options.get("devices")
+    if devices is None:
+        return True
+    if isinstance(devices, str):
+        devices = (devices,)
+    if not isinstance(devices, (list, tuple, OrderedSet, frozenset, OrderedSet)):
+        return True
+    return not graph_devices.isdisjoint(devices)
+
+
 def group_batch_fusion_passes(
     graph: torch.fx.Graph, pre_grad=True, fusion_options=None
 ):
@@ -1927,7 +2041,9 @@ def group_batch_fusion_passes(
         post_grad_options = dict(config.post_grad_fusion_options)
         # Keep the old pre-grad key working for fusions that moved post grad.
         for name in _PRE_GRAD_OPTIONS_FORWARDED_TO_POST_GRAD:
-            if name in config.pre_grad_fusion_options and name not in post_grad_options:
+            if name in config.pre_grad_fusion_options:
+                # The legacy key wins over the device-scoped default and also
+                # over an explicit post_grad entry with the same name.
                 warning_once(
                     log,
                     "Fusion option %s is post-grad; running it post grad. "
@@ -1936,6 +2052,21 @@ def group_batch_fusion_passes(
                     name,
                 )
                 post_grad_options[name] = config.pre_grad_fusion_options[name]
+        # Device-scoped defaults must not pay for the search on other
+        # devices. The "devices" filter applies to every group/batch fusion
+        # option, not just batch_linear_lhs, and the scan is skipped entirely
+        # when no option is device-scoped.
+        if any("devices" in options for options in post_grad_options.values()):
+            graph_devices = OrderedSet()
+            for node in graph.nodes:
+                value = node.meta.get("val")
+                if isinstance(value, torch.Tensor):
+                    graph_devices.add(value.device.type)
+            post_grad_options = {
+                name: options
+                for name, options in post_grad_options.items()
+                if _option_matches_graph_devices(options, graph_devices)
+            }
         fbgemm_fusion_keys = [
             x
             for x in post_grad_options

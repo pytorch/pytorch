@@ -59,6 +59,10 @@ class Foo(torch.nn.Module):
 # score_fusion_memory threshold will cause different fusion decisions and
 # generate a different wrapper. Override the threshold to make these tests
 # happy.
+# Isolate from batch_linear_lhs (on by default on XPU): the tests below
+# assert exact fusion and buffer-reuse behavior that the default would
+# otherwise change.
+@config.patch("post_grad_fusion_options", {})
 @config.patch("score_fusion_memory_threshold", 1)
 @instantiate_parametrized_tests
 class TestOperatorReorderForPeakMemory(TestCase):
