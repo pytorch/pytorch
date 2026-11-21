@@ -21,7 +21,6 @@ from ..pattern_matcher import (
     PatternExpr,
     PatternMatcherPass,
 )
-from ..utils import FOLDED_SCALED_MM_OUTPUT_SCALE
 
 
 log = logging.getLogger(__name__)
@@ -72,15 +71,11 @@ def _get_tensor(node: torch.fx.Node) -> torch.Tensor:
     return val
 
 
-def _has_folded_scaled_mm_output_scale(node: torch.fx.Node) -> bool:
-    """Whether a scaled-mm node carries a compiler-created output multiply.
-
-    The symmetric-memory scaled-matmul operators receive ``scale_result`` with
-    its public ATen semantics, which ignore it for BF16 output.  They therefore
-    cannot replace a node whose private marker means that the scale represents
-    an explicit multiply that must be preserved.
-    """
-    return bool(node.meta.get(FOLDED_SCALED_MM_OUTPUT_SCALE, False))
+def _has_scaled_mm_result_scale(node: torch.fx.Node) -> bool:
+    """The symm_mem scaled-matmul ops don't take ``scale_result``, so leave such nodes unfused."""
+    if len(node.args) > 5:
+        return node.args[5] is not None
+    return node.kwargs.get("scale_result") is not None
 
 
 @dataclass
@@ -672,7 +667,6 @@ class _ScaledMatmul(_Matmul):
     A_scale_node: torch.fx.Node
     B_scale_node: torch.fx.Node
     bias_node: torch.fx.Node | None
-    result_scale_node: torch.fx.Node | None
     out_dtype: torch.dtype | None
     use_fast_accum: bool
     pre_mm_reshape: torch.fx.Node | None
@@ -719,7 +713,6 @@ class _ScaledMatmul(_Matmul):
             A_scale_node=A_scale_node,
             B_scale_node=B_scale_node,
             bias_node=get_arg(mm_node, 4, None),
-            result_scale_node=get_arg(mm_node, 5, None),
             out_dtype=get_arg(mm_node, 6, None),
             use_fast_accum=get_arg(mm_node, 7, False),
             pre_mm_reshape=pre_mm_reshape,
@@ -735,7 +728,7 @@ def _find_reshape_mm_reshape(node: torch.fx.Node) -> list[_Matmul]:
     for mm_node in node.users:
         if mm_node.target not in (aten.mm.default, aten._scaled_mm.default):
             continue
-        if _has_folded_scaled_mm_output_scale(mm_node):
+        if _has_scaled_mm_result_scale(mm_node):
             continue
         for reshape_node in mm_node.users:
             if reshape_node.target != aten.reshape.default:
@@ -791,7 +784,7 @@ def _find_consumer_matmuls(node: torch.fx.Node) -> list[_Matmul]:
             matmul = _Matmul.from_match(match=[user])
             matmuls.append(matmul)
         elif user.target is aten._scaled_mm.default:
-            if _has_folded_scaled_mm_output_scale(user):
+            if _has_scaled_mm_result_scale(user):
                 continue
             matmul = _ScaledMatmul.from_match([user])
             matmuls.append(matmul)
@@ -853,7 +846,6 @@ def _insert_fused_all_gather_matmul(
                 gather_dim,
                 group_name,
                 [matmul.bias_node for matmul in scaled_matmuls],
-                [matmul.result_scale_node for matmul in scaled_matmuls],
                 [matmul.out_dtype for matmul in scaled_matmuls],
                 [matmul.use_fast_accum for matmul in scaled_matmuls],
             ),
@@ -1013,7 +1005,7 @@ def _find_producer_matmul(node: torch.fx.Node) -> _Matmul | None:
     if node.target is aten.mm.default:
         return _Matmul.from_match(match=[node])
     elif node.target is aten._scaled_mm.default:
-        if _has_folded_scaled_mm_output_scale(node):
+        if _has_scaled_mm_result_scale(node):
             return None
         return _ScaledMatmul.from_match(match=[node])
     elif node.target is aten.reshape.default:
@@ -1024,7 +1016,7 @@ def _find_producer_matmul(node: torch.fx.Node) -> _Matmul | None:
             raise AssertionError(f"expected an fx Node, got {type(mm_node)}")
         if mm_node.target not in (aten.mm.default, aten._scaled_mm.default):
             return None
-        if _has_folded_scaled_mm_output_scale(mm_node):
+        if _has_scaled_mm_result_scale(mm_node):
             return None
 
         reshape_node_0 = mm_node.args[0]
@@ -1104,7 +1096,6 @@ def _insert_fused_matmul_reduce_scatter(
                 group_name,
                 output_shape,
                 matmul.bias_node,
-                matmul.result_scale_node,
                 matmul.out_dtype,
                 matmul.use_fast_accum,
             ),
