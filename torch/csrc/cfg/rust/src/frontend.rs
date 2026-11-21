@@ -43,6 +43,9 @@ struct RawBlock {
 }
 
 struct Builder<'a> {
+    /// The code is a generator's: lowered for what goes over a generator
+    /// where it is made, never for a call.
+    generator: bool,
     instrs: &'a [Ins],
     table: &'a OpcodeTable,
     cfg: Vec<RawBlock>,
@@ -869,11 +872,28 @@ impl<'a> Builder<'a> {
                 Bc::CallIntrinsic1 => {
                     let a = pop_value!();
                     let v = match arg {
+                        3 if self.generator => emit!(off, Op::StopIterationError(a)),
                         5 => emit!(off, Op::Unary(UnaryKind::Pos, a)),
                         6 => emit!(off, Op::ListToTuple(a)),
                         _ => return unsupported(format!("intrinsic {} is not supported", arg)),
                     };
                     stack.push(v);
+                }
+                // The generator itself, which the code lets go of at once:
+                // what goes over it stands for it.
+                Bc::ReturnGenerator if self.generator => {
+                    let none = unsafe { PyObj::from_borrowed(ffi::Py_None()) };
+                    let c = self.extra_const(none);
+                    let v = emit!(off, Op::Const(c));
+                    stack.push(v);
+                }
+                Bc::YieldValue if self.generator => {
+                    let a = pop_value!();
+                    let v = emit!(off, Op::Yield(a));
+                    stack.push(v);
+                }
+                Bc::ReturnGenerator | Bc::YieldValue => {
+                    return unsupported("generators and coroutines are not supported");
                 }
                 Bc::GetIter => {
                     let a = pop_value!();
@@ -1132,9 +1152,22 @@ fn handler_is_transparent(instrs: &[Ins], index_of_off: &HashMap<u32, usize>, ta
 }
 
 pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> PyResult<Function> {
+    build_as(py, table, func, false)
+}
+
+/// `build` for the code of a generator (not of a coroutine, nor of an
+/// asynchronous generator): what it gives is an instruction (`Op::Yield`).
+/// Such a function is never run as the callee of a call, which makes a
+/// generator and runs nothing.
+pub fn build_generator(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> PyResult<Function> {
+    build_as(py, table, func, true)
+}
+
+fn build_as(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>, generator: bool) -> PyResult<Function> {
+    const CO_GENERATOR: u32 = 0x20;
     let code = func.getattr("__code__")?;
     let flags: u32 = code.getattr("co_flags")?.extract()?;
-    if flags & CO_GENERATOR_LIKE != 0 {
+    if flags & CO_GENERATOR_LIKE != if generator { CO_GENERATOR } else { 0 } {
         return unsupported("generators and coroutines are not supported");
     }
     let cellvars: Vec<String> = code.getattr("co_cellvars")?.extract()?;
@@ -1429,6 +1462,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
             bool_values: HashSet::new(),
             out_insts: (0..nblocks).map(|_| Vec::new()).collect(),
             out_terms: (0..nblocks).map(|_| None).collect(),
+            generator,
             extra_consts: Vec::new(),
             nconsts,
             slots: HashMap::new(),
@@ -1724,6 +1758,8 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::ToBool(a)
         | Op::IsNone(a, _)
         | Op::ListToTuple(a)
+        | Op::Yield(a)
+        | Op::StopIterationError(a)
         | Op::Unpack(a, _)
         | Op::UnpackEx(a, _, _)
         | Op::GetLen(a)
