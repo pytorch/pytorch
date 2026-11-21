@@ -6333,6 +6333,30 @@ def graph_writes_outside(x, buffer, fail):
     return (y + buffer).exp().sin().cos().tanh() + x
 
 
+class GraphKeeps(torch.nn.Module):
+    """Stores into itself, into a plain object and into containers it is
+    given, between operations."""
+
+    def __init__(self):
+        super().__init__()
+        self.fc = torch.nn.Linear(4, 4)
+        self.calls = 0
+        self.seen = []
+        self.last = None
+
+    def forward(self, x, notes, fail=False):
+        y = (self.fc(x).sin() * 2).cos().tanh()
+        self.calls += 1
+        self.seen.append(y.shape[0])
+        notes["calls"] = self.calls
+        GRAPH_TOOLS.k = float(self.calls)
+        if fail:
+            raise ValueError("after the stores")
+        self.last = y
+        made = [y, {"n": self.calls}]
+        return (y + 1).exp().sin().cos().tanh(), made
+
+
 class GraphRouted(torch.nn.Module):
     """Keeps what its layers gave in a list, with a placeholder for the
     ones nothing reads, and reads the list further on."""
@@ -8279,6 +8303,38 @@ print(json.dumps(found))
             for name, value in reference.state_dict().items():
                 self.assertEqual(state[name], value, atol=0, rtol=0, msg=name)
 
+    def test_a_store_into_an_object_is_done_once_and_in_its_place(self):
+        def keep(gm, input_types):
+            return gm
+
+        torch.manual_seed(0)
+        model, reference = GraphKeeps().eval(), None
+        reference = copy.deepcopy(model)
+        compiled = torch.vm(model, passes=(*DEFAULT, P.Graphs(), keep), fallback=False)
+        notes = [{}, {}]
+        kinds = [False] * 6 + [True, False, True] + [5] * 3 + [False] * 3
+        gains = []
+        with torch.no_grad():
+            for kind in kinds:
+                x = torch.randn(5 if kind == 5 else 3, 4)
+                results = []
+                runs = (compiled, model, notes[0]), (reference, reference, notes[1])
+                for fn, net, note in runs:
+                    try:
+                        results.append(fn(x, note, kind is True))
+                    except ValueError as raised:
+                        results.append(str(raised))
+                    results.append((net.calls, list(net.seen), dict(note), net.last))
+                    gains.append(GRAPH_TOOLS.k)
+                self.assertEqual(results[0], results[2], atol=0, rtol=0)
+                self.assertEqual(results[1], results[3], atol=0, rtol=0)
+                self.assertEqual(gains[-1], gains[-2])
+        GRAPH_TOOLS.k = 3.0
+        self.assertEqual(model.calls, len(kinds))
+        # The operations in front of the stores and behind them are graphs.
+        graphs = [g for g in self.graphs(compiled) if g["hits"]]
+        self.assertEqual(sorted(g["ops"] for g in graphs), [5, 5])
+
     def test_a_list_that_holds_tensors_and_other_things_lands_in_order(self):
         def keep(gm, input_types):
             return gm
@@ -8297,6 +8353,55 @@ print(json.dumps(found))
         # placeholder: what is read of it from there on is what the
         # instructions read.
         self.assertEqual([g["operators"].count("aten::conv2d") for g in graphs], [4])
+
+    def test_training_steps_are_those_of_eager(self):
+        def steps(make, net, batches, targets):
+            torch.manual_seed(7)
+            net = copy.deepcopy(net).train()
+            fn = make(net)
+            optimizer = torch.optim.SGD(net.parameters(), lr=0.05, momentum=0.9)
+            losses = []
+            for x, y in zip(batches, targets):
+                optimizer.zero_grad()
+                loss = torch.nn.functional.cross_entropy(fn(x).flatten(1)[:, :5], y)
+                loss.backward()
+                optimizer.step()
+                losses.append(loss.item())
+            return losses, net.state_dict()
+
+        torch.manual_seed(0)
+        blocks = (GraphResidual(), torch.nn.Dropout(0.2), GraphResidual())
+        convnet = torch.nn.Sequential(*blocks)
+        options = dict(dim_feedforward=16, dropout=0.1, batch_first=True)
+        encoder = torch.nn.TransformerEncoderLayer(8, 2, **options)
+        cases = [
+            (convnet, [torch.randn(4, 4, 8, 8) for _ in range(30)]),
+            (encoder, [torch.randn(4, 6, 8) for _ in range(30)]),
+        ]
+        targets = [torch.randint(0, 5, (4,)) for _ in range(30)]
+        for net, batches in cases:
+            eager, expected = steps(lambda net: net, net, batches, targets)
+            again, _ = steps(lambda net: net, net, batches, targets)
+            self.assertEqual(eager, again)
+
+            def keep(gm, input_types):
+                return gm
+
+            compilers = ((P.AOTAutograd(),), False), ((P.Inductor(),), False)
+            for behind, exact in (((), True), ((keep,), True), *compilers):
+                passes = (*DEFAULT, P.Graphs(), *behind)
+
+                def compiled(net, passes=passes):
+                    return torch.vm(net, passes=passes, fallback=False)
+
+                losses, state = steps(compiled, net, batches, targets)
+                close = dict(rtol=2e-3, atol=2e-4)
+                tolerance = dict(atol=0, rtol=0) if exact else close
+                said = f"{type(net).__name__} {behind}"
+                self.assertEqual(losses, eager, msg=said, **tolerance)
+                for name, value in expected.items():
+                    what = f"{said} {name}"
+                    self.assertEqual(state[name], value, msg=what, **tolerance)
 
     def test_a_write_to_what_autograd_saved_raises_as_in_eager(self):
         def keep(gm, input_types):
@@ -8694,6 +8799,66 @@ class TestVmGraphResults(TestCase):
                     found = torch.vm.regions(compiled)
                     (graph,) = [g for g in found if g.get("ops") == ops]
                     self.assertEqual(graph["hits"] > 0, bool(behind))
+
+    def test_what_changes_on_a_warm_model_that_writes_in_place(self, device):
+        def keep(gm, input_types):
+            return gm
+
+        def changes(model, x):
+            block = model.layer[0]
+            yield "weight in place", lambda: block.conv1.weight.mul_(1.5), x
+            made = dict(device=device, dtype=x.dtype)
+            fresh = torch.nn.Parameter(torch.randn(4, 4, 3, 3, **made))
+            yield "parameter replaced", lambda: setattr(block.conv1, "weight", fresh), x
+            yield "train", model.train, x
+            yield "eval", model.eval, x
+            yield "another batch size", lambda: None, torch.randn(5, 4, 8, 8, **made)
+            hooks = []
+
+            def hook():
+                hooks.append(block.register_forward_hook(lambda m, i, o: o * 2))
+
+            def replace():
+                model.layer[1] = GraphResidual().eval().to(x)
+
+            yield "forward hook", hook, x
+            yield "hook removed", lambda: hooks.pop().remove(), x
+            plain = "an activation that does not write"
+            yield plain, lambda: setattr(block, "relu", torch.nn.ReLU()), x
+            yield "submodule replaced", replace, x
+            # Other dtypes and back: half and bfloat16 where convolutions have them.
+            on_gpu = torch.device(device).type == "cuda"
+            others = (torch.float16, torch.bfloat16) if on_gpu else (torch.float64,)
+            for dtype in (*others, torch.float32):
+                yield f"{dtype}", lambda dtype=dtype: model.to(dtype), x.to(dtype)
+
+        for behind, exact in (((keep,), True), ((P.Inductor(),), False)):
+            torch.manual_seed(0)
+            model = GraphResNet().eval().to(device)
+            x = torch.randn(2, 4, 8, 8, device=device)
+            # The calls that run a graph are counted: no measurement.
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(model, passes=passes, fallback=False, demote=False)
+            with torch.no_grad():
+                for _ in range(8):
+                    compiled(x)
+                for what, change, given in changes(model, x):
+                    change()
+                    narrow = given.dtype in (torch.float16, torch.bfloat16)
+                    loose = dict(rtol=5e-2, atol=5e-2)
+                    close = loose if narrow else dict(rtol=1e-4, atol=1e-5)
+                    tolerance = dict(atol=0, rtol=0) if exact else close
+                    for _ in range(3):
+                        reference = copy.deepcopy(model)
+                        got, expected = compiled(given), reference(given)
+                        self.assertEqual(got, expected, msg=what, **tolerance)
+                        for name, value in reference.state_dict().items():
+                            said, held = f"{what}: {name}", model.state_dict()[name]
+                            self.assertEqual(held, value, msg=said, **tolerance)
+            found = [g for g in torch.vm.regions(compiled) if "ops" in g]
+            graph = max(found, key=lambda g: g["hits"])
+            self.assertGreaterEqual(graph["hits"], 20)
+            self.assertGreaterEqual(graph["ops"], 20)
 
     def same_as_eager(self, fn, make, calls=4):
         """`fn` under torch.vm, with `Graphs()` alone and with a pass that
