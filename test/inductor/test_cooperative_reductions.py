@@ -17,7 +17,6 @@ from torch.testing import assert_close
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -33,11 +32,10 @@ class TestVarianceReductionHeuristic(TestCase):
 
     def _dtypes(self):
         dtypes = [torch.float16]
-        if torch.cuda.is_bf16_supported():
+        if torch.get_device_module(GPU_TYPE).is_bf16_supported():
             dtypes.append(torch.bfloat16)
         return dtypes
 
-    @skipIfXpu(msg="intel/torch-xpu-ops/issues/5221")
     def test_var_mean_uses_two_step_for_non_split_reductions(self):
         self._skip_if_not_gpu()
 
