@@ -177,6 +177,15 @@ class Graphs(BuiltinPass):
             order), and for a graph that draws random numbers or writes to
             a tensor from outside, or one an input of which was written to
             in place since the call, such a backward raises and says so.
+
+            While a graph is taken down, twice per form, cuDNN's benchmark
+            mode is off and its deterministic mode is on for the whole
+            process (other threads' convolutions included), and both are
+            as they were when the call returns. In benchmark mode cuDNN
+            picks the algorithm of a convolution per thread, by what it
+            measured there, and eager's own gradients are not the same bits
+            on two threads: what a graph's gradients are then is what the
+            same kernels give for the same arguments in the same order.
     """
 
     engine: ClassVar[str] = "graphs"
