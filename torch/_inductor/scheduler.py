@@ -13127,6 +13127,18 @@ class Scheduler:
         # Deferred to just before the first kernel that reads each input.
         V.graph.wrapper_code.register_alignment_check_inputs()
 
+        # MPS has no device guard to initialize the Python stream variables.
+        use_unguarded_streams = (
+            V.graph.device_type == "mps"
+            and not (V.graph.cpp_wrapper or V.graph.fx_wrapper)
+            and self._has_multi_stream_nodes()
+        )
+        if use_unguarded_streams:
+            num_streams = max((self.get_node_stream(n) for n in nodes), default=0) + 1
+            V.graph.wrapper_code.codegen_python_stream_setup(
+                num_streams, self.stream_idx_to_user_obj_idx
+            )
+
         # An input read on more than one stream needs its copy_if_misaligned
         # emitted per consuming stream (not once at the first reader by line
         # order, which would place the only copy inside one branch's stream and
@@ -13222,10 +13234,10 @@ class Scheduler:
 
             # Handle stream context switching for multi-stream scheduling.
             # This runs for all nodes (including device-less sync ops like
-            # record_event/wait_event) so they are placed inside the correct
-            # stream context. Only switch when inside a device guard (i.e.
-            # current_device is set), since stream variables are declared there.
-            if self._has_multi_stream_nodes() and self.current_device is not None:
+            # record_event/wait_event) once the stream variables are initialized.
+            if use_unguarded_streams or (
+                self._has_multi_stream_nodes() and self.current_device is not None
+            ):
                 self.generate_stream_ctx_switching(node)
 
             # Emit deferred alignment copies for inputs first used by this
@@ -13335,6 +13347,8 @@ class Scheduler:
 
         self.previous_nodes = None
         self.flush()
+        if use_unguarded_streams and self.current_stream_idx is not None:
+            self.generate_stream_ctx_exit()
 
     def benchmark_combo_kernel(
         self, node_list: Sequence[BaseSchedulerNode], node_benchmark_results

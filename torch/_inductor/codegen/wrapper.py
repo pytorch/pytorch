@@ -59,7 +59,7 @@ from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import KERNEL_CONFIGS_NAME
 from ..runtime.namedtuple_helpers import namedtuple_type
-from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
+from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX
 from ..stream_utils import (
     COOR_DEVICE_IDX_VAR,
     coor_device_str,
@@ -1687,6 +1687,18 @@ class MemoryPlanningLine(WrapperLine):
         return f"{type(self).__name__}({', '.join(args)})"
 
 
+def _python_stream_setup_lines(
+    num_streams: int,
+    stream_idx_to_user_obj_idx: dict[int, int],
+    *,
+    setup_default_stream: bool = True,
+) -> Iterator[str]:
+    if setup_default_stream:
+        yield f"{DEFAULT_STREAM} = {V.graph.device_ops.current_stream()}"
+    for i in range(1, num_streams):
+        yield f"{get_stream_name(i)} = _get_stream_by_index({stream_idx_to_user_obj_idx[i]})"
+
+
 @dataclasses.dataclass
 class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine):
     """Enter a device context and retrieve user stream objects.
@@ -1703,26 +1715,18 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
 
     def codegen(self, code: IndentedBuffer) -> None:
         """Generate context switching and stream retrieval code."""
+        super().codegen(code)
         if V.graph.cpp_wrapper:
-            super().codegen(code)
             V.graph.wrapper_code.codegen_stream_info_prologue(
                 code, self.num_streams, self.stream_idx_to_user_obj_idx
             )
         else:
-            super().codegen(code)
-
-            if self.setup_stream_cache:
-                code.writeline(
-                    f"{DEFAULT_STREAM} = {V.graph.device_ops.current_stream()}"
-                )
-
-            if self.num_streams > 1:
-                for i in range(1, self.num_streams):
-                    user_obj_idx = self.stream_idx_to_user_obj_idx[i]
-                    code.writeline(
-                        f"{STREAM_NAME_TEMPLATE.format(stream_idx=i)} "
-                        f"= _get_stream_by_index({user_obj_idx})",
-                    )
+            for line in _python_stream_setup_lines(
+                self.num_streams,
+                self.stream_idx_to_user_obj_idx,
+                setup_default_stream=self.setup_stream_cache,
+            ):
+                code.writeline(line)
 
 
 @dataclasses.dataclass
@@ -3311,6 +3315,19 @@ class PythonWrapperCodegen(CodeGen):
     def next_kernel_suffix(self) -> str:
         return f"{next(self._names_iter)}"
 
+    def _write_get_stream_by_index_import(self) -> None:
+        import_line = "from torch._dynamo.variables.streams import _get_stream_by_index"
+        if not self.imports.contains(import_line):
+            self.imports.writeline(import_line)
+
+    def codegen_python_stream_setup(
+        self, num_streams: int, stream_idx_to_user_obj_idx: dict[int, int]
+    ) -> None:
+        if num_streams > 1:
+            self._write_get_stream_by_index_import()
+        for line in _python_stream_setup_lines(num_streams, stream_idx_to_user_obj_idx):
+            self.writeline(line)
+
     def codegen_device_guard_enter(
         self,
         device_idx: int,
@@ -3321,11 +3338,7 @@ class PythonWrapperCodegen(CodeGen):
             if stream_idx_to_user_obj_idx is None:
                 raise AssertionError("expected stream_idx_to_user_obj_idx to be set")
             if not V.graph.cpp_wrapper:
-                import_line = (
-                    "from torch._dynamo.variables.streams import _get_stream_by_index"
-                )
-                if not self.imports.contains(import_line):
-                    self.imports.writeline(import_line)
+                self._write_get_stream_by_index_import()
             setup_stream_cache = self._last_default_stream_device != device_idx
             self._last_default_stream_device = device_idx
             self.writeline(

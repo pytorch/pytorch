@@ -4,6 +4,9 @@ from .common import DeviceIdx, DeviceOpOverrides, register_device_op_overrides
 
 
 class MPSDeviceOpOverrides(DeviceOpOverrides):
+    def current_stream(self) -> str:
+        return "torch.mps.current_stream()"
+
     # MPS is single-device, so a non-zero index is unexpected. device_idx may be a
     # runtime expr (str) under compile-on-one-rank, but MPS never receives that (it has
     # no current_device_idx_expr override), so guard only the int case.
