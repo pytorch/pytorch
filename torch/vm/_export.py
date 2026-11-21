@@ -70,68 +70,6 @@ def _arguments(
     return args, kwargs
 
 
-def _hollow(value: Any) -> Any:
-    """A tensor of the same sizes and dtype that holds nothing (on the
-    ``meta`` device); a list or tuple with such tensors; anything else as
-    it is."""
-    if isinstance(value, torch.Tensor):
-        return torch.empty(value.shape, dtype=value.dtype, device="meta")
-    if type(value) in (list, tuple):
-        return type(value)(_hollow(item) for item in value)
-    return value
-
-
-def _sizes(value: Any, dtypes: bool) -> Any:
-    """The sizes of a tensor and, with ``dtypes``, its dtype; those of the
-    items of a list or tuple; None for what is neither."""
-    if isinstance(value, torch.Tensor):
-        return (tuple(value.shape), value.dtype if dtypes else None)
-    if isinstance(value, (list, tuple)):
-        return tuple(_sizes(item, dtypes) for item in value)
-    return None
-
-
-def sized(kind: str, head: Any, operands: list[Any], kwnames: Any, result: Any) -> bool:
-    """Whether the sizes of what an operation gave follow from the sizes of
-    the tensors it was given and from its other arguments. The operation is
-    run once more on tensors of those sizes and dtypes that hold nothing:
-    one that has to look at what a tensor holds to size its result
-    (``nonzero`` inside ``argwhere``, a count that is a tensor) cannot run
-    there, and neither can anything else this does not know how to ask, for
-    which the answer is no. The engine asks this of an operator that is
-    made of other operators, when it takes its call down: ``kind`` is
-    ``"site"`` for a kernel call (``head`` describes it), ``"call"`` for a
-    call of the function ``head``, ``"method"`` for a call of the method of
-    that name of the first operand, ``"item"`` for a subscript.
-
-    What it gives must have the dtypes of what the operation gave as well,
-    unless the thread is under autocast: autocast casts on the device of the
-    tensors of a call, and not where tensors hold nothing."""
-    dtypes = not torch._C._is_any_autocast_enabled()
-    wanted = _sizes(result, dtypes)
-    if wanted is None:
-        return False
-    hollow = [_hollow(operand) for operand in operands]
-    try:
-        with torch.no_grad():
-            if kind == "site":
-                args, kwargs = _arguments(head, lambda k: hollow[k])
-                found = _overload(head["op"], head["overload"])(*args, **kwargs)
-            elif kind == "item":
-                found = hollow[0][hollow[1]]
-            else:
-                named = len(kwnames or ())
-                positional = hollow[: len(hollow) - named]
-                kwargs = dict(zip(kwnames or (), hollow[len(positional) :]))
-                if kind == "method":
-                    found = getattr(positional[0], head)(*positional[1:], **kwargs)
-                else:
-                    found = head(*positional, **kwargs)
-    except Exception:
-        return False
-    return _sizes(found, dtypes) == wanted
-
-
 def graph_module(description: dict[str, Any]) -> torch.fx.GraphModule:
     """The graph the engine describes: a placeholder per tensor it takes, a
     call of the operator overload per kernel call with the arguments the
@@ -250,54 +188,6 @@ def graph_module(description: dict[str, Any]) -> torch.fx.GraphModule:
         given.append(graph.call_function(asked[kind], (of(tensor), *dim)))
     graph.output(tuple(given))
     return torch.fx.GraphModule(torch.nn.Module(), graph)
-
-
-# What a function of autograd saved, by its class: the names are those of
-# the class, and are looked up once.
-_SAVED: dict[type, tuple[str, ...]] = {}
-# How many functions of autograd a run is followed back through.
-_HISTORY = 4096
-
-
-def saved_changed(results: list[Any]) -> str:
-    """Why the run that gave ``results`` is not exported, as far as what
-    autograd saved goes; empty if nothing stands against it. An operation
-    that wrote in place to a tensor that an earlier one saved for its
-    derivative makes eager raise when it goes backward; a graph whose
-    writes a compiler made functional would not. The engine asks this of a
-    run with writes before it exports it. The functions that the results
-    came from are gone through, and those before them (a tensor that was
-    written to has the function of the write, and the one that saved it
-    comes before that): where there are more of them than ``_HISTORY``, or
-    one does not let what it saved be looked at, the answer is that it
-    cannot be shown."""
-    if not torch.is_grad_enabled():
-        return ""
-    seen: set[Any] = set()
-    functions = [getattr(result, "grad_fn", None) for result in results]
-    left = [function for function in functions if function is not None]
-    while left:
-        function = left.pop()
-        if function in seen:
-            continue
-        if len(seen) >= _HISTORY:
-            return f"what autograd saved is not looked at behind {_HISTORY} functions"
-        seen.add(function)
-        names = _SAVED.get(type(function))
-        if names is None:
-            listed = dir(type(function))
-            names = tuple(name for name in listed if name.startswith("_saved_"))
-            _SAVED[type(function)] = names
-        for name in names:
-            try:
-                getattr(function, name)
-            except RuntimeError as e:
-                if "modified by an inplace operation" in str(e):
-                    return "a tensor that autograd saved is written in place"
-                return f"what autograd saved cannot be looked at: {str(e).splitlines()[0][:80]}"
-        earlier = [before for before, _ in function.next_functions]
-        left.extend(before for before in earlier if before is not None)
-    return ""
 
 
 def examples(input_types: list[Any]) -> list[torch.Tensor]:

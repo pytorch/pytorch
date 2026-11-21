@@ -7529,11 +7529,9 @@ print(json.dumps(found))
         )
         found = __import__("json").loads(ran.stdout.strip().split("\n")[-1])
         # The weight needs a gradient: the engine derives the backward of
-        # the graph, and loads no compiler for that. What it loads is what
-        # it asks of a run before a callable may stand for it (whether the
-        # sizes of what an operation gives follow from its sizes).
+        # the graph, and loads nothing of Python for that either.
         self.assertEqual(found["graphs"], ["compiled"])
-        self.assertEqual(found["engine"], ["torch.vm._export"])
+        self.assertEqual(found["engine"], [])
         # A pass over graphs of one's own brings the export, and nothing
         # else; a pass that compiles brings its compiler when it first runs.
         self.assertEqual(found["exported"], ["compiled"])
@@ -9877,22 +9875,23 @@ print(json.dumps(found))
         self.assertRegex(graph["reason"], rf"^{raised} \(in helper, test_vm.py:\d+\)$")
         # What autograd saved is looked at through the history of the run,
         # up to a bound: a longer one is not exported for.
-        export = importlib.import_module("torch.vm._export")
         w = torch.randn(4, 4, requires_grad=True)
+        far = w
+        for _ in range(4100):
+            far = far + 0.0
         passes = (*DEFAULT, P.Graphs(), keep)
-        short = "what autograd saved is not looked at behind 8 functions"
-        for bound, reason in ((export._HISTORY, None), (8, short)):
-            with unittest.mock.patch.object(export, "_HISTORY", bound):
-                compiled = torch.vm(graph_remembers, passes=passes, fallback=False)
-                for _ in range(4):
-                    got, expected = compiled(x, w), graph_remembers(x, w)
-                    self.assertEqual(got, expected, atol=0, rtol=0)
-                    mine = torch.autograd.grad(got.sum(), w)
-                    theirs = torch.autograd.grad(expected.sum(), w)
-                    self.assertEqual(mine, theirs, atol=0, rtol=0)
-                forms = [form for g in self.graphs(compiled) for form in g["forms"]]
-                closed = [form["reason"] for form in forms if "reason" in form]
-                self.assertEqual(closed, [reason] if reason else [])
+        long = "what autograd saved is not looked at behind 4096 functions"
+        for weight, reason in ((w, None), (far, long)):
+            compiled = torch.vm(graph_remembers, passes=passes, fallback=False)
+            for _ in range(4):
+                got, expected = compiled(x, weight), graph_remembers(x, weight)
+                self.assertEqual(got, expected, atol=0, rtol=0)
+                mine = torch.autograd.grad(got.sum(), w)
+                theirs = torch.autograd.grad(expected.sum(), w)
+                self.assertEqual(mine, theirs, atol=0, rtol=0)
+            forms = [form for g in self.graphs(compiled) for form in g["forms"]]
+            closed = [form["reason"] for form in forms if "reason" in form]
+            self.assertEqual(closed, [reason] if reason else [])
 
     def test_a_pool_to_one_cell_and_a_meshgrid_are_operations_of_a_small_graph(self):
         def keep(gm, input_types):

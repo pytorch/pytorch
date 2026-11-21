@@ -70,11 +70,11 @@ fn refused<T>(why: impl Into<String>) -> Result<T, Stop> {
 static TORCH: PyOnceLock<Py<PyModule>> = PyOnceLock::new();
 static TENSOR: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
 
-fn torch(py: Python<'_>) -> PyResult<&Bound<'_, PyModule>> {
+pub(crate) fn torch(py: Python<'_>) -> PyResult<&Bound<'_, PyModule>> {
     Ok(TORCH.get_or_try_init(py, || PyModule::import(py, "torch").map(Bound::unbind))?.bind(py))
 }
 
-fn is_tensor(obj: &Bound<'_, PyAny>) -> bool {
+pub(crate) fn is_tensor(obj: &Bound<'_, PyAny>) -> bool {
     let py = obj.py();
     let Ok(class) = TENSOR.get_or_try_init(py, || torch(py)?.getattr("Tensor").map(Bound::unbind)) else {
         return false;
@@ -146,31 +146,14 @@ fn same_bits(a: &Bound<'_, PyAny>, b: &Bound<'_, PyAny>) -> PyResult<bool> {
     torch(a.py())?.call_method1("equal", (a, b))?.extract()
 }
 
-/// The names under which the nodes of a class hold what they saved.
-static SAVED: Mutex<Option<HashMap<usize, Vec<String>>>> = Mutex::new(None);
-
-/// The names under which a node of autograd holds what it saved, in the
-/// order of the names.
-fn saved_names(py: Python<'_>, node: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
-    let kind = node.get_type();
-    let known = SAVED.lock().unwrap().get_or_insert_with(HashMap::new).get(&(kind.as_ptr() as usize)).cloned();
-    if let Some(names) = known {
-        return Ok(names);
-    }
-    let listed: Vec<String> = py.import("builtins")?.getattr("dir")?.call1((&kind,))?.extract()?;
-    let names: Vec<String> = listed.into_iter().filter(|name| name.starts_with("_saved_")).collect();
-    SAVED.lock().unwrap().get_or_insert_with(HashMap::new).insert(kind.as_ptr() as usize, names.clone());
-    Ok(names)
-}
-
 /// Sets the grad mode of the thread until it is dropped.
-struct GradMode<'py> {
+pub(crate) struct GradMode<'py> {
     torch: &'py Bound<'py, PyModule>,
     before: bool,
 }
 
 impl<'py> GradMode<'py> {
-    fn set(py: Python<'py>, enabled: bool) -> PyResult<GradMode<'py>> {
+    pub(crate) fn set(py: Python<'py>, enabled: bool) -> PyResult<GradMode<'py>> {
         let torch = torch(py)?;
         let before: bool = torch.call_method0("is_grad_enabled")?.extract()?;
         torch.getattr("_C")?.call_method1("_set_grad_enabled", (enabled,))?;
@@ -781,11 +764,60 @@ impl Step {
     }
 }
 
+/// The operator a call site calls, and its arguments as the site has them:
+/// by name for those the operator takes by name only.
+#[allow(clippy::type_complexity)]
+fn site_of<'py>(py: Python<'py>, site: &Bound<'py, PyAny>) -> PyResult<(Bound<'py, PyAny>, Vec<(Option<String>, SiteArg)>)> {
+    let (name, overload): (String, String) = (site.get_item("op")?.extract()?, site.get_item("overload")?.extract()?);
+    let (namespace, op) = name.split_once("::").unwrap_or(("aten", &name));
+    let overload = if overload.is_empty() { "default" } else { &overload };
+    let target = torch(py)?.getattr("ops")?.getattr(namespace)?.getattr(op)?.getattr(overload)?;
+    let mut args = Vec::new();
+    for arg in site.get_item("args")?.try_iter()? {
+        let arg = arg?;
+        let (name, keyword_only, source): (String, bool, String) = (arg.get_item(0)?.extract()?, arg.get_item(1)?.extract()?, arg.get_item(2)?.extract()?);
+        let payload = arg.get_item(3)?;
+        let found = match source.as_str() {
+            "operand" => SiteArg::Operand(payload.get_item(0)?.extract()?, payload.get_item(1)?.extract::<String>().is_ok_and(|how| how == "int_as_list")),
+            "packed" => SiteArg::Packed(payload.extract()?),
+            _ => SiteArg::Const(payload.unbind()),
+        };
+        args.push((keyword_only.then_some(name), found));
+    }
+    Ok((target, args))
+}
+
+/// Calls the operator of a call site, as `site_export` describes one, with
+/// `operand(k)` for the k-th value the site takes.
+pub(crate) fn site_call<'py>(py: Python<'py>, site: &Bound<'py, PyAny>, operand: &dyn Fn(usize) -> PyResult<Bound<'py, PyAny>>) -> PyResult<Bound<'py, PyAny>> {
+    let (target, args) = site_of(py, site)?;
+    let mut positional = Vec::new();
+    let kwargs = PyDict::new(py);
+    for (name, arg) in &args {
+        let value = match arg {
+            SiteArg::Operand(at, listed) => {
+                let value = operand(*at)?;
+                if *listed {
+                    PyList::new(py, [value])?.into_any()
+                } else {
+                    value
+                }
+            }
+            SiteArg::Packed(which) => PyList::new(py, which.iter().map(|at| operand(*at)).collect::<PyResult<Vec<_>>>()?)?.into_any(),
+            SiteArg::Const(held) => held.bind(py).clone(),
+        };
+        match name {
+            Some(name) => kwargs.set_item(name, value)?,
+            None => positional.push(value),
+        }
+    }
+    target.call(PyTuple::new(py, positional)?, Some(&kwargs))
+}
+
 impl Graph {
     /// The graph the engine describes for the exporter.
     fn described(py: Python<'_>, description: &Bound<'_, PyDict>) -> PyResult<Graph> {
         let need = |name: &str| description.get_item(name)?.ok_or_else(|| PyValueError::new_err(format!("the description of a graph has no {name}")));
-        let ops = torch(py)?.getattr("ops")?;
         let mut steps = Vec::new();
         for node in need("nodes")?.try_iter()? {
             let node = node?;
@@ -794,23 +826,7 @@ impl Graph {
             let value = |at: usize| -> PyResult<Option<u32>> { Ok(Some(part(at)?.extract()?)) };
             let step = match kind.as_str() {
                 "aten" => {
-                    let site = part(1)?;
-                    let (name, overload): (String, String) = (site.get_item("op")?.extract()?, site.get_item("overload")?.extract()?);
-                    let (namespace, op) = name.split_once("::").unwrap_or(("aten", &name));
-                    let overload = if overload.is_empty() { "default" } else { &overload };
-                    let target = ops.getattr(namespace)?.getattr(op)?.getattr(overload)?;
-                    let mut args = Vec::new();
-                    for arg in site.get_item("args")?.try_iter()? {
-                        let arg = arg?;
-                        let (name, keyword_only, source): (String, bool, String) = (arg.get_item(0)?.extract()?, arg.get_item(1)?.extract()?, arg.get_item(2)?.extract()?);
-                        let payload = arg.get_item(3)?;
-                        let found = match source.as_str() {
-                            "operand" => SiteArg::Operand(payload.get_item(0)?.extract()?, payload.get_item(1)?.extract::<String>().is_ok_and(|how| how == "int_as_list")),
-                            "packed" => SiteArg::Packed(payload.extract()?),
-                            _ => SiteArg::Const(payload.unbind()),
-                        };
-                        args.push((keyword_only.then_some(name), found));
-                    }
+                    let (target, args) = site_of(py, &part(1)?)?;
                     Step { kind: Kind::Aten(target.unbind(), args, operands(&part(2)?)?), value: value(3)? }
                 }
                 "call" => Step { kind: Kind::Call(Some(operand(&part(1)?)?), None, operands(&part(2)?)?, names(&part(3)?)?), value: value(4)? },
@@ -1553,7 +1569,7 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
     // it runs: by the names it keeps it under.
     for (number, node) in nodes.order.iter().enumerate() {
         let mut kept: Vec<Value> = Vec::new();
-        for name in saved_names(py, &node.obj)? {
+        for name in crate::asks::saved_names(py, &node.obj)? {
             let Ok(held) = node.obj.getattr(name.as_str()) else {
                 continue;
             };
