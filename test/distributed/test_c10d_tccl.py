@@ -29,9 +29,9 @@
 # (the launcher sets RANK/WORLD_SIZE/MASTER_ADDR/MASTER_PORT/TCCL_PEER_DEVICES
 # per rank and runs this file on each node).
 
-import os
 import contextlib
 import math
+import os
 import sys
 import unittest
 from datetime import timedelta
@@ -40,6 +40,7 @@ import torch
 import torch.distributed as c10d
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
+
 
 # TCCL needs the multi-node launcher env. Without it (e.g. generic CI / a bare
 # pytest run) there is no fabric to talk to, so skip the module cleanly.
@@ -50,18 +51,25 @@ if not c10d.is_available():
 
 from torch.testing._internal.common_distributed import requires_tccl
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skip_but_pass_in_sandcastle_if,
     TestCase,
 )
 
 
 # ---- dtype / reduce-op tables under test ----
 REDUCE_DTYPES = [
-    torch.float32, torch.float16, torch.bfloat16,
-    torch.int64, torch.int32, torch.int16, torch.int8, torch.uint8, torch.bool,
+    torch.float32,
+    torch.float16,
+    torch.bfloat16,
+    torch.int64,
+    torch.int32,
+    torch.int16,
+    torch.int8,
+    torch.uint8,
+    torch.bool,
 ]
 COPY_DTYPES = REDUCE_DTYPES + [torch.complex64]
 FLOAT_DTYPES = [torch.float32, torch.float16, torch.bfloat16]
@@ -164,20 +172,32 @@ class TcclTestBase(TestCase):
         if env is None:
             raise unittest.SkipTest(
                 "TCCL is multi-node; launch via the TCCL launcher (sets RANK/"
-                "WORLD_SIZE/MASTER_ADDR/MASTER_PORT). Skipping single-host run.")
+                "WORLD_SIZE/MASTER_ADDR/MASTER_PORT). Skipping single-host run."
+            )
         if sys.platform != "darwin" or not c10d.is_tccl_available():
-            raise unittest.SkipTest("TCCL requires macOS with the TCCL backend built in")
+            raise unittest.SkipTest(
+                "TCCL requires macOS with the TCCL backend built in"
+            )
         if not torch.backends.mps.is_available():
             raise unittest.SkipTest("TCCL requires an available MPS device")
 
         cls.rank, cls.world_size, master_addr, master_port = env
         cls.device = torch.device("mps", 0)  # one MPS device per machine (not mps:rank)
         store = c10d.TCPStore(
-            host_name=master_addr, port=master_port, world_size=cls.world_size,
-            is_master=(cls.rank == 0), timeout=cls.timeout)
+            host_name=master_addr,
+            port=master_port,
+            world_size=cls.world_size,
+            is_master=(cls.rank == 0),
+            timeout=cls.timeout,
+        )
         c10d.init_process_group(
-            backend="tccl", store=store, rank=cls.rank, world_size=cls.world_size,
-            device_id=cls.device, timeout=cls.timeout)
+            backend="tccl",
+            store=store,
+            rank=cls.rank,
+            world_size=cls.world_size,
+            device_id=cls.device,
+            timeout=cls.timeout,
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -194,8 +214,9 @@ class TcclTestBase(TestCase):
 
     # ---- helpers --------------------------------------------------------------
     def _full(self, dtype, n=4096):
-        return torch.full((n,), _fill_value(self.rank, dtype), dtype=dtype,
-                          device=self.device)
+        return torch.full(
+            (n,), _fill_value(self.rank, dtype), dtype=dtype, device=self.device
+        )
 
     def _assert(self, actual, expected_scalar, dtype):
         exp = torch.full_like(actual, expected_scalar)
@@ -205,6 +226,8 @@ class TcclTestBase(TestCase):
 @requires_tccl()
 class ProcessGroupTcclCorrectnessTest(TcclTestBase):
     """Per-collective numerical correctness over the supported dtype/op contract."""
+
+    hw_classification = HardwareClassification.MPS
 
     # ---- allreduce ------------------------------------------------------------
     @parametrize("dtype", REDUCE_DTYPES)
@@ -258,21 +281,28 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
         out = torch.empty(1024 * ws, dtype=dtype, device=self.device)
         c10d.all_gather_into_tensor(out, inp)
         for r in range(ws):
-            exp = torch.full((1024,), _fill_value(r, dtype), dtype=dtype, device=self.device)
-            self.assertEqual(out[r * 1024:(r + 1) * 1024], exp, **_tol(dtype))
+            exp = torch.full(
+                (1024,), _fill_value(r, dtype), dtype=dtype, device=self.device
+            )
+            self.assertEqual(out[r * 1024 : (r + 1) * 1024], exp, **_tol(dtype))
 
     # ---- reduce_scatter (coalesced; TP sequence-parallel / DTensor path) ------
     @parametrize("dtype", REDUCE_DTYPES)
     @parametrize("op", ["SUM", "MIN", "MAX"])
     def test_reduce_scatter_sum_minmax(self, dtype, op):
         import torch.distributed._functional_collectives as funcol
+
         ws = self.world_size
         inp = self._full(dtype, n=1024 * ws)
-        out = funcol.reduce_scatter_tensor(inp, op.lower(), scatter_dim=0,
-                                           group=c10d.distributed_c10d._get_default_group())
+        out = funcol.reduce_scatter_tensor(
+            inp,
+            op.lower(),
+            scatter_dim=0,
+            group=c10d.distributed_c10d._get_default_group(),
+        )
         out = out.wait() if hasattr(out, "wait") else out
         if dtype == torch.bool:
-            want = True if op in ("SUM", "MAX") else False
+            want = op in ("SUM", "MAX")
             self._assert(out, want, dtype)
         else:
             want = {"SUM": ws * (ws + 1) // 2, "MIN": 1, "MAX": ws}[op]
@@ -281,20 +311,27 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
     @parametrize("dtype", FLOAT_DTYPES)
     def test_reduce_scatter_avg(self, dtype):
         import torch.distributed._functional_collectives as funcol
+
         ws = self.world_size
         inp = self._full(dtype, n=1024 * ws)
-        out = funcol.reduce_scatter_tensor(inp, "avg", scatter_dim=0,
-                                           group=c10d.distributed_c10d._get_default_group())
+        out = funcol.reduce_scatter_tensor(
+            inp, "avg", scatter_dim=0, group=c10d.distributed_c10d._get_default_group()
+        )
         out = out.wait() if hasattr(out, "wait") else out
         self._assert(out, (ws + 1) / 2.0, dtype)
 
     @parametrize("dtype", REDUCE_DTYPES)
     def test_reduce_scatter_product(self, dtype):
         import torch.distributed._functional_collectives as funcol
+
         ws = self.world_size
         inp = self._full(dtype, n=1024 * ws)
-        out = funcol.reduce_scatter_tensor(inp, "product", scatter_dim=0,
-                                           group=c10d.distributed_c10d._get_default_group())
+        out = funcol.reduce_scatter_tensor(
+            inp,
+            "product",
+            scatter_dim=0,
+            group=c10d.distributed_c10d._get_default_group(),
+        )
         out = out.wait() if hasattr(out, "wait") else out
         if dtype == torch.bool:
             self._assert(out, False, dtype)
@@ -345,8 +382,10 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.int64, torch.complex64])
     def test_gather(self, dtype):
         if _ring_topology():
-            self.skipTest("gather is mesh-only; ring rejects it "
-                          "(see ProcessGroupTcclContractTest)")
+            self.skipTest(
+                "gather is mesh-only; ring rejects it "
+                "(see ProcessGroupTcclContractTest)"
+            )
         ws, r, dev, n = self.world_size, self.rank, self.device, 1024
         inp = self._full(dtype, n=n)
         if r == 0:
@@ -376,13 +415,17 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.int64, torch.complex64])
     def test_scatter(self, dtype):
         if _ring_topology():
-            self.skipTest("scatter is mesh-only; ring rejects it "
-                          "(see ProcessGroupTcclContractTest)")
+            self.skipTest(
+                "scatter is mesh-only; ring rejects it "
+                "(see ProcessGroupTcclContractTest)"
+            )
         ws, r, dev, n = self.world_size, self.rank, self.device, 1024
         out = torch.empty(n, dtype=dtype, device=dev)
         if r == 0:
-            sl = [torch.full((n,), _fill_value(k, dtype), dtype=dtype, device=dev)
-                  for k in range(ws)]
+            sl = [
+                torch.full((n,), _fill_value(k, dtype), dtype=dtype, device=dev)
+                for k in range(ws)
+            ]
             c10d.scatter(out, scatter_list=sl, src=0)
         else:
             c10d.scatter(out, scatter_list=None, src=0)
@@ -395,8 +438,10 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
         root = ws - 1
         out = torch.empty(n, dtype=torch.float32, device=dev)
         if r == root:
-            sl = [torch.full((n,), float(k + 1), dtype=torch.float32, device=dev)
-                  for k in range(ws)]
+            sl = [
+                torch.full((n,), float(k + 1), dtype=torch.float32, device=dev)
+                for k in range(ws)
+            ]
             c10d.scatter(out, scatter_list=sl, src=root)
         else:
             c10d.scatter(out, scatter_list=None, src=root)
@@ -418,7 +463,9 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
             if dtype == torch.bool:
                 self._assert(out, op in ("SUM", "MAX"), dtype)  # SUM/MAX=OR, MIN=AND
             else:
-                self._assert(out, {"SUM": ws * (ws + 1) // 2, "MIN": 1, "MAX": ws}[op], dtype)
+                self._assert(
+                    out, {"SUM": ws * (ws + 1) // 2, "MIN": 1, "MAX": ws}[op], dtype
+                )
 
     @parametrize("dtype", FLOAT_DTYPES)
     @parametrize("algo", ["ring", "mesh"])
@@ -460,7 +507,9 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
             if dtype == torch.bool:
                 self._assert(out, op in ("SUM", "MAX"), dtype)
             else:
-                self._assert(out, {"SUM": ws * (ws + 1) // 2, "MIN": 1, "MAX": ws}[op], dtype)
+                self._assert(
+                    out, {"SUM": ws * (ws + 1) // 2, "MIN": 1, "MAX": ws}[op], dtype
+                )
 
     @parametrize("dtype", FLOAT_DTYPES)
     @parametrize("algo", ["ring", "mesh"])
@@ -505,7 +554,9 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
             c10d.recv(t, src=r - 1)
             self.assertEqual(t, torch.full((n,), float(r - 1), device=dev))
         if r < ws - 1:
-            c10d.send(torch.full((n,), float(r), dtype=torch.float32, device=dev), dst=r + 1)
+            c10d.send(
+                torch.full((n,), float(r), dtype=torch.float32, device=dev), dst=r + 1
+            )
 
     @parametrize("dtype", [torch.float32, torch.bfloat16, torch.int64])
     def test_send_recv_pair_dtypes(self, dtype):
@@ -515,7 +566,9 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
             self.skipTest("send/recv needs world_size >= 2")
         n = 512
         if r == 0:
-            c10d.send(torch.full((n,), _fill_value(7, dtype), dtype=dtype, device=dev), dst=1)
+            c10d.send(
+                torch.full((n,), _fill_value(7, dtype), dtype=dtype, device=dev), dst=1
+            )
         elif r == 1:
             t = torch.empty(n, dtype=dtype, device=dev)
             c10d.recv(t, src=0)
@@ -538,14 +591,18 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
         # rank 0 -> rank (ws-1) directly: any pair has a usable QP (full mesh),
         # not just neighbours.
         if _ring_topology():
-            self.skipTest("non-neighbor p2p is mesh-only; ring rejects it "
-                          "(see ProcessGroupTcclRingRejectTest)")
+            self.skipTest(
+                "non-neighbor p2p is mesh-only; ring rejects it "
+                "(see ProcessGroupTcclRingRejectTest)"
+            )
         ws, r, dev = self.world_size, self.rank, self.device
         if ws < 3:
             self.skipTest("non-adjacent needs world_size >= 3")
         n = 1024
         if r == 0:
-            c10d.send(torch.full((n,), 5.0, dtype=torch.float32, device=dev), dst=ws - 1)
+            c10d.send(
+                torch.full((n,), 5.0, dtype=torch.float32, device=dev), dst=ws - 1
+            )
         elif r == ws - 1:
             t = torch.empty(n, dtype=torch.float32, device=dev)
             c10d.recv(t, src=0)
@@ -561,30 +618,38 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
         with _force_algo(algo):
             ws, r, dev = self.world_size, self.rank, self.device
             seg = 256
-            inp = torch.full((seg * ws,), _fill_value(r, dtype), dtype=dtype, device=dev)
+            inp = torch.full(
+                (seg * ws,), _fill_value(r, dtype), dtype=dtype, device=dev
+            )
             out = torch.empty(seg * ws, dtype=dtype, device=dev)
             c10d.all_to_all_single(out, inp)
             for i in range(ws):
                 exp = torch.full((seg,), _fill_value(i, dtype), dtype=dtype, device=dev)
-                self.assertEqual(out[i * seg:(i + 1) * seg], exp, **_tol(dtype))
+                self.assertEqual(out[i * seg : (i + 1) * seg], exp, **_tol(dtype))
 
     def test_alltoall_uneven(self):
         # alltoallv (variable splits -> mesh). rank r sends (j+1) rows to rank j and
         # fills its input with (r+1); so rank r receives (r+1) rows from each src,
         # each block valued (src+1). Splits are consistent across ranks.
         if _ring_topology():
-            self.skipTest("uneven alltoall is mesh-only; ring rejects it "
-                          "(see ProcessGroupTcclRingRejectTest)")
+            self.skipTest(
+                "uneven alltoall is mesh-only; ring rejects it "
+                "(see ProcessGroupTcclRingRejectTest)"
+            )
         ws, r, dev = self.world_size, self.rank, self.device
         in_splits = [j + 1 for j in range(ws)]
         out_splits = [r + 1 for _ in range(ws)]
-        inp = torch.full((sum(in_splits),), float(r + 1), dtype=torch.float32, device=dev)
+        inp = torch.full(
+            (sum(in_splits),), float(r + 1), dtype=torch.float32, device=dev
+        )
         out = torch.empty(sum(out_splits), dtype=torch.float32, device=dev)
         c10d.all_to_all_single(out, inp, out_splits, in_splits)
         off = 0
         for src in range(ws):
-            self.assertEqual(out[off:off + (r + 1)],
-                             torch.full((r + 1,), float(src + 1), device=dev))
+            self.assertEqual(
+                out[off : off + (r + 1)],
+                torch.full((r + 1,), float(src + 1), device=dev),
+            )
             off += r + 1
 
     @parametrize("algo", ["ring", "mesh"])
@@ -597,8 +662,10 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
             out = torch.empty(seg * ws, dtype=torch.float32, device=dev)
             c10d.all_to_all_single(out, inp)
             for i in range(ws):
-                self.assertEqual(out[i * seg:(i + 1) * seg],
-                                 torch.full((seg,), float(i + 1), device=dev))
+                self.assertEqual(
+                    out[i * seg : (i + 1) * seg],
+                    torch.full((seg,), float(i + 1), device=dev),
+                )
 
     # ---- allgather, list form (dist.all_gather -> the `allgather` virtual) -----
     # The byte-copy paths are dtype-agnostic (proven across dtypes via the _base
@@ -607,32 +674,45 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
     def test_allgather_list(self):
         ws = self.world_size
         inp = self._full(torch.float32, n=1024)
-        outs = [torch.empty(1024, dtype=torch.float32, device=self.device) for _ in range(ws)]
+        outs = [
+            torch.empty(1024, dtype=torch.float32, device=self.device)
+            for _ in range(ws)
+        ]
         c10d.all_gather(outs, inp)
         for r in range(ws):
-            self.assertEqual(outs[r], torch.full((1024,), float(r + 1), device=self.device))
+            self.assertEqual(
+                outs[r], torch.full((1024,), float(r + 1), device=self.device)
+            )
 
     # ---- allgather coalesced (funcol -> allgather_into_tensor_coalesced) -------
     # The DTensor/TP entry point, distinct from _base (eager) above.
     def test_allgather_coalesced(self):
         import torch.distributed._functional_collectives as funcol
+
         ws = self.world_size
         inp = self._full(torch.float32, n=1024)
-        out = funcol.all_gather_tensor(inp, gather_dim=0,
-                                       group=c10d.distributed_c10d._get_default_group())
+        out = funcol.all_gather_tensor(
+            inp, gather_dim=0, group=c10d.distributed_c10d._get_default_group()
+        )
         out = out.wait() if hasattr(out, "wait") else out
         for r in range(ws):
-            self.assertEqual(out[r * 1024:(r + 1) * 1024],
-                             torch.full((1024,), float(r + 1), device=self.device))
+            self.assertEqual(
+                out[r * 1024 : (r + 1) * 1024],
+                torch.full((1024,), float(r + 1), device=self.device),
+            )
 
     # ---- large allreduce: crosses the 512 KB mesh chunk boundary + (ws>2) the ring
     #      auto-switch (fp32 >=1 MB). Tiny dtype-matrix cells never reach either. -----
     def test_allreduce_large_fp32(self):
         n = 3 * 1024 * 1024  # 12 MB fp32 -> ring at ws>2, many 512 KB chunks
-        t = torch.full((n,), float(self.rank + 1), dtype=torch.float32, device=self.device)
+        t = torch.full(
+            (n,), float(self.rank + 1), dtype=torch.float32, device=self.device
+        )
         c10d.all_reduce(t, op=c10d.ReduceOp.SUM)
         ws = self.world_size
-        self.assertEqual(t, torch.full((n,), float(ws * (ws + 1) // 2), device=self.device))
+        self.assertEqual(
+            t, torch.full((n,), float(ws * (ws + 1) // 2), device=self.device)
+        )
 
     # ---- ragged / chunk-boundary sizes on the RING path ----
     # N full 512 KB chunks + a 1-elem ODD tail: exercises the double-ring A/B
@@ -653,10 +733,14 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
         # pipeline must fill/drain a piece far smaller than kChunkSize.
         with _force_algo("ring"):
             n = 128 * 1024 + 1
-            t = torch.full((n,), float(self.rank + 1), dtype=torch.float32, device=self.device)
+            t = torch.full(
+                (n,), float(self.rank + 1), dtype=torch.float32, device=self.device
+            )
             c10d.all_reduce(t, op=c10d.ReduceOp.SUM)
             ws = self.world_size
-            self.assertEqual(t, torch.full((n,), float(ws * (ws + 1) // 2), device=self.device))
+            self.assertEqual(
+                t, torch.full((n,), float(ws * (ws + 1) // 2), device=self.device)
+            )
 
     @parametrize("op", ["SUM", "MAX"])
     def test_reduce_scatter_ring_ragged(self, op):
@@ -664,7 +748,9 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
         with _force_algo("ring"):
             ws = self.world_size
             n = 3 * 128 * 1024 + 1
-            inp = torch.full((n * ws,), float(self.rank + 1), dtype=torch.float32, device=self.device)
+            inp = torch.full(
+                (n * ws,), float(self.rank + 1), dtype=torch.float32, device=self.device
+            )
             out = torch.empty(n, dtype=torch.float32, device=self.device)
             c10d.reduce_scatter_tensor(out, inp, op=getattr(c10d.ReduceOp, op))
             want = ws * (ws + 1) // 2 if op == "SUM" else ws
@@ -675,12 +761,16 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
         with _force_algo("ring"):
             ws = self.world_size
             n = 3 * 128 * 1024 + 1
-            inp = torch.full((n,), float(self.rank + 1), dtype=torch.float32, device=self.device)
+            inp = torch.full(
+                (n,), float(self.rank + 1), dtype=torch.float32, device=self.device
+            )
             out = torch.empty(n * ws, dtype=torch.float32, device=self.device)
             c10d.all_gather_into_tensor(out, inp)
             for r in range(ws):
-                self.assertEqual(out[r * n:(r + 1) * n],
-                                 torch.full((n,), float(r + 1), device=self.device))
+                self.assertEqual(
+                    out[r * n : (r + 1) * n],
+                    torch.full((n,), float(r + 1), device=self.device),
+                )
 
     def test_send_recv_ragged_multichunk(self):
         # depth-2 pipelined p2p over an odd, non-chunk-aligned payload (rank 0 -> 1).
@@ -702,7 +792,9 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
         exp = torch.full((n,), float(ws * (ws + 1) // 2), device=self.device)
         for algo in ("ring", "mesh"):
             with _force_algo(algo):
-                t = torch.full((n,), float(self.rank + 1), dtype=torch.float32, device=self.device)
+                t = torch.full(
+                    (n,), float(self.rank + 1), dtype=torch.float32, device=self.device
+                )
                 c10d.all_reduce(t, op=c10d.ReduceOp.SUM)
                 self.assertEqual(t, exp, msg=f"algo={algo}")
 
@@ -736,6 +828,8 @@ class ProcessGroupTcclIntegrationTest(TcclTestBase):
     over TCCL, each diffed against a LOCAL single-process baseline (non-circular —
     the baseline uses no collectives)."""
 
+    hw_classification = HardwareClassification.MPS
+
     def _mlp(self):
         return nn.Sequential(nn.Linear(_IN, _HID), nn.ReLU(), nn.Linear(_HID, _OUT))
 
@@ -747,7 +841,7 @@ class ProcessGroupTcclIntegrationTest(TcclTestBase):
         # (broadcast params + allgather metadata) + backward allreduce over TCCL.
         rank, ws = self.rank, self.world_size
         dev = self.device
-        torch.manual_seed(0)                       # identical init on every rank
+        torch.manual_seed(0)  # identical init on every rank
         model = self._mlp().to(dev).to(dtype)
         init_sd = {k: v.detach().clone() for k, v in model.state_dict().items()}
 
@@ -760,15 +854,23 @@ class ProcessGroupTcclIntegrationTest(TcclTestBase):
 
         ref = self._mlp().to(dev).to(dtype)
         ref.load_state_dict(init_sd)
-        xs = torch.cat([_randn((_BATCH, _IN), 100 + r, dtype, dev) for r in range(ws)], 0)
-        ys = torch.cat([_randn((_BATCH, _OUT), 200 + r, dtype, dev) for r in range(ws)], 0)
+        xs = torch.cat(
+            [_randn((_BATCH, _IN), 100 + r, dtype, dev) for r in range(ws)], 0
+        )
+        ys = torch.cat(
+            [_randn((_BATCH, _OUT), 200 + r, dtype, dev) for r in range(ws)], 0
+        )
         ((ref(xs) - ys) ** 2).mean().backward()
         torch.mps.synchronize()
         ref_grads = [p.grad.detach().float().cpu() for p in ref.parameters()]
 
-        worst = max((dg - rg).abs().max().item() for dg, rg in zip(ddp_grads, ref_grads))
+        worst = max(
+            (dg - rg).abs().max().item() for dg, rg in zip(ddp_grads, ref_grads)
+        )
         tol = 2e-2 if dtype == torch.bfloat16 else 1e-4
-        self.assertLess(worst, tol, f"DDP grads diverge from single-process baseline: {worst:.3e}")
+        self.assertLess(
+            worst, tol, f"DDP grads diverge from single-process baseline: {worst:.3e}"
+        )
 
     @parametrize("dtype", [torch.float32, torch.bfloat16])
     def test_tp_megatron_forward(self, dtype):
@@ -778,14 +880,17 @@ class ProcessGroupTcclIntegrationTest(TcclTestBase):
         dev = self.device
         if _HID % ws != 0:
             self.skipTest(f"hidden dim {_HID} not divisible by world_size {ws}")
-        W1 = _randn((_IN, _HID), 1, dtype, dev)    # full weights, identical per rank
+        W1 = _randn((_IN, _HID), 1, dtype, dev)  # full weights, identical per rank
         W2 = _randn((_HID, _OUT), 2, dtype, dev)
         x = _randn((_BATCH, _IN), 3, dtype, dev)
-        full = torch.relu(x @ W1) @ W2             # single-process reference (no comm)
+        full = torch.relu(x @ W1) @ W2  # single-process reference (no comm)
 
         hp = _HID // ws
-        z = torch.relu(x @ W1[:, rank * hp:(rank + 1) * hp]) @ W2[rank * hp:(rank + 1) * hp, :]
-        c10d.all_reduce(z, op=c10d.ReduceOp.SUM)   # sum partials -> full output
+        z = (
+            torch.relu(x @ W1[:, rank * hp : (rank + 1) * hp])
+            @ W2[rank * hp : (rank + 1) * hp, :]
+        )
+        c10d.all_reduce(z, op=c10d.ReduceOp.SUM)  # sum partials -> full output
         torch.mps.synchronize()
 
         ref = full.float().cpu()
@@ -794,14 +899,19 @@ class ProcessGroupTcclIntegrationTest(TcclTestBase):
         # compare RELATIVE error against the reference scale.
         scale = max(1.0, ref.abs().max().item())
         rtol = 3e-2 if dtype == torch.bfloat16 else 1e-5
-        self.assertLess(abs_err / scale, rtol,
-                        f"TP forward diverges from single-process baseline: rel={abs_err/scale:.3e}")
+        self.assertLess(
+            abs_err / scale,
+            rtol,
+            f"TP forward diverges from single-process baseline: rel={abs_err / scale:.3e}",
+        )
 
 
 @requires_tccl()
 class ProcessGroupTcclContractTest(TcclTestBase):
     """Negative/contract tests: the unsupported (op, dtype) cells must reject
     cleanly (raise), not crash or silently corrupt."""
+
+    hw_classification = HardwareClassification.MPS
 
     def test_avg_integer_rejects(self):
         # AVG is float-only (matches NCCL); integer AVG must raise.
@@ -817,21 +927,25 @@ class ProcessGroupTcclContractTest(TcclTestBase):
 
     def test_complex_minmax_rejects(self):
         # complex MIN/MAX is undefined; the PyTorch frontend deny-lists it.
-        t = torch.full((128,), complex(self.rank + 1, 1), dtype=torch.complex64,
-                       device=self.device)
+        t = torch.full(
+            (128,), complex(self.rank + 1, 1), dtype=torch.complex64, device=self.device
+        )
         with self.assertRaises(Exception):
             c10d.all_reduce(t, op=c10d.ReduceOp.MAX)
 
     def test_complex_product_rejects(self):
         # complex PRODUCT is undefined via the real-view; the frontend deny-lists it.
-        t = torch.full((128,), complex(self.rank + 1, 1), dtype=torch.complex64,
-                       device=self.device)
+        t = torch.full(
+            (128,), complex(self.rank + 1, 1), dtype=torch.complex64, device=self.device
+        )
         with self.assertRaises(Exception):
             c10d.all_reduce(t, op=c10d.ReduceOp.PRODUCT)
 
     def test_noncontiguous_rejects(self):
         # TCCL requires contiguous tensors; a non-contiguous view must reject.
-        t = torch.full((64, 64), float(self.rank + 1), device=self.device).t()  # transpose -> non-contiguous
+        t = torch.full(
+            (64, 64), float(self.rank + 1), device=self.device
+        ).t()  # transpose -> non-contiguous
         self.assertFalse(t.is_contiguous())
         with self.assertRaises(Exception):
             c10d.all_reduce(t, op=c10d.ReduceOp.SUM)
@@ -854,7 +968,9 @@ class ProcessGroupTcclContractTest(TcclTestBase):
             self.skipTest("ring uneven-alltoall reject needs world_size > 2")
         in_splits = [j + 1 for j in range(ws)]
         out_splits = [r + 1 for _ in range(ws)]
-        inp = torch.full((sum(in_splits),), float(r + 1), dtype=torch.float32, device=dev)
+        inp = torch.full(
+            (sum(in_splits),), float(r + 1), dtype=torch.float32, device=dev
+        )
         out = torch.empty(sum(out_splits), dtype=torch.float32, device=dev)
         with self.assertRaises(Exception):
             c10d.all_to_all_single(out, inp, out_splits, in_splits)
@@ -864,8 +980,10 @@ class ProcessGroupTcclContractTest(TcclTestBase):
             self.skipTest("ring-only: non-neighbor send is valid on a mesh")
         ws, r, dev = self.world_size, self.rank, self.device
         if ws < 4:
-            self.skipTest("a non-neighbor only exists at world_size >= 4 "
-                          "(ws=3 ring is a fully-connected triangle)")
+            self.skipTest(
+                "a non-neighbor only exists at world_size >= 4 "
+                "(ws=3 ring is a fully-connected triangle)"
+            )
         dst = (r + 2) % ws  # two hops away -> never a ring neighbor for ws >= 4
         with self.assertRaises(Exception):
             c10d.send(torch.ones(64, device=dev), dst=dst)
@@ -875,8 +993,10 @@ class ProcessGroupTcclContractTest(TcclTestBase):
             self.skipTest("ring-only: non-neighbor recv is valid on a mesh")
         ws, r, dev = self.world_size, self.rank, self.device
         if ws < 4:
-            self.skipTest("a non-neighbor only exists at world_size >= 4 "
-                          "(ws=3 ring is a fully-connected triangle)")
+            self.skipTest(
+                "a non-neighbor only exists at world_size >= 4 "
+                "(ws=3 ring is a fully-connected triangle)"
+            )
         src = (r + 2) % ws
         with self.assertRaises(Exception):
             c10d.recv(torch.empty(64, device=dev), src=src)
@@ -889,7 +1009,11 @@ class ProcessGroupTcclContractTest(TcclTestBase):
         inp = torch.full((n,), float(r + 1), device=dev)
         with self.assertRaises(Exception):
             if r == 0:
-                c10d.gather(inp, gather_list=[torch.empty(n, device=dev) for _ in range(ws)], dst=0)
+                c10d.gather(
+                    inp,
+                    gather_list=[torch.empty(n, device=dev) for _ in range(ws)],
+                    dst=0,
+                )
             else:
                 c10d.gather(inp, gather_list=None, dst=0)
 
@@ -900,8 +1024,13 @@ class ProcessGroupTcclContractTest(TcclTestBase):
         out = torch.empty(n, device=dev)
         with self.assertRaises(Exception):
             if r == 0:
-                c10d.scatter(out, scatter_list=[torch.full((n,), float(k + 1), device=dev)
-                                                for k in range(ws)], src=0)
+                c10d.scatter(
+                    out,
+                    scatter_list=[
+                        torch.full((n,), float(k + 1), device=dev) for k in range(ws)
+                    ],
+                    src=0,
+                )
             else:
                 c10d.scatter(out, scatter_list=None, src=0)
 

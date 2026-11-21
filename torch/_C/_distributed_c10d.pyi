@@ -906,6 +906,41 @@ class ProcessGroupGloo(Backend):
     @property
     def options(self) -> Options: ...  # type: ignore[override]
 
+class ProcessGroupTCCL(Backend):
+    class Topology(Enum):
+        MESH = ...
+        RING = ...
+
+    class _Options(Backend.Options):
+        _device_name: str
+        _num_wires: int
+        _topology: ProcessGroupTCCL.Topology
+
+        def __init__(self, timeout: timedelta) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        options: ProcessGroupTCCL._Options,
+    ) -> None: ...
+    @overload
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+        timeout: timedelta = ...,
+    ) -> None: ...
+    def _set_default_timeout(self, timeout: timedelta) -> None: ...
+    @property
+    def options(self) -> ProcessGroupTCCL._Options: ...  # type: ignore[override]
+
+def _tccl_check_link_layer(device_name: str) -> None: ...
+def _tccl_list_devices() -> list[str]: ...
+
 class _ProcessGroupWrapper(Backend):
     def __init__(self, pg: Backend, gloo_pg: ProcessGroupGloo) -> None: ...
     wrapped_pg: Backend

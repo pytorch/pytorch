@@ -4411,8 +4411,7 @@ supported.
           "_device_name", &::c10d::ProcessGroupTCCL::Options::device_name)
       .def_readwrite(
           "_num_wires", &::c10d::ProcessGroupTCCL::Options::num_wires)
-      .def_readwrite(
-          "_topology", &::c10d::ProcessGroupTCCL::Options::topology);
+      .def_readwrite("_topology", &::c10d::ProcessGroupTCCL::Options::topology);
 
   processGroupTCCL
       .def(

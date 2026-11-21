@@ -845,57 +845,57 @@ void TCCLEngine::ring_all_reduce(
 
   // Reduce-scatter: A clockwise, B counter-clockwise.
   for (int s = 0; s < N - 1; ++s) {
-    const int aSend = ((rank_ - s) % N + N) % N;
-    const int aRecv = ((aSend - 1) % N + N) % N;
-    const int bSend = ((rank_ + s) % N + N) % N;
-    const int bRecv = ((bSend + 1) % N + N) % N;
-    char* aRecvDst = ptrA(aRecv);
-    char* bRecvDst = ptrB(bRecv);
+    const int sendA = ((rank_ - s) % N + N) % N;
+    const int recvA = ((sendA - 1) % N + N) % N;
+    const int sendB = ((rank_ + s) % N + N) % N;
+    const int recvB = ((sendB + 1) % N + N) % N;
+    char* recvDstA = ptrA(recvA);
+    char* recvDstB = ptrB(recvB);
     bidir_ring_step(
         right,
         left,
-        ptrA(aSend),
-        nbA(aSend),
-        nbA(aRecv),
+        ptrA(sendA),
+        nbA(sendA),
+        nbA(recvA),
         [&](std::size_t off, const void* src, std::size_t nbytes) {
           reduce_op(
               static_cast<const T*>(src),
-              reinterpret_cast<T*>(aRecvDst + off),
+              reinterpret_cast<T*>(recvDstA + off),
               nbytes / sizeof(T));
         },
-        ptrB(bSend),
-        nbB(bSend),
-        nbB(bRecv),
+        ptrB(sendB),
+        nbB(sendB),
+        nbB(recvB),
         [&](std::size_t off, const void* src, std::size_t nbytes) {
           reduce_op(
               static_cast<const T*>(src),
-              reinterpret_cast<T*>(bRecvDst + off),
+              reinterpret_cast<T*>(recvDstB + off),
               nbytes / sizeof(T));
         });
   }
 
   // All-gather: A clockwise, B counter-clockwise.
   for (int s = 0; s < N - 1; ++s) {
-    const int aSend = ((rank_ - s + 1) % N + N) % N;
-    const int aRecv = ((aSend - 1) % N + N) % N;
-    const int bSend = ((rank_ + s - 1) % N + N) % N;
-    const int bRecv = ((bSend + 1) % N + N) % N;
-    char* aRecvDst = ptrA(aRecv);
-    char* bRecvDst = ptrB(bRecv);
+    const int sendA = ((rank_ - s + 1) % N + N) % N;
+    const int recvA = ((sendA - 1) % N + N) % N;
+    const int sendB = ((rank_ + s - 1) % N + N) % N;
+    const int recvB = ((sendB + 1) % N + N) % N;
+    char* recvDstA = ptrA(recvA);
+    char* recvDstB = ptrB(recvB);
     bidir_ring_step(
         right,
         left,
-        ptrA(aSend),
-        nbA(aSend),
-        nbA(aRecv),
+        ptrA(sendA),
+        nbA(sendA),
+        nbA(recvA),
         [&](std::size_t off, const void* src, std::size_t nbytes) {
-          std::memcpy(aRecvDst + off, src, nbytes);
+          std::memcpy(recvDstA + off, src, nbytes);
         },
-        ptrB(bSend),
-        nbB(bSend),
-        nbB(bRecv),
+        ptrB(sendB),
+        nbB(sendB),
+        nbB(recvB),
         [&](std::size_t off, const void* src, std::size_t nbytes) {
-          std::memcpy(bRecvDst + off, src, nbytes);
+          std::memcpy(recvDstB + off, src, nbytes);
         });
   }
 }
@@ -936,26 +936,26 @@ inline void TCCLEngine::ring_all_gather(
   const std::size_t halfA = per_rank_bytes / 2;
   const std::size_t halfB = per_rank_bytes - halfA;
   for (int k = 0; k < N - 1; ++k) {
-    const int aSend = ((rank_ - k) % N + N) % N;
-    const int aRecv = ((aSend - 1) % N + N) % N;
-    const int bSend = ((rank_ + k) % N + N) % N;
-    const int bRecv = ((bSend + 1) % N + N) % N;
-    char* aRecvDst = reinterpret_cast<char*>(out_ptrs[aRecv]);
-    char* bRecvDst = reinterpret_cast<char*>(out_ptrs[bRecv]) + halfA;
+    const int sendA = ((rank_ - k) % N + N) % N;
+    const int recvA = ((sendA - 1) % N + N) % N;
+    const int sendB = ((rank_ + k) % N + N) % N;
+    const int recvB = ((sendB + 1) % N + N) % N;
+    char* recvDstA = reinterpret_cast<char*>(out_ptrs[recvA]);
+    char* recvDstB = reinterpret_cast<char*>(out_ptrs[recvB]) + halfA;
     bidir_ring_step(
         right,
         left,
-        reinterpret_cast<const char*>(out_ptrs[aSend]),
+        reinterpret_cast<const char*>(out_ptrs[sendA]),
         halfA,
         halfA,
         [&](std::size_t off, const void* src, std::size_t nbytes) {
-          std::memcpy(aRecvDst + off, src, nbytes);
+          std::memcpy(recvDstA + off, src, nbytes);
         },
-        reinterpret_cast<const char*>(out_ptrs[bSend]) + halfA,
+        reinterpret_cast<const char*>(out_ptrs[sendB]) + halfA,
         halfB,
         halfB,
         [&](std::size_t off, const void* src, std::size_t nbytes) {
-          std::memcpy(bRecvDst + off, src, nbytes);
+          std::memcpy(recvDstB + off, src, nbytes);
         });
   }
 }
@@ -1007,16 +1007,16 @@ void TCCLEngine::ring_reduce_scatter(
   // Ring B (d=-1): the mirror - send chunk (rank+s+1) left, recv+reduce (rank+s+2)
   // from right. Each lands work[rank_]'s half fully reduced after N-1 steps.
   for (int s = 0; s < N - 1; ++s) {
-    const int aSend = ((rank_ - s - 1) % N + N) % N;
-    const int aRecv = ((aSend - 1) % N + N) % N;
-    const int bSend = ((rank_ + s + 1) % N + N) % N;
-    const int bRecv = ((bSend + 1) % N + N) % N;
-    char* aRecvHalf = chunk(aRecv);
-    char* bRecvHalf = chunk(bRecv) + abytes;
+    const int sendA = ((rank_ - s - 1) % N + N) % N;
+    const int recvA = ((sendA - 1) % N + N) % N;
+    const int sendB = ((rank_ + s + 1) % N + N) % N;
+    const int recvB = ((sendB + 1) % N + N) % N;
+    char* aRecvHalf = chunk(recvA);
+    char* bRecvHalf = chunk(recvB) + abytes;
     bidir_ring_step(
         right,
         left,
-        chunk(aSend),
+        chunk(sendA),
         abytes,
         abytes,
         [&](std::size_t off, const void* src, std::size_t nbytes) {
@@ -1025,7 +1025,7 @@ void TCCLEngine::ring_reduce_scatter(
               reinterpret_cast<T*>(aRecvHalf + off),
               nbytes / sizeof(T));
         },
-        chunk(bSend) + abytes,
+        chunk(sendB) + abytes,
         bbytes,
         bbytes,
         [&](std::size_t off, const void* src, std::size_t nbytes) {

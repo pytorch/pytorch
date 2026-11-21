@@ -2,13 +2,13 @@
 
 #include <torch/csrc/distributed/c10d/TCCLUtils.hpp>
 
-#include <cstdlib>
-#include <cstring>
+#include <arpa/inet.h>
 #include <dlfcn.h>
 #include <ifaddrs.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
 #include <unistd.h>
+#include <cstdlib>
+#include <cstring>
 
 #include <infiniband/verbs.h>
 
@@ -25,7 +25,6 @@ static_assert(
     sizeof(ibv_gid) == 16,
     "ibv_gid is expected to be 16 bytes; TCCLDestination::gid[16] depends "
     "on this for the memcpy bridge.");
-
 
 // 32-byte layout asserted at compile time. Serialization is reinterpret_cast
 // (POD memcpy) so this MUST hold. Catches struct-padding surprises on any
@@ -115,16 +114,16 @@ TCCLIBVWrapper::TCCLIBVWrapper() {
 
   // Resolve each symbol; complain with the symbol name on failure rather
   // than the generic dlerror text alone.
-#define TCCL_LOAD_SYM(var, name)                                              \
-  do {                                                                        \
-    (var) = reinterpret_cast<decltype(var)>(dlsym(handle_, name));            \
-    TORCH_CHECK_WITH(                                                         \
-        DistBackendError,                                                     \
-        (var) != nullptr,                                                     \
-        "TCCL: dlsym(\"",                                                     \
-        name,                                                                 \
-        "\") returned null: ",                                                \
-        dlerror());                                                           \
+#define TCCL_LOAD_SYM(var, name)                                   \
+  do {                                                             \
+    (var) = reinterpret_cast<decltype(var)>(dlsym(handle_, name)); \
+    TORCH_CHECK_WITH(                                              \
+        DistBackendError,                                          \
+        (var) != nullptr,                                          \
+        "TCCL: dlsym(\"",                                          \
+        name,                                                      \
+        "\") returned null: ",                                     \
+        dlerror());                                                \
   } while (0)
 
   TCCL_LOAD_SYM(get_device_list, "ibv_get_device_list");
@@ -224,8 +223,9 @@ std::vector<std::string> resolveTcclPeerDevices(
   const int left = (rank - 1 + size) % size;
   const int right = (rank + 1) % size;
   // Which peers this rank is physically cabled to. Mesh: every non-self peer.
-  // Ring: only the two neighbors ((rank+/-1)%size) - every other slot (incl. self)
-  // must be empty, so the sparse row round-trips to null connection slots.
+  // Ring: only the two neighbors ((rank+/-1)%size) - every other slot (incl.
+  // self) must be empty, so the sparse row round-trips to null connection
+  // slots.
   const auto isConnectedPeer = [&](int p) {
     if (p == rank) {
       return false;
@@ -298,8 +298,7 @@ std::vector<std::string> resolveTcclPeerDevices(
   // Under ring topology only the two neighbor slots are filled.
   const std::string one = resolveTcclDeviceName(explicit_name);
   for (int p = 0; p < size; p++) {
-    devices[static_cast<size_t>(p)] =
-        isConnectedPeer(p) ? one : std::string();
+    devices[static_cast<size_t>(p)] = isConnectedPeer(p) ? one : std::string();
   }
   return devices;
 }
@@ -389,8 +388,8 @@ TCCLConnection::TCCLConnection(const std::string& device_name) {
       attr.port_num = kQpPort;
       attr.pkey_index = 0;
       attr.qp_access_flags = kQpAccessFlags;
-      int mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT |
-          IBV_QP_ACCESS_FLAGS;
+      int mask =
+          IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
       int ret = ibv.modify_qp(qp_, &attr, mask);
       TORCH_CHECK_WITH(
           DistBackendError,
@@ -400,8 +399,8 @@ TCCLConnection::TCCLConnection(const std::string& device_name) {
     }
 
     // Populate local routing info for the caller to publish via Store.
-    // ibv_query_port gives link state (must be ACTIVE) and LID; ibv_query_gid at
-    // index 1 gives the IPv4-mapped GID Thunderbolt addresses with.
+    // ibv_query_port gives link state (must be ACTIVE) and LID; ibv_query_gid
+    // at index 1 gives the IPv4-mapped GID Thunderbolt addresses with.
     ibv_port_attr port_attr{};
     int qp_ret = ibv.query_port(ctx_, kQpPort, &port_attr);
     TORCH_CHECK_WITH(
@@ -502,12 +501,13 @@ void TCCLConnection::transitionToRTR(const TCCLDestination& remote) {
 
   ibv_qp_attr attr{};
   attr.qp_state = IBV_QPS_RTR;
-  // MTU. TN3205 recommends IBV_MTU_4096. We keep 1024 as the default (all campaign
-  // results were validated on it); TCCL_PATH_MTU lets you select another value.
-  // Measured 2026-08-21: 4096 negotiates cleanly (the old "RTR timeout" was a subnet
-  // issue, not the MTU) and is perf-NEUTRAL - per-link BW 9.32 vs 9.33 GB/s, allreduce
-  // within noise. The TB controller segments on fixed 4KB frames regardless of
-  // path_mtu, so this attribute does not affect bandwidth on this stack.
+  // MTU. TN3205 recommends IBV_MTU_4096. We keep 1024 as the default (all
+  // campaign results were validated on it); TCCL_PATH_MTU lets you select
+  // another value. Measured 2026-08-21: 4096 negotiates cleanly (the old "RTR
+  // timeout" was a subnet issue, not the MTU) and is perf-NEUTRAL - per-link
+  // BW 9.32 vs 9.33 GB/s, allreduce within noise. The TB controller segments on
+  // fixed 4KB frames regardless of path_mtu, so this attribute does not affect
+  // bandwidth on this stack.
   attr.path_mtu = IBV_MTU_1024;
   if (const char* m = std::getenv("TCCL_PATH_MTU")) {
     if (std::strcmp(m, "4096") == 0) {
@@ -653,10 +653,7 @@ int TCCLConnection::pollCq(int max_completions, ibv_wc* wcs) {
   // ibv_poll_cq is inline; non-blocking; returns -errno on failure.
   int n = ibv_poll_cq(cq_, max_completions, wcs);
   TORCH_CHECK_WITH(
-      DistBackendError,
-      n >= 0,
-      "TCCL: ibv_poll_cq returned errno=",
-      -n);
+      DistBackendError, n >= 0, "TCCL: ibv_poll_cq returned errno=", -n);
   return n;
 }
 
@@ -737,9 +734,9 @@ void TCCLSharedBuffer::registerToPD(ibv_pd* pd) {
       DistBackendError,
       pd != nullptr,
       "TCCL: registerToPD called with null pd.");
-  // Access flag set (LOCAL_WRITE | REMOTE_READ | REMOTE_WRITE). TN3205 sec. 12.2
-  // notes LOCAL_WRITE alone is enough for 2-sided UC; the broader set is also
-  // valid and is what this backend uses.
+  // Access flag set (LOCAL_WRITE | REMOTE_READ | REMOTE_WRITE). TN3205
+  // sec. 12.2 notes LOCAL_WRITE alone is enough for 2-sided UC; the broader set
+  // is also valid and is what this backend uses.
   auto& ibv = TCCLIBVWrapper::instance();
   ibv_mr* mr = ibv.reg_mr(
       pd,
@@ -842,8 +839,7 @@ int64_t tcclInitSequence(
   if (rank == 0) {
     const int64_t seq = store.add(kInitCounterKey, 1);
     const std::string s = std::to_string(seq);
-    store.set(
-        kInitSeqBroadcastKey, std::vector<uint8_t>(s.begin(), s.end()));
+    store.set(kInitSeqBroadcastKey, std::vector<uint8_t>(s.begin(), s.end()));
     return seq;
   }
   // Non-root ranks block here until rank 0 publishes the number. Bound by the
@@ -916,9 +912,9 @@ void allgatherDestinationsViaStore(
           // Best-effort diagnostic; ignore secondary failures.
         }
       }
-      std::string missingStr =
-          missing.empty() ? std::string("(none, store reported error)")
-                          : c10::Join(",", missing);
+      std::string missingStr = missing.empty()
+          ? std::string("(none, store reported error)")
+          : c10::Join(",", missing);
       C10D_THROW_ERROR(
           DistStoreError,
           c10::str(

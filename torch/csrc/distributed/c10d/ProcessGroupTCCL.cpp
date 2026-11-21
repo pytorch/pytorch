@@ -8,14 +8,14 @@
 #include <c10/util/Exception.h>
 #include <c10/util/thread_name.h>
 
-#include <ATen/core/jit_type.h>
 #include <ATen/Context.h>
-#include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/core/jit_type.h>
 #include <ATen/detail/MPSHooksInterface.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
 
 #include <cstddef>
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <string>
 #include <type_traits>
@@ -110,9 +110,12 @@ inline bool isFloatReduceDtype(at::ScalarType st) {
 // Ring-vs-mesh selection for all_reduce (N>2): bf16 -> ring at any size,
 // fp32/fp16 -> ring only >=8MB. TCCL_FORCE_ALGO=ring|mesh overrides per-call.
 inline bool tcclUseRing(
-    int worldSize, bool autoEnable, bool isBf16, std::size_t count,
-    std::size_t elemBytes, bool forceRing = false) {
-
+    int worldSize,
+    bool autoEnable,
+    bool isBf16,
+    std::size_t count,
+    std::size_t elemBytes,
+    bool forceRing = false) {
   if (worldSize <= 2) {
     return false;
   }
@@ -120,8 +123,8 @@ inline bool tcclUseRing(
     return true;
   }
   // Auto-heuristic: bf16 any size, else >=1MB
-  bool useRing = autoEnable &&
-      (isBf16 || count * elemBytes >= 1u * 1024u * 1024u);
+  bool useRing =
+      autoEnable && (isBf16 || count * elemBytes >= 1u * 1024u * 1024u);
   if (const char* f = std::getenv("TCCL_FORCE_ALGO")) {
     const std::string forced(f);
     if (forced == "ring") {
@@ -136,7 +139,11 @@ inline bool tcclUseRing(
 // Run an allreduce with a specific reduce-op functor, picking ring vs mesh.
 template <typename T, typename Op>
 void tcclAllreduceWith(
-    TCCLEngine& mesh, T* data, std::size_t count, int worldSize, bool useRing) {
+    TCCLEngine& mesh,
+    T* data,
+    std::size_t count,
+    int worldSize,
+    bool useRing) {
   if (useRing) {
     mesh.ring_all_reduce<T, Op>(data, count, Op{});
   } else {
@@ -147,11 +154,19 @@ void tcclAllreduceWith(
 // Typed mesh allreduce. `op` selects the reduce op (SUM/MIN/MAX/AVG)
 template <typename T>
 void runMeshAllreduce(
-    TCCLEngine& mesh, at::Tensor& view, ReduceOp::RedOpType op, int worldSize) {
+    TCCLEngine& mesh,
+    at::Tensor& view,
+    ReduceOp::RedOpType op,
+    int worldSize) {
   T* data = view.data_ptr<T>();
   const std::size_t count = static_cast<std::size_t>(view.numel());
-  const bool useRing =
-      tcclUseRing(worldSize, /*autoEnable=*/true, std::is_same_v<T, at::BFloat16>, count, sizeof(T), mesh.ringTopology());
+  const bool useRing = tcclUseRing(
+      worldSize,
+      /*autoEnable=*/true,
+      std::is_same_v<T, at::BFloat16>,
+      count,
+      sizeof(T),
+      mesh.ringTopology());
   switch (op) {
     case ReduceOp::MIN:
       tcclAllreduceWith<T, TCCLMinOp<T>>(mesh, data, count, worldSize, useRing);
@@ -160,7 +175,8 @@ void runMeshAllreduce(
       tcclAllreduceWith<T, TCCLMaxOp<T>>(mesh, data, count, worldSize, useRing);
       break;
     case ReduceOp::PRODUCT:
-      tcclAllreduceWith<T, TCCLProdOp<T>>(mesh, data, count, worldSize, useRing);
+      tcclAllreduceWith<T, TCCLProdOp<T>>(
+          mesh, data, count, worldSize, useRing);
       break;
     // SUM or AVG
     default:
@@ -187,33 +203,45 @@ void runReduceScatterChunks(
     ReduceOp::RedOpType op,
     int worldSize) {
   const bool useRing = tcclUseRing(
-      worldSize, /*autoEnable=*/false, std::is_same_v<T, at::BFloat16>,
-      count_per_rank * static_cast<std::size_t>(worldSize), sizeof(T), mesh.ringTopology());
+      worldSize,
+      /*autoEnable=*/false,
+      std::is_same_v<T, at::BFloat16>,
+      count_per_rank * static_cast<std::size_t>(worldSize),
+      sizeof(T),
+      mesh.ringTopology());
   switch (op) {
     case ReduceOp::MIN:
       if (useRing)
-        mesh.ring_reduce_scatter<T, TCCLMinOp<T>>(in_chunks, out, count_per_rank, TCCLMinOp<T>{});
+        mesh.ring_reduce_scatter<T, TCCLMinOp<T>>(
+            in_chunks, out, count_per_rank, TCCLMinOp<T>{});
       else
-        mesh.reduce_scatter<T, TCCLMinOp<T>>(in_chunks, out, count_per_rank, TCCLMinOp<T>{});
+        mesh.reduce_scatter<T, TCCLMinOp<T>>(
+            in_chunks, out, count_per_rank, TCCLMinOp<T>{});
       break;
     case ReduceOp::MAX:
       if (useRing)
-        mesh.ring_reduce_scatter<T, TCCLMaxOp<T>>(in_chunks, out, count_per_rank, TCCLMaxOp<T>{});
+        mesh.ring_reduce_scatter<T, TCCLMaxOp<T>>(
+            in_chunks, out, count_per_rank, TCCLMaxOp<T>{});
       else
-        mesh.reduce_scatter<T, TCCLMaxOp<T>>(in_chunks, out, count_per_rank, TCCLMaxOp<T>{});
+        mesh.reduce_scatter<T, TCCLMaxOp<T>>(
+            in_chunks, out, count_per_rank, TCCLMaxOp<T>{});
       break;
     case ReduceOp::PRODUCT:
       if (useRing)
-        mesh.ring_reduce_scatter<T, TCCLProdOp<T>>(in_chunks, out, count_per_rank, TCCLProdOp<T>{});
+        mesh.ring_reduce_scatter<T, TCCLProdOp<T>>(
+            in_chunks, out, count_per_rank, TCCLProdOp<T>{});
       else
-        mesh.reduce_scatter<T, TCCLProdOp<T>>(in_chunks, out, count_per_rank, TCCLProdOp<T>{});
+        mesh.reduce_scatter<T, TCCLProdOp<T>>(
+            in_chunks, out, count_per_rank, TCCLProdOp<T>{});
       break;
     // SUM or AVG
     default:
       if (useRing)
-        mesh.ring_reduce_scatter<T, TCCLSumOp<T>>(in_chunks, out, count_per_rank, TCCLSumOp<T>{});
+        mesh.ring_reduce_scatter<T, TCCLSumOp<T>>(
+            in_chunks, out, count_per_rank, TCCLSumOp<T>{});
       else
-        mesh.reduce_scatter<T, TCCLSumOp<T>>(in_chunks, out, count_per_rank, TCCLSumOp<T>{});
+        mesh.reduce_scatter<T, TCCLSumOp<T>>(
+            in_chunks, out, count_per_rank, TCCLSumOp<T>{});
       break;
   }
   if (op == ReduceOp::AVG) {
@@ -270,17 +298,36 @@ void dispatchReduceScatter(
     ReduceOp::RedOpType op,
     int worldSize) {
   switch (inView.scalar_type()) {
-    case at::kFloat: runMeshReduceScatter<float>(mesh, inView, outView, op, worldSize); break;
-    case at::kHalf: runMeshReduceScatter<at::Half>(mesh, inView, outView, op, worldSize); break;
-    case at::kBFloat16: runMeshReduceScatter<at::BFloat16>(mesh, inView, outView, op, worldSize); break;
-    case at::kChar: runMeshReduceScatter<int8_t>(mesh, inView, outView, op, worldSize); break;
-    case at::kShort: runMeshReduceScatter<int16_t>(mesh, inView, outView, op, worldSize); break;
-    case at::kInt: runMeshReduceScatter<int32_t>(mesh, inView, outView, op, worldSize); break;
-    case at::kLong: runMeshReduceScatter<int64_t>(mesh, inView, outView, op, worldSize); break;
-    case at::kByte: runMeshReduceScatter<uint8_t>(mesh, inView, outView, op, worldSize); break;
-    case at::kBool: runMeshReduceScatter<bool>(mesh, inView, outView, op, worldSize); break;
+    case at::kFloat:
+      runMeshReduceScatter<float>(mesh, inView, outView, op, worldSize);
+      break;
+    case at::kHalf:
+      runMeshReduceScatter<at::Half>(mesh, inView, outView, op, worldSize);
+      break;
+    case at::kBFloat16:
+      runMeshReduceScatter<at::BFloat16>(mesh, inView, outView, op, worldSize);
+      break;
+    case at::kChar:
+      runMeshReduceScatter<int8_t>(mesh, inView, outView, op, worldSize);
+      break;
+    case at::kShort:
+      runMeshReduceScatter<int16_t>(mesh, inView, outView, op, worldSize);
+      break;
+    case at::kInt:
+      runMeshReduceScatter<int32_t>(mesh, inView, outView, op, worldSize);
+      break;
+    case at::kLong:
+      runMeshReduceScatter<int64_t>(mesh, inView, outView, op, worldSize);
+      break;
+    case at::kByte:
+      runMeshReduceScatter<uint8_t>(mesh, inView, outView, op, worldSize);
+      break;
+    case at::kBool:
+      runMeshReduceScatter<bool>(mesh, inView, outView, op, worldSize);
+      break;
     // Unreachable - validated by caller
-    default: break;
+    default:
+      break;
   }
 }
 
@@ -293,17 +340,45 @@ void dispatchReduceScatterList(
     ReduceOp::RedOpType op,
     int worldSize) {
   switch (outView.scalar_type()) {
-    case at::kFloat: runMeshReduceScatterList<float>(mesh, inChunkViews, outView, op, worldSize); break;
-    case at::kHalf: runMeshReduceScatterList<at::Half>(mesh, inChunkViews, outView, op, worldSize); break;
-    case at::kBFloat16: runMeshReduceScatterList<at::BFloat16>(mesh, inChunkViews, outView, op, worldSize); break;
-    case at::kChar: runMeshReduceScatterList<int8_t>(mesh, inChunkViews, outView, op, worldSize); break;
-    case at::kShort: runMeshReduceScatterList<int16_t>(mesh, inChunkViews, outView, op, worldSize); break;
-    case at::kInt: runMeshReduceScatterList<int32_t>(mesh, inChunkViews, outView, op, worldSize); break;
-    case at::kLong: runMeshReduceScatterList<int64_t>(mesh, inChunkViews, outView, op, worldSize); break;
-    case at::kByte: runMeshReduceScatterList<uint8_t>(mesh, inChunkViews, outView, op, worldSize); break;
-    case at::kBool: runMeshReduceScatterList<bool>(mesh, inChunkViews, outView, op, worldSize); break;
+    case at::kFloat:
+      runMeshReduceScatterList<float>(
+          mesh, inChunkViews, outView, op, worldSize);
+      break;
+    case at::kHalf:
+      runMeshReduceScatterList<at::Half>(
+          mesh, inChunkViews, outView, op, worldSize);
+      break;
+    case at::kBFloat16:
+      runMeshReduceScatterList<at::BFloat16>(
+          mesh, inChunkViews, outView, op, worldSize);
+      break;
+    case at::kChar:
+      runMeshReduceScatterList<int8_t>(
+          mesh, inChunkViews, outView, op, worldSize);
+      break;
+    case at::kShort:
+      runMeshReduceScatterList<int16_t>(
+          mesh, inChunkViews, outView, op, worldSize);
+      break;
+    case at::kInt:
+      runMeshReduceScatterList<int32_t>(
+          mesh, inChunkViews, outView, op, worldSize);
+      break;
+    case at::kLong:
+      runMeshReduceScatterList<int64_t>(
+          mesh, inChunkViews, outView, op, worldSize);
+      break;
+    case at::kByte:
+      runMeshReduceScatterList<uint8_t>(
+          mesh, inChunkViews, outView, op, worldSize);
+      break;
+    case at::kBool:
+      runMeshReduceScatterList<bool>(
+          mesh, inChunkViews, outView, op, worldSize);
+      break;
     // Unreachable - validated by caller
-    default: break;
+    default:
+      break;
   }
 }
 } // namespace
@@ -316,7 +391,9 @@ ProcessGroupTCCL::Options::Options(std::chrono::milliseconds timeout)
 // TCCLWork
 
 ProcessGroupTCCL::TCCLWork::TCCLWork(
-    OpType opType, uint64_t seq, std::vector<at::Tensor> outputs)
+    OpType opType,
+    uint64_t seq,
+    std::vector<at::Tensor> outputs)
     : Work(/*rank=*/-1, opType), seq_(seq), outputs_(std::move(outputs)) {
   // No device list: nothing to order (MPS single-queue, collective completes on
   // the CPU worker before the Future fires). DDP chaining unaffected. A device
@@ -332,9 +409,7 @@ ProcessGroupTCCL::ProcessGroupTCCL(
     int rank,
     int size,
     c10::intrusive_ptr<Options> options)
-    : Backend(rank, size),
-      store_(store),
-      options_(std::move(options)) {
+    : Backend(rank, size), store_(store), options_(std::move(options)) {
   TORCH_CHECK_WITH(
       DistBackendError,
       store_ != nullptr,
@@ -348,7 +423,8 @@ ProcessGroupTCCL::ProcessGroupTCCL(
       size,
       ").");
 
-  // 0. Resolve topology: Options field, overridden by env TCCL_TOPOLOGY=ring|mesh.
+  // 0. Resolve topology: Options field, overridden by env
+  // TCCL_TOPOLOGY=ring|mesh.
   topology_ = options_->topology;
   if (const char* t = std::getenv("TCCL_TOPOLOGY")) {
     const std::string ts(t);
@@ -414,10 +490,10 @@ ProcessGroupTCCL::ProcessGroupTCCL(
   // 4. Reserve a unique init-sequence number from the Store. The keys we
   //    use for destination exchange are prefixed with this number.
   const int64_t initSeq = tcclInitSequence(*store_, rank, options_->timeout);
-  const std::string keyPrefix =
-      "tccl_dest_s" + std::to_string(initSeq) + "_";
+  const std::string keyPrefix = "tccl_dest_s" + std::to_string(initSeq) + "_";
 
-  // 5. Construct one TCCLConnection per (peer, wire). Each constructor opens its
+  // 5. Construct one TCCLConnection per (peer, wire). Each constructor opens
+  // its
   //    own device context, allocates PD/CQ/QP, transitions the QP to INIT,
   //    and populates its localDestination.
   connections_.resize(static_cast<size_t>(size) * num_wires);
@@ -444,8 +520,10 @@ ProcessGroupTCCL::ProcessGroupTCCL(
 
   sendBuffers_.resize(static_cast<size_t>(size));
   recvBuffers_.resize(static_cast<size_t>(size));
-  pipeSendBuffers_.resize(static_cast<size_t>(size) * TCCLEngine::kPipelineDepth);
-  pipeRecvBuffers_.resize(static_cast<size_t>(size) * TCCLEngine::kPipelineDepth);
+  pipeSendBuffers_.resize(
+      static_cast<size_t>(size) * TCCLEngine::kPipelineDepth);
+  pipeRecvBuffers_.resize(
+      static_cast<size_t>(size) * TCCLEngine::kPipelineDepth);
   for (int peer = 0; peer < size; peer++) {
     if (peer == rank || peerDevices[peer].empty()) {
       // Self, or a non-neighbor in ring topology
@@ -488,28 +566,28 @@ ProcessGroupTCCL::ProcessGroupTCCL(
       continue;
     }
     for (int wire = 0; wire < num_wires; wire++) {
-      const size_t myConn =
-          static_cast<size_t>(peer) * num_wires + wire;
-      const size_t peerSlotForMe =
-          static_cast<size_t>(rank) * num_wires + wire;
-      const TCCLDestination& remote =
-          remoteDests[peer][peerSlotForMe];
+      const size_t myConn = static_cast<size_t>(peer) * num_wires + wire;
+      const size_t peerSlotForMe = static_cast<size_t>(rank) * num_wires + wire;
+      const TCCLDestination& remote = remoteDests[peer][peerSlotForMe];
       connections_[myConn]->transitionToRTR(remote);
       connections_[myConn]->transitionToRTS();
     }
   }
 
   // 9. Final sync - every rank reaches RTS before any rank may post a send.
-  tcclRtsBarrier(
-      *store_,
-      size,
-      keyPrefix + "rts_ready",
-      options_->timeout);
+  tcclRtsBarrier(*store_, size, keyPrefix + "rts_ready", options_->timeout);
 
-  // 10. Construct the collective engine (holds refs into our connection + buffer vectors).
+  // 10. Construct the collective engine (holds refs into our connection +
+  // buffer vectors).
   engine_ = std::make_unique<TCCLEngine>(
-      rank, size, connections_, sendBuffers_, recvBuffers_, pipeSendBuffers_,
-      pipeRecvBuffers_, options_->timeout,
+      rank,
+      size,
+      connections_,
+      sendBuffers_,
+      recvBuffers_,
+      pipeSendBuffers_,
+      pipeRecvBuffers_,
+      options_->timeout,
       /*ring_topology=*/ringTopology);
 
   // 11. Spawn the worker thread.
@@ -530,9 +608,7 @@ void ProcessGroupTCCL::runLoop() {
   c10::setThreadName("pt_tccl_runloop");
   std::unique_lock<std::mutex> lock(workMutex_);
   while (!stop_.load()) {
-    workCV_.wait(lock, [this] {
-      return stop_.load() || !workQueue_.empty();
-    });
+    workCV_.wait(lock, [this] { return stop_.load() || !workQueue_.empty(); });
     if (stop_.load()) {
       return;
     }
@@ -561,19 +637,18 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::enqueueCollective(
   auto work = c10::make_intrusive<TCCLWork>(opType, mySeq, std::move(outputs));
   {
     std::lock_guard<std::mutex> lock(workMutex_);
-    workQueue_.push_back(
-        [mpsEventId, fn = std::move(fn), work]() mutable {
-          std::exception_ptr ep;
-          try {
-            // Block only this worker until the GPU flushes writes to the inputs
-            mpsEventWait(mpsEventId);
-            fn();
-          } catch (...) {
-            ep = std::current_exception();
-          }
-          // Store any exception and wake threads blocked on Work::wait().
-          work->finishWork(ep);
-        });
+    workQueue_.push_back([mpsEventId, fn = std::move(fn), work]() mutable {
+      std::exception_ptr ep;
+      try {
+        // Block only this worker until the GPU flushes writes to the inputs
+        mpsEventWait(mpsEventId);
+        fn();
+      } catch (...) {
+        ep = std::current_exception();
+      }
+      // Store any exception and wake threads blocked on Work::wait().
+      work->finishWork(ep);
+    });
   }
   workCV_.notify_one();
   return work;
@@ -614,7 +689,8 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::allreduce(
       kNotImplementedHint);
   TORCH_CHECK_WITH(
       DistBackendError,
-      opts.reduceOp != ReduceOp::AVG || isFloatReduceDtype(tensor.scalar_type()),
+      opts.reduceOp != ReduceOp::AVG ||
+          isFloatReduceDtype(tensor.scalar_type()),
       "TCCL allreduce: AVG is only supported for float32/float16/bfloat16 "
       "(integer/bool AVG is undefined; matches NCCL). Use SUM for integer dtypes. ",
       " Got dtype=",
@@ -713,8 +789,13 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::broadcast(
       [this, tensor, root]() mutable {
         at::Tensor view = mpsSharedCpuView(tensor);
         const std::size_t nbytes = static_cast<std::size_t>(view.nbytes());
-        if (tcclUseRing(size_, /*autoEnable=*/false, /*isBf16=*/false, nbytes, 1,
-                        engine_->ringTopology())) {
+        if (tcclUseRing(
+                size_,
+                /*autoEnable=*/false,
+                /*isBf16=*/false,
+                nbytes,
+                1,
+                engine_->ringTopology())) {
           engine_->ring_broadcast(view.data_ptr(), nbytes, root);
         } else {
           engine_->broadcast(view.data_ptr(), nbytes, root);
@@ -733,20 +814,32 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
   TORCH_CHECK_WITH(
-      DistBackendError, tensors.size() == 1,
-      "TCCL reduce: expected exactly one tensor, got ", tensors.size());
+      DistBackendError,
+      tensors.size() == 1,
+      "TCCL reduce: expected exactly one tensor, got ",
+      tensors.size());
   auto& tensor = tensors[0];
   TORCH_CHECK_WITH(
-      DistBackendError, tensor.device().is_mps(),
-      "TCCL reduce: tensor must be on MPS device, got ", tensor.device());
+      DistBackendError,
+      tensor.device().is_mps(),
+      "TCCL reduce: tensor must be on MPS device, got ",
+      tensor.device());
   TORCH_CHECK_WITH(
-      DistBackendError, opts.rootRank >= 0 && opts.rootRank < size_,
-      "TCCL reduce: invalid rootRank ", opts.rootRank, " (world size ", size_, ").");
+      DistBackendError,
+      opts.rootRank >= 0 && opts.rootRank < size_,
+      "TCCL reduce: invalid rootRank ",
+      opts.rootRank,
+      " (world size ",
+      size_,
+      ").");
   TORCH_CHECK_WITH(
-      DistBackendError, isSupportedReduceDtype(tensor.scalar_type()),
+      DistBackendError,
+      isSupportedReduceDtype(tensor.scalar_type()),
       "TCCL reduce: unsupported dtype. Supported: float32/float16/bfloat16 and "
-      "int8/int16/int32/int64/uint8/bool. ", kNotImplementedHint,
-      " Got dtype=", tensor.scalar_type());
+      "int8/int16/int32/int64/uint8/bool. ",
+      kNotImplementedHint,
+      " Got dtype=",
+      tensor.scalar_type());
   TORCH_CHECK_WITH(
       DistBackendError,
       opts.reduceOp == ReduceOp::SUM || opts.reduceOp == ReduceOp::AVG ||
@@ -756,14 +849,16 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::reduce(
       kNotImplementedHint);
   TORCH_CHECK_WITH(
       DistBackendError,
-      opts.reduceOp != ReduceOp::AVG || isFloatReduceDtype(tensor.scalar_type()),
+      opts.reduceOp != ReduceOp::AVG ||
+          isFloatReduceDtype(tensor.scalar_type()),
       "TCCL reduce: AVG is only supported for float32/float16/bfloat16. Got dtype=",
       tensor.scalar_type());
   TORCH_CHECK_WITH(
-      DistBackendError, tensor.is_contiguous(),
+      DistBackendError,
+      tensor.is_contiguous(),
       "TCCL reduce: non-contiguous tensors are not supported. Call .contiguous().");
-  // Runs as all-reduce - reduced value on every rank (reduce guarantees only the
-  // root). rootRank is validated, not used in the reduction.
+  // Runs as all-reduce - reduced value on every rank (reduce guarantees only
+  // the root). rootRank is validated, not used in the reduction.
   const ReduceOp::RedOpType op = opts.reduceOp;
   const int worldSize = size_;
   const at::ScalarType st = tensor.scalar_type();
@@ -849,9 +944,7 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::allgather(
   // Byte-copy collective - any dtype (DDP construction allgathers kLong
   // param-size vectors).
   return enqueueCollective(
-      OpType::ALLGATHER,
-      outList,
-      [this, input, outList]() mutable {
+      OpType::ALLGATHER, outList, [this, input, outList]() mutable {
         at::Tensor inView = mpsSharedCpuView(input);
         const std::size_t per_rank_bytes =
             static_cast<std::size_t>(inView.nbytes());
@@ -867,9 +960,13 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::allgather(
           outPtrs.push_back(outViews.back().data_ptr());
         }
 
-        if (tcclUseRing(size_, /*autoEnable=*/false, /*isBf16=*/false,
-                        per_rank_bytes * static_cast<std::size_t>(size_), 1,
-                        engine_->ringTopology())) {
+        if (tcclUseRing(
+                size_,
+                /*autoEnable=*/false,
+                /*isBf16=*/false,
+                per_rank_bytes * static_cast<std::size_t>(size_),
+                1,
+                engine_->ringTopology())) {
           engine_->ring_all_gather(inView.data_ptr(), outPtrs, per_rank_bytes);
         } else {
           engine_->all_gather(inView.data_ptr(), outPtrs, per_rank_bytes);
@@ -919,9 +1016,13 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::_allgather_base(
           outPtrs[r] = ob + static_cast<std::size_t>(r) * per_rank_bytes;
         }
 
-        if (tcclUseRing(size_, /*autoEnable=*/false, /*isBf16=*/false,
-                        per_rank_bytes * static_cast<std::size_t>(size_), 1,
-                        engine_->ringTopology())) {
+        if (tcclUseRing(
+                size_,
+                /*autoEnable=*/false,
+                /*isBf16=*/false,
+                per_rank_bytes * static_cast<std::size_t>(size_),
+                1,
+                engine_->ringTopology())) {
           engine_->ring_all_gather(inView.data_ptr(), outPtrs, per_rank_bytes);
         } else {
           engine_->all_gather(inView.data_ptr(), outPtrs, per_rank_bytes);
@@ -956,9 +1057,7 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::allgather_into_tensor_coalesced(
   }
 
   return enqueueCollective(
-      OpType::ALLGATHER_COALESCED,
-      outputs,
-      [this, inputs, outputs]() mutable {
+      OpType::ALLGATHER_COALESCED, outputs, [this, inputs, outputs]() mutable {
         for (size_t i = 0; i < inputs.size(); ++i) {
           at::Tensor inView = mpsSharedCpuView(inputs[i]);
           at::Tensor outView = mpsSharedCpuView(outputs[i]);
@@ -971,10 +1070,15 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::allgather_into_tensor_coalesced(
             outPtrs[r] = ob + static_cast<std::size_t>(r) * per_rank_bytes;
           }
 
-          if (tcclUseRing(size_, /*autoEnable=*/false, /*isBf16=*/false,
-                          per_rank_bytes * static_cast<std::size_t>(size_), 1,
-                          engine_->ringTopology())) {
-            engine_->ring_all_gather(inView.data_ptr(), outPtrs, per_rank_bytes);
+          if (tcclUseRing(
+                  size_,
+                  /*autoEnable=*/false,
+                  /*isBf16=*/false,
+                  per_rank_bytes * static_cast<std::size_t>(size_),
+                  1,
+                  engine_->ringTopology())) {
+            engine_->ring_all_gather(
+                inView.data_ptr(), outPtrs, per_rank_bytes);
           } else {
             engine_->all_gather(inView.data_ptr(), outPtrs, per_rank_bytes);
           }
@@ -987,19 +1091,28 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::gather(
     std::vector<at::Tensor>& inputTensors,
     const GatherOptions& opts) {
   TORCH_CHECK_WITH(
-      DistBackendError, inputTensors.size() == 1,
-      "TCCL gather: expected exactly one input tensor, got ", inputTensors.size());
+      DistBackendError,
+      inputTensors.size() == 1,
+      "TCCL gather: expected exactly one input tensor, got ",
+      inputTensors.size());
   auto& input = inputTensors[0];
   const int root = opts.rootRank;
   TORCH_CHECK_WITH(
-      DistBackendError, root >= 0 && root < size_,
-      "TCCL gather: invalid rootRank ", root, " (world size ", size_, ").");
+      DistBackendError,
+      root >= 0 && root < size_,
+      "TCCL gather: invalid rootRank ",
+      root,
+      " (world size ",
+      size_,
+      ").");
   TORCH_CHECK_WITH(
-      DistBackendError, input.device().is_mps() && input.is_contiguous(),
+      DistBackendError,
+      input.device().is_mps() && input.is_contiguous(),
       "TCCL gather: input must be a contiguous MPS tensor.");
   // Root needs a QP to every rank - mesh-only (ring has no non-neighbor link).
   TORCH_CHECK_WITH(
-      DistBackendError, !engine_->ringTopology(),
+      DistBackendError,
+      !engine_->ringTopology(),
       "TCCL gather: not supported on a ring topology (the root needs a QP to "
       "every rank); use a full-mesh cluster.");
   const bool isRoot = (rank_ == root);
@@ -1010,7 +1123,8 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::gather(
         outputTensors.size() == 1 &&
             static_cast<int>(outputTensors[0].size()) == size_,
         "TCCL gather: the root must supply one output list of world_size (",
-        size_, ") tensors.");
+        size_,
+        ") tensors.");
     outList = outputTensors[0];
     for (const auto& o : outList) {
       TORCH_CHECK_WITH(
@@ -1049,19 +1163,27 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::scatter(
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
   TORCH_CHECK_WITH(
-      DistBackendError, outputTensors.size() == 1,
+      DistBackendError,
+      outputTensors.size() == 1,
       "TCCL scatter: expected exactly one output tensor, got ",
       outputTensors.size());
   auto& output = outputTensors[0];
   const int root = opts.rootRank;
   TORCH_CHECK_WITH(
-      DistBackendError, root >= 0 && root < size_,
-      "TCCL scatter: invalid rootRank ", root, " (world size ", size_, ").");
+      DistBackendError,
+      root >= 0 && root < size_,
+      "TCCL scatter: invalid rootRank ",
+      root,
+      " (world size ",
+      size_,
+      ").");
   TORCH_CHECK_WITH(
-      DistBackendError, output.device().is_mps() && output.is_contiguous(),
+      DistBackendError,
+      output.device().is_mps() && output.is_contiguous(),
       "TCCL scatter: output must be a contiguous MPS tensor.");
   TORCH_CHECK_WITH(
-      DistBackendError, !engine_->ringTopology(),
+      DistBackendError,
+      !engine_->ringTopology(),
       "TCCL scatter: not supported on a ring topology (the root needs a QP to "
       "every rank); use a full-mesh cluster.");
   const bool isRoot = (rank_ == root);
@@ -1072,7 +1194,8 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::scatter(
         inputTensors.size() == 1 &&
             static_cast<int>(inputTensors[0].size()) == size_,
         "TCCL scatter: the root must supply one input list of world_size (",
-        size_, ") tensors.");
+        size_,
+        ") tensors.");
     inList = inputTensors[0];
     for (const auto& in : inList) {
       TORCH_CHECK_WITH(
@@ -1183,7 +1306,8 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::reduce_scatter(
           for (auto& chunk : inputTensors[i]) {
             inChunkViews.push_back(mpsSharedCpuView(chunk));
           }
-          dispatchReduceScatterList(*engine_, inChunkViews, outView, op, worldSize);
+          dispatchReduceScatterList(
+              *engine_, inChunkViews, outView, op, worldSize);
         }
       });
 }
@@ -1331,8 +1455,9 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::alltoall_base(
   const int64_t outDim0 = outputBuffer.size(0);
   const std::size_t inRow =
       inDim0 > 0 ? static_cast<std::size_t>(inputBuffer.nbytes()) / inDim0 : 0;
-  const std::size_t outRow =
-      outDim0 > 0 ? static_cast<std::size_t>(outputBuffer.nbytes()) / outDim0 : 0;
+  const std::size_t outRow = outDim0 > 0
+      ? static_cast<std::size_t>(outputBuffer.nbytes()) / outDim0
+      : 0;
 
   const bool equal = inputSplitSizes.empty() && outputSplitSizes.empty();
   std::vector<std::size_t> sOff(ws), sBytes(ws), rOff(ws), rBytes(ws);
@@ -1340,8 +1465,13 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::alltoall_base(
     TORCH_CHECK_WITH(
         DistBackendError,
         inDim0 % ws == 0 && outDim0 % ws == 0,
-        "TCCL alltoall_base: equal split requires dim-0 (", inDim0, "/", outDim0,
-        ") divisible by world_size ", ws, ".");
+        "TCCL alltoall_base: equal split requires dim-0 (",
+        inDim0,
+        "/",
+        outDim0,
+        ") divisible by world_size ",
+        ws,
+        ".");
     const std::size_t sb = static_cast<std::size_t>(inDim0 / ws) * inRow;
     const std::size_t rb = static_cast<std::size_t>(outDim0 / ws) * outRow;
     for (int p = 0; p < ws; ++p) {
@@ -1384,14 +1514,25 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::alltoall_base(
       "all-to-all; uneven splits require the full mesh (non-neighbor peers are "
       "not connected on a ring).");
   const bool ringOk = equal && sBytes[0] == rBytes[0] &&
-      tcclUseRing(ws, /*autoEnable=*/false, /*isBf16=*/false,
-                  sBytes[0] * static_cast<std::size_t>(ws), 1, ringTop);
+      tcclUseRing(ws,
+                  /*autoEnable=*/false,
+                  /*isBf16=*/false,
+                  sBytes[0] * static_cast<std::size_t>(ws),
+                  1,
+                  ringTop);
   const std::size_t segBytes = equal ? sBytes[0] : 0;
 
   return enqueueCollective(
       OpType::ALLTOALL_BASE,
       std::vector<at::Tensor>{outputBuffer},
-      [this, inputBuffer, outputBuffer, sOff, sBytes, rOff, rBytes, ringOk,
+      [this,
+       inputBuffer,
+       outputBuffer,
+       sOff,
+       sBytes,
+       rOff,
+       rBytes,
+       ringOk,
        segBytes]() mutable {
         at::Tensor inView = mpsSharedCpuView(inputBuffer);
         at::Tensor outView = mpsSharedCpuView(outputBuffer);
@@ -1412,7 +1553,8 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::send(
   TORCH_CHECK_WITH(
       DistBackendError,
       tensors.size() == 1,
-      "TCCL send: expected exactly one tensor, got ", tensors.size());
+      "TCCL send: expected exactly one tensor, got ",
+      tensors.size());
   auto& tensor = tensors[0];
   TORCH_CHECK_WITH(
       DistBackendError,
@@ -1421,18 +1563,25 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::send(
   TORCH_CHECK_WITH(
       DistBackendError,
       dstRank >= 0 && dstRank < size_ && dstRank != rank_,
-      "TCCL send: invalid dstRank ", dstRank, " for rank ", rank_,
-      " (world size ", size_, ").");
+      "TCCL send: invalid dstRank ",
+      dstRank,
+      " for rank ",
+      rank_,
+      " (world size ",
+      size_,
+      ").");
   // Ring topology only connects the two neighbors ((rank+/-1)%world); a send to
   // any other rank has a null connection slot.
   TORCH_CHECK_WITH(
       DistBackendError,
-      !engine_->ringTopology() ||
-          dstRank == (rank_ + 1) % size_ ||
+      !engine_->ringTopology() || dstRank == (rank_ + 1) % size_ ||
           dstRank == (rank_ - 1 + size_) % size_,
       "TCCL send: ring topology only permits sends to a ring neighbor "
-      "((rank+/-1)%world); dstRank ", dstRank, " is not a neighbor of rank ",
-      rank_, ".");
+      "((rank+/-1)%world); dstRank ",
+      dstRank,
+      " is not a neighbor of rank ",
+      rank_,
+      ".");
   // Byte movement - any dtype. tag is accepted but not hardware-matched (UC has
   // no tag matching); ordering is the per-peer FIFO of matched send/recv pairs.
   return enqueueCollective(
@@ -1454,7 +1603,8 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::recv(
   TORCH_CHECK_WITH(
       DistBackendError,
       tensors.size() == 1,
-      "TCCL recv: expected exactly one tensor, got ", tensors.size());
+      "TCCL recv: expected exactly one tensor, got ",
+      tensors.size());
   auto& tensor = tensors[0];
   TORCH_CHECK_WITH(
       DistBackendError,
@@ -1463,18 +1613,25 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::recv(
   TORCH_CHECK_WITH(
       DistBackendError,
       srcRank >= 0 && srcRank < size_ && srcRank != rank_,
-      "TCCL recv: invalid srcRank ", srcRank, " for rank ", rank_,
-      " (world size ", size_, ").");
-  // Ring topology only connects the two neighbors ((rank+/-1)%world); a recv from
-  // any other rank has a null connection slot.
+      "TCCL recv: invalid srcRank ",
+      srcRank,
+      " for rank ",
+      rank_,
+      " (world size ",
+      size_,
+      ").");
+  // Ring topology only connects the two neighbors ((rank+/-1)%world); a recv
+  // from any other rank has a null connection slot.
   TORCH_CHECK_WITH(
       DistBackendError,
-      !engine_->ringTopology() ||
-          srcRank == (rank_ + 1) % size_ ||
+      !engine_->ringTopology() || srcRank == (rank_ + 1) % size_ ||
           srcRank == (rank_ - 1 + size_) % size_,
       "TCCL recv: ring topology only permits recvs from a ring neighbor "
-      "((rank+/-1)%world); srcRank ", srcRank, " is not a neighbor of rank ",
-      rank_, ".");
+      "((rank+/-1)%world); srcRank ",
+      srcRank,
+      " is not a neighbor of rank ",
+      rank_,
+      ".");
   return enqueueCollective(
       OpType::RECV,
       std::vector<at::Tensor>{tensor},

@@ -25,8 +25,6 @@ class TCCLSharedBuffer;
 
 // Reduction op templates
 
-
-
 template <typename T>
 struct TCCLSumOp {
   void operator()(const T* input, T* output, std::size_t n) const;
@@ -72,13 +70,15 @@ inline void TCCLSumOp<c10::Half>::operator()(
   }
 }
 
-// bfloat16 SUM. On FEAT_BF16 hardware (all Apple Silicon with bf16) this reduces
-// with native __bf16 arithmetic (armv8.6-a); set TCCL_NATIVE_BF16=0 to force the
-// float32-accumulate fallback. On Apple aarch64 there is no scalar bf16 FADD, so
-// __bf16 addition lowers to fcvt -> fp32 add -> fcvt: a correctly-rounded single
-// add, bitwise-identical to the fp32-accumulate path (verified), so this is a
-// pure speedup with no change to reduction semantics. The native path avoids the
-// explicit per-element convert loop, which is the bf16 all-reduce cost vs JACCL.
+// bfloat16 SUM. On FEAT_BF16 hardware (all Apple Silicon with bf16) this
+// reduces with native __bf16 arithmetic (armv8.6-a); set TCCL_NATIVE_BF16=0 to
+// force the float32-accumulate fallback. On Apple aarch64 there is no scalar
+// bf16 FADD, so
+// __bf16 addition lowers to fcvt -> fp32 add -> fcvt: a correctly-rounded
+// single add, bitwise-identical to the fp32-accumulate path (verified), so this
+// is a pure speedup with no change to reduction semantics. The native path
+// avoids the explicit per-element convert loop, which is the bf16 all-reduce
+// cost vs JACCL.
 
 #if defined(__aarch64__) && defined(__APPLE__)
 
@@ -86,12 +86,10 @@ inline bool tcclNativeBf16Enabled() {
   static bool enabled = []() {
     int value = 0;
     std::size_t value_size = sizeof(value);
-    bool hw = sysctlbyname(
-                  "hw.optional.arm.FEAT_BF16",
-                  &value,
-                  &value_size,
-                  nullptr,
-                  0) == 0 &&
+    bool hw =
+        sysctlbyname(
+            "hw.optional.arm.FEAT_BF16", &value, &value_size, nullptr, 0) ==
+            0 &&
         value != 0;
     if (!hw) {
       return false;
@@ -133,14 +131,13 @@ inline void TCCLSumOp<c10::BFloat16>::operator()(
 }
 
 // Integer SUM
-#define TCCL_DEFINE_INT_SUM(TYPE)                       \
-  template <>                                           \
-  inline void TCCLSumOp<TYPE>::operator()(              \
-      const TYPE* input, TYPE* output, std::size_t n)   \
-      const {                                           \
-    for (std::size_t i = 0; i < n; ++i) {               \
-      output[i] += input[i];                            \
-    }                                                   \
+#define TCCL_DEFINE_INT_SUM(TYPE)                             \
+  template <>                                                 \
+  inline void TCCLSumOp<TYPE>::operator()(                    \
+      const TYPE* input, TYPE* output, std::size_t n) const { \
+    for (std::size_t i = 0; i < n; ++i) {                     \
+      output[i] += input[i];                                  \
+    }                                                         \
   }
 TCCL_DEFINE_INT_SUM(int8_t)
 TCCL_DEFINE_INT_SUM(int16_t)
@@ -165,14 +162,18 @@ inline void TCCLSumOp<bool>::operator()(
 // for bool.
 template <>
 inline void TCCLProdOp<float>::operator()(
-    const float* input, float* output, std::size_t n) const {
+    const float* input,
+    float* output,
+    std::size_t n) const {
   for (std::size_t i = 0; i < n; ++i) {
     output[i] *= input[i];
   }
 }
 template <>
 inline void TCCLProdOp<c10::Half>::operator()(
-    const c10::Half* input, c10::Half* output, std::size_t n) const {
+    const c10::Half* input,
+    c10::Half* output,
+    std::size_t n) const {
   for (std::size_t i = 0; i < n; ++i) {
     output[i] = static_cast<c10::Half>(
         static_cast<float>(output[i]) * static_cast<float>(input[i]));
@@ -180,18 +181,20 @@ inline void TCCLProdOp<c10::Half>::operator()(
 }
 template <>
 inline void TCCLProdOp<c10::BFloat16>::operator()(
-    const c10::BFloat16* input, c10::BFloat16* output, std::size_t n) const {
+    const c10::BFloat16* input,
+    c10::BFloat16* output,
+    std::size_t n) const {
   for (std::size_t i = 0; i < n; ++i) {
     output[i] = static_cast<c10::BFloat16>(
         static_cast<float>(output[i]) * static_cast<float>(input[i]));
   }
 }
-#define TCCL_DEFINE_INT_PROD(TYPE)                              \
-  template <>                                                   \
-  inline void TCCLProdOp<TYPE>::operator()(                     \
-      const TYPE* input, TYPE* output, std::size_t n) const {   \
-    for (std::size_t i = 0; i < n; ++i)                         \
-      output[i] = static_cast<TYPE>(output[i] * input[i]);      \
+#define TCCL_DEFINE_INT_PROD(TYPE)                            \
+  template <>                                                 \
+  inline void TCCLProdOp<TYPE>::operator()(                   \
+      const TYPE* input, TYPE* output, std::size_t n) const { \
+    for (std::size_t i = 0; i < n; ++i)                       \
+      output[i] = static_cast<TYPE>(output[i] * input[i]);    \
   }
 TCCL_DEFINE_INT_PROD(int8_t)
 TCCL_DEFINE_INT_PROD(int16_t)
@@ -201,25 +204,27 @@ TCCL_DEFINE_INT_PROD(uint8_t)
 #undef TCCL_DEFINE_INT_PROD
 template <>
 inline void TCCLProdOp<bool>::operator()(
-    const bool* input, bool* output, std::size_t n) const {
+    const bool* input,
+    bool* output,
+    std::size_t n) const {
   for (std::size_t i = 0; i < n; ++i) {
     output[i] = output[i] && input[i];
   }
 }
 
 // MIN/MAX
-#define TCCL_DEFINE_MINMAX(TYPE)                                            \
-  template <>                                                               \
-  inline void TCCLMaxOp<TYPE>::operator()(                                  \
-      const TYPE* input, TYPE* output, std::size_t n) const {              \
-    for (std::size_t i = 0; i < n; ++i)                                     \
-      output[i] = std::max(output[i], input[i]);                            \
-  }                                                                         \
-  template <>                                                               \
-  inline void TCCLMinOp<TYPE>::operator()(                                  \
-      const TYPE* input, TYPE* output, std::size_t n) const {              \
-    for (std::size_t i = 0; i < n; ++i)                                     \
-      output[i] = std::min(output[i], input[i]);                            \
+#define TCCL_DEFINE_MINMAX(TYPE)                              \
+  template <>                                                 \
+  inline void TCCLMaxOp<TYPE>::operator()(                    \
+      const TYPE* input, TYPE* output, std::size_t n) const { \
+    for (std::size_t i = 0; i < n; ++i)                       \
+      output[i] = std::max(output[i], input[i]);              \
+  }                                                           \
+  template <>                                                 \
+  inline void TCCLMinOp<TYPE>::operator()(                    \
+      const TYPE* input, TYPE* output, std::size_t n) const { \
+    for (std::size_t i = 0; i < n; ++i)                       \
+      output[i] = std::min(output[i], input[i]);              \
   }
 TCCL_DEFINE_MINMAX(float)
 TCCL_DEFINE_MINMAX(int8_t)
@@ -230,36 +235,37 @@ TCCL_DEFINE_MINMAX(uint8_t)
 TCCL_DEFINE_MINMAX(bool)
 #undef TCCL_DEFINE_MINMAX
 
-#define TCCL_DEFINE_MINMAX_VIA_FLOAT(TYPE)                                  \
-  template <>                                                               \
-  inline void TCCLMaxOp<TYPE>::operator()(                                  \
-      const TYPE* input, TYPE* output, std::size_t n) const {              \
-    for (std::size_t i = 0; i < n; ++i)                                     \
-      output[i] = static_cast<TYPE>(std::max(                               \
-          static_cast<float>(output[i]), static_cast<float>(input[i])));    \
-  }                                                                         \
-  template <>                                                               \
-  inline void TCCLMinOp<TYPE>::operator()(                                  \
-      const TYPE* input, TYPE* output, std::size_t n) const {              \
-    for (std::size_t i = 0; i < n; ++i)                                     \
-      output[i] = static_cast<TYPE>(std::min(                               \
-          static_cast<float>(output[i]), static_cast<float>(input[i])));    \
+#define TCCL_DEFINE_MINMAX_VIA_FLOAT(TYPE)                               \
+  template <>                                                            \
+  inline void TCCLMaxOp<TYPE>::operator()(                               \
+      const TYPE* input, TYPE* output, std::size_t n) const {            \
+    for (std::size_t i = 0; i < n; ++i)                                  \
+      output[i] = static_cast<TYPE>(std::max(                            \
+          static_cast<float>(output[i]), static_cast<float>(input[i]))); \
+  }                                                                      \
+  template <>                                                            \
+  inline void TCCLMinOp<TYPE>::operator()(                               \
+      const TYPE* input, TYPE* output, std::size_t n) const {            \
+    for (std::size_t i = 0; i < n; ++i)                                  \
+      output[i] = static_cast<TYPE>(std::min(                            \
+          static_cast<float>(output[i]), static_cast<float>(input[i]))); \
   }
 TCCL_DEFINE_MINMAX_VIA_FLOAT(c10::Half)
 TCCL_DEFINE_MINMAX_VIA_FLOAT(c10::BFloat16)
 #undef TCCL_DEFINE_MINMAX_VIA_FLOAT
 
-
 // TCCLEngine
 
 class TCCLEngine {
  public:
-  // Per-peer staging buffer size (hence its MR) and max bytes per ibv_post_send.
-  // Larger messages split into a chunk loop and reduce incrementally.
+  // Per-peer staging buffer size (hence its MR) and max bytes per
+  // ibv_post_send. Larger messages split into a chunk loop and reduce
+  // incrementally.
   static constexpr size_t kChunkSize = 512 * 1024;
 
-  // Pipeline depth for the bidirectional ring: pieces in flight per stream, with
-  // an equal number of double-buffered staging slots. 2 matches JACCL's PIPELINE.
+  // Pipeline depth for the bidirectional ring: pieces in flight per stream,
+  // with an equal number of double-buffered staging slots. 2 matches JACCL's
+  // PIPELINE.
   static constexpr int kPipelineDepth = 2;
 
   TCCLEngine(
@@ -320,9 +326,10 @@ class TCCLEngine {
   // every rank.
   void broadcast(void* data, std::size_t total_bytes, int root);
 
-  // RING broadcast: pipelined store-and-forward of total_bytes from `root` along
-  // the ring (root -> right -> ... -> root's left neighbour). Enables broadcast
-  // on a ring-cabled cluster; on a full mesh the dispatch defaults to mesh broadcast.
+  // RING broadcast: pipelined store-and-forward of total_bytes from `root`
+  // along the ring (root -> right -> ... -> root's left neighbour). Enables
+  // broadcast on a ring-cabled cluster; on a full mesh the dispatch defaults to
+  // mesh broadcast.
   void ring_broadcast(void* data, std::size_t total_bytes, int root);
 
   // Mesh all-gather. `in` is this rank's contiguous shard of `per_rank_bytes`
@@ -332,17 +339,17 @@ class TCCLEngine {
       const std::vector<void*>& out_ptrs,
       std::size_t per_rank_bytes);
 
-  // Mesh gather (rooted): the root collects rank r's `per_rank_bytes` shard into
-  // out_ptrs[r]; every non-root rank sends `in`. out_ptrs is root-only (size_
-  // entries); pass empty elsewhere.
+  // Mesh gather (rooted): the root collects rank r's `per_rank_bytes` shard
+  // into out_ptrs[r]; every non-root rank sends `in`. out_ptrs is root-only
+  // (size_ entries); pass empty elsewhere.
   void gather(
       const void* in,
       const std::vector<void*>& out_ptrs,
       std::size_t per_rank_bytes,
       int root);
 
-  // Mesh scatter (rooted): the root sends in_ptrs[r] (`per_rank_bytes`) to rank r;
-  // every non-root rank receives its slice into `out`. in_ptrs is root-only
+  // Mesh scatter (rooted): the root sends in_ptrs[r] (`per_rank_bytes`) to rank
+  // r; every non-root rank receives its slice into `out`. in_ptrs is root-only
   // (size_ entries).
   void scatter(
       const std::vector<const void*>& in_ptrs,
@@ -361,13 +368,14 @@ class TCCLEngine {
       std::size_t count_per_rank,
       ReduceOp reduce_op);
 
-  // Point-to-point send: stream `nbytes` from `in` to peer `dst` over its UC QP,
-  // chunked at kChunkSize through the per-peer send buffer (PIPELINE=1, one chunk
-  // in flight).
+  // Point-to-point send: stream `nbytes` from `in` to peer `dst` over its UC
+  // QP, chunked at kChunkSize through the per-peer send buffer (PIPELINE=1, one
+  // chunk in flight).
   void p2p_send(int dst, const char* in, std::size_t nbytes);
 
   // Point-to-point recv: receive `nbytes` from peer `src` into `out`, chunked
-  // through the per-peer recv buffer (PIPELINE=1). Posts the recv before polling.
+  // through the per-peer recv buffer (PIPELINE=1). Posts the recv before
+  // polling.
   void p2p_recv(int src, char* out, std::size_t nbytes);
 
   // Mesh (direct) all-to-all. Slab destined for peer p is [send_base +
@@ -383,27 +391,35 @@ class TCCLEngine {
       const std::vector<std::size_t>& recv_off,
       const std::vector<std::size_t>& recv_bytes);
 
-  // RING all-to-all (neighbours only, store-and-forward), EQUAL splits: send_base
-  // holds size_ segments of seg_bytes each (segment j destined for rank j); on exit
-  // recv_base holds size_ segments (segment i received from rank i).
+  // RING all-to-all (neighbours only, store-and-forward), EQUAL splits:
+  // send_base holds size_ segments of seg_bytes each (segment j destined for
+  // rank j); on exit recv_base holds size_ segments (segment i received from
+  // rank i).
   void ring_all_to_all(
-      const char* send_base, char* recv_base, std::size_t seg_bytes);
+      const char* send_base,
+      char* recv_base,
+      std::size_t seg_bytes);
 
  private:
   // Core mesh primitive shared by the mesh collectives. Exchanges up to
   // `total_bytes` with every non-self peer in kChunkSize chunks. Per chunk:
   //   - want_recv(peer): pre-post a recv (UC needs recv before the matching
   //     send, Apple TN3205 sec. 12.3)
-  //   - send_src(peer, off) != nullptr: memcpy into the send buffer, post a send
+  //   - send_src(peer, off) != nullptr: memcpy into the send buffer, post a
+  //   send
   //   - busy-poll (timeout watchdog) until all WRs complete, firing
   //     on_recv(peer, recv_buf, off, chunk_bytes) per recv
   // Per-peer send_src lets reduce_scatter send each peer a different slab;
   // want_recv + nullable send_src let broadcast post an asymmetric WR set.
   // Pipeline=true drives a depth-kPipelineDepth per-peer pipeline at size_>=3;
   // safe ONLY when on_recv is cheap (a byte copy, e.g. all_gather) - a slow
-  // on_recv (reduce) held over a recv buffer starves the all-to-all under UC drop
-  // and deadlocks, so reduce collectives keep the default depth-1 path.
-  template <bool Pipeline = false, typename SendSrc, typename WantRecv, typename OnRecv>
+  // on_recv (reduce) held over a recv buffer starves the all-to-all under UC
+  // drop and deadlocks, so reduce collectives keep the default depth-1 path.
+  template <
+      bool Pipeline = false,
+      typename SendSrc,
+      typename WantRecv,
+      typename OnRecv>
   void mesh_exchange(
       std::size_t total_bytes,
       SendSrc send_src,
@@ -411,11 +427,12 @@ class TCCLEngine {
       OnRecv on_recv);
 
   // One ring step shared by reduce-scatter and all-gather: send `send_bytes`
-  // from `send_base` to right neighbor `send_peer` AND receive `recv_bytes` from
-  // left neighbor `recv_peer`, in kChunkSize pieces (PIPELINE=1, one in flight
-  // per direction). Recv before send (UC discipline), per-completion wc.status
-  // check + timeout_ watchdog. on_recv reduces/copies each received piece. The
-  // two directions carry independent byte counts (ragged last chunk differs).
+  // from `send_base` to right neighbor `send_peer` AND receive `recv_bytes`
+  // from left neighbor `recv_peer`, in kChunkSize pieces (PIPELINE=1, one in
+  // flight per direction). Recv before send (UC discipline), per-completion
+  // wc.status check + timeout_ watchdog. on_recv reduces/copies each received
+  // piece. The two directions carry independent byte counts (ragged last chunk
+  // differs).
   template <typename OnRecv>
   void ring_step(
       int send_peer,
@@ -425,17 +442,19 @@ class TCCLEngine {
       std::size_t recv_bytes,
       OnRecv on_recv);
 
-  // Bidirectional ring step: two counter-rotating rings concurrently over the two
-  // neighbor links, so both links carry traffic in both directions (~2x the
+  // Bidirectional ring step: two counter-rotating rings concurrently over the
+  // two neighbor links, so both links carry traffic in both directions (~2x the
   // unidirectional ring bandwidth; JACCL all_reduce<MAX_DIR=2> equivalent).
   //   ring A (clockwise): send sendA_bytes from sendA_base to `right`, recv
   //     recvA_bytes from `left`, firing on_recv_A per received piece.
-  //   ring B (counter-clockwise): send sendB_bytes from sendB_base to `left`, recv
+  //   ring B (counter-clockwise): send sendB_bytes from sendB_base to `left`,
+  //   recv
   //     recvB_bytes from `right`, firing on_recv_B per received piece.
   // Four independent streams (A_send/A_recv/B_send/B_recv), kChunkSize pieces,
   // PIPELINE=1 per stream. Completions demuxed by the (isSend, peer) wr_id: a
-  // connection's CQ carries one send stream and one recv stream (different rings).
-  // Recv posted before send (UC discipline), per-WR wc.status check, timeout_ watchdog.
+  // connection's CQ carries one send stream and one recv stream (different
+  // rings). Recv posted before send (UC discipline), per-WR wc.status check,
+  // timeout_ watchdog.
   template <typename OnRecvA, typename OnRecvB>
   void bidir_ring_step(
       int right,

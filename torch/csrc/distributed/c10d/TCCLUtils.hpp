@@ -2,7 +2,8 @@
 
 #ifdef USE_C10D_TCCL
 
-// TCCL transport-layer types and free-function helpers used by ProcessGroupTCCL.
+// TCCL transport-layer types and free-function helpers used by
+// ProcessGroupTCCL.
 
 #include <chrono>
 #include <cstddef>
@@ -48,7 +49,6 @@ struct TCCLDestination {
   // Align gid to 16 bytes - ibv_gid is a 16-byte union
   int32_t _pad;
   uint8_t gid[16];
-
 };
 
 // IBV wrapper - singleton dlopen of librdma.dylib
@@ -72,26 +72,26 @@ class TORCH_API TCCLIBVWrapper {
   // Signatures mirror <infiniband/verbs.h> using forward-declared struct
   // types so this header does not depend on librdma headers.
   ibv_device** (*get_device_list)(int*) = nullptr;
-  const char*  (*get_device_name)(ibv_device*) = nullptr;
+  const char* (*get_device_name)(ibv_device*) = nullptr;
   ibv_context* (*open_device)(ibv_device*) = nullptr;
-  void         (*free_device_list)(ibv_device**) = nullptr;
-  int          (*close_device)(ibv_context*) = nullptr;
-  ibv_pd*      (*alloc_pd)(ibv_context*) = nullptr;
-  ibv_cq*      (*create_cq)(
+  void (*free_device_list)(ibv_device**) = nullptr;
+  int (*close_device)(ibv_context*) = nullptr;
+  ibv_pd* (*alloc_pd)(ibv_context*) = nullptr;
+  ibv_cq* (*create_cq)(
       ibv_context*,
       int cqe,
       void* cq_context,
       ibv_comp_channel*,
       int comp_vector) = nullptr;
-  ibv_qp*      (*create_qp)(ibv_pd*, ibv_qp_init_attr*) = nullptr;
-  int          (*destroy_qp)(ibv_qp*) = nullptr;
-  int          (*destroy_cq)(ibv_cq*) = nullptr;
-  int          (*dealloc_pd)(ibv_pd*) = nullptr;
-  int          (*query_port)(ibv_context*, uint8_t, ibv_port_attr*) = nullptr;
-  int          (*query_gid)(ibv_context*, uint8_t, int, ibv_gid*) = nullptr;
-  int          (*modify_qp)(ibv_qp*, ibv_qp_attr*, int) = nullptr;
-  ibv_mr*      (*reg_mr)(ibv_pd*, void*, size_t, int) = nullptr;
-  int          (*dereg_mr)(ibv_mr*) = nullptr;
+  ibv_qp* (*create_qp)(ibv_pd*, ibv_qp_init_attr*) = nullptr;
+  int (*destroy_qp)(ibv_qp*) = nullptr;
+  int (*destroy_cq)(ibv_cq*) = nullptr;
+  int (*dealloc_pd)(ibv_pd*) = nullptr;
+  int (*query_port)(ibv_context*, uint8_t, ibv_port_attr*) = nullptr;
+  int (*query_gid)(ibv_context*, uint8_t, int, ibv_gid*) = nullptr;
+  int (*modify_qp)(ibv_qp*, ibv_qp_attr*, int) = nullptr;
+  ibv_mr* (*reg_mr)(ibv_pd*, void*, size_t, int) = nullptr;
+  int (*dereg_mr)(ibv_mr*) = nullptr;
 
  private:
   // Constructor performs dlopen + 16 dlsym in one shot.
@@ -150,12 +150,9 @@ class TORCH_API TCCLConnection {
 
   // Post a recv WR referencing `length` bytes of `buf`'s storage. Same
   // registration precondition as postSend. UC requires the recv to be
-  // posted BEFORE the matching send arrives (Apple TN3205 sec. 12.3: credit-based
-  // flow control stalls the sender otherwise).
-  void postRecv(
-      class TCCLSharedBuffer& buf,
-      uint64_t length,
-      uint64_t wr_id);
+  // posted BEFORE the matching send arrives (Apple TN3205 sec. 12.3:
+  // credit-based flow control stalls the sender otherwise).
+  void postRecv(class TCCLSharedBuffer& buf, uint64_t length, uint64_t wr_id);
 
   // Non-blocking. Polls up to `max_completions` work completion events
   // from this Connection's CQ into `wcs`. Returns the number actually
@@ -171,10 +168,18 @@ class TORCH_API TCCLConnection {
 
   // Accessors for the algorithm/buffer layer. Returned pointers are owned by
   // this Connection - do not free.
-  ibv_context* context() const noexcept { return ctx_; }
-  ibv_pd* protectionDomain() const noexcept { return pd_; }
-  ibv_cq* completionQueue() const noexcept { return cq_; }
-  ibv_qp* queuePair() const noexcept { return qp_; }
+  ibv_context* context() const noexcept {
+    return ctx_;
+  }
+  ibv_pd* protectionDomain() const noexcept {
+    return pd_;
+  }
+  ibv_cq* completionQueue() const noexcept {
+    return cq_;
+  }
+  ibv_qp* queuePair() const noexcept {
+    return qp_;
+  }
 
  private:
   void swap(TCCLConnection& other) noexcept;
@@ -226,11 +231,19 @@ class TORCH_API TCCLSharedBuffer {
   ibv_sge toSge(ibv_pd* pd, uint64_t length) const;
 
   // Raw access for memcpy in/out of the buffer. Pointer is page-aligned.
-  void* data() noexcept { return data_; }
-  const void* data() const noexcept { return data_; }
+  void* data() noexcept {
+    return data_;
+  }
+  const void* data() const noexcept {
+    return data_;
+  }
 
-  size_t size() const noexcept { return size_; }
-  bool empty() const noexcept { return data_ == nullptr; }
+  size_t size() const noexcept {
+    return size_;
+  }
+  bool empty() const noexcept {
+    return data_ == nullptr;
+  }
 
  private:
   void destroy() noexcept;
@@ -296,14 +309,13 @@ TORCH_API void checkLinkLayer(const std::string& rdma_device);
 // the same group_name cannot read stale destinations from a prior incarnation.
 // Only rank 0 reserves (Store::add) and broadcasts; others read it. Returns the
 // agreed counter value (1-indexed).
-TORCH_API int64_t tcclInitSequence(
-    Store& store,
-    int rank,
-    std::chrono::milliseconds timeout);
+TORCH_API int64_t
+tcclInitSequence(Store& store, int rank, std::chrono::milliseconds timeout);
 
 // All-to-all destination exchange. Each rank publishes its
-// num_wires-sized vector of TCCLDestinations under keyPrefix + std::to_string(rank),
-// then blocks on Store::multiGet until every peer has done the same.
+// num_wires-sized vector of TCCLDestinations under keyPrefix +
+// std::to_string(rank), then blocks on Store::multiGet until every peer has
+// done the same.
 //
 // On length mismatch (e.g. peer compiled with different num_wires), throws
 // DistBackendError with the offending peer's rank and byte counts.
@@ -331,4 +343,3 @@ TORCH_API void tcclRtsBarrier(
 } // namespace c10d
 
 #endif // USE_C10D_TCCL
-

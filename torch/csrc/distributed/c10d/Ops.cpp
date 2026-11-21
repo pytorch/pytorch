@@ -775,9 +775,9 @@ namespace {
   }
 
 // 1st level expansion
-#define REGISTER_C10D_OP(FUNC)  \
-  REGISTER_C10D_OP1(FUNC, CPU)  \
-  REGISTER_C10D_OP1(FUNC, CUDA) \
+#define REGISTER_C10D_OP(FUNC)         \
+  REGISTER_C10D_OP1(FUNC, CPU)         \
+  REGISTER_C10D_OP1(FUNC, CUDA)        \
   REGISTER_C10D_OP1(FUNC, PrivateUse1) \
   REGISTER_C10D_OP1(FUNC, MPS)
 
