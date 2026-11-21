@@ -103,6 +103,18 @@ bool is_nvshmem_available() {
   return ok;
 }
 
+ShmemOps shmem_ops() {
+  return {
+      static_cast<ShmemSignalOp>(ROCSHMEM_SIGNAL_SET),
+      static_cast<ShmemSignalOp>(ROCSHMEM_SIGNAL_ADD),
+      static_cast<ShmemCompareOp>(ROCSHMEM_CMP_EQ),
+      static_cast<ShmemCompareOp>(ROCSHMEM_CMP_NE),
+      static_cast<ShmemCompareOp>(ROCSHMEM_CMP_GT),
+      static_cast<ShmemCompareOp>(ROCSHMEM_CMP_GE),
+      static_cast<ShmemCompareOp>(ROCSHMEM_CMP_LT),
+      static_cast<ShmemCompareOp>(ROCSHMEM_CMP_LE)};
+}
+
 void nvshmemx_cumodule_init(uintptr_t module) {
   auto hipmodule = reinterpret_cast<hipModule_t>(module);
   NVSHMEM_CHECK(

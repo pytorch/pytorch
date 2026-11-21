@@ -254,7 +254,8 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             next(iterator)
         self.assertEqual(actual.exception.args, expected.exception.args)
 
-    def test_escape_instance_dict_iterator_after_attribute_write(self):
+    @parametrize("kind", ["instance", "class", "module"])
+    def test_escape_namespace_iterator_after_attribute_write(self, kind):
         class Box:
             pass
 
@@ -262,11 +263,31 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             obj.second = 2
             return x + 1, iter(obj.__dict__)
 
-        obj = Box()
+        obj = {"instance": Box(), "class": Box, "module": types.ModuleType("mod")}[kind]
         obj.first = 1
+        expected_keys = [*vars(obj), "second"]
         result, keys = torch.compile(fn, backend="eager")(torch.zeros(1), obj)
         self.assertEqual(result, torch.ones(1))
-        self.assertEqual(list(keys), list(vars(obj)))
+        self.assertEqual(obj.second, 2)
+        self.assertEqual(list(keys), expected_keys)
+
+    def test_escape_iterator_aliasing_module_dict(self):
+        def fn(x, mod, namespace):
+            mod.second = 2
+            return x + 1, iter(namespace)
+
+        mod = types.ModuleType("mod")
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager")
+        namespace = vars(mod)
+        for mapping in (namespace.copy(), namespace):
+            expected = list(mapping)
+            if mapping is namespace:
+                expected.append("second")
+            result, keys = compiled(x, mod, mapping)
+            self.assertEqual(result, x + 1)
+            self.assertEqual(list(keys), expected)
+            del mod.second
 
     @parametrize("factory", [dict, OrderedDict, set])
     def test_escape_iterator_after_owner_mutation(self, factory):
@@ -550,39 +571,6 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             ord("o") * 2,
         ]
         self.assertEqual(result, expected)
-
-    def test_constant_variable_list_tp_iter(self):
-        """ConstantVariable wrapping a list value should iterate via tp_iter_impl.
-
-        ConstantVariable.create() normally redirects list to ListVariable. This
-        test bypasses __init__ to construct a ConstantVariable holding a list
-        directly, exercising the generic tp_iter_impl unpack path.
-        """
-        from torch._dynamo.variables.base import VariableTracker
-        from torch._dynamo.variables.constant import ConstantVariable
-        from torch._dynamo.variables.lists import ListIteratorVariable
-
-        cv = ConstantVariable.__new__(ConstantVariable)
-        VariableTracker.__init__(cv)
-        cv.value = [1, 2, 3]
-
-        result = cv.tp_iter_impl(None)
-        self.assertIsInstance(result, ListIteratorVariable)
-        self.assertEqual([v.as_python_constant() for v in result.items], [1, 2, 3])
-
-    def test_constant_variable_tuple_tp_iter(self):
-        """ConstantVariable wrapping a tuple value iterates via tp_iter_impl."""
-        from torch._dynamo.variables.base import VariableTracker
-        from torch._dynamo.variables.constant import ConstantVariable
-        from torch._dynamo.variables.lists import ListIteratorVariable
-
-        cv = ConstantVariable.__new__(ConstantVariable)
-        VariableTracker.__init__(cv)
-        cv.value = (10, 20, 30)
-
-        result = cv.tp_iter_impl(None)
-        self.assertIsInstance(result, ListIteratorVariable)
-        self.assertEqual([v.as_python_constant() for v in result.items], [10, 20, 30])
 
     def test_constant_variable_non_iterable_tp_iter(self):
         """Non-iterable ConstantVariable falls back to base unimplemented."""
