@@ -62,6 +62,7 @@ from torch.testing._internal.common_utils import (
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
+from torch.utils._ordered_set import OrderedSet
 
 
 T = TypeVar("T")
@@ -239,6 +240,20 @@ class MethodKeyDict(dict):
 
 
 _HASH_ESCAPE = "Conversion of compile-time-only hash value"
+
+
+class AlwaysEqualHashKey:
+    def __init__(self, hash_value):
+        self.hash_value = hash_value
+
+    def __hash__(self):
+        return self.hash_value
+
+    def __eq__(self, other):
+        return True
+
+
+_KEY_NESTING = [(tuple, 0), (tuple, 1), (tuple, 2), (frozenset, 1), (frozenset, 2)]
 
 
 class FunctionTests(torch._dynamo.test_case.TestCase):
@@ -7521,8 +7536,11 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(opt_fn(x, a, a), (True, x + 1))
 
     @parametrize("skip", [False, True])
+    @parametrize("mapping", [False, True])
     @parametrize("receiver_type", [list, tuple, range])
-    def test_bound_builtin_method_comparison_alias_changes(self, receiver_type, skip):
+    def test_bound_builtin_method_comparison_alias_changes(
+        self, receiver_type, skip, mapping
+    ):
         def skip_source(ctx):
             value = ctx.get_local("left")
             value = value._i_will_not_complain_if_bc_breaks_VariableTracker().realize()
@@ -7533,7 +7551,8 @@ class GraphModule(torch.nn.Module):
             if skip:
                 comptime(skip_source)
             descriptor = receiver_type.__dict__["count"]
-            return x + (descriptor.__get__(left) == descriptor.__get__(right))
+            first, second = descriptor.__get__(left), descriptor.__get__(right)
+            return x + (len({first: 1, second: 2}) if mapping else first == second)
 
         value = 2 if receiver_type is range else [1, 2]
         left, right = receiver_type(value), receiver_type(value)
@@ -7629,7 +7648,7 @@ class GraphModule(torch.nn.Module):
 
         first, second, third = [], [], []
         mapping = {Keys([first.count]): 7}
-        self._check_key_reuse(fn, (second, third, first, second), mapping, frames=3)
+        self._check_key_reuse(fn, (second, third, first, second), mapping)
 
     def test_bound_builtin_method_hash(self):
         receiver = [1, 1]
@@ -7719,7 +7738,8 @@ class GraphModule(torch.nn.Module):
         fn.__code__ = code.replace(co_consts=constants)
         self.assertIsNot(literal, other)
         values = (literal, 10002) if mode == "hash" else (literal, other, literal)
-        self._check_key_reuse(fn, values, frames=2, dynamic=True)
+        frames = 1 if mode == "hash" else 2
+        self._check_key_reuse(fn, values, frames=frames, dynamic=True)
 
     def test_prebound_method_key_ignores_receiver_contents(self):
         fn = lambda x, method: (x + len({method}), method.__name__)
@@ -7753,7 +7773,7 @@ class GraphModule(torch.nn.Module):
             return x + len({key: 1, method: 2}), type(key), key == original
 
         keys = (torch.ones(1), torch.Size([1]), frozenset({1}), NoHint(), member)
-        for key in (*keys, text("a"), pair((1,)), record(1)):
+        for key in (frozenset(), *keys, text("a"), pair((1,)), record(1)):
             self.assertEqual(fn(torch.ones(1), key)[1:], (type(key), True))
             self._check_key_reuse(fn, (key,), frames=1)
             torch._dynamo.reset()
@@ -7775,6 +7795,490 @@ class GraphModule(torch.nn.Module):
             return x + isinstance(bound, type(method)), same, type(bound)
 
         self._check_key_reuse(fn, (method,), frames=1)
+
+    @parametrize("participating", [False, True])
+    def test_saved_method_key_custom_collision(self, participating):
+        def fn(x, method, key):
+            table = {method: 1}
+            return x + (key in (table if participating else {1: 1}))
+
+        method = MethodKeyDict.fromkeys
+        args = (torch.ones(1), method, AlwaysEqualHashKey(hash(method)))
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        if participating:
+            with self.assertRaisesRegex(Unsupported, "requires identity guards"):
+                compiled.aot_compile((args, {}))
+        else:
+            compiled = compiled.aot_compile((args, {}))
+            self.assertEqual(compiled(*args), fn(*args))
+
+    @parametrize("prebound", (False, True))
+    def test_builtin_method_keys(self, prebound):
+        def fn(x, pair):
+            obj, method = pair
+            left = method if prebound else obj.get
+            table, values = {left: 7}, {left}
+            right = obj.get
+            return x + table.get(right, 0), right in values, len(values | {right})
+
+        a, b = MethodKeyDict(a=1), MethodKeyDict(a=1)
+        method = a.get
+        pairs = [(obj, method) for obj in (b, a, b)]
+        self._check_key_reuse(fn, pairs, frames=2 if prebound else 1)
+
+    @parametrize("local", [False, True])
+    @parametrize("key", [torch.float32, torch.device("cpu"), object()])
+    @parametrize("mutate", [False, True])
+    def test_builtin_method_unrelated_key_containers(self, local, key, mutate):
+        class Unrelated:
+            pass
+
+        def fn(x, pair):
+            receiver, table = pair
+            if mutate:
+                Unrelated.__eq__ = lambda self, other: True
+            if local:
+                receiver = []
+            method = list.append.__get__(receiver, list)
+            return x + len({method: 1}) + table[key]
+
+        helper = {}
+        pairs = [(receiver, {helper.get: 9, key: 3}) for receiver in ([], [], [])]
+        self._check_key_reuse(fn, pairs, frames=1)
+
+    @parametrize(
+        "op",
+        ["isdisjoint", "union", "intersection", "difference", "symmetric_difference"],
+    )
+    @parametrize("empty", [False, True])
+    @parametrize("operand_type", [tuple, set])
+    def test_builtin_method_iterable_set_operand(self, op, empty, operand_type):
+        def fn(x, receiver):
+            method = list.count.__get__(receiver, list)
+            values = set() if empty else {method}
+            other = list.count.__get__(receiver, list)
+            result = getattr(values, op)(operand_type((other,)))
+            if op == "isdisjoint":
+                return x + result
+            return x + len(result), all(
+                item is other if op == "intersection" else item.__self__ is receiver
+                for item in result
+            )
+
+        self._check_key_reuse(fn, ([1], [2]), frames=1)
+
+    @parametrize("wrap", [None, tuple, frozenset])
+    @parametrize("kind", [dict, set])
+    @parametrize("base", [False, True])
+    @parametrize("prebound", [False, True])
+    @parametrize(
+        "mutation", ["between_calls", "in_frame", "after_lookup", "suppressed_lookup"]
+    )
+    def test_method_key_equality_mutation(self, wrap, kind, base, prebound, mutation):
+        receiver, other = [], []
+        bound = receiver.count
+        collision_hash = hash(bound)
+
+        class Base(int):
+            def __hash__(self):
+                return collision_hash
+
+        class Key(Base):
+            pass
+
+        key = Key(5)
+        key = wrap([key]) if wrap else key
+        container = {key: 7} if kind is dict else {key}
+        owner = Base if base else Key
+        in_frame = mutation in ("in_frame", "after_lookup")
+
+        def prime(ctx):
+            mapping, method = (
+                ctx.get_local(name)
+                ._i_will_not_complain_if_bc_breaks_VariableTracker()
+                .realize()
+                for name in ("container", "method")
+            )
+            with torch._guards.TracingContext.get().guards_context.skip_guard_install():
+                mapping._hashable_key(method)
+
+        def fn(x, obj, container):
+            size = len(container)
+            method = bound if prebound else list.count.__get__(obj, list)
+            method = wrap([method]) if wrap else method
+            if mutation == "suppressed_lookup":
+                comptime(prime)
+            if mutation == "after_lookup":
+                # Populate the comparison's guard cache first.
+                bool(method in container)
+            if in_frame:
+                owner.__eq__ = AlwaysEqualHashKey.__eq__
+            return x + 7 * (method in container) + size - 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.ones(1)
+        if in_frame:
+            with self.assertRaisesRegex(
+                Unsupported, "Builtin method keys with mutated equality"
+            ):
+                compiled(x, other, container)
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, backend=counter)
+            for obj, expected in ((other, 7 if prebound else 0), (receiver, 7)):
+                owner.__eq__ = int.__eq__
+                self.assertEqual(compiled(x, obj, container), x + expected)
+            frames = counter.frame_count
+            owner.__eq__ = int.__eq__
+            self.assertEqual(compiled(x, receiver, container), x + 7)
+            self.assertEqual(counter.frame_count, frames)
+            return
+        for obj in (other, receiver):
+            self.assertEqual(compiled(x, obj, container), x)
+        self.assertEqual(counter.frame_count, 1)
+        owner.__eq__ = AlwaysEqualHashKey.__eq__
+        self.assertEqual(fn(x, receiver, container), x + 7)
+        self.assertEqual(compiled(x, receiver, container), x + 7)
+        self.assertEqual(compiled(x, receiver, container), x + 7)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_builtin_method_key_stdlib_global(self):
+        with patch.dict(vars(inspect), {"receiver": []}):
+            exec(
+                "def _method_key_fn(x, other): "
+                "return x + len({list.append.__get__(receiver, list), list.append.__get__(other, list)})",
+                vars(inspect),
+            )
+
+            def fn(x, other):
+                return inspect._method_key_fn(x, other)
+
+            self._check_key_reuse(fn, ([], inspect.receiver, []))
+
+    @parametrize("op", ["pairs", "mapping", "move_to_end", "pop", "setitem"])
+    def test_builtin_method_mapping_collisions(self, op):
+        first, second = {}, {}
+        key = AlwaysEqualHashKey(hash(first.get))
+
+        class Mapping:
+            def __init__(self, bound):
+                self.bound = bound
+
+            def keys(self):
+                return [key, self.bound]
+
+            def __getitem__(self, key):
+                return 1
+
+        def fn(x, receiver):
+            bound = dict.get.__get__(receiver, dict)
+            if op in ("pairs", "mapping"):
+                mapping = {}
+                mapping.update(
+                    Mapping(bound) if op == "mapping" else [(key, 1), (bound, 1)]
+                )
+            else:
+                mapping = collections.OrderedDict([(key, 1)])
+                if op == "setitem":
+                    mapping[bound] = 2
+                else:
+                    try:
+                        getattr(mapping, op)(bound)
+                        return x + 1
+                    except KeyError:
+                        return x
+            return x + len(mapping)
+
+        self._check_key_reuse(fn, (first, second, first))
+
+    @parametrize(
+        "op",
+        ["lookup", "merge", "compare", "insert", "add", "subtract"]
+        + ["union", "intersection", "difference", "multi_union", "frozen_multi_union"]
+        + ["remove", "discard", "pop", "clear"],
+    )
+    def test_builtin_method_cross_container_collisions(self, op):
+        def fn(x, receiver, key):
+            method = list.count.__get__(receiver, list)
+            if op in ("insert", "add"):
+                other = list.count.__get__(first, list)
+                values = {} if op == "insert" else set()
+                for value, item in enumerate((method, other), 1):
+                    if op == "insert":
+                        values[item] = value
+                    else:
+                        values.add(item)
+                return x + len(values)
+            if op == "subtract":
+                seed = {method}
+                values = {key} - {key}
+                values.add(list.count.__get__([], list))
+                return x + len(seed) + len(values)
+            if op == "lookup":
+                return x + ({key: 1}.get(method, 0))
+            if op == "merge":
+                mapping = {method: 1}
+                mapping.update({key: 2})
+                return x + len(mapping)
+            if op in ("multi_union", "frozen_multi_union"):
+                kind = frozenset if op == "frozen_multi_union" else set
+                return x + len(kind().union({key}, {method}))
+            left, right = {method}, {key}
+            if op in ("remove", "discard", "pop", "clear"):
+                before = method in right
+                args = (key,) if op in ("remove", "discard") else ()
+                getattr(right, op)(*args)
+                right.add(method)
+                return x + len(left.union(right)), before
+            if op == "compare":
+                return x + (left == right)
+            return x + len(getattr(left, op)(right))
+
+        first, second = [], []
+        key = AlwaysEqualHashKey(hash(first.count))
+        receivers = (second, first, second)
+        self._check_key_reuse(fn, receivers, key, frames=1 if op == "subtract" else 2)
+
+    @parametrize(
+        "kind, mutate, expected_size",
+        [
+            (dict, operator.delitem, 2),
+            (dict, lambda d, k: d.pop(k), 2),
+            (dict, lambda d, k: d.popitem(), 2),
+            (dict, lambda d, k: d.clear(), 2),
+            (collections.OrderedDict, lambda d, k: d.popitem(), 2),
+            (set, lambda s, k: s.pop(), 2),
+            (set, lambda s, k: s.remove(k), 2),
+            (set, lambda s, k: s.discard(k), 2),
+            (set, lambda s, k: s.clear(), 2),
+            (set, lambda s, k: s.difference_update((k,)), 2),
+            (set, lambda s, k: operator.isub(s, {k}), 2),
+            (OrderedSet, lambda s, k: s.pop(), 2),
+            (set, lambda s, k: s.intersection_update(()), 2),
+            (set, lambda s, k: s.symmetric_difference_update((k,)), 2),
+            (set, lambda s, k: set.__init__(s, ()), 2),
+            (OrderedSet, lambda s, k: OrderedSet.__init__(s, ()), 1),
+        ],
+    )
+    def test_builtin_method_reentrant_mutation(self, kind, mutate, expected_size):
+        class Key(AlwaysEqualHashKey):
+            __hash__ = AlwaysEqualHashKey.__hash__
+
+            def __eq__(self, other):
+                mutate(self.mapping, self)
+                self.removed = True
+                return False
+
+        def fn(x, receiver):
+            mapping = kind()
+            key = Key(collision_hash)
+            key.mapping, key.removed = mapping, False
+            for item, value in ((key, 1), (receiver.count, 7), ([].count, 9)):
+                if isinstance(mapping, dict):
+                    mapping[item] = value
+                else:
+                    mapping.add(item)
+            return x + len(mapping), key.removed, mapping is key.mapping
+
+        receiver = []
+        collision_hash = hash(receiver.count)
+        x = torch.ones(1)
+        self.assertEqual(fn(x, receiver), (x + expected_size, True, True))
+        self._check_key_reuse(fn, (receiver, receiver), frames=1)
+
+    @parametrize("nested", [False, True])
+    @parametrize("independent", [False, True])
+    @parametrize("kind, name", [(dict, "get"), (list, "count"), (set, "add")])
+    @parametrize("wrap, depth", _KEY_NESTING)
+    def test_method_key_alias_guards(
+        self, kind, name, depth, wrap, independent, nested
+    ):
+        class Holder:
+            def __init__(self, left, right):
+                self.left, self.right = left, right
+
+        def fn(x, pair):
+            left, right = pair.left, pair.right
+            descriptor = kind.__dict__[name]
+            left_key = descriptor.__get__(left, kind)
+            right_key = descriptor.__get__(right, kind)
+            for _ in range(depth):
+                left_key, right_key = wrap([left_key]), wrap([right_key])
+            if independent:
+                return x + len({left_key}) + len({right_key})
+            return x + len({left_key, right_key})
+
+        a, b, c, d = (kind() for _ in range(4))
+        if nested:
+            region = torch.compiler.nested_compile_region(fn)
+            fixed = Holder(kind(), kind())
+
+            def fn(x, pair):
+                return region(x, fixed), region(x, pair)
+
+        pairs = [Holder(a, b), Holder(a, a), Holder(c, d), Holder(c, c), Holder(b, a)]
+        self._check_key_reuse(fn, pairs, frames=1 if independent else 2)
+
+    @parametrize(
+        "kind, first, second",
+        [(dict, "get", "keys"), (list, "count", "index"), (set, "add", "discard")],
+    )
+    @parametrize("depth", (0, 1, 2))
+    def test_builtin_method_local_keys(self, kind, first, second, depth):
+        def fn(x):
+            receiver = kind()
+            descriptor = kind.__dict__[first]
+            left = descriptor.__get__(receiver, kind)
+            right = kind.__dict__[second].__get__(receiver, kind)
+            alias = descriptor.__get__(receiver, kind)
+            for _ in range(depth):
+                left, right, alias = (left,), (right,), (alias,)
+            both, one = frozenset([left, right]), frozenset([left])
+            return (
+                x + len({left, right, alias}),
+                {left: 7}.get(alias),
+                {left: 7}.get(right, 0),
+                len({both, one}),
+                {both: 3}.get(frozenset([right, left])),
+            )
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("reverse", [False, True])
+    @parametrize("local", [False, True])
+    @parametrize("depth", (0, 1, 2))
+    def test_method_key_custom_collisions(self, reverse, local, depth):
+        def fn(x, obj, key):
+            receiver = {} if local else obj
+            method = dict.get.__get__(receiver, dict)
+            for _ in range(depth):
+                method, key = (method,), (key,)
+            merged = {key: 1, method: 2} if reverse else {method: 2, key: 1}
+            items = {0: 0}
+            items[1] = 0
+            items.update(merged)
+            return x + len(items)
+
+        a, b = {}, {}
+        self.assertNotEqual(hash(a.get), hash(b.get))
+        key = AlwaysEqualHashKey(hash(a.get))
+        if local:
+            self._check_key_fallback(
+                fn, (a,), "Builtin method keys with custom equality", key
+            )
+        else:
+            self._check_key_reuse(fn, (a, b), key)
+
+    @parametrize("op", ["get", "contains", "set", "input_set"])
+    @parametrize("wrap, depth", _KEY_NESTING)
+    def test_builtin_method_input_keys(self, op, wrap, depth):
+        def fn(x, pair):
+            obj, mapping = pair
+            method = list.index.__get__(obj, list)
+            for _ in range(depth):
+                method = wrap((method,))
+            if op == "get":
+                return x + mapping.get(method, -1)
+            if op in ("contains", "input_set"):
+                return x + (method in mapping)
+            return x + len({method, *mapping})
+
+        a, b = [], []
+        pairs = []
+        for owner, name in ((None, ""), (a, "count"), (a, "index"), (b, "index")):
+            for obj in (b, a, b):
+                key = "key" if owner is None else getattr(owner, name)
+                for _ in range(depth):
+                    key = wrap((key,))
+                mapping = {key} if op == "input_set" else {key: 3}
+                pairs.append((obj, mapping))
+        self._check_key_reuse(fn, pairs, frames=7)
+
+    @parametrize("depth", (0, 1, 2))
+    @parametrize("key_kind", ("metaclass", "plain_metaclass", "spoofed_method"))
+    def test_builtin_method_input_key_custom_equality(self, depth, key_kind):
+        a, b = [], []
+        method = a.count
+        self.assertNotEqual(hash(method), hash(b.count))
+
+        class BaseMeta(type):
+            __hash__ = AlwaysEqualHashKey.__hash__
+
+        class Meta(BaseMeta):
+            __hash__ = BaseMeta.__hash__
+
+            def __eq__(cls, other):
+                return hash(other) == cls.hash_value
+
+        class ClassKey(metaclass=BaseMeta if key_kind == "plain_metaclass" else Meta):
+            hash_value = hash(method)
+
+        class Key(AlwaysEqualHashKey):
+            __class__ = types.BuiltinMethodType
+            __hash__ = AlwaysEqualHashKey.__hash__
+
+            def __eq__(self, other):
+                return method == other
+
+        def fn(x, obj, mapping):
+            method = list.count.__get__(obj, list)
+            for _ in range(depth):
+                method = (method,)
+            return x + mapping.get(method, -1)
+
+        key = Key(hash(method)) if key_kind == "spoofed_method" else ClassKey
+        for _ in range(depth):
+            key = (key,)
+        mapping = {key: 3}
+        inputs = (b, a, b)
+        if key_kind == "metaclass":
+            error = "Builtin method keys with custom metaclass"
+            self._check_key_fallback(fn, inputs, error, mapping, positive_frames=True)
+        else:
+            frames = 1 if key_kind == "plain_metaclass" else 2
+            self._check_key_reuse(fn, inputs, mapping, frames=frames)
+
+    def test_builtin_method_keys_constant_receivers(self):
+        def fn(x, receiver):
+            left = int.__dict__["conjugate"].__get__(1000000000001, int)
+            right = int.__dict__["__trunc__"].__get__(1000000000001, int)
+            local = list.count.__get__([], list)
+            sourced = int.__dict__["conjugate"].__get__(receiver, int)
+            return (
+                x + 1,
+                len({left, right, local}),
+                len({left, sourced}),
+                {left: 7}.get(right, 0),
+                hash(left) == hash(right),
+                len({hash(left), hash(right)}),
+            )
+
+        literal = next(
+            value for value in fn.__code__.co_consts if value == 1000000000001
+        )
+        other = int("1000000000001")
+        self.assertIsNot(literal, other)
+        self._check_key_reuse(fn, (literal, other, literal))
+
+    def test_builtin_method_keys_after_hash_callback(self):
+        first, second = [], []
+        key = AlwaysEqualHashKey(hash(first.count))
+
+        @torch.compiler.nested_compile_region(reuse_hash_fn=lambda x, d, k: d.get(k, 0))
+        def region(x, mapping, key):
+            return x + mapping.get(key, 0)
+
+        def fn(x, receiver):
+            return region(x, {receiver.count: 7}, key)
+
+        self._check_key_reuse(fn, (first, second, first))
+
+    def test_disjoint_fixed_builtin_method_receivers_reuse(self):
+        def fn(x, receiver):
+            return x + len({"a".upper, receiver.count})
+
+        self._check_key_reuse(fn, ([], [], [], []), frames=1)
 
     @parametrize(
         "make, desc, size",
@@ -7801,8 +8305,7 @@ class GraphModule(torch.nn.Module):
 
         x, receiver = torch.ones(1), make()
         self.assertEqual(fn(x, receiver), (x + 1, size))
-        frames = 2 if sourced and size == 2 else 1
-        self._check_key_reuse(fn, (receiver, make()), frames=frames)
+        self._check_key_reuse(fn, (receiver, make()), frames=1)
 
     def test_prebound_method_descriptor_bypasses_subclass_override(self):
         class L(list):
@@ -8213,14 +8716,21 @@ class GraphModule(torch.nn.Module):
             else:
                 compiled(*args)
 
-    def _check_key_fallback(self, fn, inputs, error):
+    def _check_key_fallback(self, fn, inputs, error, *args, positive_frames=False):
         x = torch.ones(1)
         with self.assertRaisesRegex(Unsupported, error):
-            torch.compile(fn, backend="eager", fullgraph=True)(x, inputs[0])
+            torch.compile(fn, backend="eager", fullgraph=True)(x, inputs[0], *args)
         torch._dynamo.reset()
-        fallback = torch.compile(fn, backend="eager")
+        counter = torch._dynamo.testing.CompileCounter()
+        fallback = torch.compile(fn, backend=counter)
         for obj in inputs:
-            self.assertEqual(fallback(x, obj), fn(x, obj))
+            self.assertEqual(fallback(x, obj, *args), fn(x, obj, *args))
+        frames = counter.frame_count
+        if positive_frames:
+            self.assertGreater(frames, 0)
+        for obj in inputs:
+            self.assertEqual(fallback(x, obj, *args), fn(x, obj, *args))
+        self.assertEqual(counter.frame_count, frames)
 
     def _check_key_reuse(self, fn, receivers, *args, frames=2, **options):
         counter = torch._dynamo.testing.CompileCounter()
