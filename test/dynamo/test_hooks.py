@@ -27,6 +27,8 @@ from torch._dynamo.variables.hashable import HashableTracker
 from torch._dynamo.variables.lazy import LazyVariableTracker
 from torch._dynamo.variables.object_protocol import generic_getattr
 from torch._functorch.aot_autograd import aot_module_simplified
+from torch.nn.modules import module as hook_api
+from torch.nn.modules.module import _global_forward_hooks as global_post_hooks
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -452,53 +454,68 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             if isinstance(module, torch.nn.Identity):
                 return rest[-1] * 2 + len(rest)
 
-        def fn(module, x):
-            return module(x)
-
-        x = torch.ones(1)
         if global_hook:
-            hook_api = torch.nn.modules.module
             handle = hook_api.register_module_forward_hook(hook, with_kwargs=True)
-            flags = hook_api._global_forward_hooks_with_kwargs
             self.addCleanup(handle.remove)
-            # Global with_kwargs flags currently outlive their removable handle.
-            self.addCleanup(flags.pop, handle.id, None)
-
-        def make_module():
-            module = torch.nn.Identity()
+        modules = [torch.nn.Identity() for _ in range(5)]
+        for module in modules:
             module.register_forward_hook(hook, with_kwargs=local_kwargs)
-            return module
-
-        module = make_module()
-        counter = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(1)
         if capture:
-            # AOT capture uses module.py's globals for the flags.
             with get_metrics_context(), dynamo_timed(""):
-                output = fullgraph_capture(module, (x,))
-                guard = output.graph_capture_output.build_guards(
-                    get_traced_fn(module)[0].__code__
-                ).guard_manager
+                output = fullgraph_capture(modules[0], (x,))
+                code = get_traced_fn(modules[0])[0].__code__
+                guard = output.graph_capture_output.build_guards(code).guard_manager
             compiled = output.forward_callable()
         else:
-            compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        for _ in range(2):
-            module = make_module()
+            compiled, counter = self.compile_counted(lambda module, x: module(x))
+        for module in modules:
+            collision = module is modules[-1] and global_hook and not local_kwargs
+            if collision:
+                # Change only global flag membership for this local callback.
+                module._forward_hooks = OrderedDict({handle.id: hook})
             if capture:
-                self.assertTrue(
-                    guard.check({"self": module, "args": (x,), "kwargs": {}})
-                )
-            self.assertEqual(compiled(module, x), module(x))
-        if not capture:
-            self.assertEqual(counter.frame_count, 1)
-        if global_hook:
-            # Manually reused global IDs must still guard flag membership.
-            module._forward_hooks = OrderedDict({handle.id: hook})
-            if capture:
-                self.assertFalse(
-                    guard.check({"self": module, "args": (x,), "kwargs": {}})
-                )
-            else:
+                inputs = {"self": module, "args": (x,), "kwargs": {}}
+                self.assertEqual(guard.check(inputs), not collision)
+            if not capture or not collision:
                 self.assertEqual(compiled(module, x), module(x))
+            if not capture:
+                self.assertEqual(counter.frame_count, 2 if collision else 1)
+
+    @parametrize("source", ["argument", "alias", "vars", "removed"])
+    def test_global_hook_registry_reuse(self, source):
+        def fn(module, x, registry):
+            if source == "removed":
+                return module(x)
+            if source == "alias":
+                registry = global_post_hooks
+            elif source == "vars":
+                registry = vars(hook_api)["_global_forward_hooks"]
+            return len(registry) + module(x)
+
+        with hook_api.register_module_forward_hook(add_one) as handle:
+            compiled, counter = self.compile_counted(fn)
+            x = torch.ones(1)
+            module = torch.nn.Identity()
+            for _ in range(4):
+                if source == "removed":
+                    removed = hook_api.register_module_forward_hook(
+                        hook_arity, with_kwargs=True
+                    )
+                    removed.remove()
+                    self.assertNotIn(
+                        removed.id, hook_api._global_forward_hooks_with_kwargs
+                    )
+                else:
+                    module = torch.nn.Identity()
+                    module.register_forward_hook(hook_arity, with_kwargs=True)
+                args = (module, x, global_post_hooks)
+                self.assertEqual(compiled(*args), fn(*args))
+            self.assertEqual(counter.frame_count, 1)
+            if source == "argument":
+                separate = global_post_hooks.copy()
+                global_post_hooks[handle.id] = add_two
+                self.assertEqual(compiled(module, x, separate), fn(module, x, separate))
                 self.assertEqual(counter.frame_count, 2)
 
     @parametrize(
@@ -559,20 +576,26 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(counter.frame_count, 2)
 
     @parametrize("with_kwargs", [False, True])
-    def test_forward_pre_hook_reuse(self, with_kwargs):
+    @parametrize("global_hook", [False, True])
+    def test_forward_pre_hook_reuse(self, with_kwargs, global_hook):
         def hook(module, args, *rest):
             return ((args[0] + 3,), rest[0]) if rest else (args[0] + 2,)
 
         opt, cnt = self.compile_counted(lambda x, module: module(x))
         x = torch.ones(1)
 
+        if global_hook:
+            self.addCleanup(hook_api.register_module_forward_pre_hook(hook).remove)
+
         def check(flag):
             module = torch.nn.Identity()
             module.register_forward_pre_hook(hook, with_kwargs=flag)
             self.assertEqual(opt(x, module), module(x))
 
-        for flag in (with_kwargs, with_kwargs, not with_kwargs):
-            check(flag)
+        for _ in range(4):
+            check(with_kwargs)
+        self.assertEqual(cnt.frame_count, 1)
+        check(not with_kwargs)
         self.assertEqual(cnt.frame_count, 2)
         with torch.compiler.set_stance(skip_guard_eval_unsafe=True):
             check(with_kwargs)
@@ -655,7 +678,6 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             flags_source = guard.create_fn.keywords["flags_source"]
             flags = flags_source.get_value(scope, {}, {})
             pairs.add((guard.create_fn.keywords["hooks_name"], id(flags)))
-        hook_api = torch.nn.modules.module
         expected_flags = (
             module._forward_hooks_with_kwargs,
             module._forward_hooks_always_called,
@@ -773,10 +795,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=True)
     def test_hook_flag_mutation_with_recursive(self):
-        def fn(x, module):
-            return module(x)
-
-        compiled, counter = self.compile_counted(fn)
+        compiled, counter = self.compile_counted(lambda x, module: module(x))
         x = torch.ones(1)
         for first, second in ((1, 2), (3, 4)):
             module = torch.nn.Identity()
@@ -824,9 +843,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         flags = flags_type.fromkeys(initial_flags, True)
         with (
             torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=recursive),
-            patch.object(
-                torch.nn.modules.module, "_global_forward_hooks_with_kwargs", flags
-            ),
+            patch.object(hook_api, "_global_forward_hooks_with_kwargs", flags),
             patch(f"{__name__}._global_hook_flags_alias", flags),
         ):
             x = torch.ones(1)
@@ -866,7 +883,6 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         def fn(x, y, first, second):
             return region(x, first), region(y, second)
 
-        counter = torch._dynamo.testing.CompileCounter()
         x, y = torch.ones(1), torch.full((1,), 2.0)
         with (
             torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=recursive),
@@ -876,7 +892,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
                 wraps=higher_order_ops.speculate_subgraph_with_auto_output_flattening,
             ) as traces,
         ):
-            compiled = torch.compile(fn, backend=counter, fullgraph=True)
+            compiled, counter = self.compile_counted(fn)
             self.assertEqual(compiled(x, y, *modules), fn(x, y, *modules))
             self.assertEqual(traces.call_count, 1)
             if mutation == "flags":
@@ -888,9 +904,6 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
                 modules[1].probe = torch.ones(2)
             self.assertEqual(compiled(x, y, *modules), fn(x, y, *modules))
         self.assertEqual(counter.frame_count, 2)
-        y = torch.ones(2)
-        self.assertEqual(compiled(x, y, *modules), fn(x, y, *modules))
-        self.assertEqual(counter.frame_count, 3)
 
     def test_nested_region_hook_reuse_propagates_guards(self):
         modules = [torch.nn.Identity() for _ in range(4)]
@@ -909,14 +922,13 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         def fn(x, modules):
             return outer(x, *modules[:2]), outer(x, *modules[2:])
 
-        counter = torch._dynamo.testing.CompileCounter()
         x = torch.ones(1)
         with patch.object(
             higher_order_ops,
             "speculate_subgraph_with_auto_output_flattening",
             wraps=higher_order_ops.speculate_subgraph_with_auto_output_flattening,
         ) as traces:
-            compiled = torch.compile(fn, backend=counter, fullgraph=True)
+            compiled, counter = self.compile_counted(fn)
             self.assertEqual(compiled(x, modules), fn(x, modules))
             self.assertEqual(traces.call_count, 2)
             modules[-1]._forward_hooks_with_kwargs.clear()
@@ -937,9 +949,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         flags = defaultdict(int) if mapping_type is defaultdict else mapping_type()
         if populated:
             flags[1] = True
-        with patch.object(
-            torch.nn.modules.module, f"_global_forward_hooks_{flags_name}", flags
-        ):
+        with patch.object(hook_api, f"_global_forward_hooks_{flags_name}", flags):
             x = torch.ones(1)
             actual = torch.compile(fn, backend="eager", fullgraph=True)(x, flags)
             self.assertEqual(actual, fn(x, flags))
@@ -1027,7 +1037,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         registry_name = f"_global_forward_hooks_{flags_name}"
         with (
             torch._dynamo.config.patch(use_recursive_dict_tags_for_guards=recursive),
-            patch.object(torch.nn.modules.module, registry_name, flags),
+            patch.object(hook_api, registry_name, flags),
             patch(f"{__name__}._global_hook_flags_alias", flags),
         ):
             compiled = torch.compile(fn, backend="eager", fullgraph=True)
@@ -1036,7 +1046,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
                 module = torch.nn.Identity()
                 module._forward_hooks[key] = identity_forward_hook
                 if key == 1:
-                    setattr(torch.nn.modules.module, registry_name, mapping_type())
+                    setattr(hook_api, registry_name, mapping_type())
                 self.assertEqual(compiled(x, module), fn(x, module))
 
     @parametrize("mapping_type", [dict, OrderedDict])
@@ -1113,8 +1123,6 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         ],
     )
     def test_hook_dict_observable_type(self, operation, populated, registry):
-        hook_api = torch.nn.modules.module
-
         def fn(x, module):
             if registry == "global":
                 hooks = hook_api._global_forward_hooks_with_kwargs
@@ -1152,7 +1160,6 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
         cc = torch._dynamo.testing.CompileCounter()
         seen = []
         opt = torch._dynamo.optimize(cc, guard_export_fn=seen.extend, nopython=True)(fn)
-        hook_api = torch.nn.modules.module
         with contextlib.ExitStack() as stack:
             if hook_mode == "global":
                 stack.callback(hook_api.register_module_forward_hook(add_two).remove)

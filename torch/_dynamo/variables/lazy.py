@@ -170,7 +170,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
                 tracer = tx.output.current_tracer
                 if tracer.parent is not None:
                     tracer.traced_sources.add(source)
-                if tracer.tracks_lexical_sources:
+                if tracer.in_nested_compile_region:
                     from ..guards import record_lexical_alias
 
                     record_lexical_alias(
