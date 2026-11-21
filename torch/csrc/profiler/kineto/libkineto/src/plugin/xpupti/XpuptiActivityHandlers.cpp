@@ -260,10 +260,20 @@ void XpuptiActivityProfilerSession::handleRuntimeKernelMemcpyMemsetActivities(
     trace_activity->resource = activity->_thread_id;
   } else {
     if constexpr (handleMemcpyP2PActivities) {
-      // The copy is submitted to, and runs on an engine of, the source device.
-      trace_activity->device = getDeviceIdxFromUUID(activity->_src_uuid);
+      // The copy runs on the device of the queue it was submitted to, which
+      // for a pull is its destination. A PTI without the v3 record does not
+      // say which one, so assume the source, where PyTorch submits its peer
+      // copies.
+      const auto fromDevice = getDeviceIdxFromUUID(activity->_src_uuid);
       trace_activity->addMetadata(
-          XpuFields::kFromDevice, static_cast<int64_t>(trace_activity->device));
+          XpuFields::kFromDevice, static_cast<int64_t>(fromDevice));
+      if constexpr (kReportsCopyExecutingDevice) {
+        trace_activity->device = getDeviceIdxFromUUID(activity->_device_uuid);
+        trace_activity->addMetadata(
+            XpuFields::kInDevice, static_cast<int64_t>(trace_activity->device));
+      } else {
+        trace_activity->device = fromDevice;
+      }
       trace_activity->addMetadata(
           XpuFields::kToDevice,
           static_cast<int64_t>(getDeviceIdxFromUUID(activity->_dst_uuid)));
