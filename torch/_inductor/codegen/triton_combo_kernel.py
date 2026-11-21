@@ -343,6 +343,11 @@ class ComboKernel(Kernel):
     A kernel that combines multiple sub-kernels into a single fused kernel.
     """
 
+    # Maximum number of dynamic-shape subkernels in one combo/foreach kernel.
+    # Each one adds its own size arguments and index math, and Triton compile
+    # time grows faster than linearly in kernel size.
+    MAX_DYNAMIC_SUBKERNELS = 16
+
     @staticmethod
     def _update_partition(
         partition_state: PartitionState,
@@ -356,7 +361,7 @@ class ComboKernel(Kernel):
         too_many_dynamic = (
             is_dynamic
             and partition_state.cur_dynamic_count
-            >= config.combo_kernel_dynamic_max_num_nodes
+            >= ComboKernel.MAX_DYNAMIC_SUBKERNELS
         )
         if too_many_args or too_many_dynamic:
             partition_state.partitions.append(partition_state.cur_partition)
