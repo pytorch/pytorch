@@ -159,7 +159,18 @@ struct SettledBlocks {
     /// whether they took a noticeable part of it (`below`).
     watched: std::cell::Cell<bool>,
     below: std::cell::Cell<bool>,
+    /// For a function with a graph that is exported for nothing but its
+    /// backward and has its path from calls that needed none
+    /// (`GraphSite::dormant`): after how many more calls with gradients
+    /// enabled such graphs are taken down again, and after how many they
+    /// were the last time. (0, _) where there is no such graph.
+    dormant: std::cell::Cell<(u32, u32)>,
 }
+
+/// A graph that waits for a call whose tensors need a gradient is taken
+/// down again by the first call with gradients enabled, and then by every
+/// second, fourth, ... such call, to every one in this many at most.
+const DORMANT_GAP: u32 = 4096;
 
 /// Whether a callee is worth running compiled is measured, not assumed: the
 /// generic tier is slower than the interpreter on plain Python, so a callee
@@ -1970,6 +1981,7 @@ impl Compiled {
                 trial: std::cell::Cell::new(Trial::start(PLAN_EPOCH.load(Ordering::Relaxed))),
                 watched: std::cell::Cell::new(false),
                 below: std::cell::Cell::new(false),
+                dormant: std::cell::Cell::new((0, 1)),
             },
             generic,
             state: Shared::new(state),
@@ -8410,6 +8422,9 @@ impl Compiled {
         let finished = path.provisional || path.operators.len() < site.min_ops || !site.exports();
         if finished {
             site.install(path, None);
+            if site.dormant() && self.settled.dormant.get().0 == 0 {
+                self.settled.dormant.set((1, 1));
+            }
             return PathEnd::Landed(landing);
         }
         let mut described = path.describe(&site.name, &t.rec, api);
@@ -8503,6 +8518,37 @@ impl Compiled {
         result
     }
 
+    /// A call comes to a function with a graph that waits for a call whose
+    /// tensors need a gradient (`GraphSite::dormant`). Whether a call is
+    /// one is seen where a path is taken down: with gradients enabled the
+    /// graph is taken down again, by this call or by one of the next (see
+    /// `DORMANT_GAP`). What the graph was taken down by before does not
+    /// matter: calls without gradients are not counted.
+    #[cold]
+    unsafe fn wake(&self, api: &TcfgApi) {
+        if (api.call_modes)() & 1 == 0 {
+            return;
+        }
+        let (left, gap) = self.settled.dormant.get();
+        if left > 1 {
+            self.settled.dormant.set((left - 1, gap));
+            return;
+        }
+        let mut found = false;
+        for (b, bs) in self.state.borrow().blocks.iter().enumerate() {
+            for (_, site) in &bs.graphs {
+                if site.wake() {
+                    found = true;
+                    // The code that enters the graph runs again.
+                    let unsettled = Settled { code: std::ptr::null(), ..self.settled.blocks[b].get() };
+                    self.settled.blocks[b].set(unsettled);
+                }
+            }
+        }
+        let gap = (gap * 2).min(DORMANT_GAP);
+        self.settled.dormant.set(if found { (gap, gap) } else { (0, 1) });
+    }
+
     /// Runs the function: from its first block, or from where a path that
     /// was taken down through this call of it left off (`start`).
     unsafe fn exec_blocks(&self, regs: &mut [Obj], frames: &mut Frames, start: Option<PathEnd>) -> Obj {
@@ -8510,6 +8556,9 @@ impl Compiled {
         let func = &self.func;
         if self.options.specialize {
             self.settled.calls.set(self.settled.calls.get() + 1);
+        }
+        if let (true, None, Some(api)) = (self.settled.dormant.get().0 != 0, &start, api) {
+            self.wake(api);
         }
         let serial = self.settled.calls.get();
         let mut cur: usize = 0;

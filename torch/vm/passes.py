@@ -170,6 +170,20 @@ class Graphs(BuiltinPass):
             eager's tape, and a pass over graphs is handed the one graph
             with tensors that need a gradient, as with :class:`AOTAutograd`
             in the list.
+
+            Where it is not eager's: the ``grad_fn`` of what a graph gives
+            is the node of the graph. A backward that raises (a tensor it
+            needs was written to in place) raises eager's error with
+            eager's text, but before it has added anything to the ``.grad``
+            of an input of the graph, where eager has by then added up the
+            gradients of the leaves whose nodes all ran before the one
+            that raises. With ``create_graph=True`` the gradient is eager's
+            bit for bit; what a second backward computes through it is
+            eager's value, and can differ from it in the last bits (the
+            gradients that meet there are not always added in eager's
+            order), and for a graph that draws random numbers or writes to
+            a tensor from outside, or one an input of which was written to
+            in place since the call, such a backward raises and says so.
     """
 
     engine: ClassVar[str] = "graphs"
