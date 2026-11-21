@@ -2004,6 +2004,42 @@ settings.hidden = 3.0
 torch.equal(g(x, settings), reads_settings(x, settings))  # True: what the function reads is read at every call
 ```
 
+### Variables an inner function could take
+
+A function with a variable that an inner function could take (a nested
+function, a lambda, a generator expression) keeps it in a cell, which it
+makes when it is entered, whether or not the inner function is ever made.
+Such a cell is the path's own: making it, storing into it and reading it
+are instructions of a path, and a read is what the path put into it last,
+so a tensor that goes through a cell is still the operation that gave it.
+Making the inner function ends the path in front of it.
+
+```python
+def adds_up(y, scale, more):
+    total = y * scale
+    if more:
+
+        def bump():
+            nonlocal total
+            total = total + 1
+
+        bump()
+    return total + scale
+
+
+def has_cells(x, more):
+    y = (x.sin() + 1).cos()
+    return (adds_up(y, 2.0, more) * 2).tanh().exp()
+
+
+g = torch.vm(has_cells, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(6):
+    same = torch.equal(g(x, False), has_cells(x, False))
+same, [(found["ops"], found["why"]) for found in torch.vm.regions(g) if "ops" in found]
+# (True, [(8, 'the function returns')])
+torch.equal(g(x, True), has_cells(x, True))  # True: where the inner function is made, the instructions make it
+```
+
 ### The order of the list
 
 - `Graphs()` can stand anywhere among the passes over a block. It looks at a

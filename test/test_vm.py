@@ -6868,6 +6868,36 @@ def graph_takes_two(x):
     return (out * 2).tanh().exp()
 
 
+def graph_in_chunks(fn, size, x):
+    if size > 0:
+        return torch.cat(tuple(fn(part) for part in x.chunk(size)))
+    return fn(x)
+
+
+def graph_times_two(y):
+    return y * 2
+
+
+def graph_adds_up(y, scale, more):
+    total = y * scale
+    if more:
+
+        def bump():
+            nonlocal total
+            total = total + 1
+
+        bump()
+        total = total * 2
+    total = total + scale
+    return total
+
+
+def graph_has_cells(x, size, scale, more):
+    y = (x.sin() + 1).cos()
+    y = graph_in_chunks(graph_times_two, size, y)
+    return (graph_adds_up(y, scale, more) * 2).tanh().exp()
+
+
 def graph_grows_a_list(x, shape):
     y = (x.sin() + 1).cos()
     shape += [2]
@@ -10391,6 +10421,20 @@ class TestVmGraphResults(TestCase):
         other = torch.randn(5, 4, device=device)
         self.assertEqual(compiled(other), graph_takes_two(other), atol=0, rtol=0)
         self.whole_graph(graph_takes_two, (x,), 12, P.Inductor())
+
+    def test_a_variable_that_an_inner_function_could_take(self, device):
+        x = torch.randn(4, 4, device=device)
+        # Functions with an inner function they do not come to: their
+        # variables are in cells, which are the path's own; one of them is
+        # stored into and read.
+        compiled = self.whole_graph(graph_has_cells, (x, 0, 2.0, False), 9)
+        # Where the inner function is made, the path ends in front of it.
+        made = ((x, 0, 3.0, True), (x, 2, 2.0, False), (x, 2, 3.0, True))
+        for args in (*made, (x, 0, 2.0, False)):
+            for _ in range(2):
+                expected = graph_has_cells(*args)
+                self.assertEqual(compiled(*args), expected, atol=0, rtol=0)
+        self.whole_graph(graph_has_cells, (x, 0, 2.0, False), 9, P.Inductor())
 
     def test_a_list_that_is_added_to_in_place_is_changed_once(self, device):
         def keep(gm, input_types):
