@@ -1,0 +1,82 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+#
+# gitleaks.toml
+# Reference: https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml
+# Local scan: gitleaks detect --source . --config .github/scan_tools_configs/gitleaks.toml
+#
+# Gitleaks configuration for this repository's security scans.
+#
+# This file defines the repository's complete Gitleaks policy. Recurring
+# exclusions belong in this file.
+#
+# The `[extend]` section inherits Gitleaks' built-in rules, and the
+# `[[allowlists]]` below apply to every rule.
+#
+# Ways to suppress a finding, narrowest first:
+#
+#   1. `gitleaks:allow` on the offending line:
+#          api_key = "not-a-real-key"  # gitleaks:allow
+#
+#   2. `.gitleaksignore` with one finding fingerprint per line:
+#          3f2a9c1e...:tests/fixtures/creds.py:generic-api-key:12
+#      Reference: https://github.com/gitleaks/gitleaks#gitleaksignore
+#      Keep it beside this file (`.github/scan_tools_configs/.gitleaksignore`)
+#      or at the repository root. When both exist, their entries combine.
+#      The `.gitleaksignore` here is a commented placeholder.
+#
+#   3. `[[allowlists]]` below for recurring paths, regexes or stopwords.
+
+title = "gitleaks config"
+
+[extend]
+# Inherit gitleaks' built-in ruleset (rotations, AWS, GCP, Slack, ...).
+# Setting this to false would mean rolling our own detections, which
+# is almost never what you want.
+useDefault = true
+
+
+
+# Allowlist field-vs-target reference:
+#   stopwords         -> always matched against the SECRET value.
+#   regexes           -> matched against `regexTarget` (default: "secret").
+#   regexTarget       -> "secret" | "match" | "line".
+# Use "match" or "line" when the "tell" is the variable name or
+# surrounding syntax, not the value itself.
+
+[[allowlists]]
+# Allowlist by location only where a real first-party secret structurally
+# can't live. Dependency lock files qualify: their contents are generated
+# from a manifest, and the high-entropy strings they carry are artifact
+# digests rather than credentials. Add vendored third-party trees here as
+# callers bring them in, one explicit path per entry.
+description = "Generated dependency lock files"
+paths = [
+  '''.*\.lock$''',
+]
+
+[[allowlists]]
+description = "Test fixtures using well-known dummy variable names"
+# The "tell" here is the variable name on the same line, not the value
+# (the value is a random-looking string by design). Match against the
+# full rule match (variable + value) so we anchor on the identifier.
+regexTarget = "match"
+regexes = [
+  '''(?i)\bINVALID_TOKEN\s*=''',
+  '''(?i)\bwrong_secret\s*=''',
+  # Explicit test-only secret identifiers
+  '''(?i)\btest_secret\s*=''',
+  '''(?i)\bdummy_secret\s*=''',
+  '''(?i)\bfake_secret\s*=''',
+  '''(?i)\bexample_secret\s*='''
+]
+
+[[allowlists]]
+description = "Public artifact digests (variable names ending in SHA256/512/MD5)"
+# SHA-256/512/MD5 hashes of public artifacts are not secrets.
+regexTarget = "line"
+regexes = [
+  '''[A-Z][A-Z0-9_]*SHA256\s*[=:]''',
+  '''[A-Z][A-Z0-9_]*SHA512\s*[=:]''',
+  '''[A-Z][A-Z0-9_]*MD5\s*[=:]''',
+]

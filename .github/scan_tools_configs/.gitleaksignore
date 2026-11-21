@@ -1,0 +1,13 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+#
+# Reference: https://github.com/gitleaks/gitleaks#gitleaksignore
+#
+# One finding fingerprint per line, copied from a gitleaks report
+# (`<commit>:<path>:<rule-id>:<line>`). A line starting with # is a
+# comment and suppresses nothing. Remove the leading # to activate an
+# example:
+#
+#   3f2a9c1e...:tests/fixtures/creds.py:generic-api-key:12
+#
+# Entries here combine with a .gitleaksignore at the repository root.

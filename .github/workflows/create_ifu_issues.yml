@@ -1,0 +1,352 @@
+name: Create issues for ROCm commits
+
+on:
+  # Manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      prev_post_tag:
+        description: "Issue range start ref (previous IFU post tag or cold-start SHA)"
+        required: true
+        type: string
+      curr_pre_tag:
+        description: "Current IFU pre tag"
+        required: true
+        type: string
+      target_repo:
+        description: "Target repo for issue creation"
+        required: false
+        default: "ROCm/pytorch"
+        type: string
+      project_number:
+        description: "GitHub Project number"
+        required: false
+        default: "114"
+        type: string
+      project_owner:
+        description: "Project owner"
+        required: false
+        default: "ROCm"
+        type: string
+
+  # Called by create_ifu_tag.yml after tagging
+  workflow_call:
+    inputs:
+      prev_post_tag:
+        description: "Issue range start ref (previous IFU post tag or cold-start SHA)"
+        required: true
+        type: string
+      curr_pre_tag:
+        description: "Current IFU pre tag"
+        required: true
+        type: string
+      target_repo:
+        description: "Target repo for issue creation"
+        required: false
+        default: "ROCm/pytorch"
+        type: string
+      project_number:
+        description: "GitHub Project number"
+        required: false
+        default: "114"
+        type: string
+      project_owner:
+        description: "Project owner"
+        required: false
+        default: "ROCm"
+        type: string
+    secrets:
+      IFU_GITHUB_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  create-issues:
+    runs-on: ubuntu-latest
+    env:
+      # Use passed secret for workflow_call, direct secret for workflow_dispatch
+      GH_TOKEN: ${{ secrets.IFU_GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch tags
+        run: git fetch origin --tags --force
+
+      - name: Extract branch from tag
+        id: parse
+        env:
+          CURR_PRE_TAG: ${{ inputs.curr_pre_tag }}
+        run: |
+          branch="${CURR_PRE_TAG%_IFU_*}"
+          echo "Branch: $branch"
+          echo "branch=$branch" >> $GITHUB_OUTPUT
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/pytorch/pytorch.git 2>/dev/null || true
+          git fetch upstream main --force
+
+      - name: List commits in range
+        run: |
+          echo "ROCm-only commits between ${{ inputs.prev_post_tag }} and ${{ inputs.curr_pre_tag }}:"
+          git log ${{ inputs.prev_post_tag }}..${{ inputs.curr_pre_tag }} --oneline --no-merges --not upstream/main
+
+      - name: Get or create project fields
+        id: project_fields
+        if: ${{ inputs.project_number != '' }}
+        env:
+          PROJECT_NUMBER: ${{ inputs.project_number }}
+          PROJECT_OWNER: ${{ inputs.project_owner }}
+        run: |
+          echo "Getting project information..."
+
+          # Try user-owned project first.
+          project_data=$(gh api graphql -f query='
+            query($owner: String!, $number: Int!) {
+              user(login: $owner) {
+                projectV2(number: $number) {
+                  id
+                  fields(first: 50) {
+                    nodes {
+                      ... on ProjectV2Field {
+                        id
+                        name
+                        dataType
+                      }
+                      ... on ProjectV2SingleSelectField {
+                        id
+                        name
+                        dataType
+                      }
+                    }
+                  }
+                }
+              }
+            }' -f owner="${PROJECT_OWNER}" -F number="${PROJECT_NUMBER}" 2>/dev/null || true)
+
+          project_id=$(echo "$project_data" | jq -r '.data.user.projectV2.id // empty' 2>/dev/null || true)
+          echo "User project ID: ${project_id:-'(none)'}"
+
+          if [[ -z "$project_id" ]]; then
+            echo "User project not found (or owner is an org). Trying organization query..."
+            project_data=$(gh api graphql -f query='
+              query($owner: String!, $number: Int!) {
+                organization(login: $owner) {
+                  projectV2(number: $number) {
+                    id
+                    fields(first: 50) {
+                      nodes {
+                        ... on ProjectV2Field {
+                          id
+                          name
+                          dataType
+                        }
+                        ... on ProjectV2SingleSelectField {
+                          id
+                          name
+                          dataType
+                        }
+                      }
+                    }
+                  }
+                }
+              }' -f owner="${PROJECT_OWNER}" -F number="${PROJECT_NUMBER}" 2>/dev/null || true)
+
+            project_id=$(echo "$project_data" | jq -r '.data.organization.projectV2.id // empty' 2>/dev/null || true)
+            fields_json=$(echo "$project_data" | jq -r '.data.organization.projectV2.fields.nodes // empty' 2>/dev/null || true)
+          else
+            fields_json=$(echo "$project_data" | jq -r '.data.user.projectV2.fields.nodes // empty' 2>/dev/null || true)
+          fi
+
+          if [[ -z "$project_id" || -z "$fields_json" ]]; then
+            echo "Error: Could not resolve project owner '${PROJECT_OWNER}' project #${PROJECT_NUMBER}."
+            echo "If PROJECT_OWNER is an organization, ensure PROJECT_OWNER is exactly the org login and token has org access."
+            exit 1
+          fi
+
+          echo "Project ID: $project_id"
+          echo "project_id=$project_id" >> $GITHUB_OUTPUT
+
+          # Find or create 'branch' field
+          branch_field_id=$(echo "$fields_json" | jq -r '.[] | select(.name == "branch") | .id')
+          if [[ -z "$branch_field_id" || "$branch_field_id" == "null" ]]; then
+            echo "Creating 'branch' field..."
+            branch_field_id=$(gh api graphql -f query='
+              mutation($projectId: ID!, $name: String!) {
+                createProjectV2Field(input: {projectId: $projectId, dataType: TEXT, name: $name}) {
+                  projectV2Field {
+                    ... on ProjectV2Field {
+                      id
+                    }
+                  }
+                }
+              }' -f projectId="$project_id" -f name="branch" --jq '.data.createProjectV2Field.projectV2Field.id')
+            echo "Created 'branch' field: $branch_field_id"
+          else
+            echo "Found existing 'branch' field: $branch_field_id"
+          fi
+          echo "branch_field_id=$branch_field_id" >> $GITHUB_OUTPUT
+
+          # Find or create 'commit_hash' field
+          commit_hash_field_id=$(echo "$fields_json" | jq -r '.[] | select(.name == "commit_hash") | .id')
+          if [[ -z "$commit_hash_field_id" || "$commit_hash_field_id" == "null" ]]; then
+            echo "Creating 'commit_hash' field..."
+            commit_hash_field_id=$(gh api graphql -f query='
+              mutation($projectId: ID!, $name: String!) {
+                createProjectV2Field(input: {projectId: $projectId, dataType: TEXT, name: $name}) {
+                  projectV2Field {
+                    ... on ProjectV2Field {
+                      id
+                    }
+                  }
+                }
+              }' -f projectId="$project_id" -f name="commit_hash" --jq '.data.createProjectV2Field.projectV2Field.id')
+            echo "Created 'commit_hash' field: $commit_hash_field_id"
+          else
+            echo "Found existing 'commit_hash' field: $commit_hash_field_id"
+          fi
+          echo "commit_hash_field_id=$commit_hash_field_id" >> $GITHUB_OUTPUT
+
+      - name: Create issues for commits
+        env:
+          PREV_POST_TAG: ${{ inputs.prev_post_tag }}
+          CURR_PRE_TAG: ${{ inputs.curr_pre_tag }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          PROJECT_NUMBER: ${{ inputs.project_number }}
+          PROJECT_OWNER: ${{ inputs.project_owner }}
+          REPO_NAME: ${{ github.repository }}
+          BRANCH: ${{ steps.parse.outputs.branch }}
+          PROJECT_ID: ${{ steps.project_fields.outputs.project_id }}
+          BRANCH_FIELD_ID: ${{ steps.project_fields.outputs.branch_field_id }}
+          COMMIT_HASH_FIELD_ID: ${{ steps.project_fields.outputs.commit_hash_field_id }}
+        run: |
+          echo "Creating issues for commits..."
+
+          commit_count=$(git rev-list --count --no-merges "${PREV_POST_TAG}..${CURR_PRE_TAG}" --not upstream/main)
+          if [[ "${commit_count}" -eq 0 ]]; then
+            echo "No ROCm-only commits in range ${PREV_POST_TAG}..${CURR_PRE_TAG}; nothing to create."
+            exit 0
+          fi
+
+          echo "Found ${commit_count} ROCm-only commits to process."
+
+          git log "${PREV_POST_TAG}..${CURR_PRE_TAG}" --format="%H" --no-merges --not upstream/main | while read hash; do
+            short_hash="${hash:0:5}"
+            subject=$(git log -1 --format="%s" "$hash")
+            author=$(git log -1 --format="%an" "$hash")
+            email=$(git log -1 --format="%ae" "$hash")
+
+            echo "Processing ${short_hash}: ${subject}"
+
+            # Try to get GitHub username via API first
+            gh_username=""
+            gh_username=$(gh api "repos/${REPO_NAME}/commits/${hash}" --jq '.author.login // empty' 2>/dev/null || true)
+
+            if [[ -z "${gh_username}" ]]; then
+              # Fallback: try to extract from noreply email
+              if [[ "$email" =~ ^[0-9]+\+([^@]+)@users\.noreply\.github\.com$ ]]; then
+                gh_username="${BASH_REMATCH[1]}"
+                echo "  Extracted username from email: ${gh_username}"
+              fi
+            else
+              echo "  Found GitHub username via API: ${gh_username}"
+            fi
+
+            # Dedupe by commit hash marker in issue body across all issue states.
+            existing_issue_url=$(gh issue list \
+              --repo "${TARGET_REPO}" \
+              --state all \
+              --search "\"${hash}\" in:body" \
+              --limit 20 \
+              --json url,body \
+              | jq -r --arg hash "$hash" '.[] | select((.body // "") | contains("**Commit:** " + $hash)) | .url' \
+              | head -n 1 || true)
+            if [[ -n "${existing_issue_url}" ]]; then
+              echo "  Existing issue found for commit ${short_hash}: ${existing_issue_url}"
+              echo "  Skipping duplicate issue creation."
+              continue
+            fi
+
+            body="**Commit:** ${hash}"$'\n'"**Author:** ${author} (${email})"$'\n'"**Branch:** ${BRANCH}"$'\n'"**Link:** [View commit](https://github.com/${REPO_NAME}/commit/${hash})"
+
+            issue_url=$(gh issue create \
+              --repo "${TARGET_REPO}" \
+              --title "${subject}" \
+              --body "${body}" 2>/dev/null || true)
+
+            if [[ -z "${issue_url}" ]]; then
+              echo "  ERROR: Failed to create issue for ${short_hash}. Skipping."
+              continue
+            fi
+
+            echo "  Created: ${issue_url}"
+
+            # Try to assign the issue
+            if [[ -n "${gh_username}" ]]; then
+              echo "  Trying to assign to @${gh_username}..."
+              if gh issue edit "${issue_url}" --add-assignee "${gh_username}" 2>/dev/null; then
+                echo "  Successfully assigned issue"
+              else
+                echo "  Could not assign, adding comment instead"
+                gh issue comment "${issue_url}" --body "cc @${gh_username} - you authored this commit" || true
+              fi
+            fi
+
+            # Add to project and set field values
+            if [[ -n "${PROJECT_NUMBER}" && -n "${PROJECT_ID}" ]]; then
+              echo "  Adding to project..."
+              item_id=$(gh project item-add "${PROJECT_NUMBER}" --owner "${PROJECT_OWNER}" --url "${issue_url}" --format json 2>/dev/null | jq -r '.id' || true)
+
+              if [[ -n "${item_id}" && "${item_id}" != "null" ]]; then
+                echo "  Project item ID: ${item_id}"
+
+                # Set branch field
+                if [[ -n "${BRANCH_FIELD_ID}" ]]; then
+                  echo "  Setting branch field to: ${BRANCH}"
+                  gh api graphql -f query='
+                    mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
+                      updateProjectV2ItemFieldValue(input: {
+                        projectId: $projectId
+                        itemId: $itemId
+                        fieldId: $fieldId
+                        value: {text: $value}
+                      }) {
+                        projectV2Item {
+                          id
+                        }
+                      }
+                    }' -f projectId="${PROJECT_ID}" -f itemId="${item_id}" -f fieldId="${BRANCH_FIELD_ID}" -f value="${BRANCH}" || echo "  Warning: Failed to set branch field"
+                fi
+
+                # Set commit_hash field
+                if [[ -n "${COMMIT_HASH_FIELD_ID}" ]]; then
+                  echo "  Setting commit_hash field to: ${hash}"
+                  gh api graphql -f query='
+                    mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
+                      updateProjectV2ItemFieldValue(input: {
+                        projectId: $projectId
+                        itemId: $itemId
+                        fieldId: $fieldId
+                        value: {text: $value}
+                      }) {
+                        projectV2Item {
+                          id
+                        }
+                      }
+                    }' -f projectId="${PROJECT_ID}" -f itemId="${item_id}" -f fieldId="${COMMIT_HASH_FIELD_ID}" -f value="${hash}" || echo "  Warning: Failed to set commit_hash field"
+                fi
+              else
+                echo "  Warning: Could not get project item ID"
+              fi
+            fi
+
+            sleep 1
+          done
+
+          echo "Done creating issues!"

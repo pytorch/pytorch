@@ -1,0 +1,67 @@
+{
+  "_comment": "Single source of truth for pytorch/pytorch job-name matching used by the parity tooling. Consumed by download_testlogs (Python, S3 artifact + log matching) and parity-auto.yml (bash/jq, upstream check-run gating before dispatching parity.yml). See _subfields for the per-arch schema.",
+  "_subfields": {
+    "default/distributed/inductor": "Ordered list of {workflow, job_prefix} sources for that test config. The first entry is the primary upstream workflow + check-run/job-name prefix; any later entries are fallbacks tried (in order) when the primary workflow run is missing for a SHA.",
+    "distributed_4gpu": "Optional supplemental ROCm source. Its XML is merged into the distributed report category when its workflow ran for the target SHA.",
+    "shard_counts": "Number of shards per test config.",
+    "test_kinds": "CUDA only: upstream test-job kinds to match (e.g. test-osdc, test).",
+    "checkrun_regex": "PCRE matching this arch's ROCm test check-run names (parity-auto gating). CUDA uses it for the trunk CUDA test jobs."
+  },
+  "_notes": {
+    "artifact_substrings": "The S3 artifact downloader always filters on the ROCm-GPU runner tag (rocm.gpu), since every ROCm runner label follows that convention; no per-arch config is needed.",
+    "workflow_regex": "parity-auto derives the per-arch upstream-workflow-path regex from the union of the workflow values across this arch's configs, so it is not stored here."
+  },
+  "cuda": {
+    "default": [{ "workflow": "trunk", "job_prefix": "linux-jammy-cuda13.2-py3.11-gcc11" }],
+    "distributed": [{ "workflow": "trunk", "job_prefix": "linux-jammy-cuda13.2-py3.11-gcc11" }],
+    "inductor": [{ "workflow": "trunk", "job_prefix": "linux-jammy-cuda13.2-py3.11-gcc11" }],
+    "test_kinds": ["test-osdc", "test"],
+    "shard_counts": { "default": 14, "distributed": 10, "inductor": 2 },
+    "checkrun_regex": "linux-jammy-cuda13[.]2-py3[.][0-9]+-gcc[0-9]+ / (test-osdc|test) [(](default|distributed|inductor),"
+  },
+  "rocm": {
+    "mi350": {
+      "default": [
+        { "workflow": "trunk", "job_prefix": "linux-noble-rocm-py3.11-mi350" },
+        { "workflow": "rocm-mi350", "job_prefix": "linux-noble-rocm-py3.12-mi350" }
+      ],
+      "distributed": [
+        { "workflow": "trunk", "job_prefix": "linux-noble-rocm-py3.11-mi350" }
+      ],
+      "distributed_4gpu": [
+        { "workflow": "periodic-rocm-mi350", "job_prefix": "linux-noble-rocm-py3.11-mi350" }
+      ],
+      "inductor": [
+        { "workflow": "trunk", "job_prefix": "linux-noble-rocm-py3.11-mi350" }
+      ],
+      "shard_counts": { "default": 8, "distributed": 3, "distributed_4gpu": 2, "inductor": 2 },
+      "checkrun_regex": "rocm.*mi350.*/ test [(](default|distributed|distributed_4gpu|inductor),"
+    },
+    "mi300": {
+      "default": [{ "workflow": "rocm-mi300", "job_prefix": "linux-noble-rocm-py3.12-mi300" }],
+      "distributed": [{ "workflow": "periodic-rocm-mi300", "job_prefix": "linux-noble-rocm-py3.12-mi300" }],
+      "inductor": [{ "workflow": "inductor-rocm-mi300", "job_prefix": "linux-noble-rocm-py3.12-mi300" }],
+      "shard_counts": { "default": 8, "distributed": 3, "inductor": 2 },
+      "checkrun_regex": "rocm.*mi300.*/ test [(](default|distributed|inductor),"
+    },
+    "mi200": {
+      "default": [{ "workflow": "rocm-mi200", "job_prefix": "linux-jammy-rocm-py3.10-mi200" }],
+      "distributed": [{ "workflow": "periodic-rocm-mi200", "job_prefix": "linux-jammy-rocm-py3.10-mi200" }],
+      "inductor": [{ "workflow": "inductor-rocm-mi200", "job_prefix": "linux-jammy-rocm-py3.10-mi200" }],
+      "shard_counts": { "default": 10, "distributed": 3, "inductor": 4 },
+      "checkrun_regex": "rocm.*(mi200|mi210).*/ test [(](default|distributed|inductor),"
+    },
+    "rx7900": {
+      "default": [{ "workflow": "rocm-rx7900", "job_prefix": "linux-jammy-rocm-py3.11-rx7900" }],
+      "shard_counts": { "default": 2 },
+      "checkrun_regex": "rocm.*rx7900.*/ test [(]default,"
+    },
+    "preview": {
+      "default": [{ "workflow": "rocm-preview", "job_prefix": "linux-noble-rocm-preview-py3.11-mi350" }],
+      "distributed": [{ "workflow": "rocm-preview", "job_prefix": "linux-noble-rocm-preview-py3.11-mi350" }],
+      "inductor": [{ "workflow": "rocm-preview", "job_prefix": "linux-noble-rocm-preview-py3.11-mi350" }],
+      "shard_counts": { "default": 8, "distributed": 3, "inductor": 2 },
+      "checkrun_regex": "rocm.*preview.*mi350.*/ test [(](default|distributed|inductor),"
+    }
+  }
+}

@@ -1,0 +1,637 @@
+name: Parity Report
+
+# Generates the ROCm-vs-CUDA (or commit-vs-commit) test parity report for one
+# or more architectures. Three jobs run in sequence:
+#   1. setup-matrix    - turn the "arch" input into a job matrix + filename prefix
+#   2. generate-parity - per arch: download_testlogs -> per-arch CSV artifact
+#   3. summarize       - merge the per-arch CSVs into one report + step summary
+#
+# The run-name below is just a human-friendly title shown in the Actions list.
+# It reads as: [autoparity-][<csv_name>-]<label> · <archs>, where <label> is the
+# first of: "<sha> vs <baseline>", "PR <id>", or <sha> (which defaults to
+# "latest"). "autoparity-" only marks auto-trigger dispatches (parity-auto.yml)
+# and csv_name, when given, is prepended so a custom run is easy to spot.
+run-name: "${{ inputs.auto_triggered && 'autoparity-' || '' }}${{ inputs.csv_name && format('{0}-', inputs.csv_name) || '' }}${{ inputs.set1_source != 'legacy' && format('{0}@{1} vs {2}@{3}', inputs.set1_source, inputs.set1_sha, inputs.set2_source, inputs.set2_sha) || inputs.baseline_sha && format('{0} vs {1}', inputs.sha, inputs.baseline_sha) || inputs.pr_id && format('PR {0}', inputs.pr_id) || inputs.sha }}${{ inputs.set1_source == 'legacy' && format(' · {0}', inputs.arch) || '' }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      # download_testlogs flags
+      sha:
+        description: 'Commit SHA to pull test results for. Example: 67f1ccf46a966e75f37facd497a03f7d1bd72982.'
+        required: false
+        default: 'latest'
+        type: string
+      baseline_sha:
+        description: 'Baseline commit SHA to compare against (same workflow/arch). Produces a commit-vs-commit report instead of ROCm-vs-CUDA.'
+        required: false
+        type: string
+      set1_source:
+        description: 'Cross-source side 1. Use with all set1/set2 fields; legacy preserves the normal parity modes.'
+        required: false
+        default: legacy
+        type: choice
+        options: [legacy, trunk, mi350, preview, mi300, mi200, rx7900]
+      set1_sha:
+        description: 'Commit SHA for cross-source side 1.'
+        required: false
+        type: string
+      set2_source:
+        description: 'Cross-source side 2.'
+        required: false
+        default: legacy
+        type: choice
+        options: [legacy, trunk, mi350, preview, mi300, mi200, rx7900]
+      set2_sha:
+        description: 'Commit SHA for cross-source side 2.'
+        required: false
+        type: string
+      pr_id:
+        description: 'Pull request number (alternative to SHA, uses latest commit). Example: 176306'
+        required: false
+        type: string
+      arch:
+        description: 'ROCm architectures, comma or space separated. Options: mi350, mi300, mi200, rx7900, preview. Example: "preview, mi350" or "mi300"'
+        required: false
+        default: 'mi350, mi300, mi200'
+        type: string
+      auto_triggered:
+        description: 'Internal: set by parity-auto.yml for runs dispatched by the auto-trigger. Only prefixes the run name with "autoparity-"; does not affect output/CSV filenames.'
+        required: false
+        default: false
+        type: boolean
+      exclude_distributed:
+        description: 'Exclude distributed tests (auto-excluded when unavailable)'
+        required: false
+        default: false
+        type: boolean
+      exclude_inductor:
+        description: 'Exclude inductor tests (auto-excluded when unavailable)'
+        required: false
+        default: false
+        type: boolean
+      exclude_default:
+        description: 'Exclude default tests'
+        required: false
+        default: false
+        type: boolean
+      include_logs:
+        description: 'Download and include CI log files (.txt) in artifact zip'
+        required: false
+        default: true
+        type: boolean
+      skip_rocm:
+        description: 'Skip downloading ROCm test results (generate CUDA-only report)'
+        required: false
+        default: false
+        type: boolean
+      skip_cuda:
+        description: 'Skip downloading CUDA test results (generate ROCm-only report)'
+        required: false
+        default: false
+        type: boolean
+      # summarize_xml_testreports flags
+      set1_name:
+        description: 'Label for ROCm columns in output CSV. Examples: rocm, preview, mi300. Default: rocm'
+        required: false
+        default: 'rocm'
+        type: string
+      set2_name:
+        description: 'Label for CUDA columns in output CSV. Examples: cuda, trunk. Default: cuda'
+        required: false
+        default: 'cuda'
+        type: string
+      csv_name:
+        description: 'Custom prefix for output filenames and artifacts. Default: YYYYMMDD_all_tests_status'
+        required: false
+        type: string
+      include_inductor_periodic:
+        description: 'Download inductor-periodic benchmark artifacts (separate from parity CSV)'
+        required: false
+        default: false
+        type: boolean
+      include_xml:
+        description: 'Include raw XML test reports in artifact zip (WARNING: drastically increases artifact size ~10x)'
+        required: false
+        default: false
+        type: boolean
+      auto_classify:
+        description: 'Auto-classify skip reasons for SKIPPED/MISSED tests in the output CSV'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  setup-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      arch-matrix: ${{ steps.parse.outputs.matrix }}
+      prefix: ${{ steps.parse.outputs.prefix }}
+    steps:
+      - name: Parse arch input into matrix
+        id: parse
+        env:
+          SET1_SOURCE: ${{ inputs.set1_source }}
+          SET1_SHA: ${{ inputs.set1_sha }}
+          SET2_SOURCE: ${{ inputs.set2_source }}
+          SET2_SHA: ${{ inputs.set2_sha }}
+        run: |
+          if [ "$SET1_SOURCE" != "legacy" ]; then
+            if [ -z "$SET1_SHA" ] || [ "$SET2_SOURCE" = "legacy" ] || [ -z "$SET2_SHA" ]; then
+              echo "::error::Cross-source mode requires both source dropdowns and both SHAs"
+              exit 1
+            fi
+            if ! [[ "$SET1_SHA" =~ ^[0-9a-f]{40}$ ]] || ! [[ "$SET2_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::Cross-source SHAs must be 40 lowercase hex characters"
+              exit 1
+            fi
+          elif [ "$SET2_SOURCE" != "legacy" ] || [ -n "$SET1_SHA" ] || [ -n "$SET2_SHA" ]; then
+            echo "::error::Set both source dropdowns to enable cross-source mode"
+            exit 1
+          fi
+
+          if [ "$SET1_SOURCE" != "legacy" ]; then
+            if [ "$SET1_SOURCE" != "trunk" ]; then
+              ARCHS="$SET1_SOURCE"
+            elif [ "$SET2_SOURCE" != "trunk" ]; then
+              ARCHS="$SET2_SOURCE"
+            else
+              ARCHS="mi350"
+            fi
+          else
+            ARCHS="${{ inputs.arch }}"
+          fi
+          ARCHS=$(echo "$ARCHS" | tr ',[:space:]' '\n' | sed '/^$/d' | tr '\n' ' ')
+          JSON=$(echo "$ARCHS" | tr ' ' '\n' | sed '/^$/d' | sed 's/^/"/;s/$/"/' | paste -sd',' | sed 's/^/[/;s/$/]/')
+          echo "matrix=$JSON" >> "$GITHUB_OUTPUT"
+          echo "Architectures: $JSON"
+
+          # Prefix for artifact names so the per-arch jobs and the summarize job
+          # agree on where to find each other's outputs. Prefer the most
+          # specific identifier the dispatcher gave us.
+          if [ -n "${{ inputs.csv_name }}" ]; then
+            PREFIX="${{ inputs.csv_name }}"
+          elif [ "$SET1_SOURCE" != "legacy" ]; then
+            PREFIX="${SET1_SOURCE}-${SET1_SHA}-vs-${SET2_SOURCE}-${SET2_SHA}"
+          elif [ -n "${{ inputs.sha }}" ] && [ "${{ inputs.sha }}" != "latest" ]; then
+            PREFIX="${{ inputs.sha }}"
+          elif [ -n "${{ inputs.pr_id }}" ]; then
+            PREFIX="${{ inputs.pr_id }}"
+          else
+            PREFIX="parity"
+          fi
+          PREFIX=$(echo "$PREFIX" | xargs)
+          echo "prefix=$PREFIX" >> "$GITHUB_OUTPUT"
+          echo "Artifact prefix: $PREFIX"
+
+  generate-parity:
+    needs: setup-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        arch: ${{ fromJson(needs.setup-matrix.outputs.arch-matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        working-directory: .automation_scripts/pytorch-unit-test-scripts
+        run: pip install -r requirements.txt
+
+      - name: Download artifacts
+        id: download
+        working-directory: .automation_scripts/pytorch-unit-test-scripts
+        env:
+          GITHUB_TOKEN: ${{ secrets.PARITY_GITHUB_TOKEN || github.token }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          CROSS_SET1_SOURCE: ${{ inputs.set1_source }}
+          CROSS_SET1_SHA: ${{ inputs.set1_sha }}
+          CROSS_SET2_SOURCE: ${{ inputs.set2_source }}
+          CROSS_SET2_SHA: ${{ inputs.set2_sha }}
+        run: |
+          # Forward run options to download_testlogs.
+          #
+          # pipefail: without it, tee's 0 exit code hides a download_testlogs
+          # failure and we'd publish a partial report as a green run.
+          set -o pipefail
+          ARGS="--arch ${{ matrix.arch }}"
+
+          if [ -n "${{ inputs.sha }}" ] && [ "${{ inputs.sha }}" != "latest" ]; then
+            ARGS="$ARGS --sha1 ${{ inputs.sha }}"
+          fi
+          if [ -n "${{ inputs.pr_id }}" ]; then
+            ARGS="$ARGS --pr_id ${{ inputs.pr_id }}"
+          fi
+          if [ "${{ inputs.exclude_distributed }}" = "true" ]; then
+            ARGS="$ARGS --exclude_distributed"
+          fi
+          if [ "${{ inputs.exclude_inductor }}" = "true" ]; then
+            ARGS="$ARGS --exclude_inductor"
+          fi
+          if [ "${{ inputs.exclude_default }}" = "true" ]; then
+            ARGS="$ARGS --exclude_default"
+          fi
+          ARGS="$ARGS --exclude_slow"
+          ARGS="$ARGS --ignore_status"
+          if [ "${{ inputs.include_logs }}" != "true" ]; then
+            ARGS="$ARGS --artifacts_only"
+          fi
+          if [ "${{ inputs.skip_rocm }}" = "true" ]; then
+            ARGS="$ARGS --no_rocm"
+          fi
+          if [ "${{ inputs.skip_cuda }}" = "true" ]; then
+            ARGS="$ARGS --no_cuda"
+          fi
+          if [ "${{ inputs.include_inductor_periodic }}" = "true" ]; then
+            ARGS="$ARGS --include_inductor_periodic"
+          fi
+          if [ -n "${{ inputs.baseline_sha }}" ]; then
+            ARGS="$ARGS --baseline_sha ${{ inputs.baseline_sha }}"
+          fi
+          if [ "$CROSS_SET1_SOURCE" != "legacy" ]; then
+            ARGS="$ARGS --set1_source $CROSS_SET1_SOURCE"
+            ARGS="$ARGS --set1_sha $CROSS_SET1_SHA"
+            ARGS="$ARGS --set2_source $CROSS_SET2_SOURCE"
+            ARGS="$ARGS --set2_sha $CROSS_SET2_SHA"
+          fi
+
+          DIAG_SHA="${{ inputs.sha }}"
+          if ! [[ "$DIAG_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            DIAG_SHA=$(printf '%040d' "$GITHUB_RUN_ID")
+          fi
+          mkdir -p "$(date -u +%Y%m%d)_${DIAG_SHA}"
+
+          echo "Running: python3 ./download_testlogs $ARGS"
+          # Don't abort the job here on a partial download (e.g. a config whose
+          # upstream job was skipped -- ROCm distributed during GPU capacity
+          # crunches). Capture download_testlogs' real exit code, keep going so
+          # the report still generates and uploads from whatever downloaded,
+          # then fail the job at the end (see "Flag incomplete download") so the
+          # run is still clearly marked failed.
+          set +e
+          python3 ./download_testlogs $ARGS 2>&1 | tee download_${{ matrix.arch }}.log
+          DL_RC=${PIPESTATUS[0]}
+          set -e
+          echo "download_rc=$DL_RC" >> "$GITHUB_OUTPUT"
+          if [ "$DL_RC" -ne 0 ]; then
+            echo "::warning::download_testlogs exited $DL_RC for ${{ matrix.arch }}; building a partial report, the job will be failed at the end."
+          fi
+
+      - name: Identify output folder
+        id: folder
+        working-directory: .automation_scripts/pytorch-unit-test-scripts
+        run: |
+          FOLDER=$(ls -dt [0-9]*_[0-9a-f]*/ 2>/dev/null | head -1 | sed 's:/$::')
+          if [ -z "$FOLDER" ]; then
+            echo "ERROR: No output folder found"
+            exit 1
+          fi
+          echo "folder=$FOLDER" >> "$GITHUB_OUTPUT"
+          SHA=$(echo "$FOLDER" | grep -oP '[0-9a-f]{40}')
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          DATE=$(TZ='America/Los_Angeles' date '+%Y%m%d')
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+          mv download_${{ matrix.arch }}.log "$FOLDER/" 2>/dev/null || true
+          echo "Output folder: $FOLDER, SHA: $SHA, Date: $DATE"
+
+      - name: Generate CSV
+        working-directory: .automation_scripts/pytorch-unit-test-scripts
+        env:
+          CROSS_SET1_SOURCE: ${{ inputs.set1_source }}
+          CROSS_SET1_SHA: ${{ inputs.set1_sha }}
+          CROSS_SET2_SOURCE: ${{ inputs.set2_source }}
+          CROSS_SET2_SHA: ${{ inputs.set2_sha }}
+        run: |
+          set -o pipefail
+          FOLDER="${{ steps.folder.outputs.folder }}"
+          DATE="${{ steps.folder.outputs.date }}"
+          ARCH="${{ matrix.arch }}"
+
+          require_xml() {
+            local directory="$1" label="$2"
+            if ! find "$directory" -name "*.xml" -print -quit 2>/dev/null | grep -q .; then
+              echo "::error::No $label XML reports were downloaded"
+              exit 1
+            fi
+          }
+
+          # A single stray XML anywhere satisfies require_xml, so a config that
+          # downloaded nothing still shipped a report whose every row read
+          # MISSED. Check each config this arch is configured for and that was
+          # not excluded. Only hard-fail when download_testlogs claimed success:
+          # a reported incomplete download already fails the job later and we
+          # still want its partial report.
+          ARCH_CONFIGS=$(jq -r --arg a "$ARCH" \
+            '.rocm[$a] | keys_unsorted[] | select(IN("default","distributed","inductor"))' \
+            parity_job_config.json)
+          require_config_xml() {
+            local directory="$1" label="$2" config
+            for config in $ARCH_CONFIGS; do
+              case "$config" in
+                default)     [ "${{ inputs.exclude_default }}" = "true" ] && continue ;;
+                distributed) [ "${{ inputs.exclude_distributed }}" = "true" ] && continue ;;
+                inductor)    [ "${{ inputs.exclude_inductor }}" = "true" ] && continue ;;
+              esac
+              if ! find "$directory" -maxdepth 1 -type d -name "test-${config}-*" \
+                   -print -quit 2>/dev/null | grep -q .; then
+                if [ "${{ steps.download.outputs.download_rc }}" = "0" ]; then
+                  echo "::error::No $label XML reports for the '$config' config, yet the download reported success"
+                  exit 1
+                fi
+                echo "::warning::No $label XML reports for the '$config' config; it will read as MISSED"
+              fi
+            done
+          }
+          if [ "$CROSS_SET1_SOURCE" != "legacy" ]; then
+            require_xml "$FOLDER/set1_xml" "$CROSS_SET1_SOURCE"
+            require_xml "$FOLDER/set2_xml" "$CROSS_SET2_SOURCE"
+          else
+            if [ "${{ inputs.skip_rocm }}" != "true" ]; then
+              require_xml "$FOLDER/rocm_xml" "ROCm"
+              require_config_xml "$FOLDER/rocm_xml" "ROCm"
+            fi
+            if [ -n "${{ inputs.baseline_sha }}" ]; then
+              require_xml "$FOLDER/baseline_xml" "baseline"
+            elif [ "${{ inputs.skip_cuda }}" != "true" ]; then
+              require_xml "$FOLDER/cuda_xml" "CUDA"
+              require_config_xml "$FOLDER/cuda_xml" "CUDA"
+            fi
+          fi
+
+          if [ -n "${{ inputs.csv_name }}" ]; then
+            CSV_NAME="${{ inputs.csv_name }}_${ARCH}"
+          else
+            CSV_NAME="${DATE}_all_tests_status_${ARCH}"
+          fi
+
+          if [ "$CROSS_SET1_SOURCE" != "legacy" ]; then
+            SET1_SHORT=$(echo "$CROSS_SET1_SHA" | cut -c1-8)
+            SET2_SHORT=$(echo "$CROSS_SET2_SHA" | cut -c1-8)
+            ARGS="--set1 $FOLDER/set1_xml --set2 $FOLDER/set2_xml"
+            ARGS="$ARGS --set1_name ${CROSS_SET1_SOURCE}@${SET1_SHORT}"
+            ARGS="$ARGS --set2_name ${CROSS_SET2_SOURCE}@${SET2_SHORT}"
+          elif [ -n "${{ inputs.baseline_sha }}" ]; then
+            ARGS="--set1 $FOLDER/rocm_xml"
+            ARGS="$ARGS --set2 $FOLDER/baseline_xml"
+            CURRENT_SHORT=$(echo "${{ steps.folder.outputs.sha }}" | cut -c1-8)
+            BASELINE_SHORT=$(echo "${{ inputs.baseline_sha }}" | cut -c1-8)
+            ARGS="$ARGS --set1_name ${CURRENT_SHORT}"
+            ARGS="$ARGS --set2_name ${BASELINE_SHORT}"
+          else
+            ARGS="--set1 $FOLDER/rocm_xml"
+            if [ "${{ inputs.skip_cuda }}" != "true" ]; then
+              ARGS="$ARGS --set2 $FOLDER/cuda_xml"
+            fi
+            ARGS="$ARGS --set1_name ${{ inputs.set1_name }}"
+            ARGS="$ARGS --set2_name ${{ inputs.set2_name }}"
+          fi
+          ARGS="$ARGS --output_csv $FOLDER/${CSV_NAME}.csv"
+          SHORT_ARCH=$(echo "$ARCH" | sed 's/^mi//')
+          if [ -n "${{ inputs.csv_name }}" ]; then
+            RT_NAME="${{ inputs.csv_name }}_running_time_${SHORT_ARCH}"
+          else
+            RT_NAME="${DATE}_running_time_${SHORT_ARCH}"
+          fi
+          ARGS="$ARGS --test_file_running_time_output_csv $FOLDER/${RT_NAME}.csv"
+
+          echo "Running: python3 -u summarize_xml_testreports.py $ARGS"
+          python3 -u summarize_xml_testreports.py $ARGS 2>&1 | tee "$FOLDER/xml_processing_${DATE}.log"
+          test "$(wc -l < "$FOLDER/${CSV_NAME}.csv")" -gt 1 || {
+            echo "::error::Parity CSV has no data rows"
+            exit 1
+          }
+          test "$(wc -l < "$FOLDER/${RT_NAME}.csv")" -gt 1 || {
+            echo "::error::Running-time CSV has no data rows"
+            exit 1
+          }
+
+      - name: Auto-classify skip reasons
+        if: ${{ inputs.auto_classify }}
+        working-directory: .automation_scripts/pytorch-unit-test-scripts
+        run: |
+          FOLDER="${{ steps.folder.outputs.folder }}"
+          CSV=$(find "$FOLDER" -maxdepth 1 -name "*.csv" ! -name "*_running_time*" | head -1)
+          if [ -n "$CSV" ]; then
+            echo "Auto-classifying skip reasons in $CSV"
+            python3 auto_classify_skip_reasons.py -i "$CSV" -o "$CSV" --report 2>&1
+          else
+            echo "No parity CSV found in $FOLDER, skipping auto-classify"
+          fi
+
+      - name: Detect log-based failures (timeouts, crashes)
+        # This is the fallback for failures that kill pytest before it can
+        # finalize JUnit XML. Run it even if an earlier report-enrichment step
+        # fails, otherwise the summary can incorrectly claim zero failures.
+        if: ${{ always() && inputs.include_logs && steps.folder.outputs.folder != '' }}
+        working-directory: .automation_scripts/pytorch-unit-test-scripts
+        run: |
+          FOLDER="${{ steps.folder.outputs.folder }}"
+          if ls "$FOLDER"/*.txt 1>/dev/null 2>&1; then
+            python3 detect_log_failures.py --logs-dir "$FOLDER" --output "$FOLDER/log_failures_${{ matrix.arch }}.csv" 2>&1 || true
+          else
+            echo "No log files found in $FOLDER, skipping log failure detection"
+          fi
+
+      - name: Collect upload paths
+        id: upload-paths
+        if: ${{ always() && steps.folder.outputs.folder != '' }}
+        run: |
+          FOLDER=".automation_scripts/pytorch-unit-test-scripts/${{ steps.folder.outputs.folder }}"
+          PATHS="${FOLDER}/*.csv
+          ${FOLDER}/*.json
+          ${FOLDER}/*.log
+          ${FOLDER}/*.txt
+          ${FOLDER}/inductor_periodic_rocm_dir/
+          ${FOLDER}/inductor_periodic_cuda_dir/
+          ${FOLDER}/set1_inductor_periodic/
+          ${FOLDER}/set2_inductor_periodic/"
+          if [ "${{ inputs.include_xml }}" = "true" ]; then
+            PATHS="${PATHS}
+          ${FOLDER}/rocm_xml/
+          ${FOLDER}/cuda_xml/
+          ${FOLDER}/baseline_xml/
+          ${FOLDER}/set1_xml/
+          ${FOLDER}/set2_xml/"
+          fi
+          echo "paths<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$PATHS" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts
+        if: ${{ always() && steps.upload-paths.outputs.paths != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ needs.setup-matrix.outputs.prefix }}-results-${{ matrix.arch }}
+          path: ${{ steps.upload-paths.outputs.paths }}
+
+      - name: Flag incomplete download
+        # A partial download (some config's upstream jobs missing) still produces
+        # and uploads a report above; fail the job here so the run is clearly
+        # marked failed for that arch without losing the report.
+        if: ${{ always() && steps.download.outputs.download_rc != '0' && steps.download.outputs.download_rc != '' }}
+        run: |
+          echo "download_testlogs reported an incomplete download (rc=${{ steps.download.outputs.download_rc }}) for ${{ matrix.arch }}."
+          echo "A partial report was still generated and uploaded; failing the job to flag the incomplete download."
+          exit 1
+
+  summarize:
+    needs: [setup-matrix, generate-parity]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.10'
+
+      - name: Download all per-arch CSV artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: ${{ needs.setup-matrix.outputs.prefix }}-results-*
+          path: artifacts
+
+      - name: Build parity report
+        working-directory: .automation_scripts/pytorch-unit-test-scripts
+        env:
+          CROSS_SET1_SOURCE: ${{ inputs.set1_source }}
+          CROSS_SET1_SHA: ${{ inputs.set1_sha }}
+          CROSS_SET2_SOURCE: ${{ inputs.set2_source }}
+          CROSS_SET2_SHA: ${{ inputs.set2_sha }}
+        run: |
+          if [ "$CROSS_SET1_SOURCE" != "legacy" ]; then
+            if [ "$CROSS_SET1_SOURCE" != "trunk" ]; then
+              ARCHS="$CROSS_SET1_SOURCE"
+            elif [ "$CROSS_SET2_SOURCE" != "trunk" ]; then
+              ARCHS="$CROSS_SET2_SOURCE"
+            else
+              ARCHS="mi350"
+            fi
+          else
+            ARCHS="${{ inputs.arch }}"
+          fi
+          SHA="${{ inputs.sha }}"
+          [ "$SHA" = "latest" ] && SHA=""
+          PR_ID="${{ inputs.pr_id }}"
+          BASELINE_SHA="${{ inputs.baseline_sha }}"
+          if [ "$CROSS_SET1_SOURCE" != "legacy" ]; then
+            SHA="$CROSS_SET1_SHA"
+            SET1="${CROSS_SET1_SOURCE}@$(echo "$CROSS_SET1_SHA" | cut -c1-8)"
+            SET2="${CROSS_SET2_SOURCE}@$(echo "$CROSS_SET2_SHA" | cut -c1-8)"
+          elif [ -n "$BASELINE_SHA" ]; then
+            SET1=$(echo "$SHA" | cut -c1-8)
+            SET2=$(echo "$BASELINE_SHA" | cut -c1-8)
+          else
+            SET1="${{ inputs.set1_name }}"
+            SET2="${{ inputs.set2_name }}"
+          fi
+
+          ARCHS=$(echo "$ARCHS" | tr ',[:space:]' ' ')
+          PREFIX=$(echo "${{ needs.setup-matrix.outputs.prefix }}" | xargs)
+          CSV_ARGS=()
+          ARCH_ARGS=()
+          for ARCH in $ARCHS; do
+            ARTIFACT_DIR="../../artifacts/${PREFIX}-results-${ARCH}"
+            CSV=$(find "$ARTIFACT_DIR"/ -maxdepth 2 -name "*.csv" ! -name "*_running_time*" ! -name "*_summary*" ! -name "log_failures_*" ! -name "log_shards_*" ! -name "flaky_tests_*" 2>/dev/null | head -1)
+            if [ -z "$CSV" ]; then
+              echo "::error::No parity CSV found for $ARCH"
+              exit 1
+            fi
+            echo "Found CSV for $ARCH: $CSV"
+            CSV_ARGS+=("$CSV")
+            ARCH_ARGS+=("$ARCH")
+          done
+
+          if [ ${#CSV_ARGS[@]} -eq 0 ]; then
+            echo "::error::No parity CSVs found for any architecture"
+            exit 1
+          fi
+
+          ARGS=(--csv "${CSV_ARGS[@]}" --arch "${ARCH_ARGS[@]}")
+          ARGS+=(--set1_name "$SET1" --set2_name "$SET2")
+
+          if [ -n "$SHA" ]; then
+            ARGS+=(--sha "$SHA")
+          else
+            DETECTED_SHA=$(basename "$(find ../../artifacts/ -name '*.csv' | head -1)" | grep -oP '[0-9a-f]{40}' || true)
+            if [ -n "$DETECTED_SHA" ]; then
+              ARGS+=(--sha "$DETECTED_SHA")
+            fi
+          fi
+          if [ -n "$PR_ID" ]; then
+            ARGS+=(--pr_id "$PR_ID")
+          fi
+
+          # Collect log failure CSVs if they exist
+          LOG_FAIL_ARGS=()
+          for ARCH in $ARCHS; do
+            LF="../../artifacts/${PREFIX}-results-${ARCH}"
+            LF_CSV=$(find "$LF"/ -maxdepth 2 -name "log_failures_*.csv" 2>/dev/null | head -1)
+            if [ -n "$LF_CSV" ]; then
+              LOG_FAIL_ARGS+=("$LF_CSV")
+              echo "Found log failures for $ARCH: $LF_CSV"
+            fi
+          done
+          if [ ${#LOG_FAIL_ARGS[@]} -gt 0 ]; then
+            ARGS+=(--log-failures "${LOG_FAIL_ARGS[@]}")
+          fi
+
+          OUTPUT="${PREFIX}_summary"
+          ARGS+=(--output "$OUTPUT")
+
+          echo "Running: python3 generate_summary.py ${ARGS[*]}"
+          python3 generate_summary.py "${ARGS[@]}"
+
+          test -s "${OUTPUT}.md" || {
+            echo "::error::Parity summary markdown was not created"
+            exit 1
+          }
+          cat "${OUTPUT}.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$CROSS_SET1_SOURCE" != "legacy" ]; then
+            {
+              echo ""
+              echo "### Comparison sources"
+              echo ""
+              echo "- Set 1: \`${CROSS_SET1_SOURCE}@${CROSS_SET1_SHA}\`"
+              echo "- Set 2: \`${CROSS_SET2_SOURCE}@${CROSS_SET2_SHA}\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload parity summary markdown
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: parity-summary-md
+          path: .automation_scripts/pytorch-unit-test-scripts/*_summary.md
+          if-no-files-found: error
+          retention-days: 120
+
+      - name: Add artifact links to summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARTIFACTS_JSON=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --paginate -q '.artifacts[] | {name, id}')
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts"
+
+          {
+            echo ""
+            echo "### ARTIFACTS"
+            echo ""
+            echo "| Artifact | Link |"
+            echo "| --- | --- |"
+            echo "$ARTIFACTS_JSON" | jq -r '"| \(.name) | [Download]('"${RUN_URL}"'/\(.id)) |"'
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
