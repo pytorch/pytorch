@@ -4504,6 +4504,69 @@ def demote_chain_4(n):
     return demote_chain_3(n)
 
 
+TRIAL_ADDS = 64
+
+
+def trial_adds(n, x):
+    total = 0
+    for i in range(n):
+        total += i * i % 7
+    for _ in range(TRIAL_ADDS):
+        x = x + 1.0
+    return total, x
+
+
+def trial_caller(n, x):
+    # Through a builtin, so that the graph is the callee's own and the
+    # callee is what is measured with it.
+    return next(map(trial_adds, (n,), (x,)))
+
+
+def trial_slower_caller(n, x):
+    # A loop of its own, which makes it slower in the VM than in the
+    # interpreter unless trial_adds runs compiled with its graph.
+    total = 0
+    for i in range(n // 2):
+        total += i * i % 7
+    inner, x = next(map(trial_adds, (n,), (x,)))
+    return total + inner, x
+
+
+def trial_at_once(seconds, runs):
+    """A pass over the graph of trial_adds. Adding one to whole numbers is
+    exact, so one add does the work of all of them: with it the function is
+    faster compiled than in the interpreter, without it the loop of integer
+    arithmetic makes it slower. In front of the add the graph calls a
+    function that counts its runs in `runs` and sleeps for what `seconds`
+    says for the number of the run."""
+
+    def waits(x):
+        runs.append(len(runs))
+        pause = seconds(len(runs))
+        if pause:
+            time.sleep(pause)
+        return x
+
+    def at_once(gm, input_types):
+        graph = gm.graph
+        adds = [n for n in graph.nodes if n.target is torch.ops.aten.add.Tensor]
+        if len(adds) != TRIAL_ADDS:
+            # The graph of a backward, which the engine hands a pass as well.
+            return gm
+        (x,) = [node for node in graph.nodes if node.op == "placeholder"]
+        out = next(node for node in graph.nodes if node.op == "output")
+        (last,) = out.args[0]
+        add = torch.ops.aten.add.Tensor
+        with graph.inserting_before(out):
+            waited = graph.call_function(waits, (x,))
+            total = graph.call_function(add, (waited, float(TRIAL_ADDS)))
+        last.replace_all_uses_with(total)
+        graph.eliminate_dead_code()
+        return gm
+
+    return at_once
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmDemotion(TestCase):
     """What the interpreter runs faster is left to it."""
@@ -4733,6 +4796,159 @@ class TestVmDemotion(TestCase):
         )
         for x in range(200):
             self.assertEqual(call_outcome(compiled, x), call_outcome(caller, x))
+
+    def trial(self, fn, seconds, calls, grad=False):
+        """Calls `fn` (trial_adds, or trial_caller, which has it as a callee)
+        `calls` times under torch.vm, measured against the interpreter, with
+        a graph whose callable sleeps for what `seconds` says for the number
+        of the run of the form. Returns the compiled function and, per call,
+        how often the callable had run and what `stats()` said of the second
+        look at trial_adds."""
+        runs = []
+        # With a gradient the first two runs of a form are the engine taking
+        # its backward down, on eager's tape.
+        first = 2 if grad else 0
+        behind = trial_at_once(lambda run: seconds(run + first), runs)
+        kept = DEFAULT if fn is trial_adds else without(P.Inline)
+        passes = (*kept, P.Graphs(), behind)
+        compiled = torch.vm(fn, fallback=False, demote=True, passes=passes)
+        x = torch.ones(30000, requires_grad=grad)
+        expected = fn(2400, x)
+        seen = []
+        # A collection in the middle of one sample is not the function's time.
+        gc.disable()
+        self.addCleanup(gc.enable)
+        for _ in range(calls):
+            total, y = compiled(2400, x)
+            self.assertEqual(total, expected[0])
+            self.assertEqual(y, expected[1], atol=0, rtol=0)
+            looks = compiled.stats()["second_looks"]
+            seen.append((len(runs), looks.get("trial_adds")))
+        if grad:
+            (got,) = torch.autograd.grad(y.sum(), x)
+            self.assertEqual(got, torch.ones(30000), atol=0, rtol=0)
+        return compiled, seen
+
+    @parametrize("slow_runs", (1, 3, 6))
+    def test_a_form_that_is_slow_in_its_first_runs_is_not_given_up(self, slow_runs):
+        # What a pass makes of a graph can be slow the first times it runs
+        # (a compiler that does its work then). Calls that long are measured
+        # with three calls to warm up, so the slow runs behind those are
+        # samples, of a form that is not yet what it will be.
+        def seconds(run):
+            return 0.85 * (run <= slow_runs)
+
+        compiled, seen = self.trial(trial_caller, seconds, 120)
+        stats = compiled.stats()
+        left = (stats["demoted_callees"], stats["second_looks"])
+        self.assertEqual(left, ([], {}))
+        self.assertFalse(stats["measuring"])
+        # The graph runs in every call by now.
+        self.assertEqual(seen[-1][0] - seen[-41][0], 40)
+
+    def test_a_form_whose_times_are_coming_down_does_not_lose(self):
+        # Slow from its ninth run on, the first that counts against it, and
+        # twice as fast at each of the four runs behind it: three slow
+        # samples lose a measurement, unless the times are coming down.
+        def seconds(run):
+            return 0.64 / 2 ** (run - 9) if 9 <= run < 14 else 0
+
+        compiled, seen = self.trial(trial_caller, seconds, 150)
+        stats = compiled.stats()
+        # Not left to the interpreter for a while either: no second look.
+        left = (stats["demoted_callees"], stats["second_looks"])
+        self.assertEqual(left, ([], {}))
+        self.assertFalse(stats["measuring"])
+        self.assertEqual(seen[-1][0] - seen[-41][0], 40)
+
+    @parametrize("grad", (False, True))
+    def test_a_function_that_lost_with_a_graph_is_measured_once_more(self, grad):
+        # As slow at each of its first 19 runs. The ten samples behind the
+        # eight runs that do not count lose the first measurement in
+        # whatever order the samples are drawn; the eight calls that warm
+        # the second one up are the last slow ones at the latest.
+        def seconds(run):
+            return 0.02 * (run <= 19)
+
+        compiled, seen = self.trial(trial_caller, seconds, 220, grad)
+        looks = [look for _, look in seen]
+        order = sorted(set(looks), key=looks.index)
+        self.assertEqual(order, [None, "to come", "under way", "won"])
+        # While it waited, for 64 calls behind the one that lost, the
+        # interpreter ran it.
+        waited = [ran for ran, look in seen if look == "to come"]
+        self.assertGreaterEqual(len(waited), 65)
+        self.assertEqual(len(set(waited)), 1)
+        stats = compiled.stats()
+        left = (stats["demoted_callees"], stats["second_looks"])
+        self.assertEqual(left, ([], {"trial_adds": "won"}))
+        self.assertFalse(stats["measuring"])
+        self.assertEqual(seen[-1][0] - seen[-41][0], 40)
+
+    def test_a_caller_is_not_given_up_while_its_callee_waits_for_a_second_look(self):
+        # While trial_adds is the interpreter's, between its two
+        # measurements, the caller is slower compiled than in the
+        # interpreter; once trial_adds runs compiled it is faster. A call in
+        # which a function waits for its second look is no sample against
+        # its caller, or the caller would be left with all it calls, and
+        # there would be no second look.
+        def seconds(run):
+            return 0.02 * (run <= 19)
+
+        compiled, seen = self.trial(trial_slower_caller, seconds, 260)
+        stats = compiled.stats()
+        left = (stats["demoted"], stats["demoted_callees"], stats["second_looks"])
+        self.assertEqual(left, (False, [], {"trial_adds": "won"}))
+        self.assertFalse(stats["measuring"])
+        self.assertEqual(seen[-1][0] - seen[-41][0], 40)
+
+    @parametrize("fn", (trial_adds, trial_caller), name_fn=lambda fn: fn.__name__)
+    def test_a_function_that_stays_slower_is_measured_twice_and_no_more(self, fn):
+        compiled, seen = self.trial(fn, lambda run: 0.003, 420)
+        looks = [look for _, look in seen]
+        order = sorted(set(looks), key=looks.index)
+        self.assertEqual(order, [None, "to come", "under way", "lost"])
+        # The call that lost and the 64 calls behind it, which the
+        # interpreter ran. Of a callee these are the calls that came to the
+        # VM: its caller is measured as well, and the interpreter runs some
+        # calls of the caller with all they call.
+        waited = [ran for ran, look in seen if look == "to come"]
+        if fn is trial_adds:
+            self.assertEqual(len(waited), 65)
+        else:
+            self.assertGreaterEqual(len(waited), 65)
+        self.assertEqual(len(set(waited)), 1)
+        # Not a third time: in more calls than a second look is waited for,
+        # nothing of the graph ran.
+        lost = looks.index("lost")
+        self.assertGreater(len(looks) - lost, 3 * 64)
+        self.assertEqual(seen[lost][0], seen[-1][0])
+        stats = compiled.stats()
+        self.assertEqual(stats["second_looks"], {"trial_adds": "lost"})
+        if fn is trial_adds:
+            self.assertTrue(stats["demoted"])
+        else:
+            self.assertEqual(stats["demoted_callees"], ["trial_adds"])
+        self.assertFalse(stats["measuring"])
+
+    def test_a_function_without_graphs_is_decided_as_early_as_before(self):
+        compiled = torch.vm(demote_python, fallback=False, demote=True)
+        decided = None
+        for call in range(1, 121):
+            self.assertEqual(compiled(300), demote_python(300))
+            stats = compiled.stats()
+            if decided is None and stats["demoted"]:
+                decided = call
+            elif decided is not None:
+                # For good, from the next call on, and with no second look.
+                said = (stats["demoted"], stats["measuring"], stats["second_looks"])
+                self.assertEqual(said, (True, False, {}))
+        # Eight calls warm up. Three samples of each kind decide, and one
+        # kind gets ten at most before the other has three.
+        self.assertLessEqual(decided, 8 + 10 + 3)
+
+
+instantiate_parametrized_tests(TestVmDemotion)
 
 
 def e2e_halve(x):
@@ -9220,10 +9436,14 @@ print(json.dumps(found))
         self.assertTrue(named and len(kinds) == len(named), named)
         self.assertEqual(len(named), len(closed))
         # Calls of a kind it has a form for count: it is left to the
-        # interpreter, as the measurement would have had it all along.
-        for _ in range(80):
+        # interpreter, as the measurement would have had it all along. A
+        # function with a graph is measured twice before it is left for
+        # good, with 64 calls in between.
+        for _ in range(160):
             self.assertEqual(compiled(plain), graph_timed(plain), atol=0, rtol=0)
-        self.assertTrue(compiled.stats()["demoted"])
+        stats = compiled.stats()
+        self.assertTrue(stats["demoted"])
+        self.assertEqual(stats["second_looks"], {"graph_timed": "lost"})
 
     def test_the_graphs_of_what_is_called_wait_for_the_graph_of_the_caller(self):
         exported = []
