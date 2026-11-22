@@ -10514,6 +10514,60 @@ def graph_draws_behind_a_branch(x):
     return torch.tanh(h) + 1
 
 
+def graph_pinned_scaled(h, scale=2.0, shift=1.0):
+    return h * scale + shift
+
+
+def graph_pins_a_place(x, given):
+    h = torch.relu(x) + 1
+    items = [h, h * 2, h * 3]
+    return (items[given] * 0.5).sum()
+
+
+def graph_pins_a_place_of_a_tuple(x, given):
+    h = torch.relu(x) + 1
+    items = (h, h * 2, h * 3)
+    return (items[given] * 0.5).sum()
+
+
+def graph_pins_a_number(x, given):
+    h = torch.relu(x) + 1
+    return (h * (h.shape[0] * given)).sum()
+
+
+def graph_pins_a_rate(x, given):
+    h = (torch.relu(x) + 1).reshape(1, 3, 4)
+    attend = torch.nn.functional.scaled_dot_product_attention
+    return attend(h, h, h, dropout_p=given).sum()
+
+
+def graph_pins_names(x, given):
+    h = torch.relu(x) + 1
+    names = {name: 2.0 for name in (given,)}  # noqa: C420
+    return graph_pinned_scaled(h, **names).sum()
+
+
+def graph_pins_a_function(x, given):
+    h = torch.relu(x) + 1
+    return (h * given(h.shape[0], h.shape[1])).sum()
+
+
+def graph_pins_a_class(x, given):
+    h = torch.relu(x) + 1
+    return (h * (2.0 if isinstance(h.shape, given) else 3.0)).sum()
+
+
+def graph_pins_defaults(x, given):
+    graph_pinned_scaled.__defaults__ = given
+    return graph_pinned_scaled(torch.relu(x) + 1).sum()
+
+
+def graph_pins_ten(x, given):
+    h = torch.relu(x) + 1
+    items = [h * (at + 1) for at in range(10)]
+    return (items[given] * 0.5).sum()
+
+
 def graph_spread_list(x, given):
     h = torch.relu(x) + 1
     made = [h, 0.5]
@@ -10540,19 +10594,25 @@ def graph_spread_twice(x, given):
     return (torch.tanh(torch.clamp(*again) * 2) * 2 - 1).sum()
 
 
-# How long one case of `GRAPH_CYCLES` may take before it counts as one that
+# How long one case of `GRAPH_THINGS` may take before it counts as one that
 # does not come back.
-GRAPH_CYCLE_SECONDS = 300
-GRAPH_CYCLES = '''"""Things that hold themselves, on a path and handed to one: the cases
-of a group (`made`, `outside`, `printed`), each with `Graphs()` alone, with
-a pass that returns the graph and with an input that requires a gradient,
-twelve calls against eager from the same state. What is compared is the
-result or what is raised, and what was given back and left outside, as
-shapes that say which object is which. One line `start NAME` before a case
-and one `done NAME {...}` behind it: a case that does not come back is the
-one started last."""
+GRAPH_CASE_SECONDS = 300
+GRAPH_THINGS = '''"""The things a function makes between its operations (a list, a dict,
+an object, a cell, an iterator), on a path: the cases of a group, each with
+`Graphs()` alone, with a pass that returns the graph and with an input that
+requires a gradient, twelve calls against eager from the same state. The
+groups: `made` (things that hold themselves), `outside` (a list that holds
+itself, handed to the function), `printed` (some of `made`), `sides` (what
+reads and what changes one thing, on the two sides of the graph), `own`
+(what comes from outside the path through an iterator, an item, an
+attribute, a default or a variable of an outer function). What is compared
+is the result or what is raised, and what was given back and left outside,
+as shapes that say which object is which. One line `start NAME` before a
+case and one `done NAME {...}` behind it: a case that does not come back is
+the one started last."""
 import gc
 import json
+import resource
 import sys
 import types
 
@@ -10890,6 +10950,423 @@ def a_cycle_extended_outside(x, given):
     return tail(h)
 
 
+# A holder, an alias or a read IN FRONT of what makes the thing late.
+def holder_tuple_of_a_list_in_front(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    b = [a]
+    c = (b, 1)
+    a.append(h)
+    BOX.items = c
+    return tail(h)
+
+
+def holder_given_back_in_front(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    b = [a]
+    a.append(h)
+    return tail(h), b
+
+
+def holder_unpacked_in_front(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    b = [a]
+    c = (b, given)
+    a.append(h)
+    first, second = c
+    BOX.items = first
+    return tail(h) * second
+
+
+def holder_dict_in_front(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    d = {"a": a}
+    e = [d]
+    a.append(h)
+    BOX.items = e
+    return tail(h)
+
+
+def holder_object_in_front(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    thing = Thing()
+    thing.items = a
+    holder = [thing]
+    a.append(h)
+    BOX.items = holder
+    return tail(h)
+
+
+def holder_cell_in_front(x, given):
+    h = torch.relu(x) + 1
+    acc = [given]
+    keep = (acc, 1)
+    acc.append(h)
+    BOX.items = keep
+    out = tail(h)
+
+    def later():
+        return acc
+
+    HELD.append(later)
+    return out
+
+
+def iterator_in_front(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    it = iter(a)
+    a.append(h)
+    BOX.items = list(it)
+    return tail(h)
+
+
+def alias_in_front(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    other = {"k": a}.get("k")
+    a.append(h)
+    BOX.items = (len(other), other)
+    return tail(h)
+
+
+def length_in_front(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    b = [a]
+    n = len(b)
+    a.append(h)
+    BOX.items = n
+    return tail(h) * n
+
+
+def slice_in_front(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    b = [a, given]
+    c = b[:1]
+    a.append(h)
+    BOX.items = c
+    return tail(h)
+
+
+# The same BEHIND what makes the thing late.
+def item_behind(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    b = [a, given]
+    a.append(h)
+    return tail(h) * b[-1], b
+
+
+def loop_behind(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    b = [a]
+    a.append(h)
+    for item in b:
+        BOX.items = item[-1]
+    return tail(h)
+
+
+def length_through_an_item_behind(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    b = [a]
+    a.append(h)
+    for item in b:
+        BOX.items = len(item)
+    return tail(h)
+
+
+def dict_read_behind(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    d = {"a": a}
+    a.append(h)
+    BOX.items = d.get("a")[-1]
+    return tail(h)
+
+
+def holder_behind(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    a.append(h)
+    b = [a]
+    a.append(given + 1)
+    c = (b, len(a))
+    BOX.items = c
+    return tail(h)
+
+
+# A read that runs behind the graph, and a change that stands behind it in the function.
+def joined_then_appended(x, given):
+    h = torch.relu(x) + 1
+    made = [given]
+    joined = made + [h.shape[0]]
+    made.append(given + 1)
+    return tail(h), joined
+
+
+def text_then_appended(x, given):
+    h = torch.relu(x) + 1
+    made = [given]
+    BOX.items = "%s %s" % (made, h.shape[0])
+    made.append(given + 1)
+    return tail(h), made
+
+
+def sliced_by_a_size_then_appended(x, given):
+    h = torch.relu(x) + 1
+    made = [given, given + 1, given + 2]
+    part = made[-(h.shape[0] - 1):]
+    made.append(given + 3)
+    return tail(h), part
+
+
+def extended_behind_a_size_then_appended(x, given):
+    h = torch.relu(x) + 1
+    made = [given]
+    joined = [h.shape[0], *made]
+    made.append(given + 1)
+    return tail(h), joined
+
+
+def extended_in_front_of_a_size_then_appended(x, given):
+    h = torch.relu(x) + 1
+    made = [given]
+    joined = [*made, h.shape[0]]
+    made.append(given + 1)
+    return tail(h), joined
+
+
+def spread_behind_a_result_then_appended(x, given):
+    h = torch.relu(x) + 1
+    bounds = [0.25, 1.75]
+    args = (h, *bounds)
+    bounds.append(given)
+    return tail(torch.clamp(*args)), bounds
+
+
+def iterator_drawn_behind_a_size_then_drawn(x, given):
+    h = torch.relu(x) + 1
+    it = iter([1.0, 2.0, 3.0, given])
+    pairs = list(zip(it, h.shape))
+    last = 0.0
+    for last in it:
+        break
+    BOX.items = (pairs, last)
+    return tail(h) * last
+
+
+def iterator_drawn_then_drawn_behind_a_size(x, given):
+    h = torch.relu(x) + 1
+    it = iter([1.0, 2.0, 3.0, given])
+    first = 0.0
+    for first in it:
+        break
+    pairs = list(zip(it, h.shape))
+    BOX.items = (pairs, first)
+    return tail(h) * first
+
+
+def object_stored_twice(x, given):
+    h = torch.relu(x) + 1
+    thing = Thing()
+    thing.value = h
+    thing.value = given
+    other = Thing()
+    other.value = given
+    other.value = h
+    BOX.items = (thing, other)
+    return tail(h)
+
+
+def dict_of_sizes(x, given):
+    h = torch.relu(x) + 1
+    made = {name: h.shape[at] + given for at, name in enumerate(("rows", "columns"))}
+    holder = [made]
+    BOX.items = holder
+    return tail(h) * made["rows"]
+
+
+def cell_set_behind(x, given):
+    h = torch.relu(x) + 1
+    count = given
+    seen = [count]
+    count = h.shape[0]
+    seen.append(count)
+    BOX.items = seen
+    out = tail(h)
+
+    def later():
+        return count
+
+    HELD.append(later)
+    return out
+
+
+def two_things_one_late(x, given):
+    h = torch.relu(x) + 1
+    plain = [given]
+    late = [given]
+    both = (plain, late)
+    late.append(h)
+    plain.append(given + 1)
+    n = len(plain)
+    BOX.items = both
+    return tail(h) * n
+
+
+def a_thing_put_into_a_late_one(x, given):
+    h = torch.relu(x) + 1
+    late = [h]
+    plain = [given]
+    late.append(plain)
+    plain.append(given + 1)
+    BOX.items = (late[1][-1], len(plain))
+    return tail(h), late
+
+
+THINGS = [Thing(), Thing()]
+TABLE = {"a": Thing(), "b": Thing()}
+HOLDER = Thing()
+HOLDER.inner = Thing()
+WATCHED = [THINGS[0], THINGS[1], TABLE["a"], TABLE["b"], HOLDER.inner]
+
+
+# What an iterator of the path gives, an item, an attribute, a default or a
+# variable of an outer function, where what it comes from is from outside the
+# path: an object from outside, and a store into it waits.
+def own_loop(x, given):
+    h = torch.relu(x) + 1
+    for thing in THINGS:
+        thing.seen = given
+    return tail(h)
+
+
+def own_enumerate(x, given):
+    h = torch.relu(x) + 1
+    for at, thing in enumerate(THINGS):
+        thing.seen = at + given
+    return tail(h)
+
+
+def own_zip(x, given):
+    h = torch.relu(x) + 1
+    for thing, n in zip(THINGS, (1, 2)):
+        thing.seen = n + given
+    return tail(h)
+
+
+def own_iter(x, given):
+    h = torch.relu(x) + 1
+    for thing in iter(THINGS):
+        thing.seen = given
+    return tail(h)
+
+
+def own_items_of_a_dict(x, given):
+    h = torch.relu(x) + 1
+    for name, thing in TABLE.items():
+        thing.seen = (name, given)
+    return tail(h)
+
+
+def own_values_of_a_dict(x, given):
+    h = torch.relu(x) + 1
+    for thing in TABLE.values():
+        thing.seen = given
+    return tail(h)
+
+
+def own_item(x, given):
+    h = torch.relu(x) + 1
+    THINGS[0].seen = given
+    TABLE["b"].seen = given + 1
+    return tail(h)
+
+
+def own_attribute(x, given):
+    h = torch.relu(x) + 1
+    HOLDER.inner.seen = given
+    return tail(h)
+
+
+def stores_into_its_default(given, thing=THINGS[1]):
+    thing.seen = given
+
+
+def own_default(x, given):
+    h = torch.relu(x) + 1
+    stores_into_its_default(given)
+    return tail(h)
+
+
+def stores_into_an_outer_variable():
+    thing = Thing()
+    WATCHED.append(thing)
+
+    def own_cell(x, given):
+        h = torch.relu(x) + 1
+        thing.seen = given
+        return tail(h)
+
+    return own_cell
+
+
+own_cell = stores_into_an_outer_variable()
+
+
+# The same through a holder the path built of things from outside: what is
+# taken out of it is from outside.
+def own_list_of_outside(x, given):
+    h = torch.relu(x) + 1
+    for thing in [THINGS[0], THINGS[1]]:
+        thing.seen = given
+    return tail(h)
+
+
+def own_enumerate_of_a_list_of_outside(x, given):
+    h = torch.relu(x) + 1
+    for at, thing in enumerate([THINGS[1], THINGS[0]]):
+        thing.seen = at + given
+    return tail(h)
+
+
+def own_pairs(x, given):
+    h = torch.relu(x) + 1
+    pairs = list(zip(THINGS, (1, 2)))
+    for thing, n in pairs:
+        thing.seen = n + given
+    return tail(h)
+
+
+def stores_into_what_it_is_handed_by_name(given, **kwargs):
+    for name, thing in kwargs.items():
+        thing.seen = (name, given)
+    return kwargs.get("first")
+
+
+def own_names(x, given):
+    h = torch.relu(x) + 1
+    things = {"first": THINGS[0], "second": THINGS[1]}
+    first = stores_into_what_it_is_handed_by_name(given, **things)
+    first.other = given
+    return tail(h)
+
+
+OWN = [
+    own_loop, own_enumerate, own_zip, own_iter, own_items_of_a_dict,
+    own_values_of_a_dict, own_item, own_attribute, own_default, own_cell,
+    own_list_of_outside, own_enumerate_of_a_list_of_outside, own_pairs, own_names,
+]
+
+
 def ones():
     return torch.ones(3, 4, device=DEVICE)
 
@@ -10980,6 +11457,9 @@ def shape(value, seen=None):
 
 
 def reset():
+    for thing in WATCHED:
+        vars(thing).pop("seen", None)
+        vars(thing).pop("other", None)
     BOX.items = None
     del LOG[:]
     del HELD[:]
@@ -11009,7 +11489,7 @@ def calls(run, quiet, loud, graded, plant):
         del given
         log = list(LOG)
         gc.collect()
-        left = shape([BOX.items, list(HELD)])
+        left = shape([BOX.items, list(HELD), WATCHED])
         found.append(repr((said, left, log, list(LOG), STATE[0])))
         BOX.items = None
     return found
@@ -11079,7 +11559,8 @@ def try_it(name, fn, quiet, loud, plant):
         differ = [(at, a, b) for at, (a, b) in enumerate(zip(got, expected)) if a != b]
         found = torch.vm.regions(compiled)
         str(found)
-        graphs = [(g["ops"], g.get("hits")) for g in found if "ops" in g]
+        own = [g for g in found if g["where"].startswith(fn.__qualname__ + " ")]
+        graphs = [(g["ops"], g.get("hits")) for g in own if "ops" in g]
         first = [str(part)[:300] for part in differ[:1]]
         said[label] = {"differ": len(differ), "first": first, "graphs": graphs}
     print(f"done {name} " + json.dumps(said), flush=True)
@@ -11092,14 +11573,50 @@ PRINTED = (
     "a_list_and_a_dict",
     "an_object_in_itself",
 )
+SIDES = [
+    holder_tuple_of_a_list_in_front,
+    holder_given_back_in_front,
+    holder_unpacked_in_front,
+    holder_dict_in_front,
+    holder_object_in_front,
+    holder_cell_in_front,
+    iterator_in_front,
+    alias_in_front,
+    length_in_front,
+    slice_in_front,
+    item_behind,
+    loop_behind,
+    length_through_an_item_behind,
+    dict_read_behind,
+    holder_behind,
+    joined_then_appended,
+    text_then_appended,
+    sliced_by_a_size_then_appended,
+    extended_behind_a_size_then_appended,
+    extended_in_front_of_a_size_then_appended,
+    spread_behind_a_result_then_appended,
+    iterator_drawn_behind_a_size_then_drawn,
+    iterator_drawn_then_drawn_behind_a_size,
+    object_stored_twice,
+    dict_of_sizes,
+    cell_set_behind,
+    two_things_one_late,
+    a_thing_put_into_a_late_one,
+]
 
 if __name__ == "__main__":
+    # A case that ends the process is to be seen at once, as that: no core is
+    # written (where cores are handed to a collector, the process is held for
+    # minutes and looks like a call that does not come back).
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     gc.disable()
-    cases = [(fn.__name__, fn, one, two) for fn in MADE]
+    cases = []
+    cases += [(fn.__name__, "made", fn, one, two) for fn in MADE]
     for more, fn, quiet, loud in OUTSIDE:
-        cases.append((fn.__name__ + more, fn, quiet, loud))
-    for name, fn, quiet, loud in cases:
-        group = "outside" if name.startswith("outside_") else "made"
+        cases.append((fn.__name__ + more, "outside", fn, quiet, loud))
+    cases += [(fn.__name__, "sides", fn, one, two) for fn in SIDES]
+    cases += [(fn.__name__, "own", fn, one, two) for fn in OWN]
+    for name, group, fn, quiet, loud in cases:
         wanted = not WANTED or name in WANTED or group in WANTED
         if wanted or ("printed" in WANTED and name in PRINTED):
             plant = plant_cycle if fn is outside_let_go_of else None
@@ -12901,15 +13418,17 @@ class TestVmGraphResults(TestCase):
             graphs = [g for g in listed if "ops" in g and "within" not in g]
             self.assertEqual([(g["ops"], g["why"]) for g in graphs], [(5, why)])
 
-    def graph_cycle_cases(self, device, group, debug=False):
-        # The cases of a group of `GRAPH_CYCLES` in a process of their own:
+    def graph_thing_cases(self, device, group, debug=False):
+        # The cases of a group of `GRAPH_THINGS` in a process of their own:
         # one that does not come back within the time limit, or that ends
-        # the process, is a failure and not a suite that stands still.
+        # the process, is a failure and not a suite that stands still,
+        # and the failure says which of the two it was (the process
+        # writes no core, so that a crash is seen at once).
         import json
         import queue
 
         env = dict(os.environ, TORCH_VM_GRAPH_DEBUG="2") if debug else None
-        command = [sys.executable, "-c", GRAPH_CYCLES, device, group]
+        command = [sys.executable, "-c", GRAPH_THINGS, device, group]
         pipes = {"stdout": subprocess.PIPE, "stderr": subprocess.DEVNULL, "text": True}
         ran = subprocess.Popen(command, env=env, **pipes)
         lines = queue.Queue()
@@ -12923,11 +13442,11 @@ class TestVmGraphResults(TestCase):
         started, found = None, {}
         while True:
             try:
-                line = lines.get(timeout=GRAPH_CYCLE_SECONDS)
+                line = lines.get(timeout=GRAPH_CASE_SECONDS)
             except queue.Empty:
                 ran.kill()
                 ran.wait()
-                limit = GRAPH_CYCLE_SECONDS
+                limit = GRAPH_CASE_SECONDS
                 self.fail(f"{started} did not come back within {limit} seconds")
             if line is None:
                 break
@@ -12936,7 +13455,9 @@ class TestVmGraphResults(TestCase):
             elif line.startswith("done "):
                 name, said = line[5:].split(" ", 1)
                 found[name] = json.loads(said)
-        self.assertEqual(ran.wait(), 0, msg=f"the process ended in {started}")
+        code = ran.wait()
+        how = f"signal {-code}" if code < 0 else f"exit {code}"
+        self.assertEqual(code, 0, msg=f"{started} ended the process ({how})")
         self.assertIn(started, found, msg=f"{started} did not finish")
         for name, ways in found.items():
             for way, said in ways.items():
@@ -12988,7 +13509,7 @@ class TestVmGraphResults(TestCase):
         # holds itself: every call is eager's, with `Graphs()` alone,
         # with a pass and with a gradient, and the graph around such a
         # thing runs.
-        found = self.graph_cycle_cases(device, "made")
+        found = self.graph_thing_cases(device, "made")
         self.assertEqual(len(found), 34)
         runs = (
             "two_lists_given_back",
@@ -13016,7 +13537,7 @@ class TestVmGraphResults(TestCase):
                 ran = sum(hits for _, hits in graphs)
                 self.assertGreaterEqual(ran, 6, msg=f"{name}, {way}: {graphs}")
         # What is printed of such things ends as well.
-        printed = self.graph_cycle_cases(device, "printed", debug=True)
+        printed = self.graph_thing_cases(device, "printed", debug=True)
         self.assertEqual(len(printed), 5)
 
     def test_a_list_from_outside_that_holds_itself_ends_every_walk(self, device):
@@ -13025,7 +13546,7 @@ class TestVmGraphResults(TestCase):
         # what eager raises), let go of. Such a list is no value a form
         # is checked against or has as a constant, is not handed to an
         # operation of a graph and is not turned into text on a path.
-        found = self.graph_cycle_cases(device, "outside")
+        found = self.graph_thing_cases(device, "outside")
         self.assertEqual(len(found), 11)
         runs = (
             "outside_read",
@@ -13038,6 +13559,114 @@ class TestVmGraphResults(TestCase):
                 graphs = found[name][way]["graphs"]
                 ran = sum(hits for _, hits in graphs)
                 self.assertGreaterEqual(ran, 6, msg=f"{name}, {way}: {graphs}")
+
+    def test_reads_and_changes_of_a_thing_keep_the_order_of_the_function(self, device):
+        # A thing the function makes (a list, a dict, an object, a cell,
+        # an iterator) runs in front of what stands for the graph until
+        # an instruction that takes it has to run behind: a result of
+        # the graph is put into it, or what reads it takes a size of the
+        # graph's as well. From that instruction on everything that
+        # takes the thing, or what may be it or hold it, runs behind the
+        # graph; everything in front of it ran in front. So a holder
+        # that was built of the thing before, an alias, a length or a
+        # slice that was taken before are there for what uses them in
+        # front of the graph, and a change that stands behind a read in
+        # the function is not seen by the read. Every call is eager's,
+        # and the graph runs.
+        found = self.graph_thing_cases(device, "sides")
+        self.assertEqual(len(found), 28)
+        for name, ways in found.items():
+            for way in ("pass", "gradient"):
+                graphs = ways[way]["graphs"]
+                ran = sum(hits for _, hits in graphs)
+                self.assertGreaterEqual(ran, 6, msg=f"{name}, {way}: {graphs}")
+
+    def test_what_a_path_takes_out_of_outside_is_from_outside(self, device):
+        # What an iterator that the path made gives is something of the
+        # path's only where what it goes over may be or hold one: `for
+        # i, layer in enumerate(layers)` over a container from outside
+        # gives the layers, which are from outside. The same for an item
+        # or an attribute of an object from outside, a default, a
+        # variable of an outer function, an item of a list the path
+        # built of such objects, a value of the `**kwargs` of a function
+        # the path went into. A store into such an object is an effect
+        # of the path, which waits, and no reason to end it: the graph
+        # goes to the function's return, and what the stores leave is
+        # eager's.
+        found = self.graph_thing_cases(device, "own")
+        self.assertEqual(len(found), 14)
+        for name, ways in found.items():
+            for way in ("pass", "gradient"):
+                graphs = ways[way]["graphs"]
+                whole = sum(hits for ops, hits in graphs if ops >= 7)
+                self.assertGreaterEqual(whole, 6, msg=f"{name}, {way}: {graphs}")
+
+    def test_a_form_runs_only_under_the_checks_of_its_path(self, device):
+        # Two calls that take the same instructions are one path only if
+        # they were taken down with the same pinned values: the place of
+        # an item that is taken out of a list or a tuple the path built,
+        # a number or a name that a check made a constant, the rate of
+        # an attention, a function or a class that something behind the
+        # graph is computed with, how many defaults a function has. A
+        # call with another one is a path of its own, with its own
+        # checks, and what was made of its graph is never tried for a
+        # call of the first. The pinned thing changes at the eighth and
+        # the eleventh call and changes back: every call is eager's.
+        def keep(gm, input_types):
+            return gm
+
+        cases = (
+            (graph_pins_a_place, 0, 1),
+            (graph_pins_a_place_of_a_tuple, 0, 2),
+            (graph_pins_a_number, 2, 3),
+            (graph_pins_a_rate, 0.0, 0.5),
+            (graph_pins_names, "scale", "shift"),
+            (graph_pins_a_function, max, min),
+            (graph_pins_a_class, tuple, list),
+            (graph_pins_defaults, (2.0, 1.0), (7.0, 3.0, 1.5)),
+        )
+
+        def calls(run, usual, other, graded):
+            found = []
+            for at in range(14):
+                torch.manual_seed(100 + at)
+                x = torch.full((3, 4), 0.25 * (at + 1), device=device)
+                x.requires_grad_(graded)
+                out = run(x, other if at in (7, 10) else usual)
+                if graded:
+                    out.backward()
+                grad = None if x.grad is None else x.grad.sum().item()
+                found.append((out.item(), grad))
+            return found
+
+        try:
+            for fn, usual, other in cases:
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{fn.__name__}, a pass: {bool(behind)}, a gradient: {graded}"
+                    got = calls(compiled, usual, other, graded)
+                    expected = calls(fn, usual, other, graded)
+                    self.assertTrue(got == expected, msg=f"{msg}: {got} {expected}")
+                    if behind:
+                        found = torch.vm.regions(compiled)
+                        graphs = [g for g in found if "ops" in g and "within" not in g]
+                        ran = sum(g["hits"] for g in graphs)
+                        self.assertGreaterEqual(ran, 6, msg=f"{msg}: {graphs}")
+            # Ten places, three times round: no more forms than the graph may
+            # have, and the calls that none is for run the instructions.
+            passes = (*DEFAULT, P.Graphs(), keep)
+            ten = torch.vm(graph_pins_ten, passes=passes, fallback=False, demote=False)
+            for at in range(30):
+                x = torch.full((3, 4), 0.25 * (at + 1), device=device)
+                got, expected = ten(x, at % 10), graph_pins_ten(x, at % 10)
+                self.assertEqual(got, expected, atol=0, rtol=0)
+            found = torch.vm.regions(ten)
+            (graph,) = [g for g in found if "ops" in g and "within" not in g]
+            self.assertLessEqual(len(graph["forms"]), 8, msg=str(graph))
+            self.assertGreaterEqual(graph["hits"], 8, msg=str(graph))
+        finally:
+            graph_pinned_scaled.__defaults__ = (2.0, 1.0)
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
