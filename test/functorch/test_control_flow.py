@@ -5,7 +5,6 @@ import unittest
 
 import torch
 import torch.utils._pytree as pytree
-
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond
 from torch._dynamo.testing import (
@@ -8435,72 +8434,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
     """,
         )
 
-    def test_cond_nested_traced(self):
-        def true_nested(y):
-            return y * y
-
-        def false_nested(y):
-            return y + y
-
-        def true_fn(x, pred2):
-            z = cond(pred2, true_nested, false_nested, [x])
-            return x + z
-
-        def false_fn(x, _):
-            return x.cos()
-
-        def f(x, pred, pred2):
-            return cond(pred, true_fn, false_fn, [x, pred2])
-
-        x = torch.randn(4)
-        graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
-
-        result_true_true = graph.forward(
-            x, torch.tensor(True), torch.tensor(True)
-        )  # True + True -> x * x
-        result_true_false = graph.forward(
-            x, torch.tensor(True), torch.tensor(False)
-        )  # True + True -> x + x
-        result_false_true = graph.forward(
-            x, torch.tensor(False), torch.tensor(True)
-        )  # False + either -> cos
-        result_false_false = graph.forward(
-            x, torch.tensor(False), torch.tensor(False)
-        )  # False + either -> cos
-
-        self.assertNotEqual(result_true_true, result_true_false)
-        self.assertFalse(torch.allclose(result_false_true, result_true_true))
-
-        self.assertEqual(result_false_true, result_false_false)
-
-        self.assertEqual(result_true_true, (x * x) + x)
-        self.assertEqual(result_true_false, x + x + x)
-
-        self.assertEqual(result_false_true, torch.cos(x))
-
-        graph = make_fx(f, tracing_mode="symbolic")(
-            x, torch.tensor(False), torch.tensor(False)
-        )
-        self.assertEqual(
-            graph(x, torch.tensor(True), torch.tensor(True)),
-            f(x, torch.tensor(True), torch.tensor(True)),
-        )
-
-        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
-            x_cuda = x.cuda()
-            true_pred = torch.tensor(True).cuda()
-
-            _check_compile_cudagraph_backend(
-                self,
-                f,
-                [x_cuda, true_pred, true_pred],
-            )
-            _check_compile_many_backends_with_cudagraph(
-                self,
-                f,
-                [x_cuda, true_pred, true_pred],
-            )
-
     def test_cond_accepts_torch_function_as_inputs(self):
         a = torch.randn(3, 4)
         b = torch.randn(3, 4)
@@ -8989,62 +8922,6 @@ def forward(self, x_1):
         b = torch.tensor([2.0, 2.0])
         result_true_true = graph.forward(b, torch.tensor(True), torch.tensor(True))
         self.assertEqual(result_true_true, (b * b) + torch.tensor([0.25, 0.25]))
-
-    def test_cond_nested_traced_multi(self):
-        def true_a(y):
-            return y * y
-
-        def false_a(y):
-            return y + y
-
-        def true_b(y, z):
-            return y + z
-
-        def false_b(y, z):
-            return y * z
-
-        def f(x, pred, pred2):
-            a_out = cond(pred, true_a, false_a, [x])
-            b_out = cond(pred2, true_b, false_b, [x, x])
-            return a_out + b_out
-
-        x = torch.randn(4)
-        graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
-
-        self.assertExpectedInline(
-            graph.code.strip(),
-            """\
-def forward(self, x_1, pred_1, pred2_1):
-    true_graph_0 = self.true_graph_0
-    false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  pred_1 = true_graph_0 = false_graph_0 = None
-    getitem = cond[0];  cond = None
-    true_graph_1 = self.true_graph_1
-    false_graph_1 = self.false_graph_1
-    cond_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, (x_1,));  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
-    getitem_1 = cond_1[0];  cond_1 = None
-    add = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
-    return add""",
-        )
-        self.assertExpectedInline(
-            graph.true_graph_0.code.strip(),
-            """\
-def forward(self, arg0_1):
-    mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
-    return (mul,)""",
-        )
-
-        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
-            _check_compile_cudagraph_backend(
-                self,
-                f,
-                [x.cuda(), torch.tensor(False).cuda(), torch.tensor(False).cuda()],
-            )
-            _check_compile_many_backends_with_cudagraph(
-                self,
-                f,
-                [x.cuda(), torch.tensor(False).cuda(), torch.tensor(False).cuda()],
-            )
 
     def test_raise_error_on_mismatch_type_size(self):
         def true_fn(x):
@@ -12107,6 +11984,138 @@ class GraphModule(torch.nn.Module):
 
         compiled = torch.compile(g, backend=backend, dynamic=True, fullgraph=True)
         self.assertEqual(compiled(5, 7), g(5, 7))
+
+
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@skipIfNoDynamoSupport
+class TestControlFlowCUDAGraphs(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        torch._dynamo.reset()
+        super().setUp()
+
+    def test_cond_nested_traced(self):
+        def true_nested(y):
+            return y * y
+
+        def false_nested(y):
+            return y + y
+
+        def true_fn(x, pred2):
+            z = cond(pred2, true_nested, false_nested, [x])
+            return x + z
+
+        def false_fn(x, _):
+            return x.cos()
+
+        def f(x, pred, pred2):
+            return cond(pred, true_fn, false_fn, [x, pred2])
+
+        x = torch.randn(4)
+        graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
+
+        result_true_true = graph.forward(
+            x, torch.tensor(True), torch.tensor(True)
+        )  # True + True -> x * x
+        result_true_false = graph.forward(
+            x, torch.tensor(True), torch.tensor(False)
+        )  # True + True -> x + x
+        result_false_true = graph.forward(
+            x, torch.tensor(False), torch.tensor(True)
+        )  # False + either -> cos
+        result_false_false = graph.forward(
+            x, torch.tensor(False), torch.tensor(False)
+        )  # False + either -> cos
+
+        self.assertNotEqual(result_true_true, result_true_false)
+        self.assertFalse(torch.allclose(result_false_true, result_true_true))
+
+        self.assertEqual(result_false_true, result_false_false)
+
+        self.assertEqual(result_true_true, (x * x) + x)
+        self.assertEqual(result_true_false, x + x + x)
+
+        self.assertEqual(result_false_true, torch.cos(x))
+
+        graph = make_fx(f, tracing_mode="symbolic")(
+            x, torch.tensor(False), torch.tensor(False)
+        )
+        self.assertEqual(
+            graph(x, torch.tensor(True), torch.tensor(True)),
+            f(x, torch.tensor(True), torch.tensor(True)),
+        )
+
+        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
+            x_cuda = x.cuda()
+            true_pred = torch.tensor(True).cuda()
+
+            _check_compile_cudagraph_backend(
+                self,
+                f,
+                [x_cuda, true_pred, true_pred],
+            )
+            _check_compile_many_backends_with_cudagraph(
+                self,
+                f,
+                [x_cuda, true_pred, true_pred],
+            )
+
+    def test_cond_nested_traced_multi(self):
+        def true_a(y):
+            return y * y
+
+        def false_a(y):
+            return y + y
+
+        def true_b(y, z):
+            return y + z
+
+        def false_b(y, z):
+            return y * z
+
+        def f(x, pred, pred2):
+            a_out = cond(pred, true_a, false_a, [x])
+            b_out = cond(pred2, true_b, false_b, [x, x])
+            return a_out + b_out
+
+        x = torch.randn(4)
+        graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
+
+        self.assertExpectedInline(
+            graph.code.strip(),
+            """\
+def forward(self, x_1, pred_1, pred2_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    cond = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, (x_1,));  pred_1 = true_graph_0 = false_graph_0 = None
+    getitem = cond[0];  cond = None
+    true_graph_1 = self.true_graph_1
+    false_graph_1 = self.false_graph_1
+    cond_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, (x_1,));  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+    getitem_1 = cond_1[0];  cond_1 = None
+    add = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
+    return add""",
+        )
+        self.assertExpectedInline(
+            graph.true_graph_0.code.strip(),
+            """\
+def forward(self, arg0_1):
+    mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
+    return (mul,)""",
+        )
+
+        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
+            _check_compile_cudagraph_backend(
+                self,
+                f,
+                [x.cuda(), torch.tensor(False).cuda(), torch.tensor(False).cuda()],
+            )
+            _check_compile_many_backends_with_cudagraph(
+                self,
+                f,
+                [x.cuda(), torch.tensor(False).cuda(), torch.tensor(False).cuda()],
+            )
 
     def test_cond_functionalized(self):
         def true_fn(x):
