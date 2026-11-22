@@ -1430,6 +1430,32 @@ pub unsafe fn quiet_keys(dict: Obj) -> bool {
     true
 }
 
+/// What a dict has under a name (borrowed; null for nothing), wherever
+/// the engine itself looks into a dict that it did not make: in front of
+/// an instruction, to show what the instruction will do, or in its
+/// place. `Err` where the name is not plain or a key of the dict is not
+/// (`quiet_keys`): comparing the two could run Python code, once more
+/// than the instruction runs it. Nothing of the engine looks into such
+/// a dict: what asked is not shown, and the instruction runs as it is.
+pub unsafe fn entry(dict: Obj, name: Obj) -> Result<Obj, ()> {
+    if !is_plain_key(name) || !quiet_keys(dict) {
+        return Err(());
+    }
+    let held = ffi::PyDict_GetItemWithError(dict, name);
+    if held.is_null() {
+        ffi::PyErr_Clear();
+    }
+    Ok(held)
+}
+
+/// `entry` under a name of the engine's own (`_buffers`).
+unsafe fn entry_of(dict: Obj, name: &std::ffi::CStr) -> Result<Obj, ()> {
+    if !quiet_keys(dict) {
+        return Err(());
+    }
+    Ok(ffi::PyDict_GetItemString(dict, name.as_ptr()))
+}
+
 /// The class of what `functools.lru_cache` makes of a function, or null
 /// where `functools` was not imported.
 unsafe fn cache_wrapper() -> *mut ffi::PyTypeObject {
@@ -1840,7 +1866,7 @@ unsafe fn weakly_watched(o: Obj, more: &mut Vec<PyObj>) -> bool {
             return true;
         }
         let slot = pyffi::_PyObject_GetDictPtr(container);
-        if slot.is_null() || (*slot).is_null() {
+        if slot.is_null() || (*slot).is_null() || !quiet_keys(*slot) {
             return true;
         }
         let own = |name: &std::ffi::CStr| ffi::PyDict_GetItemString(*slot, name.as_ptr());
@@ -1855,10 +1881,10 @@ unsafe fn weakly_watched(o: Obj, more: &mut Vec<PyObj>) -> bool {
             if !same || !own(c"_remove_id").is_null() || !dict(values) || !dict(references) || ffi::PyLong_CheckExact(identity) == 0 {
                 return true;
             }
-            let value = ffi::PyDict_GetItemWithError(values, identity);
-            if value.is_null() {
-                ffi::PyErr_Clear();
-            } else {
+            let Ok(value) = entry(values, identity) else {
+                return true;
+            };
+            if !value.is_null() {
                 more.push(PyObj::from_borrowed(value));
             }
             continue;
@@ -3450,8 +3476,9 @@ pub unsafe fn absent(o: Obj, name: Obj) -> bool {
     }
     let slot = pyffi::_PyObject_GetDictPtr(o);
     let dict = if slot.is_null() { null_mut() } else { *slot };
-    let has = |name: Obj| !dict.is_null() && !ffi::PyDict_GetItemWithError(dict, name).is_null();
-    !has(name) && !(ffi::PyModule_Check(o) != 0 && has(specials().getattr.as_ptr()))
+    // Not shown for a dict that is not looked into (`entry`).
+    let lacks = |name: Obj| dict.is_null() || entry(dict, name).is_ok_and(|held| held.is_null());
+    lacks(name) && (ffi::PyModule_Check(o) == 0 || lacks(specials().getattr.as_ptr()))
 }
 
 /// Whether an object has no attribute of a name and says so without
@@ -3464,7 +3491,7 @@ pub unsafe fn quiet_absent(obj: Obj, name: Obj) -> bool {
     absent(obj, name)
         && ffi::PyModule_Check(obj) == 0
         && crate::shortcuts::has_getattr(ffi::Py_TYPE(obj))
-        && !crate::shortcuts::finds(obj, name)
+        && crate::shortcuts::among(obj, name) == Ok(null_mut())
 }
 
 /// Whether the lookup of `object` finds nothing under a name of an object,
@@ -3577,12 +3604,14 @@ pub unsafe fn holds_generic(callee: Obj, name: Obj, found: &mut Obj, api: &TcfgA
     }
     let slot = pyffi::_PyObject_GetDictPtr(obj);
     if !slot.is_null() && !(*slot).is_null() {
-        let held = ffi::PyDict_GetItemWithError(*slot, name);
-        if !held.is_null() {
-            *found = new_ref(held);
-            return true;
+        match entry(*slot, name) {
+            Err(()) => return false,
+            Ok(held) if !held.is_null() => {
+                *found = new_ref(held);
+                return true;
+            }
+            Ok(_) => {}
         }
-        ffi::PyErr_Clear();
     }
     if descr.is_null() || (*ffi::Py_TYPE(descr)).tp_descr_get.is_some() {
         return false;
@@ -3689,8 +3718,8 @@ pub unsafe fn quiet_generic(obj: Obj, name: Obj) -> bool {
         return !python;
     }
     let slot = pyffi::_PyObject_GetDictPtr(obj);
-    let own = !slot.is_null() && !(*slot).is_null() && !ffi::PyDict_GetItemWithError(*slot, name).is_null();
-    own || (!descr.is_null() && !python)
+    let own = if slot.is_null() || (*slot).is_null() { Ok(null_mut()) } else { entry(*slot, name) };
+    own.is_ok_and(|held| !held.is_null() || (!descr.is_null() && !python))
 }
 
 /// The property that the lookup of `object` comes down to for a name of
@@ -3755,11 +3784,15 @@ unsafe fn quiet_super(bound: Obj, name: Obj) -> bool {
         if let Some(start) = (0..count).find(|i| ffi::PyTuple_GET_ITEM(order, *i) == this) {
             for i in start + 1..count {
                 let dict = pyffi::PyType_GetDict(ffi::PyTuple_GET_ITEM(order, i) as *mut ffi::PyTypeObject);
-                let found = if dict.is_null() { null_mut() } else { ffi::PyDict_GetItemWithError(dict, name) };
+                let found = if dict.is_null() { Ok(null_mut()) } else { entry(dict, name) };
                 xdecref(dict);
-                if !found.is_null() {
-                    quiet = !python_descriptor(found);
-                    break;
+                match found {
+                    Ok(found) if found.is_null() => {}
+                    Ok(found) => {
+                        quiet = !python_descriptor(found);
+                        break;
+                    }
+                    Err(()) => break,
                 }
             }
         }
@@ -3801,17 +3834,11 @@ pub unsafe fn read_attr(obj: Obj, name: Obj) -> Option<Obj> {
     if obj.is_null() || capi::is_unboxed(obj) {
         return None;
     }
-    let found = |dict: Obj| {
-        let held = ffi::PyDict_GetItemWithError(dict, name);
-        if held.is_null() {
-            ffi::PyErr_Clear();
-        }
-        (!held.is_null()).then(|| new_ref(held))
-    };
+    let found = |held: Obj| (!held.is_null()).then(|| new_ref(held));
     let ty = ffi::Py_TYPE(obj);
     if ffi::PyModule_CheckExact(obj) != 0 {
         let dict = ffi::PyModule_GetDict(obj);
-        return if dict.is_null() { None } else { found(dict) };
+        return if dict.is_null() { None } else { found(entry(dict, name).ok()?) };
     }
     if ty == std::ptr::addr_of_mut!(ffi::PySuper_Type) || ffi::PyType_Check(obj) != 0 {
         return None;
@@ -3827,15 +3854,14 @@ pub unsafe fn read_attr(obj: Obj, name: Obj) -> Option<Obj> {
     }
     let slot = pyffi::_PyObject_GetDictPtr(obj);
     if !slot.is_null() && !(*slot).is_null() {
-        if let Some(held) = found(*slot) {
+        if let Some(held) = found(entry(*slot, name).ok()?) {
             return Some(held);
         }
     }
     if !descr.is_null() || generic || !crate::shortcuts::has_getattr(ty) {
         return None;
     }
-    let held = crate::shortcuts::found(obj, name);
-    (!held.is_null()).then(|| new_ref(held))
+    found(crate::shortcuts::among(obj, name).ok()?)
 }
 
 /// `read_attr`, with what was found put into `found`.
@@ -3862,7 +3888,7 @@ pub unsafe fn quiet_attr(obj: Obj, name: Obj, api: &TcfgApi) -> bool {
     let ty = ffi::Py_TYPE(obj);
     if ffi::PyModule_CheckExact(obj) != 0 {
         let dict = ffi::PyModule_GetDict(obj);
-        return !dict.is_null() && !ffi::PyDict_GetItemWithError(dict, name).is_null();
+        return !dict.is_null() && entry(dict, name).is_ok_and(|held| !held.is_null());
     }
     if ty == std::ptr::addr_of_mut!(ffi::PySuper_Type) {
         return quiet_super(obj, name);
@@ -3903,14 +3929,16 @@ pub unsafe fn quiet_attr(obj: Obj, name: Obj, api: &TcfgApi) -> bool {
         return !python;
     }
     let slot = pyffi::_PyObject_GetDictPtr(obj);
-    let own = !slot.is_null() && !(*slot).is_null() && !ffi::PyDict_GetItemWithError(*slot, name).is_null();
-    if own {
+    let Ok(own) = (if slot.is_null() || (*slot).is_null() { Ok(null_mut()) } else { entry(*slot, name) }) else {
+        return false;
+    };
+    if !own.is_null() {
         return true;
     }
     if !descr.is_null() {
         return !python;
     }
-    shortcut && crate::shortcuts::finds(obj, name)
+    shortcut && crate::shortcuts::among(obj, name).is_ok_and(|held| !held.is_null())
 }
 
 /// What of the state of a thread changes what a compiled graph computes and
@@ -5831,19 +5859,20 @@ pub enum Keeps {
 }
 
 /// The list or dict of an object that a store of that kind changes; null
-/// where there is none.
-pub unsafe fn kept(o: Obj, keeps: Keeps) -> Obj {
+/// where there is none. `Err` where finding it would look into a dict
+/// that is not looked into (`entry`).
+pub unsafe fn kept(o: Obj, keeps: Keeps) -> Result<Obj, ()> {
     if o.is_null() || capi::is_unboxed(o) {
-        return null_mut();
+        return Ok(null_mut());
     }
     if keeps == Keeps::Itself {
-        return o;
+        return Ok(o);
     }
     let slot = pyffi::_PyObject_GetDictPtr(o);
     if slot.is_null() || (*slot).is_null() {
-        return null_mut();
+        return Ok(null_mut());
     }
-    if keeps == Keeps::Attributes { *slot } else { ffi::PyDict_GetItemString(*slot, c"_buffers".as_ptr()) }
+    if keeps == Keeps::Attributes { Ok(*slot) } else { entry_of(*slot, c"_buffers") }
 }
 
 /// Whether what a read goes through is not what a store changes: `read`
@@ -5857,16 +5886,24 @@ pub unsafe fn apart(read: Obj, attributes: bool, target: Obj, keeps: Keeps) -> b
     if read.is_null() || target.is_null() || read == target || capi::is_unboxed(read) {
         return false;
     }
-    let changed = kept(target, keeps);
+    // Not shown where a dict would be looked into that is not (`entry`).
+    let Ok(changed) = kept(target, keeps) else {
+        return false;
+    };
     if changed.is_null() {
         return true;
     }
     if !attributes {
         return read != changed;
     }
-    let own = kept(read, Keeps::Attributes);
-    let part = |name: &std::ffi::CStr| if own.is_null() { null_mut() } else { ffi::PyDict_GetItemString(own, name.as_ptr()) };
-    ![own, part(c"_parameters"), part(c"_buffers"), part(c"_modules")].contains(&changed)
+    let Ok(own) = kept(read, Keeps::Attributes) else {
+        return false;
+    };
+    let part = |name: &std::ffi::CStr| if own.is_null() { Ok(null_mut()) } else { entry_of(own, name) };
+    let (Ok(parameters), Ok(buffers), Ok(modules)) = (part(c"_parameters"), part(c"_buffers"), part(c"_modules")) else {
+        return false;
+    };
+    ![own, parameters, buffers, modules].contains(&changed)
 }
 
 /// Whether what a tensor says of itself under a name is the same in front
@@ -6023,14 +6060,18 @@ pub unsafe fn store_kind(obj: Obj, name: Obj, value: Obj, api: &TcfgApi) -> Opti
     if !(exact || (!tensor && !capi::is_unboxed(value) && !of_class(layer) && !of_class(tensors))) {
         return None;
     }
-    let of = |kind: &std::ffi::CStr| ffi::PyDict_GetItemString(*slot, kind.as_ptr());
-    let holds = |dict: Obj| !dict.is_null() && ffi::PyDict_CheckExact(dict) != 0 && !ffi::PyDict_GetItemWithError(dict, name).is_null();
-    let (parameters, modules, buffers) = (of(c"_parameters"), of(c"_modules"), of(c"_buffers"));
+    // What the function of the class looks into, looked into in its
+    // place: not where a key is not plain (`entry`).
+    let of = |kind: &std::ffi::CStr| entry_of(*slot, kind).ok();
+    let holds = |dict: Obj| {
+        if dict.is_null() || ffi::PyDict_CheckExact(dict) == 0 { Some(false) } else { entry(dict, name).ok().map(|held| !held.is_null()) }
+    };
+    let (parameters, modules, buffers) = (of(c"_parameters")?, of(c"_modules")?, of(c"_buffers")?);
     let known = |dict: Obj| dict.is_null() || dict == ffi::Py_None() || ffi::PyDict_CheckExact(dict) != 0;
-    if !known(parameters) || !known(modules) || !known(buffers) || holds(parameters) || holds(modules) {
+    if !known(parameters) || !known(modules) || !known(buffers) || holds(parameters)? || holds(modules)? {
         return None;
     }
-    if !holds(buffers) {
+    if !holds(buffers)? {
         return Some(Store::Plain);
     }
     let hooked = hooks == 0 || ffi::PyObject_Size(hooks as Obj) != 0;
