@@ -11229,6 +11229,92 @@ class TestVmGraphResults(TestCase):
         finally:
             put(whole)
 
+    def test_what_a_tensor_keeps_alive_through_its_base_ends_in_its_place(self, device):
+        # A view keeps the tensor it is a view of alive from C++, with the
+        # Python object of that tensor and what its attributes hold; a
+        # storage keeps its Python object and that one's attributes; a
+        # dual tensor its tangent. None of it is what a tensor shows. A
+        # path lets go of such a tensor only where what it keeps that way
+        # is looked at, or stays alive: every call is eager's.
+        import torch.autograd.forward_ad as forward_ad
+
+        def keep(gm, input_types):
+            return gm
+
+        def plant(what):
+            base = torch.ones(4, 4)
+            if what == "storage":
+                made = torch.ones(2)
+                made.untyped_storage().held = GraphEnds()
+                return made
+            base.held = GraphEnds()
+            if what == "view":
+                return base[:2]
+            if what == "transposed":
+                return base.T
+            if what == "unbound":
+                return base.unbind()[0]
+            return (torch.ones(2), base[:2])
+
+        def dual():
+            tangent = torch.ones(2)
+            tangent.held = GraphEnds()
+            return forward_ad.make_dual(torch.ones(2), tangent)
+
+        def calls(run, make, graded, boxed):
+            GRAPH_END_BOX.item = None
+            del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+            GRAPH_END_STATE[0] = 0.5
+            found = []
+            for at in range(12):
+                made = make() if at in (7, 10) else torch.ones(2)
+                if boxed:
+                    GRAPH_END_BOX.item = made
+                else:
+                    GRAPH_END_HELD.append(made)
+                del made
+                torch.manual_seed(at)
+                x = torch.randn(3, 4, device=device, requires_grad=graded)
+                out = run(x)
+                out = out[0] if isinstance(out, tuple) else out
+                if graded:
+                    out.backward()
+                found.append((out.item(), len(GRAPH_END_LOG), GRAPH_END_STATE[0]))
+                del GRAPH_END_HELD[:]
+            GRAPH_END_BOX.item = None
+            return found
+
+        def check(fn, what, behind, graded):
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            msg = f"{fn.__name__} {what} {behind} {graded}"
+            boxed = fn is graph_end_attribute
+            if what == "a dual tensor":
+                # A tangent that holds an object, of a dual tensor that the
+                # path lets go of inside the level.
+                with forward_ad.dual_level():
+                    got = calls(compiled, dual, graded, boxed)
+                    expected = calls(fn, dual, graded, boxed)
+                self.assertEqual(got, expected, msg=msg)
+                return
+            got = calls(compiled, lambda: plant(what), graded, boxed)
+            expected = calls(fn, lambda: plant(what), graded, boxed)
+            self.assertEqual(got, expected, msg=msg)
+            if behind:
+                listed = torch.vm.regions(compiled)
+                graphs = [g for g in listed if "ops" in g and "within" not in g]
+                self.assertGreaterEqual(sum(g["hits"] for g in graphs), 4, msg=msg)
+
+        kinds = ("view", "transposed", "unbound", "in a tuple", "storage")
+        for fn in (graph_end_attribute, graph_end_variable):
+            for what in kinds:
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    check(fn, what, behind, graded)
+            for behind in ((), (keep,)):
+                check(fn, "a dual tensor", behind, False)
+        del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+        GRAPH_END_STATE[0] = 0.5
+
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
 
