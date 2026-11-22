@@ -3238,12 +3238,16 @@ impl Compiled {
                         return Err(());
                     }
                 }
-                cache.set(LoadCache {
-                    owner: null_mut(),
-                    version: versions.0,
-                    builtins_version: versions.1,
-                    value: v,
-                });
+                // Remembered only for dicts whose keys compare in C: under
+                // any other key the interpreter looks at every read.
+                if graph::quiet_keys(f.globals.as_ptr()) && graph::quiet_keys(f.builtins.as_ptr()) {
+                    cache.set(LoadCache {
+                        owner: null_mut(),
+                        version: versions.0,
+                        builtins_version: versions.1,
+                        value: v,
+                    });
+                }
                 Ok(new_ref(v))
             }
             Op::LoadDeref(i) => {
@@ -3543,7 +3547,9 @@ impl Compiled {
                         }
                         let v = ffi::PyDict_GetItemWithError(dict, f.consts[*name as usize].as_ptr());
                         if !v.is_null() {
-                            cache.set(LoadCache { owner: obj, version, builtins_version: 0, value: v });
+                            if graph::quiet_keys(dict) {
+                                cache.set(LoadCache { owner: obj, version, builtins_version: 0, value: v });
+                            }
                             return Ok(new_ref(v));
                         }
                         if !ffi::PyErr_Occurred().is_null() {
@@ -3986,8 +3992,7 @@ impl Compiled {
                     }
                     Part::KwDefault(name) if function => {
                         let defaults = ffi::PyFunction_GetKwDefaults(held);
-                        let default =
-                            if defaults.is_null() { null_mut() } else { ffi::PyDict_GetItemWithError(defaults, name.as_ptr()) };
+                        let default = if defaults.is_null() { null_mut() } else { graph::entry(defaults, name.as_ptr()).unwrap_or(null_mut()) };
                         ffi::Py_XINCREF(default);
                         default
                     }
@@ -4018,7 +4023,7 @@ impl Compiled {
                         found
                     }
                     Part::Entry(key) if ffi::PyDict_CheckExact(held) != 0 => {
-                        let found = ffi::PyDict_GetItemWithError(held, key.as_ptr());
+                        let found = graph::entry(held, key.as_ptr()).unwrap_or(null_mut());
                         ffi::Py_XINCREF(found);
                         found
                     }
@@ -5442,11 +5447,10 @@ impl Compiled {
     /// what the operands of the instruction hold. Err where that cannot
     /// be told.
     unsafe fn replaced(&self, op: &Op, at: &dyn Fn(V) -> Obj, api: &TcfgApi) -> Result<Obj, ()> {
-        let found = |dict: Obj, key: Obj| {
-            let held = if dict.is_null() { null_mut() } else { ffi::PyDict_GetItemWithError(dict, key) };
-            ffi::PyErr_Clear();
-            held
-        };
+        // A name or a key is looked up only where that runs none of the
+        // code of a key (`graph::entry`): the look comes in front of the
+        // store, which is what compares them, once.
+        let found = |dict: Obj, key: Obj| if dict.is_null() { Ok(null_mut()) } else { graph::entry(dict, key) };
         match op {
             Op::StoreAttr { obj, name, val } => {
                 let name = self.func.consts[*name as usize].as_ptr();
@@ -5455,9 +5459,9 @@ impl Compiled {
                 match graph::store_kind(object, name, value, api) {
                     Some(graph::Store::Plain) => {
                         let slot = pyffi::_PyObject_GetDictPtr(object);
-                        Ok(if slot.is_null() { null_mut() } else { found(*slot, name) })
+                        if slot.is_null() { Ok(null_mut()) } else { found(*slot, name) }
                     }
-                    Some(graph::Store::Buffer(buffers)) => Ok(found(buffers, name)),
+                    Some(graph::Store::Buffer(buffers)) => found(buffers, name),
                     None => Err(()),
                 }
             }
@@ -5467,10 +5471,7 @@ impl Compiled {
                     return Err(());
                 }
                 if ffi::PyDict_CheckExact(held) != 0 {
-                    // A key is looked up only where that runs none of
-                    // its code: the look comes in front of the store,
-                    // which is what hashes it, once.
-                    return if graph::is_plain_key(place) && graph::quiet_keys(held) { Ok(found(held, place)) } else { Err(()) };
+                    return found(held, place);
                 }
                 if ffi::PyList_CheckExact(held) == 0 || ffi::PyLong_CheckExact(place) == 0 {
                     return Err(());
@@ -6484,6 +6485,9 @@ impl Compiled {
             Op::CallEx { args, kwargs, .. } => {
                 let (row, dict) = (reg(regs, *args), if *kwargs == NONE { null_mut() } else { reg(regs, *kwargs) });
                 if row.is_null() || !graph::is_row(row) || (!dict.is_null() && ffi::PyDict_CheckExact(dict) == 0) {
+                    return None;
+                }
+                if !dict.is_null() && !graph::quiet_keys(dict) {
                     return None;
                 }
                 let found = if dict.is_null() { null_mut() } else { ffi::PyDict_GetItemString(dict, keyword.as_ptr()) };
@@ -8289,8 +8293,8 @@ impl Compiled {
         if attribute && pyffi::str_to_string(key) == "__dict__" {
             // The dict itself: what is read of it later is looked at then,
             // unless a store of the path is into it.
-            let own = graph::kept(held, graph::Keeps::Attributes);
-            let changed = t.stores.iter().any(|store| !own.is_null() && graph::kept(store.object, store.keeps) == own);
+            let own = graph::kept(held, graph::Keeps::Attributes).unwrap_or(null_mut());
+            let changed = t.stores.iter().any(|store| !own.is_null() && graph::kept(store.object, store.keeps).map_or(true, |kept| kept == own));
             return if changed { Behind::Ends } else { Behind::Clear };
         }
         let alike: Vec<usize> = (0..t.stores.len())
