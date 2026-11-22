@@ -17548,13 +17548,15 @@ op_db: list[OpInfo] = [
         dtypesIfCUDA=custom_types(torch.float16)
         if not SM80OrLater
         else custom_types(torch.float16, torch.bfloat16),
+        dtypesIfXPU=custom_types(torch.float16, torch.bfloat16),
+        backward_dtypesIfXPU=custom_types(torch.float16),
         supports_out=False,
         has_nondeterministic_output=True,
         supports_autograd=True,
         supports_fwgrad_bwgrad=False,
         supports_forward_ad=False,
         check_batched_forward_grad=False,
-        decorators=[skipXPU, skipCUDAIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "This platform doesn't support Flash Attention")],
+        decorators=[skipCUDAIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "This platform doesn't support Flash Attention")],
         skips=(
             # Checking the scalar value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type=('cuda', 'xpu')),
@@ -17596,7 +17598,9 @@ op_db: list[OpInfo] = [
         skip_cow_input_backward=True,
         decorators=[
             skipCUDAIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "This platform doesn't support efficient attention"),
-            skipXPU],
+            # https://github.com/intel/torch-xpu-ops/issues/5809
+            skipXPU,
+        ],
         skips=(
             # Checking the scaler value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type=('cuda', 'xpu')),
