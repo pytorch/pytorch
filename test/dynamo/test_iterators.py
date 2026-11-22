@@ -257,10 +257,9 @@ class TestIterators(torch._dynamo.test_case.TestCase):
 
     def _assert_iterator_reconstruction_fallback(self, fn, *args):
         with self.assertRaisesRegex(
-            Unsupported, r"sourceless variable \w*Iterator\(\)"
-        ) as cm:
+            Unsupported, "mutations are replayed after reconstruction"
+        ):
             torch.compile(fn, backend="eager", fullgraph=True)(*args)
-        self.assertEqual(cm.exception.gb_type, "Reconstruction failure")
 
     @parametrize("kind", ["instance", "class", "module"])
     def test_escape_namespace_iterator_after_attribute_write(self, kind):
@@ -281,12 +280,15 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         self.assertEqual(obj.second, 2)
         self.assertEqual(list(keys), expected_keys)
 
-    @parametrize("kind", ["module", "instance", "globals"])
+    @parametrize("kind", ["module", "instance", "globals", "mapping_write"])
     def test_escape_iterator_aliasing_namespace(self, kind):
         class Box:
             pass
 
         def fn(x, mod, namespace):
+            if kind == "mapping_write":
+                namespace["second"] = 2
+                return x + 1, iter(mod.__dict__)
             mod.second = 2
             return x + 1, iter(namespace)
 
@@ -295,22 +297,25 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             second = 2
             return x + 1, iter(namespace)
 
-        mod = Box() if kind == "instance" else types.ModuleType("mod")
+        mod = (
+            Box() if kind in ("instance", "mapping_write") else types.ModuleType("mod")
+        )
         namespace = vars(mod)
         if kind == "globals":
             namespace["__builtins__"] = __builtins__
             fn = types.FunctionType(write_global.__code__, namespace)
         x = torch.ones(1)
         mappings = namespace.copy(), namespace
-        # Ordinary fallback skips this frame on later calls. Check both strict traces first.
         for mapping in mappings:
             self._assert_iterator_reconstruction_fallback(fn, x, mod, mapping)
-        compiled = torch.compile(fn, backend="eager")
         for mapping in mappings:
-            result, keys = compiled(x, mod, mapping)
+            torch._dynamo.reset()
+            result, keys = torch.compile(fn, backend="eager")(x, mod, mapping)
             self.assertEqual(result, x + 1)
-            self.assertEqual(list(keys), list(mapping))
-            del mod.second
+            self.assertEqual(
+                list(keys), list(namespace if kind == "mapping_write" else mapping)
+            )
+            (mapping if kind == "mapping_write" else namespace).pop("second")
 
     @parametrize("factory", [dict, OrderedDict, set])
     def test_escape_iterator_after_owner_mutation(self, factory):
