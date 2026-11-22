@@ -36,7 +36,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_utils import HardwareClassification, parametrize
 from torch.testing._internal.inductor_utils import HAS_TRITON, requires_triton
-from torch.utils._triton import has_triton_for_device
 
 
 if HAS_TRITON:
@@ -217,9 +216,6 @@ class OnlineSoftmaxCombineTest(TestCase):
     def test_combine_special_values(
         self, device, dtype, fast, strict, with_sum, fusion
     ) -> None:
-        if not has_triton_for_device(device):
-            self.skipTest(f"Triton is not available for {device}")
-
         finfo = torch.finfo(dtype)
         values = torch.tensor(
             [
@@ -284,9 +280,6 @@ class ExclusiveScanDecoupledLookback64Test(TestCase):
     def test_flag_2_branch_with_int64_index(self, device) -> None:
         """Test `if flag == 2` branch with int64 index."""
 
-        if not has_triton_for_device(device):
-            self.skipTest(f"Triton is not available for {device}")
-
         # Scratch memory layout per block: [flag, partial_aggregate, inclusive_prefix]
         # Block 0: flag=2 (inclusive prefix ready), inclusive_prefix=10.0
         scratch = torch.zeros(6, dtype=torch.uint64, device=device)
@@ -309,9 +302,6 @@ class ExclusiveScanDecoupledLookback64Test(TestCase):
     @onlyAccelerator
     def test_flag_2_branch_with_int32_index(self, device) -> None:
         """Test `if flag == 2` branch with int32 index."""
-
-        if not has_triton_for_device(device):
-            self.skipTest(f"Triton is not available for {device}")
 
         # Scratch memory layout per block: [flag, partial_aggregate, inclusive_prefix]
         # Block 0: flag=2 (inclusive prefix ready), inclusive_prefix=10.0
@@ -346,9 +336,6 @@ class SelectOneTest(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def _run_select_one(self, device, dtype: torch.dtype) -> None:
-        if not has_triton_for_device(device):
-            self.skipTest(f"Triton is not available for {device}")
-
         BLOCK_SIZE = 4
 
         # Create input tensor and a one-hot mask selecting the element at index 2
@@ -389,9 +376,6 @@ class Random4xTest(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def _run_random_4x_order(self, device, normal: bool, block_size: int) -> None:
-        if not has_triton_for_device(device):
-            self.skipTest(f"Triton is not available for {device}")
-
         helper_result = torch.empty(block_size, dtype=torch.float32, device=device)
         expected_result = torch.empty(block_size, dtype=torch.float32, device=device)
 
@@ -430,9 +414,6 @@ class Random4xTest(TestCase):
         self._run_random_4x_order(device, normal=True, block_size=2)
 
     def _run_random_4x_block_size_stability(self, device, normal: bool) -> None:
-        if not has_triton_for_device(device):
-            self.skipTest(f"Triton is not available for {device}")
-
         sample_count = 1024
         small_block_result = torch.empty(
             sample_count, dtype=torch.float32, device=device
@@ -466,9 +447,6 @@ class Random4xTest(TestCase):
 
     @onlyAccelerator
     def test_rand4x_distribution(self, device) -> None:
-        if not has_triton_for_device(device):
-            self.skipTest(f"Triton is not available for {device}")
-
         block_size = 1024
         num_blocks = 128
         sample_count = block_size * num_blocks
@@ -492,9 +470,6 @@ class Random4xTest(TestCase):
 
     @onlyAccelerator
     def test_randn4x_distribution(self, device) -> None:
-        if not has_triton_for_device(device):
-            self.skipTest(f"Triton is not available for {device}")
-
         block_size = 1024
         num_blocks = 128
         sample_count = block_size * num_blocks
@@ -522,9 +497,6 @@ class MinimumMaximumTest(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_elementwise_nan_and_signed_zero(self, device: str) -> None:
-        if not has_triton_for_device(device):
-            self.skipTest(f"Triton is not available for {device}")
-
         a = torch.tensor(
             [
                 -0.0,
@@ -573,9 +545,6 @@ class MinimumMaximumTest(TestCase):
         )
 
     def test_reduction_nan(self, device: str) -> None:
-        if not has_triton_for_device(device):
-            self.skipTest(f"Triton is not available for {device}")
-
         x = torch.tensor(
             [
                 [1.0, -2.0, 3.0, float("nan")],
@@ -597,9 +566,6 @@ class MinimumMaximumTest(TestCase):
         self.assertEqual(actual_max, torch.amax(x, dim=1))
 
     def test_reduction_signed_zero(self, device: str) -> None:
-        if not has_triton_for_device(device):
-            self.skipTest(f"Triton is not available for {device}")
-
         x = torch.tensor(
             [
                 [-0.0, 0.0, 0.0, 0.0],
@@ -625,9 +591,6 @@ class MinimumMaximumTest(TestCase):
         self.assertEqual(actual_max.view(torch.int32), expected_max.view(torch.int32))
 
     def test_reduction_relaxed_signed_zero(self, device: str) -> None:
-        if not has_triton_for_device(device):
-            self.skipTest(f"Triton is not available for {device}")
-
         x = torch.tensor(
             [
                 [-0.0, 0.0, 0.0, 0.0],
