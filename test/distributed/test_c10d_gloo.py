@@ -47,6 +47,7 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     create_device,
+    MultiProcContinuousTest,
     MultiProcessTestCase,
     requires_gloo,
     simple_sparse_reduce_tests,
@@ -1065,6 +1066,112 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                         torch.allclose(output, expect),
                         lambda msg: f"{msg}\nop={op}, rank={self.rank}: output={output[0]}, expected={expect[0]}",
                     )
+
+    @requires_gloo()
+    def test_reduce_scatter_list_strided(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        torch.manual_seed(42)
+
+        ws = self.world_size
+        # Strided chunks with distinct per-element values exercise the
+        # concatenated single-allreduce path, including a chunk-ordering
+        # mistake being unable to hide.
+        for dtype in (torch.float32, torch.float64, torch.int32):
+            with self.subTest(dtype=dtype):
+                chunks = [
+                    (
+                        torch.arange(4, dtype=dtype)
+                        + 100 * self.rank
+                        + 1000 * i
+                    ).unsqueeze(1).repeat(1, 3)[:, 1]
+                    for i in range(ws)
+                ]
+                for chunk in chunks:
+                    self.assertFalse(chunk.is_contiguous())
+                originals = [chunk.clone() for chunk in chunks]
+                output = torch.empty(4, dtype=dtype)
+
+                work = dist.reduce_scatter(output, chunks, async_op=True)
+                work.wait()
+
+                base = 50 * ws * (ws - 1)
+                expect = torch.tensor(
+                    [ws * j + base + 1000 * ws * self.rank for j in range(4)],
+                    dtype=dtype,
+                )
+                self.assertTrue(torch.equal(output, expect))
+                for chunk, original in zip(chunks, originals, strict=True):
+                    self.assertTrue(torch.equal(chunk, original))
+
+    @requires_gloo()
+    def test_reduce_scatter_list_mixed_shapes(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        torch.manual_seed(42)
+
+        ws = self.world_size
+        # Chunk shapes that differ per index cannot be concatenated and
+        # must keep taking the per-chunk allreduce path. The legacy path
+        # only checks the own-rank chunk against the output, so the output
+        # shape differs per rank here.
+        chunks = [
+            torch.arange(i + 2, dtype=torch.float32) + 100 * self.rank
+            for i in range(ws)
+        ]
+        output = torch.empty(self.rank + 2, dtype=torch.float32)
+
+        work = dist.reduce_scatter(output, chunks, async_op=True)
+        work.wait()
+
+        base = 50 * ws * (ws - 1)
+        expect = torch.arange(self.rank + 2, dtype=torch.float32) * ws + base
+        self.assertTrue(torch.allclose(output, expect))
+
+    @requires_gloo()
+    def test_reduce_scatter_list_concurrent(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        torch.manual_seed(42)
+
+        ws = self.world_size
+        first = [
+            torch.full((4,), float(self.rank + 1 + i)) for i in range(ws)
+        ]
+        second = [
+            torch.full((4,), float(2 * (self.rank + 1 + i))) for i in range(ws)
+        ]
+        first_out = torch.empty(4)
+        second_out = torch.empty(4)
+        # Two in-flight async works must complete independently.
+        w1 = dist.reduce_scatter(first_out, first, async_op=True)
+        w2 = dist.reduce_scatter(second_out, second, async_op=True)
+        w2.wait()
+        w1.wait()
+        total = float(sum(p + 1 + self.rank for p in range(ws)))
+        self.assertTrue(
+            torch.allclose(first_out, torch.full((4,), total)),
+            lambda msg: f"{msg}\nfirst_out={first_out}, expected total={total}",
+        )
+        self.assertTrue(
+            torch.allclose(second_out, torch.full((4,), 2 * total)),
+            lambda msg: f"{msg}\nsecond_out={second_out}, expected total={2 * total}",
+        )
 
     @requires_gloo()
     def test_scatter_checks(self):
@@ -2209,6 +2316,53 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_alltoall_multidim_cuda(self):
         self._test_alltoall_multidim(lambda t: t.clone().cuda())
+
+
+# Exercises reduce_scatter at a non-power-of-two world size.
+class ProcessGroupGlooReduceScatterUnevenTest(MultiProcContinuousTest):
+    world_size = 3
+
+    @classmethod
+    def backend_str(cls):
+        return "gloo"
+
+    @requires_gloo()
+    def test_reduce_scatter_single(self):
+        ws = self.world_size
+        # Distinct per-element and per-rank values, so a chunk-ordering
+        # mistake cannot hide.
+        for op in (c10d.ReduceOp.SUM, c10d.ReduceOp.AVG):
+            with self.subTest(op=op):
+                input = torch.arange(ws * 4, dtype=torch.float32) + 100 * self.rank
+                output = torch.empty(4)
+                work = dist.reduce_scatter_single(output, input, op=op, async_op=True)
+                work.wait()
+                # Element j on rank r reduces global element r*4+j:
+                # sum_p (r*4+j + 100p).
+                base = ws * (ws - 1) * 50.0
+                expect = torch.tensor(
+                    [ws * (self.rank * 4 + j) + base for j in range(4)],
+                    dtype=torch.float32,
+                )
+                if op == c10d.ReduceOp.AVG:
+                    expect /= ws
+                self.assertTrue(torch.allclose(output, expect))
+
+                chunks = [
+                    1000 * i + torch.arange(4, dtype=torch.float32) + 100 * self.rank
+                    for i in range(ws)
+                ]
+                list_output = torch.empty(4)
+                work = dist.reduce_scatter(list_output, chunks, op=op, async_op=True)
+                work.wait()
+                # Output element j on rank r sums chunks[r] across ranks.
+                list_expect = torch.tensor(
+                    [1000 * ws * self.rank + ws * j + base for j in range(4)],
+                    dtype=torch.float32,
+                )
+                if op == c10d.ReduceOp.AVG:
+                    list_expect /= ws
+                self.assertTrue(torch.allclose(list_output, list_expect))
 
 
 class DistributedDataParallelTest(
