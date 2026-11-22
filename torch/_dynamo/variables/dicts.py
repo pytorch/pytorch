@@ -71,6 +71,7 @@ from ..utils import (
     istype,
     iter_mro_static_dicts,
     lazily_unpack,
+    no_keywords,
     odict_items,
     odict_keys,
     odict_values,
@@ -753,15 +754,36 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             self.install_dict_keys_match_guard()
             tx.output.guard_on_key_order.add(self.source)
 
-    _mutating_dict_methods = ("clear", "pop", "popitem", "setdefault", "update")
-
     def check_base_dict_mutation(
-        self, tx: "InstructionTranslatorBase", name: str
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+        *,
+        bound: bool = False,
     ) -> None:
-        if (
-            name in ("__init__", "__ior__", "__setitem__", "__delitem__")
-            or name in self._mutating_dict_methods
-        ) and issubclass(self.python_type(), collections.OrderedDict):
+        if issubclass(self.python_type(), collections.OrderedDict):
+            if name in ("clear", "pop", "popitem", "setdefault", "update"):
+                owner = self.python_type() if bound else dict
+                qualname = type.__dict__["__qualname__"].__get__(owner)
+                flags = _flags_from_ml_flags(dict, name)
+                _check_method_arity(tx, f"{qualname}.{name}", flags, args, kwargs)
+                if name == "update":
+                    check_positional(tx, name, len(args), 0, 1)
+                elif name in ("pop", "setdefault"):
+                    check_positional(tx, name, len(args), 1, 2)
+            elif name == "__init__":
+                check_positional(tx, "dict", len(args), 0, 1)
+            elif name in ("__ior__", "__delitem__", "__setitem__"):
+                no_keywords(tx, f"wrapper {name}", kwargs)
+                if name == "__setitem__":
+                    opname = name if sys.version_info >= (3, 14) else ""
+                    check_positional(tx, opname, len(args), 2, 2)
+                elif len(args) != 1:
+                    raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+            else:
+                return
             unimplemented(
                 gb_type="dict storage mutation on OrderedDict",
                 context=f"dict.{name}",
@@ -917,15 +939,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         name = descriptor.__name__
         is_read = name in ("keys", "values", "items", "__reversed__", "copy")
         if descriptor.__objclass__ is dict:
-            if not is_read and issubclass(self.python_type(), collections.OrderedDict):
-                flags = _flags_from_ml_flags(dict, name)
-                owner = self.python_type_name() if bound else "dict"
-                _check_method_arity(tx, f"{owner}.{name}", flags, args, kwargs)
-                if name == "update":
-                    check_positional(tx, name, len(args), 0, 1)
-                elif name in ("pop", "setdefault"):
-                    check_positional(tx, name, len(args), 1, 2)
-            self.check_base_dict_mutation(tx, name)
+            self.check_base_dict_mutation(tx, name, args, kwargs, bound=bound)
         if not is_read and name != "popitem":
             return None
         owner = descriptor.__objclass__
@@ -941,7 +955,9 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         method = cls.tp_methods.get(name, ConstDictVariable.tp_methods.get(name))
         if method is not None:
             flags = _flags_from_ml_flags(owner, name)
-            _check_method_arity(tx, descriptor.__qualname__, flags, args, kwargs)
+            receiver = self.python_type() if bound else owner
+            qualname = type.__dict__["__qualname__"].__get__(receiver)
+            _check_method_arity(tx, f"{qualname}.{name}", flags, args, kwargs)
             return method.handler(self, tx, args, kwargs)
         return None
 

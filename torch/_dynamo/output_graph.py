@@ -131,7 +131,7 @@ from .graph_id_filter import (
     get_inductor_config_override_for_compile_id,
 )
 from .graph_region_tracker import GraphRegionTracker
-from .guards import GuardBuilder, install_guard
+from .guards import _get_closure_vars, GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import (
     AttributeMutationExisting,
@@ -1846,7 +1846,9 @@ class OutputGraph(OutputGraphCommon):
     def current_tx(self) -> "InstructionTranslatorBase":
         return self.root_tx if not self._current_tx else self._current_tx[-1]
 
-    def resolve_source_value(self, source: Source) -> Any:
+    def resolve_source_value(
+        self, source: Source, cache: dict[Source, Any] | None = None
+    ) -> Any:
         """
         Resolve the runtime value a Source points to using root_tx's frame.
 
@@ -1855,8 +1857,8 @@ class OutputGraph(OutputGraphCommon):
         """
         return source.get_value(
             {"G": self.root_tx.f_globals, "L": self.root_tx.f_locals},
-            {},
-            {},  # type: ignore[arg-type]
+            _get_closure_vars(),
+            {} if cache is None else cache,
         )
 
     def count_calls(self) -> int:
