@@ -3510,11 +3510,138 @@ pub unsafe fn plainly_absent(obj: Obj, name: Obj) -> bool {
     generic && generic_absent(obj, name)
 }
 
+/// The class of a slot wrapper that is bound to an object, and the wrapper
+/// that `object` has for `__getattribute__`, where a bound wrapper has its
+/// two fields where `pyffi::WrapperObject` says (shown once, on
+/// `None.__getattribute__`, against what its attributes say); (0, 0)
+/// where it has not.
+unsafe fn generic_wrapper() -> (usize, usize) {
+    static FOUND: std::sync::OnceLock<(usize, usize)> = std::sync::OnceLock::new();
+    *FOUND.get_or_init(|| {
+        let names = specials();
+        let bound = ffi::PyObject_GetAttr(ffi::Py_None(), names.getattribute.as_ptr());
+        let of_object = pyffi::_PyType_Lookup(std::ptr::addr_of_mut!(ffi::PyBaseObject_Type), names.getattribute.as_ptr());
+        let mut found = (0, 0);
+        if !bound.is_null() && !of_object.is_null() {
+            let fields = bound as *mut pyffi::WrapperObject;
+            let said = ffi::PyObject_GetAttrString(bound, c"__self__".as_ptr());
+            if (*fields).descr == of_object && (*fields).bound == ffi::Py_None() && said == ffi::Py_None() {
+                found = (ffi::Py_TYPE(bound) as usize, of_object as usize);
+            }
+            xdecref(said);
+        }
+        ffi::PyErr_Clear();
+        xdecref(bound);
+        found
+    })
+}
+
+/// No answer of `generic_bound`: the fields of a bound wrapper are not
+/// known to be where they are read.
+const NOT_READ: Obj = 1 as Obj;
+
+/// `generic_reader`, read off the fields of the callee: the object
+/// (borrowed), null for a callee that is something else, `NOT_READ` where
+/// the fields are not known.
+unsafe fn generic_bound(callee: Obj) -> Obj {
+    let (wrapper, of_object) = generic_wrapper();
+    if wrapper == 0 {
+        return NOT_READ;
+    }
+    if callee.is_null() || capi::is_unboxed(callee) || ffi::Py_TYPE(callee) as usize != wrapper {
+        return null_mut();
+    }
+    let fields = callee as *mut pyffi::WrapperObject;
+    if (*fields).descr as usize == of_object { (*fields).bound } else { null_mut() }
+}
+
+/// What `object.__getattribute__(obj, name)` gives (a new reference) for
+/// a callee that is that function bound to an object and a name that is a
+/// text, where the lookup comes down to finding the value: in the dict of
+/// the object, with nothing in its class that takes the lookup first, or
+/// in the class as a value that is no descriptor. False for every other
+/// callee and lookup: `pure_call` says which run no Python code, and the
+/// call is made as it is.
+pub unsafe fn holds_generic(callee: Obj, name: Obj, found: &mut Obj, api: &TcfgApi) -> bool {
+    let obj = generic_bound(callee);
+    let mut info = TcfgTensorInfo::empty();
+    if obj.is_null() || obj == NOT_READ || name.is_null() || capi::is_unboxed(name) || ffi::PyUnicode_CheckExact(name) == 0 {
+        return false;
+    }
+    if capi::is_unboxed(obj) || ffi::PyType_Check(obj) != 0 || (api.tensor_info)(obj, &mut info) != 0 {
+        return false;
+    }
+    let descr = pyffi::_PyType_Lookup(ffi::Py_TYPE(obj), name);
+    if !descr.is_null() && (*ffi::Py_TYPE(descr)).tp_descr_set.is_some() {
+        return false;
+    }
+    let slot = pyffi::_PyObject_GetDictPtr(obj);
+    if !slot.is_null() && !(*slot).is_null() {
+        let held = ffi::PyDict_GetItemWithError(*slot, name);
+        if !held.is_null() {
+            *found = new_ref(held);
+            return true;
+        }
+        ffi::PyErr_Clear();
+    }
+    if descr.is_null() || (*ffi::Py_TYPE(descr)).tp_descr_get.is_some() {
+        return false;
+    }
+    *found = new_ref(descr);
+    true
+}
+
+/// What `d.get(key)` or `d.get(key, default)` gives (a new reference)
+/// for a callee that is the `get` of an exact dict, bound to it, a plain
+/// key and a dict whose keys are all plain: the entry, or the default.
+/// False for every other callee and call.
+pub unsafe fn holds_get(callee: Obj, key: Obj, default: Obj, found: &mut Obj) -> bool {
+    static GET: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    if callee.is_null() || capi::is_unboxed(callee) || ffi::PyCFunction_Check(callee) == 0 {
+        return false;
+    }
+    let get = *GET.get_or_init(|| {
+        let dict = ffi::PyDict_New();
+        let bound = if dict.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(dict, c"get".as_ptr()) };
+        let method = if bound.is_null() || ffi::PyCFunction_Check(bound) == 0 { 0 } else { (*(bound as *mut ffi::PyCFunctionObject)).m_ml as usize };
+        ffi::PyErr_Clear();
+        xdecref(bound);
+        xdecref(dict);
+        method
+    });
+    let function = callee as *mut ffi::PyCFunctionObject;
+    let dict = (*function).m_self;
+    if get == 0 || (*function).m_ml as usize != get || dict.is_null() || ffi::PyDict_CheckExact(dict) == 0 {
+        return false;
+    }
+    if key.is_null() || !is_plain_key(key) || !quiet_keys(dict) {
+        return false;
+    }
+    let held = ffi::PyDict_GetItemWithError(dict, key);
+    if held.is_null() && !ffi::PyErr_Occurred().is_null() {
+        ffi::PyErr_Clear();
+        return false;
+    }
+    *found = new_ref(if !held.is_null() {
+        held
+    } else if default.is_null() {
+        ffi::Py_None()
+    } else {
+        default
+    });
+    true
+}
+
 /// For what `object.__getattribute__` is when it is bound to an object
 /// (what `super().__getattribute__(name)` comes down to in a class that
 /// reads its attributes in a function of its own): the object. Owned;
 /// null for anything else.
 pub unsafe fn generic_reader(callee: Obj) -> Obj {
+    let held = generic_bound(callee);
+    if held != NOT_READ {
+        ffi::Py_XINCREF(held);
+        return held;
+    }
     static WRAPPER: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     if callee.is_null() || capi::is_unboxed(callee) {
         return null_mut();
@@ -3578,17 +3705,48 @@ pub unsafe fn generic_property(obj: Obj, name: Obj) -> Obj {
     if property { descr } else { null_mut() }
 }
 
+/// Whether what `super(class, obj)` gives has its fields where
+/// `pyffi::SuperObject` says: shown once, on `super(int, True)`, against
+/// what its attributes say.
+unsafe fn super_fields() -> bool {
+    static SHOWN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SHOWN.get_or_init(|| {
+        let (int, flag) = (std::ptr::addr_of_mut!(ffi::PyLong_Type) as Obj, ffi::Py_True());
+        let made = ffi::PyObject_CallFunctionObjArgs(std::ptr::addr_of_mut!(ffi::PySuper_Type) as Obj, int, flag, null_mut::<ffi::PyObject>());
+        let shown = !made.is_null() && {
+            let fields = made as *mut pyffi::SuperObject;
+            let (this, class) = (ffi::PyObject_GetAttrString(made, c"__thisclass__".as_ptr()), ffi::PyObject_GetAttrString(made, c"__self_class__".as_ptr()));
+            let same = this == int && (*fields).this as Obj == int && (*fields).obj == flag && !class.is_null() && (*fields).obj_type as Obj == class;
+            xdecref(this);
+            xdecref(class);
+            same
+        };
+        ffi::PyErr_Clear();
+        xdecref(made);
+        shown
+    })
+}
+
+unsafe fn new_ref_or_null(o: Obj) -> Obj {
+    ffi::Py_XINCREF(o);
+    o
+}
+
 /// Whether reading an attribute of what `super(class, obj)` gave runs no
 /// Python code: the classes behind `class`, in the order of the class of
 /// `obj`, are gone through for the name, and what the first that has it
 /// holds is bound by C code (a function, a method of a class written in
 /// C) or is no descriptor. False for a name none of them has.
 unsafe fn quiet_super(bound: Obj, name: Obj) -> bool {
-    if pyffi::str_to_string(name) == "__class__" {
+    if ffi::PyUnicode_CompareWithASCIIString(name, c"__class__".as_ptr()) == 0 {
         return false;
     }
-    let this = ffi::PyObject_GetAttrString(bound, c"__thisclass__".as_ptr());
-    let class = ffi::PyObject_GetAttrString(bound, c"__self_class__".as_ptr());
+    let (this, class) = if super_fields() {
+        let fields = bound as *mut pyffi::SuperObject;
+        (new_ref_or_null((*fields).this as Obj), new_ref_or_null((*fields).obj_type as Obj))
+    } else {
+        (ffi::PyObject_GetAttrString(bound, c"__thisclass__".as_ptr()), ffi::PyObject_GetAttrString(bound, c"__self_class__".as_ptr()))
+    };
     ffi::PyErr_Clear();
     let mut quiet = false;
     if !this.is_null() && !class.is_null() && ffi::PyType_Check(class) != 0 {
