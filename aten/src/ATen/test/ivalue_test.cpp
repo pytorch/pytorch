@@ -6,6 +6,10 @@
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+#include <cmath>
+#include <limits>
+#include <sstream>
+
 // Snippets for checking assembly.
 c10::IValue inspectTupleConstruction() {
   std::tuple<std::string, std::string> s = std::make_tuple(
@@ -300,6 +304,32 @@ TEST(IValueTest, TuplePrint) {
     std::stringstream ss;
     ss << tp;
     ASSERT_EQ(std::move(ss).str(), "(3, 3)");
+  }
+}
+
+TEST(IValueTest, DoubleIValuePrint) {
+  constexpr double int64_lower = -0x1p63;
+  constexpr double int64_upper = 0x1p63;
+  const std::pair<double, const char*> cases[] = {
+      {3.0, "3."},
+      {3.25, "3.25"},
+      {int64_lower, "-9223372036854775808."},
+      {std::nextafter(int64_lower, -std::numeric_limits<double>::infinity()),
+       "-9.2233720368547779e+18"},
+      {std::nextafter(int64_upper, 0.0), "9223372036854774784."},
+      {int64_upper, "9.2233720368547758e+18"},
+      {static_cast<double>(std::numeric_limits<c10::BFloat16>::lowest()),
+       "-3.3895313892515355e+38"},
+      {-std::numeric_limits<double>::max(), "-1.7976931348623157e+308"},
+      {std::numeric_limits<double>::max(), "1.7976931348623157e+308"},
+  };
+  for (const auto& [value, expected] : cases) {
+    SCOPED_TRACE(expected);
+    std::stringstream ss;
+    ss.precision(4);
+    ss << IValue(value);
+    ASSERT_EQ(ss.str(), expected);
+    ASSERT_EQ(ss.precision(), 4);
   }
 }
 

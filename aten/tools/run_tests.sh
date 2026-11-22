@@ -35,6 +35,7 @@ run_if_exists() {
 }
 
 run_if_exists tensor_interop_test
+run_if_exists ivalue_test
 run_if_exists cudnn_test
 run_if_exists cuda_generator_test
 run_if_exists apply_test
