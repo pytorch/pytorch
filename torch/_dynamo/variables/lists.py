@@ -835,13 +835,13 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
     # range object's start/stop/step are wrapped as symbolic ints, so specialize
     # them (installing a guard) rather than assuming a plain constant.
     def start(self) -> int:
-        return guard_if_dyn(self.items[0])
+        return specialize_symnode(self.items[0]).guard_as_python_constant()
 
     def stop(self) -> int:
-        return guard_if_dyn(self.items[1])
+        return specialize_symnode(self.items[1]).guard_as_python_constant()
 
     def step(self) -> int:
-        return guard_if_dyn(self.items[2])
+        return specialize_symnode(self.items[2]).guard_as_python_constant()
 
     def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: range_bool in https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L740-L744
