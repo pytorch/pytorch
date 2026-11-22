@@ -682,6 +682,18 @@ class _DynamoCodeCacheEntry:
     skip_recursive: bool = False
     eager_fallback: bool = False
 
+    def without_compiled_code(self) -> "_DynamoCodeCacheEntry":
+        """Return a copy with no guarded codes or backend ids, and with
+        ``function_names``/``import_sources`` detached so the copy can be filled
+        in without touching the original."""
+        return dataclasses.replace(
+            self,
+            guarded_codes=[],
+            backend_ids=[],
+            function_names=list(self.function_names),
+            import_sources=dict(self.import_sources),
+        )
+
 
 def _globals_module(namespace: dict[str, object]) -> types.ModuleType | None:
     name = namespace.get("__name__")
@@ -1302,20 +1314,12 @@ class CompilePackage:
             for key, code in self._codes.items():
                 if code.bypassed:
                     # install() skips a bypassed entry entirely, so its guarded
-                    # codes and backend ids are dead; start from a copy without
-                    # them so the fresh compile's record replaces them and the
-                    # next save writes an installable entry. A copy, not a
-                    # clear, with the mutable containers the fresh compile
-                    # writes to (import_sources, function_names) detached too:
-                    # the caller's entry may be a store's own object
-                    # (InMemoryDynamoStore hands out what it holds).
-                    self._codes[key] = dataclasses.replace(
-                        code,
-                        guarded_codes=[],
-                        backend_ids=[],
-                        function_names=list(code.function_names),
-                        import_sources=dict(code.import_sources),
-                    )
+                    # codes and backend ids are dead; the fresh compile's record
+                    # replaces them and the next save writes an installable
+                    # entry. A copy, not a clear: the caller's entry may be a
+                    # store's own object (InMemoryDynamoStore hands out what it
+                    # holds).
+                    self._codes[key] = code.without_compiled_code()
             # The codes come back, so the device they recorded must too, or one
             # recompile after a reload re-saves the entry as what that frame
             # alone named. The collapse is a maximum under one order, so
