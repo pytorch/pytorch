@@ -400,6 +400,12 @@ pub struct Path {
     /// Per register: an instruction of the path made what it holds
     /// (`Def::made`), which is the path's own to change and to use up.
     pub made: Vec<bool>,
+    /// What the checks of the path pin: a value of the path with the value
+    /// it has to have (`Assert::Equals`) or, with the flag unset, the
+    /// object it has to be (`Assert::Is`). The path was taken down with
+    /// these, so they are part of which path it is (`pinned_as`), as its
+    /// instructions are.
+    pub pins: Vec<(PathValue, PyObj, bool)>,
 }
 
 // The registers are empty between calls, and only touched with the GIL held.
@@ -454,6 +460,16 @@ impl Path {
     /// How many kinds of calls it was recorded for and is not exported for.
     pub fn closed(&self) -> usize {
         self.exported.borrow().iter().filter(|exported| exported.callable.is_none()).count()
+    }
+
+    /// Whether two paths of the same instructions were taken down with
+    /// the same pinned values: only then are they one path, and a form
+    /// of the one may run under the checks of the other.
+    pub fn pinned_as(&self, other: &Path) -> bool {
+        self.pins.len() == other.pins.len()
+            && self.pins.iter().zip(&other.pins).all(|((v, a, value), (w, b, _))| {
+                v == w && if *value { unsafe { same_value(a.as_ptr(), b.as_ptr()) } } else { a.as_ptr() == b.as_ptr() }
+            })
     }
 }
 
@@ -798,7 +814,11 @@ impl GraphSite {
             return;
         }
         let mut paths = self.variants.borrow_mut();
-        let known = paths.iter().position(|other| other.shape == path.shape && other.provisional == path.provisional);
+        // The same path: the same instructions, taken down with the same
+        // pinned values. A form runs under the checks of the path it is
+        // kept with, so the form of a trace with other pinned values is
+        // kept with a path of its own.
+        let known = paths.iter().position(|other| other.shape == path.shape && other.provisional == path.provisional && other.pinned_as(&path));
         let at = known.unwrap_or_else(|| {
             // A path that was not final makes way for the ones that are.
             paths.retain(|other| !other.provisional);
@@ -4957,6 +4977,7 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
         stages: stages_of(&body),
         handed: Vec::new(),
         made: Vec::new(),
+        pins: Vec::new(),
         body,
         feeds,
         held: vec![true; outputs.len()],
@@ -5232,6 +5253,7 @@ pub struct Mark {
     /// a call it went into.
     pub frames: usize,
     stores: usize,
+    pins: usize,
     flags: (bool, bool, bool),
     pinned: usize,
     body: usize,
@@ -5306,6 +5328,68 @@ pub struct Trace {
     /// The path ends where a later one will go on: at a block, or a call
     /// of a function, that the tiers have not decided on yet.
     pub provisional: bool,
+    /// The things the path made and what may be them or hold them, in
+    /// families (see `Family`).
+    pub things: Family,
+    /// See `Path::pins`.
+    pub pins: Vec<(PathValue, PyObj, bool)>,
+}
+
+/// The things a path made (a list, a dict, an iterator, a cell) and the
+/// values of the path that may be one of them or may hold one, at this
+/// call or at another, in families: two things are of one family once one
+/// may hold the other, or one value may be or hold both. A value can be a
+/// thing, or hold one, in four ways only: an instruction of the path made
+/// it; it was taken out of a value of a family in which something holds a
+/// thing (an item, what an iterator gives, what a cell holds); it is an
+/// attribute of one (a method bound to it); or an instruction that is no
+/// operation of the graph was handed one and may give it back or keep it
+/// (a call, a tuple that is built). What comes from in front of the path,
+/// and what is read of an object from outside, is none: nothing of the
+/// path's is stored there before the path lands. Kept as the trace goes,
+/// so a value is what it may be where its instruction stands.
+///
+/// A family is the unit of three things: which changes run in a run
+/// (`Path::of`: those of a family that something that runs takes a value
+/// of); which object a store is into (`Compiled::record_effect`: none of a
+/// family's); and on which side of what stands for the graph its
+/// instructions run (`since`).
+#[derive(Default)]
+pub struct Family {
+    /// Per value of the path: a value of the same family that was made
+    /// before it, itself for the first one, NONE for a value of no family.
+    first: Vec<PathValue>,
+    /// Per first value: the values of the family; whether something of it
+    /// may hold a thing, so that what is taken out of a value of it may be
+    /// one; whether it runs behind the callable from some instruction on.
+    values: HashMap<PathValue, Vec<PathValue>>,
+    nested: HashMap<PathValue, bool>,
+    behind: HashMap<PathValue, bool>,
+    /// Per value of the path: the instruction of the path from which it is
+    /// late (computed behind the callable, or of a family that runs there
+    /// from that instruction on); u32::MAX for one that is not.
+    since: Vec<u32>,
+}
+
+impl Family {
+    /// The first value of the family of a value, or NONE.
+    pub fn of(&self, v: PathValue) -> PathValue {
+        let mut at = self.first.get(v as usize).copied().unwrap_or(NONE);
+        while at != NONE && self.first[at as usize] != at {
+            at = self.first[at as usize];
+        }
+        at
+    }
+
+    /// Whether a value may be a thing the path made, or hold one.
+    pub fn has(&self, v: PathValue) -> bool {
+        v != NONE && v != UNDEF && self.first.get(v as usize).is_some_and(|first| *first != NONE)
+    }
+
+    /// Whether a value is late for the instruction `at` of the path.
+    pub fn late(&self, v: PathValue, at: usize) -> bool {
+        self.since.get(v as usize).is_some_and(|since| (*since as usize) <= at)
+    }
 }
 
 impl Trace {
@@ -5335,6 +5419,8 @@ impl Trace {
             inlined: Vec::new(),
             lost: false,
             provisional: false,
+            things: Family { first: vec![NONE], since: vec![u32::MAX], ..Family::default() },
+            pins: Vec::new(),
         }
     }
 
@@ -5342,72 +5428,233 @@ impl Trace {
         self.acts.last_mut().expect("a trace is in a function")
     }
 
-    /// Whether a value may be something the path made (a list, a dict, an
-    /// iterator, an object), at this call or at another one. A value is
-    /// one only if the path made it, if it was taken out of something
-    /// that may hold one (an item, an entry, what an iterator gives), if
-    /// it is an attribute of one (the dict of an object, a method bound
-    /// to it), or if an instruction that is no operation of the graph
-    /// was handed one, or something that holds one, and may give it back
-    /// (a call: the default of a `get`). What comes from in front of the
-    /// path, and what is read of an object from outside, is none: nothing
-    /// of the path's is stored there before the path lands. What a thing
-    /// holds is what it was built of and what the changes of the path put
-    /// into it.
-    pub fn from_own(&self, v: PathValue) -> bool {
-        if v == NONE || v == UNDEF {
-            return false;
+    /// The family of a value becomes late from the instruction `from` on:
+    /// every value of it that is not late yet is, from there.
+    fn runs_behind(&mut self, first: PathValue, from: u32) {
+        if self.things.behind.insert(first, true) == Some(true) {
+            return;
         }
-        let mut own: Vec<bool> = self.defs.iter().map(|def| def.made).collect();
-        let mut holds = vec![false; own.len()];
-        loop {
-            let mut more = false;
-            for inst in &self.body {
-                let either = |u: PathValue| own[u as usize] || holds[u as usize];
-                let any = || {
-                    let mut any = false;
-                    inst.op.for_each_use(|u| any |= either(u));
-                    any
-                };
-                // What a change puts into a thing.
-                let put = match &inst.op {
-                    Op::ListAppend(into, item) | Op::CellSet(into, item) => Some((*into, either(*item))),
-                    Op::StoreAttr { obj, val, .. } => Some((*obj, either(*val))),
-                    Op::MapAdd(into, key, item) => Some((*into, either(*key) || either(*item))),
-                    Op::ListExtend(into, more) | Op::DictMerge(into, more, _) => Some((*into, holds[*more as usize])),
-                    _ => None,
-                };
-                if let Some((into, put)) = put.filter(|_| inst.kind == Kind::Residual) {
-                    more |= put && !std::mem::replace(&mut holds[into as usize], true);
-                    continue;
-                }
-                let dst = inst.dst;
-                if dst == NONE || inst.kind == Kind::Effect || self.defs[dst as usize].node {
-                    continue;
-                }
-                let (is, has) = match &inst.op {
-                    // What is taken out of something is one of the things
-                    // that holds, which may hold more.
-                    Op::GetItem(of, _) | Op::IterNext(of) | Op::TupleGet(of, _) | Op::CellGet(of, ..) | Op::Part(_, of) => {
-                        (holds[*of as usize], holds[*of as usize])
-                    }
-                    // An attribute may also be a part of the thing (the
-                    // dict of an object) or hold it (a bound method).
-                    Op::LoadAttr(of, _) => (either(*of), either(*of)),
-                    // The iterator of an iterator is that iterator; a new
-                    // one gives what the thing holds.
-                    Op::GetIter(of) => (own[*of as usize], holds[*of as usize]),
-                    Op::ListToTuple(of) => (false, holds[*of as usize]),
-                    // What is built of values holds them and is none of them.
-                    op if container(op) || matches!(op, Op::BuildMap(_)) => (false, any()),
-                    // Anything else may give back what it was handed.
-                    _ => (any(), any()),
-                };
-                more |= is && !std::mem::replace(&mut own[dst as usize], true);
-                more |= has && !std::mem::replace(&mut holds[dst as usize], true);
+        for v in self.things.values.get(&first).cloned().unwrap_or_default() {
+            if self.things.since[v as usize] == u32::MAX {
+                self.things.since[v as usize] = from;
+                self.defs[v as usize].late = true;
             }
-            if !more {
-                return own[v as usize];
+        }
+    }
+
+    /// Two values are of one family from here on (`a` is of one). The
+    /// family is kept under its first value. It runs behind the callable
+    /// only if both did: the values of the one that does not are not late,
+    /// and become so with the first instruction that makes them
+    /// (`runs_behind`).
+    fn joins(&mut self, a: PathValue, b: PathValue) {
+        let (a, b) = (self.things.of(a), self.things.of(b));
+        if a == b || a == NONE || b == NONE {
+            return;
+        }
+        let (first, other) = (a.min(b), a.max(b));
+        let moved = self.things.values.remove(&other).unwrap_or_default();
+        self.things.values.entry(first).or_default().extend(moved);
+        self.things.first[other as usize] = first;
+        let nested = self.things.nested.remove(&other).unwrap_or(false);
+        *self.things.nested.entry(first).or_insert(false) |= nested;
+        let behind = self.things.behind.remove(&other).unwrap_or(false);
+        *self.things.behind.entry(first).or_insert(false) &= behind;
+    }
+
+    /// A value is of the family of `of` from here on.
+    fn belongs(&mut self, v: PathValue, of: PathValue) {
+        let first = self.things.of(of);
+        if first == NONE || self.things.first[v as usize] != NONE {
+            return;
+        }
+        self.things.first[v as usize] = first;
+        self.things.values.entry(first).or_default().push(v);
+    }
+
+    /// For a call of a method of a dict the path made that gives an entry
+    /// of the dict or what the call was handed (`get`, `pop`): the dict.
+    /// The path made the dict, so it is of exactly that class at every
+    /// call, and the method is read off it by its name.
+    fn entry_of(&self, op: &Op, dst: PathValue) -> Option<PathValue> {
+        let dict = match op {
+            Op::CallMethod { recv, .. } => *recv,
+            Op::Call { callee, .. } => match self.body.iter().rev().find(|inst| inst.dst == *callee).map(|inst| &inst.op) {
+                Some(Op::LoadAttr(of, _)) => *of,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let (held, gave) = (self.rec.values[dict as usize], self.rec.values[dst as usize]);
+        let exact = self.defs[dict as usize].made && !held.is_null() && unsafe { ffi::PyDict_CheckExact(held) != 0 };
+        // `keys()`, `values()` and `items()` give a view.
+        let view = gave.is_null() || unsafe { std::ffi::CStr::from_ptr((*ffi::Py_TYPE(gave)).tp_name).to_bytes().starts_with(b"dict_") };
+        (exact && !view).then_some(dict)
+    }
+
+    /// What an instruction that is about to be added to the path means
+    /// for the things the path made (`Family`): which family what it gives
+    /// is of, which families it makes one, and on which side of the
+    /// callable they run from here on.
+    ///
+    /// The side. An instruction runs behind the callable if it takes a
+    /// late value. One that does, and that reads or changes a thing (it
+    /// takes a value of the thing's family as more than a reference to
+    /// keep), puts the family behind the callable from itself on: every
+    /// later instruction that takes a value of the family is late, and so
+    /// runs behind it, in the order of the function; every earlier one
+    /// was not, and ran in front of it, in that order. So what reads and
+    /// what changes one thing run in the order the function has them. A
+    /// tuple, a list, a dict or a cell that is built keeps a reference to
+    /// what it is built of and reads nothing of it, so it moves no
+    /// family. An operation of the graph runs between the two sides, and
+    /// puts the families of the lists and other things it is handed
+    /// behind it.
+    fn note(&mut self, op: &Op, dst: PathValue, kind: Kind) {
+        let at = self.body.len() as u32;
+        if dst != NONE && self.defs[dst as usize].late && self.things.since[dst as usize] == u32::MAX {
+            self.things.since[dst as usize] = at;
+        }
+        if matches!(kind, Kind::Effect | Kind::Check) {
+            return;
+        }
+        let made = dst != NONE && self.defs[dst as usize].made;
+        let (mut late, mut any) = (kind == Kind::Node, false);
+        reads(op, |v| {
+            late |= v != NONE && self.defs[v as usize].late;
+            any |= self.things.has(v);
+        });
+        if !any && !made {
+            return;
+        }
+        let mut taken: Vec<PathValue> = Vec::new();
+        reads(op, |v| {
+            if self.things.has(v) {
+                taken.push(v);
+            }
+        });
+        // What only keeps a reference to what it is given reads nothing
+        // of it.
+        let keeps = matches!(op, Op::BuildTuple(_) | Op::BuildList(_) | Op::BuildMap(_) | Op::BuildSlice(..) | Op::MakeCell(_) | Op::Is(..) | Op::IsNone(..));
+        if kind == Kind::Node {
+            // A form is for calls that hand its operations what this one
+            // handed them: a number, a text or a tensor is one of the
+            // same kind at each (the checks of the form), and nothing
+            // of a thing is read through it.
+            let holds_nothing = |trace: &Trace, v: PathValue| {
+                let held = trace.rec.values[v as usize];
+                let mut info = TcfgTensorInfo::empty();
+                !held.is_null() && unsafe { is_plain(held) || is_token(held) || capi::api().is_some_and(|api| (api.tensor_info)(held, &mut info) != 0) }
+            };
+            taken.retain(|v| !holds_nothing(self, *v));
+            for v in taken {
+                let first = self.things.of(v);
+                self.runs_behind(first, at + 1);
+            }
+            return;
+        }
+        if late && !keeps {
+            for v in &taken {
+                let first = self.things.of(*v);
+                self.runs_behind(first, at);
+            }
+        }
+        let nested = |things: &Family, v: PathValue| things.nested.get(&things.of(v)).copied().unwrap_or(false);
+        let holds = |trace: &mut Trace, v: PathValue| {
+            let first = trace.things.of(v);
+            trace.things.nested.insert(first, true);
+        };
+        if made {
+            // A thing: of a family of its own, and of that of what it was
+            // made of. An iterator, or a copy, of a thing holds what the
+            // thing holds; anything else holds what it was made of.
+            self.things.first[dst as usize] = dst;
+            self.things.values.insert(dst, vec![dst]);
+            if late {
+                self.things.behind.insert(dst, true);
+            }
+            let over = matches!(op, Op::GetIter(_) | Op::Call { .. } | Op::CallMethod { .. });
+            let inner = taken.iter().any(|v| nested(&self.things, *v));
+            for v in &taken {
+                self.joins(dst, *v);
+            }
+            if !taken.is_empty() && (!over || inner) {
+                holds(self, dst);
+            }
+            return;
+        }
+        match op {
+            // What a change puts into a thing.
+            Op::ListAppend(into, item) | Op::CellSet(into, item) | Op::StoreAttr { obj: into, val: item, .. } => {
+                if self.things.has(*item) {
+                    self.joins(*into, *item);
+                    holds(self, *into);
+                }
+            }
+            Op::MapAdd(into, key, item) => {
+                for v in [*key, *item] {
+                    if self.things.has(v) {
+                        self.joins(*into, v);
+                        holds(self, *into);
+                    }
+                }
+            }
+            // The items of another: things only where that one holds some.
+            Op::ListExtend(into, more) | Op::DictMerge(into, more, _) => {
+                if self.things.has(*more) && nested(&self.things, *more) {
+                    self.joins(*into, *more);
+                }
+            }
+            // What is taken out of something is a thing only where the
+            // family has one that is held.
+            Op::GetItem(of, _) | Op::IterNext(of) | Op::TupleGet(of, _) | Op::CellGet(of, _) | Op::Unpack(of, _) | Op::ListToTuple(of) | Op::Part(Part::Index(_) | Part::Entry(_) | Part::Cell(_), of) => {
+                if dst != NONE && self.things.has(*of) && nested(&self.things, *of) {
+                    self.belongs(dst, *of);
+                }
+            }
+            // An attribute may be a part of the thing (the dict of an
+            // object) or hold it (a bound method), and what a method is
+            // bound to may be the thing.
+            Op::LoadAttr(of, _) | Op::Part(_, of) => {
+                if dst != NONE {
+                    self.belongs(dst, *of);
+                }
+            }
+            // A method of a dict the path made (`get`, and `pop`, which
+            // is a change of it): what it gives was in the dict, as
+            // above, or is the default it was handed. Not a view of the
+            // dict, which goes over it as an iterator does.
+            Op::Call { args, .. } | Op::CallMethod { args, .. } if dst != NONE && self.entry_of(op, dst).is_some() => {
+                let dict = self.entry_of(op, dst).expect("just asked");
+                if nested(&self.things, dict) {
+                    self.belongs(dst, dict);
+                }
+                for v in args.iter().filter(|v| self.things.has(**v)).copied().collect::<Vec<PathValue>>() {
+                    self.belongs(dst, v);
+                    self.joins(dst, v);
+                }
+            }
+            // What cannot hold anything: a number, a text, a flag.
+            Op::Compare(..) | Op::Is(..) | Op::IsNone(..) | Op::ToBool(_) | Op::Contains(..) | Op::GetLen(_) | Op::Unary(..) | Op::Format { .. } | Op::BuildString(_) | Op::CheckBound(..) | Op::IsFunction { .. } => {}
+            // A tuple or a slice that is built holds what it is built of.
+            Op::BuildTuple(_) | Op::BuildSlice(..) => {
+                for v in &taken {
+                    self.belongs(dst, *v);
+                    self.joins(dst, *v);
+                }
+                holds(self, dst);
+            }
+            // Anything else may give back what it was handed (the
+            // default of a `get`), go over it (a view of a dict) or be
+            // made of what it holds (two lists that are joined): of its
+            // family, and nothing is held that was not.
+            _ => {
+                if dst != NONE {
+                    for v in &taken {
+                        self.belongs(dst, *v);
+                        self.joins(dst, *v);
+                    }
+                }
             }
         }
     }
@@ -5448,6 +5695,8 @@ impl Trace {
     pub fn value(&mut self, def: Def, kept: Obj) -> PathValue {
         let made = self.defs.len() as PathValue;
         self.defs.push(def);
+        self.things.first.push(NONE);
+        self.things.since.push(u32::MAX);
         self.source.push((self.owner(), NONE));
         self.rec.values.push(kept);
         if !kept.is_null() && !capi::is_unboxed(kept) {
@@ -5504,6 +5753,7 @@ impl Trace {
 
     pub fn push(&mut self, op: Op, dst: PathValue, kind: Kind, bc: u32) {
         let owner = self.owner();
+        self.note(&op, dst, kind);
         self.body.push(PathInst { op, dst, kind, bc, stage: Stage::Before, in_graph: false, assert: None, owner, named: None });
     }
 
@@ -5521,6 +5771,12 @@ impl Trace {
             Assert::Apart(a, attributes, b, keeps) => {
                 self.shape.extend([u32::MAX - 6, *a, *attributes as u32, *b, *keeps as u32])
             }
+            // How a call binds what it is not handed.
+            Assert::Enters(_, _, defaults) => self.shape.extend([u32::MAX - 8, *defaults as u32]),
+            // What the path was taken down with: the place of an item, a
+            // number or a name that was made a constant, an object.
+            Assert::Equals(v, value) => self.pins.push((*v, value.clone(), true)),
+            Assert::Is(v, object) => self.pins.push((*v, object.clone(), false)),
             _ => {}
         }
         // A check of what the graph gives is made behind the callable,
@@ -5597,6 +5853,7 @@ impl Trace {
             at,
             frames,
             stores: self.stores.len(),
+            pins: self.pins.len(),
             flags: (self.writes, self.fallible, self.inplace),
             pinned: self.pinned.len(),
             body: self.body.len(),
@@ -5628,6 +5885,7 @@ impl Trace {
         };
         self.body.truncate(mark.body);
         self.stores.truncate(mark.stores);
+        self.pins.truncate(mark.pins);
         self.apart.clear();
         (self.writes, self.fallible, self.inplace) = mark.flags;
         if self.operators.is_empty() {
@@ -5635,6 +5893,12 @@ impl Trace {
         }
         self.pinned.truncate(mark.pinned);
         self.defs.truncate(mark.values);
+        // A family is kept under its first value, which is still there
+        // when a later one is not. What was joined or put behind the
+        // callable since the mark stays so: nothing is taken down behind
+        // this, and the path is staged by the instruction (`Family::late`).
+        self.things.first.truncate(mark.values);
+        self.things.since.truncate(mark.values);
         self.source.truncate(mark.values);
         for kept in self.rec.values.drain(mark.values..) {
             if let Some(count) = self.rec.kept.get_mut(&(kept as usize)) {
@@ -5802,6 +6066,7 @@ impl Path {
             stages: Default::default(),
             handed: Vec::new(),
             made: Vec::new(),
+            pins: Vec::new(),
         }
     }
 
@@ -5821,6 +6086,13 @@ impl Path {
         provisional: bool,
         returns: bool,
     ) -> Path {
+        // A value that is late is so from some instruction on: from the
+        // first, where nothing says from which.
+        for v in 0..trace.defs.len() {
+            if trace.defs[v].late && trace.things.since[v] == u32::MAX {
+                trace.things.since[v] = 0;
+            }
+        }
         let defs = &trace.defs;
         let nregs = defs.len();
         // What is read behind the path of what it made, and so has to be
@@ -5879,14 +6151,16 @@ impl Path {
             }
             _ => false,
         };
-        // Which thing a value of the path is: the first value that was the
-        // same object in the run that was taken down (the iterator of an
-        // iterator is that iterator).
-        let first = &trace.rec.kept;
-        let thing = |v: PathValue| {
-            let held = values[v as usize];
-            if held.is_null() { v } else { first.get(&(held as usize)).map_or(v, |(_, first)| *first) }
+        // Which thing a value of the path is, or may be, or may hold: its
+        // family (`Family`), or itself for a value of none.
+        let things = &trace.things;
+        let thing = |v: PathValue| match things.of(v) {
+            NONE => v,
+            first => first,
         };
+        // Whether a value is late for the instruction `at`: computed
+        // behind the callable, or of a family that runs behind it by then.
+        let late = |v: PathValue, at: usize| things.late(v, at);
         // What an instruction changes of what the path made: the list it
         // appends to or extends, the dict it stores into, the cell it puts
         // into, the iterator it takes the next item of.
@@ -5919,17 +6193,17 @@ impl Path {
         let (mut branches, mut calls) = (0, 0);
         let constants: std::cell::RefCell<Vec<PathValue>> = std::cell::RefCell::new(Vec::new());
         loop {
-            for inst in trace.body.iter_mut().rev() {
+            for (at, inst) in trace.body.iter_mut().enumerate().rev() {
                 inst.in_graph = false;
                 let dst = inst.dst;
                 let needed = dst != NONE && need[dst as usize];
-                let def = if dst == NONE { Def::default() } else { defs[dst as usize] };
+                let def = if dst == NONE { Def::default() } else { Def { late: late(dst, at), ..defs[dst as usize] } };
                 // What an operation of the graph, or a value the graph computes,
                 // takes: of what depends on a node, the graph computes it too,
                 // and it has the lists the path builds as what they hold; the
                 // rest is there in front of the callable.
                 let takes = |op: &Op, wanted: &mut [bool], need: &mut [bool]| {
-                    reads(op, |v| match defs[v as usize] {
+                    reads(op, |v| match (Def { late: late(v, at), ..defs[v as usize] }) {
                         // Computed behind the callable and the same whenever
                         // the form is for the call: a constant of the graph.
                         taken if taken.late && taken.fixed && !taken.node && !taken.graph => {
@@ -5944,12 +6218,12 @@ impl Path {
                     })
                 };
                 let uses = |op: &Op, need: &mut [bool]| {
-                    let mut late = false;
+                    let mut behind = false;
                     op.for_each_use(|v| {
                         need[v as usize] = true;
-                        late |= defs[v as usize].late;
+                        behind |= late(v, at);
                     });
-                    if late { Stage::After } else { Stage::Before }
+                    if behind { Stage::After } else { Stage::Before }
                 };
                 inst.stage = match inst.kind {
                     Kind::Node => {
@@ -5966,7 +6240,7 @@ impl Path {
                             // What is the same in every call a form is for was
                             // checked when the path was taken down: the tensor
                             // it is computed from need not be given back for it.
-                            Assert::Truth(..) | Assert::Null(..) | Assert::Guard(_) if defs[v].late && defs[v].fixed => {
+                            Assert::Truth(..) | Assert::Null(..) | Assert::Guard(_) if late(v as PathValue, at) && defs[v].fixed => {
                                 branches += matches!(assert, Assert::Truth(..) | Assert::Null(..)) as usize;
                                 Stage::Skipped
                             }
@@ -5980,12 +6254,12 @@ impl Path {
                                 branches += matches!(assert, Assert::Truth(..) | Assert::Null(..)) as usize;
                                 calls += matches!(assert, Assert::Enters(..)) as usize;
                                 need[v] = true;
-                                let mut late = defs[v].late;
+                                let mut behind = late(v as PathValue, at);
                                 if let Assert::Same(_, other) | Assert::Apart(_, _, other, _) = assert {
                                     need[*other as usize] = true;
-                                    late |= defs[*other as usize].late;
+                                    behind |= late(*other, at);
                                 }
-                                if late { Stage::After } else { Stage::Before }
+                                if behind { Stage::After } else { Stage::Before }
                             }
                         }
                     }
@@ -6072,9 +6346,9 @@ impl Path {
         let effects = trace.body.iter().any(|inst| inst.stage == Stage::Landing);
         let constants = constants.into_inner();
         let mut feeds: Vec<PathValue> = Vec::new();
-        for inst in trace.body.iter().filter(|inst| inst.kind == Kind::Node || inst.in_graph) {
+        for (at, inst) in trace.body.iter().enumerate().filter(|(_, inst)| inst.kind == Kind::Node || inst.in_graph) {
             reads(&inst.op, |v| {
-                if !defs[v as usize].late && !wanted[v as usize] && !feeds.contains(&v) {
+                if !late(v, at) && !wanted[v as usize] && !feeds.contains(&v) {
                     feeds.push(v);
                 }
             });
@@ -6102,6 +6376,7 @@ impl Path {
             stages: stages_of(&trace.body),
             handed: handed_of(&trace.inputs, &trace.body, &writes, &bound),
             made: trace.defs.iter().map(|def| def.made).collect(),
+            pins: std::mem::take(&mut trace.pins),
             inputs: trace.inputs.clone(),
             body: std::mem::take(&mut trace.body),
             feeds,
