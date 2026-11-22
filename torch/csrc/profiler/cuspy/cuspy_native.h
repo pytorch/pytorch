@@ -266,11 +266,9 @@ class TORCH_API CuptiMetadataStore {
 // ppRecordLayouts is null.
 std::vector<CuptiRecordLayout> cuspyParseRecordLayouts(void* complete_info);
 
-// Benchmark helper (benchmarks/profiler_benchmark/bench_decode.py): run the
-// native per-buffer decode -- stride-walk the records and accumulate every
-// field into per-(kind, field_id) byte columns over a synthetic buffer (no
-// GPU/CUPTI) -- `iters` times over `buffer_addr`, returning the total
-// wall-clock seconds. The columns are discarded each iter.
+// Time the production per-buffer decode over a synthetic buffer, excluding the
+// worker's queue and shared accumulation. The columns are discarded each iter.
+// Returns total wall-clock seconds without requiring a GPU or CUPTI.
 TORCH_API double cuspyBenchDecode(
     uintptr_t buffer_addr,
     size_t valid_size,

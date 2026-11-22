@@ -94,8 +94,8 @@ void convolution_transpose_backward_data_compute_v3(
 void convolution_transpose_backward_weights_compute_v3(
     const ideep::tensor& src,
     const ideep::tensor& diff_dst,
-    const dnnl::memory::dims& diff_weights_dims,
-    ideep::tensor& diff_weights,
+    const dnnl::memory::dims& diff_weights_dims, // dim: {i, o[, d], h, w}
+    ideep::tensor& diff_weights, // dim: {i, o[, d], h, w}
     ideep::tensor& diff_bias,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
@@ -111,8 +111,8 @@ void convolution_transpose_backward_weights_compute_v3(
 void convolution_transpose_backward_weights_compute_v3(
     const ideep::tensor& src,
     const ideep::tensor& diff_dst,
-    const dnnl::memory::dims& diff_weights_dims,
-    ideep::tensor& diff_weights,
+    const dnnl::memory::dims& diff_weights_dims, // dim: {i, o[, d], h, w}
+    ideep::tensor& diff_weights, // dim: {i, o[, d], h, w}
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,
