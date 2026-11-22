@@ -119,6 +119,10 @@ pub enum Assert {
     /// own dict, as `object` has it (`stores_plainly`): a store into an
     /// object the path made cannot fail and runs no Python code.
     Plain(PathValue, PyObj),
+    /// What `object` reads of the object this is bound to finds nothing
+    /// under the name (`reads_nothing`): the read raises AttributeError
+    /// and does nothing else.
+    Missing(PathValue, PyObj),
 }
 
 impl Assert {
@@ -138,7 +142,8 @@ impl Assert {
             | Assert::Is(v, _)
             | Assert::Same(v, _)
             | Assert::Apart(v, ..)
-            | Assert::Plain(v, _) => *v,
+            | Assert::Plain(v, _)
+            | Assert::Missing(v, _) => *v,
             Assert::Guard(cond) => cond.value(),
         }
     }
@@ -2886,7 +2891,8 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
             // What is not there is answered too where nothing is raised
             // out of the call.
             let caught = which == Builtin::HasAttr || found;
-            named && (quiet_attr(args[0], args[1], api) || (caught && quiet_absent(args[0], args[1])))
+            let absent = || quiet_absent(args[0], args[1]) || plainly_absent(args[0], args[1]);
+            named && (quiet_attr(args[0], args[1], api) || (caught && absent()))
         }
         Builtin::IsInstance => {
             static CLASS: std::sync::OnceLock<PyObj> = std::sync::OnceLock::new();
@@ -3139,9 +3145,24 @@ pub unsafe fn generic_absent(obj: Obj, name: Obj) -> bool {
     slot.is_null() || (*slot).is_null() || (pyffi::text_keys(*slot) && ffi::PyDict_GetItemWithError(*slot, name).is_null())
 }
 
+/// Whether a callee is `object.__getattribute__` bound to an object that
+/// is no tensor and has nothing under a name (`generic_absent`): calling
+/// it with the name raises AttributeError and does nothing else.
+pub unsafe fn reads_nothing(callee: Obj, name: Obj, api: &TcfgApi) -> bool {
+    let reader = generic_reader(callee);
+    if reader.is_null() {
+        return false;
+    }
+    let mut info = TcfgTensorInfo::empty();
+    let nothing = (api.tensor_info)(reader, &mut info) == 0 && generic_absent(reader, name);
+    ffi::Py_DECREF(reader);
+    nothing
+}
+
 /// Whether an object whose attributes are read as `object` reads them,
 /// with no function of its class asked behind that, has nothing under a
-/// name: reading it raises AttributeError and does nothing else.
+/// name: reading it raises AttributeError and does nothing else, and
+/// `getattr` with a default gives the default, `hasattr` False.
 pub unsafe fn plainly_absent(obj: Obj, name: Obj) -> bool {
     if obj.is_null() || capi::is_unboxed(obj) || ffi::PyModule_Check(obj) != 0 {
         return false;
@@ -5577,6 +5598,11 @@ pub struct Trace {
     pub lost: bool,
     /// The trace was let go of (`abandon`), and why.
     pub abandoned: Option<String>,
+    /// An instruction of a function the path went into raised because a
+    /// lookup of `object` found nothing, as the path checks
+    /// (`Assert::Missing`), and the raise is on its way out of the
+    /// functions the path is in.
+    pub absent: bool,
     /// The path ends where a later one will go on: at a block, or a call
     /// of a function, that the tiers have not decided on yet.
     pub provisional: bool,
@@ -5604,6 +5630,7 @@ impl Trace {
             again: false,
             over: Vec::new(),
             abandoned: None,
+            absent: false,
             writes: false,
             fallible: false,
             inplace: false,
@@ -5734,6 +5761,9 @@ impl Trace {
             Assert::Apart(a, attributes, b, keeps) => {
                 self.shape.extend([u32::MAX - 6, *a, *attributes as u32, *b, *keeps as u32])
             }
+            // The function it is in is left where one that found the
+            // attribute goes on.
+            Assert::Missing(v, _) => self.shape.extend([u32::MAX - 7, *v]),
             _ => {}
         }
         // A check of what the graph gives is made behind the callable,

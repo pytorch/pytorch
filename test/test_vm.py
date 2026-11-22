@@ -10721,6 +10721,47 @@ def graph_default_by_name_goes(x):
     return torch.tanh(h) + h
 
 
+class GraphConfigBase:
+    # A class that reads its attributes in a function of its own, which
+    # ends in the lookup of `object`, as a base class does it for it too.
+    def __getattribute__(self, key):
+        spec = super().__getattribute__("__dict__").get("_spec")
+        if spec is not None and key in spec:
+            raise RuntimeError("not asked for")
+        return super().__getattribute__(key)
+
+
+class GraphConfig(GraphConfigBase):
+    attribute_map = {"alias": "scale"}
+
+    def __init__(self):
+        self.scale = 2.0
+
+    def __getattribute__(self, key):
+        if key != "attribute_map" and key in super().__getattribute__("attribute_map"):
+            key = super().__getattribute__("attribute_map")[key]
+        return super().__getattribute__(key)
+
+
+def graph_asks_a_config(config, x):
+    h = torch.relu(x) + 1
+    h = h * config.alias - 3
+    if not getattr(config, "is_causal", True):
+        return h.sum()
+    h = torch.tanh(h) * 2 + 1
+    if hasattr(config, "extra"):
+        h = h - 5
+    return torch.relu(h) + h
+
+
+def graph_asks_a_plain_object(obj, x):
+    h = torch.relu(x) + 1
+    h = h * getattr(obj, "scale", 3.0) - 3
+    if hasattr(obj, "extra"):
+        h = h - 5
+    return torch.tanh(h) + h
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -12702,6 +12743,51 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
                 check(fn, "a dual tensor", behind, False)
         del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
         GRAPH_END_STATE[0] = 0.5
+
+    def test_a_lookup_that_finds_nothing_under_getattr_with_a_default(self, device):
+        # `getattr(config, name, default)` and `hasattr(config, name)` on
+        # an object whose class reads its attributes in a function of its
+        # own (two of them, one calling the other, as a config class and
+        # its base do it), for a name that is not there: the lookup of
+        # `object` at the end of those functions finds nothing and raises,
+        # the functions are left by that, and the builtin gives the
+        # default, or False. A path checks that the lookup finds nothing
+        # and goes on behind the builtin: one graph with all the
+        # operations of the function. The attribute comes and goes
+        # between calls; every call is eager's. The same for a plain
+        # object, whose attributes `object` itself reads.
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(3, 4, device=device)
+        asked = (graph_asks_a_config, GraphConfig)
+        for fn, made in (asked, (graph_asks_a_plain_object, GraphUnusedPlain)):
+            for behind in ((), (keep,)):
+                obj = made()
+                passes = (*DEFAULT, P.Graphs(), *behind)
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                for at in range(60):
+                    if at == 40:
+                        obj.is_causal, obj.scale = False, 4.0
+                    if at == 44:
+                        del obj.is_causal
+                        obj.extra = 1
+                        if made is GraphUnusedPlain:
+                            del obj.scale
+                    if at == 48:
+                        del obj.extra
+                        obj.scale = 2.0
+                    msg = f"{fn.__name__}, call {at}"
+                    got, expected = compiled(obj, x), fn(obj, x)
+                    self.assertEqual(got, expected, atol=0, rtol=0, msg=msg)
+                listed = torch.vm.regions(compiled)
+                graphs = [g for g in listed if "ops" in g and "within" not in g]
+                ends = [g["why"] for g in graphs]
+                self.assertEqual(ends, ["the function returns"], msg=str(graphs))
+                if behind:
+                    # Every way through the function has its path, and
+                    # each runs when its turn comes again.
+                    self.assertGreaterEqual(graphs[0]["hits"], 45, msg=str(graphs))
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
