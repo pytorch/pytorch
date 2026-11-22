@@ -2013,6 +2013,8 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
 // For example, q (b, h, g, s, d) @ kT (b, h, 1, d, t) becomes
 // q.view(b * h, g * s, d).bmm(kT.view(b * h, d, t)) without copying either input.
 // Returns nullopt when this does not apply or is not clearly cheaper.
+// Unlike here, the Python decomposition in torch/_decomp/decompositions.py keeps the
+// expand path when both inputs are 4-D, so that Inductor's attention patterns match.
 static std::optional<Tensor> matmul_fold_broadcast_batch(
     const Tensor& tensor1,
     const Tensor& tensor2) {
@@ -2156,7 +2158,9 @@ The behavior depends on the dimensionality of the Tensors as follows:
   conditions on the strides apply (see should_fold) we fold the first N-1 dimensions
   of the ND argument to form a matrix, call mm or mv, reshape it back to ND and return it
 - Otherwise, we return bmm, after broadcasting and folding the batched dimensions if
-  there's more than one
+  there's more than one. If the second argument has size 1 in some batch dimensions and
+  expanding it would copy it, those dimensions are folded into the rows of the first
+  argument instead (see matmul_fold_broadcast_batch)
 */
 static Tensor _matmul_impl(
     Tensor& out,
@@ -2292,7 +2296,10 @@ static Tensor _matmul_impl(
       }
     }
 
-    if (!has_out && dim_tensor2 >= 2 && dim_tensor1 >= dim_tensor2) {
+    // Expanding tensor2 can only copy it if tensor1 has at least two batch dims and
+    // tensor2 at least one
+    if (!has_out && dim_tensor1 >= 4 && dim_tensor2 >= 3 &&
+        dim_tensor1 >= dim_tensor2) {
       if (auto folded = matmul_fold_broadcast_batch(tensor1, tensor2)) {
         return *std::move(folded);
       }

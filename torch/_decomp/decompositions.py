@@ -5578,7 +5578,9 @@ def matmul(tensor1, tensor2, *, is_out=False):
             if guard_or_false(batch_tensor2[0] == 1) and tensor2.requires_grad:
                 return matmul(tensor1, tensor2.squeeze(0))
 
-        if not is_out and dim_tensor2 > 1 and dim_tensor1 >= dim_tensor2:
+        # Expanding tensor2 can only copy it if tensor1 has at least two batch dims and
+        # tensor2 at least one
+        if not is_out and dim_tensor1 >= 4 and dim_tensor1 >= dim_tensor2 >= 3:
             folded = _matmul_fold_broadcast_batch(tensor1, tensor2)
             if folded is not None:
                 return folded

@@ -1398,6 +1398,7 @@ class DecompOneOffTests(TestCase):
             ((2, 4, 8, 16), (2, 1, 16, 8), False, 1),
             ((1, 4, 8, 16), (1, 1, 16, 8), False, 0),
             ((2, 4, 8, 16), (1, 1, 16, 8), False, 0),
+            ((2, 2, 4, 8, 16), (1, 1, 1, 16, 8), False, 0),
         ):
             x = torch.randn(size_x, device=device)
             y = torch.randn(size_y, device=device)
