@@ -1375,8 +1375,6 @@ unsafe fn class_named(module: &std::ffi::CStr, name: &std::ffi::CStr) -> Obj {
 ///   out of sight. Whether the storage ends with the tensor (another
 ///   tensor may share it) cannot be asked from here either.
 ///
-/// - the Python object of its storage has attributes of its own (C++
-///   keeps that object for the storage, and it ends with the storage);
 /// - a level of forward-mode differentiation is open (a tangent is held
 ///   for the tensor from C++, and cannot be asked for without the level);
 /// - it is not laid out plainly (`plainly_laid_out`): sparse, quantized,
@@ -1384,10 +1382,11 @@ unsafe fn class_named(module: &std::ffi::CStr, name: &std::ffi::CStr) -> Obj {
 ///   tensor, each of which has parts that C++ holds for it.
 ///
 /// Ok with what C++ holds for the tensor that can be handed over (new
-/// references): its `.grad` where it has one, and, for a view, the tensor
-/// it is a view of, whose Python object C++ keeps for as long as a view
-/// needs it. They are looked at like what the tensor refers to, whatever
-/// their counts of references say.
+/// references): the Python object of its storage, which C++ keeps for
+/// the storage and which ends with it; its `.grad` where it has one; and,
+/// for a view, the tensor it is a view of, whose Python object C++ keeps
+/// for as long as a view needs it. They are looked at like what the
+/// tensor refers to, whatever their counts of references say.
 unsafe fn unseen(o: Obj) -> Result<Vec<PyObj>, ()> {
     static NAMES: std::sync::OnceLock<(PyObj, PyObj)> = std::sync::OnceLock::new();
     if holds_unseen(o) {
@@ -1400,23 +1399,24 @@ unsafe fn unseen(o: Obj) -> Result<Vec<PyObj>, ()> {
         let name = |text: &std::ffi::CStr| PyObj::from_owned(ffi::PyUnicode_InternFromString(text.as_ptr()));
         (name(c"untyped_storage"), name(c"resizable"))
     });
-    let own = {
-        let memory = ffi::PyObject_CallMethodNoArgs(o, storage.as_ptr());
-        let said = if memory.is_null() { null_mut() } else { ffi::PyObject_CallMethodNoArgs(memory, resizable.as_ptr()) };
-        // What the storage's Python object has of its own ends with it.
-        let slot = if memory.is_null() { std::ptr::null_mut() } else { pyffi::_PyObject_GetDictPtr(memory) };
-        let bare = slot.is_null() || (*slot).is_null() || ffi::PyDict_Size(*slot) == 0;
-        let own = said == ffi::Py_True() && bare;
-        xdecref(said);
-        xdecref(memory);
-        own
-    };
+    let memory = ffi::PyObject_CallMethodNoArgs(o, storage.as_ptr());
     // A tensor without a storage of this kind says so by raising.
+    if memory.is_null() {
+        ffi::PyErr_Clear();
+        return Err(());
+    }
+    let memory = PyObj::from_owned(memory);
+    let said = ffi::PyObject_CallMethodNoArgs(memory.as_ptr(), resizable.as_ptr());
+    let own = said == ffi::Py_True();
+    xdecref(said);
     ffi::PyErr_Clear();
     if !own || forward_level() || !plainly_laid_out(o) {
         return Err(());
     }
-    let mut held = Vec::new();
+    // The Python object of the storage ends with the storage: it is
+    // looked at like any object that ends (what it has of its own, a
+    // weak reference on it that is told, a finalizer).
+    let mut held = vec![memory];
     for name in [c"grad", c"_base"] {
         let found = ffi::PyObject_GetAttrString(o, name.as_ptr());
         if found.is_null() {
@@ -3747,7 +3747,7 @@ impl Path {
         let values = &trace.rec.values;
         // A method of the interpreter's, read off a tensor that an
         // operation of the graph gave and bound to it.
-        let method_of_result = |op: &Op, dst: PathValue| match op {
+        let bound_method = |op: &Op, dst: PathValue| match op {
             Op::LoadAttr(of, _) if dst != NONE && defs[*of as usize].node => {
                 let (held, tensor) = (values[dst as usize], values[*of as usize]);
                 !held.is_null() && unsafe { ffi::PyCFunction_Check(held) != 0 && (*(held as *mut ffi::PyCFunctionObject)).m_self == tensor }
@@ -3834,7 +3834,7 @@ impl Path {
                 // a call in which it raises is not the path's.
                 // Nor is a method that was read off a tensor the graph
                 // gives, which the operation that calls it stands for.
-                _ if !infallible(&inst.op) && !method_of_result(&inst.op, dst) => uses(&inst.op, &mut need),
+                _ if !infallible(&inst.op) && !bound_method(&inst.op, dst) => uses(&inst.op, &mut need),
                 _ => Stage::Skipped,
             };
         }
