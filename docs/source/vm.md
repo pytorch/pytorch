@@ -240,6 +240,38 @@ for _ in range(4):
 found["ops"], found["why"]  # (9, 'the function returns')
 ```
 
+A copy of such a list (`[*out]`, `(*out,)`) has the items the list holds
+where the copy is made, and an operation that the copy is spread into is
+handed those, whatever is appended to the list afterwards.
+
+What the function makes may come to hold itself: a list that is appended to
+itself, two lists that hold each other, or a list in a dict in the list. A
+path makes such things as the function makes them, by the same instructions
+in the same order, so where the path ends they hold each other as they do in
+eager mode, and the graph around them runs. Nothing that looks into what a
+list or a tuple holds goes round one that holds itself, whether the function
+made it or was handed it: such a list is never a value that a form is
+checked against or has as a constant, it is not turned into text on a path,
+and a call that hands it to an operation is no operation of a graph (the
+call runs as it stands, and raises what it raises in eager mode).
+
+```python
+def ring(x, n):
+    y = x.sin() * 2
+    a = [n]
+    b = [a]
+    a.append(b)  # a holds b, b holds a
+    return (y.cos() + 1).exp().sum(), a
+
+
+g = torch.vm(ring, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), as_it_is))
+for _ in range(4):
+    out, a = g(x, 3)
+a[1][0] is a, a[0]  # (True, 3)
+(found,) = torch.vm.regions(g)
+found["ops"], found["hits"]  # (6, 2)
+```
+
 What ends a path:
 
 - a call that the path does not go into ("Paths across calls" below says
@@ -677,8 +709,10 @@ default dtype, whether algorithms have to be deterministic, the dispatch
 keys it adds); and the same
 numbers and objects where an operation takes one from outside the graph (the
 function a global names, a float; a list or a tuple of numbers by what is in
-it at the call, to any depth, not by which list it is: one that was changed
-in place since is another value). A call of another kind runs the
+it at the call, up to 64 lists, tuples and slices inside one another, not by
+which list it is: one that was changed in place since is another value, and
+one that goes deeper, or that holds itself, is never the value a form was
+made for). A call of another kind runs the
 operations and is exported in its turn. What was made for a kind of call is
 a form of the graph, and a graph has `max_variants` of them at most (8
 unless `Graphs` is made with another number); calls of further kinds then
@@ -2163,8 +2197,10 @@ under 10 (between 1.3 and 9.8) and no process was on the GPU. Every row was
 measured twice, and most of the rows whose eager figure was more than 3
 percent apart between the two processes a third time (eager's own figure
 moves by up to 9 percent from one process to the next); all the figures are
-given. Eager mode and what is compared with it take turns in one process, so
-that both have the same machine.
+given, and the rows whose eager figure moved are listed with the figures of
+each process behind the tables. Eager mode and what is compared with it take
+turns in one process, so that both have the same machine: a ratio is of the
+turns inside one process, never of figures from two.
 
 With the default settings and `Graphs()` and `Inductor()` in the list, the
 forward of a resnet is one graph, and yolov3 is two. In images per second
@@ -2217,6 +2253,19 @@ eager's. On the CPU the gradient of every parameter of a small model is
 within 1e-4 of eager's at each of 30 steps with `AOTAutograd()` and with
 `Inductor()`, which is what the tests hold.
 
+
+Eager's own figure was more than 3 percent apart between the processes of 5
+rows of the two tables above. For these, every figure of every process, in
+the order the processes ran: eager's, the other side's, and the ratio, which
+is of the turns inside that one process.
+
+| row | eager | the other side | ratio |
+|---|---|---|---|
+| yolov3, `Graphs()`, images a second | 832, 779, 808 | 835, 787, 838 | 1.00x, 1.01x, 1.04x |
+| yolov3, `Graphs(), Inductor()`, images a second | 826, 800, 825 | 1419, 1485, 1456 | 1.72x, 1.86x, 1.76x |
+| resnet50, float32, `Graphs()`, images a second | 3152, 2999, 3034 | 3157, 3121, 3131 | 1.00x, 1.04x, 1.03x |
+| resnet50, bfloat16, `Graphs()`, images a second | 2874, 2754, 2799 | 2887, 2779, 2819 | 1.00x, 1.01x, 1.01x |
+| resnet18, `Graphs()`, steps a second | 136.2, 142.1, 142.3 | 141.1, 143.0, 143.0 | 1.04x, 1.01x, 1.01x |
 
 ### Limits
 
