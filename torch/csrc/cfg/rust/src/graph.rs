@@ -1857,10 +1857,20 @@ unsafe fn class_named(module: &std::ffi::CStr, name: &std::ffi::CStr) -> Obj {
 ///   out of sight. Whether the storage ends with the tensor (another
 ///   tensor may share it) cannot be asked from here either.
 ///
-/// Ok with the tensor's `.grad` where it has one (a new reference): C++
-/// holds it for the tensor, and it is looked at like what the tensor
-/// refers to.
-unsafe fn unseen(o: Obj) -> Result<Option<PyObj>, ()> {
+/// - the Python object of its storage has attributes of its own (C++
+///   keeps that object for the storage, and it ends with the storage);
+/// - a level of forward-mode differentiation is open (a tangent is held
+///   for the tensor from C++, and cannot be asked for without the level);
+/// - it is not laid out plainly (`plainly_laid_out`): sparse, quantized,
+///   nested, of another library's layout, or a wrapper around another
+///   tensor, each of which has parts that C++ holds for it.
+///
+/// Ok with what C++ holds for the tensor that can be handed over (new
+/// references): its `.grad` where it has one, and, for a view, the tensor
+/// it is a view of, whose Python object C++ keeps for as long as a view
+/// needs it. They are looked at like what the tensor refers to, whatever
+/// their counts of references say.
+unsafe fn unseen(o: Obj) -> Result<Vec<PyObj>, ()> {
     static NAMES: std::sync::OnceLock<(PyObj, PyObj)> = std::sync::OnceLock::new();
     if holds_unseen(o) {
         return Err(());
@@ -1875,23 +1885,83 @@ unsafe fn unseen(o: Obj) -> Result<Option<PyObj>, ()> {
     let own = {
         let memory = ffi::PyObject_CallMethodNoArgs(o, storage.as_ptr());
         let said = if memory.is_null() { null_mut() } else { ffi::PyObject_CallMethodNoArgs(memory, resizable.as_ptr()) };
-        let own = said == ffi::Py_True();
+        // What the storage's Python object has of its own ends with it.
+        let slot = if memory.is_null() { std::ptr::null_mut() } else { pyffi::_PyObject_GetDictPtr(memory) };
+        let bare = slot.is_null() || (*slot).is_null() || ffi::PyDict_Size(*slot) == 0;
+        let own = said == ffi::Py_True() && bare;
         xdecref(said);
         xdecref(memory);
         own
     };
     // A tensor without a storage of this kind says so by raising.
     ffi::PyErr_Clear();
-    if !own {
+    if !own || forward_level() || !plainly_laid_out(o) {
         return Err(());
     }
-    let gradient = ffi::PyObject_GetAttrString(o, c"grad".as_ptr());
-    if gradient.is_null() {
-        ffi::PyErr_Clear();
-        return Err(());
+    let mut held = Vec::new();
+    for name in [c"grad", c"_base"] {
+        let found = ffi::PyObject_GetAttrString(o, name.as_ptr());
+        if found.is_null() {
+            ffi::PyErr_Clear();
+            return Err(());
+        }
+        let found = PyObj::from_owned(found);
+        if found.as_ptr() != ffi::Py_None() {
+            held.push(found);
+        }
     }
-    let gradient = PyObj::from_owned(gradient);
-    Ok((gradient.as_ptr() != ffi::Py_None()).then_some(gradient))
+    Ok(held)
+}
+
+/// Whether a tensor is one whose parts are all in its one storage: dense
+/// and strided, not quantized (the scales and zero points per channel are
+/// tensors that C++ holds for it), not nested, not of another library's
+/// layout, and no wrapper around another tensor (a transform of
+/// `torch.func`, a functional tensor), which C++ holds for it. Each is
+/// asked of the tensor through an attribute or a function that torch has
+/// in C; false where one cannot be asked.
+unsafe fn plainly_laid_out(o: Obj) -> bool {
+    static PARTS: std::sync::OnceLock<Option<(PyObj, PyObj, PyObj)>> = std::sync::OnceLock::new();
+    let parts = PARTS.get_or_init(|| {
+        let of = |module: &std::ffi::CStr, name: &std::ffi::CStr| {
+            let module = ffi::PyDict_GetItemString(ffi::PyImport_GetModuleDict(), module.as_ptr());
+            let found = if module.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(module, name.as_ptr()) };
+            ffi::PyErr_Clear();
+            (!found.is_null()).then(|| PyObj::from_owned(found))
+        };
+        Some((of(c"torch", c"strided")?, of(c"torch._C._functorch", c"is_functorch_wrapped_tensor")?, of(c"torch", c"_is_functional_tensor")?))
+    });
+    let Some((strided, wrapped, functional)) = parts else {
+        return false;
+    };
+    let layout = ffi::PyObject_GetAttrString(o, c"layout".as_ptr());
+    let dense = layout == strided.as_ptr();
+    xdecref(layout);
+    let says = |name: &std::ffi::CStr| {
+        let said = ffi::PyObject_GetAttrString(o, name.as_ptr());
+        xdecref(said);
+        said
+    };
+    let asked = |function: &PyObj| {
+        let said = ffi::PyObject_CallOneArg(function.as_ptr(), o);
+        xdecref(said);
+        said
+    };
+    let no = ffi::Py_False();
+    let plain = dense && says(c"is_quantized") == no && says(c"is_nested") == no && says(c"is_mkldnn") == no && asked(wrapped) == no && asked(functional) == no;
+    ffi::PyErr_Clear();
+    plain
+}
+
+/// Whether a level of forward-mode differentiation is open on this thread
+/// (`torch.autograd.forward_ad`), or cannot be shown not to be.
+unsafe fn forward_level() -> bool {
+    let module = ffi::PyDict_GetItemString(ffi::PyImport_GetModuleDict(), c"torch.autograd.forward_ad".as_ptr());
+    if module.is_null() || ffi::PyModule_Check(module) == 0 {
+        return false;
+    }
+    let level = ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), c"_current_level".as_ptr());
+    level.is_null() || ffi::PyLong_CheckExact(level) == 0 || ffi::PyLong_AsLong(level) >= 0
 }
 
 /// Whether an object that shows the garbage collector nothing (its class
