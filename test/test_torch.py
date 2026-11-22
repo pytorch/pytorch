@@ -58,6 +58,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
     onlyCPU,
+    onlyOn,
     preserves_device_selection,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
@@ -7384,6 +7385,45 @@ class TestTorchDeviceType(TestCase):
         if torch.version.cuda is not None:
             self._test_to_with_layout(torch.sparse_csr, device)
 
+    # The device backends name their elementwise kernels differently, so the
+    # accelerator-wide profiler assertions below look the name up per backend.
+    VECTORIZED_KERNEL = {
+        "cuda": "vectorized_elementwise_kernel",
+        "xpu": "VectorizedElementwiseKernel",
+    }
+
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
+    @unittest.skipIf(TEST_WITH_ROCM, "which path dense zero_ takes is ROCm-version dependent; see zero_cuda_")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5371")
+    def test_zero_dense_emits_memset(self, device):
+        base = torch.ones(64, 96, device=device)
+        with torch.profiler.profile() as prof:
+            base[16:32].zero_()
+            torch.accelerator.synchronize()
+        names = tuple(event.key for event in prof.key_averages())
+        self.assertTrue(any("Memset" in name for name in names), names)
+
+    @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/6150")
+    @parametrize("src_dtype,dst_dtype", [(torch.int32, torch.int64),
+                                         (torch.bool, torch.int64),
+                                         (torch.bool, torch.float64)])
+    def test_converting_copy_emits_vectorized_kernel(self, device, src_dtype, dst_dtype):
+        if src_dtype == torch.bool:
+            src = torch.randint(0, 256, (1024, 1024), dtype=torch.uint8, device=device).view(torch.bool)
+        else:
+            src = make_tensor((1024, 1024), dtype=src_dtype, device=device)
+        torch.accelerator.synchronize()
+        with torch.profiler.profile() as prof:
+            dst = src.to(dst_dtype)
+            torch.accelerator.synchronize()
+        names = tuple(event.key for event in prof.key_averages())
+        vectorized = self.VECTORIZED_KERNEL[torch.device(device).type]
+        self.assertTrue(any(vectorized in name for name in names), names)
+        self.assertEqual(dst.cpu(), src.cpu().to(dst_dtype))
+
 
 class TestTorchCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -7397,15 +7437,6 @@ class TestTorchCUDA(TestCase):
         with self.assertWarnsOnceRegex(UserWarning, msg):
             torch.cuda.DoubleTensor([0])
 
-    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
-    @unittest.skipIf(TEST_WITH_ROCM, "which path dense zero_ takes is ROCm-version dependent; see zero_cuda_")
-    def test_zero_dense_emits_memset(self, device):
-        base = torch.ones(64, 96, device=device)
-        with torch.profiler.profile() as prof:
-            base[16:32].zero_()
-            torch.cuda.synchronize()
-        names = tuple(event.key for event in prof.key_averages())
-        self.assertTrue(any("Memset" in name for name in names), names)
 
     @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
     def test_zero_strided_emits_fill_kernel(self, device):
@@ -7446,22 +7477,6 @@ class TestTorchCUDA(TestCase):
         names = tuple(event.key for event in prof.key_averages())
         self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
 
-    @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @parametrize("src_dtype,dst_dtype", [(torch.int32, torch.int64),
-                                         (torch.bool, torch.int64),
-                                         (torch.bool, torch.float64)])
-    def test_converting_copy_emits_vectorized_kernel(self, device, src_dtype, dst_dtype):
-        if src_dtype == torch.bool:
-            src = torch.randint(0, 256, (1024, 1024), dtype=torch.uint8, device=device).view(torch.bool)
-        else:
-            src = make_tensor((1024, 1024), dtype=src_dtype, device=device)
-        torch.cuda.synchronize()
-        with torch.profiler.profile() as prof:
-            dst = src.to(dst_dtype)
-            torch.cuda.synchronize()
-        names = tuple(event.key for event in prof.key_averages())
-        self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
-        self.assertEqual(dst.cpu(), src.cpu().to(dst_dtype))
 
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfRocm
