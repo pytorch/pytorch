@@ -399,6 +399,13 @@ def update_bn(
         is either a tensor or a list or tuple of tensors; in the latter case it
         is assumed that :meth:`model.forward()` should be called on the first
         element of the list or tuple corresponding to the data batch.
+
+    .. note::
+        `update_bn` puts :attr:`model` in training mode for the pass over
+        :attr:`loader`, then restores the training mode of :attr:`model` and of
+        each of its submodules, calling :meth:`~torch.nn.Module.train` on every
+        module whose mode changed. The running statistics of every BatchNorm
+        layer are reset and re-estimated, including layers in eval mode.
     """
     momenta = {}
     for module in model.modules():
@@ -410,7 +417,7 @@ def update_bn(
         return
 
     # Record every module's mode, not just the root's, so submodules the caller
-    # put in eval mode (e.g. frozen BatchNorm or Dropout) are restored too.
+    # put in eval mode (e.g. Dropout) get their mode back afterwards.
     was_training = {module: module.training for module in model.modules()}
     model.train()
     for module in momenta:
@@ -426,11 +433,12 @@ def update_bn(
 
     for bn_module in momenta:
         bn_module.momentum = momenta[bn_module]
-    # modules() is pre-order, so a parent's recursive train() runs before its
-    # children are checked. Calling train() keeps any overrides' side effects.
-    for module, training in was_training.items():
-        if module.training != training:
-            module.train(training)
+    # The pre-order walk with duplicates visits a module again under each of
+    # its parents, so its last check comes after every parent's recursive
+    # train(). Calling train() keeps any overrides' side effects.
+    for _, module in model.named_modules(remove_duplicate=False):
+        if module.training != was_training[module]:
+            module.train(was_training[module])
 
 
 class SWALR(LRScheduler):

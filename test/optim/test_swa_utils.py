@@ -198,11 +198,38 @@ class TestSWAUtilsGeneric(TestCase):
 
         dl_x = torch.utils.data.DataLoader(torch.rand(20, 4), batch_size=5)
         model = torch.nn.Sequential(Net())
-        model.eval()
+        model.train()
+        model[0].eval()
         model[0].modes.clear()
         update_bn(dl_x, model)
-        self.assertEqual(model[0].modes, [True, False])
-        self.assertFalse(model.training)
+        self.assertFalse(model[0].modes[-1])
+        self.assertFalse(model[0].training)
+        self.assertTrue(model.training)
+
+    def test_bn_update_restores_shared_submodule_mode(self):
+        # A module with two parents must get its own mode back even when a
+        # later parent's recursive train() changes it.
+        dl_x = torch.utils.data.DataLoader(torch.rand(20, 4), batch_size=5)
+        shared = torch.nn.Dropout()
+        a = torch.nn.Sequential(shared)
+        b = torch.nn.Sequential(shared)
+        model = torch.nn.Sequential(torch.nn.BatchNorm1d(4), a, b)
+        model.train()
+        b.eval()
+        shared.train()
+        update_bn(dl_x, model)
+        self.assertFalse(b.training)
+        self.assertTrue(shared.training)
+
+    def test_bn_update_restores_train_submodule_in_eval_model(self):
+        # Submodules in train mode inside a model in eval mode (e.g. Monte
+        # Carlo dropout) must stay in train mode after update_bn.
+        dl_x = torch.utils.data.DataLoader(torch.rand(20, 4), batch_size=5)
+        model = torch.nn.Sequential(torch.nn.BatchNorm1d(4), torch.nn.Dropout())
+        model.eval()
+        model[1].train()
+        update_bn(dl_x, model)
+        self.assertEqual([m.training for m in model.modules()], [False, False, True])
 
 
 instantiate_parametrized_tests(TestSWAUtilsGeneric)
