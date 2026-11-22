@@ -2103,6 +2103,16 @@ impl Compiled {
             let mut pos: ffi::Py_ssize_t = 0;
             let mut key: Obj = null_mut();
             let mut value: Obj = null_mut();
+            // A name that is no text is refused before any name is
+            // compared with a parameter, as the interpreter refuses it:
+            // a key of another class may compare in Python.
+            while ffi::PyDict_Next(kwargs, &mut pos, &mut key, &mut value) != 0 {
+                if ffi::PyUnicode_Check(key) == 0 {
+                    set_error(ffi::PyExc_TypeError, "keywords must be strings".to_string());
+                    return Err(());
+                }
+            }
+            pos = 0;
             while ffi::PyDict_Next(kwargs, &mut pos, &mut key, &mut value) != 0 {
                 let mut found = None;
                 for j in f.posonlyargcount..argcount + f.kwonlyargcount {
@@ -5119,7 +5129,7 @@ impl Compiled {
                 graph::quiet_import(f.builtins.as_ptr(), f.consts[*name as usize].as_ptr(), at(*fromlist), at(*level))
             }
             Op::BuildMap(vs) => vs.iter().step_by(2).all(|k| !at(*k).is_null() && graph::is_plain_key(at(*k))),
-            Op::MapAdd(_, k, _) => !at(*k).is_null() && graph::is_plain_key(at(*k)),
+            Op::MapAdd(d, k, v) => !at(*d).is_null() && !at(*k).is_null() && !at(*v).is_null() && graph::is_plain_key(at(*k)),
             // Into an object the path made: `record` takes down no other.
             Op::StoreAttr { obj, name, val } => {
                 let held = at(*obj);
@@ -5146,9 +5156,12 @@ impl Compiled {
                 let given: Vec<Obj> = args[..args.len() - strict as usize].iter().map(|v| at(*v)).collect();
                 (*kwnames == NONE || strict) && graph::pure_call(at(*callee), &given, |i| own(args[i]), api).is_some()
             }
+            // A method that changes what it is called on (`pop` of a
+            // dict) only where the path made that.
             Op::CallMethod { recv, name, args, kwnames } => {
                 let given: Vec<Obj> = args.iter().map(|v| at(*v)).collect();
-                *kwnames == NONE && graph::pure_method(at(*recv), self.func.consts[*name as usize].as_ptr(), &given, api)
+                let name = self.func.consts[*name as usize].as_ptr();
+                *kwnames == NONE && (graph::pure_method(at(*recv), name, &given, api) || (own(*recv) && graph::quiet_pop(at(*recv), name, &given)))
             }
             _ => false,
         }
@@ -5337,7 +5350,10 @@ impl Compiled {
                     return Err(());
                 }
                 if ffi::PyDict_CheckExact(held) != 0 {
-                    return Ok(found(held, place));
+                    // A key is looked up only where that runs none of
+                    // its code: the look comes in front of the store,
+                    // which is what hashes it, once.
+                    return if graph::is_plain_key(place) && graph::quiet_keys(held) { Ok(found(held, place)) } else { Err(()) };
                 }
                 if ffi::PyList_CheckExact(held) == 0 || ffi::PyLong_CheckExact(place) == 0 {
                     return Err(());
@@ -6472,7 +6488,7 @@ impl Compiled {
         }
         // What the instruction is to a path, or why it is no part of one.
         let made = |t: &Trace, v: V| t.mapped(v) != NONE && t.defs[t.mapped(v) as usize].made;
-        if let Some((list, item)) = self.appends(inst, regs).filter(|(list, _)| made(t, *list)) {
+        if let Some((list, item)) = self.appends(t, inst, regs).filter(|(list, _)| made(t, *list)) {
             // `list.append(item)` on a list the path made: the list gets
             // the item, and the call gives None.
             let (list, item) = (self.path_value(t, regs, list), self.path_value(t, regs, item));
@@ -6509,6 +6525,55 @@ impl Compiled {
                 t.check(Assert::Plain(class, name_of.clone()), inst.bc);
                 t.push(Op::StoreAttr { obj: target, name: *name, val: value }, NONE, Kind::Residual, inst.bc);
                 t.stores.push(graph::Stored { object: held, keeps: graph::Keeps::Attributes, key: Some(name_of), attribute: true, target, value, own: true });
+                kill(t, regs);
+                return Taken::Went;
+            }
+        }
+        if let Op::SetItem { obj, key, val } = &inst.op {
+            // An item put into a dict the path made, under a plain key:
+            // an entry of it, as where a dict is built (`map_add`). It
+            // is done here and wherever the path runs.
+            let (held, at) = (reg(regs, *obj), reg(regs, *key));
+            let own = made(t, *obj) && !held.is_null() && !capi::is_unboxed(held) && ffi::PyDict_CheckExact(held) != 0;
+            if own && !at.is_null() && !reg(regs, *val).is_null() && graph::is_plain_key(at) && graph::quiet_keys(held) {
+                let (dict, key, value) = (t.mapped(*obj), self.path_value(t, regs, *key), self.path_value(t, regs, *val));
+                frames.top().at(inst.bc & OFFSET_MASK);
+                let Ok(nothing) = self.exec_op(regs, &inst.op) else {
+                    return Taken::Raised;
+                };
+                capi::release(nothing);
+                t.defs[dict as usize].fixed &= t.defs[key as usize].fixed && t.defs[value as usize].fixed;
+                t.push(Op::MapAdd(dict, key, value), NONE, Kind::Residual, inst.bc);
+                kill(t, regs);
+                return Taken::Went;
+            }
+        }
+        if let Some((recv, name, args, held)) = self.method_of(t, inst, regs) {
+            // `pop(key)` or `pop(key, default)` of a dict the path made:
+            // a change of it that gives what it takes out. It is done
+            // here and wherever the path runs, as the call of the method
+            // on the dict, also where the function read the method off
+            // the dict first and calls it later.
+            let (recv, name) = (&recv, &name);
+            let given: Vec<Obj> = args.iter().map(|v| reg(regs, *v)).collect();
+            if made(t, *recv) && inst.dst != NONE && graph::quiet_pop(held, self.func.consts[*name as usize].as_ptr(), &given) {
+                let dict = t.mapped(*recv);
+                let handed: Vec<PathValue> = args.iter().map(|v| self.path_value(t, regs, *v)).collect();
+                // Without the key it raises: behind the graph, that is
+                // what a path that wrote to a tensor from outside cannot
+                // have.
+                let late = t.defs[dict as usize].late || handed.iter().any(|v| t.defs[*v as usize].late);
+                if late && t.writes {
+                    return Taken::Ends("what can fail behind a write to a tensor from outside the path".to_string());
+                }
+                frames.top().at(inst.bc & OFFSET_MASK);
+                let Ok(result) = self.exec_op(regs, &inst.op) else {
+                    return Taken::Raised;
+                };
+                ffi::Py_XINCREF(result);
+                let dst = t.derive(Op::CallMethod { recv: dict, name: *name, args: handed, kwnames: NONE }, Kind::Residual, false, result, inst.bc);
+                capi::release(std::mem::replace(&mut regs[inst.dst as usize], result));
+                t.rename(inst.dst, dst);
                 kill(t, regs);
                 return Taken::Went;
             }
@@ -6560,6 +6625,29 @@ impl Compiled {
                     kill(t, regs);
                     return Taken::Went;
                 }
+            }
+        }
+        if let Op::GetItem(dict, key) = &inst.op {
+            // An entry of a dict the path made, under a plain key, is the
+            // value the path put there, where the path knows everything
+            // that is in the dict: the key is one of the checks.
+            let (held, at) = (reg(regs, *dict), reg(regs, *key));
+            let own = made(t, *dict) && !held.is_null() && !capi::is_unboxed(held) && ffi::PyDict_CheckExact(held) != 0;
+            let known = own && !at.is_null() && graph::is_plain_key(at) && self.pins_keys(t, t.mapped(*dict), inst.bc);
+            let entries = if known { self.entries(t, t.mapped(*dict)) } else { None };
+            let found = entries.filter(|entries| entries.len() as isize == ffi::PyDict_Size(held)).and_then(|entries| {
+                entries.iter().find(|(other, _)| !other.is_null() && graph::same_value(*other, at)).map(|(_, value)| *value)
+            });
+            if let Some(value) = found {
+                let Ok(item) = self.exec_op(regs, &inst.op) else {
+                    return Taken::Raised;
+                };
+                let asked = self.path_value(t, regs, *key);
+                t.check(Assert::Equals(asked, graph::frozen(at)), inst.bc);
+                capi::release(std::mem::replace(&mut regs[inst.dst as usize], item));
+                t.rename(inst.dst, value);
+                kill(t, regs);
+                return Taken::Went;
             }
         }
         if let Op::CellGet(cell, _) = &inst.op {
@@ -7015,6 +7103,10 @@ impl Compiled {
             // The function of a generator expression is of the same code
             // at every call, and of nothing else.
             (Op::MakeFunction { .. }, _) => true,
+            // What stands at a place of a tuple that is the same in every
+            // call is the same in every call, in front of the callable
+            // too: a name of the names a call is written with.
+            (Op::TupleGet(of, _), _) if t.defs[*of as usize].fixed && ffi::PyTuple_CheckExact(t.rec.values[*of as usize]) != 0 => true,
             (Op::Dispatch(d), Kind::Node) => !unsure && d.slot.operator().is_some_and(|name| graph::shaped_operator(&name)),
             (_, Kind::Node) => {
                 !unsure && operators.as_ref().is_some_and(|names| names.split('+').all(graph::shaped_operator))
@@ -7537,7 +7629,10 @@ impl Compiled {
                 let held = ffi::PyCFunction_GetSelf(bound);
                 let method = pyffi::str_to_string(f.consts[*name as usize].as_ptr());
                 let exact = !held.is_null() && !capi::is_unboxed(held) && ffi::PyList_CheckExact(held) != 0;
-                if !exact || made(t, *recv) || t.mapped(*recv) == NONE {
+                // The list is the value the method was read off: a method
+                // of another list that an object merely holds is no
+                // change of the object.
+                if !exact || made(t, *recv) || t.mapped(*recv) == NONE || t.rec.values[t.mapped(*recv) as usize] != held {
                     return None;
                 }
                 let more = reg(regs, args[0]);
@@ -9208,27 +9303,40 @@ impl Compiled {
 
     /// For `list.append(item)` on an exact list, however the code has it:
     /// the list and the item.
-    unsafe fn appends(&self, inst: &Inst, regs: &[Obj]) -> Option<(V, V)> {
-        let (list, name, item, held) = match &inst.op {
-            Op::CallMethod { recv, name, args, kwnames } if *kwnames == NONE && args.len() == 1 => {
-                (*recv, *name, args[0], reg(regs, *recv))
-            }
-            // The method was bound earlier: it has the list.
-            Op::Call { callee, args, kwnames } if *kwnames == NONE && args.len() == 1 => {
-                let bound = reg(regs, *callee);
-                let function = !bound.is_null() && !capi::is_unboxed(bound) && ffi::PyCFunction_Check(bound) != 0;
-                match self.analysis.def_op(&self.func, *callee) {
-                    Some(Op::LoadAttr(recv, name)) if function => {
-                        (*recv, *name, args[0], ffi::PyCFunction_GetSelf(bound))
-                    }
-                    _ => return None,
-                }
-            }
-            _ => return None,
-        };
+    unsafe fn appends(&self, t: &Trace, inst: &Inst, regs: &[Obj]) -> Option<(V, V)> {
+        let (list, name, args, held) = self.method_of(t, inst, regs)?;
         let named = pyffi::str_to_string(self.func.consts[name as usize].as_ptr()) == "append";
         let exact = !held.is_null() && !capi::is_unboxed(held) && ffi::PyList_CheckExact(held) != 0;
-        (named && exact && inst.dst != NONE).then_some((list, item))
+        (named && exact && args.len() == 1 && inst.dst != NONE).then(|| (list, args[0]))
+    }
+
+    /// A call of a method without names, as the two ways a function has
+    /// of writing it: the register the method is called on, its name,
+    /// what it is handed, and the value it is called on. `d.pop(key)` is
+    /// one instruction; `take = d.pop` and `take(key)` later, or
+    /// `d.pop(key, f())`, are a read of the method and a call of what was
+    /// read. For the second the method is one written in C that has
+    /// exactly the value it was read off, which the path has taken down
+    /// (the register may be empty by now): a method that an object merely
+    /// holds, `o.append = other.append`, is a method of the other value,
+    /// and no method of the object.
+    unsafe fn method_of<'a>(&self, t: &Trace, inst: &'a Inst, regs: &[Obj]) -> Option<(V, u32, &'a [V], Obj)> {
+        match &inst.op {
+            Op::CallMethod { recv, name, args, kwnames: NONE } => Some((*recv, *name, args.as_slice(), reg(regs, *recv))),
+            Op::Call { callee, args, kwnames: NONE } => {
+                let bound = reg(regs, *callee);
+                if bound.is_null() || capi::is_unboxed(bound) || ffi::PyCFunction_Check(bound) == 0 {
+                    return None;
+                }
+                let Some(Op::LoadAttr(recv, name)) = self.analysis.def_op(&self.func, *callee) else {
+                    return None;
+                };
+                let (held, read_off) = (ffi::PyCFunction_GetSelf(bound), t.mapped(*recv));
+                let same = read_off != NONE && !held.is_null() && t.rec.values[read_off as usize] == held;
+                same.then(|| (*recv, *name, args.as_slice(), held))
+            }
+            _ => None,
+        }
     }
 
     /// The values a call takes out of a list or a tuple that the code
@@ -9388,6 +9496,12 @@ impl Compiled {
                     }
                 }
                 Op::DictMerge(target, more, _) if *target == dict => entries.as_mut()?.extend(Self::entries_by(t, *more, at)?),
+                // `pop` (the one method of a dict the path made that a
+                // path has as a change): the entry under the key is gone.
+                Op::CallMethod { recv, args, .. } if *recv == dict && inst.kind == Kind::Residual => {
+                    let taken = key(*args.first()?);
+                    entries.as_mut()?.retain(|(other, _)| *other != taken && !unsafe { graph::same_value(*other, taken) });
+                }
                 _ => {}
             }
         }
@@ -9424,7 +9538,14 @@ impl Compiled {
         }
         for key in keys {
             let (of, held) = (t.defs[key as usize], t.rec.values[key as usize]);
-            if of.fixed {
+            // A constant of its function is one wherever the path took
+            // it from (a path that starts behind it has it as an input).
+            let (owner, v) = t.source[key as usize];
+            let constant = v != NONE && v != UNDEF && {
+                let function = &*t.owners[owner as usize];
+                matches!(function.analysis.def_op(&function.func, v), Some(Op::Const(_)))
+            };
+            if of.fixed || constant {
                 continue;
             }
             if of.late || held.is_null() || !graph::checkable(held) {
