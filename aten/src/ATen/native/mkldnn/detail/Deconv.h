@@ -7,7 +7,6 @@
 
 #include <memory>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 namespace at::native::mkldnn {
@@ -30,7 +29,8 @@ struct deconv_forward_params {
 // Ported from ideep::convolution_transpose_forward::compute (int8 2-in-1).
 // 2-in-1 Compute for int8
 // With bias. Bias is disabled if it is empty.
-// This one does not have `is_channels_last` argument for compatibility
+// Channels-last is inferred from the src and weights descriptors.
+// Only <true, true> is instantiated.
 template <bool reorder_src = true, bool reorder_weight = true>
 void convolution_transpose_forward_compute(
     const ITensor& src,
@@ -56,7 +56,7 @@ void convolution_transpose_forward_compute(
 // Ported from ideep::convolution_transpose_forward::prepare (int8).
 // Prepare for int8
 // With bias. Bias is disabled if it is empty.
-// This one does not have `is_channels_last` argument for compatibility
+// Channels-last is inferred from the src and weights descriptors.
 void convolution_transpose_forward_prepare(
     deconv_forward_params& param,
     const ITensor& src,
@@ -67,8 +67,8 @@ void convolution_transpose_forward_prepare(
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,
-    const dnnl::memory::dims& dilates, // default = {1, 1}
-    int groups, // default = 1
+    const dnnl::memory::dims& dilates,
+    int groups,
     const std::vector<float>& src_scales,
     const std::vector<float>& weights_scales,
     const std::vector<float>& dst_scales,
@@ -80,12 +80,12 @@ void convolution_transpose_forward_prepare(
     const lowp_kind alowp_kind = u8s8);
 
 // Ported from ideep::convolution_transpose_forward::compute (prepared params).
-// Compute with prepared params. For both fp32 and int8
+// Compute with params from convolution_transpose_forward_prepare.
 // With bias. Bias is disabled if it is empty.
 // `reorder_src` and `reorder_weight` indicate whether
 // src/dst and weight/bias should be checked and possibly reordered.
-// Set them to False if you are sure they don't need reordering.
-template <bool reorder_src = true, bool reorder_weight = true>
+// Only <false, false> is instantiated.
+template <bool reorder_src, bool reorder_weight>
 void convolution_transpose_forward_compute(
     const deconv_forward_params& param,
     const ITensor& src,
@@ -180,8 +180,8 @@ void convolution_transpose_backward_data_compute_v3(
 void convolution_transpose_backward_weights_compute_v3(
     const ITensor& src,
     const ITensor& diff_dst,
-    const dnnl::memory::dims& diff_weights_dims,
-    ITensor& diff_weights,
+    const dnnl::memory::dims& diff_weights_dims, // dim: {i, o[, d], h, w}
+    ITensor& diff_weights, // dim: {i, o[, d], h, w}
     ITensor& diff_bias,
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
@@ -197,8 +197,8 @@ void convolution_transpose_backward_weights_compute_v3(
 void convolution_transpose_backward_weights_compute_v3(
     const ITensor& src,
     const ITensor& diff_dst,
-    const dnnl::memory::dims& diff_weights_dims,
-    ITensor& diff_weights,
+    const dnnl::memory::dims& diff_weights_dims, // dim: {i, o[, d], h, w}
+    ITensor& diff_weights, // dim: {i, o[, d], h, w}
     const dnnl::memory::dims& strides,
     const dnnl::memory::dims& padding_l,
     const dnnl::memory::dims& padding_r,

@@ -7,7 +7,6 @@
 
 #include <memory>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 namespace at::native::mkldnn {
@@ -29,7 +28,6 @@ struct matmul_forward_params {
   Attr op_attr;
   Attr src_attr;
   Attr weights_attr;
-  Attr bias_attr; // contains requantization scales for bias
   std::shared_ptr<matmul_forward_dyn_quant_params> dq_param_ptr;
   // Keep {dnnl_arg, tensor} pairs of scales and zero points for primitive
   // execution
