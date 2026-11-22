@@ -3603,6 +3603,25 @@ pub struct Trace {
     pub abandoned: Option<String>,
     /// See `Path::first`.
     pub first: Option<(usize, u32)>,
+    /// From which instruction of the path each of its values is late (see
+    /// `Family`).
+    pub things: Family,
+}
+
+/// Per value of a path, from where it is late: computed behind the
+/// callable.
+#[derive(Default)]
+pub struct Family {
+    /// Per value of the path: the instruction of the path from which it is
+    /// late (computed behind the callable); u32::MAX for one that is not.
+    since: Vec<u32>,
+}
+
+impl Family {
+    /// Whether a value is late for the instruction `at` of the path.
+    pub fn late(&self, v: PathValue, at: usize) -> bool {
+        self.since.get(v as usize).is_some_and(|since| (*since as usize) <= at)
+    }
 }
 
 impl Trace {
@@ -3620,6 +3639,7 @@ impl Trace {
             rec: Recording { values: vec![null_mut()], kept: HashMap::new(), nodes: Vec::new(), failed: None, wrote: false },
             abandoned: None,
             first: None,
+            things: Family { since: vec![u32::MAX] },
         }
     }
 
@@ -3629,6 +3649,7 @@ impl Trace {
     pub fn define(&mut self, v: V, def: Def, kept: Obj) -> PathValue {
         let made = self.defs.len() as PathValue;
         self.defs.push(def);
+        self.things.since.resize(self.defs.len(), u32::MAX);
         self.source.push(v);
         self.rec.values.push(kept);
         if !kept.is_null() && !capi::is_unboxed(kept) {
@@ -3801,8 +3822,20 @@ impl Path {
         ends: String,
         provisional: bool,
     ) -> Path {
+        // A value that is late is so from some instruction on: from the
+        // first, where nothing says from which.
+        trace.things.since.resize(trace.defs.len(), u32::MAX);
+        for v in 0..trace.defs.len() {
+            if trace.defs[v].late && trace.things.since[v] == u32::MAX {
+                trace.things.since[v] = 0;
+            }
+        }
         let defs = &trace.defs;
         let nregs = defs.len();
+        let things = &trace.things;
+        // Whether a value is late for the instruction `at`: computed
+        // behind the callable, or of a family that runs behind it by then.
+        let late = |v: PathValue, at: usize| things.late(v, at);
         // What is read behind the path of what it made, and so has to be
         // there when it ends.
         let mut need = vec![false; nregs];
@@ -3836,28 +3869,28 @@ impl Path {
         let mut wanted = vec![false; nregs];
         let (mut outputs, mut exits) = (Vec::new(), Vec::new());
         let mut branches = 0;
-        for inst in trace.body.iter_mut().rev() {
+        for (at, inst) in trace.body.iter_mut().enumerate().rev() {
             let dst = inst.dst;
             let needed = dst != NONE && need[dst as usize];
-            let def = if dst == NONE { Def::default() } else { defs[dst as usize] };
+            let def = if dst == NONE { Def::default() } else { Def { late: late(dst, at), ..defs[dst as usize] } };
             // What an operation of the graph, or a value the graph computes,
             // takes: of what depends on a node, the graph computes it too,
             // and it has the lists the path builds as what they hold; the
             // rest is there in front of the callable.
             let takes = |op: &Op, wanted: &mut [bool], need: &mut [bool]| {
-                reads(op, |v| match defs[v as usize] {
+                reads(op, |v| match (Def { late: late(v, at), ..defs[v as usize] }) {
                     taken if (taken.late && !taken.node) || built[v as usize] => wanted[v as usize] = true,
                     taken if !taken.late => need[v as usize] = true,
                     _ => {}
                 })
             };
             let uses = |op: &Op, need: &mut [bool]| {
-                let mut late = false;
+                let mut behind = false;
                 op.for_each_use(|v| {
                     need[v as usize] = true;
-                    late |= defs[v as usize].late;
+                    behind |= late(v, at);
                 });
-                if late { Stage::After } else { Stage::Before }
+                if behind { Stage::After } else { Stage::Before }
             };
             inst.stage = match inst.kind {
                 Kind::Node => {
@@ -3880,7 +3913,7 @@ impl Path {
                         _ => {
                             branches += matches!(assert, Assert::Truth(..) | Assert::Null(..)) as usize;
                             need[v] = true;
-                            if defs[v].late { Stage::After } else { Stage::Before }
+                            if late(v as PathValue, at) { Stage::After } else { Stage::Before }
                         }
                     }
                 }
@@ -3919,9 +3952,9 @@ impl Path {
         outputs.reverse();
         exits.reverse();
         let mut feeds: Vec<PathValue> = Vec::new();
-        for inst in trace.body.iter().filter(|inst| inst.kind == Kind::Node || inst.in_graph) {
+        for (at, inst) in trace.body.iter().enumerate().filter(|(_, inst)| inst.kind == Kind::Node || inst.in_graph) {
             reads(&inst.op, |v| {
-                if !defs[v as usize].late && !wanted[v as usize] && !feeds.contains(&v) {
+                if !late(v, at) && !wanted[v as usize] && !feeds.contains(&v) {
                     feeds.push(v);
                 }
             });
