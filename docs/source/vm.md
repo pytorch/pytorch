@@ -649,8 +649,10 @@ default dtype, whether algorithms have to be deterministic, the dispatch
 keys it adds); and the same
 numbers and objects where an operation takes one from outside the graph (the
 function a global names, a float; a list or a tuple of numbers by what is in
-it at the call, to any depth, not by which list it is: one that was changed
-in place since is another value). A call of another kind runs the
+it at the call, up to 64 lists, tuples and slices inside one another, not by
+which list it is: one that was changed in place since is another value, and
+one that goes deeper, or that holds itself, is never the value a form was
+made for). A call of another kind runs the
 operations and is exported in its turn. What was made for a kind of call is
 a form of the graph, and a graph has `max_variants` of them at most (8
 unless `Graphs` is made with another number); calls of further kinds then
