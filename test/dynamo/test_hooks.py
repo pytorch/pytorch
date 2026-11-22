@@ -107,8 +107,11 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     @staticmethod
-    def compile_counted(fn):
+    def compile_counted(fn, export=None):
         counter = torch._dynamo.testing.CompileCounter()
+        if export is not None:
+            opt = torch._dynamo.optimize(counter, nopython=True, guard_export_fn=export)
+            return opt(fn), counter
         return torch.compile(fn, backend=counter, fullgraph=True), counter
 
     @parametrize("mapping_type", [dict, OrderedDict])
@@ -353,12 +356,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             global_module._forward_hooks[1] = add_one
         module = copy.copy(global_module)
         exported = []
-        counter = torch._dynamo.testing.CompileCounter()
-        compiled = torch._dynamo.optimize(
-            counter,
-            nopython=True,
-            guard_export_fn=lambda guards: exported.append(list(guards)),
-        )(fn)
+        compiled, counter = self.compile_counted(fn, lambda g: exported.append(list(g)))
         x = torch.ones(1)
         with patch(f"{__name__}._mixed_hook_module", global_module):
             self.assertEqual(compiled(x, module), fn(x, module))
@@ -428,6 +426,20 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(compiled(module, x), module(x))
             if not capture:
                 self.assertEqual(counter.frame_count, 2 if collision else 1)
+
+    def test_global_hook_registry_argument_checks_type(self):
+        class AllKeys(dict):
+            def __contains__(self, key):
+                return True
+
+        def fn(x, registry):
+            return x + (5 in registry)
+
+        compiled, counter = self.compile_counted(fn)
+        x = torch.ones(1)
+        for registry in (hook_api._global_forward_hooks_with_kwargs, AllKeys()):
+            self.assertEqual(compiled(x, registry), fn(x, registry))
+        self.assertEqual(counter.frame_count, 2)
 
     @parametrize("source", ["argument", "alias", "vars", "removed"])
     def test_global_hook_registry_reuse(self, source):
@@ -596,11 +608,7 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             return module(x)
 
         exported = []
-        compiled = torch._dynamo.optimize(
-            "eager",
-            nopython=True,
-            guard_export_fn=lambda guards: exported.append(list(guards)),
-        )(fn)
+        compiled, _ = self.compile_counted(fn, lambda g: exported.append(list(g)))
         x = torch.ones(1)
         module, fresh = torch.nn.Identity(), torch.nn.Identity()
         for current in (module, fresh):
@@ -1090,9 +1098,8 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
                 x = module(x)
             return x + 1
 
-        cc = torch._dynamo.testing.CompileCounter()
         seen = []
-        opt = torch._dynamo.optimize(cc, guard_export_fn=seen.extend, nopython=True)(fn)
+        opt, cc = self.compile_counted(fn, seen.extend)
         with contextlib.ExitStack() as stack:
             if hook_mode == "global":
                 stack.callback(hook_api.register_module_forward_hook(add_two).remove)
