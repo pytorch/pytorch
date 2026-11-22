@@ -221,6 +221,26 @@ class TestSWAUtilsGeneric(TestCase):
         self.assertFalse(b.training)
         self.assertTrue(shared.training)
 
+    def test_bn_update_submodule_created_in_forward(self):
+        # A submodule registered during forward() has no saved mode and takes
+        # its parent's restored mode.
+        class Net(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bn = torch.nn.BatchNorm1d(4)
+
+            def forward(self, x):
+                if not hasattr(self, "head"):
+                    self.head = torch.nn.Linear(4, 4)
+                return self.head(self.bn(x))
+
+        dl_x = torch.utils.data.DataLoader(torch.rand(20, 4), batch_size=5)
+        model = Net()
+        model.eval()
+        update_bn(dl_x, model)
+        self.assertFalse(model.training)
+        self.assertFalse(model.head.training)
+
     def test_bn_update_restores_train_submodule_in_eval_model(self):
         # Submodules in train mode inside a model in eval mode (e.g. Monte
         # Carlo dropout) must stay in train mode after update_bn.

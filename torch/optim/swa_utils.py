@@ -435,10 +435,12 @@ def update_bn(
         bn_module.momentum = momenta[bn_module]
     # The pre-order walk with duplicates visits a module again under each of
     # its parents, so its last check comes after every parent's recursive
-    # train(). Calling train() keeps any overrides' side effects.
-    for _, module in model.named_modules(remove_duplicate=False):
-        if module.training != was_training[module]:
-            module.train(was_training[module])
+    # train(). Calling train() keeps any overrides' side effects. Modules
+    # created during forward() have no saved mode; their parent sets it.
+    for module in model.modules(remove_duplicate=False):
+        training = was_training.get(module)
+        if training is not None and module.training != training:
+            module.train(training)
 
 
 class SWALR(LRScheduler):
