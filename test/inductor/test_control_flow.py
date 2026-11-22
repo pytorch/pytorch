@@ -2157,6 +2157,23 @@ class ScanModels:
 
             return scan_op(step, initial, xs)
 
+    class ScanOverTiles(torch.nn.Module):
+        def __init__(self, dim):
+            super().__init__()
+            self.dim = dim
+            self.linear = torch.nn.Linear(3, 5)
+
+        def forward(self, scan_op, x):
+            # Only the tile count n = rows // 4 reaches the combine_fn, not rows itself.
+            n = x.size(0) // 4
+            sizes = (n, 4) if self.dim == 0 else (4, n)
+            xs = x.narrow(0, 0, n * 4).unflatten(0, sizes)
+
+            def step(acc, tile):
+                return acc + tile.sum(), self.linear(tile).sin()
+
+            return scan_op(step, torch.zeros((), device=x.device), xs, dim=self.dim)
+
     class ScanWithClamp(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -2447,6 +2464,27 @@ class ScanTests(TestCase):
             autograd=False,
         )
 
+    @parametrize("device", ["cpu"] + ([GPU_TYPE] if HAS_GPU else []))
+    @parametrize("dim", [0, 1])
+    @parametrize("cpp_wrapper", [False, True])
+    @parametrize("autograd", [False, True])
+    def test_scan_length_derived_from_dynamic_size(
+        self, device, dim, cpp_wrapper, autograd
+    ):
+        model = ScanModels.ScanOverTiles(dim).to(device)
+        compiled = torch.compile(model, fullgraph=True)
+        with torch._inductor.config.patch(cpp_wrapper=cpp_wrapper):
+            for rows in (16, 26):
+                x = torch.randn(rows, 3, device=device, requires_grad=autograd)
+                torch._dynamo.mark_dynamic(x, 0)
+                result, expected = compiled(scan, x), model(_fake_scan, x)
+                self.assertEqual(result, expected)
+                if autograd:
+                    inputs = (x, *model.parameters())
+                    grads = torch.autograd.grad(loss_fn(result), inputs)
+                    expected_grads = torch.autograd.grad(loss_fn(expected), inputs)
+                    self.assertEqual(grads, expected_grads)
+
 
 class MapModels:
     class Simple(torch.nn.Module):
@@ -2509,6 +2547,19 @@ class MapModels:
             return torch._higher_order_ops.cond(
                 x.sum() > 0, true_fn, false_fn, (x, y, z)
             )
+
+    class MapOverTiles(torch.nn.Module):
+        def __init__(self, dim):
+            super().__init__()
+            self.dim = dim
+            self.linear = torch.nn.Linear(3, 5)
+
+        def forward(self, map_op, x):
+            # Only the tile count n = rows // 4 reaches f, not rows itself.
+            n = x.size(0) // 4
+            sizes = (n, 4) if self.dim == 0 else (4, n)
+            xs = x.narrow(0, 0, n * 4).unflatten(0, sizes).movedim(self.dim, 0)
+            return map_op(lambda tile: self.linear(tile).sin(), xs)
 
 
 class MapTests(TestCase):
@@ -2619,6 +2670,23 @@ class MapTests(TestCase):
             dynamic=dynamic,
             autograd=autograd,
         )
+
+    @parametrize("device", ["cpu"] + ([GPU_TYPE] if HAS_GPU else []))
+    @parametrize("dim", [0, 1])
+    @parametrize("autograd", [False, True])
+    def test_map_length_derived_from_dynamic_size(self, device, dim, autograd):
+        model = MapModels.MapOverTiles(dim).to(device)
+        compiled = torch.compile(model, fullgraph=True)
+        hop_map = torch._higher_order_ops.map
+        for rows in (16, 26):
+            x = torch.randn(rows, 3, device=device, requires_grad=autograd)
+            torch._dynamo.mark_dynamic(x, 0)
+            result, expected = compiled(hop_map, x), model(_fake_map, x)
+            self.assertEqual(result, expected)
+            if autograd:
+                inputs = (x, *model.parameters())
+                grads = torch.autograd.grad(result.sum(), inputs)
+                self.assertEqual(grads, torch.autograd.grad(expected.sum(), inputs))
 
 
 class SwitchModels:
