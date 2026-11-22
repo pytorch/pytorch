@@ -5055,6 +5055,16 @@ impl Compiled {
     /// graph all the same (see `graph::generic`), on the values it is about
     /// to run on: its operators, as they are reported.
     unsafe fn operation(&self, block: usize, origin: u32, inst: &Inst, regs: &[Obj], api: &TcfgApi) -> Option<String> {
+        let operators = self.operation_of(block, origin, inst, regs, api)?;
+        // No operation takes a list or a tuple that holds itself: what
+        // goes into the operands of an operation ends.
+        let mut closed = false;
+        inst.op.for_each_use(|v| closed |= graph::holds_itself(reg(regs, v)));
+        (!closed).then_some(operators)
+    }
+
+    /// `operation`, before the operands are looked into.
+    unsafe fn operation_of(&self, block: usize, origin: u32, inst: &Inst, regs: &[Obj], api: &TcfgApi) -> Option<String> {
         let mut info = TcfgTensorInfo::empty();
         let mut tensor = |v: V| !reg(regs, v).is_null() && (api.tensor_info)(reg(regs, v), &mut info) != 0;
         let fits = match &inst.op {
