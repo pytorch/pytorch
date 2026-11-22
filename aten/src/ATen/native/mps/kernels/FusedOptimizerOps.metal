@@ -112,6 +112,40 @@ inline void adam_math_amsgrad(
   grad = grad_;
 }
 
+// The compiler outlines adam_math_amsgrad (a call per element). For float that
+// is slightly faster than inlining it, but it makes the half and bfloat AMSGrad
+// kernels about 1.3x slower, so those inline it through this wrapper.
+template <typename T, typename state_steps_t, ADAM_MODE adam_mode>
+inline __attribute__((always_inline, flatten)) void adam_math_amsgrad_inlined(
+    device T& param,
+    device T& grad,
+    device T& exp_avg,
+    device T& exp_avg_sq,
+    device T& max_exp_avg_sq,
+    device state_steps_t& state_steps,
+    const float lr,
+    const float beta1,
+    const float beta2,
+    const float weight_decay,
+    const float eps,
+    const uint8_t maximize,
+    device const float* grad_scale) {
+  adam_math_amsgrad<T, state_steps_t, adam_mode>(
+      param,
+      grad,
+      exp_avg,
+      exp_avg_sq,
+      max_exp_avg_sq,
+      state_steps,
+      lr,
+      beta1,
+      beta2,
+      weight_decay,
+      eps,
+      maximize,
+      grad_scale);
+}
+
 // Without always_inline this gets outlined (a call per element), which makes
 // the half and bfloat Adam kernels 1.5x slower
 template <typename T, typename state_steps_t, ADAM_MODE adam_mode>
@@ -199,20 +233,37 @@ kernel void fused_adam_amsgrad(
 
   for (uint32_t i_start = tid; i_start < numel && i_start < chunk_size;
        i_start += tptg) {
-    adam_math_amsgrad<T, state_steps_t, adam_mode>(
-        *(param + i_start),
-        *(grad + i_start),
-        *(exp_avg + i_start),
-        *(exp_avg_sq + i_start),
-        *(max_exp_avg_sq + i_start),
-        *step_count,
-        lr,
-        beta1,
-        beta2,
-        weight_decay,
-        eps,
-        maximize,
-        grad_scale);
+    if IF_CONSTEXPR (metal::is_same_v<T, float>) {
+      adam_math_amsgrad<T, state_steps_t, adam_mode>(
+          *(param + i_start),
+          *(grad + i_start),
+          *(exp_avg + i_start),
+          *(exp_avg_sq + i_start),
+          *(max_exp_avg_sq + i_start),
+          *step_count,
+          lr,
+          beta1,
+          beta2,
+          weight_decay,
+          eps,
+          maximize,
+          grad_scale);
+    } else {
+      adam_math_amsgrad_inlined<T, state_steps_t, adam_mode>(
+          *(param + i_start),
+          *(grad + i_start),
+          *(exp_avg + i_start),
+          *(exp_avg_sq + i_start),
+          *(max_exp_avg_sq + i_start),
+          *step_count,
+          lr,
+          beta1,
+          beta2,
+          weight_decay,
+          eps,
+          maximize,
+          grad_scale);
+    }
   }
 }
 
