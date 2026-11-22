@@ -7160,7 +7160,7 @@ class ShapeEnv:
 
     def produce_guards_expression(
         self,
-        placeholders: Sequence[SymInt | FakeTensor],
+        placeholders: Sequence[SymInt | SymFloat | FakeTensor | None],
         *,
         guards: list[ShapeGuard] | None = None,
         ignore_static: bool = True,
@@ -7215,7 +7215,9 @@ class ShapeEnv:
             return self.evaluate_guards_expression(code, args)
         return True
 
-    def get_pruned_guards(self, symints: Sequence[torch.SymInt]) -> list[ShapeGuard]:
+    def get_pruned_guards(
+        self, symints: Sequence[torch.SymInt | torch.SymFloat]
+    ) -> list[ShapeGuard]:
         """
         Get a list of guards, but pruned so it only provides guards that
         reference symints from the passed in input

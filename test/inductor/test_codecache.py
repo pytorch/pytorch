@@ -3866,6 +3866,44 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
+    @torch._dynamo.config.patch(specialize_float=False)
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @parametrize("is_aot", (False, True))
+    def test_dynamic_shapes_from_graph_float_guard(self, is_aot: bool) -> None:
+        def f(x, s):
+            if s > 0.5:
+                return x * s + 1.0
+            return x * s - 1.0
+
+        x = torch.ones(3, requires_grad=True)
+        with fresh_cache(), tempfile.TemporaryDirectory() as temp_dir:
+            gm, args, kwargs = self.capture(f, dynamic=True)(x, 0.8)
+            if kwargs:
+                raise AssertionError
+
+            path = os.path.join(temp_dir, "compiled_artifact.bin")
+            compiled_artifact = torch._inductor.standalone_compile(
+                gm, args, dynamic_shapes="from_graph", aot=is_aot
+            )
+            compiled_artifact.save(path=path, format="binary")
+
+            with fresh_cache():
+                loaded = torch._inductor.CompiledArtifact.load(
+                    path=path, format="binary"
+                )
+                concrete_args = [
+                    3
+                    if isinstance(a, torch.SymInt)
+                    else torch.tensor(0.9, dtype=a.dtype)
+                    if isinstance(a, torch.Tensor) and a.ndim == 0
+                    else x.detach().clone().requires_grad_(True)
+                    for a in args
+                ]
+                (result,) = loaded(*concrete_args)
+                self.assertEqual(result, f(x.detach(), 0.9))
+
 
 class _TestCustomPartitionerFn(CustomPartitionerFn):
     def __init__(self):

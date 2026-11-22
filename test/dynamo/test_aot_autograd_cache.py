@@ -3800,7 +3800,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
-    def test_float_symbol_guard_bypasses_cache_and_strict_raises(self):
+    def test_float_symbol_guard_caches_and_misses_missing_placeholder(self):
         def fn(x, s):
             if s > 0.5:
                 return x * s + 1.0
@@ -3817,39 +3817,50 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             compiled_fn = torch.compile(fn, backend="inductor", dynamic=True)
             t, out = run(compiled_fn, 0.8)
             self.assertEqual(out, fn(t.detach(), 0.8))
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
 
             torch._dynamo.reset()
             t, out = run(compiled_fn, 0.9)
             self.assertEqual(out, fn(t.detach(), 0.9))
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 2)
-
-            torch._dynamo.reset()
-            with functorch_config.patch({"strict_autograd_cache": True}):
-                with self.assertRaisesRegex(
-                    (
-                        torch._dynamo.exc.BackendCompilerFailed,
-                        autograd_cache.BypassAOTAutogradCache,
-                    ),
-                    "guard on float symbol",
-                ):
-                    run(torch.compile(fn, backend="inductor", dynamic=True), 0.8)
-
-            def int_fn(x, n):
-                if n > 2:
-                    return x * n + 1.0
-                return x * n - 1.0
-
-            torch._dynamo.reset()
-            counters.clear()
-            compiled_int = torch.compile(int_fn, backend="inductor", dynamic=True)
-            t, out = run(compiled_int, 4)
-            self.assertEqual(out, int_fn(t.detach(), 4))
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+            with functorch_config.patch({"strict_autograd_cache": True}):
+                counters.clear()
+                torch._dynamo.reset()
+                t, out = run(compiled_fn, 0.85)
+                self.assertEqual(out, fn(t.detach(), 0.85))
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+                torch._dynamo.reset()
+                t, out = run(compiled_fn, 0.95)
+                self.assertEqual(out, fn(t.detach(), 0.95))
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+        # Guard against None != c false hits and cross-argument slot shifts.
+        shape_env = torch.fx.experimental.symbolic_shapes.ShapeEnv()
+        fake_mode = torch._subclasses.FakeTensorMode(shape_env=shape_env)
+        ctx = torch._guards.TracingContext(fake_mode)
+        with torch._guards.tracing(ctx):
+            self.assertFalse(
+                autograd_cache.AOTAutogradCache.evaluate_guards("L['t0'] == 0.2", [])
+            )
+            self.assertFalse(
+                autograd_cache.AOTAutogradCache.evaluate_guards(
+                    "L['t0'] != 0.1", [None, 0.2]
+                )
+            )
+            self.assertFalse(
+                autograd_cache.AOTAutogradCache.evaluate_guards(
+                    "L['t0'] == 0.2", [None, 0.2]
+                )
+            )
+            self.assertTrue(
+                autograd_cache.AOTAutogradCache.evaluate_guards(
+                    "L['t1'] == 0.2", [None, 0.2]
+                )
+            )
 
 
 @functorch_config.patch({"bundled_autograd_cache": True})

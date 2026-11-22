@@ -1947,6 +1947,9 @@ def add_ephemeral_timeout_increase_for_distributed(time_saved_ns: int) -> int:
     return increased_timeout_sec
 
 
+_GuardedCacheHintT = TypeVar("_GuardedCacheHintT")
+
+
 class GuardedCache(Generic[T]):
     """
     Mixin for caches that have guards associated with their entries.
@@ -2032,8 +2035,8 @@ class GuardedCache(Generic[T]):
         key: str,
         local: bool,
         remote_cache: RemoteCache[JsonDataTy] | None,
-        evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool],
-        hints: list[int],
+        evaluate_guards: Callable[[str, list[_GuardedCacheHintT]], bool],
+        hints: list[_GuardedCacheHintT],
     ) -> tuple[T | None, bytes | None, CacheInfo]:
         """
         Find the first cache entry in iterate_over_candidates that passes `evaluate_guards`.

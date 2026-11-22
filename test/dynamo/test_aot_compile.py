@@ -11524,7 +11524,7 @@ from user code:
             self.assertEqual(reloaded(x, 0.9), fn(x, 0.9))
             self.assertEqual(
                 torch._dynamo.utils.counters["aot_autograd"]["autograd_cache_saved"],
-                0,
+                1,
             )
             with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
                 reloaded(x, 0.2)
