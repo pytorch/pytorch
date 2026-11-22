@@ -1949,10 +1949,11 @@ class DeviceCachingAllocator {
 
     // Can't reuse an existing block; try to get a new one.
     if (!block_found) {
-      // Do garbage collection if the flag is set.
+      // Do garbage collection if the flag is set. Not during graph capture:
+      // cudaFree invalidates it.
       if (allowed_memory_maximum.has_value() &&
-          AcceleratorAllocatorConfig::garbage_collection_threshold() > 0.0)
-          [[unlikely]] {
+          AcceleratorAllocatorConfig::garbage_collection_threshold() > 0.0 &&
+          !is_capture_context()) [[unlikely]] {
         garbage_collect_cached_blocks(context);
         drain_deferred_custom_frees_outside_lock(lock);
       }
