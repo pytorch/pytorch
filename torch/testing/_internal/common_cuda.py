@@ -394,6 +394,8 @@ def evaluate_platform_supports_fp8_grouped_gemm():
             return SM90OrLater and not SM100OrLater
     if torch.xpu.is_available():
         return True
+    if torch.backends.mps.is_available():
+        return True
     return False
 
 def evaluate_platform_supports_mx_gemm():
@@ -431,6 +433,9 @@ def evaluate_platform_supports_mxfp8_grouped_gemm():
         built_with_mslk = "USE_MSLK" in torch.__config__.show()
         return built_with_mslk and IS_SM100
     if torch.xpu.is_available():
+        return True
+    # MXFP8 and NVFP4 for 2d x 3d and 2d x 2d inputs on MPS
+    if torch.backends.mps.is_available():
         return True
     return False
 

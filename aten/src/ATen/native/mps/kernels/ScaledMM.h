@@ -35,6 +35,8 @@ C10_METAL_CONSTEXPR uint32_t scaled_mm_blockwise_step = 64;
 template <typename index_t = int64_t>
 struct ScaledMMParams {
   uint32_t m, n, k;
+  // Row stride of the block-scaled recipes' scales, in blocks of K
+  uint32_t k_blocks;
   index_t a_row_stride, a_col_stride;
   index_t b_row_stride, b_col_stride;
   index_t out_row_stride, out_col_stride;
@@ -48,3 +50,19 @@ struct ScaledMMParams {
 static_assert(
     sizeof(ScaledMMParams<>) == 72,
     "ScaledMMParams layout must match Metal");
+
+// Batch strides of the operands of _scaled_grouped_mm, by which the kernels
+// offset each group's view; zero for operands shared by every group.
+// scale_a/scale_b are the float (RowWise, TensorWise or NVFP4 global) scales,
+// block_scale_a/block_scale_b the scales of the block-scaled recipes.
+struct ScaledGroupedMMParams {
+  ScaledMMParams<> mm;
+  uint32_t groups;
+  int64_t a_batch_stride, b_batch_stride, out_batch_stride;
+  int64_t scale_a_batch_stride, scale_b_batch_stride;
+  int64_t block_scale_a_batch_stride, block_scale_b_batch_stride;
+};
+
+static_assert(
+    sizeof(ScaledGroupedMMParams) == 136,
+    "ScaledGroupedMMParams layout must match Metal");
