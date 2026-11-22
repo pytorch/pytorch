@@ -7232,11 +7232,14 @@ class ShapeEnv:
     ) -> list[ShapeGuard]:
         """
         Get a list of guards, but pruned so it only provides guards that
-        reference symints from the passed in input
+        reference symbols from the passed in input
         """
         # pyrefly: ignore [bad-assignment]
         symints = {
-            s.node.expr for s in symints if isinstance(s.node.expr, sympy.Symbol)
+            e
+            for s in symints
+            for e in (s.node.expr, s.node._expr)
+            if isinstance(e, sympy.Symbol)
         }
         guards = [
             g for g in self.guards if all(s in symints for s in g.expr.free_symbols)

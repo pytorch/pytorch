@@ -3806,37 +3806,39 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
                 return x * s + 1.0
             return x * s - 1.0
 
-        def run(callable_fn, s):
+        def run(callable_fn, ref_fn, s):
             t = torch.randn(4, requires_grad=True)
+            t_ref = t.detach().clone().requires_grad_(True)
             out = callable_fn(t, s)
+            out_ref = ref_fn(t_ref, s)
             out.sum().backward()
-            return t, out
+            out_ref.sum().backward()
+            self.assertEqual(out, out_ref)
+            self.assertEqual(t.grad, t_ref.grad)
 
         with fresh_cache():
             counters.clear()
             compiled_fn = torch.compile(fn, backend="inductor", dynamic=True)
-            t, out = run(compiled_fn, 0.6)
-            self.assertEqual(out, fn(t.detach(), 0.6))
+            run(compiled_fn, fn, 0.6)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
 
             torch._dynamo.reset()
-            t, out = run(compiled_fn, 0.8)
-            self.assertEqual(out, fn(t.detach(), 0.8))
+            run(compiled_fn, fn, 0.8)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+            self.assertEqual(counters["aot_autograd"]["total"], 2)
+            # A warm cache hit must not pin the float symbol via math.isnan(SymFloat).
+            run(compiled_fn, fn, 0.9)
+            self.assertEqual(counters["aot_autograd"]["total"], 2)
 
             torch._dynamo.reset()
-            t, out = run(compiled_fn, 0.4)
-            self.assertEqual(out, fn(t.detach(), 0.4))
+            run(compiled_fn, fn, 0.4)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
 
             torch._dynamo.reset()
-            t, out = run(compiled_fn, 0.2)
-            self.assertEqual(out, fn(t.detach(), 0.2))
+            run(compiled_fn, fn, 0.2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
@@ -3844,12 +3846,10 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             with functorch_config.patch({"strict_autograd_cache": True}):
                 counters.clear()
                 torch._dynamo.reset()
-                t, out = run(compiled_fn, 0.85)
-                self.assertEqual(out, fn(t.detach(), 0.85))
+                run(compiled_fn, fn, 0.85)
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
                 torch._dynamo.reset()
-                t, out = run(compiled_fn, 0.95)
-                self.assertEqual(out, fn(t.detach(), 0.95))
+                run(compiled_fn, fn, 0.95)
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
         def alpha_fn(x, alpha):
@@ -3858,49 +3858,38 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         with fresh_cache():
             counters.clear()
             compiled_alpha = torch.compile(alpha_fn, backend="inductor", fullgraph=True)
-            a6 = torch.tensor(0.6, dtype=torch.float64)
-            t, out = run(compiled_alpha, a6)
-            self.assertEqual(out, alpha_fn(t.detach(), a6))
+            run(compiled_alpha, alpha_fn, torch.tensor(0.6, dtype=torch.float64))
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
             torch._dynamo.reset()
-            a4 = torch.tensor(0.4, dtype=torch.float64)
-            t, out = run(compiled_alpha, a4)
-            self.assertEqual(out, alpha_fn(t.detach(), a4))
+            run(compiled_alpha, alpha_fn, torch.tensor(0.4, dtype=torch.float64))
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-            self.assertGreaterEqual(
-                counters["aot_autograd"]["autograd_cache_guard_miss"], 1
-            )
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_guard_miss"], 2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
 
             torch._dynamo.reset()
-            t, out = run(compiled_alpha, torch.tensor(0.6, dtype=torch.float64))
-            self.assertEqual(out, alpha_fn(t.detach(), a6))
+            run(compiled_alpha, alpha_fn, torch.tensor(0.6, dtype=torch.float64))
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
         # Guard against None != c false hits and cross-argument slot shifts.
-        shape_env = torch.fx.experimental.symbolic_shapes.ShapeEnv()
-        fake_mode = torch._subclasses.FakeTensorMode(shape_env=shape_env)
-        ctx = torch._guards.TracingContext(fake_mode)
-        with torch._guards.tracing(ctx):
-            self.assertFalse(
-                autograd_cache.AOTAutogradCache.evaluate_guards("L['t0'] == 0.2", [])
+        self.assertFalse(
+            autograd_cache.AOTAutogradCache.evaluate_guards("L['t0'] == 0.2", [])
+        )
+        self.assertFalse(
+            autograd_cache.AOTAutogradCache.evaluate_guards(
+                "L['t0'] != 0.1", [None, 0.2]
             )
-            self.assertFalse(
-                autograd_cache.AOTAutogradCache.evaluate_guards(
-                    "L['t0'] != 0.1", [None, 0.2]
-                )
+        )
+        self.assertFalse(
+            autograd_cache.AOTAutogradCache.evaluate_guards(
+                "L['t0'] == 0.2", [None, 0.2]
             )
-            self.assertFalse(
-                autograd_cache.AOTAutogradCache.evaluate_guards(
-                    "L['t0'] == 0.2", [None, 0.2]
-                )
+        )
+        self.assertTrue(
+            autograd_cache.AOTAutogradCache.evaluate_guards(
+                "L['t1'] == 0.2", [None, 0.2]
             )
-            self.assertTrue(
-                autograd_cache.AOTAutogradCache.evaluate_guards(
-                    "L['t1'] == 0.2", [None, 0.2]
-                )
-            )
+        )
 
     @parametrize("eps_offset", (1e-3, 0.0))
     @inductor_config.patch("fx_graph_remote_cache", False)

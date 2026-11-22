@@ -12,6 +12,7 @@ import functools
 import hashlib
 import json
 import logging
+import math
 import os
 import pickle
 import shutil
@@ -120,10 +121,29 @@ class _MissingPlaceholder(Exception):
 
 
 class _GuardLocals(dict[str, Any]):
+    def __missing__(self, key: str) -> Any:
+        raise _MissingPlaceholder(key)
+
     def __getitem__(self, key: str) -> Any:
-        if key not in self or (val := super().__getitem__(key)) is None:
+        if (val := super().__getitem__(key)) is None:
             raise _MissingPlaceholder(key)
         return val
+
+
+class _GuardMath:
+    """Proxy `math` so `not math.isnan(SymFloat)` in `_check_guards` does not specialize."""
+
+    @staticmethod
+    def isnan(x: object) -> bool:
+        if isinstance(x, torch.SymFloat):
+            return False if (v := x.node.maybe_as_float()) is None else math.isnan(v)
+        return math.isnan(x)  # type: ignore[arg-type]
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(math, name)
+
+
+_GUARD_INTERP: dict[str, Any] = {**SYMPY_INTERP, "math": _GuardMath()}
 
 
 class BypassAOTAutogradCache(Exception):
@@ -1394,23 +1414,20 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     def _filter_backed_symbols(
         cls: type[AOTAutogradCache], inputs: Sequence[Any]
     ) -> list[torch.SymInt | torch.SymFloat | None]:
-        """Collect backed SymInt and SymFloat placeholders at stable input slots."""
+        """Collect backed SymInt and SymFloat placeholders at stable scalar/0-d-float slots."""
         symbols: list[torch.SymInt | torch.SymFloat | None] = []
         for a in inputs:
             if isinstance(a, (torch.SymInt, int)) and not isinstance(a, bool):
                 symbols.append(
                     a if isinstance(a, torch.SymInt) and has_guarding_hint(a) else None
                 )
-            elif isinstance(a, (torch.SymFloat, float)):
-                symbols.append(
-                    a
-                    if isinstance(a, torch.SymFloat)
-                    and isinstance(a.node._expr, sympy.Symbol)
-                    and has_guarding_hint(a)
-                    else None
-                )
-            elif isinstance(a, torch.Tensor) and a.ndim == 0 and a.is_floating_point():
-                f = maybe_get_item_memo(a)
+            elif isinstance(a, (torch.SymFloat, float)) or (
+                isinstance(a, torch.Tensor) and a.ndim == 0 and a.is_floating_point()
+            ):
+                f = a if isinstance(a, torch.SymFloat) else maybe_get_item_memo(a)
+                # Check _expr, not .expr: an earlier Dynamo Eq(zf, c) replaces
+                # .expr with Float(c), and produce_guards_expression still needs
+                # the placeholder to emit L['tN'] == c.
                 symbols.append(
                     f
                     if isinstance(f, torch.SymFloat)
@@ -1492,15 +1509,12 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     ) -> bool:
         if torch._inductor.config.unsafe_skip_cache_dynamic_shape_guards:
             return True
-        shape_env = AOTAutogradCache._get_shape_env()
-        if shape_env is None:
-            raise AssertionError("shape_env must not be None")
         arg_names = [f"t{i}" for i in range(len(hints))]
         try:
             return bool(
                 eval(
                     guard_expr,
-                    SYMPY_INTERP,
+                    _GUARD_INTERP,
                     {"L": _GuardLocals(zip(arg_names, hints))},
                 )
             )

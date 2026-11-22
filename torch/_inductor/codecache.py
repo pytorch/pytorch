@@ -166,6 +166,7 @@ from .virtualized import V
 
 
 T = TypeVar("T")
+_GuardedCacheHintT = TypeVar("_GuardedCacheHintT")
 
 
 class SystemDeviceInfo(TypedDict):
@@ -1969,9 +1970,6 @@ def add_ephemeral_timeout_increase_for_distributed(time_saved_ns: int) -> int:
     return increased_timeout_sec
 
 
-_GuardedCacheHintT = TypeVar("_GuardedCacheHintT")
-
-
 class GuardedCache(Generic[T]):
     """
     Mixin for caches that have guards associated with their entries.
@@ -2079,7 +2077,7 @@ class GuardedCache(Generic[T]):
             remote_cache: The remote cache to check, if any
             evaluate_guards: Function that evaluates whether a guard passes the check,
                 given a list of hint values and the guard expression.
-            hints: List of symint hints paired with evaluate_guards
+            hints: List of symbol hints paired with evaluate_guards
 
         Returns:
             A tuple of (entry, pickled_content, cache_info). entry and
