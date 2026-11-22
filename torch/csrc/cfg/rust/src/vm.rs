@@ -4740,12 +4740,13 @@ impl Compiled {
             | Op::IsNone(..)
             | Op::Is(..)
             | Op::IsFunction { .. }
-            | Op::BuildTuple(_)
-            | Op::BuildList(_)
-            | Op::BuildSlice(..)
             | Op::Part(..)
             | Op::Object(_)
             | Op::CheckBound(..) => true,
+            // Of what is there: a register that is empty is nothing to
+            // build of.
+            Op::BuildTuple(vs) | Op::BuildList(vs) => vs.iter().all(|v| !at(*v).is_null()),
+            Op::BuildSlice(a, b, c) => [a, b, c].into_iter().all(|v| *v == NONE || !at(*v).is_null()),
             // What changes a list, or draws on an iterator, does so to one
             // the path made: `record` takes down no other.
             Op::ListAppend(..) | Op::IterNext(_) => true,
@@ -5649,8 +5650,8 @@ impl Compiled {
                 return Taken::Raised;
             };
             // What is read of a list that holds what an operation gave is
-            // read behind the graph, and so is what is put into it later.
-            t.defs[list as usize].late |= t.defs[item as usize].late;
+            // read behind the graph, and so is what is put into it later
+            // (`Trace::note`).
             t.push(Op::ListAppend(list, item), NONE, Kind::Residual, inst.bc);
             ffi::Py_XINCREF(nothing);
             let dst = t.define(inst.dst, Def::default(), nothing);
@@ -5974,13 +5975,6 @@ impl Compiled {
             if t.operators.len() == 1 && t.outermost() && origin != NONE {
                 t.first = Some((block, origin));
             }
-        }
-        if let Op::ListAppend(into, ..) | Op::MapAdd(into, ..) | Op::ListExtend(into, _) | Op::DictMerge(into, ..) = &renamed {
-            // What is read of a list or a dict that holds what an operation
-            // gave is read behind the graph.
-            let mut late = false;
-            graph::reads(&renamed, |v| late |= t.defs[v as usize].late);
-            t.defs[*into as usize].late |= late;
         }
         t.push(renamed, dst, kind, inst.bc);
         kill(t, regs);
@@ -6483,8 +6477,9 @@ impl Compiled {
                 }
                 if *kwargs != NONE {
                     let named = self.path_value(t, regs, *kwargs);
+                    let pinned = self.pins_keys(t, named, bc);
                     let entries = self.entries(t, named).filter(|entries| {
-                        entries.len() == nkw && entries.iter().zip(&keys).all(|((key, _), name)| key == name)
+                        pinned && entries.len() == nkw && entries.iter().zip(&keys).all(|((key, _), name)| key == name)
                     });
                     match entries {
                         Some(entries) => given.extend(entries.iter().map(|(_, value)| *value)),
@@ -6725,6 +6720,52 @@ impl Compiled {
             }
         }
         entries
+    }
+
+    /// Whether the keys under which a path put entries into a dict it made,
+    /// and took them out, are the same at every call: each is a constant
+    /// or is made one here by a check (`Assert::Equals`). What `entries`
+    /// says of the dict holds at another call only with this: with other
+    /// keys the same instructions leave other entries. False where a key
+    /// is computed behind the callable or cannot be checked, and for a
+    /// dict that took the entries of one of which this is not so.
+    unsafe fn pins_keys(&self, t: &mut Trace, dict: PathValue, bc: u32) -> bool {
+        if dict == NONE || dict == UNDEF {
+            return false;
+        }
+        let (mut keys, mut merged): (Vec<PathValue>, Vec<(usize, PathValue)>) = (Vec::new(), Vec::new());
+        for (at, inst) in t.body.iter().enumerate() {
+            match &inst.op {
+                Op::BuildMap(vs) if inst.dst == dict => keys.extend(vs.iter().step_by(2)),
+                Op::MapAdd(target, key, _) if *target == dict => keys.push(*key),
+                Op::CallMethod { recv, args, .. } if *recv == dict && inst.kind == Kind::Residual => keys.extend(args.first()),
+                Op::DictMerge(target, more, _) if *target == dict => merged.push((at, *more)),
+                _ => {}
+            }
+        }
+        // The dict that was merged was put together in front of the merge.
+        for (at, more) in merged {
+            let built = t.body[..at].iter().any(|inst| inst.dst == more && matches!(inst.op, Op::BuildMap(_)));
+            if !built || !self.pins_keys(t, more, bc) {
+                return false;
+            }
+        }
+        for key in keys {
+            let (of, held) = (t.defs[key as usize], t.rec.values[key as usize]);
+            // A constant of the function, or pinned by a check already.
+            let known = |inst: &graph::PathInst| match &inst.assert {
+                Some(Assert::Equals(v, _)) => *v == key,
+                _ => inst.dst == key && matches!(inst.op, Op::Const(_)),
+            };
+            if t.body.iter().any(known) {
+                continue;
+            }
+            if of.late || held.is_null() || !graph::checkable(held) {
+                return false;
+            }
+            t.check(Assert::Equals(key, graph::frozen(held)), bc);
+        }
+        true
     }
 
     /// For a list that a path made: the values it holds where the trace has
@@ -6997,13 +7038,14 @@ impl Compiled {
         if graph::debug() {
             let (steps, ops) = (path.body.len(), path.operators.len());
             eprintln!(
-                "torch.vm graph {}: a path of {} instructions, {} operations ({} in front of what stands for them, {} behind; {} registers), ends at {:?}: {}",
+                "torch.vm graph {}: a path of {} instructions, {} operations ({} in front of what stands for them, {} behind; {} registers, {} results), ends at {:?}: {}",
                 site.name,
                 steps,
                 ops,
                 path.stages[0].len(),
                 path.stages[1].len(),
                 path.nregs,
+                path.outputs.len(),
                 land,
                 path.ends
             );
