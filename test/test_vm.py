@@ -7339,6 +7339,77 @@ class TestVmGraphResults(TestCase):
         del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
         GRAPH_END_STATE[0] = 0.5
 
+    def test_what_watches_the_storage_of_a_tensor_is_told_in_its_place(self, device):
+        # C++ keeps the Python object of a storage for the storage, and
+        # it ends with it: with the tensor, where nothing else has the
+        # storage. A weak reference on that object with a function to
+        # tell, or a `weakref.finalize`, runs Python code there, as for
+        # any object that ends. A path lets go of such a tensor (a
+        # tensor, a view of one whose storage is watched) only where the
+        # instructions do: every call is eager's, and what the function
+        # reads behind the place is what it reads in eager mode.
+        def keep(gm, input_types):
+            return gm
+
+        def told(ref=None):
+            GRAPH_END_LOG.append("the storage ended")
+            GRAPH_END_STATE[0] += 1.0
+
+        def plant(what):
+            made = torch.ones(4, 4)
+            storage = made.untyped_storage()
+            if what in ("a reference", "a view, a reference"):
+                GRAPH_END_REFS.append(weakref.ref(storage, told))
+            elif what in ("a finalizer", "a view, a finalizer"):
+                weakref.finalize(storage, told)
+            elif what == "an attribute that ends quietly":
+                storage.note = [1, 2]
+            return made[:2] if what.startswith("a view") else made
+
+        def calls(run, what, graded):
+            del GRAPH_END_HELD[:], GRAPH_END_LOG[:], GRAPH_END_REFS[:]
+            GRAPH_END_STATE[0] = 0.5
+            found = []
+            for at in range(12):
+                made = plant(what) if at in (7, 10) else torch.ones(2)
+                GRAPH_END_HELD.append(made)
+                del made
+                x = torch.full((3, 4), 0.25 * (at + 1), device=device)
+                x.requires_grad_(graded)
+                out = run(x)
+                out = out[0] if isinstance(out, tuple) else out
+                if graded:
+                    out.backward()
+                found.append((out.item(), len(GRAPH_END_LOG), GRAPH_END_STATE[0]))
+                del GRAPH_END_HELD[:]
+            return found
+
+        kinds = ("a reference", "a finalizer", "a view, a reference")
+        kinds += ("a view, a finalizer", "an attribute that ends quietly")
+
+        def check(fn, what, behind, graded):
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            msg = f"{fn.__name__}, {what}, a pass: {bool(behind)}, a gradient: {graded}"
+            got = calls(compiled, what, graded)
+            expected = calls(fn, what, graded)
+            self.assertTrue(got == expected, msg=f"{msg}: {got} {expected}")
+            if behind:
+                listed = torch.vm.regions(compiled)
+                graphs = [g for g in listed if "ops" in g and "within" not in g]
+                # What ends quietly is no reason to turn a path down.
+                least = 9 if what == kinds[-1] else 4
+                hits = sum(g["hits"] for g in graphs)
+                self.assertGreaterEqual(hits, least, msg=f"{msg}: {graphs}")
+
+        try:
+            for what in kinds:
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    check(graph_end_variable, what, behind, graded)
+        finally:
+            del GRAPH_END_HELD[:], GRAPH_END_LOG[:], GRAPH_END_REFS[:]
+            GRAPH_END_STATE[0] = 0.5
+
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
 
