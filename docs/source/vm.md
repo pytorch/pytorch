@@ -118,6 +118,19 @@ found["operators"][2:4]  # ['aten::tanh', 'aten::sub.Tensor']: of the path that 
 found["ends"], found["why"]  # ([(3, 6)], 'the function returns')
 ```
 
+A value that a path was taken down with and that decides what the path is is
+one of its checks as well: the place of an item that is taken out of a list
+or a tuple the function built (`items[k]`), a name under which a dict that
+is spread into a call was filled, a number that is multiplied with a size
+the graph computes, the function or the class that such a size is computed
+with. A call that comes with another such value takes the same instructions
+and is a path of its own all the same, with its own checks; what was made of
+its graph runs for calls with that value and for no others. They count
+against `max_variants` like the ways through a branch: a function that is
+called with more places than a graph may have forms (eight by default) runs
+the instructions for the ones that got none, so a place that keeps changing
+costs the graph and never the result.
+
 `branches` is how many branches the path goes through and `paths` how many
 ways through the function were taken down; `ends` says for each path where
 the function goes on behind it, once for paths that end at the same place.
@@ -137,10 +150,7 @@ stay: they are what shows that the call gets as far as the path does. In a
 call in which one of them raises, the path is not taken: the instructions
 run, and raise where they stand. What changes something the path made
 itself (an append to a list it built, the next item of an iterator it
-made) is left out only together with the thing: where anything that runs
-takes the list or the iterator, in front of the change or behind it, the
-change runs, in its place. A list that the function stores into an object
-and appends to afterwards is held there by reference, and has the item.
+made) is left out only together with the thing ("What a function makes").
 
 ```python
 class Settings:
@@ -238,34 +248,6 @@ for _ in range(4):
     same = torch.equal(g(xs), routed(xs))
 (found,) = torch.vm.regions(g)
 found["ops"], found["why"]  # (9, 'the function returns')
-```
-
-What the function makes may come to hold itself: a list that is appended to
-itself, two lists that hold each other, or a list in a dict in the list. A
-path makes such things as the function makes them, by the same instructions
-in the same order, so where the path ends they hold each other as they do in
-eager mode, and the graph around them runs. Nothing that looks into what a
-list or a tuple holds goes round one that holds itself, whether the function
-made it or was handed it: such a list is never a value that a form is
-checked against or has as a constant, and a call that hands it to an
-operation is no operation of a graph (the call runs as it stands, and raises
-what it raises in eager mode).
-
-```python
-def ring(x, n):
-    y = x.sin() * 2
-    a = [n]
-    b = [a]
-    a.append(b)  # a holds b, b holds a
-    return (y.cos() + 1).exp().sum(), a
-
-
-g = torch.vm(ring, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), as_it_is))
-for _ in range(4):
-    out, a = g(x, 3)
-a[1][0] is a, a[0]  # (True, 3)
-(found,) = torch.vm.regions(g)
-found["ops"], found["hits"]  # (6, 2)
 ```
 
 What ends a path:
@@ -560,6 +542,101 @@ for _ in range(3):
     same = torch.equal(g(v), net(v))
 whole = [found for found in torch.vm.regions(g) if found["where"].startswith("Net.forward")][0]
 same, whole["hits"] - hits  # (True, 3): and without it, it is again
+```
+
+### What a function makes
+
+A list, a dict, an iterator: what the instructions of a path make between
+its operations is the path's own. One model says what a path does with such
+a thing.
+
+**Which values are the thing.** A thing is known by the instruction that
+made it. Other values of the function may be that thing, or hold it: an item
+or an attribute that is taken out of something that holds it, what an
+iterator over such a holder gives, a method that is bound to it, what a call
+that was handed it gives back (`d.get(k, made)`), a tuple, a list or a dict
+that is built of it. Such a value counts as the thing wherever it may be it
+at some call. What the function had before the path, and what it reads of
+objects from outside, is never one: nothing of the path's is stored there
+before the path ends. So what an iterator of the path gives is from outside
+where what it goes over is: `for i, layer in enumerate(self.layers)` gives
+the layers, and a store into one of them (`layer.grid = ...`) is a store
+into an object from outside ("Stores into objects"), whatever the path made
+to go over them: the iterator, the `enumerate`, a list or the `**kwargs` of
+a call built of such objects.
+
+**What runs.** What changes a thing (an append, `[*a, b]`, an entry of a
+dict it builds, the next item of an iterator) runs in a run of the path
+whenever anything that runs takes the thing, or what may be it or hold it,
+in front of the change or behind it. It is left out only together with the
+thing. A list that the function stores into an object and appends to
+afterwards is held there by reference, and has the item.
+
+**On which side of the graph.** The instructions that take nothing the graph
+gives run in front of what stands for the graph, the others behind it
+("Paths"). A thing begins in front. It moves behind the graph at the first
+instruction that takes it, or what may be it or hold it, and has to run
+there: a result of the graph is appended to it. From that instruction on
+everything that takes the thing runs behind the graph, also what takes
+nothing else of the graph's; everything in front of it ran in front. So what
+reads and what changes one thing runs in the order the function has it, on
+both sides: a list that is counted, sliced or put into a tuple before a
+result is appended to it is counted, sliced and held as it was then, and an
+item that is appended behind a read is not seen by the read.
+
+```python
+def kept(x, n):
+    y = x.sin() * 2
+    made = [n]
+    holder = (made, len(made))  # in front of the graph: the list has one item
+    made.append(y)  # behind the graph: it takes what the graph gives
+    made.append(n + 1)  # behind that append in the function, so behind the graph too
+    return (y.cos() + 1).exp().sum(), holder
+
+
+g = torch.vm(kept, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), as_it_is))
+for _ in range(4):
+    out, holder = g(x, 3)
+len(holder[0]), holder[1], holder[0][2]  # (3, 1, 4)
+found = torch.vm.regions(g)[0]
+found["ops"], found["hits"]  # (6, 2)
+```
+
+**What ends a path instead.** A path ends in front of a store into a value
+that may be a thing without being the value that made it, and of an `extend`
+with one ("Stores into objects"): which object such a value is can differ
+from call to call. It ends in front of an operation that is handed something
+of a thing that has moved behind the graph, other than tensors and sizes of
+the graph's own (a list of those is handed over item by item). And on a path
+that writes to a tensor from outside or draws random numbers, it ends in
+front of an instruction that takes such a thing and can fail ("Writes").
+
+What the function makes may come to hold itself: a list that is appended to
+itself, two lists that hold each other, or a list in a dict in the list. A
+path makes such things as the function makes them, by the same instructions
+in the same order, so where the path ends they hold each other as they do in
+eager mode, and the graph around them runs. Nothing that looks into what a
+list or a tuple holds goes round one that holds itself, whether the function
+made it or was handed it: such a list is never a value that a form is
+checked against or has as a constant, and a call that hands it to an
+operation is no operation of a graph (the call runs as it stands, and raises
+what it raises in eager mode).
+
+```python
+def ring(x, n):
+    y = x.sin() * 2
+    a = [n]
+    b = [a]
+    a.append(b)  # a holds b, b holds a
+    return (y.cos() + 1).exp().sum(), a
+
+
+g = torch.vm(ring, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), as_it_is))
+for _ in range(4):
+    out, a = g(x, 3)
+a[1][0] is a, a[0]  # (True, 3)
+(found,) = torch.vm.regions(g)
+found["ops"], found["hits"]  # (6, 2)
 ```
 
 ### Passes over graphs
@@ -1105,13 +1182,13 @@ $ TORCH_VM_GRAPH_TIMES=1 python times.py
 ```
 
 With `TORCH_VM_GRAPH_DEBUG=1` in the environment the engine says on stderr
-what it does with graphs: a line per path it takes down (how long it is,
-how many of its instructions run in front of what stands for its operations,
-behind it and where it lands, how many registers it has, where it ends and
-why), per call that is not gone into, and per call that did not run what was
-made of a graph, with the check that did not hold (with
-`TORCH_VM_GRAPH_DEBUG=2`, also the instructions that run in front of what
-stands for a path and behind it):
+what it does with graphs: a line per path it takes down (how long it is, how
+many of its instructions run in front of what stands for its operations,
+behind it and where it lands, how many registers it has and how many results
+the graph gives, where it ends and why), per call that is not gone into, and
+per call that did not run what was made of a graph, with the check that did
+not hold (with `TORCH_VM_GRAPH_DEBUG=2`, also the instructions that run in
+front of what stands for a path and behind it):
 
 ```console
 $ cat debug.py
@@ -1134,9 +1211,9 @@ x = torch.randn(4)
 for flag in (True, True, True, False):
     out = g(x, flag)
 $ TORCH_VM_GRAPH_DEBUG=1 python debug.py
-torch.vm graph branchy (block 0)[0]: a path of 11 instructions, 7 operations (4 in front of what stands for them, 0 behind, 0 where it lands; 13 registers), ends at (3, 6): the function returns
+torch.vm graph branchy (block 0)[0]: a path of 11 instructions, 7 operations (4 in front of what stands for them, 0 behind, 0 where it lands; 13 registers, 1 results), ends at (3, 6): the function returns
 torch.vm graph branchy (block 0)[0]: a check of the path does not hold: the way of a branch (instruction 4 of 11, in branchy; of: to_bool %5)
-torch.vm graph branchy (block 0)[0]: a path of 5 instructions, 2 operations (3 in front of what stands for them, 0 behind, 0 where it lands; 7 registers), ends at (2, 0): a block that was not profiled yet
+torch.vm graph branchy (block 0)[0]: a path of 5 instructions, 2 operations (3 in front of what stands for them, 0 behind, 0 where it lands; 7 registers, 1 results), ends at (2, 0): a block that was not profiled yet
 ```
 
 ### AOTAutograd and Inductor
@@ -1670,13 +1747,13 @@ graph that writes to a tensor from outside is the exception ("Writes"): what
 was made of it is not run a second time, what it raises goes out, and the
 stores of that call are not done.
 
-A store keeps a reference to what it is given, and what the function
-changes of a list or a dict it made itself is changed in its place, in
-front of the stores: a list that is stored and then appended to has the
-item when it is stored, as it has in the function once both are done.
-`l.extend(xs)` is the one store that reads what it is given. Of a list the
-path made it takes the items the list holds where the instruction stands,
-whatever is appended to that list behind it.
+A store keeps a reference to what it is given, and what the function changes
+of a list or a dict it made itself is changed in its place ("What a function
+makes"), in front of the stores: a list that is stored and then appended to
+has the item when it is stored, as it has in the function once both are
+done. `l.extend(xs)` is the one store that reads what it is given. Of a list
+the path made it takes the items the list holds where the instruction
+stands, whatever is appended to that list behind it.
 
 What is stored into is an object from outside the path. A list or a dict
 that the function made itself is changed in place, and a value that may be
