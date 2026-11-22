@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import abc
+import builtins as builtins_module
 import collections
 import collections.abc
 import copy
@@ -3827,6 +3829,33 @@ class TestVmFrames(TestCase):
             torch.vm(adds, fallback=False)
         compiled = torch.vm(f, fallback=False)
         self.assertEqual(compiled(adds), 8)
+        self.assertEqual(len(compiled.stats()["interpreted_callees"]), 1)
+
+    def test_callee_whose_builtins_are_not_a_plain_dict_runs_in_the_interpreter(self):
+        # A name that the globals do not have is asked of the builtins,
+        # through the mapping protocol where they are no plain dict: the
+        # interpreter calls the `__getitem__` of the class at every read.
+        asked = []
+
+        class Counted(dict):
+            def __getitem__(self, key):
+                asked.append(key)
+                return super().__getitem__(key)
+
+        names = Counted(vars(builtins_module))
+        code = compile("lambda items: len(items) + len(items)", "counts", "eval")
+        counts = types_module.FunctionType(code, {"__builtins__": names})()
+
+        def f(g, items):
+            return g(items)
+
+        refused = "builtins of the function are not a plain dict"
+        with self.assertRaisesRegex(torch.vm.Unsupported, refused):
+            torch.vm(counts, fallback=False)
+        compiled = torch.vm(f, fallback=False)
+        for at in range(1, 5):
+            self.assertEqual(compiled(counts, [1, 2]), 4)
+            self.assertEqual(asked, ["len", "len"] * at)
         self.assertEqual(len(compiled.stats()["interpreted_callees"]), 1)
 
     def test_call_of_a_c_function_does_not_keep_its_tensors_alive(self):
@@ -10721,6 +10750,84 @@ def graph_default_by_name_goes(x):
     return torch.tanh(h) + h
 
 
+class GraphConfigBase:
+    # A class that reads its attributes in a function of its own, which
+    # ends in the lookup of `object`, as a base class does it for it too.
+    def __getattribute__(self, key):
+        spec = super().__getattribute__("__dict__").get("_spec")
+        if spec is not None and key in spec:
+            raise RuntimeError("not asked for")
+        return super().__getattribute__(key)
+
+
+class GraphConfig(GraphConfigBase):
+    attribute_map = {"alias": "scale"}
+
+    def __init__(self):
+        self.scale = 2.0
+
+    def __getattribute__(self, key):
+        if key != "attribute_map" and key in super().__getattribute__("attribute_map"):
+            key = super().__getattribute__("attribute_map")[key]
+        return super().__getattribute__(key)
+
+
+def graph_asks_a_config(config, x):
+    h = torch.relu(x) + 1
+    h = h * config.alias - 3
+    if not getattr(config, "is_causal", True):
+        return h.sum()
+    h = torch.tanh(h) * 2 + 1
+    if hasattr(config, "extra"):
+        h = h - 5
+    return torch.relu(h) + h
+
+
+def graph_asks_a_plain_object(obj, x):
+    h = torch.relu(x) + 1
+    h = h * getattr(obj, "scale", 3.0) - 3
+    if hasattr(obj, "extra"):
+        h = h - 5
+    return torch.tanh(h) + h
+
+
+class GraphKept(abc.ABC):
+    @abc.abstractmethod
+    def size(self):
+        pass
+
+
+class GraphKeptOne(GraphKept):
+    def size(self):
+        return 1
+
+
+class GraphKeptNot:
+    pass
+
+
+class GraphKeptSays:
+    # What it says its class is runs this code.
+    @property
+    def __class__(self):
+        GRAPH_UNUSED_LOG.append("asked for its class")
+        return GraphKeptOne
+
+
+def graph_asks_an_abstract_class(obj, x):
+    h = torch.relu(x) + 1
+    if isinstance(obj, GraphKept):
+        h = h * 2 - 3
+    return torch.tanh(h) + h
+
+
+def graph_binds_a_method_of_a_dict(table, x, key):
+    h = torch.relu(x) + 1
+    get = table.get
+    h = h * get(key, 3.0) - 3
+    return torch.tanh(h) + h
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -12616,6 +12723,219 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
                         self.assertGreaterEqual(ran, 15, msg=str(graphs))
         finally:
             put(whole)
+
+    def test_what_a_tensor_keeps_alive_through_its_base_ends_in_its_place(self, device):
+        # A view keeps the tensor it is a view of alive from C++, with the
+        # Python object of that tensor and what its attributes hold; a
+        # storage keeps its Python object and that one's attributes; a
+        # dual tensor its tangent. None of it is what a tensor shows. A
+        # path lets go of such a tensor only where what it keeps that way
+        # is looked at, or stays alive: every call is eager's.
+        import torch.autograd.forward_ad as forward_ad
+
+        def keep(gm, input_types):
+            return gm
+
+        def plant(what):
+            base = torch.ones(4, 4)
+            if what == "storage":
+                made = torch.ones(2)
+                made.untyped_storage().held = GraphEnds()
+                return made
+            base.held = GraphEnds()
+            if what == "view":
+                return base[:2]
+            if what == "transposed":
+                return base.T
+            if what == "unbound":
+                return base.unbind()[0]
+            return (torch.ones(2), base[:2])
+
+        def dual():
+            tangent = torch.ones(2)
+            tangent.held = GraphEnds()
+            return forward_ad.make_dual(torch.ones(2), tangent)
+
+        def calls(run, make, graded, boxed):
+            GRAPH_END_BOX.item = None
+            del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+            GRAPH_END_STATE[0] = 0.5
+            found = []
+            for at in range(12):
+                made = make() if at in (7, 10) else torch.ones(2)
+                if boxed:
+                    GRAPH_END_BOX.item = made
+                else:
+                    GRAPH_END_HELD.append(made)
+                del made
+                torch.manual_seed(at)
+                x = torch.randn(3, 4, device=device, requires_grad=graded)
+                out = run(x)
+                out = out[0] if isinstance(out, tuple) else out
+                if graded:
+                    out.backward()
+                found.append((out.item(), len(GRAPH_END_LOG), GRAPH_END_STATE[0]))
+                del GRAPH_END_HELD[:]
+            GRAPH_END_BOX.item = None
+            return found
+
+        def check(fn, what, behind, graded):
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            msg = f"{fn.__name__} {what} {behind} {graded}"
+            boxed = fn is graph_end_attribute
+            if what == "a dual tensor":
+                # A tangent that holds an object, of a dual tensor that the
+                # path lets go of inside the level.
+                with forward_ad.dual_level():
+                    got = calls(compiled, dual, graded, boxed)
+                    expected = calls(fn, dual, graded, boxed)
+                self.assertEqual(got, expected, msg=msg)
+                return
+            got = calls(compiled, lambda: plant(what), graded, boxed)
+            expected = calls(fn, lambda: plant(what), graded, boxed)
+            self.assertEqual(got, expected, msg=msg)
+            if behind or graded:
+                listed = torch.vm.regions(compiled)
+                graphs = [g for g in listed if "ops" in g and "within" not in g]
+                self.assertGreaterEqual(sum(g["hits"] for g in graphs), 4, msg=msg)
+
+        kinds = ("view", "transposed", "unbound", "in a tuple", "storage")
+        for fn in (graph_end_attribute, graph_end_variable):
+            for what in kinds:
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    check(fn, what, behind, graded)
+            for behind in ((), (keep,)):
+                check(fn, "a dual tensor", behind, False)
+        del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
+        GRAPH_END_STATE[0] = 0.5
+
+    def test_a_lookup_that_finds_nothing_under_getattr_with_a_default(self, device):
+        # `getattr(config, name, default)` and `hasattr(config, name)` on
+        # an object whose class reads its attributes in a function of its
+        # own (two of them, one calling the other, as a config class and
+        # its base do it), for a name that is not there: the lookup of
+        # `object` at the end of those functions finds nothing and raises,
+        # the functions are left by that, and the builtin gives the
+        # default, or False. A path checks that the lookup finds nothing
+        # and goes on behind the builtin: one graph with all the
+        # operations of the function. The attribute comes and goes
+        # between calls; every call is eager's. The same for a plain
+        # object, whose attributes `object` itself reads.
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(3, 4, device=device)
+        asked = (graph_asks_a_config, GraphConfig)
+        for fn, made in (asked, (graph_asks_a_plain_object, GraphUnusedPlain)):
+            for behind in ((), (keep,)):
+                obj = made()
+                passes = (*DEFAULT, P.Graphs(), *behind)
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                for at in range(60):
+                    if at == 40:
+                        obj.is_causal, obj.scale = False, 4.0
+                    if at == 44:
+                        del obj.is_causal
+                        obj.extra = 1
+                        if made is GraphUnusedPlain:
+                            del obj.scale
+                    if at == 48:
+                        del obj.extra
+                        obj.scale = 2.0
+                    msg = f"{fn.__name__}, call {at}"
+                    got, expected = compiled(obj, x), fn(obj, x)
+                    self.assertEqual(got, expected, atol=0, rtol=0, msg=msg)
+                listed = torch.vm.regions(compiled)
+                graphs = [g for g in listed if "ops" in g and "within" not in g]
+                ends = [g["why"] for g in graphs]
+                self.assertEqual(ends, ["the function returns"], msg=str(graphs))
+                if behind:
+                    # Every way through the function has its path, and
+                    # each runs when its turn comes again.
+                    self.assertGreaterEqual(graphs[0]["hits"], 45, msg=str(graphs))
+
+    def test_an_abstract_class_that_has_kept_its_answer_is_on_a_path(self, device):
+        # `isinstance(obj, cls)` for an abstract base class comes down to a
+        # builtin that gives the answer the class has kept for the class
+        # of the object, and asks the class's `__subclasscheck__` (which
+        # may run a `__subclasshook__`) where it has kept none. With a
+        # kept answer it calls nothing, and is a call of a path: yes for a
+        # subclass, no for another class. A class that is registered
+        # between calls makes every kept no stale, and the answer for it
+        # is asked anew; an object that says what its class is in a
+        # property is asked, in its place, at every call. (A call for
+        # which no answer is kept runs the instructions; three such calls
+        # in a row would give the graph up, as for any instruction that
+        # cannot be shown to run no Python code.)
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(3, 4, device=device)
+        fn = graph_asks_an_abstract_class
+        for behind in ((), (keep,)):
+
+            class Later:
+                pass
+
+            def given(at):
+                kinds = (GraphKeptOne, GraphKeptNot, GraphKeptOne, Later, GraphKeptSays)
+                return kinds[at % 5]()
+
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            seen = []
+            for run in (compiled, fn):
+                del GRAPH_UNUSED_LOG[:]
+                found = []
+                for at in range(50):
+                    if at == 25 and run is compiled:
+                        GraphKept.register(Later)
+                    out = run(given(at), x)
+                    registered = isinstance(Later(), GraphKept)
+                    found.append((out, registered, list(GRAPH_UNUSED_LOG)))
+                seen.append(found)
+            for at, (got, expected) in enumerate(zip(*seen)):
+                # (The class is registered once, in the first of the two
+                # runs: the second has it from its first call on.)
+                said = f"call {at}"
+                if at % 5 != 3 or at >= 25:
+                    self.assertEqual(got[0], expected[0], atol=0, rtol=0, msg=said)
+                self.assertEqual(got[2], expected[2], msg=said)
+            self.assertTrue(all(row[1] for row in seen[0][25:]))
+            self.assertFalse(any(row[1] for row in seen[0][:25]))
+            if behind:
+                listed = torch.vm.regions(compiled)
+                graphs = [g for g in listed if "ops" in g and "within" not in g]
+                largest = sorted(g["ops"] for g in graphs)[-1:]
+                self.assertEqual(largest, [6], msg=str(graphs))
+                ran = sum(g["hits"] for g in graphs)
+                self.assertGreaterEqual(ran, 24, msg=str(graphs))
+        del GRAPH_UNUSED_LOG[:]
+
+    def test_a_method_of_a_dict_that_was_bound_earlier_is_the_method(self, device):
+        # `get = table.get` and then `get(key, default)`: the call of what
+        # was bound to the dict is the method of the dict, on a path as
+        # `table.get(key, default)` is. The dict changes between calls.
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(3, 4, device=device)
+        fn = graph_binds_a_method_of_a_dict
+        for behind in ((), (keep,)):
+            table = {"a": 2.0}
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            for at in range(30):
+                if at == 15:
+                    table["b"] = 5.0
+                key = "a" if at % 3 else "b"
+                got, expected = compiled(table, x, key), fn(table, x, key)
+                self.assertEqual(got, expected, atol=0, rtol=0)
+            listed = torch.vm.regions(compiled)
+            graphs = [g for g in listed if "ops" in g and "within" not in g]
+            found = [(g["ops"], g["why"]) for g in graphs]
+            self.assertEqual(found, [(6, "the function returns")], msg=str(graphs))
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
