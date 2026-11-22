@@ -25,6 +25,12 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/ScaledMM_metallib.h>
 #endif
 
+// Whether mat's storage offset and leading stride are multiples of alignment elements, which are bytes for the
+// one-byte types the kernels load as vectors
+bool is_aligned(const Tensor& mat, int64_t leading_stride, int64_t alignment) {
+  return mat.storage_offset() % alignment == 0 && leading_stride % alignment == 0;
+}
+
 const std::array<scaled::ScaleKernelDispatchEntry, 5> scale_kernel_dispatch = {{
     {"tensorwise_tensorwise", scaled::check_tensorwise_recipe, scaled::ScaledGemmImplementation::TENSORWISE_TENSORWISE},
     {"rowwise_rowwise", scaled::check_rowwise_recipe, scaled::ScaledGemmImplementation::ROWWISE_ROWWISE},
@@ -35,8 +41,8 @@ const std::array<scaled::ScaleKernelDispatchEntry, 5> scale_kernel_dispatch = {{
      scaled::ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE},
 }};
 
-// Block-scaled recipes decode their operands while staging the tiles, so A must be row-major and B column-major (both
-// K-contiguous, like cuBLASLt) and the scales unswizzled [rows, K / block]. The validator has checked the scale shapes.
+// Block-scaled recipes read A row-major and B column-major (both K-contiguous, like cuBLASLt) with unswizzled
+// [rows, K / block] scales; the validator has checked the scale shapes.
 void scaled_mm_blockwise_out(const Tensor& mat_a,
                              const Tensor& mat_b,
                              ArrayRef<Tensor> scale_a,
@@ -71,8 +77,28 @@ void scaled_mm_blockwise_out(const Tensor& mat_a,
       .has_bias = bias.has_value(),
       .bias_bfloat16 = bias.has_value() && bias->scalar_type() == kBFloat16,
   };
-  const auto kernel_name =
-      fmt::format("scaled_mm_{}_{}", nvfp4 ? "nvfp4" : "mxfp8", scalarToMetalTypeString(out.scalar_type()));
+  // Metal 4.1 MPP applies MX block scales natively. It needs dense operands, since it derives the scale plane's row
+  // pitch from the data's, fp8 tensors whose base and row stride are aligned per the MSL spec, and indexes each tile in
+  // int32.
+  const bool native = !nvfp4 && has_metal_4_1() && mat_a.stride(0) == k && mat_b.stride(1) == k &&
+      is_aligned(mat_a, k, scaled_mm_native_fp8_alignment) && is_aligned(mat_b, k, scaled_mm_native_fp8_alignment) &&
+      std::in_range<int32_t>(scaled_mm_native_tile * k);
+  // The few rows kernel reads whole chunks of K with vector loads
+  const bool few_rows = params.m <= scaled_mm_few_rows_max && k % scaled_mm_blockwise_chunk == 0 &&
+      is_aligned(mat_a, mat_a.stride(0), scaled_mm_few_rows_load_bytes) &&
+      is_aligned(mat_b, mat_b.stride(1), scaled_mm_few_rows_load_bytes);
+  // The MPP kernel decodes rows of K with vector loads
+  const bool mpp = has_mpp() && is_aligned(mat_a, mat_a.stride(0), scaled_mm_alignment) &&
+      is_aligned(mat_b, mat_b.stride(1), scaled_mm_alignment);
+  const auto type_str = scalarToMetalTypeString(out.scalar_type());
+  const auto format = nvfp4 ? "nvfp4" : "mxfp8";
+  const auto kernel_name = few_rows ? fmt::format("scaled_mm_few_rows_{}_{}_{}", format, params.m, type_str)
+      : native                      ? fmt::format("scaled_mm_native_mxfp8_{}", type_str)
+                                    : fmt::format("scaled_mm_{}{}_{}", mpp ? "mpp_" : "", format, type_str);
+  const auto tile = native ? scaled_mm_native_tile : mpp ? scaled_mm_blockwise_tile : scaled_mm_tile;
+  const auto groups = few_rows
+      ? MTLSizeMake(c10::metal::ceil_div<int64_t>(params.n, scaled_mm_simdgroups), 1, 1)
+      : MTLSizeMake(c10::metal::ceil_div<int64_t>(params.n, tile), c10::metal::ceil_div<int64_t>(params.m, tile), 1);
   auto pso = lib.getPipelineStateForFunc(kernel_name);
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -90,10 +116,7 @@ void scaled_mm_blockwise_out(const Tensor& mat_a,
                   tensor_scale(scale_b),
                   bias,
                   params);
-      [encoder dispatchThreadgroups:MTLSizeMake(c10::metal::ceil_div<int64_t>(params.n, scaled_mm_tile),
-                                                c10::metal::ceil_div<int64_t>(params.m, scaled_mm_tile),
-                                                1)
-              threadsPerThreadgroup:MTLSizeMake(scaled_mm_threads, 1, 1)];
+      [encoder dispatchThreadgroups:groups threadsPerThreadgroup:MTLSizeMake(scaled_mm_threads, 1, 1)];
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
@@ -225,7 +248,7 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
       return;
     }
     const auto leading_stride = mat.stride(1) == 1 ? mat.stride(0) : mat.stride(1);
-    TORCH_CHECK_VALUE(mat.storage_offset() % scaled_mm_alignment == 0 && leading_stride % scaled_mm_alignment == 0,
+    TORCH_CHECK_VALUE(is_aligned(mat, leading_stride, scaled_mm_alignment),
                       "Expected ",
                       name,
                       " storage offset and leading stride to be divisible by ",
