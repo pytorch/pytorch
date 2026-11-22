@@ -4721,6 +4721,9 @@ class SIMDScheduling(BaseScheduling):
             and config.multi_kernel_hints
             and not V.graph.cpp_wrapper
             and not V.graph.fx_wrapper
+            # The compile-time autotune block launches a multi-kernel once, so only the
+            # sub-kernel its example inputs dispatch to would be tuned (precompile sets it).
+            and not config.triton.autotune_at_compile_time
             and len(kernels) == 1
         ):
             # Tensor arguments exist only after codegen, so the first kernel supplies
