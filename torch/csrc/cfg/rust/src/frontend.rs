@@ -1791,6 +1791,8 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::ExcMatch(a, b)
         | Op::MatchKeys(a, b)
         | Op::WithExceptStart { exit: a, exc: b }
+        | Op::ContextSet(a, b)
+        | Op::ContextReset(a, b)
         | Op::CellSet(a, b) => r!(a, b),
         Op::MatchClass { subject, class, names, .. } => r!(subject, class, names),
         Op::CallObject(_, args) => {
