@@ -13817,7 +13817,7 @@ class _AOTAutogradHardwareTestBase(_TestAOTAutogradBase):
 
 
 class TestAOTAutogradAutocast(_AOTAutogradHardwareTestBase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CPU
 
     def test_backward_pass_autocast_on(self, device):
         self._test_backward_pass_autocast(
@@ -13848,14 +13848,14 @@ class TestAOTAutogradAutocast(_AOTAutogradHardwareTestBase):
 class TestAOTAutogradWithDynamoAutocast(
     _AOTAutogradDynamoMixin, TestAOTAutogradAutocast
 ):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CPU
 
 
 @inherit_device_tests
 class TestAOTAutogradWithCacheAutocast(
     _AOTAutogradCacheMixin, TestAOTAutogradWithDynamoAutocast
 ):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CPU
 
 
 class TestAOTAutogradAccelerator(_AOTAutogradHardwareTestBase):
