@@ -1,5 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
+from contextlib import nullcontext
+
 from model_registry import ModelWithKwargs
 
 import torch
@@ -13,9 +15,9 @@ from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     HardwareClassification,
     run_tests,
     TestCase,
@@ -303,38 +305,39 @@ class MicrobatchTestsDevices(TestCase):
             self.assertIsNone(arg_split[i][3])
             self.assertIsNone(kwarg_split[i]["attention_mask"])
 
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_chunk_spec(self, device):
-        mod = ModelWithKwargs().to(device)
-        batch_size = ModelWithKwargs.DEFAULT_BATCH_SIZE
+        # oneDNN is nondeterministic on XPU: https://github.com/intel/torch-xpu-ops/issues/1682
+        with DeterministicGuard(True) if self.device_type == "xpu" else nullcontext():
+            mod = ModelWithKwargs().to(device)
+            batch_size = ModelWithKwargs.DEFAULT_BATCH_SIZE
 
-        x = torch.randn(batch_size, d_hid, device=device)
-        y = torch.randn(batch_size, d_hid, device=device)
+            x = torch.randn(batch_size, d_hid, device=device)
+            y = torch.randn(batch_size, d_hid, device=device)
 
-        num_chunks = 4
+            num_chunks = 4
 
-        args_chunk_spec = TensorChunkSpec.from_tuple((0,))
-        kwargs_chunk_spec = TensorChunkSpec.from_dict({"y": 0})
+            args_chunk_spec = TensorChunkSpec.from_tuple((0,))
+            kwargs_chunk_spec = TensorChunkSpec.from_dict({"y": 0})
 
-        args_split, kwargs_split = split_args_kwargs_into_chunks(
-            (x,),
-            {"y": y},
-            num_chunks,
-            args_chunk_spec,
-            kwargs_chunk_spec,
-        )
+            args_split, kwargs_split = split_args_kwargs_into_chunks(
+                (x,),
+                {"y": y},
+                num_chunks,
+                args_chunk_spec,
+                kwargs_chunk_spec,
+            )
 
-        pipe = pipeline(
-            mod,
-            mb_args=args_split[0],
-            mb_kwargs=kwargs_split[0],
-        ).to(device)
+            pipe = pipeline(
+                mod,
+                mb_args=args_split[0],
+                mb_kwargs=kwargs_split[0],
+            ).to(device)
 
-        ref = mod(x, y)
-        out = pipe(x, y)[0]
+            ref = mod(x, y)
+            out = pipe(x, y)[0]
 
-        torch.testing.assert_close(out, ref)
-        print(f"equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
+            torch.testing.assert_close(out, ref)
+            print(f"equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
 
 
 instantiate_device_type_tests(MicrobatchTestsDevices, globals(), allow_xpu=True)

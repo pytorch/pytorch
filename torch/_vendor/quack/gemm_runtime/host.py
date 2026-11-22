@@ -103,6 +103,7 @@ def _compile_gemm_epi(
     batched,
     b_kn,
     epi_keys,  # ((op_name, op.host_arg_key(value)), ...) — name-sorted
+    varlen_k=False,
     swap_ab=False,
     use_tma_gather=False,
     concat_layout=(),
@@ -172,6 +173,7 @@ def _compile_gemm_epi(
             d_major,
             c_major,
             varlen_m=varlen_m,
+            varlen_k=varlen_k,
             gather_A=gather_A,
             batched=batched,
             b_kn=b_kn,
@@ -215,7 +217,7 @@ def _compile_gemm_epi(
     )
     varlen_args = make_fake_varlen_args(
         varlen_m,
-        False,
+        varlen_k,
         gather_A,
         m if varlen_m else None,
         has_cu_tiles_m=varlen_m and _has_m_fold_sink(ops, epi_keys),
@@ -331,6 +333,7 @@ def build_gemm_epi_plan(
     is_dynamic_persistent=False,
     max_swizzle_size=8,
     varlen_m=False,
+    varlen_k=False,
     gather_A=False,
     b_kn=False,
     swap_ab=False,  # swap-at-trace: slot tensors in, caller-oriented D/C
@@ -380,7 +383,7 @@ def build_gemm_epi_plan(
                 "transform_a_operand(mod, A, values, tile_M)"
             )
             A = A.blob
-    batched = A.ndim == 3 or varlen_m
+    batched = A.ndim == 3 or varlen_m or varlen_k
     a_major = _get_major(A, "m", "k")
     b_major = _get_major(B, "n", "k")
     if b_kn:
@@ -441,6 +444,7 @@ def build_gemm_epi_plan(
         batched,
         b_kn,
         epi_keys,
+        varlen_k=varlen_k,
         swap_ab=swap_ab,
         use_tma_gather=use_tma_gather,
         concat_layout=concat_layout,

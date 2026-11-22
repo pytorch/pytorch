@@ -166,12 +166,12 @@ binary_additive_ops = [
 _BINARY_ADDITIVE_RULES: list[list[Placement]] = [
     [Partial("sum"), Partial("sum"), Partial("sum")],
     [Partial("avg"), Partial("avg"), Partial("avg")],
-    # P(x), R -> P(x): adding/subtracting a replicated value preserves partial types
-    # avg, max, min. sum would result in R being added n times, n = num_ranks
-    # (the replicated value is constant across ranks, so reduce order is unaffected)
+    # P(avg), R -> P(avg): adding/subtracting a replicated value preserves avg.
+    # sum would result in R being added n times, n = num_ranks.
+    # P(max/min), R is excluded: inf - inf creates a NaN on one rank only, and
+    # NCCL's all_reduce MAX/MIN ignores NaN. E.g. P(max) with local values
+    # [inf, 1] plus R(-inf) gives max(nan, -inf) = -inf instead of inf - inf = nan.
     [Partial("avg"), Partial("avg"), Replicate()],
-    [Partial("max"), Partial("max"), Replicate()],
-    [Partial("min"), Partial("min"), Replicate()],
     # R, P(avg) -> P(avg): avg is linear so this holds for any alpha
     # (R, P(max/min) excluded: negative alpha would flip the ordering)
     [Partial("avg"), Replicate(), Partial("avg")],
@@ -247,6 +247,11 @@ for op in scalar_linear_ops:
 # Only ops that are non-decreasing on their ENTIRE domain belong here.
 # Ops with restricted domains (e.g. log on (0,∞), asin on [-1,1]) do NOT qualify
 # because P(max) offsets can push inputs outside the valid domain.
+# Ops must also map NaN to NaN. A NaN held by one rank either propagates through
+# the reduction or is ignored (NCCL's all_reduce MAX/MIN), and an op that maps NaN
+# to a number can give a different result when applied before the reduction.
+# This excludes sign, sgn and nan_to_num (NaN -> 0): for P(max) of [nan, 5],
+# sign(max(nan, 5)) = 0 but max(sign(nan), sign(5)) = 1.
 non_decreasing_unary_ops = [
     aten.asinh.default,
     aten.asinh_.default,
@@ -286,15 +291,9 @@ non_decreasing_unary_ops = [
     aten.round_.default,
     aten.round.decimals_out,
     aten.round.out,
-    aten.sgn.default,
-    aten.sgn_.default,
-    aten.sgn.out,
     aten.sigmoid.default,
     aten.sigmoid_.default,
     aten.sigmoid.out,
-    aten.sign.default,
-    aten.sign_.default,
-    aten.sign.out,
     aten.sinh.default,
     aten.sinh_.default,
     aten.sinh.out,
@@ -304,11 +303,6 @@ non_decreasing_unary_ops = [
     aten.trunc.default,
     aten.trunc_.default,
     aten.trunc.out,
-    # nan_to_num is non-decreasing on its entire domain (including nan/inf):
-    # it maps -inf→min, nan→0, inf→max, and is identity elsewhere.
-    aten.nan_to_num.default,
-    aten.nan_to_num_.default,
-    aten.nan_to_num.out,
     # hardshrink: x if |x|>lambd else 0. Non-decreasing on entire domain.
     aten.hardshrink.default,
     # I1(x) is monotonically non-decreasing for all real x.
@@ -418,11 +412,27 @@ for op in all_partial_preserving_binary_ops:
     _register_single_dim_pointwise(op, _ALL_PARTIAL_BINARY_PRESERVING_RULES)
 
 # Monotonic increasing in both args but don't preserve any specific partial type.
+# maximum/minimum (and clamp_min/clamp_max.Tensor) would also allow
+# P(max), P(max) -> P(max) (resp. min), but NCCL's all_reduce MAX/MIN ignores NaN,
+# so a NaN in one input hides that rank's value of the other input. E.g. P(max)
+# a = [nan, 1] and b = [9, 2] on two ranks: on NCCL max(a) = 1 and max(b) = 9, so
+# maximum(a, b) = 9, but max(maximum(nan, 9), maximum(1, 2)) = max(nan, 2) = 2.
+# fmax/fmin are not listed: they map a NaN to the other argument, so applying them
+# before the reduction gives a different result. E.g. P(max) of [nan, 5] with
+# R(2): fmax(max(nan, 5), 2) = 2 but max(fmax(nan, 2), fmax(5, 2)) = 5.
 monotonic_binary_ops = [
+    aten.clamp_max.Tensor,
+    aten.clamp_min.Tensor,
     aten.logaddexp.default,
     aten.logaddexp.out,
     aten.logaddexp2.default,
     aten.logaddexp2.out,
+    aten.maximum.default,
+    aten.maximum.out,
+    aten.minimum.default,
+    aten.minimum.out,
+    # foreach variants
+    aten._foreach_maximum_.List,
 ]
 
 _MONOTONE_BINARY_BASE_RULES: list[list[Placement]] = [
@@ -434,45 +444,6 @@ _MONOTONE_BINARY_BASE_RULES: list[list[Placement]] = [
 
 for op in monotonic_binary_ops:
     _register_single_dim_pointwise(op, _MONOTONE_BINARY_BASE_RULES)
-
-# Binary ops monotonically increasing in both arguments.
-# max-preserving: P(max)+P(max)->P(max) because max(max(a),max(b)) = max(a,b)
-monotonic_max_preserving_binary_ops = [
-    aten.clamp_min.Tensor,
-    aten.fmax.default,
-    aten.fmax.out,
-    aten.maximum.default,
-    aten.maximum.out,
-    prims.fmax.default,
-    # foreach variants
-    aten._foreach_maximum_.List,
-]
-
-_MONOTONE_MAX_PRESERVING_BINARY_BASE_RULES: list[list[Placement]] = [
-    *_MONOTONE_BINARY_BASE_RULES,
-    [Partial("max"), Partial("max"), Partial("max")],
-]
-
-for op in monotonic_max_preserving_binary_ops:
-    _register_single_dim_pointwise(op, _MONOTONE_MAX_PRESERVING_BINARY_BASE_RULES)
-
-# min-preserving: P(min)+P(min)->P(min) because min(min(a),min(b)) = min(a,b)
-monotonic_min_preserving_binary_ops = [
-    aten.clamp_max.Tensor,
-    aten.fmin.default,
-    aten.fmin.out,
-    aten.minimum.default,
-    aten.minimum.out,
-    prims.fmin.default,
-]
-
-_MONOTONE_MIN_PRESERVING_BINARY_BASE_RULES: list[list[Placement]] = [
-    *_MONOTONE_BINARY_BASE_RULES,
-    [Partial("min"), Partial("min"), Partial("min")],
-]
-
-for op in monotonic_min_preserving_binary_ops:
-    _register_single_dim_pointwise(op, _MONOTONE_MIN_PRESERVING_BINARY_BASE_RULES)
 
 
 # Ops that are pointwise for DTensor purposes but lack torch.Tag.pointwise.

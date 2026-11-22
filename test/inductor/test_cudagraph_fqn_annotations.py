@@ -35,7 +35,11 @@ from torch.cuda._graph_annotations import (
     register_fqn_annotation_hooks,
     save_kernel_annotations,
 )
-from torch.testing._internal.common_utils import skipIfRocm, TemporaryFileName
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    skipIfRocm,
+    TemporaryFileName,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
@@ -209,6 +213,8 @@ def _assert_per_layer_fused_and_extern(test, all_strs, num_layers, prefix):
 class TestFqnAnnotationCodegen(TestCase):
     """Checks the mark_kernels() calls in the generated wrapper code."""
 
+    hw_classification = HardwareClassification.CUDA
+
     def _wrapper_code(self, model, *inputs, annotate=True, fullgraph=True) -> str:
         with (
             config.patch({"triton.cudagraph_kernel_annotations": annotate}),
@@ -318,6 +324,8 @@ class TestFqnAnnotationCodegen(TestCase):
 )
 class TestCudagraphFqnAnnotations(TestCase):
     """Checks the annotations recorded on captured CUDA graph nodes."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         super().setUp()
@@ -508,6 +516,8 @@ class TestCudagraphFqnAnnotations(TestCase):
 
 class TestGraphViewHelpers(TestCase):
     """Unit tests for _clean_stack_name and _strip_instance_suffix."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_clean_stack_name_module_subscript(self):
         from torch._inductor.fx_passes.graph_view import _clean_stack_name

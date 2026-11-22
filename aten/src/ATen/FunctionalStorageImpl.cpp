@@ -5,6 +5,7 @@
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <vector>
 
 namespace at::functionalization {
@@ -74,7 +75,7 @@ static c10::SymInt get_nbytes(const Tensor& value) {
     // and lazy tensor (LTC/XLA).
     // LTC hasn't implemented SymInt support yet though
     // Once it does, we should remove this check.
-    if (value.key_set().has(c10::DispatchKey::Python)) {
+    if (value.key_set().has(c10::DispatchKey::Python) || value.is_fake()) {
       return value.storage().sym_nbytes();
     }
     return at::detail::computeStorageNbytes(value.sym_sizes(), value.sym_strides(),static_cast<int64_t>(value.dtype().itemsize()), value.sym_storage_offset());
@@ -109,7 +110,7 @@ void FunctionalStorageImpl::add_update(const Tensor& updated_val, const std::vec
   TORCH_CHECK(!frozen_, "cannot mutate tensors with frozen storage");
 
   if (metas.size() > 1) {
-    for (size_t i = 1; i < metas.size(); ++i) {
+    for (const auto i : c10::irange(1, metas.size())) {
       // Skipping this check for XLA. Would be good to add it back, but it is failing XLA CI
       TORCH_CHECK(updated_val.device().type() == c10::DeviceType::XLA || !metas[i]->is_as_strided,
 "During torch.compile, encountered a mutation on a view chain of length ", metas.size(), ", where view ", i,

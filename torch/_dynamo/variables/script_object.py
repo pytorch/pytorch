@@ -107,7 +107,7 @@ class CustomClassVariable(UserDefinedVariable):
         # allowing for proper validation and error handling
         return False
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         # CustomClassVariable wraps the CLASS, not an instance.
         # Classes are always hashable in CPython (type.__hash__ = object.__hash__).
         return hash(self.value), False
@@ -341,17 +341,16 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
         op: str,
     ) -> "VariableTracker":
         from .constant import ConstantVariable
-        from .object_protocol import object_richcompare
 
         # Try value-based comparison first. CustomClassObjectVariable wraps
         # pybind11 objects (e.g. Placement subclasses) whose C++ operator==
-        # does value comparison. Falling through to object_richcompare would
+        # does value comparison. Falling through to object's tp_richcompare would
         # use identity, returning wrong results (e.g. Shard(0) == Shard(0)
         # would be False instead of True).
         try:
             self_val = self.as_python_constant()
         except NotImplementedError:
-            return object_richcompare(self, tx, other, op)
+            return VariableTracker.tp_richcompare_impl(self, tx, other, op)
         try:
             other_val = other.as_python_constant()
         except NotImplementedError:
@@ -404,11 +403,12 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
             elif is_opaque_constant_type(real_obj_type):
                 return super().tp_getattro_impl(tx, name)
 
-            elif name in ("__bool__", "__len__") and not hasattr(real_obj, name):
-                # Special case: __bool__ and __len__ are used for truthiness checks.
-                # If they're not registered and the real object doesn't have them,
-                # raise ObservedAttributeError so the caller can fall back to
-                # treating the object as truthy (Python default behavior)
+            elif not hasattr(real_obj, name):
+                # The real object has no such attribute, so the observable
+                # behavior is an AttributeError.  This lets hasattr() and
+                # getattr(obj, name, default) work on unregistered members,
+                # and lets truthiness checks fall back to the Python default
+                # when __bool__/__len__ are absent.
                 raise_observed_exception(AttributeError, tx)
 
             else:
@@ -462,6 +462,24 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
         # Call call_method directly on this class to avoid the __getitem__ →
         # mp_subscript_impl loop in VariableTracker.call_method.
         return CustomClassObjectVariable.call_method(self, tx, "__getitem__", [key], {})
+
+    def tp_setattro_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # A TorchScript object's attribute writes are not modeled; call_method
+        # rejects them with its usual graph break. Opaque objects keep the
+        # generic protocol, which checks their registered members.
+        obj = self.value
+        if isinstance(obj, FakeScriptObject):
+            obj = obj.real_obj
+        if not isinstance(obj, torch.ScriptObject):
+            return super().tp_setattro_impl(tx, name, value)
+        dunder = "__delattr__" if value is None else "__setattr__"
+        args = [name] if value is None else [name, value]
+        return self.call_method(tx, dunder, args, {})
 
     # We only support method calls on script objects. Interpreting the bytecodes
     # should go through tp_getattro_impl then call_function instead of call_method.
@@ -573,7 +591,7 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
             return self.value
         return super().as_python_constant()
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         from ..exc import raise_type_error
 
         real_obj = self.as_python_constant()

@@ -7,7 +7,6 @@ from .qconfig import *  # noqa: F403
 from .quant_type import *  # noqa: F403
 from .quantization_mappings import *  # noqa: F403
 from .quantize import *  # noqa: F403
-from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
 
 
@@ -31,15 +30,6 @@ __all__ = [
     "prepare",
     "convert",
     "prepare_qat",
-    # Top level API for graph mode quantization on TorchScript
-    "quantize_jit",
-    "quantize_dynamic_jit",
-    # pyrefly: ignore [bad-dunder-all]
-    "_prepare_ondevice_dynamic_jit",
-    # pyrefly: ignore [bad-dunder-all]
-    "_convert_ondevice_dynamic_jit",
-    # pyrefly: ignore [bad-dunder-all]
-    "_quantize_ondevice_dynamic_jit",
     # Top level API for graph mode quantization on GraphModule(torch.fx)
     # 'fuse_fx', 'quantize_fx',  # TODO: add quantize_dynamic_fx
     # 'prepare_fx', 'prepare_dynamic_fx', 'convert_fx',

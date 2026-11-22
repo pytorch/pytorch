@@ -3,6 +3,7 @@ import collections
 import contextlib
 import copy
 import functools
+import importlib
 import inspect
 import logging
 import math
@@ -296,6 +297,16 @@ class Tracer(TracerBase):
     in the docstrings of the methods on this class.
     """
 
+    #: When False (the default), a function registered with :func:`wrap` is a leaf
+    #: only under the name it was registered under, in the module that registered
+    #: it, with one wrapper per registration. When True, a function registered in
+    #: the module that defines it is also a leaf under every other global name a
+    #: scanned scope binds it to, e.g. ``from x import wrapped_fn``, and all its
+    #: names share one wrapper during a trace. Set it on a subclass, an instance, or
+    #: on ``torch.fx.Tracer`` itself for the whole process. A trace nested in
+    #: another one keeps the names the outer one patched, whatever either value.
+    wrap_aliases: bool = False
+
     # Not checking BC on this API because the default value for `autowrap_modules`
     # includes the local filepath to the `math` module, which would jitter
     # across machines.
@@ -333,6 +344,11 @@ class Tracer(TracerBase):
         """
 
         super().__init__()
+
+        # A Tracer built inside another trace must not resolve lazy globals under it.
+        if CURRENT_PATCHER is not None:
+            for m in autowrap_modules:
+                _resolve_lazy_imports(CURRENT_PATCHER, m.__dict__)
 
         # Functions we will eagerly wrap when we see them while tracing
         # this captures both `math.sqrt()` and `from math import sqrt` automatically
@@ -887,6 +903,13 @@ class Tracer(TracerBase):
                 raise AssertionError(f"Expected FunctionType, got {type(fn)}")
 
             fn_globals = fn.__globals__  # run before it gets patched
+            # A deserialized GraphModule is re-traced through _CodeOnlyModule, whose
+            # forward FX generated, whichever loader compiled it (torch.package's too).
+            from .graph_module import _CodeOnlyModule
+
+            fn_is_generated = isinstance(root, _CodeOnlyModule) or _is_generated_code(
+                fn
+            )
             fn, args = self.create_args_for_root(
                 fn, isinstance(root, torch.nn.Module), concrete_args
             )
@@ -909,14 +932,19 @@ class Tracer(TracerBase):
                 def forward(*args: Any, **kwargs: Any) -> Any:
                     return _orig_module_call(mod, *args, **kwargs)
 
+                mod_forward = getattr(mod, "forward", mod)
                 _autowrap_check(
                     patcher,  # type: ignore[has-type]
-                    getattr(getattr(mod, "forward", mod), "__globals__", {}),
+                    getattr(mod_forward, "__globals__", {}),
                     self._autowrap_function_ids,
+                    scan_importable=not _is_generated_code(mod_forward),
                 )
                 return self.call_module(mod, forward, args, kwargs)
 
             with _new_patcher() as patcher:
+                # Resolve fn's lazy globals before patching, so a torch.fx.wrap their
+                # module bodies call applies to this trace.
+                _resolve_lazy_imports(patcher, fn_globals)
                 # allow duplicate patches to support the case of nested calls
                 patcher.patch_method(
                     torch.nn.Module,
@@ -930,8 +958,13 @@ class Tracer(TracerBase):
                     module_call_wrapper,
                     deduplicate=False,
                 )
-                _patch_wrapped_functions(patcher)
-                _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
+                _patch_wrapped_functions(patcher, aliases=self.wrap_aliases)
+                _autowrap_check(
+                    patcher,
+                    fn_globals,
+                    self._autowrap_function_ids,
+                    scan_importable=not fn_is_generated,
+                )
                 for module in self._autowrap_search:
                     _autowrap_check(
                         patcher, module.__dict__, self._autowrap_function_ids
@@ -1053,6 +1086,8 @@ class Tracer(TracerBase):
 # We key by the globals dict id and function name to ensure we're wrapping a given
 # function only once.
 _wrapped_fns_to_patch: dict[tuple[int, str], dict[str, Any]] = {}
+# The thread that registered each _wrapped_fns_to_patch entry.
+_wrapped_fn_threads: dict[tuple[int, str], int] = {}
 
 # List of methods on classes to wrap (class type, function name)
 # this currently only works for Tensor.* methods that aren't traced properly
@@ -1102,6 +1137,10 @@ def _create_wrapped_func(orig_fn: Callable[_P, _T]) -> Callable[_P, _T]:
             return return_proxy
         return orig_fn(*args, **kwargs)
 
+    # Scripting a caller of a patched global, e.g. on another thread mid-trace,
+    # compiles orig_fn rather than this wrapper, whose globals are this module's.
+    if isinstance(orig_fn, FunctionType):
+        wrapped.__prepare_scriptable__ = lambda: orig_fn  # type: ignore[attr-defined]
     return wrapped
 
 
@@ -1162,10 +1201,22 @@ class _PatchedFnSetAttr(_PatchedFn):
 
 
 class _Patcher:
-    def __init__(self) -> None:
+    def __init__(self, outer: "_Patcher | None" = None) -> None:
         super().__init__()
         self.patches_made: list[_PatchedFn] = []
         self.visited: set[int] = set()
+        # wrap_aliases only: id of each function torch.fx.wrap registered => its
+        # wrapper in this trace. _patch_wrapped_functions binds it to the registered
+        # names it patches; _autowrap_check, for ids in importable_fn_ids, to the
+        # other names it patches.
+        self.wrapped_fns: dict[int, Callable[..., Any]] = {}
+        # ids of those registered in the module that defines them; _autowrap_check
+        # also wraps their other names (aliases, from-imports).
+        self.importable_fn_ids: set[int] = set()
+        # The patcher of the trace this one is nested in, if any.
+        self.outer = outer
+        # Open _maybe_revert_all_patches windows; only the outermost one reverts.
+        self.revert_depth = 0
 
     def patch(
         self,
@@ -1177,11 +1228,11 @@ class _Patcher:
         """
         Replace frame_dict[name] with new_fn until we exit the context manager.
         """
-        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
+        new_fn._fx_already_patched = deduplicate  # type: ignore[attr-defined]
         if name not in frame_dict and hasattr(builtins, name):
             self.patches_made.append(_PatchedFnDel(frame_dict, name, None, new_fn))
             self.patches_made[-1].patch()
-        elif getattr(frame_dict[name], "__fx_already_patched", False):
+        elif getattr(frame_dict[name], "_fx_already_patched", False):
             return  # already patched, no need to do it again
         else:
             self.patches_made.append(
@@ -1195,9 +1246,9 @@ class _Patcher:
         """
         Replace object_or_dict.name with new_fn until we exit the context manager.
         """
-        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
+        new_fn._fx_already_patched = deduplicate  # type: ignore[attr-defined]
         orig_fn = getattr(cls, name)
-        if getattr(orig_fn, "__fx_already_patched", False):
+        if getattr(orig_fn, "_fx_already_patched", False):
             return  # already patched, no need to do it again
         self.patches_made.append(_PatchedFnSetAttr(cls, name, orig_fn, new_fn))
         self.patches_made[-1].patch()
@@ -1242,6 +1293,8 @@ class _Patcher:
             # unpatch in reverse order to handle duplicates correctly
             self.patches_made.pop().revert()
         self.visited.clear()
+        self.wrapped_fns.clear()
+        self.importable_fn_ids.clear()
 
 
 CURRENT_PATCHER: _Patcher | None = None
@@ -1252,7 +1305,7 @@ def _new_patcher() -> Iterator[_Patcher]:
     global CURRENT_PATCHER
     prior_patcher = CURRENT_PATCHER
     try:
-        CURRENT_PATCHER = _Patcher()
+        CURRENT_PATCHER = _Patcher(outer=prior_patcher)
         yield CURRENT_PATCHER
     finally:
         # Clear all the patches made by when using current patcher.
@@ -1263,16 +1316,27 @@ def _new_patcher() -> Iterator[_Patcher]:
 
 
 @contextlib.contextmanager
-def _maybe_revert_all_patches() -> Iterator[None]:
-    current_patcher = CURRENT_PATCHER
+def _maybe_revert_all_patches(patcher: _Patcher | None = None) -> Iterator[None]:
+    current_patcher = CURRENT_PATCHER if patcher is None else patcher
+    # A nested window, e.g. Dynamo compiling from a lazy import FX resolves, finds
+    # the patches already reverted and leaves reapplying them to the outer one.
+    if current_patcher is not None and current_patcher.revert_depth > 0:
+        current_patcher.revert_depth += 1
+        try:
+            yield
+        finally:
+            current_patcher.revert_depth -= 1
+        return
     patches_made = None
     patches_removed = None
     try:
         if current_patcher is not None:
+            current_patcher.revert_depth += 1
             patches_removed = current_patcher.revert_all_patches()
         yield
     finally:
         if current_patcher is not None:
+            current_patcher.revert_depth -= 1
             patches_made = current_patcher.reapply_all_patches()
         if patches_made != patches_removed:
             raise AssertionError(
@@ -1280,36 +1344,151 @@ def _maybe_revert_all_patches() -> Iterator[None]:
             )
 
 
-def _patch_wrapped_functions(patcher: _Patcher) -> None:
+def _resolve_lazy_imports(
+    patcher: _Patcher, frame_dict: dict[str, Any], names: Iterable[str] | None = None
+) -> None:
+    """Resolve the unresolved lazy imports among ``names`` (default: every global of
+    ``frame_dict``) with the patches of ``patcher``, and of every trace it is nested
+    in, reverted.
+
+    Reading an unresolved lazy import runs its module body, which must not see the
+    globals FX patches mid-trace or FX's tracing flag. This covers only the scopes FX
+    scans (the traced function's globals, the autowrap modules, the wrapped names and
+    each called submodule's ``forward.__globals__``); a lazy global read by any other
+    code during the trace still resolves under FX's patches.
+    ``importlib.is_lazy_import`` exists only on PEP 690-style lazy-import runtimes
+    (e.g. Cinder).
     """
-    Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
+    is_lazy_import = getattr(importlib, "is_lazy_import", None)
+    if is_lazy_import is None:
+        return
+    lazy_names = [
+        name
+        for name in (frame_dict if names is None else names)
+        if name in frame_dict and is_lazy_import(frame_dict, name)
+    ]
+    if not lazy_names:
+        return
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(_is_fx_tracing_context(False))
+        # Innermost first: a nested patcher recorded the outer one's wrappers as the
+        # originals it restores. A patcher whose patches are already reverted (Dynamo
+        # compiling inside the trace) is left as it is.
+        current: _Patcher | None = patcher
+        while current is not None:
+            stack.enter_context(_maybe_revert_all_patches(current))
+            current = current.outer
+        for name in lazy_names:
+            _ = frame_dict[name]
+
+
+def _is_defined_in(fn: Callable[..., Any], frame_dict: dict[str, Any]) -> bool:
+    """Whether ``fn``, or a function on its ``__wrapped__`` chain (decorators using
+    ``functools.wraps``), was defined in the module whose globals are ``frame_dict``."""
+
+    def defined_here(f: Callable[..., Any]) -> bool:
+        return getattr(f, "__globals__", None) is frame_dict
+
+    try:
+        return defined_here(inspect.unwrap(fn, stop=defined_here))
+    except ValueError:  # a __wrapped__ cycle, or a chain past the recursion limit
+        return False
+
+
+def _patch_wrapped_functions(patcher: _Patcher, *, aliases: bool | None = None) -> None:
+    """
+    Go through ``_wrapped_fns_to_patch`` and, for each frame object, wrap
     the listed global functions in the `_create_wrapped_func` wrapper.
+    If ``aliases`` (default: ``Tracer.wrap_aliases``), also record the functions
+    registered in the module that defines them, so that ``_autowrap_check`` wraps
+    their other names too. The default reads the class attribute on ``Tracer``
+    itself, so an override of ``Tracer.trace`` that calls this helper must pass
+    ``aliases=self.wrap_aliases`` to honour a value set on its subclass or instance.
     """
-    for (_, name), frame_dict in _wrapped_fns_to_patch.copy().items():
-        if name not in frame_dict and hasattr(builtins, name):
-            orig_fn = getattr(builtins, name)
-        else:
-            orig_fn = frame_dict[name]
-        patcher.patch(frame_dict, name, _create_wrapped_func(orig_fn))
+    if aliases is None:
+        aliases = Tracer.wrap_aliases
+    this_thread = threading.get_ident()
+    patched: set[tuple[int, str]] = set()
+    pending = list(_wrapped_fns_to_patch)
+    while pending:
+        for key in pending:
+            patched.add(key)
+            frame_dict = _wrapped_fns_to_patch[key]
+            name = key[1]
+            _resolve_lazy_imports(patcher, frame_dict, (name,))
+            if name in frame_dict:
+                orig_fn = frame_dict[name]
+            elif hasattr(builtins, name):
+                orig_fn = getattr(builtins, name)
+            else:
+                # Its module body has not defined it yet, e.g. one another thread is
+                # running.
+                continue
+            if not aliases:  # one wrapper per registration
+                patcher.patch(frame_dict, name, _create_wrapped_func(orig_fn))
+                continue
+            defined_fn = orig_fn
+            if getattr(defined_fn, "_fx_already_patched", False):
+                # A nested trace finds the enclosing trace's wrapper here. The default
+                # covers a MagicMock, which answers _fx_already_patched but raises
+                # AttributeError for the dunder __wrapped__.
+                defined_fn = getattr(defined_fn, "__wrapped__", defined_fn)
+            # One wrapper per function, whichever names and modules register it.
+            wrapper = patcher.wrapped_fns.get(id(defined_fn))
+            if wrapper is None:
+                wrapper = _create_wrapped_func(orig_fn)
+            patcher.patch(frame_dict, name, wrapper)
+            patcher.wrapped_fns.setdefault(id(defined_fn), frame_dict[name])
+            if _is_defined_in(defined_fn, frame_dict):
+                patcher.importable_fn_ids.add(id(defined_fn))
+        # A module body _resolve_lazy_imports ran may have registered more wraps.
+        # Another thread's body may still be running, e.g. about to script a caller
+        # of the name it just registered, so leave its registrations alone.
+        pending = [
+            k
+            for k in list(_wrapped_fns_to_patch)
+            if k not in patched and _wrapped_fn_threads.get(k) == this_thread
+        ]
 
     for cls, name in _wrapped_methods_to_patch:
         patcher.patch_method(cls, name, _create_wrapped_method(cls, name))
 
 
+def _is_generated_code(fn: object) -> bool:
+    """Whether ``fn`` was compiled from source FX's loader holds: a GraphModule's
+    ``forward``, as ``recompile`` or a pickle load builds it. Its globals bind each
+    call_function target under a global name, and codegen already re-registers with
+    :func:`wrap` the names of nodes a trace leafed, so the scan for other names of
+    wrapped functions skips those globals: a re-trace leafs what the first trace
+    leafed, as before. Ordinary code that shares those globals is scanned as the
+    first visitor of the dict decides."""
+    from .graph_module import _loader
+
+    filename = getattr(getattr(fn, "__code__", None), "co_filename", None)
+    return filename is not None and filename in _loader.eval_cache
+
+
 def _autowrap_check(
-    patcher: _Patcher, frame_dict: dict[str, Any], function_ids: set[int]
+    patcher: _Patcher,
+    frame_dict: dict[str, Any],
+    function_ids: set[int],
+    *,
+    scan_importable: bool = True,
 ) -> None:
     """
     Some methods, like `math.sqrt` are common enough we want to automatically wrap them as we see them.
-    This method searches a scope for them and patches them if found.
+    This method searches a scope for them and patches them if found, along with any
+    other name bound to a function in ``patcher.importable_fn_ids`` (e.g.
+    ``from x import wrapped_fn``) unless ``scan_importable`` is False.
     """
     if patcher.visit_once(frame_dict):
+        _resolve_lazy_imports(patcher, frame_dict)
         for name, value in frame_dict.items():
-            if (
-                not name.startswith("_")
-                and callable(value)
-                and id(value) in function_ids
-            ):
+            if not callable(value):
+                continue
+            if scan_importable and id(value) in patcher.importable_fn_ids:
+                patcher.patch(frame_dict, name, patcher.wrapped_fns[id(value)])
+            elif not name.startswith("_") and id(value) in function_ids:
                 patcher.patch(frame_dict, name, _create_wrapped_func(value))
 
 
@@ -1348,6 +1527,27 @@ def wrap(fn_or_name: str | Callable[..., Any]) -> str | Callable[..., Any]:
     "leaf modules", that is, they are functions that are left as calls in the FX trace
     rather than traced through.
 
+    The function is a leaf only under the name it was registered under, in the
+    module that registered it: by default, another module's
+    ``from foo.bar.baz import my_custom_function`` binding is traced through. To
+    also leaf it under its other names, set :attr:`Tracer.wrap_aliases` to True on a
+    ``Tracer`` subclass or instance, or on ``torch.fx.Tracer`` for the whole process.
+
+    With ``wrap_aliases``, a function wrapped in the module that defines it is also a
+    leaf under any other global name bound to it in a scope the trace scans: an alias
+    in its own module, or a from-import under any name elsewhere. The trace scans the
+    traced function's globals and the tracer's ``autowrap_modules`` when it starts,
+    and a submodule's ``forward`` globals when that submodule is first called, so a
+    call made from those globals before then is traced through. "Defines" looks
+    through decorators that set ``__wrapped__`` (``functools.wraps``, so
+    ``torch.no_grad()`` and ``functools.cache`` too). If only modules that imported a
+    function wrap it, it is a leaf only under the names they registered. During such
+    a trace, the names leafed for a function registered in its defining module all
+    hold one wrapper, so those names stay identical (``a is b``), except in a trace
+    nested in one without ``wrap_aliases``: it keeps that trace's wrappers. A
+    reference taken another way (an attribute set in ``__init__``, a dict key, a
+    default argument or a closure) still holds the original function.
+
     Args:
 
         fn_or_name (Union[str, Callable]): The function or name of the global function to insert into the
@@ -1372,17 +1572,26 @@ def wrap(fn_or_name: str | Callable[..., Any]) -> str | Callable[..., Any]:
         fn_name = fn_or_name
 
     currentframe = inspect.currentframe()
-    if currentframe is None:
-        raise AssertionError("inspect.currentframe() returned None")
-    f = currentframe.f_back
-    if f is None:
-        raise AssertionError("currentframe.f_back is None")
-    if f.f_code.co_name != "<module>":
-        raise NotImplementedError("wrap must be called at the top level of a module")
+    f = None
+    try:
+        if currentframe is None:
+            raise AssertionError("inspect.currentframe() returned None")
+        f = currentframe.f_back
+        if f is None:
+            raise AssertionError("currentframe.f_back is None")
+        if f.f_code.co_name != "<module>":
+            raise NotImplementedError(
+                "wrap must be called at the top level of a module"
+            )
 
-    # consider implementing Callable version of this via _autowrap_function_ids / _autowrap_search
-    # semantics would be slightly different, but would add support `from x import wrapped_function`
-    _wrapped_fns_to_patch[(id(f.f_globals), fn_name)] = f.f_globals
+        key = (id(f.f_globals), fn_name)
+        _wrapped_fn_threads[key] = threading.get_ident()
+        _wrapped_fns_to_patch[key] = f.f_globals
+    finally:
+        # Holding our own frame in a local makes a reference cycle that keeps the
+        # entire calling stack (and its tensors) alive until the next gc. That stack
+        # is deep when the module is first imported lazily from inside a running op.
+        del currentframe, f
     return fn_or_name
 
 

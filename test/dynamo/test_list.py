@@ -6,14 +6,18 @@
 import collections
 import enum
 import sys
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.exc
+import torch._dynamo.side_effects
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     make_dynamo_test,
+    parametrize,
 )
 
 
@@ -223,6 +227,46 @@ class TupleTests(torch._dynamo.test_case.TestCase):
         tree = (1, 2)
         result = [tree] * 2
         self.assertEqual(result, [tree, tree])
+
+
+class CustomNewTupleTests(torch._dynamo.test_case.TestCase):
+    # No class between GrandchildPlainTuple and tuple overrides __new__ at
+    # all (not even in Python) -- tp_new must resolve by walking the MRO to
+    # find the owner (tuple), not by checking self.value.__new__ identity,
+    # which happens to be depth-independent only for types where it was
+    # explicitly special-cased.
+    class PlainTuple(tuple):  # noqa: SLOT001
+        pass
+
+    class GrandchildPlainTuple(PlainTuple):
+        pass
+
+    def setUp(self):
+        self.old = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+        super().setUp()
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = self.old
+        return super().tearDown()
+
+    def assertEqual(self, a, b):
+        return self.assertTrue(a == b, lambda msg: f"{msg}\n{a} != {b}")
+
+    @make_dynamo_test
+    def test_tuple_new_exact_type(self):
+        t = tuple.__new__(tuple, [1, 2])
+        self.assertTrue(t == (1, 2))
+
+    @make_dynamo_test
+    def test_tuple_new_rejects_kwargs(self):
+        self.assertRaises(TypeError, lambda: tuple.__new__(tuple, [1, 2], extra=1))
+
+    @make_dynamo_test
+    def test_tuple_new_multilevel_no_override(self):
+        t = self.GrandchildPlainTuple.__new__(self.GrandchildPlainTuple, [1, 2, 3])
+        self.assertTrue(type(t) is self.GrandchildPlainTuple)
+        self.assertTrue(tuple(t) == (1, 2, 3))
 
 
 class ListTests(TupleTests):
@@ -578,6 +622,89 @@ class ListTests(TupleTests):
         self.assertEqual(p, ["a", "x", "y", "d", "e", "f"])
 
 
+class CustomNewListTests(torch._dynamo.test_case.TestCase):
+    # No class between GrandchildPlainList and list overrides __new__ at
+    # all -- tp_new must resolve by walking the MRO to find the owner
+    # (list), not by checking self.value.__new__ identity.
+    class PlainList(list):
+        pass
+
+    class GrandchildPlainList(PlainList):
+        pass
+
+    def setUp(self):
+        self.old = torch._dynamo.config.enable_trace_unittest
+        torch._dynamo.config.enable_trace_unittest = True
+        super().setUp()
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_unittest = self.old
+        return super().tearDown()
+
+    def assertEqual(self, a, b):
+        return self.assertTrue(a == b, lambda msg: f"{msg}\n{a} != {b}")
+
+    @make_dynamo_test
+    def test_list_new_multilevel_no_override_ignores_extra_args(self):
+        # list.__new__ (PyType_GenericNew) ignores extra args/kwargs even
+        # when reached through a multi-level MRO chain with no override in
+        # between.
+        lst = self.GrandchildPlainList.__new__(
+            self.GrandchildPlainList, [1, 2], extra="ignored"
+        )
+        self.assertTrue(type(lst) is self.GrandchildPlainList)
+        self.assertTrue(lst == [])
+
+    @make_dynamo_test
+    def test_list_new_exact_type(self):
+        lst = list.__new__(list)
+        lst.append(1)
+        self.assertTrue(lst == [1])
+
+    @make_dynamo_test
+    def test_list_new_ignores_kwargs(self):
+        # list.__new__ (PyType_GenericNew) silently ignores extra args/kwargs
+        # -- only list.__init__ (called separately) actually populates it.
+        lst = list.__new__(list, [1, 2], extra="ignored")
+        self.assertTrue(lst == [])
+
+    def test_list_subclass_new_stores_no_init_args(self):
+        # Regression test: list.__new__ ignores its extra (iterable) arg, so
+        # UserDefinedClassVariable.tp_new_impl must not thread it through to
+        # track_new_user_defined_object as init_args (which would otherwise
+        # get replayed, unused, by reconstruction codegen). This used to only
+        # work for the exact self.value.__new__ identities hardcoded there
+        # (dict/set/deque/SimpleNamespace); list was missing from that list.
+        class PlainList(list):
+            pass
+
+        class GrandchildPlainList(PlainList):
+            pass
+
+        def fn(x):
+            return GrandchildPlainList([1, 2, 3]), x + 1
+
+        seen_init_args = []
+        orig = torch._dynamo.side_effects.SideEffects.track_new_user_defined_object
+
+        def spy(self, base_cls_vt, cls_vt, init_args, **kwargs):
+            seen_init_args.append(list(init_args))
+            return orig(self, base_cls_vt, cls_vt, init_args, **kwargs)
+
+        with patch.object(
+            torch._dynamo.side_effects.SideEffects,
+            "track_new_user_defined_object",
+            spy,
+        ):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            lst, _ = opt_fn(torch.ones(2))
+
+        self.assertEqual(list(lst), [1, 2, 3])
+        self.assertTrue(len(seen_init_args) >= 1)
+        for init_args in seen_init_args:
+            self.assertEqual(init_args, [])
+
+
 class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -831,6 +958,85 @@ class SymIntIndexTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
         with self.assertRaises(torch._dynamo.exc.UserError):
             compiled(torch.ones(3, dtype=torch.int64))
+
+
+class ListSubclass(list):
+    pass
+
+
+class DequeSubclass(collections.deque):
+    pass
+
+
+@instantiate_parametrized_tests
+class SubclassSideEffectTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    # A container subclass input can mutate on two axes at once: the builtin
+    # contents and the instance __dict__. Both must be replayed on the caller's
+    # object.
+    @parametrize("cls", [ListSubclass, DequeSubclass], name_fn=lambda cls: cls.__name__)
+    def test_subclass_input_append(self, cls):
+        def fn(lst, x):
+            lst.append(5)
+            lst.attr = len(lst)
+            for v in lst:
+                x = x * v
+            return x
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref, res = cls([1, 2]), cls([1, 2])
+        self.assertEqual(fn(ref, x), opt_fn(res, x))
+        self.assertEqual(list(ref), list(res))
+        self.assertEqual(list(res), [1, 2, 5])
+        self.assertEqual(res.attr, ref.attr)
+
+    @parametrize("cls", [ListSubclass, DequeSubclass], name_fn=lambda cls: cls.__name__)
+    def test_subclass_input_pop(self, cls):
+        def fn(lst, x):
+            lst.pop()
+            return x * len(lst)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref, res = cls([1, 2, 3]), cls([1, 2, 3])
+        self.assertEqual(fn(ref, x), opt_fn(res, x))
+        self.assertEqual(list(ref), list(res))
+        self.assertEqual(list(res), [1, 2])
+
+    @parametrize("cls", [ListSubclass, DequeSubclass], name_fn=lambda cls: cls.__name__)
+    def test_subclass_input_iadd_ignores_rhs_radd(self, cls):
+        # A list/deque subclass inherits nb_inplace_add = list_inplace_concat,
+        # so `+=` must extend in place and never consult the rhs __radd__.
+        class Rhs(cls):
+            def __radd__(self, other):
+                return "radd"
+
+        def fn(lst, x):
+            lst += Rhs([3])
+            return x * len(lst)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref, res = cls([1, 2]), cls([1, 2])
+        self.assertEqual(fn(ref, x), opt_fn(res, x))
+        self.assertEqual(list(ref), list(res))
+        self.assertEqual(list(res), [1, 2, 3])
+
+    def test_list_subclass_input_read_only(self):
+        def fn(lst, x):
+            return x * len(lst)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref, res = ListSubclass([1, 2]), ListSubclass([1, 2])
+        self.assertEqual(fn(ref, x), opt_fn(res, x))
+        self.assertEqual(list(res), [1, 2])
 
 
 if __name__ == "__main__":

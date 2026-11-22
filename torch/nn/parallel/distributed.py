@@ -781,14 +781,22 @@ class DistributedDataParallel(Module, Joinable):
         batched_grad_copy (bool): When set to ``True``, individual per-parameter
                     gradient-to-bucket copy and division operations are deferred
                     and flushed as a single ``_foreach_copy_`` plus one flat
-                    ``div_`` when a bucket becomes ready. This reduces per-parameter
-                    kernel launches down to 2 kernels per bucket, which can improve
-                    throughput for models with many small parameters. The
-                    optimization is most effective with
+                    ``div_`` when a bucket becomes ready. The symmetric copy of
+                    the reduced bucket back into each parameter's ``.grad`` (used
+                    when ``gradient_as_bucket_view=False``) is likewise batched
+                    into a single ``_foreach_copy_`` per bucket. This reduces
+                    per-parameter kernel launches to a small constant per bucket,
+                    which can improve throughput for models with many small
+                    parameters. The optimization is most effective with
                     ``optimizer.zero_grad(set_to_none=True)`` (the default), where
                     ``gradient_as_bucket_view`` alone cannot avoid copies because
                     the bucket view alias is destroyed every iteration.
                     (default: ``False``)
+        lazy_bucket_allocation (bool): When set to ``True``, DDP allocates dense
+                    gradient buckets as their gradients become ready during
+                    backward and releases reducer-owned bucket storage after
+                    backward finishes. This reduces bucket and activation memory
+                    overlap. (default: ``False``)
         forward_sync_buffers (bool or None): Flag that enables syncing
                     (broadcasting) buffers of the module at runtime, including
                     at the beginning of ``forward`` and after uneven-input
@@ -834,6 +842,7 @@ class DistributedDataParallel(Module, Joinable):
         bucket_cap_mb_list: list[int] | None = None,
         batched_grad_copy=False,
         forward_sync_buffers: bool | None = None,
+        lazy_bucket_allocation=False,
     ):
         super().__init__()
         Joinable.__init__(self)
@@ -995,6 +1004,7 @@ class DistributedDataParallel(Module, Joinable):
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
         self.batched_grad_copy = batched_grad_copy
+        self.lazy_bucket_allocation = lazy_bucket_allocation
         self.mixed_precision = mixed_precision
         if self.mixed_precision is not None:
             logger.warning("Received mixed precision config %s", self.mixed_precision)
@@ -1459,6 +1469,7 @@ class DistributedDataParallel(Module, Joinable):
             self._use_python_reducer,
             bucket_size_limits_for_rebuilding,
             self.batched_grad_copy,
+            self.lazy_bucket_allocation,
         )
 
         self.logger = dist.Logger(self.reducer)
@@ -1485,12 +1496,27 @@ class DistributedDataParallel(Module, Joinable):
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self.module)
 
-    def __getstate__(self):
-        self._check_default_group()
+    # The process group and the C++ reducer and logger, which do not pickle.
+    _unpicklable_attrs = ("process_group", "reducer", "logger")
+
+    def _picklable_state(self):
         attrs = copy.copy(self.__dict__)
-        del attrs["process_group"]
-        del attrs["reducer"]
-        del attrs["logger"]
+        # A DDP that delays every parameter's all-reduce never builds a reducer
+        # or logger.
+        for name in self._unpicklable_attrs:
+            attrs.pop(name, None)
+        return attrs
+
+    def __getstate__(self):
+        # __setstate__ would build the reducer this DDP never had. Checked first
+        # so a sub-group DDP is refused for this cause, not for its group.
+        if self._delay_all_reduce_all_params:
+            raise RuntimeError(
+                "DDP Pickling/Unpickling is not supported when the all-reduce of "
+                "every parameter is delayed"
+            )
+        self._check_default_group()
+        attrs = self._picklable_state()
         # broadcast_buffers is a property; include it for backward compat.
         attrs["broadcast_buffers"] = self.forward_sync_buffers
         return attrs
@@ -1502,6 +1528,8 @@ class DistributedDataParallel(Module, Joinable):
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         self.__dict__.setdefault("_require_manual_backward_finalization", False)
+        self.__dict__.setdefault("batched_grad_copy", False)
+        self.__dict__.setdefault("lazy_bucket_allocation", False)
         # broadcast_buffers is now a property; pop it so it doesn't shadow.
         # Old pickles may only have broadcast_buffers; use it to seed forward_sync_buffers.
         old_broadcast = self.__dict__.pop("broadcast_buffers", True)

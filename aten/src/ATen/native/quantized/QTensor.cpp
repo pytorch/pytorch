@@ -161,9 +161,10 @@ Tensor make_per_channel_quantized_tensor_cpu(
   Tensor self_contig = self.contiguous();
   AT_DISPATCH_QINT_TYPES(
       dst.scalar_type(), "per_channel_affine_qtensor", [&]() {
-        underlying_t* self_data = self_contig.data_ptr<underlying_t>();
+        const underlying_t* self_data =
+            self_contig.const_data_ptr<underlying_t>();
         underlying_t* dst_data =
-            reinterpret_cast<underlying_t*>(dst.data_ptr<scalar_t>());
+            reinterpret_cast<underlying_t*>(dst.mutable_data_ptr<scalar_t>());
         if (self.numel() > 0) {
           memcpy(dst_data, self_data, self.nbytes());
         }
@@ -263,10 +264,10 @@ bool equal_quantized_cpu(const Tensor& self, const Tensor& other) {
   const void* self_data = self_contig.const_data_ptr();
   const void* other_data = other_contig.const_data_ptr();
   auto data_size = self.numel() * self.element_size();
-  // For QUint4x2 and QUInt2x4, two elements are packed in one byte
-  if (self.scalar_type() == kQUInt4x2 || self.scalar_type() == kQUInt2x4) {
-      TORCH_INTERNAL_ASSERT(self.element_size() == 1);
-      data_size = (data_size>>1) + (data_size&1);
+  const int64_t element_per_byte = subByteElementPerByte(self.dtype());
+  if (element_per_byte > 1) {
+    TORCH_INTERNAL_ASSERT(self.element_size() == 1);
+    data_size = (data_size + element_per_byte - 1) / element_per_byte;
   }
   return 0 == memcmp(self_data, other_data, data_size);
 }

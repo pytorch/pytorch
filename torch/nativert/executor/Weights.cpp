@@ -272,8 +272,7 @@ Weights::Weights(
           " in constantPaths");
       auto& fileName = pathIt->second;
 
-      if (c10::starts_with(
-              fileName,
+      if (fileName.starts_with(
               torch::_export::archive_spec::TENSOR_CONSTANT_FILENAME_PREFIX)) {
         // tensor constants
         isUsed = !weightValues[weightIndex]->users().empty();
@@ -307,8 +306,7 @@ Weights::Weights(
         " in constantPaths");
     auto& fileName = pathIt->second;
 
-    if (!c10::starts_with(
-            fileName,
+    if (!fileName.starts_with(
             torch::_export::archive_spec::CUSTOM_OBJ_FILENAME_PREFIX)) {
       TORCH_CHECK(false, "Unknown constant path: ", fileName);
     }

@@ -4,11 +4,12 @@ import ctypes
 import subprocess
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import torch
-from torch.testing._internal.common_cuda import TEST_CUPTI, TEST_CUPTI_V13_3
+from torch.testing._internal.common_cuda import TEST_CUPTI, TEST_CUPTI_V13_5
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -17,18 +18,54 @@ from torch.testing._internal.common_utils import (
 
 
 # These tests drive the real libcupti through _PyLibCupti, so they import its symbols;
-# cupti-python imports its enums at load, so guard the import on TEST_CUPTI. TEST_CUPTI_V13_3
-# additionally requires a loaded libcupti >= 13.3 (the v2 user-defined-record API the wrapper
-# targets) -- e.g. the 13.3 wheel LD_PRELOADed; torch's bundled libcupti is typically 13.1.
+# cupti-python imports its enums at load, so guard the import on TEST_CUPTI. TEST_CUPTI_V13_5
+# additionally requires a CUDA >= 13.5 build and a loaded libcupti >= 13.5 (the Cuspy test
+# floor; the v2 user-defined-record API the wrapper targets landed in 13.3) -- e.g. the 13.5
+# wheel LD_PRELOADed; torch's bundled libcupti is typically 13.1.
 if TEST_CUPTI:
     from torch.profiler._cuspy.cupti_python import CUPTI_SUCCESS, CuptiError, pylibcupti
 
 
-@unittest.skipIf(not TEST_CUPTI_V13_3, "requires a loaded libcupti >= 13.3")
+@unittest.skipIf(not TEST_CUPTI, "requires cupti-python")
 @instantiate_parametrized_tests
-class TestPyLibCupti(TestCase):
+class TestPyLibCuptiHes(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("rc", [0, 1, 15, 999])
+    def test_hes_uses_subscriber_and_preserves_error(self, rc):
+        from torch.profiler._cuspy import cupti_python
+
+        lib = MagicMock()
+        lib.cuptiActivitySetAttribute_v2.return_value = rc
+        wrapper = object.__new__(cupti_python._PyLibCupti)
+        wrapper._lib = lib
+        with patch.object(wrapper, "_result_string", return_value=f"CUPTI_ERROR_{rc}"):
+            if rc == CUPTI_SUCCESS:
+                wrapper.activity_enable_hes(1234)
+            else:
+                with self.assertRaisesRegex(
+                    CuptiError,
+                    rf"cuptiActivitySetAttribute_v2\(ENABLE_HES\) failed with CUPTI_ERROR_{rc}",
+                ):
+                    wrapper.activity_enable_hes(1234)
+        lib.cuptiActivitySetAttribute_v2.assert_called_once()
+        subscriber, attr, size, value = lib.cuptiActivitySetAttribute_v2.call_args.args
+        self.assertEqual(subscriber.value, 1234)
+        self.assertEqual(attr, cupti_python.ActivityAttr.ENABLE_HES)
+        self.assertEqual(ctypes.cast(size, ctypes.POINTER(ctypes.c_size_t))[0], 1)
+        self.assertEqual(ctypes.cast(value, ctypes.POINTER(ctypes.c_uint8))[0], 1)
+        lib.cuptiActivityEnableHWTrace.assert_not_called()
+
+
+@unittest.skipIf(
+    not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + a loaded libcupti >= 13.5"
+)
+@instantiate_parametrized_tests
+class TestPyLibCuptiCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_get_version(self):
-        self.assertGreaterEqual(pylibcupti().get_version(), 130300)
+        self.assertGreaterEqual(pylibcupti().get_version(), 130500)
 
     @parametrize(
         "runtime,outcome",

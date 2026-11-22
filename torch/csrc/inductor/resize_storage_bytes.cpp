@@ -1,6 +1,7 @@
 #include <torch/library.h>
 
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/native/Resize.h>
 
 #ifdef USE_CUDA

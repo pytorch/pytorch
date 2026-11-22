@@ -16,7 +16,7 @@
 #include <omp.h>
 #endif
 
-#if defined(__APPLE__) && defined(__aarch64__) && !defined(C10_MOBILE)
+#if defined(__APPLE__) && defined(__aarch64__)
 #include <sys/sysctl.h>
 #endif
 
@@ -30,7 +30,6 @@ std::string get_env_var(
   return env.has_value() ? env.value() : def_value;
 }
 
-#ifndef C10_MOBILE
 size_t get_env_num_threads(const char* var_name, size_t def_value = 0) {
   try {
     if (auto value = c10::utils::get_env(var_name)) {
@@ -45,7 +44,6 @@ size_t get_env_num_threads(const char* var_name, size_t def_value = 0) {
   }
   return def_value;
 }
-#endif
 
 } // namespace
 
@@ -88,9 +86,6 @@ std::string get_parallel_info() {
   #elif AT_PARALLEL_NATIVE
   ss << "native thread pool";
   #endif
-  #ifdef C10_MOBILE
-  ss << " [mobile]";
-  #endif
   ss << '\n';
 
   #if AT_EXPERIMENTAL_SINGLE_THREAD_POOL
@@ -101,12 +96,6 @@ std::string get_parallel_info() {
 }
 
 int intraop_default_num_threads() {
-#ifdef C10_MOBILE
-  // Intraop thread pool size should be determined by mobile cpuinfo.
-  // We should hook up with the logic in caffe2/utils/threadpool if we ever need
-  // call this API for mobile.
-  TORCH_CHECK(false, "Undefined intraop_default_num_threads on mobile.");
-#else
   size_t nthreads = get_env_num_threads("OMP_NUM_THREADS", 0);
   nthreads = get_env_num_threads("MKL_NUM_THREADS", nthreads);
   if (nthreads == 0) {
@@ -129,7 +118,6 @@ int intraop_default_num_threads() {
 #endif
   }
   return static_cast<int>(nthreads);
-#endif /* !defined(C10_MOBILE) */
 }
 
 } // namespace at

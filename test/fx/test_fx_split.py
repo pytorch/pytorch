@@ -1,5 +1,6 @@
 # Owner(s): ["module: fx"]
 
+import argparse
 import dataclasses
 from collections import defaultdict
 from unittest import mock
@@ -8,10 +9,15 @@ import torch
 import torch.fx.passes.operator_support as op_support
 import torch.fx.passes.splitter_base as splitter_base
 from torch.fx.passes.split_utils import split_by_tags
-from torch.testing._internal.common_utils import HardwareClassification, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
-@torch.jit.script
 @dataclasses.dataclass
 class DummyDataClass:
     a: int
@@ -88,6 +94,61 @@ class TestFXSplit(TestCase):
             update_deps.assert_called_once_with(splitter)
             self.assertEqual(splitter.fusions, {})
 
+    # Libraries build these settings inside other programs, so that program's
+    # own flags must neither stop it nor change a setting.
+    @parametrize(
+        "host_args",
+        (
+            ["-h", "64"],
+            ["--help"],
+            ["--min", "3"],
+            ["--max", "3"],
+            ["--min-acc", "3"],
+            ["--skip-f"],
+            ["--allow"],
+            ["--move-non-tensor"],
+            ["--max-acc-splits", "auto"],
+        ),
+        name_fn=lambda host_args: "_".join(
+            a.strip("-").replace("-", "_") for a in host_args
+        ),
+    )
+    def test_splitter_settings_ignore_host_program_flags(self, host_args) -> None:
+        with mock.patch("sys.argv", ["prog", *host_args]):
+            settings = splitter_base._SplitterSettingBase(min_acc_module_size=7)
+        self.assertEqual(settings.min_acc_module_size, 7)
+        self.assertFalse(settings.skip_fusion)
+        self.assertFalse(settings.allow_non_tensor)
+        self.assertFalse(settings.move_non_tensor_nodes_on_boundary)
+
+    @parametrize(
+        "sep", ("-", "_"), name_fn=lambda sep: "dash" if sep == "-" else "underscore"
+    )
+    @parametrize(
+        "setting, value_args, value",
+        (
+            ("min_acc_module_size", ["3"], 3),
+            ("skip_fusion", [], True),
+            ("allow_non_tensor", [], True),
+            ("move_non_tensor_nodes_on_boundary", [], True),
+        ),
+        name_fn=lambda setting, value_args, value: setting,
+    )
+    def test_splitter_settings_read_exact_flags(
+        self, sep, setting, value_args, value
+    ) -> None:
+        flag = "--" + setting.replace("_", sep)
+        with mock.patch("sys.argv", ["prog", flag, *value_args]):
+            settings = splitter_base._SplitterSettingBase(min_acc_module_size=7)
+        self.assertEqual(getattr(settings, setting), value)
+
+    def test_splitter_settings_bad_value_raises(self) -> None:
+        with (
+            mock.patch("sys.argv", ["prog", "--min-acc-module-size", "auto"]),
+            self.assertRaisesRegex(argparse.ArgumentError, "invalid int value"),
+        ):
+            splitter_base._SplitterSettingBase()
+
     def test_split_preserve_node_meta(self):
         class TestModule(torch.nn.Module):
             def forward(self, x, y):
@@ -119,7 +180,7 @@ class TestFXSplit(TestCase):
                 self.assertEqual(node.meta["name"], node.name)
 
     def test_dataclass_as_graph_entry(self):
-        """
+        r"""
         Test that splitting works when the graph entry is a dataclass instance
         and a wrapped function is called with it, resulting in a call_function
         node with no input dependencies. This tests the edge case fixed in D81232435
@@ -133,7 +194,7 @@ class TestFXSplit(TestCase):
               wrapped_add
                   |
               z (output)
-        """  # noqa: W605
+        """
 
         class TestModuleWithFunctionEntry(torch.nn.Module):
             def forward(self, y):
@@ -247,6 +308,9 @@ class TestFXSplit(TestCase):
         member_deps = [splitter.deps[n] - group for n in group]
         for other in member_deps[1:]:
             self.assertEqual(member_deps[0], other)
+
+
+instantiate_parametrized_tests(TestFXSplit)
 
 
 class TestSplitByTags(TestCase):
@@ -440,7 +504,4 @@ class TestSplitOutputType(TestCase):
 
 
 if __name__ == "__main__":
-    raise RuntimeError(
-        "This test is not currently used and should be "
-        "enabled in discover_tests.py if required."
-    )
+    raise_on_run_directly("test/test_fx.py")

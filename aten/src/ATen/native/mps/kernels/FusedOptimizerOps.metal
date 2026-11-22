@@ -1,9 +1,5 @@
+#include <c10/metal/utils.h>
 #include <metal_stdlib>
-
-using metal::max;
-bfloat max(bfloat a, bfloat b) {
-  return a > b ? a : b;
-}
 
 #define kmaxThreadGroups 32
 #define kmaxTensors 32
@@ -108,7 +104,7 @@ inline void adam_math_amsgrad(
   const auto bias_correction2 =
       1 - metal::precise::pow(beta2, casted_state_steps);
   const auto bias_correction2_sqrt = metal::precise::sqrt(bias_correction2);
-  max_exp_avg_sq = max(max_exp_avg_sq, exp_avg_sq);
+  max_exp_avg_sq = c10::metal::max(max_exp_avg_sq, exp_avg_sq);
 
   const auto denom =
       (metal::precise::sqrt(max_exp_avg_sq) / bias_correction2_sqrt) + eps;
