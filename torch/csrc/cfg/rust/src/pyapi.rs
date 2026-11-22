@@ -745,14 +745,23 @@ impl CfgFunction {
     ) -> Option<(Arc<Compiled>, Arc<GraphSite>)> {
         // The first operation of this graph, which may be one of a
         // function it goes into itself, is on a path of a graph of another
-        // function that goes through this one.
+        // function, behind an instruction of this function: the path
+        // goes through this function to that operation. A path that was
+        // cut back in front of the call has no instruction of this
+        // function (`Path::owners` still lists every function the trace
+        // entered), and an operation of a function that both call is
+        // on it for another reason.
         let path = site.path();
         let node = path.body.iter().find(|inst| inst.kind == crate::graph::Kind::Node)?;
-        let first = (path.owners[node.owner as usize], node.bc);
+        let (first, function) = ((path.owners[node.owner as usize], node.bc), Arc::as_ptr(cf));
+        let through = |path: &crate::graph::Path| {
+            let of = |inst: &crate::graph::PathInst| path.owners[inst.owner as usize];
+            let entered = path.body.iter().position(|inst| of(inst) == function);
+            let reached = path.body.iter().rposition(|inst| inst.kind == crate::graph::Kind::Node && (of(inst), inst.bc) == first);
+            matches!((entered, reached), (Some(entered), Some(reached)) if entered <= reached)
+        };
         let of_caller = |(owner, at, caller, graph): &&(*const Compiled, u32, Arc<Compiled>, Arc<GraphSite>)| {
-            (*owner, *at) == first
-                && !Arc::ptr_eq(caller, cf)
-                && graph.paths().iter().any(|path| path.owners.contains(&Arc::as_ptr(cf)))
+            (*owner, *at) == first && !Arc::ptr_eq(caller, cf) && graph.paths().iter().any(|path| through(path))
         };
         held.iter().find(of_caller).map(|(_, _, caller, graph)| (caller.clone(), graph.clone()))
     }
