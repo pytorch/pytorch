@@ -317,12 +317,13 @@ taking the entry out hashes and compares it. A tensor that ends has to be
 of the class `torch.Tensor` itself, require no gradient (what a history
 holds, a hook or what a `torch.autograd.Function` kept for its backward, is
 not to be seen), have memory that is torch's own (a tensor over a numpy
-array, a buffer or a DLPack capsule keeps their owner alive) and a storage
-whose Python object has no attributes, and be one dense block (not sparse,
-quantized or nested, and no wrapper around another tensor); its attributes,
-its `.grad` and, for a view, the tensor it is a view of are looked at, and
-while a level of forward-mode differentiation is open, in which a tensor
-may have a tangent, no tensor ends quietly. An object that shows the
+array, a buffer or a DLPack capsule keeps their owner alive), and be one
+dense block (not sparse, quantized or nested, and no wrapper around another
+tensor); its attributes, its `.grad`, the Python object of its storage
+(which ends with the storage: what it has of its own, a weak reference on
+it that is told, a `weakref.finalize`) and, for a view, the tensor it is a
+view of are looked at, and while a level of forward-mode differentiation is
+open, in which a tensor may have a tangent, no tensor ends quietly. An object that shows the
 collector nothing (a capsule, a numpy array, a storage) is taken to end
 with Python code unless its class is known to hold nothing. A call for
 which that cannot be shown runs the operations of the function as they are:
