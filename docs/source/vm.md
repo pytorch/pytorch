@@ -243,6 +243,38 @@ for _ in range(4):
 found["ops"], found["why"]  # (9, 'the function returns')
 ```
 
+A copy of such a list (`[*out]`, `(*out,)`) has the items the list holds
+where the copy is made, and an operation that the copy is spread into is
+handed those, whatever is appended to the list afterwards.
+
+What the function makes may come to hold itself: a list that is appended to
+itself, two lists that hold each other, or a list in a dict in the list. A
+path makes such things as the function makes them, by the same instructions
+in the same order, so where the path ends they hold each other as they do in
+eager mode, and the graph around them runs. Nothing that looks into what a
+list or a tuple holds goes round one that holds itself, whether the function
+made it or was handed it: such a list is never a value that a form is
+checked against or has as a constant, it is not turned into text on a path,
+and a call that hands it to an operation is no operation of a graph (the
+call runs as it stands, and raises what it raises in eager mode).
+
+```python
+def ring(x, n):
+    y = x.sin() * 2
+    a = [n]
+    b = [a]
+    a.append(b)  # a holds b, b holds a
+    return (y.cos() + 1).exp().sum(), a
+
+
+g = torch.vm(ring, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), as_it_is))
+for _ in range(4):
+    out, a = g(x, 3)
+a[1][0] is a, a[0]  # (True, 3)
+(found,) = torch.vm.regions(g)
+found["ops"], found["hits"]  # (6, 2)
+```
+
 What ends a path:
 
 - a call that the path does not go into ("Paths across calls" below says
@@ -688,8 +720,10 @@ default dtype, whether algorithms have to be deterministic, the dispatch
 keys it adds); and the same
 numbers and objects where an operation takes one from outside the graph (the
 function a global names, a float; a list or a tuple of numbers by what is in
-it at the call, to any depth, not by which list it is: one that was changed
-in place since is another value). A call of another kind runs the
+it at the call, up to 64 lists, tuples and slices inside one another, not by
+which list it is: one that was changed in place since is another value, and
+one that goes deeper, or that holds itself, is never the value a form was
+made for). A call of another kind runs the
 operations and is exported in its turn. What was made for a kind of call is
 a form of the graph, and a graph has `max_variants` of them at most (8
 unless `Graphs` is made with another number); calls of further kinds then
@@ -2597,8 +2631,10 @@ under 10 (between 1.3 and 9.8) and no process was on the GPU. Every row was
 measured twice, and most of the rows whose eager figure was more than 3
 percent apart between the two processes a third time (eager's own figure
 moves by up to 9 percent from one process to the next); all the figures are
-given. Eager mode and what is compared with it take turns in one process, so
-that both have the same machine.
+given, and the rows whose eager figure moved are listed with the figures of
+each process behind the tables. Eager mode and what is compared with it take
+turns in one process, so that both have the same machine: a ratio is of the
+turns inside one process, never of figures from two.
 
 With the default settings and `Graphs()` and `Inductor()` in the list, the
 forward of a resnet is one graph, and yolov3 is two. In images per second
@@ -2665,6 +2701,43 @@ gradient of every parameter of a small model is within 1e-4 of eager's at
 each of 30 steps with `AOTAutograd()` and with `Inductor()`, which is what
 the tests hold.
 
+
+Three rows of the table are near eager's speed under `torch.vm` (0.97x to
+1.09x), each for what its graphs hold, as `regions` says it. The convnet
+under autocast has 6 of the 16 operations of its forward in its graph, where
+in float32 it has all 16: under autocast the path ends in the
+`_check_input_dim` of a batch norm, at what can fail behind a write to a
+tensor from outside the path ("Writes"). The attention of the encoder layer
+is `scaled_dot_product_attention` with a dropout rate, which draws random
+numbers in training: it is in no graph, and the graphs that run are two
+around it, of 4 and 5 operations. DistilGPT2 has the same operator in every
+layer, and the path of a layer's attention ends in front of it, at a draw
+behind what can fail ("Writes"): a layer is a graph of 14 operations and one
+of 18 with the attention between them, and two more, of 7 and 10, run around
+the layers, where their paths end at calls of Python code.
+
+Eager's own figure was more than 3 percent apart between the processes of 13
+rows of the two tables above. For these, every figure of every process, in
+the order the processes ran: eager's, the other side's, and the ratio, which
+is of the turns inside that one process.
+
+| row | eager | the other side | ratio |
+|---|---|---|---|
+| yolov3, `Graphs()`, images a second | 832, 779, 808 | 835, 787, 838 | 1.00x, 1.01x, 1.04x |
+| yolov3, `Graphs(), Inductor()`, images a second | 826, 800, 825 | 1419, 1485, 1456 | 1.72x, 1.86x, 1.76x |
+| resnet50, float32, `Graphs()`, images a second | 3152, 2999, 3034 | 3157, 3121, 3131 | 1.00x, 1.04x, 1.03x |
+| resnet50, bfloat16, `Graphs()`, images a second | 2874, 2754, 2799 | 2887, 2779, 2819 | 1.00x, 1.01x, 1.01x |
+| resnet18, `Graphs()`, steps a second | 138.3, 133.8, 134.7 | 196.4, 191.5, 191.3 | 1.42x, 1.43x, 1.42x |
+| resnet18, `torch.compile`, steps a second | 134.8, 139.7, 134.9 | 196.6, 200.7, 199.2 | 1.46x, 1.44x, 1.48x |
+| resnet18 under autocast, `Graphs()`, steps a second | 115.6, 112.3, 116.1 | 166.5, 166.3, 166.1 | 1.44x, 1.48x, 1.43x |
+| resnet50, `Graphs()`, steps a second | 56.1, 58.2, 58.5 | 84.1, 86.8, 85.5 | 1.50x, 1.49x, 1.46x |
+| resnet50, `Graphs(), Inductor()`, steps a second | 55.1, 57.1, 55.8 | 78.4, 78.8, 79.3 | 1.42x, 1.38x, 1.42x |
+| the convnet, `Graphs(), AOTAutograd(), Inductor()`, steps a second | 588.4, 612.7 | 691.3, 732.4 | 1.17x, 1.20x |
+| the convnet under autocast, `torch.compile`, steps a second | 431.9, 471.6 | 597.3, 612.5 | 1.38x, 1.30x |
+| the encoder layer, `torch.compile`, steps a second | 334.6, 345.2 | 454.6, 454.2 | 1.36x, 1.32x |
+| resnet18, `Graphs(backward=False)`, steps a second | 136.2, 142.1, 142.3 | 141.1, 143.0, 143.0 | 1.04x, 1.01x, 1.01x |
+
+The 3 rows with two figures have not been measured a third time.
 
 The models of timm and the transformer models have other code around their
 operations than the convolutional models above, and the graphs they get are
@@ -2775,11 +2848,6 @@ What graphs do not do at this stage:
   dropped while what a pass made of the graph runs (by that code itself, or
   by another thread it waits for) ends where the path lands. A store looks
   again where it lands.
-- A function whose own lists or dicts come to hold each other (`a = []`,
-  `b = [a]`, `a.append(b)`) must not be compiled with `Graphs()` in the list
-  yet, with a pass behind it or without: where such a list is given back or
-  stored, the engine goes through what it holds without coming to an end,
-  and the call does not come back.
 - Sizes are fixed per export. Every size a graph is called with is a kind of
   call of its own, with a graph of its own, so a function that is called
   with many sizes uses up `max_variants`. Sizes of the tensors the graph
