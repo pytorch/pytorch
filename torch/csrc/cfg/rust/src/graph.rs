@@ -3331,6 +3331,19 @@ pub fn infallible(op: &Op) -> bool {
     )
 }
 
+/// Whether a change of something the path made can be left out of a run
+/// together with the thing: only one that cannot fail and runs no Python
+/// code whatever it is given. An append is such. An entry that is put into
+/// a dict is one only under a key that is a constant of the function: any
+/// other key may be one that cannot be hashed at another call, or that is
+/// hashed in Python.
+fn leaves_quietly(op: &Op, constant: &[bool]) -> bool {
+    match op {
+        Op::MapAdd(_, key, _) => constant[*key as usize],
+        _ => true,
+    }
+}
+
 /// A list, a tuple or a slice that the instructions make.
 fn container(op: &Op) -> bool {
     matches!(op, Op::BuildTuple(_) | Op::BuildList(_) | Op::BuildSlice(..))
@@ -4209,6 +4222,11 @@ impl Path {
         for inst in trace.body.iter().filter(|inst| inst.dst != NONE && container(&inst.op)) {
             built[inst.dst as usize] = true;
         }
+        // The constants of the function among the values of the path.
+        let mut constant = vec![false; nregs];
+        for inst in trace.body.iter().filter(|inst| inst.dst != NONE && matches!(inst.op, Op::Const(_))) {
+            constant[inst.dst as usize] = true;
+        }
         let values = &trace.rec.values;
         // A method of the interpreter's, bound to what it was read off: a
         // tensor that an operation of the graph gave, or a list, a dict or
@@ -4319,10 +4337,14 @@ impl Path {
                         }
                     }
                     Kind::Residual => {
-                        // What changes something the path made goes with it.
+                        // What changes something the path made goes with it,
+                        // unless it can fail: then it runs, and the thing
+                        // with it, so that a call in which it fails is not
+                        // the path's.
                         let target = changes(inst);
                         let taken = target != NONE && (need[target as usize] || alive[thing(target) as usize]);
-                        if (needed || taken) && !matches!(inst.op, Op::Hold(_) | Op::StoreLocal(..)) {
+                        let fails = !leaves_quietly(&inst.op, &constant);
+                        if (needed || taken || fails) && !matches!(inst.op, Op::Hold(_) | Op::StoreLocal(..)) {
                             uses(&inst.op, &mut need)
                         } else {
                             Stage::Skipped
