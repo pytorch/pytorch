@@ -1663,6 +1663,7 @@ class GuardBuilder(GuardBuilderBase):
         # Save the guard managers to avoid repeatedly traversing sources.
         self._cached_guard_managers: dict[str, GuardManager] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
+        self._builtin_object_sources: set[Source] = set()
         self.object_aliasing_guard_codes: list[tuple[str, str]] = []
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
@@ -2785,6 +2786,14 @@ class GuardBuilder(GuardBuilderBase):
         if code in self.already_added_code_parts:
             return
         self._set_guard_export_info(guard, [code])
+        source = guard.originating_source
+        if (
+            isinstance(source, TypeDictSource)
+            and source.base in self._builtin_object_sources
+            and key not in object.__dict__
+        ):
+            # A retained class guard already pins the immutable object dictionary.
+            return
         reason = (
             f"Dictionary {dict_ref} must not contain key {key!r}; Dynamo specialized "
             "the compiled code on this key being absent."
@@ -3493,6 +3502,8 @@ class GuardBuilder(GuardBuilderBase):
                 f"{guard.name} is not a class, but CLASS_MATCH is used"
             )
         self.id_match_unchecked(guard)
+        if val is object:
+            self._builtin_object_sources.add(guard.originating_source)
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,

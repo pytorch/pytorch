@@ -3255,6 +3255,34 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
 class TestGuardSerialization(TestGuardSerializationBase):
+    @parametrize("keep_class", [False, True])
+    def test_pinned_object_skips_redundant_dict_lookup(self, keep_class):
+        def install(ctx):
+            from torch._dynamo.guards import GuardBuilder, install_guard
+            from torch._dynamo.source import TypeDictSource
+
+            source = LocalSource("cls")
+            install_guard(
+                source.make_guard(GuardBuilder.CLASS_MATCH),
+                TypeDictSource(source).make_guard(
+                    functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key="mro")
+                ),
+            )
+
+        def fn(x, cls):
+            comptime(install)
+            return x + 1
+
+        x = torch.ones(1)
+        kinds = ["DICT_NOT_CONTAINS"]
+        if keep_class:
+            kinds.append("CLASS_MATCH")
+        managers = self._test_serialization(kinds, fn, x, object)
+        for manager in managers:
+            self.assertEqual("DICT_CONTAINS:" in str(manager), not keep_class)
+        for cls, expected in ((object, True), (dict, not keep_class), (type, False)):
+            self._test_check_fn(*managers, {"x": x, "cls": cls}, expected)
+
     @parametrize("reordered", [False, True])
     def test_native_ordered_dict_order(self, reordered):
         def install_order_guard(ctx):
