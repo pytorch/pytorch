@@ -9792,6 +9792,10 @@ class KernelTestsDecomposition(torch._inductor.test_case.TestCase):
             )
             self.assertEqual(len(mutation_nodes), 1)
 
+
+class KernelTestsConstantFolding(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @common_utils.parametrize(
         "dsl",
         [
@@ -9868,6 +9872,7 @@ class KernelTestsDecomposition(torch._inductor.test_case.TestCase):
 common_utils.instantiate_parametrized_tests(KernelTestsGeneric)
 common_utils.instantiate_parametrized_tests(KernelTestsCudaClusters)
 instantiate_device_type_tests(KernelTestsDecomposition, globals(), allow_xpu=True)
+instantiate_device_type_tests(KernelTestsConstantFolding, globals(), allow_xpu=True)
 
 
 instantiate_device_type_tests(
