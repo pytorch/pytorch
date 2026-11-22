@@ -1728,10 +1728,14 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
           transposed |= ndim > 1 && strides[1] > 0 && strides[0] > strides[1];
         }
         if (transposed) {
+          // A 32x8 tile keeps the transposed reads within a few cache lines. When dim 0 or dim 1 is narrower, the
+          // rest of the 256 threads go to dims 1 and 2, or a batch of 3x3 matrices would run 9-thread groups.
+          const auto tg_size = std::min<NSUInteger>(256, [binaryPSO maxTotalThreadsPerThreadgroup]);
           const auto tg_x = std::min<NSUInteger>(32, dim0);
-          const auto tg_y = std::min({8UL, dim1, [binaryPSO maxTotalThreadsPerThreadgroup] / tg_x});
+          const auto tg_y = std::min(tg_size / tg_x, dim1);
+          const auto tg_z = std::min(tg_size / (tg_x * tg_y), dim2);
           [computeEncoder dispatchThreads:MTLSizeMake(dim0, dim1, dim2)
-                    threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, 1)];
+                    threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, tg_z)];
         } else {
           mtl_dispatch3DJob(computeEncoder, binaryPSO, dim0, dim1, dim2);
         }
