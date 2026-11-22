@@ -776,9 +776,7 @@ class SubgraphReuseMatch:
         return self.cloned_sources[source]
 
     def resolve(self, source: Source) -> Any:
-        root = self.tx.output.root_tx
-        scope = {"G": root.f_globals, "L": root.f_locals}
-        return source.get_value(scope, {}, self.resolve_cache)
+        return self.tx.output.resolve_source_value(source, self.resolve_cache)
 
     def build_capture(self, source: Source) -> VariableTracker:
         from .builder import VariableBuilder
