@@ -1566,6 +1566,30 @@ class CompilePackage:
         if record:
             self._installed_globals.setdefault(module, []).append(name)
 
+    def _install_resume_functions(
+        self,
+        module: types.ModuleType,
+        code: types.CodeType,
+        function_names: list[_FunctionId],
+    ) -> None:
+        for function_name in function_names:
+            if code.co_freevars:
+                # Resume functions with freevars need a factory that takes a
+                # closure tuple, matching install_resume_function_global in
+                # output_graph.py.
+                def _make_fn(
+                    closure: tuple[types.CellType, ...],
+                    _code: types.CodeType = code,
+                    _globals: dict[str, Any] = module.__dict__,
+                    _name: str = function_name,
+                ) -> types.FunctionType:
+                    return types.FunctionType(_code, _globals, _name, None, closure)
+
+                self._install_global(module, function_name, _make_fn)
+            else:
+                fn = types.FunctionType(code, module.__dict__, function_name)
+                self._install_global(module, function_name, fn)
+
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
 
@@ -1620,30 +1644,7 @@ class CompilePackage:
                     )
                 target_code = code
                 if entry.install_to_global:
-                    for function_name in entry.function_names:
-                        if code.co_freevars:
-                            # Resume functions with freevars need a factory
-                            # that takes a closure tuple, matching
-                            # install_resume_function_global in output_graph.py.
-                            f_globals = module.__dict__
-                            fn_name = function_name
-
-                            def _make_fn(
-                                closure: tuple[types.CellType, ...],
-                                _code: types.CodeType = code,
-                                _globals: dict[str, Any] = f_globals,
-                                _name: str = fn_name,
-                            ) -> types.FunctionType:
-                                return types.FunctionType(
-                                    _code, _globals, _name, None, closure
-                                )
-
-                            self._install_global(module, function_name, _make_fn)
-                        else:
-                            fn = types.FunctionType(
-                                code, module.__dict__, function_name
-                            )
-                            self._install_global(module, function_name, fn)
+                    self._install_resume_functions(module, code, entry.function_names)
                 if entry.code_source:
                     target_code = _lookup_code(entry)
 
