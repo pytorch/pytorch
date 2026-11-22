@@ -158,8 +158,18 @@ def _check_capture_options(options: Mapping[str, object]) -> None:
         )
 
 
+def _inductor_setting(options: Mapping[str, object], key: str) -> object:
+    # An Inductor setting as a capture's compiles see it: the capture's options
+    # over the ambient config.
+    import torch._inductor.config as inductor_config
+
+    return options.get(key, getattr(inductor_config, key))
+
+
 @contextlib.contextmanager
-def _capture_config(*, lowers_kernels: bool) -> Iterator[None]:
+def _capture_config(
+    *, lowers_kernels: bool, inductor_pins: Mapping[str, bool] | None = None
+) -> Iterator[None]:
     """The compiler configuration a multi-graph capture's calls run under.
 
     Backends serialize into the artifact (``bundled_autograd_cache``) rather
@@ -198,6 +208,8 @@ def _capture_config(*, lowers_kernels: bool) -> Iterator[None]:
     holds -- with it on, a weakref callback on a value the frame captured does
     not fire when the caller drops its reference (test/dynamo/test_repros.py
     ReproTests.test_weakref_callback).
+    ``inductor_pins`` are the Inductor settings a session reads once, when it
+    is created, and holds every captured call to.
 
     Every scope patches and restores for itself: ``config.patch`` is re-entrant
     and per-thread, so nested scopes unwind in order and a worker thread sees
@@ -239,6 +251,7 @@ def _capture_config(*, lowers_kernels: bool) -> Iterator[None]:
             {
                 **CAPTURE_INDUCTOR_PATCH,
                 **(_frozen_kernel_config() if lowers_kernels else {}),
+                **(inductor_pins or {}),
             }
         ),
         torch._dynamo.config.patch(allow_empty_graphs=True),
@@ -1945,6 +1958,26 @@ class PrecompileSession(Generic[_P, _R]):
         )
         if not isinstance(backend, str):
             _check_capture_options(backend.config)
+        # What every captured call holds torch._inductor.config to, read here (the
+        # options over the ambient config). cudagraph_trees decides whether a graph
+        # can compile for CUDA graphs and, at load, how it is wrapped, so one value
+        # holds for the whole capture and is recorded.
+        self._inductor_pins: dict[str, bool] = {}
+        if self._backend_name == "inductor":
+            options: Mapping[str, object] = (
+                {} if isinstance(backend, str) else backend.config
+            )
+            trees = _inductor_setting(options, "triton.cudagraph_trees")
+            self._inductor_pins["triton.cudagraph_trees"] = bool(trees)
+            # Dynamo reads triton.cudagraphs too: under it a Python float argument
+            # is specialized rather than passed as a CPU scalar tensor. A
+            # partitioned graph copies that scalar to the device outside its CUDA
+            # graph, but it keeps an unpartitioned graph out of CUDA graphs, so
+            # only an unpartitioned CUDA graph capture is traced under the flag
+            # (mode and options reach Inductor alone, as under torch.compile).
+            cudagraphs = _inductor_setting(options, "triton.cudagraphs")
+            if cudagraphs and not _inductor_setting(options, "graph_partition"):
+                self._inductor_pins["triton.cudagraphs"] = True
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
@@ -2062,9 +2095,12 @@ class PrecompileSession(Generic[_P, _R]):
         limit = max(
             self._recompile_limit, torch._dynamo.config.accumulated_recompile_limit
         )
+        lowers_kernels = self._backend_name == "inductor"
         try:
             with (
-                _capture_config(lowers_kernels=self._backend_name == "inductor"),
+                _capture_config(
+                    lowers_kernels=lowers_kernels, inductor_pins=self._inductor_pins
+                ),
                 torch._dynamo.config.patch(accumulated_recompile_limit=limit),
             ):
                 return self._compiled(*args, **kwargs)
@@ -2332,6 +2368,9 @@ class PrecompileSession(Generic[_P, _R]):
         }
         for n, t in package.graph_break_op_devices:
             op_devices.setdefault(n, set()).add(t)
+        # Whether any graph compiled for CUDA graphs. Load post-compiles with them
+        # on then, and each graph runs as one only if it compiled for them.
+        cudagraphs = False
         for backend_id, artifact in backends.items():
             # Unlike a make_fx capture, the graph's ops stay even if Inductor
             # decomposed them, since the frame's guards can name them.
@@ -2343,6 +2382,7 @@ class PrecompileSession(Generic[_P, _R]):
                 for result in (c.result for c in compiled if c is not None):
                     if isinstance(result, CompiledFxGraph):
                         names |= _called_op_names(result.source_code)
+                        cudagraphs |= result.cudagraph_info is not None
             for n in names:
                 op_devices.setdefault(n, set()).update(
                     package.device_types.get(backend_id, ())
@@ -2372,12 +2412,20 @@ class PrecompileSession(Generic[_P, _R]):
             _warn_unregistered_ops(found, tuple(sorted(served - set(found.modules))))
         sections = dict(custom_op_modules=modules, custom_ops=ops, custom_op_keys=keys)
         options = None if isinstance(self._backend, str) else self._backend.config
+        cudagraph_config: dict[str, bool] = {}
+        if self._backend_name == "inductor":
+            trees = self._inductor_pins["triton.cudagraph_trees"]
+            cudagraph_config = {
+                "triton.cudagraphs": cudagraphs,
+                "triton.cudagraph_trees": trees,
+            }
         return _build_multigraph_artifact(
             entry,
             backends,
             summary,
             self._backend_name,
             self._fn,
+            cudagraph_config=cudagraph_config,
             inductor_options=options,
             **sections,
         )
