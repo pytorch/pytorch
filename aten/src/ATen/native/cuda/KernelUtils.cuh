@@ -81,10 +81,6 @@ __device__ __forceinline__ index_t idx_cl(
 }
 
 #ifdef USE_ROCM
-// LLVM 18+. __MEMORY_SCOPE_DEVICE is the agent scope.
-#define TORCH_HIP_RELAXED_AGENT_STORE(ptr, val) \
-  __scoped_atomic_store_n((ptr), (val), __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE)
-
 // This function implements a committed store.
 // Upon returning, the store is committed to global memory.
 // This is useful in avoiding the need for fences.
@@ -105,20 +101,32 @@ __device__ inline void cmtdStore(void* address, T value) {
   } _pnr = {.v = value};
   if constexpr (num_long_per_val * sizeof(long) == sizeof(value))
     for (int i = 0; i < num_long_per_val; i++)
-      TORCH_HIP_RELAXED_AGENT_STORE(
-          reinterpret_cast<long*>(address) + i, _pnr.l[i]);
+      __hip_atomic_store(
+          reinterpret_cast<long*>(address) + i,
+          _pnr.l[i],
+          __ATOMIC_RELAXED,
+          __HIP_MEMORY_SCOPE_AGENT);
   else if constexpr (num_int_per_val * sizeof(int) == sizeof(value))
     for (int i = 0; i < num_int_per_val; i++)
-      TORCH_HIP_RELAXED_AGENT_STORE(
-          reinterpret_cast<int*>(address) + i, _pnr.i[i]);
+      __hip_atomic_store(
+          reinterpret_cast<int*>(address) + i,
+          _pnr.i[i],
+          __ATOMIC_RELAXED,
+          __HIP_MEMORY_SCOPE_AGENT);
   else if constexpr (num_short_per_val * sizeof(short) == sizeof(value))
     for (int i = 0; i < num_short_per_val; i++)
-      TORCH_HIP_RELAXED_AGENT_STORE(
-          reinterpret_cast<short*>(address) + i, _pnr.s[i]);
+      __hip_atomic_store(
+          reinterpret_cast<short*>(address) + i,
+          _pnr.s[i],
+          __ATOMIC_RELAXED,
+          __HIP_MEMORY_SCOPE_AGENT);
   else if constexpr (num_char_per_val * sizeof(char) == sizeof(value))
     for (int i = 0; i < num_char_per_val; i++)
-      TORCH_HIP_RELAXED_AGENT_STORE(
-          reinterpret_cast<char*>(address) + i, _pnr.c[i]);
+      __hip_atomic_store(
+          reinterpret_cast<char*>(address) + i,
+          _pnr.c[i],
+          __ATOMIC_RELAXED,
+          __HIP_MEMORY_SCOPE_AGENT);
   if constexpr (wait_for_commit) {
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
 #if defined(__GFX12__)
@@ -132,7 +140,6 @@ __device__ inline void cmtdStore(void* address, T value) {
     __atomic_signal_fence(__ATOMIC_SEQ_CST);
   }
 }
-#undef TORCH_HIP_RELAXED_AGENT_STORE
 
 // This function implements warp-level opportunistic fastatomics
 // To reduce contention on an atomicAdd, this replaces per-thread atomicAdd with
