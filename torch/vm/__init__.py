@@ -437,12 +437,18 @@ def vm(
             ``stats()["demoted"]`` says whether the function itself was, and
             ``stats()["measuring"]`` whether that is still open for the
             function, or for calls that took a noticeable part (1/64) of its
-            last call. ``stats()["sampling_callees"]`` lists the callees that
-            are being measured right now: each call of one is drawn to run
-            rewritten or in the interpreter, with all it calls, so until the
-            list is empty a count of what ran in a call (the hits of a graph,
-            say) is of calls some of which the interpreter ran. On by
-            default; the environment variable
+            last call. A function that loses while it has a graph that was
+            exported is measured a second time 64 of its calls later, since
+            what is made of a graph is slow at first;
+            ``stats()["second_looks"]`` maps each such function to
+            ``"to come"``, ``"under way"``, ``"lost"`` or ``"won"``, and
+            until the second look is over the function counts as left and
+            as still being measured. ``stats()["sampling_callees"]`` lists
+            the callees that are being measured right now: each call of one
+            is drawn to run rewritten or in the interpreter, with all it
+            calls, so until the list is empty a count of what ran in a call
+            (the hits of a graph, say) is of calls some of which the
+            interpreter ran. On by default; the environment variable
             ``TORCH_VM_DEMOTE=0`` turns the default off, for looking at the VM
             itself.
         max_versions: how many specialized versions a block can have at once.
