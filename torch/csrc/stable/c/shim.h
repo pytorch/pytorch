@@ -384,24 +384,6 @@ AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
  */
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
-// Returns whether torch.set_warn_always(True) is in effect.
-AOTI_TORCH_EXPORT bool torch_is_warn_always_enabled();
-
-// Returns whether the tensor's conjugate bit is set.
-AOTI_TORCH_EXPORT AOTITorchError
-torch_is_conj(AtenTensorHandle tensor, bool* ret_is_conj);
-
-// Returns whether the tensor's negative bit is set.
-AOTI_TORCH_EXPORT AOTITorchError
-torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg);
-
-// Returns whether the tensor is an inference tensor.
-AOTI_TORCH_EXPORT AOTITorchError
-torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
-
-// More Python interop shims; see the Python interop section above for the
-// libtorch_python / GIL contract.
-
 // Read the layout out of a Python torch.layout object. The returned code uses
 // the same encoding as aoti_torch_layout_*().
 AOTI_TORCH_EXPORT AOTITorchError
@@ -494,6 +476,21 @@ AOTI_TORCH_EXPORT AOTITorchError torch_new_list_pyobject(
     void* const* items,
     size_t length,
     void** ret); // returns new reference
+
+// Returns whether torch.set_warn_always(True) is in effect.
+AOTI_TORCH_EXPORT bool torch_is_warn_always_enabled();
+
+// Returns whether the tensor's conjugate bit is set.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_conj(AtenTensorHandle tensor, bool* ret_is_conj);
+
+// Returns whether the tensor's negative bit is set.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg);
+
+// Returns whether the tensor is an inference tensor.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
