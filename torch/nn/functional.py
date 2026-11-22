@@ -1030,6 +1030,10 @@ def max_unpool1d(
 ) -> Tensor:
     r"""Compute a partial inverse of :class:`MaxPool1d`.
 
+    :attr:`indices` is a :class:`torch.Tensor` of dtype ``torch.int64``
+    with the same shape as :attr:`input`. Use the indices returned by
+    :func:`torch.nn.functional.max_pool1d` with ``return_indices=True``.
+
     See :class:`~torch.nn.MaxUnpool1d` for details.
     """
     if has_torch_function_unary(input):
