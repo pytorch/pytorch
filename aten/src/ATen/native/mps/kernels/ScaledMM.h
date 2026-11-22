@@ -26,6 +26,8 @@ struct ScaledMMParams {
   index_t b_row_stride, b_col_stride;
   index_t out_row_stride, out_col_stride;
   bool rowwise;
+  // False for block-scaled recipes without a tensor-wise scale
+  bool has_tensor_scales;
   bool has_bias;
   bool bias_bfloat16;
 };

@@ -185,6 +185,8 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type) {
       return "bfloat";
     case ScalarType::Float8_e4m3fn:
       return "float8_e4m3fn";
+    case ScalarType::Float8_e8m0fnu:
+      return "float8_e8m0fnu";
     case ScalarType::Int:
       return "int";
     case ScalarType::Long:
@@ -613,6 +615,8 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
       return {.size = sizeof(short), .type = type, .value = {.bf16 = scalar.to<BFloat16>()}};
     case ScalarType::Float8_e4m3fn:
       return {.size = sizeof(Float8_e4m3fn), .type = type, .value = {.f8 = scalar.to<Float8_e4m3fn>()}};
+    case ScalarType::Float8_e8m0fnu:
+      return {.size = sizeof(Float8_e8m0fnu), .type = type, .value = {.f8e8m0 = scalar.to<Float8_e8m0fnu>()}};
     case ScalarType::ComplexHalf:
       return {.size = sizeof(int32_t), .type = type, .value = {.ch = scalar.to<c10::complex<Half>>()}};
     case ScalarType::ComplexFloat:
@@ -640,6 +644,21 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
     default:
       TORCH_INTERNAL_ASSERT(false, "Unsupported scalar type '", type, "' on MPS backend.");
   }
+}
+
+MPSScalar getMPSScalar(const TensorBase& cpu_scalar) {
+  TORCH_CHECK(cpu_scalar.dim() == 0, "Passed CPU tensor to MPS op");
+  const auto type = cpu_scalar.scalar_type();
+  if (type == kDouble) [[unlikely]] {
+    return getMPSScalar(*cpu_scalar.const_data_ptr<double>(), type);
+  }
+  if (type == kComplexDouble) [[unlikely]] {
+    return getMPSScalar(*cpu_scalar.const_data_ptr<c10::complex<double>>(), type);
+  }
+  MPSScalar s{.size = static_cast<size_t>(cpu_scalar.element_size()), .type = type};
+  TORCH_CHECK(s.size <= sizeof(s.value), "Unsupported CPU scalar type ", type);
+  std::memcpy(&s.value, cpu_scalar.const_data_ptr(), s.size);
+  return s;
 }
 
 MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar) {
@@ -1823,6 +1842,10 @@ void MetalKernelFunction::setArg(unsigned idx, const at::TensorBase& t) {
 void MetalKernelFunction::setArg(unsigned idx, const void* ptr, uint64_t size) {
   TORCH_CHECK(size > 0);
   [encoder setBytes:ptr length:size atIndex:idx];
+}
+
+void MetalKernelFunction::setTensorListArg(unsigned idx, c10::ArrayRef<at::Tensor> tensors) {
+  mtl_setTensorList(encoder, tensors, idx);
 }
 
 void MetalKernelFunction::setErrorBufferIndex(unsigned idx) {
