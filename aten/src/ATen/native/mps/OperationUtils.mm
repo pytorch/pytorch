@@ -649,11 +649,15 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
 MPSScalar getMPSScalar(const TensorBase& cpu_scalar) {
   TORCH_CHECK(cpu_scalar.dim() == 0, "Passed CPU tensor to MPS op");
   const auto type = cpu_scalar.scalar_type();
+  // Unlike getMPSScalar(Scalar), which checks the range like CPU does for Scalar arguments such as alpha, narrow the
+  // way CPU casts a scalar operand to the common dtype: values out of float range become inf instead of raising
   if (type == kDouble) [[unlikely]] {
-    return getMPSScalar(*cpu_scalar.const_data_ptr<double>(), type);
+    const auto value = static_cast<float>(*cpu_scalar.const_data_ptr<double>());
+    return {.size = sizeof(value), .type = type, .value = {.f = value}};
   }
   if (type == kComplexDouble) [[unlikely]] {
-    return getMPSScalar(*cpu_scalar.const_data_ptr<c10::complex<double>>(), type);
+    const auto value = static_cast<c10::complex<float>>(*cpu_scalar.const_data_ptr<c10::complex<double>>());
+    return {.size = sizeof(value), .type = type, .value = {.cf = value}};
   }
   MPSScalar s{.size = static_cast<size_t>(cpu_scalar.element_size()), .type = type};
   TORCH_CHECK(s.size <= sizeof(s.value), "Unsupported CPU scalar type ", type);

@@ -4372,6 +4372,24 @@ class TestMPS(TestCaseMPS):
             scalar_int = cpu_ints[i]
             self.assertEqual((mps_ints + scalar_int).cpu(), torch.full((3,), 1 + (i + 1) * 10, dtype=torch.int32))
 
+    def test_binary_op_with_scalar_out_of_float_range(self):
+        # Like CPU, a double scalar out of float range becomes inf (or the largest float) instead of raising
+        x = torch.tensor([[0.0, 1.0, -2.5, 3.4028234663852886e38], [math.inf, -math.inf, math.nan, -1.0]])
+        for dtype, scalar in itertools.product([torch.float32, torch.float16, torch.bfloat16], [1e39, -1e39, 3.4028235e38]):
+            cpu_x = x.to(dtype)
+            mps_x = cpu_x.to('mps')
+            cpu_s = torch.tensor(scalar, dtype=torch.float64)
+            for op in [torch.add, torch.sub, torch.lt, torch.eq]:
+                self.assertEqual(op(mps_x, scalar), op(cpu_x, scalar))
+                self.assertEqual(op(cpu_s, mps_x), op(cpu_s, cpu_x))
+                self.assertEqual(op(mps_x.t(), scalar), op(cpu_x.t(), scalar))
+                self.assertEqual(op(mps_x[0, :1], scalar), op(cpu_x[0, :1], scalar))
+        cpu_z = x.to(torch.complex64)
+        mps_z = cpu_z.to('mps')
+        for scalar in [complex(1e39, 0), complex(0, -1e39)]:
+            self.assertEqual(mps_z * scalar, cpu_z * scalar)
+            self.assertEqual(mps_z == scalar, cpu_z == scalar)
+
     def test_slice_contiguous_view(self):
         # https://github.com/pytorch/pytorch/issues/77750
 
