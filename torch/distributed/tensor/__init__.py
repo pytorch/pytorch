@@ -2,9 +2,12 @@
 
 import torch
 
-# Compiled graphs call these ops. A package served from the Dynamo cache never
-# traces, so the imports on the tracing paths cannot be what registers them.
-import torch.distributed._ops.device_mesh
+
+# Register the device_mesh:: ops. Compiled graphs call them at runtime, and one
+# served from the Dynamo cache never ran the tracing code that imports them.
+if torch.distributed.is_available():
+    import torch.distributed._ops.device_mesh
+
 import torch.distributed.tensor._ops  # force import all built-in dtensor ops
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor._api import (

@@ -2899,27 +2899,33 @@ class TestCompileOnOneRankPrecompile(TestCase):
 
 
             with torch.compiler.set_stance("default" if rank == 0 else "fail_on_recompile"):
-                out = torch.compile(fn)(torch.arange(4.0))
+                out = torch.compile(fn, fullgraph=True)(torch.arange(4.0))
             assert out.tolist() == [[0.0, 1.0], [2.0, 3.0]][rank], out
             if rank == 0:
-                PrecompileContext.save_to_dynamo_cache()
+                saved = PrecompileContext.save_to_dynamo_cache()
+                assert saved["dynamo"] and saved["backends"], saved
             """
         )
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "script.py")
             with open(path, "w") as f:
                 f.write(script)
-            env = {**os.environ, "TORCHINDUCTOR_CACHE_DIR": os.path.join(tmp, "cache")}
-            for rank in ("0", "1"):
+            env = {
+                **os.environ,
+                "TORCHINDUCTOR_CACHE_DIR": os.path.join(tmp, "cache"),
+                "TORCHINDUCTOR_COMPILE_THREADS": "1",
+            }
+            for rank, step in enumerate(("save", "load")):
                 proc = subprocess.run(
-                    [sys.executable, path, rank],
+                    [sys.executable, path, str(rank)],
                     env=env,
                     capture_output=True,
                     text=True,
                     timeout=600,
                     check=False,
                 )
-                self.assertEqual(proc.returncode, 0, proc.stderr[-3000:])
+                msg = f"rank {rank} ({step}) failed:\n{proc.stderr[-3000:]}"
+                self.assertEqual(proc.returncode, 0, msg)
 
 
 if __name__ == "__main__":
