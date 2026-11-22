@@ -370,6 +370,10 @@ or an `nn.ModuleList`, also through `iter`, `enumerate` and `zip`),
 its `__len__`, its `__getitem__`, and where an attribute is read, the getter
 of a property, the `__get__` of a descriptor whose class is written in
 Python, or the `__getattr__` of the class for a name that is not there.
+The truth of an object whose class has a `__len__` and no `__bool__` is
+that function as well; whether the class, or a class it is made of, has a
+`__bool__` is asked again at every call, as the interpreter asks it at
+every truth test.
 `list(x)` and `tuple(x)` ask the object for its `__len__` or its
 `__length_hint__` as well, once they have its iterator, so a path goes into
 the `__iter__` for them only where the class has neither, which it checks
@@ -2894,7 +2898,7 @@ profiler counts an operation of a graph as less than one):
 | DistillGPT2 (HuggingFace) | 4 | 4 | 254 of 247 |
 | hf_DistilBert (TorchBench) | 4 | 14 | 136 of 136 |
 | MobileBertForMaskedLM (HuggingFace) | 3 | 3 | 1295 of 1250 |
-| whisper-tiny (HuggingFace) | 6 | 18 | 366 of 385 |
+| whisper-tiny (HuggingFace) | 3 | 3 | 371 of 385 |
 
 The outputs are those of eager mode bit for bit. A timm model and the vision
 transformer are one graph, the whole forward. A transformer language model
@@ -2905,10 +2909,9 @@ them and the last normalization behind: a graph starts behind the call of
 the helper that makes its mask ("Graphs that start behind a call"). What their
 paths end at is the code around the attention mask at the start of every
 model (a wrapper that reads a member of an enumeration, a branch on what the
-mask holds), the truth of the cache that a decoder asks at every layer,
-which is a `__len__` in Python, the objects the models construct for their
-outputs, and library code such as `inspect.signature` and `copy.deepcopy`
-("Limits"). A training step has fewer of its operations
+mask holds), the objects the models construct for their outputs, and
+library code such as `inspect.signature` and `copy.deepcopy` ("Limits"). A
+training step has fewer of its operations
 in graphs (counted on eager's tape, with `Graphs(backward=False)`): for
 DistillGPT2, 5 graphs that run 15 times in a step, with 191
 of the about 820 operators that the profiler counts in one step of eager
