@@ -35,6 +35,7 @@ from torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_g
 
 _prep_fn_cache = {}
 _gemm_fn_cache = {}
+_gemm_seed_cache = {}
 
 _KERNEL_CONFIG_KEY = (
     TILE_M, TILE_N, CLUSTER_M, CLUSTER_N,
@@ -67,19 +68,13 @@ def _to_fake_cute_tensor(t, assumed_align=16):
 
 
 def _to_fake_gemm_tensor(t, assumed_align=16):
-    """Build a symbolic layout for a descriptor-seed GEMM operand.
-
-    The grouped kernel rewrites the TMA descriptors for each group at runtime.
-    Keep the seed independent of the packed M dimension while preserving the
-    operand's post-transpose major order and aligned leading stride.
-    """
+    """Build a symbolic layout for a descriptor-seed GEMM operand."""
     shape = tuple(1 if int(size) == 1 else cute.sym_int64() for size in t.shape)
-    non_singleton = [int(size) != 1 for size in t.shape]
     leading_dim = next(
         (
             dim
-            for dim, (size, stride) in enumerate(zip(non_singleton, t.stride()))
-            if size and int(stride) == 1
+            for dim, (size, stride) in enumerate(zip(t.shape, t.stride()))
+            if int(size) != 1 and int(stride) == 1
         ),
         None,
     )
@@ -87,7 +82,11 @@ def _to_fake_gemm_tensor(t, assumed_align=16):
     stride = tuple(
         1
         if dim == leading_dim
-        else cute.sym_int64(divisibility=stride_divisibility)
+        else cute.sym_int64(
+            divisibility=(
+                stride_divisibility if int(t.shape[dim]) != 1 else 1
+            )
+        )
         for dim in range(t.ndim)
     )
     return cute.runtime.make_fake_tensor(
@@ -96,6 +95,32 @@ def _to_fake_gemm_tensor(t, assumed_align=16):
         stride=stride,
         assumed_align=assumed_align,
     )
+
+
+def _get_gemm_seed_tensor(t, assumed_align=16):
+    """Keep a small layout-matched seed alive for runtime CuTe compilation."""
+    leading_dim = next(
+        (
+            dim
+            for dim, (size, stride) in enumerate(zip(t.shape, t.stride()))
+            if int(size) != 1 and int(stride) == 1
+        ),
+        0,
+    )
+    itemsize = int(t.element_size())
+    seed_dim = max(assumed_align // itemsize, 1)
+    key = (t.device, t.dtype, t.ndim, leading_dim, seed_dim)
+    if key not in _gemm_seed_cache:
+        shape = tuple(
+            seed_dim if dim != t.ndim - 1 else 1 for dim in range(t.ndim)
+        )
+        stride = [seed_dim] * t.ndim
+        stride[leading_dim] = 1
+        stride[-1] = 1
+        _gemm_seed_cache[key] = torch.empty_strided(
+            shape, tuple(stride), dtype=t.dtype, device=t.device
+        )
+    return _gemm_seed_cache[key]
 
 
 @functools.lru_cache
@@ -340,11 +365,15 @@ def launch_build_group_ptrs_from_bases(
         a_unsq = input_a.unsqueeze(-1)
         b_unsq = input_b[0].unsqueeze(-1)
         c_unsq = {{get_output()}}.unsqueeze(-1)
+        # Keep alignment-sized descriptor seeds alive outside CUDA graph capture.
+        seed_a = _get_gemm_seed_tensor(a_unsq)
+        seed_b = _get_gemm_seed_tensor(b_unsq)
+        seed_c = _get_gemm_seed_tensor(c_unsq)
         gemm_executor = cute.compile(
             grouped_gemm,
-            _to_fake_gemm_tensor(a_unsq),
-            _to_fake_gemm_tensor(b_unsq),
-            _to_fake_gemm_tensor(c_unsq),
+            _to_fake_gemm_tensor(seed_a),
+            _to_fake_gemm_tensor(seed_b),
+            _to_fake_gemm_tensor(seed_c),
             G,
             _to_fake_cute_tensor(probs_t, assumed_align=4),
             _to_fake_cute_tensor(strides_t, assumed_align=4),
