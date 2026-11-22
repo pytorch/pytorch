@@ -2953,6 +2953,12 @@ What graphs do not do at this stage:
   leaf whose nodes all ran before that one; the node of a graph raises
   before it gives anything, so no input of the graph has a gradient of that
   backward. The error and its text are eager's.
+- With gradients recorded and the engine's backward, the Python object of a
+  tensor that a graph is handed and that is no leaf lives until the node of
+  the graph's result ends, and with it what only that object holds (an
+  attribute of the tensor): the node keeps what the graph was fed. In eager
+  mode it ends where the caller lets go of the tensor, or at the backward
+  where a node had saved the tensor. A leaf lives as long in eager mode too.
 - A backward that is to be differentiated again, or one for some results of
   a node of eager's with several, runs the graph once more on the tape: a
   graph that draws random numbers or writes to a tensor from outside raises
