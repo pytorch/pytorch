@@ -163,7 +163,6 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
-from .exc import unimplemented
 from .source import (
     AttrProxySource,
     AttrSource,
@@ -350,6 +349,8 @@ class NativeMethodMetadata(NamedTuple):
 def _native_method_metadata(
     value: object, *, portable: bool = True
 ) -> NativeMethodMetadata | None:
+    # A builtin bound to a class, like an autograd Function's ``apply``: every
+    # attribute read makes a new bound object, so only equality is portable.
     if type(value) is not types.BuiltinMethodType:
         return None
     receiver = value.__self__
@@ -410,11 +411,13 @@ def _method_identity_guards_filtered(
 
 
 def _untracked_method_identity(context: str, *, skip_frame: bool = False) -> NoReturn:
-    unimplemented(
+    exc.unimplemented(
         gb_type="Builtin method operation requires identity guards",
         context=context,
         explanation="Dynamo cannot establish the stable receiver identity required by this operation.",
-        hints=["Bind on a stable receiver and retain its identity guards."],
+        hints=[
+            "Use a stable receiver or pass the result into the saved graph or reuse hash function."
+        ],
         skip_frame=skip_frame,
         preserve_skip_frame_after_inline=skip_frame,
     )
@@ -1803,6 +1806,7 @@ class GuardBuilder(GuardBuilderBase):
         # Save the guard managers to avoid repeatedly traversing sources.
         self._cached_guard_managers: dict[str, GuardManager] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
+        self._builtin_object_sources: set[Source] = set()
         self._cached_distinct_inputs: set[frozenset[Source]] = set()
         self.object_aliasing_guard_codes: list[tuple[str, str]] = []
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
@@ -2936,6 +2940,14 @@ class GuardBuilder(GuardBuilderBase):
         if code in self.already_added_code_parts:
             return
         self._set_guard_export_info(guard, [code])
+        source = guard.originating_source
+        if (
+            isinstance(source, TypeDictSource)
+            and source.base in self._builtin_object_sources
+            and key not in object.__dict__
+        ):
+            # A retained class guard already pins the immutable object dictionary.
+            return
         reason = (
             f"Dictionary {dict_ref} must not contain key {key!r}; Dynamo specialized "
             "the compiled code on this key being absent."
@@ -3678,6 +3690,8 @@ class GuardBuilder(GuardBuilderBase):
                 f"{guard.name} is not a class, but CLASS_MATCH is used"
             )
         self.id_match_unchecked(guard)
+        if val is object:
+            self._builtin_object_sources.add(guard.originating_source)
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
@@ -4687,9 +4701,8 @@ class GuardBuilder(GuardBuilderBase):
                 metadata = output_graph.input_source_to_sizes_strides[
                     guard.originating_source
                 ]
-                self.has_metadata_only_tensor |= metadata.get(
-                    "needs_alias_check", False
-                )
+                if metadata.get("needs_alias_check", False):
+                    self.has_metadata_only_tensor = True
                 size = convert_to_concrete_values(metadata["size"])
                 stride = convert_to_concrete_values(metadata["stride"])
                 device_index_is_current = _guard_device_index_is_current(
@@ -5626,9 +5639,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         global_scope: dict[str, Any],
         dictionaries: collections.abc.Collection[dict[Any, Any]],
     ) -> None:
-        """Retain keys, then prune unused pytree leaves and bound receivers.
-        Keep constructor dependencies reachable from surviving roots before freezing dictionary slots.
-        """
+        """Retain keys and constructor dependencies before freezing unused dictionary slots."""
         value: Any
         for value in itertools.chain(self.guard_tree_values.values(), dictionaries):
             if issubclass(type(value), dict):
@@ -5637,10 +5648,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         dictionaries = tuple(v for v in dictionaries if _can_prune_dict_values(v))
         self._pruned_dictionary_ids.update(map(id, dictionaries))
         self._prune_local_scope(local_scope)
-        if any(
-            type(d) is not dict or any(self._can_prune_value(v) for v in dict.values(d))
-            for d in dictionaries
-        ):
+        if dictionaries:
             self._retain_dict_aliases(
                 itertools.chain(local_scope.values(), global_scope.values())
             )
@@ -5655,10 +5663,7 @@ class GuardsStatePickler(FunctionPicklerBase):
     def _retain_dict_aliases(
         self, roots: collections.abc.Iterable[Any], *, checking_copy: bool = False
     ) -> None:
-        """Find saved reducers first, then retain dictionaries their constructors can inspect.
-
-        A late proxy copy must fail if a newly discovered dependency has already been pruned.
-        """
+        """Protect state that survives through a saved constructor from pruning by identity."""
         retained = self.guard_tree_values.keys() | self._verbatim_elements
         opaque: list[Any] = []
         for whole, pending in ((False, list(roots)), (True, opaque)):
@@ -5672,7 +5677,12 @@ class GuardsStatePickler(FunctionPicklerBase):
                 if obj_id in self._whole_compared_values:
                     continue
                 if whole:
-                    if checking_copy or obj_id in self._pruned_dictionary_ids:
+                    if (
+                        checking_copy
+                        or obj_id in self._pruned_dictionary_ids
+                        or obj_id in self.missing_values
+                        or obj_id in self.empty_values
+                    ):
                         self._retain_required_state(
                             (value,), checking_copy=checking_copy
                         )
@@ -6002,11 +6012,8 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         if type(obj) is types.MethodWrapperType:
             # Pickle's getattr(receiver, name) can select a different subclass slot.
-            return type(self)._unpickle_method_wrapper, (
-                obj.__objclass__,
-                obj.__name__,
-                obj.__self__,
-            )
+            args = (obj.__objclass__, obj.__name__, obj.__self__)
+            return type(self)._unpickle_method_wrapper, args
 
         if obj is dict_keys:
             return type, (dict[Any, Any]().keys(),)
@@ -8166,11 +8173,8 @@ def unique(seq: Sequence[T]) -> Generator[T, None, None]:
 def guard_mixed_scope_alias(left: Source, right: Source) -> None:
     # make_dupe_guard cannot relate a local argument to a preloaded global.
     if is_from_local_source(left) != is_from_local_source(right):
-        install_guard(
-            left.make_guard(
-                functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=right)
-            )
-        )
+        check = functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=right)
+        install_guard(left.make_guard(check))
 
 
 def record_lexical_alias(
