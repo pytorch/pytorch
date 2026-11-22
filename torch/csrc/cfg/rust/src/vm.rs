@@ -4476,10 +4476,11 @@ impl Compiled {
             | Op::IsNone(..)
             | Op::Is(..)
             | Op::IsFunction { .. }
-            | Op::BuildTuple(_)
-            | Op::BuildList(_)
-            | Op::BuildSlice(..)
             | Op::CheckBound(..) => true,
+            // Of what is there: a register that is empty is nothing to
+            // build of.
+            Op::BuildTuple(vs) | Op::BuildList(vs) => vs.iter().all(|v| !at(*v).is_null()),
+            Op::BuildSlice(a, b, c) => [a, b, c].into_iter().all(|v| *v == NONE || !at(*v).is_null()),
             // What changes a list, or draws on an iterator, does so to one
             // the path made: `record` takes down no other.
             Op::ListAppend(..) | Op::IterNext(_) => true,
@@ -5199,13 +5200,15 @@ impl Compiled {
                 return Taken::Raised;
             };
             // What is read of a list that holds what an operation gave is
-            // read behind the graph, and so is what is put into it later.
-            t.defs[list as usize].late |= t.defs[item as usize].late;
+            // read behind the graph, and so is what is put into it later
+            // (`Trace::note`).
             let append = Op::ListAppend(list, item);
+            t.note(&append, NONE, Kind::Residual);
             t.body.push(PathInst { op: append, dst: NONE, kind: Kind::Residual, bc: inst.bc, stage: Stage::Before, in_graph: false, assert: None });
             ffi::Py_XINCREF(nothing);
             let dst = t.define(inst.dst, Def::default(), nothing);
             let none = Op::Const(self.func.const_none);
+            t.note(&none, dst, Kind::Pure);
             t.body.push(PathInst { op: none, dst, kind: Kind::Pure, bc: inst.bc, stage: Stage::Before, in_graph: false, assert: None });
             capi::release(std::mem::replace(&mut regs[inst.dst as usize], nothing));
             kill(t, regs);
@@ -5275,6 +5278,7 @@ impl Compiled {
                         t.rec.kept.entry(kept as usize).or_insert((0, list)).0 += 1;
                     }
                     let inst = PathInst { op, dst: list, kind: Kind::Pure, bc: inst.bc, stage: Stage::Before, in_graph: false, assert: None };
+                    t.note(&inst.op, inst.dst, inst.kind);
                     t.body.push(inst);
                     lists.push((v, list));
                 }
@@ -5376,14 +5380,8 @@ impl Compiled {
                 t.first = Some((block, origin));
             }
         }
-        if let Op::ListAppend(into, ..) | Op::MapAdd(into, ..) = &renamed {
-            // What is read of a list or a dict that holds what an operation
-            // gave is read behind the graph.
-            let mut late = false;
-            graph::reads(&renamed, |v| late |= t.defs[v as usize].late);
-            t.defs[*into as usize].late |= late;
-        }
         let taken = PathInst { op: renamed, dst, kind, bc: inst.bc, stage: Stage::Before, in_graph: false, assert: None };
+        t.note(&taken.op, taken.dst, taken.kind);
         t.body.push(taken);
         kill(t, regs);
         Taken::Went
@@ -5591,13 +5589,14 @@ impl Compiled {
         if graph::debug() {
             let (steps, ops) = (path.body.len(), path.operators.len());
             eprintln!(
-                "torch.vm graph {}: a path of {} instructions, {} operations ({} in front of what stands for them, {} behind; {} registers), ends at {:?}: {}",
+                "torch.vm graph {}: a path of {} instructions, {} operations ({} in front of what stands for them, {} behind; {} registers, {} results), ends at {:?}: {}",
                 site.name,
                 steps,
                 ops,
                 path.stages[0].len(),
                 path.stages[1].len(),
                 path.nregs,
+                path.outputs.len(),
                 land,
                 path.ends
             );
