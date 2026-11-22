@@ -944,6 +944,11 @@ DEFINE_CACHING_PYTHON_IMPORT_GETTER(
         .attr("_op_schema")
         .attr("TupleStrategy"))
 
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_fake_script_object_class,
+    py::module::import("torch._library.fake_class_registry")
+        .attr("FakeScriptObject"))
+
 static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   const auto dtensor_spec_class = get_dtensor_spec_class();
   const auto op_strategy_class = get_op_strategy_class();
@@ -1107,20 +1112,20 @@ static c10::SymDimVector tuple_to_symintlist(PyObject* obj) {
 // efficient than (5), (5) seems like the best path forward.
 
 // We can't safely steal bits from IValue, so we just use 24 bytes of
-// space. If dtensor_spec is non-null (truthy) then it's the active
-// member, otherwise it's iv.
+// space. If key_obj (_hash_key_no_mesh or _cache_key) is non-null (truthy) then
+// it's the active member, otherwise it's iv.
 struct IValueOrDTensorSpec {
   IValueOrDTensorSpec() = default;
   explicit IValueOrDTensorSpec(c10::IValue v) : iv(std::move(v)) {}
-  explicit IValueOrDTensorSpec(py::object dts) : dtensor_spec(std::move(dts)) {}
+  explicit IValueOrDTensorSpec(py::object obj) : key_obj(std::move(obj)) {}
   c10::IValue iv;
-  py::object dtensor_spec;
+  py::object key_obj;
 
   bool operator==(const IValueOrDTensorSpec& rhs) const {
-    if (dtensor_spec) {
-      return rhs.dtensor_spec && dtensor_spec.equal(rhs.dtensor_spec);
+    if (key_obj) {
+      return rhs.key_obj && key_obj.equal(rhs.key_obj);
     }
-    return !rhs.dtensor_spec && iv == rhs.iv;
+    return !rhs.key_obj && iv == rhs.iv;
   }
 };
 
@@ -1134,7 +1139,8 @@ class NativeOpSchema {
       const c10::OperatorHandle& op,
       c10::SmallVector<IValueOrDTensorSpec, 8> comparison_key,
       std::size_t comparison_key_hash,
-      std::size_t args_schema_len)
+      std::size_t args_schema_len,
+      std::size_t num_mesh_fingerprints)
       : op_(op),
         hash_(hash_combine(
             hash_combine(
@@ -1142,7 +1148,8 @@ class NativeOpSchema {
                 comparison_key_hash),
             args_schema_len)),
         args_schema_len_(args_schema_len),
-        comparison_key_(std::move(comparison_key)) {}
+        comparison_key_(std::move(comparison_key)),
+        num_mesh_fingerprints_(num_mesh_fingerprints) {}
 
   bool operator==(const NativeOpSchema& rhs) const {
     // If two NativeOpSchema are being compared, they are probably
@@ -1174,12 +1181,19 @@ class NativeOpSchema {
     }
     ss << '(';
     bool first = true;
-    for (const auto& item : comparison_key_) {
+    // Trailing entries are per-mesh fingerprints: part of the key, but only
+    // noise in a log line.
+    const auto num_args = comparison_key_.size() - num_mesh_fingerprints_;
+    for (const auto i : c10::irange(num_args)) {
+      const auto& item = comparison_key_[i];
       if (!first)
         ss << ", ";
       first = false;
-      if (item.dtensor_spec) {
-        ss << py::str(item.dtensor_spec).cast<std::string>();
+      if (item.key_obj) {
+        // _hash_key_no_mesh is (placements, shard_order[, shape, stride,
+        // dtype]). Print placements only.
+        ss << py::str(py::reinterpret_borrow<py::tuple>(item.key_obj)[0])
+                  .cast<std::string>();
       } else if (!item.iv.isNone()) {
         ss << item.iv;
       }
@@ -1197,6 +1211,7 @@ class NativeOpSchema {
   // There is no particular justification for the choice of 8
   // here. Feel free to change it.
   c10::SmallVector<IValueOrDTensorSpec, 8> comparison_key_;
+  std::size_t num_mesh_fingerprints_;
 };
 
 namespace std {
@@ -1481,6 +1496,15 @@ static py::object make_output_sharding(
       redistribute_schema.ptr(),
       cached.needs_redistribute ? Py_True : Py_False,
       cached.use_val_from_redistribute_schema ? Py_True : Py_False);
+}
+
+static py::object mesh_cache_key(py::handle mesh) {
+  if (Py_TYPE(mesh.ptr()) ==
+      reinterpret_cast<PyTypeObject*>(get_fake_script_object_class().ptr())) {
+
+    return mesh.attr("real_obj").attr("_cache_key");
+  }
+  return mesh.attr("_cache_key");
 }
 
 static std::optional<NativeOpSchemaAndMeshes> create_native_op_schema(
@@ -2585,7 +2609,7 @@ static std::optional<NativeOpSchemaAndMeshes> create_native_op_schema(
                                    &comparison_key_hash](py::object arg) {
     comparison_key_hash = c10::hash_combine(
         comparison_key_hash, static_cast<size_t>(py::hash(arg)));
-    comparison_key.emplace_back(std::move(arg));
+    comparison_key.emplace_back(arg.attr("_hash_key_no_mesh"));
   };
 
   const auto handle_non_tensor_or_undefined =
@@ -2843,14 +2867,21 @@ static std::optional<NativeOpSchemaAndMeshes> create_native_op_schema(
     return std::nullopt;
   }
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(meshes[0].is(compute_mesh));
+  for (const auto& mesh : meshes) {
+    comparison_key_hash = 
+        hash_combine(comparison_key_hash, static_cast<size_t>(py::hash(mesh)));
+    comparison_key.emplace_back(mesh_cache_key(mesh));
+  }
 
+  TORCH_INTERNAL_ASSERT(meshes[0].is(compute_mesh));
+  const auto num_mesh_fingerprints = meshes.size();
   return NativeOpSchemaAndMeshes{
       NativeOpSchema(
           op,
           std::move(comparison_key),
           comparison_key_hash,
-          args_kwargs.num_positional_args()),
+          args_kwargs.num_positional_args(),
+          num_mesh_fingerprints),
       std::move(meshes)};
 }
 
@@ -4234,3 +4265,4 @@ bool THPVariable_initModule(PyObject* module) {
 
   return true;
 }
+ 

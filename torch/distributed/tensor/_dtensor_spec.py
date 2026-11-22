@@ -123,6 +123,7 @@ class DTensorSpec:
                 self.shard_order = self.compute_default_shard_order(self.placements)
 
         self._hash: int | None = None
+        self._no_mesh_hash = None
 
     @staticmethod
     def _normalize_placements_into_shard_order(
@@ -410,6 +411,7 @@ class DTensorSpec:
             "shard_order",
         ):
             self._hash = None
+            self._no_mesh_hash = None
         # This assert was triggered by buggy handling for dict outputs in some
         # FX passes, where you accidentally iterate over a dict and try to put
         # keys into TensorMeta.  See https://github.com/pytorch/pytorch/issues/157919
@@ -424,16 +426,7 @@ class DTensorSpec:
 
     def _hash_key(self) -> tuple[Any, ...]:
         """Return the tuple used for hashing. Used by both __hash__ and _stable_hash."""
-        if self.tensor_meta is not None:
-            return (
-                self.mesh,
-                self.placements,
-                self.shard_order,
-                self.tensor_meta.shape,
-                self.tensor_meta.stride,
-                self.tensor_meta.dtype,
-            )
-        return (self.mesh, self.placements, self.shard_order)
+        return (self.mesh,) + self._hash_key_no_mesh
 
     def _hash_impl(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding
@@ -692,6 +685,22 @@ class DTensorSpec:
             for idx, placement in enumerate(self.placements)
             if placement.is_partial()
         ]
+
+    @property
+    def _hash_key_no_mesh(self) -> tuple[Any, ...]:
+        """Return the tuple used for hashing without the actual mesh."""
+        if self._no_mesh_hash is None:
+            if self.tensor_meta is not None:
+                self._no_mesh_hash = (
+                    self.placements,
+                    self.shard_order,
+                    self.tensor_meta.shape,
+                    self.tensor_meta.stride,
+                    self.tensor_meta.dtype,
+                )
+            else:
+                self._no_mesh_hash = (self.placements, self.shard_order)
+        return self._no_mesh_hash
 
     @classmethod
     def from_dim_map(

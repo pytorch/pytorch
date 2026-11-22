@@ -387,6 +387,7 @@ else:
                 self._coordinate_on_dim = self._compute_coordinate_on_dim()
 
             self._hash: int | None = None
+            self._cache_key = self._hash_key()
 
         @staticmethod
         def _compute_coordinates_from_mesh(
