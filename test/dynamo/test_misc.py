@@ -5404,7 +5404,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     def test_deepcopy_ordered_dict(self):
         def minimal(x):
             copy.deepcopy(collections.OrderedDict(a=1))
-            return x + 1
+            mapping = collections.OrderedDict()
+            mapping.tag = x + 1
+            return mapping.tag
 
         x = torch.randn(4)
         self.assertEqual(
@@ -5415,8 +5417,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     def test_deepcopy_ordered_dict_memo(self, nested):
         class Obj:
             def __deepcopy__(self, memo):
-                memo[getattr(self, "memo_key", id(self))] = value = ()
-                return value if nested else self
+                memo[id(self)] = ()
+                return () if nested else self
 
         def region(x, m):
             copied = copy.deepcopy(m, None if nested else {id(Obj()): None})
@@ -5431,10 +5433,19 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertEqual(report.graph_break_count, 0)
             names = [g.create_fn_name() for g in report.out_guards]
             self.assertNotIn("DEEPCOPY_MEMO_CONTAINS_ID", names)
-            if hasattr(copy, "_deepcopy_atomic"):
-                m["a"].memo_key = id(next(reversed(m)))
-                with self.assertRaisesRegex(Unsupported, "memo may already contain"):
-                    torch._dynamo.export(region)(torch.tensor(1), m)
+
+    @unittest.skipUnless(hasattr(copy, "_deepcopy_atomic"), "requires legacy deepcopy")
+    def test_deepcopy_ordered_dict_memo_export(self):
+        class Obj:
+            def __deepcopy__(self, memo):
+                memo[self.key_id] = ()
+                return ()
+
+        m = collections.OrderedDict(a=Obj(), b=0)
+        m["a"].key_id = id(next(reversed(m)))
+        export = torch._dynamo.export(lambda x, m: x + len(copy.deepcopy(m)))
+        with self.assertRaisesRegex(Unsupported, "memo may already contain"):
+            export(torch.ones(1), m)
 
     @parametrize(
         "copier", [copy.copy, copy.deepcopy, lambda od: copy.deepcopy([od], {17: 3})[0]]
