@@ -718,6 +718,12 @@ REGISTER_FLOAT_BINARY_OP(legendre_polynomial_p);
 REGISTER_INT2FLOAT_BINARY_OP(legendre_polynomial_p);
 REGISTER_FLOAT_BINARY_OP(pow);
 REGISTER_INTEGER_BINARY_OP(pow);
+REGISTER_BINARY_TYPED_CAST_OP(pow, float, float, float, int);
+REGISTER_BINARY_TYPED_CAST_OP(pow, float, float, float, long);
+REGISTER_BINARY_TYPED_CAST_OP(pow, half, half, half, int);
+REGISTER_BINARY_TYPED_CAST_OP(pow, half, half, half, long);
+REGISTER_BINARY_TYPED_CAST_OP(pow, bfloat, bfloat, bfloat, int);
+REGISTER_BINARY_TYPED_CAST_OP(pow, bfloat, bfloat, bfloat, long);
 REGISTER_BINARY_OP(pow, float2, float2);
 // chalf pow must accumulate in float2: the polar form exp(y*log(x)) overflows
 // half for moderately large magnitudes (e.g. (300+0j)**1 -> inf), see #195585

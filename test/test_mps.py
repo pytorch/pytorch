@@ -3851,6 +3851,16 @@ class TestMPS(TestCaseMPS):
         ref = torch.pow(base.cpu().to(torch.cfloat), exp.cpu().to(torch.cfloat))
         self.assertEqual(torch.pow(base, exp).cpu().to(torch.cfloat), ref, atol=1e-2, rtol=1e-2)
 
+        # Integer exponent tensors: float bases have cast kernels typed on the input dtype pair, the other
+        # pairs (int16 exponent, integer base) the generic ones. Dense, transposed and broadcast exponents.
+        int_dtypes = [torch.int32, torch.int64, torch.int16]
+        for dtype, exp_dtype in product([torch.float, torch.half, torch.bfloat16], int_dtypes):
+            x = torch.rand(32, 33, device="mps", dtype=dtype) + 0.5
+            e = torch.randint(-3, 4, (33, 32), device="mps", dtype=exp_dtype)
+            for ev in [e.t().contiguous(), e.t(), e[:1].t().expand(32, 33)]:
+                self.assertEqual(torch.pow(x, ev), torch.pow(x.cpu(), ev.cpu()))
+                self.assertEqual(torch.pow(ev.abs(), x), torch.pow(ev.cpu().abs(), x.cpu()))
+
     # Test addcmul
     def test_addcmul(self):
         def helper(shape, value, xtype=torch.float32, ytype=None, ztype=None):
