@@ -5,6 +5,7 @@ import functools
 import os
 import subprocess
 import sys
+import tempfile
 import textwrap
 import unittest
 from unittest.mock import patch
@@ -2866,6 +2867,59 @@ class TestCompileOnOneRankLocalShapeAndChunks(TestCase):
                         finally:
                             dist.destroy_process_group()
                 self.assertEqual(len(graphs), 1)
+
+
+@unittest.skipIf(not dist.is_available(), "distributed not available")
+class TestCompileOnOneRankPrecompile(TestCase):
+    def test_dtensor_package_loads_in_fresh_process(self):
+        # Rank 0 saves a package and rank 1 serves it without tracing, so only an
+        # import can have registered the device_mesh ops the compiled graph calls.
+        # Needs fresh processes: an op this process traced stays registered.
+        script = textwrap.dedent(
+            """
+            import sys
+
+            import torch
+            import torch.distributed as dist
+            from torch._dynamo.precompile_context import PrecompileContext
+            from torch.distributed.device_mesh import init_device_mesh
+            from torch.distributed.tensor import DTensor, Replicate, Shard
+            from torch.testing._internal.distributed.fake_pg import FakeStore
+
+            rank = int(sys.argv[1])
+            torch.compiler.config.compile_on_one_rank = True
+            torch._dynamo.config.caching_precompile = True
+            dist.init_process_group("fake", store=FakeStore(), rank=rank, world_size=2)
+            mesh = init_device_mesh("cpu", (2,))
+
+
+            def fn(x):
+                d = DTensor.from_local(x, mesh, [Replicate()], run_check=False)
+                return d.redistribute(mesh, [Shard(0)]).to_local()
+
+
+            with torch.compiler.set_stance("default" if rank == 0 else "fail_on_recompile"):
+                out = torch.compile(fn)(torch.arange(4.0))
+            assert out.tolist() == [[0.0, 1.0], [2.0, 3.0]][rank], out
+            if rank == 0:
+                PrecompileContext.save_to_dynamo_cache()
+            """
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "script.py")
+            with open(path, "w") as f:
+                f.write(script)
+            env = {**os.environ, "TORCHINDUCTOR_CACHE_DIR": os.path.join(tmp, "cache")}
+            for rank in ("0", "1"):
+                proc = subprocess.run(
+                    [sys.executable, path, rank],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                    check=False,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr[-3000:])
 
 
 if __name__ == "__main__":
