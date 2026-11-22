@@ -503,6 +503,36 @@ class GraphModule(torch.nn.Module):
 
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
+class TestLeafFunctionEagerForward(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_forward_drops_fake_key(self):
+        # Include keys captured while tracing under a C++ fake mode contain
+        # Fake; the leaf function runs with the captured include set without
+        # Fake, and with the captured exclude set.
+        from torch._higher_order_ops.invoke_leaf_function import _make_forward
+
+        fake = torch._C.DispatchKey.Fake
+        seen = []
+
+        def fn(x):
+            seen_include = torch._C._dispatch_tls_local_include_set()
+            seen.append((seen_include, torch._C._dispatch_tls_local_exclude_set()))
+            return (x * 2,)
+
+        # Captured sets that differ from the ambient ones (the default include
+        # set also has ADInplaceOrView), so that forcing them is observable
+        include = torch._C.DispatchKeySet(torch._C.DispatchKey.BackendSelect)
+        snapshot = torch._C.DispatchKeySet(torch._C.DispatchKey.PythonTLSSnapshot)
+        exclude = torch._C._dispatch_tls_local_exclude_set() | snapshot
+        forward, _ = _make_forward(fn, include | torch._C.DispatchKeySet(fake), exclude)
+        x = torch.randn(3, requires_grad=True)
+        (out,) = forward(x)
+        self.assertEqual(seen, [(include, exclude)])
+        self.assertEqual(out, x * 2)
+
+
+@skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionEscapedGradients(TestCase):
     hw_classification = HardwareClassification.GENERIC
 

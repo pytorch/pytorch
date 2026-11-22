@@ -19,7 +19,7 @@ from torch._guards import Source
 from .. import graph_break_hints, variables
 from ..exc import raise_observed_exception, raise_type_error, unimplemented
 from ..source import AttrSource
-from ..utils import istype, tracked_repr, unpack_iterable
+from ..utils import FrameState, istype, tracked_repr, unpack_iterable
 from .base import (
     GetSet,
     getset_build,
@@ -36,7 +36,10 @@ from .object_protocol import generic_repr, generic_str
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._dynamo.symbolic_convert import (
+        InliningGeneratorInstructionTranslator,
+        InstructionTranslatorBase,
+    )
 
 
 class FrameSummaryVariable(VariableTracker):
@@ -59,6 +62,51 @@ class FrameSummaryVariable(VariableTracker):
         "name": Member(getset_build(lambda s: s.frame_summary.name), readonly_setter),
         "line": Member(getset_build(lambda s: s.frame_summary.line), readonly_setter),
     }
+
+
+class FrameVariable(VariableTracker):
+    # PyFrame_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/frameobject.c#L1769
+    _cpython_type = types.FrameType
+
+    def __init__(
+        self, inline_tracer: "InliningGeneratorInstructionTranslator", **kwargs: Any
+    ) -> None:
+        super().__init__(**kwargs)
+        self.inline_tracer = inline_tracer
+
+    def python_type(self) -> type:
+        return types.FrameType
+
+    def _get_f_back(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # A generator frame is linked to its caller only while it is running,
+        # and a frame that outlives its generator can keep that link.
+        state = self.inline_tracer.frame_state
+        if state in {
+            FrameState.FRAME_CREATED,
+            FrameState.FRAME_SUSPENDED,
+            FrameState.FRAME_SUSPENDED_YIELD_FROM,
+        }:
+            return ConstantVariable.create(None)
+        unimplemented(
+            gb_type="Unsupported generator frame f_back",
+            context=f"{state}",
+            explanation="f_back is only modeled for created or suspended generators.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    tp_getset = {"f_back": GetSet(_get_f_back, readonly_setter)}
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if self.lookup_tp_getset_member(name) is None:
+            unimplemented(
+                gb_type="Unsupported generator frame attribute",
+                context=f"frame.{name}",
+                explanation=f"Dynamo does not model the frame attribute {name}.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return super().tp_getattro_impl(tx, name)
 
 
 class TracebackVariable(VariableTracker):
@@ -97,7 +145,7 @@ class TracebackVariable(VariableTracker):
         return istype(obj, TracebackVariable) or obj.is_constant_none()
 
     def extract_tb(self) -> list[traceback.FrameSummary | FrameSummaryVariable]:
-        if istype(self.tb_next, ConstantVariable):
+        if not isinstance(self.tb_next, TracebackVariable):
             return [self.frame_summary]
         return [self.frame_summary] + self.tb_next.extract_tb()
 
@@ -112,18 +160,6 @@ class TracebackVariable(VariableTracker):
 
     def python_type(self) -> type[types.TracebackType]:
         return types.TracebackType
-
-    def call_setattr(
-        self,
-        tx: "InstructionTranslatorBase",
-        name_var: VariableTracker,
-        val: VariableTracker,
-    ) -> VariableTracker:
-        name = name_var.as_python_constant()
-        getset = self.lookup_tp_getset_member(name)
-        if getset is not None:
-            getset.setter(self, tx, val)
-        return variables.ConstantVariable.create(None)
 
     def _get_tb_next(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.tb_next
@@ -172,24 +208,6 @@ class TracebackVariable(VariableTracker):
     tp_members = {
         "tb_lasti": Member(_get_tb_lasti, readonly_setter),
     }
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__setattr__":
-            return self.call_setattr(tx, *args)
-        return super().call_method(tx, name, args, kwargs)
 
 
 class ExceptionVariable(VariableTracker):
@@ -256,12 +274,7 @@ class ExceptionVariable(VariableTracker):
 
         def codegen_attr(name: str) -> None:
             attr = getattr(self, name)
-            if istype(attr, ConstantVariable):
-                if attr.value not in (True, False, None):
-                    raise AssertionError(
-                        f"attr.value must be True, False, or None, got {attr}"
-                    )
-            else:
+            if not attr.is_constant_match(True, False, None):
                 codegen.dup_top()
                 codegen(attr)
                 codegen.extend_output(codegen.rot_n(2))
@@ -273,43 +286,6 @@ class ExceptionVariable(VariableTracker):
 
     def python_type(self) -> type:
         return self.exc_type
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__setattr__":
-            attr = args[0].as_python_constant()
-            # Writable attributes route through their tp_getset/tp_members
-            # setter. Anything else becomes a custom instance-dict attribute.
-            getset = self.lookup_tp_getset_member(attr)
-            if getset is not None:
-                getset.setter(self, tx, args[1])
-            else:
-                # Arbitrary user attribute -> store in the instance __dict__
-                # via the side effects table.
-                se = tx.output.side_effects
-                if not se.is_attribute_mutation(self):
-                    se.track_attribute_mutation_new(self)
-                se.store_instance_dict_attr(self, attr, args[1])
-            return variables.ConstantVariable.create(None)
-        elif name == "__delattr__":
-            attr = args[0].as_python_constant()
-            getset = self.lookup_tp_getset_member(attr)
-            if getset is not None:
-                getset.setter(self, tx, None)
-                return variables.ConstantVariable.create(None)
-        return super().call_method(tx, name, args, kwargs)
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -580,7 +556,7 @@ class _KwargAttrExceptionVariable(ExceptionVariable):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         super().reconstruct(codegen)
         for name, val in self._attrs.items():
-            if not (istype(val, ConstantVariable) and val.value is None):
+            if not val.is_constant_none():
                 codegen.dup_top()
                 codegen(val)
                 codegen.extend_output(codegen.rot_n(2))

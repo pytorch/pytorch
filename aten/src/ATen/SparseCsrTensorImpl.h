@@ -79,6 +79,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   }
 
  private:
+  void resize_values_(IntArrayRef size);
   inline int64_t block_dim() const noexcept {
     return (layout_ == kSparseBsr || layout_ == kSparseBsc ? 2 : 0);
   }
@@ -126,8 +127,13 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
       interpreter = *c10::impl::getGlobalPyInterpreter();
     } else {
       // otherwise just copy the SparseTensorImpl and not the PyObject.
+      // Allocate a fake's placeholder components on Meta, before copying its
+      // logical device and the shared components below.
       auto impl = c10::make_intrusive<SparseCsrTensorImpl>(
-          key_set(), device(), layout_impl(), dtype());
+          is_fake() ? DispatchKeySet(DispatchKey::SparseCsrMeta) : key_set(),
+          is_fake() ? Device(kMeta) : device(),
+          layout_impl(),
+          dtype());
       copy_tensor_metadata(
           /*src_sparse_impl=*/this,
           /*dest_sparse_impl=*/impl.get(),

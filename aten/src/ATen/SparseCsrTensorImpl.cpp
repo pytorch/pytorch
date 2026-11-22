@@ -87,6 +87,12 @@ void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
   auto cols = size[size.size() - 1];
   auto old_crow_indices_size = crow_indices_.size(-1);
 
+  // The values go first: resize_values_ may raise, and then no member has
+  // been modified yet.
+  auto col_indices_values_size = DimVector(size.slice(0, size.size() - 2));
+  col_indices_values_size.push_back(std::min<int64_t>(nnz, rows*cols));
+  resize_values_(col_indices_values_size);
+
   auto new_crow_indices_size = DimVector(size.slice(0, size.size() - 2));
   new_crow_indices_size.push_back(rows + 1);
   crow_indices_.resize_(new_crow_indices_size);
@@ -95,10 +101,7 @@ void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
   } else {
     crow_indices_.narrow(-1, rows, 1).fill_(std::min<int64_t>(nnz, rows*cols));
   }
-  auto col_indices_values_size = DimVector(size.slice(0, size.size() - 2));
-  col_indices_values_size.push_back(std::min<int64_t>(nnz, rows*cols));
   col_indices_.resize_(col_indices_values_size);
-  values_.resize_(col_indices_values_size);
   sizes_and_strides_.set_sizes(size);
   refresh_numel();
 }
@@ -152,6 +155,20 @@ void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, int64_t dense_di
   refresh_numel();
 }
 
+void SparseCsrTensorImpl::resize_values_(IntArrayRef size) {
+  // resize_ on a non-contiguous view would overwrite the storage between
+  // its elements. A resize to zero elements writes nothing, as in zero_().
+  TORCH_CHECK(
+      values_.is_contiguous() || values_.sizes().equals(size) ||
+          c10::multiply_integers(size) == 0,
+      "resizing the non-contiguous values of a sparse compressed tensor from size ",
+      values_.sizes(), " to ", size, " is not supported: the values must be ",
+      "contiguous or already have the same shape as the result. This usually ",
+      "means that out= (or self of an in-place op) has non-contiguous values ",
+      "and a different nnz than the result");
+  values_.resize_(size);
+}
+
 void SparseCsrTensorImpl::resize_as_sparse_compressed_tensor_(
     const Tensor& src) {
   TORCH_CHECK(
@@ -170,6 +187,11 @@ void SparseCsrTensorImpl::resize_as_sparse_compressed_tensor_(
 
   auto [compressed_indices, plain_indices] =
       sparse_csr::getCompressedPlainIndices(src);
+  // Reuse values storage. The values go first: resize_values_ may raise, and
+  // then no member has been modified yet.
+  if (values_.sizes() != src.values().sizes()) {
+    resize_values_(src.values().sizes());
+  }
   // reuse self indices storage
   if (crow_indices_.sizes() != compressed_indices.sizes()) {
     crow_indices_.resize_as_(compressed_indices);
@@ -181,10 +203,6 @@ void SparseCsrTensorImpl::resize_as_sparse_compressed_tensor_(
   if ((sizes() != src.sizes()) || (dense_dim() != src.dense_dim())) {
     crow_indices_.copy_(compressed_indices);
     col_indices_.copy_(plain_indices);
-  }
-  // Reuse values storage
-  if (values_.sizes() != src.values().sizes()) {
-    values_.resize_as_(src.values());
   }
   sizes_and_strides_.set_sizes(src.sizes());
   refresh_numel();

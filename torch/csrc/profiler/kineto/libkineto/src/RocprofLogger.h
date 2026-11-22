@@ -27,6 +27,10 @@
 
 #include "RocLogger.h"
 
+namespace libkineto {
+class RocprofActivityApiTest;
+}
+
 struct ThreadTraceBuffer {
   explicit ThreadTraceBuffer(uint64_t bufferGeneration)
       : generation(bufferGeneration) {}
@@ -70,6 +74,9 @@ class RocprofLogger {
       rocprofiler_buffer_tracing_kind_t kind,
       rocprofiler_tracing_operation_t op);
 
+  // HIP runtime API ids whose GPU work is reported as a memset or memcpy.
+  static bool isMemsetOrCopyApi(uint32_t id);
+
  private:
   static void insert_row_to_buffer(rocprofBase* row);
 
@@ -101,6 +108,9 @@ class RocprofLogger {
   uint32_t maxBufferSize_{5000000}; // 5M GPU runtime/kernel events.
   std::vector<rocprofBase*> rows_;
   std::mutex rowsMutex_;
+  // Detached rows count toward the shared-buffer path's session limit only;
+  // guarded by rowsMutex_.
+  uint64_t processedRows_{0};
 
   // This vector collects pairs of correlationId and their respective
   // externalCorrelationId for each CorrelationDomain. This will be used
@@ -124,4 +134,5 @@ class RocprofLogger {
   std::chrono::milliseconds dispatchRecordWait_{20};
 
   friend class libkineto::RocprofActivityApi;
+  friend class libkineto::RocprofActivityApiTest;
 };

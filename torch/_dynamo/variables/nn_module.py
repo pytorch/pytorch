@@ -29,7 +29,7 @@ import re
 import types
 from collections.abc import Iterable
 from contextlib import contextmanager, nullcontext
-from typing import Any, TYPE_CHECKING
+from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch.nn
 from torch._guards import Source
@@ -61,7 +61,6 @@ from ..source import (
     UnspecializedNNModuleSource,
 )
 from ..utils import (
-    enumerate_items_with_dict_position,
     get_custom_getattr,
     get_fake_value,
     is_lazy_module,
@@ -80,13 +79,11 @@ from ..utils import (
 from .base import Method, typestr, ValueMutationNew, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lazy import LazyVariableTracker
-from .user_defined import UserDefinedObjectVariable
+from .user_defined import can_guard_class_function_code, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-
-    from .constant import ConstantVariable
 
 
 def initialize_lazy_module(
@@ -186,7 +183,10 @@ def guard_to_detect_forward_monkeypatching(
     # To keep the guard overhead down, we just guard on the `forward` being
     # not present in the mod __dict__. The common case of patching forward
     # method adds `forward` in the instance __dict__, whereas the unpatched
-    # `forward` sits in the type(mod).__dict__
+    # `forward` sits in the type(mod).__dict__. Patching the class's forward is
+    # caught only for UnspecializedNNModuleVariable, by its call_function's code
+    # guard on the type(mod).__dict__ source. The specialized NNModuleVariable
+    # path does not guard the class's forward (known gap).
     if source:
         if "forward" in mod.__dict__ and callable(mod.__dict__["forward"]):
             # Monkeypatched forward method, guard on call-relevant structure.
@@ -370,21 +370,11 @@ class NNModuleVariable(VariableTracker):
             )
         return result
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "ConstantVariable":
-        mod = tx.output.get_submodule(self.module_key)
-        result = hasattr(mod, name)
-        install_guard(
-            self.source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
-        )
-        return VariableTracker.build(tx, result)
-
     def is_training(self, tx: "InstructionTranslatorBase") -> bool:
         mod = tx.output.get_submodule(self.module_key)
         return getattr(mod, "training", False)
 
-    def convert_to_unspecialized(self, tx: "InstructionTranslatorBase") -> None:
+    def convert_to_unspecialized(self, tx: "InstructionTranslatorBase") -> NoReturn:
         """Restart analysis treating this module as an UnspecializedNNModuleVariable"""
         mod = tx.output.get_submodule(self.module_key)
         GenerationTracker.tag(mod)
@@ -393,6 +383,43 @@ class NNModuleVariable(VariableTracker):
         if tx.f_code.co_name != "__init__":
             GenerationTracker.mark_class_dynamic(type(mod))
         raise UnspecializeRestartAnalysis
+
+    def tp_setattro_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # A specialized module's attributes are read straight off the real
+        # module (see tp_getattro_impl), so a pending side-effect store would
+        # never be seen by later reads in this frame. Restart as unspecialized
+        # instead, which tracks mutations through the side-effects table.
+        if not tx.output.is_root_tracer():
+            unimplemented(
+                gb_type="nn.Module mutation in HigherOrderOp",
+                context=f"nn.Module: {self}",
+                explanation="Inplace modifying nn.Module params/buffers inside HigherOrderOps is not allowed.",
+                hints=[
+                    "Remove the mutation or move it outside of the HigherOrderOp.",
+                    *graph_break_hints.FUNDAMENTAL,
+                ],
+            )
+        if name.is_python_constant() and isinstance(value, variables.TensorVariable):
+            assigning_fake_val = get_fake_value(value.as_proxy().node, tx)
+            try:
+                getattr_var = self.tp_getattro_impl(tx, name.as_python_constant())
+            except (AttributeError, ObservedAttributeError):
+                getattr_var = None
+            if getattr_var is not None and getattr_var.is_tensor():
+                existing_fake_attr = get_fake_value(getattr_var.as_proxy().node, tx)
+                # Same tensor identity and the default __setattr__: a no-op.
+                mod_setattr = inspect.getattr_static(self.module_type, "__setattr__")
+                if (
+                    existing_fake_attr is assigning_fake_val
+                    and mod_setattr is torch.nn.Module.__setattr__
+                ):
+                    return variables.ConstantVariable.create(None)
+        self.convert_to_unspecialized(tx)
 
     def _custom_getattr_fallback(
         self,
@@ -1473,13 +1500,18 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 fn_vt = VariableTracker.build(tx, fn, source=source, realize=True)
                 return fn_vt.call_function(tx, [self] + list(args), kwargs)
             else:
-                # Ideally we would have just used VariableTracker.build(tx, fn,
-                # source=source) but that introduces guard on the
-                # `forward.__code__` object. Given that we already guard on the
-                # forward not present in generic dict, we don't need this guard.
-                return VariableBuilder.create_internal_user_function(
-                    fn, source=source
-                ).call_function(tx, [self] + list(args), kwargs)
+                # This call skips resolve_type_attr, so guard the class
+                # function's __code__ here the same way (forward, or a
+                # user-defined __call__).
+                if source is not None and can_guard_class_function_code(tx, fn):
+                    fn_vt = variables.UserFunctionVariable.create_with_source(
+                        fn, source
+                    )
+                else:
+                    fn_vt = VariableBuilder.create_internal_user_function(
+                        fn, source=source
+                    )
+                return fn_vt.call_function(tx, [self] + list(args), kwargs)
 
     def call_method(
         self,
@@ -1527,53 +1559,62 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     ],
                 )
 
-            # "_parameters" in self.value.__dict__ checks that module is initialized
-            if name == "__setattr__" and "_parameters" in self.value.__dict__:
-                # Record if mutations happens on parameters/buffers/modules. The
-                # mutations on these are not tracked by base class
-                # UserDefinedObject vt. This will be used later to graph break
-                # on seeing a parameters() and family calls.
-                # TODO(anijain2305) - This might not be needed if we let Dynamo
-                # inline both getattr and setattr. In that case, it should see
-                # the lowest level dicts - _parameters and family and
-                # automatically track mutations on those. Investigate if that
-                # can be done.
-                attr_name = args[0].as_python_constant()
-                value = args[1]
-
-                # This is reverse engineered by looking at nn module __setattr__
-                # logic.
-                if (
-                    value.is_tensor() and value.python_type() is torch.nn.Parameter
-                ) or attr_name in self.value.__dict__["_parameters"]:
-                    # Handle parameters
-                    self.is_state_mutated = True
-                elif attr_name in self.value.__dict__["_buffers"]:
-                    # Handle buffers
-                    self.is_state_mutated = True
-                elif (
-                    isinstance(
-                        value,
-                        (
-                            variables.NNModuleVariable,
-                            variables.UnspecializedNNModuleVariable,
-                        ),
-                    )
-                    or attr_name in self.value.__dict__["_modules"]
-                ):
-                    # Handle submodules
-                    self.is_state_mutated = True
-
-            if (
-                method is torch.nn.Module.__setattr__
-                and isinstance(args[1], variables.DeletedVariable)
-            ) or method is torch.nn.Module.__delattr__:
-                # Trace through __delattr__ to track mutations on the module
-                # members like `_modules``.
-                fn_vt = VariableTracker.build(tx, torch.nn.Module.__delattr__)
-                return fn_vt.call_function(tx, [self, args[0]], kwargs)
-
         return super().call_method(tx, name, list(args), kwargs)
+
+    def tp_setattro_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # "_parameters" in self.value.__dict__ checks that module is initialized
+        if "_parameters" in self.value.__dict__:
+            # Record if mutations happens on parameters/buffers/modules. The
+            # mutations on these are not tracked by base class
+            # UserDefinedObject vt. This will be used later to graph break
+            # on seeing a parameters() and family calls.
+            # TODO(anijain2305) - This might not be needed if we let Dynamo
+            # inline both getattr and setattr. In that case, it should see
+            # the lowest level dicts - _parameters and family and
+            # automatically track mutations on those. Investigate if that
+            # can be done.
+
+            # This is reverse engineered by looking at nn module __setattr__
+            # logic.
+            if (
+                value is not None
+                and value.is_tensor()
+                and value.python_type() is torch.nn.Parameter
+            ) or name in self.value.__dict__["_parameters"]:
+                # Handle parameters
+                self.is_state_mutated = True
+            elif name in self.value.__dict__["_buffers"]:
+                # Handle buffers
+                self.is_state_mutated = True
+            elif (
+                isinstance(
+                    value,
+                    (
+                        variables.NNModuleVariable,
+                        variables.UnspecializedNNModuleVariable,
+                    ),
+                )
+                or name in self.value.__dict__["_modules"]
+            ):
+                # Handle submodules
+                self.is_state_mutated = True
+
+        if (
+            value is None
+            and inspect.getattr_static(type(self.value), "__delattr__", None)
+            is torch.nn.Module.__delattr__
+        ):
+            # Trace through __delattr__ to track mutations on the module
+            # members like `_modules``.
+            fn_vt = VariableTracker.build(tx, torch.nn.Module.__delattr__)
+            return fn_vt.call_function(tx, [self, VariableTracker.build(tx, name)], {})
+
+        return super().tp_setattro_impl(tx, name, value)
 
     def getattr_helper(
         self, tx: "InstructionTranslatorBase", field: str, name_vt: VariableTracker
@@ -1586,6 +1627,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        from .builder import _dict_input_snapshot
+
         if (
             tx.output.side_effects.is_attribute_mutation(self)
             and name
@@ -1673,8 +1716,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 return key, value
 
             result = dict(
-                build_key_value(i, k, v)
-                for i, k, v in enumerate_items_with_dict_position(hooks_dict)
+                build_key_value(i, k, v) for i, k, v in _dict_input_snapshot(hooks_dict)
             )
 
             # noqa: RVT001

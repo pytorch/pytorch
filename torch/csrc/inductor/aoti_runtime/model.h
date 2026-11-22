@@ -18,6 +18,13 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       const std::string& device_str,
       std::optional<std::string> cubin_dir);
 
+#ifdef USE_CUDA
+  // Captured graphs launch kernels from kernels_, so they go first.
+  ~AOTInductorModel() {
+    cudagraph_manager_.reset();
+  }
+#endif // USE_CUDA
+
   std::unordered_map<std::string, AtenTensorHandle> const_run_impl(
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor,

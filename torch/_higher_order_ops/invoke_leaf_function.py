@@ -453,11 +453,14 @@ def _make_forward(
 
     @functools.wraps(fn)
     def forward(*args, **kwargs):
+        # See NOTE: [Autograd support for invoke_leaf_function], item 2
         effective_keys = include_keys
         if include_keys.has(DispatchKey.PythonDispatcher):
             effective_keys = effective_keys.remove(DispatchKey.PythonDispatcher)
         if effective_keys.has(DispatchKey.Python):
             effective_keys = effective_keys.remove(DispatchKey.Python)
+        if effective_keys.has(DispatchKey.Fake):
+            effective_keys = effective_keys.remove(DispatchKey.Fake)
         with torch._C._ForceDispatchKeyGuard(effective_keys, exclude_keys):
             with torch.enable_grad():
                 outputs = fn(*args, **kwargs)
@@ -627,6 +630,11 @@ invoke_leaf_function = InvokeLeafFunction()
 #    outer graph (gradients flow through our backward, not internal ops)
 # 2. Real function is invoked at backend dispatch keys (i.e. CompositeExplicitAutograd)
 #    where autograd is disabled. We re-enable grad and restore dispatch keys for the autograd engine to work.
+#    The include keys may have been captured while tracing, so PythonDispatcher (from
+#    enable_python_dispatcher), Python (from a Python dispatch mode) and Fake (from a C++ fake
+#    mode) are dropped: they must not intercept the leaf function when it runs eagerly. They are
+#    dropped from the include set rather than excluded, so a tensor that itself carries Python
+#    or Fake still dispatches to it, unless the captured exclude set excludes that key.
 # 3. Store GradientInfo (gradient edges + tensor metadata) instead of full tensors for backward,
 #    which is sufficient for autograd.grad and avoids keeping tensors alive.
 #

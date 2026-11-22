@@ -28,8 +28,7 @@ import sys
 import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, IO, NewType, Optional, TYPE_CHECKING, Union
-from typing_extensions import Never
+from typing import Any, IO, Never, NewType, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.exc import PackageError
@@ -48,6 +47,8 @@ logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    from torch._guards import Source
+
     from .guards import GuardManagerWrapper, GuardsState
 
 
@@ -519,13 +520,18 @@ class _GuardsStateUnpickler(pickle.Unpickler):
 
 
 def load_guards_state(guards_state: bytes) -> Any:
+    from torch._subclasses.fake_tensor import unset_fake_temporarily
+
     try:
         import torch.distributed.fsdp._fully_shard._fully_shard as _fully_shard
 
         ctx = _fully_shard.disable_fsdp_module_new_init()
     except ImportError:
         ctx = nullcontext()  # type: ignore[assignment]
-    with ctx:
+    # Rebuild the meta templates with the fake mode unset so they are plain meta
+    # tensors; from_meta_and_device rejects fakes. Other active dispatch modes
+    # still apply.
+    with ctx, unset_fake_temporarily():
         return _GuardsStateUnpickler(io.BytesIO(guards_state)).load()
 
 
@@ -600,6 +606,15 @@ class SourceInfo:
                 content=_get_module_content(module),
             )
         )
+
+    def check_unchanged(self) -> None:
+        for code in self.inlined_sources:
+            m = importlib.import_module(code.module)
+            checksum = _hash_sourcelines(m, code.firstlineno, code.lastlineno)
+            if checksum != code.checksum:
+                raise RuntimeError(
+                    f"Source code changes detected for {code.module} (line {code.firstlineno} - line {code.lastlineno})"
+                )
 
 
 @dataclasses.dataclass
@@ -895,24 +910,42 @@ class SystemInfo:
     toolkit_version: str | None
     triton_version: tuple[int, int] | None
     gpu_name: str | None
+    # What the kernels depend on instead of the GPU name: the arch they were
+    # compiled for (CUDA compute capability as major * 10 + minor, or the ROCm
+    # gfx arch) and the SM count, which a cooperative reduction sizes its grid
+    # from and needs every block resident for. None on XPU, and in packages
+    # written before they were recorded, where the GPU name is compared instead.
+    gpu_arch: int | str | None = None
+    gpu_sm_count: int | None = None
     CHECK_GPUS = ("cuda", "xpu")
 
     @classmethod
     def current(cls) -> "SystemInfo":
         """Create a SystemInfo instance with current system information."""
-        # Get GPU name if CUDA or XPU is available
-        gpu_name = None
         from torch.utils._triton import get_triton_version
 
+        from .device_interface import get_interface_for_device
+
         gpu_name, toolkit_version = None, None
+        gpu_arch, gpu_sm_count = None, None
         for device_type in cls.CHECK_GPUS:
             if getattr(torch, device_type).is_available():
                 try:
                     gpu_name = getattr(torch, device_type).get_device_name()
                     toolkit_version = getattr(torch.version, device_type)
+                    if device_type == "cuda":
+                        interface = get_interface_for_device(device_type)
+                        gpu_arch, gpu_sm_count = (
+                            interface.get_compute_capability(),
+                            interface.get_multi_processor_count(),
+                        )
                     break
                 except Exception:
-                    pass
+                    logger.debug(
+                        "Could not read the %s device's info for SystemInfo",
+                        device_type,
+                        exc_info=True,
+                    )
 
         return cls(
             python_version=platform.python_version(),
@@ -920,21 +953,30 @@ class SystemInfo:
             toolkit_version=toolkit_version,
             triton_version=get_triton_version((0, 0)),
             gpu_name=gpu_name,
+            gpu_arch=gpu_arch,
+            gpu_sm_count=gpu_sm_count,
         )
 
     def check_compatibility(
-        self, other: "SystemInfo", device_type: str = "cpu"
+        self, current: "SystemInfo", device_type: str = "cpu"
     ) -> None:
         """
-        Check if this SystemInfo is compatible with another SystemInfo.
-        Raises RuntimeError if incompatible.
+        Check that a package recorded with this SystemInfo can load on a system
+        described by ``current``. A Triton version of (0, 0) or a GPU name of
+        None in the package is not compared; a toolkit version of None is, so a
+        package built without CUDA is refused on a CUDA host. The GPU arch and
+        SM count are compared when both sides record an arch, and the GPU name
+        otherwise. Raises RuntimeError if incompatible.
         """
-        if self.python_version != other.python_version:
+        if _bytecode_version(self.python_version) != _bytecode_version(
+            current.python_version
+        ):
             raise RuntimeError(
-                f"Compile package was created with a different Python version: {self.python_version}"
+                f"Compile package was created with a different Python version: "
+                f"cached={self.python_version}, current={current.python_version}"
             )
 
-        if self.torch_version != other.torch_version:
+        if self.torch_version != current.torch_version:
             raise RuntimeError(
                 f"Compile package was created with a different PyTorch version: {self.torch_version}"
             )
@@ -942,25 +984,41 @@ class SystemInfo:
             if not getattr(torch, device_type).is_available():
                 raise RuntimeError(f"{device_type} is not available")
 
-            if self.toolkit_version != other.toolkit_version:
+            if self.toolkit_version != current.toolkit_version:
                 raise RuntimeError(
                     f"Compile package was created with a different toolkit version: {self.toolkit_version}"
                 )
 
             if (
-                other.triton_version != (0, 0)
-                and self.triton_version != other.triton_version
+                self.triton_version != (0, 0)
+                and self.triton_version != current.triton_version
             ):
                 raise RuntimeError(
                     f"Compile package was created with a different Triton version: {self.triton_version}"
                 )
 
-            # Check GPU name if CUDA/XPU was used
-            if other.gpu_name is not None and self.gpu_name != other.gpu_name:
+            if self.gpu_arch is not None and current.gpu_arch is not None:
+                saved = (self.gpu_arch, self.gpu_sm_count)
+                if saved != (current.gpu_arch, current.gpu_sm_count):
+                    raise RuntimeError(
+                        f"Compile package was created for a different GPU: "
+                        f"cached={self.gpu_name} (arch {self.gpu_arch}, "
+                        f"{self.gpu_sm_count} SMs), current={current.gpu_name} "
+                        f"(arch {current.gpu_arch}, {current.gpu_sm_count} SMs)"
+                    )
+            elif self.gpu_name is not None and self.gpu_name != current.gpu_name:
                 raise RuntimeError(
                     f"Compile package was created with different GPU: "
-                    f"cached={self.gpu_name}, current={other.gpu_name}"
+                    f"cached={self.gpu_name}, current={current.gpu_name}"
                 )
+
+
+def _bytecode_version(python_version: str) -> str:
+    """Code objects change between minor releases, and between pre-releases."""
+    parts = python_version.split(".")
+    if len(parts) == 3 and parts[2].isdigit():
+        return ".".join(parts[:2])
+    return python_version
 
 
 def _collapse_device_types(device_types: frozenset[str]) -> str:
@@ -1149,6 +1207,23 @@ def _update_skip_hold(code: types.CodeType, recursive: bool, hold: bool) -> None
     set_code_exec_strategy(code, strategy)
 
 
+def _seed_builtins_dict(global_scope: dict[str, Any], name: str) -> None:
+    """The installed builtins dict might be absent from the runtime while
+    loading guards. Populate it if it's missing."""
+    from .output_graph import get_builtins_dict
+
+    # A pre-reset compile's CleanupHook may still own this name even when we're
+    # about to leave its value alone below (same dict object every compile in
+    # this module), so it must not delete it once collected.
+    CleanupHook.disown(global_scope, name)
+    builtins_dict = get_builtins_dict(global_scope)
+    if name in global_scope:
+        if global_scope[name] is not builtins_dict:
+            raise AssertionError(f"Builtins dict mismatch for key '{name}'")
+    else:
+        global_scope[name] = builtins_dict
+
+
 class CompilePackage:
     """
     CompilePackage is considered a low level component and should not be directly exposed to
@@ -1217,14 +1292,7 @@ class CompilePackage:
                 raise AssertionError(f"Expected _DynamoCacheEntry, got {type(dynamo)}")
             dynamo.check_versions()
             if not ignore_inlined_sources:
-                for code in dynamo.source_info.inlined_sources:
-                    m = importlib.import_module(code.module)
-                    checksum = _hash_sourcelines(m, code.firstlineno, code.lastlineno)
-                    if checksum != code.checksum:
-                        raise RuntimeError(
-                            f"Source code changes detected for {code.module} (line {code.firstlineno} - line {code.lastlineno})"
-                        )
-
+                dynamo.source_info.check_unchanged()
                 self._source_info = dynamo.source_info
 
             main, *codes = dynamo.codes
@@ -1517,6 +1585,61 @@ class CompilePackage:
         if record:
             self._installed_globals.setdefault(module, []).append(name)
 
+    def _install_resume_functions(
+        self,
+        module: types.ModuleType,
+        code: types.CodeType,
+        function_names: list[_FunctionId],
+    ) -> None:
+        for function_name in function_names:
+            if code.co_freevars:
+                # Resume functions with freevars need a factory that takes a
+                # closure tuple, matching install_resume_function_global in
+                # output_graph.py.
+                def _make_fn(
+                    closure: tuple[types.CellType, ...],
+                    _code: types.CodeType = code,
+                    _globals: dict[str, Any] = module.__dict__,
+                    _name: str = function_name,
+                ) -> types.FunctionType:
+                    return types.FunctionType(_code, _globals, _name, None, closure)
+
+                self._install_global(module, function_name, _make_fn)
+            else:
+                fn = types.FunctionType(code, module.__dict__, function_name)
+                self._install_global(module, function_name, fn)
+
+    def _bind_unnamed_scopes(
+        self,
+        module: types.ModuleType,
+        global_scope: dict[str, Any],
+        sources: dict[str, "Source"],
+    ) -> None:
+        # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict in the
+        # tracing process, so a fresh process has no binding for it. Bind it to
+        # the live namespace, found again through the inlined function's
+        # source, so the guards and the bytecode see what they saw while
+        # tracing; the artifact's copy of the dict is frozen and has its tensors
+        # faked. A key whose source does not resolve here (one rooted at a frame
+        # local, or a chain through user objects that raises against this
+        # process's state) stays unbound and misses as before. A binding already
+        # here is kept; a live compile's is taken over from its CleanupHook, so
+        # uninstall() drops it, and anyone else's is left alone.
+        closure_vars = torch._dynamo.guards._get_closure_vars()
+        for name, source in sources.items():
+            try:
+                namespace = source.get_value({"G": global_scope}, closure_vars, {})
+            except Exception as e:
+                logger.debug("leaving %s unbound, %s raised: %r", name, source.name, e)
+                continue
+            if isinstance(namespace, dict):
+                self._install_global(
+                    module,
+                    name,
+                    global_scope.get(name, namespace),
+                    record_only_if_new=True,
+                )
+
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
 
@@ -1544,7 +1667,6 @@ class CompilePackage:
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
         from .convert_frame import input_codes
-        from .output_graph import get_builtins_dict
 
         self.uninstall()
         for code, entry in self._codes.items():
@@ -1571,30 +1693,7 @@ class CompilePackage:
                     )
                 target_code = code
                 if entry.install_to_global:
-                    for function_name in entry.function_names:
-                        if code.co_freevars:
-                            # Resume functions with freevars need a factory
-                            # that takes a closure tuple, matching
-                            # install_resume_function_global in output_graph.py.
-                            f_globals = module.__dict__
-                            fn_name = function_name
-
-                            def _make_fn(
-                                closure: tuple[types.CellType, ...],
-                                _code: types.CodeType = code,
-                                _globals: dict[str, Any] = f_globals,
-                                _name: str = fn_name,
-                            ) -> types.FunctionType:
-                                return types.FunctionType(
-                                    _code, _globals, _name, None, closure
-                                )
-
-                            self._install_global(module, function_name, _make_fn)
-                        else:
-                            fn = types.FunctionType(
-                                code, module.__dict__, function_name
-                            )
-                            self._install_global(module, function_name, fn)
+                    self._install_resume_functions(module, code, entry.function_names)
                 if entry.code_source:
                     target_code = _lookup_code(entry)
 
@@ -1640,64 +1739,18 @@ class CompilePackage:
                     with dynamo_timed("precompile_load_guards"):
                         guards_state = load_guards_state(guarded_code.guards_state)
                     runtime_global_scope = sys.modules[entry.python_module].__dict__
-                    # The installed builtins dict might be absent from the runtime
-                    # while loading guards. Populate it if it's missing.
                     if (
                         builtin_dict_name
                         := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
                     ):
-                        # A pre-reset compile's CleanupHook may still own this
-                        # name even when we're about to leave its value alone
-                        # below (same dict object every compile in this
-                        # module), so it must not delete it once collected.
-                        CleanupHook.disown(runtime_global_scope, builtin_dict_name)
-                        builtins_dict = get_builtins_dict(runtime_global_scope)
-                        if builtin_dict_name in runtime_global_scope:
-                            if (
-                                runtime_global_scope[builtin_dict_name]
-                                is not builtins_dict
-                            ):
-                                raise AssertionError(
-                                    f"Builtins dict mismatch for key '{builtin_dict_name}'"
-                                )
-                        else:
-                            runtime_global_scope[builtin_dict_name] = builtins_dict
-                    # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict
-                    # in the tracing process, so a fresh process has no binding
-                    # for it. Bind it (after the builtins dict above, which a
-                    # recorded source can be rooted at) to the live namespace,
-                    # found again through the inlined function's source, so
-                    # the guards and the bytecode see what they saw while
-                    # tracing; the artifact's copy of the dict is frozen and
-                    # has its tensors faked. A
-                    # key whose source does not resolve here (one rooted at a
-                    # frame local, or a chain through user objects that raises
-                    # against this process's state) stays unbound and misses as
-                    # before. A binding already here is kept; a live compile's
-                    # is taken over from its CleanupHook, so uninstall() drops
-                    # it, and anyone else's is left alone.
-                    sources = guards_state.output_graph.unnamed_scope_sources
-                    closure_vars = torch._dynamo.guards._get_closure_vars()
-                    for name, source in sources.items():
-                        try:
-                            namespace = source.get_value(
-                                {"G": runtime_global_scope}, closure_vars, {}
-                            )
-                        except Exception as e:
-                            logger.debug(
-                                "leaving %s unbound, %s raised: %r",
-                                name,
-                                source.name,
-                                e,
-                            )
-                            continue
-                        if isinstance(namespace, dict):
-                            self._install_global(
-                                module,
-                                name,
-                                runtime_global_scope.get(name, namespace),
-                                record_only_if_new=True,
-                            )
+                        _seed_builtins_dict(runtime_global_scope, builtin_dict_name)
+                    # After the builtins dict above, which a recorded source
+                    # can be rooted at.
+                    self._bind_unnamed_scopes(
+                        module,
+                        runtime_global_scope,
+                        guards_state.output_graph.unnamed_scope_sources,
+                    )
                     if not isinstance(guards_state, torch._dynamo.guards.GuardsState):
                         raise AssertionError(
                             f"Expected GuardsState, got {type(guards_state)}"
@@ -1910,6 +1963,10 @@ class DiskDynamoStore(DynamoStore):
     def path_prefix(self) -> str:
         return self._path_prefix
 
+    def _entry_dir(self, path: str) -> str:
+        prefix = self.path_prefix()
+        return os.path.join(prefix, path) if prefix else path
+
     def clear(self) -> None:
         """
         Clear all CompilePackages from disk.
@@ -1937,7 +1994,7 @@ class DiskDynamoStore(DynamoStore):
     def _write_to_local_cache(self, pickled_content: bytes, path: str) -> None:
         from torch._inductor.codecache import write_atomic
 
-        path = os.path.join(self.path_prefix(), path) if self.path_prefix() else path
+        path = self._entry_dir(path)
         try:
             os.makedirs(path, exist_ok=True)
             write_atomic(os.path.join(path, "entry"), pickled_content)
@@ -1948,7 +2005,7 @@ class DiskDynamoStore(DynamoStore):
         """
         Read dynamo cache entry and backends from disk.
         """
-        path = os.path.join(self.path_prefix(), path) if self.path_prefix() else path
+        path = self._entry_dir(path)
         try:
             with open(os.path.join(path, "entry"), "rb") as f:
                 pickled_content = f.read()
@@ -1978,7 +2035,7 @@ class DiskDynamoCache(DiskDynamoStore):
         """
         key = CompilePackage.source_id_from_fn(fn)
         logger.info("Loading CompilePackage for %s", key)
-        path = os.path.join(self.path_prefix(), key)
+        path = self._entry_dir(key)
         if os.path.exists(path):
             try:
                 result = super().load_cache_entry(key)

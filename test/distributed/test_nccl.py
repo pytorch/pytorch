@@ -9,7 +9,7 @@ from collections.abc import Callable
 from datetime import timedelta
 from functools import wraps
 from typing import ParamSpec, TypeVar
-from unittest import mock, SkipTest
+from unittest import mock, skipIf, SkipTest
 
 import torch
 import torch.cuda
@@ -34,7 +34,12 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     skip_if_lt_x_gpu,
 )
+from torch.testing._internal.common_symmem import (
+    captured_signal_pad_order,
+    gated_signal_pad_order,
+)
 from torch.testing._internal.common_utils import (
+    get_cycles_per_ms,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     lazy_skip_if,
@@ -286,8 +291,69 @@ class TestNCCL(TestCase):
             self.assertEqual(outputs[i], expected[i])
 
 
+# Every NCCL-backend op that synchronizes ranks through PyTorch's signal pad or
+# an NCCL device communicator, with all_to_all_nd once per guarded path.
+# put_wait_signal cannot run eagerly: nccl_wait_for_signal never clears the pad.
+
+_NCCL_EAGER_PAD_OPS = (
+    "barrier",
+    "reduce_scatter_offset",
+    "all_to_all_nd_scatter_dim1",
+    "all_to_all_nd_scatter_dim0",
+)
+_NCCL_PAD_OPS = ("put_wait_signal",) + _NCCL_EAGER_PAD_OPS
+
+
+def _nccl_pad_op_launches(group, device) -> dict:
+    """Launches for each op in _NCCL_PAD_OPS on ``group``, one zero-argument
+    callable per guarded call."""
+    rank, world_size, name = group.rank(), group.size(), group.group_name
+    peer = (c10d.get_rank() + 1) % c10d.get_world_size()
+    t = symm_mem.empty(64, dtype=torch.float32, device=device)
+    hdl = symm_mem.rendezvous(t, group=group)
+    rows, cols = 64, 32
+    rs_in = symm_mem.empty(world_size * rows, cols, device=device).fill_(rank)
+    symm_mem.rendezvous(rs_in, group=group)
+    rs_out = [torch.empty(rows, cols, device=device)]
+    offsets = [i * rows for i in range(1, world_size + 1)]
+    a2a_in = symm_mem.empty(8, world_size * 4, device=device).fill_(rank)
+    symm_mem.rendezvous(a2a_in, group=group)
+    a2a_out = torch.empty(world_size * 8, 4, device=device)
+    a2a_t_in = symm_mem.empty(world_size * 8, 4, device=device).fill_(rank)
+    symm_mem.rendezvous(a2a_t_in, group=group)
+    a2a_t_out = torch.empty(8, world_size * 4, device=device)
+    return {
+        "barrier": [lambda: hdl.barrier(channel=0)],
+        "put_wait_signal": [
+            lambda: torch.ops.symm_mem.nccl_put_with_signal(t, 1, peer, name),
+            lambda: torch.ops.symm_mem.nccl_wait_for_signal(t, 1, name),
+        ],
+        "reduce_scatter_offset": [
+            lambda: symm_mem.reduce_scatter_offset(
+                rs_in,
+                rs_out,
+                name,
+                dim=0,
+                offsets=offsets,
+                dst_ranks=list(range(world_size)),
+            )
+        ],
+        "all_to_all_nd_scatter_dim1": [
+            lambda: symm_mem.all_to_all_nd(
+                a2a_in, a2a_out, scatter_dim=1, gather_dim=0, group=name
+            )
+        ],
+        "all_to_all_nd_scatter_dim0": [
+            lambda: symm_mem.all_to_all_nd(
+                a2a_t_in, a2a_t_out, scatter_dim=0, gather_dim=1, group=name
+            )
+        ],
+    }
+
+
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
+@skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
 @skip_if_rccl_lt_2_30_4
 @skip_if_rccl_symmem_not_compiled
 class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
@@ -672,6 +738,145 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             with self.assertRaisesRegex(RuntimeError, "requires RCCL 2.30.7"):
                 with torch.cuda.graph(graph, stream=capture_stream):
                     symm_mem.empty(1_000_003, device=self.device)
+
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_but_pass_in_sandcastle_if(not _HAS_CUDA_BINDINGS, "requires cuda.bindings")
+    @requires_nccl_version(
+        (2, 29, 7), "nccl_reduce_scatter_offset requires nccl 2.29.7"
+    )
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "op_a,op_b,same_group",
+        [
+            ("barrier", "barrier", True),
+            ("barrier", "barrier", False),
+            ("put_wait_signal", "put_wait_signal", True),
+            ("put_wait_signal", "put_wait_signal", False),
+            ("barrier", "put_wait_signal", True),
+            ("reduce_scatter_offset", "reduce_scatter_offset", True),
+            ("reduce_scatter_offset", "reduce_scatter_offset", False),
+            ("all_to_all_nd_scatter_dim1", "all_to_all_nd_scatter_dim1", True),
+            ("all_to_all_nd_scatter_dim1", "all_to_all_nd_scatter_dim1", False),
+            ("all_to_all_nd_scatter_dim0", "all_to_all_nd_scatter_dim0", True),
+            ("all_to_all_nd_scatter_dim0", "all_to_all_nd_scatter_dim0", False),
+            ("barrier", "reduce_scatter_offset", True),
+            ("reduce_scatter_offset", "all_to_all_nd_scatter_dim1", True),
+            ("all_to_all_nd_scatter_dim1", "all_to_all_nd_scatter_dim0", True),
+        ],
+        name_fn=lambda a, b, same: (a if a == b else f"{a}_then_{b}")
+        + f"_same_group_{same}",
+    )
+    def test_nccl_symmem_stream_serialization_graph_order(
+        self, op_a: str, op_b: str, same_group: bool
+    ):
+        """The NCCL-backend counterpart of
+        SymmetricMemoryTest.test_stream_serialization_graph_order in
+        test_symmetric_memory.py, which states the ordering checked."""
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+
+        group_b = (
+            c10d.group.WORLD
+            if same_group
+            else c10d.new_group(list(range(self.world_size)))
+        )
+        ops_a = _nccl_pad_op_launches(c10d.group.WORLD, self.device)
+        ops_b = _nccl_pad_op_launches(group_b, self.device)
+
+        # Run each op that can run eagerly once before capture: the device
+        # communicator is created, collectively, on first use.
+        main = torch.cuda.Stream()
+        main.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(main):
+            for op in _NCCL_EAGER_PAD_OPS:
+                ops_a[op][0]()
+                ops_b[op][0]()
+        torch.cuda.synchronize()
+
+        after_a, after_marker = captured_signal_pad_order(
+            main, ops_a[op_a], ops_b[op_b]
+        )
+        where = "one group" if same_group else "different groups"
+        verb = "is" if after_a else "is not"
+        msg = f"{op_b} {verb} ordered after {op_a} on {where}"
+        self.assertEqual(after_a, same_group, msg)
+        self.assertFalse(
+            after_marker, f"{op_b} waits for work queued on the stream after {op_a}"
+        )
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_but_pass_in_sandcastle_if(not _HAS_CUDA_BINDINGS, "requires cuda.bindings")
+    @requires_nccl_version(
+        (2, 29, 7), "nccl_reduce_scatter_offset requires nccl 2.29.7"
+    )
+    @skip_if_lt_x_gpu(2)
+    @parametrize("op", _NCCL_EAGER_PAD_OPS)
+    @parametrize("same_group", [True, False])
+    def test_nccl_symmem_stream_serialization_eager_order(
+        self, op: str, same_group: bool
+    ):
+        """The NCCL-backend counterpart of
+        SymmetricMemoryTest.test_stream_serialization_eager_order in
+        test_symmetric_memory.py, for each op that can run eagerly."""
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+
+        group_b = (
+            c10d.group.WORLD
+            if same_group
+            else c10d.new_group(list(range(self.world_size)))
+        )
+        ops_a = _nccl_pad_op_launches(c10d.group.WORLD, self.device)
+        ops_b = _nccl_pad_op_launches(group_b, self.device)
+        for launch in ops_a[op] + ops_b[op]:
+            launch()
+        torch.cuda.synchronize()
+
+        while_gated, after_open = gated_signal_pad_order(
+            ops_a[op], ops_b[op], expect_ordered=same_group
+        )
+        where = "one group" if same_group else "different groups"
+        verb = "finished" if while_gated else "stayed blocked"
+        msg = f"{op} b {verb} while a was gated, on {where}"
+        self.assertEqual(while_gated, not same_group, msg)
+        self.assertTrue(
+            after_open, f"{op} b waits for work queued on the stream after a"
+        )
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_but_pass_in_sandcastle_if(not _HAS_CUDA_BINDINGS, "requires cuda.bindings")
+    @requires_symmetric_memory_device_API
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_stream_serialization_eager_order_across_capture(self):
+        """The NCCL-backend counterpart of
+        SymmetricMemoryTest.test_stream_serialization_eager_order_across_capture:
+        eager barrier b still waits for eager barrier a when a barrier of the
+        same group is captured between them."""
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+
+        barrier = _nccl_pad_op_launches(c10d.group.WORLD, self.device)["barrier"]
+        barrier[0]()
+        torch.cuda.synchronize()
+        graph = torch.cuda.CUDAGraph()
+        capture_stream = torch.cuda.Stream()
+
+        def capture_barrier():
+            with torch.cuda.stream(capture_stream):
+                graph.capture_begin(capture_error_mode="thread_local")
+                barrier[0]()
+                graph.capture_end()
+
+        while_gated, after_open = gated_signal_pad_order(
+            barrier, barrier, expect_ordered=True, between=capture_barrier
+        )
+        self.assertFalse(while_gated, "b finished while a was gated")
+        self.assertTrue(after_open, "b waits for work queued on the stream after a")
 
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_symmetric_memory_device_API
@@ -1365,11 +1570,11 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         else:
             self.assertEqual(handle.multicast_ptr, 0)
 
-    def _symm_mem_pool_group(self, backend: str, cta_policy: int | None = None):
+    def _symm_mem_pool_group(self, cta_policy: int | None = None):
         opts = c10d.ProcessGroupNCCL.Options()
         if cta_policy is not None:
             opts.config.cta_policy = cta_policy
-        pg = c10d.new_group(backend=backend, pg_options=opts)
+        pg = c10d.new_group(backend="nccl", pg_options=opts)
         # register_mem_pool needs a live communicator.
         c10d.all_reduce(torch.ones(1, device=self.device), group=pg)
         nccl_backend = c10d.get_backend_impl(pg, self.device)
@@ -1392,9 +1597,8 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 28), "NCCL symmetric kernels need nccl 2.28")
     @skip_if_lt_x_gpu(2)
-    @parametrize("backend", ["nccl", "nccl-legacy"])
-    def test_nccl_symmem_mem_pool_all_reduce_symk(self, backend: str):
-        pg, nccl_backend, pool = self._symm_mem_pool_group(backend)
+    def test_nccl_symmem_mem_pool_all_reduce_symk(self):
+        pg, nccl_backend, pool = self._symm_mem_pool_group()
         try:
             with torch.cuda.use_mem_pool(pool):
                 t = torch.full(
@@ -1410,10 +1614,9 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 28), "NCCL copy-engine collectives need nccl 2.28")
     @skip_if_lt_x_gpu(2)
-    @parametrize("backend", ["nccl", "nccl-legacy"])
-    def test_nccl_symmem_mem_pool_all_gather_copy_engine(self, backend: str):
+    def test_nccl_symmem_mem_pool_all_gather_copy_engine(self):
         pg, nccl_backend, pool = self._symm_mem_pool_group(
-            backend, c10d.ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO
+            c10d.ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO
         )
         numel = 1024 * 1024
         try:
@@ -1438,6 +1641,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
 
 @requires_cuda_p2p_access()
+@skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
 @skip_if_rccl_symmem_not_compiled
 class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
     """NCCL symmetric memory over an nccl2-backed process group.
@@ -1698,7 +1902,6 @@ class SymmMemCftHandleTest(MultiProcessTestCase):
             hdl.get_multimem_cft_handle()
 
 
-@instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 @skip_but_pass_in_sandcastle_if(
     not TEST_WITH_ROCM, "ROCm-specific symmetric-memory lifecycle test"
@@ -1728,14 +1931,12 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
     def device(self) -> torch.device:
         return torch.device("cuda", self.rank)
 
-    def _init_process_group(
-        self, backend_name: str, store_suffix: str, **kwargs
-    ) -> None:
+    def _init_process_group(self, store_suffix: str, **kwargs) -> None:
         if not PLATFORM_SUPPORTS_SYMM_MEM:
             raise SkipTest("Test requires SymmMem support")
         torch.cuda.set_device(self.device)
         c10d.init_process_group(
-            backend=backend_name,
+            backend="nccl",
             world_size=self.world_size,
             rank=self.rank,
             store=c10d.FileStore(self.file_name + store_suffix, self.world_size),
@@ -1754,12 +1955,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         # Delays this rank's next collective on the device. A rank that skips
         # the collective instead would leave its peer blocked in RCCL's
         # host-side enqueue, so the peer's work would never reach wait().
-        torch.cuda.synchronize(self.device)
-        start = time.monotonic()
-        torch.cuda._sleep(10**7)
-        torch.cuda.synchronize(self.device)
-        seconds_per_cycle = max(time.monotonic() - start, 1e-4) / 10**7
-        torch.cuda._sleep(int(seconds / seconds_per_cycle))
+        torch.cuda._sleep(int(seconds * 1000 * get_cycles_per_ms()))
 
     def _assert_stale(self, handle) -> None:
         # buffer_ptrs checks liveness without launching through the comm.
@@ -1768,19 +1964,13 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         ):
             _ = handle.buffer_ptrs
 
-    @parametrize("backend_name", ["nccl", "nccl-legacy"])
     @skip_if_lt_x_gpu(2)
-    def test_stale_handle_rejected_across_same_name_restart(
-        self, backend_name: str
-    ) -> None:
+    def test_stale_handle_rejected_across_same_name_restart(self) -> None:
         symm_mem.set_backend("NCCL")
-        self._init_process_group(backend_name, "")
+        self._init_process_group("")
         old_pg = c10d.distributed_c10d._get_default_group()
         pg_backend = old_pg._get_backend(self.device)
-        expected_backend_type = (
-            c10d.ProcessGroupNCCL2 if backend_name == "nccl" else c10d.ProcessGroupNCCL
-        )
-        self.assertIsInstance(pg_backend, expected_backend_type)
+        self.assertIsInstance(pg_backend, c10d.ProcessGroupNCCL2)
         old_group_name = old_pg.group_name
 
         c10d.all_reduce(torch.ones(1, device=self.device))
@@ -1791,7 +1981,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         self._assert_stale(old_handle)
 
         try:
-            self._init_process_group(backend_name, "_successor")
+            self._init_process_group("_successor")
             new_pg = c10d.distributed_c10d._get_default_group()
             self.assertEqual(new_pg.group_name, old_group_name)
             c10d.all_reduce(torch.ones(1, device=self.device))
@@ -1835,23 +2025,16 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
             if c10d.is_initialized():
                 c10d.destroy_process_group()
 
-    @parametrize("backend_name", ["nccl", "nccl-legacy"])
     @skip_if_lt_x_gpu(2)
-    def test_retained_handle_rejected_after_abort(self, backend_name: str) -> None:
+    def test_retained_handle_rejected_after_abort(self) -> None:
         # Aborting invalidates the comm through NCCLComm::abort() rather than
-        # destroy(). Both backends are covered because only "nccl-legacy"
-        # resolves to stock ProcessGroupNCCL, which retires the registration
-        # from the comm's pre-invalidate hook; "nccl" resolves to
-        # ProcessGroupNCCL2 and retires through its own path.
+        # destroy().
         patch_env(self, TORCH_NCCL_ASYNC_ERROR_HANDLING="0")
 
         symm_mem.set_backend("NCCL")
-        self._init_process_group(backend_name, "_abort")
+        self._init_process_group("_abort")
         pg = c10d.distributed_c10d._get_default_group()
-        expected_backend_type = (
-            c10d.ProcessGroupNCCL2 if backend_name == "nccl" else c10d.ProcessGroupNCCL
-        )
-        self.assertIsInstance(pg._get_backend(self.device), expected_backend_type)
+        self.assertIsInstance(pg._get_backend(self.device), c10d.ProcessGroupNCCL2)
         group_name = pg.group_name
         c10d.all_reduce(torch.ones(1, device=self.device))
         tensor = symm_mem.empty(4096, dtype=torch.float32, device=self.device).fill_(
@@ -1872,11 +2055,8 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         ):
             symm_mem.rendezvous(tensor, group=group_name)
 
-    @parametrize("backend_name", ["nccl", "nccl-legacy"])
     @skip_if_lt_x_gpu(2)
-    def test_retained_handle_stale_after_wait_timeout_abort(
-        self, backend_name: str
-    ) -> None:
+    def test_retained_handle_stale_after_wait_timeout_abort(self) -> None:
         # A timed-out blocking wait aborts the comm from the work object, before
         # any process-group teardown runs.
         patch_env(
@@ -1886,7 +2066,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
             TORCH_NCCL_DUMP_ON_TIMEOUT="0",
         )
         symm_mem.set_backend("NCCL")
-        self._init_process_group(backend_name, "_wait_abort")
+        self._init_process_group("_wait_abort")
         _tensor, handle = self._retained_handle()
         side_store = c10d.FileStore(self.file_name + "_wait_side", self.world_size)
         if self.rank == 0:
@@ -1905,11 +2085,8 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         finally:
             side_store.set("peer_done", "1")
 
-    @parametrize("backend_name", ["nccl", "nccl-legacy"])
     @skip_if_lt_x_gpu(2)
-    def test_retained_handle_stale_after_watchdog_abort(
-        self, backend_name: str
-    ) -> None:
+    def test_retained_handle_stale_after_watchdog_abort(self) -> None:
         # With cleanup enabled, the watchdog aborts the timed-out work's comm
         # before it aborts the process group's comms.
         patch_env(
@@ -1922,7 +2099,6 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         # Only the peer's watchdog may time out: the holding rank's abort waits
         # for its held-back work, which a short timeout would cut off.
         self._init_process_group(
-            backend_name,
             "_watchdog_abort",
             timeout=timedelta(seconds=2) if self.rank == 1 else None,
         )
@@ -1967,15 +2143,14 @@ class NCCLSymmetricMemoryCapabilityGateTest(MultiProcessTestCase):
 
     The other symmetric-memory tests export NCCL_CUMEM_ENABLE and
     NCCL_WIN_ENABLE before a process group exists, so the rejection path is
-    never taken. These spawn workers without them.
+    never taken. These spawn workers with NCCL_CUMEM_ENABLE=0.
     """
 
     def setUp(self) -> None:
         super().setUp()
-        patch_env(self, TORCH_DIST_USE_NCCL2="1")
-        # The capability snapshot has to be taken with these absent.
-        for name in ("NCCL_CUMEM_ENABLE", "NCCL_WIN_ENABLE"):
-            os.environ.pop(name, None)
+        # RCCL auto-enables cuMem on gfx1250 when NCCL_CUMEM_ENABLE is unset, so
+        # set it to 0 to get the disabled state.
+        patch_env(self, TORCH_DIST_USE_NCCL2="1", NCCL_CUMEM_ENABLE="0")
         self._spawn_processes()
 
     @property

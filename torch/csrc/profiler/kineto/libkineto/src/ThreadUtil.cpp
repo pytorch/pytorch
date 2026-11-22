@@ -86,7 +86,9 @@ int32_t systemThreadId(bool cache) {
   int32_t sysTid = 0;
   if (!_sysTid) {
 #ifdef __APPLE__
-    sysTid = static_cast<int32_t>(syscall(SYS_thread_selfid));
+    uint64_t tid = 0;
+    pthread_threadid_np(nullptr, &tid);
+    sysTid = static_cast<int32_t>(tid);
 #elif defined _WIN32
     sysTid = static_cast<int32_t>(GetCurrentThreadId());
 #elif defined __FreeBSD__
@@ -107,9 +109,9 @@ int32_t systemThreadId(bool cache) {
 int32_t threadId() {
   if (!_tid) {
 #ifdef __APPLE__
-    uint64_t tid;
+    uint64_t tid = 0;
     pthread_threadid_np(nullptr, &tid);
-    _tid = tid;
+    _tid = static_cast<int32_t>(tid);
 #elif defined _WIN32
     _tid = static_cast<int32_t>(GetCurrentThreadId());
 #else
