@@ -1942,6 +1942,8 @@ impl Plan {
         if let Some(known) = self.backs.lock().unwrap().get(&key) {
             return known.clone().map_err(Stop::Refused);
         }
+        // The time this takes says nothing about the function.
+        crate::vm::unsettled();
         let made = self.make(py, way, pattern, needed, saved, grads);
         let kept = match &made {
             Ok(back) => Ok(back.clone()),
@@ -2156,6 +2158,7 @@ impl Kept {
             // in here: eager's nodes run in its place, from now on.
             Err(error) if needed.is_empty() && pattern.iter().all(|came| *came) => return Err(error),
             Err(error) => {
+                crate::vm::unsettled();
                 let why = format!("its kernels do not fit: {}", error.value(py).to_string().lines().next().unwrap_or(""));
                 self.plan.backs.lock().unwrap().insert((way, pattern.clone(), needed.to_vec()), Err(why.clone()));
                 return self.again(py, grads, out, false, &why);
@@ -2491,6 +2494,9 @@ impl Form {
     }
 
     fn learn<'py>(&self, py: Python<'py>, feeds: &[Bound<'py, PyAny>]) -> PyResult<Vec<Bound<'py, PyAny>>> {
+        // A call in which a form is taken down, or made of what was taken
+        // down, is no sample of a measurement against the interpreter.
+        crate::vm::unsettled();
         let (values, taken) = take_down(py, &self.graph, feeds)?;
         let given = self.graph.given(py, &values)?;
         // The state is not held while Python is asked something: another

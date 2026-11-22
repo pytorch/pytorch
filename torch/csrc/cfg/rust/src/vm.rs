@@ -202,6 +202,18 @@ struct Trial {
     settled_samples: u8,
     interpreted_best: u64,
     interpreted_samples: u8,
+    /// For a function that has a graph with a form: whether its last
+    /// settled sample was faster than the best one before it by more than
+    /// 1/8 (`TRIAL_FALLING_SHIFT`). What is made of a graph gets faster
+    /// over its first runs, so such a sample is the first of a form that
+    /// the samples before it were not of, and `settled_samples` starts
+    /// over with it: the compiled side does not lose on fewer samples of
+    /// what it has become than it would otherwise lose on. Each such
+    /// sample is 1/8 below the best, so there are few of them.
+    falling: bool,
+    /// Whether this is the second look at a function that was left to the
+    /// interpreter while it had a graph with a form (`TRIAL_WAITING`).
+    second: bool,
 }
 
 impl Trial {
@@ -236,7 +248,14 @@ impl Trial {
             settled_samples: 0,
             interpreted_best: u64::MAX,
             interpreted_samples: 0,
+            falling: false,
+            second: false,
         }
+    }
+
+    /// The same measurement from its start, under `epoch`.
+    fn again(&self, epoch: u32) -> Trial {
+        Trial { born: self.born, second: self.second, ..Trial::start(epoch) }
     }
 }
 
@@ -244,6 +263,26 @@ const TRIAL_WARMUP: u8 = 0;
 const TRIAL_SAMPLING: u8 = 1;
 const TRIAL_COMPILED: u8 = 2;
 const TRIAL_DEMOTED: u8 = 3;
+/// Left to the interpreter, and to be measured once more: what is made of a
+/// graph can be slow for more runs than a measurement waits for (a compiler
+/// behind it that works at the first runs, caches that fill), and a function
+/// that was given up for that would stay with the interpreter for the rest
+/// of the process. After `TRIAL_REVISIT_CALLS` more calls, which the
+/// interpreter runs, the function is measured a second time, from the
+/// start; what that says stands. Only a function that has a graph with a
+/// form when it loses gets the second look, so the cost is bounded by one
+/// more measurement per such function: its warm-up calls and its samples
+/// run compiled once more.
+const TRIAL_WAITING: u8 = 4;
+const TRIAL_REVISIT_CALLS: u32 = 64;
+/// See `Trial::falling`.
+const TRIAL_FALLING_SHIFT: u32 = 3;
+/// What is made of a graph is not as fast as it will be in its first runs
+/// (the engine takes the backward of a form down in them and hands its
+/// parts to the passes, a compiler behind a pass may finish its work in
+/// them, kernels are loaded): a call in which a form runs one of its first
+/// runs of this many is no settled sample.
+const FORM_YOUNG_RUNS: u64 = 8;
 const TRIAL_WARMUP_CALLS: u32 = 8;
 const TRIAL_SAMPLES: u8 = 10;
 /// With this many samples of each, one side that is a quarter faster than
@@ -503,24 +542,37 @@ impl Callees {
     }
 
     /// Qualified names of the compiled functions that were measured to run
-    /// faster in the interpreter and were left to it.
+    /// faster in the interpreter and were left to it, for good or until
+    /// they are measured once more.
     pub fn demoted(&self) -> Vec<String> {
-        self.measured_as(TRIAL_DEMOTED)
+        self.measured_as(&[TRIAL_DEMOTED, TRIAL_WAITING])
+    }
+
+    /// The compiled functions that get or got a second look, by their
+    /// qualified names, with what `Compiled::second_look` says of each.
+    pub fn second_looks(&self) -> Vec<(String, &'static str)> {
+        let entries = self.entries.borrow();
+        let mut looks: Vec<(String, &'static str)> = entries
+            .values()
+            .filter_map(|c| c.compiled.second_look().map(|look| (c.compiled.func.qualname.clone(), look)))
+            .collect();
+        looks.sort();
+        looks
     }
 
     /// Qualified names of the callees whose measurement against the
     /// interpreter is in the phase in which each call of one is drawn to
     /// run compiled or in the interpreter, with all it calls.
     pub fn sampling(&self) -> Vec<String> {
-        self.measured_as(TRIAL_SAMPLING)
+        self.measured_as(&[TRIAL_SAMPLING])
     }
 
-    fn measured_as(&self, phase: u8) -> Vec<String> {
+    fn measured_as(&self, phases: &[u8]) -> Vec<String> {
         let mut names: Vec<String> = self
             .entries
             .borrow()
             .values()
-            .filter(|c| c.compiled.settled.trial.get().phase == phase)
+            .filter(|c| phases.contains(&c.compiled.settled.trial.get().phase))
             .map(|c| unsafe {
                 let name = ffi::PyObject_GetAttrString(c.code.as_ptr(), c"co_qualname".as_ptr());
                 if name.is_null() {
@@ -2884,14 +2936,35 @@ impl Compiled {
     /// noticeable part of it: its calls are not yet as fast as they will be.
     pub fn is_measuring(&self) -> bool {
         let phase = self.settled.trial.get().phase;
-        let open = phase == TRIAL_WARMUP || phase == TRIAL_SAMPLING;
+        let open = phase == TRIAL_WARMUP || phase == TRIAL_SAMPLING || phase == TRIAL_WAITING;
         self.options.demote && (open || self.settled.below.get())
     }
 
     /// Whether this function was measured to run faster in the interpreter
-    /// and is left to it.
+    /// and is left to it, for good or until it is measured once more.
     pub fn is_demoted(&self) -> bool {
-        self.settled.trial.get().phase == TRIAL_DEMOTED
+        let phase = self.settled.trial.get().phase;
+        phase == TRIAL_DEMOTED || phase == TRIAL_WAITING
+    }
+
+    /// For a function that lost its first measurement while it had a graph
+    /// with a form: whether its second look is still "to come", is "under
+    /// way", or was "lost" or "won". None for any other function.
+    pub fn second_look(&self) -> Option<&'static str> {
+        let trial = self.settled.trial.get();
+        match trial.phase {
+            TRIAL_WAITING => Some("to come"),
+            _ if !trial.second => None,
+            TRIAL_DEMOTED => Some("lost"),
+            TRIAL_COMPILED => Some("won"),
+            _ => Some("under way"),
+        }
+    }
+
+    /// Whether a graph of the function has a form with a callable.
+    fn has_form(&self) -> bool {
+        let st = self.state.borrow();
+        st.blocks.iter().flat_map(|bs| bs.graphs.iter()).any(|(_, site)| site.forms().0 > 0)
     }
 
     /// Calls a callee either compiled or through the interpreter, whichever
@@ -2964,8 +3037,18 @@ impl Compiled {
             return run_interpreted();
         }
         let epoch = PLAN_EPOCH.load(Ordering::Relaxed);
+        if trial.phase == TRIAL_WAITING {
+            // What calls it is not as fast as it may yet be.
+            unsettled();
+            trial.calls += 1;
+            if trial.calls <= TRIAL_REVISIT_CALLS {
+                slot.set(trial);
+                return run_interpreted();
+            }
+            trial = Trial { second: true, ..trial.again(epoch) };
+        }
         if trial.epoch != epoch {
-            trial = Trial { born: trial.born, ..Trial::start(epoch) };
+            trial = trial.again(epoch);
         }
         trial.calls += 1;
         slot.set(trial);
@@ -3026,8 +3109,11 @@ impl Compiled {
                 trial.compiled_best = trial.compiled_best.min(elapsed);
                 trial.compiled_samples += 1;
                 if TRIAL_EVENTS.load(Ordering::Relaxed) == events {
-                    trial.settled_best = trial.settled_best.min(elapsed);
-                    trial.settled_samples += 1;
+                    let best = trial.settled_best;
+                    let fell = best != u64::MAX && elapsed < best - (best >> TRIAL_FALLING_SHIFT);
+                    trial.falling = fell && (*compiled).has_form();
+                    trial.settled_best = best.min(elapsed);
+                    trial.settled_samples = if trial.falling { 1 } else { trial.settled_samples + 1 };
                 }
             } else {
                 trial.interpreted_best = trial.interpreted_best.min(elapsed);
@@ -3042,15 +3128,28 @@ impl Compiled {
             && quarter(trial.compiled_best) < trial.interpreted_best)
             || (seen(trial.compiled_samples, enough)
                 && trial.interpreted_best + margin >= trial.compiled_best);
+        // On the settled samples since its times last came down
+        // (`Trial::falling`).
         let lost = (seen(trial.settled_samples, TRIAL_EARLY_SAMPLES)
             && quarter(trial.interpreted_best) < trial.settled_best)
             || (seen(trial.settled_samples, enough)
                 && trial.interpreted_best + margin < trial.settled_best);
+        // A function that loses with a graph that has a form is looked at
+        // once more (`TRIAL_WAITING`); any other, and one that loses its
+        // second look, is the interpreter's from here on.
+        let leave = |trial: &mut Trial| {
+            if !trial.second && (*compiled).has_form() {
+                trial.phase = TRIAL_WAITING;
+                trial.calls = 0;
+            } else {
+                trial.phase = TRIAL_DEMOTED;
+                self.forget_compiled(func);
+            }
+        };
         if won {
             trial.phase = TRIAL_COMPILED;
         } else if lost {
-            trial.phase = TRIAL_DEMOTED;
-            self.forget_compiled(func);
+            leave(&mut trial);
         } else if trial.calls >= TRIAL_MAX_CALLS {
             // Still open: something below was compiled or measured during
             // every one of its calls.
@@ -3058,12 +3157,11 @@ impl Compiled {
             let behind = seen(trial.compiled_samples, enough)
                 && trial.interpreted_best + margin < trial.compiled_best;
             if age < TRIAL_YOUNG_ENTRIES {
-                trial = Trial { born: trial.born, ..Trial::start(epoch) };
-            } else if behind {
+                trial = trial.again(epoch);
+            } else if behind && !trial.falling {
                 // What it was measured to be is what it is: nothing says
                 // that the calls below get any quieter.
-                trial.phase = TRIAL_DEMOTED;
-                self.forget_compiled(func);
+                leave(&mut trial);
             } else {
                 trial.phase = TRIAL_COMPILED;
             }
@@ -5908,6 +6006,9 @@ impl Compiled {
                 if counted { info.version } else { capi::TCFG_NO_VERSION }
             };
             let before: Vec<u64> = exported.bumps.iter().map(|(k, _)| version(*k)).collect();
+            if exported.hits.load(Ordering::Relaxed) < FORM_YOUNG_RUNS {
+                unsettled();
+            }
             let result = ffi::PyObject_Vectorcall(callable.as_ptr(), args.as_ptr(), args.len(), null_mut());
             if !result.is_null() {
                 // The version counters end where the operations leave them.
