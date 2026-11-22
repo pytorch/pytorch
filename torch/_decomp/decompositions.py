@@ -5404,7 +5404,10 @@ def _matmul_fold_broadcast_batch(
     # See matmul_fold_broadcast_batch in aten/src/ATen/native/LinearAlgebra.cpp
     from torch._subclasses.fake_impls import _compute_stride
     from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        statically_known_true,
+    )
     from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
     # Unlike eager, keep the expand path when both inputs are 4-D: Inductor's attention
@@ -5467,15 +5470,18 @@ def _matmul_fold_broadcast_batch(
     perm_sizes = [sizes1[i] for i in perm]
     perm_strides = [tensor1.stride(i) for i in perm]
     t1_stride = _compute_stride(perm_sizes, perm_strides, t1_shape, size_oblivious=True)
-    # Folding must not copy tensor1, or give it a layout that bmm would copy
+    # Folding must not copy tensor1, or give it a layout that bmm would copy. These
+    # checks and the INT_MAX check below must not guard: a guard would bound dynamic
+    # dims that the expand path leaves free, e.g. an unbounded torch.export Dim
     if t1_stride is None or not (
-        guard_or_false(t1_stride[2] == 1) and guard_or_false(t1_stride[1] >= m1)
+        statically_known_true(t1_stride[2] == 1)
+        and statically_known_true(t1_stride[1] >= m1)
     ):
         return None
     # BLAS takes the folded rows and the leading dims as int
     int_max = torch.iinfo(torch.int32).max
     ints = (t1_shape[1], t1_stride[1], *tensor2.stride()[-2:])
-    if not all(guard_or_false(v <= int_max) for v in ints):
+    if not all(statically_known_true(v <= int_max) for v in ints):
         return None
 
     if perm != sorted(perm):

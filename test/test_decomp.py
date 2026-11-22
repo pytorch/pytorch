@@ -1381,6 +1381,13 @@ class DecompOneOffTests(TestCase):
         # https://github.com/pytorch/pytorch/issues/154128
         from torch.fx.experimental.proxy_tensor import make_fx
 
+        def bounded_matmul(x, y):
+            # With symbolic sizes, the fold needs a bound that shows its rows fit in an
+            # int (see test_matmul_broadcast_batch_fold_export)
+            for size in (*x.shape, *y.shape):
+                torch._check(size <= 2**10)
+            return torch.matmul(x, y)
+
         # y is folded into the rows of x only when expanding y would copy it and x and
         # y are not both 4-D, as in multi-query attention
         for size_x, size_y, folded, num_clones in (
@@ -1397,7 +1404,7 @@ class DecompOneOffTests(TestCase):
             expected = x @ y.expand(*size_x[:-2], *size_y[-2:]).contiguous()
             for tracing_mode in ("real", "symbolic"):
                 with enable_python_dispatcher():
-                    gm = make_fx(torch.matmul, tracing_mode=tracing_mode)(x, y)
+                    gm = make_fx(bounded_matmul, tracing_mode=tracing_mode)(x, y)
                 targets = [node.target for node in gm.graph.nodes]
                 self.assertEqual(torch.ops.aten.expand.default not in targets, folded)
                 clones = targets.count(torch.ops.aten.clone.default)
@@ -1428,6 +1435,49 @@ class DecompOneOffTests(TestCase):
                 gm = make_fx(torch.matmul)(x, y)
             targets = [node.target for node in gm.graph.nodes]
             self.assertIn(torch.ops.aten.expand.default, targets)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_matmul_broadcast_batch_fold_export(self, device):
+        # The fold must not guard on dynamic dims: its guards would bound torch.export
+        # Dims that the expand path leaves unbounded
+        class QK(torch.nn.Module):
+            def forward(self, q, k):
+                return q @ k.transpose(-1, -2)
+
+        q = torch.randn(2, 2, 4, 16, 8, device=device)
+        k = torch.randn(2, 2, 1, 16, 8, device=device)
+        expected = q @ k.transpose(-1, -2)
+        # The rows are 4 * s, so the fold only applies when the max of s bounds them
+        for s, strict, folded in (
+            (torch.export.Dim("s"), False, False),
+            (torch.export.Dim("s"), True, False),
+            (torch.export.Dim("s", max=2**20), False, True),
+        ):
+            dynamic_shapes = {"q": {3: s}, "k": {3: s}}
+            ep = torch.export.export(
+                QK(), (q, k), dynamic_shapes=dynamic_shapes, strict=strict
+            )
+            self.assertEqual(ep.module()(q, k), expected)
+            targets = [node.target for node in ep.run_decompositions().graph.nodes]
+            self.assertEqual(torch.ops.aten.expand.default not in targets, folded)
+
+        # The layout check on x: its rows have stride 16 and its last dim is odd, so the
+        # expand path never compares that dim with 16
+        class MatMul(torch.nn.Module):
+            def forward(self, x, y):
+                return x @ y
+
+        x = torch.randn(2, 2, 4, 8, 16, device=device)[..., :7]
+        y = torch.randn(2, 2, 1, 7, 5, device=device)
+        d = torch.export.Dim("d", min=2)
+        dynamic_shapes = {"x": {4: 2 * d + 1}, "y": {3: 2 * d + 1}}
+        ep = torch.export.export(
+            MatMul(), (x, y), dynamic_shapes=dynamic_shapes, strict=False
+        )
+        x = torch.randn(2, 2, 4, 8, 32, device=device)[..., :17]
+        y = torch.randn(2, 2, 1, 17, 5, device=device)
+        self.assertEqual(ep.module()(x, y), x @ y)
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
