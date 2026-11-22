@@ -682,6 +682,22 @@ class _DynamoCodeCacheEntry:
     skip_recursive: bool = False
     eager_fallback: bool = False
 
+    def without_compiled_code(self) -> "_DynamoCodeCacheEntry":
+        # install() skips a bypassed entry entirely, so its guarded codes and
+        # backend ids are dead; start from a copy without them so the fresh
+        # compile's record replaces them and the next save writes an
+        # installable entry. A copy, not a clear, with the mutable containers
+        # the fresh compile writes to (import_sources, function_names) detached
+        # too: the caller's entry may be a store's own object
+        # (InMemoryDynamoStore hands out what it holds).
+        return dataclasses.replace(
+            self,
+            guarded_codes=[],
+            backend_ids=[],
+            function_names=list(self.function_names),
+            import_sources=dict(self.import_sources),
+        )
+
 
 def _globals_module(namespace: dict[str, object]) -> types.ModuleType | None:
     name = namespace.get("__name__")
@@ -1301,21 +1317,7 @@ class CompilePackage:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
             for key, code in self._codes.items():
                 if code.bypassed:
-                    # install() skips a bypassed entry entirely, so its guarded
-                    # codes and backend ids are dead; start from a copy without
-                    # them so the fresh compile's record replaces them and the
-                    # next save writes an installable entry. A copy, not a
-                    # clear, with the mutable containers the fresh compile
-                    # writes to (import_sources, function_names) detached too:
-                    # the caller's entry may be a store's own object
-                    # (InMemoryDynamoStore hands out what it holds).
-                    self._codes[key] = dataclasses.replace(
-                        code,
-                        guarded_codes=[],
-                        backend_ids=[],
-                        function_names=list(code.function_names),
-                        import_sources=dict(code.import_sources),
-                    )
+                    self._codes[key] = code.without_compiled_code()
             # The codes come back, so the device they recorded must too, or one
             # recompile after a reload re-saves the entry as what that frame
             # alone named. The collapse is a maximum under one order, so
@@ -1609,6 +1611,33 @@ class CompilePackage:
                 fn = types.FunctionType(code, module.__dict__, function_name)
                 self._install_global(module, function_name, fn)
 
+    def _install_backends(
+        self,
+        module: types.ModuleType,
+        backend_ids: list[_BackendId],
+        backends: dict[_BackendId, Any],
+    ) -> None:
+        import torch._inductor.config as inductor_config
+
+        for backend_id in backend_ids:
+            if backend_id not in backends:
+                raise RuntimeError(
+                    f"Backend {backend_id} is not found in the given backends"
+                )
+            # AutotuneCacheBundler keeps one bundle per compile context, left
+            # open on a remote-cache miss until the first compiled call. A
+            # backend with a backward post-compiles both in one
+            # after_deserialization(), and a frame can have several backends, so
+            # a second bundle would fail to open. With the flag off these
+            # kernels' first-call autotune results are not uploaded as a bundle;
+            # the per-kernel autotune caches still apply.
+            with (
+                dynamo_timed("after_deserialization", phase_name="backend_compile"),
+                inductor_config.patch(bundled_autotune_remote_cache=False),
+            ):
+                backend = backends[backend_id].after_deserialization()
+                self._install_global(module, backend_id, torch._dynamo.disable(backend))
+
     def _bind_unnamed_scopes(
         self,
         module: types.ModuleType,
@@ -1663,7 +1692,6 @@ class CompilePackage:
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
-        import torch._inductor.config as inductor_config
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
         from .convert_frame import input_codes
@@ -1703,31 +1731,7 @@ class CompilePackage:
                     continue
 
                 input_codes.add(target_code)
-                for backend_id in entry.backend_ids:
-                    if backend_id not in backends:
-                        raise RuntimeError(
-                            f"Backend {backend_id} is not found in the given backends"
-                        )
-                    # AutotuneCacheBundler keeps one bundle per compile
-                    # context, left open on a remote-cache miss until the
-                    # first compiled call. A backend with a backward
-                    # post-compiles both in one after_deserialization(), and a
-                    # frame can have several backends, so a second bundle
-                    # would fail to open. With the flag off these kernels'
-                    # first-call autotune results are not uploaded as a
-                    # bundle; the per-kernel autotune caches still apply.
-                    with (
-                        dynamo_timed(
-                            "after_deserialization", phase_name="backend_compile"
-                        ),
-                        inductor_config.patch(bundled_autotune_remote_cache=False),
-                    ):
-                        backend = backends[backend_id].after_deserialization()
-                        self._install_global(
-                            module,
-                            backend_id,
-                            torch._dynamo.disable(backend),
-                        )
+                self._install_backends(module, entry.backend_ids, backends)
 
                 # Dynamo generates empty graph for trivial functions, should just skip them
                 # in these cases.
