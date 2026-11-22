@@ -2092,6 +2092,10 @@ class BuiltinVariable(TypeVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if self.fn is type:
+            if len(args) not in (1, 3):
+                raise_type_error(tx, "type() takes 1 or 3 arguments")
+            if kwargs and len(args) == 1:
+                raise_type_error(tx, "type() takes 1 or 3 arguments")
             if kwargs:
                 unimplemented(
                     gb_type="Dynamic class creation with type",
@@ -2101,8 +2105,6 @@ class BuiltinVariable(TypeVariable):
                     skip_frame=True,
                     preserve_skip_frame_after_inline=True,
                 )
-            if len(args) not in (1, 3):
-                raise_type_error(tx, "type() takes 1 or 3 arguments")
 
         if self.fn is object and not args and not kwargs:
             # object() -> a fresh opaque instance. Falling through to the
@@ -2772,6 +2774,8 @@ class BuiltinVariable(TypeVariable):
                 context=f"dir({arg.value})",
                 explanation="Dynamo cannot safely inspect this class while it has deferred mutations.",
                 hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
             )
         if isinstance(arg, variables.UserDefinedClassVariable):
             return VariableTracker.build(tx, dir(arg.value))
@@ -3305,7 +3309,7 @@ class BuiltinVariable(TypeVariable):
         tx: "InstructionTranslatorBase",
         obj: VariableTracker,
         *args: VariableTracker,
-    ) -> VariableTracker | None:
+    ) -> VariableTracker:
         if args:
             if len(args) != 2:
                 raise AssertionError(
@@ -3316,6 +3320,15 @@ class BuiltinVariable(TypeVariable):
                     gb_type="type() with non-constant class arguments",
                     context=f"type({obj}, {args[0]}, {args[1]})",
                     explanation="Dynamo can only reconstruct classes created from constant arguments.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
+                )
+            if not (tx.one_graph or tx.error_on_graph_break):
+                unimplemented(
+                    gb_type="Dynamic class creation with type",
+                    context="type(name, bases, namespace)",
+                    explanation="Dynamo only traces dynamic class creation when graph breaks are errors.",
                     hints=[*graph_break_hints.SUPPORTABLE],
                     skip_frame=True,
                     preserve_skip_frame_after_inline=True,

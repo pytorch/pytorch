@@ -9470,7 +9470,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         error = (
             "Dynamic class creation with type"
             if variant == "keyword"
-            else "type\\(\\) with unsupported class arguments"
+            else "type\\(\\) with non-constant class arguments"
         )
         with self.assertRaisesRegex(Unsupported, error):
             torch.compile(fullgraph_fn, backend="eager", fullgraph=True)(x)

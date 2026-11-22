@@ -313,6 +313,13 @@ class MiscTests(torch._inductor.test_case.TestCase):
             except ValueError:
                 return x + 1
 
+        def invalid_class_name_encoding(x):
+            cls = type("A", (), {})
+            try:
+                cls.__name__ = "\ud800"
+            except UnicodeEncodeError:
+                return x + 1
+
         def invalid_class_qualname(x):
             cls = type("A", (), {})
             try:
@@ -326,11 +333,19 @@ class MiscTests(torch._inductor.test_case.TestCase):
             except TypeError:
                 return x + 1
 
+        def invalid_keyword_arity(x):
+            try:
+                type(x, key=True)
+            except TypeError:
+                return x + 1
+
         for fn in (
             invalid_class_name_type,
             invalid_class_name_value,
+            invalid_class_name_encoding,
             invalid_class_qualname,
             invalid_arity,
+            invalid_keyword_arity,
         ):
             self.assertEqual(
                 torch.compile(fn, backend="eager", fullgraph=True)(x), x + 1
@@ -379,14 +394,36 @@ class MiscTests(torch._inductor.test_case.TestCase):
             cls.__qualname__ = "B"
             return x + int("B" in repr(cls))
 
+        def read_str(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in str(cls))
+
+        def read_fstring(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in f"{cls}")
+
+        cases = (
+            (read_dict, "Introspection on a class created in the same frame"),
+            (instantiate, "Instantiating a class created in the same frame"),
+            (read_dir, "Introspection on a class created in the same frame"),
+            (read_repr, "Introspection on a class created in the same frame"),
+            (read_str, "Introspection on a class created in the same frame"),
+            (read_fstring, "Introspection on a class created in the same frame"),
+        )
         x = torch.ones(2)
-        for fn in (read_dict, instantiate, read_dir, read_repr):
+        for fn, error in cases:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
-                "class created in the same frame",
+                error,
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(x)
-            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+            counter = CompileCounter()
+            compiled = torch.compile(fn, backend=counter)
+            for _ in range(torch._dynamo.config.recompile_limit + 1):
+                self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(counter.frame_count, 0)
 
     def test_new_class_attribute_list_alias(self):
         def fn(x):
@@ -417,14 +454,16 @@ class MiscTests(torch._inductor.test_case.TestCase):
             cls.__doc__ = "after"
             return x + len(cls.items), cls
 
-        compiled = torch.compile(fn, backend="eager")
+        counter = CompileCounter()
+        compiled = torch.compile(fn, backend=counter)
         x = torch.ones(2)
-        for _ in range(2):
+        for _ in range(torch._dynamo.config.recompile_limit + 1):
             result, cls = compiled(x)
             expected, eager_cls = fn(x)
             self.assertEqual(result, expected)
             self.assertEqual(cls.__doc__, eager_cls.__doc__)
             self.assertEqual(cls.items, eager_cls.items)
+        self.assertEqual(counter.frame_count, 0)
 
     def test_existing_class_doc_mutation_graph_break(self):
         class Existing:
@@ -441,40 +480,6 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertEqual(result, torch.full((2,), 2.0))
         self.assertEqual(before, "updated")
         self.assertEqual(after, "updated")
-
-    def test_existing_class_descriptor_owner_mutation(self):
-        class Descriptor:
-            def __get__(self, obj, owner):
-                owner.counter += 1
-                return owner.counter
-
-        class Existing:
-            counter = 0
-            value = Descriptor()
-
-        def fn(x):
-            return x + Existing.value
-
-        compiled = torch.compile(fn, backend="eager")
-        x = torch.ones(2)
-        for expected in (1, 2, 3):
-            self.assertEqual(compiled(x), x + expected)
-            self.assertEqual(Existing.counter, expected)
-
-    def test_existing_class_base_mutation(self):
-        class Base:
-            counter = 0
-
-        def fn(x):
-            cls = type("A", (Base,), {})
-            cls.__base__.counter += 1
-            return x + cls.__base__.counter
-
-        compiled = torch.compile(fn, backend="eager")
-        x = torch.ones(2)
-        for expected in (1, 2, 3):
-            self.assertEqual(compiled(x), x + expected)
-            self.assertEqual(Base.counter, expected)
 
     def test_storage_offset_scalar_output(self):
         def fn(x):

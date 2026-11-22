@@ -59,6 +59,7 @@ from ..exc import (
     raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
+    raise_value_error,
     unimplemented,
 )
 from ..graph_bytecode_inputs import get_external_object_by_index
@@ -396,6 +397,8 @@ _type_getattribute = type.__getattribute__
 _MUTABLE_TYPE_METADATA = frozenset(
     {"__doc__", "__module__", "__name__", "__qualname__"}
 )
+_NEW_CLASS_INTROSPECTION = frozenset({"__base__", "__bases__", "__dict__", "__mro__"})
+_TYPE_NAME_METADATA = frozenset({"__name__", "__qualname__"})
 
 
 def is_data_descriptor(obj: object) -> bool:
@@ -759,7 +762,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # Step 1-2: Metaclass data descriptors.
         # For type(cls) is type, these are C-level getset/member descriptors
         # for __dict__, __mro__, __name__, __qualname__, __doc__, etc.
-        # Deferred writes to writable type metadata must beat trace-time descriptors.
+        # Direct callers bypass generic_getattr's pending-mutation check.
         if (
             metacls is type
             and name in _MUTABLE_TYPE_METADATA
@@ -2277,6 +2280,9 @@ class NewClassVariable(UserDefinedClassVariable):
         super().__init__(value, **kwargs)
         self.constructor_args = constructor_args
 
+    def is_python_constant(self) -> bool:
+        return False
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -2288,6 +2294,8 @@ class NewClassVariable(UserDefinedClassVariable):
             context=str(self.value),
             explanation="Dynamo cannot preserve the identity of this class and its instances.",
             hints=[*graph_break_hints.SUPPORTABLE],
+            skip_frame=True,
+            preserve_skip_frame_after_inline=True,
         )
 
     def call_method(
@@ -2299,30 +2307,55 @@ class NewClassVariable(UserDefinedClassVariable):
     ) -> VariableTracker:
         if name == "__setattr__" and len(args) == 2 and not kwargs:
             name_var, value = args
-            if not name_var.is_python_constant() or not isinstance(
-                attr_name := name_var.as_python_constant(), str
-            ):
-                raise_type_error(tx, "attribute name must be string")
-            if attr_name in {"__name__", "__qualname__"}:
+            if not name_var.is_python_constant():
+                unimplemented(
+                    gb_type="Non-constant class attribute mutation",
+                    context=f"setattr({self}, {name_var}, {value})",
+                    explanation="Dynamo cannot validate this class attribute mutation.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
+                )
+            attr_name = name_var.as_python_constant()
+            if not isinstance(attr_name, str):
+                raise_type_error(
+                    tx,
+                    f"attribute name must be string, not '{type(attr_name).__name__}'",
+                )
+            if attr_name in _TYPE_NAME_METADATA:
                 if not value.is_python_constant():
                     unimplemented(
                         gb_type="Non-constant class name mutation",
                         context=f"setattr({self}, {attr_name}, {value})",
                         explanation="Dynamo cannot validate this class name mutation.",
                         hints=[*graph_break_hints.SUPPORTABLE],
+                        skip_frame=True,
+                        preserve_skip_frame_after_inline=True,
                     )
                 metadata = value.as_python_constant()
+                current_name = self.value.__name__
+                if tx.output.side_effects.has_pending_mutation_of_attr(
+                    self, "__name__"
+                ):
+                    current_name = tx.output.side_effects.load_attr(
+                        self, "__name__"
+                    ).as_python_constant()
                 if not isinstance(metadata, str):
                     raise_type_error(
                         tx,
-                        f"can only assign string to {self.value.__name__}.{attr_name}, not '{type(metadata).__name__}'",
+                        f"can only assign string to {current_name}.{attr_name}, not '{type(metadata).__name__}'",
                     )
-                if attr_name == "__name__" and "\x00" in metadata:
-                    raise_observed_exception(
-                        ValueError,
-                        tx,
-                        args=["type name must not contain null characters"],
-                    )
+                if attr_name == "__name__":
+                    if "\x00" in metadata:
+                        raise_value_error(
+                            tx, "type name must not contain null characters"
+                        )
+                    try:
+                        metadata.encode("utf-8")
+                    except UnicodeEncodeError as exc:
+                        raise_observed_exception(
+                            UnicodeEncodeError, tx, args=list(exc.args)
+                        )
             meta_attr = self.lookup_metaclass_attr(attr_name)
             if (
                 meta_attr is not NO_SUCH_SUBOBJ
@@ -2334,6 +2367,8 @@ class NewClassVariable(UserDefinedClassVariable):
                     context=f"setattr({self}, {attr_name}, {value})",
                     explanation="Dynamo does not model this metaclass attribute setter.",
                     hints=[*graph_break_hints.SUPPORTABLE],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
                 )
             tx.output.side_effects.store_attr(self, attr_name, value)
             return variables.ConstantVariable.create(None)
@@ -2342,12 +2377,14 @@ class NewClassVariable(UserDefinedClassVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        if name in {"__base__", "__bases__", "__dict__", "__mro__"}:
+        if name in _NEW_CLASS_INTROSPECTION:
             unimplemented(
                 gb_type="Introspection on a class created in the same frame",
                 context=f"{self.value}.{name}",
                 explanation="Dynamo cannot safely materialize this class metadata.",
                 hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
             )
         return super().tp_getattro_impl(tx, name)
 
@@ -2357,15 +2394,14 @@ class NewClassVariable(UserDefinedClassVariable):
             context=f"repr({self.value})",
             explanation="Dynamo cannot safely represent this class while it has deferred mutations.",
             hints=[*graph_break_hints.SUPPORTABLE],
+            skip_frame=True,
+            preserve_skip_frame_after_inline=True,
         )
 
     def getattr_needs_tracing(self, tx: "InstructionTranslatorBase", name: str) -> bool:
-        return name in {
-            "__base__",
-            "__bases__",
-            "__dict__",
-            "__mro__",
-        } or super().getattr_needs_tracing(tx, name)
+        return name in _NEW_CLASS_INTROSPECTION or super().getattr_needs_tracing(
+            tx, name
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen.load_import_from("builtins", "type"))
