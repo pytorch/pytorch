@@ -74,6 +74,7 @@ from .base import (
     NO_SUCH_SUBOBJ,
     readonly_setter,
     type_qualified_name,
+    ValueMutationNew,
     VariableTracker,
 )
 from .constant import ConstantVariable
@@ -87,6 +88,9 @@ def _nested_region_identity(
     left: VariableTracker, right: VariableTracker, a: Source | None, b: Source | None
 ) -> ConstantVariable | None:
     from ..symbolic_convert import InstructionTranslator
+    from .dicts import ConstDictVariable
+    from .lists import BaseListVariable, SliceVariable
+    from .sets import BaseSetVariable
 
     tx = InstructionTranslator.current_tx()
     tracer = tx.output.current_tracer
@@ -96,14 +100,8 @@ def _nested_region_identity(
     kind = type(left)
     if kind is not type(right):
         return None
-    container = kind in (
-        variables.ListVariable,
-        variables.ConstDictVariable,
-        variables.SetVariable,
-        variables.TupleVariable,
-        variables.RangeVariable,
-        variables.SliceVariable,
-    )
+    families = (BaseListVariable, ConstDictVariable, BaseSetVariable, SliceVariable)
+    container = isinstance(left, families)
     tracer.has_container_identity |= container
     if a is None or b is None or a == b or any(map(is_constant_source, (a, b))):
         return None
@@ -3031,7 +3029,10 @@ def object_generic_setattr_str(
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
             if (
-                type(obj) is variables.OrderedDictVariable
+                (
+                    type(obj) is variables.OrderedDictVariable
+                    and not isinstance(obj.mutation_type, ValueMutationNew)
+                )
                 or obj.is_tensor()
                 or isinstance(obj, variables.PythonModuleVariable)
             ):
