@@ -1205,6 +1205,23 @@ def _update_skip_hold(code: types.CodeType, recursive: bool, hold: bool) -> None
     set_code_exec_strategy(code, strategy)
 
 
+def _seed_builtins_dict(global_scope: dict[str, Any], name: str) -> None:
+    """The installed builtins dict might be absent from the runtime while
+    loading guards. Populate it if it's missing."""
+    from .output_graph import get_builtins_dict
+
+    # A pre-reset compile's CleanupHook may still own this name even when we're
+    # about to leave its value alone below (same dict object every compile in
+    # this module), so it must not delete it once collected.
+    CleanupHook.disown(global_scope, name)
+    builtins_dict = get_builtins_dict(global_scope)
+    if name in global_scope:
+        if global_scope[name] is not builtins_dict:
+            raise AssertionError(f"Builtins dict mismatch for key '{name}'")
+    else:
+        global_scope[name] = builtins_dict
+
+
 class CompilePackage:
     """
     CompilePackage is considered a low level component and should not be directly exposed to
@@ -1617,7 +1634,6 @@ class CompilePackage:
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
         from .convert_frame import input_codes
-        from .output_graph import get_builtins_dict
 
         self.uninstall()
         for code, entry in self._codes.items():
@@ -1690,28 +1706,11 @@ class CompilePackage:
                     with dynamo_timed("precompile_load_guards"):
                         guards_state = load_guards_state(guarded_code.guards_state)
                     runtime_global_scope = sys.modules[entry.python_module].__dict__
-                    # The installed builtins dict might be absent from the runtime
-                    # while loading guards. Populate it if it's missing.
                     if (
                         builtin_dict_name
                         := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
                     ):
-                        # A pre-reset compile's CleanupHook may still own this
-                        # name even when we're about to leave its value alone
-                        # below (same dict object every compile in this
-                        # module), so it must not delete it once collected.
-                        CleanupHook.disown(runtime_global_scope, builtin_dict_name)
-                        builtins_dict = get_builtins_dict(runtime_global_scope)
-                        if builtin_dict_name in runtime_global_scope:
-                            if (
-                                runtime_global_scope[builtin_dict_name]
-                                is not builtins_dict
-                            ):
-                                raise AssertionError(
-                                    f"Builtins dict mismatch for key '{builtin_dict_name}'"
-                                )
-                        else:
-                            runtime_global_scope[builtin_dict_name] = builtins_dict
+                        _seed_builtins_dict(runtime_global_scope, builtin_dict_name)
                     # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict
                     # in the tracing process, so a fresh process has no binding
                     # for it. Bind it (after the builtins dict above, which a
