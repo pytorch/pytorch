@@ -392,9 +392,10 @@ void validate_scaled_mm_v2_inputs(
   const auto N = mat_b.sym_size(1);
   const bool both_fp4 = is_fp4_type(mat_a.scalar_type()) && is_fp4_type(mat_b.scalar_type());
   const auto K_unpacked = both_fp4 ? mat_a.sym_size(1) * 2 : mat_a.sym_size(1);
-  // XPU (oneDNN) uses unswizzled, unpadded blockwise scale shapes, unlike the
-  // L4-padded SWIZZLE_32_4_4 layout that CUDA expects.
+  // XPU (oneDNN) and MPS use unswizzled, unpadded blockwise scale shapes,
+  // unlike the L4-padded SWIZZLE_32_4_4 layout that CUDA expects.
   const bool is_xpu = mat_a.is_xpu();
+  const bool unswizzled = is_xpu || mat_a.is_mps();
 
   auto sym_ceil_div = [](const c10::SymInt& a, int64_t b) {
     return (a + b - 1) / b;
@@ -412,14 +413,14 @@ void validate_scaled_mm_v2_inputs(
   };
 
   // NVFP4 (BlockWise1x16) blockwise scale element count for a given outer
-  // dim, shared by the single- and two-level NVFP4 recipes. XPU uses the
+  // dim, shared by the single- and two-level NVFP4 recipes. XPU and MPS use the
   // unpadded shape. ROCm's count, rows * round_up(K/16, 8), is used only for
   // SWIZZLE_128; any other swizzle is rejected before the size checks. The
   // remaining case is the padded SWIZZLE_32_4_4 shape. The arch gate stays
   // in the kernel, which can query the device.
-  const bool rocm_nvfp4 = !is_xpu && at::globalContext().hasROCM();
+  const bool rocm_nvfp4 = !unswizzled && at::globalContext().hasROCM();
   auto nvfp4_scale_elems = [&](const c10::SymInt& dim) {
-    if (is_xpu) {
+    if (unswizzled) {
       return dim * sym_ceil_div(K_unpacked, 16);
     }
     if (rocm_nvfp4) {
@@ -451,9 +452,9 @@ void validate_scaled_mm_v2_inputs(
   // reported as a scale-size error for whichever side disagrees with
   // swizzle_a. The arch/version gate stays in the kernel's `check_mx_swizzle`,
   // which can query the device. `hasROCM()` is a property of the process, so
-  // exclude XPU tensors explicitly: they take the oneDNN path below, which
-  // accepts an empty swizzle list.
-  const bool is_rocm_mx = is_mx_1x32 && !is_xpu && at::globalContext().hasROCM();
+  // exclude XPU and MPS tensors explicitly: they take the unswizzled path
+  // below, which accepts an empty swizzle list.
+  const bool is_rocm_mx = is_mx_1x32 && !unswizzled && at::globalContext().hasROCM();
   if (is_rocm_mx) {
     TORCH_CHECK_VALUE(
         swizzle_a.size() == 1 && swizzle_b.size() == 1,
@@ -581,8 +582,8 @@ void validate_scaled_mm_v2_inputs(
       expected_b_elems = sym_round_up(N, 32) *
           sym_round_up(sym_ceil_div(K_unpacked, 32), 8);
       scale_layout = "SWIZZLE_32_8";
-    } else if (is_xpu) {
-      // XPU: unpadded [M, ceil_div(K, 32)] / [N, ceil_div(K, 32)], NO_SWIZZLE.
+    } else if (unswizzled) {
+      // XPU and MPS: unpadded [M, ceil_div(K, 32)] / [N, ceil_div(K, 32)], NO_SWIZZLE.
       expected_a_elems = M * sym_ceil_div(K_unpacked, 32);
       expected_b_elems = N * sym_ceil_div(K_unpacked, 32);
       scale_layout = "NO_SWIZZLE";
@@ -678,8 +679,8 @@ void validate_scaled_mm_v2_inputs(
     const auto num_args_a = recipe_a.size();
     const auto num_args_b = recipe_b.size();
     const bool is_rocm = at::globalContext().hasROCM();
-    if (is_xpu) {
-      // XPU consumes unswizzled scales for all MX/NVFP4 recipes.
+    if (unswizzled) {
+      // XPU and MPS consume unswizzled scales for all MX/NVFP4 recipes.
       // swizzle_a/swizzle_b may be omitted (empty) by Python callers
       // (F.scaled_mm defaults swizzle to None); treat that as NO_SWIZZLE.
       // Otherwise they must match the recipe count and be all NO_SWIZZLE,
@@ -692,12 +693,12 @@ void validate_scaled_mm_v2_inputs(
       for (auto s : swizzle_a) {
         TORCH_CHECK_VALUE(
             s == SwizzleType::NO_SWIZZLE,
-            "For XPU MX/NVFP4 gemm, scale_a swizzle entries must all be NO_SWIZZLE");
+            "For XPU and MPS MX/NVFP4 gemm, scale_a swizzle entries must all be NO_SWIZZLE");
       }
       for (auto s : swizzle_b) {
         TORCH_CHECK_VALUE(
             s == SwizzleType::NO_SWIZZLE,
-            "For XPU MX/NVFP4 gemm, scale_b swizzle entries must all be NO_SWIZZLE");
+            "For XPU and MPS MX/NVFP4 gemm, scale_b swizzle entries must all be NO_SWIZZLE");
       }
     } else if (!is_rocm) {
       TORCH_CHECK_VALUE(
