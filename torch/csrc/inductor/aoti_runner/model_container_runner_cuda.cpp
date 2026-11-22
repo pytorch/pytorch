@@ -3,6 +3,18 @@
 
 namespace torch::inductor {
 
+namespace {
+
+// A null stream means the current CUDA stream.
+void* stream_or_current(void* stream_handle) {
+  if (stream_handle != nullptr) {
+    return stream_handle;
+  }
+  return reinterpret_cast<void*>(c10::cuda::getCurrentCUDAStream().stream());
+}
+
+} // namespace
+
 AOTIModelContainerRunnerCuda::AOTIModelContainerRunnerCuda(
     const std::string& model_so_path,
     size_t num_models,
@@ -34,11 +46,16 @@ AOTIModelContainerRunnerCuda::~AOTIModelContainerRunnerCuda() = default;
 std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run_impl(
     std::vector<AtenTensorHandle>& input_handles,
     void* stream_handle) {
-  if (stream_handle == nullptr) {
-    at::cuda::CUDAStream cuda_stream = c10::cuda::getCurrentCUDAStream();
-    stream_handle = reinterpret_cast<void*>(cuda_stream.stream());
-  }
-  return AOTIModelContainerRunner::run_impl(input_handles, stream_handle);
+  return AOTIModelContainerRunner::run_impl(
+      input_handles, stream_or_current(stream_handle));
+}
+
+std::vector<at::Tensor> AOTIModelContainerRunnerCuda::
+    run_with_lazy_cuda_graphs_impl(
+        std::vector<AtenTensorHandle>& input_handles,
+        void* stream_handle) {
+  return AOTIModelContainerRunner::run_with_lazy_cuda_graphs_impl(
+      input_handles, stream_or_current(stream_handle));
 }
 
 std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run_with_cuda_stream(

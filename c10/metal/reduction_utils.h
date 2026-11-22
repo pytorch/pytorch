@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/metal/utils.h>
+#include <metal_array>
 #include <metal_compute>
 
 namespace c10 {
@@ -504,6 +505,50 @@ struct MinOp {
     return c10::metal::threadgroup_min(shared, val, tid, tptg);
   }
 };
+
+// Per-thread part of a flat reduction of n elements by tptg threads. Each step
+// consumes 4 adjacent elements and NCHAINS independent accumulators hide the
+// latency of combine. load(i) returns element i already in the accumulator
+// type, so callers can fuse elementwise math into the reduction.
+template <uint NCHAINS, typename T, typename Load, typename Combine>
+inline T thread_reduce_flat(
+    Load load,
+    Combine combine,
+    T init,
+    uint n,
+    uint tid,
+    uint tptg) {
+  ::metal::array<T, NCHAINS> acc;
+  for (uint j = 0; j < NCHAINS; j++) {
+    acc[j] = init;
+  }
+  const uint n_quads = n / 4;
+  const uint stride = tptg * NCHAINS;
+  uint i = tid;
+  for (; i + (NCHAINS - 1) * tptg < n_quads; i += stride) {
+    for (uint j = 0; j < NCHAINS; j++) {
+      const uint base = (i + j * tptg) * 4;
+#pragma unroll
+      for (uint k = 0; k < 4; k++) {
+        acc[j] = combine(acc[j], load(base + k));
+      }
+    }
+  }
+  for (; i < n_quads; i += tptg) {
+#pragma unroll
+    for (uint k = 0; k < 4; k++) {
+      acc[0] = combine(acc[0], load(i * 4 + k));
+    }
+  }
+  for (uint k = n_quads * 4 + tid; k < n; k += tptg) {
+    acc[0] = combine(acc[0], load(k));
+  }
+  T val = acc[0];
+  for (uint j = 1; j < NCHAINS; j++) {
+    val = combine(val, acc[j]);
+  }
+  return val;
+}
 
 } // namespace metal
 } // namespace c10

@@ -9,8 +9,11 @@ import torch.utils._pytree as pytree
 from torch._custom_class_base import CustomClassBase
 from torch._guards import detect_fake_mode
 from torch._library.opaque_object import is_custom_class
-from torch._subclasses import FakeTensor, FakeTensorMode
-from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
+from torch._subclasses.fake_tensor import (
+    FakeTensorMode,
+    is_fake_tensor,
+    maybe_get_fake_mode,
+)
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -24,6 +27,7 @@ from .utils import get_loaded_async_collective_tensor_type
 if TYPE_CHECKING:
     from collections.abc import Generator, KeysView
 
+    from torch._subclasses.fake_tensor import CppFakeTensorMode
     from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
 
@@ -35,7 +39,7 @@ static_inputs_log = torch._logging.getArtifactLogger(
 def process_inputs(
     flat_args: list[Any],
     aot_config: AOTConfig,
-    fake_mode: FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
     shape_env: ShapeEnv | None,
     ignore_shape_env: bool = False,
 ) -> tuple[FakifiedFlatArgs, list[ActInputPath]]:
@@ -122,15 +126,15 @@ def process_inputs(
                 all_this_fake = True
                 for a in attrs:
                     match getattr(x, a):
-                        case FakeTensor() as v:
-                            if v.fake_mode is not fake_mode:
-                                # FakeTensor subclass from a different mode.
+                        case torch.Tensor() as v:
+                            if (
+                                not is_fake_tensor(v)
+                                or maybe_get_fake_mode(v) is not fake_mode
+                            ):
+                                # A real tensor or a fake from a different mode.
                                 # Fall through to refakify.
                                 all_this_fake = False
                                 break
-                        case torch.Tensor():
-                            all_this_fake = False
-                            break
                         case CustomClassBase():
                             pass
                         case unexpected:
@@ -225,7 +229,7 @@ def _resolve_input_async_collectives(
 
 def construct_fake_mode(
     flat_args: list[Any], aot_config: AOTConfig
-) -> tuple[FakeTensorMode, ShapeEnv | None]:
+) -> tuple[FakeTensorMode | CppFakeTensorMode, ShapeEnv | None]:
     fake_mode = detect_fake_mode(flat_args)
     if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None

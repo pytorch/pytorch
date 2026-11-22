@@ -1177,6 +1177,13 @@ This feature is a prototype and may have compatibility breaking changes in the f
 
 ```{eval-rst}
 .. py:module:: torch.version
+
+.. py:data:: xpu_ops_commit
+   :type: Optional[str]
+
+   Full torch-xpu-ops commit SHA used to build the XPU implementation.
+   ``None`` for non-XPU builds or when the SHA is unavailable, including
+   Python-only builds that use an external LibTorch without this metadata.
 ```
 
 % Compiler configuration module - documented in torch.compiler.config.md

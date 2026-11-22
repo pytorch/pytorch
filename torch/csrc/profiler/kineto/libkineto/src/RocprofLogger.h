@@ -9,6 +9,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <deque>
 #include <functional>
 #include <list>
@@ -18,11 +19,17 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
+#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 
 #include "RocLogger.h"
+
+namespace libkineto {
+class RocprofActivityApiTest;
+}
 
 struct ThreadTraceBuffer {
   explicit ThreadTraceBuffer(uint64_t bufferGeneration)
@@ -41,8 +48,6 @@ class RocprofLogger {
   RocprofLogger(const RocprofLogger&) = delete;
   RocprofLogger& operator=(const RocprofLogger&) = delete;
 
-  virtual ~RocprofLogger();
-
   static RocprofLogger& singleton();
 
   static void pushCorrelationID(uint64_t id, RocLogger::CorrelationDomain type);
@@ -54,6 +59,7 @@ class RocprofLogger {
   void clearLogs();
   void setMaxEvents(uint32_t maxBufferSize);
   void setPerThreadBuffers(bool enabled);
+  void setDispatchRecordWait(std::chrono::milliseconds wait);
 
   static int toolInit(
       rocprofiler_client_finalize_t finalize_func,
@@ -68,10 +74,10 @@ class RocprofLogger {
       rocprofiler_buffer_tracing_kind_t kind,
       rocprofiler_tracing_operation_t op);
 
- private:
-  bool registered_{false};
-  void endTracing();
+  // HIP runtime API ids whose GPU work is reported as a memset or memcpy.
+  static bool isMemsetOrCopyApi(uint32_t id);
 
+ private:
   static void insert_row_to_buffer(rocprofBase* row);
 
   static ThreadTraceBuffer* getThreadBuffer();
@@ -79,6 +85,10 @@ class RocprofLogger {
 
   //
   static void api_callback(
+      rocprofiler_callback_tracing_record_t record,
+      rocprofiler_user_data_t* user_data,
+      void* callback_data);
+  static void dispatch_callback(
       rocprofiler_callback_tracing_record_t record,
       rocprofiler_user_data_t* user_data,
       void* callback_data);
@@ -98,6 +108,9 @@ class RocprofLogger {
   uint32_t maxBufferSize_{5000000}; // 5M GPU runtime/kernel events.
   std::vector<rocprofBase*> rows_;
   std::mutex rowsMutex_;
+  // Detached rows count toward the shared-buffer path's session limit only;
+  // guarded by rowsMutex_.
+  uint64_t processedRows_{0};
 
   // This vector collects pairs of correlationId and their respective
   // externalCorrelationId for each CorrelationDomain. This will be used
@@ -112,8 +125,14 @@ class RocprofLogger {
   std::atomic<uint64_t> generation_{0};
   std::atomic<uint64_t> totalRows_{0};
 
-  bool externalCorrelationEnabled_{true};
-  bool logging_{false};
+  std::atomic<bool> externalCorrelationEnabled_{true};
+
+  // Dispatch ids of kernels enqueued in this session whose dispatch record has
+  // not been delivered yet; stopLogging() waits for them.
+  std::unordered_set<uint64_t> pendingDispatches_;
+  std::mutex pendingDispatchesMutex_;
+  std::chrono::milliseconds dispatchRecordWait_{20};
 
   friend class libkineto::RocprofActivityApi;
+  friend class libkineto::RocprofActivityApiTest;
 };

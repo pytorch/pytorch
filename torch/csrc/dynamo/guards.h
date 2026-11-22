@@ -4,6 +4,8 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 
+#include <optional>
+
 namespace torch::dynamo {
 
 PyObject* torch_c_dynamo_guards_init();

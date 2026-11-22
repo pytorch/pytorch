@@ -16,7 +16,6 @@ import torch.nn as nn
 import torch.testing._internal.dist_utils
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
-from torch.distributed.rpc import RRef
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     IS_MACOS,
@@ -100,11 +99,6 @@ def build_sparse_tensor(coalesce=False, requires_grad=True, dtype=torch.float32)
     return tensor
 
 
-@torch.jit.script
-def create_torchscript_tensor() -> torch.Tensor:
-    return torch.ones((3, 3)).requires_grad_()
-
-
 def my_py_add(t1, t2):
     return torch.add(t1, t2)
 
@@ -116,17 +110,6 @@ def my_scalar_add(a, b):
 def my_rref_add(rref_t1, t2):
     ret = torch.add(rref_t1.local_value(), t2)
     return ret
-
-
-@torch.jit.script
-def my_script_add(t1, t2):
-    return torch.add(t1, t2)
-
-
-@torch.jit.script
-def my_script_ref_add(ref_t1: RRef[torch.Tensor], t2: torch.Tensor) -> torch.Tensor:
-    t1 = ref_t1.to_here()
-    return torch.add(t1, t2)
 
 
 def my_nested_rref_add(dst, rref_t1, t2):
@@ -175,21 +158,6 @@ def _all_contexts_cleaned_up(timeout_seconds=10):
 def _run_trainer(rref_t1, t2, ps, rank_diff, sparse):
     with dist_autograd.context() as context_id:
         ret = rpc.rpc_sync(ps, my_rref_add, args=(rref_t1, t2))
-        if sparse:
-            loss = torch.sparse.sum(ret)
-        else:
-            loss = ret.sum()
-        dist_autograd.backward(context_id, [loss])
-        # prevent deleting dist autograd context
-        rpc.rpc_sync(ps, _set_rpc_done, args=(context_id, rank_diff))
-        rpc.rpc_sync(ps, _check_rpc_done, args=(0,))
-
-
-# This function is the same as _run_trainer, except rpc calls torchscript
-# function "my_script_ref_add" instead of python function "my_rref_add"
-def _run_trainer_torchscript(rref_t1, t2, ps, rank_diff, sparse):
-    with dist_autograd.context() as context_id:
-        ret = rpc.rpc_sync(ps, my_script_ref_add, args=(rref_t1, t2))
         if sparse:
             loss = torch.sparse.sum(ret)
         else:
@@ -793,27 +761,6 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                     exec_mode, [loss], context_id, local_grads, t1, t2
                 )
 
-    # Run the same code locally and with dist autograd and verify gradients
-    # are same.
-    def _backward_simple_script_call(self, t1, t2, sparse):
-        local_grads = None
-        for exec_mode in [
-            ExecMode.LOCAL,
-            ExecMode.RPC_SYNC,
-            ExecMode.RPC_ASYNC,
-            ExecMode.REMOTE,
-        ]:
-            with dist_autograd.context() as context_id:
-                forward_ret = self._exec_func(exec_mode, my_script_add, t1, t2)
-                if sparse:
-                    loss = torch.sparse.sum(forward_ret)
-                else:
-                    loss = forward_ret.sum()
-                ret = self._verify_backwards(
-                    exec_mode, [loss], context_id, local_grads, t1, t2
-                )
-                local_grads = ret if ret else local_grads
-
     def _nested_backward_accumulate_grads(self, t1, t2, sparse):
         with dist_autograd.context() as context_id:
             ret = rpc.rpc_sync(
@@ -1168,14 +1115,6 @@ class TensorPipeAgentDistAutogradTest(CommonDistAutogradTest):
     @dist_init
     def test_backward_simple_python_udf_sparse(self):
         self._backward_simple_python_udf(
-            build_sparse_tensor(requires_grad=True),
-            build_sparse_tensor(requires_grad=True),
-            True,
-        )
-
-    @dist_init
-    def test_backward_simple_script_call_sparse(self):
-        self._backward_simple_script_call(
             build_sparse_tensor(requires_grad=True),
             build_sparse_tensor(requires_grad=True),
             True,
@@ -1539,20 +1478,6 @@ class DistAutogradTest(CommonDistAutogradTest):
         self._test_trainer_ps(create_tensor, _run_trainer, False)
 
     @dist_init
-    def test_trainer_ps_torchscript_functions(self):
-        # TODO, need more investigation
-        # there is rref leak when shutting down, suspect it is because
-        # ref as arg is passed to pybind boundary, and the ref is not garbage
-        # collected by python when calling shutdown()
-        import torch.distributed.rpc.api as api
-
-        api._ignore_rref_leak = True
-
-        self._test_trainer_ps(
-            create_torchscript_tensor, _run_trainer_torchscript, False
-        )
-
-    @dist_init
     def test_backward_multiple_round_trips(self):
         self._backward_multiple_round_trips(
             torch.rand((3, 3), requires_grad=True),
@@ -1799,14 +1724,6 @@ class DistAutogradTest(CommonDistAutogradTest):
     @dist_init
     def test_backward_simple_python_udf(self):
         self._backward_simple_python_udf(
-            torch.rand(3, 3, requires_grad=True),
-            torch.rand(3, 3, requires_grad=True),
-            False,
-        )
-
-    @dist_init
-    def test_backward_simple_script_call(self):
-        self._backward_simple_script_call(
             torch.rand(3, 3, requires_grad=True),
             torch.rand(3, 3, requires_grad=True),
             False,

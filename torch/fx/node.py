@@ -11,6 +11,7 @@ from typing_extensions import ParamSpec, TypeVar
 
 import torch
 from torch._C import _fx_map_aggregate, _fx_map_arg, _NodeBase
+from torch._functorch.predispatch import _functorch_predispatch_functions
 from torch.fx.operator_schemas import (
     ArgsKwargsPair,
     normalize_function,
@@ -115,6 +116,7 @@ _side_effectful_functions: set[Callable[..., Any]] = {
     torch.autograd.grad_mode._enter_inference_mode,
     torch.autograd.grad_mode._exit_inference_mode,
     *_side_effectful_need_to_be_preserved_pre_dispatch,
+    *_functorch_predispatch_functions,
 }
 
 if hasattr(_ops.inductor, "resize_storage_bytes_"):

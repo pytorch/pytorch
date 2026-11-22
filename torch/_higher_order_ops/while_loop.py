@@ -14,6 +14,7 @@ from torch._higher_order_ops.auto_functionalize import (
 )
 from torch._higher_order_ops.utils import (
     _check_alias_and_mutation,
+    _fake_mode_handler,
     _find_or_create_fake_mode,
     _maybe_fake_tracing,
     _maybe_run_with_interpreter,
@@ -29,7 +30,11 @@ from torch._higher_order_ops.utils import (
 )
 from torch._library.effects import EffectType
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
+    FakeTensorMode,
+    maybe_clear_fake_constant,
+)
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -435,7 +440,7 @@ def while_loop_autograd(
 
 
 def _create_unbacked_symint(
-    fake_mode: FakeTensorMode, ignore_fresh_unbacked_symbols: bool
+    fake_mode: FakeTensorMode | CppFakeTensorMode, ignore_fresh_unbacked_symbols: bool
 ) -> torch.SymInt:
     if fake_mode is None or fake_mode.shape_env is None:
         raise AssertionError("Must provide a fake_mode with shape_env.")
@@ -508,7 +513,7 @@ def while_loop_tracing(
         #   users to be >= 0 (either before while_loop or inside body_fn) and it increments by 1 in each
         #   iteration. Ideally, we should know that the final output is >= 0 but we didn't constrain the
         #   unbacked symint output of subgraph as of today because this requires a smart range analysis.
-        fake_mode: FakeTensorMode = _find_or_create_fake_mode()
+        fake_mode = _find_or_create_fake_mode()
 
         def _unspecialize_carried_inputs(x):
             if isinstance(x, (int, torch.SymInt)):
@@ -527,9 +532,7 @@ def while_loop_tracing(
             # be specialized to fixed values during tracing body_fn or cond_fn.
             elif isinstance(x, torch.Tensor):
                 x = x.clone()
-                if hasattr(x, "constant") and x.constant is not None:
-                    # pyrefly: ignore [missing-attribute]
-                    x.constant = None
+                maybe_clear_fake_constant(x)
             return x
 
         with disable_proxy_modes_tracing():
@@ -691,6 +694,9 @@ def while_loop_fake_tensor_mode(
             ),
             body_outs,
         )
+
+
+while_loop_op.py_impl(DispatchKey.Fake)(_fake_mode_handler(while_loop_fake_tensor_mode))
 
 
 @while_loop_op.py_functionalize_impl
@@ -1195,6 +1201,12 @@ while_loop_stack_output_op.py_impl(ProxyTorchDispatchMode)(
 
 while_loop_stack_output_op.py_impl(FakeTensorMode)(
     functools.partial(while_loop_fake_tensor_mode, stack_output=True)
+)
+
+while_loop_stack_output_op.py_impl(DispatchKey.Fake)(
+    _fake_mode_handler(
+        functools.partial(while_loop_fake_tensor_mode, stack_output=True)
+    )
 )
 
 while_loop_stack_output_op.py_functionalize_impl(

@@ -1,5 +1,6 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
 
@@ -63,12 +64,12 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 #if IS_PYTHON_3_16_PLUS
   TORCH_CHECK(false, "Python 3.16+");
 #elif IS_PYTHON_3_14_PLUS
-  for (int i = 0; i < offset; i++) {
+  for (const auto i : c10::irange(offset)) {
     update_framelocals(
         i, THP_PyStackRef_AsPyObjectBorrow(&frame->localsplus[i]));
   }
 #else
-  for (int i = 0; i < offset; i++) {
+  for (const auto i : c10::irange(offset)) {
     update_framelocals(i, frame->localsplus[i]);
   }
 #endif
@@ -80,7 +81,7 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 #else
   PyObject* closure = FUNC(frame)->func_closure;
 #endif
-  for (int i = 0; i < co->co_nfreevars; i++) {
+  for (const auto i : c10::irange(co->co_nfreevars)) {
     update_framelocals(offset + i, PyTuple_GET_ITEM(closure, i));
   }
 
@@ -95,7 +96,7 @@ void FrameLocalsMapping::_realize_dict() {
 
   auto nlocalsplus = ((PyCodeObject*)_code_obj.ptr())->co_nlocalsplus;
   DEBUG_CHECK(nlocalsplus == _framelocals.size());
-  for (int i = 0; i < nlocalsplus; i++) {
+  for (const auto i : c10::irange(nlocalsplus)) {
     if (_framelocals[i]) {
       _dict[framelocals_names[i]] = _framelocals[i];
     }

@@ -8,6 +8,7 @@
 #include <torch/csrc/inductor/static_launcher/cuda.h>
 #include <cstdint>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <cstring>
 #include <filesystem>
@@ -178,6 +179,7 @@ std::pair<CUmodule, CUfunction> loadKernel(
   }
   CUmodule mod = nullptr;
   CUfunction func = nullptr;
+  uint32_t shared_needed = sharedMemBytes;
 
 #if defined(USE_ROCM)
   // Unlike cuModuleLoad, hipModuleLoad keeps a file descriptor for the loaded
@@ -199,6 +201,13 @@ std::pair<CUmodule, CUfunction> loadKernel(
       CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
       device));
 
+  int shared_static = 0;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncGetAttribute(
+      &shared_static, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, func));
+  shared_needed += static_cast<uint32_t>(shared_static);
+  int shared_limit = torch::aot_inductor::sharedMemoryLimit(
+      shared_needed, shared_optin, device, nvrtc().cuDeviceGetAttribute);
+
 #endif
 
   // Shared memory logic from triton/third-party/nvidia/backend/driver.c
@@ -208,33 +217,29 @@ std::pair<CUmodule, CUfunction> loadKernel(
   // the static shared memory and total max shared memory allowed on the device.
   // This prevents us from setting shared memory above the maximum
 
-  // TODO: Unify the CUDA and ROCm shared memory checks. Currently using <= for
-  // ROCm and < for CUDA because ROCm hits the boundary case more often.
 #if defined(USE_ROCM)
-  TORCH_CHECK_WITH(
-      OutOfMemoryError,
-      sharedMemBytes <= static_cast<uint32_t>(shared_optin),
-      "out of resource: ",
-      funcName,
-      " Required: ",
-      sharedMemBytes,
-      " Hardware limit:",
-      shared_optin,
-      " Reducing block sizes or `num_stages` may help.");
+  const auto sharedOptinLimit = static_cast<uint32_t>(shared_optin);
+  if (sharedMemBytes > sharedOptinLimit) {
+    torch::inductor::static_launcher::throwOutOfResourceError(
+        funcName.c_str(), sharedMemBytes, sharedOptinLimit);
+  }
 #else
-  TORCH_CHECK_WITH(
-      OutOfMemoryError,
-      sharedMemBytes < static_cast<uint32_t>(shared_optin),
-      "out of resource: ",
-      funcName,
-      " Required: ",
-      sharedMemBytes,
-      " Hardware limit:",
-      shared_optin,
-      " Reducing block sizes or `num_stages` may help.");
+  if (shared_needed > static_cast<uint32_t>(shared_limit)) {
+    torch::inductor::static_launcher::throwOutOfResourceError(
+        funcName.c_str(), shared_needed, shared_limit);
+  }
+
+  if (shared_limit > shared_optin) {
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncSetAttribute(
+        func,
+        static_cast<CUfunction_attribute>(
+            torch::aot_inductor::kFuncAttrSharedMemoryMode),
+        torch::aot_inductor::kSharedMemoryModeAllowOversized));
+    return {mod, func};
+  }
 #endif
 
-  if (sharedMemBytes > SHARED_MEM_STATIC_MAX &&
+  if (shared_needed > SHARED_MEM_STATIC_MAX &&
       shared_optin > SHARED_MEM_STATIC_MAX) {
 #if defined(USE_ROCM)
     AT_CUDA_DRIVER_CHECK(hipFuncSetCacheConfig(func, hipFuncCachePreferShared));
@@ -253,13 +258,6 @@ std::pair<CUmodule, CUfunction> loadKernel(
 #else
     AT_CUDA_DRIVER_CHECK(
         nvrtc().cuFuncSetCacheConfig(func, CU_FUNC_CACHE_PREFER_SHARED));
-    int shared_total = 0, shared_static = 0;
-    AT_CUDA_DRIVER_CHECK(nvrtc().cuDeviceGetAttribute(
-        &shared_total,
-        CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
-        device));
-    AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncGetAttribute(
-        &shared_static, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, func));
     AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncSetAttribute(
         func,
         CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
@@ -277,10 +275,12 @@ inline void launchKernel(
     uint32_t numWarps,
     uint32_t sharedMemBytes,
     void** args,
-    cudaStream_t stream) {
+    cudaStream_t stream,
+    bool launchPdl) {
   // cta_args is always 1 for inductor generated triton kernels,
   // so we don't need to figure out grid dimension here
 #if defined(USE_ROCM)
+  TORCH_CHECK(!launchPdl, "PDL launches are not supported on ROCm");
   int device = 0;
   AT_CUDA_DRIVER_CHECK(hipGetDevice(&device));
   int warp_size = 0;
@@ -301,6 +301,25 @@ inline void launchKernel(
       nullptr));
 
 #else
+  if (launchPdl) {
+    CUlaunchAttribute attr{};
+    attr.id = CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION;
+    attr.value.programmaticStreamSerializationAllowed = 1;
+    CUlaunchConfig config{};
+    config.gridDimX = gridX;
+    config.gridDimY = gridY;
+    config.gridDimZ = gridZ;
+    config.blockDimX = 32 * numWarps;
+    config.blockDimY = 1;
+    config.blockDimZ = 1;
+    config.sharedMemBytes = sharedMemBytes;
+    config.hStream = stream;
+    config.attrs = &attr;
+    config.numAttrs = 1;
+    AT_CUDA_DRIVER_CHECK(
+        nvrtc().cuLaunchKernelEx(&config, func, args, nullptr));
+    return;
+  }
   AT_CUDA_DRIVER_CHECK(nvrtc().cuLaunchKernel(
       func,
       gridX,
@@ -348,7 +367,7 @@ void parseKernelArgs(
       PyTuple_Size(varArgs) == static_cast<Py_ssize_t>(numKernelArgs),
       "Mismatch between number of argument types and provided arguments");
 
-  for (int i = 0; i < numKernelArgs; ++i) {
+  for (const auto i : c10::irange(numKernelArgs)) {
     // Get pointer to the ith 8-byte slot.
     void* slot = static_cast<void*>(&argStorage[i]);
     PyObject* item = PyTuple_GetItem(varArgs, i);
@@ -496,7 +515,8 @@ PyObject* launch_kernel_inner(
     int sharedMemBytes,
     const char* argTypes,
     PyObject* varArgs,
-    cudaStream_t cudaStream) {
+    cudaStream_t cudaStream,
+    bool launchPdl) {
   // Launch the kernel
   // Prepare the arguments for the kernel
   // We allocate 8 bytes per argument on the stack. We then allocate 8 more
@@ -513,7 +533,8 @@ PyObject* launch_kernel_inner(
       numWarps,
       sharedMemBytes,
       kernelArgs.data(),
-      cudaStream);
+      cudaStream,
+      launchPdl);
   Py_RETURN_NONE;
 }
 
@@ -526,7 +547,8 @@ PyObject* launch_kernel_slow(
     int sharedMemBytes,
     const char* argTypes,
     PyObject* varArgs,
-    cudaStream_t cudaStream) {
+    cudaStream_t cudaStream,
+    bool launchPdl) {
   /* For the slow case, allocate memory on the stack instead of the heap */
   size_t numArgs = std::strlen(argTypes);
   std::vector<uint64_t> argStorage(numArgs);
@@ -542,7 +564,8 @@ PyObject* launch_kernel_slow(
       numWarps,
       sharedMemBytes,
       kernelArgs.data(),
-      cudaStream);
+      cudaStream,
+      launchPdl);
   Py_RETURN_NONE;
 }
 
@@ -558,6 +581,7 @@ PyObject* launch_kernel_slow(
       arg_tys, # e.g. "bO" for (int8_t, uint64_t)
       args, # tuple of arguments passed to the kernel
       stream,
+      launch_pdl, # optional, launch with programmatic stream serialization
   )
 *
 */
@@ -571,10 +595,11 @@ PyObject* launch_kernel(PyObject* /*self*/, PyObject* args) {
   uint64_t stream = 0;
   const char* argTypes = nullptr;
   PyObject* varArgs = nullptr;
+  int launchPdl = 0;
   // Parse the fixed arguments and the format string
   if (!PyArg_ParseTuple(
           args,
-          "KiiiiisOK",
+          "KiiiiisOK|p",
           &func_ptr,
           &gridX,
           &gridY,
@@ -583,7 +608,8 @@ PyObject* launch_kernel(PyObject* /*self*/, PyObject* args) {
           &sharedMemBytes,
           &argTypes,
           &varArgs,
-          &stream)) {
+          &stream,
+          &launchPdl)) {
     return nullptr;
   }
   if (gridX * gridY * gridZ <= 0) {
@@ -624,7 +650,8 @@ PyObject* launch_kernel(PyObject* /*self*/, PyObject* args) {
         numWarps,
         sharedMemBytes,
         nullptr,
-        cudaStream);
+        cudaStream,
+        launchPdl);
     Py_RETURN_NONE;
   } else if (num_args <= MAX_ARGS) {
     return launch_kernel_inner(
@@ -636,7 +663,8 @@ PyObject* launch_kernel(PyObject* /*self*/, PyObject* args) {
         sharedMemBytes,
         argTypes,
         varArgs,
-        cudaStream);
+        cudaStream,
+        launchPdl);
   } else {
     return launch_kernel_slow(
         func,
@@ -647,7 +675,8 @@ PyObject* launch_kernel(PyObject* /*self*/, PyObject* args) {
         sharedMemBytes,
         argTypes,
         varArgs,
-        cudaStream);
+        cudaStream,
+        launchPdl);
   }
   END_HANDLE_TH_ERRORS
 }
@@ -752,7 +781,7 @@ inline CUdeviceptr getPointerFast(PyObject* obj) {
   // Fast type check: inductor-generated tensors are always exact THPVariable
   // (or Parameter). Use CheckExact — a single Py_TYPE pointer comparison —
   // instead of THPVariable_Check which also calls PyObject_IsInstance.
-  if (C10_LIKELY(THPVariable_CheckExact(obj))) {
+  if (THPVariable_CheckExact(obj)) [[likely]] {
     auto tensor = THPVariable_Unpack(obj);
     TORCH_CHECK(
         tensor.defined(),
@@ -779,7 +808,8 @@ inline CUdeviceptr getPointerFast(PyObject* obj) {
 // _FastCudaLauncher: pre-bound callable that uses vectorcall (PEP 590)
 // to launch a triton kernel with minimal overhead.
 //
-// Pre-binds: CUfunction, numWarps, sharedMemBytes, argTypes, scratch slots.
+// Pre-binds: CUfunction, numWarps, sharedMemBytes, argTypes, scratch slots,
+//            launchPdl.
 // Per-call:  only grid, stream, and kernel args are passed.
 // Skips:     cuCtxGetCurrent, cuPointerGetAttribute, PyArg_ParseTuple for
 //            kernel metadata.
@@ -790,6 +820,7 @@ struct FastCudaLauncherObject {
   CUfunction func;
   uint32_t numWarps;
   uint32_t sharedMemBytes;
+  bool launchPdl;
   int numKernelArgs; // args passed from Python
   int numTotalArgs; // numKernelArgs + nScratch
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -825,10 +856,17 @@ static PyObject* FastCudaLauncher_new(
     return nullptr;
 
   uint64_t func_ptr = 0;
-  int numWarps = 0, shared = 0, nScratch = 0;
+  int numWarps = 0, shared = 0, nScratch = 0, launchPdl = 0;
   const char* argTypes = nullptr;
   if (!PyArg_ParseTuple(
-          args, "Kiisi", &func_ptr, &numWarps, &shared, &argTypes, &nScratch)) {
+          args,
+          "Kiisi|p",
+          &func_ptr,
+          &numWarps,
+          &shared,
+          &argTypes,
+          &nScratch,
+          &launchPdl)) {
     Py_DECREF(self);
     return nullptr;
   }
@@ -836,6 +874,7 @@ static PyObject* FastCudaLauncher_new(
   self->func = reinterpret_cast<CUfunction>(func_ptr); // NOLINT
   self->numWarps = static_cast<uint32_t>(numWarps);
   self->sharedMemBytes = static_cast<uint32_t>(shared);
+  self->launchPdl = launchPdl;
 
   int nKernel = static_cast<int>(std::strlen(argTypes));
   int nTotal = nKernel + nScratch;
@@ -853,14 +892,14 @@ static PyObject* FastCudaLauncher_new(
   self->numTotalArgs = nTotal;
   std::memcpy(self->argTypes, argTypes, nKernel);
   // Scratch slots are pointer type ('O')
-  for (int i = nKernel; i < nTotal; ++i) {
+  for (const auto i : c10::irange(nKernel, nTotal)) {
     self->argTypes[i] = 'O';
   }
   self->argTypes[nTotal] = '\0';
 
   // Pre-compute kernelArgs pointers and zero all storage.
   std::memset(self->argStorage, 0, sizeof(self->argStorage));
-  for (int i = 0; i < nTotal; ++i) {
+  for (const auto i : c10::irange(nTotal)) {
     self->kernelArgs[i] = &self->argStorage[i];
   }
 
@@ -917,7 +956,7 @@ static PyObject* fast_launcher_vectorcall(
   uint64_t stream = THPUtils_unpackUInt64(args[3]);
 
   // Pack kernel args from Python into pre-allocated argStorage.
-  for (int i = 0; i < self->numKernelArgs; ++i) {
+  for (const auto i : c10::irange(self->numKernelArgs)) {
     PyObject* item = args[4 + i];
     void* slot = static_cast<void*>(&self->argStorage[i]);
     char typeChar = self->argTypes[i];
@@ -997,7 +1036,8 @@ static PyObject* fast_launcher_vectorcall(
       self->numWarps,
       self->sharedMemBytes,
       self->kernelArgs,
-      reinterpret_cast<cudaStream_t>(stream)); // NOLINT
+      reinterpret_cast<cudaStream_t>(stream), // NOLINT
+      self->launchPdl);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

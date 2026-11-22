@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 from typing import Any, TYPE_CHECKING, TypeVar
-from typing_extensions import TypeVarTuple, Unpack
+from typing_extensions import TypeVarTuple
 
 
 if TYPE_CHECKING:
@@ -20,7 +20,7 @@ _Ts = TypeVarTuple("_Ts")
 
 
 def dispatch(
-    *types: Unpack[_Ts], **kwargs: Any
+    *types: *_Ts, **kwargs: Any
 ) -> Callable[[Callable[..., _T]], Callable[..., _T]]:
     """Dispatch function on the types of the inputs
     Supports dispatch on all non-keyword arguments.

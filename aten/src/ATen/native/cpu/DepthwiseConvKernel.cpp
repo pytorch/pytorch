@@ -190,11 +190,9 @@ void convolution_depthwise3x3_winograd_impl(
       int64_t ih = oth * 2 - args.pad_rows;
       int64_t iw = otw * 2 - args.pad_cols;
       // fast-path, all accesses in-bounds
-      if (C10_LIKELY(
-              ih >= 0 && iw >= 0 && ih + 3 < args.in_rows &&
+      if (ih >= 0 && iw >= 0 && ih + 3 < args.in_rows &&
                   iw + 3 < args.in_cols && 2 * oth + 1 < args.out_rows &&
-                  2 * otw + 1 < args.out_cols
-              )) {
+                  2 * otw + 1 < args.out_cols) [[likely]] {
         float32x4x4_t input_tile;
         for (const auto row : c10::irange(4)) {
           input_tile.val[row] =
@@ -405,11 +403,9 @@ void convolution_depthwise3x3_winograd_impl(
       int64_t ih = oth * 2 - args.pad_rows;
       int64_t iw = otw * 2 - args.pad_cols;
       // fast-path, all accesses in-bounds
-      if (C10_LIKELY(
-              ih >= 0 && iw >= 0 && ih + 3 < args.in_rows &&
+      if (ih >= 0 && iw >= 0 && ih + 3 < args.in_rows &&
                   iw + 3 < args.in_cols && 2 * oth + 1 < args.out_rows &&
-                  2 * otw + 1 < args.out_cols
-              )) {
+                  2 * otw + 1 < args.out_cols) [[likely]] {
         vfloat32m1x4_t input_tile;
         for (const auto row : c10::irange(4)) {
           __riscv_vse32_v_f32m1(

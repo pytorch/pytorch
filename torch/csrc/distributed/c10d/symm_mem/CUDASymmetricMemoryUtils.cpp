@@ -14,6 +14,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 
@@ -66,6 +67,22 @@ at::Tensor stage_bytes_to_device(
              at::TensorOptions().dtype(at::kByte))
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       .to(c10::Device(c10::DeviceType::CUDA, device_idx));
+}
+
+sockaddr_un make_socket_addr(const std::string& socket_name) {
+  struct sockaddr_un addr = {.sun_family = AF_UNIX};
+  // Leave room for the NUL; truncating could collide with another rank's name.
+  TORCH_CHECK(
+      socket_name.size() < sizeof(addr.sun_path),
+      "SymmetricMemory IPC socket path is too long (",
+      socket_name.size(),
+      " bytes, max ",
+      sizeof(addr.sun_path) - 1,
+      "): ",
+      socket_name,
+      ". Set TMPDIR to a shorter directory.");
+  std::memcpy(addr.sun_path, socket_name.data(), socket_name.size());
+  return addr;
 }
 
 } // namespace
@@ -165,15 +182,16 @@ IpcChannel::IpcChannel()
   //  On error, -1 is returned, and errno is set to indicate the error.
   TORCH_CHECK(
       socket_ != -1, "Failed to create socket: ", c10::utils::str_error(errno));
+  // A throwing constructor does not run the destructor.
+  auto close_socket =
+      c10::make_scope_exit([this]() noexcept { close(socket_); });
 
-  struct sockaddr_un addr = {.sun_family = AF_UNIX};
-  // NOLINTNEXTLINE(modernize-use-ranges)
-  std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
-
+  auto addr = make_socket_addr(socket_name_);
   TORCH_CHECK(
       bind(socket_, (struct sockaddr*)&addr, SUN_LEN(&addr)) == 0,
       "Failed to bind socket: ",
       c10::utils::str_error(errno));
+  close_socket.release();
 }
 
 IpcChannel::~IpcChannel() {
@@ -186,10 +204,7 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
   // pass them via normal socket payloads (like write() or send()).  Unix domain
   // sockets provide a mechanism to pass actual FDs via sendmsg()/recvmsg().
   // Define destination socket address
-  struct sockaddr_un addr = {.sun_family = AF_UNIX};
-  auto socket_name = get_socket_name(dst_pid);
-  // NOLINTNEXTLINE(modernize-use-ranges)
-  std::copy(socket_name.begin(), socket_name.end(), addr.sun_path);
+  auto addr = make_socket_addr(get_socket_name(dst_pid));
 
   // Prepare data to send
   // Data being sent is "fd", the value of fd will be sent as auxiliary data
@@ -251,16 +266,11 @@ int IpcChannel::recv_fd() {
   char cbuf[CMSG_SPACE(sizeof(int))];
   memset(cbuf, 0, sizeof(cbuf));
 
-  // Define socket address to receive on: family AF_UNIX means unix domain
-  // socket
-  struct sockaddr_un addr = {.sun_family = AF_UNIX};
-  // NOLINTNEXTLINE(modernize-use-ranges)
-  std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
-
-  // Prepare message header
+  // Prepare message header. msg_name is an output of recvmsg (the sender's
+  // address), which we never read, so leave it null.
   struct msghdr msg = {
-      .msg_name = (void*)&addr,
-      .msg_namelen = sizeof(struct sockaddr_un),
+      .msg_name = nullptr,
+      .msg_namelen = 0,
       .msg_iov = &io,
       .msg_iovlen = 1,
       .msg_control = cbuf,
@@ -293,7 +303,7 @@ std::vector<int> IpcChannel::all_gather_fds(
   fds[rank] = fd;
 
   int dst_rank = (rank + 1) % world_size;
-  for (int step = 1; step < world_size; ++step) {
+  for (const auto step : c10::irange(1, world_size)) {
     int src_rank = (rank + world_size - step) % world_size;
     send_fd(pids[dst_rank], fd);
     fd = recv_fd();
@@ -310,7 +320,7 @@ int IpcChannel::broadcast_fds(
   int world_size = static_cast<int>(pids.size());
 
   if (rank == src_rank) {
-    for (int dst_rank = 0; dst_rank < world_size; ++dst_rank) {
+    for (const auto dst_rank : c10::irange(world_size)) {
       if (dst_rank == rank) {
         continue;
       }

@@ -165,7 +165,7 @@ void fbgemm_spmdm_report_error_(
     const index_t* offsets,
     const index_t* indices) {
   for (const auto m : c10::irange(output_size)) {
-    for (index_t i = offsets[m]; i < offsets[m + 1]; ++i) {
+    for (const auto i : c10::irange(offsets[m], offsets[m + 1])) {
       TORCH_CHECK(i < index_size);
       index_t idx = indices[i];
       TORCH_CHECK(
@@ -1566,12 +1566,12 @@ static void _embedding_bag_dense_backward_cpu_sum_mean(
         &mode, &per_sample_weights_data, &per_sample_weights_stride, &scale_grad_by_freq,
         &counts, &grad, &index_grad_weight, &padding_idx
       ](index_t start, index_t end) {
-      for (index_t i = start; i < end; i++) {
+      for (const auto i : c10::irange(start, end)) {
         index_t indices_start = i == 0 ? 0 : next_unique_index_idx[i - 1];
         index_t index = indices_data[indices_start];
 
         if (index != static_cast<index_t>(padding_idx)) {
-          for (index_t j = indices_start; j < next_unique_index_idx[i]; j++) {
+          for (const auto j : c10::irange(indices_start, next_unique_index_idx[i])) {
             index_t source = offset2bag_data[j];
             double scale = 1.0;
             if (per_sample_weights) {
@@ -1725,7 +1725,7 @@ static Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
     parallel_for(0, num_samples, 64,
       [&embedding_features, &grad_data, &grad_stride0, &grad_stride1, &weight_data, &weight_stride0,
         &weight_stride1, &offset2bag_data, &indices_data, &output_data, &padding_idx](index_t begin, index_t end) {
-      for (index_t sample_idx = begin; sample_idx < end; sample_idx++) {
+      for (const auto sample_idx : c10::irange(begin, end)) {
         auto bag_idx = offset2bag_data[sample_idx];
         auto embedding_idx = indices_data[sample_idx];
 
