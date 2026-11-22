@@ -1348,6 +1348,18 @@ def optim_error_inputs_func_sgd(device, dtype):
                 error_regex="Invalid weight_decay value: nan",
             ),
         ]
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(dampening=dampening),
+                    desc="dampening should be between 0 and 1",
+                ),
+                error_type=ValueError,
+                error_regex=f"Invalid dampening value: {dampening}",
+            )
+            for dampening in (-0.5, 1.5, float("nan"))
+        ]
     return error_inputs
 
 
