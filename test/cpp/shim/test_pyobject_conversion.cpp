@@ -112,3 +112,32 @@ TEST(TorchPyObjectConversion, DeviceValuesValidatedBeforeNarrowing) {
           "device index 256 is out of range"),
       nullptr);
 }
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
+TEST(TorchPyObjectConversion, LayoutNoopErrorsWithoutLibtorchPython) {
+  int dummy = 0;
+  int32_t layout_out = -1;
+  EXPECT_EQ(
+      torch_layout_from_pyobject(&dummy, &layout_out), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(layout_out, -1);
+
+  void* py_out = nullptr;
+  EXPECT_EQ(
+      torch_layout_to_pyobject(aoti_torch_layout_sparse_csr(), &py_out),
+      AOTI_TORCH_FAILURE);
+  EXPECT_EQ(py_out, nullptr);
+}
+
+TEST(TorchPyObjectConversion, LayoutCodeValidatedBeforeNarrowing) {
+  void* py_out = nullptr;
+  EXPECT_EQ(torch_layout_to_pyobject(256, &py_out), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(py_out, nullptr);
+  EXPECT_NE(
+      std::strstr(
+          torch_exception_get_what_without_backtrace(),
+          "invalid layout code 256"),
+      nullptr);
+}
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
