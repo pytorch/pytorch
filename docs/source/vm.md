@@ -363,6 +363,21 @@ the `__iter__` for them only where the class has neither, which it checks
 at every call: of a module container, or of a tensor, they end the path in
 front of the call.
 
+`getattr(obj, name, default)` and `hasattr(obj, name)` are part of a path
+where the attribute is found without Python code running, where the class
+reads its attributes in a `__getattribute__` of its own (the path goes into
+it), and where the name is not there: `object` then raises `AttributeError`
+and does nothing else, the functions the path went into are left by that,
+the builtin gives the default (or `False`), and the path checks at every
+call that the name is still not there. A configuration object that is asked
+for an option it may not have (`getattr(config, "is_causal", True)`) does
+not end a path. `isinstance(obj, cls)` for an abstract base class is part
+of a path while the class has kept its answer for the class of the object;
+registering a class makes the kept answers stale, and the calls that find
+that out run the instructions, which ask anew. A method of a dict that was
+bound earlier (`get = table.get`) is the method of the dict when it is
+called.
+
 The instruction that such a function runs for gives what the interpreter
 makes of what the function returned: `for` and `iter` raise `TypeError` for
 what is no iterator, `len` gives the `__index__` of what `__len__` returned
@@ -922,9 +937,13 @@ that is hashed without Python code and is alone under its hash, since
 taking the entry out hashes and compares it. A tensor that ends has to be
 of the class `torch.Tensor` itself, require no gradient (what a history
 holds, a hook or what a `torch.autograd.Function` kept for its backward, is
-not to be seen) and have memory that is torch's own (a tensor over a numpy
-array, a buffer or a DLPack capsule keeps their owner alive); its
-attributes and its `.grad` are looked at. An object that shows the
+not to be seen), have memory that is torch's own (a tensor over a numpy
+array, a buffer or a DLPack capsule keeps their owner alive) and a storage
+whose Python object has no attributes, and be one dense block (not sparse,
+quantized or nested, and no wrapper around another tensor); its attributes,
+its `.grad` and, for a view, the tensor it is a view of are looked at, and
+while a level of forward-mode differentiation is open, in which a tensor
+may have a tangent, no tensor ends quietly. An object that shows the
 collector nothing (a capsule, a numpy array, a storage) is taken to end
 with Python code unless its class is known to hold nothing. A call for
 which that cannot be shown runs the operations of the function as they are:
@@ -963,11 +982,8 @@ all(torch.equal(a, b) for a, b in zip(got, expected)), STATE[0]  # (True, 1.5)
 What an object refers to is what it shows the garbage collector, and no
 more than 4,096 objects that end are looked at (with more, the call runs
 the operations). Objects in a reference cycle end when the collector runs,
-as they do in eager mode. Not seen is what a tensor keeps alive through
-another tensor or through its storage: the base of a view, where the view
-is the last to hold it and an attribute was set on the base; the tangent of
-a dual tensor; an attribute set on a storage. What a pass's own callable
-does is not looked at ("Limits").
+as they do in eager mode. What a pass's own callable does is not looked at
+("Limits").
 
 A call in which a path is taken down holds on to what the path reads until
 the run has been described. Where the function lets go, in such a call, of
@@ -2844,7 +2860,7 @@ profiler counts an operation of a graph as less than one):
 | DistillGPT2 (HuggingFace) | 4 | 4 | 254 of 247 |
 | hf_DistilBert (TorchBench) | 4 | 14 | 136 of 136 |
 | MobileBertForMaskedLM (HuggingFace) | 3 | 3 | 1295 of 1250 |
-| whisper-tiny (HuggingFace) | 5 | 22 | 346 of 385 |
+| whisper-tiny (HuggingFace) | 6 | 18 | 366 of 385 |
 
 The outputs are those of eager mode bit for bit. A timm model and the vision
 transformer are one graph, the whole forward. A transformer language model
@@ -2853,11 +2869,12 @@ one per layer or per stack of layers, and a few around them. The six layers
 of DistillGPT2 are one graph of 231 operations, with the dropout in front of
 them and the last normalization behind: a graph starts behind the call of
 the helper that makes its mask ("Graphs that start behind a call"). What their
-paths end at is `getattr(config, name, default)` where the configuration
-raises for a name it does not have (at the start of every model, where the
-attention mask is made), a branch on what the mask holds, the objects the
-models construct for their outputs, and library code such as
-`inspect.signature` ("Limits"). A training step has fewer of its operations
+paths end at is the code around the attention mask at the start of every
+model (a wrapper that reads a member of an enumeration, a branch on what the
+mask holds), the truth of the cache that a decoder asks at every layer,
+which is a `__len__` in Python, the objects the models construct for their
+outputs, and library code such as `inspect.signature` and `copy.deepcopy`
+("Limits"). A training step has fewer of its operations
 in graphs (counted on eager's tape, with `Graphs(backward=False)`): for
 DistillGPT2, 5 graphs that run 15 times in a step, with 191
 of the about 820 operators that the profiler counts in one step of eager
@@ -2867,9 +2884,14 @@ nothing that can fail has been taken down in front of them ("Writes").
 
 With the models on a GPU (one H100, counted the same way) every model of
 the table above has the graphs it has there, with the same number of runs
-in a call and the same operations in them; the profiler counts a few more
-operations in a call of eager mode for three of them (253 for DistillGPT2,
-1274 for MobileBertForMaskedLM, 389 for whisper-tiny). That holds for the
+in a call, and the same operations in them but for one graph of
+DistillGPT2: where its mask is made the path goes on to the branch on what
+the mask holds, 8 operations where the CPU has 5 (there a helper asks
+whether a CUDA stream is being captured, inside a `try`, which raises
+without CUDA), so that 257 operations are in its graphs. The profiler
+counts a few more operations in a call of eager mode for three of them
+(253 for DistillGPT2, 1274 for MobileBertForMaskedLM, 389 for
+whisper-tiny). That holds for the
 models that call `scaled_dot_product_attention` with `**` as well, in the
 build of torch they were counted with, which has no fused attention
 kernels: the attention comes down to `bmm` there, whose CUDA kernel is
@@ -2912,9 +2934,10 @@ What graphs do not do at this stage:
   check per store ("Stores into objects"); a read through what a store
   changed ends the path.
 - A raise that is caught ends a path: `getattr(obj, name, default)` and
-  `hasattr` where a `__getattribute__` written in Python raises
-  `AttributeError`, a `try` around a call that raises, `Mapping.get` of a key
-  that is not there. So do constructing an object of a class that a path
+  `hasattr` where a function of the class raises `AttributeError` itself
+  (the lookup of `object` that finds nothing does not: "Paths across
+  calls"), a `try` around a call that raises, `Mapping.get` of a key that is
+  not there. So do constructing an object of a class that a path
   does not make objects of ("Objects a path makes": a named tuple, a class
   with a `__setattr__` of its own or made of `dict`, as the output objects
   of the transformer models are), `functools.partial`, making an inner
@@ -2968,6 +2991,12 @@ What graphs do not do at this stage:
   operations run one by one, and the call is as fast as eager mode, no
   faster. Under `torch.no_grad()`, and in `float32`, such a graph is compiled
   like any other.
+- `module.__class__` (and `module.__dict__`) of a module whose own dict has
+  an entry under that name gives the entry. The interpreter itself gives
+  two answers there: the class the first time the instruction runs, and
+  the dict's entry once it has specialized the instruction, which then
+  reads the module's dict and does not look at the class of modules. There
+  is no single answer of eager mode to give.
 - With the engine's backward ("Gradients") the state behind a backward that
   raises is not eager's. Eager raises at the node that needs the tensor that
   was written to in place, and has by then added up the gradient of every
