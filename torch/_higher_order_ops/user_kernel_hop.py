@@ -1,12 +1,12 @@
 """DSL-agnostic pieces of the user-kernel HOPs.
 
-A user-defined kernel (e.g. a ``@triton.jit`` kernel) is captured as a pair of HOPs:
-a mutation HOP that launches the kernel and writes its arguments in place, and a
-functional HOP that functionalization rewrites it into (clones of the written
-arguments, then the launch on the clones). Everything here is shared by every DSL's
-pair; each DSL's module (e.g. triton_kernel_wrap.py) adds the parts that depend on
-the kernel object: how to launch it, how to find its write set, and how to capture a
-call to it (the HOPifier).
+A user-defined kernel (a ``@triton.jit`` kernel, a ``@cute.jit`` host function) is
+captured as a pair of HOPs: a mutation HOP that launches the kernel and writes its
+arguments in place, and a functional HOP that functionalization rewrites it into
+(clones of the written arguments, then the launch on the clones). Everything here is
+shared by every DSL's pair; each DSL's module (triton_kernel_wrap.py,
+cutedsl_kernel_wrap.py) adds the parts that depend on the kernel object: how to launch
+it, how to find its write set, and how to capture a call to it (the HOPifier).
 """
 
 import collections
@@ -339,7 +339,7 @@ class KernelSideTable(Generic[KernelT]):
         # entries cannot be evicted sooner.
         self.constant_rules = constant_rules
         self._constant_args_index: dict[object, int] = {}
-        # index -> {name: constant_key of the arg}.
+        # index -> {name: constant_key of the arg}, for a launch to reuse.
         self._constant_args_keys: dict[int, dict[str, object]] = {}
 
     # Returns index on the table
@@ -681,7 +681,7 @@ class UserKernelHOPInfo:
     (FxGraphHashDetails, and the has_user_defined_triton_kernels flag computed from
     it), so a DSL whose HOPs are cacheable must extend the cache key first. HOPs are
     not cacheable by default, and the cache bypasses every graph that contains an
-    uncacheable HOP.
+    uncacheable HOP, such as CuTeDSL's (cacheable=False).
     """
 
     dsl: str

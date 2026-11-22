@@ -22,7 +22,7 @@ This is the place to look if you are trying to find low-level communication APIs
 
 - API layer: [torch/distributed/distributed_c10d.py](https://github.com/pytorch/pytorch/blob/main/torch/distributed/distributed_c10d.py)
 - Python Bindings: [torch/csrc/distributed/c10d/init.cpp](https://github.com/pytorch/pytorch/blob/main/torch/csrc/distributed/c10d/init.cpp)
-- Implementations: [torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp](https://github.com/pytorch/pytorch/blob/main/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp)
+- Implementations: [torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.cpp](https://github.com/pytorch/pytorch/blob/main/torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.cpp)
 
 #### DTensor
 
