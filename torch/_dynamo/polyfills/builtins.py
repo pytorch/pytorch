@@ -14,8 +14,6 @@ import typing
 from collections.abc import Callable
 from typing import TYPE_CHECKING, TypeVar
 
-import torch
-
 from ..decorators import substitute_in_graph
 
 
@@ -185,11 +183,11 @@ def cast(typ: type, val: _T) -> _T:  # type: ignore[type-var]
     return val
 
 
-def str_format(template, /, *args, **kwargs):
-    return _expand_format(template, args, kwargs, 2, 0)[0]
+def str_format(defer, template, /, *args, **kwargs):
+    return _expand_format(defer, template, args, kwargs, 2, 0)[0]
 
 
-def _expand_format(template, args, kwargs, depth, position):
+def _expand_format(defer, template, args, kwargs, depth, position):
     # CPython shares positional numbering across nested format specs.
     if depth == 0:
         raise ValueError("Max string recursion exceeded")
@@ -218,7 +216,7 @@ def _expand_format(template, args, kwargs, depth, position):
         value = args[key] if isinstance(key, int) else kwargs[key]
         for is_attr, index in path:
             value = getattr(value, index) if is_attr else value[index]
-        if isinstance(value, torch.Tensor) and conv in ("s", "r", "a"):
+        if conv in ("s", "r", "a") and defer(value):
             value = ("{!" + conv + "}").format(value)
         elif conv == "s":
             value = str(value)
@@ -229,6 +227,8 @@ def _expand_format(template, args, kwargs, depth, position):
         elif conv and conv != "\0":
             ("{!" + conv + "}").format(None)
         if "{" in spec:
-            spec, position = _expand_format(spec, args, kwargs, depth - 1, position)
+            spec, position = _expand_format(
+                defer, spec, args, kwargs, depth - 1, position
+            )
         parts.append(format(value, spec))
     return "".join(parts), position
