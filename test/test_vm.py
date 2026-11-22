@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import abc
+import builtins as builtins_module
 import collections
 import collections.abc
 import copy
@@ -3828,6 +3829,33 @@ class TestVmFrames(TestCase):
             torch.vm(adds, fallback=False)
         compiled = torch.vm(f, fallback=False)
         self.assertEqual(compiled(adds), 8)
+        self.assertEqual(len(compiled.stats()["interpreted_callees"]), 1)
+
+    def test_callee_whose_builtins_are_not_a_plain_dict_runs_in_the_interpreter(self):
+        # A name that the globals do not have is asked of the builtins,
+        # through the mapping protocol where they are no plain dict: the
+        # interpreter calls the `__getitem__` of the class at every read.
+        asked = []
+
+        class Counted(dict):
+            def __getitem__(self, key):
+                asked.append(key)
+                return super().__getitem__(key)
+
+        names = Counted(vars(builtins_module))
+        code = compile("lambda items: len(items) + len(items)", "counts", "eval")
+        counts = types_module.FunctionType(code, {"__builtins__": names})()
+
+        def f(g, items):
+            return g(items)
+
+        refused = "builtins of the function are not a plain dict"
+        with self.assertRaisesRegex(torch.vm.Unsupported, refused):
+            torch.vm(counts, fallback=False)
+        compiled = torch.vm(f, fallback=False)
+        for at in range(1, 5):
+            self.assertEqual(compiled(counts, [1, 2]), 4)
+            self.assertEqual(asked, ["len", "len"] * at)
         self.assertEqual(len(compiled.stats()["interpreted_callees"]), 1)
 
     def test_call_of_a_c_function_does_not_keep_its_tensors_alive(self):
