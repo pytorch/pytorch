@@ -5425,13 +5425,14 @@ impl Compiled {
         if graph::debug() {
             let (steps, ops) = (path.body.len(), path.operators.len());
             eprintln!(
-                "torch.vm graph {}: a path of {} instructions, {} operations ({} in front of what stands for them, {} behind; {} registers), ends at {:?}: {}",
+                "torch.vm graph {}: a path of {} instructions, {} operations ({} in front of what stands for them, {} behind; {} registers, {} results), ends at {:?}: {}",
                 site.name,
                 steps,
                 ops,
                 path.stages[0].len(),
                 path.stages[1].len(),
                 path.nregs,
+                path.outputs.len(),
                 land,
                 path.ends
             );
