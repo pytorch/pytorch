@@ -131,7 +131,7 @@ class _GuardLocals(dict[str, Any]):
 
 
 class _GuardMath:
-    """Proxy `math` so `not math.isnan(SymFloat)` in `_check_guards` does not specialize."""
+    """Proxy `math` so guard checks on `SymFloat`/`SymInt` do not specialize."""
 
     @staticmethod
     def isnan(x: object) -> bool:
@@ -140,6 +140,8 @@ class _GuardMath:
         return math.isnan(x)  # type: ignore[arg-type]
 
     def __getattr__(self, name: str) -> Any:
+        if (sym_fn := getattr(torch, f"_sym_{name}", None)) is not None:
+            return sym_fn
         return getattr(math, name)
 
 
@@ -1414,7 +1416,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     def _filter_backed_symbols(
         cls: type[AOTAutogradCache], inputs: Sequence[Any]
     ) -> list[torch.SymInt | torch.SymFloat | None]:
-        """Collect backed SymInt and SymFloat placeholders at stable scalar/0-d-float slots."""
+        """Collect backed SymInt/SymFloat placeholders at stable scalar/0-d-float slots (unlike _filter_backed_symints)."""
         symbols: list[torch.SymInt | torch.SymFloat | None] = []
         for a in inputs:
             if isinstance(a, (torch.SymInt, int)) and not isinstance(a, bool):
