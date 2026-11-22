@@ -53,8 +53,10 @@ inline void scaled_mm_store(
     uint col,
     thread const ScaledMMArgs<T>& args,
     constant ScaledMMParams<>& p) {
-  value = (value * args.scale_a[p.rowwise ? row : 0]) *
-      args.scale_b[p.rowwise ? col : 0];
+  if (p.has_tensor_scales) {
+    value = (value * args.scale_a[p.rowwise ? row : 0]) *
+        args.scale_b[p.rowwise ? col : 0];
+  }
   if (p.has_bias) {
     value += p.bias_bfloat16
         ? float(reinterpret_cast<device const bfloat*>(args.bias)[col])
@@ -63,19 +65,16 @@ inline void scaled_mm_store(
   args.out[row * p.out_row_stride + col * p.out_col_stride] = T(value);
 }
 
-template <typename T>
-[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
-kernel void scaled_mm(
-    device const float8_e4m3fn* a [[buffer(0)]],
-    device const float8_e4m3fn* b [[buffer(1)]],
-    device T* out [[buffer(2)]],
-    device const float* scale_a [[buffer(3)]],
-    device const float* scale_b [[buffer(4)]],
-    device const uchar* bias [[buffer(5)]],
-    constant ScaledMMParams<>& p [[buffer(6)]],
-    uint2 group [[threadgroup_position_in_grid]],
-    uint tid [[thread_index_in_threadgroup]],
-    uint sg [[simdgroup_index_in_threadgroup]]) {
+// Accumulates the threadgroup's output tile over all of K into c_tile;
+// load_tiles(k) stages the A and B tiles of the K step starting at k.
+template <typename S, typename LoadTiles>
+inline void scaled_mm_accumulate(
+    threadgroup S* a_tile,
+    threadgroup S* b_tile,
+    threadgroup float* c_tile,
+    uint k_size,
+    uint sg,
+    LoadTiles load_tiles) {
   constexpr auto tile = scaled_mm_tile;
   // SIMD groups form a square grid over the tile; each owns a block built from
   // 8x8 simdgroup matrix fragments.
@@ -89,10 +88,6 @@ kernel void scaled_mm(
   static_assert(
       frags * frag * sg_grid == tile,
       "scaled_mm_tile must split into 8x8 fragments per SIMD group");
-  threadgroup half a_tile[tile * tile];
-  threadgroup half b_tile[tile * tile];
-  threadgroup float c_tile[tile * tile];
-  const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, a_tile, b_tile};
   const uint sg_row = sg / sg_grid * block;
   const uint sg_col = sg % sg_grid * block;
   simdgroup_float8x8 accum[frags][frags];
@@ -103,14 +98,12 @@ kernel void scaled_mm(
       accum[i][j] = simdgroup_float8x8(0.0f);
     }
   }
-  const uint row_start = group.y * tile;
-  const uint col_start = group.x * tile;
-  for (uint k = 0; k < p.k; k += tile) {
-    scaled_mm_load_tiles(args, p, row_start, col_start, k, tid);
+  for (uint k = 0; k < k_size; k += tile) {
+    load_tiles(k);
     threadgroup_barrier(mem_flags::mem_threadgroup);
 #pragma unroll
     for (uint kk = 0; kk < tile; kk += frag) {
-      simdgroup_half8x8 aa[frags], bb[frags];
+      simdgroup_matrix<S, frag, frag> aa[frags], bb[frags];
 #pragma unroll
       for (uint i = 0; i < frags; ++i) {
         simdgroup_load(aa[i], a_tile + (sg_row + i * frag) * tile + kk, tile);
@@ -137,6 +130,17 @@ kernel void scaled_mm(
     }
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
+}
+
+template <typename T>
+inline void scaled_mm_store_tile(
+    threadgroup const float* c_tile,
+    uint row_start,
+    uint col_start,
+    uint tid,
+    thread const ScaledMMArgs<T>& args,
+    constant ScaledMMParams<>& p) {
+  constexpr auto tile = scaled_mm_tile;
   for (uint i = tid; i < tile * tile; i += scaled_mm_threads) {
     const uint row = row_start + i / tile;
     const uint col = col_start + i % tile;
@@ -144,6 +148,32 @@ kernel void scaled_mm(
       scaled_mm_store(c_tile[i], row, col, args, p);
     }
   }
+}
+
+template <typename T>
+[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
+kernel void scaled_mm(
+    device const float8_e4m3fn* a [[buffer(0)]],
+    device const float8_e4m3fn* b [[buffer(1)]],
+    device T* out [[buffer(2)]],
+    device const float* scale_a [[buffer(3)]],
+    device const float* scale_b [[buffer(4)]],
+    device const uchar* bias [[buffer(5)]],
+    constant ScaledMMParams<>& p [[buffer(6)]],
+    uint2 group [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint sg [[simdgroup_index_in_threadgroup]]) {
+  constexpr auto tile = scaled_mm_tile;
+  threadgroup half a_tile[tile * tile];
+  threadgroup half b_tile[tile * tile];
+  threadgroup float c_tile[tile * tile];
+  const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, a_tile, b_tile};
+  const uint row_start = group.y * tile;
+  const uint col_start = group.x * tile;
+  scaled_mm_accumulate(a_tile, b_tile, c_tile, p.k, sg, [&](uint k) {
+    scaled_mm_load_tiles(args, p, row_start, col_start, k, tid);
+  });
+  scaled_mm_store_tile(c_tile, row_start, col_start, tid, args, p);
 }
 
 #define REGISTER_SCALED_MM_WITH_OUT_T(T)                            \
@@ -163,6 +193,115 @@ REGISTER_SCALED_MM_WITH_OUT_T(float);
 REGISTER_SCALED_MM_WITH_OUT_T(half);
 REGISTER_SCALED_MM_WITH_OUT_T(bfloat);
 REGISTER_SCALED_MM_WITH_OUT_T(float8_e4m3fn);
+
+// Block-scaled operand formats: decode element k of a K-contiguous row or
+// column, and its block's scale. stage_t is the threadgroup staging type.
+struct nvfp4_format {
+  // e2m1 times an e4m3 scale has at most 5 significant bits, so half is exact
+  using stage_t = half;
+  static constexpr constant uint block = 16;
+  static float element(device const uchar* data, uint k) {
+    // Two e2m1 values per byte, the first in the low nibble. Shifting the 3
+    // magnitude bits into half's exponent and mantissa and rebiasing by 2^14
+    // decodes them without a table, as MLX does.
+    const uint code = data[k / 2] >> (k % 2 * 4);
+    const float magnitude =
+        float(as_type<half>(ushort((code & 7) << 9))) * 16384.0f;
+    return code & 8 ? -magnitude : magnitude;
+  }
+  static float scale(uchar s) {
+    return c10::metal::detail::fp8e4m3fn_to_fp32(s);
+  }
+};
+
+struct mxfp8_format {
+  // e8m0 scales span 2^-127..2^127, beyond half's range
+  using stage_t = float;
+  static constexpr constant uint block = 32;
+  static float element(device const uchar* data, uint k) {
+    return c10::metal::detail::fp8e4m3fn_to_fp32(data[k]);
+  }
+  static float scale(uchar s) {
+    return c10::metal::detail::fp8e8m0fnu_to_fp32(s);
+  }
+};
+
+// A is row-major and B column-major (both K-contiguous); scale_a and scale_b
+// hold one scale per block of K for each row of A and column of B. The
+// optional tensor-wise scales (two-level NVFP4) are applied by the store.
+template <typename T, typename F>
+[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
+kernel void scaled_mm_blockwise(
+    device const uchar* a [[buffer(0)]],
+    device const uchar* b [[buffer(1)]],
+    device T* out [[buffer(2)]],
+    device const uchar* scale_a [[buffer(3)]],
+    device const uchar* scale_b [[buffer(4)]],
+    device const float* tensor_scale_a [[buffer(5)]],
+    device const float* tensor_scale_b [[buffer(6)]],
+    device const uchar* bias [[buffer(7)]],
+    constant ScaledMMParams<>& p [[buffer(8)]],
+    uint2 group [[threadgroup_position_in_grid]],
+    uint tid [[thread_index_in_threadgroup]],
+    uint sg [[simdgroup_index_in_threadgroup]]) {
+  constexpr auto tile = scaled_mm_tile;
+  using S = typename F::stage_t;
+  threadgroup S a_tile[tile * tile];
+  threadgroup S b_tile[tile * tile];
+  threadgroup float c_tile[tile * tile];
+  const uint row_start = group.y * tile;
+  const uint col_start = group.x * tile;
+  const uint k_blocks = (p.k + F::block - 1) / F::block;
+  const auto decode = [&](device const uchar* data,
+                          device const uchar* scales,
+                          int64_t stride,
+                          uint outer,
+                          uint outer_size,
+                          uint k) {
+    return outer < outer_size && k < p.k
+        ? S(F::element(data + outer * stride, k) *
+            F::scale(scales[outer * k_blocks + k / F::block]))
+        : S(0);
+  };
+  scaled_mm_accumulate(a_tile, b_tile, c_tile, p.k, sg, [&](uint k) {
+    // Consecutive threads walk K, the contiguous dimension of both operands
+    for (uint i = tid; i < tile * tile; i += scaled_mm_threads) {
+      const uint outer = i / tile;
+      const uint kk = i % tile;
+      a_tile[outer * tile + kk] =
+          decode(a, scale_a, p.a_row_stride, row_start + outer, p.m, k + kk);
+      b_tile[kk * tile + outer] =
+          decode(b, scale_b, p.b_col_stride, col_start + outer, p.n, k + kk);
+    }
+  });
+  const ScaledMMArgs<T> args{
+      nullptr, nullptr, out, tensor_scale_a, tensor_scale_b, bias, {}, {}};
+  scaled_mm_store_tile(c_tile, row_start, col_start, tid, args, p);
+}
+
+#define REGISTER_SCALED_MM_BLOCKWISE(NAME, FORMAT, T)           \
+  template [[host_name("scaled_mm_" #NAME "_" #T)]] kernel void \
+  scaled_mm_blockwise<T, FORMAT>(                               \
+      device const uchar*,                                      \
+      device const uchar*,                                      \
+      device T*,                                                \
+      device const uchar*,                                      \
+      device const uchar*,                                      \
+      device const float*,                                      \
+      device const float*,                                      \
+      device const uchar*,                                      \
+      constant ScaledMMParams<>&,                               \
+      uint2,                                                    \
+      uint,                                                     \
+      uint);
+
+#define REGISTER_SCALED_MM_BLOCKWISE_WITH_OUT_T(T)      \
+  REGISTER_SCALED_MM_BLOCKWISE(nvfp4, nvfp4_format, T); \
+  REGISTER_SCALED_MM_BLOCKWISE(mxfp8, mxfp8_format, T)
+
+REGISTER_SCALED_MM_BLOCKWISE_WITH_OUT_T(float);
+REGISTER_SCALED_MM_BLOCKWISE_WITH_OUT_T(half);
+REGISTER_SCALED_MM_BLOCKWISE_WITH_OUT_T(bfloat);
 
 inline float4 scaled_mm_decode_scaled(uint bytes) {
   // mask the sign bit
