@@ -153,8 +153,13 @@ stay: they are what shows that the call gets as far as the path does. In a
 call in which one of them raises, the path is not taken: the instructions
 run, and raise where they stand. What changes something the path made
 itself (an append to a list it built, a store into an object of a class it
-called, the next item of an iterator it made) is left out only together
-with the thing ("What a function makes").
+called, the next item of an iterator it made) is left out only together with
+the thing ("What a function makes"), and only where it cannot fail either:
+an entry that is put into a dict under a key that is no constant of the
+function and a list or a dict that is filled from a value from outside
+(`[*xs]`, `{**d}`) run in every run, used or not, so that a call in which
+the key cannot be hashed or the value cannot be gone over runs the
+instructions, which raise.
 
 ```python
 class Settings:
@@ -3154,7 +3159,8 @@ forward, loss, backward and update in one function). A call in milliseconds
 in eager mode, under `torch.vm` with `Graphs(), Inductor()`, and under
 `torch.compile`; the three take turns in one process, 40 calls each, three
 times, and the figures are the median of the three medians. At inference the
-runner has `torch.no_grad()` around the calls of a model. Measured that way,
+runner has `torch.no_grad()` around the calls of a model, and the
+`forward_pass` of the huggingface suite enters it itself. Measured that way,
 which is what the dashboard's runner does:
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
@@ -3163,12 +3169,25 @@ which is what the dashboard's runner does:
 | mobilenetv2_100 (timm) | 8.51, 8.55 ms | 3.12, 3.14 ms | 2.73x, 2.72x | 3.04, 3.06 ms | 2.80x, 2.80x | 0.97, 0.97 | 152 x1 |
 | adv_inception_v3 (timm) | 21.27, 21.13 ms | 8.66, 8.62 ms | 2.45x, 2.45x | 8.45, 8.39 ms | 2.52x, 2.52x | 0.97, 0.97 | 314 x1 |
 | deit_base_distilled_patch16_224 (timm) | 6.68, 6.73 ms | 6.28, 6.29 ms | 1.07x, 1.07x | 6.21, 6.21 ms | 1.08x, 1.08x | 0.99, 0.99 | 233 x1 |
+| DistillGPT2 (HuggingFace) | 13.86 ms | 4.62 ms | 3.00x | 3.74 ms | 3.70x | 0.81 | 231 x1, 10 x1, 8 x1, 8 x1 |
+| MobileBertForMaskedLM (HuggingFace) | 30.00 ms | 14.81 ms | 2.03x | 13.32 ms | 2.25x | 0.90 | 1272 x1, 16 x1, 7 x1 |
+| whisper-tiny (HuggingFace) | 8.91 ms | 4.89 ms | 1.82x | 3.05 ms | 2.92x | 0.62 | 237 x1, 126 x1, 8 x1 |
+| Qwen3-0.6B (HuggingFace) | 32.34 ms | 9.85 ms | 3.28x | 7.45 ms | 4.34x | 0.76 | 2080 x1, 11 x1, 6 x1 |
+
+The rows of the four models of the huggingface suite are one measurement
+each, made by another job with the same tool on the same code (the Rust of
+its build is that tree's byte for byte), on 16 cores, with the load average
+between 5 and 7 and nothing else on the GPU; the tool calls `forward_pass`,
+which for this suite is the runner's mode. For these models the graphs that
+run are those counted above (DistillGPT2 with the operations it has on a
+GPU).
 
 As a check that these rows are the runner's mode, the runner's own lines for
 the same models (`python benchmarks/dynamo/torchbench.py --performance
 --inference --bfloat16 --only MODEL` with `--vm` and with `--backend
-inductor`, `timm_models.py` for the models of timm; one run each), which
-report the speed against eager mode, next to what the tool has:
+inductor`, `timm_models.py` and `huggingface.py` for the models of those
+suites; one run each), which report the speed against eager mode, next to
+what the tool has:
 
 | model | the runner with `--vm` | the tool, `torch.vm` | the runner with `--backend inductor` | the tool, `torch.compile` |
 |---|---|---|---|---|
@@ -3178,12 +3197,12 @@ report the speed against eager mode, next to what the tool has:
 | deit_base_distilled_patch16_224 | 1.06x | 1.07x, 1.07x | 1.08x | 1.08x, 1.08x |
 
 With gradients recorded: the same calls without `torch.no_grad()` (the tool
-calls `forward_pass` directly), and the training steps. A forward that
-records gradients is another graph than one under `torch.no_grad()`: what
-stands for it also keeps what its backward needs ("Gradients"), and for deit
-and hf_DistilBert the cuDNN attention node in half precision keeps the graph
-on eager's tape altogether ("Limits"). The transformer models have been
-measured in this mode only:
+calls the `forward_pass` of the torchbench and timm suites directly, which
+does not enter it), and the training steps. A forward that records gradients
+is another graph than one under `torch.no_grad()`: what stands for it also
+keeps what its backward needs ("Gradients"), and for deit and hf_DistilBert
+the cuDNN attention node in half precision keeps the graph on eager's tape
+altogether ("Limits"):
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
 |---|---|---|---|---|---|---|---|
@@ -3191,23 +3210,17 @@ measured in this mode only:
 | mobilenetv2_100 (timm), gradients recorded | 9.66, 9.69 ms | 5.48, 5.45 ms | 1.76x, 1.78x | 3.16, 3.15 ms | 3.06x, 3.07x | 0.58, 0.58 | 152 x1 |
 | adv_inception_v3 (timm), gradients recorded | 21.21, 21.23 ms | 12.82, 12.85 ms | 1.66x, 1.65x | 8.72, 8.72 ms | 2.43x, 2.43x | 0.68, 0.68 | 314 x1 |
 | deit_base_distilled_patch16_224 (timm), gradients recorded | 6.80, 6.82 ms | 6.95, 6.84 ms | 0.98x, 1.00x | 6.21, 6.22 ms | 1.10x, 1.10x | 0.89, 0.91 | 233 x1 |
-| DistillGPT2 (HuggingFace), gradients recorded | 13.86 ms | 4.62 ms | 3.00x | 3.74 ms | 3.70x | 0.81 | 231 x1, 10 x1, 8 x1, 8 x1 |
-| MobileBertForMaskedLM (HuggingFace), gradients recorded | 30.00 ms | 14.81 ms | 2.03x | 13.32 ms | 2.25x | 0.90 | 1272 x1, 16 x1, 7 x1 |
 | hf_DistilBert (TorchBench), gradients recorded | 3.88 ms | 3.97 ms | 0.98x | 1.99 ms | 1.95x | 0.50 | 6 x1, 4 x1 |
-| whisper-tiny (HuggingFace), gradients recorded | 8.91 ms | 4.89 ms | 1.82x | 3.05 ms | 2.92x | 0.62 | 237 x1, 126 x1, 8 x1 |
-| Qwen3-0.6B (HuggingFace), gradients recorded | 32.34 ms | 9.85 ms | 3.28x | 7.45 ms | 4.34x | 0.76 | 2080 x1, 11 x1, 6 x1 |
 | resnet18 (TorchBench), a training step | 8.50, 8.35 ms | 5.48, 5.37 ms | 1.55x, 1.56x | 5.42, 5.22 ms | 1.57x, 1.60x | 0.99, 0.97 | 89 x1 |
 | resnet50 (TorchBench), a training step | 23.48, 22.99 ms | 15.74, 15.68 ms | 1.49x, 1.47x | 13.98, 13.37 ms | 1.68x, 1.72x | 0.89, 0.85 | 228 x1 |
 | DistillGPT2, a training step | 53.30 ms | 29.73 ms | 1.79x | 17.97 ms | 2.97x | 0.60 | 15 x6, 10 x1, 8 x1, 8 x1 |
 
-The rows of the five transformer models and of DistillGPT2's training step
-are one measurement each, made by another job with the same tool on the same
-code (the Rust of its build is this tree's byte for byte), on 16 cores, with
-the load average between 5 and 7 and nothing else on the GPU. For these
-models the graphs that run are those counted above (DistillGPT2 with the
-operations it has on a GPU), with one exception: of hf_DistilBert only 2
-small graphs run in this setting (6 x1, 4 x1), and its call takes what
-eager's takes.
+The rows of hf_DistilBert and of DistillGPT2's training step are one
+measurement each, made by another job with the same tool on the same code as
+the rows of this job (the Rust of its build is that tree's byte for byte),
+on 16 cores, with the load average between 5 and 6 and nothing else on the
+GPU. With gradients recorded only 2 small graphs of hf_DistilBert run (6 x1,
+4 x1), and its call takes what eager's takes.
 
 That gradients are recorded is why deit and hf_DistilBert are at eager's
 speed in their rows with gradients. Their attention is
@@ -3351,6 +3364,10 @@ What graphs do not do at this stage:
   either: a training graph still ends in front of a loss that can fail
   behind a batch norm's write to its statistics ("Writes"), and the nodes of
   the loss stand in front of `GraphBackward` on eager's tape.
+- A dict whose keys are not all texts, spread into a call (`f(**d)`), raises
+  `TypeError` as it does without the engine, but the engine has compared such
+  a key with the names of the parameters by then: an `__eq__` of the key's
+  class that is written in Python runs where the interpreter runs none.
 
 ## API Reference
 
