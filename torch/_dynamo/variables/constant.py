@@ -720,7 +720,7 @@ class FakeIdVariable(VariableTracker):
         if self.kind is FakeValueKind.HASH:
             unimplemented(
                 gb_type="Conversion of compile-time-only hash value",
-                context="FakeIdVariable",
+                context="identity-dependent hash",
                 explanation="An identity-dependent hash cannot be converted to a constant result.",
                 hints=["Compute the hash outside the compiled function."],
             )
@@ -744,7 +744,6 @@ class FakeIdVariable(VariableTracker):
         return ConstantVariable.create(repr(self.guard_as_python_constant()))
 
     def nb_bool_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
-        # As for repr, this conversion is restricted to ID values.
         # Mirrors long_bool. The fake value is only meaningful at compile time,
         # but its truthiness is, like tp_repr_impl, a plain function of it.
         return ConstantVariable.create(bool(self.guard_as_python_constant()))
@@ -856,8 +855,7 @@ class FakeIdVariable(VariableTracker):
         return self._create(self.value, kind=self.kind)
 
     def reconstruct(self, codegen: Any) -> None:
-        if self.kind is FakeValueKind.HASH:
-            self.guard_as_python_constant()
+        self.guard_as_python_constant()
         unimplemented(
             gb_type="Reconstruction of FakeIdVariable",
             context=str(self.value),

@@ -1022,7 +1022,10 @@ class DictViewIterator(IteratorVariable):
             side_effects.is_modified(container)
             or (
                 isinstance(container, DunderDictVariable)
-                and side_effects.has_pending_mutation(container.items.item)
+                and (
+                    side_effects.has_pending_mutation(container.items.item)
+                    or side_effects.has_existing_dict_mutation()
+                )
             )
             or (
                 # A dict input can alias an instance namespace or the globals on a cache hit.
@@ -1033,7 +1036,14 @@ class DictViewIterator(IteratorVariable):
                 )
             )
         ):
-            return super().reconstruct(codegen)
+            unimplemented(
+                gb_type="Iterator reconstruction before an input mutation",
+                context=str(container.source),
+                explanation="The iterator can refer to an input whose mutations are replayed after reconstruction.",
+                hints=[
+                    "Create the iterator after returning from the compiled function."
+                ],
+            )
         if len(container.items) != self._initial_size:
             return super().reconstruct(codegen)
         if self.linked_order:

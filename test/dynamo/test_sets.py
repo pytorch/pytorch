@@ -285,44 +285,25 @@ class DictSetOperandTests(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x), (x + 2, True, (int,)))
 
-    @parametrize("operation", [set, frozenset, set.update, lambda m: set().union(m)])
-    def test_ordered_dict_collision_order(self, operation):
-        def fn(x, mapping):
-            if operation is set.update:
-                result = set()
-                result.update(mapping)
-            else:
-                result = operation(mapping)
-            return x + 1, list(result)
-
-        # OrderedDict takes CPython's iterable path, not its exact-dict fast path.
-        # With colliding hashes, insertion order affects the resulting set order.
-        mapping = OrderedDict.fromkeys((0, sys.hash_info.modulus))
-        counter = CompileCounter()
-        compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        x = torch.ones(1)
-        for _ in range(2):
-            self.assertEqual(compiled(x, mapping), fn(x, mapping))
-            mapping.move_to_end(next(iter(mapping)))
-        self.assertEqual(counter.frame_count, 2)
-
     @parametrize("mapping_type", (dict, OrderedDict))
     @parametrize(
         "operation",
         ("set", "frozenset", "update", "union", "symmetric_difference", "isdisjoint"),
     )
     def test_dict_operand_keys(self, mapping_type, operation):
-        def fn(x, mapping):
+        def fn(x, mapping, observe_order=False):
             if operation == "set":
                 result = set(mapping)
             elif operation == "frozenset":
                 result = frozenset(mapping)
             else:
-                result = {"a", "z"}
+                result = set() if observe_order else {"a", "z"}
                 if operation == "update":
                     result.update(mapping)
                 else:
                     result = getattr(result, operation)(mapping)
+            if observe_order:
+                return x + 1, list(result)
             return x + 1, result
 
         counter = CompileCounter()
@@ -348,6 +329,15 @@ class DictSetOperandTests(torch._dynamo.test_case.TestCase):
             self.assertIs(type(actual[1]), type(expected[1]))
             frame_counts.append(counter.frame_count)
         self.assertEqual(frame_counts, [1, 1, 2, 3, 4, 5, 6, 6])
+
+        order_sensitive = ("set", "frozenset", "update", "union")
+        if mapping_type is OrderedDict and operation in order_sensitive:
+            # Colliding hashes make set iteration sensitive to the OrderedDict's linked order.
+            mapping = mapping_type.fromkeys((0, sys.hash_info.modulus))
+            for _ in range(2):
+                self.assertEqual(compiled(x, mapping, True), fn(x, mapping, True))
+                mapping.move_to_end(0)
+            self.assertEqual(counter.frame_count, 8)
 
     @parametrize("operation", ["isdisjoint", "intersection", "difference"])
     def test_dict_operand_order_observed_by_equality(self, operation):
