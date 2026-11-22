@@ -213,6 +213,11 @@ pub enum Op {
     /// Only on a path: an object the path has itself, a name that a call
     /// hands a value under.
     Object(PyObj),
+    /// Only on a path, as effects of it: `var.set(value)` of a
+    /// `contextvars.ContextVar`, which gives the token, and
+    /// `var.reset(token)` with the token that a `set` of the path gave.
+    ContextSet(V, V),
+    ContextReset(V, V),
     /// In front of the first operation of a graph: runs what was made of
     /// the graph in place of its instructions when it holds for the values
     /// of the call, or has the instructions that follow recorded as a path,
@@ -418,6 +423,8 @@ impl Op {
             | Op::ExcMatch(a, b)
             | Op::MatchKeys(a, b)
             | Op::WithExceptStart { exit: a, exc: b }
+            | Op::ContextSet(a, b)
+            | Op::ContextReset(a, b)
             | Op::CellSet(a, b) => {
                 f(*a);
                 f(*b)
@@ -936,6 +943,8 @@ impl Function {
             Op::Guard(g) => format!("guard {}    ; else resume generic at {}", self.guard_repr(&g.cond), g.resume),
             Op::Part(_, a) => format!("part {}", n(a)),
             Op::Object(_) => "object".to_string(),
+            Op::ContextSet(a, b) => format!("context_set {} {}", n(a), n(b)),
+            Op::ContextReset(a, b) => format!("context_reset {} {}", n(a), n(b)),
             Op::Graph(site) => format!("graph {}", site.describe()),
         }
     }
