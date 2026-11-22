@@ -401,11 +401,9 @@ def update_bn(
         element of the list or tuple corresponding to the data batch.
 
     .. note::
-        `update_bn` puts :attr:`model` in training mode for the pass over
-        :attr:`loader`, then restores the training mode of :attr:`model` and of
-        each of its submodules, calling :meth:`~torch.nn.Module.train` on every
-        module whose mode changed. The running statistics of every BatchNorm
-        layer are reset and re-estimated, including layers in eval mode.
+        `update_bn` restores the training mode of :attr:`model` and of each
+        submodule afterwards. The running statistics of every BatchNorm layer
+        are still reset and re-estimated, including layers in eval mode.
     """
     momenta = {}
     for module in model.modules():
@@ -416,8 +414,7 @@ def update_bn(
     if not momenta:
         return
 
-    # Record every module's mode, not just the root's, so submodules the caller
-    # put in eval mode (e.g. Dropout) get their mode back afterwards.
+    # Save every module's mode, not just the root's.
     was_training = {module: module.training for module in model.modules()}
     model.train()
     for module in momenta:
@@ -433,10 +430,8 @@ def update_bn(
 
     for bn_module in momenta:
         bn_module.momentum = momenta[bn_module]
-    # The pre-order walk with duplicates visits a module again under each of
-    # its parents, so its last check comes after every parent's recursive
-    # train(). Calling train() keeps any overrides' side effects. Modules
-    # created during forward() have no saved mode; their parent sets it.
+    # A shared module is visited once per parent, so its last check runs after
+    # every parent's train(). Modules created in forward() take their parent's mode.
     for module in model.modules(remove_duplicate=False):
         training = was_training.get(module)
         if training is not None and module.training != training:

@@ -162,8 +162,7 @@ class TestSWAUtilsGeneric(TestCase):
         self.assertEqual(cnn.bn.momentum, 0.3)
 
     def test_bn_update_restores_submodule_modes(self):
-        # Submodules put in eval mode inside a model in train mode must stay
-        # in eval mode after update_bn.
+        # Submodules in eval mode stay in eval mode
         x = torch.rand(20, 4)
         dl_x = torch.utils.data.DataLoader(x, batch_size=5)
         model = torch.nn.Sequential(
@@ -181,8 +180,7 @@ class TestSWAUtilsGeneric(TestCase):
         )
 
     def test_bn_update_calls_overridden_train(self):
-        # Modules that override train() must see it called when their mode is
-        # restored, so side effects of train(True) are undone.
+        # A module that overrides train() gets train(False) called on it
         class Net(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -207,8 +205,7 @@ class TestSWAUtilsGeneric(TestCase):
         self.assertTrue(model.training)
 
     def test_bn_update_restores_shared_submodule_mode(self):
-        # A module with two parents must get its own mode back even when a
-        # later parent's recursive train() changes it.
+        # A module with two parents keeps its own mode
         dl_x = torch.utils.data.DataLoader(torch.rand(20, 4), batch_size=5)
         shared = torch.nn.Dropout()
         a = torch.nn.Sequential(shared)
@@ -222,8 +219,7 @@ class TestSWAUtilsGeneric(TestCase):
         self.assertTrue(shared.training)
 
     def test_bn_update_submodule_created_in_forward(self):
-        # A submodule registered during forward() has no saved mode and takes
-        # its parent's restored mode.
+        # A module created in forward() takes its parent's mode
         class Net(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -242,8 +238,7 @@ class TestSWAUtilsGeneric(TestCase):
         self.assertFalse(model.head.training)
 
     def test_bn_update_restores_train_submodule_in_eval_model(self):
-        # Submodules in train mode inside a model in eval mode (e.g. Monte
-        # Carlo dropout) must stay in train mode after update_bn.
+        # Dropout left in train mode in an eval model (MC dropout) stays on
         dl_x = torch.utils.data.DataLoader(torch.rand(20, 4), batch_size=5)
         model = torch.nn.Sequential(torch.nn.BatchNorm1d(4), torch.nn.Dropout())
         model.eval()
