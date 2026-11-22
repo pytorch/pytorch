@@ -5675,7 +5675,7 @@ impl Compiled {
         }
         // What the instruction is to a path, or why it is no part of one.
         let made = |t: &Trace, v: V| t.mapped(v) != NONE && t.defs[t.mapped(v) as usize].made;
-        if let Some((list, item)) = self.appends(inst, regs).filter(|(list, _)| made(t, *list)) {
+        if let Some((list, item)) = self.appends(t, inst, regs).filter(|(list, _)| made(t, *list)) {
             // `list.append(item)` on a list the path made: the list gets
             // the item, and the call gives None.
             let (list, item) = (self.path_value(t, regs, list), self.path_value(t, regs, item));
@@ -6675,27 +6675,40 @@ impl Compiled {
 
     /// For `list.append(item)` on an exact list, however the code has it:
     /// the list and the item.
-    unsafe fn appends(&self, inst: &Inst, regs: &[Obj]) -> Option<(V, V)> {
-        let (list, name, item, held) = match &inst.op {
-            Op::CallMethod { recv, name, args, kwnames } if *kwnames == NONE && args.len() == 1 => {
-                (*recv, *name, args[0], reg(regs, *recv))
-            }
-            // The method was bound earlier: it has the list.
-            Op::Call { callee, args, kwnames } if *kwnames == NONE && args.len() == 1 => {
-                let bound = reg(regs, *callee);
-                let function = !bound.is_null() && !capi::is_unboxed(bound) && ffi::PyCFunction_Check(bound) != 0;
-                match self.analysis.def_op(&self.func, *callee) {
-                    Some(Op::LoadAttr(recv, name)) if function => {
-                        (*recv, *name, args[0], ffi::PyCFunction_GetSelf(bound))
-                    }
-                    _ => return None,
-                }
-            }
-            _ => return None,
-        };
+    unsafe fn appends(&self, t: &Trace, inst: &Inst, regs: &[Obj]) -> Option<(V, V)> {
+        let (list, name, args, held) = self.method_of(t, inst, regs)?;
         let named = pyffi::str_to_string(self.func.consts[name as usize].as_ptr()) == "append";
         let exact = !held.is_null() && !capi::is_unboxed(held) && ffi::PyList_CheckExact(held) != 0;
-        (named && exact && inst.dst != NONE).then_some((list, item))
+        (named && exact && args.len() == 1 && inst.dst != NONE).then(|| (list, args[0]))
+    }
+
+    /// A call of a method without names, as the two ways a function has
+    /// of writing it: the register the method is called on, its name,
+    /// what it is handed, and the value it is called on. `a.append(item)`
+    /// is one instruction; `add = a.append` and `add(item)` later are a
+    /// read of the method and a call of what was read. For the second
+    /// the method is one written in C that has exactly the value it was
+    /// read off, which the path has taken down (the register may be
+    /// empty by now): a method that an object merely holds,
+    /// `o.append = other.append`, is a method of the other value, and no
+    /// method of the object.
+    unsafe fn method_of<'a>(&self, t: &Trace, inst: &'a Inst, regs: &[Obj]) -> Option<(V, u32, &'a [V], Obj)> {
+        match &inst.op {
+            Op::CallMethod { recv, name, args, kwnames: NONE } => Some((*recv, *name, args.as_slice(), reg(regs, *recv))),
+            Op::Call { callee, args, kwnames: NONE } => {
+                let bound = reg(regs, *callee);
+                if bound.is_null() || capi::is_unboxed(bound) || ffi::PyCFunction_Check(bound) == 0 {
+                    return None;
+                }
+                let Some(Op::LoadAttr(recv, name)) = self.analysis.def_op(&self.func, *callee) else {
+                    return None;
+                };
+                let (held, read_off) = (ffi::PyCFunction_GetSelf(bound), t.mapped(*recv));
+                let same = read_off != NONE && !held.is_null() && t.rec.values[read_off as usize] == held;
+                same.then(|| (*recv, *name, args.as_slice(), held))
+            }
+            _ => None,
+        }
     }
 
     /// For a tuple or a list that a path built: the values it holds where
@@ -6786,12 +6799,19 @@ impl Compiled {
         }
         for key in keys {
             let (of, held) = (t.defs[key as usize], t.rec.values[key as usize]);
-            // A constant of the function, or pinned by a check already.
+            // A constant of its function is one wherever the path took
+            // it from (a path that starts behind it has it as an input).
+            let (owner, v) = t.source[key as usize];
+            let constant = v != NONE && v != UNDEF && {
+                let function = &*t.owners[owner as usize];
+                matches!(function.analysis.def_op(&function.func, v), Some(Op::Const(_)))
+            };
+            // A constant that the path loads, or pinned by a check already.
             let known = |inst: &graph::PathInst| match &inst.assert {
                 Some(Assert::Equals(v, _)) => *v == key,
                 _ => inst.dst == key && matches!(inst.op, Op::Const(_)),
             };
-            if t.body.iter().any(known) {
+            if constant || t.body.iter().any(known) {
                 continue;
             }
             if of.late || held.is_null() || !graph::checkable(held) {
