@@ -10001,6 +10001,574 @@ def graph_gives_loudly():
         yield step
 
 
+# How long one case of `GRAPH_CYCLES` may take before it counts as one that
+# does not come back.
+GRAPH_CYCLE_SECONDS = 300
+GRAPH_CYCLES = '''"""Things that hold themselves, on a path and handed to one: the cases
+of a group (`made`, `outside`, `printed`), each with `Graphs()` alone, with
+a pass that returns the graph and with an input that requires a gradient,
+twelve calls against eager from the same state. What is compared is the
+result or what is raised, and what was given back and left outside, as
+shapes that say which object is which. One line `start NAME` before a case
+and one `done NAME {...}` behind it: a case that does not come back is the
+one started last."""
+import gc
+import json
+import sys
+import types
+
+import torch
+import torch.vm
+
+P, DEFAULT = torch.vm.passes, torch.vm.DEFAULT_PASSES
+DEVICE, WANTED = sys.argv[1], sys.argv[2:]
+
+
+class Box:
+    pass
+
+
+class Thing:
+    def method(self):
+        return 1
+
+
+class Ends:
+    def __del__(self):
+        LOG.append("ended")
+        STATE[0] += 1.0
+
+
+BOX = Box()
+LOG = []
+STATE = [0.5]
+HELD = []
+
+
+def keep(gm, input_types):
+    return gm
+
+
+def tail(h):
+    return (torch.tanh(h * 2) * 2 - 1).sum()
+
+
+def two_lists_given_back(x, given):
+    h = torch.relu(x) + 1
+    a = []
+    b = [a]
+    a.append(b)
+    return tail(h), a
+
+
+def two_lists_stored(x, given):
+    h = torch.relu(x) + 1
+    a = []
+    b = [a]
+    a.append(b)
+    BOX.items = a
+    b.append(given)
+    a.append(given + 1)
+    return tail(h)
+
+
+def two_lists_dropped(x, given):
+    h = torch.relu(x) + 1
+    a = []
+    b = [a]
+    a.append(b)
+    b.append(given)
+    return tail(h)
+
+
+def a_list_in_itself(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    a.append(a)
+    BOX.items = a
+    return tail(h)
+
+
+def a_list_in_itself_given_back(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    a.append(a)
+    return tail(h), a
+
+
+def a_list_in_itself_dropped(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    a.append(a)
+    return tail(h)
+
+
+def a_list_in_itself_many_times(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    for _ in range(40):
+        a.append(a)
+    BOX.items = len(a)
+    return tail(h), a
+
+
+def a_list_and_a_dict(x, given):
+    h = torch.relu(x) + 1
+    a = []
+    d = {"a": a}
+    a.append(d)
+    BOX.items = d
+    return tail(h)
+
+
+def a_list_and_a_dict_given_back(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    d = {"a": a, "n": given}
+    a.append(d)
+    return tail(h), a
+
+
+def a_tuple_through_a_list(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    t = (a, given)
+    a.append(t)
+    BOX.items = t
+    return tail(h), a
+
+
+def a_dict_in_itself(x, given):
+    h = torch.relu(x) + 1
+    d = {"k": given}
+    d["self"] = d
+    BOX.items = d
+    return tail(h)
+
+
+def a_set_through_an_object(x, given):
+    h = torch.relu(x) + 1
+    thing = Thing()
+    members = {thing}
+    thing.members = members
+    thing.value = given
+    BOX.items = thing
+    return tail(h)
+
+
+def an_object_in_itself(x, given):
+    h = torch.relu(x) + 1
+    thing = Thing()
+    thing.me = thing
+    thing.value = given
+    BOX.items = thing
+    return tail(h)
+
+
+def two_objects(x, given):
+    h = torch.relu(x) + 1
+    a = Thing()
+    b = Thing()
+    a.other = b
+    b.other = a
+    b.value = given
+    return tail(h), a
+
+
+def an_object_and_a_list(x, given):
+    h = torch.relu(x) + 1
+    thing = Thing()
+    items = [thing, given]
+    thing.items = items
+    items.append(h.shape[0])
+    BOX.items = items
+    return tail(h)
+
+
+def an_object_read_through_itself(x, given):
+    h = torch.relu(x) + 1
+    thing = Thing()
+    thing.me = thing
+    thing.value = given
+    return tail(h) * thing.me.me.me.value, thing
+
+
+def a_cell_through_a_function(x, given):
+    h = torch.relu(x) + 1
+
+    def inner(n):
+        return inner if n else given
+
+    BOX.items = inner
+    return tail(h)
+
+
+def a_cell_through_a_list(x, given):
+    h = torch.relu(x) + 1
+    items = [given]
+
+    def get():
+        return items
+
+    items.append(get)
+    BOX.items = items
+    return tail(h)
+
+
+def a_bound_method_in_its_list(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    a.append(a.append)
+    BOX.items = a
+    return tail(h)
+
+
+def a_bound_method_in_its_object(x, given):
+    h = torch.relu(x) + 1
+    thing = Thing()
+    thing.call = thing.method
+    thing.value = given
+    BOX.items = thing
+    return tail(h)
+
+
+def a_generator_that_holds_its_list(x, given):
+    h = torch.relu(x) + 1
+    out = [given]
+    gen = (len(out) + v for v in (1, 2))
+    out.append(gen)
+    BOX.items = out
+    return tail(h)
+
+
+def a_generator_drained_into_its_list(x, given):
+    h = torch.relu(x) + 1
+    out = [given]
+    out.append(tuple(v + 1 for v in (1, 2)))
+    out.append(out)
+    BOX.items = out
+    return tail(h)
+
+
+def a_cycle_read_through(x, given):
+    h = torch.relu(x) + 1
+    a = []
+    b = [a]
+    a.append(b)
+    c = a[0][0][0]
+    c.append(given)
+    return tail(h), a
+
+
+def a_cycle_with_a_size(x, given):
+    h = torch.relu(x) + 1
+    a = [h.shape[0] + given]
+    a.append(a)
+    return tail(h), a
+
+
+def a_cycle_with_a_result(x, given):
+    h = torch.relu(x) + 1
+    a = [h]
+    a.append(a)
+    BOX.items = a
+    return tail(h)
+
+
+def a_cycle_spread(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    b = [*a, a]
+    a.append(b)
+    return tail(h), b
+
+
+def a_cycle_spread_into_a_tuple(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    b = (*a, a)
+    a.append(b)
+    a.append(given + 1)
+    return tail(h), b
+
+
+def a_cycle_sliced_into_an_operation(x, given):
+    h = torch.relu(x) + 1
+    parts = [h, h * 2]
+    parts.append(parts)
+    return tail(torch.cat(parts[:2])), parts
+
+
+def a_cycle_handed_to_an_operation(x, given):
+    h = torch.relu(x) + 1
+    parts = [h, h * 2]
+    parts.append(parts)
+    return tail(torch.cat(parts))
+
+
+def a_cycle_as_the_sizes_of_an_operation(x, given):
+    h = torch.relu(x) + 1
+    sizes = [2, 6]
+    sizes.append(sizes)
+    return tail(h.reshape(sizes[0], sizes[1])), sizes
+
+
+def a_cycle_gone_over(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    a.append(a)
+    total = 0
+    for item in a:
+        if isinstance(item, list):
+            total = total + len(item)
+        else:
+            total = total + item
+    return tail(h) * total
+
+
+def a_cycle_asked_which_it_is(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    a.append(a)
+    same = a[1] is a
+    return tail(h) + (1 if same else 0), a
+
+
+def a_cycle_formatted(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    a.append(a)
+    BOX.items = f"{a}"
+    return tail(h)
+
+
+def a_cycle_extended_outside(x, given):
+    h = torch.relu(x) + 1
+    a = [given]
+    a.append(a)
+    HELD.extend(a)
+    a.append(given + 1)
+    return tail(h)
+
+
+def ones():
+    return torch.ones(3, 4, device=DEVICE)
+
+
+def loop_of(*items):
+    made = list(items)
+    made.append(made)
+    return made
+
+
+def outside_read(x, given):
+    h = torch.relu(x) + 1
+    return tail(h * given[0]), given[-1] is given
+
+
+def outside_counted(x, given):
+    h = torch.relu(x) + 1
+    return tail(h) * len(given)
+
+
+def outside_stored(x, given):
+    h = torch.relu(x) + 1
+    BOX.items = given
+    return tail(h)
+
+
+def outside_formatted(x, given):
+    h = torch.relu(x) + 1
+    BOX.items = f"{given}"
+    return tail(h)
+
+
+def outside_handed_to_an_operation(x, given):
+    h = torch.relu(x) + 1
+    return tail(torch.cat([h, *given]))
+
+
+def outside_as_the_sizes_of_an_operation(x, given):
+    h = torch.relu(x) + 1
+    return tail(h.reshape(given))
+
+
+def outside_as_a_rate(x, given):
+    h = torch.relu(x) + 1
+    return tail(torch.nn.functional.dropout(h, given, False))
+
+
+def outside_as_an_index(x, given):
+    h = torch.relu(x) + 1
+    return tail(h[given])
+
+
+def outside_let_go_of(x, given):
+    held = HELD.pop()
+    h = (torch.relu(x) + 1) * STATE[0]
+    held = None
+    return tail(h + STATE[0]) + STATE[0], held
+
+
+def shape(value, seen=None):
+    """What a value is made of, with each object that is met a second time
+    named by when it was met first."""
+    seen = {} if seen is None else seen
+    if isinstance(value, torch.Tensor):
+        return ("tensor", tuple(value.shape), round(float(value.detach().sum()), 4))
+    if isinstance(value, (int, float, str, bool, type(None))):
+        return value
+    if id(value) in seen:
+        return ("met", seen[id(value)])
+    seen[id(value)] = len(seen)
+    if isinstance(value, (list, tuple)):
+        return (type(value).__name__, *[shape(item, seen) for item in value])
+    if isinstance(value, dict):
+        return ("dict", *[(key, shape(item, seen)) for key, item in value.items()])
+    if isinstance(value, (set, frozenset)):
+        return ("set", *sorted(repr(shape(item, seen)) for item in value))
+    if isinstance(value, Thing):
+        return ("Thing", shape(vars(value), seen))
+    if isinstance(value, types.CellType):
+        return ("cell", shape(value.cell_contents, seen))
+    if isinstance(value, types.FunctionType):
+        return ("function", value.__name__, shape(value.__closure__, seen))
+    if isinstance(value, (types.BuiltinMethodType, types.MethodType)):
+        return ("method", value.__name__, shape(value.__self__, seen))
+    if isinstance(value, types.GeneratorType):
+        return ("generator", shape(tuple(value), seen))
+    return type(value).__name__
+
+
+def reset():
+    BOX.items = None
+    del LOG[:]
+    del HELD[:]
+    STATE[0] = 0.5
+
+
+def calls(run, quiet, loud, graded, plant):
+    reset()
+    gc.collect()
+    torch.manual_seed(1234)
+    found = []
+    for at in range(12):
+        given = loud() if at in (7, 10) else quiet()
+        if plant is not None:
+            plant(at)
+        x = torch.full((3, 4), 0.25 * (at + 1), device=DEVICE, requires_grad=graded)
+        try:
+            out = run(x, given)
+            rest = out[1:] if isinstance(out, tuple) else ()
+            out = out[0] if isinstance(out, tuple) else out
+            if graded:
+                out.backward()
+            grad = None if x.grad is None else round(float(x.grad.sum()), 4)
+            said = (round(out.item(), 4), shape(rest), grad)
+        except Exception as error:
+            said = f"{type(error).__name__}: {str(error)[:60]}"
+        del given
+        log = list(LOG)
+        gc.collect()
+        left = shape([BOX.items, list(HELD)])
+        found.append(repr((said, left, log, list(LOG), STATE[0])))
+        BOX.items = None
+    return found
+
+
+def plant_cycle(at):
+    # At calls 7 and 10 what the function lets go of is a list that holds
+    # itself and an object whose end is heard; at the others a list of
+    # numbers.
+    held = [1.0]
+    if at in (7, 10):
+        held.append(held)
+        held.append(Ends())
+    HELD.append(held)
+
+
+def one():
+    return 1
+
+
+def two():
+    return 2
+
+
+MADE = [
+    two_lists_given_back, two_lists_stored, two_lists_dropped, a_list_in_itself,
+    a_list_in_itself_given_back, a_list_in_itself_dropped, a_list_in_itself_many_times,
+    a_list_and_a_dict, a_list_and_a_dict_given_back, a_tuple_through_a_list,
+    a_dict_in_itself, a_set_through_an_object, an_object_in_itself, two_objects,
+    an_object_and_a_list, an_object_read_through_itself, a_cell_through_a_function,
+    a_cell_through_a_list, a_bound_method_in_its_list, a_bound_method_in_its_object,
+    a_generator_that_holds_its_list, a_generator_drained_into_its_list,
+    a_cycle_read_through, a_cycle_with_a_size, a_cycle_with_a_result, a_cycle_spread,
+    a_cycle_spread_into_a_tuple, a_cycle_sliced_into_an_operation,
+    a_cycle_handed_to_an_operation, a_cycle_as_the_sizes_of_an_operation,
+    a_cycle_gone_over, a_cycle_asked_which_it_is, a_cycle_formatted,
+    a_cycle_extended_outside,
+]
+# What it is called, with the name of the function: the function, what it is
+# given at most calls, what at calls 7 and 10.
+OUTSIDE = [
+    ("", outside_read, lambda: loop_of(2.0), lambda: loop_of(3.0)),
+    ("_at_times", outside_read, lambda: [2.0, 1.0], lambda: loop_of(2.0)),
+    ("", outside_counted, lambda: [1.0, 2.0], lambda: loop_of(1.0)),
+    ("", outside_stored, lambda: loop_of(1.0), lambda: loop_of(2.0)),
+    ("", outside_formatted, lambda: [1.0], lambda: loop_of(1.0)),
+    ("_always", outside_formatted, lambda: loop_of(1.0), lambda: loop_of(1.0)),
+    ("", outside_handed_to_an_operation, lambda: [ones()], lambda: loop_of(ones())),
+    ("", outside_as_the_sizes_of_an_operation, lambda: [2, 6], lambda: loop_of(2, 6)),
+    ("", outside_as_a_rate, lambda: 0.5, lambda: loop_of(0.5)),
+    ("", outside_as_an_index, lambda: [0, 1], lambda: loop_of(0, 1)),
+    ("", outside_let_go_of, one, two),
+]
+
+
+WAYS = (("graphs", (), False), ("pass", (keep,), False), ("gradient", (), True))
+
+
+def try_it(name, fn, quiet, loud, plant):
+    print(f"start {name}", flush=True)
+    said = {}
+    for label, behind, graded in WAYS:
+        passes = (*DEFAULT, P.Graphs(), *behind)
+        compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+        got = calls(compiled, quiet, loud, graded, plant)
+        expected = calls(fn, quiet, loud, graded, plant)
+        differ = [(at, a, b) for at, (a, b) in enumerate(zip(got, expected)) if a != b]
+        found = torch.vm.regions(compiled)
+        str(found)
+        graphs = [(g["ops"], g.get("hits")) for g in found if "ops" in g]
+        first = [str(part)[:300] for part in differ[:1]]
+        said[label] = {"differ": len(differ), "first": first, "graphs": graphs}
+    print(f"done {name} " + json.dumps(said), flush=True)
+
+
+PRINTED = (
+    "two_lists_given_back",
+    "two_lists_stored",
+    "a_list_in_itself",
+    "a_list_and_a_dict",
+    "an_object_in_itself",
+)
+
+if __name__ == "__main__":
+    gc.disable()
+    cases = [(fn.__name__, fn, one, two) for fn in MADE]
+    for more, fn, quiet, loud in OUTSIDE:
+        cases.append((fn.__name__ + more, fn, quiet, loud))
+    for name, fn, quiet, loud in cases:
+        group = "outside" if name.startswith("outside_") else "made"
+        wanted = not WANTED or name in WANTED or group in WANTED
+        if wanted or ("printed" in WANTED and name in PRINTED):
+            plant = plant_cycle if fn is outside_let_go_of else None
+            try_it(name, fn, quiet, loud, plant)
+    print("all done", flush=True)
+'''
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -11423,6 +11991,113 @@ class TestVmGraphResults(TestCase):
         fns = [graph_goes_over, graph_goes_over_two, graph_goes_over_under_tuple]
         for other in (three, two, zipped, generated):
             self.graph_change_as_eager(fns, device, makes=(row, other))
+
+    def graph_cycle_cases(self, device, group, debug=False):
+        # The cases of a group of `GRAPH_CYCLES` in a process of their own:
+        # one that does not come back within the time limit, or that ends
+        # the process, is a failure and not a suite that stands still.
+        import json
+        import queue
+
+        env = dict(os.environ, TORCH_VM_GRAPH_DEBUG="2") if debug else None
+        command = [sys.executable, "-c", GRAPH_CYCLES, device, group]
+        pipes = {"stdout": subprocess.PIPE, "stderr": subprocess.DEVNULL, "text": True}
+        ran = subprocess.Popen(command, env=env, **pipes)
+        lines = queue.Queue()
+
+        def read():
+            for line in ran.stdout:
+                lines.put(line)
+            lines.put(None)
+
+        threading.Thread(target=read, daemon=True).start()
+        started, found = None, {}
+        while True:
+            try:
+                line = lines.get(timeout=GRAPH_CYCLE_SECONDS)
+            except queue.Empty:
+                ran.kill()
+                ran.wait()
+                limit = GRAPH_CYCLE_SECONDS
+                self.fail(f"{started} did not come back within {limit} seconds")
+            if line is None:
+                break
+            if line.startswith("start "):
+                started = line.split()[1]
+            elif line.startswith("done "):
+                name, said = line[5:].split(" ", 1)
+                found[name] = json.loads(said)
+        self.assertEqual(ran.wait(), 0, msg=f"the process ended in {started}")
+        self.assertIn(started, found, msg=f"{started} did not finish")
+        for name, ways in found.items():
+            for way, said in ways.items():
+                msg = f"{name}, {way}: {said['first']}"
+                self.assertEqual(said["differ"], 0, msg=msg)
+        return found
+
+    def test_things_a_path_made_that_hold_each_other(self, device):
+        # Lists that hold each other, a list in itself, a list and a
+        # dict, a tuple closed through a list, objects of a class the
+        # function calls, a set through an object, cells, a bound method
+        # stored in what it is bound to, a generator that holds the list
+        # it fills: made between the operations of a function, given
+        # back, stored outside, dropped, read through, gone over,
+        # spread, handed to an operation. A path makes them by the
+        # instructions of the function in their order, and nothing that
+        # looks into what a list or a tuple holds goes round one that
+        # holds itself: every call is eager's, with `Graphs()` alone,
+        # with a pass and with a gradient, and the graph around such a
+        # thing runs.
+        found = self.graph_cycle_cases(device, "made")
+        self.assertEqual(len(found), 34)
+        runs = (
+            "two_lists_given_back",
+            "two_lists_stored",
+            "two_lists_dropped",
+            "a_list_in_itself",
+            "a_list_in_itself_given_back",
+            "a_list_in_itself_many_times",
+            "a_list_and_a_dict",
+            "a_tuple_through_a_list",
+            "an_object_in_itself",
+            "two_objects",
+            "an_object_and_a_list",
+            "a_bound_method_in_its_list",
+            "a_cycle_read_through",
+            "a_cycle_with_a_result",
+            "a_cycle_spread",
+            "a_cycle_spread_into_a_tuple",
+            "a_cycle_asked_which_it_is",
+            "a_cycle_extended_outside",
+        )
+        for name in runs:
+            for way in ("pass",):
+                graphs = found[name][way]["graphs"]
+                ran = sum(hits for _, hits in graphs)
+                self.assertGreaterEqual(ran, 6, msg=f"{name}, {way}: {graphs}")
+        # What is printed of such things ends as well.
+        printed = self.graph_cycle_cases(device, "printed", debug=True)
+        self.assertEqual(len(printed), 5)
+
+    def test_a_list_from_outside_that_holds_itself_ends_every_walk(self, device):
+        # A list that holds itself, handed to a function: read, counted,
+        # stored, turned into text, handed to an operation (which raises
+        # what eager raises), let go of. Such a list is no value a form
+        # is checked against or has as a constant, is not handed to an
+        # operation of a graph and is not turned into text on a path.
+        found = self.graph_cycle_cases(device, "outside")
+        self.assertEqual(len(found), 11)
+        runs = (
+            "outside_read",
+            "outside_read_at_times",
+            "outside_counted",
+            "outside_stored",
+        )
+        for name in runs:
+            for way in ("pass",):
+                graphs = found[name][way]["graphs"]
+                ran = sum(hits for _, hits in graphs)
+                self.assertGreaterEqual(ran, 6, msg=f"{name}, {way}: {graphs}")
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
