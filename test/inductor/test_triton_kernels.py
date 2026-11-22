@@ -6061,9 +6061,8 @@ def forward(self, arg0_1, arg1_1):
             self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
-    @skipIfXpu(
-        msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs, "
-        "https://github.com/pytorch/pytorch/pull/167786"
+    @skipIfXpu(  # issues/6050
+        msg="https://github.com/intel/torch-xpu-ops/issues/6050"
     )
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
