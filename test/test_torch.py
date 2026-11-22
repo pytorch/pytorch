@@ -59,7 +59,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyCPU,
     preserves_device_selection,
-    dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
+    dtypes, dtypesIfCUDA, dtypesIfCPU, dtypesIfXPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
     get_all_device_types, skipXLA, onlyAccelerator, skipCUDAIf)
 import torch.backends.quantized
@@ -4077,6 +4077,11 @@ class TestTorchDeviceType(TestCase):
     @dtypes(*floating_and_complex_types())
     @dtypesIfCPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfXPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    # https://github.com/intel/torch-xpu-ops/issues/5376
+    @decorateIf(unittest.expectedFailure,
+                lambda params: torch.device(params["device"]).type == "xpu"  # issues/5376
+                and params["dtype"] == torch.bool)  # issues/5376
     def test_scatter_reduce_operations_to_large_input(self, device, dtype):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
@@ -4107,6 +4112,11 @@ class TestTorchDeviceType(TestCase):
     @dtypes(*floating_and_complex_types())
     @dtypesIfCPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfXPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    # https://github.com/intel/torch-xpu-ops/issues/5376
+    @decorateIf(unittest.expectedFailure,
+                lambda params: torch.device(params["device"]).type == "xpu"  # issues/5376
+                and params["dtype"] == torch.bool)  # issues/5376
     def test_scatter_reduce_scalar(self, device, dtype):
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
@@ -4149,6 +4159,11 @@ class TestTorchDeviceType(TestCase):
     @dtypes(*floating_and_complex_types())
     @dtypesIfCPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfXPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    # https://github.com/intel/torch-xpu-ops/issues/5376
+    @decorateIf(unittest.expectedFailure,
+                lambda params: torch.device(params["device"]).type == "xpu"  # issues/5376
+                and params["dtype"] == torch.bool)  # issues/5376
     def test_scatter_reduce_non_unique_index(self, device, dtype):
         height = 2
         width = 2
