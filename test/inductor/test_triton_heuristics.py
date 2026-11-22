@@ -3087,7 +3087,7 @@ with patch.object(TestCase, "setUpClass", classmethod(lambda cls: None)):
     instantiate_device_type_tests(
         TestTritonHeuristicsBackendConfig,
         globals(),
-        only_for=(GPU_TYPE,),
+        only_for=("cuda", "xpu"),
         allow_xpu=True,
     )
     instantiate_device_type_tests(
