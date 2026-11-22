@@ -101,7 +101,7 @@ if BACKEND in ("gloo", "nccl", "xccl"):
         timeout = dist.distributed_c10d._get_default_timeout(BACKEND)
 
         @classmethod
-        def backend_str(cls):
+        def backend_str(cls, device):
             return BACKEND
 
         @property
