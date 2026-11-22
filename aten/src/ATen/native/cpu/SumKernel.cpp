@@ -746,27 +746,42 @@ void nansum_kernel_impl(TensorIterator &iter) {
 
 inline namespace CPU_CAPABILITY {
 
+template <typename scalar_t>
+static void cascade_powsum(TensorIterator &iter, double p, bool is_norm) {
+  using out_t = std::conditional_t<is_reduced_floating_point_v<scalar_t>, float, scalar_t>;
+  if (p == 0) {
+    TORCH_INTERNAL_ASSERT(is_norm, "cascade_powsum: _powsum with p == 0 counts zeros too");
+    cascade_sum<NonZeroMap, scalar_t, out_t>(iter);
+  } else if (p == 1) {
+    cascade_sum<AbsMap, scalar_t, out_t>(iter);
+  } else {
+    cascade_sum<SquareMap, scalar_t, out_t>(iter, /*sqrt_result=*/is_norm);
+  }
+}
+
 bool cascade_powsum_kernel(TensorIterator &iter, double p, bool is_norm) {
   const auto in = iter.input_dtype();
   const auto out = iter.dtype(0);
   const bool supported_dtypes = isReducedFloatingType(in)
       ? out == kFloat || (out == in && iter.output_base(0).numel() == 1)
       : (in == kFloat || in == kDouble) && out == in;
-  if (!cascade_powsum_supports(p, is_norm) || !supported_dtypes) {
+  // Dispatch under the tags of the kernels this replaces, so that selective
+  // (mobile) builds traced before it existed keep working. A dtype the build
+  // did not select for that tag falls back to the old kernel instead of throwing.
+  const char* tag = is_norm ? "norm_cpu" : "powsum_cpu";
+  if (!cascade_powsum_supports(p, is_norm) || !supported_dtypes ||
+      !at::should_include_kernel_dtype(tag, in)) {
     return false;
   }
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::BFloat16, ScalarType::Half, in, "cascade_powsum_cpu", [&] {
-    using out_t = std::conditional_t<is_reduced_floating_point_v<scalar_t>, float, scalar_t>;
-    if (p == 0) {
-      TORCH_INTERNAL_ASSERT(is_norm, "cascade_powsum: _powsum with p == 0 counts zeros too");
-      cascade_sum<NonZeroMap, scalar_t, out_t>(iter);
-    } else if (p == 1) {
-      cascade_sum<AbsMap, scalar_t, out_t>(iter);
-    } else {
-      cascade_sum<SquareMap, scalar_t, out_t>(iter, /*sqrt_result=*/is_norm);
-    }
-  });
+  if (is_norm) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, in, "norm_cpu", [&] {
+      cascade_powsum<scalar_t>(iter, p, is_norm);
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, in, "powsum_cpu", [&] {
+      cascade_powsum<scalar_t>(iter, p, is_norm);
+    });
+  }
   return true;
 }
 
