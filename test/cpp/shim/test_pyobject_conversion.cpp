@@ -112,3 +112,87 @@ TEST(TorchPyObjectConversion, DeviceValuesValidatedBeforeNarrowing) {
           "device index 256 is out of range"),
       nullptr);
 }
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
+TEST(TorchPyObjectConversion, LayoutNoopErrorsWithoutLibtorchPython) {
+  int dummy = 0;
+  int32_t layout_out = -1;
+  EXPECT_EQ(
+      torch_layout_from_pyobject(&dummy, &layout_out), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(layout_out, -1);
+
+  void* py_out = nullptr;
+  EXPECT_EQ(
+      torch_layout_to_pyobject(aoti_torch_layout_sparse_csr(), &py_out),
+      AOTI_TORCH_FAILURE);
+  EXPECT_EQ(py_out, nullptr);
+}
+
+TEST(TorchPyObjectConversion, LayoutCodeValidatedBeforeNarrowing) {
+  void* py_out = nullptr;
+  EXPECT_EQ(torch_layout_to_pyobject(256, &py_out), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(py_out, nullptr);
+  EXPECT_NE(
+      std::strstr(
+          torch_exception_get_what_without_backtrace(),
+          "invalid layout code 256"),
+      nullptr);
+}
+
+namespace {
+
+void expect_noop_error(AOTITorchError status) {
+  EXPECT_EQ(status, AOTI_TORCH_FAILURE);
+  const char* message = torch_exception_get_what_without_backtrace();
+  ASSERT_NE(message, nullptr);
+  EXPECT_NE(
+      std::strstr(message, "requires libtorch_python to be loaded"), nullptr);
+}
+
+} // namespace
+
+TEST(TorchPyObjectConversion, MemoryFormatNoopErrorsWithoutLibtorchPython) {
+  int dummy = 0;
+  int32_t memory_format_out = -1;
+  expect_noop_error(
+      torch_memory_format_from_pyobject(&dummy, &memory_format_out));
+  EXPECT_EQ(memory_format_out, -1);
+
+  void* py_out = nullptr;
+  expect_noop_error(torch_memory_format_to_pyobject(
+      aoti_torch_memory_format_channels_last(), &py_out));
+  EXPECT_EQ(py_out, nullptr);
+}
+
+TEST(TorchPyObjectConversion, MemoryFormatCodeValidatedBeforeNarrowing) {
+  void* py_out = nullptr;
+  EXPECT_EQ(torch_memory_format_to_pyobject(256, &py_out), AOTI_TORCH_FAILURE);
+  EXPECT_EQ(py_out, nullptr);
+  const char* message = torch_exception_get_what_without_backtrace();
+  ASSERT_NE(message, nullptr);
+  EXPECT_NE(std::strstr(message, "invalid memory format code 256"), nullptr);
+}
+
+TEST(TorchPyObjectConversion, ScalarNoopErrorsWithoutLibtorchPython) {
+  int dummy = 0;
+  bool bool_out = true;
+  expect_noop_error(torch_bool_from_pyobject(&dummy, &bool_out));
+  EXPECT_TRUE(bool_out);
+  int64_t int64_out = -1;
+  expect_noop_error(torch_int64_from_pyobject(&dummy, &int64_out));
+  EXPECT_EQ(int64_out, -1);
+  double double_out = 1.25;
+  expect_noop_error(torch_double_from_pyobject(&dummy, &double_out));
+  EXPECT_EQ(double_out, 1.25);
+
+  void* py_out = nullptr;
+  expect_noop_error(torch_bool_to_pyobject(true, &py_out));
+  EXPECT_EQ(py_out, nullptr);
+  expect_noop_error(torch_int64_to_pyobject(17, &py_out));
+  EXPECT_EQ(py_out, nullptr);
+  expect_noop_error(torch_double_to_pyobject(1.5, &py_out));
+  EXPECT_EQ(py_out, nullptr);
+}
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
