@@ -337,9 +337,7 @@ class FloorDiv(sympy.Function):
             if equal_valued(gcd, 1) and isinstance(divisor, sympy.Add):
                 gcd = safe_gcd(base, divisor)
             if not equal_valued(gcd, 1):
-                return FloorDiv(
-                    sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
-                )
+                return FloorDiv(sympy.cancel(base / gcd), sympy.cancel(divisor / gcd))
         except sympy.PolynomialError:
             pass  # https://github.com/pytorch/pytorch/issues/108276
 
@@ -379,9 +377,7 @@ class ModularIndexing(sympy.Function):
                 gcd = safe_gcd(base, divisor)
                 if gcd != 1:
                     return ModularIndexing(
-                        sympy.simplify(base / gcd),
-                        sympy.simplify(divisor / gcd),
-                        modulus,
+                        sympy.cancel(base / gcd), sympy.cancel(divisor / gcd), modulus
                     )
         except sympy.PolynomialError:
             pass  # https://github.com/pytorch/pytorch/issues/108276
