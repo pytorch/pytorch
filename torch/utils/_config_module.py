@@ -561,7 +561,9 @@ class ConfigModule(ModuleType):
             else:
                 if name == "_custom_ops_profile":
                     self._enable_cpp_fake_custom_op_profiles(value)
-                self._set_user_override(name, config, value)
+                config.user_override.set(value)
+                self._hash_dirty_var.set(True)
+                self._mark_get_dict_dirty(name)
                 # Avoid a redundant instance-__dict__ write: hide defaults to False on
                 # the class and is only ever set True by __delattr__ (the mock.patch
                 # workaround), so only clear it when it is actually set.
@@ -1180,11 +1182,6 @@ class ConfigModule(ModuleType):
     def get_config_copy(self) -> dict[str, Any]:
         return self._get_dict()
 
-    def _set_user_override(self, name: str, entry: _ConfigEntry, value: Any) -> None:
-        entry.user_override.set(value)
-        self._hash_dirty_var.set(True)
-        self._mark_get_dict_dirty(name)
-
     def _save_user_overrides(self) -> dict[str, Any]:
         saved = {}
         for k, e in self._config.items():
@@ -1364,11 +1361,15 @@ class ConfigModule(ModuleType):
             for k, v in changes.items():
                 if k == "_custom_ops_profile":
                     self._enable_cpp_fake_custom_op_profiles(v)
-                self._set_user_override(k, config[k], v)
+                config[k].user_override.set(v)
+                self._hash_dirty_var.set(True)
+                self._mark_get_dict_dirty(k)
 
             def revert() -> None:
                 for k, v in prior.items():
-                    self._set_user_override(k, config[k], v)
+                    config[k].user_override.set(v)
+                    self._hash_dirty_var.set(True)
+                    self._mark_get_dict_dirty(k)
 
             return revert
 
