@@ -38,6 +38,7 @@ from .base import (
     getset_load_or_build,
     getset_read,
     getset_set,
+    load_pending_mutation,
     Member,
     NO_SUCH_SUBOBJ,
     readonly_setter,
@@ -49,7 +50,11 @@ from .base import (
 from .constant import ConstantVariable
 from .functions import BaseUserFunctionVariable, UserMethodVariable
 from .object_protocol import mro_lookup, python_constant_repr_impl
-from .user_defined import setattr_hackcheck, UserDefinedObjectVariable
+from .user_defined import (
+    setattr_hackcheck,
+    UserDefinedClassVariable,
+    UserDefinedObjectVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -1376,6 +1381,36 @@ class GetSetDescriptorVariable(DescriptorVariable):
         return VariableTracker.build(tx, resolved, result_source)
 
 
+def _unwrap_property_arg(arg: VariableTracker) -> Any:
+    if isinstance(arg, UserMethodVariable):
+        # UserMethodVariable wraps a bound method.  Materialising via
+        # im_func.get_function() snapshots NestedUserFunctionVariable closure
+        # cells, so nonlocal rebinds are silently lost and p.fget is not the
+        # same object f later.  Raise so callers emit a clean graph break
+        # instead of silently using the wrong callable.
+        raise NotImplementedError(
+            "UserMethodVariable cannot be safely unwrapped for property argument"
+        )
+    if isinstance(arg, BaseUserFunctionVariable):
+        return arg.get_function()
+    if isinstance(arg, variables.BuiltinVariable):
+        return arg.fn
+    if isinstance(arg, UserDefinedClassVariable):
+        return arg.value
+    if isinstance(arg, UserDefinedObjectVariable):
+        return arg.value
+    if isinstance(arg, PropertyVariable):
+        return arg.descriptor
+    if arg.is_python_constant():
+        return arg.as_python_constant()
+    try:
+        return arg.as_python_constant()
+    except Exception:
+        raise NotImplementedError(
+            f"Unable to extract Python object for property argument: {arg}"
+        )
+
+
 class PropertyVariable(VariableTracker):
     """Python property descriptor.
 
@@ -1415,15 +1450,43 @@ class PropertyVariable(VariableTracker):
             ),
             readonly_setter,
         ),
-        "__doc__": Member(
-            getset_load_or_build(
-                lambda s: s.descriptor.__doc__,
-                "__doc__",
-                lambda s: s.source and AttrSource(s.source, "__doc__"),
-            ),
-            getset_set("__doc__"),
-        ),
     }
+
+    def _doc_getter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        pending = load_pending_mutation(tx, self, "__doc__")
+        if pending is not None:
+            if isinstance(pending, variables.DeletedVariable):
+                return ConstantVariable.create(None)
+            return pending
+        try:
+            doc = self.descriptor.__doc__
+        except AttributeError as exc:
+            raise_attribute_error(
+                tx,
+                str(exc) or f"'{self.python_type_name()}' object has no attribute '__doc__'",
+            )
+        source = self.source and AttrSource(self.source, "__doc__")
+        return VariableTracker.build(tx, doc, source)
+
+    def _doc_setter(
+        self,
+        tx: "InstructionTranslatorBase",
+        value: VariableTracker | None,
+    ) -> None:
+        cls = self.python_type()
+        if cls is not property:
+            has_dict = hasattr(self.descriptor, "__dict__")
+            has_doc_slot = hasattr(cls, "__doc__") and isinstance(
+                getattr(cls, "__doc__"), types.MemberDescriptorType
+            )
+            if not has_dict and not has_doc_slot:
+                raise_attribute_error(
+                    tx,
+                    f"'{self.python_type_name()}' object attribute '__doc__' is read-only",
+                )
+        if value is None:
+            value = ConstantVariable.create(None)
+        store_attr_mutation(tx, self, "__doc__", value)
 
     def _name_getter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # property.__name__ only exists from 3.13
@@ -1448,6 +1511,7 @@ class PropertyVariable(VariableTracker):
         return fn.call_function(tx, [self], {})
 
     tp_getset = {
+        "__doc__": GetSet(_doc_getter, _doc_setter),
         "__name__": GetSet(_name_getter, getset_set("__name__")),
         "__isabstractmethod__": GetSet(
             _isabstractmethod_getter,
@@ -1474,10 +1538,258 @@ class PropertyVariable(VariableTracker):
         return f"PropertyVariable({fget_name})"
 
     def python_type(self) -> type:
-        return property
+        return type(self.descriptor)
 
     def as_python_constant(self) -> property:
         return self.descriptor
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        pending = load_pending_mutation(tx, self, name)
+        if pending is not None:
+            if isinstance(pending, variables.DeletedVariable):
+                return None
+            return pending
+        if hasattr(self.descriptor, "__dict__") and name in self.descriptor.__dict__:
+            source = self.source and AttrSource(self.source, name)
+            return VariableTracker.build(tx, self.descriptor.__dict__[name], source)
+        return None
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name in ("getter", "setter", "deleter") and len(args) == 1 and not kwargs:
+            try:
+                fn = _unwrap_property_arg(args[0])
+            except NotImplementedError:
+                unimplemented(
+                    gb_type="property.getter/setter/deleter with unsupported argument",
+                    context=f"property.{name}({args[0]})",
+                    explanation=(
+                        f"property.{name} received an argument that cannot be "
+                        "unwrapped to a Python callable"
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            method = getattr(self.descriptor, name)
+            try:
+                new_descriptor = method(fn)
+            except Exception as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+            if id(new_descriptor) in tx.output.side_effects.id_to_variable:
+                return tx.output.side_effects.id_to_variable[id(new_descriptor)]
+            result = PropertyVariable(new_descriptor)
+            # Newly produced descriptor -- register as AttributeMutationNew so
+            # it can be reconstructed from scratch without a source.
+            tx.output.side_effects.track_attribute_mutation_new(result)
+            tx.output.side_effects.id_to_variable[id(new_descriptor)] = result
+            tx.output.side_effects.keepalive.append(new_descriptor)
+            return result
+
+        if name == "__set_name__":
+            try:
+                py_args = [_unwrap_property_arg(a) for a in args]
+                py_kwargs = {k: _unwrap_property_arg(v) for k, v in kwargs.items()}
+            except NotImplementedError:
+                unimplemented(
+                    gb_type="property.__set_name__ with unsupported arguments",
+                    context="property.__set_name__",
+                    explanation=(
+                        "property.__set_name__ received arguments that cannot be "
+                        "unwrapped to Python objects"
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            try:
+                res = self.descriptor.__set_name__(*py_args, **py_kwargs)
+            except Exception as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+            return ConstantVariable.create(res)
+
+        if name == "__get__":
+            if (len(args) in (1, 2)) and not kwargs:
+                obj = (
+                    None
+                    if args[0].is_python_constant() and args[0].as_python_constant() is None
+                    else args[0]
+                )
+                owner = args[1] if len(args) == 2 else VariableTracker.build(tx, type(obj))
+                return self.tp_descr_get_impl(tx, obj, owner)
+
+        if name == "__set__":
+            if len(args) == 2 and not kwargs:
+                return self.tp_descr_set_impl(tx, args[0], args[1])
+
+        if name == "__delete__":
+            if len(args) == 1 and not kwargs:
+                return self.tp_descr_set_impl(tx, args[0], None)
+
+        if name == "__setattr__":
+            if len(args) != 2:
+                raise AssertionError(f"__setattr__ expects 2 args, got {len(args)}")
+            name_var, val = args
+            if not name_var.is_python_constant():
+                unimplemented(
+                    gb_type="setattr on property with non-constant attribute name",
+                    context="property.__setattr__",
+                    explanation=(
+                        "Dynamo cannot trace setattr on a property descriptor "
+                        "with a dynamic attribute name"
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            attr_name = name_var.as_python_constant()
+            getset = self.lookup_tp_getset_member(attr_name)
+            if getset is not None and getset.setter is not None:
+                getset.setter(self, tx, val)
+                return val
+            cls = self.python_type()
+            if cls is not property:
+                if hasattr(self.descriptor, "__dict__"):
+                    store_attr_mutation(tx, self, attr_name, val)
+                    return val
+                elif hasattr(cls, attr_name):
+                    slot = getattr(cls, attr_name)
+                    if isinstance(slot, types.MemberDescriptorType):
+                        store_attr_mutation(tx, self, attr_name, val)
+                        return val
+            raise_attribute_error(
+                tx,
+                f"'{self.python_type_name()}' object has no attribute '{attr_name}'"
+                if cls is property
+                else f"'{self.python_type_name()}' object attribute '{attr_name}' is read-only",
+            )
+
+        if name == "__delattr__":
+            if len(args) != 1:
+                raise AssertionError(f"__delattr__ expects 1 arg, got {len(args)}")
+            name_var = args[0]
+            if not name_var.is_python_constant():
+                unimplemented(
+                    gb_type="delattr on property with non-constant attribute name",
+                    context="property.__delattr__",
+                    explanation=(
+                        "Dynamo cannot trace delattr on a property descriptor "
+                        "with a dynamic attribute name"
+                    ),
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            attr_name = name_var.as_python_constant()
+            if attr_name == "__doc__":
+                self._doc_setter(tx, None)
+                return ConstantVariable.create(None)
+            cls = self.python_type()
+            if cls is not property and hasattr(self.descriptor, "__dict__"):
+                pending = load_pending_mutation(tx, self, attr_name)
+                if pending is not None:
+                    if isinstance(pending, variables.DeletedVariable):
+                        raise_attribute_error(
+                            tx,
+                            f"'{self.python_type_name()}' object has no attribute '{attr_name}'",
+                        )
+                elif attr_name not in self.descriptor.__dict__:
+                    raise_attribute_error(
+                        tx,
+                        f"'{self.python_type_name()}' object has no attribute '{attr_name}'",
+                    )
+                store_attr_mutation(tx, self, attr_name, variables.DeletedVariable())
+                return ConstantVariable.create(None)
+            raise_attribute_error(
+                tx,
+                f"'{self.python_type_name()}' object has no attribute '{attr_name}'",
+            )
+
+        return super().call_method(tx, name, args, kwargs)
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.append_output(codegen.create_load_const_unchecked(self.descriptor))
+
+    @classmethod
+    def create_from_call(
+        cls,
+        target_cls: type,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        try:
+            py_args = [_unwrap_property_arg(arg) for arg in args]
+            py_kwargs = {k: _unwrap_property_arg(v) for k, v in kwargs.items()}
+        except NotImplementedError:
+            unimplemented(
+                gb_type="property subclass construction with unsupported arguments",
+                context=f"Constructing {target_cls}",
+                explanation=(
+                    f"Constructing a property subclass {target_cls} with "
+                    "arguments that cannot be unwrapped to Python objects"
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        try:
+            prop = target_cls(*py_args, **py_kwargs)
+        except Exception as exc:
+            raise_observed_exception(type(exc), tx, args=list(exc.args))
+
+        if isinstance(prop, property):
+            if id(prop) in tx.output.side_effects.id_to_variable:
+                return tx.output.side_effects.id_to_variable[id(prop)]
+            result = cls(prop)
+            # Property is newly constructed inside the compiled region -- no
+            # outer-scope source.  Register as AttributeMutationNew so that
+            # codegen_save_tempvars can reconstruct it via reconstruct().
+            tx.output.side_effects.track_attribute_mutation_new(result)
+            tx.output.side_effects.id_to_variable[id(prop)] = result
+            tx.output.side_effects.keepalive.append(prop)
+            return result
+        return VariableTracker.build(tx, prop)
+
+    @classmethod
+    def tp_new_impl(
+        cls,
+        self_vt: VariableTracker,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        """Handle property.__new__(target_cls, fget=None, ...).
+
+        property.__new__ is PyType_GenericNew in CPython -- it only allocates;
+        __init__ fills in fget/fset/fdel/doc.  Calling T(*a) for real would
+        run __init__ twice and skip CPython's subtype guard (raises TypeError
+        for non-property subtypes).  Instead we:
+          1. Validate target_cls is a property subclass.
+          2. Delegate to create_from_call which calls target_cls(fget,...).
+        """
+        from .builtin import BuiltinVariable
+
+        if not args:            raise_type_error(tx, "property.__new__(): not enough arguments")
+        cls_arg = args[0]
+        try:
+            target_cls = cls_arg.as_python_constant()
+        except Exception:
+            unimplemented(
+                gb_type="property.__new__ with non-constant class argument",
+                context=f"property.__new__({cls_arg})",
+                explanation=(
+                    "property.__new__ requires a constant class argument "
+                    "to determine the property subclass to construct"
+                ),
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        # CPython checks: type must be a subtype of property.
+        if not (isinstance(target_cls, type) and issubclass(target_cls, property)):
+            raise_type_error(
+                tx,
+                f"property.__new__({target_cls!r}): "
+                f"{target_cls!r} is not a subtype of property",
+            )
+        return cls.create_from_call(target_cls, tx, list(args[1:]), kwargs)
 
     def tp_descr_set_impl(
         self,

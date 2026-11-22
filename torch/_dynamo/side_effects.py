@@ -213,6 +213,7 @@ _MUTABLE_GETATTRIBUTES: tuple[Any, ...] = (
     collections.defaultdict.__getattribute__,
     collections.deque.__getattribute__,
     BaseException.__getattribute__,
+    property.__getattribute__,
 )
 if sys.version_info < (3, 13):
     # SimpleNamespace names tp_getattro in its static struct before 3.13, so

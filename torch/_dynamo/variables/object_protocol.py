@@ -2417,7 +2417,7 @@ def _is_skipped_constant_property(
     ):
         return False
     type_attr = mro_lookup(obj.python_type(), name)
-    if type(type_attr) is not property:
+    if not isinstance(type_attr, property):
         return False
     # Python getters can have specialized SkipFunctionVariable handlers.
     if isinstance(type_attr.fget, types.FunctionType):

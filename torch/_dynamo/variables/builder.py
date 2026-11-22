@@ -2389,10 +2389,24 @@ class VariableBuilder:
             return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MemberDescriptorType):
             return MemberDescriptorVariable(value)
-        elif type(value) is property:
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = PropertyVariable(value, source=self.source)
-            return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, property):
+            cls = type(value)
+            # Only route to PropertyVariable when the type has no custom
+            # descriptor-protocol overrides.  Subclasses that redefine
+            # __get__, __set__, or __delete__ must stay on the
+            # UserDefinedObjectVariable path so those overrides are traced.
+            # e.g. torch/distributions/utils.py _lazy_property_and_property
+            if cls is not property and (
+                cls.__get__ is not property.__get__
+                or cls.__set__ is not property.__set__
+                or cls.__delete__ is not property.__delete__
+            ):
+                # Fall through -- will be picked up as UserDefinedObjectVariable
+                pass
+            else:
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                result = PropertyVariable(value, source=self.source)
+                return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, types.MethodWrapperType):
             # Attribute lookup can create a fresh method-wrapper. For descriptor
             # receivers, guard the receiver and operation instead of wrapper identity.
@@ -6029,6 +6043,8 @@ class SourcelessBuilder:
             # source-backed reconstruction; model them as ordinary user objects so
             # raw __dict__ descriptor reads can follow their Python attributes.
             return UserDefinedObjectVariable(value)
+        elif isinstance(value, property):
+            return PropertyVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
             try:
                 return ConstantVariable.create(str(value))

@@ -2146,6 +2146,15 @@ class BuiltinVariable(TypeVariable):
         if target is not None:
             # pyrefly: ignore[bad-argument-type]
             return target.tp_new_impl(self, tx, args, kwargs)
+        if self.fn is property:
+            # property.__new__(cls, fget=None, fset=None, fdel=None, doc=None)
+            # CPython's property.__new__ is PyType_GenericNew -- it only
+            # allocates; __init__ fills in fget/fset/fdel/doc.  Calling
+            # T(*a) for real would run __init__ twice and skip the subtype
+            # check that CPython enforces (raises TypeError for non-subtype).
+            # Delegate to PropertyVariable.tp_new_impl which mirrors the
+            # CPython logic without eager execution.
+            return variables.PropertyVariable.tp_new_impl(self, tx, args, kwargs)
         # T.__new__(T, ...) == T(...) holds for the immutable types with their
         # own TypeVariable subclass, not for the callables still wrapped here.
         return VariableTracker.tp_new_impl(self, tx, args, kwargs)
@@ -3222,6 +3231,16 @@ class BuiltinVariable(TypeVariable):
     ) -> VariableTracker:
         return variables.StaticMethodVariable.create(func)
 
+    def call_property(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        return variables.PropertyVariable.create_from_call(
+            property, tx, list(args), kwargs
+        )
+
     def call_next(
         self,
         tx: "InstructionTranslatorBase",
@@ -4016,6 +4035,7 @@ class SetAttrBuiltinVariable(BuiltinVariable):
         check_positional(tx, "setattr", len(args), 3, 3)
         obj, name_var, val = args
         return generic_setattr(tx, obj, name_var, val)
+
 
 
 class ListBuiltinVariable(TypeVariable):

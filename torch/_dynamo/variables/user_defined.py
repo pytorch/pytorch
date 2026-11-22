@@ -1697,6 +1697,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
             result.call_method(tx, "__init__", list(args), kwargs)
             return result
+        elif isinstance(self.value, type) and issubclass(self.value, property):
+            return variables.PropertyVariable.create_from_call(
+                self.value, tx, args, kwargs
+            )
         elif is_typeddict(self.value):
             if self.value.__optional_keys__:  # type: ignore[attr-defined]
                 unimplemented(

@@ -7432,5 +7432,65 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB7101": [
+    {
+      "Gb_type": "property.getter/setter/deleter with unsupported argument",
+      "Context": "property.{name}({arg})",
+      "Explanation": "property.{name} received an argument that cannot be unwrapped to a Python callable",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7102": [
+    {
+      "Gb_type": "property.__set_name__ with unsupported arguments",
+      "Context": "property.__set_name__",
+      "Explanation": "property.__set_name__ received arguments that cannot be unwrapped to Python objects",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7103": [
+    {
+      "Gb_type": "setattr on property with non-constant attribute name",
+      "Context": "property.__setattr__",
+      "Explanation": "Dynamo cannot trace setattr on a property descriptor with a dynamic attribute name",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7104": [
+    {
+      "Gb_type": "delattr on property with non-constant attribute name",
+      "Context": "property.__delattr__",
+      "Explanation": "Dynamo cannot trace delattr on a property descriptor with a dynamic attribute name",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7105": [
+    {
+      "Gb_type": "property subclass construction with unsupported arguments",
+      "Context": "Constructing {target_cls}",
+      "Explanation": "Constructing a property subclass with arguments that cannot be unwrapped to Python objects",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7106": [
+    {
+      "Gb_type": "property.__new__ with non-constant class argument",
+      "Context": "property.__new__({cls_arg})",
+      "Explanation": "property.__new__ requires a constant class argument to determine the property subclass to construct",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }
