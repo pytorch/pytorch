@@ -2247,14 +2247,17 @@ of this series, which is above this one and has what the commits between add
 (the graphs the tables name are that tree's), on one H100 and eight cores,
 one process at a time under the lock that every job on the machine takes for
 a timed run. In front of every row the load average of the last minute was
-under 10 (between 1.3 and 9.8) and no process was on the GPU. Every row was
-measured twice, and most of the rows whose eager figure was more than 3
-percent apart between the two processes a third time (eager's own figure
-moves by up to 9 percent from one process to the next); all the figures are
-given, and the rows whose eager figure moved are listed with the figures of
-each process behind the tables. Eager mode and what is compared with it take
+under 10 (between 1.2 and 9.8) and no process was on the GPU. Every row was
+measured twice, and every row whose eager figure was more than 3 percent
+apart between the two processes a third time (eager's own figure moves by up
+to 11 percent from one process to the next); all the figures are given, and
+the rows whose eager figure moved are listed with the figures of each
+process behind the tables. Eager mode and what is compared with it take
 turns in one process, so that both have the same machine: a ratio is of the
-turns inside one process, never of figures from two.
+turns inside one process, never of figures from two. The row of yolov3 is of
+the tree of commit `5c0ad0cf96d7`, on which its forward is one graph: on the
+other tree a store that a detection layer makes into itself ended the path,
+and the model was two graphs.
 
 With the default settings and `Graphs()` and `Inductor()` in the list, the
 forward of a resnet is one graph, and so is that of yolov3. In images per
@@ -2263,7 +2266,7 @@ the best of three rounds of 60 batches for each side):
 
 | model | the graphs that run | `Graphs()` | `Graphs(), Inductor()` |
 |---|---|---|---|
-| yolov3 (TorchBench), bfloat16, batch 8 of 3x384x512 | one graph | to be measured | to be measured |
+| yolov3 (TorchBench), bfloat16, batch 8 of 3x384x512 | 328 operations | 1.05x, 0.97x, 1.02x | 2.38x, 2.24x, 2.19x |
 | resnet18 (torchvision), float32, batch 16 of 3x224x224 | 69 operations | 1.01x, 0.97x | 1.89x, 1.93x |
 | resnet18, bfloat16 | 69 operations | 1.03x, 1.00x | 2.17x, 2.26x |
 | resnet50, float32 | 175 operations | 1.00x, 1.04x, 1.03x | 1.70x, 1.72x |
@@ -2273,16 +2276,15 @@ With `Graphs()` alone the outputs are those of eager mode bit for bit, the
 operations in place included. With `Inductor()` they differ by its
 arithmetic: by 2.4e-4 of the largest value in float32, and by up to 1.4e-2
 in bfloat16. With `Inductor()` a few small functions on the way were left to
-the interpreter by measurement (`ContextProp.__get__`,
-`Sequential.__iter__`, `interpolate`), and the graphs go through them. The
-graph of a resnet is its whole forward, the pool, the flatten and the linear
-layer at the end included. On the tree these times are of, yolov3 was two
-graphs: a store that a detection layer makes into itself ended the path of
-the model's forward. On this tree such a store is an effect of the path,
-since what an iterator over the model's layers gives is an object from
-outside ("What a function makes"), and the forward is one graph again, with
-328 of the about 347 operations of a call on the CPU (float32, a batch of
-2). Its row is to be measured on this tree.
+the interpreter by measurement (`ContextProp.__get__`, `Module.__setattr__`,
+`_BufferMeta.__instancecheck__`, `_ParameterMeta.__instancecheck__`), and
+the graphs go through them. The graph of a resnet is its whole forward, the
+pool, the flatten and the linear layer at the end included. The graph of
+yolov3 is the model with its three detection layers and the stores they make
+into themselves, 328 operations: what an iterator over the model's layers
+gives is a layer, an object from outside, and a store into it is an effect
+of the path ("Stores into objects", "What a function makes"). It ends at a
+call that runs no kernel, and the one operation behind that runs by itself.
 
 The forward of a training step is one graph as well: 89 operations for
 resnet18 and 228 for resnet50, the batch norms writing their statistics and
@@ -2308,14 +2310,15 @@ within 1e-4 of eager's at each of 30 steps with `AOTAutograd()` and with
 `Inductor()`, which is what the tests hold.
 
 
-Eager's own figure was more than 3 percent apart between the processes of 3
-rows of the two tables above (yolov3's rows are not among them: they are to
-be measured). For these, every figure of every process, in the order the
-processes ran: eager's, the other side's, and the ratio, which is of the
-turns inside that one process.
+Eager's own figure was more than 3 percent apart between the processes of 5
+rows of the two tables above. For these, every figure of every process, in
+the order the processes ran: eager's, the other side's, and the ratio, which
+is of the turns inside that one process.
 
 | row | eager | the other side | ratio |
 |---|---|---|---|
+| yolov3, `Graphs()`, images a second | 786, 833, 816 | 825, 809, 835 | 1.05x, 0.97x, 1.02x |
+| yolov3, `Graphs(), Inductor()`, images a second | 807, 835, 830 | 1922, 1869, 1820 | 2.38x, 2.24x, 2.19x |
 | resnet50, float32, `Graphs()`, images a second | 3152, 2999, 3034 | 3157, 3121, 3131 | 1.00x, 1.04x, 1.03x |
 | resnet50, bfloat16, `Graphs()`, images a second | 2874, 2754, 2799 | 2887, 2779, 2819 | 1.00x, 1.01x, 1.01x |
 | resnet18, `Graphs()`, steps a second | 136.2, 142.1, 142.3 | 141.1, 143.0, 143.0 | 1.04x, 1.01x, 1.01x |
