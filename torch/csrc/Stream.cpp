@@ -146,13 +146,16 @@ static PyObject* THPStream_get_native_handle(THPStream* self, void* unused) {
 static PyObject* THPStream_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPStream*>(_self);
-
-  return PyBool_FromLong(c10::Stream::unpack3(
-                             self->stream_id,
-                             static_cast<c10::DeviceIndex>(self->device_index),
-                             static_cast<c10::DeviceType>(self->device_type))
-                             .query());
-
+  bool res = false;
+  {
+    pybind11::gil_scoped_release no_gil;
+    res = c10::Stream::unpack3(
+              self->stream_id,
+              static_cast<c10::DeviceIndex>(self->device_index),
+              static_cast<c10::DeviceType>(self->device_type))
+              .query();
+  }
+  return PyBool_FromLong(res);
   END_HANDLE_TH_ERRORS
 }
 

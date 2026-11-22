@@ -65,10 +65,6 @@ class _ZesDeviceInfo:
 
 
 _cached_zes_device_infos: list[_ZesDeviceInfo] = []
-# Guards _cached_zes_device_infos, which is rebuilt in place on every
-# enumeration. device_count() reaches here from arbitrary threads before XPU
-# is initialized, so concurrent rebuilds must not interleave.
-_zes_device_infos_lock = threading.Lock()
 # Interval between two HW counter reads; must be >=100ms for fresh data.
 _zes_sample_interval_ms = 100
 
@@ -145,8 +141,8 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     Enumerates devices from all Level Zero Sysman drivers and counts those
     whose logical index appears in *visible_mask*.  Only devices listed in
     the visible mask participate in counting.
-    The populated ``_cached_zes_device_infos`` list is indexed by PyTorch
-    device ordinal.
+    The populated ``_cached_zes_device_infos`` list is indexed by Level Zero
+    Sysman logical index (dGPU first); callers should match entries by UUID.
 
     Discrete GPUs (dGPUs) take priority: if any visible dGPU is found, only
     dGPUs are counted; integrated GPUs (iGPUs) are counted only when no
@@ -166,8 +162,6 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
         import pyzes  # type: ignore[import]
     except Exception:
         return -1
-
-    global _cached_zes_device_infos
 
     def _zes_check_warn(rc: int, msg: str) -> bool:
         """Return True if the call failed (rc != ZE_RESULT_SUCCESS) after issuing a warning."""
@@ -216,77 +210,75 @@ def _enum_zes_device_infos(visible_mask: list[int]) -> int:
     # --- Count visible dGPUs and iGPUs ---
     ZES_DEVICE_PROPERTY_FLAG_INTEGRATED = 1 << 0
     expose_subdevices = os.getenv("ZE_FLAT_DEVICE_HIERARCHY") != "COMPOSITE"
+    infos: list[_ZesDeviceInfo] = []
 
-    with _zes_device_infos_lock:
-        _cached_zes_device_infos.clear()
+    for device in devices:
+        props = pyzes.zes_device_properties_t()
+        props.stype = pyzes.ZES_STRUCTURE_TYPE_DEVICE_PROPERTIES
+        ext_props = pyzes.zes_device_ext_properties_t()
+        ext_props.stype = pyzes.ZES_STRUCTURE_TYPE_DEVICE_EXT_PROPERTIES
+        props.pNext = cast(pointer(ext_props), c_void_p)
+        if _zes_check_warn(
+            pyzes.zesDeviceGetProperties(device, byref(props)),
+            "Can't get Level Zero Sysman device properties",
+        ):
+            return -1
 
-        for device in devices:
-            props = pyzes.zes_device_properties_t()
-            props.stype = pyzes.ZES_STRUCTURE_TYPE_DEVICE_PROPERTIES
-            ext_props = pyzes.zes_device_ext_properties_t()
-            ext_props.stype = pyzes.ZES_STRUCTURE_TYPE_DEVICE_EXT_PROPERTIES
-            props.pNext = cast(pointer(ext_props), c_void_p)
+        is_integrated = bool(ext_props.flags & ZES_DEVICE_PROPERTY_FLAG_INTEGRATED)
+
+        # Tiled dGPUs in FLAT/COMBINED mode expose each sub-device as a
+        # separate logical device; everything else counts as one slot.
+        tiled = not is_integrated and props.numSubdevices > 0 and expose_subdevices
+
+        if not tiled:
+            infos.append(
+                _ZesDeviceInfo(
+                    device_handle=device,
+                    subdevice_id=None,
+                    is_integrated=is_integrated,
+                    uuid=bytes(ext_props.uuid.id),
+                )
+            )
+        else:
+            sub_ext_props = (
+                pyzes.zes_subdevice_exp_properties_t * props.numSubdevices
+            )()
+            for sub_ext_prop in sub_ext_props:
+                sub_ext_prop.stype = pyzes.ZES_STRUCTURE_TYPE_SUBDEVICE_EXP_PROPERTIES
             if _zes_check_warn(
-                pyzes.zesDeviceGetProperties(device, byref(props)),
-                "Can't get Level Zero Sysman device properties",
+                pyzes.zesDeviceGetSubDevicePropertiesExp(
+                    device, byref(c_uint32(props.numSubdevices)), sub_ext_props
+                ),
+                "Can't get Level Zero Sysman subdevice properties",
             ):
                 return -1
 
-            is_integrated = bool(ext_props.flags & ZES_DEVICE_PROPERTY_FLAG_INTEGRATED)
-
-            # Tiled dGPUs in FLAT/COMBINED mode expose each sub-device as a
-            # separate logical device; everything else counts as one slot.
-            tiled = not is_integrated and props.numSubdevices > 0 and expose_subdevices
-
-            if not tiled:
-                _cached_zes_device_infos.append(
+            for sub_ext_prop in sub_ext_props:
+                infos.append(
                     _ZesDeviceInfo(
                         device_handle=device,
-                        subdevice_id=None,
+                        subdevice_id=sub_ext_prop.subdeviceId,
                         is_integrated=is_integrated,
-                        uuid=bytes(ext_props.uuid.id),
+                        uuid=bytes(sub_ext_prop.uuid.id),
                     )
                 )
-            else:
-                sub_ext_props = (
-                    pyzes.zes_subdevice_exp_properties_t * props.numSubdevices
-                )()
-                for sub_ext_prop in sub_ext_props:
-                    sub_ext_prop.stype = (
-                        pyzes.ZES_STRUCTURE_TYPE_SUBDEVICE_EXP_PROPERTIES
-                    )
-                if _zes_check_warn(
-                    pyzes.zesDeviceGetSubDevicePropertiesExp(
-                        device, byref(c_uint32(props.numSubdevices)), sub_ext_props
-                    ),
-                    "Can't get Level Zero Sysman subdevice properties",
-                ):
-                    return -1
 
-                for sub_ext_prop in sub_ext_props:
-                    _cached_zes_device_infos.append(
-                        _ZesDeviceInfo(
-                            device_handle=device,
-                            subdevice_id=sub_ext_prop.subdeviceId,
-                            is_integrated=is_integrated,
-                            uuid=bytes(sub_ext_prop.uuid.id),
-                        )
-                    )
+    # Sort iGPUs to the end, then count only the visible ordinals.
+    infos.sort(key=lambda info: info.is_integrated)
+    # Atomic in-place update; readers never see a partially built list.
+    _cached_zes_device_infos[:] = infos
+    visible = set(visible_mask)
+    num_igpu = 0
+    num_dgpu = 0
 
-        # Sort iGPUs to the end, then count only the visible ordinals.
-        _cached_zes_device_infos.sort(key=lambda info: info.is_integrated)
-        visible = set(visible_mask)
-        num_igpu = 0
-        num_dgpu = 0
-
-        for logical_index, info in enumerate(_cached_zes_device_infos):
-            if logical_index not in visible:
-                continue
-            if info.is_integrated:
-                num_igpu += 1
-            else:
-                num_dgpu += 1
-        return num_dgpu or num_igpu
+    for logical_index, info in enumerate(infos):
+        if logical_index not in visible:
+            continue
+        if info.is_integrated:
+            num_igpu += 1
+        else:
+            num_dgpu += 1
+    return num_dgpu or num_igpu
 
 
 def _raw_device_count_zes(visible_mask: list[int]) -> int:
@@ -878,18 +870,11 @@ def _get_zes_device_info(device: Device = None) -> _ZesDeviceInfo:
 
     device = _get_device_index(device, optional=True)
     uuid = bytes(torch.xpu.get_device_properties(device).uuid.bytes)
-    # Fast path: the device already occupies its ordinal slot.
-    target = _cached_zes_device_infos[device]
-    if target.uuid == uuid:
-        return target
-
-    # Slow path: search for the device by UUID and swap it into the correct slot.
-    for index, info in enumerate(_cached_zes_device_infos):
+    # Match by UUID since Level Zero Sysman and SYCL may enumerate devices in
+    # different orders. Concurrent re-enumeration only replaces entries with
+    # equivalent ones (same UUIDs, same order), so lock-free iteration is safe.
+    for info in _cached_zes_device_infos:
         if info.uuid == uuid:
-            _cached_zes_device_infos[device], _cached_zes_device_infos[index] = (
-                info,
-                target,
-            )
             return info
     raise RuntimeError(
         f"No Level Zero Sysman device matches XPU device {device} (UUID {uuid.hex()})."

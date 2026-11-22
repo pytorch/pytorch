@@ -58,6 +58,7 @@ from tools.stats.import_test_stats import (
 )
 from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.testing.discover_tests import (
+    COMPILER_TEST_PREFIXES,
     CPP_TEST_PATH,
     CPP_TEST_PREFIX,
     CPP_TESTS_DIR,
@@ -130,10 +131,12 @@ NUM_PYTEST_RERUNS = int(os.getenv("PYTORCH_NUM_PYTEST_RERUNS", "2"))
 NUM_PROCESS_RETRIES = int(os.getenv("PYTORCH_NUM_PROCESS_RETRIES", "2"))
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
-# The periodic config hosts slow-gated tests (test.sh sets
-# PYTORCH_TEST_WITH_SLOW for it), so it gets slow's per-file timeout budget.
+# The periodic configs host slow-gated tests (test.sh sets
+# PYTORCH_TEST_WITH_SLOW for them), so they get slow's per-file timeout budget.
 IS_SLOW = (
-    "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT or TEST_CONFIG == "periodic"
+    "slow" in TEST_CONFIG
+    or "slow" in BUILD_ENVIRONMENT
+    or TEST_CONFIG in ("periodic", "periodic_daily")
 )
 IS_S390X = platform.machine() == "s390x"
 
@@ -352,7 +355,6 @@ XPU_BLOCKLIST = [
     "test_cuda_sanitizer",
     "test_functionalization_of_rng_ops",
     "test_jiterator",
-    "test_matmul_cuda",
     "test_sparse_semi_structured",
     "test_stateless_rng",
 ]
@@ -503,6 +505,7 @@ AOT_DISPATCH_TESTS = [
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 DYNAMO_CORE_TESTS = [test for test in TESTS if test.startswith("dynamo")]
+COMPILER_TESTS = [test for test in TESTS if test.startswith(COMPILER_TEST_PREFIXES)]
 CPYTHON_TESTS = [test for test in TESTS if "cpython" in test]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
@@ -1790,6 +1793,11 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--compiler-tests",
+        action="store_true",
+        help="Run compiler, export, higher-order operator, and tracing test suites.",
+    )
+    parser.add_argument(
         "--functorch",
         "--functorch",
         action="store_true",
@@ -2101,7 +2109,7 @@ def can_run_in_pytest(test):
 
 
 def get_selected_tests(options) -> list[str]:
-    selected_tests = options.include
+    selected_tests = options.include[:]
 
     # filter if there's JIT only and distributed only test options
     if options.jit:
@@ -2170,6 +2178,7 @@ def get_selected_tests(options) -> list[str]:
             "test_linalg",
             "test_scaled_matmul_cuda",
             "test_stream",
+            "quantization/core/experimental/test_floatx",
             "nn/test_convolution",
             "nn/test_dropout",
             "nn/test_pooling",
@@ -2337,6 +2346,8 @@ def get_selected_tests(options) -> list[str]:
         ]
 
     selected_tests = [parse_test_module(x) for x in selected_tests]
+    if options.compiler_tests:
+        selected_tests = [test for test in selected_tests if test in COMPILER_TESTS]
     return selected_tests
 
 
@@ -2502,7 +2513,10 @@ def run_tests(
         "multigpu": "multigpu",
         "not-multigpu": "not multigpu",
     }.get(getattr(options, "multigpu_filter", None))
-    periodic_marker = "periodic" if TEST_CONFIG == "periodic" else None
+    periodic_marker = {
+        "periodic": "periodic and not periodic_daily",
+        "periodic_daily": "periodic_daily",
+    }.get(TEST_CONFIG)
 
     # Orthogonal min-GPU threshold on the `multigpu` tests, applied by a pytest
     # plugin (see test/conftest.py). 0 disables it, so it is a no-op unless a
@@ -2707,7 +2721,6 @@ def main():
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
-
     test_prioritizations = import_results()
     if len(test_prioritizations.get_all_tests()) == 0:
         options.enable_td = False

@@ -78,7 +78,11 @@ from .sets import DictKeySetVariable, FrozensetVariable, OrderedSetVariable, Set
 if TYPE_CHECKING:
     from torch._dynamo.output_graph import SubgraphTracer
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+    from torch._subclasses.fake_tensor import (
+        CppFakeTensorMode,
+        FakeTensor,
+        FakeTensorMode,
+    )
     from . import AutogradFunctionContextVariable
 
 from collections.abc import Generator, Iterable
@@ -1030,7 +1034,10 @@ def _call_while_loop(
 
 
 def are_same_graph_modules(
-    fn_name: str, a_mod: GraphModule, b_mod: GraphModule, fake_mode: "FakeTensorMode"
+    fn_name: str,
+    a_mod: GraphModule,
+    b_mod: GraphModule,
+    fake_mode: "FakeTensorMode | CppFakeTensorMode",
 ) -> bool:
     from torch._subclasses._fake_tensor_utils import _CacheKeyState
     from torch._subclasses.fake_tensor import extract_tensor_metadata
@@ -2489,7 +2496,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Specialize into one of the branches since pred is constant
         pred, true_fn, false_fn, operands = args
-        if type(args[0]) is ConstantVariable:
+        if ConstantVariable.is_constant_vt(args[0]):
             warnings.warn(
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
                 " If you want torch.cond to preserve two branches, please make the predicate a boolean tensor or a SymBool.",
@@ -2501,8 +2508,8 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 return false_fn.call_function(tx, unpack_iterable(tx, operands), {})
 
         # predicate
-        if type(pred.realize()) not in (
-            ConstantVariable,
+        pred = pred.realize()
+        if not ConstantVariable.is_constant_vt(pred) and type(pred) not in (
             TensorVariable,
             SymNodeVariable,
         ):
@@ -2714,7 +2721,7 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         index, branches, operands = args
-        if type(index) is ConstantVariable:
+        if ConstantVariable.is_constant_vt(index):
             # Specialize into one of the branches since index is constant.
             warnings.warn(
                 "Index is a Python constant. When used with torch.switch, it specializes on one of the branches."
@@ -2728,8 +2735,8 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         # index
-        if type(index.realize()) not in (
-            ConstantVariable,
+        index = index.realize()
+        if not ConstantVariable.is_constant_vt(index) and type(index) not in (
             TensorVariable,
             SymNodeVariable,
         ):
