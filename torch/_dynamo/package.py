@@ -2044,20 +2044,18 @@ class DiskDynamoCache(DiskDynamoStore):
         key = CompilePackage.source_id_from_fn(fn)
         logger.info("Loading CompilePackage for %s", key)
         path = self._entry_dir(key)
-        if os.path.exists(path):
-            try:
-                result = super().load_cache_entry(key)
-                counters["dynamo_cache"]["dynamo_cache_hit"] += 1
-                return result
-            except Exception:
-                counters["dynamo_cache"]["dynamo_cache_error"] += 1
-                logger.warning(
-                    "Failed to load package from path %s", path, exc_info=True
-                )
-                return None
-        logger.info("No package found for %s", key)
-        counters["dynamo_cache"]["dynamo_cache_miss"] += 1
-        return None
+        if not os.path.exists(path):
+            logger.info("No package found for %s", key)
+            counters["dynamo_cache"]["dynamo_cache_miss"] += 1
+            return None
+        try:
+            result = super().load_cache_entry(key)
+        except Exception:
+            counters["dynamo_cache"]["dynamo_cache_error"] += 1
+            logger.warning("Failed to load package from path %s", path, exc_info=True)
+            return None
+        counters["dynamo_cache"]["dynamo_cache_hit"] += 1
+        return result
 
     def load_and_install_package(self, fn: Callable[..., Any]) -> CompilePackage | None:
         """
@@ -2066,10 +2064,9 @@ class DiskDynamoCache(DiskDynamoStore):
         results = self.load(fn)
         if results is None:
             return None
-        else:
-            package = CompilePackage(fn, results.dynamo)
-            package.install(results.backends)
-            return package
+        package = CompilePackage(fn, results.dynamo)
+        package.install(results.backends)
+        return package
 
     def path_prefix(self) -> str:
         return os.path.join(cache_dir(), "dynamo")
