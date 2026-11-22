@@ -3428,19 +3428,23 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         block_recipe = ScalingType.BlockWise1x16 if recipe == "nvfp4" else ScalingType.BlockWise1x32
         swizzle = mx_swizzle_for(device, A.dtype)
 
-        compiled_scaled_mm = torch.compile(scaled_mm_wrap, backend="inductor")
-        C = compiled_scaled_mm(
-            A,
-            B.t(),
-            A_scale,
-            B_scale,
-            scale_recipe_a=block_recipe,
-            scale_recipe_b=block_recipe,
-            swizzle_a=swizzle,
-            swizzle_b=swizzle,
-            out_dtype=torch.bfloat16,
-            use_fast_accum=False,
-        )
+        # Quantizing A in the graph makes Inductor generate the kernels that pack it
+        @torch.compile(backend="inductor")
+        def quantize_and_scaled_mm(a):
+            return scaled_mm_wrap(
+                _bfloat16_to_float4_e2m1fn_x2(a),
+                B.t(),
+                A_scale,
+                B_scale,
+                scale_recipe_a=block_recipe,
+                scale_recipe_b=block_recipe,
+                swizzle_a=swizzle,
+                swizzle_b=swizzle,
+                out_dtype=torch.bfloat16,
+                use_fast_accum=False,
+            )
+
+        C = quantize_and_scaled_mm(A_ref)
         torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
 
 

@@ -60,6 +60,8 @@ DTYPE_TO_METAL = {
     torch.bfloat16: "bfloat",
     torch.float8_e4m3fn: "c10::metal::float8_e4m3fn",
     torch.float8_e8m0fnu: "c10::metal::float8_e8m0fnu",
+    # Two packed e2m1 values that kernels only copy or bitcast, as Triton does
+    torch.float4_e2m1fn_x2: "uchar",
 }
 FP8_METAL_NAMES = {
     torch.float8_e4m3fn: "fp8e4m3fn",
