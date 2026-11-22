@@ -119,6 +119,10 @@ pub enum Assert {
     /// own dict, as `object` has it (`stores_plainly`): a store into an
     /// object the path made cannot fail and runs no Python code.
     Plain(PathValue, PyObj),
+    /// What `object` reads of the object this is bound to finds nothing
+    /// under the name (`reads_nothing`): the read raises AttributeError
+    /// and does nothing else.
+    Missing(PathValue, PyObj),
 }
 
 impl Assert {
@@ -138,7 +142,8 @@ impl Assert {
             | Assert::Is(v, _)
             | Assert::Same(v, _)
             | Assert::Apart(v, ..)
-            | Assert::Plain(v, _) => *v,
+            | Assert::Plain(v, _)
+            | Assert::Missing(v, _) => *v,
             Assert::Guard(cond) => cond.value(),
         }
     }
@@ -1857,10 +1862,20 @@ unsafe fn class_named(module: &std::ffi::CStr, name: &std::ffi::CStr) -> Obj {
 ///   out of sight. Whether the storage ends with the tensor (another
 ///   tensor may share it) cannot be asked from here either.
 ///
-/// Ok with the tensor's `.grad` where it has one (a new reference): C++
-/// holds it for the tensor, and it is looked at like what the tensor
-/// refers to.
-unsafe fn unseen(o: Obj) -> Result<Option<PyObj>, ()> {
+/// - the Python object of its storage has attributes of its own (C++
+///   keeps that object for the storage, and it ends with the storage);
+/// - a level of forward-mode differentiation is open (a tangent is held
+///   for the tensor from C++, and cannot be asked for without the level);
+/// - it is not laid out plainly (`plainly_laid_out`): sparse, quantized,
+///   nested, of another library's layout, or a wrapper around another
+///   tensor, each of which has parts that C++ holds for it.
+///
+/// Ok with what C++ holds for the tensor that can be handed over (new
+/// references): its `.grad` where it has one, and, for a view, the tensor
+/// it is a view of, whose Python object C++ keeps for as long as a view
+/// needs it. They are looked at like what the tensor refers to, whatever
+/// their counts of references say.
+unsafe fn unseen(o: Obj) -> Result<Vec<PyObj>, ()> {
     static NAMES: std::sync::OnceLock<(PyObj, PyObj)> = std::sync::OnceLock::new();
     if holds_unseen(o) {
         return Err(());
@@ -1875,23 +1890,83 @@ unsafe fn unseen(o: Obj) -> Result<Option<PyObj>, ()> {
     let own = {
         let memory = ffi::PyObject_CallMethodNoArgs(o, storage.as_ptr());
         let said = if memory.is_null() { null_mut() } else { ffi::PyObject_CallMethodNoArgs(memory, resizable.as_ptr()) };
-        let own = said == ffi::Py_True();
+        // What the storage's Python object has of its own ends with it.
+        let slot = if memory.is_null() { std::ptr::null_mut() } else { pyffi::_PyObject_GetDictPtr(memory) };
+        let bare = slot.is_null() || (*slot).is_null() || ffi::PyDict_Size(*slot) == 0;
+        let own = said == ffi::Py_True() && bare;
         xdecref(said);
         xdecref(memory);
         own
     };
     // A tensor without a storage of this kind says so by raising.
     ffi::PyErr_Clear();
-    if !own {
+    if !own || forward_level() || !plainly_laid_out(o) {
         return Err(());
     }
-    let gradient = ffi::PyObject_GetAttrString(o, c"grad".as_ptr());
-    if gradient.is_null() {
-        ffi::PyErr_Clear();
-        return Err(());
+    let mut held = Vec::new();
+    for name in [c"grad", c"_base"] {
+        let found = ffi::PyObject_GetAttrString(o, name.as_ptr());
+        if found.is_null() {
+            ffi::PyErr_Clear();
+            return Err(());
+        }
+        let found = PyObj::from_owned(found);
+        if found.as_ptr() != ffi::Py_None() {
+            held.push(found);
+        }
     }
-    let gradient = PyObj::from_owned(gradient);
-    Ok((gradient.as_ptr() != ffi::Py_None()).then_some(gradient))
+    Ok(held)
+}
+
+/// Whether a tensor is one whose parts are all in its one storage: dense
+/// and strided, not quantized (the scales and zero points per channel are
+/// tensors that C++ holds for it), not nested, not of another library's
+/// layout, and no wrapper around another tensor (a transform of
+/// `torch.func`, a functional tensor), which C++ holds for it. Each is
+/// asked of the tensor through an attribute or a function that torch has
+/// in C; false where one cannot be asked.
+unsafe fn plainly_laid_out(o: Obj) -> bool {
+    static PARTS: std::sync::OnceLock<Option<(PyObj, PyObj, PyObj)>> = std::sync::OnceLock::new();
+    let parts = PARTS.get_or_init(|| {
+        let of = |module: &std::ffi::CStr, name: &std::ffi::CStr| {
+            let module = ffi::PyDict_GetItemString(ffi::PyImport_GetModuleDict(), module.as_ptr());
+            let found = if module.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(module, name.as_ptr()) };
+            ffi::PyErr_Clear();
+            (!found.is_null()).then(|| PyObj::from_owned(found))
+        };
+        Some((of(c"torch", c"strided")?, of(c"torch._C._functorch", c"is_functorch_wrapped_tensor")?, of(c"torch", c"_is_functional_tensor")?))
+    });
+    let Some((strided, wrapped, functional)) = parts else {
+        return false;
+    };
+    let layout = ffi::PyObject_GetAttrString(o, c"layout".as_ptr());
+    let dense = layout == strided.as_ptr();
+    xdecref(layout);
+    let says = |name: &std::ffi::CStr| {
+        let said = ffi::PyObject_GetAttrString(o, name.as_ptr());
+        xdecref(said);
+        said
+    };
+    let asked = |function: &PyObj| {
+        let said = ffi::PyObject_CallOneArg(function.as_ptr(), o);
+        xdecref(said);
+        said
+    };
+    let no = ffi::Py_False();
+    let plain = dense && says(c"is_quantized") == no && says(c"is_nested") == no && says(c"is_mkldnn") == no && asked(wrapped) == no && asked(functional) == no;
+    ffi::PyErr_Clear();
+    plain
+}
+
+/// Whether a level of forward-mode differentiation is open on this thread
+/// (`torch.autograd.forward_ad`), or cannot be shown not to be.
+unsafe fn forward_level() -> bool {
+    let module = ffi::PyDict_GetItemString(ffi::PyImport_GetModuleDict(), c"torch.autograd.forward_ad".as_ptr());
+    if module.is_null() || ffi::PyModule_Check(module) == 0 {
+        return false;
+    }
+    let level = ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), c"_current_level".as_ptr());
+    level.is_null() || ffi::PyLong_CheckExact(level) == 0 || ffi::PyLong_AsLong(level) >= 0
 }
 
 /// Whether an object that shows the garbage collector nothing (its class
@@ -2712,6 +2787,142 @@ pub unsafe fn makes_sequence(callee: Obj) -> bool {
     builtin_named(Builtin::List) == callee as usize || builtin_named(Builtin::Tuple) == callee as usize
 }
 
+/// What an abstract base class keeps its answers in, as CPython 3.12 lays
+/// it out (`_abc_data` in `Modules/_abc.c`).
+#[cfg(not(Py_3_13))]
+#[repr(C)]
+struct AbcData {
+    ob_base: ffi::PyObject,
+    registry: Obj,
+    cache: Obj,
+    negative: Obj,
+    version: std::os::raw::c_ulonglong,
+}
+
+/// The builtin that `ABCMeta.__instancecheck__` calls, the builtin that
+/// gives the token of the answers that are kept, and the class of what an
+/// abstract base class keeps them in: found once, by where they are (the
+/// last as the class of what `abc.ABC` has). None while `abc` is not
+/// imported.
+#[cfg(not(Py_3_13))]
+unsafe fn abc_parts() -> Option<(usize, usize, usize)> {
+    static FOUND: std::sync::OnceLock<(usize, usize, usize)> = std::sync::OnceLock::new();
+    if let Some(found) = FOUND.get() {
+        return Some(*found);
+    }
+    let modules = ffi::PyImport_GetModuleDict();
+    let of = |module: &std::ffi::CStr, name: &std::ffi::CStr| {
+        let module = ffi::PyDict_GetItemString(modules, module.as_ptr());
+        if module.is_null() || ffi::PyModule_Check(module) == 0 { null_mut() } else { ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), name.as_ptr()) }
+    };
+    let (check, token, base) = (of(c"_abc", c"_abc_instancecheck"), of(c"_abc", c"get_cache_token"), of(c"abc", c"ABC"));
+    let builtin = |o: Obj| !o.is_null() && ffi::PyCFunction_Check(o) != 0;
+    if !builtin(check) || !builtin(token) || base.is_null() || ffi::PyType_Check(base) == 0 {
+        return None;
+    }
+    let name = PyObj::from_owned(ffi::PyUnicode_InternFromString(c"_abc_impl".as_ptr()));
+    let kept = pyffi::_PyType_Lookup(base as *mut ffi::PyTypeObject, name.as_ptr());
+    if kept.is_null() {
+        return None;
+    }
+    // The modules keep them.
+    let found = (check as usize, token as usize, ffi::Py_TYPE(kept) as usize);
+    let _ = FOUND.set(found);
+    Some(found)
+}
+
+/// For a call of the builtin behind `isinstance(instance, cls)` for an
+/// abstract base class (`_abc._abc_instancecheck(cls, instance)`): the
+/// answer, where the class has kept one for the class of the instance and
+/// the builtin gives it without calling anything. That is so when what
+/// the class keeps its answers in is found as `type` finds an attribute;
+/// the instance says it is of the class it is of, and saying so runs no
+/// Python code; classes are hashed and compared as `type` does it (the
+/// class of the instance, and every class an answer is kept for); and the
+/// class of the instance is among those the answer is yes for, or among
+/// those it is no for while no class has been registered since. None for
+/// any other call: the builtin then asks `__subclasscheck__`.
+#[cfg(not(Py_3_13))]
+pub unsafe fn abc_kept(callee: Obj, args: &[Obj], api: &TcfgApi) -> Option<bool> {
+    static NAMES: std::sync::OnceLock<(PyObj, PyObj)> = std::sync::OnceLock::new();
+    let (check, token, data) = abc_parts()?;
+    if callee as usize != check || args.len() != 2 || args.iter().any(|o| o.is_null() || capi::is_unboxed(*o)) {
+        return None;
+    }
+    let (cls, instance) = (args[0], args[1]);
+    if ffi::PyType_Check(cls) == 0 {
+        return None;
+    }
+    let (kept, class) = NAMES.get_or_init(|| {
+        let name = |text: &std::ffi::CStr| PyObj::from_owned(ffi::PyUnicode_InternFromString(text.as_ptr()));
+        (name(c"_abc_impl"), name(c"__class__"))
+    });
+    let meta = ffi::Py_TYPE(cls);
+    let reads = (*meta).tp_getattro.map(|own| own as usize) == (*std::ptr::addr_of!(ffi::PyType_Type)).tp_getattro.map(|own| own as usize);
+    let held = pyffi::_PyType_Lookup(cls as *mut ffi::PyTypeObject, kept.as_ptr());
+    if !reads || !pyffi::_PyType_Lookup(meta, kept.as_ptr()).is_null() || held.is_null() || ffi::Py_TYPE(held) as usize != data {
+        return None;
+    }
+    if !quiet_attr(instance, class.as_ptr(), api) {
+        return None;
+    }
+    let said = ffi::PyObject_GetAttr(instance, class.as_ptr());
+    ffi::PyErr_Clear();
+    xdecref(said);
+    let of = ffi::Py_TYPE(instance) as Obj;
+    if said != of {
+        return None;
+    }
+    let object = std::ptr::addr_of!(ffi::PyBaseObject_Type);
+    let as_type = |class: Obj| {
+        let meta = ffi::Py_TYPE(class);
+        (*meta).tp_hash.map(|own| own as usize) == (*object).tp_hash.map(|own| own as usize)
+            && (*meta).tp_richcompare.map(|own| own as usize) == (*object).tp_richcompare.map(|own| own as usize)
+    };
+    if !as_type(of) {
+        return None;
+    }
+    // Whether the class is among those a set of weak references is of;
+    // None where one of them is of a class that is hashed or compared by
+    // code of its own.
+    let within = |set: Obj| -> Option<bool> {
+        if set.is_null() {
+            return Some(false);
+        }
+        if ffi::PySet_CheckExact(set) == 0 {
+            return None;
+        }
+        let over = ffi::PyObject_GetIter(set);
+        if over.is_null() {
+            ffi::PyErr_Clear();
+            return None;
+        }
+        let (mut found, mut plain) = (false, true);
+        loop {
+            let reference = ffi::PyIter_Next(over);
+            if reference.is_null() {
+                break;
+            }
+            let to = if ffi::PyWeakref_Check(reference) != 0 { ffi::PyWeakref_GetObject(reference) } else { null_mut() };
+            found |= to == of;
+            plain &= !to.is_null() && (to == ffi::Py_None() || (ffi::PyType_Check(to) != 0 && as_type(to)));
+            ffi::Py_DECREF(reference);
+        }
+        ffi::PyErr_Clear();
+        ffi::Py_DECREF(over);
+        plain.then_some(found)
+    };
+    let answers = held as *const AbcData;
+    if within((*answers).cache)? {
+        return Some(true);
+    }
+    let now = ffi::PyObject_CallNoArgs(token as Obj);
+    let current = if now.is_null() { None } else { Some(ffi::PyLong_AsUnsignedLongLong(now)) };
+    xdecref(now);
+    ffi::PyErr_Clear();
+    (current == Some((*answers).version) && within((*answers).negative)?).then_some(false)
+}
+
 /// The modules whose functions a path may call on any arguments (`torch._C`:
 /// those that ask about the state of the thread or of what they are given)
 /// or on numbers (`math`).
@@ -2755,6 +2966,12 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
         return Some(true);
     }
     if ffi::PyCFunction_Check(callee) != 0 {
+        // An abstract base class that has its answer for the class of an
+        // instance: the builtin gives it, and calls nothing.
+        #[cfg(not(Py_3_13))]
+        if abc_kept(callee, args, api).is_some() {
+            return Some(false);
+        }
         let function = callee as *mut ffi::PyCFunctionObject;
         let (state, math, operator) = quiet_modules();
         let of = (*function).m_self as usize;
@@ -2776,6 +2993,14 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
         // they cannot change, and what their classes do is written in C.
         if of != 0 && unchanging(of as Obj) {
             return args.iter().all(|o| quiet_text(*o)).then_some(false);
+        }
+        // What a dict has, asked of a method that was bound to it earlier.
+        if of != 0 && is_plain_dict(of as Obj) {
+            let name = ffi::PyUnicode_FromString((*(*function).m_ml).ml_name);
+            let fine = !name.is_null() && pure_method(of as Obj, name, args, api);
+            ffi::PyErr_Clear();
+            xdecref(name);
+            return fine.then_some(false);
         }
         if of != 0 && of == math {
             return args.iter().all(|o| is_number(*o)).then_some(false);
@@ -2816,7 +3041,8 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
             // What is not there is answered too where nothing is raised
             // out of the call.
             let caught = which == Builtin::HasAttr || found;
-            named && (quiet_attr(args[0], args[1], api) || (caught && quiet_absent(args[0], args[1])))
+            let absent = || quiet_absent(args[0], args[1]) || plainly_absent(args[0], args[1]);
+            named && (quiet_attr(args[0], args[1], api) || (caught && absent()))
         }
         Builtin::IsInstance => {
             static CLASS: std::sync::OnceLock<PyObj> = std::sync::OnceLock::new();
@@ -3069,9 +3295,24 @@ pub unsafe fn generic_absent(obj: Obj, name: Obj) -> bool {
     slot.is_null() || (*slot).is_null() || (pyffi::text_keys(*slot) && ffi::PyDict_GetItemWithError(*slot, name).is_null())
 }
 
+/// Whether a callee is `object.__getattribute__` bound to an object that
+/// is no tensor and has nothing under a name (`generic_absent`): calling
+/// it with the name raises AttributeError and does nothing else.
+pub unsafe fn reads_nothing(callee: Obj, name: Obj, api: &TcfgApi) -> bool {
+    let reader = generic_reader(callee);
+    if reader.is_null() {
+        return false;
+    }
+    let mut info = TcfgTensorInfo::empty();
+    let nothing = (api.tensor_info)(reader, &mut info) == 0 && generic_absent(reader, name);
+    ffi::Py_DECREF(reader);
+    nothing
+}
+
 /// Whether an object whose attributes are read as `object` reads them,
 /// with no function of its class asked behind that, has nothing under a
-/// name: reading it raises AttributeError and does nothing else.
+/// name: reading it raises AttributeError and does nothing else, and
+/// `getattr` with a default gives the default, `hasattr` False.
 pub unsafe fn plainly_absent(obj: Obj, name: Obj) -> bool {
     if obj.is_null() || capi::is_unboxed(obj) || ffi::PyModule_Check(obj) != 0 {
         return false;
@@ -5507,6 +5748,11 @@ pub struct Trace {
     pub lost: bool,
     /// The trace was let go of (`abandon`), and why.
     pub abandoned: Option<String>,
+    /// An instruction of a function the path went into raised because a
+    /// lookup of `object` found nothing, as the path checks
+    /// (`Assert::Missing`), and the raise is on its way out of the
+    /// functions the path is in.
+    pub absent: bool,
     /// The path ends where a later one will go on: at a block, or a call
     /// of a function, that the tiers have not decided on yet.
     pub provisional: bool,
@@ -5534,6 +5780,7 @@ impl Trace {
             again: false,
             over: Vec::new(),
             abandoned: None,
+            absent: false,
             writes: false,
             fallible: false,
             inplace: false,
@@ -5664,6 +5911,9 @@ impl Trace {
             Assert::Apart(a, attributes, b, keeps) => {
                 self.shape.extend([u32::MAX - 6, *a, *attributes as u32, *b, *keeps as u32])
             }
+            // The function it is in is left where one that found the
+            // attribute goes on.
+            Assert::Missing(v, _) => self.shape.extend([u32::MAX - 7, *v]),
             _ => {}
         }
         // A check of what the graph gives is made behind the callable,

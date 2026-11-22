@@ -1648,6 +1648,11 @@ fn build_as(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>, genera
         return unsupported("the globals of the function are not a plain dict");
     }
     let builtins = func.getattr("__builtins__")?;
+    // The builtins as well: a name that the globals do not have is asked
+    // of them through the mapping protocol where they are no plain dict.
+    if builtins.cast::<PyDict>().is_ok() && !builtins.is_exact_instance_of::<PyDict>() {
+        return unsupported("the builtins of the function are not a plain dict");
+    }
     let builtins = if builtins.cast::<PyDict>().is_ok() {
         builtins
     } else {
