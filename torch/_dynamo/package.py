@@ -1962,6 +1962,9 @@ class DiskDynamoStore(DynamoStore):
     def path_prefix(self) -> str:
         return self._path_prefix
 
+    def _entry_dir(self, path: str) -> str:
+        return os.path.join(self.path_prefix(), path) if self.path_prefix() else path
+
     def clear(self) -> None:
         """
         Clear all CompilePackages from disk.
@@ -1989,7 +1992,7 @@ class DiskDynamoStore(DynamoStore):
     def _write_to_local_cache(self, pickled_content: bytes, path: str) -> None:
         from torch._inductor.codecache import write_atomic
 
-        path = os.path.join(self.path_prefix(), path) if self.path_prefix() else path
+        path = self._entry_dir(path)
         try:
             os.makedirs(path, exist_ok=True)
             write_atomic(os.path.join(path, "entry"), pickled_content)
@@ -2000,7 +2003,7 @@ class DiskDynamoStore(DynamoStore):
         """
         Read dynamo cache entry and backends from disk.
         """
-        path = os.path.join(self.path_prefix(), path) if self.path_prefix() else path
+        path = self._entry_dir(path)
         try:
             with open(os.path.join(path, "entry"), "rb") as f:
                 pickled_content = f.read()
@@ -2030,7 +2033,7 @@ class DiskDynamoCache(DiskDynamoStore):
         """
         key = CompilePackage.source_id_from_fn(fn)
         logger.info("Loading CompilePackage for %s", key)
-        path = os.path.join(self.path_prefix(), key)
+        path = self._entry_dir(key)
         if os.path.exists(path):
             try:
                 result = super().load_cache_entry(key)
