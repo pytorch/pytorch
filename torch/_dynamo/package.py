@@ -47,8 +47,9 @@ logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    from torch._guards import Source
+
     from .guards import GuardManagerWrapper, GuardsState
-    from .source import Source
 
 
 _CODE_CACHE = WeakIdKeyDictionary()
