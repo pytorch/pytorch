@@ -2598,7 +2598,16 @@ pub unsafe fn quiet_sized(container: Obj) -> bool {
 /// Whether `item in container` runs no Python code: the item is compared
 /// with what the container holds.
 pub unsafe fn quiet_contains(item: Obj, container: Obj) -> bool {
-    if capi::is_unboxed(item) || capi::is_unboxed(container) || !is_plain(item) {
+    if capi::is_unboxed(item) || capi::is_unboxed(container) {
+        return false;
+    }
+    // A list or a tuple is gone over, and each item is compared with the
+    // value (the item's class is asked first).
+    if ffi::PyList_CheckExact(container) != 0 || ffi::PyTuple_CheckExact(container) != 0 {
+        return (0..ffi::PyObject_Size(container)).all(|i| compares_in_c(item) && compares_in_c(sequence_item(container, i)));
+    }
+    // A dict, a set and a text hash the value or search for it.
+    if !is_plain(item) {
         return false;
     }
     if is_plain_dict(container) {
@@ -2607,11 +2616,7 @@ pub unsafe fn quiet_contains(item: Obj, container: Obj) -> bool {
     if ffi::PyAnySet_CheckExact(container) != 0 {
         return quiet_members(container);
     }
-    if ffi::PyUnicode_CheckExact(container) != 0 {
-        return ffi::PyUnicode_CheckExact(item) != 0;
-    }
-    let sequence = ffi::PyList_CheckExact(container) != 0 || ffi::PyTuple_CheckExact(container) != 0;
-    sequence && (0..ffi::PyObject_Size(container)).all(|i| is_plain(sequence_item(container, i)))
+    ffi::PyUnicode_CheckExact(container) != 0 && ffi::PyUnicode_CheckExact(item) != 0
 }
 
 /// Whether `bool(o)` runs no Python code.
@@ -2645,10 +2650,61 @@ pub unsafe fn move_version(tensor: Obj, count: u64) {
     ffi::PyErr_Clear();
 }
 
-/// Whether two values compare in C code: numbers, texts, dtypes and
-/// devices, or tuples of numbers, texts and None (the sizes of a tensor
-/// with those of another, or with a tuple).
+/// Whether the class of a value compares it with the function of `str`,
+/// `int`, `float` or `object`: the class is one of them, or one written
+/// in Python that has no comparison of its own anywhere above it (a
+/// member of an enum, an object that is equal to itself only, None).
+/// The interpreter keeps what a class compares with in this slot, and
+/// puts its own function there when the class or one above it gets an
+/// `__eq__` or an `__lt__`. Each of the four looks at what it is handed,
+/// answers or says that it has no answer, and calls nothing. So does
+/// the class of None, which no class can be made of; a class with
+/// nothing in the slot is not asked at all.
+unsafe fn compares_in_c(o: Obj) -> bool {
+    if o.is_null() || capi::is_unboxed(o) {
+        return false;
+    }
+    let slot = |ty: *const ffi::PyTypeObject| (*ty).tp_richcompare.map(|f| f as usize);
+    let own = slot(ffi::Py_TYPE(o));
+    own.is_none()
+        || o == ffi::Py_None()
+        || [
+            std::ptr::addr_of!(ffi::PyUnicode_Type),
+            std::ptr::addr_of!(ffi::PyLong_Type),
+            std::ptr::addr_of!(ffi::PyFloat_Type),
+            std::ptr::addr_of!(ffi::PyBaseObject_Type),
+        ]
+        .iter()
+        .any(|ty| slot(*ty) == own)
+}
+
+/// Whether `str` of a value is the text `type` makes of a class: the value
+/// is a class, and its class turns it into text as `type` does (it has no
+/// `__str__` and no `__repr__` of its own, which the interpreter keeps in
+/// these two slots). `type` reads the module and the name of the class in
+/// the class's own dict, whose keys are texts here, and calls nothing.
+unsafe fn class_text(o: Obj) -> bool {
+    if o.is_null() || capi::is_unboxed(o) || ffi::PyType_Check(o) == 0 {
+        return false;
+    }
+    let (meta, plain, object) = (ffi::Py_TYPE(o), std::ptr::addr_of!(ffi::PyType_Type), std::ptr::addr_of!(ffi::PyBaseObject_Type));
+    let says = (*meta).tp_str.map(|f| f as usize) == (*object).tp_str.map(|f| f as usize)
+        && (*meta).tp_repr.map(|f| f as usize) == (*plain).tp_repr.map(|f| f as usize);
+    let dict = (*(o as *mut ffi::PyTypeObject)).tp_dict;
+    says && (is_static(o as *mut ffi::PyTypeObject) || (!dict.is_null() && quiet_keys(dict)))
+}
+
+/// Whether two values compare in C code: two values whose classes
+/// compare with the function of `str`, `int`, `float` or `object`
+/// (`compares_in_c`: the interpreter asks the class of one, then that of
+/// the other, and with no answer says which object each is, or raises
+/// TypeError for an order); dtypes and devices; or tuples of numbers,
+/// texts and None (the sizes of a tensor with those of another, or with
+/// a tuple).
 pub unsafe fn quiet_compare(a: Obj, b: Obj) -> bool {
+    if compares_in_c(a) && compares_in_c(b) {
+        return true;
+    }
     let text = |o: Obj| !capi::is_unboxed(o) && ffi::PyUnicode_CheckExact(o) != 0;
     let token = |o: Obj| !capi::is_unboxed(o) && is_token(o);
     // A tuple, or one of a class that is defined in C and compares as a
@@ -3137,7 +3193,7 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
         Builtin::Zip => !args.is_empty() && all(),
         Builtin::Tuple | Builtin::List => args.len() <= 1 && all(),
         Builtin::Int | Builtin::Float | Builtin::Abs => args.len() == 1 && numbers(),
-        Builtin::Str => args.len() == 1 && (numbers() || ffi::PyUnicode_CheckExact(args[0]) != 0),
+        Builtin::Str => args.len() == 1 && (numbers() || ffi::PyUnicode_CheckExact(args[0]) != 0 || class_text(args[0])),
         Builtin::Min | Builtin::Max => args.len() >= 2 && numbers(),
         Builtin::Bool => args.len() == 1 && quiet_truth(args[0]),
         Builtin::Type | Builtin::Callable => args.len() == 1,
@@ -3187,6 +3243,22 @@ unsafe fn unchanging(o: Obj) -> bool {
             || ffi::PyUnicode_CheckExact(o) != 0
             || ffi::PyBytes_CheckExact(o) != 0
             || (ffi::PyTuple_CheckExact(o) != 0 && quiet_text(o)))
+}
+
+/// Whether a call of a method takes an entry out of a dict and gives what
+/// was under it (or the default), running no Python code: `pop` of an
+/// exact dict with a plain key, whose keys are all plain. Without a
+/// default it raises KeyError where the key is not there, and does
+/// nothing else. For a dict the path made: it is changed.
+pub unsafe fn quiet_pop(recv: Obj, name: Obj, args: &[Obj]) -> bool {
+    !recv.is_null()
+        && !capi::is_unboxed(recv)
+        && ffi::PyDict_CheckExact(recv) != 0
+        && (1..=2).contains(&args.len())
+        && args.iter().all(|o| !o.is_null())
+        && ffi::PyUnicode_CompareWithASCIIString(name, c"pop".as_ptr()) == 0
+        && is_plain_key(args[0])
+        && quiet_keys(recv)
 }
 
 /// Whether a call of a method runs no Python code, no kernel, and changes
@@ -3638,13 +3710,23 @@ pub unsafe fn quiet_attr(obj: Obj, name: Obj, api: &TcfgApi) -> bool {
         return quiet_super(obj, name);
     }
     if ffi::PyType_Check(obj) != 0 {
-        // A class: what it has itself, or else what `type` has for it.
-        if ty != std::ptr::addr_of_mut!(ffi::PyType_Type) {
+        // A class whose class reads attributes as `type` does (`type`
+        // itself, or a class made of it without a `__getattribute__` or
+        // a `__getattr__` of its own: an enum class, an abstract one).
+        // As `type` reads: what the class of the class has under the
+        // name if that takes stores too; else what the class has
+        // itself; else what the class of the class has. Each is given
+        // out by C code, or the read is none of a path.
+        let reads = (*ty).tp_getattro.map(|own| own as usize) == (*std::ptr::addr_of!(ffi::PyType_Type)).tp_getattro.map(|own| own as usize);
+        if !reads {
             return false;
         }
-        let own = pyffi::_PyType_Lookup(obj as *mut ffi::PyTypeObject, name);
         let meta = pyffi::_PyType_Lookup(ty, name);
-        return if own.is_null() { !meta.is_null() } else { !python_descriptor(own) };
+        if !meta.is_null() && (*ffi::Py_TYPE(meta)).tp_descr_set.is_some() {
+            return !python_descriptor(meta);
+        }
+        let own = pyffi::_PyType_Lookup(obj as *mut ffi::PyTypeObject, name);
+        return if own.is_null() { !meta.is_null() && !python_descriptor(meta) } else { !python_descriptor(own) };
     }
     // The lookup of `object`, or that and then a `__getattr__` for what it
     // does not find: of the latter, only one that has a shortcut is known.
@@ -5171,6 +5253,25 @@ fn idle(op: &Op) -> bool {
         Op::Part(Part::Cell(_) | Part::KwDefault(_), _) => false,
         Op::Part(..) => true,
         op => infallible(op),
+    }
+}
+
+/// Whether a change of something the path made can be left out of a run
+/// together with the thing: like every instruction that is left out
+/// (`idle`), only one that cannot fail and runs no Python code whatever it
+/// is given. An append, a store into an object of the path and a variable
+/// that is bound are such. An entry that is put into a dict is one only
+/// under a key that is the same at every call (a constant): any other
+/// key may be one that cannot be hashed at another call, or that is
+/// hashed in Python. A `pop` is none (the key may not be there), nor is
+/// what goes over a value from outside the path to extend a list or to
+/// fill a dict. `own` says whether the path built or made a value.
+fn leaves_quietly(op: &Op, defs: &[Def], own: impl Fn(PathValue) -> bool) -> bool {
+    match op {
+        Op::MapAdd(_, key, _) => defs[*key as usize].fixed,
+        Op::ListExtend(_, more) | Op::DictMerge(_, more, _) => own(*more),
+        Op::Call { .. } | Op::CallMethod { .. } => false,
+        _ => true,
     }
 }
 
@@ -6864,10 +6965,14 @@ impl Path {
                         Stage::Landing
                     }
                     Kind::Residual => {
-                        // What changes something the path made goes with it.
+                        // What changes something the path made goes with it,
+                        // unless it can fail: then it runs, and the thing
+                        // with it, so that a call in which it fails is not
+                        // the path's.
                         let target = changes(inst);
                         let taken = target != NONE && (need[target as usize] || alive[thing(target) as usize]);
-                        if (needed || taken) && !matches!(inst.op, Op::Hold(_) | Op::StoreLocal(..)) {
+                        let fails = !leaves_quietly(&inst.op, defs, |v| defs[v as usize].made || built[v as usize]);
+                        if (needed || taken || fails) && !matches!(inst.op, Op::Hold(_) | Op::StoreLocal(..)) {
                             uses(&inst.op, &mut need)
                         } else {
                             Stage::Skipped
