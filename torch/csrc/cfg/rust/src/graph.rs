@@ -3189,6 +3189,22 @@ unsafe fn unchanging(o: Obj) -> bool {
             || (ffi::PyTuple_CheckExact(o) != 0 && quiet_text(o)))
 }
 
+/// Whether a call of a method takes an entry out of a dict and gives what
+/// was under it (or the default), running no Python code: `pop` of an
+/// exact dict with a plain key, whose keys are all plain. Without a
+/// default it raises KeyError where the key is not there, and does
+/// nothing else. For a dict the path made: it is changed.
+pub unsafe fn quiet_pop(recv: Obj, name: Obj, args: &[Obj]) -> bool {
+    !recv.is_null()
+        && !capi::is_unboxed(recv)
+        && ffi::PyDict_CheckExact(recv) != 0
+        && (1..=2).contains(&args.len())
+        && args.iter().all(|o| !o.is_null())
+        && ffi::PyUnicode_CompareWithASCIIString(name, c"pop".as_ptr()) == 0
+        && is_plain_key(args[0])
+        && quiet_keys(recv)
+}
+
 /// Whether a call of a method runs no Python code, no kernel, and changes
 /// nothing: what a dict has, as a view or under a key; what a tensor says
 /// of itself; any method of a number, a text or a tuple of such on such
@@ -5179,15 +5195,16 @@ fn idle(op: &Op) -> bool {
 /// (`idle`), only one that cannot fail and runs no Python code whatever it
 /// is given. An append, a store into an object of the path and a variable
 /// that is bound are such. An entry that is put into a dict is one only
-/// under a key that is the same at every call (a constant): any other key
-/// may be one that cannot be hashed at another call, or that is hashed in
-/// Python. What goes over a value from outside the path to extend a list or
-/// to fill a dict is none. `own` says whether the path built or made a
-/// value.
+/// under a key that is the same at every call (a constant): any other
+/// key may be one that cannot be hashed at another call, or that is
+/// hashed in Python. A `pop` is none (the key may not be there), nor is
+/// what goes over a value from outside the path to extend a list or to
+/// fill a dict. `own` says whether the path built or made a value.
 fn leaves_quietly(op: &Op, defs: &[Def], own: impl Fn(PathValue) -> bool) -> bool {
     match op {
         Op::MapAdd(_, key, _) => defs[*key as usize].fixed,
         Op::ListExtend(_, more) | Op::DictMerge(_, more, _) => own(*more),
+        Op::Call { .. } | Op::CallMethod { .. } => false,
         _ => true,
     }
 }

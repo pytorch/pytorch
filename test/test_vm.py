@@ -11190,11 +11190,12 @@ groups: `made` (things that hold themselves), `outside` (a list that holds
 itself, handed to the function), `printed` (some of `made`), `sides` (what
 reads and what changes one thing, on the two sides of the graph), `own`
 (what comes from outside the path through an iterator, an item, an
-attribute, a default or a variable of an outer function). What is compared
-is the result or what is raised, and what was given back and left outside,
-as shapes that say which object is which. One line `start NAME` before a
-case and one `done NAME {...}` behind it: a case that does not come back is
-the one started last."""
+attribute, a default or a variable of an outer function), `dicts` (a dict
+the path made that an item is stored into and popped out of). What is
+compared is the result or what is raised, and what was given back and left
+outside, as shapes that say which object is which. One line `start NAME`
+before a case and one `done NAME {...}` behind it: a case that does not come
+back is the one started last."""
 import gc
 import json
 import resource
@@ -11767,6 +11768,171 @@ OWN = [
 ]
 
 
+OUT = {"k": 1.0}
+
+
+class Key:
+    def __hash__(self):
+        return 7
+
+    def __eq__(self, other):
+        return self is other
+
+
+def takes_names(h, scale=1.0, shift=0.0):
+    return h * scale + shift
+
+
+def fills_kwargs(h, **kwargs):
+    kwargs["shift"] = kwargs.get("shift", 0.5)
+    kwargs["scale"] = 2.0
+    return takes_names(h, **kwargs)
+
+
+def pops_kwargs(h, **kwargs):
+    flag = kwargs.pop("flag", None)
+    scale = kwargs.pop("scale")
+    out = takes_names(h, **kwargs)
+    return out * scale if flag is None else out
+
+
+def stores_items(x, given):
+    h = torch.relu(x) + 1
+    made = {"a": given}
+    made["b"] = given + 1
+    made["a"] = h.shape[0]
+    BOX.items = made
+    return tail(h) * made["b"]
+
+
+def stores_a_result(x, given):
+    h = torch.relu(x) + 1
+    made = {}
+    made["h"] = h
+    made["n"] = given
+    return tail(made["h"]), made
+
+
+def stores_into_kwargs(x, given):
+    return fills_kwargs(torch.relu(x) + 1, shift=given).sum()
+
+
+def pops_from_kwargs(x, given):
+    return pops_kwargs(torch.relu(x) + 1, scale=given, shift=0.25).sum()
+
+
+def pops_what_is_there_or_not(x, given):
+    h = torch.relu(x) + 1
+    made = {"a": 1.0, "b": 2.0}
+    value = made.pop(given)
+    BOX.items = made
+    return tail(h) * value
+
+
+def pops_with_a_default(x, given):
+    h = torch.relu(x) + 1
+    made = {"a": 1.0}
+    value = made.pop(given, 3.0)
+    BOX.items = made
+    return tail(h) * value
+
+
+def pops_a_thing(x, given):
+    h = torch.relu(x) + 1
+    inner = [given]
+    made = {"k": inner}
+    taken = made.pop("k")
+    inner.append(h.shape[0])
+    BOX.items = (made, taken)
+    return tail(h)
+
+
+def pops_and_nothing_takes_the_dict(x, given):
+    h = torch.relu(x) + 1
+    made = {"a": given, "b": 2.0}
+    value = made.pop("a")
+    return tail(h) * value
+
+
+def stores_behind_a_late_read(x, given):
+    h = torch.relu(x) + 1
+    made = {"a": given}
+    keys = list(made) + [h.shape[0]]
+    made["b"] = given
+    made.pop("a")
+    BOX.items = made
+    return tail(h), keys
+
+
+def stores_by_another_way(x, given):
+    h = torch.relu(x) + 1
+    made = {"a": given}
+    other = {"k": made}.get("k")
+    other["z"] = 1
+    made["b"] = given + 1
+    BOX.items = made
+    return tail(h)
+
+
+def stores_under_a_key_hashed_in_python(x, given):
+    h = torch.relu(x) + 1
+    made = {"a": given}
+    made[Key()] = given
+    BOX.items = len(made)
+    return tail(h)
+
+
+def pops_out_of_a_dict_from_outside(x, given):
+    h = torch.relu(x) + 1
+    value = OUT.pop("k", 0.5)
+    OUT["k"] = value + given
+    return tail(h) * value
+
+
+def spreads_what_is_left(x, given):
+    h = torch.relu(x) + 1
+    names = {"scale": given, "shift": 0.25, "unused": 1}
+    names.pop("unused")
+    names["shift"] = 0.5
+    return takes_names(h, **names).sum(), names
+
+
+def spreads_names_that_change(x, given):
+    h = torch.relu(x) + 1
+    names = {name: 2.0 for name in (given,)}
+    return takes_names(h, **names).sum()
+
+
+def spreads_a_name_it_stored(x, given):
+    h = torch.relu(x) + 1
+    names = {}
+    names[given] = 2.0
+    return takes_names(h, **names).sum()
+
+
+def spreads_names_in_another_order(x, given):
+    h = torch.relu(x) + 1
+    names = {"scale": 1.5, "shift": 0.5}
+    names[given] = 3.0
+    return takes_names(h, **names).sum(), names
+
+
+def reads_under_a_name_that_changes(x, given):
+    h = torch.relu(x) + 1
+    made = {}
+    made[given] = h
+    made["other"] = h * 2
+    return made["scale"].sum()
+
+
+def pops_under_a_name_that_changes(x, given):
+    h = torch.relu(x) + 1
+    made = {"scale": h, "shift": h * 2}
+    made.pop(given)
+    left = made.pop("scale", None)
+    return (h if left is None else left * 3).sum(), made
+
+
 def ones():
     return torch.ones(3, 4, device=DEVICE)
 
@@ -11852,6 +12018,8 @@ def shape(value, seen=None):
 
 
 def reset():
+    OUT.clear()
+    OUT["k"] = 1.0
     for thing in WATCHED:
         vars(thing).pop("seen", None)
         vars(thing).pop("other", None)
@@ -11899,6 +12067,13 @@ def plant_cycle(at):
         held.append(held)
         held.append(Ends())
     HELD.append(held)
+
+
+def gives(value):
+    def give():
+        return value
+
+    return give
 
 
 def one():
@@ -11986,6 +12161,27 @@ SIDES = [
     two_things_one_late,
     a_thing_put_into_a_late_one,
 ]
+# The case, what it is given at most calls, what at calls 7 and 10.
+DICTS = [
+    (stores_items, 1, 2),
+    (stores_a_result, 1, 2),
+    (stores_into_kwargs, 1, 2),
+    (pops_from_kwargs, 1, 2),
+    (pops_what_is_there_or_not, "a", "zz"),
+    (pops_with_a_default, "a", "zz"),
+    (pops_a_thing, 1, 2),
+    (pops_and_nothing_takes_the_dict, 1, 2),
+    (stores_behind_a_late_read, 1, 2),
+    (stores_by_another_way, 1, 2),
+    (stores_under_a_key_hashed_in_python, 1, 2),
+    (pops_out_of_a_dict_from_outside, 1, 2),
+    (spreads_what_is_left, 1, 2),
+    (spreads_names_that_change, "scale", "shift"),
+    (spreads_a_name_it_stored, "scale", "shift"),
+    (spreads_names_in_another_order, "scale", "shift"),
+    (reads_under_a_name_that_changes, "scale", "shift"),
+    (pops_under_a_name_that_changes, "scale", "shift"),
+]
 
 if __name__ == "__main__":
     # A case that ends the process is to be seen at once, as that: no core is
@@ -11999,6 +12195,8 @@ if __name__ == "__main__":
         cases.append((fn.__name__ + more, "outside", fn, quiet, loud))
     cases += [(fn.__name__, "sides", fn, one, two) for fn in SIDES]
     cases += [(fn.__name__, "own", fn, one, two) for fn in OWN]
+    for fn, usual, other in DICTS:
+        cases.append((fn.__name__, "dicts", fn, gives(usual), gives(other)))
     for name, group, fn, quiet, loud in cases:
         wanted = not WANTED or name in WANTED or group in WANTED
         if wanted or ("printed" in WANTED and name in PRINTED):
@@ -12059,6 +12257,35 @@ def graph_key_spread(x, given):
     return ((graph_key_scaled(h, **made) * 0.1).sin() * 2 - 1).sum()
 
 
+class GraphKeyRaises(str):
+    __slots__ = ()
+
+    def __hash__(self):
+        GRAPH_KEY_LOG.append("hash")
+        raise ValueError("a key that has no hash")
+
+
+def graph_key_stored_and_dropped(x, given):
+    h = torch.relu(x) + 1
+    made = {}
+    made[given] = 1
+    return (torch.tanh(h * 2) * 2 - 1).sum()
+
+
+def graph_key_popped_and_dropped(x, given):
+    h = torch.relu(x) + 1
+    made = {"k": 1}
+    made.pop(given)
+    return (torch.tanh(h * 2) * 2 - 1).sum()
+
+
+def graph_key_popped_with_a_default(x, given):
+    h = torch.relu(x) + 1
+    made = {"k": 1}
+    made.pop(given, None)
+    return (torch.tanh(h * 2) * 2 - 1).sum()
+
+
 class GraphWithinShared(torch.nn.Module):
     def forward(self, h):
         return torch.relu(h) + 1
@@ -12104,6 +12331,44 @@ def graph_appends_by_a_method_of_another_list(x, given):
     add = holder.append
     add(1.0)
     return (h * len(GRAPH_OUTSIDE_LISTS[given])).sum()
+
+
+GRAPH_NAMED = {}
+
+
+def graph_pops_by_a_method_read_earlier(x, given):
+    h = torch.relu(x) + 1
+    table = {"scale": given, "shift": 1.0}
+    take = table.pop
+    scale = take("scale")
+    rest = take("offset", len(table))
+    return (h * scale + rest).sum()
+
+
+def graph_pops_by_a_method_that_alone_has_the_dict(x, given):
+    h = torch.relu(x) + 1
+    take = {"scale": given, "shift": 1.0}.pop
+    return (h * take("scale") + take("shift")).sum()
+
+
+def graph_takes_named(h, **kwargs):
+    scale = kwargs.pop("scale", float(len(kwargs)))
+    return graph_pinned_scaled(h, scale, **kwargs)
+
+
+def graph_pops_with_a_default_it_calls_for(x, given):
+    h = torch.relu(x) + 1
+    if given:
+        return graph_takes_named(h, scale=2.0, shift=0.5).sum()
+    return graph_takes_named(h, shift=0.5).sum()
+
+
+def graph_pops_by_a_method_of_another_dict(x, given):
+    h = torch.relu(x) + 1
+    holder = GraphBareHolder()
+    holder.pop = GRAPH_NAMED.pop
+    take = holder.pop
+    return (h * take(given, 2.5)).sum()
 
 
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
@@ -14905,6 +15170,8 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
         # path's, and the instructions run and raise. The same for a
         # list or a dict that is filled from a value from outside
         # (`[*xs]`, `{**d}`) which cannot be gone over at some calls.
+        # And for a store into a dict the function made and a `pop` out
+        # of it: a key that cannot be hashed, a name that is not there.
         def keep(gm, input_types):
             return gm
 
@@ -14912,6 +15179,10 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
             (graph_key_dict_of_a_comprehension, lambda: 1, lambda: [1]),
             (graph_key_list_of_what_is_spread, lambda: (1, 2), lambda: 5),
             (graph_key_dict_of_what_is_spread, lambda: {"a": 1}, lambda: 5),
+            (graph_key_stored_and_dropped, lambda: 1, lambda: [1]),
+            (graph_key_popped_and_dropped, lambda: "k", lambda: [1]),
+            (graph_key_popped_and_dropped, lambda: "k", lambda: "gone"),
+            (graph_key_popped_with_a_default, lambda: "k", lambda: [1]),
         )
 
         def calls(run, usual, other, graded):
@@ -14952,7 +15223,9 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
         # written in Python is hashed and compared by the instruction
         # that stores or reads under it, as often as without the engine:
         # what the class logs is what it logs there, also in the calls
-        # in which a path is taken down.
+        # in which a path is taken down. A store or a `pop` under such a
+        # key is no part of a path, and a `__hash__` that raises raises
+        # where the instruction stands.
         def keep(gm, input_types):
             return gm
 
@@ -14967,6 +15240,10 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
             (graph_key_stored_and_read, logs("k"), logs("k")),
             (graph_key_spread, logs("scale"), logs("shift")),
             (spread, lambda: {"a": 1}, lambda: {GraphKeyText("a"): 1}),
+            (graph_key_stored_and_dropped, lambda: "k", lambda: GraphKeyRaises("k")),
+            (graph_key_stored_and_dropped, lambda: "k", logs("k")),
+            (graph_key_popped_with_a_default, lambda: "k", logs("k")),
+            (graph_key_spread, lambda: "scale", logs("scale")),
         )
 
         def calls(run, usual, other, graded):
@@ -15089,6 +15366,102 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
         finally:
             for held in GRAPH_OUTSIDE_LISTS:
                 del held[:]
+
+    def graph_goes_to_the_return(self, compiled, msg):
+        # The graphs of the function that ran end where it returns, and
+        # ran at six calls or more.
+        found = torch.vm.regions(compiled)
+        graphs = [g for g in found if "ops" in g and "within" not in g and g["hits"]]
+        ends = {g["why"] for g in graphs}
+        self.assertEqual(ends, {"the function returns"}, msg=f"{msg}: {graphs}")
+        ran = sum(g["hits"] for g in graphs)
+        self.assertGreaterEqual(ran, 6, msg=f"{msg}: {graphs}")
+
+    def test_a_store_into_a_dict_a_path_made_and_a_pop_change_the_dict(self, device):
+        # `d[key] = value` and `d.pop(key)` on a dict the function made,
+        # or on the `**kwargs` of a function the path went into, are
+        # changes of a thing of the path: done in their place, in the
+        # order of the function. A read under a key gives what was
+        # stored, and what is spread from the dict afterwards is what it
+        # holds then. The names under which the path stores and pops are
+        # checks of it: with another name the call runs the instructions
+        # (eager's result, or eager's KeyError). A store by another way,
+        # a store under a key that is hashed in Python, or a pop out of
+        # a dict from outside is no such change, and every call is
+        # eager's too. Where the store or the pop is part of the path,
+        # the graph that runs holds the operations on both sides of it:
+        # `whole` has how many that is for each case (without the change
+        # on the path it is the ones behind the dict, or no graph at
+        # all).
+        found = self.graph_thing_cases(device, "dicts")
+        self.assertEqual(len(found), 18)
+        whole = {
+            "stores_items": 8,
+            "stores_a_result": 7,
+            "stores_into_kwargs": 5,
+            "pops_from_kwargs": 6,
+            "pops_what_is_there_or_not": 8,
+            "pops_with_a_default": 8,
+            "pops_a_thing": 7,
+            "pops_and_nothing_takes_the_dict": 8,
+            "stores_behind_a_late_read": 7,
+            "spreads_what_is_left": 5,
+            "spreads_names_that_change": 5,
+            "spreads_a_name_it_stored": 5,
+            "spreads_names_in_another_order": 5,
+            "reads_under_a_name_that_changes": 4,
+            "pops_under_a_name_that_changes": 4,
+        }
+        for name, least in whole.items():
+            for way in ("pass", "gradient"):
+                graphs = found[name][way]["graphs"]
+                ran = sum(hits for ops, hits in graphs if ops >= least)
+                self.assertGreaterEqual(ran, 4, msg=f"{name}, {way}: {graphs}")
+
+    def test_a_pop_by_a_method_read_off_earlier_is_the_change_pop_is(self, device):
+        # `take = d.pop` and `take(key)` later, or `d.pop(key, f())` where
+        # the default is computed between the read of the method and the
+        # call, is `pop` of the dict the method was read off: the change
+        # of a dict the path made that the one instruction is. A method
+        # of another dict that an object of the path holds is not one of
+        # the object, and pops out of that dict at every call.
+        def keep(gm, input_types):
+            return gm
+
+        cases = (
+            (graph_pops_by_a_method_read_earlier, 2.0, 3.0, True),
+            (graph_pops_by_a_method_that_alone_has_the_dict, 2.0, 3.0, True),
+            (graph_pops_with_a_default_it_calls_for, True, False, True),
+            (graph_pops_by_a_method_of_another_dict, "gone", "kept", False),
+        )
+
+        def calls(run, usual, other, graded):
+            GRAPH_NAMED.clear()
+            GRAPH_NAMED["kept"] = 4.0
+            found = []
+            for at in range(14):
+                x = torch.full((3, 4), 0.25 * (at + 1), device=device)
+                x.requires_grad_(graded)
+                out = run(x, other if at in (7, 10) else usual)
+                if graded:
+                    out.backward()
+                grad = None if x.grad is None else x.grad.sum().item()
+                found.append((out.item(), grad, sorted(GRAPH_NAMED)))
+            return found
+
+        try:
+            for fn, usual, other, whole in cases:
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{fn.__name__}, a pass: {bool(behind)}, a gradient: {graded}"
+                    got = calls(compiled, usual, other, graded)
+                    expected = calls(fn, usual, other, graded)
+                    self.assertTrue(got == expected, msg=f"{msg}: {got} {expected}")
+                    if whole and (behind or graded):
+                        self.graph_goes_to_the_return(compiled, msg)
+        finally:
+            GRAPH_NAMED.clear()
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
