@@ -47,6 +47,8 @@ logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    from torch._guards import Source
+
     from .guards import GuardManagerWrapper, GuardsState
 
 
@@ -1607,6 +1609,37 @@ class CompilePackage:
                 fn = types.FunctionType(code, module.__dict__, function_name)
                 self._install_global(module, function_name, fn)
 
+    def _bind_unnamed_scopes(
+        self,
+        module: types.ModuleType,
+        global_scope: dict[str, Any],
+        sources: dict[str, "Source"],
+    ) -> None:
+        # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict in the
+        # tracing process, so a fresh process has no binding for it. Bind it to
+        # the live namespace, found again through the inlined function's
+        # source, so the guards and the bytecode see what they saw while
+        # tracing; the artifact's copy of the dict is frozen and has its tensors
+        # faked. A key whose source does not resolve here (one rooted at a frame
+        # local, or a chain through user objects that raises against this
+        # process's state) stays unbound and misses as before. A binding already
+        # here is kept; a live compile's is taken over from its CleanupHook, so
+        # uninstall() drops it, and anyone else's is left alone.
+        closure_vars = torch._dynamo.guards._get_closure_vars()
+        for name, source in sources.items():
+            try:
+                namespace = source.get_value({"G": global_scope}, closure_vars, {})
+            except Exception as e:
+                logger.debug("leaving %s unbound, %s raised: %r", name, source.name, e)
+                continue
+            if isinstance(namespace, dict):
+                self._install_global(
+                    module,
+                    name,
+                    global_scope.get(name, namespace),
+                    record_only_if_new=True,
+                )
+
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
 
@@ -1711,42 +1744,13 @@ class CompilePackage:
                         := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
                     ):
                         _seed_builtins_dict(runtime_global_scope, builtin_dict_name)
-                    # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict
-                    # in the tracing process, so a fresh process has no binding
-                    # for it. Bind it (after the builtins dict above, which a
-                    # recorded source can be rooted at) to the live namespace,
-                    # found again through the inlined function's source, so
-                    # the guards and the bytecode see what they saw while
-                    # tracing; the artifact's copy of the dict is frozen and
-                    # has its tensors faked. A
-                    # key whose source does not resolve here (one rooted at a
-                    # frame local, or a chain through user objects that raises
-                    # against this process's state) stays unbound and misses as
-                    # before. A binding already here is kept; a live compile's
-                    # is taken over from its CleanupHook, so uninstall() drops
-                    # it, and anyone else's is left alone.
-                    sources = guards_state.output_graph.unnamed_scope_sources
-                    closure_vars = torch._dynamo.guards._get_closure_vars()
-                    for name, source in sources.items():
-                        try:
-                            namespace = source.get_value(
-                                {"G": runtime_global_scope}, closure_vars, {}
-                            )
-                        except Exception as e:
-                            logger.debug(
-                                "leaving %s unbound, %s raised: %r",
-                                name,
-                                source.name,
-                                e,
-                            )
-                            continue
-                        if isinstance(namespace, dict):
-                            self._install_global(
-                                module,
-                                name,
-                                runtime_global_scope.get(name, namespace),
-                                record_only_if_new=True,
-                            )
+                    # After the builtins dict above, which a recorded source
+                    # can be rooted at.
+                    self._bind_unnamed_scopes(
+                        module,
+                        runtime_global_scope,
+                        guards_state.output_graph.unnamed_scope_sources,
+                    )
                     if not isinstance(guards_state, torch._dynamo.guards.GuardsState):
                         raise AssertionError(
                             f"Expected GuardsState, got {type(guards_state)}"
