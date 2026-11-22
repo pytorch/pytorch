@@ -11321,6 +11321,152 @@ def graph_asks_whether_any(held, x):
     return torch.tanh(h) + h
 
 
+GRAPH_NAME_LOG = []
+
+
+class GraphKeyLoud(str):
+    """A text that logs when it is compared: as a key of a dict, whenever a
+    lookup under an equal text comes to it."""
+
+    __slots__ = ()
+
+    def __eq__(self, other):
+        GRAPH_NAME_LOG.append("eq")
+        return str.__eq__(self, other)
+
+    __hash__ = str.__hash__
+
+
+class GraphKeyNever(str):
+    """As `GraphKeyLoud`, and equal to nothing."""
+
+    __slots__ = ()
+
+    def __eq__(self, other):
+        GRAPH_NAME_LOG.append("never")
+        return False
+
+    __hash__ = str.__hash__
+
+
+class GraphKeyConfig:
+    def __init__(self):
+        self.width, self.scale = 2.0, 3.0
+
+
+class GraphKeyOwnLookup(GraphKeyConfig):
+    def __getattribute__(self, key):
+        return super().__getattribute__(key)
+
+
+GraphKeyBase = type("GraphKeyBase", (), {GraphKeyLoud("width"): 2.0, "scale": 3.0})
+
+
+class GraphKeyChild(GraphKeyBase):
+    @property
+    def width(self):
+        return super().width
+
+
+def graph_key_reads(x, config):
+    h = torch.relu(x) + 1
+    h = h * config.width + 0.5
+    return ((h * config.scale).sin() * 2 - 1).sum()
+
+
+def graph_key_stores(x, config):
+    h = torch.relu(x) + 1
+    config.width = 2.0
+    h = h * config.scale + 0.5
+    return ((h * 2).sin() * 2 - 1).sum()
+
+
+GRAPH_NAME_GLOBALS = {"torch": torch, "graph_key_width": 2.0}
+exec(
+    "def graph_key_reads_a_global(x, config):\n"
+    "    h = torch.relu(x) + 1\n"
+    "    h = h * graph_key_width + 0.5\n"
+    "    return ((h * 3.0).sin() * 2 - 1).sum()\n",
+    GRAPH_NAME_GLOBALS,
+)
+
+
+def graph_key_module():
+    module = types_module.ModuleType("graph_key_module")
+    module.width, module.scale = 2.0, 3.0
+    return module
+
+
+def graph_key_loud(held, name="width"):
+    # The entry under the name, under a key that is equal and compares in
+    # Python.
+    held[GraphKeyLoud(name)] = held.pop(name)
+
+
+def graph_key_never(config):
+    # A key of the same hash that is equal to nothing, and the value in
+    # the class.
+    del vars(config)["width"]
+    vars(config)[GraphKeyNever("width")] = 9.0
+    type(config).width = 2.5
+
+
+def graph_key_plain(held, name="width"):
+    for key in [key for key in held if key == name]:
+        held[name] = held.pop(key)
+
+
+def graph_key_back(config):
+    held = vars(config)
+    for key in [key for key in held if type(key) is GraphKeyNever]:
+        del held[key]
+    held["width"] = 2.0
+    del type(config).width
+
+
+# Per case: the function, what makes what it is handed, what puts the
+# key there, and what takes it out again.
+GRAPH_NAME_CASES = {
+    "an attribute of an object": (
+        graph_key_reads,
+        GraphKeyConfig,
+        lambda c: graph_key_loud(vars(c)),
+        lambda c: graph_key_plain(vars(c)),
+    ),
+    "an attribute read by a function of the class": (
+        graph_key_reads,
+        GraphKeyOwnLookup,
+        lambda c: graph_key_loud(vars(c)),
+        lambda c: graph_key_plain(vars(c)),
+    ),
+    "a key that is equal to nothing": (
+        graph_key_reads,
+        GraphKeyConfig,
+        graph_key_never,
+        graph_key_back,
+    ),
+    "an attribute of a module": (
+        graph_key_reads,
+        graph_key_module,
+        lambda m: graph_key_loud(vars(m)),
+        lambda m: graph_key_plain(vars(m)),
+    ),
+    "a global of the function": (
+        GRAPH_NAME_GLOBALS["graph_key_reads_a_global"],
+        lambda: GRAPH_NAME_GLOBALS,
+        lambda g: graph_key_loud(g, "graph_key_width"),
+        lambda g: graph_key_plain(g, "graph_key_width"),
+    ),
+    "a store into an object": (
+        graph_key_stores,
+        GraphKeyConfig,
+        lambda c: graph_key_loud(vars(c)),
+        lambda c: graph_key_plain(vars(c)),
+    ),
+    "an attribute read through super()": (graph_key_reads, GraphKeyChild, None, None),
+}
+
+
 def graph_pinned_scaled(h, scale=2.0, shift=1.0):
     return h * scale + shift
 
@@ -15657,6 +15803,72 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
                 graphs = ways[way]["graphs"]
                 whole = sum(hits for ops, hits in graphs if ops >= 7)
                 self.assertGreaterEqual(whole, 6, msg=f"{name}, {way}: {graphs}")
+
+    def test_a_key_that_compares_in_python_is_compared_once_per_lookup(self, device):
+        # A dict that the engine looks a name up in (the dict of an object,
+        # of a module, of a class behind `super()`, the globals of the
+        # function) with a key that is no plain text and hashes as the
+        # name: the key's `__eq__` runs once per lookup of an instruction.
+        # The engine itself looks into no dict with such a key, neither to
+        # show what an instruction will do nor in its place, and remembers
+        # nothing it found there. The key there at every call, or at the
+        # eighth and the eleventh. The interpreter looks once more at a
+        # call at which it tries to specialize a read: eager is run twice,
+        # and of each call the shorter log is what the instructions do.
+        def keep(gm, input_types):
+            return gm
+
+        def shorter(a, b):
+            return a if len(a[2]) <= len(b[2]) else b
+
+        def calls(run, make, change, back, when, graded):
+            found = []
+            config = make()
+            if when == "always" and change:
+                change(config)
+            try:
+                for at in range(14):
+                    late = when == "late" and at in (7, 10)
+                    if late:
+                        change(config)
+                    x = torch.full((3, 4), 0.25 * (at + 1), device=device)
+                    x.requires_grad_(graded)
+                    del GRAPH_NAME_LOG[:]
+                    try:
+                        out = run(x, config)
+                        if graded:
+                            out.backward()
+                        grad = None if x.grad is None else x.grad.sum().item()
+                        found.append((out.item(), grad, list(GRAPH_NAME_LOG)))
+                    finally:
+                        if late:
+                            back(config)
+            finally:
+                if when == "always" and back:
+                    back(config)
+                del GRAPH_NAME_LOG[:]
+            return found
+
+        ways = (((), False), ((keep,), False), ((), True))
+        for name, (fn, make, change, back) in GRAPH_NAME_CASES.items():
+            for when in ("always", "late") if change else ("always",):
+                for behind, graded in ways:
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{name}, {when}, pass {bool(behind)}, gradient {graded}"
+                    got = calls(compiled, make, change, back, when, graded)
+                    eager = (fn, make, change, back, when, graded)
+                    twice = [calls(*eager) for _ in range(2)]
+                    expected = [shorter(a, b) for a, b in zip(*twice)]
+                    self.assertTrue(got == expected, msg=f"{msg}: {got} {expected}")
+                    # The key is compared in every call it is there in.
+                    logged = sum(len(row[2]) for row in expected)
+                    self.assertEqual(logged, 14 if when == "always" else 2, msg=msg)
+                    if when == "late" and (behind or graded):
+                        # With plain keys the whole function is one graph.
+                        found = [g for g in torch.vm.regions(compiled) if "ops" in g]
+                        ran = sum(g["hits"] for g in found if g["ops"] >= 9)
+                        self.assertGreaterEqual(ran, 6, msg=f"{msg}: {found}")
 
     def test_a_form_runs_only_under_the_checks_of_its_path(self, device):
         # Two calls that take the same instructions are one path only if
