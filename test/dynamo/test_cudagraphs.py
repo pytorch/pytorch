@@ -264,14 +264,17 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10, device=device)
 
+        capture = (
+            torch.cuda.graph(torch.cuda.CUDAGraph())
+            if self.device_type == "cuda"
+            else torch.xpu.graph(torch.xpu.XPUGraph())
+        )
         # Should raise TorchRuntimeError when trying to compile during capture
-        with self.assertRaisesRegex(
+        with capture, self.assertRaisesRegex(
             TorchRuntimeError,
             rf"cannot JIT compile during {self.device_type.upper()} graph capture",
         ):
-            graph = torch.accelerator.Graph()
-            with torch.Stream(device=device), graph:
-                comp_fn(x)
+            comp_fn(x)
 
         self.assertEqual(comp_fn(x), fn(x))
 

@@ -6035,16 +6035,16 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
         def test_graph_partition_cross_device_custom_op_fallback(self, device):
             device = torch.device(device)
 
-            @torch.library.custom_op("mylib::cpu_to_cuda", mutates_args=())
-            def cpu_to_cuda(x: torch.Tensor) -> torch.Tensor:
+            @torch.library.custom_op("mylib::cpu_to_device", mutates_args=())
+            def cpu_to_device(x: torch.Tensor) -> torch.Tensor:
                 return x.to(device)
 
-            @cpu_to_cuda.register_fake
+            @cpu_to_device.register_fake
             def _(x):
                 return torch.empty_like(x, device=device)
 
             def f(x):
-                return cpu_to_cuda(x) + 1
+                return cpu_to_device(x) + 1
 
             compiled_f = torch.compile(f, mode="reduce-overhead", fullgraph=True)
 
@@ -6054,7 +6054,7 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
                 compiled_out = compiled_f(x)
                 self.assertEqual(eager_out, compiled_out)
 
-            # Only the downstream CUDA add should be recorded.
+            # Only the downstream add should be recorded.
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
         @config.patch(implicit_fallbacks=True)
@@ -6062,29 +6062,29 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
         def test_graph_partition_cross_device_out_variant_custom_op(self, device):
             # With a Tag.out overload, the op lowers to ExternKernelOut rather
             # than FallbackKernel.
-            device = torch.device(device, self.device_idx)
+            device = torch.device(device)
 
-            def to_cuda(x):
+            def to_device(x):
                 return x.to(device)
 
-            def to_cuda_out(x, *, out):
+            def to_device_out(x, *, out):
                 return out.copy_(x)
 
             with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-                lib.define("to_cuda(Tensor x) -> Tensor")
+                lib.define("to_device(Tensor x) -> Tensor")
                 lib.define(
-                    "to_cuda.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
+                    "to_device.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
                     tags=(torch.Tag.out,),
                 )
-                lib.impl("to_cuda", to_cuda, "CompositeExplicitAutograd")
-                lib.impl("to_cuda.out", to_cuda_out, "CompositeExplicitAutograd")
+                lib.impl("to_device", to_device, "CompositeExplicitAutograd")
+                lib.impl("to_device.out", to_device_out, "CompositeExplicitAutograd")
 
-                @torch.library.register_fake("mylib::to_cuda", lib=lib)
+                @torch.library.register_fake("mylib::to_device", lib=lib)
                 def _(x):
                     return torch.empty_like(x, device=device)
 
                 def f(x):
-                    return torch.ops.mylib.to_cuda(x) + 1
+                    return torch.ops.mylib.to_device(x) + 1
 
                 compiled_f = torch.compile(f, mode="reduce-overhead", fullgraph=True)
 
@@ -6094,7 +6094,7 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
                     compiled_out = compiled_f(x)
                     self.assertEqual(eager_out, compiled_out)
 
-                # Only the downstream CUDA add should be recorded.
+                # Only the downstream add should be recorded.
                 self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
         @config.patch(implicit_fallbacks=True)
