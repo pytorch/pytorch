@@ -5156,6 +5156,11 @@ pub struct Def {
     /// tensors and from constants. A check of such a value behind the
     /// callable cannot fail.
     pub fixed: bool,
+    /// What an effect of the path gives (the token of a `set` of a context
+    /// variable): it is made where the path lands, behind everything else
+    /// the path runs. Only another effect takes it, a test for None (which
+    /// it is not), a variable, and what the function gives back.
+    pub lands: bool,
 }
 
 /// The binary operators a graph computes on integers: + - * // %.
@@ -5583,7 +5588,7 @@ fn define(unit: &Unit, cx: &PassCx, roles: &[Role], defs: &mut HashMap<V, Def>, 
     }
     if inst.dst != NONE {
         let graph = late && !node && computes(&inst.op, defs, cx, unit);
-        defs.insert(inst.dst, Def { node, late, graph, made: false, own: false, fixed: false });
+        defs.insert(inst.dst, Def { node, late, graph, made: false, own: false, fixed: false, lands: false });
     }
     true
 }
@@ -6581,6 +6586,18 @@ impl Trace {
 
     pub fn push(&mut self, op: Op, dst: PathValue, kind: Kind, bc: u32) {
         let owner = self.owner();
+        // What is made where the path lands (`Def::lands`) is there for
+        // the effects behind it and for nothing that runs in front of
+        // them: `Compiled::record_inst` ends the path in front of an
+        // instruction of a function that takes it, and a run in which
+        // anything else took it is no run to make a form of.
+        if kind != Kind::Effect {
+            let mut lands = false;
+            reads(&op, |v| lands |= v != NONE && self.defs[v as usize].lands);
+            if lands && self.rec.failed.is_none() {
+                self.rec.failed = Some("an instruction takes what is made where the path lands".to_string());
+            }
+        }
         self.note(&op, dst, kind);
         self.body.push(PathInst { op, dst, kind, bc, stage: Stage::Before, in_graph: false, assert: None, owner, named: None, again: NONE });
     }
@@ -6659,7 +6676,7 @@ impl Trace {
         if late && !graph && !fixed && !infallible(&op) {
             self.fails_late();
         }
-        let dst = self.value(Def { node: false, late, graph, made, own: false, fixed }, kept);
+        let dst = self.value(Def { node: false, late, graph, made, own: false, fixed, lands: false }, kept);
         self.push(op, dst, kind, bc);
         dst
     }
@@ -7241,7 +7258,7 @@ impl Path {
         let mut there = vec![false; nregs];
         trace.inputs.iter().for_each(|(_, v)| there[*v as usize] = true);
         outputs.iter().for_each(|v| there[*v as usize] = true);
-        for inst in trace.body.iter().filter(|inst| matches!(inst.stage, Stage::Before | Stage::After)) {
+        for inst in trace.body.iter().filter(|inst| matches!(inst.stage, Stage::Before | Stage::After | Stage::Landing)) {
             if inst.dst != NONE {
                 there[inst.dst as usize] = true;
             }
