@@ -402,6 +402,9 @@ pub struct Path {
     /// them, as they are or as an item of a tuple it builds. What such a
     /// value holds is held by the function when the path has landed.
     pub handed: Vec<V>,
+    /// Per register: an instruction of the path made what it holds
+    /// (`Def::made`), which is the path's own to change and to use up.
+    pub made: Vec<bool>,
 }
 
 // The registers are empty between calls, and only touched with the GIL held.
@@ -1851,8 +1854,6 @@ unsafe fn class_named(module: &std::ffi::CStr, name: &std::ffi::CStr) -> Obj {
 ///   out of sight. Whether the storage ends with the tensor (another
 ///   tensor may share it) cannot be asked from here either.
 ///
-/// - the Python object of its storage has attributes of its own (C++
-///   keeps that object for the storage, and it ends with the storage);
 /// - a level of forward-mode differentiation is open (a tangent is held
 ///   for the tensor from C++, and cannot be asked for without the level);
 /// - it is not laid out plainly (`plainly_laid_out`): sparse, quantized,
@@ -1860,10 +1861,11 @@ unsafe fn class_named(module: &std::ffi::CStr, name: &std::ffi::CStr) -> Obj {
 ///   tensor, each of which has parts that C++ holds for it.
 ///
 /// Ok with what C++ holds for the tensor that can be handed over (new
-/// references): its `.grad` where it has one, and, for a view, the tensor
-/// it is a view of, whose Python object C++ keeps for as long as a view
-/// needs it. They are looked at like what the tensor refers to, whatever
-/// their counts of references say.
+/// references): the Python object of its storage, which C++ keeps for
+/// the storage and which ends with it; its `.grad` where it has one; and,
+/// for a view, the tensor it is a view of, whose Python object C++ keeps
+/// for as long as a view needs it. They are looked at like what the
+/// tensor refers to, whatever their counts of references say.
 unsafe fn unseen(o: Obj) -> Result<Vec<PyObj>, ()> {
     static NAMES: std::sync::OnceLock<(PyObj, PyObj)> = std::sync::OnceLock::new();
     if holds_unseen(o) {
@@ -1876,23 +1878,24 @@ unsafe fn unseen(o: Obj) -> Result<Vec<PyObj>, ()> {
         let name = |text: &std::ffi::CStr| PyObj::from_owned(ffi::PyUnicode_InternFromString(text.as_ptr()));
         (name(c"untyped_storage"), name(c"resizable"))
     });
-    let own = {
-        let memory = ffi::PyObject_CallMethodNoArgs(o, storage.as_ptr());
-        let said = if memory.is_null() { null_mut() } else { ffi::PyObject_CallMethodNoArgs(memory, resizable.as_ptr()) };
-        // What the storage's Python object has of its own ends with it.
-        let slot = if memory.is_null() { std::ptr::null_mut() } else { pyffi::_PyObject_GetDictPtr(memory) };
-        let bare = slot.is_null() || (*slot).is_null() || ffi::PyDict_Size(*slot) == 0;
-        let own = said == ffi::Py_True() && bare;
-        xdecref(said);
-        xdecref(memory);
-        own
-    };
+    let memory = ffi::PyObject_CallMethodNoArgs(o, storage.as_ptr());
     // A tensor without a storage of this kind says so by raising.
+    if memory.is_null() {
+        ffi::PyErr_Clear();
+        return Err(());
+    }
+    let memory = PyObj::from_owned(memory);
+    let said = ffi::PyObject_CallMethodNoArgs(memory.as_ptr(), resizable.as_ptr());
+    let own = said == ffi::Py_True();
+    xdecref(said);
     ffi::PyErr_Clear();
     if !own || forward_level() || !plainly_laid_out(o) {
         return Err(());
     }
-    let mut held = Vec::new();
+    // The Python object of the storage ends with the storage: it is
+    // looked at like any object that ends (what it has of its own, a
+    // weak reference on it that is told, a finalizer).
+    let mut held = vec![memory];
     for name in [c"grad", c"_base"] {
         let found = ffi::PyObject_GetAttrString(o, name.as_ptr());
         if found.is_null() {
@@ -4830,17 +4833,27 @@ pub fn container(op: &Op) -> bool {
 fn why(unit: &Unit, cx: &PassCx, i: usize) -> String {
     let u = &unit.insts[i];
     let reason = cx.reasons.get(u.origin as usize).and_then(|r| r.as_ref());
-    why_not(cx.func(), &u.inst.op, facts(cx, unit, i), reason)
+    why_not(cx.func(), &u.inst.op, facts(cx, unit, i), reason, false)
 }
 
 /// Why an instruction is no part of a graph, from what the profiling tier
-/// saw it do (`found`) and why it is no call site (`reason`).
-pub fn why_not(func: &Function, op: &Op, found: Option<&InstFacts>, reason: Option<&String>) -> String {
+/// saw it do (`found`) and why it is no call site (`reason`). `behind`:
+/// the path it would be on has taken down something that can fail behind
+/// what stands for the graph, which is why an operation that draws random
+/// numbers is none of it.
+pub fn why_not(func: &Function, op: &Op, found: Option<&InstFacts>, reason: Option<&String>, behind: bool) -> String {
     let no_site = || match reason {
         Some(reason) => format!("runs kernels and is no call site: {}", reason),
         None => "runs kernels and is no call site".to_string(),
     };
     let kernels = found.is_some_and(|f| matches!(f.kernels, Kernels::One | Kernels::Many));
+    let behind = if behind { " behind what can fail" } else { "" };
+    // The operators of a call that is no call site, where all that keeps
+    // it from being an operation is that it draws.
+    let draws = found.filter(|_| kernels).and_then(|f| {
+        let drawn: Vec<&str> = f.operators.iter().filter(|name| !pure_operator(name)).map(|name| name.as_str()).collect();
+        (!drawn.is_empty() && drawn.iter().all(|name| seeded_operator(name))).then(|| drawn.join("+"))
+    });
     match op {
         Op::Dispatch(d) => {
             let operator = unsafe { d.slot.operator() }.unwrap_or_else(|| "the kernel".to_string());
@@ -4848,7 +4861,7 @@ pub fn why_not(func: &Function, op: &Op, found: Option<&InstFacts>, reason: Opti
             if traits & SITE_WRITES != 0 || found.is_some_and(|f| f.wrote) {
                 format!("{} writes to an argument", operator)
             } else if traits & SITE_RANDOM != 0 {
-                format!("{} draws random numbers", operator)
+                format!("{} draws random numbers{}", operator, behind)
             } else if traits & SITE_SCALAR != 0 {
                 format!("{} gives a number read from a tensor", operator)
             } else {
@@ -4871,6 +4884,7 @@ pub fn why_not(func: &Function, op: &Op, found: Option<&InstFacts>, reason: Opti
                 format!("calls {}", name)
             }
             Some(CalleeFact::Many) => "calls more than one function".to_string(),
+            _ if draws.is_some() => format!("{} draws random numbers{}", draws.unwrap_or_default(), behind),
             _ if kernels => no_site(),
             _ if found.is_some_and(|f| f.frames) => "calls Python code".to_string(),
             _ if found.is_some_and(|f| f.runs > 0) => "a call that runs no kernel".to_string(),
@@ -5148,6 +5162,7 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
         inputs,
         stages: stages_of(&body),
         handed: Vec::new(),
+        made: Vec::new(),
         body,
         feeds,
         held: vec![true; outputs.len()],
@@ -5558,6 +5573,76 @@ impl Trace {
         self.classes.iter().find(|(made, _)| *made == object).map(|(_, class)| *class)
     }
 
+    /// Whether a value may be something the path made (a list, a dict, an
+    /// iterator, an object), at this call or at another one. A value is
+    /// one only if the path made it, if it was taken out of something
+    /// that may hold one (an item, an entry, what an iterator gives), if
+    /// it is an attribute of one (the dict of an object, a method bound
+    /// to it), or if an instruction that is no operation of the graph
+    /// was handed one, or something that holds one, and may give it back
+    /// (a call: the default of a `get`). What comes from in front of the
+    /// path, and what is read of an object from outside, is none: nothing
+    /// of the path's is stored there before the path lands. What a thing
+    /// holds is what it was built of and what the changes of the path put
+    /// into it.
+    pub fn from_own(&self, v: PathValue) -> bool {
+        if v == NONE || v == UNDEF {
+            return false;
+        }
+        let mut own: Vec<bool> = self.defs.iter().map(|def| def.made).collect();
+        let mut holds = vec![false; own.len()];
+        loop {
+            let mut more = false;
+            for inst in &self.body {
+                let either = |u: PathValue| own[u as usize] || holds[u as usize];
+                let any = || {
+                    let mut any = false;
+                    inst.op.for_each_use(|u| any |= either(u));
+                    any
+                };
+                // What a change puts into a thing.
+                let put = match &inst.op {
+                    Op::ListAppend(into, item) | Op::CellSet(into, item) => Some((*into, either(*item))),
+                    Op::StoreAttr { obj, val, .. } => Some((*obj, either(*val))),
+                    Op::MapAdd(into, key, item) => Some((*into, either(*key) || either(*item))),
+                    Op::ListExtend(into, more) | Op::DictMerge(into, more, _) => Some((*into, holds[*more as usize])),
+                    _ => None,
+                };
+                if let Some((into, put)) = put.filter(|_| inst.kind == Kind::Residual) {
+                    more |= put && !std::mem::replace(&mut holds[into as usize], true);
+                    continue;
+                }
+                let dst = inst.dst;
+                if dst == NONE || inst.kind == Kind::Effect || self.defs[dst as usize].node {
+                    continue;
+                }
+                let (is, has) = match &inst.op {
+                    // What is taken out of something is one of the things
+                    // that holds, which may hold more.
+                    Op::GetItem(of, _) | Op::IterNext(of) | Op::TupleGet(of, _) | Op::CellGet(of, ..) | Op::Part(_, of) => {
+                        (holds[*of as usize], holds[*of as usize])
+                    }
+                    // An attribute may also be a part of the thing (the
+                    // dict of an object) or hold it (a bound method).
+                    Op::LoadAttr(of, _) => (either(*of), either(*of)),
+                    // The iterator of an iterator is that iterator; a new
+                    // one gives what the thing holds.
+                    Op::GetIter(of) => (own[*of as usize], holds[*of as usize]),
+                    Op::ListToTuple(of) => (false, holds[*of as usize]),
+                    // What is built of values holds them and is none of them.
+                    op if container(op) || matches!(op, Op::BuildMap(_)) => (false, any()),
+                    // Anything else may give back what it was handed.
+                    _ => (any(), any()),
+                };
+                more |= is && !std::mem::replace(&mut own[dst as usize], true);
+                more |= has && !std::mem::replace(&mut holds[dst as usize], true);
+            }
+            if !more {
+                return own[v as usize];
+            }
+        }
+    }
+
     /// Whether the trace is in the function it started in.
     pub fn outermost(&self) -> bool {
         self.acts.len() == 1
@@ -5963,6 +6048,7 @@ impl Path {
             registers: Shared::new(Vec::new()),
             stages: Default::default(),
             handed: Vec::new(),
+            made: Vec::new(),
         }
     }
 
@@ -6022,159 +6108,213 @@ impl Path {
             let held = values[v as usize];
             !held.is_null() && unsafe { checkable(held) || (!capi::is_unboxed(held) && ffi::PyType_Check(held) != 0) }
         };
-        // A method of the interpreter's, read off a tensor that an
-        // operation of the graph gave and bound to it.
-        let method_of_result = |op: &Op, dst: PathValue| match op {
-            Op::LoadAttr(of, _) if dst != NONE && defs[*of as usize].node => {
-                let (held, tensor) = (values[dst as usize], values[*of as usize]);
-                !held.is_null() && unsafe { ffi::PyCFunction_Check(held) != 0 && (*(held as *mut ffi::PyCFunctionObject)).m_self == tensor }
+        // A method of the interpreter's, bound to what it was read off: a
+        // tensor that an operation of the graph gave, or a list, a dict or
+        // a set that the path made, of exactly that class. Nothing in such
+        // a read can fail or run code, at any call.
+        let bound_method = |op: &Op, dst: PathValue| match op {
+            Op::LoadAttr(of, _) if dst != NONE => {
+                let (held, of, def) = (values[dst as usize], values[*of as usize], defs[*of as usize]);
+                let builtin = |class: *mut ffi::PyTypeObject| unsafe { ffi::Py_TYPE(of) == class };
+                let plain = !of.is_null()
+                    && (builtin(std::ptr::addr_of_mut!(ffi::PyList_Type))
+                        || builtin(std::ptr::addr_of_mut!(ffi::PyDict_Type))
+                        || builtin(std::ptr::addr_of_mut!(ffi::PySet_Type)));
+                (def.node || (def.made && plain))
+                    && !held.is_null()
+                    && unsafe { ffi::PyCFunction_Check(held) != 0 && (*(held as *mut ffi::PyCFunctionObject)).m_self == of }
             }
             _ => false,
         };
+        // Which thing a value of the path is: the first value that was the
+        // same object in the run that was taken down (the iterator of an
+        // iterator is that iterator).
+        let first = &trace.rec.kept;
+        let thing = |v: PathValue| {
+            let held = values[v as usize];
+            if held.is_null() { v } else { first.get(&(held as usize)).map_or(v, |(_, first)| *first) }
+        };
+        // What an instruction changes of what the path made: the list it
+        // appends to or extends, the object or the dict it stores into,
+        // the cell it puts into, the iterator it takes the next item of.
+        let changes = |inst: &PathInst| {
+            let mut target = NONE;
+            if inst.kind == Kind::Residual && !matches!(inst.op, Op::Hold(_) | Op::StoreLocal(..) | Op::GetIter(_)) {
+                inst.op.for_each_use(|v| {
+                    if target == NONE {
+                        target = v;
+                    }
+                });
+            }
+            target
+        };
+        // The things that something that runs takes, wherever on the path
+        // it stands: a change to one of them runs too. An object is held
+        // by reference, so what took it in front of the change (a store, a
+        // list of the caller's, another list of the path) has the change,
+        // and what takes the next item of an iterator needs every item in
+        // front of it taken. The instructions are gone over from the last
+        // to the first, which finds a use behind a change and not one in
+        // front of it: they are gone over again with what the last time
+        // found, until that finds no more.
+        let mut alive = vec![false; nregs];
+        let (first_need, first_kept) = (need, kept);
+        let (mut need, mut kept) = (first_need.clone(), first_kept.clone());
         // The values that are no tensors and that the graph computes.
         let mut wanted = vec![false; nregs];
         let (mut outputs, mut exits) = (Vec::new(), Vec::new());
         let (mut branches, mut calls) = (0, 0);
         let constants: std::cell::RefCell<Vec<PathValue>> = std::cell::RefCell::new(Vec::new());
-        for inst in trace.body.iter_mut().rev() {
-            let dst = inst.dst;
-            let needed = dst != NONE && need[dst as usize];
-            let def = if dst == NONE { Def::default() } else { defs[dst as usize] };
-            // What an operation of the graph, or a value the graph computes,
-            // takes: of what depends on a node, the graph computes it too,
-            // and it has the lists the path builds as what they hold; the
-            // rest is there in front of the callable.
-            let takes = |op: &Op, wanted: &mut [bool], need: &mut [bool]| {
-                reads(op, |v| match defs[v as usize] {
-                    // Computed behind the callable and the same whenever
-                    // the form is for the call: a constant of the graph.
-                    taken if taken.late && taken.fixed && !taken.node && !taken.graph => {
-                        need[v as usize] = true;
-                        if !constants.borrow().contains(&v) {
-                            constants.borrow_mut().push(v);
-                        }
-                    }
-                    taken if (taken.late && !taken.node) || built[v as usize] => wanted[v as usize] = true,
-                    taken if !taken.late => need[v as usize] = true,
-                    _ => {}
-                })
-            };
-            let uses = |op: &Op, need: &mut [bool]| {
-                let mut late = false;
-                op.for_each_use(|v| {
-                    need[v as usize] = true;
-                    late |= defs[v as usize].late;
-                });
-                if late { Stage::After } else { Stage::Before }
-            };
-            inst.stage = match inst.kind {
-                Kind::Node => {
-                    if needed {
-                        outputs.push(dst);
-                    }
-                    takes(&inst.op, &mut wanted, &mut need);
-                    Stage::Inside
-                }
-                Kind::Check => {
-                    let assert = inst.assert.as_ref().expect("a check has what it checks");
-                    let v = assert.value() as usize;
-                    match assert {
-                        // What is the same in every call a form is for was
-                        // checked when the path was taken down: the tensor
-                        // it is computed from need not be given back for it.
-                        Assert::Truth(..) | Assert::Null(..) | Assert::Guard(_) if defs[v].late && defs[v].fixed => {
-                            branches += matches!(assert, Assert::Truth(..) | Assert::Null(..)) as usize;
-                            Stage::Skipped
-                        }
-                        // A guard on what a node returns looks at what the
-                        // graph says of it.
-                        Assert::Guard(cond) if defs[v].node => {
-                            exits.push(cond.clone());
-                            Stage::Inside
-                        }
-                        _ => {
-                            branches += matches!(assert, Assert::Truth(..) | Assert::Null(..)) as usize;
-                            calls += matches!(assert, Assert::Enters(..)) as usize;
-                            need[v] = true;
-                            let mut late = defs[v].late;
-                            if let Assert::Same(_, other) | Assert::Apart(_, _, other, _) = assert {
-                                need[*other as usize] = true;
-                                // Which object one that the path made is
-                                // does not wait for what is put into it.
-                                let own = matches!(assert, Assert::Apart(..)) && trace.classes.iter().any(|(made, _)| made == other);
-                                late |= defs[*other as usize].late && !own;
+        loop {
+            for inst in trace.body.iter_mut().rev() {
+                inst.in_graph = false;
+                let dst = inst.dst;
+                let needed = dst != NONE && need[dst as usize];
+                let def = if dst == NONE { Def::default() } else { defs[dst as usize] };
+                // What an operation of the graph, or a value the graph computes,
+                // takes: of what depends on a node, the graph computes it too,
+                // and it has the lists the path builds as what they hold; the
+                // rest is there in front of the callable.
+                let takes = |op: &Op, wanted: &mut [bool], need: &mut [bool]| {
+                    reads(op, |v| match defs[v as usize] {
+                        // Computed behind the callable and the same whenever
+                        // the form is for the call: a constant of the graph.
+                        taken if taken.late && taken.fixed && !taken.node && !taken.graph => {
+                            need[v as usize] = true;
+                            if !constants.borrow().contains(&v) {
+                                constants.borrow_mut().push(v);
                             }
-                            if late { Stage::After } else { Stage::Before }
                         }
-                    }
-                }
-                // What it stores is there when the path lands: what the
-                // graph computed is one of its results.
-                Kind::Effect => {
-                    inst.op.for_each_use(|v| need[v as usize] = true);
-                    Stage::Landing
-                }
-                Kind::Residual => {
-                    // What changes something the path made goes with it.
-                    let mut target = NONE;
-                    inst.op.for_each_use(|v| {
-                        if target == NONE {
-                            target = v;
-                        }
+                        taken if (taken.late && !taken.node) || built[v as usize] => wanted[v as usize] = true,
+                        taken if !taken.late => need[v as usize] = true,
+                        _ => {}
+                    })
+                };
+                let uses = |op: &Op, need: &mut [bool]| {
+                    let mut late = false;
+                    op.for_each_use(|v| {
+                        need[v as usize] = true;
+                        late |= defs[v as usize].late;
                     });
-                    let kept = needed || (dst == NONE && target != NONE && need[target as usize]);
-                    if kept && !matches!(inst.op, Op::Hold(_) | Op::StoreLocal(..)) {
-                        uses(&inst.op, &mut need)
-                    } else {
-                        Stage::Skipped
-                    }
-                }
-                _ if dst != NONE && wanted[dst as usize] => {
-                    inst.in_graph = true;
-                    takes(&inst.op, &mut wanted, &mut need);
-                    if needed && container(&inst.op) {
-                        // What is read behind the path is made there.
-                        uses(&inst.op, &mut need)
-                    } else {
+                    if late { Stage::After } else { Stage::Before }
+                };
+                inst.stage = match inst.kind {
+                    Kind::Node => {
                         if needed {
                             outputs.push(dst);
                         }
+                        takes(&inst.op, &mut wanted, &mut need);
                         Stage::Inside
                     }
+                    Kind::Check => {
+                        let assert = inst.assert.as_ref().expect("a check has what it checks");
+                        let v = assert.value() as usize;
+                        match assert {
+                            // What is the same in every call a form is for was
+                            // checked when the path was taken down: the tensor
+                            // it is computed from need not be given back for it.
+                            Assert::Truth(..) | Assert::Null(..) | Assert::Guard(_) if defs[v].late && defs[v].fixed => {
+                                branches += matches!(assert, Assert::Truth(..) | Assert::Null(..)) as usize;
+                                Stage::Skipped
+                            }
+                            // A guard on what a node returns looks at what the
+                            // graph says of it.
+                            Assert::Guard(cond) if defs[v].node => {
+                                exits.push(cond.clone());
+                                Stage::Inside
+                            }
+                            _ => {
+                                branches += matches!(assert, Assert::Truth(..) | Assert::Null(..)) as usize;
+                                calls += matches!(assert, Assert::Enters(..)) as usize;
+                                need[v] = true;
+                                let mut late = defs[v].late;
+                                if let Assert::Same(_, other) | Assert::Apart(_, _, other, _) = assert {
+                                    need[*other as usize] = true;
+                                    // Which object one that the path made is
+                                    // does not wait for what is put into it.
+                                    let own = matches!(assert, Assert::Apart(..)) && trace.classes.iter().any(|(made, _)| made == other);
+                                    late |= defs[*other as usize].late && !own;
+                                }
+                                if late { Stage::After } else { Stage::Before }
+                            }
+                        }
+                    }
+                    // What it stores is there when the path lands: what the
+                    // graph computed is one of its results.
+                    Kind::Effect => {
+                        inst.op.for_each_use(|v| need[v as usize] = true);
+                        Stage::Landing
+                    }
+                    Kind::Residual => {
+                        // What changes something the path made goes with it.
+                        let target = changes(inst);
+                        let taken = target != NONE && (need[target as usize] || alive[thing(target) as usize]);
+                        if (needed || taken) && !matches!(inst.op, Op::Hold(_) | Op::StoreLocal(..)) {
+                            uses(&inst.op, &mut need)
+                        } else {
+                            Stage::Skipped
+                        }
+                    }
+                    _ if dst != NONE && wanted[dst as usize] => {
+                        inst.in_graph = true;
+                        takes(&inst.op, &mut wanted, &mut need);
+                        if needed && container(&inst.op) {
+                            // What is read behind the path is made there.
+                            uses(&inst.op, &mut need)
+                        } else {
+                            if needed {
+                                outputs.push(dst);
+                            }
+                            Stage::Inside
+                        }
+                    }
+                    // An integer the graph computes is one it can give.
+                    _ if needed && def.late && def.graph && !container(&inst.op) => {
+                        inst.in_graph = true;
+                        outputs.push(dst);
+                        takes(&inst.op, &mut wanted, &mut need);
+                        Stage::Inside
+                    }
+                    _ if needed => uses(&inst.op, &mut need),
+                    // What nothing uses is left out of a run only where it
+                    // cannot fail: anything else is what shows that the call
+                    // gets this far (an attribute that is read for nothing
+                    // and may be gone, a call whose answer is dropped), and
+                    // a call in which it raises is not the path's. What is
+                    // computed behind the graph and is the same in every call
+                    // the form is for did not fail when the path was taken
+                    // down, and does the same again.
+                    // Nor is a method that was read off a tensor the graph
+                    // gives, which the operation that calls it stands for,
+                    // or off a list, a dict or a set the path made (the
+                    // `append` of a list that a loop fills).
+                    _ if !idle(&inst.op) && !(def.late && def.fixed) && !bound_method(&inst.op, dst) => uses(&inst.op, &mut need),
+                    _ => Stage::Skipped,
+                };
+                // What is put into something the path made is held where that
+                // is, which may be anywhere; a check holds nothing.
+                let holds = match (inst.stage, inst.kind) {
+                    (Stage::Landing, _) => true,
+                    (Stage::Before | Stage::After, Kind::Residual) => true,
+                    (Stage::Before | Stage::After, Kind::Check) => false,
+                    (Stage::Before | Stage::After, _) => dst != NONE && kept[dst as usize] && !plain(dst),
+                    _ => false,
+                };
+                if holds {
+                    inst.op.for_each_use(|v| kept[v as usize] = true);
                 }
-                // An integer the graph computes is one it can give.
-                _ if needed && def.late && def.graph && !container(&inst.op) => {
-                    inst.in_graph = true;
-                    outputs.push(dst);
-                    takes(&inst.op, &mut wanted, &mut need);
-                    Stage::Inside
-                }
-                _ if needed => uses(&inst.op, &mut need),
-                // What nothing uses is left out of a run only where it
-                // cannot fail: anything else is what shows that the call
-                // gets this far (an attribute that is read for nothing
-                // and may be gone, a call whose answer is dropped), and
-                // a call in which it raises is not the path's. What is
-                // computed behind the graph and is the same in every call
-                // the form is for did not fail when the path was taken
-                // down, and does the same again.
-                // Nor is a method that was read off a tensor the graph
-                // gives, which the operation that calls it stands for.
-                _ if !idle(&inst.op) && !(def.late && def.fixed) && !method_of_result(&inst.op, dst) => uses(&inst.op, &mut need),
-                _ => Stage::Skipped,
-            };
-            // What is put into something the path made is held where that
-            // is, which may be anywhere; a check holds nothing.
-            let holds = match (inst.stage, inst.kind) {
-                (Stage::Landing, _) => true,
-                (Stage::Before | Stage::After, Kind::Residual) => true,
-                (Stage::Before | Stage::After, Kind::Check) => false,
-                (Stage::Before | Stage::After, _) => dst != NONE && kept[dst as usize] && !plain(dst),
-                _ => false,
-            };
-            if holds {
-                inst.op.for_each_use(|v| kept[v as usize] = true);
             }
+            let mut found = alive.clone();
+            (0..nregs).filter(|v| need[*v]).for_each(|v| found[thing(v as PathValue) as usize] = true);
+            let left_out = |inst: &PathInst| inst.stage == Stage::Skipped && changes(inst) != NONE && found[thing(changes(inst)) as usize];
+            if !trace.body.iter().any(left_out) {
+                break;
+            }
+            alive = found;
+            (need, kept) = (first_need.clone(), first_kept.clone());
+            wanted.iter_mut().for_each(|wanted| *wanted = false);
+            (outputs.clear(), exits.clear(), constants.borrow_mut().clear());
+            (branches, calls) = (0, 0);
         }
         outputs.reverse();
         exits.reverse();
@@ -6211,6 +6351,7 @@ impl Path {
             nregs,
             stages: stages_of(&trace.body),
             handed: handed_of(&trace.inputs, &trace.body, &writes, &bound),
+            made: trace.defs.iter().map(|def| def.made).collect(),
             inputs: trace.inputs.clone(),
             body: std::mem::take(&mut trace.body),
             feeds,
