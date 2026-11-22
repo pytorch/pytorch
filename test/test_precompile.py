@@ -4824,6 +4824,10 @@ def single(model, x):
     return model(x).sum(dim=0)
 
 
+def scaled(model, x, scale):
+    return model(x).sin() * scale
+
+
 def reads_version(model, x):
     # Dynamo records the _version read as prims::_tensor_version.
     y = model(x) + 0
@@ -6218,6 +6222,22 @@ class TestPrecompileDynamoCapture(TestCase):
             meta = _parse_artifact_metadata(artifact.read())
         self.assertFalse(meta["CUDAGRAPH_CONFIG"]["triton.cudagraph_trees"])
 
+    @parametrize("partition", [True, False])
+    def test_a_float_argument_stays_dynamic_unless_graph_partition_is_off(
+        self, partition
+    ):
+        traced = self._compiles_see("triton.cudagraphs")
+        options = {"triton.cudagraphs": True, "graph_partition": partition}
+        with self._capture(self.mod.scaled, options=options) as cap:
+            for scale in (1.0, 2.0, 3.0):
+                cap(self.model, self.x2, scale)
+        # Dynamo traces under the ambient config (CUDA graphs off), as under
+        # torch.compile, unless the graphs are unpartitioned.
+        self.assertEqual(set(traced), {not partition})
+        # The second value recompiles with scale as a dynamic input, which covers
+        # the third; specialized, each value is its own variant.
+        self.assertEqual(len(traced), 2 if partition else 3)
+
     def test_a_graph_compiled_without_cudagraphs_loads_with_the_flag_on(self):
         # Load post-compiles each graph under the loading process's
         # triton.cudagraphs; one compiled without CUDA graphs has nothing to be
@@ -6629,6 +6649,10 @@ def calls_breaking_helper(model, x):
     return breaking_helper(model(x)) + 1
 
 
+def scaled(model, x, scale):
+    return model(x).sin() * scale
+
+
 def turns_cudagraphs_on(model, x):
     with torch._dynamo.override_cudagraphs(fwd=True):
         return step(model, x)
@@ -6677,13 +6701,14 @@ f = torch.compiler.precompile.load(artifact, cache)
 assert cudagraph_config() == ambient
 training = saved["expected_grad"] is not None
 with contextlib.nullcontext() if training else torch.no_grad():
-    for _ in range(3):
+    for i in range(3):
         if saved["mark_step"]:
             torch.compiler.cudagraph_mark_step_begin()
         model.zero_grad(set_to_none=True)
+        args, expected = saved["calls"][i % len(saved["calls"])]
         # y stays alive into the next call, as in a loop that uses its output.
-        y = f(model, saved["x"])
-        torch.testing.assert_close(y, saved["expected"])
+        y = f(model, *args)
+        torch.testing.assert_close(y, expected)
         if training:
             y.sum().backward()
             torch.testing.assert_close(model.lin.weight.grad, saved["expected_grad"])
@@ -6745,20 +6770,23 @@ class TestPrecompileCudagraphs(TestCase):
         return self.model.lin.weight.grad.clone()
 
     def _serve_in_fresh_process(
-        self, expected, env=None, mark_step=False, expected_grad=None
+        self, expected, env=None, mark_step=False, expected_grad=None, args=None
     ):
-        # Calls the loaded artifact three times in a fresh process, whose
-        # triton.cudagraphs is off unless env turns it on, and returns what that
-        # process counted:
+        # Calls the loaded artifact three times, on the model and args (self.x
+        # by default; a list gives each call its own args and expected), in a
+        # fresh process whose triton.cudagraphs is off unless env turns it on,
+        # and returns what that process counted:
         #   recorded: the nodes in its CUDA graph tree
         #   captured: every CUDA graph captured, a tree manager's pool graph too
         #   trees: whether it made a CUDA graph tree manager
         #   skips: its cudagraph skips
         # With expected_grad, each call also runs the backward.
         state = os.path.join(self.dir, "state.pt")
+        calls = [((self.x,) if args is None else args, expected)]
+        if isinstance(args, list):
+            calls = list(zip(args, expected))
         saved = {
-            "x": self.x,
-            "expected": expected,
+            "calls": calls,
             "expected_grad": expected_grad,
             "mark_step": mark_step,
         }
@@ -6804,6 +6832,25 @@ class TestPrecompileCudagraphs(TestCase):
         record = {"triton.cudagraphs": True, "triton.cudagraph_trees": True}
         self.assertEqual(meta["CUDAGRAPH_CONFIG"], record)
         self.assertGreater(self._serve_in_fresh_process(y)["recorded"], 0)
+
+    def test_a_float_that_changed_during_capture_serves_values_it_never_saw(self):
+        # Dynamo traces the calls under the ambient config, so the float becomes
+        # one dynamic input, which the partitioned graph copies to the device
+        # outside its CUDA graph.
+        fn = self.mod.scaled
+        options = {"triton.cudagraphs": True, "graph_partition": True}
+        with torch.no_grad():
+            with capture(
+                fn, artifact_path=self.artifact, cache_path=self.cache, options=options
+            ) as cap:
+                cap(self.model, self.x, 1.0)
+                cap(self.model, self.x, 2.0)
+            # A value per call: a replay must not bake in the one it recorded.
+            args = [(self.x, scale) for scale in (3.0, 4.0, 5.0)]
+            expected = [fn(self.model, *a) for a in args]
+        served = self._serve_in_fresh_process(expected, args=args)
+        self.assertGreater(served["recorded"], 0)
+        self.assertEqual(served["skips"], 0)
 
     def test_a_training_artifact_serves_its_forward_and_backward_as_cudagraphs(self):
         step = self.mod.step
