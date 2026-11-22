@@ -605,6 +605,15 @@ class SourceInfo:
             )
         )
 
+    def check_unchanged(self) -> None:
+        for code in self.inlined_sources:
+            m = importlib.import_module(code.module)
+            checksum = _hash_sourcelines(m, code.firstlineno, code.lastlineno)
+            if checksum != code.checksum:
+                raise RuntimeError(
+                    f"Source code changes detected for {code.module} (line {code.firstlineno} - line {code.lastlineno})"
+                )
+
 
 @dataclasses.dataclass
 class _DynamoCodeCacheEntry:
@@ -1264,14 +1273,7 @@ class CompilePackage:
                 raise AssertionError(f"Expected _DynamoCacheEntry, got {type(dynamo)}")
             dynamo.check_versions()
             if not ignore_inlined_sources:
-                for code in dynamo.source_info.inlined_sources:
-                    m = importlib.import_module(code.module)
-                    checksum = _hash_sourcelines(m, code.firstlineno, code.lastlineno)
-                    if checksum != code.checksum:
-                        raise RuntimeError(
-                            f"Source code changes detected for {code.module} (line {code.firstlineno} - line {code.lastlineno})"
-                        )
-
+                dynamo.source_info.check_unchanged()
                 self._source_info = dynamo.source_info
 
             main, *codes = dynamo.codes
