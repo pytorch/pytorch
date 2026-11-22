@@ -185,7 +185,9 @@ unsafe fn holds_now(condition: &Condition) -> bool {
             let version = pyffi::dict_version(globals.as_ptr());
             let (seen_version, mut value) = seen.get();
             if seen_version != version {
-                value = ffi::PyDict_GetItemWithError(globals.as_ptr(), name.as_ptr());
+                // Not looked into, and so not falsy, where a key is not
+                // plain (`graph::entry`).
+                value = crate::graph::entry(globals.as_ptr(), name.as_ptr()).unwrap_or(null_mut());
                 seen.set((version, value));
             }
             !value.is_null() && falsy(value) == Some(true)
@@ -212,9 +214,13 @@ unsafe fn resolve(
     ty: *mut ffi::PyTypeObject,
     dict: Obj,
 ) -> Option<(Obj, [Obj; MAX_WATCHED])> {
+    // The shortcut looks into the dict of the object in place of the
+    // function it stands for, and not as often: not where a key of the
+    // dict is not plain (`graph::quiet_keys`).
     let target = pyffi::_PyType_Lookup(ty, shortcut.target.as_ptr());
     if target.is_null()
         || ffi::PyFunction_Check(target) == 0
+        || !crate::graph::quiet_keys(dict)
         || !ffi::PyDict_GetItemWithError(dict, shortcut.target.as_ptr()).is_null()
     {
         return None;
@@ -360,57 +366,39 @@ pub unsafe fn has_getattr(ty: *mut ffi::PyTypeObject) -> bool {
     getattr_shortcut(ty) != 0
 }
 
-/// Whether one of the dicts of a getattr shortcut has the name, for an
-/// object of a type that has such a shortcut: the lookup then ends there,
-/// without the function the shortcut stands for.
-pub unsafe fn finds(obj: Obj, name: Obj) -> bool {
-    let which = getattr_shortcut(ffi::Py_TYPE(obj));
-    let shortcut = registry().borrow().getattrs.get(which.wrapping_sub(1)).copied();
-    let dict = instance_dict(obj);
-    let (Some(shortcut), false) = (shortcut, dict.is_null()) else {
-        return false;
-    };
+/// What the dicts of a getattr shortcut have under a name, in the dict
+/// of an object: the first that has it ends the lookup, without the
+/// function the shortcut stands for. Borrowed; null where none has it.
+/// `Err` where a dict that would be looked into has a key that is not
+/// plain (`graph::entry`): the function looks there itself, as often as
+/// it does.
+unsafe fn within(shortcut: &GetattrShortcut, dict: Obj, name: Obj) -> Result<Obj, ()> {
     for key in &shortcut.dicts {
-        let entries = ffi::PyDict_GetItemWithError(dict, key.as_ptr());
+        let entries = crate::graph::entry(dict, key.as_ptr())?;
         if entries.is_null() {
             continue;
         }
         if ffi::PyDict_Check(entries) == 0 {
             break;
         }
-        if !ffi::PyDict_GetItemWithError(entries, name).is_null() {
-            return true;
+        let held = crate::graph::entry(entries, name)?;
+        if !held.is_null() {
+            return Ok(held);
         }
     }
-    ffi::PyErr_Clear();
-    false
+    Ok(null_mut())
 }
 
-/// What one of the dicts of a getattr shortcut has under the name, for an
-/// object of a type that has such a shortcut (see `finds`): borrowed, or
-/// null.
-pub unsafe fn found(obj: Obj, name: Obj) -> Obj {
+/// `within`, for an object of a type that has a getattr shortcut; null
+/// for any other.
+pub unsafe fn among(obj: Obj, name: Obj) -> Result<Obj, ()> {
     let which = getattr_shortcut(ffi::Py_TYPE(obj));
     let shortcut = registry().borrow().getattrs.get(which.wrapping_sub(1)).copied();
     let dict = instance_dict(obj);
-    let (Some(shortcut), false) = (shortcut, dict.is_null()) else {
-        return null_mut();
-    };
-    for key in &shortcut.dicts {
-        let entries = ffi::PyDict_GetItemWithError(dict, key.as_ptr());
-        if entries.is_null() {
-            continue;
-        }
-        if ffi::PyDict_Check(entries) == 0 {
-            break;
-        }
-        let held = ffi::PyDict_GetItemWithError(entries, name);
-        if !held.is_null() {
-            return held;
-        }
+    match shortcut {
+        Some(shortcut) if !dict.is_null() => within(shortcut, dict, name),
+        _ => Ok(null_mut()),
     }
-    ffi::PyErr_Clear();
-    null_mut()
 }
 
 /// `getattr(obj, name)` through a getattr shortcut. Returns a new reference;
@@ -431,21 +419,10 @@ pub unsafe fn load_attr(obj: Obj, name: Obj) -> Obj {
     let shortcut = registry().borrow().getattrs.get(which - 1).copied();
     let dict = instance_dict(obj);
     if let (Some(shortcut), false) = (shortcut, dict.is_null()) {
-        for key in &shortcut.dicts {
-            let entries = ffi::PyDict_GetItemWithError(dict, key.as_ptr());
-            if entries.is_null() {
-                continue;
-            }
-            if ffi::PyDict_Check(entries) == 0 {
-                break;
-            }
-            let value = ffi::PyDict_GetItemWithError(entries, name);
+        if let Ok(value) = within(shortcut, dict, name) {
             if !value.is_null() {
                 ffi::Py_INCREF(value);
                 return value;
-            }
-            if !ffi::PyErr_Occurred().is_null() {
-                return null_mut();
             }
         }
     }

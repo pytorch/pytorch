@@ -87,9 +87,9 @@ unsafe fn constant_range(
     };
     let name = func.consts[*name as usize].as_ptr();
     let range = std::ptr::addr_of_mut!(ffi::PyRange_Type) as *mut ffi::PyObject;
-    let shadowed = !ffi::PyDict_GetItemWithError(func.globals.as_ptr(), name).is_null();
-    if shadowed || ffi::PyDict_GetItemWithError(func.builtins.as_ptr(), name) != range {
-        ffi::PyErr_Clear();
+    // Not shown where a key of one of the two is not plain (`graph::entry`).
+    let clear = crate::graph::entry(func.globals.as_ptr(), name).is_ok_and(|held| held.is_null());
+    if !clear || crate::graph::entry(func.builtins.as_ptr(), name) != Ok(range) {
         return None;
     }
     let count = func.consts[*count as usize].as_ptr();
