@@ -56,8 +56,8 @@ inline float fp8e8m0fnu_to_fp32(uchar input) {
   return as_type<float>(uint(input) << 23);
 }
 
-// Rounds |value| to the nearest power of two, ties going up, like
-// torch/headeronly/util/Float8_e8m0fnu.h; NaN and infinity map to NaN.
+// Keeps the exponent of |value|, rounding the mantissa to nearest even; NaN and
+// infinity map to NaN.
 inline uchar fp8e8m0fnu_from_fp32(float value) {
   const uint bits = as_type<uint>(value);
   uint exponent = (bits >> 23) & 0xff;
@@ -66,8 +66,9 @@ inline uchar fp8e8m0fnu_from_fp32(float value) {
   }
   const bool guard = bits & 0x400000;
   const bool round = bits & 0x200000;
-  // Subnormals (exponent 0) only round up from 1.5 * 2^-127.
-  return exponent + (exponent > 0 ? guard : (guard && round));
+  const bool sticky = bits & 0x1fffff;
+  const bool lsb = exponent > 0;
+  return exponent + (guard && (round || sticky || lsb));
 }
 
 } // namespace detail
