@@ -1969,6 +1969,7 @@ class TestDeserializeSymExpr(TestCase):
         deserializer.shape_env = ShapeEnv()
         deserializer.sympy_functions = {}
         deserializer.symbol_name_to_symbol = {}
+        deserializer.sym_expr_cache = {}
         deserializer.symbol_name_to_range = symbol_name_to_range or {}
         deserializer.unbacked_symbols = set()
         return deserializer
@@ -1985,6 +1986,18 @@ class TestDeserializeSymExpr(TestCase):
         self.assertEqual(sympify.call_count, 1)
         self.assertEqual(len(expr.free_symbols), 64)
         self.assertEqual(len(deserializer.symbol_name_to_symbol), 65)
+
+    def test_parses_a_repeated_string_once(self) -> None:
+        deserializer = self._deserializer({"s0": ValueRanges(2, 8)})
+
+        with patch.object(sympy, "sympify", wraps=sympy.sympify) as sympify:
+            first = deserializer._parse_sym_expr("2*s0 + 1", hint=5)
+            second = deserializer._parse_sym_expr("2*s0 + 1", hint=5)
+
+        self.assertEqual(sympify.call_count, 1)
+        self.assertIs(first, second)
+        s0 = deserializer.symbol_name_to_symbol["s0"]
+        self.assertEqual(deserializer.shape_env.var_to_range[s0], ValueRanges(2, 8))
 
     def test_processes_nested_subexpressions(self) -> None:
         deserializer = self._deserializer(

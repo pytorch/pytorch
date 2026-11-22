@@ -3,6 +3,7 @@ import base64
 import copy
 import copyreg
 import dataclasses
+import functools
 import heapq
 import inspect
 import io
@@ -2446,10 +2447,16 @@ class GraphModuleDeserializer(metaclass=Final):
                     self.shape_env.var_to_stack[sym] = CapturedTraceback.extract(skip=1)
             return sym
 
-        expr = sympy.sympify(
-            expr_str,
-            locals={**self.sympy_functions, **self.symbol_name_to_symbol},
-        )
+        # A program repeats the same few expressions on every node. Every symbol
+        # a parse creates is registered in symbol_name_to_symbol, so parsing
+        # the same string again would give the same expression.
+        expr = self.sym_expr_cache.get(expr_str)
+        if expr is None:
+            expr = sympy.sympify(
+                expr_str,
+                locals={**self.sympy_functions, **self.symbol_name_to_symbol},
+            )
+            self.sym_expr_cache[expr_str] = expr
         return _process_sym_expr(expr, hint)
 
     def deserialize_sym_int(self, s: SymInt) -> int | torch.SymInt:
@@ -2987,6 +2994,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 "Identity": torch.utils._sympy.functions.Identity,
             }
             self.symbol_name_to_symbol: dict[str, sympy.Symbol] = {}
+            self.sym_expr_cache: dict[str, sympy.Expr] = {}
 
             # deserialization does analysis with checks on 0/1, so we create fake range constraints and
             # restore the original range constraints afterwards
@@ -3757,6 +3765,11 @@ def _resolve_schema_cls(cls):
     return cls
 
 
+@functools.cache
+def _schema_type_hints(cls: type) -> dict[str, Any]:
+    return typing.get_type_hints(cls, globalns=vars(schema))
+
+
 def _dict_to_dataclass(cls, data):
     cls = _resolve_schema_cls(cls)
     if isinstance(cls, str):
@@ -3781,13 +3794,13 @@ def _dict_to_dataclass(cls, data):
         _value = next(iter(data.values()))
         if not isinstance(_type, str):
             raise AssertionError(f"expected str key, got {type(_type).__name__}")
-        type_hints = typing.get_type_hints(cls, globalns=vars(schema))
+        type_hints = _schema_type_hints(cls)
         field_type = type_hints[_type]
         # pyrefly: ignore [missing-attribute]
         return cls.create(**{_type: _dict_to_dataclass(field_type, _value)})
     elif dataclasses.is_dataclass(cls):
         fields = {}
-        type_hints = typing.get_type_hints(cls, globalns=vars(schema))
+        type_hints = _schema_type_hints(cls)
         # For forward compatibility consideration, we ignore all the keys
         # that are not showing up in the dataclass definition.
         for f in dataclasses.fields(cls):
