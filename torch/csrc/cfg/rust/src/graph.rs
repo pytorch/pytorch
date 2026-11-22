@@ -3654,13 +3654,23 @@ pub unsafe fn quiet_attr(obj: Obj, name: Obj, api: &TcfgApi) -> bool {
         return quiet_super(obj, name);
     }
     if ffi::PyType_Check(obj) != 0 {
-        // A class: what it has itself, or else what `type` has for it.
-        if ty != std::ptr::addr_of_mut!(ffi::PyType_Type) {
+        // A class whose class reads attributes as `type` does (`type`
+        // itself, or a class made of it without a `__getattribute__` or
+        // a `__getattr__` of its own: an enum class, an abstract one).
+        // As `type` reads: what the class of the class has under the
+        // name if that takes stores too; else what the class has
+        // itself; else what the class of the class has. Each is given
+        // out by C code, or the read is none of a path.
+        let reads = (*ty).tp_getattro.map(|own| own as usize) == (*std::ptr::addr_of!(ffi::PyType_Type)).tp_getattro.map(|own| own as usize);
+        if !reads {
             return false;
         }
-        let own = pyffi::_PyType_Lookup(obj as *mut ffi::PyTypeObject, name);
         let meta = pyffi::_PyType_Lookup(ty, name);
-        return if own.is_null() { !meta.is_null() } else { !python_descriptor(own) };
+        if !meta.is_null() && (*ffi::Py_TYPE(meta)).tp_descr_set.is_some() {
+            return !python_descriptor(meta);
+        }
+        let own = pyffi::_PyType_Lookup(obj as *mut ffi::PyTypeObject, name);
+        return if own.is_null() { !meta.is_null() && !python_descriptor(meta) } else { !python_descriptor(own) };
     }
     // The lookup of `object`, or that and then a `__getattr__` for what it
     // does not find: of the latter, only one that has a shortcut is known.

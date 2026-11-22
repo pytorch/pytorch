@@ -7,6 +7,7 @@ import collections.abc
 import copy
 import dataclasses
 import dis
+import enum
 import functools
 import gc
 import importlib
@@ -12371,6 +12372,38 @@ def graph_pops_by_a_method_of_another_dict(x, given):
     return (h * take(given, 2.5)).sum()
 
 
+GRAPH_META_LOG = []
+
+
+class GraphMeta(type):
+    pass
+
+
+class GraphKinds(metaclass=GraphMeta):
+    scale = 2.0
+
+
+class GraphColor(enum.Enum):
+    RED = 1
+    BLUE = 2
+
+
+def graph_reads_of_classes(x, color):
+    h = torch.relu(x) + 1
+    if color is GraphColor.RED:
+        h = h * GraphKinds.scale
+    out = (torch.tanh(h * 2) * 2 - 1).sum()
+    return out + (2.0 if color is GraphColor.BLUE else 1.0)
+
+
+class GraphWithinBehindAMember(GraphWithinModel):
+    def forward(self, x):
+        h = torch.tanh(self.shared(x) * 2) - 1
+        if GraphColor.RED is GraphColor.BLUE:
+            h = h + 1
+        return self.inner(h).sum()
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -15291,11 +15324,14 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
         # and was cut back in front of the call holds none of it, even
         # where the first operation is one of a module that the caller
         # calls too: the graph of the function is one of its own, which
-        # runs at every call and is counted.
+        # runs at every call and is counted. The
+        # third model is the same behind a read of an attribute of an enum
+        # class.
         def keep(gm, input_types):
             return gm
 
-        models = ((GraphWithinModel, False), (GraphWithinModel, True))
+        member = (GraphWithinBehindAMember, True)
+        models = ((GraphWithinModel, False), (GraphWithinModel, True), member)
         for model_class, loud in models:
             for graded in (False, True):
                 model = model_class(loud).to(device)
@@ -15462,6 +15498,53 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
                         self.graph_goes_to_the_return(compiled, msg)
         finally:
             GRAPH_NAMED.clear()
+
+    def test_an_attribute_of_a_class_whose_class_reads_as_type_does(self, device):
+        # A class whose class is not `type` (an enum class, a class with
+        # a metaclass) has its attributes read as `type` reads them
+        # while its class has no `__getattribute__` and no `__getattr__`
+        # of its own: such a read is part of a path, and whether it
+        # still runs no Python code is asked at every call. A property
+        # that the class of the class gets under the name answers
+        # first, and logs: the calls with it are eager's, log included
+        # (never three of them in a row, which would give the graph up).
+        def keep(gm, input_types):
+            return gm
+
+        def logs(cls):
+            GRAPH_META_LOG.append("read")
+            return 3.0
+
+        def calls(run, graded):
+            del GRAPH_META_LOG[:]
+            found = []
+            for at in range(16):
+                if at in (9, 10, 13):
+                    GraphMeta.scale = property(logs)
+                x = torch.full((3, 4), 0.25 * (at + 1), device=device)
+                x.requires_grad_(graded)
+                out = run(x, GraphColor.RED if at % 4 else GraphColor.BLUE)
+                if graded:
+                    out.backward()
+                found.append((out.item(), len(GRAPH_META_LOG)))
+                if "scale" in vars(GraphMeta):
+                    del GraphMeta.scale
+            return found
+
+        fn = graph_reads_of_classes
+        try:
+            for behind, graded in (((), False), ((keep,), False), ((), True)):
+                passes = (*DEFAULT, P.Graphs(), *behind)
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                msg = f"with a pass: {bool(behind)}, with a gradient: {graded}"
+                got, expected = calls(compiled, graded), calls(fn, graded)
+                self.assertTrue(got == expected, msg=f"{msg}: {got} {expected}")
+                if behind or graded:
+                    self.graph_goes_to_the_return(compiled, msg)
+        finally:
+            if "scale" in vars(GraphMeta):
+                del GraphMeta.scale
+            del GRAPH_META_LOG[:]
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
