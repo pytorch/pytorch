@@ -897,9 +897,13 @@ that is hashed without Python code and is alone under its hash, since
 taking the entry out hashes and compares it. A tensor that ends has to be
 of the class `torch.Tensor` itself, require no gradient (what a history
 holds, a hook or what a `torch.autograd.Function` kept for its backward, is
-not to be seen) and have memory that is torch's own (a tensor over a numpy
-array, a buffer or a DLPack capsule keeps their owner alive); its
-attributes and its `.grad` are looked at. An object that shows the
+not to be seen), have memory that is torch's own (a tensor over a numpy
+array, a buffer or a DLPack capsule keeps their owner alive) and a storage
+whose Python object has no attributes, and be one dense block (not sparse,
+quantized or nested, and no wrapper around another tensor); its attributes,
+its `.grad` and, for a view, the tensor it is a view of are looked at, and
+while a level of forward-mode differentiation is open, in which a tensor
+may have a tangent, no tensor ends quietly. An object that shows the
 collector nothing (a capsule, a numpy array, a storage) is taken to end
 with Python code unless its class is known to hold nothing. A call for
 which that cannot be shown runs the operations of the function as they are:
@@ -938,11 +942,8 @@ all(torch.equal(a, b) for a, b in zip(got, expected)), STATE[0]  # (True, 1.5)
 What an object refers to is what it shows the garbage collector, and no
 more than 4,096 objects that end are looked at (with more, the call runs
 the operations). Objects in a reference cycle end when the collector runs,
-as they do in eager mode. Not seen is what a tensor keeps alive through
-another tensor or through its storage: the base of a view, where the view
-is the last to hold it and an attribute was set on the base; the tangent of
-a dual tensor; an attribute set on a storage. What a pass's own callable
-does is not looked at ("Limits").
+as they do in eager mode. What a pass's own callable does is not looked at
+("Limits").
 
 A call in which a path is taken down holds on to what the path reads until
 the run has been described. Where the function lets go, in such a call, of
