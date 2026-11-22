@@ -52,7 +52,7 @@ if TYPE_CHECKING:
     # False as emitted; load(allow_serve_time_compiles=True) flips it to True.
     _ALLOW_SERVE_TIME_COMPILES: bool = False
     # The Inductor config the subgraphs are post-compiled under: CUDA graphs on
-    # if any of them compiled for CUDA graphs.
+    # if any of them compiled for CUDA graphs, and the capture's cudagraph_trees.
     CUDAGRAPH_CONFIG: dict[str, bool] = {}
     # The capture's normalized mode/options, which a serve-time compile uses;
     # None when they have no literal form.

@@ -6192,6 +6192,32 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("passed through", out.stdout)
 
+    def _compiles_see(self, key):
+        # Appends torch._inductor.config's key as each Dynamo compile starts.
+        from torch._dynamo import callback
+
+        seen = []
+
+        def record(args):
+            if args.callback_trigger == callback.CallbackTrigger.DYNAMO:
+                seen.append(operator.attrgetter(key)(torch._inductor.config))
+
+        callback.on_compile_start(record)
+        self.addCleanup(callback.callback_handler.remove_start_callback, record)
+        return seen
+
+    def test_a_capture_holds_cudagraph_trees_to_the_value_it_records(self):
+        seen = self._compiles_see("triton.cudagraph_trees")
+        # Read when capture() is called: the options over the ambient config.
+        options = {"triton.cudagraph_trees": False}
+        with self._capture(self.mod.single, options=options) as cap:
+            with torch._inductor.config.patch({"triton.cudagraph_trees": True}):
+                cap(self.model, self.x2)
+        self.assertEqual(seen, [False])
+        with open(self.artifact) as artifact:
+            meta = _parse_artifact_metadata(artifact.read())
+        self.assertFalse(meta["CUDAGRAPH_CONFIG"]["triton.cudagraph_trees"])
+
     def test_a_graph_compiled_without_cudagraphs_loads_with_the_flag_on(self):
         # Load post-compiles each graph under the loading process's
         # triton.cudagraphs; one compiled without CUDA graphs has nothing to be
@@ -6210,7 +6236,8 @@ class TestPrecompileDynamoCapture(TestCase):
             y = cap(self.model, self.x2)
         self.assertEqual(y, single(self.model, self.x2))
         # No graph compiled for CUDA graphs; an eager capture has none to wrap.
-        record = {"triton.cudagraphs": False}
+        trees = torch._inductor.config.triton.cudagraph_trees
+        record = {"triton.cudagraphs": False, "triton.cudagraph_trees": trees}
         with open(self.artifact) as artifact:
             meta = _parse_artifact_metadata(artifact.read())
         self.assertEqual(meta["CUDAGRAPH_CONFIG"], {} if backend == "eager" else record)
@@ -6638,11 +6665,16 @@ def counting_capture_begin(self, *args, **kwargs):
     return capture_begin(self, *args, **kwargs)
 
 
+def cudagraph_config():
+    triton = torch._inductor.config.triton
+    return triton.cudagraphs, triton.cudagraph_trees
+
+
 torch.cuda.CUDAGraph.capture_begin = counting_capture_begin
-ambient = torch._inductor.config.triton.cudagraphs
+ambient = cudagraph_config()
 f = torch.compiler.precompile.load(artifact, cache)
 # load() patches the artifact's config around the post-compile, and sets nothing.
-assert torch._inductor.config.triton.cudagraphs == ambient
+assert cudagraph_config() == ambient
 training = saved["expected_grad"] is not None
 with contextlib.nullcontext() if training else torch.no_grad():
     for _ in range(3):
@@ -6662,6 +6694,7 @@ for node in nodes:
 served = {
     "recorded": len(nodes),
     "captured": captured,
+    "trees": manager is not None,
     "skips": counters["inductor"]["cudagraph_skips"],
     "compiles": counters["frames"]["ok"],
 }
@@ -6719,6 +6752,7 @@ class TestPrecompileCudagraphs(TestCase):
         # process counted:
         #   recorded: the nodes in its CUDA graph tree
         #   captured: every CUDA graph captured, a tree manager's pool graph too
+        #   trees: whether it made a CUDA graph tree manager
         #   skips: its cudagraph skips
         # With expected_grad, each call also runs the backward.
         state = os.path.join(self.dir, "state.pt")
@@ -6767,7 +6801,8 @@ class TestPrecompileCudagraphs(TestCase):
         else:
             kwargs = {"options": {"triton.cudagraphs": True}}
         y, meta = self._capture_step(self.mod.step, **kwargs)
-        self.assertEqual(meta["CUDAGRAPH_CONFIG"], {"triton.cudagraphs": True})
+        record = {"triton.cudagraphs": True, "triton.cudagraph_trees": True}
+        self.assertEqual(meta["CUDAGRAPH_CONFIG"], record)
         self.assertGreater(self._serve_in_fresh_process(y)["recorded"], 0)
 
     def test_a_training_artifact_serves_its_forward_and_backward_as_cudagraphs(self):
@@ -6777,6 +6812,16 @@ class TestPrecompileCudagraphs(TestCase):
         served = self._serve_in_fresh_process(y, expected_grad=grad)
         # One graph for the forward, one for the backward.
         self.assertEqual(served["recorded"], 2)
+
+    def test_an_artifact_serves_cudagraphs_without_trees_as_captured(self):
+        config = {"triton.cudagraphs": True, "triton.cudagraph_trees": False}
+        y, meta = self._capture_step(self.mod.step, options=config)
+        self.assertEqual(meta["CUDAGRAPH_CONFIG"], config)
+        # The loading process leaves triton.cudagraph_trees at its default (on).
+        served = self._serve_in_fresh_process(y)
+        self.assertFalse(served["trees"])
+        self.assertGreater(served["captured"], 0)
+        self.assertEqual(served["skips"], 0)
 
     @parametrize("how", ["ambient", "options"])
     def test_an_artifact_captured_without_cudagraphs_serves_none(self, how):
