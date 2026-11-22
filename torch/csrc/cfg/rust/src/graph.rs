@@ -4993,6 +4993,24 @@ fn idle(op: &Op) -> bool {
     }
 }
 
+/// Whether a change of something the path made can be left out of a run
+/// together with the thing: like every instruction that is left out
+/// (`idle`), only one that cannot fail and runs no Python code whatever it
+/// is given. An append, a store into an object of the path and a variable
+/// that is bound are such. An entry that is put into a dict is one only
+/// under a key that is the same at every call (a constant): any other key
+/// may be one that cannot be hashed at another call, or that is hashed in
+/// Python. What goes over a value from outside the path to extend a list or
+/// to fill a dict is none. `own` says whether the path built or made a
+/// value.
+fn leaves_quietly(op: &Op, defs: &[Def], own: impl Fn(PathValue) -> bool) -> bool {
+    match op {
+        Op::MapAdd(_, key, _) => defs[*key as usize].fixed,
+        Op::ListExtend(_, more) | Op::DictMerge(_, more, _) => own(*more),
+        _ => true,
+    }
+}
+
 /// A list, a tuple or a slice that the instructions make.
 pub fn container(op: &Op) -> bool {
     matches!(op, Op::BuildTuple(_) | Op::BuildList(_) | Op::BuildSlice(..))
@@ -6671,10 +6689,14 @@ impl Path {
                         Stage::Landing
                     }
                     Kind::Residual => {
-                        // What changes something the path made goes with it.
+                        // What changes something the path made goes with it,
+                        // unless it can fail: then it runs, and the thing
+                        // with it, so that a call in which it fails is not
+                        // the path's.
                         let target = changes(inst);
                         let taken = target != NONE && (need[target as usize] || alive[thing(target) as usize]);
-                        if (needed || taken) && !matches!(inst.op, Op::Hold(_) | Op::StoreLocal(..)) {
+                        let fails = !leaves_quietly(&inst.op, defs, |v| defs[v as usize].made || built[v as usize]);
+                        if (needed || taken || fails) && !matches!(inst.op, Op::Hold(_) | Op::StoreLocal(..)) {
                             uses(&inst.op, &mut need)
                         } else {
                             Stage::Skipped
