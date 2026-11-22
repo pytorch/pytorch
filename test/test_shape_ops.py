@@ -804,6 +804,16 @@ class TestShapeOps(TestCase):
         self.assertEqual(dst1, dst4, atol=0, rtol=0)
         self.assertEqual(strides, dst4.stride())
 
+    # https://github.com/pytorch/pytorch/issues/170175
+    def test_nonzero_strides_match_cpu(self, device):
+        shapes = ((4,), (8, 8), (4, 5, 6), (0, 3))
+        inputs = [torch.randint(0, 2, s, device=device) for s in shapes]
+        inputs.append(torch.zeros(4, 4, dtype=torch.long, device=device))
+        for x in inputs:
+            out, expected = x.nonzero(), x.cpu().nonzero()
+            self.assertEqual(out, expected)
+            self.assertEqual(out.stride(), expected.stride())
+
     def test_nonzero_non_diff(self, device):
         x = torch.randn(10, requires_grad=True, device=device)
         nz = x.nonzero()
