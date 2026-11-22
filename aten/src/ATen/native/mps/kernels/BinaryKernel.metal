@@ -4,6 +4,7 @@
 #include <metal_stdlib>
 using namespace metal;
 using c10::metal::float8_e4m3fn;
+using c10::metal::float8_e8m0fnu;
 
 struct add_functor {
   template <typename T>
@@ -663,9 +664,11 @@ struct logical_xor_functor {
   REGISTER_BINARY_OP(NAME, half2, bool);          \
   REGISTER_BINARY_CASTOUT_OP(NAME, half2, bool)
 
-#define REGISTER_FP8_EQ_OP(NAME)                 \
-  REGISTER_BINARY_OP(NAME, float8_e4m3fn, bool); \
-  REGISTER_BINARY_CASTOUT_OP(NAME, float8_e4m3fn, bool)
+#define REGISTER_FP8_EQ_OP(NAME)                         \
+  REGISTER_BINARY_OP(NAME, float8_e4m3fn, bool);         \
+  REGISTER_BINARY_CASTOUT_OP(NAME, float8_e4m3fn, bool); \
+  REGISTER_BINARY_OP(NAME, float8_e8m0fnu, bool);        \
+  REGISTER_BINARY_CASTOUT_OP(NAME, float8_e8m0fnu, bool)
 
 REGISTER_FLOAT_BINARY_OP(hypot);
 REGISTER_FLOAT_BINARY_OP(atan2);
