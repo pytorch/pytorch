@@ -130,11 +130,17 @@ the function ran on that way, less the operations: the reads, the tests and
 the other instructions that take nothing the graph gives run in front of
 it, at every call, and those that do run behind it. An instruction whose
 value nothing uses is left out only if it cannot fail whatever it is given
-(a tuple that is built, a constant, a test for `None`). An attribute or an
+(a tuple that is built, a constant, a test for `None`; the `append` that a
+loop reads off a list the function made, each time round). An attribute or an
 item that is read for nothing, a call whose answer is dropped, a division
 stay: they are what shows that the call gets as far as the path does. In a
 call in which one of them raises, the path is not taken: the instructions
-run, and raise where they stand.
+run, and raise where they stand. What changes something the path made
+itself (an append to a list it built, the next item of an iterator it
+made) is left out only together with the thing: where anything that runs
+takes the list or the iterator, in front of the change or behind it, the
+change runs, in its place. A list that the function stores into an object
+and appends to afterwards is held there by reference, and has the item.
 
 ```python
 class Settings:
@@ -169,6 +175,12 @@ loop on a count), with the test of the loop as a branch each time round. The
 number of times round is no input of the graph: it is the path. The calls of
 `len`, `range`, `enumerate`, `zip` and `isinstance` that such loops are
 written with are part of a path.
+
+Going over an iterator uses it up, so a path goes over an iterator only if
+it made it itself, of a list, a tuple, a dict or a `range` (`iter`,
+`enumerate`, `zip`, the loop's own). Where the value that was a list when
+the path was taken down is an iterator of the caller's at a later call,
+that call runs the instructions, which use the iterator up once.
 
 ```python
 def loop(x, n):
@@ -905,12 +917,13 @@ taking the entry out hashes and compares it. A tensor that ends has to be
 of the class `torch.Tensor` itself, require no gradient (what a history
 holds, a hook or what a `torch.autograd.Function` kept for its backward, is
 not to be seen), have memory that is torch's own (a tensor over a numpy
-array, a buffer or a DLPack capsule keeps their owner alive) and a storage
-whose Python object has no attributes, and be one dense block (not sparse,
-quantized or nested, and no wrapper around another tensor); its attributes,
-its `.grad` and, for a view, the tensor it is a view of are looked at, and
-while a level of forward-mode differentiation is open, in which a tensor
-may have a tangent, no tensor ends quietly. An object that shows the
+array, a buffer or a DLPack capsule keeps their owner alive), and be one
+dense block (not sparse, quantized or nested, and no wrapper around another
+tensor); its attributes, its `.grad`, the Python object of its storage
+(which ends with the storage: what it has of its own, a weak reference on
+it that is told, a `weakref.finalize`) and, for a view, the tensor it is a
+view of are looked at, and while a level of forward-mode differentiation is
+open, in which a tensor may have a tangent, no tensor ends quietly. An object that shows the
 collector nothing (a capsule, a numpy array, a storage) is taken to end
 with Python code unless its class is known to hold nothing. A call for
 which that cannot be shown runs the operations of the function as they are:
@@ -1627,6 +1640,22 @@ graph that writes to a tensor from outside is the exception ("Writes"): what
 was made of it is not run a second time, what it raises goes out, and the
 stores of that call are not done.
 
+A store keeps a reference to what it is given, and what the function
+changes of a list or a dict it made itself is changed in its place, in
+front of the stores: a list that is stored and then appended to has the
+item when it is stored, as it has in the function once both are done.
+`l.extend(xs)` is the one store that reads what it is given. Of a list the
+path made it takes the items the list holds where the instruction stands,
+whatever is appended to that list behind it.
+
+What is stored into is an object from outside the path. A list or a dict
+that the function made itself is changed in place, and a value that may be
+such a list without being the name it was made under (what a dict the
+function built gives under a key, the default of a `get`, what a method of
+the list is bound to) may be that very list at one call and a list from
+outside at the next: a store into such a value ends the path in front of
+it, and so does an `extend` with one.
+
 A read of what a store of the path put there, behind the store, is given the
 stored value (`self.n = k` and then `self.n`). What is stored is not one of
 the checks: a counter that is another number at every call does not make
@@ -1809,6 +1838,11 @@ What graphs do not do at this stage:
   dropped while what a pass made of the graph runs (by that code itself, or
   by another thread it waits for) ends where the path lands. A store looks
   again where it lands.
+- A function whose own lists or dicts come to hold each other (`a = []`,
+  `b = [a]`, `a.append(b)`) must not be compiled with `Graphs()` in the list
+  yet, with a pass behind it or without: where such a list is given back or
+  stored, the engine goes through what it holds without coming to an end,
+  and the call does not come back.
 - Sizes are fixed per export. Every size a graph is called with is a kind of
   call of its own, with a graph of its own, so a function that is called
   with many sizes uses up `max_variants`. Sizes of the tensors the graph
