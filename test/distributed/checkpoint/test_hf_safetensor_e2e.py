@@ -102,6 +102,47 @@ class TestSingleRankSaveLoad(TestCase):
         )
 
     @with_temp_dir
+    def test_save_tied_weights(self) -> None:
+        try:
+            from safetensors.torch import load_file
+        except ImportError:
+            print("safetensors not installed")
+            return
+
+        CHECKPOINT_DIR = self.temp_dir
+
+        class TiedModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.embed = torch.nn.Embedding(8, 4)
+                self.lm_head = torch.nn.Linear(4, 8, bias=False)
+                self.lm_head.weight = self.embed.weight
+
+        model = TiedModule()
+        dist_cp.save(
+            state_dict=model.state_dict(),
+            storage_writer=dist_cp.HuggingFaceStorageWriter(path=CHECKPOINT_DIR),
+        )
+
+        state_dict_loaded = load_file(
+            CHECKPOINT_DIR + "/model-00001-of-00001.safetensors"
+        )
+        self.assertEqual(
+            sorted(state_dict_loaded.keys()), ["embed.weight", "lm_head.weight"]
+        )
+        for key in state_dict_loaded:
+            self.assertTrue(torch.equal(state_dict_loaded[key], model.embed.weight))
+        self.assertIs(model.lm_head.weight, model.embed.weight)
+
+        new_model = TiedModule()
+        dist_cp.load(
+            state_dict=new_model.state_dict(),
+            storage_reader=dist_cp.HuggingFaceStorageReader(path=CHECKPOINT_DIR),
+        )
+        self.assertTrue(torch.equal(new_model.embed.weight, model.embed.weight))
+        self.assertIs(new_model.lm_head.weight, new_model.embed.weight)
+
+    @with_temp_dir
     def test_save_consolidated_skips_unsaved_mapping_entries(self) -> None:
         try:
             from safetensors.torch import load_file

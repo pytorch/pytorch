@@ -435,6 +435,7 @@ def _write_files_from_queue(
 
                 tensor_dict = {}
                 metadata_dict = {}
+                saved_storages: set[int] = set()
                 for tensor, write_item in loader.values():
                     if not tensor.is_cpu:
                         raise AssertionError("Tensor must be on CPU")
@@ -442,6 +443,16 @@ def _write_files_from_queue(
                         # safetensors only serializes contiguous tensors, and a
                         # state_dict may hold views such as transposed weights.
                         tensor = tensor.contiguous()
+                        # safetensors also refuses tensors that share memory,
+                        # which tied weights (e.g. embeddings and an LM head)
+                        # do. The loader already copied views smaller than
+                        # their storage, so a repeated storage is a tie: copy
+                        # it so every key is saved, as FileSystemWriter does.
+                        storage = tensor.untyped_storage().data_ptr()
+                        if storage in saved_storages:
+                            tensor = tensor.clone()
+                        else:
+                            saved_storages.add(storage)
                     write_results.append(
                         _write_item(
                             transforms,
