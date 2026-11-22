@@ -1410,10 +1410,13 @@ def register_fqn_annotation_hooks(
     """Register forward hooks that annotate CUDA graph kernels with module FQNs.
 
     For use with standalone CUDA graphs (without Inductor).  Each module's
-    forward pass is wrapped with ``mark_kernels(fqn)`` during graph capture so
-    that kernel nodes are annotated with their layer name.  Nested modules
-    produce overlapping scopes; ``resolve_pending_annotations`` picks the
-    innermost annotation for each kernel node.
+    forward pass is wrapped with ``mark_kernels({"module_name": fqn})`` during
+    graph capture so that kernel nodes are annotated with their layer name.
+    The FQN is stored under ``"module_name"`` rather than ``"name"`` so that a
+    user's own ``mark_kernels("...")`` scope nested inside a module does not
+    overwrite it.  Nested modules produce overlapping scopes;
+    ``resolve_pending_annotations`` picks the innermost annotation for each
+    kernel node.
 
     The FQN format matches the Inductor convention: ``L.<module_path>`` where
     the root module is ``L`` and submodules use dotted paths, e.g.
@@ -1449,7 +1452,7 @@ def register_fqn_annotation_hooks(
         fqn = f"L.{name}" if name else "L"
 
         def pre_hook(mod: Any, _input: Any, fqn: str = fqn) -> None:
-            cm = mark_kernels(fqn)
+            cm = mark_kernels({"module_name": fqn})
             active_cms[id(mod)].append(cm)
             cm.__enter__()
 

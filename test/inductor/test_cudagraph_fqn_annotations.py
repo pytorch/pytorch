@@ -5,12 +5,12 @@ nn.Module fully-qualified names are attached to CUDA graph kernel nodes on two
 paths:
 
   1. Inductor, driven by ``triton.cudagraph_kernel_annotations``: the generated
-     wrapper wraps kernel calls in ``mark_kernels(fqn)``.
+     wrapper wraps kernel calls in ``mark_kernels({"module_name": fqn})``.
   2. Standalone ``torch.cuda.CUDAGraph`` capture via
      ``register_fqn_annotation_hooks``.
 
 Annotations are keyed by graph node ``tools_id``; each value is a list of
-``{"name": "<fqn>"}`` dicts.  ``TestFqnAnnotationCodegen`` checks the generated
+``{"module_name": "<fqn>"}`` dicts.  ``TestFqnAnnotationCodegen`` checks the generated
 wrapper code and only needs CUDA + Triton.  ``TestCudagraphFqnAnnotations``
 checks the recorded annotations and needs ``cudaGraphNodeGetToolsId``
 (CUDA >= 13.1).
@@ -169,10 +169,10 @@ class GraphBreakLayers(nn.Module):
 
 def _all_fqn_strings(annotations) -> list:
     return [
-        ann["name"]
+        ann["module_name"]
         for ann_list in annotations.values()
         for ann in ann_list
-        if isinstance(ann, dict) and ann.get("name")
+        if isinstance(ann, dict) and ann.get("module_name")
     ]
 
 
@@ -220,7 +220,7 @@ class TestFqnAnnotationCodegen(TestCase):
 
     def _mark_kernels_args(self, model, *inputs, **kwargs) -> list[str]:
         code = self._wrapper_code(model, *inputs, **kwargs)
-        return re.findall(r"mark_kernels\('([^']*)'\)", code)
+        return re.findall(r"mark_kernels\(\{'module_name': '([^']*)'\}\)", code)
 
     def test_each_layer_has_fused_triton_and_extern_annotation(self):
         model = OuterModel(dim=64, num_layers=2).cuda()
@@ -452,8 +452,8 @@ class TestCudagraphFqnAnnotations(TestCase):
             except (TypeError, ValueError):
                 continue
             for ann in annotations.get(gid, []):
-                if isinstance(ann, dict) and ann.get("name"):
-                    recovered[gid] = ann["name"]
+                if isinstance(ann, dict) and ann.get("module_name"):
+                    recovered[gid] = ann["module_name"]
 
         seen_arg_keys = sorted({k for ke in kernel_events for k in ke.get("args", {})})
         self.assertTrue(

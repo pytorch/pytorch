@@ -1208,7 +1208,10 @@ class AnnotatedKernelCallLine(WrapperLine):
     module_fqn: str
 
     def codegen(self, code: IndentedBuffer) -> None:
-        code.writeline(f"with _graph_annotations.mark_kernels({self.module_fqn!r}):")
+        code.writeline(
+            "with _graph_annotations.mark_kernels("
+            f"{{'module_name': {self.module_fqn!r}}}):"
+        )
         with code.indent():
             self.inner.codegen(code)
 
@@ -1224,7 +1227,10 @@ class AnnotatedExternKernelBlock(WrapperLine):
     module_fqn: str
 
     def codegen(self, code: IndentedBuffer) -> None:
-        code.writeline(f"with _graph_annotations.mark_kernels({self.module_fqn!r}):")
+        code.writeline(
+            "with _graph_annotations.mark_kernels("
+            f"{{'module_name': {self.module_fqn!r}}}):"
+        )
         with code.indent():
             start = len(code._lines)
             for line in self.inner_lines:
