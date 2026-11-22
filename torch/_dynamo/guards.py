@@ -157,7 +157,6 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
-from .exc import unimplemented
 from .source import (
     AttrProxySource,
     AttrSource,
@@ -344,6 +343,8 @@ class NativeMethodMetadata(NamedTuple):
 def _native_method_metadata(
     value: object, *, portable: bool = True
 ) -> NativeMethodMetadata | None:
+    # A builtin bound to a class, like an autograd Function's ``apply``: every
+    # attribute read makes a new bound object, so only equality is portable.
     if type(value) is not types.BuiltinMethodType:
         return None
     receiver = value.__self__
@@ -404,11 +405,13 @@ def _method_identity_guards_filtered(
 
 
 def _untracked_method_identity(context: str, *, skip_frame: bool = False) -> NoReturn:
-    unimplemented(
+    exc.unimplemented(
         gb_type="Builtin method operation requires identity guards",
         context=context,
         explanation="Dynamo cannot establish the stable receiver identity required by this operation.",
-        hints=["Bind on a stable receiver and retain its identity guards."],
+        hints=[
+            "Use a stable receiver or pass the result into the saved graph or reuse hash function."
+        ],
         skip_frame=skip_frame,
         preserve_skip_frame_after_inline=skip_frame,
     )
@@ -1758,6 +1761,7 @@ class GuardBuilder(GuardBuilderBase):
         # Save the guard managers to avoid repeatedly traversing sources.
         self._cached_guard_managers: dict[str, GuardManager] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
+        self._builtin_object_sources: set[Source] = set()
         self.object_aliasing_guard_codes: list[tuple[str, str]] = []
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
@@ -2883,6 +2887,14 @@ class GuardBuilder(GuardBuilderBase):
         if code in self.already_added_code_parts:
             return
         self._set_guard_export_info(guard, [code])
+        source = guard.originating_source
+        if (
+            isinstance(source, TypeDictSource)
+            and source.base in self._builtin_object_sources
+            and key not in object.__dict__
+        ):
+            # A retained class guard already pins the immutable object dictionary.
+            return
         reason = (
             f"Dictionary {dict_ref} must not contain key {key!r}; Dynamo specialized "
             "the compiled code on this key being absent."
@@ -3591,6 +3603,8 @@ class GuardBuilder(GuardBuilderBase):
                 f"{guard.name} is not a class, but CLASS_MATCH is used"
             )
         self.id_match_unchecked(guard)
+        if val is object:
+            self._builtin_object_sources.add(guard.originating_source)
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
@@ -5487,11 +5501,8 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         if type(obj) is types.MethodWrapperType:
             # Pickle's getattr(receiver, name) can select a different subclass slot.
-            return type(self)._unpickle_method_wrapper, (
-                obj.__objclass__,
-                obj.__name__,
-                obj.__self__,
-            )
+            args = (obj.__objclass__, obj.__name__, obj.__self__)
+            return type(self)._unpickle_method_wrapper, args
 
         if obj is dict_keys:
             return type, (dict[Any, Any]().keys(),)
