@@ -3960,6 +3960,13 @@ impl Compiled {
             }
             Op::TupleGet(t, i) => Ok(new_ref(ffi::PyTuple_GET_ITEM(self.obj(regs, *t), *i as isize))),
             Op::Object(o) => Ok(new_ref(o.as_ptr())),
+            Op::ContextSet(var, value) => checked(ffi::PyContextVar_Set(self.obj(regs, *var), self.obj(regs, *value))),
+            Op::ContextReset(var, token) => {
+                if ffi::PyContextVar_Reset(self.obj(regs, *var), self.obj(regs, *token)) < 0 {
+                    return Err(());
+                }
+                Ok(new_ref(ffi::Py_None()))
+            }
             Op::Part(part, v) => {
                 let held = self.obj(regs, *v);
                 let function = ffi::PyFunction_Check(held) != 0;
@@ -5699,6 +5706,26 @@ impl Compiled {
                         Err(()) => return false,
                     }
                 }
+                // A `set` of a context variable whose token the path
+                // neither resets nor hands on: the token alone has what
+                // the variable held, and ends where the path lands.
+                Op::ContextSet(var, _) if !at(*var).is_null() && !capi::is_unboxed(at(*var)) && ffi::PyContextVar_CheckExact(at(*var)) != 0 => {
+                    let token = inst.dst;
+                    let handed = token != NONE && (path.writes.iter().any(|(made, _)| *made == token) || path.bound.iter().any(|(_, made)| *made == token));
+                    let reset = token != NONE && path.staged(Stage::Landing).any(|other| matches!(&other.op, Op::ContextReset(_, taken) if *taken == token));
+                    if !handed && !reset {
+                        let mut held: Obj = null_mut();
+                        if ffi::PyContextVar_Get(at(*var), null_mut(), &mut held) < 0 {
+                            ffi::PyErr_Clear();
+                            return false;
+                        }
+                        if !held.is_null() {
+                            // The context, or the variable, has it until then.
+                            ffi::Py_DECREF(held);
+                            take(&mut gone, held);
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -5804,6 +5831,16 @@ impl Compiled {
                     let given: Vec<Obj> = args.iter().map(|v| at(*v)).collect();
                     graph::cached(at(*callee), &given).is_some()
                 }
+                // A context variable is of a class that nothing can be
+                // made of and that cannot be changed: its `set` is C code
+                // that keeps the value and lets go of nothing (the token
+                // has what was there). The token of a `reset` is the one
+                // the `set` of this path in front of it gives, where the
+                // path lands: not used, of this variable (`Assert::Same`)
+                // and of this context, so the `reset` cannot fail, and
+                // what it takes out the registers of the path still hold.
+                Op::ContextSet(var, value) if there(*var) => ffi::PyContextVar_CheckExact(at(*var)) != 0 && (!at(*value).is_null() || !landed),
+                Op::ContextReset(var, _) if there(*var) => ffi::PyContextVar_CheckExact(at(*var)) != 0,
                 // Into what the graph gives: shown where the path lands.
                 _ => !landed,
             }
@@ -5811,9 +5848,11 @@ impl Compiled {
     }
 
     /// Does a store of a path, as the instruction it was taken down from
-    /// does it where it runs no Python code.
-    unsafe fn effect(&self, own: &mut [Obj], op: &Op, api: &TcfgApi) -> Result<(), ()> {
-        let done = match op {
+    /// does it where it runs no Python code. What the effect gives (the
+    /// token of a `set` of a context variable) is in its register from
+    /// here on.
+    unsafe fn effect(&self, own: &mut [Obj], inst: &graph::PathInst, api: &TcfgApi) -> Result<(), ()> {
+        let done = match &inst.op {
             Op::StoreAttr { obj, name, val } => {
                 let name = self.func.consts[*name as usize].as_ptr();
                 let (object, value) = (self.obj(own, *obj), self.obj(own, *val));
@@ -5831,6 +5870,10 @@ impl Compiled {
                 ffi::PyList_Append(list, item)
             }
             op => match self.exec_op(own, op) {
+                Ok(gave) if inst.dst != NONE => {
+                    capi::release(std::mem::replace(&mut own[inst.dst as usize], gave));
+                    0
+                }
                 Ok(nothing) => {
                     capi::release(nothing);
                     0
@@ -6133,7 +6176,7 @@ impl Compiled {
             }
             for inst in path.staged(Stage::Landing) {
                 let owner = &*path.owners[inst.owner as usize];
-                if owner.effect(&mut own, &inst.op, api).is_err() {
+                if owner.effect(&mut own, inst, api).is_err() {
                     leave(own);
                     return Ran::Landed(Landing { block: usize::MAX, code: std::ptr::null(), pc: inst.bc as usize });
                 }
@@ -6598,6 +6641,15 @@ impl Compiled {
                 return Taken::Went;
             }
             _ => {}
+        }
+        // What an effect of the path gives is made where the path lands.
+        let mut landed = false;
+        inst.op.for_each_use(|v| landed |= t.mapped(v) != NONE && t.defs[t.mapped(v) as usize].lands);
+        if landed {
+            return self.record_landed(t, site, (block, code as *const BlockCode, pc), regs, frames, api);
+        }
+        if let Some(taken) = self.record_context(t, inst, regs, frames) {
+            return taken;
         }
         // What the instruction is to a path, or why it is no part of one.
         let made = |t: &Trace, v: V| t.mapped(v) != NONE && t.defs[t.mapped(v) as usize].made;
@@ -7101,7 +7153,7 @@ impl Compiled {
                     let graph = late && graph::computed(&op, &t.defs, |_| false);
                     let kept = t.rec.values[v as usize];
                     ffi::Py_XINCREF(kept);
-                    let list = t.value(Def { node: false, late, graph, made: false, own: false, fixed }, kept);
+                    let list = t.value(Def { node: false, late, graph, made: false, own: false, fixed, lands: false }, kept);
                     t.source[list as usize] = t.source[v as usize];
                     t.push(op, list, Kind::Pure, inst.bc);
                     lists.push((v, list));
@@ -7474,7 +7526,7 @@ impl Compiled {
                     }
                 });
             }
-            dst = t.define(inst.dst, Def { node, late, graph, made: makes, own, fixed }, obj);
+            dst = t.define(inst.dst, Def { node, late, graph, made: makes, own, fixed, lands: false }, obj);
             capi::release(std::mem::replace(&mut regs[inst.dst as usize], obj));
         } else {
             capi::release(obj);
@@ -7674,6 +7726,142 @@ impl Compiled {
             t.kill(*v);
         }
         Some(Taken::Went)
+    }
+
+    /// Takes `var.set(value)` of a context variable down as an effect of
+    /// the path that gives something: the token. The receiver is exactly a
+    /// `contextvars.ContextVar`, a class that nothing can be made of and
+    /// that takes no attributes, so the method under the name is the one
+    /// written in C, which keeps the value, changes the context of the
+    /// thread and runs no Python code. It is done here, as the instruction
+    /// does it; where the path is run it is done when the path lands, in
+    /// the order of the effects, and not in its place: a check that fails
+    /// behind it turns the call down, the instructions run from the start
+    /// of the path and set once more, and the first token would never be
+    /// reset. So the token is there from the landing on (`Def::lands`),
+    /// and until then nothing of the path reads the variable: a `get` is a
+    /// call the path does not know and ends in front of. None for any
+    /// other instruction.
+    unsafe fn record_context(&self, t: &mut Trace, inst: &Inst, regs: &mut [Obj], frames: &mut Frames) -> Option<Taken> {
+        let (recv, name, args, held) = self.method_of(t, inst, regs)?;
+        let variable = !held.is_null() && !capi::is_unboxed(held) && ffi::PyContextVar_CheckExact(held) != 0;
+        if !variable || args.len() != 1 || pyffi::str_to_string(self.func.consts[name as usize].as_ptr()) != "set" {
+            return None;
+        }
+        let (var, value) = (self.path_value(t, regs, recv), self.path_value(t, regs, args[0]));
+        if var == UNDEF || value == UNDEF {
+            return None;
+        }
+        // That it is a context variable is shown behind the callable where
+        // the graph gives it: something that can fail there.
+        let late = t.defs[var as usize].late;
+        if late && t.writes {
+            return Some(Taken::Ends("sets what the graph gives, behind a write to a tensor from outside".to_string()));
+        }
+        frames.top().at(inst.bc & OFFSET_MASK);
+        let Ok(token) = self.exec_op(regs, &inst.op) else {
+            return Some(Taken::Raised);
+        };
+        if late {
+            t.fails_late();
+        }
+        let dst = if inst.dst == NONE {
+            capi::release(token);
+            NONE
+        } else {
+            ffi::Py_XINCREF(token);
+            let dst = t.define(inst.dst, Def { lands: true, ..Def::default() }, token);
+            capi::release(std::mem::replace(&mut regs[inst.dst as usize], token));
+            dst
+        };
+        t.push(Op::ContextSet(var, value), dst, Kind::Effect, inst.bc);
+        for v in &inst.kills {
+            capi::release(take(regs, *v));
+            t.kill(*v);
+        }
+        Some(Taken::Went)
+    }
+
+    /// For an instruction that takes what an effect of the path gave (the
+    /// token of a `set` of a context variable, `Def::lands`): the value is
+    /// made where the path lands, so nothing that runs in front of that
+    /// can take it. `var.reset(token)` is the effect that takes it: of the
+    /// variable the `set` was of (a check, where the path came to it
+    /// another way), once: a second `reset` raises, so the path ends in
+    /// front of it. A test for None is False without the token, by what
+    /// `set` gives. A call that the path goes into hands it on. The path
+    /// ends in front of anything else.
+    unsafe fn record_landed(
+        &self,
+        t: &mut Trace,
+        site: &Arc<GraphSite>,
+        at: (usize, *const BlockCode, usize),
+        regs: &mut [Obj],
+        frames: &mut Frames,
+        api: &TcfgApi,
+    ) -> Taken {
+        let inst = &(&(*at.1).insts)[at.2];
+        let ends = || {
+            if graph::debug() {
+                eprintln!("torch.vm graph: a path ends in {} in front of {} (it takes the token of a set)", self.func.qualname, self.func.op_repr(&inst.op));
+            }
+            Taken::Ends("takes what the set of a context variable gave, which is made where the path ends".to_string())
+        };
+        let kill = |t: &mut Trace, regs: &mut [Obj]| {
+            for v in &inst.kills {
+                capi::release(take(regs, *v));
+                t.kill(*v);
+            }
+        };
+        if let Op::IsNone(_, invert) = &inst.op {
+            let flag = py_bool(*invert);
+            let dst = t.derive(Op::Object(PyObj::from_borrowed(flag)), Kind::Pure, false, new_ref(flag), inst.bc);
+            capi::release(std::mem::replace(&mut regs[inst.dst as usize], flag));
+            t.rename(inst.dst, dst);
+            kill(t, regs);
+            return Taken::Went;
+        }
+        if !matches!(inst.op, Op::Call { .. } | Op::CallMethod { .. } | Op::CallEx { .. }) {
+            return ends();
+        }
+        let Some((recv, name, args, held)) = self.method_of(t, inst, regs) else {
+            return self.record_call(t, site, at, regs, frames, api).unwrap_or_else(ends);
+        };
+        let variable = !held.is_null() && !capi::is_unboxed(held) && ffi::PyContextVar_CheckExact(held) != 0;
+        if !variable {
+            return self.record_call(t, site, at, regs, frames, api).unwrap_or_else(ends);
+        }
+        let (var, token) = (self.path_value(t, regs, recv), if args.len() == 1 { t.mapped(args[0]) } else { NONE });
+        let named = pyffi::str_to_string(self.func.consts[name as usize].as_ptr()) == "reset";
+        if !named || var == UNDEF || token == NONE || !t.defs[token as usize].lands {
+            return ends();
+        }
+        let set = t.body.iter().find(|other| other.dst == token).and_then(|other| match &other.op {
+            Op::ContextSet(of, _) => Some(*of),
+            _ => None,
+        });
+        let used = t.body.iter().any(|other| matches!(&other.op, Op::ContextReset(_, taken) if *taken == token));
+        let Some(of) = set.filter(|of| !used && t.rec.values[*of as usize] == held) else {
+            return ends();
+        };
+        frames.top().at(inst.bc & OFFSET_MASK);
+        let Ok(nothing) = self.exec_op(regs, &inst.op) else {
+            return Taken::Raised;
+        };
+        if var != of {
+            t.check(Assert::Same(var, of), inst.bc);
+        }
+        t.push(Op::ContextReset(var, token), NONE, Kind::Effect, inst.bc);
+        if inst.dst == NONE {
+            capi::release(nothing);
+        } else {
+            ffi::Py_XINCREF(nothing);
+            let dst = t.define(inst.dst, Def::default(), nothing);
+            t.push(Op::Const(self.func.const_none), dst, Kind::Pure, inst.bc);
+            capi::release(std::mem::replace(&mut regs[inst.dst as usize], nothing));
+        }
+        kill(t, regs);
+        Taken::Went
     }
 
     /// Takes a store into an object from outside the path down as an effect
@@ -9744,6 +9932,21 @@ impl Compiled {
                 // where the trace keeps it.
                 let sweep = self.lets_go(t, &c.insts[pc], regs, frames.top(), api, &mut suspects);
                 let taken = self.record_inst(t, site, b, c, pc, regs, frames, api);
+                // What the instruction gave and the function let go of
+                // with the same instruction (its register is empty behind
+                // it: a result that nothing takes) was not there to be
+                // looked at in front of it. The trace keeps it like every
+                // value it defines, so it ends here only if the trace lets
+                // go of it: the token of a `set` of a context variable,
+                // which holds what the variable held.
+                let gave = c.insts[pc].dst;
+                if matches!(taken, Taken::Went) && gave != NONE && reg(regs, gave).is_null() {
+                    let made = t.mapped(gave);
+                    let kept = if made == NONE || made == UNDEF { null_mut() } else { t.rec.values[made as usize] };
+                    if !kept.is_null() && !capi::is_unboxed(kept) {
+                        suspects.push(kept);
+                    }
+                }
                 if matches!(taken, Taken::Went) && self.overdue(t, &mut suspects, sweep) {
                     let reason = t.abandoned.clone().unwrap_or_default();
                     return Walked::Left { block: b, code, call: pc, reason };
