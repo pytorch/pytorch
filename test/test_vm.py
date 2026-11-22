@@ -4,6 +4,7 @@ import abc
 import builtins as builtins_module
 import collections
 import collections.abc
+import contextvars
 import copy
 import dataclasses
 import dis
@@ -12718,6 +12719,196 @@ def graph_text_of_a_class(x, given):
     return (h * GRAPH_NAMED.get(str(given.__class__), 1.5)).sum()
 
 
+GRAPH_VAR = contextvars.ContextVar("graph_first", default=None)
+GRAPH_VARS = [GRAPH_VAR, contextvars.ContextVar("graph_second", default=None)]
+GRAPH_VAR_LOG = []
+GRAPH_VAR_OUT = []
+
+
+class GraphCollector:
+    """A context variable behind methods written in Python, as a library has it."""
+
+    def __init__(self):
+        self.var = contextvars.ContextVar("graph_collector", default=None)
+        self.compiling = False
+
+    def set(self, value):
+        if self.compiling:
+            return None
+        return self.var.set(value)
+
+    def reset(self, token):
+        if self.compiling or token is None:
+            self.compiling = False
+        else:
+            self.var.reset(token)
+
+
+GRAPH_COLLECTOR = GraphCollector()
+
+
+def graph_var_sets_and_resets(x, given):
+    h = torch.relu(x) + 1
+    token = GRAPH_VAR.set(given)
+    try:
+        h = torch.tanh(h * 2) * 2 - 1
+    finally:
+        GRAPH_VAR.reset(token)
+    return h.sum(), None
+
+
+def graph_var_through_a_holder(x, given):
+    collected = {"seen": given}
+    h = torch.relu(x) + 1
+    token = GRAPH_COLLECTOR.set(collected)
+    try:
+        h = torch.tanh(h * 2) * 2 - 1
+    finally:
+        GRAPH_COLLECTOR.reset(token)
+    return h.sum(), collected
+
+
+def graph_var_around_a_layer(x, given):
+    # `given` is a layer: at some calls one with a hook, which reads the variable.
+    h = torch.relu(x) + 1
+    token = GRAPH_VAR.set("on")
+    try:
+        h = given(h)
+    finally:
+        GRAPH_VAR.reset(token)
+    return (torch.tanh(h) * 2).sum(), None
+
+
+def graph_var_in_front_of_a_branch(x, given):
+    h = torch.relu(x) + 1
+    token = GRAPH_VAR.set("on")
+    if given:
+        h = h * 3
+    h = torch.tanh(h * 2) * 2 - 1
+    GRAPH_VAR.reset(token)
+    return h.sum(), None
+
+
+def graph_var_set(value):
+    return GRAPH_VAR.set(value)
+
+
+def graph_var_gives_the_token_back(x, given):
+    h = torch.relu(x) + 1
+    token = graph_var_set(given)
+    h = torch.tanh(h * 2) * 2 - 1
+    GRAPH_VAR_OUT.append(h.sum())
+    return token
+
+
+def graph_var_is_read_between(x, given):
+    h = torch.relu(x) + 1
+    token = GRAPH_VAR.set(given)
+    h = torch.tanh(h * 2) * 2 - 1
+    seen = GRAPH_VAR.get()
+    GRAPH_VAR.reset(token)
+    return (h * (2 if seen == given else 3)).sum(), seen
+
+
+def graph_var_resets_twice(x, given):
+    h = torch.relu(x) + 1
+    token = GRAPH_VAR.set(given)
+    h = torch.tanh(h * 2) * 2 - 1
+    GRAPH_VAR.reset(token)
+    try:
+        GRAPH_VAR.reset(token)
+    except RuntimeError:
+        GRAPH_VAR_LOG.append("twice")
+    return h.sum(), None
+
+
+def graph_var_resets_what_it_is_handed(x, given):
+    h = torch.relu(x) + 1
+    h = torch.tanh(h * 2) * 2 - 1
+    try:
+        GRAPH_VAR.reset(given)
+    except RuntimeError:
+        GRAPH_VAR_LOG.append("used")
+    return h.sum(), None
+
+
+def graph_var_by_methods_read_earlier(x, given):
+    put, back = GRAPH_VARS[0].set, GRAPH_VARS[0].reset
+    h = torch.relu(x) + 1
+    token = put(given)
+    h = torch.tanh(h * 2) * 2 - 1
+    back(token)
+    return h.sum(), None
+
+
+def graph_var_by_another_way(x, given):
+    first, second = given
+    h = torch.relu(x) + 1
+    token = first.set("on")
+    h = torch.tanh(h * 2) * 2 - 1
+    try:
+        second.reset(token)
+    except ValueError:
+        GRAPH_VAR_LOG.append("another")
+        first.reset(token)
+    return h.sum(), None
+
+
+def graph_var_holds_what_the_path_made(x, given):
+    h = torch.relu(x) + 1
+    made = {"first": given}
+    token = GRAPH_VAR.set(made)
+    made["rows"] = h.shape[0]
+    h = torch.tanh(h * 2) * 2 - 1
+    GRAPH_VAR_OUT.append(h.sum())
+    return token
+
+
+def graph_var_holds_what_the_graph_gives(x, given):
+    h = torch.relu(x) + 1
+    token = GRAPH_VAR.set(h)
+    h = torch.tanh(h * 2) * 2 - 1
+    GRAPH_VAR_OUT.append(h.sum())
+    return token
+
+
+class GraphVarEnds:
+    def __del__(self):
+        GRAPH_VAR_LOG.append("ended")
+
+
+def graph_var_set_and_dropped(x, given):
+    h = torch.relu(x) + 1
+    # The token is dropped at once, and with it what the variable held.
+    GRAPH_VAR.set(given)
+    GRAPH_VAR_LOG.append("behind the set")
+    h = torch.tanh(h * 2) * 2 - 1
+    return h.sum(), None
+
+
+def graph_var_dropped_and_read(x, given):
+    h = torch.relu(x) + 1
+    GRAPH_VAR.set(given)
+    # What the variable held ended with the token: the log has it by now.
+    seen = len(GRAPH_VAR_LOG)
+    return (torch.tanh(h * 2) * 2 - 1).sum(), seen
+
+
+def graph_var_dropped_twice(x, given):
+    h = torch.relu(x) + 1
+    GRAPH_VAR.set(given)
+    first = len(GRAPH_VAR_LOG)
+    GRAPH_VAR.set(None)
+    return (torch.tanh(h * 2) * 2 - 1).sum(), (first, len(GRAPH_VAR_LOG))
+
+
+def graph_var_token_into_a_list(x, given):
+    h = torch.relu(x) + 1
+    tokens = [GRAPH_VAR.set(given)]
+    h = torch.tanh(h * 2) * 2 - 1
+    return h.sum(), tokens[0]
+
+
 GRAPH_LOOKUP_LOG = []
 
 
@@ -16002,6 +16193,132 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
             GRAPH_NAMED.clear()
             del GRAPH_COMPARE_LOG[:]
 
+    def test_set_and_reset_of_a_context_variable_are_effects_of_a_path(self, device):
+        # `var.set(value)` of a `contextvars.ContextVar` is an effect of
+        # a path that gives something, the token: it is done where the
+        # path ends, in the order of the effects, and not in its place,
+        # so a call that the path turns out not to be for (a layer with
+        # a hook, another way through a branch) sets the variable once,
+        # when the instructions run. `var.reset(token)` with the token
+        # of the path, on the same variable, is the effect that takes
+        # it; a test for None is False without it, and a function that
+        # gives the token back gives the one that was made where the
+        # path ended. Anything else that takes the token (a list or a
+        # tuple that is built of it), a second `reset`, a `reset` of a
+        # token from outside and a `get` end the path, and the set is
+        # done by then. A `set` whose token is dropped lets go of what
+        # the variable held: where the end of that runs Python code, the
+        # instructions run, and it ends where they end it. What a call
+        # leaves is eager's: the variables, the token, what a hook saw,
+        # what was logged and in which order, what was raised.
+        def keep(gm, input_types):
+            return gm
+
+        def seen(module, args, output):
+            GRAPH_VAR_LOG.append(("hook", GRAPH_VAR.get()))
+
+        plain = torch.nn.Linear(4, 4).to(device)
+        hooked = torch.nn.Linear(4, 4).to(device)
+        hooked.register_forward_hook(seen)
+
+        def handed():
+            return GRAPH_VAR.set("handed")
+
+        def used():
+            token = GRAPH_VAR.set("handed")
+            GRAPH_VAR.reset(token)
+            return token
+
+        def holds_a_number():
+            GRAPH_VAR.set(0)
+            return 1
+
+        def holds_what_ends_loudly():
+            GRAPH_VAR.set(GraphVarEnds())
+            return 2
+
+        first, second = GRAPH_VARS
+        # The function, what it is given at most calls and at the eighth
+        # and the eleventh, and the operations of the graph that runs: so
+        # many, to the function's return; or (a negative number) so many
+        # at least, wherever the path ends; or nothing asked (0).
+        cases = (
+            (graph_var_sets_and_resets, 1, 2, 7),
+            (graph_var_through_a_holder, 1, 2, 7),
+            (graph_var_around_a_layer, plain, hooked, 6),
+            (graph_var_in_front_of_a_branch, False, True, 7),
+            (graph_var_gives_the_token_back, 1, 2, 7),
+            (graph_var_by_methods_read_earlier, 1, 2, 7),
+            (graph_var_by_another_way, (first, first), (first, second), -6),
+            (graph_var_holds_what_the_path_made, 1, 2, 7),
+            (graph_var_holds_what_the_graph_gives, 1, 2, 7),
+            (graph_var_set_and_dropped, holds_a_number, holds_what_ends_loudly, 7),
+            (graph_var_is_read_between, 1, 2, -6),
+            (graph_var_resets_twice, 1, 2, -6),
+            (graph_var_resets_what_it_is_handed, handed, used, 0),
+            (graph_var_token_into_a_list, 1, 2, 0),
+        )
+        variables = (*GRAPH_VARS, GRAPH_COLLECTOR.var)
+
+        def told(value):
+            if isinstance(value, torch.Tensor):
+                return ("tensor", value.sum().item())
+            if isinstance(value, dict):
+                return sorted(value.items())
+            return "missing" if value is contextvars.Token.MISSING else value
+
+        def calls(run, usual, other, graded):
+            del GRAPH_VAR_LOG[:], GRAPH_VAR_OUT[:]
+            found = []
+            for at in range(14):
+                x = torch.full((3, 4), 0.25 * (at + 1), device=device)
+                x.requires_grad_(graded)
+                given = other if at in (7, 10) else usual
+                if isinstance(given, types_module.FunctionType):
+                    given = given()
+                try:
+                    gave = run(x, given)
+                    if isinstance(gave, tuple):
+                        out, extra = gave
+                    else:
+                        out, extra = GRAPH_VAR_OUT.pop(), gave
+                    if graded:
+                        out.backward()
+                    grad = None if x.grad is None else x.grad.sum().item()
+                    said = (out.item(), grad)
+                except (RuntimeError, ValueError) as error:
+                    said, extra = f"{type(error).__name__}: {error}", None
+                held = [told(var.get()) for var in variables]
+                if isinstance(extra, contextvars.Token):
+                    old, name = told(extra.old_value), extra.var.name
+                    extra = ("token", name, old, extra.var.reset(extra))
+                # A variable that a wrong run leaves set is not carried
+                # into the next call.
+                for var in variables:
+                    if var.get() is not None:
+                        var.set(None)
+                found.append((said, held, told(extra), list(GRAPH_VAR_LOG)))
+            return found
+
+        try:
+            for fn, usual, other, ops in cases:
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{fn.__name__}, a pass: {bool(behind)}, a gradient: {graded}"
+                    got = calls(compiled, usual, other, graded)
+                    expected = calls(fn, usual, other, graded)
+                    self.assertTrue(got == expected, msg=f"{msg}: {got} {expected}")
+                    if ops and (behind or graded):
+                        found = [g for g in torch.vm.regions(compiled) if "ops" in g]
+                        start, ends = fn.__name__ + " ", "the function returns"
+                        own = [g for g in found if g["where"].startswith(start)]
+                        whole = [g for g in own if ops < 0 or g["why"] == ends]
+                        ran = sum(g["hits"] for g in whole if g["ops"] >= abs(ops))
+                        self.assertGreaterEqual(ran, 6, msg=f"{msg}: {found}")
+        finally:
+            del GRAPH_VAR_LOG[:], GRAPH_VAR_OUT[:]
+
     def test_two_reads_found_once_give_what_the_instructions_give(self, device):
         # A run finds what `super().__getattribute__(key)` reads of an
         # object, and what `d.get(key)` gives, in one step where that is
@@ -16085,6 +16402,45 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
                     self.assertGreaterEqual(ran, 6, msg=f"{msg}: {found}")
         finally:
             del GRAPH_LOOKUP_LOG[:]
+
+    def test_a_dropped_token_ends_where_the_instructions_drop_it(self, device):
+        # The token of a `set` whose result nothing takes ends with the
+        # instruction, and what the variable held ends with the token. A
+        # call that takes a path down keeps what its instructions give, so
+        # the token is let go of there like everything else the function
+        # lets go of. The variable holds an object whose end is logged at
+        # EVERY call, so that the calls in which a path is taken down are
+        # among them, with `Graphs()` alone as well.
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(3, 4, device=device)
+        ways = (((), False), ((keep,), False), ((), True))
+        for fn in (graph_var_dropped_and_read, graph_var_dropped_twice):
+            for behind, graded in ways:
+                with self.subTest(fn=fn.__name__, behind=len(behind), graded=graded):
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    arg = x.clone().requires_grad_(graded)
+                    seen = []
+                    for run in (compiled, fn):
+                        got = []
+                        for call in range(12):
+                            GRAPH_VAR.set(GraphVarEnds())
+                            del GRAPH_VAR_LOG[:]
+                            out, counts = run(arg, GraphVarEnds() if call % 2 else call)
+                            got.append((out.item(), counts))
+                        seen.append(got)
+                        GRAPH_VAR.set(None)
+                    self.assertEqual(seen[0], seen[1])
+                    # The end is in front of the read at every call.
+                    firsts = {c if isinstance(c, int) else c[0] for _, c in seen[0]}
+                    self.assertEqual(firsts, {1})
+                    # The operations behind the set are a graph that runs.
+                    if behind or graded:
+                        found = torch.vm.regions(compiled)
+                        hits = [r["hits"] for r in found if "ops" in r]
+                        self.assertGreater(max(hits), 4, found)
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
