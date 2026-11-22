@@ -795,7 +795,14 @@ pub unsafe fn raised_text() -> String {
 /// it now, not by being that object: it can be changed in place (see
 /// `frozen`).
 pub unsafe fn same_value(a: Obj, b: Obj) -> bool {
-    if ffi::Py_TYPE(a) != ffi::Py_TYPE(b) {
+    same_within(a, b, 0)
+}
+
+/// `same_value`, this many lists, tuples and slices deep in both values.
+/// Two values that go on further than `NESTED` are not the same: a list
+/// that holds itself is the same as nothing, itself included.
+unsafe fn same_within(a: Obj, b: Obj, depth: usize) -> bool {
+    if ffi::Py_TYPE(a) != ffi::Py_TYPE(b) || depth > NESTED {
         return false;
     }
     if ffi::PyFloat_CheckExact(a) != 0 {
@@ -817,7 +824,7 @@ pub unsafe fn same_value(a: Obj, b: Obj) -> bool {
     if ffi::PySlice_Check(a) != 0 {
         return [c"start", c"stop", c"step"].iter().all(|name| {
             let (x, y) = (ffi::PyObject_GetAttrString(a, name.as_ptr()), ffi::PyObject_GetAttrString(b, name.as_ptr()));
-            let same = !x.is_null() && !y.is_null() && same_value(x, y);
+            let same = !x.is_null() && !y.is_null() && same_within(x, y, depth + 1);
             xdecref(x);
             xdecref(y);
             same
@@ -830,7 +837,66 @@ pub unsafe fn same_value(a: Obj, b: Obj) -> bool {
     if !sequence || ffi::PyObject_Size(a) != ffi::PyObject_Size(b) {
         return false;
     }
-    (0..ffi::PyObject_Size(a)).all(|i| same_value(sequence_item(a, i), sequence_item(b, i)))
+    (0..ffi::PyObject_Size(a)).all(|i| same_within(sequence_item(a, i), sequence_item(b, i), depth + 1))
+}
+
+/// How many lists, tuples and slices inside one another `same_value` goes
+/// into.
+const NESTED: usize = 64;
+
+/// Whether a list, a tuple or a slice holds itself, directly or through
+/// the lists, tuples and slices it holds: going into what it holds, and
+/// into what that holds, does not end. Each of them is gone into once
+/// (those the walk is inside of, and those it is done with, are kept),
+/// so this ends for any value. Runs no Python code.
+pub unsafe fn holds_itself(o: Obj) -> bool {
+    let holds = |o: Obj| !o.is_null() && !capi::is_unboxed(o) && (ffi::PyList_Check(o) != 0 || ffi::PyTuple_Check(o) != 0 || ffi::PySlice_Check(o) != 0);
+    let count = |o: Obj| {
+        if ffi::PyList_Check(o) != 0 {
+            ffi::PyList_GET_SIZE(o)
+        } else if ffi::PyTuple_Check(o) != 0 {
+            ffi::PyTuple_GET_SIZE(o)
+        } else {
+            3
+        }
+    };
+    let item = |o: Obj, i: isize| {
+        if ffi::PyList_Check(o) != 0 {
+            ffi::PyList_GET_ITEM(o, i)
+        } else if ffi::PyTuple_Check(o) != 0 {
+            ffi::PyTuple_GET_ITEM(o, i)
+        } else {
+            let slice = o as *mut ffi::PySliceObject;
+            [(*slice).start, (*slice).stop, (*slice).step][i as usize]
+        }
+    };
+    if !holds(o) {
+        return false;
+    }
+    // Depth first: what the walk is inside of, each with the item it has
+    // got to, and what it has been through.
+    let mut inside: Vec<(Obj, isize)> = vec![(o, 0)];
+    let mut open: std::collections::HashSet<usize> = std::collections::HashSet::from([o as usize]);
+    let mut done: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    while let Some((held, at)) = inside.last_mut() {
+        let held = *held;
+        if *at >= count(held) {
+            open.remove(&(held as usize));
+            done.insert(held as usize);
+            inside.pop();
+            continue;
+        }
+        let part = item(held, *at);
+        *at += 1;
+        if !holds(part) || done.contains(&(part as usize)) {
+            continue;
+        }
+        if !open.insert(part as usize) {
+            return true;
+        }
+        inside.push((part, 0));
+    }
+    false
 }
 
 /// What a check keeps of a value to tell the value of a later call from
@@ -840,12 +906,18 @@ pub unsafe fn same_value(a: Obj, b: Obj) -> bool {
 /// outside the function is the same object at every call whatever is in
 /// it.
 pub unsafe fn frozen(o: Obj) -> PyObj {
-    if capi::is_unboxed(o) {
+    // What holds itself has no copy that ends, and is nothing a check is
+    // made of (`checkable`).
+    if capi::is_unboxed(o) || holds_itself(o) {
         return PyObj::from_borrowed(o);
     }
+    frozen_row(o)
+}
+
+unsafe fn frozen_row(o: Obj) -> PyObj {
     if ffi::PySlice_Check(o) != 0 {
         let parts: Vec<Obj> = [c"start", c"stop", c"step"].iter().map(|name| ffi::PyObject_GetAttrString(o, name.as_ptr())).collect();
-        let kept: Vec<PyObj> = parts.iter().map(|part| if part.is_null() { PyObj::from_borrowed(ffi::Py_None()) } else { frozen(*part) }).collect();
+        let kept: Vec<PyObj> = parts.iter().map(|part| if part.is_null() { PyObj::from_borrowed(ffi::Py_None()) } else { frozen_row(*part) }).collect();
         let same = parts.iter().zip(&kept).all(|(part, kept)| *part == kept.as_ptr());
         parts.into_iter().for_each(|part| xdecref(part));
         ffi::PyErr_Clear();
@@ -858,7 +930,7 @@ pub unsafe fn frozen(o: Obj) -> PyObj {
         return PyObj::from_borrowed(o);
     }
     let count = ffi::PyObject_Size(o);
-    let items: Vec<PyObj> = (0..count).map(|i| frozen(sequence_item(o, i))).collect();
+    let items: Vec<PyObj> = (0..count).map(|i| frozen_row(sequence_item(o, i))).collect();
     let list = ffi::PyList_CheckExact(o) != 0;
     if !list && (0..count).all(|i| items[i as usize].as_ptr() == sequence_item(o, i)) {
         return PyObj::from_borrowed(o);
@@ -892,6 +964,12 @@ unsafe fn is_token(o: Obj) -> bool {
 /// Whether `same_value` can tell a later value from this one: what an
 /// exported form may have as a constant under a check.
 pub unsafe fn checkable(o: Obj) -> bool {
+    // Not a list or a tuple that holds itself: it has no copy to keep
+    // (`frozen`), and the walk into it would not end.
+    !holds_itself(o) && plainly_checkable(o)
+}
+
+unsafe fn plainly_checkable(o: Obj) -> bool {
     if capi::is_unboxed(o) {
         return false;
     }
@@ -907,13 +985,13 @@ pub unsafe fn checkable(o: Obj) -> bool {
     if ffi::PySlice_Check(o) != 0 {
         return [c"start", c"stop", c"step"].iter().all(|name| {
             let part = ffi::PyObject_GetAttrString(o, name.as_ptr());
-            let fine = !part.is_null() && checkable(part);
+            let fine = !part.is_null() && plainly_checkable(part);
             xdecref(part);
             fine
         });
     }
     let sequence = ffi::PyTuple_CheckExact(o) != 0 || ffi::PyList_CheckExact(o) != 0;
-    sequence && (0..ffi::PyObject_Size(o)).all(|i| checkable(sequence_item(o, i)))
+    sequence && (0..ffi::PyObject_Size(o)).all(|i| plainly_checkable(sequence_item(o, i)))
 }
 
 /// An exact int, float or bool.
