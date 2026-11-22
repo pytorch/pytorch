@@ -1618,7 +1618,16 @@ class VariableBuilder:
                 or value is hook_api._global_backward_pre_hooks
                 or value is hook_api._global_backward_hooks
             )
-            if not (global_hooks and config.skip_nnmodule_hook_guards):
+            if not (
+                global_hooks
+                and config.skip_nnmodule_hook_guards
+                and isinstance(self.source, AttrSource)
+                and self.source.member.startswith("_global_")
+                and self.source.member.removeprefix("_global") in module_hook_attrs
+                and isinstance(self.source.base, GlobalSource)
+                and self.tx.output.import_sources.get(self.source.base.global_name)
+                == hook_api.__name__
+            ):
                 self.install_guards(GuardBuilder.TYPE_MATCH)
             snapshot, reordered = _dict_items_and_order(value, self.get_source())
             all_const = all(ConstantVariable.is_literal(k) for _, k, _ in snapshot)

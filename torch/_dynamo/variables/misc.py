@@ -3034,11 +3034,10 @@ class WeakRefVariable(VariableTracker):
         if source is None:
             raise AssertionError("WeakRefVariable.build requires a source")
         callback = weakref_value.__callback__
-        callback_source = source and AttrSource(source, "__callback__")
+        callback_source = AttrSource(source, "__callback__")
         callback_vt = VariableTracker.build(tx, callback, callback_source)
         referent = weakref_value()
-        source = source and WeakRefCallSource(source)
-        referent_vt = VariableTracker.build(tx, referent, source)
+        referent_vt = VariableTracker.build(tx, referent, WeakRefCallSource(source))
         options["source"] = source
         return WeakRefVariable.create(referent_vt, callback_vt, **options)
 
