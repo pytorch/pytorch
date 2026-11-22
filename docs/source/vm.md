@@ -2219,58 +2219,69 @@ torch.vm(f, passes=(*default, keep, P.Inductor())).passes
 
 ### Models
 
-With the default settings and `Graphs()` and `Inductor()` in the list, the
-forward of a convolutional model is one graph. Measured on one H100, in
-images per second against eager mode (the model in eval mode under
-`torch.no_grad()`, the best of three rounds of 60 batches; two runs with
-`Inductor()`, one with `Graphs()` alone; eager mode itself differs by up to
-3 percent between two runs):
+The times of this section were measured on the tree of commit `90f834123d55`
+of this series, which is above this one and has what the commits between add
+(the graphs the tables name are that tree's), on one H100 and eight cores,
+one process at a time under the lock that every job on the machine takes for
+a timed run. In front of every row the load average of the last minute was
+under 10 (between 1.3 and 9.8) and no process was on the GPU. Every row was
+measured twice, and most of the rows whose eager figure was more than 3
+percent apart between the two processes a third time (eager's own figure
+moves by up to 9 percent from one process to the next); all the figures are
+given. Eager mode and what is compared with it take turns in one process, so
+that both have the same machine.
 
-| model | the graph that runs | `Graphs()` | `Graphs(), Inductor()` |
+With the default settings and `Graphs()` and `Inductor()` in the list, the
+forward of a resnet is one graph, and yolov3 is two. In images per second
+against eager mode (the model in eval mode under `torch.no_grad()`, the best
+of three rounds of 60 batches for each side):
+
+| model | the graphs that run | `Graphs()` | `Graphs(), Inductor()` |
 |---|---|---|---|
-| yolov3 (TorchBench), bfloat16, batch 8 of 3x384x512 | 328 operations | 0.97x | 2.32x, 2.30x |
-| resnet18 (torchvision), float32, batch 16 of 3x224x224 | 69 operations | 0.97x | 1.92x, 1.82x |
-| resnet18, bfloat16 | 69 operations | 1.03x | 2.26x, 2.29x |
-| resnet50, float32 | 175 operations | 1.02x | 1.74x, 1.75x |
-| resnet50, bfloat16 | 175 operations | 1.01x | 2.25x, 2.17x |
+| yolov3 (TorchBench), bfloat16, batch 8 of 3x384x512 | 2 graphs, 230 operations | 1.00x, 1.01x, 1.04x | 1.72x, 1.86x, 1.76x |
+| resnet18 (torchvision), float32, batch 16 of 3x224x224 | 69 operations | 1.01x, 0.97x | 1.89x, 1.93x |
+| resnet18, bfloat16 | 69 operations | 1.03x, 1.00x | 2.17x, 2.26x |
+| resnet50, float32 | 175 operations | 1.00x, 1.04x, 1.03x | 1.70x, 1.72x |
+| resnet50, bfloat16 | 175 operations | 1.00x, 1.01x, 1.01x | 2.23x, 2.16x |
 
 With `Graphs()` alone the outputs are those of eager mode bit for bit, the
 operations in place included. With `Inductor()` they differ by its
-arithmetic: by 2e-4 of the largest value in float32, and by up to 1.4e-2 in
-bfloat16. Each graph was exported once. With `Inductor()` at most four small
-functions on the way were left to the interpreter by measurement
-(`Module.__setattr__`, `ContextProp.__get__`), and the graphs go through
-them. The graph of a resnet is its whole forward, the pool, the flatten and
-the linear layer at the end included. The graph of yolov3 is the model with
-its three detection layers, the stores they make into themselves and the
-`torch.meshgrid` of each included; it ends where the model takes the outputs
-of the layers apart with `zip(*outputs)`, and the one `torch.cat` behind
-that runs by itself.
+arithmetic: by 2.4e-4 of the largest value in float32, and by up to 1.4e-2
+in bfloat16. With `Inductor()` a few small functions on the way were left to
+the interpreter by measurement (`ContextProp.__get__`,
+`Sequential.__iter__`, `interpolate`), and the graphs go through them. The
+graph of a resnet is its whole forward, the pool, the flatten and the linear
+layer at the end included. The first graph of yolov3 is the model without
+what its three detection layers do themselves, 205 operations: its path ends
+in front of the first layer's `create_grids`, at the stores the layer makes
+into itself, since the layer is what an iterator over the model's layers
+gave and a store into what may be a thing the path made is none of a path
+("Stores into objects"). The second, of 25 operations, is the forward of a
+detection layer, and runs three times in a call.
 
 The forward of a training step is one graph as well: 89 operations for
 resnet18 and 228 for resnet50, the batch norms writing their statistics and
-counting their batches in it. In steps per second against eager mode
-(batch 16 of 3x224x224, 100 classes, cross entropy and SGD with momentum; a
-step is forward, loss, backward and update, the best of three runs of 30
-steps once warm; one run with `Graphs()` alone, three with `Inductor()`):
+counting their batches in it. In steps per second against eager mode (batch
+16 of 3x224x224, 100 classes, cross entropy and SGD with momentum; a step is
+forward, loss, backward and update; eager's steps and the other side's take
+turns of two seconds until each side has run twelve), with `Graphs()` alone,
+on eager's tape, and with `Inductor()` behind it, for which AOTAutograd
+derives the backward:
 
 | model | `Graphs()` | `Graphs(), Inductor()` |
 |---|---|---|
-| resnet18 (eager 125 steps a second) | 1.00x | 1.28x, 1.30x, 1.50x |
-| resnet50 (eager 53 to 54 steps a second) | 1.01x | 1.46x, 1.30x, 1.28x |
+| resnet18 (eager 131 to 142 steps a second) | 1.04x, 1.01x, 1.01x | 1.50x, 1.42x |
+| resnet50 (eager 57 to 58 steps a second) | 1.03x, 1.03x | 1.37x, 1.38x |
 
-The figure with `Inductor()` differs from one process to the next by that
-much while eager's does not. With `Graphs()` alone the losses of 20 steps
-and the parameters and statistics after them are eager's bit for bit. With
-`Inductor()` the losses are equal for the two steps that the instructions
-run and then go apart, by 4e-5 at the third step and by up to 2e-2 within
-the first ten for resnet18 (6e-4 and up to 1e-1 for resnet50): the gradients
-of one step from the same state differ by 7e-2 of the largest for resnet18
-and 4e-1 for resnet50, with the loss of that step equal to 1e-5 of itself,
-and 20 steps of SGD on a freshly initialised model carry that on. On the CPU
-the gradient of every parameter of a small model is within 1e-4 of eager's
-at each of 30 steps with `AOTAutograd()` and with `Inductor()`, which is
-what the tests hold.
+On the tree these were measured on the two lists are written
+`Graphs(backward=False)` and `Graphs(), AOTAutograd(), Inductor()`. With
+`Graphs()` alone the losses and the gradients of 30 steps in lockstep with
+eager mode are eager's bit for bit. With `Inductor()` they are not: the
+gradients of a step from the same state are within 5.2e-1 of the largest of
+eager's. On the CPU the gradient of every parameter of a small model is
+within 1e-4 of eager's at each of 30 steps with `AOTAutograd()` and with
+`Inductor()`, which is what the tests hold.
+
 
 The models of timm and the transformer models have other code around their
 operations than the convolutional models above, and the graphs they get are
