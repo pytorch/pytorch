@@ -1386,7 +1386,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(score_mod_scale, dtype, device=device)
 
     @supported_platform
-    @common_utils.parametrize("head_dim", [17, 24, 94, 121])
+    @common_utils.parametrize("head_dim", [17, 24, 94, 96, 121, 576])
     @parametrize_device_dtype("dtypes_fast")
     @common_utils.serialTest()
     def test_non_pow_2_headdim(self, device, dtype, head_dim):

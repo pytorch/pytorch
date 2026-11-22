@@ -457,7 +457,11 @@ def contiguous_last_dim(x):
 
 
 def set_head_dim_values(
-    kernel_options: dict[str, Any], qk_head_dim, v_head_dim, graph_sizevars
+    kernel_options: dict[str, Any],
+    qk_head_dim,
+    v_head_dim,
+    graph_sizevars,
+    allow_head_dim_tiling: bool = False,
 ):
     """
     Mutates kernel options, adding head dimension calculations.
@@ -467,6 +471,8 @@ def set_head_dim_values(
         qk_head_dim: Query/Key head dimension
         v_head_dim: Value head dimension
         graph_sizevars: Graph size variables object with guard_int method
+        allow_head_dim_tiling: Allow splitting a QK head dim that is the sum of
+            two powers of two into two chunks (USE_HEAD_DIM_TILING)
 
     """
     # QK dimensions
@@ -477,12 +483,12 @@ def set_head_dim_values(
     )
 
     chunks = (
-        exact_power_of_2_split(qk_head_dim_static) if torch.xpu.is_available() else None
+        exact_power_of_2_split(qk_head_dim_static) if allow_head_dim_tiling else None
     )
-    kernel_options.setdefault("USE_HEAD_DIM_TILING", chunks is not None)
     if chunks is None:
         kernel_options["USE_HEAD_DIM_TILING"] = False
     else:
+        kernel_options.setdefault("USE_HEAD_DIM_TILING", True)
         kernel_options.setdefault("QK_HEAD_DIM_CHUNK0", chunks[0])
         kernel_options.setdefault("QK_HEAD_DIM_CHUNK1", chunks[1])
 

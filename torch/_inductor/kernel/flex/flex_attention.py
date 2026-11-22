@@ -533,7 +533,13 @@ def flex_attention(
             empty(0, device=query.get_device()) for _ in range(2)
         )
 
-    set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
+    set_head_dim_values(
+        kernel_options,
+        qk_head_dim,
+        v_head_dim,
+        V.graph.sizevars,
+        allow_head_dim_tiling=query.get_device().type == "xpu",
+    )
 
     choices: list[Any] = []
 
@@ -1255,7 +1261,6 @@ def flex_attention_backward(*args, **kwargs):
             empty(0, device=query.get_device()) for _ in range(4)
         )
 
-    kernel_options["USE_HEAD_DIM_TILING"] = False
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)

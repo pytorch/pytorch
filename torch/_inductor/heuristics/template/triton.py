@@ -2710,7 +2710,6 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
         }
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
             FlexConfig(32, 16, 2, 4),
-            FlexConfig(128, 64, 3, 16),
             FlexConfig(128, 64, 2, 16),
             FlexConfig(128, 64, 2, 8),
             FlexConfig(128, 32, 2, 16),
@@ -2721,6 +2720,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             FlexBwDConfig(64, 64, 64, 64, 2, 4),
         ]
         self.flex_decode_autotune_configs: list[FlexDecodeConfig] = []
+        self.flex_decode_wide_warp_autotune_configs: list[FlexDecodeConfig] = []
 
         if not bool(os.getenv("CI")):
             self.flex_attn_bwd_autotune_configs += [
@@ -2742,7 +2742,8 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
                 FlexDecodeConfig(64, 2, 2),
                 FlexDecodeConfig(64, 2, 1),
             ]
-            self.flex_decode_autotune_configs += [
+            # Used instead of the list above when head_dim > 256.
+            self.flex_decode_wide_warp_autotune_configs += [
                 FlexDecodeConfig(block_n, num_stages, num_warps)
                 for block_n in [32, 64, 128]
                 for num_stages in [1, 2]
@@ -2825,12 +2826,11 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
                     if not needs_wide_warps
                     or c.num_warps >= MIN_DECODE_WARPS_LARGE_HEAD_DIM
                 ]
-            flex_decode_configs += [
-                c
-                for c in self.flex_decode_autotune_configs
-                if not needs_wide_warps
-                or c.num_warps >= MIN_DECODE_WARPS_LARGE_HEAD_DIM
-            ]
+            flex_decode_configs += (
+                self.flex_decode_wide_warp_autotune_configs
+                if needs_wide_warps
+                else self.flex_decode_autotune_configs
+            )
 
         if needs_wide_warps:
             default_config = FlexDecodeConfig(64, 2, 4)

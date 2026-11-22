@@ -159,6 +159,11 @@ flex_decoding_template = TritonTemplate(
 )
 
 
+# BLOCK_N of the XPU default decode configs. Capping SPLIT_KV on it, rather than on
+# the configs being tried, keeps SPLIT_KV independent of the autotune search space.
+XPU_SPLIT_KV_BLOCK_N = 64
+
+
 def get_split_k(
     B: int, H: int, Mk: int, device: torch.device, block_n: int | None = None
 ) -> int:
@@ -287,9 +292,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     kernel_options.setdefault("SM_SCALE", scale)
     if "SPLIT_KV" not in kernel_options:
-        min_block_n = min((c.block_n for c in configs), default=None)
         kernel_options["SPLIT_KV"] = get_split_k(
-            B, Hkv, seq_len_kv, device, block_n=min_block_n
+            B,
+            Hkv,
+            seq_len_kv,
+            device,
+            block_n=XPU_SPLIT_KV_BLOCK_N if device.type == "xpu" else None,
         )
     MAX_SPLIT_KV = kernel_options["SPLIT_KV"]
 
@@ -316,7 +324,13 @@ def create_flex_decoding_kernel(*args, **kwargs):
         FlexibleLayout.contiguous_strides(buf_ACC_shape),
     )
 
-    set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
+    set_head_dim_values(
+        kernel_options,
+        qk_head_dim,
+        v_head_dim,
+        V.graph.sizevars,
+        allow_head_dim_tiling=device.type == "xpu",
+    )
 
     # Mark SPARSE_Q_BLOCK_SIZE as static: the default BLOCK_M below depends on it.
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)

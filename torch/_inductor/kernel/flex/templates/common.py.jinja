@@ -27,35 +27,38 @@ def forward_block_mn(
     # -- load k --
     # NB reversed order to since K is transposed
     kv_base_offset = kv_start + kv_offset
+    {%- if USE_TMA %}
     # Descriptor loads require 32-bit coordinates. Decode derives kv_start from
     # off_t, a program id cast to INDEX_DTYPE, so kv_base_offset may be int64.
     # Convert the descriptor coordinate here, preserving wide pointer
     # arithmetic; the cast does not validate coordinate bounds.
-    {%- if USE_HEAD_DIM_TILING and USE_TMA %}
-    k0 = tl.load_tensor_descriptor(desc_k, [kv_base_offset.to(tl.int32), 0])
-    k1 = tl.load_tensor_descriptor(desc_k1, [kv_base_offset.to(tl.int32), QK_HEAD_DIM_CHUNK0])
-    k0 = tl.trans(k0)
-    k1 = tl.trans(k1)
-    # -- compute qk ---
-    qk = (tl.dot(q, k0, input_precision=FLOAT32_PRECISION)
-          + tl.dot(q1, k1, input_precision=FLOAT32_PRECISION))
-    {%- elif USE_TMA %}
     k = tl.load_tensor_descriptor(
         desc_k,
         [kv_base_offset.to(tl.int32), 0],
     )
-    k = tl.trans(k)
-    # -- compute qk ---
-    qk = tl.dot(q, k, input_precision=FLOAT32_PRECISION) # TODO: use cuda matmul when q_len <= 2.
+    {%- if USE_HEAD_DIM_TILING %}
+    k1 = tl.load_tensor_descriptor(
+        desc_k1,
+        [kv_base_offset.to(tl.int32), QK_HEAD_DIM_CHUNK0],
+    )
+    {%- endif %}
     {%- else %}
 
     # Load K as [BLOCK_N, QK_HEAD_DIM_ROUNDED] then transpose to [QK_HEAD_DIM_ROUNDED, BLOCK_N]
     offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
     offs_n_load = kv_base_offset + tl.arange(0, BLOCK_N)
     k = load_checked_2d(K, offs_n_load, offs_k, stride_kn, stride_kk, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, QK_HEAD_DIM, INDEX_DTYPE)
+    {%- endif %}
+
     k = tl.trans(k)
     k = k.to(q.dtype)
     # -- compute qk ---
+    {%- if USE_HEAD_DIM_TILING and USE_TMA %}
+    k1 = tl.trans(k1)
+    k1 = k1.to(q1.dtype)
+    qk = (tl.dot(q, k, input_precision=FLOAT32_PRECISION)
+          + tl.dot(q1, k1, input_precision=FLOAT32_PRECISION))
+    {%- else %}
     qk = tl.dot(q, k, input_precision=FLOAT32_PRECISION) # TODO: use cuda matmul when q_len <= 2.
     {%- endif %}
     if not PRESCALE_QK:
