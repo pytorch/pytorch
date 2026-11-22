@@ -13,7 +13,7 @@
 
 namespace c10d::nccl2 {
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0) && !defined(USE_ROCM)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0)
 #define NCCL2_HAS_COLL_CONFIG
 #endif
 
@@ -540,7 +540,7 @@ ncclResult_t DefaultNcclApi::gather(
     cudaStream_t stream,
     const MaterializedCollectiveConfig& config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3) && !defined(USE_ROCM)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3)
 #ifdef NCCL2_HAS_COLL_CONFIG
   if (config.data != nullptr) {
     return ncclGatherConfig(
@@ -633,6 +633,22 @@ ncclResult_t DefaultNcclApi::memFree(void* buff) {
       fmt::format(
           "NCCL version {} does not support ncclMemFree API",
           NCCL_VERSION_CODE));
+#endif
+}
+
+ncclResult_t DefaultNcclApi::setEncryptionPsk(const char* psk) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 32, 3) && !defined(USE_ROCM)
+  ncclEncryptionConfig_t config = NCCL_ENCRYPTION_CONFIG_INITIALIZER;
+  if (psk != nullptr) {
+    config.mode = NCCL_ENCRYPTION_MODE_PSK;
+    config.psk = psk;
+  }
+  return ncclSetEncryption(&config);
+#else
+  std::ignore = psk;
+  TC_LOG(ERROR) << "NCCL version " << NCCL_VERSION_CODE
+                << " does not support ncclSetEncryption API";
+  return ncclInvalidUsage;
 #endif
 }
 

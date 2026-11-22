@@ -1,4 +1,5 @@
 
+#include <ATen/DeviceAccelerator.h>
 #include <c10/core/Device.h>
 #include <gtest/gtest.h>
 #include <unordered_map>
@@ -20,10 +21,18 @@ TEST(PlacementTest, IsSameDevice) {
   c10::Device cudaDevice = c10::Device(c10::DeviceType::CUDA);
   c10::Device cudaDevice0 = c10::Device(c10::DeviceType::CUDA, 0);
   c10::Device cudaDevice1 = c10::Device(c10::DeviceType::CUDA, 1);
-  EXPECT_TRUE(isSameDevice(cudaDevice, cudaDevice0));
   EXPECT_FALSE(isSameDevice(cudaDevice0, cudaDevice1));
 
   EXPECT_FALSE(isSameDevice(cudaDevice0, cpuDevice));
+  EXPECT_FALSE(isSameDevice(cudaDevice, cpuDevice));
+
+  // An unset accelerator index resolves to the current device, which needs a
+  // device to query.
+  if (at::accelerator::deviceCount() > 0) {
+    c10::Device cudaCurrent =
+        c10::Device(c10::DeviceType::CUDA, at::accelerator::getDeviceIndex());
+    EXPECT_TRUE(isSameDevice(cudaDevice, cudaCurrent));
+  }
 }
 
 TEST(PlacementTest, PlacementDefaultOnly) {

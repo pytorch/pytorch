@@ -415,6 +415,20 @@ def register_comm_lowerings():
         )
         return inp
 
+    @register_comm_lowering(c10d.reduce)
+    def _reduce(inp, dst, reduce_op, group_name):
+        return _create_out_of_place(
+            c10d.reduce.default, inp, dst, reduce_op, group_name
+        )
+
+    @register_comm_lowering(c10d.gather)
+    def _gather(inp, dst, group_name):
+        return _create_out_of_place(c10d.gather.default, inp, dst, group_name)
+
+    @register_comm_lowering(c10d.scatter)
+    def _scatter(inp, src, group_name):
+        return _create_out_of_place(c10d.scatter.default, inp, src, group_name)
+
     @register_comm_lowering(torch.ops._dtensor.shard_dim_alltoall)
     def _shard_dim_alltoall(inp, gather_dim, shard_dim, group_name):
         return _create_out_of_place(

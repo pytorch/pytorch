@@ -62,9 +62,7 @@ def ap_style_initial_capture(
     - no AP decomps
     - no inductor
     """
-    fake_mode = FakeTensorMode()
-    fake_mode.shape_env = ShapeEnv()
-    fake_mode.static_shapes = False
+    fake_mode = FakeTensorMode(shape_env=ShapeEnv(), static_shapes=False)
 
     with fake_mode:
         inputs = inputs_fn()

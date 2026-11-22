@@ -42,6 +42,7 @@ A {class}`torch.dtype` is an object that represents the data type of a
 | `torch.float8_e4m3fnuz` [^shell] [^1] | 8-bit floating point, S-E-M 1-4-3, from <https://arxiv.org/pdf/2206.02915> |
 | `torch.float8_e5m2fnuz` [^shell] [^1] | 8-bit floating point, S-E-M 1-5-2, from <https://arxiv.org/pdf/2206.02915> |
 | `torch.float8_e8m0fnu` [^shell] [^1] | 8-bit floating point, S-E-M 0-8-0, from <https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf> |
+| `torch.float8_e5m3fnu` [^shell] [^1] [^4] | 8-bit unsigned floating point, S-E-M 0-5-3, block-scale format, from <https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#alternate-floating-point-data-formats> (`ue5m3`) |
 | `torch.float4_e2m1fn_x2` [^shell] [^1] [^3] | packed 4-bit floating point, S-E-M 1-2-1, from <https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf> |
 
 **Integer dtypes**
@@ -69,6 +70,7 @@ A {class}`torch.dtype` is an object that represents the data type of a
 [^1]: The "fn", "fnu" and "fnuz" dtype suffixes mean:
     "f" - finite value encodings only, no infinity;
     "n" - nan value encodings differ from the IEEE spec;
+    "u" - unsigned, i.e. no sign bit;
     "uz" - "unsigned zero" only, i.e. no negative zero encoding
 
 [^2]: Unsigned types asides from `uint8` are currently planned to only have
@@ -80,6 +82,13 @@ A {class}`torch.dtype` is an object that represents the data type of a
 [^3]: The `torch.float4_e2m1fn_x2` dtype represents two 4-bit values packed into a byte.
     Note that PyTorch operations which modify the shape/strides of a tensor (such as transposing)
     operate at the byte boundary and will **not** unpack/repack sub-byte values.
+
+[^4]: `torch.float8_e5m3fnu` has an exponent bias of 15 and supports subnormals.
+    All encodings are finite except `0xFF`, which is the only NaN; this includes
+    exponent 31 (`0xF8`..`0xFE`), so values range from `2**-17` (smallest subnormal)
+    to `114688` (`1.75 * 2**16`). Casting to this dtype rounds the absolute value
+    of the input to nearest, ties to even: the sign is ignored, values above the
+    max and infinities saturate to the max, and NaN maps to NaN.
 
 **Note**: legacy constructors such as `torch.*.FloatTensor`, `torch.*.DoubleTensor`, `torch.*.HalfTensor`,
 `torch.*.BFloat16Tensor`, `torch.*.ByteTensor`, `torch.*.CharTensor`, `torch.*.ShortTensor`, `torch.*.IntTensor`,

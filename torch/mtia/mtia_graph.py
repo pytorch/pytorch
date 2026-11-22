@@ -1,7 +1,7 @@
 # pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
-from typing_extensions import Self
+from typing import Self
 
 import torch
 

@@ -42,7 +42,7 @@ declare -f -t trap_add
 function assert_git_not_dirty() {
     # TODO: we should add an option to `build_amd.py` that reverts the repo to
     #       an unmodified state.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]] && [[ "$BUILD_ENVIRONMENT" != *xpu* ]] ; then
+    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xpu* ]] ; then
         git_status=$(git status --porcelain | grep -v '?? third_party' || true)
         if [[ $git_status ]]; then
             echo "Build left local git repository checkout dirty"
@@ -117,6 +117,35 @@ function pip_install() {
 function pip_uninstall() {
   # uninstall 2 times
   pip3 uninstall -y "$@" || pip3 uninstall -y "$@"
+}
+
+# Create a venv at $1 layered on top of the CI image's Python environment, so
+# anything the image already has satisfies requirements instead of being
+# re-resolved from the index at test time, while packages installed into the
+# venv shadow the image's. `venv --system-site-packages` doesn't do this: the
+# image Python is itself a venv, and that flag exposes the base interpreter.
+# The venv gets no pip or setuptools of its own, so the image's are used. Its
+# `pip`, `pip3` and `pip3.<minor>` run `python -m pip` with the venv's
+# interpreter, so they install into the venv; without them, `pip` would be the
+# image's script and install into the image.
+function create_venv_over_image() {
+  local venv_dir=$1
+  local add_image_sites
+  add_image_sites=$(python -c 'import sysconfig; print("; ".join(f"site.addsitedir({p!r})" for p in dict.fromkeys(sysconfig.get_path(k) for k in ("purelib", "platlib"))))')
+  python -m venv --without-pip "${venv_dir}"
+  local venv_python
+  venv_python="$(cd "${venv_dir}" && pwd)/bin/python"
+  echo "import site; ${add_image_sites}" > "$("${venv_python}" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/_ci_image.pth"
+  for name in pip pip3 "pip3.$("${venv_python}" -c 'import sys; print(sys.version_info.minor)')"; do
+    printf '#!/bin/sh\nexec "%s" -m pip "$@"\n' "${venv_python}" > "${venv_dir}/bin/${name}"
+    chmod +x "${venv_dir}/bin/${name}"
+  done
+}
+
+# Fail unless `import torch` in the active venv finds the venv's own torch rather
+# than the image's, which create_venv_over_image leaves visible behind it.
+function assert_venv_torch() {
+  (cd / && python -c 'import os, sys, torch; real = os.path.realpath; sys.exit(0 if real(torch.__file__).startswith(real(os.environ["VIRTUAL_ENV"]) + os.sep) else f"torch {torch.__version__} imported from {torch.__file__}, not from the venv")')
 }
 
 function get_pkg_versions() {
@@ -205,6 +234,7 @@ function install_fbgemm() {
   local build_variant=$1
 
   local fbgemm_commit
+  # fbgemm pin is the v1.5.0-rc3 tag commit
   fbgemm_commit=$(get_pinned_commit fbgemm)
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
     fbgemm_commit=$(get_pinned_commit fbgemm_rocm)
@@ -263,6 +293,7 @@ function install_fbgemm() {
 
 function install_torchrec_and_fbgemm() {
   local torchrec_commit
+  # torchrec pin is the release/v1.4.0 branch head (untagged)
   torchrec_commit=$(get_pinned_commit torchrec)
 
   pip_uninstall torchrec-nightly
@@ -304,40 +335,10 @@ function install_torchrec_and_fbgemm() {
   fi
 }
 
-function clone_pytorch_xla() {
-  if [[ ! -d ./xla ]]; then
-    git clone --recursive --quiet https://github.com/pytorch/xla.git
-    pushd xla
-    # pin the xla hash so that we don't get broken by changes to xla
-    git checkout "$(cat ../.github/ci_commit_pins/xla.txt)"
-    git submodule sync
-    git submodule update --init --recursive
-    popd
-  fi
-}
-
 function install_torchao() {
   local commit
   commit=$(get_pinned_commit torchao)
   pip_build_and_install "git+https://github.com/pytorch/ao.git@${commit}" dist/ao
-}
-
-function install_torchcomms() {
-  local commit
-  commit=$(get_pinned_commit torchcomms)
-  export USE_GLOO=1
-  export USE_NCCLX=0
-  export USE_TRANSPORT=0
-  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
-    export USE_NCCL=1
-  else
-    export USE_NCCL=0
-  fi
-  pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
-}
-
-function install_nccl4py() {
-  pip_install nccl4py==0.5.0
 }
 
 function install_spmd_types() {
@@ -352,7 +353,8 @@ function install_flash_attn_cute() {
   if [[ "${DESIRED_CUDA:-}" == 13.* || "${CUDA_VERSION:-}" == 13.* || "${BUILD_ENVIRONMENT:-}" == *cuda13* ]]; then
     flash_attn_package="flash-attn-4[cu13]==4.0.0b31"
   fi
-  # FA4 and QuACK support the CuTeDSL version accepted by torch._native.
+  # FA4 and QuACK do not pin CuTeDSL, so install the pinned version first.
+  install_cutlass_dsl
   pip_install \
     "$flash_attn_package" \
     quack-kernels==0.6.5 \

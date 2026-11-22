@@ -66,6 +66,10 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
     def kernel_driver(self) -> str:
         """Return C++ host-side helpers (loadKernel, launchKernel, CUDA_DRIVER_CHECK)
         embedded in AOTI-generated wrapper code."""
+        # Like Inductor's static launcher, loadKernel prefers shared memory to
+        # L1 for kernels that use more than 48 KB of it; otherwise the driver
+        # may pick a carveout that fits fewer of their blocks per SM.
+        #
         # NVIDIA devices have a warp size of 32, while AMD devices can have a
         # warp size of 32 or 64 depending on the architecture.
         source_codes = """
@@ -86,6 +90,49 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                 }                                              \\
             } while (0);
 
+            static inline void setKernelSharedMemory(
+                    CUfunction func,
+                    uint32_t sharedMemBytes) {
+                if (sharedMemBytes == 0) {
+                    return;
+                }
+            #if !defined(USE_ROCM)
+                CUdevice device;
+                CUDA_DRIVER_CHECK(cuCtxGetDevice(&device));
+                int sharedOptin = 0;
+                CUDA_DRIVER_CHECK(cuDeviceGetAttribute(
+                    &sharedOptin,
+                    CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
+                    device
+                ));
+                int sharedStatic = 0;
+                CUDA_DRIVER_CHECK(cuFuncGetAttribute(
+                    &sharedStatic, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, func
+                ));
+                if (torch::aot_inductor::sharedMemoryLimit(
+                        sharedMemBytes + static_cast<uint32_t>(sharedStatic),
+                        sharedOptin,
+                        device,
+                        cuDeviceGetAttribute) > sharedOptin) {
+                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
+                        func,
+                        static_cast<CUfunction_attribute>(
+                            torch::aot_inductor::kFuncAttrSharedMemoryMode),
+                        torch::aot_inductor::kSharedMemoryModeAllowOversized
+                    ));
+                    return;
+                }
+            #endif
+                CUDA_DRIVER_CHECK(cuFuncSetAttribute(
+                    func,
+                    CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                    sharedMemBytes
+                ))
+                if (sharedMemBytes > 49152) {
+                    CUDA_DRIVER_CHECK(cuFuncSetCacheConfig(func, CU_FUNC_CACHE_PREFER_SHARED))
+                }
+            }
+
             static inline CUfunction loadKernel(
                     std::string filePath,
                     const std::string &funcName,
@@ -105,13 +152,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     loaded_modules->push_back(mod);
                 }
                 CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
-                if (sharedMemBytes > 0) {
-                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
-                        func,
-                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                        sharedMemBytes
-                    ))
-                }
+                setKernelSharedMemory(func, sharedMemBytes);
                 return func;
             }
 
@@ -127,13 +168,7 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
                     loaded_modules->push_back(mod);
                 }
                 CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
-                if (sharedMemBytes > 0) {
-                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
-                        func,
-                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                        sharedMemBytes
-                    ))
-                }
+                setKernelSharedMemory(func, sharedMemBytes);
                 return func;
             }
 

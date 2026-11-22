@@ -5,11 +5,19 @@ import subprocess
 import tempfile
 import unittest
 
-from torch.testing._internal.common_utils import IS_LINUX, IS_S390X, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_LINUX,
+    IS_S390X,
+    run_tests,
+    TestCase,
+)
 
 
 @unittest.skipIf(IS_S390X or not IS_LINUX, "Only works on linux")
 class TestTorchrun(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def setUp(self):
         super().setUp()
         self._test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)

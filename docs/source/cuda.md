@@ -251,8 +251,8 @@ can equally be saved next to a trace and joined offline.
 To capture Python launch stacks as well, set
 ``annotation_config={"record_py_stacks": True}`` with ``enable_annotations=True``.
 Recording uses Cuspy's CUPTI node-creation callbacks, even when no profiler
-session is running. It requires `cupti-python`, CUPTI >= 13.3, and a CUPTI
-subscription not already held by Kineto, Nsight Systems, or another profiler.
+session is running. It requires `cupti-python`, a CUDA >= 13.5 build, CUPTI >= 13.5,
+and a CUPTI subscription not already held by Kineto, Nsight Systems, or another profiler.
 Use Cuspy for subsequent GPU profiling in the same process. Disable autograd
 multithreading during both warmup and capture.
 
@@ -477,6 +477,13 @@ configuration steps, which differ from the CUDA ones, are covered in
 
 See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use these.
 
+{meth}`~torch.cuda.gds.GdsFile.load_storage` and {meth}`~torch.cuda.gds.GdsFile.save_storage`
+first wait for the work already enqueued on the current stream, then block the host until the
+transfer completes. {meth}`~torch.cuda.gds.GdsFile.load_storage_async`
+and {meth}`~torch.cuda.gds.GdsFile.save_storage_async` are instead enqueued on the current stream
+and return without waiting, and follow the usual {ref}`stream semantics<cuda-stream-semantics>`.
+All four raise an error during CUDA graph capture.
+
 ```{eval-rst}
 .. currentmodule:: torch.cuda.gds
 ```
@@ -665,14 +672,6 @@ device/domain are deliberately retained through interpreter shutdown. Reclaiming
 physical memory waits for the allocation stream. Cleanup failures are logged, not
 raised; memory still in use after a failed stream wait is left for process exit
 to reclaim. During interpreter shutdown, callbacks skip CUDA cleanup entirely.
-
-```{warning}
-Concurrent allocator activity is unsupported. Other threads must not allocate,
-free, or query allocator state (including `MemPool.use_count()`) concurrently
-with this allocator. The ctypes callbacks acquire the GIL while holding the
-native allocator mutex; an allocator-state query can acquire these locks in the
-opposite order and deadlock.
-```
 
 #### Fork/join execution with localized outputs
 

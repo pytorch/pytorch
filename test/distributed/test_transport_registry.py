@@ -4,7 +4,6 @@ import asyncio
 import json
 import threading
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -63,11 +62,27 @@ class _TestTransport(Transport):
     def register_memory(self, tensor):
         return tensor
 
-    def write(self, local_buffer, remote_buffer, *, async_op=False, timeout=None):
+    def write(
+        self,
+        local_buffer,
+        remote_buffer,
+        *,
+        async_op=False,
+        timeout=None,
+        notification=None,
+    ):
         self.operation(local_buffer, remote_buffer)
         return _completed_work() if async_op else 0
 
-    def read(self, local_buffer, remote_buffer, *, async_op=False, timeout=None):
+    def read(
+        self,
+        local_buffer,
+        remote_buffer,
+        *,
+        async_op=False,
+        timeout=None,
+        notification=None,
+    ):
         return self.write(
             local_buffer, remote_buffer, async_op=async_op, timeout=timeout
         )
@@ -106,8 +121,20 @@ class TestTransportRegistry(TestCase):
                 transport.unregister_memory(None)
 
     def test_mutable_view_protocol(self):
-        readonly = SimpleNamespace(size=lambda: 8)
-        mutable = SimpleNamespace(size=lambda: 8, writable=True)
+        class View:
+            def size(self):
+                return 8
+
+            def slice(self, offset=None, length=None):
+                return self
+
+            def __getitem__(self, key):
+                return self
+
+        class MutableView(View):
+            writable = True
+
+        readonly, mutable = View(), MutableView()
         self.assertIsInstance(readonly, MemoryView)
         self.assertNotIsInstance(readonly, MutableMemoryView)
         self.assertIsInstance(mutable, MutableMemoryView)
@@ -275,7 +302,7 @@ class TestTransportWork(TestCase):
                         None, None, timeout=0.5
                     )
                     submit.assert_called_once_with(
-                        None, None, async_op=True, timeout=0.5
+                        None, None, async_op=True, timeout=0.5, notification=None
                     )
 
         asyncio.run(run())

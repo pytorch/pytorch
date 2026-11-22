@@ -33,6 +33,7 @@ from torch._inductor.codegen.cpp import (
     LoopNest,
 )
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+from torch._inductor.cpp_builder import CppTorchDeviceOptions
 from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import fresh_cache, timed
@@ -42,9 +43,9 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     get_gcc_major_version,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_ARM64,
-    IS_CI,
     IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
     IS_MACOS,
@@ -54,10 +55,10 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfRocmArch,
     slowTest,
-    TEST_CUDA,
     TEST_WITH_ROCM,
     xfailIfS390X,
 )
+from torch.testing._internal.inductor_utils import RUN_CPU
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -152,8 +153,15 @@ class LstmModule(torch.nn.Module):
         return x, h
 
 
+# Not a module-level skip: other test files import this one, including on GPU
+# jobs (test_gpu_select_algorithm, through test_cpu_select_algorithm).
+@unittest.skipIf(
+    not RUN_CPU,
+    "CPU tests not selected: no C++ compiler, or the device filter excludes cpu",
+)
 @instantiate_parametrized_tests
 class CPUReproTests(TestCase):
+    hw_classification = HardwareClassification.CPU
     common = check_model
 
     @torch._dynamo.config.patch(prefer_deferred_runtime_asserts_over_guards=True)
@@ -546,6 +554,34 @@ class CPUReproTests(TestCase):
                         )
 
     @requires_vectorization
+    @parametrize("enabled", (False, True))
+    @parametrize("dtype", (torch.float32, torch.float64))
+    def test_sqrt_without_errno(self, enabled, dtype):
+        def fn(x):
+            return torch.nn.functional.layer_norm(x, [56]), torch.sqrt(x[:, 0])
+
+        x = torch.randn(9, 56, dtype=dtype)
+        # NaN for a negative or NaN input, -0 for -0, inf for inf; a subnormal
+        # input has a normal square root.
+        specials = (-1.0, -0.0, float("inf"), float("nan"), 0.0)
+        x[: len(specials), 0] = torch.tensor(specials, dtype=dtype)
+        x[len(specials), 0] = torch.finfo(dtype).smallest_normal / 4
+        with config.patch({"cpp.sqrt_without_errno": enabled}):
+            torch._dynamo.reset()
+            actual, code = run_and_get_cpp_code(torch.compile(fn), x)
+        self.assertEqual(actual[0], fn(x)[0], equal_nan=True)
+        # Both forms are IEEE square roots: correctly rounded, signed zero
+        # included. (Eager float32 sqrt can be 1 ulp off.)
+        expected = torch.sqrt(x[:, 0].double()).to(dtype)
+        self.assertEqual(actual[1], expected, equal_nan=True, atol=0, rtol=0)
+        self.assertTrue(actual[1][1].signbit())  # sqrt(-0) is -0
+        # LayerNorm's rsqrt and the explicit sqrt both use the helper when enabled.
+        n_rsqrt = code.count("1 / sqrt_without_errno(")
+        self.assertEqual(n_rsqrt > 0, enabled)
+        self.assertEqual(code.count("sqrt_without_errno(") > n_rsqrt, enabled)
+        self.assertEqual("std::sqrt(" in code, not enabled)
+
+    @requires_vectorization
     def test_nn_fold_permuted_input(self):
         # Fix https://github.com/pytorch/pytorch/issues/191837
         def fn(x):
@@ -558,8 +594,10 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             opt_fn = torch.compile(fn, backend="inductor")
             actual, code = run_and_get_cpp_code(opt_fn, v)
-        FileCheck().check("transpose_mxn").run(code)
-        FileCheck().check("atomic_add_vec").run(code)
+        if not config.avoid_modular_indexing:
+            # the realized permute + reshape changes the generated kernels
+            FileCheck().check("transpose_mxn").run(code)
+            FileCheck().check("atomic_add_vec").run(code)
         self.assertEqual(fn(v), actual, atol=1e-4, rtol=1e-4)
 
     def test_conv_max_pool_where_backward_mutation_dep(self):
@@ -1641,6 +1679,40 @@ class CPUReproTests(TestCase):
             self.common(mod, (x, weight), atol=5e-1, rtol=5e-1)
 
     @requires_vectorization
+    def test_simd_horizontal_reduction(self):
+        def fn(x):
+            return x.sum(-1), x.amax(-1)
+
+        # 37 columns leave a masked tail; bfloat16 accumulates in VectorizedN<float, 2>.
+        dtypes = (torch.float32, torch.bfloat16)
+        simdlens = sorted({isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()})
+        for dtype, simdlen in itertools.product(dtypes, simdlens):
+            x = torch.randn(4, 37, dtype=dtype)
+            for enabled in (False, True):
+                patches = {
+                    "cpp.simdlen": simdlen,
+                    "cpp.simd_horizontal_reduction": enabled,
+                }
+                with config.patch(patches):
+                    torch._dynamo.reset()
+                    actual, code = run_and_get_cpp_code(torch.compile(fn), x)
+                self.assertEqual(actual, fn(x))
+                self.assertEqual("simd_vec_reduce_all" in code, enabled)
+
+    @requires_vectorization
+    def test_vec_exp_u20(self):
+        def fn(x):
+            return torch.softmax(x, -1)
+
+        x = torch.randn(3, 24) * 10
+        for enabled in (False, True):
+            with config.patch({"cpp.vec_exp_u20": enabled}):
+                torch._dynamo.reset()
+                actual, code = run_and_get_cpp_code(torch.compile(fn), x)
+            self.assertEqual(".exp_u20()" in code, enabled)
+            self.assertEqual(actual, fn(x), atol=1e-6, rtol=1e-5)
+
+    @requires_vectorization
     def test_max_parallel_depth_sub_vector_width_loop(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/190757
         # A vectorized loop smaller than the vector width runs 1 iteration, not
@@ -2718,7 +2790,9 @@ class CPUReproTests(TestCase):
                 channel_shuffle,
                 (x, 2, output_scale, output_zero_point, quant_min, quant_max, dtype),
             )
-            check_metrics_vec_kernel_count(2)
+            if not config.avoid_modular_indexing:
+                # the realized channel shuffle changes the vectorized kernels
+                check_metrics_vec_kernel_count(2)
 
     @requires_vectorization
     def test_tile2d_store_channel_shuffle_cl_quant_output_uint8(self):
@@ -3679,6 +3753,20 @@ class CPUReproTests(TestCase):
                     torch.allclose(output_eager, output_compiled, atol=1e-4, rtol=1e-4)
                 )
 
+    @parametrize("enabled", (False, True))
+    def test_force_inline_welford(self, enabled):
+        # use_two_step_variance keeps Welford for a single row. The flag only
+        # changes how the Welford helpers in cpp_prefix.h are compiled.
+        mod = torch.nn.LayerNorm(57).eval()
+        x = torch.randn(1, 57)
+        with config.patch({"cpp.force_inline_welford": enabled}), torch.no_grad():
+            torch._dynamo.reset()
+            actual, code = run_and_get_cpp_code(torch.compile(mod), x)
+            definitions = CppTorchDeviceOptions(device_type="cpu").get_definitions()
+        self.assertEqual(actual, mod(x))
+        self.assertIn("welford_combine", code)
+        self.assertEqual("TORCH_INDUCTOR_FORCE_INLINE_WELFORD" in definitions, enabled)
+
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
@@ -3954,9 +4042,6 @@ class CPUReproTests(TestCase):
         self.common(fn, (input, eps))
 
     @slowTest
-    # Pure CPU vec codegen; running it on a GPU CI runner leaves the GPU idle
-    # for the ~1h this test takes.
-    @unittest.skipIf(IS_CI and TEST_CUDA, "CPU-only test, skip on GPU runners")
     @requires_vectorization
     def test_vec_compare_op_cpu_only(self):
         def fn(x):
@@ -4801,7 +4886,9 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 x = torch.randn(64, 58, 28, 28)
                 self.common(channel_shuffle, (x, 2))
-                check_metrics_vec_kernel_count(2)
+                if not config.avoid_modular_indexing:
+                    # the realized channel shuffle changes the vectorized kernels
+                    check_metrics_vec_kernel_count(2)
 
     @slowTest
     @requires_vectorization
@@ -5807,8 +5894,11 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod, dynamic=dynamic)
                 actual, code = run_and_get_cpp_code(compiled_m, x)
                 self.assertEqual(expected, actual)
-                # 3 generated kernels (first one for var_mean, last two for result)
-                check_metrics_vec_kernel_count(3)
+                # 3 generated kernels (first one for var_mean, last two for
+                # result); the realized view of the low-precision input's
+                # float32 cast adds kernels
+                if dtype == torch.float32 or not config.avoid_modular_indexing:
+                    check_metrics_vec_kernel_count(3)
 
                 # check loop split optimization
                 if fmt == torch.channels_last:
@@ -6373,8 +6463,10 @@ class CPUReproTests(TestCase):
             metrics.reset()
             _, code = run_and_get_cpp_code(opt_m, x)
             self.assertTrue(same(m(x), opt_m(x)))
-            # Two kernels: one for reduction, one pointwises
-            check_metrics_vec_kernel_count(4)
+            # Two kernels: one for reduction, one pointwises; the realized
+            # window merge adds one
+            if not config.avoid_modular_indexing:
+                check_metrics_vec_kernel_count(4)
             FileCheck().check_count(
                 "Vectorized<float>::loadu(tmpbuf.data())", 0, exactly=True
             ).run(code)
@@ -6868,7 +6960,9 @@ class CPUReproTests(TestCase):
 
         metrics.reset()
         self.common(fn, ())
-        check_metrics_vec_kernel_count(1)
+        if not config.avoid_modular_indexing:
+            # the realized window partition changes the vectorized kernels
+            check_metrics_vec_kernel_count(1)
 
     def test_highp_to_lowp_cse_var_cache_with_store(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/128263
@@ -8071,7 +8165,6 @@ class CPUReproTests(TestCase):
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_CPU
 
-    if HAS_CPU and not IS_MACOS:
+    if RUN_CPU and not IS_MACOS:
         run_tests(needs="filelock")

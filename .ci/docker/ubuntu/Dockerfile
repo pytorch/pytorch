@@ -161,6 +161,11 @@ COPY ./common/install_onnx.sh ./common/common_utils.sh ./
 RUN if [ -n "${ONNX}" ]; then bash ./install_onnx.sh; fi
 RUN rm install_onnx.sh common_utils.sh
 
+ARG CUPTI_PYTHON
+COPY ./common/install_cupti_python.sh ./common/common_utils.sh ./
+RUN if [ -n "${CUPTI_PYTHON}" ]; then bash ./install_cupti_python.sh; fi
+RUN rm install_cupti_python.sh common_utils.sh
+
 ARG TVM
 # Install apache-tvm for the dynamo tvm backend tests
 # apache-tvm declares apache-tvm-ffi>=0.1.12 with no upper bound, but its

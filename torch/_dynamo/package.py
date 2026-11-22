@@ -28,8 +28,7 @@ import sys
 import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, IO, NewType, Optional, TYPE_CHECKING, Union
-from typing_extensions import Never
+from typing import Any, IO, Never, NewType, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.exc import PackageError
@@ -87,7 +86,6 @@ class SerializedCode:
     co_linetable: bytes | None = None
     co_qualname: str | None = None
     co_exceptiontable: bytes | None = None
-    co_lnotab: str | None = None
 
     @classmethod
     @_code_cache
@@ -330,17 +328,21 @@ class FunctionPicklerBase(pickle.Pickler):
         on this alone."""
         if "<locals>" in fn.__qualname__.split("."):
             return False
+        return FunctionPicklerBase._lookup(fn.__module__, fn.__qualname__) is fn
+
+    @staticmethod
+    def _lookup(module_name: object, dotted_name: str) -> object:
+        """What pickle's by-reference lookup of ``module_name.dotted_name``
+        finds among the imported modules, or None."""
         # __module__ need not be a str (a decorator can set anything); an
         # unhashable one must not TypeError out of the reducer.
-        module = (
-            sys.modules.get(fn.__module__) if isinstance(fn.__module__, str) else None
-        )
+        module = sys.modules.get(module_name) if isinstance(module_name, str) else None
         if module is None:
-            return False
+            return None
         resolved: object = module
-        for name in fn.__qualname__.split("."):
+        for name in dotted_name.split("."):
             resolved = getattr(resolved, name, None)
-        return resolved is fn
+        return resolved
 
     @staticmethod
     def _read_raw_annotations(obj: Any, *, evaluate: bool = False) -> dict[str, Any]:
@@ -516,13 +518,18 @@ class _GuardsStateUnpickler(pickle.Unpickler):
 
 
 def load_guards_state(guards_state: bytes) -> Any:
+    from torch._subclasses.fake_tensor import unset_fake_temporarily
+
     try:
         import torch.distributed.fsdp._fully_shard._fully_shard as _fully_shard
 
         ctx = _fully_shard.disable_fsdp_module_new_init()
     except ImportError:
         ctx = nullcontext()  # type: ignore[assignment]
-    with ctx:
+    # Rebuild the meta templates with the fake mode unset so they are plain meta
+    # tensors; from_meta_and_device rejects fakes. Other active dispatch modes
+    # still apply.
+    with ctx, unset_fake_temporarily():
         return _GuardsStateUnpickler(io.BytesIO(guards_state)).load()
 
 
@@ -633,6 +640,22 @@ class _DynamoCodeCacheEntry:
          uninstall(). Set on a frame a precompile capture serves as plain
          Python: its variants inlined its Python callees, which hold no entries
          of their own.
+      12. Whether Dynamo gave up on the frame during capture and skipped it for
+         the rest of the capture, for any of its soft reasons: an
+         ``Unsupported`` or ``UserError`` raised for the whole code object (a
+         graph break it could not resume from, such as one inside a loop, a
+         ``torch._dynamo.skip_frame()`` call, or an entry generator, which it
+         refuses to trace: a callee generator is refused before it gets an
+         entry, or a backend that failed on the graph with an error Dynamo
+         falls back on, such as ``DynamicOutputShapeException``), or a
+         ``SkipFrame``: a backend that declined the graph, or,
+         outside a precompile capture (which allows empty graphs), a frame that
+         traced no ops. A compile error ``suppress_errors=True`` swallows also
+         makes Dynamo skip the frame but is not flagged, so that failure stays a
+         coverage gap. A frame with no variants is skipped at install like a
+         trivial one; for a frame with variants, an installed precompile
+         artifact serves them and runs a call they miss eagerly instead of
+         refusing it.
     """
 
     python_code: SerializedCode
@@ -646,6 +669,7 @@ class _DynamoCodeCacheEntry:
     has_compile_id: bool = False
     bypassed: bool = False
     skip_recursive: bool = False
+    eager_fallback: bool = False
 
 
 def _globals_module(namespace: dict[str, object]) -> types.ModuleType | None:
@@ -746,7 +770,7 @@ def _get_code_source(
 
     toplevel: Any = module
     search_module_tree = code_module is None
-    if sys.version_info >= (3, 11) and not search_module_tree:
+    if not search_module_tree:
         parts = code.co_qualname.split(".")
 
         for part in parts:
@@ -816,7 +840,7 @@ def _get_code_source(
                         toplevel = obj
                         return f".__closure__[{i}].cell_contents{res}"
 
-        if sys.version_info < (3, 11) or search_module_tree:
+        if search_module_tree:
             if inspect.ismodule(obj):
                 for value in obj.__dict__.values():
                     if not (
@@ -875,24 +899,42 @@ class SystemInfo:
     toolkit_version: str | None
     triton_version: tuple[int, int] | None
     gpu_name: str | None
+    # What the kernels depend on instead of the GPU name: the arch they were
+    # compiled for (CUDA compute capability as major * 10 + minor, or the ROCm
+    # gfx arch) and the SM count, which a cooperative reduction sizes its grid
+    # from and needs every block resident for. None on XPU, and in packages
+    # written before they were recorded, where the GPU name is compared instead.
+    gpu_arch: int | str | None = None
+    gpu_sm_count: int | None = None
     CHECK_GPUS = ("cuda", "xpu")
 
     @classmethod
     def current(cls) -> "SystemInfo":
         """Create a SystemInfo instance with current system information."""
-        # Get GPU name if CUDA or XPU is available
-        gpu_name = None
         from torch.utils._triton import get_triton_version
 
+        from .device_interface import get_interface_for_device
+
         gpu_name, toolkit_version = None, None
+        gpu_arch, gpu_sm_count = None, None
         for device_type in cls.CHECK_GPUS:
             if getattr(torch, device_type).is_available():
                 try:
                     gpu_name = getattr(torch, device_type).get_device_name()
                     toolkit_version = getattr(torch.version, device_type)
+                    if device_type == "cuda":
+                        interface = get_interface_for_device(device_type)
+                        gpu_arch, gpu_sm_count = (
+                            interface.get_compute_capability(),
+                            interface.get_multi_processor_count(),
+                        )
                     break
                 except Exception:
-                    pass
+                    logger.debug(
+                        "Could not read the %s device's info for SystemInfo",
+                        device_type,
+                        exc_info=True,
+                    )
 
         return cls(
             python_version=platform.python_version(),
@@ -900,21 +942,30 @@ class SystemInfo:
             toolkit_version=toolkit_version,
             triton_version=get_triton_version((0, 0)),
             gpu_name=gpu_name,
+            gpu_arch=gpu_arch,
+            gpu_sm_count=gpu_sm_count,
         )
 
     def check_compatibility(
-        self, other: "SystemInfo", device_type: str = "cpu"
+        self, current: "SystemInfo", device_type: str = "cpu"
     ) -> None:
         """
-        Check if this SystemInfo is compatible with another SystemInfo.
-        Raises RuntimeError if incompatible.
+        Check that a package recorded with this SystemInfo can load on a system
+        described by ``current``. A Triton version of (0, 0) or a GPU name of
+        None in the package is not compared; a toolkit version of None is, so a
+        package built without CUDA is refused on a CUDA host. The GPU arch and
+        SM count are compared when both sides record an arch, and the GPU name
+        otherwise. Raises RuntimeError if incompatible.
         """
-        if self.python_version != other.python_version:
+        if _bytecode_version(self.python_version) != _bytecode_version(
+            current.python_version
+        ):
             raise RuntimeError(
-                f"Compile package was created with a different Python version: {self.python_version}"
+                f"Compile package was created with a different Python version: "
+                f"cached={self.python_version}, current={current.python_version}"
             )
 
-        if self.torch_version != other.torch_version:
+        if self.torch_version != current.torch_version:
             raise RuntimeError(
                 f"Compile package was created with a different PyTorch version: {self.torch_version}"
             )
@@ -922,25 +973,41 @@ class SystemInfo:
             if not getattr(torch, device_type).is_available():
                 raise RuntimeError(f"{device_type} is not available")
 
-            if self.toolkit_version != other.toolkit_version:
+            if self.toolkit_version != current.toolkit_version:
                 raise RuntimeError(
                     f"Compile package was created with a different toolkit version: {self.toolkit_version}"
                 )
 
             if (
-                other.triton_version != (0, 0)
-                and self.triton_version != other.triton_version
+                self.triton_version != (0, 0)
+                and self.triton_version != current.triton_version
             ):
                 raise RuntimeError(
                     f"Compile package was created with a different Triton version: {self.triton_version}"
                 )
 
-            # Check GPU name if CUDA/XPU was used
-            if other.gpu_name is not None and self.gpu_name != other.gpu_name:
+            if self.gpu_arch is not None and current.gpu_arch is not None:
+                saved = (self.gpu_arch, self.gpu_sm_count)
+                if saved != (current.gpu_arch, current.gpu_sm_count):
+                    raise RuntimeError(
+                        f"Compile package was created for a different GPU: "
+                        f"cached={self.gpu_name} (arch {self.gpu_arch}, "
+                        f"{self.gpu_sm_count} SMs), current={current.gpu_name} "
+                        f"(arch {current.gpu_arch}, {current.gpu_sm_count} SMs)"
+                    )
+            elif self.gpu_name is not None and self.gpu_name != current.gpu_name:
                 raise RuntimeError(
                     f"Compile package was created with different GPU: "
-                    f"cached={self.gpu_name}, current={other.gpu_name}"
+                    f"cached={self.gpu_name}, current={current.gpu_name}"
                 )
+
+
+def _bytecode_version(python_version: str) -> str:
+    """Code objects change between minor releases, and between pre-releases."""
+    parts = python_version.split(".")
+    if len(parts) == 3 and parts[2].isdigit():
+        return ".".join(parts[:2])
+    return python_version
 
 
 def _collapse_device_types(device_types: frozenset[str]) -> str:
@@ -1141,6 +1208,8 @@ class CompilePackage:
     3. `package.install(backends) which will handle all the side-effectful global scope
         updates with compiled functions and resume functions.
     """
+
+    records_graph_break_ops = False
 
     def __init__(
         self,
@@ -1370,6 +1439,13 @@ class CompilePackage:
         for backend_id in _backend_ids_from_code(dynamo_code):
             self._add_backend_id(backend_id)
 
+    def record_eager_fallback(self, code: types.CodeType) -> None:
+        """Note that Dynamo gave up on ``code`` and skips it from now on (see
+        ``_DynamoCodeCacheEntry``)."""
+        entry = self._codes.get(code)
+        if entry is not None:
+            entry.eager_fallback = True
+
     def add_inlined_source(self, sources: list[types.CodeType]) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_inlined_source")
@@ -1386,6 +1462,21 @@ class CompilePackage:
 
     def note_compute(self) -> None:
         """Called when the current compile traced a graph, even one bypass_package then drops."""
+
+    def add_backend_graph(self, backend_id: str, gm: torch.fx.GraphModule) -> None:
+        """Called with each graph registered under ``backend_id``, before its backend
+        compiles it."""
+
+    def add_graph_break_op(
+        self,
+        op: object,
+        failed_op: object = None,
+        device_types: frozenset[str] = frozenset(),
+    ) -> None:
+        """Called with the target of an FX node fake tensors could not run, or with
+        an op on the stack of an instruction Dynamo graph-breaks on; either runs
+        eagerly on ``device_types``. Non-operator targets are ignored. ``failed_op``
+        comes only with a data-dependent, dynamic-shape or unsupported-op failure."""
 
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.

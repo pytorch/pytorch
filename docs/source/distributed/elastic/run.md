@@ -7,7 +7,7 @@
 .. currentmodule:: torch.distributed.run
 
 .. autosummary::
-   :toctree: generated
+   :toctree: ../../generated
    :nosignatures:
 
    config_from_args
