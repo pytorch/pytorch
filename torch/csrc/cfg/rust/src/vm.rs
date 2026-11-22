@@ -5285,6 +5285,18 @@ impl Compiled {
                 // An attribute that is found in a dict: found once, not
                 // once to show that the lookup is quiet and once more.
                 Op::LoadAttr(of, name) if graph::holds_attr(reg(own, *of), owner.func.consts[*name as usize].as_ptr(), &mut read) => Ok(read),
+                // The same for two calls: what `object` reads of the
+                // object its `__getattribute__` is bound to, and what an
+                // exact dict has under a plain key, by its `get`.
+                Op::Call { callee, args, kwnames }
+                    if *kwnames == NONE
+                        && ((args.len() == 1 && graph::holds_generic(reg(own, *callee), reg(own, args[0]), &mut read, api))
+                            || ((1..=2).contains(&args.len())
+                                && (args.len() == 1 || !reg(own, args[1]).is_null())
+                                && graph::holds_get(reg(own, *callee), reg(own, args[0]), if args.len() == 2 { reg(own, args[1]) } else { null_mut() }, &mut read))) =>
+                {
+                    Ok(read)
+                }
                 op if owner.quiet_of(own, op, &|v| path.made.get(v as usize).is_some_and(|made| *made), api) => owner.exec_op(own, op),
                 // An attribute that the path read is not there at this
                 // call, and `object` says so itself: the read raises and
