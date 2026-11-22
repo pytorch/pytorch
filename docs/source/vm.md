@@ -1984,6 +1984,46 @@ torch.equal(out, (model.last + 1).exp().sin().cos().tanh())  # True
 found["ops"], found["hits"], found["exports"]  # (10, 6, 1): one graph across the stores, exported once
 ```
 
+`var.set(value)` of a context variable (`contextvars.ContextVar`) is an
+effect of a path as well, and the one effect that gives something back: the
+token. It is done when the path ends, in the order of the stores, so a call
+that the path turns out not to be for sets the variable once, where the
+instructions do. The token is there from then on. The function can hand it
+back or keep it in a variable; `var.reset(token)` with it, on the same
+variable, is the effect that takes it; and a test of it for `None` is known
+without it. Until the path ends nothing of the path reads the variable: a
+path ends in front of a `get`, of a second `reset` with the token, of a
+`reset` with a token it did not make, and of anything else that takes the
+token (a list or a tuple that is built of it), and the variable is set by
+then, as it is in eager mode at that place. A `set` whose token is dropped
+lets go of what the variable held; like everything a path lets go of, that
+has to be something whose end runs no Python code, or the instructions run
+("Limits"). That holds in the call that takes a path down as well: where the
+end of what the variable held runs Python code, the path ends behind the
+`set`, and the code runs where the instructions drop the token.
+
+```python
+import contextvars
+
+ACTIVE = contextvars.ContextVar("active", default=None)
+
+
+def collected(x, notes):
+    token = ACTIVE.set(notes)
+    try:
+        y = (x.sin() * 2 + 1).cos()
+    finally:
+        ACTIVE.reset(token)
+    return (y * y).tanh().sum()
+
+
+g = torch.vm(collected, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(4):
+    same = torch.equal(g(v, {}), collected(v, {}))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["why"], ACTIVE.get()  # (True, 7, 'the function returns', None)
+```
+
 A store that would run Python code is no effect, and ends the path in front
 of itself: into an object whose class has a `__setattr__` of its own, through
 a property or another descriptor that takes stores, and on a module where
