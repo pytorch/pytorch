@@ -137,7 +137,12 @@ stay: they are what shows that the call gets as far as the path does. In a
 call in which one of them raises, the path is not taken: the instructions
 run, and raise where they stand. What changes something the path made
 itself (an append to a list it built, the next item of an iterator it
-made) is left out only together with the thing ("What a function makes").
+made) is left out only together with the thing ("What a function makes"),
+and only where it cannot fail either: an entry that is put into a dict under
+a key that is no constant of the function and a list or a dict that is
+filled from a value from outside (`[*xs]`, `{**d}`) run in every run, used
+or not, so that a call in which the key cannot be hashed or the value cannot
+be gone over runs the instructions, which raise.
 
 ```python
 class Settings:
@@ -1154,6 +1159,10 @@ What graphs do not do at this stage:
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported.
+- A dict whose keys are not all texts, spread into a call (`f(**d)`), raises
+  `TypeError` as it does without the engine, but the engine has compared such
+  a key with the names of the parameters by then: an `__eq__` of the key's
+  class that is written in Python runs where the interpreter runs none.
 
 ## API Reference
 
