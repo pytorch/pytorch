@@ -86,11 +86,30 @@ def _compress_hook(
             group_to_use,
         )
         return decompress(grad)
-    else:
-        fut = dist.all_reduce(
-            compressed_tensor, group=group_to_use, async_op=True
-        ).get_future()
-        return fut.then(decompress)
+
+    work = dist.all_reduce(compressed_tensor, group=group_to_use, async_op=True)
+    if dtype == torch.float16 and compressed_tensor.is_cuda and group_to_use is not None:
+        nccl2 = getattr(dist, "ProcessGroupNCCL2", None)
+        if (
+            nccl2 is not None
+            and isinstance(group_to_use._get_backend(compressed_tensor.device), nccl2)
+            and not torch._C._distributed_c10d._allow_inflight_collective_as_graph_input()
+        ):
+            with torch.cuda.device(compressed_tensor.device):
+                capturing = torch.cuda.is_current_stream_capturing()
+            if not capturing:
+
+                def decompress_and_release(fut):
+                    result = decompress(fut)
+                    # The Future has ordered this callback stream after the
+                    # AllReduce and registered the compressed storage on it.
+                    # Release the input shelf here, after the last read is
+                    # enqueued, without adding a wait to the backward stream.
+                    work.block_current_stream()
+                    return result
+
+                return work.get_future().then(decompress_and_release)
+    return work.get_future().then(decompress)
 
 
 def fp16_compress_hook(

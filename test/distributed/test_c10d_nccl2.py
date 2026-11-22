@@ -793,6 +793,70 @@ class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_fp16_ddp_hook_releases_compressed_storage(self) -> None:
+        from torch.distributed.algorithms.ddp_comm_hooks import default_hooks
+        from torch.multiprocessing.reductions import StorageWeakRef
+
+        device = torch.device("cuda", self.rank)
+        torch.cuda.set_device(device)
+        with mock.patch.dict(
+            os.environ,
+            {"TORCH_NCCL_BLOCKING_WAIT": "0", "TORCH_FR_BUFFER_SIZE": "0"},
+        ):
+            dist.init_process_group(
+                "nccl2",
+                world_size=self.world_size,
+                rank=self.rank,
+                store=dist.FileStore(self.file_name, self.world_size),
+                device_id=device,
+            )
+        try:
+            group = dist.group.WORLD
+            all_reduce = dist.all_reduce
+            observations = []
+
+            def track_all_reduce(tensor, *, group, async_op):
+                self.assertEqual(tensor.dtype, torch.float16)
+                self.assertTrue(async_op)
+                storage = StorageWeakRef(tensor.untyped_storage())
+                before = group._get_sequence_number_for_group()
+                work = all_reduce(tensor, group=group, async_op=True)
+                after = group._get_sequence_number_for_group()
+                self.assertEqual(after, before + 1)
+                observations.append((storage, after))
+                return work
+
+            def hook(group, bucket):
+                # Keep only a weak storage reference. Mock call history would
+                # otherwise retain the compressed tensor.
+                with mock.patch.object(dist, "all_reduce", new=track_all_reduce):
+                    return default_hooks.fp16_compress_hook(group, bucket)
+
+            model = torch.nn.parallel.DistributedDataParallel(
+                torch.nn.Linear(256, 256, bias=False, device=device),
+                device_ids=[self.rank],
+                process_group=group,
+                forward_sync_buffers=False,
+                gradient_as_bucket_view=True,
+            )
+            model.register_comm_hook(group, hook)
+            x = torch.full((1, 256), self.rank + 1.0, device=device)
+            model(x).sum().backward()
+            # A local wait lets the copy finish without draining the NCCL
+            # input shelf through the next collective or a Work wait.
+            torch.cuda.synchronize(device)
+            self.assertEqual(len(observations), 1)
+            storage, seq = observations[0]
+            self.assertEqual(group._get_sequence_number_for_group(), seq)
+            grad = model.module.weight.grad
+            minimum, maximum = torch.aminmax(grad)
+            self.assertEqual((minimum.item(), maximum.item()), (1.5, 1.5))
+            self.assertTrue(storage.expired(), "FP16 hook retained compressed storage")
+        finally:
+            dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_work_outlives_process_group(self) -> None:
         device = torch.device("cuda", self.rank)
         torch.cuda.set_device(device)
