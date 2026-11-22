@@ -84,6 +84,26 @@ pub unsafe fn new_ref(o: Obj) -> Obj {
     o
 }
 
+/// What `super(class, obj)` gives, as C has it: the class the lookup
+/// starts behind, the object, and the class of the object.
+#[repr(C)]
+pub struct SuperObject {
+    pub ob_base: ffi::PyObject,
+    pub this: *mut ffi::PyTypeObject,
+    pub obj: Obj,
+    pub obj_type: *mut ffi::PyTypeObject,
+}
+
+/// A slot wrapper that is bound to an object (`obj.__getattribute__` of
+/// a class written in C), as C has it: the wrapper of the class, and the
+/// object.
+#[repr(C)]
+pub struct WrapperObject {
+    pub ob_base: ffi::PyObject,
+    pub descr: Obj,
+    pub bound: Obj,
+}
+
 #[inline(always)]
 pub unsafe fn py_bool(b: bool) -> Obj {
     new_ref(if b { ffi::Py_True() } else { ffi::Py_False() })
