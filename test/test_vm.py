@@ -12287,6 +12287,16 @@ def graph_key_popped_with_a_default(x, given):
     return (torch.tanh(h * 2) * 2 - 1).sum()
 
 
+class GraphKeyNumber(int):
+    def __hash__(self):
+        GRAPH_KEY_LOG.append("hash")
+        return int.__hash__(self)
+
+    def __eq__(self, other):
+        GRAPH_KEY_LOG.append("eq")
+        return int.__eq__(self, other)
+
+
 class GraphWithinShared(torch.nn.Module):
     def forward(self, h):
         return torch.relu(h) + 1
@@ -15342,7 +15352,9 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
         # what the class logs is what it logs there, also in the calls
         # in which a path is taken down. A store or a `pop` under such a
         # key is no part of a path, and a `__hash__` that raises raises
-        # where the instruction stands.
+        # where the instruction stands. A dict whose names are no texts
+        # is refused where it is spread into a call, before a name is
+        # compared.
         def keep(gm, input_types):
             return gm
 
@@ -15361,6 +15373,7 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
             (graph_key_stored_and_dropped, lambda: "k", logs("k")),
             (graph_key_popped_with_a_default, lambda: "k", logs("k")),
             (graph_key_spread, lambda: "scale", logs("scale")),
+            (graph_key_spread, lambda: 1, lambda: GraphKeyNumber(1)),
         )
 
         def calls(run, usual, other, graded):

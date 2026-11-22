@@ -3463,10 +3463,6 @@ What graphs do not do at this stage:
   either: a training graph still ends in front of a loss that can fail
   behind a batch norm's write to its statistics ("Writes"), and the nodes of
   the loss stand in front of `GraphBackward` on eager's tape.
-- A dict whose keys are not all texts, spread into a call (`f(**d)`), raises
-  `TypeError` as it does without the engine, but the engine has compared such
-  a key with the names of the parameters by then: an `__eq__` of the key's
-  class that is written in Python runs where the interpreter runs none.
 
 ## API Reference
 
