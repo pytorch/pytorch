@@ -59,12 +59,12 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
       break;
     case at::kComplexHalf:
       *(c10::complex<at::Half>*)data =
-          at::convert<c10::complex<at::Half>, c10::complex<double>>(
+          (c10::complex<at::Half>)static_cast<c10::complex<float>>(
               THPUtils_unpackComplexDouble(obj));
       break;
     case at::kBComplex32:
       *(c10::complex<at::BFloat16>*)data =
-          at::convert<c10::complex<at::BFloat16>, c10::complex<double>>(
+          (c10::complex<at::BFloat16>)static_cast<c10::complex<float>>(
               THPUtils_unpackComplexDouble(obj));
       break;
     case at::kComplexFloat:
