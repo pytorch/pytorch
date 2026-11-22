@@ -326,6 +326,26 @@ if sys.platform == "win32":
                 err = ctypes.WinError(ctypes.get_last_error()).strerror
                 warnings.warn(f'Failed to preload "{dll}": {err}', stacklevel=2)
 
+        # The XPU runtime DLLs (SYCL, Unified Runtime, oneMKL) are installed in
+        # <prefix>\Library\bin and resolve some of their dependencies, such as
+        # libmmd.dll and mkl_core.3.dll, through the standard search order, which
+        # includes PATH but not os.add_dll_directory. Conda activation puts that
+        # directory on PATH; a venv does not, so add it here.
+        from torch.version import xpu as xpu_version
+
+        if xpu_version:
+            path_entries = os.environ.get("PATH", "").split(os.pathsep)
+            on_path = {os.path.normcase(os.path.normpath(p)) for p in path_entries if p}
+            xpu_dll_paths = [
+                p
+                for p in (py_dll_path, base_py_dll_path)
+                if p
+                and os.path.exists(p)
+                and os.path.normcase(os.path.normpath(p)) not in on_path
+            ]
+            if xpu_dll_paths:
+                os.environ["PATH"] = os.pathsep.join([*xpu_dll_paths, *path_entries])
+
         kernel32.SetErrorMode(prev_error_mode)
 
     _load_dll_libraries()
@@ -1791,7 +1811,15 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
-        * :func:`torch.bmm` when called on sparse-dense CUDA tensors
+        * :func:`torch.bmm` when called on sparse-dense CUDA tensors, except for a sparse
+          CSR tensor on ROCm
+        * :func:`torch.mm`, :func:`torch.addmm`, :func:`torch.sparse.mm` and
+          :func:`torch.sparse.addmm` when called on sparse-dense CUDA tensors with a
+          sparse COO, CSR or CSC operand, except on ROCm
+        * :func:`torch.mv` when called on a sparse COO, CSR or CSC CUDA tensor and
+          :func:`torch.addmv` when called on a sparse CSR or CSC CUDA tensor, except on ROCm
+        * :func:`torch.baddbmm` when called on a sparse CSR CUDA tensor, except on ROCm
+        * :func:`torch.hspmm` when called on a CUDA tensor, except on ROCm
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
@@ -1855,6 +1883,10 @@ def use_deterministic_algorithms(
           tensor is given
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when called on a CUDA tensor
+        * :func:`torch.mm`, :func:`torch.addmm`, :func:`torch.sparse.mm`, :func:`torch.sparse.addmm`,
+          :func:`torch.mv`, :func:`torch.addmv`, :func:`torch.baddbmm` and :func:`torch.hspmm`
+          when called on sparse-dense tensors on ROCm, with the sparse layouts listed above, and
+          :func:`torch.bmm` when called on a sparse CSR tensor on ROCm
         * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on
           an MPS tensor with floating or complex dtype
         * :func:`torch.kthvalue` when called on an MPS tensor
