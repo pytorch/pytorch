@@ -7865,6 +7865,8 @@ class TestNNDeviceType(NNTestCase):
     @onlyAccelerator
     @parametrize_test("shape", [(2, 20001), (2, 4097), (100, 256), (300, 33)])
     def test_layer_norm_backward_shapes(self, device, shape):
+        if torch.device(device).type == "xpu" and shape[-1] >= 8192:
+            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/6310")
         normalized_shape = shape[-1:]
         args = [torch.randn(s, dtype=torch.half) for s in (shape, normalized_shape, normalized_shape)]
         grad = torch.randn(shape, dtype=torch.half)
@@ -9912,6 +9914,7 @@ class TestNNDeviceType(NNTestCase):
         unittest.skip('Lanczos mode does not support align_corners=True'),
         lambda p: p['mode'] == 'lanczos' and torch.device(p['device']).type == 'cpu' and p['antialias'] and p['align_corners'],
     )
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6206")
     def test_upsamplingBiMode2d(self, device, antialias, align_corners, mode, memory_format):
         self._test_upsamplingBiMode2d(
             device, antialias, align_corners, mode, memory_format
