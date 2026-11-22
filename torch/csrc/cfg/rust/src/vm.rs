@@ -5263,6 +5263,16 @@ impl Compiled {
     /// graph all the same (see `graph::generic`), on the values it is about
     /// to run on: its operators, as they are reported.
     unsafe fn operation(&self, block: usize, origin: u32, inst: &Inst, regs: &[Obj], api: &TcfgApi) -> Option<String> {
+        let operators = self.operation_of(block, origin, inst, regs, api)?;
+        // No operation takes a list or a tuple that holds itself: what
+        // goes into the operands of an operation ends.
+        let mut closed = false;
+        inst.op.for_each_use(|v| closed |= graph::holds_itself(reg(regs, v)));
+        (!closed).then_some(operators)
+    }
+
+    /// `operation`, before the operands are looked into.
+    unsafe fn operation_of(&self, block: usize, origin: u32, inst: &Inst, regs: &[Obj], api: &TcfgApi) -> Option<String> {
         let mut info = TcfgTensorInfo::empty();
         let mut tensor = |v: V| !reg(regs, v).is_null() && (api.tensor_info)(reg(regs, v), &mut info) != 0;
         let fits = match &inst.op {
@@ -6078,13 +6088,23 @@ impl Compiled {
     /// For a tuple or a list that a path built: the values it holds where
     /// the trace has got to.
     fn built(&self, t: &Trace, sequence: PathValue) -> Option<Vec<PathValue>> {
+        Self::built_by(t, sequence, t.body.len())
+    }
+
+    /// `built` as the first `upto` instructions of the trace left it. A
+    /// list that was spread into another (`[*a, b]`, `tuple(a)`) gave it
+    /// the items it held where that instruction stands, so what it held
+    /// is asked as of there: every step from one sequence to another goes
+    /// on in front of the instruction it comes from, and so this ends,
+    /// whatever the path put into what.
+    fn built_by(t: &Trace, sequence: PathValue, upto: usize) -> Option<Vec<PathValue>> {
         let mut items: Option<Vec<PathValue>> = None;
-        for inst in &t.body {
+        for (at, inst) in t.body[..upto].iter().enumerate() {
             match &inst.op {
                 Op::BuildTuple(vs) | Op::BuildList(vs) if inst.dst == sequence => items = Some(vs.clone()),
-                Op::ListToTuple(list) if inst.dst == sequence => items = self.built(t, *list),
+                Op::ListToTuple(list) if inst.dst == sequence => items = Self::built_by(t, *list, at),
                 Op::ListAppend(target, v) if *target == sequence => items.as_mut()?.push(*v),
-                Op::ListExtend(target, more) if *target == sequence => items.as_mut()?.extend(self.built(t, *more)?),
+                Op::ListExtend(target, more) if *target == sequence => items.as_mut()?.extend(Self::built_by(t, *more, at)?),
                 _ => {}
             }
         }
@@ -6094,9 +6114,17 @@ impl Compiled {
     /// For a dict that a path built: its keys, as they were in this run,
     /// and the values it holds under them where the trace has got to.
     fn entries(&self, t: &Trace, dict: PathValue) -> Option<Vec<(Obj, PathValue)>> {
+        Self::entries_by(t, dict, t.body.len())
+    }
+
+    /// `entries` as the first `upto` instructions of the trace left it:
+    /// a dict that was merged into another gave it the entries it had
+    /// where that instruction stands (see `built_by`, also for why this
+    /// ends).
+    fn entries_by(t: &Trace, dict: PathValue, upto: usize) -> Option<Vec<(Obj, PathValue)>> {
         let mut entries: Option<Vec<(Obj, PathValue)>> = None;
         let key = |v: PathValue| t.rec.values[v as usize];
-        for inst in &t.body {
+        for (at, inst) in t.body[..upto].iter().enumerate() {
             match &inst.op {
                 Op::BuildMap(vs) if inst.dst == dict => {
                     entries = Some(vs.chunks(2).map(|pair| (key(pair[0]), pair[1])).collect());
@@ -6108,7 +6136,7 @@ impl Compiled {
                         None => entries.push((key(*k), *v)),
                     }
                 }
-                Op::DictMerge(target, more, _) if *target == dict => entries.as_mut()?.extend(self.entries(t, *more)?),
+                Op::DictMerge(target, more, _) if *target == dict => entries.as_mut()?.extend(Self::entries_by(t, *more, at)?),
                 _ => {}
             }
         }
