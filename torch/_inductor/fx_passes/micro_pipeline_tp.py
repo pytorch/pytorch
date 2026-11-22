@@ -8,12 +8,14 @@ from typing import Any, cast
 
 import torch
 from torch._inductor.utils import get_collective_config, infer_scale_swizzle
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, inductor_prims
 from ..pattern_matcher import (
     CallFunction,
+    get_arg_value,
     Ignored,
     KeywordArg,
     ListOf,
@@ -604,10 +606,12 @@ class _Matmul:
         if len(self.nodes) not in (1, 3):
             raise AssertionError(f"expected 1 or 3 nodes, got {len(self.nodes)}")
         if len(self.nodes) == 1:
-            if self.nodes[0].target not in (aten.mm.default, aten._scaled_mm.default):
-                raise AssertionError(
-                    f"expected mm or _scaled_mm, got {self.nodes[0].target}"
-                )
+            if self.nodes[0].target not in (
+                aten.mm.default,
+                aten._scaled_mm.default,
+                aten._scaled_mm_v2.default,
+            ):
+                raise AssertionError(f"expected a matmul, got {self.nodes[0].target}")
         else:
             if self.nodes[0].target is not aten.reshape.default:
                 raise AssertionError(f"expected reshape, got {self.nodes[0].target}")
@@ -693,6 +697,7 @@ class _ScaledMatmul(_Matmul):
     use_fast_accum: bool
     pre_mm_reshape: torch.fx.Node | None
     post_mm_reshape: torch.fx.Node | None
+    swizzle: SwizzleType = SwizzleType.NO_SWIZZLE
 
     def __post_init__(self):
         super().__post_init__()
@@ -1079,7 +1084,10 @@ def _get_fusible_reduce_scatter_matmul(
     """Return the producer matmul accepted by reduce-scatter fusion."""
 
     input_node = reduce_scatter.input_node
-    matmul = _find_producer_matmul(input_node)
+    if input_node.target == aten._scaled_mm_v2.default:
+        matmul = _match_mxfp8_reduce_scatter(reduce_scatter)
+    else:
+        matmul = _find_producer_matmul(input_node)
     if matmul is None:
         return None
 
@@ -1099,6 +1107,119 @@ def _get_fusible_reduce_scatter_matmul(
     if reduce_scatter.wait_tensor_node in matmul.arg_ancestor_nodes:
         return None
     return matmul
+
+
+def _match_mxfp8_reduce_scatter(
+    reduce_scatter: _ReduceScatterMatch,
+) -> _ScaledMatmul | None:
+    mm = reduce_scatter.input_node
+    rs = reduce_scatter.reduce_scatter_node
+    if (
+        reduce_scatter.scatter_dim != 0
+        or reduce_scatter.reduce_op != "sum"
+        or get_arg_value(rs, 0, "input") is not mm
+        or len(mm.users) != 1
+        or len(rs.users) != 1
+    ):
+        return None
+
+    schema_args = aten._scaled_mm_v2.default._schema.arguments
+    args = {arg.name: arg.default_value for arg in schema_args}
+    args.update(zip((arg.name for arg in schema_args), mm.args, strict=False))
+    args.update(mm.kwargs)
+    recipe = ScalingType.BlockWise1x32
+    swizzle = SwizzleType.SWIZZLE_32_4_4
+    if (
+        args["recipe_a"] != [recipe.value]
+        or args["recipe_b"] != [recipe.value]
+        or args["swizzle_a"] != [swizzle.value]
+        or args["swizzle_b"] != [swizzle.value]
+        or args["bias"] is not None
+        or args["out_dtype"] != torch.bfloat16
+        or args["contraction_dim"] not in (None, [], [1, 0])
+        or args["use_fast_accum"]
+    ):
+        return None
+
+    nodes = [args["self"], args["mat2"]]
+    for scales in (args["scale_a"], args["scale_b"]):
+        if not isinstance(scales, (list, tuple)) or len(scales) != 1:
+            return None
+        nodes.append(scales[0])
+    a_node, b_node, a_scale_node, b_scale_node = nodes
+    if not (
+        isinstance(a_node, torch.fx.Node)
+        and isinstance(b_node, torch.fx.Node)
+        and isinstance(a_scale_node, torch.fx.Node)
+        and isinstance(b_scale_node, torch.fx.Node)
+    ):
+        return None
+    a = a_node.meta.get("val")
+    b = b_node.meta.get("val")
+    a_scale = a_scale_node.meta.get("val")
+    b_scale = b_scale_node.meta.get("val")
+    if not (
+        isinstance(a, torch.Tensor)
+        and isinstance(b, torch.Tensor)
+        and isinstance(a_scale, torch.Tensor)
+        and isinstance(b_scale, torch.Tensor)
+    ):
+        return None
+    if (
+        a.ndim != 2
+        or b.ndim != 2
+        or a.device.type != "cuda"
+        or torch.version.hip is not None
+        or a.dtype != torch.float8_e4m3fn
+        or b.dtype != a.dtype
+        or b.device != a.device
+        or not all(type(size) is int for size in (*a.shape, *b.shape))
+    ):
+        return None
+    m, k = a.shape
+    n = b.shape[1]
+    group_size = get_arg_value(rs, 2, "group_size")
+    if (
+        type(group_size) is not int
+        or group_size <= 1
+        or min(m, n, k) <= 0
+        or m % (128 * group_size)
+        or k % 128
+        or n % 16
+        or k != b.shape[0]
+        or a.stride() != (k, 1)
+        or b.stride() != (1, k)
+        or not torch.cuda.is_available()
+        or torch.cuda.get_device_capability(a.device) < (10, 0)
+    ):
+        return None
+
+    for scale, rows in ((a_scale, m), (b_scale, n)):
+        expected = ((rows + 127) // 128) * 128 * (k // 32)
+        if (
+            scale.device != a.device
+            or scale.dtype != torch.float8_e8m0fnu
+            or not all(type(size) is int for size in scale.shape)
+            or not scale.is_contiguous()
+            or not statically_known_true(scale.numel() == expected)
+            or not statically_known_true(scale.storage_offset() == 0)
+        ):
+            return None
+
+    return _ScaledMatmul(
+        nodes=[mm],
+        A_node=a_node,
+        B_node=b_node,
+        A_scale_node=a_scale_node,
+        B_scale_node=b_scale_node,
+        recipe=recipe,
+        swizzle=swizzle,
+        bias_node=None,
+        out_dtype=torch.bfloat16,
+        use_fast_accum=False,
+        pre_mm_reshape=None,
+        post_mm_reshape=None,
+    )
 
 
 def _insert_fused_matmul_reduce_scatter(
@@ -1129,10 +1250,10 @@ def _insert_fused_matmul_reduce_scatter(
                 matmul.B_node,
                 matmul.A_scale_node,
                 matmul.recipe.value,
-                SwizzleType.NO_SWIZZLE.value,
+                matmul.swizzle.value,
                 matmul.B_scale_node,
                 matmul.recipe.value,
-                SwizzleType.NO_SWIZZLE.value,
+                matmul.swizzle.value,
                 reduce_op,
                 orig_scatter_dim,
                 scatter_dim_after_reshape,

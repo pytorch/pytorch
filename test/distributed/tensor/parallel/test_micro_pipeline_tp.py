@@ -22,6 +22,7 @@ from torch._inductor.utils import (
     fresh_cache,
     run_and_get_triton_code,
 )
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.distributed._functional_collectives import (
     all_gather_single,
     all_gather_tensor,
@@ -36,6 +37,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.nn.functional import ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
@@ -764,6 +766,113 @@ class MicroPipelineTPTest(TestCase):
         self.assertNotIn("all_gather_into_tensor", code)
         self.assertIn("fused_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
+
+
+@instantiate_parametrized_tests
+class MicroPipelineTPMXFP8Test(TestCase):
+    @parametrize(
+        "case",
+        [
+            "aligned",
+            "kwargs",
+            "unaligned",
+            "recipe",
+            "swizzle",
+            "scale_size",
+            "scale_stride",
+            "extra_user",
+            "extra_rs_user",
+            "hopper",
+        ],
+    )
+    def test_direct_mxfp8_reduce_scatter(self, case):
+        graph = torch.fx.Graph()
+        mode = FakeTensorMode()
+        device = torch.device("cuda", 0)
+        aten = torch.ops.aten
+        c10d = torch.ops._c10d_functional
+
+        def value(shape, dtype, *, transpose=False, strided=False):
+            meta = torch.empty(shape, dtype=dtype, device="meta")
+            if transpose:
+                meta = meta.t()
+            if strided:
+                meta = meta[::2]
+            return FakeTensor(mode, meta, device)
+
+        def placeholder(name, fake_value):
+            node = graph.placeholder(name)
+            node.meta["val"] = fake_value
+            return node
+
+        m, n, k = (384 if case == "unaligned" else 256), 256, 256
+        fp8, scale_dtype = torch.float8_e4m3fn, torch.float8_e8m0fnu
+        a = placeholder("a", value((m, k), fp8))
+        b = placeholder("b", value((n, k), fp8, transpose=True))
+        scale_elements = m * (k // 32)
+        if case == "scale_size":
+            scale_elements //= 2
+        if case == "scale_stride":
+            scale_elements *= 2
+        sa = placeholder(
+            "sa", value((scale_elements,), scale_dtype, strided=case == "scale_stride")
+        )
+        sb = placeholder("sb", value((n * (k // 32),), scale_dtype))
+        mx, sw = ScalingType.BlockWise1x32.value, SwizzleType.SWIZZLE_32_4_4.value
+        recipe_b = ScalingType.RowWise.value if case == "recipe" else mx
+        swizzle_b = SwizzleType.NO_SWIZZLE.value if case == "swizzle" else sw
+        args = (
+            a,
+            b,
+            [sa],
+            [mx],
+            [sw],
+            [sb],
+            [recipe_b],
+            [swizzle_b],
+            None,
+            torch.bfloat16,
+        )
+        if case == "kwargs":
+            names = (arg.name for arg in aten._scaled_mm_v2.default._schema.arguments)
+            mm = graph.call_function(
+                aten._scaled_mm_v2.default, kwargs=dict(zip(names, args, strict=False))
+            )
+        else:
+            mm = graph.call_function(aten._scaled_mm_v2.default, args=args)
+        mm.meta["val"] = value((m, n), torch.bfloat16)
+        rs = graph.call_function(
+            c10d.reduce_scatter_tensor.default, (mm, "sum", 2, "tp")
+        )
+        wait = graph.call_function(c10d.wait_tensor.default, (rs,))
+        if case == "extra_user":
+            graph.output((wait, mm))
+        elif case == "extra_rs_user":
+            graph.output((wait, rs))
+        else:
+            graph.output(wait)
+
+        capability = (9, 0) if case == "hopper" else (10, 0)
+        with (
+            _test_mode(),
+            torch._inductor.config.patch(reorder_for_compute_comm_overlap=False),
+            mock.patch.object(dist, "is_nccl_available", return_value=True),
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(
+                torch.cuda, "get_device_capability", return_value=capability
+            ),
+        ):
+            micro_pipeline_tp_pass(graph)
+        graph.lint()
+        if case in ("aligned", "kwargs"):
+            target = torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter.default
+            (fused,) = [node for node in graph.nodes if node.target == target]
+            self.assertEqual(fused.args[2:8], (sa, mx, sw, sb, mx, sw))
+            self.assertEqual(fused.args[8:13], ("sum", 0, 0, "tp", [m, n]))
+            self.assertNotIn(rs, graph.nodes)
+        else:
+            self.assertIn(mm, graph.nodes)
+            self.assertIn(rs, graph.nodes)
 
 
 @instantiate_parametrized_tests
