@@ -47,8 +47,9 @@ logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    from torch._guards import Source
+
     from .guards import GuardManagerWrapper, GuardsState
-    from .source import Source
 
 
 _CODE_CACHE = WeakIdKeyDictionary()
@@ -1963,7 +1964,8 @@ class DiskDynamoStore(DynamoStore):
         return self._path_prefix
 
     def _entry_dir(self, path: str) -> str:
-        return os.path.join(self.path_prefix(), path) if self.path_prefix() else path
+        prefix = self.path_prefix()
+        return os.path.join(prefix, path) if prefix else path
 
     def clear(self) -> None:
         """
