@@ -2425,8 +2425,8 @@ class AOTCompiledModel:
         included), or the target a Dynamo wrapper is seen through to does not
         resolve itself. In these cases the artifact uses its saved global scope.
         Guards on saved globals cannot see later rebinding or changes to live
-        dictionary key order. A guard on a missing name fails. Loading warns when
-        an artifact needs a global name and explains why the live scope was unavailable.
+        dictionary key order. A guard on a missing name fails. Loading warns when a guard
+        needs a global beyond synthetic imports, constant results and the builtins dictionary.
 
         The function ``model.forward`` resolves to is the one bound as ``forward``
         seen through Dynamo's own wrappers -- the ones ``torch.compile``,
