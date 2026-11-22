@@ -393,9 +393,15 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 2 if observe_order else 1)
 
     @parametrize("mapping_type", [dict, OrderedDict])
-    @parametrize("operation", ["iter", "extend", "copy", "update", "union", "popitem"])
+    @parametrize(
+        "operation",
+        ["iter", "extend", "copy", "update", "union", "popitem"]
+        + [pytree.tree_map, pytree.tree_map_with_path],
+    )
     def test_sourced_mapping_order_consumers(self, mapping_type, operation):
         def fn(x, mapping):
+            if callable(operation):
+                return list(operation(lambda *args: args[-1] + 1, mapping).items())
             if operation == "iter":
                 views = mapping.keys(), mapping.values(), mapping.items()
                 iterables = (mapping, *views, dict.items(mapping))
@@ -416,8 +422,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
         counter = torch._dynamo.testing.CompileCounter()
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
         x = torch.ones(1)
-        for reordered in (False, True):
-            mapping = mapping_type(a=1, b=2, c=3)
+        value_type = torch.tensor if callable(operation) else int
+        for keys, reordered in (("abc", False), ("bac", False), ("abc", True)):
+            mapping = mapping_type((key, value_type(ord(key))) for key in keys)
             expected = mapping.copy()
             if reordered:
                 for value in (mapping, expected):
@@ -428,7 +435,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(compiled(x, mapping), fn(x, expected))
             self.assertEqual(tuple(mapping), tuple(expected))
             self.assertEqual(tuple(dict.keys(mapping)), tuple(dict.keys(expected)))
-        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(counter.frame_count, 3)
 
     @parametrize("base", [dict, OrderedDict])
     def test_dict_storage_order_descriptor_custom_new(self, base):
@@ -664,19 +671,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
                 mapping["a"] = mapping.pop("a")
             self.assertEqual(compiled(x, mapping), fn(x, mapping))
         self.assertEqual(counter.frame_count, 4)
-
-    @parametrize("mapper", [pytree.tree_map, pytree.tree_map_with_path])
-    def test_ordered_dict_tree_map_order_guards(self, mapper):
-        def fn(x, mapping):
-            result = mapper(lambda *args: args[-1] + 1, mapping)
-            return x + 1, list(result.items())
-
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        x = torch.ones(1)
-        for storage, linked in (("ab", "ab"), ("ba", "ba"), ("ab", "ba")):
-            mapping = OrderedDict((key, torch.tensor(ord(key))) for key in storage)
-            mapping.move_to_end(linked[-1])
-            self.assertEqual(compiled(x, mapping), fn(x, mapping))
 
     @parametrize(
         "owner, mapping_type, reordered",

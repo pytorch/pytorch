@@ -1142,7 +1142,9 @@ def identity_child_hook(module, args, output):
 
 
 class ParentWithChildModule(torch.nn.Module):
-    # Dispatch the child's hook to retain a guard rooted at the synthetic module alias.
+    # Calling a CHILD module routes through nn.Module.__call__, whose hook-dict
+    # guards are rooted at Dynamo's synthetic __import_torch_dot_nn_... alias.
+    # That is the shape a reloaded artifact could not resolve.
     def __init__(self):
         super().__init__()
         self.lin = torch.nn.Linear(4, 4)
@@ -1155,7 +1157,7 @@ class ParentWithChildModule(torch.nn.Module):
         # guard is rooted at the key and a load must leave it unseeded, which is
         # the negative test_load_seeds_exactly_the_recorded_globals pins;
         # keep_builtin_guards keeps the guard instead, which is how the seeding
-        # itself gets pinned. Avoid non-alias globals such as torch in this fixture.
+        # itself gets pinned.
         if not len(x.shape):
             raise TypeError(type(x))
         return self.lin(x)
