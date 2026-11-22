@@ -5043,6 +5043,16 @@ impl Compiled {
     /// `__getattr__` of Python; an item of a list, a tuple or a dict; a list
     /// or a dict that is made; a loop over a list, a tuple or a range.
     unsafe fn quiet(&self, regs: &[Obj], op: &Op, api: &TcfgApi) -> bool {
+        self.quiet_of(regs, op, &|_| true, api)
+    }
+
+    /// `quiet` where a path is run: `own` says of a register whether the
+    /// path made what it holds. What goes over an iterator uses it up,
+    /// and may do that to one the path made at this call and to no other:
+    /// a value that was a list when the path was taken down may be an
+    /// iterator of the caller's now. (While a path is taken down, `record`
+    /// asks that of the trace itself.)
+    unsafe fn quiet_of(&self, regs: &[Obj], op: &Op, own: &dyn Fn(V) -> bool, api: &TcfgApi) -> bool {
         let at = |v: V| reg(regs, v);
         match op {
             Op::Const(_)
@@ -5112,7 +5122,7 @@ impl Compiled {
                 let plain = !held.is_null() && !capi::is_unboxed(held) && *val != UNDEF && !at(*val).is_null();
                 plain && graph::stores_plainly(ffi::Py_TYPE(held) as Obj, self.func.consts[*name as usize].as_ptr())
             }
-            Op::GetIter(v) => !at(*v).is_null() && graph::quiet_iter(at(*v)).is_some(),
+            Op::GetIter(v) => !at(*v).is_null() && graph::quiet_iter(at(*v)).is_some_and(|used_up| !used_up || own(*v)),
             Op::Binary(kind, a, b) => graph::quiet_binary(*kind, at(*a), at(*b)),
             Op::Unary(UnaryKind::Not, a) | Op::ToBool(a) => !at(*a).is_null() && graph::quiet_truth(at(*a)),
             Op::Unary(_, a) => !at(*a).is_null() && graph::is_number(at(*a)),
@@ -5125,11 +5135,12 @@ impl Compiled {
                 !at(*item).is_null() && !at(*container).is_null() && graph::quiet_contains(at(*item), at(*container))
             }
             Op::GetLen(v) | Op::Unpack(v, _) => !at(*v).is_null() && graph::quiet_sized(at(*v)),
-            // An iterator among the arguments is one the path made.
+            // An iterator among the arguments is gone over only if the
+            // path made it.
             Op::Call { callee, args, kwnames } => {
                 let strict = *kwnames != NONE && self.strict_zip(regs, *callee, args, *kwnames);
                 let given: Vec<Obj> = args[..args.len() - strict as usize].iter().map(|v| at(*v)).collect();
-                (*kwnames == NONE || strict) && graph::pure_call(at(*callee), &given, |_| true, api).is_some()
+                (*kwnames == NONE || strict) && graph::pure_call(at(*callee), &given, |i| own(args[i]), api).is_some()
             }
             Op::CallMethod { recv, name, args, kwnames } => {
                 let given: Vec<Obj> = args.iter().map(|v| at(*v)).collect();
@@ -5207,7 +5218,7 @@ impl Compiled {
                             Assert::Enters(..) => "the function a call enters",
                             Assert::Iterator(_) | Assert::Count(_) | Assert::Flag(_) => "what a function of a class returned",
                             Assert::Absent(..) => "an attribute left to __getattr__",
-                            Assert::Lacks(..) => "a class without a __getattr__",
+                            Assert::Lacks(..) => "a name that a class has nothing under",
                             Assert::Sequence(..) | Assert::Keys(..) => "what a call spreads",
                             Assert::Equals(..) => "the place of an item",
                             Assert::Is(..) => "an object that is computed with behind the callable",
@@ -5257,7 +5268,7 @@ impl Compiled {
                 // An attribute that is found in a dict: found once, not
                 // once to show that the lookup is quiet and once more.
                 Op::LoadAttr(of, name) if graph::holds_attr(reg(own, *of), owner.func.consts[*name as usize].as_ptr(), &mut read) => Ok(read),
-                op if owner.quiet(own, op, api) => owner.exec_op(own, op),
+                op if owner.quiet_of(own, op, &|v| path.made.get(v as usize).is_some_and(|made| *made), api) => owner.exec_op(own, op),
                 // An attribute that the path read is not there at this
                 // call, and `object` says so itself: the read raises and
                 // does nothing else, where the instructions get to it.
@@ -6577,6 +6588,7 @@ impl Compiled {
         // callable has been taken down: it cannot be taken back.
         let outside = std::cell::Cell::new(false);
         let draws = site.exports() && !t.fallible;
+        let behind = site.exports() && t.fallible;
         let operators = self.operation(block, origin, inst, regs, api, &|v| owned(t, v), (!t.fallible).then_some(&outside), draws);
         if operators.is_none() {
             if let Some(taken) = self.record_call(t, site, (block, code as *const BlockCode, pc), regs, frames, api) {
@@ -6745,7 +6757,7 @@ impl Compiled {
                 let seen = found.map_or(String::new(), |f| format!("runs {} operators {:?} frames {} wrote {}", f.runs, f.operators, f.frames, f.wrote));
                 eprintln!("torch.vm graph: a path ends in {} in front of {} ({})", self.func.qualname, self.func.op_repr(&inst.op), seen);
             }
-            graph::why_not(&self.func, &inst.op, found, reason)
+            graph::why_not(&self.func, &inst.op, found, reason, behind)
         };
         let ends = || Taken::Ends(why());
         if kind.is_none() && !t.outermost() {
@@ -7535,6 +7547,11 @@ impl Compiled {
         if t.classes.iter().any(|(made, _)| t.rec.values[*made as usize] == object) {
             return Some(Taken::Ends("stores into an object the path made, by another way".to_string()));
         }
+        // Nor is it a list or a dict the path made, at this call or at
+        // any other, which no check tells: it was not computed from one.
+        if t.from_own(t.mapped(target)) {
+            return Some(Taken::Ends("stores into what may be a list or a dict the path made, taken by another way".to_string()));
+        }
         // That it can be done is shown behind the callable where what it
         // stores into is given by the graph: something that can fail
         // there, which a path that wrote to a tensor from outside cannot
@@ -7544,14 +7561,45 @@ impl Compiled {
         if late && t.writes {
             return Some(Taken::Ends("stores into what the graph gives, behind a write to a tensor from outside".to_string()));
         }
+        // The one store that reads what it is given is `extend`: the items
+        // of the sequence. It waits for the path to land, and what changes
+        // a list the path made is done where it stands, so of such a list
+        // the store takes the items it holds here, as a tuple.
+        let mut here: Option<Op> = None;
+        if let Op::ListExtend(_, more) = &op {
+            let (held, taken) = (reg(regs, *more), t.mapped(*more));
+            let own = taken != NONE && t.defs[taken as usize].made;
+            if !own && ffi::PyList_CheckExact(held) != 0 && t.from_own(taken) {
+                return Some(Taken::Ends("extends a list from outside with what may be a list the path made, taken by another way".to_string()));
+            }
+            if own && ffi::PyList_CheckExact(held) != 0 {
+                here = Some(match self.built(t, taken) {
+                    Some(items) => Op::BuildTuple(items),
+                    None if t.defs[taken as usize].late && t.writes => {
+                        let why = "extends a list from outside with what the graph gives, behind a write to a tensor from outside";
+                        return Some(Taken::Ends(why.to_string()));
+                    }
+                    None => Op::ListToTuple(taken),
+                });
+            }
+        }
         frames.top().at(inst.bc & OFFSET_MASK);
         let Ok(nothing) = self.exec_op(regs, &inst.op) else {
             return Some(Taken::Raised);
         };
-        let renamed = graph::renamed(&op, &mut |v| self.path_value(t, regs, v))?;
+        let mut renamed = graph::renamed(&op, &mut |v| self.path_value(t, regs, v))?;
         let (into, value) = (t.mapped(target), t.mapped(stored));
         if late {
             t.fails_late();
+        }
+        if let (Some(items), Op::ListExtend(list, _)) = (here, &renamed) {
+            let held = ffi::PyList_AsTuple(reg(regs, stored));
+            if held.is_null() {
+                capi::release(nothing);
+                return Some(Taken::Raised);
+            }
+            let here = t.derive(items, Kind::Pure, false, held, inst.bc);
+            renamed = Op::ListExtend(*list, here);
         }
         if matches!(inst.op, Op::StoreAttr { .. }) {
             let made: Vec<PathValue> = t.classes.iter().map(|(made, _)| *made).collect();
@@ -7970,6 +8018,12 @@ impl Compiled {
                 }
             }
             Op::CallEx { callee, args, kwargs } => Form::Spread { callee: *callee, args: *args, kwargs: *kwargs },
+            // The truth of an object whose class says how many it holds
+            // and nothing else of its truth: the `__len__` of the class,
+            // and whether what it gives is not zero.
+            Op::ToBool(v) | Op::Unary(UnaryKind::Not, v) if special(*v, &names.len) && graph::lacks_truth(reg(regs, *v)) => {
+                Form::Special(&names.len, *v, None)
+            }
             Op::GetIter(v) if special(*v, &names.iter) => Form::Special(&names.iter, *v, None),
             Op::GetItem(a, key) if special(*a, &names.getitem) => Form::Special(&names.getitem, *a, Some(*key)),
             Op::Contains(item, container, _) if special(*container, &names.contains) => {
@@ -8069,6 +8123,16 @@ impl Compiled {
             }
             if !why.is_empty() {
                 t.check(check, inst.bc);
+            }
+            // The truth of what has a `__len__`: whether the count is not
+            // zero; `not` of it, whether it is.
+            if let (true, Op::ToBool(_) | Op::Unary(UnaryKind::Not, _)) = (std::ptr::eq(*name, &names.len), &inst.op) {
+                let not = matches!(inst.op, Op::Unary(UnaryKind::Not, _));
+                let truth = py_bool((ffi::PyObject_IsTrue(result) != 0) != not);
+                ffi::Py_DECREF(result);
+                result = new_ref(truth);
+                let op = if not { Op::Unary(UnaryKind::Not, value) } else { Op::ToBool(value) };
+                value = t.derive(op, Kind::Pure, false, new_ref(truth), inst.bc);
             }
             // `not in` is whether what was returned is not true.
             if std::ptr::eq(*name, &names.contains) && matches!(inst.op, Op::Contains(_, _, true)) {
@@ -8423,6 +8487,10 @@ impl Compiled {
                     return null_mut();
                 }
                 result
+            }
+            (Form::Special(name, ..), Op::ToBool(_) | Op::Unary(UnaryKind::Not, _)) if std::ptr::eq(*name, &names.len) => {
+                let count = counted(result);
+                if count.is_null() { count } else { truth(count, matches!(inst.op, Op::Unary(UnaryKind::Not, _))) }
             }
             (Form::Special(name, ..), _) if std::ptr::eq(*name, &names.len) => counted(result),
             (Form::Special(name, ..), _) if std::ptr::eq(*name, &names.instancecheck) => truth(result, false),
@@ -8932,6 +9000,12 @@ impl Compiled {
                 given.push(self.path_value(t, regs, *v));
                 if let Some(key) = key {
                     given.push(self.path_value(t, regs, *key));
+                }
+                // The truth of an object is its `__len__` only while its
+                // class has nothing under `__bool__`, which the interpreter
+                // asks at every truth test: so does the path.
+                if matches!((&(*at.1).insts)[at.2].op, Op::ToBool(_) | Op::Unary(UnaryKind::Not, _)) {
+                    t.check(Assert::Lacks(given[0], names.truth.clone()), bc);
                 }
                 let part = match t.class_of(given[0]) {
                     Some(class) => Op::Part(Part::Member((*name).clone()), class),
