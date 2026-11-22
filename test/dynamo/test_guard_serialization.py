@@ -3633,8 +3633,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
     @parametrize("helper_type", [DictionaryToken, ReducedHolder, TokenConsumer])
     @parametrize("mapping_type", [dict, collections.defaultdict])
     def test_dictionary_snapshot_constructor_aliases(self, helper_type, mapping_type):
-        def fn(x, holder):
-            return x + len(tuple(holder.cfg)) + holder.items[1]
+        def fn(x, holder, nested):
+            return x + len(tuple(holder.cfg)) + holder.items[1] + nested["opts"][0]
 
         passive = helper_type is DictionaryToken
         token = threading.Lock() if passive else DictionaryToken()
@@ -3644,13 +3644,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
         else:
             helper = DictionaryToken() if passive else ReducedHolder(2, {})
             helper.cfg = holder.cfg
-        holder.items = [helper, 5]
-        inputs = {"x": torch.ones(1), "holder": holder}
+        nested_token = DictionaryToken()
+        nested = PlainNamespaceDict(opts=[1, nested_token])
+        holder.items = [helper, 5, TokenConsumer(nested_token)]
+        inputs = {"x": torch.ones(1), "holder": holder, "nested": nested}
         kinds = ("DICT_KEYS_MATCH", "SEQUENCE_LENGTH", "CONSTANT_MATCH")
         check = self._roundtrip_checks(kinds, fn, inputs)
         holder.items[1] += 1
         check(inputs, False)
-        loaded = self._saved_scope["holder"]
+        scope = self._saved_scope
+        loaded = scope["holder"]
+        self.assertIs(loaded.items[2].token, scope["nested"]["opts"][1])
         if helper_type is ReducedHolder:
             self.assertIsInstance(loaded.cfg["token"], DictionaryToken)
             self.assertIs(loaded.items[0].cfg["token"], loaded.cfg["token"])
@@ -3846,6 +3850,34 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": x, "left": left, "right": right}, True)
         self._test_check_fn(ref, loaded, {"x": x, "left": left, "right": left}, False)
         self._test_check_fn(ref, loaded, {"x": x, "left": [], "right": []}, True)
+
+    @parametrize("keep_class", [False, True])
+    def test_pinned_object_skips_redundant_dict_lookup(self, keep_class):
+        def install(ctx):
+            from torch._dynamo.guards import GuardBuilder, install_guard
+            from torch._dynamo.source import TypeDictSource
+
+            source = LocalSource("cls")
+            install_guard(
+                source.make_guard(GuardBuilder.CLASS_MATCH),
+                TypeDictSource(source).make_guard(
+                    functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key="mro")
+                ),
+            )
+
+        def fn(x, cls):
+            comptime(install)
+            return x + 1
+
+        x = torch.ones(1)
+        kinds = ["DICT_NOT_CONTAINS"]
+        if keep_class:
+            kinds.append("CLASS_MATCH")
+        managers = self._test_serialization(kinds, fn, x, object)
+        for manager in managers:
+            self.assertEqual("DICT_CONTAINS:" in str(manager), not keep_class)
+        for cls, expected in ((object, True), (dict, not keep_class), (type, False)):
+            self._test_check_fn(*managers, {"x": x, "cls": cls}, expected)
 
     @parametrize("reordered", [False, True])
     def test_native_ordered_dict_order(self, reordered):
