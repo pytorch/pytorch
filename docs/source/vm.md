@@ -137,9 +137,7 @@ stay: they are what shows that the call gets as far as the path does. In a
 call in which one of them raises, the path is not taken: the instructions
 run, and raise where they stand. What changes something the path made
 itself (an append to a list it built, the next item of an iterator it
-made) is left out only together with the thing: where anything that runs
-takes the list or the iterator, in front of the change or behind it, the
-change runs, in its place.
+made) is left out only together with the thing ("What a function makes").
 
 ```python
 class Settings:
@@ -276,6 +274,64 @@ for _ in range(3):
 sorted((found["where"], found["operators"]) for found in torch.vm.regions(g))
 # [('Linear.forward (block 0)[4]', ['aten::linear']), ('relu (block 4)[2]', ['aten::relu'])]
 ```
+
+### What a function makes
+
+A list, a dict, an iterator: what the instructions of a path make between
+its operations is the path's own. One model says what a path does with such
+a thing.
+
+**Which values are the thing.** A thing is known by the instruction that
+made it. Other values of the function may be that thing, or hold it: an item
+or an attribute that is taken out of something that holds it, what an
+iterator over such a holder gives, a method that is bound to it, a tuple, a
+list or a dict that is built of it. Such a value counts as the thing
+wherever it may be it at some call. What the function had before the path,
+and what it reads of objects from outside, is never one: nothing of the
+path's is stored there before the path ends. So what an iterator of the path
+gives is from outside where what it goes over is: `for i, layer in
+enumerate(self.layers)` gives the layers.
+
+**What runs.** What changes a thing (an append, `[*a, b]`, an entry of a
+dict it builds, the next item of an iterator) runs in a run of the path
+whenever anything that runs takes the thing, or what may be it or hold it,
+in front of the change or behind it. It is left out only together with the
+thing.
+
+**On which side of the graph.** The instructions that take nothing the graph
+gives run in front of what stands for the graph, the others behind it
+("Paths"). A thing begins in front. It moves behind the graph at the first
+instruction that takes it, or what may be it or hold it, and has to run
+there: a result of the graph is appended to it. From that instruction on
+everything that takes the thing runs behind the graph, also what takes
+nothing else of the graph's; everything in front of it ran in front. So what
+reads and what changes one thing runs in the order the function has it, on
+both sides: a list that is counted, sliced or put into a tuple before a
+result is appended to it is counted, sliced and held as it was then, and an
+item that is appended behind a read is not seen by the read.
+
+```python
+def kept(x, n):
+    y = x.sin() * 2
+    made = [n]
+    holder = (made, len(made))  # in front of the graph: the list has one item
+    made.append(y)  # behind the graph: it takes what the graph gives
+    made.append(n + 1)  # behind that append in the function, so behind the graph too
+    return (y.cos() + 1).exp().sum(), holder
+
+
+g = torch.vm(kept, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), as_it_is))
+for _ in range(4):
+    out, holder = g(x, 3)
+len(holder[0]), holder[1], holder[0][2]  # (3, 1, 4)
+found = torch.vm.regions(g)[0]
+found["ops"], found["hits"]  # (6, 2)
+```
+
+**What ends a path instead.** A path ends in front of an operation that is
+handed something of a thing that has moved behind the graph, other than
+tensors and sizes of the graph's own (a list of those is handed over item by
+item).
 
 ### Passes over graphs
 
