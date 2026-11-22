@@ -926,6 +926,8 @@ class TestLibtorchAgnostic(TestCase):
 
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 16)
+    # Requires eager tensor lifetimes; Dynamo retains frame inputs.
+    @torch.compiler.disable
     def test_pyobject_list_failure_releases_elements(self, device):
         import libtorch_agn_2_16 as libtorch_agnostic
 
