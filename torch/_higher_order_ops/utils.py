@@ -310,7 +310,9 @@ def _functorch_grad_rule(
                 leaves = [next(it) if isinstance(a, torch.Tensor) else a for a in flat]
                 op_args, op_kwargs = pytree.tree_unflatten(leaves, spec)
                 outputs[:], out_spec = pytree.tree_flatten(op(*op_args, **op_kwargs))
-            return _wrap_all_tensors(tuple(outputs), level)
+                # Only backward uses the graph recorded at the lower level
+                out = pytree.tree_map_only(torch.Tensor, torch.Tensor.detach, outputs)
+            return _wrap_all_tensors(tuple(out), level)
 
         def backward(ctx, *grads):
             # torch.func.vjp runs the backward after the grad level has exited

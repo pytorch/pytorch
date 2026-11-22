@@ -5122,6 +5122,22 @@ class TestControlFlowDevice(_TestControlFlowBase):
                     self.assertEqual(run_hop(fn, sign * x), run(fn_exp, sign * x))
 
     @skipCUDAIf(not SM70OrLater, "triton")
+    def test_cond_func_grad_chained(self, device):
+        def body(x):
+            return x.sin() * x
+
+        def chain(x):
+            y = cond(x.sum() > 0, body, torch.cos, (x,))
+            return cond(y.sum() > 0, body, torch.cos, (y,))
+
+        x = torch.rand(5, 3, device=device) + 0.5
+        w = torch.rand(5, 3, device=device)
+        grad = torch.func.grad
+        got = grad(lambda x: (chain(x) * w).sum())(x)
+        self.assertEqual(got, grad(lambda x: (body(body(x)) * w).sum())(x))
+        self.assertFalse(torch.func.vjp(chain, x)[0].requires_grad)
+
+    @skipCUDAIf(not SM70OrLater, "triton")
     def test_cond_func_grad_unsupported_raises(self, device):
         def f(x):
             return cond(x.sum() > 0, lambda x: x.sin() * x, torch.cos, (x,))
