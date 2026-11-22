@@ -4,7 +4,7 @@ import functools
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, overload, TypeVar
+from typing import Any, Concatenate, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -39,6 +39,10 @@ from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+
+if TYPE_CHECKING:
+    from torch._functorch.pyfunctorch import GradInterpreter
 
 
 @dataclass
@@ -261,16 +265,19 @@ def _maybe_compile_and_run_fn(fn, *args):
         return fn(*args)
 
 
-def _functorch_grad_rule(op: HigherOrderOperator) -> Callable[..., Any]:
+def _functorch_grad_rule(
+    op: HigherOrderOperator,
+) -> Callable[Concatenate["GradInterpreter", ...], object]:
     """
     TransformType.Grad rule of a HOP, used by torch.func.grad and torch.func.vjp.
     Like the Grad rule of autograd.Function (see generate_single_level_function in
     torch/_functorch/autograd_function.py), it records a single node at the grad level.
     Its forward runs the HOP one level lower, where the HOP's autograd implementation
-    records the graph, and its backward differentiates that graph. Only first-order
-    gradients are supported.
+    records the graph, and its backward differentiates that graph. Other transforms and
+    autograd outside of the grad level cannot see that graph, so the rule raises when
+    they are involved. Furthermore, only first-order gradients are supported.
     """
-    from torch._C._functorch import _unwrap_for_grad, TransformType
+    from torch._C._functorch import _unwrap_for_grad, is_dead_tensor_wrapper
     from torch._functorch.eager_transforms import (
         _autograd_grad,
         _create_differentiable,
@@ -279,17 +286,21 @@ def _functorch_grad_rule(op: HigherOrderOperator) -> Callable[..., Any]:
     from torch._functorch.pyfunctorch import retrieve_all_functorch_interpreters
     from torch._functorch.utils import enable_single_level_autograd_function
 
-    def grad_rule(interpreter, *args, **kwargs):
+    prefix = f"torch.func.grad/vjp over {op.name()}"
+
+    def grad_rule(interpreter: "GradInterpreter", *args: Any, **kwargs: Any) -> object:
         level = interpreter.level()
         flat, spec = pytree.tree_flatten((args, kwargs))
         tensors = [a for a in flat if isinstance(a, torch.Tensor)]
         inputs: list[torch.Tensor] = []
         outputs: list[torch.Tensor] = []
         out_spec = None
+        # Created at the grad level, so it is dead once the level has exited
+        token = torch.empty(0)
 
         def forward(*tensors):
             nonlocal out_spec
-            with torch.enable_grad(), interpreter.lower():
+            with interpreter.lower(), torch.enable_grad():
                 unwrapped = [_unwrap_for_grad(t, level).detach() for t in tensors]
                 inputs[:] = [
                     _create_differentiable(x) if t.requires_grad else x
@@ -304,19 +315,34 @@ def _functorch_grad_rule(op: HigherOrderOperator) -> Callable[..., Any]:
         def backward(ctx, *grads):
             # torch.func.vjp runs the backward after the grad level has exited
             current = torch._C._functorch.peek_interpreter_stack()
-            in_transform = current is not None and current.level() == level
+            alive = not is_dead_tensor_wrapper(token)
+            in_transform = current is not None and current.level() == level and alive
+            if current is not None and not in_transform:
+                raise RuntimeError(
+                    f"{prefix} does not support computing gradients inside another torch.func transform"
+                )
             wrt = [x for x in inputs if x.requires_grad]
+            retain = torch._C._autograd._get_current_graph_task_keep_graph()
             with interpreter.lower() if in_transform else nullcontext():
                 grads = [_unwrap_for_grad(g, level) for g in grads]
-                res = _autograd_grad(outputs, wrt, grads, create_graph=False)
-            res = iter(_wrap_all_tensors(res, level) if in_transform else res)
+                res = _autograd_grad(outputs, wrt, grads, retain, create_graph=False)
+            res = _wrap_all_tensors(res, level) if in_transform else res
+            if in_transform and torch.is_grad_enabled():
+                # Differentiating res again at the grad level reaches this error
+                msg = f"{prefix} supports only first-order gradients"
+                err_fn = torch._C._functions.DelayedError(msg, len(res) + len(tensors))
+                res = err_fn(*res, *tensors)[: len(res)]
+            res = iter(res)
             return tuple(next(res) if x.requires_grad else None for x in inputs)
 
-        # The graph recorded one level lower is not visible to an outer grad level
-        outer = retrieve_all_functorch_interpreters()[:-1]
-        if any(i.key() == TransformType.Grad for i in outer):
+        if retrieve_all_functorch_interpreters()[:-1]:
             raise RuntimeError(
-                f"{op.name()} does not support higher-order gradients with torch.func"
+                f"{prefix} is not supported inside another torch.func transform"
+            )
+        unwrapped = (_unwrap_for_grad(t, level) for t in tensors)
+        if interpreter.prev_grad_mode() and any(t.requires_grad for t in unwrapped):
+            raise RuntimeError(
+                f"{prefix} does not support inputs that require grad outside of the transform"
             )
 
         HopGrad = type(

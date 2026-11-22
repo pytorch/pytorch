@@ -24,6 +24,7 @@ from torch._higher_order_ops.partitioner import (
 from torch._higher_order_ops.utils import (
     _batch_dims_as_last_for_scan,
     _fake_mode_handler,
+    _functorch_grad_rule,
     _maybe_compile_and_run_fn,
     _maybe_run_with_interpreter,
     _move_batch_dims_to_last_for_scan,
@@ -1084,6 +1085,9 @@ def scan_autograd(combine_fn, init, xs, additional_inputs, mutated_arg_indices="
         *xs,
         *additional_inputs,
     )
+
+
+scan_op.py_impl(torch._C._functorch.TransformType.Grad)(_functorch_grad_rule(scan_op))
 
 
 @scan_op.py_impl(ProxyTorchDispatchMode)
