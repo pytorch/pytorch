@@ -1669,6 +1669,37 @@ class CompilePackage:
                     record_only_if_new=True,
                 )
 
+    def _install_guarded_code(
+        self,
+        module: types.ModuleType,
+        python_module: str,
+        target_code: types.CodeType,
+        guarded_code: _GuardedCodeCacheEntry,
+    ) -> None:
+        from torch._C._dynamo.eval_frame import _load_precompile_entry
+
+        with dynamo_timed("precompile_load_guards"):
+            guards_state = load_guards_state(guarded_code.guards_state)
+        runtime_global_scope = sys.modules[python_module].__dict__
+        output_graph = guards_state.output_graph
+        if builtin_dict_name := output_graph.name_of_builtins_dict_key_in_fglobals:
+            _seed_builtins_dict(runtime_global_scope, builtin_dict_name)
+        # After the builtins dict above, which a recorded source can be rooted at.
+        self._bind_unnamed_scopes(
+            module, runtime_global_scope, output_graph.unnamed_scope_sources
+        )
+        if not isinstance(guards_state, torch._dynamo.guards.GuardsState):
+            raise AssertionError(f"Expected GuardsState, got {type(guards_state)}")
+        with dynamo_timed("precompile_build_guards"):
+            guard_manager = load_guard_manager(
+                guards_state, target_code, runtime_global_scope
+            )
+        _load_precompile_entry(
+            target_code,
+            guard_manager,
+            SerializedCode.to_code_object(guarded_code.dynamo_code),
+        )
+
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
 
@@ -1692,8 +1723,6 @@ class CompilePackage:
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
-        from torch._C._dynamo.eval_frame import _load_precompile_entry
-
         from .convert_frame import input_codes
 
         self.uninstall()
@@ -1740,33 +1769,8 @@ class CompilePackage:
                     self._skipped_codes.append((target_code, entry.skip_recursive))
 
                 for guarded_code in entry.guarded_codes:
-                    with dynamo_timed("precompile_load_guards"):
-                        guards_state = load_guards_state(guarded_code.guards_state)
-                    runtime_global_scope = sys.modules[entry.python_module].__dict__
-                    if (
-                        builtin_dict_name
-                        := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
-                    ):
-                        _seed_builtins_dict(runtime_global_scope, builtin_dict_name)
-                    # After the builtins dict above, which a recorded source
-                    # can be rooted at.
-                    self._bind_unnamed_scopes(
-                        module,
-                        runtime_global_scope,
-                        guards_state.output_graph.unnamed_scope_sources,
-                    )
-                    if not isinstance(guards_state, torch._dynamo.guards.GuardsState):
-                        raise AssertionError(
-                            f"Expected GuardsState, got {type(guards_state)}"
-                        )
-                    with dynamo_timed("precompile_build_guards"):
-                        guard_manager = load_guard_manager(
-                            guards_state, target_code, runtime_global_scope
-                        )
-                    _load_precompile_entry(
-                        target_code,
-                        guard_manager,
-                        SerializedCode.to_code_object(guarded_code.dynamo_code),
+                    self._install_guarded_code(
+                        module, entry.python_module, target_code, guarded_code
                     )
 
     def cache_entry(self) -> _DynamoCacheEntry:
