@@ -153,8 +153,13 @@ stay: they are what shows that the call gets as far as the path does. In a
 call in which one of them raises, the path is not taken: the instructions
 run, and raise where they stand. What changes something the path made
 itself (an append to a list it built, a store into an object of a class it
-called, the next item of an iterator it made) is left out only together
-with the thing ("What a function makes").
+called, the next item of an iterator it made) is left out only together with
+the thing ("What a function makes"), and only where it cannot fail either:
+an entry that is put into a dict under a key that is no constant of the
+function, a `pop`, and a list or a dict that is filled from a value from
+outside (`[*xs]`, `{**d}`) run in every run, used or not, so that a call in
+which the key cannot be hashed, the name is not there or the value cannot be
+gone over runs the instructions, which raise.
 
 ```python
 class Settings:
@@ -407,7 +412,10 @@ of a path while the class has kept its answer for the class of the object;
 registering a class makes the kept answers stale, and the calls that find
 that out run the instructions, which ask anew. A method of a dict that was
 bound earlier (`get = table.get`) is the method of the dict when it is
-called.
+called. An attribute of a class (`Color.RED` of an enum class, a constant of
+a class with a metaclass) is read as `type` reads it while the class of the
+class has no `__getattribute__` and no `__getattr__` of its own, and what is
+found is given out by C code; that is asked again at every call.
 
 The instruction that such a function runs for gives what the interpreter
 makes of what the function returned: `for` and `iter` raise `TypeError` for
@@ -419,6 +427,44 @@ is that already (an iterator, an `int` that is not negative), which it
 checks at every call. For anything else, and where the path ends inside
 the function, which then runs on to its end as instructions (below), the
 instruction gives the interpreter's answer and the path ends in front of it.
+
+A comparison (`a == b`, `a < b`, `a in (b, c)`) is part of a path where the
+classes of both values compare with the function of `str`, `int`, `float` or
+`object`: numbers and texts, None, the members of an enum (also of one that
+is a `str` as well), any two objects whose classes have no `__eq__`, which
+are equal only where they are the same object. A class that has an `__eq__`
+or an `__lt__` written in Python, or gets one, compares there, and a path
+does not go on through that comparison; which of the two it is, is asked of
+both classes at every call. An order that the classes do not have raises
+`TypeError` at the instruction, as it does without the engine. `str(cls)` of
+a class is part of a path while the class of the class leaves the text to
+`type`.
+
+```python
+import enum
+
+
+class Action(str, enum.Enum):
+    NONE = "none"
+    NOTIFY = "notify"
+    RAISE = "raise"
+
+
+def checked(x, action):
+    y = x.sin() * 2
+    if action == Action.RAISE:
+        raise ValueError(action)
+    if action in (Action.NOTIFY, Action.RAISE):
+        y = y + 1
+    return y.cos().sum()
+
+
+g = torch.vm(checked, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), as_it_is))
+for _ in range(4):
+    same = torch.equal(g(x, Action.NOTIFY), checked(x, Action.NOTIFY))
+found = torch.vm.regions(g)[0]
+same, found["ops"], found["why"]  # (True, 5, 'the function returns')
+```
 
 ```python
 class Block(torch.nn.Module):
@@ -603,13 +649,55 @@ objects"), whatever the path made to go over them: the iterator, the
 `enumerate`, a list or the `**kwargs` of a call built of such objects.
 
 **What runs.** What changes a thing (an append, `[*a, b]`, a store into an
-object of a class the path called, an entry of a dict it builds, a variable
-that an inner function shares being bound, the next item of an iterator)
-runs in a run of the path whenever anything that runs takes the thing, or
-what may be it or hold it, in front of the change or behind it. It is left
+object of a class the path called, an entry of a dict it builds, an item
+that is stored into a dict it made or popped out of it, a variable that an
+inner function shares being bound, the next item of an iterator) runs in
+a run of the path whenever anything that runs takes the thing, or what may
+be it or hold it, in front of the change or behind it. It is left
 out only together with the thing. A list that the function stores into an
 object and appends to afterwards is held there by reference, and has the
 item.
+
+A dict that the function made, and the `**kwargs` of a function that the
+path went into, is such a thing: `kwargs[name] = value` and
+`kwargs.pop(name, default)` are done in their place, a read under a name
+gives what was stored under it, and what the dict is spread into afterwards
+(`inner(**kwargs)`) is handed what it holds then. The names under which a
+path stores and pops are among its checks: a call that comes with another
+name runs the instructions. A key is hashed and compared by the instruction
+that stores, reads or pops under it, as often as without the engine: the
+engine itself looks under a key only where the key is of one of the
+interpreter's own exact classes (a number, a text, `None`, a tuple of such)
+and every key of the dict is, which it asks at every call, at the
+instruction; a key of any other class (a subclass of `str` with a `__hash__`
+of its own) is left to the instructions. A method that is read off the thing
+first and called later (`take = kwargs.pop`, or `kwargs.pop(name,
+default_of(config))`, where the default is computed between the two) is the
+same change; a method of another list or dict that an object of the function
+merely holds (`holder.append = outside.append`) is a change of that other
+one.
+
+```python
+def scaled_by(y, scale=1.0, shift=0.0):
+    return y * scale + shift
+
+
+def wrapped(y, **kwargs):
+    kwargs["shift"] = kwargs.pop("offset", 0.0)
+    kwargs["scale"] = 2.0
+    return scaled_by(y, **kwargs)
+
+
+def named(x, offset):
+    return wrapped(x.sin() * 2, offset=offset).cos().sum()
+
+
+g = torch.vm(named, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), as_it_is))
+for _ in range(4):
+    same = torch.equal(g(x, 0.5), named(x, 0.5))
+(found,) = [found for found in torch.vm.regions(g) if found["where"].startswith("named")]
+same, found["ops"], found["hits"]  # (True, 6, 2)
+```
 
 **On which side of the graph.** The instructions that take nothing the graph
 gives run in front of what stands for the graph, the others behind it
@@ -3154,7 +3242,8 @@ forward, loss, backward and update in one function). A call in milliseconds
 in eager mode, under `torch.vm` with `Graphs(), Inductor()`, and under
 `torch.compile`; the three take turns in one process, 40 calls each, three
 times, and the figures are the median of the three medians. At inference the
-runner has `torch.no_grad()` around the calls of a model. Measured that way,
+runner has `torch.no_grad()` around the calls of a model, and the
+`forward_pass` of the huggingface suite enters it itself. Measured that way,
 which is what the dashboard's runner does:
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
@@ -3164,11 +3253,33 @@ which is what the dashboard's runner does:
 | adv_inception_v3 (timm) | 21.27, 21.13 ms | 8.66, 8.62 ms | 2.45x, 2.45x | 8.45, 8.39 ms | 2.52x, 2.52x | 0.97, 0.97 | 314 x1 |
 | deit_base_distilled_patch16_224 (timm) | 6.68, 6.73 ms | 6.28, 6.29 ms | 1.07x, 1.07x | 6.21, 6.21 ms | 1.08x, 1.08x | 0.99, 0.99 | 233 x1 |
 
+One step before the code of this commit, which since changed what `regions`
+says of a graph within another, what a run leaves out with a thing that
+nothing uses and how the keys of a dict are asked (the graphs of these
+models are the same on both), by another job with the same tool, which
+enters the runner's own grad mode around the calls: one measurement each, on
+16 cores, with the load average between 3 and 5 and nothing else on the GPU.
+The graphs that run are those counted above (DistillGPT2 with the operations
+it has on a GPU; of hf_DistilBert the graph of a layer and the one of its
+feed-forward part run six times each in a call):
+
+| model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
+|---|---|---|---|---|---|---|---|
+| resnet18 (TorchBench) | 2.42 ms | 1.02 ms | 2.37x | 0.98 ms | 2.47x | 0.96 | 69 x1 |
+| resnet50 (TorchBench) | 6.04 ms | 2.66 ms | 2.27x | 2.54 ms | 2.38x | 0.95 | 175 x1 |
+| yolov3 (TorchBench) | 9.88 ms | 4.26 ms | 2.32x | 3.94 ms | 2.51x | 0.92 | 328 x1 |
+| hf_DistilBert (TorchBench) | 3.35 ms | 3.25 ms | 1.03x | 1.71 ms | 1.96x | 0.52 | 17 x6, 6 x1, 4 x6, 4 x1 |
+| DistillGPT2 (HuggingFace) | 13.89 ms | 4.65 ms | 2.99x | 3.76 ms | 3.69x | 0.81 | 231 x1, 10 x1, 8 x1, 8 x1 |
+| MobileBertForMaskedLM (HuggingFace) | 29.91 ms | 14.88 ms | 2.01x | 13.09 ms | 2.28x | 0.88 | 1272 x1, 16 x1, 7 x1 |
+| whisper-tiny (HuggingFace) | 8.91 ms | 4.92 ms | 1.81x | 3.09 ms | 2.88x | 0.63 | 237 x1, 126 x1, 8 x1 |
+| Qwen3-0.6B (HuggingFace) | 32.60 ms | 9.70 ms | 3.36x | 7.28 ms | 4.48x | 0.75 | 2080 x1, 11 x1, 6 x1 |
+
 As a check that these rows are the runner's mode, the runner's own lines for
 the same models (`python benchmarks/dynamo/torchbench.py --performance
 --inference --bfloat16 --only MODEL` with `--vm` and with `--backend
-inductor`, `timm_models.py` for the models of timm; one run each), which
-report the speed against eager mode, next to what the tool has:
+inductor`, `timm_models.py` and `huggingface.py` for the models of those
+suites; one run each), which report the speed against eager mode, next to
+what the tool has:
 
 | model | the runner with `--vm` | the tool, `torch.vm` | the runner with `--backend inductor` | the tool, `torch.compile` |
 |---|---|---|---|---|
@@ -3176,14 +3287,15 @@ report the speed against eager mode, next to what the tool has:
 | mobilenetv2_100 | 2.71x | 2.73x, 2.72x | 2.77x | 2.80x, 2.80x |
 | adv_inception_v3 | 2.45x | 2.45x, 2.45x | 2.49x | 2.52x, 2.52x |
 | deit_base_distilled_patch16_224 | 1.06x | 1.07x, 1.07x | 1.08x | 1.08x, 1.08x |
+| DistillGPT2 | 2.98x | 2.99x | 3.71x | 3.69x |
 
 With gradients recorded: the same calls without `torch.no_grad()` (the tool
-calls `forward_pass` directly), and the training steps. A forward that
-records gradients is another graph than one under `torch.no_grad()`: what
-stands for it also keeps what its backward needs ("Gradients"), and for deit
-and hf_DistilBert the cuDNN attention node in half precision keeps the graph
-on eager's tape altogether ("Limits"). The transformer models have been
-measured in this mode only:
+calls the `forward_pass` of the torchbench and timm suites directly, which
+does not enter it), and the training steps. A forward that records gradients
+is another graph than one under `torch.no_grad()`: what stands for it also
+keeps what its backward needs ("Gradients"), and for deit and hf_DistilBert
+the cuDNN attention node in half precision keeps the graph on eager's tape
+altogether ("Limits"):
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
 |---|---|---|---|---|---|---|---|
@@ -3191,23 +3303,17 @@ measured in this mode only:
 | mobilenetv2_100 (timm), gradients recorded | 9.66, 9.69 ms | 5.48, 5.45 ms | 1.76x, 1.78x | 3.16, 3.15 ms | 3.06x, 3.07x | 0.58, 0.58 | 152 x1 |
 | adv_inception_v3 (timm), gradients recorded | 21.21, 21.23 ms | 12.82, 12.85 ms | 1.66x, 1.65x | 8.72, 8.72 ms | 2.43x, 2.43x | 0.68, 0.68 | 314 x1 |
 | deit_base_distilled_patch16_224 (timm), gradients recorded | 6.80, 6.82 ms | 6.95, 6.84 ms | 0.98x, 1.00x | 6.21, 6.22 ms | 1.10x, 1.10x | 0.89, 0.91 | 233 x1 |
-| DistillGPT2 (HuggingFace), gradients recorded | 13.86 ms | 4.62 ms | 3.00x | 3.74 ms | 3.70x | 0.81 | 231 x1, 10 x1, 8 x1, 8 x1 |
-| MobileBertForMaskedLM (HuggingFace), gradients recorded | 30.00 ms | 14.81 ms | 2.03x | 13.32 ms | 2.25x | 0.90 | 1272 x1, 16 x1, 7 x1 |
 | hf_DistilBert (TorchBench), gradients recorded | 3.88 ms | 3.97 ms | 0.98x | 1.99 ms | 1.95x | 0.50 | 6 x1, 4 x1 |
-| whisper-tiny (HuggingFace), gradients recorded | 8.91 ms | 4.89 ms | 1.82x | 3.05 ms | 2.92x | 0.62 | 237 x1, 126 x1, 8 x1 |
-| Qwen3-0.6B (HuggingFace), gradients recorded | 32.34 ms | 9.85 ms | 3.28x | 7.45 ms | 4.34x | 0.76 | 2080 x1, 11 x1, 6 x1 |
 | resnet18 (TorchBench), a training step | 8.50, 8.35 ms | 5.48, 5.37 ms | 1.55x, 1.56x | 5.42, 5.22 ms | 1.57x, 1.60x | 0.99, 0.97 | 89 x1 |
 | resnet50 (TorchBench), a training step | 23.48, 22.99 ms | 15.74, 15.68 ms | 1.49x, 1.47x | 13.98, 13.37 ms | 1.68x, 1.72x | 0.89, 0.85 | 228 x1 |
 | DistillGPT2, a training step | 53.30 ms | 29.73 ms | 1.79x | 17.97 ms | 2.97x | 0.60 | 15 x6, 10 x1, 8 x1, 8 x1 |
 
-The rows of the five transformer models and of DistillGPT2's training step
-are one measurement each, made by another job with the same tool on the same
-code (the Rust of its build is this tree's byte for byte), on 16 cores, with
-the load average between 5 and 7 and nothing else on the GPU. For these
-models the graphs that run are those counted above (DistillGPT2 with the
-operations it has on a GPU), with one exception: of hf_DistilBert only 2
-small graphs run in this setting (6 x1, 4 x1), and its call takes what
-eager's takes.
+The rows of hf_DistilBert and of DistillGPT2's training step are one
+measurement each, made by another job with the same tool on the same code as
+the rows of this job (the Rust of its build is that tree's byte for byte),
+on 16 cores, with the load average between 5 and 6 and nothing else on the
+GPU. With gradients recorded only 2 small graphs of hf_DistilBert run (6 x1,
+4 x1), and its call takes what eager's takes.
 
 That gradients are recorded is why deit and hf_DistilBert are at eager's
 speed in their rows with gradients. Their attention is
@@ -3226,6 +3332,12 @@ runs 6 times in a step, but the attention of a layer is in none (the
 operator draws random numbers, and the call around it runs kernels and is no
 call site), and neither are the kernels of the optimizer's update, which are
 no call sites.
+
+In the runner's mode the layers of hf_DistilBert are graphs (17 operations,
+and the 4 of the feed-forward part, six times each in a call), and a call
+takes 3.25 ms where eager's takes 3.35: of the 3.22 ms of a call that the
+tool takes apart, 1.94 are in what stands for the graphs, 0.43 in front of
+them and 0.82 between them.
 
 ### Limits
 
