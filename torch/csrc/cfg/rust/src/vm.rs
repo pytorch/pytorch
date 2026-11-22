@@ -4954,12 +4954,13 @@ impl Compiled {
             | Op::IsNone(..)
             | Op::Is(..)
             | Op::IsFunction { .. }
-            | Op::BuildTuple(_)
-            | Op::BuildList(_)
-            | Op::BuildSlice(..)
             | Op::Part(..)
             | Op::Object(_)
             | Op::CheckBound(..) => true,
+            // Of what is there: a register that is empty is nothing to
+            // build of.
+            Op::BuildTuple(vs) | Op::BuildList(vs) => vs.iter().all(|v| !at(*v).is_null()),
+            Op::BuildSlice(a, b, c) => [a, b, c].into_iter().all(|v| *v == NONE || !at(*v).is_null()),
             // What changes a list, or draws on an iterator, does so to one
             // the path made: `record` takes down no other.
             Op::ListAppend(..) | Op::IterNext(_) => true,
@@ -6276,8 +6277,8 @@ impl Compiled {
                 return Taken::Raised;
             };
             // What is read of a list that holds what an operation gave is
-            // read behind the graph, and so is what is put into it later.
-            t.defs[list as usize].late |= t.defs[item as usize].late;
+            // read behind the graph, and so is what is put into it later
+            // (`Trace::note`).
             t.push(Op::ListAppend(list, item), NONE, Kind::Residual, inst.bc);
             ffi::Py_XINCREF(nothing);
             let dst = t.define(inst.dst, Def::default(), nothing);
@@ -6519,7 +6520,11 @@ impl Compiled {
             (Op::CallEx { callee, args, kwargs }, Kind::Node) => {
                 let sequence = self.path_value(t, regs, *args);
                 let mut items = if sequence == UNDEF { None } else { self.spread(t, sequence, inst.bc) };
-                let entries = if *kwargs == NONE { Some(Vec::new()) } else { self.entries(t, t.mapped(*kwargs)) };
+                let entries = match *kwargs {
+                    NONE => Some(Vec::new()),
+                    named if self.pins_keys(t, t.mapped(named), inst.bc) => self.entries(t, t.mapped(named)),
+                    _ => None,
+                };
                 match (&mut items, entries) {
                     (Some(items), Some(entries)) if !entries.is_empty() => {
                         let keys = ffi::PyTuple_New(entries.len() as isize);
@@ -6997,14 +7002,8 @@ impl Compiled {
             }
         }
         if let Op::ListAppend(into, ..) | Op::MapAdd(into, ..) | Op::ListExtend(into, _) | Op::DictMerge(into, ..) = &renamed {
-            // What is read of a list or a dict that holds what an operation
-            // gave is read behind the graph.
-            let (mut late, mut fixed) = (false, true);
-            graph::reads(&renamed, |v| {
-                late |= t.defs[v as usize].late;
-                fixed &= v == *into || t.defs[v as usize].fixed;
-            });
-            t.defs[*into as usize].late |= late;
+            let mut fixed = true;
+            graph::reads(&renamed, |v| fixed &= v == *into || t.defs[v as usize].fixed);
             t.defs[*into as usize].fixed &= fixed;
         }
         t.push(renamed, dst, kind, inst.bc);
@@ -7099,8 +7098,9 @@ impl Compiled {
         };
         let object = if bound_to.is_null() { reg(regs, target) } else { bound_to };
         // Nor is it a list or a dict the path made, at this call or at
-        // any other, which no check tells: it was not computed from one.
-        if t.from_own(t.mapped(target)) {
+        // any other, which no check tells: it is of no family of things
+        // the path made (`graph::Family`).
+        if t.things.has(t.mapped(target)) {
             return Some(Taken::Ends("stores into what may be a list or a dict the path made, taken by another way".to_string()));
         }
         // That it can be done is shown behind the callable where what it
@@ -7120,7 +7120,7 @@ impl Compiled {
         if let Op::ListExtend(_, more) = &op {
             let (held, taken) = (reg(regs, *more), t.mapped(*more));
             let own = taken != NONE && t.defs[taken as usize].made;
-            if !own && ffi::PyList_CheckExact(held) != 0 && t.from_own(taken) {
+            if !own && ffi::PyList_CheckExact(held) != 0 && t.things.has(taken) {
                 return Some(Taken::Ends("extends a list from outside with what may be a list the path made, taken by another way".to_string()));
             }
             if own && ffi::PyList_CheckExact(held) != 0 {
@@ -7933,8 +7933,9 @@ impl Compiled {
                 }
                 if *kwargs != NONE {
                     let named = self.path_value(t, regs, *kwargs);
+                    let pinned = self.pins_keys(t, named, bc);
                     let entries = self.entries(t, named).filter(|entries| {
-                        entries.len() == nkw && entries.iter().zip(&keys).all(|((key, _), name)| key == name)
+                        pinned && entries.len() == nkw && entries.iter().zip(&keys).all(|((key, _), name)| key == name)
                     });
                     match entries {
                         Some(entries) => given.extend(entries.iter().map(|(_, value)| *value)),
@@ -8282,6 +8283,48 @@ impl Compiled {
         entries
     }
 
+    /// Whether the keys under which a path put entries into a dict it made,
+    /// and took them out, are the same at every call: each is a constant
+    /// or is made one here by a check (`Assert::Equals`). What `entries`
+    /// says of the dict holds at another call only with this: with other
+    /// keys the same instructions leave other entries. False where a key
+    /// is computed behind the callable or cannot be checked, and for a
+    /// dict that took the entries of one of which this is not so.
+    unsafe fn pins_keys(&self, t: &mut Trace, dict: PathValue, bc: u32) -> bool {
+        if dict == NONE || dict == UNDEF {
+            return false;
+        }
+        let (mut keys, mut merged): (Vec<PathValue>, Vec<(usize, PathValue)>) = (Vec::new(), Vec::new());
+        for (at, inst) in t.body.iter().enumerate() {
+            match &inst.op {
+                Op::BuildMap(vs) if inst.dst == dict => keys.extend(vs.iter().step_by(2)),
+                Op::MapAdd(target, key, _) if *target == dict => keys.push(*key),
+                Op::CallMethod { recv, args, .. } if *recv == dict && inst.kind == Kind::Residual => keys.extend(args.first()),
+                Op::DictMerge(target, more, _) if *target == dict => merged.push((at, *more)),
+                _ => {}
+            }
+        }
+        // The dict that was merged was put together in front of the merge.
+        for (at, more) in merged {
+            let built = t.body[..at].iter().any(|inst| inst.dst == more && matches!(inst.op, Op::BuildMap(_)));
+            if !built || !self.pins_keys(t, more, bc) {
+                return false;
+            }
+        }
+        for key in keys {
+            let (of, held) = (t.defs[key as usize], t.rec.values[key as usize]);
+            if of.fixed {
+                continue;
+            }
+            if of.late || held.is_null() || !graph::checkable(held) {
+                return false;
+            }
+            t.check(Assert::Equals(key, graph::frozen(held)), bc);
+            t.defs[key as usize].fixed = true;
+        }
+        true
+    }
+
     /// For a list that a path made: the values it holds where the trace has
     /// got to, if the path filled it by nothing but appending. None for any
     /// other value, and for a list that is as its instruction built it.
@@ -8570,7 +8613,7 @@ impl Compiled {
         if graph::debug() {
             let (steps, ops) = (path.body.len(), path.operators.len());
             eprintln!(
-                "torch.vm graph {}: a path of {} instructions, {} operations ({} in front of what stands for them, {} behind, {} where it lands; {} registers), ends at {:?}: {}",
+                "torch.vm graph {}: a path of {} instructions, {} operations ({} in front of what stands for them, {} behind, {} where it lands; {} registers, {} results), ends at {:?}: {}",
                 site.name,
                 steps,
                 ops,
@@ -8578,6 +8621,7 @@ impl Compiled {
                 path.stages[1].len(),
                 path.stages[2].len(),
                 path.nregs,
+                path.outputs.len(),
                 land,
                 path.ends
             );
