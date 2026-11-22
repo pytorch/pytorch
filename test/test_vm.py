@@ -12473,6 +12473,21 @@ def graph_compares_an_order(x, given):
     return (h * (2.0 if given < GRAPH_MIDDLE else 3.0)).sum()
 
 
+class GraphLoudMeta(type):
+    def __repr__(cls):
+        GRAPH_COMPARE_LOG.append("repr")
+        return "<class 'loud'>"
+
+
+class GraphOfLoudMeta(metaclass=GraphLoudMeta):
+    pass
+
+
+def graph_text_of_a_class(x, given):
+    h = torch.relu(x) + 1
+    return (h * GRAPH_NAMED.get(str(given.__class__), 1.5)).sum()
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -15682,6 +15697,50 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
             if "__eq__" in vars(GraphQuietText):
                 del GraphQuietText.__eq__
                 del GraphQuietText.__lt__
+            del GRAPH_COMPARE_LOG[:]
+
+    def test_the_text_of_a_class_is_part_of_a_path(self, device):
+        # `str(cls)` is part of a path while the class of the class leaves
+        # the text to `type`, which is asked at every call: a class whose
+        # class has a `__repr__` of its own says its text there, at the
+        # eighth and the eleventh call, and what it logs is eager's.
+        def keep(gm, input_types):
+            return gm
+
+        plain = GraphQuietText("narrow")
+        cases = ((plain, GraphLoudText("a")), (plain, GraphOfLoudMeta()))
+
+        def calls(run, usual, other, graded):
+            del GRAPH_COMPARE_LOG[:]
+            GRAPH_NAMED.clear()
+            GRAPH_NAMED[str(GraphQuietText)] = 2.0
+            GRAPH_NAMED[str(GraphLoudText)] = 3.0
+            found = []
+            for at in range(14):
+                x = torch.full((3, 4), 0.25 * (at + 1), device=device)
+                x.requires_grad_(graded)
+                out = run(x, other if at in (7, 10) else usual)
+                if graded:
+                    out.backward()
+                grad = None if x.grad is None else x.grad.sum().item()
+                found.append((out.item(), grad, list(GRAPH_COMPARE_LOG)))
+            return found
+
+        fn = graph_text_of_a_class
+        try:
+            for usual, other in cases:
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"with {type(other).__name__}, a pass: {bool(behind)}"
+                    msg += f", a gradient: {graded}"
+                    got = calls(compiled, usual, other, graded)
+                    expected = calls(fn, usual, other, graded)
+                    self.assertTrue(got == expected, msg=f"{msg}: {got} {expected}")
+                    if behind or graded:
+                        self.graph_goes_to_the_return(compiled, msg)
+        finally:
+            GRAPH_NAMED.clear()
             del GRAPH_COMPARE_LOG[:]
 
 

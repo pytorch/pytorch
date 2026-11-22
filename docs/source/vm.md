@@ -436,7 +436,9 @@ are equal only where they are the same object. A class that has an `__eq__`
 or an `__lt__` written in Python, or gets one, compares there, and a path
 does not go on through that comparison; which of the two it is, is asked of
 both classes at every call. An order that the classes do not have raises
-`TypeError` at the instruction, as it does without the engine.
+`TypeError` at the instruction, as it does without the engine. `str(cls)` of
+a class is part of a path while the class of the class leaves the text to
+`type`.
 
 ```python
 import enum
@@ -3250,18 +3252,27 @@ which is what the dashboard's runner does:
 | mobilenetv2_100 (timm) | 8.51, 8.55 ms | 3.12, 3.14 ms | 2.73x, 2.72x | 3.04, 3.06 ms | 2.80x, 2.80x | 0.97, 0.97 | 152 x1 |
 | adv_inception_v3 (timm) | 21.27, 21.13 ms | 8.66, 8.62 ms | 2.45x, 2.45x | 8.45, 8.39 ms | 2.52x, 2.52x | 0.97, 0.97 | 314 x1 |
 | deit_base_distilled_patch16_224 (timm) | 6.68, 6.73 ms | 6.28, 6.29 ms | 1.07x, 1.07x | 6.21, 6.21 ms | 1.08x, 1.08x | 0.99, 0.99 | 233 x1 |
-| DistillGPT2 (HuggingFace) | 13.86 ms | 4.62 ms | 3.00x | 3.74 ms | 3.70x | 0.81 | 231 x1, 10 x1, 8 x1, 8 x1 |
-| MobileBertForMaskedLM (HuggingFace) | 30.00 ms | 14.81 ms | 2.03x | 13.32 ms | 2.25x | 0.90 | 1272 x1, 16 x1, 7 x1 |
-| whisper-tiny (HuggingFace) | 8.91 ms | 4.89 ms | 1.82x | 3.05 ms | 2.92x | 0.62 | 237 x1, 126 x1, 8 x1 |
-| Qwen3-0.6B (HuggingFace) | 32.34 ms | 9.85 ms | 3.28x | 7.45 ms | 4.34x | 0.76 | 2080 x1, 11 x1, 6 x1 |
 
-The rows of the four models of the huggingface suite are one measurement
-each, made by another job with the same tool on the same code (the Rust of
-its build is that tree's byte for byte), on 16 cores, with the load average
-between 5 and 7 and nothing else on the GPU; the tool calls `forward_pass`,
-which for this suite is the runner's mode. For these models the graphs that
-run are those counted above (DistillGPT2 with the operations it has on a
-GPU).
+One step before the code of this commit, which since changed what `regions`
+says of a graph within another, what a run leaves out with a thing that
+nothing uses and how the keys of a dict are asked (the graphs of these
+models are the same on both), by another job with the same tool, which
+enters the runner's own grad mode around the calls: one measurement each, on
+16 cores, with the load average between 3 and 5 and nothing else on the GPU.
+The graphs that run are those counted above (DistillGPT2 with the operations
+it has on a GPU; of hf_DistilBert the graph of a layer and the one of its
+feed-forward part run six times each in a call):
+
+| model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
+|---|---|---|---|---|---|---|---|
+| resnet18 (TorchBench) | 2.42 ms | 1.02 ms | 2.37x | 0.98 ms | 2.47x | 0.96 | 69 x1 |
+| resnet50 (TorchBench) | 6.04 ms | 2.66 ms | 2.27x | 2.54 ms | 2.38x | 0.95 | 175 x1 |
+| yolov3 (TorchBench) | 9.88 ms | 4.26 ms | 2.32x | 3.94 ms | 2.51x | 0.92 | 328 x1 |
+| hf_DistilBert (TorchBench) | 3.35 ms | 3.25 ms | 1.03x | 1.71 ms | 1.96x | 0.52 | 17 x6, 6 x1, 4 x6, 4 x1 |
+| DistillGPT2 (HuggingFace) | 13.89 ms | 4.65 ms | 2.99x | 3.76 ms | 3.69x | 0.81 | 231 x1, 10 x1, 8 x1, 8 x1 |
+| MobileBertForMaskedLM (HuggingFace) | 29.91 ms | 14.88 ms | 2.01x | 13.09 ms | 2.28x | 0.88 | 1272 x1, 16 x1, 7 x1 |
+| whisper-tiny (HuggingFace) | 8.91 ms | 4.92 ms | 1.81x | 3.09 ms | 2.88x | 0.63 | 237 x1, 126 x1, 8 x1 |
+| Qwen3-0.6B (HuggingFace) | 32.60 ms | 9.70 ms | 3.36x | 7.28 ms | 4.48x | 0.75 | 2080 x1, 11 x1, 6 x1 |
 
 As a check that these rows are the runner's mode, the runner's own lines for
 the same models (`python benchmarks/dynamo/torchbench.py --performance
@@ -3276,6 +3287,7 @@ what the tool has:
 | mobilenetv2_100 | 2.71x | 2.73x, 2.72x | 2.77x | 2.80x, 2.80x |
 | adv_inception_v3 | 2.45x | 2.45x, 2.45x | 2.49x | 2.52x, 2.52x |
 | deit_base_distilled_patch16_224 | 1.06x | 1.07x, 1.07x | 1.08x | 1.08x, 1.08x |
+| DistillGPT2 | 2.98x | 2.99x | 3.71x | 3.69x |
 
 With gradients recorded: the same calls without `torch.no_grad()` (the tool
 calls the `forward_pass` of the torchbench and timm suites directly, which
@@ -3320,6 +3332,12 @@ runs 6 times in a step, but the attention of a layer is in none (the
 operator draws random numbers, and the call around it runs kernels and is no
 call site), and neither are the kernels of the optimizer's update, which are
 no call sites.
+
+In the runner's mode the layers of hf_DistilBert are graphs (17 operations,
+and the 4 of the feed-forward part, six times each in a call), and a call
+takes 3.25 ms where eager's takes 3.35: of the 3.22 ms of a call that the
+tool takes apart, 1.94 are in what stands for the graphs, 0.43 in front of
+them and 0.82 between them.
 
 ### Limits
 

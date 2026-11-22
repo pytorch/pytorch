@@ -2678,6 +2678,22 @@ unsafe fn compares_in_c(o: Obj) -> bool {
         .any(|ty| slot(*ty) == own)
 }
 
+/// Whether `str` of a value is the text `type` makes of a class: the value
+/// is a class, and its class turns it into text as `type` does (it has no
+/// `__str__` and no `__repr__` of its own, which the interpreter keeps in
+/// these two slots). `type` reads the module and the name of the class in
+/// the class's own dict, whose keys are texts here, and calls nothing.
+unsafe fn class_text(o: Obj) -> bool {
+    if o.is_null() || capi::is_unboxed(o) || ffi::PyType_Check(o) == 0 {
+        return false;
+    }
+    let (meta, plain, object) = (ffi::Py_TYPE(o), std::ptr::addr_of!(ffi::PyType_Type), std::ptr::addr_of!(ffi::PyBaseObject_Type));
+    let says = (*meta).tp_str.map(|f| f as usize) == (*object).tp_str.map(|f| f as usize)
+        && (*meta).tp_repr.map(|f| f as usize) == (*plain).tp_repr.map(|f| f as usize);
+    let dict = (*(o as *mut ffi::PyTypeObject)).tp_dict;
+    says && (is_static(o as *mut ffi::PyTypeObject) || (!dict.is_null() && quiet_keys(dict)))
+}
+
 /// Whether two values compare in C code: two values whose classes
 /// compare with the function of `str`, `int`, `float` or `object`
 /// (`compares_in_c`: the interpreter asks the class of one, then that of
@@ -3177,7 +3193,7 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
         Builtin::Zip => !args.is_empty() && all(),
         Builtin::Tuple | Builtin::List => args.len() <= 1 && all(),
         Builtin::Int | Builtin::Float | Builtin::Abs => args.len() == 1 && numbers(),
-        Builtin::Str => args.len() == 1 && (numbers() || ffi::PyUnicode_CheckExact(args[0]) != 0),
+        Builtin::Str => args.len() == 1 && (numbers() || ffi::PyUnicode_CheckExact(args[0]) != 0 || class_text(args[0])),
         Builtin::Min | Builtin::Max => args.len() >= 2 && numbers(),
         Builtin::Bool => args.len() == 1 && quiet_truth(args[0]),
         Builtin::Type | Builtin::Callable => args.len() == 1,
