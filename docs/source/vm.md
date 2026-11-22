@@ -2970,15 +2970,18 @@ torch.vm(f, passes=(*default, keep, P.Inductor())).passes
 The times of this section were measured on the tree of commit `90f834123d55`
 of this series, on one H100 and eight cores, one process at a time under the
 lock that every job on the machine takes for a timed run. In front of every
-row the load average of the last minute was under 10 (between 1.3 and 9.8)
-and no process was on the GPU. Every row was measured twice, and most of the
-rows whose eager figure was more than 3 percent apart between the two
-processes a third time (eager's own figure moves by up to 9 percent from one
-process to the next); all the figures are given, and the rows whose eager
-figure moved are listed with the figures of each process behind the tables.
-Eager mode and what is compared with it take turns in one process, so that
-both have the same machine: a ratio is of the turns inside one process,
-never of figures from two.
+row the load average of the last minute was under 10 (between 1.2 and 9.8)
+and no process was on the GPU. Every row was measured twice, and every row
+whose eager figure was more than 3 percent apart between the two processes a
+third time (eager's own figure moves by up to 11 percent from one process to
+the next); all the figures are given, and the rows whose eager figure moved
+are listed with the figures of each process behind the tables. Eager mode
+and what is compared with it take turns in one process, so that both have
+the same machine: a ratio is of the turns inside one process, never of
+figures from two. The row of yolov3 is of the tree of commit `5c0ad0cf96d7`,
+on which its forward is one graph: on the other tree a store that a
+detection layer makes into itself ended the path, and the model was two
+graphs.
 
 With the default settings and `Graphs()` and `Inductor()` in the list, the
 forward of a resnet is one graph, and so is that of yolov3. In images per
@@ -2987,7 +2990,7 @@ the best of three rounds of 60 batches for each side):
 
 | model | the graphs that run | `Graphs()` | `Graphs(), Inductor()` |
 |---|---|---|---|
-| yolov3 (TorchBench), bfloat16, batch 8 of 3x384x512 | one graph | to be measured | to be measured |
+| yolov3 (TorchBench), bfloat16, batch 8 of 3x384x512 | 328 operations | 1.05x, 0.97x, 1.02x | 2.38x, 2.24x, 2.19x |
 | resnet18 (torchvision), float32, batch 16 of 3x224x224 | 69 operations | 1.01x, 0.97x | 1.89x, 1.93x |
 | resnet18, bfloat16 | 69 operations | 1.03x, 1.00x | 2.17x, 2.26x |
 | resnet50, float32 | 175 operations | 1.00x, 1.04x, 1.03x | 1.70x, 1.72x |
@@ -2997,16 +3000,15 @@ With `Graphs()` alone the outputs are those of eager mode bit for bit, the
 operations in place included. With `Inductor()` they differ by its
 arithmetic: by 2.4e-4 of the largest value in float32, and by up to 1.4e-2
 in bfloat16. With `Inductor()` a few small functions on the way were left to
-the interpreter by measurement (`ContextProp.__get__`,
-`Sequential.__iter__`, `interpolate`), and the graphs go through them. The
-graph of a resnet is its whole forward, the pool, the flatten and the linear
-layer at the end included. On the tree these times are of, yolov3 was two
-graphs: a store that a detection layer makes into itself ended the path of
-the model's forward. On this tree such a store is an effect of the path,
-since what an iterator over the model's layers gives is an object from
-outside ("What a function makes"), and the forward is one graph again, with
-328 of the about 347 operations of a call on the CPU (float32, a batch of
-2). Its row is to be measured on this tree.
+the interpreter by measurement (`ContextProp.__get__`, `Module.__setattr__`,
+`_BufferMeta.__instancecheck__`, `_ParameterMeta.__instancecheck__`), and
+the graphs go through them. The graph of a resnet is its whole forward, the
+pool, the flatten and the linear layer at the end included. The graph of
+yolov3 is the model with its three detection layers and the stores they make
+into themselves, 328 operations: what an iterator over the model's layers
+gives is a layer, an object from outside, and a store into it is an effect
+of the path ("Stores into objects", "What a function makes"). It ends at a
+call that runs no kernel, and the one operation behind that runs by itself.
 
 The forward of a training step is one graph as well: 89 operations for
 resnet18 and 228 for resnet50, the batch norms writing their statistics and
@@ -3026,9 +3028,9 @@ default, without `torch.vm`. "Under autocast" is the loss computed under
 | resnet18, under autocast | 112 to 116 | 1.44x, 1.48x, 1.43x | 1.52x, 1.53x | 1.51x, 1.54x | 1.55x, 1.61x |
 | resnet50, batch 16 of 3x224x224 | 55 to 58 | 1.50x, 1.49x, 1.46x | 1.42x, 1.38x, 1.42x | 1.37x, 1.38x | 1.07x, 1.04x |
 | resnet50, under autocast | 49 to 50 | 1.51x, 1.48x | 1.57x, 1.53x | 1.54x, 1.54x | 1.55x, 1.59x |
-| a convnet with batch norm and dropout, batch 32 of 3x32x32 | 588 to 616 | 1.23x, 1.23x | 1.17x, 1.19x | 1.17x, 1.20x | 1.24x, 1.27x |
-| the convnet, under autocast | 432 to 472 | 1.04x, 1.05x | 1.02x, 0.97x | 1.01x, 0.97x | 1.38x, 1.30x |
-| a transformer encoder layer with dropout, batch 32 of 128 tokens | 333 to 345 | 1.01x, 1.01x | 1.00x, 1.00x | 0.99x, 1.00x | 1.36x, 1.32x |
+| a convnet with batch norm and dropout, batch 32 of 3x32x32 | 588 to 616 | 1.23x, 1.23x | 1.17x, 1.19x | 1.17x, 1.20x, 1.20x | 1.24x, 1.27x |
+| the convnet, under autocast | 432 to 478 | 1.04x, 1.05x | 1.02x, 0.97x | 1.01x, 0.97x | 1.38x, 1.30x, 1.31x |
+| a transformer encoder layer with dropout, batch 32 of 128 tokens | 333 to 345 | 1.01x, 1.01x | 1.00x, 1.00x | 0.99x, 1.00x | 1.36x, 1.32x, 1.36x |
 | DistilGPT2 (HuggingFace), batch 8 of 128 tokens | 58 to 59 | 0.98x, 0.98x | 1.09x, 1.09x | 1.04x, 1.05x | 1.16x, 1.16x |
 
 On eager's tape, with `Graphs(backward=False)`, the two resnets run at
@@ -3060,14 +3062,15 @@ behind what can fail ("Writes"): a layer is a graph of 14 operations and one
 of 18 with the attention between them, and two more, of 7 and 10, run around
 the layers, where their paths end at calls of Python code.
 
-Eager's own figure was more than 3 percent apart between the processes of 11
-rows of the two tables above (yolov3's rows are not among them: they are to
-be measured). For these, every figure of every process, in the order the
-processes ran: eager's, the other side's, and the ratio, which is of the
-turns inside that one process.
+Eager's own figure was more than 3 percent apart between the processes of 13
+rows of the two tables above. For these, every figure of every process, in
+the order the processes ran: eager's, the other side's, and the ratio, which
+is of the turns inside that one process.
 
 | row | eager | the other side | ratio |
 |---|---|---|---|
+| yolov3, `Graphs()`, images a second | 786, 833, 816 | 825, 809, 835 | 1.05x, 0.97x, 1.02x |
+| yolov3, `Graphs(), Inductor()`, images a second | 807, 835, 830 | 1922, 1869, 1820 | 2.38x, 2.24x, 2.19x |
 | resnet50, float32, `Graphs()`, images a second | 3152, 2999, 3034 | 3157, 3121, 3131 | 1.00x, 1.04x, 1.03x |
 | resnet50, bfloat16, `Graphs()`, images a second | 2874, 2754, 2799 | 2887, 2779, 2819 | 1.00x, 1.01x, 1.01x |
 | resnet18, `Graphs()`, steps a second | 138.3, 133.8, 134.7 | 196.4, 191.5, 191.3 | 1.42x, 1.43x, 1.42x |
@@ -3075,12 +3078,10 @@ turns inside that one process.
 | resnet18 under autocast, `Graphs()`, steps a second | 115.6, 112.3, 116.1 | 166.5, 166.3, 166.1 | 1.44x, 1.48x, 1.43x |
 | resnet50, `Graphs()`, steps a second | 56.1, 58.2, 58.5 | 84.1, 86.8, 85.5 | 1.50x, 1.49x, 1.46x |
 | resnet50, `Graphs(), Inductor()`, steps a second | 55.1, 57.1, 55.8 | 78.4, 78.8, 79.3 | 1.42x, 1.38x, 1.42x |
-| the convnet, `Graphs(), AOTAutograd(), Inductor()`, steps a second | 588.4, 612.7 | 691.3, 732.4 | 1.17x, 1.20x |
-| the convnet under autocast, `torch.compile`, steps a second | 431.9, 471.6 | 597.3, 612.5 | 1.38x, 1.30x |
-| the encoder layer, `torch.compile`, steps a second | 334.6, 345.2 | 454.6, 454.2 | 1.36x, 1.32x |
+| the convnet, `Graphs(), AOTAutograd(), Inductor()`, steps a second | 588.4, 612.7, 614.6 | 691.3, 732.4, 735.8 | 1.17x, 1.20x, 1.20x |
+| the convnet under autocast, `torch.compile`, steps a second | 431.9, 471.6, 478.3 | 597.3, 612.5, 626.2 | 1.38x, 1.30x, 1.31x |
+| the encoder layer, `torch.compile`, steps a second | 334.6, 345.2, 337.3 | 454.6, 454.2, 457.7 | 1.36x, 1.32x, 1.36x |
 | resnet18, `Graphs(backward=False)`, steps a second | 136.2, 142.1, 142.3 | 141.1, 143.0, 143.0 | 1.04x, 1.01x, 1.01x |
-
-The 3 rows with two figures have not been measured a third time.
 
 The models of timm and the transformer models have other code around their
 operations than the convolutional models above, and the graphs they get are
@@ -3149,26 +3150,52 @@ raises, and the path ends there.
 Timed, the models as the benchmark runner of `benchmarks/dynamo` loads them,
 with its batch and its own functions for a call: inference in bfloat16 (the
 runner's `forward_pass`), and a training step under `--amp` (the runner's
-forward, loss, backward and update in one function). Gradients are recorded
-in every row, the inference rows included: the tool that measures calls
-`forward_pass` directly, where the runner itself has `torch.no_grad()`
-around it at inference, so the inference rows are not the figures of the
-dashboard's runner. A call in milliseconds in eager mode, under `torch.vm`
-with `Graphs(), Inductor()`, and under `torch.compile`; the three take turns
-in one process, 40 calls each, three times, and the figures are the median
-of the three medians:
+forward, loss, backward and update in one function). A call in milliseconds
+in eager mode, under `torch.vm` with `Graphs(), Inductor()`, and under
+`torch.compile`; the three take turns in one process, 40 calls each, three
+times, and the figures are the median of the three medians. At inference the
+runner has `torch.no_grad()` around the calls of a model. Measured that way,
+which is what the dashboard's runner does:
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
 |---|---|---|---|---|---|---|---|
-| resnet50 (TorchBench) | 6.88, 6.98 ms | 3.78, 3.82 ms | 1.82x, 1.83x | 2.91, 2.91 ms | 2.36x, 2.40x | 0.77, 0.76 | 175 x1 |
-| mobilenetv2_100 (timm) | 9.66, 9.69 ms | 5.48, 5.45 ms | 1.76x, 1.78x | 3.16, 3.15 ms | 3.06x, 3.07x | 0.58, 0.58 | 152 x1 |
-| adv_inception_v3 (timm) | 21.21, 21.23 ms | 12.82, 12.85 ms | 1.66x, 1.65x | 8.72, 8.72 ms | 2.43x, 2.43x | 0.68, 0.68 | 314 x1 |
-| deit_base_distilled_patch16_224 (timm) | 6.80, 6.82 ms | 6.95, 6.84 ms | 0.98x, 1.00x | 6.21, 6.22 ms | 1.10x, 1.10x | 0.89, 0.91 | 233 x1 |
-| DistillGPT2 (HuggingFace) | 13.86 ms | 4.62 ms | 3.00x | 3.74 ms | 3.70x | 0.81 | 231 x1, 10 x1, 8 x1, 8 x1 |
-| MobileBertForMaskedLM (HuggingFace) | 30.00 ms | 14.81 ms | 2.03x | 13.32 ms | 2.25x | 0.90 | 1272 x1, 16 x1, 7 x1 |
-| hf_DistilBert (TorchBench) | 3.88 ms | 3.97 ms | 0.98x | 1.99 ms | 1.95x | 0.50 | 6 x1, 4 x1 |
-| whisper-tiny (HuggingFace) | 8.91 ms | 4.89 ms | 1.82x | 3.05 ms | 2.92x | 0.62 | 237 x1, 126 x1, 8 x1 |
-| Qwen3-0.6B (HuggingFace) | 32.34 ms | 9.85 ms | 3.28x | 7.45 ms | 4.34x | 0.76 | 2080 x1, 11 x1, 6 x1 |
+| resnet50 (TorchBench) | 6.02, 6.06 ms | 2.62, 2.61 ms | 2.29x, 2.32x | 2.51, 2.47 ms | 2.40x, 2.45x | 0.96, 0.95 | 175 x1 |
+| mobilenetv2_100 (timm) | 8.51, 8.55 ms | 3.12, 3.14 ms | 2.73x, 2.72x | 3.04, 3.06 ms | 2.80x, 2.80x | 0.97, 0.97 | 152 x1 |
+| adv_inception_v3 (timm) | 21.27, 21.13 ms | 8.66, 8.62 ms | 2.45x, 2.45x | 8.45, 8.39 ms | 2.52x, 2.52x | 0.97, 0.97 | 314 x1 |
+| deit_base_distilled_patch16_224 (timm) | 6.68, 6.73 ms | 6.28, 6.29 ms | 1.07x, 1.07x | 6.21, 6.21 ms | 1.08x, 1.08x | 0.99, 0.99 | 233 x1 |
+
+As a check that these rows are the runner's mode, the runner's own lines for
+the same models (`python benchmarks/dynamo/torchbench.py --performance
+--inference --bfloat16 --only MODEL` with `--vm` and with `--backend
+inductor`, `timm_models.py` for the models of timm; one run each), which
+report the speed against eager mode, next to what the tool has:
+
+| model | the runner with `--vm` | the tool, `torch.vm` | the runner with `--backend inductor` | the tool, `torch.compile` |
+|---|---|---|---|---|
+| resnet50 | 2.25x | 2.29x, 2.32x | 2.29x | 2.40x, 2.45x |
+| mobilenetv2_100 | 2.71x | 2.73x, 2.72x | 2.77x | 2.80x, 2.80x |
+| adv_inception_v3 | 2.45x | 2.45x, 2.45x | 2.49x | 2.52x, 2.52x |
+| deit_base_distilled_patch16_224 | 1.06x | 1.07x, 1.07x | 1.08x | 1.08x, 1.08x |
+
+With gradients recorded: the same calls without `torch.no_grad()` (the tool
+calls `forward_pass` directly), and the training steps. A forward that
+records gradients is another graph than one under `torch.no_grad()`: what
+stands for it also keeps what its backward needs ("Gradients"), and for deit
+and hf_DistilBert the cuDNN attention node in half precision keeps the graph
+on eager's tape altogether ("Limits"). The transformer models have been
+measured in this mode only:
+
+| model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
+|---|---|---|---|---|---|---|---|
+| resnet50 (TorchBench), gradients recorded | 6.88, 6.98 ms | 3.78, 3.82 ms | 1.82x, 1.83x | 2.91, 2.91 ms | 2.36x, 2.40x | 0.77, 0.76 | 175 x1 |
+| mobilenetv2_100 (timm), gradients recorded | 9.66, 9.69 ms | 5.48, 5.45 ms | 1.76x, 1.78x | 3.16, 3.15 ms | 3.06x, 3.07x | 0.58, 0.58 | 152 x1 |
+| adv_inception_v3 (timm), gradients recorded | 21.21, 21.23 ms | 12.82, 12.85 ms | 1.66x, 1.65x | 8.72, 8.72 ms | 2.43x, 2.43x | 0.68, 0.68 | 314 x1 |
+| deit_base_distilled_patch16_224 (timm), gradients recorded | 6.80, 6.82 ms | 6.95, 6.84 ms | 0.98x, 1.00x | 6.21, 6.22 ms | 1.10x, 1.10x | 0.89, 0.91 | 233 x1 |
+| DistillGPT2 (HuggingFace), gradients recorded | 13.86 ms | 4.62 ms | 3.00x | 3.74 ms | 3.70x | 0.81 | 231 x1, 10 x1, 8 x1, 8 x1 |
+| MobileBertForMaskedLM (HuggingFace), gradients recorded | 30.00 ms | 14.81 ms | 2.03x | 13.32 ms | 2.25x | 0.90 | 1272 x1, 16 x1, 7 x1 |
+| hf_DistilBert (TorchBench), gradients recorded | 3.88 ms | 3.97 ms | 0.98x | 1.99 ms | 1.95x | 0.50 | 6 x1, 4 x1 |
+| whisper-tiny (HuggingFace), gradients recorded | 8.91 ms | 4.89 ms | 1.82x | 3.05 ms | 2.92x | 0.62 | 237 x1, 126 x1, 8 x1 |
+| Qwen3-0.6B (HuggingFace), gradients recorded | 32.34 ms | 9.85 ms | 3.28x | 7.45 ms | 4.34x | 0.76 | 2080 x1, 11 x1, 6 x1 |
 | resnet18 (TorchBench), a training step | 8.50, 8.35 ms | 5.48, 5.37 ms | 1.55x, 1.56x | 5.42, 5.22 ms | 1.57x, 1.60x | 0.99, 0.97 | 89 x1 |
 | resnet50 (TorchBench), a training step | 23.48, 22.99 ms | 15.74, 15.68 ms | 1.49x, 1.47x | 13.98, 13.37 ms | 1.68x, 1.72x | 0.89, 0.85 | 228 x1 |
 | DistillGPT2, a training step | 53.30 ms | 29.73 ms | 1.79x | 17.97 ms | 2.97x | 0.60 | 15 x6, 10 x1, 8 x1, 8 x1 |
@@ -3183,19 +3210,22 @@ small graphs run in this setting (6 x1, 4 x1), and its call takes what
 eager's takes.
 
 That gradients are recorded is why deit and hf_DistilBert are at eager's
-speed in this table. Their attention is `scaled_dot_product_attention` on
-CUDA in half precision, a cuDNN kernel, and with gradients recorded a graph
-that holds it keeps eager's tape and is handed to no compiler ("Limits").
-The graph of deit is its whole forward, 233 operations, and its operations
-run one by one on eager's kernels. The graph of a layer of hf_DistilBert, 17
-operations, keeps eager's tape for the same node; it is no faster than the
-instructions it stands for, so the measurement leaves the layer to the
-interpreter, and the 2 graphs that run hold 0.25 of the 4.02 ms of a call.
-DistillGPT2's training step has 1.7 of its 29.8 ms in what stands for its
-graphs: a layer's MLP is a graph of 15 operations that runs 6 times in a
-step, but the attention of a layer is in none (the operator draws random
-numbers, and the call around it runs kernels and is no call site), and
-neither are the kernels of the optimizer's update, which are no call sites.
+speed in their rows with gradients. Their attention is
+`scaled_dot_product_attention` on CUDA in half precision, a cuDNN kernel,
+and with gradients recorded a graph that holds it keeps eager's tape and is
+handed to no compiler ("Limits"). The graph of deit is its whole forward,
+233 operations, and its operations run one by one on eager's kernels. Under
+`torch.no_grad()` the same graph is compiled like any other, and a call of
+deit takes 6.28, 6.29 ms where eager's takes 6.68, 6.73. The graph of a
+layer of hf_DistilBert, 17 operations, keeps eager's tape for the same node;
+it is no faster than the instructions it stands for, so the measurement
+leaves the layer to the interpreter, and the 2 graphs that run hold 0.25 of
+the 4.02 ms of a call. DistillGPT2's training step has 1.7 of its 29.8 ms in
+what stands for its graphs: a layer's MLP is a graph of 15 operations that
+runs 6 times in a step, but the attention of a layer is in none (the
+operator draws random numbers, and the call around it runs kernels and is no
+call site), and neither are the kernels of the optimizer's update, which are
+no call sites.
 
 ### Limits
 
