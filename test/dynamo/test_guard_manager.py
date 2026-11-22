@@ -110,6 +110,7 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
     @parametrize("verbose", [False, True])
     def test_hook_membership_guard_retains_temporary_dictionary(self, partial, verbose):
         references = []
+        alive_at_comparison = []
 
         class Registries:
             @property
@@ -120,8 +121,7 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
 
             @property
             def flags(self):
-                if references[-1]() is None:
-                    raise RuntimeError("hook dictionary was freed before comparison")
+                alive_at_comparison.append(references[-1]() is not None)
                 return None if partial else {1: True}
 
         root = RootGuardManager()
@@ -133,6 +133,7 @@ class NNModuleHookMembershipGuardTests(torch._dynamo.test_case.TestCase):
         inputs = Registries()
         result = root.check_verbose(inputs).result if verbose else root.check(inputs)
         self.assertEqual(result, not partial)
+        self.assertEqual(alive_at_comparison, [True])
         self.assertIsNone(references[-1]())
 
     @parametrize("verbose", [False, True])
