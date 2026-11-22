@@ -4300,12 +4300,10 @@ def load(
     graphs are wrapped and run (``cudagraph_policy``, which can decline to wrap
     a graph, ``triton.cudagraph_capture_sizes``, the rerecord limits,
     ``triton.cudagraph_or_error``, the warmup and sync knobs, ...) are the
-    loading process's, as for a :func:`torch.compile` cache hit. So is a
-    serve-time compile (``allow_serve_time_compiles``, below), which takes the
-    capture's ``mode`` or ``options`` and otherwise the loading process's
-    config. Loading does not apply :func:`torch.compile`'s CUPTI workaround
-    for CUDA graphs (a serve-time compile whose ``mode`` or ``options`` turn
-    them on does): when profiling repeatedly on CUDA older than 12.6, set
+    loading process's, as for a :func:`torch.compile` cache hit. Loading does
+    not apply :func:`torch.compile`'s CUPTI workaround for CUDA graphs
+    (``allow_serve_time_compiles``, below, does when the artifact's CUDA
+    graphs are on): when profiling repeatedly on CUDA older than 12.6, set
     ``DISABLE_CUPTI_LAZY_REINIT=1`` and ``TEARDOWN_CUPTI=0`` yourself.
 
     Frozen C++ kernels are keyed by their build command with the PyTorch install
@@ -4323,7 +4321,14 @@ def load(
     refusal: a call no captured variant covers compiles with the artifact's
     backend and the capture's ``mode`` or ``options`` (recorded in the
     artifact's ``INDUCTOR_OPTIONS``), as ``torch.compile`` would, under the
-    process-wide stance like any other compile. An artifact whose options are
+    process-wide stance like any other compile. For the CUDA graph settings
+    those do not name, Inductor lowers it under the artifact's
+    ``CUDAGRAPH_CONFIG``, so a miss runs as a CUDA graph when the artifact's
+    graphs do. Dynamo traces it under the loading process's own config,
+    though: for an artifact captured with CUDA graphs on and
+    ``graph_partition`` off, turn ``triton.cudagraphs`` on in the loading
+    process too, or a Python float argument becomes a CPU scalar input that
+    keeps the serve-time graph out of CUDA graphs. An artifact whose options are
     not all Python literals (such as a custom pass) refuses the flag. The
     captured variants are still served first and do not count toward
     ``torch._dynamo.config.recompile_limit``, so each frame gets

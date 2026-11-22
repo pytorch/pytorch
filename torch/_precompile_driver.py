@@ -996,8 +996,11 @@ def _build_installed_forward():
         # caching_precompile would make optimize(package=None) create its own
         # package, which context(fn) fills from the on-disk Dynamo cache.
         backend: object = BACKEND
-        if _ALLOW_SERVE_TIME_COMPILES and INDUCTOR_OPTIONS:
-            backend = torch._TorchCompileInductorWrapper(None, INDUCTOR_OPTIONS, None)
+        if _ALLOW_SERVE_TIME_COMPILES and BACKEND == "inductor":
+            # A miss is lowered as the captured graphs were: for the CUDA graph
+            # settings the capture's options do not name, by CUDAGRAPH_CONFIG.
+            options = {**CUDAGRAPH_CONFIG, **(INDUCTOR_OPTIONS or {})}
+            backend = torch._TorchCompileInductorWrapper(None, options, None)
         with torch._dynamo.config.patch(caching_precompile=False):
             context = torch._dynamo.optimize(
                 backend, package=None if _ALLOW_SERVE_TIME_COMPILES else package
