@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace at::native::mkldnn {
@@ -104,8 +105,7 @@ struct convolution_forward_params {
   Attr op_attr;
   int groups;
   Attr bias_attr;
-  // From IPEX. Set in `do_prepare()`, only used outside ideep.
-  // TO-DO: Use a better name, i.e., num_threads
+  // Set by the constructors but not read in ATen; kept to match ideep's layout.
   int pd_use_threads;
 
   // Keep {dnnl_arg, tensor} pairs of scales and zero points for primitive execution
