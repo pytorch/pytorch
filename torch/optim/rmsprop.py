@@ -53,7 +53,7 @@ class RMSprop(Optimizer):
             raise ValueError(f"Invalid momentum value: {momentum}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
-        if not 0.0 <= alpha:
+        if not 0.0 <= alpha <= 1.0:
             raise ValueError(f"Invalid alpha value: {alpha}")
 
         defaults = {
@@ -247,7 +247,7 @@ RMSprop.__doc__ = (
     Args:
         {_params_doc}
         lr (float, Tensor, optional): learning rate (default: 1e-2)
-        alpha (float, optional): smoothing constant (default: 0.99)
+        alpha (float, optional): smoothing constant in [0, 1] (default: 0.99)
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)

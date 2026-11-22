@@ -47,6 +47,10 @@ class Rprop(Optimizer):
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 < etas[0] < 1.0 < etas[1]:
             raise ValueError(f"Invalid eta values: {etas[0]}, {etas[1]}")
+        if not 0.0 <= step_sizes[0] <= step_sizes[1]:
+            raise ValueError(
+                f"Invalid step size values: {step_sizes[0]}, {step_sizes[1]}"
+            )
 
         defaults = {
             "lr": lr,
@@ -211,7 +215,8 @@ Rprop.__doc__ = (
             are multiplicative increase and decrease factors
             (default: (0.5, 1.2))
         step_sizes (Tuple[float, float], optional): a pair of minimal and
-            maximal allowed step sizes (default: (1e-6, 50))
+            maximal allowed step sizes with ``0 <= min <= max``
+            (default: (1e-6, 50))
         {_capturable_doc}
         {_foreach_doc}
         {_maximize_doc}

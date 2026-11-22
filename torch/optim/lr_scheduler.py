@@ -597,7 +597,7 @@ class StepLR(LRScheduler):
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
-        step_size (int): Period of learning rate decay.
+        step_size (int): Period of learning rate decay. Must be positive.
         gamma (float): Multiplicative factor of learning rate decay.
             Default: 0.1.
         last_epoch (int): The index of last epoch. Default: -1.
@@ -625,6 +625,9 @@ class StepLR(LRScheduler):
         gamma: float = 0.1,
         last_epoch: int = -1,
     ) -> None:
+        if not 0 < step_size:
+            raise ValueError(f"step_size must be positive, but got {step_size}")
+
         self.step_size = step_size
         self.gamma = gamma
         super().__init__(optimizer, last_epoch)
@@ -780,7 +783,8 @@ class ConstantLR(LRScheduler):
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
-        factor (float): The number we multiply learning rate until the milestone. Default: 1./3.
+        factor (float): Multiplicative factor in the range (0, 1], applied until
+            the milestone. Default: 1./3.
         total_iters (int): The number of steps that the scheduler multiplies the learning rate by the factor.
             Default: 5.
         last_epoch (int): The index of the last epoch. Default: -1.
@@ -810,10 +814,8 @@ class ConstantLR(LRScheduler):
         total_iters: int = 5,
         last_epoch: int = -1,
     ) -> None:
-        if factor > 1.0 or factor < 0:
-            raise ValueError(
-                "Constant multiplicative factor expected to be between 0 and 1."
-            )
+        if not 0.0 < factor <= 1.0:
+            raise ValueError("Constant multiplicative factor expected to be in (0, 1].")
 
         self.factor = factor
         self.total_iters = total_iters

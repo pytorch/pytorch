@@ -1227,6 +1227,15 @@ def optim_error_inputs_func_rmsprop(device, dtype):
                 error_type=ValueError,
                 error_regex="Invalid momentum value: -1.0",
             ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(alpha=1.5),
+                    desc="alpha should be between 0 and 1",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid alpha value: 1.5",
+            ),
         ]
     return error_inputs
 
@@ -1269,6 +1278,24 @@ def optim_error_inputs_func_rprop(device, dtype):
                 error_type=ValueError,
                 error_regex="Invalid eta values: 1.0, 0.5",
             ),
+        ]
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(step_sizes=step_sizes),
+                    desc="0 <= step_size_min <= step_size_max",
+                ),
+                error_type=ValueError,
+                error_regex=f"Invalid step size values: {step_sizes[0]}, {step_sizes[1]}",
+            )
+            for step_sizes in (
+                (-2.0, -1.0),
+                (-1.0, 50.0),
+                (2.0, 1.0),
+                (float("nan"), 50.0),
+                (0.0, float("nan")),
+            )
         ]
     return error_inputs
 

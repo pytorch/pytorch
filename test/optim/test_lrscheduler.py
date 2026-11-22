@@ -354,6 +354,11 @@ class TestLRScheduler(TestCase):
         scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
         self._test(scheduler, targets, epochs)
 
+    @parametrize("step_size", [0, -1, float("nan")])
+    def test_step_lr_step_size_limits(self, step_size):
+        with self.assertRaisesRegex(ValueError, "step_size must be positive"):
+            StepLR(self.opt, step_size=step_size)
+
     def test_get_last_lr_step_lr(self):
         from torch.nn import Parameter
 
@@ -448,6 +453,11 @@ class TestLRScheduler(TestCase):
         targets = [single_targets, [x * epochs for x in single_targets]]
         scheduler = ConstantLR(self.opt, factor=1.0 / 2, total_iters=5)
         self._test(scheduler, targets, epochs)
+
+    @parametrize("factor", [-1.0, 0.0, 1.1, float("nan")])
+    def test_constantlr_factor_limits(self, factor):
+        with self.assertRaisesRegex(ValueError, "Constant multiplicative factor"):
+            ConstantLR(self.opt, factor=factor)
 
     def test_linearlr(self):
         # lr = 0.025     if epoch == 0
