@@ -10213,6 +10213,245 @@ def graph_default_by_name_goes(x):
     return torch.tanh(h) + h
 
 
+class GraphChangeBox:
+    pass
+
+
+class GraphChangeThing:
+    def __init__(self):
+        self.value = 0
+
+
+GRAPH_CHANGE_BOX = GraphChangeBox()
+GRAPH_CHANGE_SEEN = []
+GRAPH_CHANGE_TABLE = {}
+
+
+def graph_change_tail(h):
+    return (torch.tanh(h * 2) * 2 - 1).sum()
+
+
+# Functions that change something they made after something else took it.
+def graph_change_appends_behind_a_store(x, given):
+    h = torch.relu(x) + 1
+    made = []
+    GRAPH_CHANGE_BOX.items = made
+    made.append(given)
+    return graph_change_tail(h)
+
+
+def graph_change_appends_behind_a_list_from_outside(x, given):
+    h = torch.relu(x) + 1
+    made = []
+    GRAPH_CHANGE_SEEN.append(made)
+    made.append(given)
+    return graph_change_tail(h)
+
+
+def graph_change_appends_behind_a_dict_from_outside(x, given):
+    h = torch.relu(x) + 1
+    made = []
+    GRAPH_CHANGE_TABLE["made"] = made
+    made.append(given)
+    return graph_change_tail(h)
+
+
+def graph_change_appends_to_an_item_of_a_list(x, given):
+    h = torch.relu(x) + 1
+    inner = []
+    outer = [inner]
+    GRAPH_CHANGE_BOX.items = outer
+    inner.append(given)
+    return graph_change_tail(h)
+
+
+def graph_change_appends_to_an_item_of_a_tuple(x, given):
+    h = torch.relu(x) + 1
+    inner = []
+    GRAPH_CHANGE_BOX.items = (inner, 1)
+    inner.append(given)
+    return graph_change_tail(h)
+
+
+def graph_change_appends_to_what_an_object_holds(x, given):
+    h = torch.relu(x) + 1
+    inner = []
+    thing = GraphChangeThing()
+    thing.value = inner
+    GRAPH_CHANGE_BOX.items = thing
+    inner.append(given)
+    return graph_change_tail(h)
+
+
+def graph_change_appends_around_a_store(x, given):
+    h = torch.relu(x) + 1
+    made = []
+    made.append(given)
+    GRAPH_CHANGE_BOX.items = made
+    made.append(given + 1)
+    return graph_change_tail(h)
+
+
+def graph_change_appends_a_size(x, given):
+    h = torch.relu(x) + 1
+    made = []
+    GRAPH_CHANGE_BOX.items = made
+    made.append(h.shape[0] + given)
+    return graph_change_tail(h)
+
+
+def graph_change_appends_a_result(x, given):
+    h = torch.relu(x) + 1
+    made = []
+    GRAPH_CHANGE_BOX.items = made
+    made.append(h * given)
+    return graph_change_tail(h)
+
+
+def graph_change_stores_behind_a_store(x, given):
+    h = torch.relu(x) + 1
+    thing = GraphChangeThing()
+    GRAPH_CHANGE_BOX.items = thing
+    thing.value = given
+    return graph_change_tail(h)
+
+
+def graph_change_stores_behind_a_list_from_outside(x, given):
+    h = torch.relu(x) + 1
+    thing = GraphChangeThing()
+    GRAPH_CHANGE_SEEN.append([thing])
+    thing.value = given
+    thing.other = given + 1
+    return graph_change_tail(h)
+
+
+def graph_change_ends_an_iterator(x, given):
+    h = torch.relu(x) + 1
+    going = iter((h.shape[0], h.shape[1]))
+    GRAPH_CHANGE_BOX.items = going
+    for step in going:
+        pass
+    return graph_change_tail(h)
+
+
+def graph_change_goes_over_a_tuple(x, given):
+    h = torch.relu(x) + 1
+    for step in (given, given + 1.0):
+        h = h + step
+    return graph_change_tail(h)
+
+
+# Functions with an `extend` of a list from outside, which waits for the
+# path to land, in front of a change to the list it is given.
+def graph_waits_for_a_list_given_back(x, given):
+    h = torch.relu(x) + 1
+    made = [0]
+    GRAPH_CHANGE_SEEN.extend(made)
+    made.append(given)
+    return graph_change_tail(h), made
+
+
+def graph_waits_for_a_list_that_is_stored(x, given):
+    h = torch.relu(x) + 1
+    made = [0]
+    GRAPH_CHANGE_SEEN.extend(made)
+    made.append(h.shape[1] + given)
+    GRAPH_CHANGE_BOX.items = made
+    return graph_change_tail(h)
+
+
+def graph_waits_for_a_list_nothing_else_takes(x, given):
+    h = torch.relu(x) + 1
+    made = [0]
+    GRAPH_CHANGE_SEEN.extend(made)
+    made.append(given)
+    return graph_change_tail(h)
+
+
+def graph_waits_for_a_list_made_of_a_tuple(x, given):
+    h = torch.relu(x) + 1
+    pair = (given, 0)
+    made = list(pair)
+    GRAPH_CHANGE_SEEN.extend(made)
+    made.append(given)
+    return graph_change_tail(h), made
+
+
+def graph_waits_for_a_list_from_outside(x, given):
+    h = torch.relu(x) + 1
+    row = GRAPH_CHANGE_TABLE["row"]
+    row.append(given)
+    GRAPH_CHANGE_SEEN.extend(row)
+    row.append(given + 1)
+    return graph_change_tail(h)
+
+
+# Functions that change a list they made through another name for it.
+def graph_other_way_through_a_dict(x, given):
+    h = torch.relu(x) + 1
+    made = [0]
+    other = {"k": made}.get("k")
+    other.append(1)
+    made.append(given)
+    return graph_change_tail(h), made
+
+
+def graph_other_way_through_a_method(x, given):
+    h = torch.relu(x) + 1
+    made = [0]
+    other = made.append.__self__
+    other.append(1)
+    made.append(given)
+    return graph_change_tail(h), made
+
+
+def graph_other_way_through_a_default(x, given):
+    # The list itself where the dict from outside has no "k", and the
+    # list that dict has there otherwise.
+    h = torch.relu(x) + 1
+    made = [0]
+    other = GRAPH_CHANGE_TABLE.get("k", made)
+    other.append(1)
+    made.append(given)
+    return graph_change_tail(h), made
+
+
+def graph_other_way_extends(x, given):
+    h = torch.relu(x) + 1
+    made = [0]
+    other = GRAPH_CHANGE_TABLE.get("k", made)
+    GRAPH_CHANGE_SEEN.extend(other)
+    made.append(given)
+    return graph_change_tail(h), made
+
+
+# Functions that go over what they are given.
+def graph_goes_over(x, given):
+    h = torch.relu(x) + 1
+    for step in given:
+        h = h + step
+    return graph_change_tail(h)
+
+
+def graph_goes_over_two(x, given):
+    h = torch.relu(x) + 1
+    for step, scale in zip(given, (1.0, 2.0, 3.0)):
+        h = h + step * scale
+    return graph_change_tail(h)
+
+
+def graph_goes_over_under_tuple(x, given):
+    h = torch.relu(x) + 1
+    got = tuple(given)
+    return graph_change_tail(h * got[0] + len(got))
+
+
+def graph_gives_loudly():
+    for step in (1.0, 2.0, 3.0):
+        GRAPH_CHANGE_SEEN.append(step)
+        yield step
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -11636,6 +11875,278 @@ class TestVmGraphResults(TestCase):
                 check(fn, "a dual tensor", behind, False)
         del GRAPH_END_HELD[:], GRAPH_END_LOG[:]
         GRAPH_END_STATE[0] = 0.5
+
+    def test_what_watches_the_storage_of_a_tensor_is_told_in_its_place(self, device):
+        # C++ keeps the Python object of a storage for the storage, and
+        # it ends with it: with the tensor, where nothing else has the
+        # storage. A weak reference on that object with a function to
+        # tell, or a `weakref.finalize`, runs Python code there, as for
+        # any object that ends. A path lets go of such a tensor (a
+        # tensor, a view of one whose storage is watched) only where the
+        # instructions do: every call is eager's, and what the function
+        # reads behind the place is what it reads in eager mode.
+        def keep(gm, input_types):
+            return gm
+
+        def told(ref=None):
+            GRAPH_END_LOG.append("the storage ended")
+            GRAPH_END_STATE[0] += 1.0
+
+        def plant(what):
+            made = torch.ones(4, 4)
+            storage = made.untyped_storage()
+            if what in ("a reference", "a view, a reference"):
+                GRAPH_END_REFS.append(weakref.ref(storage, told))
+            elif what in ("a finalizer", "a view, a finalizer"):
+                weakref.finalize(storage, told)
+            elif what == "an attribute that ends quietly":
+                storage.note = [1, 2]
+            return made[:2] if what.startswith("a view") else made
+
+        def calls(run, what, graded, boxed):
+            GRAPH_END_BOX.item = None
+            del GRAPH_END_HELD[:], GRAPH_END_LOG[:], GRAPH_END_REFS[:]
+            GRAPH_END_STATE[0] = 0.5
+            found = []
+            for at in range(12):
+                made = plant(what) if at in (7, 10) else torch.ones(2)
+                if boxed:
+                    GRAPH_END_BOX.item = made
+                else:
+                    GRAPH_END_HELD.append(made)
+                del made
+                x = torch.full((3, 4), 0.25 * (at + 1), device=device)
+                x.requires_grad_(graded)
+                out = run(x)
+                out = out[0] if isinstance(out, tuple) else out
+                if graded:
+                    out.backward()
+                found.append((out.item(), len(GRAPH_END_LOG), GRAPH_END_STATE[0]))
+                del GRAPH_END_HELD[:]
+            GRAPH_END_BOX.item = None
+            return found
+
+        kinds = ("a reference", "a finalizer", "a view, a reference")
+        kinds += ("a view, a finalizer", "an attribute that ends quietly")
+
+        def check(fn, what, behind, graded):
+            boxed = fn is graph_end_attribute
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            msg = f"{fn.__name__}, {what}, a pass: {bool(behind)}, a gradient: {graded}"
+            got = calls(compiled, what, graded, boxed)
+            expected = calls(fn, what, graded, boxed)
+            self.assertTrue(got == expected, msg=f"{msg}: {got} {expected}")
+            if behind:
+                listed = torch.vm.regions(compiled)
+                graphs = [g for g in listed if "ops" in g and "within" not in g]
+                # What ends quietly is no reason to turn a path down.
+                least = 9 if what == kinds[-1] else 4
+                hits = sum(g["hits"] for g in graphs)
+                self.assertGreaterEqual(hits, least, msg=f"{msg}: {graphs}")
+
+        try:
+            for fn in (graph_end_attribute, graph_end_variable):
+                for what in kinds:
+                    for behind, graded in (((), False), ((keep,), False), ((), True)):
+                        check(fn, what, behind, graded)
+        finally:
+            del GRAPH_END_HELD[:], GRAPH_END_LOG[:], GRAPH_END_REFS[:]
+            GRAPH_END_STATE[0] = 0.5
+
+    def graph_change_calls(self, run, graded, device, makes=()):
+        # Twelve calls from the same state: what each gave or raised, and
+        # what it left outside (as plain values; of an iterator, what is
+        # left). The calls are given what the first of `makes` makes, the
+        # eighth and the eleventh what the second makes.
+        def plain(value):
+            if isinstance(value, (list, tuple)):
+                return [plain(item) for item in value]
+            if isinstance(value, dict):
+                return {key: plain(item) for key, item in value.items()}
+            if isinstance(value, GraphChangeThing):
+                return plain(vars(value))
+            if type(value).__name__.endswith("iterator"):
+                return ["left", *value]
+            if isinstance(value, torch.Tensor):
+                return (value.tolist(), value.requires_grad, value.grad_fn is None)
+            return value
+
+        def one():
+            return 1.0
+
+        def two():
+            return 2.0
+
+        usual, other = makes or (one, two)
+        GRAPH_CHANGE_BOX.items = None
+        del GRAPH_CHANGE_SEEN[:]
+        GRAPH_CHANGE_TABLE.clear()
+        GRAPH_CHANGE_TABLE["row"] = []
+        found = []
+        for at in range(12):
+            given = other() if at in (7, 10) else usual()
+            x = torch.full((3, 4), 0.25 * (at + 1), device=device)
+            x.requires_grad_(graded)
+            try:
+                out = run(x, given)
+                rest = plain(out[1:]) if isinstance(out, tuple) else []
+                out = out[0] if isinstance(out, tuple) else out
+                if graded:
+                    out.backward()
+                gave = (out.item(), rest)
+            except (TypeError, IndexError) as error:
+                gave = type(error).__name__
+            box, seen = plain(GRAPH_CHANGE_BOX.items), plain(GRAPH_CHANGE_SEEN)
+            found.append((gave, box, seen, plain(GRAPH_CHANGE_TABLE)))
+        return found
+
+    def graph_change_as_eager(self, fns, device, makes=()):
+        def keep(gm, input_types):
+            return gm
+
+        try:
+            for fn in fns:
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    got = self.graph_change_calls(compiled, graded, device, makes)
+                    expected = self.graph_change_calls(fn, graded, device, makes)
+                    pairs = enumerate(zip(got, expected))
+                    differ = [(at, a, b) for at, (a, b) in pairs if a != b]
+                    msg = f"{fn.__name__}, a pass: {bool(behind)}, a gradient: {graded}"
+                    self.assertEqual(differ[:1], [], msg=msg)
+                    if behind:
+                        listed = torch.vm.regions(compiled)
+                        graphs = [g for g in listed if "ops" in g and "within" not in g]
+                        hits = sum(g["hits"] for g in graphs)
+                        self.assertGreaterEqual(hits, 6, msg=f"{msg}: {graphs}")
+        finally:
+            GRAPH_CHANGE_BOX.items = None
+            del GRAPH_CHANGE_SEEN[:]
+            GRAPH_CHANGE_TABLE.clear()
+
+    def test_a_change_to_what_a_path_made_runs_where_the_thing_was_taken(self, device):
+        # What changes something the function made between its operations
+        # (an append to a list, a store into an object of a class it
+        # called, the next item of an iterator) is seen by whatever took
+        # the thing, in front of the change or behind it: a list that was
+        # stored into an object, put into a list or a dict from outside,
+        # or into another list, a tuple or an object the function made
+        # that was, has the item (a number, a size, what the graph
+        # gives), and an iterator whose last item is asked for has given
+        # every item in front of it. A path leaves such a change out of a
+        # run only together with the thing.
+        fns = [
+            graph_change_appends_behind_a_store,
+            graph_change_appends_behind_a_list_from_outside,
+            graph_change_appends_behind_a_dict_from_outside,
+            graph_change_appends_to_an_item_of_a_list,
+            graph_change_appends_to_an_item_of_a_tuple,
+            graph_change_appends_to_what_an_object_holds,
+            graph_change_appends_around_a_store,
+            graph_change_appends_a_size,
+            graph_change_appends_a_result,
+            graph_change_stores_behind_a_store,
+            graph_change_stores_behind_a_list_from_outside,
+            graph_change_ends_an_iterator,
+            graph_change_goes_over_a_tuple,
+        ]
+        self.graph_change_as_eager(fns, device)
+
+    def test_an_extend_that_waits_takes_what_the_list_holds_at_its_place(self, device):
+        # A store into an object from outside waits for the path to land;
+        # what changes a list the path made is done where it stands. Of
+        # all stores only `extend` reads what it is given, so of a list
+        # the path made it takes the items the list holds at its place,
+        # not those an append behind it adds. A list from outside is
+        # changed by stores only, which are done in their order.
+        fns = [
+            graph_waits_for_a_list_given_back,
+            graph_waits_for_a_list_that_is_stored,
+            graph_waits_for_a_list_nothing_else_takes,
+            graph_waits_for_a_list_made_of_a_tuple,
+            graph_waits_for_a_list_from_outside,
+        ]
+        self.graph_change_as_eager(fns, device)
+
+    def test_a_method_read_off_a_list_the_path_made_keeps_nothing_back(self, device):
+        # A loop that fills a list of its own reads `out.append` off the
+        # list each time round. The read is of a method of the builtin
+        # class, off a list the path made: it cannot fail and nothing sees
+        # it, so it is left out where nothing uses what it gives (the
+        # append is the path's own instruction). With it kept, it would
+        # run behind the graph, the appends with it, and the graph would
+        # have to give every item of the list back as a result.
+        graphs = []
+
+        def keep(gm, input_types):
+            graphs.append(gm)
+            return gm
+
+        passes = (*DEFAULT, P.Graphs(), keep)
+        for fn in (graph_collects,):
+            del graphs[:]
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            xs = [torch.randn(3, device=device) for _ in range(3)]
+            for _ in range(6):
+                self.assertEqual(compiled(xs), fn(xs), atol=0, rtol=0)
+            listed = torch.vm.regions(compiled)
+            (found,) = [g for g in listed if "ops" in g and "within" not in g]
+            self.assertGreaterEqual(found["hits"], 3, msg=str(found))
+            nodes = graphs[0].graph.nodes
+            (given,) = [n.args[0] for n in nodes if n.op == "output"]
+            self.assertEqual(len(given), 1, msg=f"{fn.__name__}: {graphs[0].code}")
+
+    def test_a_store_into_what_may_be_a_list_of_the_path_ends_the_path(self, device):
+        # A store into a list from outside waits for the path to land,
+        # and an append to a list the path made is done where it stands.
+        # A list that is reached through another value (what a dict of
+        # the path gives, the default of a `get`, what a method of the
+        # list is bound to) may be the list the path made, at this call
+        # or at a later one, and then the order of the two appends is the
+        # function's only if both are done in place: such a store is none
+        # of a path, and neither is an `extend` with such a list.
+        def keyed():
+            GRAPH_CHANGE_TABLE["k"] = GRAPH_CHANGE_TABLE["row"]
+            return 1.0
+
+        def bare():
+            GRAPH_CHANGE_TABLE.pop("k", None)
+            return 2.0
+
+        fns = [graph_other_way_through_a_dict, graph_other_way_through_a_method]
+        self.graph_change_as_eager(fns, device)
+        fns = [graph_other_way_through_a_default, graph_other_way_extends]
+        for usual, other in ((bare, bare), (keyed, bare), (bare, keyed)):
+            self.graph_change_as_eager(fns, device, makes=(usual, other))
+
+    def test_a_path_goes_over_no_iterator_but_its_own(self, device):
+        # What goes over an iterator uses it up. A value that is a list
+        # when the path is taken down may be an iterator of the caller's
+        # at a later call: the instructions of the path do not go over
+        # it (a path that then turned out not to be for the call would
+        # leave the instructions an iterator that is used up, and a `zip`
+        # over a generator runs the generator). Every call is eager's:
+        # the result or what is raised, and what the generator logged.
+        def row():
+            return [1.0, 2.0]
+
+        def three():
+            return iter([1.0, 2.0, 3.0])
+
+        def two():
+            return iter([1.0, 2.0])
+
+        def zipped():
+            return zip(graph_gives_loudly())
+
+        def generated():
+            return (b for a, b in enumerate(graph_gives_loudly()))
+
+        fns = [graph_goes_over, graph_goes_over_two, graph_goes_over_under_tuple]
+        for other in (three, two, zipped, generated):
+            self.graph_change_as_eager(fns, device, makes=(row, other))
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())

@@ -4948,6 +4948,16 @@ impl Compiled {
     /// `__getattr__` of Python; an item of a list, a tuple or a dict; a list
     /// or a dict that is made; a loop over a list, a tuple or a range.
     unsafe fn quiet(&self, regs: &[Obj], op: &Op, api: &TcfgApi) -> bool {
+        self.quiet_of(regs, op, &|_| true, api)
+    }
+
+    /// `quiet` where a path is run: `own` says of a register whether the
+    /// path made what it holds. What goes over an iterator uses it up,
+    /// and may do that to one the path made at this call and to no other:
+    /// a value that was a list when the path was taken down may be an
+    /// iterator of the caller's now. (While a path is taken down, `record`
+    /// asks that of the trace itself.)
+    unsafe fn quiet_of(&self, regs: &[Obj], op: &Op, own: &dyn Fn(V) -> bool, api: &TcfgApi) -> bool {
         let at = |v: V| reg(regs, v);
         match op {
             Op::Const(_)
@@ -5002,7 +5012,7 @@ impl Compiled {
             }
             Op::BuildMap(vs) => vs.iter().step_by(2).all(|k| !at(*k).is_null() && graph::is_plain_key(at(*k))),
             Op::MapAdd(_, k, _) => !at(*k).is_null() && graph::is_plain_key(at(*k)),
-            Op::GetIter(v) => !at(*v).is_null() && graph::quiet_iter(at(*v)).is_some(),
+            Op::GetIter(v) => !at(*v).is_null() && graph::quiet_iter(at(*v)).is_some_and(|used_up| !used_up || own(*v)),
             Op::Binary(kind, a, b) => graph::quiet_binary(*kind, at(*a), at(*b)),
             Op::Unary(UnaryKind::Not, a) | Op::ToBool(a) => !at(*a).is_null() && graph::quiet_truth(at(*a)),
             Op::Unary(_, a) => !at(*a).is_null() && graph::is_number(at(*a)),
@@ -5015,11 +5025,12 @@ impl Compiled {
                 !at(*item).is_null() && !at(*container).is_null() && graph::quiet_contains(at(*item), at(*container))
             }
             Op::GetLen(v) | Op::Unpack(v, _) => !at(*v).is_null() && graph::quiet_sized(at(*v)),
-            // An iterator among the arguments is one the path made.
+            // An iterator among the arguments is gone over only if the
+            // path made it.
             Op::Call { callee, args, kwnames } => {
                 let strict = *kwnames != NONE && self.strict_zip(regs, *callee, args, *kwnames);
                 let given: Vec<Obj> = args[..args.len() - strict as usize].iter().map(|v| at(*v)).collect();
-                (*kwnames == NONE || strict) && graph::pure_call(at(*callee), &given, |_| true, api).is_some()
+                (*kwnames == NONE || strict) && graph::pure_call(at(*callee), &given, |i| own(args[i]), api).is_some()
             }
             Op::CallMethod { recv, name, args, kwnames } => {
                 let given: Vec<Obj> = args.iter().map(|v| at(*v)).collect();
@@ -5119,7 +5130,7 @@ impl Compiled {
                     let held = if there { pyffi::PyCell_Get(ffi::PyTuple_GET_ITEM(closure, *i as isize)) } else { null_mut() };
                     checked(held)
                 }
-                op if owner.quiet(own, op, api) => owner.exec_op(own, op),
+                op if owner.quiet_of(own, op, &|v| path.made.get(v as usize).is_some_and(|made| *made), api) => owner.exec_op(own, op),
                 // An attribute that the path read is not there at this
                 // call, and `object` says so itself: the read raises and
                 // does nothing else, where the instructions get to it.
@@ -7100,6 +7111,11 @@ impl Compiled {
             _ => return None,
         };
         let object = if bound_to.is_null() { reg(regs, target) } else { bound_to };
+        // Nor is it a list or a dict the path made, at this call or at
+        // any other, which no check tells: it was not computed from one.
+        if t.from_own(t.mapped(target)) {
+            return Some(Taken::Ends("stores into what may be a list or a dict the path made, taken by another way".to_string()));
+        }
         // That it can be done is shown behind the callable where what it
         // stores into is given by the graph: something that can fail
         // there, which a path that wrote to a tensor from outside cannot
@@ -7109,14 +7125,45 @@ impl Compiled {
         if late && t.writes {
             return Some(Taken::Ends("stores into what the graph gives, behind a write to a tensor from outside".to_string()));
         }
+        // The one store that reads what it is given is `extend`: the items
+        // of the sequence. It waits for the path to land, and what changes
+        // a list the path made is done where it stands, so of such a list
+        // the store takes the items it holds here, as a tuple.
+        let mut here: Option<Op> = None;
+        if let Op::ListExtend(_, more) = &op {
+            let (held, taken) = (reg(regs, *more), t.mapped(*more));
+            let own = taken != NONE && t.defs[taken as usize].made;
+            if !own && ffi::PyList_CheckExact(held) != 0 && t.from_own(taken) {
+                return Some(Taken::Ends("extends a list from outside with what may be a list the path made, taken by another way".to_string()));
+            }
+            if own && ffi::PyList_CheckExact(held) != 0 {
+                here = Some(match self.built(t, taken) {
+                    Some(items) => Op::BuildTuple(items),
+                    None if t.defs[taken as usize].late && t.writes => {
+                        let why = "extends a list from outside with what the graph gives, behind a write to a tensor from outside";
+                        return Some(Taken::Ends(why.to_string()));
+                    }
+                    None => Op::ListToTuple(taken),
+                });
+            }
+        }
         frames.top().at(inst.bc & OFFSET_MASK);
         let Ok(nothing) = self.exec_op(regs, &inst.op) else {
             return Some(Taken::Raised);
         };
-        let renamed = graph::renamed(&op, &mut |v| self.path_value(t, regs, v))?;
+        let mut renamed = graph::renamed(&op, &mut |v| self.path_value(t, regs, v))?;
         let (into, value) = (t.mapped(target), t.mapped(stored));
         if late {
             t.fails_late();
+        }
+        if let (Some(items), Op::ListExtend(list, _)) = (here, &renamed) {
+            let held = ffi::PyList_AsTuple(reg(regs, stored));
+            if held.is_null() {
+                capi::release(nothing);
+                return Some(Taken::Raised);
+            }
+            let here = t.derive(items, Kind::Pure, false, held, inst.bc);
+            renamed = Op::ListExtend(*list, here);
         }
         t.push(renamed, NONE, Kind::Effect, inst.bc);
         let attribute = matches!(inst.op, Op::StoreAttr { .. });
