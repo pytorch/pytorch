@@ -94,12 +94,10 @@ impl Inliner<'_, '_> {
         let name = *self.global_name.get(callee)?;
         let target = unsafe {
             let key = func.consts[name as usize].as_ptr();
-            let found = ffi::PyDict_GetItemWithError(func.globals.as_ptr(), key);
-            if found.is_null() {
-                // A builtin, or nothing yet: either way not a Python function.
-                ffi::PyErr_Clear();
-                return None;
-            }
+            // A builtin, or nothing yet: either way not a Python function.
+            // Nor is one looked for under a key that is not plain
+            // (`graph::entry`).
+            let found = crate::graph::entry(func.globals.as_ptr(), key).ok().filter(|found| !found.is_null())?;
             // A function of another module would load its globals from ours.
             if ffi::PyFunction_Check(found) == 0
                 || ffi::PyFunction_GetGlobals(found) != func.globals.as_ptr()
