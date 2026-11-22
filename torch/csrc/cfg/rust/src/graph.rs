@@ -2598,7 +2598,16 @@ pub unsafe fn quiet_sized(container: Obj) -> bool {
 /// Whether `item in container` runs no Python code: the item is compared
 /// with what the container holds.
 pub unsafe fn quiet_contains(item: Obj, container: Obj) -> bool {
-    if capi::is_unboxed(item) || capi::is_unboxed(container) || !is_plain(item) {
+    if capi::is_unboxed(item) || capi::is_unboxed(container) {
+        return false;
+    }
+    // A list or a tuple is gone over, and each item is compared with the
+    // value (the item's class is asked first).
+    if ffi::PyList_CheckExact(container) != 0 || ffi::PyTuple_CheckExact(container) != 0 {
+        return (0..ffi::PyObject_Size(container)).all(|i| compares_in_c(item) && compares_in_c(sequence_item(container, i)));
+    }
+    // A dict, a set and a text hash the value or search for it.
+    if !is_plain(item) {
         return false;
     }
     if is_plain_dict(container) {
@@ -2607,11 +2616,7 @@ pub unsafe fn quiet_contains(item: Obj, container: Obj) -> bool {
     if ffi::PyAnySet_CheckExact(container) != 0 {
         return quiet_members(container);
     }
-    if ffi::PyUnicode_CheckExact(container) != 0 {
-        return ffi::PyUnicode_CheckExact(item) != 0;
-    }
-    let sequence = ffi::PyList_CheckExact(container) != 0 || ffi::PyTuple_CheckExact(container) != 0;
-    sequence && (0..ffi::PyObject_Size(container)).all(|i| is_plain(sequence_item(container, i)))
+    ffi::PyUnicode_CheckExact(container) != 0 && ffi::PyUnicode_CheckExact(item) != 0
 }
 
 /// Whether `bool(o)` runs no Python code.
@@ -2645,10 +2650,45 @@ pub unsafe fn move_version(tensor: Obj, count: u64) {
     ffi::PyErr_Clear();
 }
 
-/// Whether two values compare in C code: numbers, texts, dtypes and
-/// devices, or tuples of numbers, texts and None (the sizes of a tensor
-/// with those of another, or with a tuple).
+/// Whether the class of a value compares it with the function of `str`,
+/// `int`, `float` or `object`: the class is one of them, or one written
+/// in Python that has no comparison of its own anywhere above it (a
+/// member of an enum, an object that is equal to itself only, None).
+/// The interpreter keeps what a class compares with in this slot, and
+/// puts its own function there when the class or one above it gets an
+/// `__eq__` or an `__lt__`. Each of the four looks at what it is handed,
+/// answers or says that it has no answer, and calls nothing. So does
+/// the class of None, which no class can be made of; a class with
+/// nothing in the slot is not asked at all.
+unsafe fn compares_in_c(o: Obj) -> bool {
+    if o.is_null() || capi::is_unboxed(o) {
+        return false;
+    }
+    let slot = |ty: *const ffi::PyTypeObject| (*ty).tp_richcompare.map(|f| f as usize);
+    let own = slot(ffi::Py_TYPE(o));
+    own.is_none()
+        || o == ffi::Py_None()
+        || [
+            std::ptr::addr_of!(ffi::PyUnicode_Type),
+            std::ptr::addr_of!(ffi::PyLong_Type),
+            std::ptr::addr_of!(ffi::PyFloat_Type),
+            std::ptr::addr_of!(ffi::PyBaseObject_Type),
+        ]
+        .iter()
+        .any(|ty| slot(*ty) == own)
+}
+
+/// Whether two values compare in C code: two values whose classes
+/// compare with the function of `str`, `int`, `float` or `object`
+/// (`compares_in_c`: the interpreter asks the class of one, then that of
+/// the other, and with no answer says which object each is, or raises
+/// TypeError for an order); dtypes and devices; or tuples of numbers,
+/// texts and None (the sizes of a tensor with those of another, or with
+/// a tuple).
 pub unsafe fn quiet_compare(a: Obj, b: Obj) -> bool {
+    if compares_in_c(a) && compares_in_c(b) {
+        return true;
+    }
     let text = |o: Obj| !capi::is_unboxed(o) && ffi::PyUnicode_CheckExact(o) != 0;
     let token = |o: Obj| !capi::is_unboxed(o) && is_token(o);
     // A tuple, or one of a class that is defined in C and compares as a

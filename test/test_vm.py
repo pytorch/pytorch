@@ -12404,6 +12404,75 @@ class GraphWithinBehindAMember(GraphWithinModel):
         return self.inner(h).sum()
 
 
+GRAPH_COMPARE_LOG = []
+GRAPH_OUTSIDE_LISTS = ([], [])
+GRAPH_NAMED = {}
+
+
+class GraphAction(str, enum.Enum):
+    NONE = "none"
+    NOTIFY = "notify"
+    RAISE = "raise"
+
+
+class GraphPlace(enum.Enum):
+    ONE = 1
+    TWO = 2
+
+
+class GraphQuietText(str):
+    __slots__ = ()
+
+
+GRAPH_MIDDLE = GraphQuietText("m")
+
+
+class GraphLoudText(str):
+    __slots__ = ()
+
+    def __eq__(self, other):
+        GRAPH_COMPARE_LOG.append("eq")
+        return str.__eq__(self, other)
+
+    __hash__ = str.__hash__
+
+
+def graph_loud_eq(self, other):
+    GRAPH_COMPARE_LOG.append("planted")
+    return str.__eq__(self, other)
+
+
+def graph_compares_members(x, given):
+    h = torch.relu(x) + 1
+    action = GraphAction.NONE if given is None else GraphAction.NOTIFY
+    if action == GraphAction.RAISE:
+        raise ValueError(action)
+    elif action in (GraphAction.NOTIFY, GraphAction.RAISE):
+        h = h * 3
+    return (h * 2).sum()
+
+
+def graph_compares_which_it_is(x, given):
+    h = torch.relu(x) + 1
+    if given == GraphPlace.TWO or given != GraphPlace.ONE:
+        h = h * 3
+    if given in [GraphPlace.TWO, None]:
+        h = h + 1
+    return (h * 2).sum()
+
+
+def graph_compares_texts(x, given):
+    h = torch.relu(x) + 1
+    if given == "wide" or given in ("deep", "tall"):
+        h = h * 3
+    return (h * 2).sum()
+
+
+def graph_compares_an_order(x, given):
+    h = torch.relu(x) + 1
+    return (h * (2.0 if given < GRAPH_MIDDLE else 3.0)).sum()
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -15545,6 +15614,75 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
             if "scale" in vars(GraphMeta):
                 del GraphMeta.scale
             del GRAPH_META_LOG[:]
+
+    def test_a_comparison_whose_classes_compare_in_c_is_part_of_a_path(self, device):
+        # A comparison (`==`, `<`, `in` over a list or a tuple) is part of
+        # a path where the classes of both values compare with the
+        # function of `str`, `int`, `float` or `object`: members of an
+        # enum, objects that have no `__eq__`, None. Which it is, is asked
+        # of the values at every call. A class that compares in Python
+        # (one that has an `__eq__`, or gets one at the eighth and the
+        # eleventh call) does so at those calls, and what it logs is
+        # eager's; an order that is not there raises eager's TypeError.
+        def keep(gm, input_types):
+            return gm
+
+        plain, wide = GraphQuietText("narrow"), GraphQuietText("wide")
+        low, high = GraphQuietText("a"), GraphQuietText("z")
+        cases = (
+            (graph_compares_members, None, 1, False),
+            (graph_compares_which_it_is, GraphPlace.ONE, GraphPlace.TWO, False),
+            (graph_compares_which_it_is, GraphPlace.ONE, None, False),
+            (graph_compares_texts, plain, wide, False),
+            (graph_compares_texts, plain, GraphLoudText("wide"), False),
+            (graph_compares_texts, plain, plain, True),
+            (graph_compares_an_order, low, high, False),
+            (graph_compares_an_order, low, None, False),
+            (graph_compares_an_order, low, low, True),
+        )
+
+        def calls(run, usual, other, planted, graded):
+            del GRAPH_COMPARE_LOG[:]
+            found = []
+            for at in range(14):
+                x = torch.full((3, 4), 0.25 * (at + 1), device=device)
+                x.requires_grad_(graded)
+                if planted and at in (7, 10):
+                    GraphQuietText.__eq__ = graph_loud_eq
+                    GraphQuietText.__lt__ = graph_loud_eq
+                try:
+                    out = run(x, other if at in (7, 10) else usual)
+                    if graded:
+                        out.backward()
+                    grad = None if x.grad is None else x.grad.sum().item()
+                    said = (out.item(), grad)
+                except (TypeError, ValueError) as error:
+                    said = f"{type(error).__name__}: {error}"
+                finally:
+                    if "__eq__" in vars(GraphQuietText):
+                        del GraphQuietText.__eq__
+                        del GraphQuietText.__lt__
+                found.append((said, list(GRAPH_COMPARE_LOG)))
+            return found
+
+        try:
+            for fn, usual, other, planted in cases:
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{fn.__name__} with {usual!r} and {other!r}"
+                    msg += f", planted: {planted}, a pass: {bool(behind)}"
+                    msg += f", a gradient: {graded}"
+                    got = calls(compiled, usual, other, planted, graded)
+                    expected = calls(fn, usual, other, planted, graded)
+                    self.assertTrue(got == expected, msg=f"{msg}: {got} {expected}")
+                    if behind or graded:
+                        self.graph_goes_to_the_return(compiled, msg)
+        finally:
+            if "__eq__" in vars(GraphQuietText):
+                del GraphQuietText.__eq__
+                del GraphQuietText.__lt__
+            del GRAPH_COMPARE_LOG[:]
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
