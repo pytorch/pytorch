@@ -20190,6 +20190,22 @@ A.last
         res = opt_f(x)
         self.assertEqual(ref, res)
 
+    @parametrize("op", ["sdpa", "torch_sum", "tensor_sum", "dropout"])
+    def test_symbool_as_bool_arg(self, op):
+        fns = {
+            "sdpa": lambda x: F.scaled_dot_product_attention(x, x, x, is_causal=x.shape[2] > 1),
+            "torch_sum": lambda x: torch.sum(x, 0, keepdim=x.shape[0] > 1),
+            "tensor_sum": lambda x: x.sum(0, keepdim=x.shape[0] > 1),
+            "dropout": lambda x: F.dropout(x, 0.0, training=x.shape[0] > 1),
+        }
+
+        fn = fns[op]
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+
+        for shape in [(2, 4, 16, 8), (3, 4, 1, 8)]:
+            x = torch.randn(shape)
+            self.assertEqual(opt_fn(x), fn(x))
+
     def test_builtin_complex(self):
         def f(x):
             c = (
