@@ -1700,6 +1700,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 isinstance(result, UserDefinedObjectVariable)
                 and isinstance(result.value, enum.Enum)
                 and type(result.value) is self.value
+                and result.cls_source is None
             ):
                 result.cls_source = self.source
             return result

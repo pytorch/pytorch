@@ -280,7 +280,7 @@ class WrapperDescriptorVariable(DescriptorVariable):
             if isinstance(obj, BoundBuiltinMethodVariable):
                 return self.owner.call_method(tx, name, args, kwargs)
         if objclass is dict and isinstance(obj, variables.ConstDictVariable):
-            obj.check_base_dict_mutation(tx, name)
+            obj.check_base_dict_mutation(tx, name, rest, kwargs)
         # The VT class modeling objclass, e.g. ConstDictVariable for
         # dict.__eq__ on an OrderedDict: its impl, not the subclass VT's.
         vt_cls = _vt_cls_modeling(obj, objclass)
@@ -423,7 +423,9 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
             self.obj, variables.ConstDictVariable
         ):
             # A prebound base-dict write still bypasses OrderedDict's linked storage.
-            self.obj.check_base_dict_mutation(tx, self.descriptor.__name__)
+            self.obj.check_base_dict_mutation(
+                tx, self.descriptor.__name__, args, kwargs, bound=True
+            )
         if (
             inspect.getattr_static(self.obj.python_type(), self.descriptor.__name__)
             is not self.descriptor
@@ -877,7 +879,9 @@ class BoundBuiltinMethodVariable(VariableTracker):  # noqa: RVT001
             fn = VariableTracker.build(tx, descriptor)
             return fn.call_function(tx, [obj, *args], kwargs)
         if isinstance(obj, variables.ConstDictVariable):
-            result = obj.call_method_descriptor(tx, descriptor, args, kwargs)
+            result = obj.call_method_descriptor(
+                tx, descriptor, args, kwargs, bound=True
+            )
             if result is not None:
                 return result
         if mro_lookup(obj.python_type(), name) is descriptor:
