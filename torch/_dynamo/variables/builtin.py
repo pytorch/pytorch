@@ -3406,74 +3406,89 @@ class BuiltinVariable(TypeVariable):
         effects = tx.output.side_effects
         writes = effects.store_attr_mutations
         expanding = tx.f_code is polyfills.builtins._expand_format.__code__
-        if self.fn is str.format:
-            if expanding or value is None or value.python_type() is not str:
-                return None
-            if any(
-                isinstance(v, UserDefinedObjectVariable) and v.is_python_constant()
-                for v in itertools.chain(args[1:], kwargs.values())
-            ) or any("__format__" in attrs for attrs in writes.values()):
-                from .builder import SourcelessBuilder
+        slots = {"__format__", "__str__", "__float__"}
 
-                build = SourcelessBuilder.create_internal_user_function
-                fn = build(polyfills.builtins.str_format)
-                return fn.call_function(tx, args, kwargs)
-            return None
-        if kwargs or len(args) not in (1, 2):
-            return None
-        spec = args[1] if len(args) == 2 else ConstantVariable.create("")
-        if expanding and isinstance(
-            value, (TensorVariable, SymNodeVariable, StringFormatVariable)
-        ):
-            return StringFormatVariable.create(tx, "{0:{1}}", [value, spec], {})
-        if isinstance(value, UserDefinedObjectVariable) and spec.python_type() is str:
-            cls_type = value.python_type()
-            slots = {"__format__", "__str__", "__float__"}
-            mutated = bool(writes) and any(
-                cls in effects and slots.intersection(writes.get(effects[cls], ()))
-                for cls in get_type_mro_no_user_code(cls_type)
-            )
-            lookup = value.lookup_class_mro_attr
-            formatter = None if mutated else lookup("__format__")
-            if isinstance(formatter, types.FunctionType):
-                return value.SLOT1(tx, "__format__", spec)
-            if not mutated and not value.is_python_constant():
-                if expanding:
-                    return StringFormatVariable.create(tx, "{0:{1}}", [value, spec], {})
-                return None
-            for base in (int, float, str, object):
-                if formatter is not base.__format__ or value.cls_source is None:
-                    continue
-                text = spec.guard_as_python_constant()
-                names = ["__format__"]
-                if not text:
-                    names.append("__str__")
-                elif base is int and text[-1] in "eEfFgG%":
-                    # Floating-point presentations call PyNumber_Float on the integer.
-                    names.append("__float__")
-                for name in names:
-                    source = mro_attr_source(tx, cls_type, value.cls_source, name)
-                    if source is None:
-                        break
-                    install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
-                    if (
-                        name == "__str__"
-                        and (impl := lookup(name)) is not base.__repr__
-                    ):
-                        is_native = torch._C._dynamo.utils.is_instancemethod
-                        if impl is str.__str__ or (base is object and is_native(impl)):
-                            continue
-                        return generic_str(tx, value)
-                    if name == "__float__" and lookup(name) is not int.__float__:
-                        break
-                else:
-                    return None  # use the ordinary constant-fold handler
+        def defer(field):
+            field = field.realize()
+            if isinstance(field, UserDefinedObjectVariable):
+                if writes and any(
+                    cls in effects and slots.intersection(writes.get(effects[cls], ()))
+                    for cls in get_type_mro_no_user_code(field.python_type())
+                ):
+                    unsupported(field, True)
+                return ConstantVariable.create(False)
+            if isinstance(field, FakeIdVariable):
+                field.guard_as_python_constant()
+            return ConstantVariable.create(True)
+
+        def unsupported(value, mutated):
             unimplemented(
                 gb_type="Unsupported user-defined formatting",
                 context=f"{value.python_type_name()}.__format__, pending class mutation: {mutated}",
                 explanation="Dynamo cannot safely specialize this object's formatting behavior.",
                 hints=["Format this value outside the compiled region."],
             )
+
+        if self.fn is str.format:
+            if expanding or value is None or value.python_type() is not str:
+                return None
+            if any(
+                isinstance(v, UserDefinedObjectVariable) and v.is_python_constant()
+                for v in itertools.chain(args[1:], kwargs.values())
+            ) or any(
+                isinstance(cls, variables.UserDefinedClassVariable)
+                and slots.intersection(attrs)
+                for cls, attrs in writes.items()
+            ):
+                from .builder import SourcelessBuilder
+
+                build = SourcelessBuilder.create_internal_user_function
+                fn = build(polyfills.builtins.str_format)
+                fields = [variables.LambdaVariable(defer), *args]
+                return fn.call_function(tx, fields, kwargs)
+            return None
+        if value is None or kwargs or len(args) not in (1, 2):
+            return None
+        spec = args[1] if len(args) == 2 else ConstantVariable.create("")
+        defer(value)  # validate mutations and identity-dependent hashes before folding
+        if isinstance(value, UserDefinedObjectVariable):
+            if spec.python_type() is not str:
+                return None
+            cls_type = value.python_type()
+            lookup = value.lookup_class_mro_attr
+            formatter = lookup("__format__")
+            if isinstance(formatter, types.FunctionType):
+                return value.SLOT1(tx, "__format__", spec)
+            if value.is_python_constant():
+                for base in (int, float, str, object):
+                    if formatter is not base.__format__ or value.cls_source is None:
+                        continue
+                    text = spec.guard_as_python_constant()
+                    names = ["__format__"]
+                    if not text:
+                        names.append("__str__")
+                    elif base is int and text[-1] in "eEfFgG%":
+                        # Floating-point presentations call PyNumber_Float on the integer.
+                        names.append("__float__")
+                    for name in names:
+                        source = mro_attr_source(tx, cls_type, value.cls_source, name)
+                        if source is None:
+                            break
+                        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+                        if name == "__str__":
+                            impl = lookup(name)
+                            if impl is base.__repr__ or impl is str.__str__:
+                                continue
+                            native = torch._C._dynamo.utils.is_instancemethod
+                            if base is not object or not native(impl):
+                                return generic_str(tx, value)
+                        if name == "__float__" and lookup(name) is not int.__float__:
+                            break
+                    else:
+                        return None  # use the ordinary constant-fold handler
+                unsupported(value, False)
+        if expanding:
+            return StringFormatVariable.create(tx, "{0:{1}}", [value, spec], {})
         return None
 
     def call_format(
@@ -3484,8 +3499,6 @@ class BuiltinVariable(TypeVariable):
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
         if self.fn is format:
-            if isinstance(_format_string, FakeIdVariable):
-                _format_string.guard_as_python_constant()
             return None
         format_string = _format_string.as_python_constant()
         format_string = str(format_string)
