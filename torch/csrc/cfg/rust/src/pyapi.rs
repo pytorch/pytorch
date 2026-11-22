@@ -433,6 +433,14 @@ impl CfgFunction {
         out.set_item("sampling_callees", cf.callees.sampling())?;
         out.set_item("demoted", cf.is_demoted())?;
         out.set_item("measuring", cf.is_measuring())?;
+        let looks = PyDict::new(py);
+        for (name, look) in cf.callees.second_looks() {
+            looks.set_item(name, look)?;
+        }
+        if let Some(look) = cf.second_look() {
+            looks.set_item(cf.func.qualname.clone(), look)?;
+        }
+        out.set_item("second_looks", looks)?;
         out.set_item("log", state.log.clone())?;
         drop(state);
         // The graphs of the function and of what it called: how many there
