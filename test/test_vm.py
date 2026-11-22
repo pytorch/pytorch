@@ -12498,6 +12498,32 @@ def graph_text_of_a_class(x, given):
     return (h * GRAPH_NAMED.get(str(given.__class__), 1.5)).sum()
 
 
+GRAPH_LOOKUP_LOG = []
+
+
+class GraphOwnLookup:
+    """A class that reads its attributes in a function of its own, as the
+    configuration of a library does."""
+
+    names = {"wide": "width"}
+    bias = 0.25
+
+    def __init__(self):
+        self.width, self.scale = 2.0, 3.0
+
+    def __getattribute__(self, key):
+        if key != "names" and key in super().__getattribute__("names"):
+            key = super().__getattribute__("names")[key]
+        return super().__getattribute__(key)
+
+
+def graph_reads_by_its_own_lookup(x, given):
+    config, options = given
+    h = torch.relu(x) + 1
+    h = h * config.wide + options.get("shift", 0.5) + config.bias
+    return ((h * config.scale).sin() * 2 - (options.get("drop") or 1.0)).sum(), None
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -15755,6 +15781,90 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
         finally:
             GRAPH_NAMED.clear()
             del GRAPH_COMPARE_LOG[:]
+
+    def test_two_reads_found_once_give_what_the_instructions_give(self, device):
+        # A run finds what `super().__getattribute__(key)` reads of an
+        # object, and what `d.get(key)` gives, in one step where that is
+        # an entry of the object's dict, a plain value of its class, or
+        # an entry of an exact dict under a plain key. What is found is
+        # what the instructions find at that call: a value that was
+        # changed, a name that maps to another, a property planted in
+        # the class (its getter logs), an entry that is gone, a key that
+        # compares in Python.
+        def keep(gm, input_types):
+            return gm
+
+        class Loud(str):
+            __slots__ = ()
+
+            def __eq__(self, other):
+                GRAPH_LOOKUP_LOG.append("eq")
+                return str.__eq__(self, other)
+
+            __hash__ = str.__hash__
+
+        def scale(self):
+            GRAPH_LOOKUP_LOG.append("scale")
+            return 5.0
+
+        config, options = GraphOwnLookup(), {"shift": 0.75, "drop": 2.0}
+
+        def values_back():
+            config.width = 2.0
+            options.update(shift=0.75)
+
+        def class_back():
+            del GraphOwnLookup.scale
+            GraphOwnLookup.bias, GraphOwnLookup.names["wide"] = 0.25, "width"
+            options.clear()
+            options.update(shift=0.75, drop=2.0)
+
+        def changes(at):
+            # What a call at the eighth and the eleventh place finds
+            # changed, and what puts it back.
+            if at == 7:
+                config.width, options["shift"] = 4.0, 1.5
+                return values_back
+            GraphOwnLookup.scale, GraphOwnLookup.bias = property(scale), 0.5
+            del options["drop"]
+            GraphOwnLookup.names["wide"] = "scale"
+            options[Loud("shift")] = options.pop("shift")
+            return class_back
+
+        def calls(run, graded):
+            del GRAPH_LOOKUP_LOG[:]
+            found = []
+            for at in range(14):
+                x = torch.full((3, 4), 0.25 * (at + 1), device=device)
+                x.requires_grad_(graded)
+                back = changes(at) if at in (7, 10) else None
+                try:
+                    out, _ = run(x, (config, options))
+                    if graded:
+                        out.backward()
+                    grad = None if x.grad is None else x.grad.sum().item()
+                    found.append((out.item(), grad, list(GRAPH_LOOKUP_LOG)))
+                finally:
+                    if back is not None:
+                        back()
+            return found
+
+        fn = graph_reads_by_its_own_lookup
+        try:
+            for behind, graded in (((), False), ((keep,), False), ((), True)):
+                passes = (*DEFAULT, P.Graphs(), *behind)
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                msg = f"with a pass: {bool(behind)}, with a gradient: {graded}"
+                got, expected = calls(compiled, graded), calls(fn, graded)
+                self.assertTrue(got == expected, msg=f"{msg}: {got} {expected}")
+                self.assertEqual(len({row[0] for row in expected}), 14, msg=msg)
+                if behind or graded:
+                    found = [g for g in torch.vm.regions(compiled) if "ops" in g]
+                    whole = [g for g in found if g["why"] == "the function returns"]
+                    ran = sum(g["hits"] for g in whole if g["ops"] >= 10)
+                    self.assertGreaterEqual(ran, 6, msg=f"{msg}: {found}")
+        finally:
+            del GRAPH_LOOKUP_LOG[:]
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())
