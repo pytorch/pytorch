@@ -5998,7 +5998,8 @@ class TestPrecompileDynamoCapture(TestCase):
             cap(self.model, self.x2)
         with open(self.artifact) as f:
             recorded = _parse_artifact_metadata(f.read())["INDUCTOR_OPTIONS"]
-        self.assertEqual(recorded, expected)
+        # Beside the CUDA graph settings the capture's compiles ran under.
+        self.assertLessEqual(expected.items(), recorded.items())
         script = (
             "import ast, sys, torch\n"
             "from torch._inductor import compile_fx\n"
@@ -6212,9 +6213,11 @@ class TestPrecompileDynamoCapture(TestCase):
 
     def test_a_capture_holds_cudagraph_trees_to_the_value_it_records(self):
         seen = self._compiles_see("triton.cudagraph_trees")
-        # Read when capture() is called: the options over the ambient config.
-        options = {"triton.cudagraph_trees": False}
-        with self._capture(self.mod.single, options=options) as cap:
+        # Read when capture() is called, here from the ambient config: nothing
+        # but the session holds the captured calls to it.
+        with torch._inductor.config.patch({"triton.cudagraph_trees": False}):
+            session = self._capture(self.mod.single)
+        with session as cap:
             with torch._inductor.config.patch({"triton.cudagraph_trees": True}):
                 cap(self.model, self.x2)
         self.assertEqual(seen, [False])
@@ -6242,12 +6245,17 @@ class TestPrecompileDynamoCapture(TestCase):
         # Load post-compiles each graph under the loading process's
         # triton.cudagraphs; one compiled without CUDA graphs has nothing to be
         # wrapped with, and runs as it compiled.
+        from torch._dynamo.utils import counters
+
         single = self.mod.single
         with self._capture(single) as cap:
             y = cap(self.model, self.x2)
+        counters.clear()
         with torch._inductor.config.patch({"triton.cudagraphs": True}):
             f = load(self.artifact, self.cache)
             self.assertEqual(f(self.model, self.x2), y)
+        # Not a skip: the graph was never meant to run as a CUDA graph.
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
     @parametrize("backend", ["inductor", "eager"])
     def test_a_single_graph_serves_in_process(self, backend):
@@ -6797,18 +6805,18 @@ class TestPrecompileCudagraphs(TestCase):
 
     def _serve_in_fresh_process(
         self,
-        expected,
+        expected=None,
         env=None,
         mark_step=False,
         expected_grad=None,
-        args=None,
+        calls=None,
         serve_time=False,
         config=None,
     ):
-        # Calls the loaded artifact three times, on the model and args (self.x
-        # by default; a list gives each call its own args and expected), in a
-        # fresh process whose triton.cudagraphs is off unless env turns it on,
-        # and returns what that process counted:
+        # Calls the loaded artifact three times, on the model and self.x (or on
+        # each of calls' (args, expected) in turn), in a fresh process whose
+        # triton.cudagraphs is off unless env turns it on, and returns what that
+        # process counted:
         #   recorded: the nodes in its CUDA graph tree
         #   captured: every CUDA graph captured, a tree manager's pool graph too
         #   trees: whether it made a CUDA graph tree manager
@@ -6818,11 +6826,8 @@ class TestPrecompileCudagraphs(TestCase):
         # serve_time loads with allow_serve_time_compiles.
         # config is the Inductor config the process sets before load().
         state = os.path.join(self.dir, "state.pt")
-        calls = [((self.x,) if args is None else args, expected)]
-        if isinstance(args, list):
-            calls = list(zip(args, expected))
         saved = {
-            "calls": calls,
+            "calls": calls or [((self.x,), expected)],
             "expected_grad": expected_grad,
             "mark_step": mark_step,
             "serve_time": serve_time,
@@ -6885,8 +6890,8 @@ class TestPrecompileCudagraphs(TestCase):
                 cap(self.model, self.x, 2.0)
             # A value per call: a replay must not bake in the one it recorded.
             args = [(self.x, scale) for scale in (3.0, 4.0, 5.0)]
-            expected = [fn(self.model, *a) for a in args]
-        served = self._serve_in_fresh_process(expected, args=args)
+            calls = [(a, fn(self.model, *a)) for a in args]
+        served = self._serve_in_fresh_process(calls=calls)
         self.assertGreater(served["recorded"], 0)
         self.assertEqual(served["skips"], 0)
 
@@ -6949,22 +6954,21 @@ class TestPrecompileCudagraphs(TestCase):
 
     @parametrize("cudagraphs", [False, True])
     @torch._dynamo.config.patch(nested_graph_breaks=False)
-    def test_a_serve_time_compile_takes_the_artifact_cudagraph_config(self, cudagraphs):
+    def test_a_serve_time_compile_takes_the_capture_cudagraph_settings(
+        self, cudagraphs
+    ):
         fn = self.mod.calls_breaking_helper
-        # The capture takes the flag from the ambient config, so the artifact's
-        # INDUCTOR_OPTIONS do not carry it.
+        # The capture takes the flag from the ambient config, not from options.
         with torch._inductor.config.patch({"triton.cudagraphs": cudagraphs}):
             _, meta = self._capture_step(fn)
-        self.assertEqual(meta["INDUCTOR_OPTIONS"], {})
+        self.assertEqual(meta["INDUCTOR_OPTIONS"]["triton.cudagraphs"], cudagraphs)
         # A shape no captured variant covers, so every graph serving it is
         # compiled in the loading process, whose own flag says the opposite.
         miss = torch.randn(6, 8, device="cuda")
         with torch.no_grad():
-            expected = fn(self.model, miss)
+            calls = [((miss,), fn(self.model, miss))]
         env = {"TORCHINDUCTOR_CUDAGRAPHS": "0" if cudagraphs else "1"}
-        served = self._serve_in_fresh_process(
-            expected, env, args=(miss,), serve_time=True
-        )
+        served = self._serve_in_fresh_process(env=env, calls=calls, serve_time=True)
         self.assertEqual(served["captured"] > 0, cudagraphs)
         self.assertEqual(served["skips"], 0)
 
