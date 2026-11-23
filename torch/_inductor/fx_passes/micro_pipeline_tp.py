@@ -72,7 +72,7 @@ def _get_tensor(node: torch.fx.Node) -> torch.Tensor:
     return val
 
 
-def _infer_scaled_mm_recipes(
+def _infer_scaled_mm_scaling_types(
     mm_node: torch.fx.Node,
 ) -> tuple[ScalingType | None, ScalingType | None]:
     A, B, A_scale, B_scale = (
@@ -83,7 +83,7 @@ def _infer_scaled_mm_recipes(
 
 def _is_unfusible_scaled_mm(node: torch.fx.Node) -> bool:
     """The symm_mem scaled-matmul ops take no ``scale_result`` and only support
-    matching tensor-wise or row-wise recipes, so leave other ``_scaled_mm`` nodes unfused."""
+    matching tensor-wise or row-wise scaling types, so leave other ``_scaled_mm`` nodes unfused."""
     if node.target is not aten._scaled_mm.default:
         return False
     args, kwargs = node.args, node.kwargs
@@ -91,10 +91,15 @@ def _is_unfusible_scaled_mm(node: torch.fx.Node) -> bool:
     if scale_result is not None:
         log.debug("async TP: not fusing %s, it has a scale_result", node)
         return True
-    recipe_a, recipe_b = _infer_scaled_mm_recipes(node)
+    scaling_type_a, scaling_type_b = _infer_scaled_mm_scaling_types(node)
     fusible = (ScalingType.TensorWise, ScalingType.RowWise)
-    if recipe_a != recipe_b or recipe_a not in fusible:
-        log.debug("async TP: not fusing %s, recipes %s/%s", node, recipe_a, recipe_b)
+    if scaling_type_a != scaling_type_b or scaling_type_a not in fusible:
+        log.debug(
+            "async TP: not fusing %s, scaling types %s/%s",
+            node,
+            scaling_type_a,
+            scaling_type_b,
+        )
         return True
     return False
 
@@ -687,7 +692,7 @@ class _Matmul:
 class _ScaledMatmul(_Matmul):
     A_scale_node: torch.fx.Node
     B_scale_node: torch.fx.Node
-    recipe: ScalingType
+    scaling_type: ScalingType
     bias_node: torch.fx.Node | None
     out_dtype: torch.dtype | None
     use_fast_accum: bool
@@ -727,8 +732,8 @@ class _ScaledMatmul(_Matmul):
         B_node = cast("torch.fx.Node", mm_node.args[1])
         A_scale_node = cast("torch.fx.Node", mm_node.args[2])
         B_scale_node = cast("torch.fx.Node", mm_node.args[3])
-        recipe = _infer_scaled_mm_recipes(mm_node)[0]
-        if recipe is None:
+        scaling_type = _infer_scaled_mm_scaling_types(mm_node)[0]
+        if scaling_type is None:
             raise AssertionError(f"from_match on an unfusible _scaled_mm: {mm_node}")
 
         return _ScaledMatmul(
@@ -737,7 +742,7 @@ class _ScaledMatmul(_Matmul):
             B_node=B_node,
             A_scale_node=A_scale_node,
             B_scale_node=B_scale_node,
-            recipe=recipe,
+            scaling_type=scaling_type,
             bias_node=get_arg(mm_node, 4, None),
             out_dtype=get_arg(mm_node, 6, None),
             use_fast_accum=get_arg(mm_node, 7, False),
@@ -840,9 +845,12 @@ def _get_fusible_all_gather_matmuls(
     if last_dim and isinstance(matmuls[0], _ScaledMatmul):
         return []
     if isinstance(matmuls[0], _ScaledMatmul):
-        # The fused op takes a single A scale and a single recipe for every B.
+        # The fused op takes a single A scale and a single scaling type for every B.
         scaled_matmuls = cast("list[_ScaledMatmul]", matmuls)
-        if len(OrderedSet((m.A_scale_node, m.recipe) for m in scaled_matmuls)) != 1:
+        if (
+            len(OrderedSet((m.A_scale_node, m.scaling_type) for m in scaled_matmuls))
+            != 1
+        ):
             return []
     return matmuls
 
@@ -867,9 +875,9 @@ def _insert_fused_all_gather_matmul(
         )
     elif mm_type == _ScaledMatmul:
         scaled_matmuls = cast("list[_ScaledMatmul]", matmuls)
-        # One recipe for all matmuls (_get_fusible_all_gather_matmuls), and
-        # _is_unfusible_scaled_mm requires B's recipe to match A's.
-        recipe = scaled_matmuls[0].recipe.value
+        # One scaling type for all matmuls (_get_fusible_all_gather_matmuls), and
+        # _is_unfusible_scaled_mm requires B's scaling type to match A's.
+        scaling_type = scaled_matmuls[0].scaling_type.value
         no_swizzle = SwizzleType.NO_SWIZZLE.value
         return graph.call_function(
             torch.ops.symm_mem.fused_all_gather_scaled_matmul.default,
@@ -877,10 +885,10 @@ def _insert_fused_all_gather_matmul(
                 shard_node,
                 [matmul.B_node for matmul in scaled_matmuls],
                 scaled_matmuls[0].A_scale_node,
-                recipe,
+                scaling_type,
                 no_swizzle,
                 [matmul.B_scale_node for matmul in scaled_matmuls],
-                recipe,
+                scaling_type,
                 no_swizzle,
                 gather_dim,
                 group_name,
@@ -1128,10 +1136,10 @@ def _insert_fused_matmul_reduce_scatter(
                 matmul.A_node,
                 matmul.B_node,
                 matmul.A_scale_node,
-                matmul.recipe.value,
+                matmul.scaling_type.value,
                 SwizzleType.NO_SWIZZLE.value,
                 matmul.B_scale_node,
-                matmul.recipe.value,
+                matmul.scaling_type.value,
                 SwizzleType.NO_SWIZZLE.value,
                 reduce_op,
                 orig_scatter_dim,

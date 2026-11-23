@@ -537,8 +537,8 @@ lib.define(
 )
 lib.define(
     "fused_all_gather_scaled_matmul("
-    "Tensor A, Tensor[] Bs, Tensor A_scale, int recipe_a, int swizzle_a, "
-    "Tensor[] B_scales, int recipe_b, int swizzle_b, "
+    "Tensor A, Tensor[] Bs, Tensor A_scale, int scaling_type_a, int swizzle_type_a, "
+    "Tensor[] B_scales, int scaling_type_b, int swizzle_type_b, "
     "int gather_dim, str group_name, "
     "Tensor?[] biases, "
     "ScalarType?[] out_dtypes, "
@@ -551,8 +551,8 @@ lib.define(
 )
 lib.define(
     "fused_scaled_matmul_reduce_scatter("
-    "Tensor A, Tensor B, Tensor A_scale, int recipe_a, int swizzle_a, "
-    "Tensor B_scale, int recipe_b, int swizzle_b, "
+    "Tensor A, Tensor B, Tensor A_scale, int scaling_type_a, int swizzle_type_a, "
+    "Tensor B_scale, int scaling_type_b, int swizzle_type_b, "
     "str reduce_op, int orig_scatter_dim, int scatter_dim_after_maybe_reshape, str group_name, SymInt[]? output_shape, "
     "Tensor? bias = None, "
     "ScalarType? out_dtype = None, "
@@ -618,7 +618,7 @@ class _ScaleMode(Enum):
 def _check_and_verify_fp8_all_gather_scale_mode(
     shard: torch.Tensor,
     scale: torch.Tensor | None,
-    recipe: ScalingType | None,
+    scaling_type: ScalingType | None,
     gather_dim: int,
     group_size: int,
 ) -> _ScaleMode:
@@ -627,15 +627,17 @@ def _check_and_verify_fp8_all_gather_scale_mode(
 
     if scale is None:
         return _ScaleMode.UNSCALED
-    elif recipe == ScalingType.TensorWise and scale.numel() == 1:
+    elif scaling_type == ScalingType.TensorWise and scale.numel() == 1:
         return _ScaleMode.TENSOR_WISE
-    elif recipe == ScalingType.RowWise and scale.dim() > 0 and scale.shape[-1] == 1:
+    elif (
+        scaling_type == ScalingType.RowWise and scale.dim() > 0 and scale.shape[-1] == 1
+    ):
         if scale.shape[:-1] == shard.shape[:-1]:
             return _ScaleMode.ROW_WISE_SHARDED
         if list(scale.shape[:-1]) == full_shape[:-1]:
             return _ScaleMode.ROW_WISE_REPLICATED
     raise ValueError(
-        f"Invalid scale for fp8 all-gather with recipe {recipe} "
+        f"Invalid scale for fp8 all-gather with scaling type {scaling_type} "
         f"(shard shape: {shard.shape}, scale shape: {scale.shape})"
     )
 
@@ -660,7 +662,7 @@ def _fused_all_gather_matmul_impl(
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
     A_scale: torch.Tensor | None,
-    recipe_a: ScalingType | None,
+    scaling_type_a: ScalingType | None,
     kwargs_list: list[dict[str, Any]],
     out_dtypes: list[torch.dtype | None],
     gather_dim: int,
@@ -720,7 +722,7 @@ def _fused_all_gather_matmul_impl(
     scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
         shard=A_shard,
         scale=A_scale,
-        recipe=recipe_a,
+        scaling_type=scaling_type_a,
         gather_dim=gather_dim,
         group_size=group.size(),
     )
@@ -1231,11 +1233,11 @@ def _fused_all_gather_scaled_matmul_fallback(
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
     A_scale: torch.Tensor,
-    recipe_a: int,
-    swizzle_a: int,
+    scaling_type_a: int,
+    swizzle_type_a: int,
     B_scales: list[torch.Tensor],
-    recipe_b: int,
-    swizzle_b: int,
+    scaling_type_b: int,
+    swizzle_type_b: int,
     gather_dim: int,
     group_name: c10d.GroupName,
     biases: list[torch.Tensor | None],
@@ -1254,7 +1256,7 @@ def _fused_all_gather_scaled_matmul_fallback(
     scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
         shard=A_shard,
         scale=A_scale,
-        recipe=ScalingType(recipe_a),
+        scaling_type=ScalingType(scaling_type_a),
         gather_dim=gather_dim,
         group_size=group_size,
     )
@@ -1289,11 +1291,11 @@ def _fused_all_gather_scaled_matmul_fallback(
             A.flatten(0, -2),
             B,
             [A_scale],
-            [recipe_a],
-            [swizzle_a],
+            [scaling_type_a],
+            [swizzle_type_a],
             [B_scale],
-            [recipe_b],
-            [swizzle_b],
+            [scaling_type_b],
+            [swizzle_type_b],
             bias,
             out_dtype,
             use_fast_accum=use_fast_accum,
@@ -1314,11 +1316,11 @@ def _fused_all_gather_scaled_matmul(
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
     A_scale: torch.Tensor,
-    recipe_a: int,
-    swizzle_a: int,
+    scaling_type_a: int,
+    swizzle_type_a: int,
     B_scales: list[torch.Tensor],
-    recipe_b: int,
-    swizzle_b: int,
+    scaling_type_b: int,
+    swizzle_type_b: int,
     gather_dim: int,
     group_name: c10d.GroupName,
     biases: list[torch.Tensor | None],
@@ -1332,12 +1334,12 @@ def _fused_all_gather_scaled_matmul(
         A = all_gather_single(A_shard, gather_dim, group_name)
         leading_dims = A.shape[:-1]
         res = torch.ops.aten._scaled_mm_v2(
-            A.flatten(0, -2), B, [A_scale], [recipe_a], [swizzle_a],
-            [B_scale], [recipe_b], [swizzle_b], ...
+            A.flatten(0, -2), B, [A_scale], [scaling_type_a], [swizzle_type_a],
+            [B_scale], [scaling_type_b], [swizzle_type_b], ...
         )
         res = res.unflatten(0, leading_dims)
 
-    The recipes must be both TensorWise or both RowWise. A row-wise `A_scale`
+    The scaling types must be both TensorWise or both RowWise. A row-wise `A_scale`
     can be sharded like `A_shard` or replicated (covering the gathered `A`).
 
     Optimal stride order for `A_shard` - if `A_shard.movedim(gather_dim, 0)` is
@@ -1358,11 +1360,11 @@ def _fused_all_gather_scaled_matmul(
             A_shard,
             Bs,
             A_scale,
-            recipe_a,
-            swizzle_a,
+            scaling_type_a,
+            swizzle_type_a,
             B_scales,
-            recipe_b,
-            swizzle_b,
+            scaling_type_b,
+            swizzle_type_b,
             gather_dim,
             group_name,
             biases,
@@ -1376,14 +1378,14 @@ def _fused_all_gather_scaled_matmul(
             A_shard,
             Bs,
             A_scale,
-            ScalingType(recipe_a),
+            ScalingType(scaling_type_a),
             [
                 {
-                    "recipe_a": [recipe_a],
-                    "swizzle_a": [swizzle_a],
+                    "recipe_a": [scaling_type_a],
+                    "swizzle_a": [swizzle_type_a],
                     "scale_b": B_scale,
-                    "recipe_b": [recipe_b],
-                    "swizzle_b": [swizzle_b],
+                    "recipe_b": [scaling_type_b],
+                    "swizzle_b": [swizzle_type_b],
                     "bias": bias,
                     "out_dtype": out_dtype,
                     "use_fast_accum": fast_accum,
@@ -1572,11 +1574,11 @@ def _fused_scaled_matmul_reduce_scatter(
     A: torch.Tensor,
     B: torch.Tensor,
     A_scale: torch.Tensor,
-    recipe_a: int,
-    swizzle_a: int,
+    scaling_type_a: int,
+    swizzle_type_a: int,
     B_scale: torch.Tensor,
-    recipe_b: int,
-    swizzle_b: int,
+    scaling_type_b: int,
+    swizzle_type_b: int,
     reduce_op: str,
     orig_scatter_dim: int,
     scatter_dim_after_maybe_reshape: int,
@@ -1591,11 +1593,11 @@ def _fused_scaled_matmul_reduce_scatter(
             A,
             B,
             A_scale,
-            recipe_a,
-            swizzle_a,
+            scaling_type_a,
+            swizzle_type_a,
             B_scale,
-            recipe_b,
-            swizzle_b,
+            scaling_type_b,
+            swizzle_type_b,
             reduce_op,
             orig_scatter_dim,
             scatter_dim_after_maybe_reshape,
@@ -1611,13 +1613,13 @@ def _fused_scaled_matmul_reduce_scatter(
             A=A,
             B=B,
             A_scale=A_scale,
-            recipe_a=ScalingType(recipe_a),
+            scaling_type_a=ScalingType(scaling_type_a),
             kwargs={
-                "recipe_a": [recipe_a],
-                "swizzle_a": [swizzle_a],
+                "recipe_a": [scaling_type_a],
+                "swizzle_a": [swizzle_type_a],
                 "scale_b": B_scale,
-                "recipe_b": [recipe_b],
-                "swizzle_b": [swizzle_b],
+                "recipe_b": [scaling_type_b],
+                "swizzle_b": [swizzle_type_b],
                 "bias": bias,
                 "out_dtype": out_dtype,
                 "use_fast_accum": use_fast_accum,
@@ -1636,11 +1638,11 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     A: torch.Tensor,
     B: torch.Tensor,
     A_scale: torch.Tensor,
-    recipe_a: int,
-    swizzle_a: int,
+    scaling_type_a: int,
+    swizzle_type_a: int,
     B_scale: torch.Tensor,
-    recipe_b: int,
-    swizzle_b: int,
+    scaling_type_b: int,
+    swizzle_type_b: int,
     reduce_op: str,
     orig_scatter_dim: int,
     scatter_dim_after_maybe_reshape: int,
@@ -1650,7 +1652,7 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     out_dtype: torch.dtype | None = None,
     use_fast_accum: bool = False,
 ) -> torch.Tensor:
-    if ScalingType(recipe_a) == ScalingType.RowWise:
+    if ScalingType(scaling_type_a) == ScalingType.RowWise:
         if A_scale.shape[:-1] != A.shape[:-1]:
             raise ValueError(
                 "For row-wise scaling, the leading dims of A_scale "
@@ -1668,11 +1670,11 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
         A.flatten(0, -2).contiguous(),
         B,
         [A_scale],
-        [recipe_a],
-        [swizzle_a],
+        [scaling_type_a],
+        [swizzle_type_a],
         [B_scale],
-        [recipe_b],
-        [swizzle_b],
+        [scaling_type_b],
+        [swizzle_type_b],
         bias,
         out_dtype,
         use_fast_accum=use_fast_accum,
@@ -1693,7 +1695,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     A: torch.Tensor,
     B: torch.Tensor,
     A_scale: torch.Tensor,
-    recipe_a: ScalingType,
+    scaling_type_a: ScalingType,
     kwargs: dict[str, Any],
     out_dtype: torch.dtype | None,
     reduce_op: str,
@@ -1731,13 +1733,13 @@ def _fused_scaled_matmul_reduce_scatter_impl(
 
     # Now that 'A' is sharded along the first dim, we need to update its scale(s) accordingly.
     # For tensorwise scaling, the scale should be replicated so each shard has a copy.
-    if recipe_a == ScalingType.TensorWise:
+    if scaling_type_a == ScalingType.TensorWise:
         A_scale_shards = [A_scale] * group.size()
 
     # For rowwise scaling, we need to move the scatter dim to the first dim to match the
     # dim swap of the 'A' tensor. Then we can shard the scales along the first dim, just like
     # the 'A' tensor.
-    elif recipe_a == ScalingType.RowWise:
+    elif scaling_type_a == ScalingType.RowWise:
         if A_scale.shape[:-1] != A.shape[:-1]:
             raise ValueError(
                 "For row-wise scaling, the leading dims of A_scale "
@@ -1756,7 +1758,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
             t if t.data_ptr() % 16 == 0 else t.clone() for t in A_scale_shards
         ]
     else:
-        raise ValueError(f"Unsupported recipe_a: {recipe_a}")
+        raise ValueError(f"Unsupported scaling_type_a: {scaling_type_a}")
 
     # Computing block-wise matmul along the first dim of A
     def chunk_producer(rank: int, out: torch.Tensor) -> None:
