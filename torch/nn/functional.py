@@ -4542,7 +4542,7 @@ def multilabel_margin_loss(
                                   Default: 'mean'.
 
     Returns:
-       Tensor: Mutilabel margin loss.
+       Tensor: Multilabel margin loss.
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
@@ -4619,6 +4619,9 @@ def multilabel_soft_margin_loss(
     Args:
        input (Tensor): Predicted values.
        target (Tensor): Ground truth values.
+       weight (Tensor, optional): a manual rescaling weight given to each
+                               class. If given, it has to be a Tensor of size `C`. Otherwise, it is
+                               treated as if having all ones.
        size_average (bool, optional): Deprecated (see :attr:`reduction`).
        reduce (bool, optional): Deprecated (see :attr:`reduction`).
        reduction (str, optional): Specifies the reduction to apply to the output:
@@ -4627,7 +4630,7 @@ def multilabel_soft_margin_loss(
                                   Default: 'mean'.
 
     Returns:
-       Tensor: Mutilabel soft margin loss.
+       Tensor: Multilabel soft margin loss.
     """
     if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
