@@ -964,6 +964,38 @@ impl Compiled {
                 }
                 Ok(py_bool(ffi::PyErr_GivenExceptionMatches(self.obj(regs, *exc), class) != 0))
             }
+            Op::LoadSpecial(obj, name) => {
+                let o = self.obj(regs, *obj);
+                let ty = ffi::Py_TYPE(o);
+                let attr = pyffi::_PyType_Lookup(ty, f.consts[*name as usize].as_ptr());
+                if attr.is_null() {
+                    set_error(
+                        ffi::PyExc_TypeError,
+                        format!(
+                            "'{}' object does not support the context manager protocol",
+                            pyffi::type_name(o)
+                        ),
+                    );
+                    return Err(());
+                }
+                match (*ffi::Py_TYPE(attr)).tp_descr_get {
+                    Some(bind) => checked(bind(attr, o, ty as Obj)),
+                    None => Ok(new_ref(attr)),
+                }
+            }
+            Op::WithExceptStart { exit, exc } => {
+                let exit = self.obj(regs, *exit);
+                let exc = self.obj(regs, *exc);
+                let traceback = ffi::PyException_GetTraceback(exc);
+                let args = [
+                    ffi::Py_TYPE(exc) as Obj,
+                    exc,
+                    if traceback.is_null() { ffi::Py_None() } else { traceback },
+                ];
+                let r = ffi::PyObject_Vectorcall(exit, args.as_ptr(), 3, null_mut());
+                xdecref(traceback);
+                checked(r)
+            }
             Op::StoreDeref(i, v) => {
                 let cell = self.closure_cell(*i)?;
                 if pyffi::PyCell_Set(cell, self.obj(regs, *v)) < 0 {

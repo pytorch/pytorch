@@ -721,6 +721,22 @@ impl<'a> Builder<'a> {
                     let exc = pop_value!();
                     term = Some(Term::Reraise(exc));
                 }
+                Bc::WithExceptStart => {
+                    // exit, raising offset, previous exception, exception
+                    let (exit, exc) = (peek!(4), peek!(1));
+                    let v = emit!(off, Op::WithExceptStart { exit, exc });
+                    stack.push(v);
+                }
+                Bc::BeforeWith => {
+                    let manager = pop_value!();
+                    let enter = self.name_const("__enter__");
+                    let exit = self.name_const("__exit__");
+                    let enter = emit!(off, Op::LoadSpecial(manager, enter));
+                    let exit = emit!(off, Op::LoadSpecial(manager, exit));
+                    let entered = emit!(off, Op::Call { callee: enter, args: Vec::new(), kwnames: NONE });
+                    stack.push(exit);
+                    stack.push(entered);
+                }
                 Bc::LoadAssertionError => {
                     let obj = unsafe { PyObj::from_borrowed(ffi::PyExc_AssertionError) };
                     let c = self.extra_const(obj);
@@ -763,6 +779,15 @@ impl<'a> Builder<'a> {
         self.out_insts[b] = insts;
         self.out_terms[b] = Some(term);
         Ok(())
+    }
+
+    fn name_const(&mut self, name: &str) -> u32 {
+        let obj = unsafe {
+            PyObj::from_owned(ffi::PyUnicode_InternFromString(
+                std::ffi::CString::new(name).unwrap().as_ptr(),
+            ))
+        };
+        self.extra_const(obj)
     }
 
     fn varname_const(&mut self, local: u32) -> PyResult<u32> {
@@ -1296,6 +1321,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::StoreSlot(_, a)
         | Op::PushExcInfo(a)
         | Op::PopExcInfo(a)
+        | Op::LoadSpecial(a, _)
         | Op::MakeCell(a)
         | Op::CellGet(a, _)
         | Op::StoreGlobal(_, a)
@@ -1324,6 +1350,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
         | Op::DictUpdate(a, b)
         | Op::DictMerge(a, b)
         | Op::ExcMatch(a, b)
+        | Op::WithExceptStart { exit: a, exc: b }
         | Op::CellSet(a, b) => r!(a, b),
         Op::StoreAttr { obj, val, .. } => r!(obj, val),
         Op::SetItem { obj, key, val } => r!(obj, key, val),
