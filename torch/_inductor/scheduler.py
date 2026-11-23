@@ -3283,6 +3283,33 @@ class BaseSchedulerNode:
 
             return True
 
+        def feeds_indirect_index_in_fused_node(
+            input_name: str, output_name: str
+        ) -> bool:
+            # A GPU kernel can run more threads than it has elements, e.g. a
+            # Triton layout with num_warps * warp_size > XBLOCK replicates each
+            # element across warps. Only one replica stores, so the others may
+            # load an in-place buffer after it was overwritten. That is benign
+            # unless the loaded value becomes an address: the late replica then
+            # dereferences the new value. So never inplace a buffer whose values,
+            # or values computed from it in the same kernel, feed indirect indexing.
+            fused_node = self.scheduler.get_fused_node(self)
+            nodes = [n for n in fused_node.get_nodes() if isinstance(n, SchedulerNode)]
+            tainted = OrderedSet([input_name, output_name])
+            changed = True
+            while changed:
+                changed = False
+                for node in nodes:
+                    if not any(dep.name in tainted for dep in node.read_writes.reads):
+                        continue
+                    if node._get_indirect_index_source_buffers() & tainted:
+                        return True
+                    for out_name in node.get_buffer_names():
+                        if out_name not in tainted:
+                            tainted.add(out_name)
+                            changed = True
+            return False
+
         for buf in self.get_outputs():
             buf_node = buf.node
             if buf_node is None:
@@ -3350,6 +3377,9 @@ class BaseSchedulerNode:
                         )
                         and can_match_buffer_size(input_buf.node, buf.node)
                         and single_index_in_fused_node(input_buf)
+                        and not feeds_indirect_index_in_fused_node(
+                            input_buf.get_name(), buf.get_name()
+                        )
                     ):
                         # if there isn't a triton kernel, then we don't need to call triton-specific things.
                         # but TODO this might be a convenient place to signal to the Collective kernels to inplace
@@ -4435,6 +4465,34 @@ class SchedulerNode(BaseSchedulerNode):
                         else (node.args[1] if len(node.args) >= 2 else "")
                     )
         return buffers_store_as_atomic_add
+
+    @cache_on_self
+    def _get_indirect_index_source_buffers(self) -> OrderedSet[str]:
+        """Buffers whose loaded values flow into an indirect index."""
+        sources: OrderedSet[str] = OrderedSet()
+        if not isinstance(self._body, LoopBody):
+            return sources
+        body = self._body
+        for node in body.get_nodes():
+            if node.op != "call_module" or not str(node.target).startswith(
+                "set_indirect"
+            ):
+                continue
+            pending = list(node.all_input_nodes)
+            seen: OrderedSet[torch.fx.Node] = OrderedSet()
+            while pending:
+                n = pending.pop()
+                if n in seen:
+                    continue
+                seen.add(n)
+                if n.op == "call_method" and n.target == "load":
+                    name = n.kwargs.get("name", n.args[1] if len(n.args) >= 2 else None)
+                    if isinstance(name, str):
+                        sources.add(name)
+                elif n.op == "call_module" and n.target in body.subblocks:
+                    pending.extend(body.subblocks[str(n.target)].graph.nodes)
+                pending.extend(n.all_input_nodes)
+        return sources
 
     @cache_on_self
     def has_side_effects(self) -> bool:
