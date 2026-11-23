@@ -10793,6 +10793,13 @@ def graph_asks_an_abstract_class(obj, x):
     return torch.tanh(h) + h
 
 
+def graph_binds_a_method_of_a_dict(table, x, key):
+    h = torch.relu(x) + 1
+    get = table.get
+    h = h * get(key, 3.0) - 3
+    return torch.tanh(h) + h
+
+
 class GraphChangeBox:
     pass
 
@@ -14141,6 +14148,30 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
                 self.assertGreaterEqual(ran, 24, msg=str(graphs))
         del GRAPH_UNUSED_LOG[:]
 
+    def test_a_method_of_a_dict_that_was_bound_earlier_is_the_method(self, device):
+        # `get = table.get` and then `get(key, default)`: the call of what
+        # was bound to the dict is the method of the dict, on a path as
+        # `table.get(key, default)` is. The dict changes between calls.
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(3, 4, device=device)
+        fn = graph_binds_a_method_of_a_dict
+        for behind in ((), (keep,)):
+            table = {"a": 2.0}
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            for at in range(30):
+                if at == 15:
+                    table["b"] = 5.0
+                key = "a" if at % 3 else "b"
+                got, expected = compiled(table, x, key), fn(table, x, key)
+                self.assertEqual(got, expected, atol=0, rtol=0)
+            listed = torch.vm.regions(compiled)
+            graphs = [g for g in listed if "ops" in g and "within" not in g]
+            found = [(g["ops"], g["why"]) for g in graphs]
+            self.assertEqual(found, [(6, "the function returns")], msg=str(graphs))
+
     def test_what_watches_the_storage_of_a_tensor_is_told_in_its_place(self, device):
         # C++ keeps the Python object of a storage for the storage, and
         # it ends with it: with the tensor, where nothing else has the
@@ -14353,8 +14384,15 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
             graphs.append(gm)
             return gm
 
+        def bound(xs):
+            out, table = [], {"scale": 2.0}
+            put, get = out.append, table.get
+            for x in xs:
+                put(torch.sin(x) * get("scale"))
+            return torch.tanh(torch.cat(out)).sum()
+
         passes = (*DEFAULT, P.Graphs(), keep)
-        for fn in (graph_collects,):
+        for fn in (graph_collects, bound):
             del graphs[:]
             compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
             xs = [torch.randn(3, device=device) for _ in range(3)]

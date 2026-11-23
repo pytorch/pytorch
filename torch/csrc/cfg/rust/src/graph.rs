@@ -3100,6 +3100,14 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
         if of != 0 && unchanging(of as Obj) {
             return args.iter().all(|o| quiet_text(*o)).then_some(false);
         }
+        // What a dict has, asked of a method that was bound to it earlier.
+        if of != 0 && is_plain_dict(of as Obj) {
+            let name = ffi::PyUnicode_FromString((*(*function).m_ml).ml_name);
+            let fine = !name.is_null() && pure_method(of as Obj, name, args, api);
+            ffi::PyErr_Clear();
+            xdecref(name);
+            return fine.then_some(false);
+        }
         if of != 0 && of == math {
             return args.iter().all(|o| is_number(*o)).then_some(false);
         }
