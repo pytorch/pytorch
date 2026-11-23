@@ -790,6 +790,32 @@ impl Frame {
         }
     }
 
+    /// Whether the frame has a frame object: something has looked at it (a
+    /// traceback, `sys._getframe`, a debugger).
+    unsafe fn looked_at(&self) -> bool {
+        !self.object.is_null() && !(*self.object).is_null()
+    }
+
+    /// Whether something can read the variables of the frame when the
+    /// function returns or has returned: something other than the stack
+    /// refers to its frame object, or the object has a trace function,
+    /// which is told that the function returns (`frame_returns`). Not a
+    /// frame object that nothing holds any more: the traceback of an
+    /// exception that the function caught and let go of made one.
+    unsafe fn outlives(&self) -> bool {
+        if !self.looked_at() {
+            return false;
+        }
+        if self.held() {
+            return true;
+        }
+        let trace = ffi::PyObject_GetAttrString(*self.object, c"f_trace".as_ptr());
+        ffi::PyErr_Clear();
+        let traced = !trace.is_null() && trace != ffi::Py_None();
+        xdecref(trace);
+        traced
+    }
+
     /// Whether something refers to the frame object: the traceback of the
     /// exception that is leaving the function, as a rule.
     unsafe fn held(&self) -> bool {
@@ -2388,7 +2414,7 @@ impl Compiled {
         let mut result = result;
         // A debugger that was entered below this call has its trace function
         // on the frame, and is told that the function returns.
-        if !frame.object.is_null() && !(*frame.object).is_null() && !result.is_null() {
+        if frame.looked_at() && !result.is_null() {
             if let Some(returns) = capi::api().and_then(|api| api.frame_returns) {
                 if returns(frame.ptr, result) != 0 {
                     ffi::Py_DECREF(result);
@@ -6018,6 +6044,16 @@ impl Compiled {
             leave(own);
             return Ran::Other;
         }
+        // A frame object may outlive the call, with the variables as they
+        // are when the function returns: a path that leaves one unbound
+        // is the path of this call and is not run for it.
+        if path.unbinds && frames.top().outlives() {
+            if graph::debug() {
+                eprintln!("torch.vm graph {}: not run for this call: its path leaves a variable unbound where the function returns, and something holds the frame object", site.name);
+            }
+            leave(own);
+            return Ran::Miss;
+        }
         let args: Vec<Obj> = exported.args.iter().map(|place| place.at(&own)).collect();
         let bc = path.body[0].bc;
         frames.top().at(bc & OFFSET_MASK);
@@ -6166,6 +6202,14 @@ impl Compiled {
                 return Ran::Landed(Landing { block: usize::MAX, code: std::ptr::null(), pc: bc as usize });
             }
             path.exported.borrow_mut().retain(|other| !Arc::ptr_eq(other, &exported));
+            leave(own);
+            return Ran::Miss;
+        }
+        if path.unbinds && !path.mutates && frames.top().outlives() {
+            // What the callable called took the frame object while it ran:
+            // the results are dropped, and the instructions run and bind
+            // every variable. Not where the path wrote to a tensor from
+            // outside, which cannot be done again.
             leave(own);
             return Ran::Miss;
         }

@@ -60,18 +60,19 @@ torch.vm.regions(g)
 
 `where` names the function, the block, and the instruction of the first
 operation of the graph, whether its path starts there or with the function
-(`g.dump()` shows them). The state `"built"` says that the engine runs
-the graph itself. `ops` and `operators` are the operations of the path that
-was taken down last, and `inputs` and `outputs` how many values that path
-takes from the code in front of it (here `x` and `w`) and how many the code
-behind it reads, `held` how many of those something can still hold when the
-function goes on ("Gradients" has what that decides). `ends` is the block
-and the instruction the function goes on at behind the path, and `why` what
-ends the path there. `misses` counts
-the calls that came to the graph and ran its instructions, the one the path
-was taken down from among them. What was left out of the graphs of a block
-that has tensor work on both sides of it is listed too, with the state
-`"vm"` and the reason:
+(`g.dump()` shows them). The state `"built"` says that the engine runs the
+graph itself. `ops` and `operators` are the operations of the path that was
+taken down last, and `inputs` and `outputs` how many values that path takes
+from the code in front of it (here `x` and `w`) and how many it gives: what
+the code behind it reads, and what a variable of the function is bound to
+where the path lands ("Paths"); `held` is how many of those something can
+still hold when the function goes on ("Gradients" has what that decides).
+`ends` is the block and the instruction the function goes on at behind the
+path, and `why` what ends the path there. `misses` counts the calls that
+came to the graph and ran its instructions, the one the path was taken down
+from among them. What was left out of the graphs of a block that has tensor
+work on both sides of it is listed too, with the state `"vm"` and the
+reason:
 
 ```python
 def two(x):
@@ -285,6 +286,51 @@ What ends a path:
 - the end of the function, a block that this call is the first to run (the
   path is taken down again at the next call, up to three times), and 200,000
   instructions.
+
+Wherever a path lands, the frame of the function has every variable the
+instructions would have bound: what a variable is bound to last is one of
+the results of the path, whether the code behind reads it or not. A path
+lands in front of a call into Python that it does not go into, in front of
+an instruction that could run Python code, at a `raise` statement, or at the
+`return` of the function. In the first three the function goes on, and what
+looks at its frame (the traceback of an exception, `locals()`,
+`sys._getframe`, a debugger) finds what it finds in eager mode. At the
+`return` the frame is gone, and the path gives only what is returned or
+stored: such a path is not run for a call whose frame object something holds
+by then (it may read the variables when the function has returned) or has a
+trace function of a debugger, and the instructions run. A frame object that
+nothing holds any more, like the one the traceback of an exception that the
+function caught leaves, is in nobody's way. If the frame object is taken
+while what was made of the graph runs, by that code, the results are dropped
+and the instructions run as well (not behind a write to a tensor from
+outside: "Limits").
+
+```python
+import sys
+
+
+def keep(gm, input_types):
+    return gm
+
+
+def variables():
+    return sorted(sys._getframe(1).f_locals)
+
+
+def scaled(x):
+    h = torch.relu(x) + 1
+    y = (h * 2).sin() * 3 + 1
+    names = variables()  # nothing behind this call uses h
+    return (y * 2).tanh().sum(), names
+
+
+g = torch.vm(scaled, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(8):
+    out, names = g(torch.randn(4, 8))
+names  # ['h', 'x', 'y']
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+found["ops"], found["outputs"]  # (6, 2): y, which is read behind the call, and h
+```
 
 A branch on the data of a tensor therefore ends a graph, and another starts
 behind it:
@@ -551,7 +597,8 @@ A path does not go into every call. It ends in front of a call
 - whose arguments do not fit the function: the call raises the `TypeError`
   where the function has it;
 - that hands on `**kwargs` from a dict whose keys are no strs;
-- while a trace function is set (a debugger, coverage).
+- while a trace function is set with `sys.settrace` (a debugger, coverage);
+  `sys.monitoring` is not asked ("Limits").
 
 A path starts and ends in one function. Where it would end inside a function
 that it went into (at an instruction that can be no part of a path, at a
@@ -1929,6 +1976,19 @@ AOTAutograd's compiled backward as its `grad_fn`. A loss that the same
 function computes is not in
 that graph: `cross_entropy` can fail for what its labels hold, so the path
 ends in front of it, and the loss is computed behind the graph.
+
+With gradients recorded, a tensor that a variable of the function still
+holds where such a path lands is a result of the graph ("Paths": the frame
+has every variable), and a result that the graph also reads is one the graph
+is cut at: a part that computes it and a part that goes on from it, each
+with a backward of its own, so that a hook on the tensor, or the gradient at
+it, is what it is in eager mode for whoever takes it out of the frame. A
+function whose path lands at its `return`, or that holds nothing there but
+what the code behind the graph reads, is not cut. A step is one graph with
+one backward if the function that computes the loss binds no intermediate
+that the graph uses again: one name that is bound anew (`x =
+self.features(x)`, then `x = self.head(x.flatten(1))`), or the calls nested,
+and not `h = self.features(x)` with `self.head(h.flatten(1))` behind it.
 
 ```python
 import copy
@@ -3352,16 +3412,18 @@ which is what the dashboard's runner does:
 | adv_inception_v3 (timm) | 21.27, 21.13 ms | 8.66, 8.62 ms | 2.45x, 2.45x | 8.45, 8.39 ms | 2.52x, 2.52x | 0.97, 0.97 | 314 x1 |
 | deit_base_distilled_patch16_224 (timm) | 6.68, 6.73 ms | 6.28, 6.29 ms | 1.07x, 1.07x | 6.21, 6.21 ms | 1.08x, 1.08x | 0.99, 0.99 | 233 x1 |
 
-Two steps before the code of this commit, which since changed which dicts
-the engine looks a name up in (none whose keys are not all plain) and made a
-take that writes to a tensor from outside a path of its own (the graphs of
-these models are the same on all three), by another job with the same tool,
-which enters the runner's own grad mode around the calls: the median of
-three turns in one process, on 16 cores, with the load average between 1.5
-and 20, falling, and nothing else on the GPU. The graphs that run are those
-counted above (DistillGPT2 with the operations it has on a GPU; of
-hf_DistilBert the graph of a layer and the one of its feed-forward part run
-six times each in a call):
+Three steps before the code of this commit, which since changed which dicts
+the engine looks a name up in (none whose keys are not all plain), made a
+take that writes to a tensor from outside a path of its own, and gave the
+frame every variable wherever a path lands (the graphs of these models have
+the same operations and run as often on all four; what the variables add to
+what a graph gives is said behind the next table but one), by another job
+with the same tool, which enters the runner's own grad mode around the
+calls: the median of three turns in one process, on 16 cores, with the load
+average between 1.5 and 20, falling, and nothing else on the GPU. The graphs
+that run are those counted above (DistillGPT2 with the operations it has on
+a GPU; of hf_DistilBert the graph of a layer and the one of its feed-forward
+part run six times each in a call):
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
 |---|---|---|---|---|---|---|---|
@@ -3421,9 +3483,25 @@ that tree's byte for byte), on 16 cores, with the load average between 5 and
 6 and nothing else on the GPU. With gradients recorded only 2 small graphs
 of hf_DistilBert run (6 x1, 4 x1), and its call takes what eager's takes.
 The rows of yolov3 and of DistillGPT2's training step are of the measurement
-of the eight rows above, two steps before the code of this commit. yolov3
-with gradients recorded runs its graph in the process that fills the
-compiler's cache as in a later one ("Limits").
+of the eight rows above, three steps before the code of this commit. Since
+then a graph gives what the variables of the function are bound to where its
+path lands as well ("Paths"): as the job that measured it counts them, the
+graph of yolov3 gives 77 results where it gave 49 (what the layers put into
+the list that the model keeps until its forward returns), the two small
+graphs of DistillGPT2 6 and 3 where they gave 3 and 1, and two graphs of
+whisper-tiny 7 and 4 where they gave 6 and 3; the graphs of the other models
+give what they gave. With gradients recorded the graph of yolov3 is cut at
+28 more of its results, those that it also reads ("Writes"). That job ran
+the code in front of the change and the code behind it in turns on the same
+cores and the same GPU, beside other load on the machine (a load average of
+34 to 41), two turns each, which are no rows of these tables: a call of
+yolov3 took 4.47 and 4.62 ms where it took 4.40 and 4.49 under
+`torch.no_grad()`, and 11.11 and 11.61 ms where it took 7.99 and 7.94 with
+gradients recorded. The rows of this section with gradients recorded are of
+code from before the change: a model whose forward binds a tensor that its
+graph reads again is cut there since. yolov3 with gradients recorded runs
+its graph in the process that fills the compiler's cache as in a later one
+("Limits").
 
 That gradients are recorded is why deit and hf_DistilBert are at eager's
 speed in their rows with gradients. Their attention is
@@ -3533,6 +3611,20 @@ What graphs do not do at this stage:
   measured twice: with gradients recorded the layers of hf_DistilBert lose
   both times ("Models"), and the model settles after 147 to 159 calls
   where one measurement took 136.
+- A function whose frame object something holds when a path would land at
+  its `return` (the function put `sys._getframe()` somewhere, a traceback of
+  an earlier exception in it is kept, a debugger is attached) runs the
+  instructions of that path in that call. A frame object that is first taken
+  while what was made of a graph runs lacks the variables that such a path
+  does not give back if the path writes to a tensor from outside: its
+  results cannot be dropped.
+- A call that starts while a trace function is set (`sys.settrace`) is the
+  interpreter's, and the trace function gets every line as in eager mode.
+  One that is set during a call that the engine is running (by a callee,
+  with the `f_trace` of the frame) sees no further line of that function.
+  `sys.monitoring` is not asked: a tool that asks it for the lines of a
+  function (debuggers and coverage tools that use `sys.monitoring`) sees
+  none of a call that the engine runs, whenever it asked.
 - A path lets go of an object from outside it only where the end of the
   object cannot run Python code, or the object stays alive. Whether it
   stays alive is looked at in front of what stands for the graph: for a
@@ -3546,12 +3638,6 @@ What graphs do not do at this stage:
   computes are computed in it (`torch.ops.aten.sym_size.int`), but its
   inputs have the sizes of the call it was exported from. With `Inductor()`
   every export is a compilation.
-- Where what the passes made runs in place of the operations of a graph, or
-  the graph runs with a backward of its own while gradients are recorded, a
-  variable that the graph binds and that nothing reads behind it is not in
-  the frame of the function there: `locals()`, a callee that reads its
-  caller's frame (`sys._getframe(1).f_locals`) and the frame of a traceback
-  do not have it.
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported.
