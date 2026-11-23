@@ -337,7 +337,9 @@ impl OpcodeTable {
                 )))
             }
         };
-        let opcode = py.import("opcode")?;
+        // As the interpreter keeps it: the module is not imported here.
+        let opcode = unsafe { pyo3::Bound::from_borrowed_ptr_or_opt(py, crate::pyffi::module(c"opcode")) };
+        let opcode = opcode.ok_or_else(|| pyo3::exceptions::PyNotImplementedError::new_err("torch.vm: the module opcode is not there"))?;
         let names: Vec<String> = opcode.getattr("opname")?.extract()?;
         // By opcode in 3.12, by name in 3.14.
         let caches = opcode.getattr("_inline_cache_entries")?;

@@ -12009,6 +12009,275 @@ def vm_binds_property(x, holder, n):
     return x
 
 
+IMPORT_FORMS = '''"""A function under torch.vm while `builtins.__import__` is a function written in
+Python that only hands on (a lazy-import shim, an import profiler, a test
+harness): the forms of an import a function can come to, each called eight
+times and then eight times in eager mode. `before`: the hook is there before
+anything ran compiled in this process; `after`: another function ran
+compiled first. The ways: `graphs` (`Graphs()` alone), `pass` (a pass
+that returns the graph), `grad` (the input requires a gradient and every
+result is differentiated). One line `start NAME` before a case and one
+`done NAME {...}` behind it, with what the calls gave against eager and the
+names the hook was called with per call (not from inside an import)."""
+import builtins
+import importlib
+import json
+import sys
+
+import torch
+import torch.vm
+
+DEVICE, WHEN, WAY, WANTED = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
+P = torch.vm.passes
+CALLS, INSIDE = [], []
+handed_on = builtins.__import__
+
+
+def hook(name, globals=None, locals=None, fromlist=(), level=0):
+    # What a module imports while it is imported for the first time is
+    # not counted: that is in whichever call comes to it first.
+    if not INSIDE:
+        CALLS.append(name)
+    INSIDE.append(name)
+    try:
+        return handed_on(name, globals, locals, fromlist, level)
+    finally:
+        INSIDE.pop()
+
+
+def none(x):
+    h = torch.relu(x) + 1
+    return (h * 2).sin().sum()
+
+
+def statement(x):
+    import math
+
+    h = torch.relu(x) + 1
+    return (h * math.pi).sin().sum()
+
+
+def from_module(x):
+    from math import pi
+
+    h = torch.relu(x) + 1
+    return (h * pi).sin().sum()
+
+
+def helper(h):
+    import math
+
+    return h * math.pi
+
+
+def in_a_callee(x):
+    h = torch.relu(x) + 1
+    return helper(h).sin().sum()
+
+
+def in_torch(x):
+    # `norm` with a text for `p` and `einsum` import inside their own code.
+    h = torch.relu(x) + 1
+    return torch.functional.norm(h, p="fro") + torch.einsum("ij->", h)
+
+
+def by_name(x):
+    math = __import__("math")
+    h = torch.relu(x) + 1
+    return (h * math.pi).sin().sum()
+
+
+def import_module(x):
+    math = importlib.import_module("math")
+    h = torch.relu(x) + 1
+    return (h * math.pi).sin().sum()
+
+
+def not_imported_yet(x):
+    import colorsys
+
+    h = torch.relu(x) + 1
+    return (h * colorsys.ONE_THIRD).sin().sum()
+
+
+def made_of_others(x):
+    # With a pass the engine asks torch whether the sizes of what an
+    # operator that is made of others gives follow from the sizes it is
+    # given, by running it on tensors that hold nothing: Python code of
+    # torch's, which imports as it goes.
+    h = torch.nn.functional.conv2d(x.reshape(1, 1, 3, 4), WEIGHT, padding=1)
+    return (torch.relu(h) * 2 + 1).sin().sum()
+
+
+def keep(gm, input_types):
+    return gm
+
+
+WEIGHT = torch.full((2, 1, 3, 3), 0.125, device=DEVICE)
+FORMS = (none, statement, from_module, in_a_callee, in_torch)
+FORMS += (by_name, import_module, not_imported_yet, made_of_others)
+BEHIND = {"graphs": (P.Graphs(),), "pass": (P.Graphs(), keep), "grad": (P.Graphs(),)}[WAY]
+PASSES = (*torch.vm.DEFAULT_PASSES, *BEHIND)
+
+
+def runs(fn):
+    # Per call: the result, the gradient where one is asked for, and the
+    # names the hook was called with.
+    found = []
+    for at in range(8):
+        x = torch.full((3, 4), 0.25 * (at + 1), device=DEVICE, requires_grad=WAY == "grad")
+        del CALLS[:]
+        out = fn(x)
+        if WAY == "grad":
+            out.backward()
+        grad = x.grad.cpu().numpy().tobytes().hex() if WAY == "grad" else None
+        found.append((out.item().hex(), grad, list(CALLS)))
+    return found
+
+
+if WHEN == "after":
+    warm = torch.vm(none, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+    for at in range(8):
+        warm(torch.full((3, 4), 0.25 * (at + 1), device=DEVICE))
+builtins.__import__ = hook
+for fn in FORMS:
+    if fn.__name__ not in WANTED:
+        continue
+    print(f"start {fn.__name__}", flush=True)
+    # Not counted: what `torch.vm(...)` itself imports when it is first
+    # called in a process (the runtime; with a pass over graphs, the module
+    # that hands graphs to Python) is an import of a library's own module,
+    # and no call the function makes. The calls are counted.
+    compiled = torch.vm(fn, passes=PASSES)
+    under, eager = runs(compiled), runs(fn)
+    said = {
+        "results": [a[:2] == b[:2] for a, b in zip(under, eager)],
+        "under": [a[2] for a in under],
+        "eager": [b[2] for b in eager],
+        "graphs": [g["ops"] for g in torch.vm.regions(compiled) if "ops" in g],
+    }
+    print(f"done {fn.__name__} " + json.dumps(said), flush=True)
+builtins.__import__ = handed_on
+'''
+
+
+REPLACED_NAMES = '''"""What a process put under a name before anything ran compiled, where the
+engine could call it by that name for itself or take it for the
+interpreter's own: `main` (functions of `__main__` named `type`, `iter`,
+`range`, `reversed`, and a loop while a tensor variable waits for its
+object), `dir` and `slice` (functions in `builtins`, and a gradient through
+a slice), `locals` (a function in `builtins` that the function calls) and
+`named` (`len`, `isinstance`, `hasattr`, `getattr`, `callable`, `abs`, `min`,
+`max`, `iter` as functions in `builtins`). One line `done {...}`: the calls,
+of eight, in which the result, the gradient or the calls of what was put
+there differ from eager's, and the first of them."""
+import builtins
+import json
+import sys
+
+import torch
+import torch.vm
+
+DEVICE, CASE = sys.argv[1], sys.argv[2]
+P = torch.vm.passes
+CALLS = []
+OWN = {name: getattr(builtins, name) for name in dir(builtins)}
+
+
+def counted(name):
+    own = OWN[name]
+
+    def replacement(*args, **kwargs):
+        CALLS.append(name)
+        return own(*args, **kwargs)
+
+    return replacement
+
+
+def counted_locals():
+    # As the builtin answers: torch's own code calls it too.
+    CALLS.append("locals")
+    return dict(sys._getframe(1).f_locals)
+
+
+class Holder:
+    scale = 2.0
+
+
+def keep(gm, input_types):
+    return gm
+
+
+def loops(x, rows):
+    h = torch.relu(x) + 1
+    total = 0.0
+    for row in rows:
+        total += row
+    for at, row in enumerate(zip(rows, rows)):
+        total += at
+    return (h * total).sin().sum(), total
+
+
+def sliced(x):
+    h = torch.relu(x) + 1
+    return (h[:, 1:] * 2).sin().sum() + (h * 3).cos().sum(), None
+
+
+def reads_locals(x):
+    h = torch.relu(x) + 1
+    names = sorted(locals())
+    return (h * 2).sin().sum(), names
+
+
+def calls_named(x, held):
+    h = torch.relu(x) + 1
+    k = len((1, 2)) + abs(-2) + min(1, 2) + max(1, 2)
+    if isinstance(held, Holder) and hasattr(held, "scale") and callable(keep):
+        k += getattr(held, "scale")
+    for item in iter((1.0, 2.0)):
+        k += item
+    return (h * k).sin().sum(), k
+
+
+more, grad, replaced, behind = (lambda: ()), False, (), (P.Graphs(), keep)
+if CASE == "main":
+    # Names of this module that are the interpreter's in `builtins`; the
+    # default passes: the loop runs in the VM.
+    type, iter, range, reversed = (counted(name) for name in ("type", "iter", "range", "reversed"))
+    fn, more, behind = loops, (lambda: ([1.0, 2.0],)), ()
+elif CASE in ("dir", "slice"):
+    fn, grad, replaced = sliced, True, (CASE,)
+elif CASE == "locals":
+    fn, replaced = reads_locals, ("locals",)
+elif CASE == "named":
+    fn, more = calls_named, (lambda: (Holder(),))
+    replaced = ("len", "isinstance", "hasattr", "getattr", "callable", "abs", "min", "max", "iter")
+ways = {}
+for name in replaced:
+    setattr(builtins, name, counted_locals if name == "locals" else counted(name))
+try:
+    compiled = torch.vm(fn, passes=(*torch.vm.DEFAULT_PASSES, *behind))
+    for label, run in (("under", compiled), ("eager", fn)):
+        rows = []
+        for at in OWN["range"](8):
+            x = torch.full((3, 4), 0.25 * (at + 1), device=DEVICE, requires_grad=grad)
+            del CALLS[:]
+            out, said = run(x, *more())
+            if grad:
+                out.backward()
+            gave = x.grad.cpu().numpy().tobytes().hex() if grad else None
+            rows.append((out.item().hex(), gave, said, OWN["sorted"](CALLS)))
+        ways[label] = rows
+finally:
+    for name in replaced:
+        setattr(builtins, name, OWN[name])
+differ = [at for at in OWN["range"](8) if ways["under"][at] != ways["eager"][at]]
+first = [ways["under"][differ[0]][2:], ways["eager"][differ[0]][2:]] if differ else None
+graphs = [g["ops"] for g in torch.vm.regions(compiled) if "ops" in g]
+print("done " + json.dumps({"differ": differ, "first": first, "graphs": graphs}), flush=True)
+'''
+
+
 GRAPH_NAME_LOG = []
 
 
@@ -16903,6 +17172,98 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
             self.assertEqual(later, bound, msg=fn.__name__)
         del VM_LOOKS_SEEN[:]
 
+    def import_form_cases(self, device, when, way, forms):
+        # Cases of `IMPORT_FORMS` in a process of their own: one that does
+        # not come back within the time limit is a failure that says so.
+        import json
+        import queue
+
+        command = [sys.executable, "-c", IMPORT_FORMS, device, when, way, *forms]
+        pipes = {"stdout": subprocess.PIPE, "stderr": subprocess.DEVNULL, "text": True}
+        ran = subprocess.Popen(command, **pipes)
+        lines = queue.Queue()
+
+        def read():
+            for line in ran.stdout:
+                lines.put(line)
+            lines.put(None)
+
+        threading.Thread(target=read, daemon=True).start()
+        started, found = None, {}
+        while True:
+            try:
+                line = lines.get(timeout=GRAPH_CASE_SECONDS)
+            except queue.Empty:
+                ran.kill()
+                ran.wait()
+                limit, where = GRAPH_CASE_SECONDS, f"{started}, {when}, {way}"
+                self.fail(f"{where}: did not come back within {limit} seconds")
+            if line is None:
+                break
+            if line.startswith("start "):
+                started = line.split()[1]
+            elif line.startswith("done "):
+                name, said = line[5:].split(" ", 1)
+                found[name] = json.loads(said)
+        code = ran.wait()
+        how = f"signal {-code}" if code < 0 else f"exit {code}"
+        msg = f"{started}, {when}, {way}: ended the process ({how})"
+        self.assertEqual(code, 0, msg=msg)
+        self.assertEqual(sorted(found), sorted(forms), msg=f"{when}, {way}")
+        return found
+
+    def test_a_call_comes_back_under_an_import_hook_written_in_python(self, device):
+        # The engine imports nothing: what it asks of a module it reads off
+        # the modules the interpreter keeps, and what it finds once it
+        # finds without waiting for itself. With `builtins.__import__`
+        # replaced by a function in Python every call comes back with
+        # eager's result and eager's gradient, and the hook is called
+        # with the names eager calls it with, call by call, for nothing
+        # the function does not import itself: not for the sizes of an
+        # operator that is made of others either, which torch finds in
+        # Python code that imports. A graph is built in front of or behind
+        # the import where the function has four operations in a row.
+        forms = ("none", "statement", "from_module", "in_a_callee", "in_torch")
+        forms += ("by_name", "import_module", "not_imported_yet", "made_of_others")
+        graphs = {name: [5] for name in forms}
+        graphs.update(in_a_callee=[], in_torch=[], made_of_others=[7])
+        for way in ("graphs", "pass", "grad"):
+            # Before anything ran compiled every form finds the engine as a
+            # new process has it; afterwards one process runs them all.
+            after = self.import_form_cases(device, "after", way, forms)
+            found = {("after", name): said for name, said in after.items()}
+            for name in forms:
+                alone = self.import_form_cases(device, "before", way, (name,))
+                found["before", name] = alone[name]
+            for (when, name), said in found.items():
+                msg = f"{name}, {when}, {way}: {said}"
+                self.assertEqual(said["results"], [True] * 8, msg=msg)
+                self.assertEqual(said["under"], said["eager"], msg=msg)
+                self.assertEqual(said["graphs"], graphs[name], msg=msg)
+
+    def test_a_name_the_process_replaced_is_not_called_for_the_engine(self, device):
+        # What the engine needs of the interpreter it takes from the
+        # interpreter, by no name that a process can put something else
+        # under: the classes of its iterators (not by `type`, `iter`,
+        # `range`, `reversed` as `__main__` has them), the names a node of
+        # autograd saved (not by `builtins.dir`), a slice of its backward
+        # (not by `builtins.slice`). And a function in Python that sits
+        # under a builtin's name when the engine first asks for the builtin
+        # is called as the function it is. Each case in a process of its
+        # own, in which nothing ran compiled before.
+        import json
+
+        cases = {"main": [], "dir": [10], "slice": [10], "locals": [], "named": []}
+        for case, graphs in cases.items():
+            command = [sys.executable, "-c", REPLACED_NAMES, device, case]
+            limit = GRAPH_CASE_SECONDS
+            pipes = {"capture_output": True, "text": True, "timeout": limit}
+            ran = subprocess.run(command, **pipes)
+            self.assertEqual(ran.returncode, 0, msg=f"{case}: {ran.stderr[-600:]}")
+            said = json.loads(ran.stdout.strip().split("\n")[-1][5:])
+            self.assertEqual(said["differ"], [], msg=f"{case}: {said}")
+            self.assertEqual(said["graphs"], graphs, msg=f"{case}: {said}")
+
     def test_a_key_that_compares_in_python_is_compared_once_per_lookup(self, device):
         # A dict that the engine looks a name up in (the dict of an object,
         # of a module, of a class behind `super()`, the globals of the
@@ -18710,8 +19071,9 @@ class TestVmGraphBackward(TestCase):
             # The comparison with the autograd engine raises: the form is
             # taken back, the instructions run, and the settings are back.
             compiled = self.staged(back_pair)
-            with unittest.mock.patch.object(torch.autograd, "grad") as compared:
-                compared.side_effect = RuntimeError("stopped")
+            variable = torch.autograd.variable.Variable
+            with unittest.mock.patch.object(variable, "_execution_engine") as compared:
+                compared.run_backward.side_effect = RuntimeError("stopped")
                 calls(compiled, back_pair)
             graphs = torch.vm.regions(compiled)
             reasons = [graph.get("reason", "") for graph in graphs]

@@ -866,7 +866,7 @@ impl Joint {
     /// A graph over the tensors a form is handed, in their order.
     #[new]
     pub fn new(py: Python<'_>, inputs: Vec<Bound<'_, PyAny>>) -> PyResult<Self> {
-        let tensor = py.import("torch")?.getattr("Tensor")?.unbind();
+        let tensor = crate::pyffi::of_module(py, c"torch", c"Tensor")?.unbind();
         let mut joint = Joint {
             inputs: inputs.len() as u32,
             forward: Vec::new(),
