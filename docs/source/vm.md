@@ -403,7 +403,10 @@ and does nothing else, the functions the path went into are left by that,
 the builtin gives the default (or `False`), and the path checks at every
 call that the name is still not there. A configuration object that is asked
 for an option it may not have (`getattr(config, "is_causal", True)`) does
-not end a path.
+not end a path. `isinstance(obj, cls)` for an abstract base class is part
+of a path while the class has kept its answer for the class of the object;
+registering a class makes the kept answers stale, and the calls that find
+that out run the instructions, which ask anew.
 
 The instruction that such a function runs for gives what the interpreter
 makes of what the function returned: `for` and `iter` raise `TypeError` for
@@ -3108,11 +3111,11 @@ them and the last normalization behind: a graph starts behind the call of
 the helper that makes its mask ("Graphs that start behind a call"). What their
 paths end at is the code around the attention mask at the start of every
 model (a wrapper that reads a member of an enumeration, a branch on what the
-mask holds), what a decoder asks of its cache at every layer (`isinstance`
-for an abstract class, a method of a dict that was bound earlier, the truth
-of the cache, which is a `__len__` in Python), the objects the models
-construct for their outputs, and library code such as `inspect.signature`
-and `copy.deepcopy` ("Limits"). A training step has fewer of its operations
+mask holds), what a decoder asks of its cache at every layer (a method of a
+dict that was bound earlier, the truth of the cache, which is a `__len__` in
+Python), the objects the models construct for their outputs, and library
+code such as `inspect.signature` and `copy.deepcopy` ("Limits"). A training
+step has fewer of its operations
 in graphs (counted on eager's tape, with `Graphs(backward=False)`): for
 DistillGPT2, 5 graphs that run 15 times in a step, with 191
 of the about 820 operators that the profiler counts in one step of eager

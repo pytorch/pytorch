@@ -2893,6 +2893,142 @@ pub unsafe fn makes_sequence(callee: Obj) -> bool {
     builtin_named(Builtin::List) == callee as usize || builtin_named(Builtin::Tuple) == callee as usize
 }
 
+/// What an abstract base class keeps its answers in, as CPython 3.12 lays
+/// it out (`_abc_data` in `Modules/_abc.c`).
+#[cfg(not(Py_3_13))]
+#[repr(C)]
+struct AbcData {
+    ob_base: ffi::PyObject,
+    registry: Obj,
+    cache: Obj,
+    negative: Obj,
+    version: std::os::raw::c_ulonglong,
+}
+
+/// The builtin that `ABCMeta.__instancecheck__` calls, the builtin that
+/// gives the token of the answers that are kept, and the class of what an
+/// abstract base class keeps them in: found once, by where they are (the
+/// last as the class of what `abc.ABC` has). None while `abc` is not
+/// imported.
+#[cfg(not(Py_3_13))]
+unsafe fn abc_parts() -> Option<(usize, usize, usize)> {
+    static FOUND: std::sync::OnceLock<(usize, usize, usize)> = std::sync::OnceLock::new();
+    if let Some(found) = FOUND.get() {
+        return Some(*found);
+    }
+    let modules = ffi::PyImport_GetModuleDict();
+    let of = |module: &std::ffi::CStr, name: &std::ffi::CStr| {
+        let module = ffi::PyDict_GetItemString(modules, module.as_ptr());
+        if module.is_null() || ffi::PyModule_Check(module) == 0 { null_mut() } else { ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), name.as_ptr()) }
+    };
+    let (check, token, base) = (of(c"_abc", c"_abc_instancecheck"), of(c"_abc", c"get_cache_token"), of(c"abc", c"ABC"));
+    let builtin = |o: Obj| !o.is_null() && ffi::PyCFunction_Check(o) != 0;
+    if !builtin(check) || !builtin(token) || base.is_null() || ffi::PyType_Check(base) == 0 {
+        return None;
+    }
+    let name = PyObj::from_owned(ffi::PyUnicode_InternFromString(c"_abc_impl".as_ptr()));
+    let kept = pyffi::_PyType_Lookup(base as *mut ffi::PyTypeObject, name.as_ptr());
+    if kept.is_null() {
+        return None;
+    }
+    // The modules keep them.
+    let found = (check as usize, token as usize, ffi::Py_TYPE(kept) as usize);
+    let _ = FOUND.set(found);
+    Some(found)
+}
+
+/// For a call of the builtin behind `isinstance(instance, cls)` for an
+/// abstract base class (`_abc._abc_instancecheck(cls, instance)`): the
+/// answer, where the class has kept one for the class of the instance and
+/// the builtin gives it without calling anything. That is so when what
+/// the class keeps its answers in is found as `type` finds an attribute;
+/// the instance says it is of the class it is of, and saying so runs no
+/// Python code; classes are hashed and compared as `type` does it (the
+/// class of the instance, and every class an answer is kept for); and the
+/// class of the instance is among those the answer is yes for, or among
+/// those it is no for while no class has been registered since. None for
+/// any other call: the builtin then asks `__subclasscheck__`.
+#[cfg(not(Py_3_13))]
+pub unsafe fn abc_kept(callee: Obj, args: &[Obj], api: &TcfgApi) -> Option<bool> {
+    static NAMES: std::sync::OnceLock<(PyObj, PyObj)> = std::sync::OnceLock::new();
+    let (check, token, data) = abc_parts()?;
+    if callee as usize != check || args.len() != 2 || args.iter().any(|o| o.is_null() || capi::is_unboxed(*o)) {
+        return None;
+    }
+    let (cls, instance) = (args[0], args[1]);
+    if ffi::PyType_Check(cls) == 0 {
+        return None;
+    }
+    let (kept, class) = NAMES.get_or_init(|| {
+        let name = |text: &std::ffi::CStr| PyObj::from_owned(ffi::PyUnicode_InternFromString(text.as_ptr()));
+        (name(c"_abc_impl"), name(c"__class__"))
+    });
+    let meta = ffi::Py_TYPE(cls);
+    let reads = (*meta).tp_getattro.map(|own| own as usize) == (*std::ptr::addr_of!(ffi::PyType_Type)).tp_getattro.map(|own| own as usize);
+    let held = pyffi::_PyType_Lookup(cls as *mut ffi::PyTypeObject, kept.as_ptr());
+    if !reads || !pyffi::_PyType_Lookup(meta, kept.as_ptr()).is_null() || held.is_null() || ffi::Py_TYPE(held) as usize != data {
+        return None;
+    }
+    if !quiet_attr(instance, class.as_ptr(), api) {
+        return None;
+    }
+    let said = ffi::PyObject_GetAttr(instance, class.as_ptr());
+    ffi::PyErr_Clear();
+    xdecref(said);
+    let of = ffi::Py_TYPE(instance) as Obj;
+    if said != of {
+        return None;
+    }
+    let object = std::ptr::addr_of!(ffi::PyBaseObject_Type);
+    let as_type = |class: Obj| {
+        let meta = ffi::Py_TYPE(class);
+        (*meta).tp_hash.map(|own| own as usize) == (*object).tp_hash.map(|own| own as usize)
+            && (*meta).tp_richcompare.map(|own| own as usize) == (*object).tp_richcompare.map(|own| own as usize)
+    };
+    if !as_type(of) {
+        return None;
+    }
+    // Whether the class is among those a set of weak references is of;
+    // None where one of them is of a class that is hashed or compared by
+    // code of its own.
+    let within = |set: Obj| -> Option<bool> {
+        if set.is_null() {
+            return Some(false);
+        }
+        if ffi::PySet_CheckExact(set) == 0 {
+            return None;
+        }
+        let over = ffi::PyObject_GetIter(set);
+        if over.is_null() {
+            ffi::PyErr_Clear();
+            return None;
+        }
+        let (mut found, mut plain) = (false, true);
+        loop {
+            let reference = ffi::PyIter_Next(over);
+            if reference.is_null() {
+                break;
+            }
+            let to = if ffi::PyWeakref_Check(reference) != 0 { ffi::PyWeakref_GetObject(reference) } else { null_mut() };
+            found |= to == of;
+            plain &= !to.is_null() && (to == ffi::Py_None() || (ffi::PyType_Check(to) != 0 && as_type(to)));
+            ffi::Py_DECREF(reference);
+        }
+        ffi::PyErr_Clear();
+        ffi::Py_DECREF(over);
+        plain.then_some(found)
+    };
+    let answers = held as *const AbcData;
+    if within((*answers).cache)? {
+        return Some(true);
+    }
+    let now = ffi::PyObject_CallNoArgs(token as Obj);
+    let current = if now.is_null() { None } else { Some(ffi::PyLong_AsUnsignedLongLong(now)) };
+    xdecref(now);
+    ffi::PyErr_Clear();
+    (current == Some((*answers).version) && within((*answers).negative)?).then_some(false)
+}
+
 /// The modules whose functions a path may call on any arguments (`torch._C`:
 /// those that ask about the state of the thread or of what they are given)
 /// or on numbers (`math`).
@@ -2936,6 +3072,12 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
         return Some(true);
     }
     if ffi::PyCFunction_Check(callee) != 0 {
+        // An abstract base class that has its answer for the class of an
+        // instance: the builtin gives it, and calls nothing.
+        #[cfg(not(Py_3_13))]
+        if abc_kept(callee, args, api).is_some() {
+            return Some(false);
+        }
         let function = callee as *mut ffi::PyCFunctionObject;
         let (state, math, operator) = quiet_modules();
         let of = (*function).m_self as usize;

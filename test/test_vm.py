@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import abc
 import collections
 import collections.abc
 import copy
@@ -10762,6 +10763,36 @@ def graph_asks_a_plain_object(obj, x):
     return torch.tanh(h) + h
 
 
+class GraphKept(abc.ABC):
+    @abc.abstractmethod
+    def size(self):
+        pass
+
+
+class GraphKeptOne(GraphKept):
+    def size(self):
+        return 1
+
+
+class GraphKeptNot:
+    pass
+
+
+class GraphKeptSays:
+    # What it says its class is runs this code.
+    @property
+    def __class__(self):
+        GRAPH_UNUSED_LOG.append("asked for its class")
+        return GraphKeptOne
+
+
+def graph_asks_an_abstract_class(obj, x):
+    h = torch.relu(x) + 1
+    if isinstance(obj, GraphKept):
+        h = h * 2 - 3
+    return torch.tanh(h) + h
+
+
 class GraphChangeBox:
     pass
 
@@ -14051,6 +14082,64 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
                     # Every way through the function has its path, and
                     # each runs when its turn comes again.
                     self.assertGreaterEqual(graphs[0]["hits"], 45, msg=str(graphs))
+
+    def test_an_abstract_class_that_has_kept_its_answer_is_on_a_path(self, device):
+        # `isinstance(obj, cls)` for an abstract base class comes down to a
+        # builtin that gives the answer the class has kept for the class
+        # of the object, and asks the class's `__subclasscheck__` (which
+        # may run a `__subclasshook__`) where it has kept none. With a
+        # kept answer it calls nothing, and is a call of a path: yes for a
+        # subclass, no for another class. A class that is registered
+        # between calls makes every kept no stale, and the answer for it
+        # is asked anew; an object that says what its class is in a
+        # property is asked, in its place, at every call. (A call for
+        # which no answer is kept runs the instructions; three such calls
+        # in a row would give the graph up, as for any instruction that
+        # cannot be shown to run no Python code.)
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(3, 4, device=device)
+        fn = graph_asks_an_abstract_class
+        for behind in ((), (keep,)):
+
+            class Later:
+                pass
+
+            def given(at):
+                kinds = (GraphKeptOne, GraphKeptNot, GraphKeptOne, Later, GraphKeptSays)
+                return kinds[at % 5]()
+
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            seen = []
+            for run in (compiled, fn):
+                del GRAPH_UNUSED_LOG[:]
+                found = []
+                for at in range(50):
+                    if at == 25 and run is compiled:
+                        GraphKept.register(Later)
+                    out = run(given(at), x)
+                    registered = isinstance(Later(), GraphKept)
+                    found.append((out, registered, list(GRAPH_UNUSED_LOG)))
+                seen.append(found)
+            for at, (got, expected) in enumerate(zip(*seen)):
+                # (The class is registered once, in the first of the two
+                # runs: the second has it from its first call on.)
+                said = f"call {at}"
+                if at % 5 != 3 or at >= 25:
+                    self.assertEqual(got[0], expected[0], atol=0, rtol=0, msg=said)
+                self.assertEqual(got[2], expected[2], msg=said)
+            self.assertTrue(all(row[1] for row in seen[0][25:]))
+            self.assertFalse(any(row[1] for row in seen[0][:25]))
+            if behind:
+                listed = torch.vm.regions(compiled)
+                graphs = [g for g in listed if "ops" in g and "within" not in g]
+                largest = sorted(g["ops"] for g in graphs)[-1:]
+                self.assertEqual(largest, [6], msg=str(graphs))
+                ran = sum(g["hits"] for g in graphs)
+                self.assertGreaterEqual(ran, 24, msg=str(graphs))
+        del GRAPH_UNUSED_LOG[:]
 
     def test_what_watches_the_storage_of_a_tensor_is_told_in_its_place(self, device):
         # C++ keeps the Python object of a storage for the storage, and
