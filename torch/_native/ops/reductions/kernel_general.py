@@ -501,8 +501,8 @@ def _try_indexed_itree(
 ) -> tuple[torch.Tensor, ...] | None:
     """Apply the fixed logical-row DAG through arbitrary storage strides, or return None
     when the geometry is declined; _reduce then silently uses the default order. From
-    _reduce (0 < count) the only decline is num_o * nbatch reaching Int32: itree_plan
-    returns None only for N < 1."""
+    _reduce (0 < count) the declines are num_o * nbatch reaching Int32 and counts within
+    one chunk of it: itree_plan returns None only for N < 1."""
     from . import kernel_rowtile as rt
 
     plan = rt.itree_plan(count, num_o, x.element_size(), stage=False)
@@ -510,6 +510,11 @@ def _try_indexed_itree(
         return None
     nbatch = plan.split[0] if plan.shape == "split" else 1
     if num_o * nbatch >= _INT32_LIMIT:
+        return None
+    # Split warps past a row's end start at column count and add up to one chunk, and
+    # their Int32 columns must not wrap.
+    chunk = max(tm.loads * WARP * tm.vec for tm in plan.tms)
+    if count + chunk >= _INT32_LIMIT:
         return None
 
     if plan.shape != "split":
