@@ -1626,15 +1626,18 @@ class Reduction(Loops):
         reduction_numel_hint: int,
         numel_hint: int,
         split: int,
+        reduction_numel_is_static: bool = True,
     ) -> bool:
         # The normal one-pass Blackwell plan uses R0_BLOCK=64. Runtime-matched
         # production sweeps show a sharp schedule cliff when a deep leading
         # reduction has a tail at that granularity, while aligned depths favor
         # the one-pass plan. Keep output tails and shallow reductions on the
         # one-pass path, and rely on the split/workspace bounds above.
+        # A symbolic depth cannot be known to be aligned at runtime, so treat it
+        # as having a tail instead of deciding from its hint.
         return (
             reduction_numel_hint >= 4096
-            and reduction_numel_hint % 64 != 0
+            and (not reduction_numel_is_static or reduction_numel_hint % 64 != 0)
             and numel_hint >= 8192
             and numel_hint % 128 == 0
             and split > 1
@@ -1781,6 +1784,14 @@ class Reduction(Loops):
             return ReductionHint.DEFAULT, 1
 
         large_output = numel_hint >= num_sm * 2 * 32
+        reduction_numel_static = _is_static(
+            reduction_numel
+        ) or V.graph.sizevars.statically_known_equals(
+            reduction_numel, reduction_numel_hint
+        )
+        numel_static = _is_static(numel) or V.graph.sizevars.statically_known_equals(
+            numel, numel_hint
+        )
         preserve_large_outer_hint = (
             config.max_autotune
             and reduction_type == "sum"
@@ -1792,14 +1803,20 @@ class Reduction(Loops):
             and props.major >= 10
             and reduction_numel_hint >= 2048
             and (
-                _is_static(reduction_numel)
-                or V.graph.sizevars.statically_known_equals(
-                    reduction_numel, reduction_numel_hint
+                (reduction_numel_static and numel_static)
+                # With an experimental OUTER mode on, backed symbolic sizes are
+                # eligible too: the plan is chosen from their hints without a
+                # guard, and the split reduction is correct for any runtime size.
+                # The split, workspace cap and benchmarked plan choice follow the
+                # hints, so they suit sizes that stay near them.
+                or (
+                    (
+                        config.triton.enable_experimental_large_output_outer_reductions
+                        or config.triton.autotune_experimental_large_output_outer_reductions
+                    )
+                    and not has_free_unbacked_symbols(reduction_numel)
+                    and not has_free_unbacked_symbols(numel)
                 )
-            )
-            and (
-                _is_static(numel)
-                or V.graph.sizevars.statically_known_equals(numel, numel_hint)
             )
         )
         split_large_outer = (
@@ -2001,7 +2018,10 @@ class Reduction(Loops):
                         reduction_numel_hint, numel_hint, num_sm
                     )
                     if Reduction._should_use_experimental_large_output_outer_plan(
-                        reduction_numel_hint, numel_hint, split
+                        reduction_numel_hint,
+                        numel_hint,
+                        split,
+                        reduction_numel_is_static=reduction_numel_static,
                     ):
                         return ReductionHint.OUTER, split
                 return ReductionHint.OUTER_NO_SPLIT, 1
@@ -2374,16 +2394,18 @@ class Reduction(Loops):
                     # OUTER also names pre-existing split reductions. Preserve
                     # one-pass only for either bounded family we intend to benchmark.
                     num_sm = DeviceProperties.create(device).multi_processor_count
+                    static_depth = _is_static(
+                        reduction_numel
+                    ) or V.graph.sizevars.statically_known_equals(
+                        reduction_numel, reduction_numel_hint
+                    )
                     split_reduction._whole_plan_outer_reduction = (
-                        (
-                            numel_hint >= num_sm * 2 * 32
-                            and Reduction._should_use_experimental_large_output_outer_plan(
-                                reduction_numel_hint, numel_hint, int(split)
-                            )
+                        numel_hint >= num_sm * 2 * 32
+                        and Reduction._should_use_experimental_large_output_outer_plan(
+                            reduction_numel_hint, numel_hint, int(split), static_depth
                         )
-                        or Reduction._should_autotune_split_outer_plan(
-                            reduction_numel_hint, numel_hint, int(split), num_sm
-                        )
+                    ) or Reduction._should_autotune_split_outer_plan(
+                        reduction_numel_hint, numel_hint, int(split), num_sm
                     )
             return out
 
