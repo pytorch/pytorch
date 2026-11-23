@@ -3,7 +3,7 @@ import collections
 import logging
 import operator
 from collections import OrderedDict
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Set as AbstractSet
 from typing import Any
 
 import torch
@@ -87,7 +87,7 @@ def _normalize_devices(devices: object) -> OrderedSet[str] | None:
         return None
     if isinstance(devices, (str, torch.device)):
         devices = (devices,)
-    if not isinstance(devices, (list, tuple, set, frozenset, OrderedSet)):
+    if not isinstance(devices, (list, tuple, AbstractSet, OrderedSet)):
         raise ValueError(
             "devices must be a device type, a torch.device, or a sequence of them"
         )
