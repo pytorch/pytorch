@@ -714,13 +714,14 @@ def fold_linear_rolled(
     128 elements that is ATen's association (CUDA) for M >= 16, which covers every M the
     dispatcher routes here. Accumulators past a short row stay at init and combine as
     identities; TileReduce.row_chains drops them for rows of at most 8 or 16 elements.
-    Those rows fold at most one element per accumulator, so a whole wave takes leaves
-    and the result combines with init once. Their leaves differ from reduce(init, x)
-    only in a sum's -0.0, which that combine restores, and in add or mul NaN payloads,
-    which the tree's own ops canonicalize (row_chains keeps WARP for traits whose leaves
-    differ further). Multi-field traits keep fold_row_rolled's per-lane accumulators.
-    `unroll` applies to multi-field traits only; each single-field wave already issues
-    `chains` elements of loads.
+    chains < WARP requires at most one full wave (nchunks * vec <= chains), which
+    row_chains guarantees: those rows fold at most one element per accumulator, so a
+    whole wave takes leaves and the result combines with init once. Their leaves differ
+    from reduce(init, x) only in a sum's -0.0, which that combine restores, and in add
+    or mul NaN payloads, which the tree's own ops canonicalize (row_chains keeps WARP
+    for traits without leaf_is_reduce_init). Multi-field traits keep fold_row_rolled's
+    per-lane accumulators. `unroll` applies to multi-field traits only; each
+    single-field wave already issues `chains` elements of loads.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     gv = cute.flat_divide(mX[Int64(r), None], (vec,))
@@ -1192,21 +1193,20 @@ class TileReduce:
         self.warps_per_row = (
             threads_per_row // WARP
         )  # 0 at threads_per_row == 1: nothing to merge
-        from .traits import AbsMaxOps, AbsMinOps, NormOps
-
         # fold_linear_rolled's single-field accumulators. For rows no wider than 8 or
         # 16, the top ones of WARP only combine identities into the rest, which every
         # single-field trait returns bitwise (a sum leaf 0.0 + y is never -0.0), so
-        # fewer keep the bits. Narrow rows then fold leaves, not reduce(init, x): a
-        # norm's leaf rounds its square on its own, and an abs-extremum leaf can carry
-        # another NaN payload than max(0.0, |x|).
+        # fewer keep the bits. Narrow rows then fold leaves, not reduce(init, x), so
+        # only traits that promise leaf_is_reduce_init opt in: a norm's leaf rounds its
+        # square on its own, and an abs-extremum leaf can carry another NaN payload than
+        # max(0.0, |x|).
         narrow = (
             axis == "row"
             and order == "linear"
             and threads_per_row == 1
             and not (use_tma or ragged_vector)
             and trait.nfields == 1
-            and not isinstance(trait, (AbsMaxOps, AbsMinOps, NormOps))
+            and getattr(trait, "leaf_is_reduce_init", False)
         )
         self.row_chains = next((n for n in (8, 16) if narrow and N <= n), WARP)
         self.tiler = (threads_per_block, N)  # TMA box: threads_per_block whole rows
@@ -1222,7 +1222,8 @@ class TileReduce:
     def cache_sig(self) -> tuple[Any, ...]:
         # TMA (static box) keys N, the uniform tree its whole-load count and a tail flag,
         # and fixed DAGs their N; ragged rows take a runtime width and other paths share a
-        # vector class.
+        # vector class, except that row_chains splits a one-thread single-field class
+        # into up to three plans.
         return (
             self.axis,
             self.vec,
