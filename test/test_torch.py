@@ -3278,21 +3278,20 @@ class TestTorchDeviceType(TestCase):
         # On MI350 and MI450 these rows and 1-D lines cover each ROCm row-scan strategy: a group of
         # lanes, a warp or a block per row, and long lines split into chunks. The inputs keep
         # every result exact in `dtype` for any combine order: integers wrap around (odd factors for
-        # cumprod, so products never reach 0), and floating-point inputs are small integers for
-        # cumsum and +-1 (+-1j) for cumprod.
+        # cumprod, so products never reach 0). Floating-point cumsum inputs are differences of a
+        # random 0/1 sequence, so every run of them sums to -1, 0 or 1 (in each of the real and
+        # imaginary parts), and cumprod inputs are +-1 (+-1j).
         shapes = [(8, 5), (5000, 300), (3, 5000), (3, 200_001), (5000,), (2_000_001,)]
-        # Partial sums of up to this many values in {-1, 0, 1} are exact in `dtype`.
-        max_len = {torch.half: 2048, torch.bfloat16: 256}.get(dtype, 2**24)
         for shape, op in product(shapes, (torch.cumsum, torch.cumprod)):
-            if op is torch.cumsum and shape[-1] > max_len:
-                continue
             if dtype.is_floating_point or dtype.is_complex:
                 if op is torch.cumsum:
-                    vals = [-1, 0, 1] + ([1j, -1j, 1 + 1j] if dtype.is_complex else [])
+                    b = torch.randint(0, 2, (2, *shape[:-1], shape[-1] + 1)).to(dtype)
+                    x = b[0, ..., 1:] - b[0, ..., :-1]
+                    if dtype.is_complex:
+                        x = x + 1j * (b[1, ..., 1:] - b[1, ..., :-1])
                 else:
-                    vals = [-1, 1] + ([1j, -1j] if dtype.is_complex else [])
-                vals = torch.tensor(vals, dtype=dtype)
-                x = vals[torch.randint(len(vals), shape)]
+                    vals = torch.tensor([-1, 1] + ([1j, -1j] if dtype.is_complex else []), dtype=dtype)
+                    x = vals[torch.randint(len(vals), shape)]
             elif op is torch.cumsum:
                 x = make_tensor(shape, dtype=dtype, device="cpu")
             else:
