@@ -89,6 +89,32 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
     @common_utils.parametrize(
         "fn",
         [
+            common_utils.subtest(torch.logaddexp, name="logaddexp"),
+            common_utils.subtest(torch.logaddexp2, name="logaddexp2"),
+        ],
+    )
+    @common_utils.parametrize("dtype", [torch.float16, torch.float32, torch.float64])
+    def test_logaddexp_is_numerically_stable(self, fn, dtype):
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                return fn(a, b)
+
+        inf, nan = float("inf"), float("nan")
+        a = torch.tensor(
+            [100.0, -100.0, 1000.0, -200.0, 0.0, 3.0, inf, -inf, inf, -inf, nan, 1.0],
+            dtype=dtype,
+        )
+        b = torch.tensor(
+            [100.0, -100.0, 0.0, -210.0, 0.0, -2.5, inf, -inf, -inf, 5.0, 1.0, nan],
+            dtype=dtype,
+        )
+
+        onnx_program = self.export(Model(), (a, b))
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    @common_utils.parametrize(
+        "fn",
+        [
             common_utils.subtest(lambda a, b: a + b, name="tensor"),
             common_utils.subtest(lambda a, b: a + True, name="scalar"),
             common_utils.subtest(
