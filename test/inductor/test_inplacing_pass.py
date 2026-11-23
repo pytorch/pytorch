@@ -1508,6 +1508,150 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertIn(aten.copy_.default, targets)
         self._assert_graph_matches(gm, model, (x, indices, values, replacement))
 
+    @parametrize(
+        "case",
+        [
+            "safe",
+            "negative_indices",
+            "live_x",
+            "live_y",
+            "alias_inputs",
+            "alias_copy_source",
+            "missing_y_copy",
+            "dtype_promotion",
+        ],
+    )
+    def test_foreach_input_views_independent_copybacks(self, case):
+        def f(x, y, replacement_x, replacement_y):
+            vx = x.view(2, 4)
+            vy = x.view(2, 4) if case == "alias_inputs" else y.view(2, 4)
+            ux, uy = torch._foreach_add([vx, vy], 0.5)
+            sx = ux.square()
+            x.copy_(x if case == "alias_copy_source" else replacement_x)
+            sy = uy.square()
+            if case != "missing_y_copy":
+                y.copy_(replacement_y)
+            if case == "live_x":
+                return sx + sy, ux
+            if case == "live_y":
+                return sx + sy, uy
+            return sx + sy
+
+        x = torch.arange(
+            8, dtype=torch.int64 if case == "dtype_promotion" else torch.float32
+        )
+        y = torch.arange(8, dtype=torch.float32) + 10
+        inputs = (x, y, torch.full_like(x, -1), torch.full_like(y, -2))
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        if case == "negative_indices":
+            foreach = next(
+                n for n in gm.graph.nodes if n.target is aten._foreach_add.Scalar
+            )
+            for user in list(foreach.users):
+                user.update_arg(1, user.args[1] - 2)
+        reinplace_inplaceable_ops_core(gm.graph)
+        targets = [node.target for node in gm.graph.nodes]
+        allowed = case in ("safe", "negative_indices")
+        self.assertIn(
+            aten._foreach_add_.Scalar if allowed else aten._foreach_add.Scalar, targets
+        )
+        self.assertNotIn(
+            aten._foreach_add.Scalar if allowed else aten._foreach_add_.Scalar, targets
+        )
+        # These independent overwrites are required even after foreach reuse.
+        self.assertIn(aten.copy_.default, targets)
+        self._assert_graph_matches(gm, f, inputs)
+        if case == "safe":
+            expected_inputs = tuple(t.clone() for t in inputs)
+            compiled_inputs = tuple(t.clone() for t in inputs)
+            expected = f(*expected_inputs)
+            actual = torch.compile(f, fullgraph=True)(*compiled_inputs)
+            self.assertEqual(actual, expected)
+            self.assertEqual(compiled_inputs, expected_inputs)
+
+    @parametrize("input_kind", ["direct", "temporary"])
+    @parametrize("case", ["live_result", "dtype_promotion"])
+    def test_foreach_preserves_live_results_and_dtype(self, input_kind, case):
+        def f(x, replacement):
+            buf = x if input_kind == "direct" else x.clone()
+            updated = torch._foreach_add([buf], 0.5)[0]
+            if case == "live_result" or input_kind == "direct":
+                buf.copy_(replacement)
+            return updated
+
+        dtype = torch.int64 if case == "dtype_promotion" else torch.float32
+        x = torch.tensor([2], dtype=dtype)
+        inputs = (x, torch.full_like(x, 9))
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        reinplace_inplaceable_ops_core(gm.graph)
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten._foreach_add.Scalar, targets)
+        self.assertNotIn(aten._foreach_add_.Scalar, targets)
+        self._assert_graph_matches(gm, f, inputs)
+
+    @parametrize("input_kind", ["view", "direct", "temporary"])
+    def test_foreach_cross_operand_alias_keeps_functional(self, input_kind):
+        def f(x, y, replacement_x, replacement_y):
+            bx = x.clone() if input_kind == "temporary" else x
+            by = y.clone() if input_kind == "temporary" else y
+            vx = bx.view(2, 4) if input_kind == "view" else bx
+            vy = by.view(2, 4) if input_kind == "view" else by
+            ux, uy = torch._foreach_add([vx, vy], [vy, vx])
+            sx = ux.square()
+            bx.copy_(replacement_x)
+            sy = uy.square()
+            by.copy_(replacement_y)
+            return sx + sy
+
+        x, y = torch.ones(8), torch.full((8,), 10.0)
+        inputs = (x, y, torch.full_like(x, -1), torch.full_like(y, -2))
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        reinplace_inplaceable_ops_core(gm.graph)
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten._foreach_add.List, targets)
+        self.assertNotIn(aten._foreach_add_.List, targets)
+        self._assert_graph_matches(gm, f, inputs)
+
+    def test_foreach_self_copy_keeps_functional(self):
+        def f(x):
+            updated = torch._foreach_add([x], 0.5)[0]
+            result = updated.square()
+            x.copy_(x)
+            return result
+
+        inputs = (torch.arange(8, dtype=torch.float32),)
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        reinplace_inplaceable_ops_core(gm.graph)
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten._foreach_add.Scalar, targets)
+        self.assertNotIn(aten._foreach_add_.Scalar, targets)
+        self._assert_graph_matches(gm, f, inputs)
+
+    @parametrize("source_index", [0, 1, -1])
+    @parametrize("live_result", [False, True])
+    def test_foreach_copyback_matches_mutated_input(self, source_index, live_result):
+        def f(x, y):
+            temporary = y.clone()
+            outputs = torch._foreach_add([x, temporary], 0.5)
+            ux, ut = outputs
+            result = ux.square() + ut.square()
+            x.copy_(outputs[source_index])
+            return (result, ux) if live_result else result
+
+        inputs = (torch.tensor([1.0]), torch.tensor([10.0]))
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        reinplace_inplaceable_ops_core(gm.graph)
+        targets = [node.target for node in gm.graph.nodes]
+        allowed = source_index == 0 or not live_result
+        self.assertIn(
+            aten._foreach_add_.Scalar if allowed else aten._foreach_add.Scalar, targets
+        )
+        if source_index == 0:
+            self.assertNotIn(aten.copy_.default, targets)
+        else:
+            self.assertIn(aten.copy_.default, targets)
+        self._assert_graph_matches(gm, f, inputs)
+
     @parametrize("alias_source", [False, True])
     def test_input_view_aliased_copyback_keeps_functional(self, alias_source):
         def f(x, indices, values):

@@ -812,9 +812,64 @@ def reinplace_inplaceable_ops_core(
             for written in get_mutated_input_nodes(node)
         )
 
+    def get_mutation_results(node, mutated_args):
+        """Collect complete tensor results per input; [] means unknown or incompatible."""
+        results = {arg: [] for arg in mutated_args}
+        if node.target in inplaceable_foreach_ops:
+            outputs = node.meta.get("val")
+            if not isinstance(outputs, (list, tuple)) or len(outputs) != len(
+                mutated_args
+            ):
+                return results
+            for user in node.users:
+                if (
+                    user.target is not operator.getitem
+                    or not isinstance(user.args[1], int)
+                    or not -len(mutated_args) <= user.args[1] < len(mutated_args)
+                ):
+                    return {arg: [] for arg in mutated_args}
+                results[mutated_args[user.args[1]]].append(user)
+            for arg, output in zip(mutated_args, outputs, strict=True):
+                tracked = results[arg]
+                # Foreach result i belongs only to input i; require complete tracking.
+                if (
+                    not same_tensor_meta(arg, output)
+                    or not tracked
+                    or any(
+                        get_node_storage(result) != get_storage(output)
+                        for result in tracked
+                    )
+                ):
+                    results[arg] = []
+            return results
+
+        tensor_results = (
+            [node]
+            if isinstance(node.meta.get("val"), torch.Tensor)
+            else [
+                user
+                for user in node.users
+                if isinstance(user.meta.get("val"), torch.Tensor)
+            ]
+        )
+        if not isinstance(node.meta.get("val"), torch.Tensor) and any(
+            user.target is not operator.getitem for user in node.users
+        ):
+            return results
+        output_storages = FakeTensorUpdater._storage_ids(node.meta.get("val"))
+        tracked_storages = OrderedSet(
+            get_node_storage(result) for result in tensor_results
+        )
+        if output_storages is not None and all(
+            storage in tracked_storages for storage in output_storages
+        ):
+            # Without an operator-specific relationship, protect every tensor result.
+            return dict.fromkeys(mutated_args, tensor_results)
+        return results
+
     def can_inplace(node, mutated_arg, *, result_nodes=None):
-        # For the expanded input-view permission, None infers tensor results;
-        # [] disables that permission when structured results are not tracked.
+        # Explicit result_nodes come from a complete input-to-result mapping;
+        # [] disables expanded permission when that relationship is untracked.
         # ls should be a list of tensors that all shares the same storage.
         def _overlap(ls) -> bool:
             try:
@@ -831,7 +886,22 @@ def reinplace_inplaceable_ops_core(
                 # We can probably do better (that is, reinplace one of them and clone the other)
                 # but that requires more work and mutable List[Tensor] are not that common.
                 return False
-            return all(can_inplace(node, arg, result_nodes=[]) for arg in mutated_arg)
+            if node.target in inplaceable_foreach_ops:
+                # Updating one element must not change another element's operand.
+                if any(
+                    isinstance(arg, torch.fx.Node)
+                    and get_node_storage(arg) in unique_storages
+                    for arg in pytree.tree_leaves((node.args[1:], node.kwargs))
+                ):
+                    return False
+                results = get_mutation_results(node, mutated_arg)
+                if not all(results.values()):
+                    return False
+            else:
+                results = {arg: [] for arg in mutated_arg}
+            return all(
+                can_inplace(node, arg, result_nodes=results[arg]) for arg in mutated_arg
+            )
 
         if get_node_storage(mutated_arg) is None:
             return False
@@ -860,6 +930,9 @@ def reinplace_inplaceable_ops_core(
         elif (result_storage := get_node_storage(node)) is not None:
             result_views.update(storage_to_nodes[result_storage])
 
+        for result in result_nodes or ():
+            result_views.update(storage_to_nodes[get_node_storage(result)])
+
         preserved_copyback_views = OrderedSet()
         copy_node = None
         mutated_arg_base = mutated_arg
@@ -875,10 +948,13 @@ def reinplace_inplaceable_ops_core(
             )
             if copy_node is None or node_order[copy_node] <= node_order[node]:
                 return False
-        # Direct input mutations and recognized copybacks keep their permission.
+        # Candidate-specific copybacks keep their existing permission checks.
         if (
             copy_node is not None
-            and mutated_arg.op not in ("placeholder", "get_attr")
+            and (
+                mutated_arg.op not in ("placeholder", "get_attr")
+                or node.target in inplaceable_foreach_ops
+            )
             and copy_node is not removable_copyback
         ):
             # An unrelated copy can hide the view mutation only if it overwrites
@@ -895,33 +971,13 @@ def reinplace_inplaceable_ops_core(
                 return False
 
             if result_nodes is None:
-                if not isinstance(node.meta.get("val"), torch.Tensor) and any(
-                    user.target is not operator.getitem for user in node.users
-                ):
-                    return False
-                result_nodes = (
-                    [node]
-                    if isinstance(node.meta.get("val"), torch.Tensor)
-                    else [
-                        user
-                        for user in node.users
-                        if isinstance(user.meta.get("val"), torch.Tensor)
-                    ]
-                )
+                result_nodes = get_mutation_results(node, [mutated_arg])[mutated_arg]
+            if not result_nodes:
+                return False
             source_storage = get_node_storage(copy_node.args[1])
             # A self-copy or aliased source would preserve the early mutation
             # instead of restoring the input's required final values.
             if source_storage is None or source_storage == mutated_storage:
-                return False
-            # Untracked outputs could remain live after the overwrite and would
-            # observe different values once reinplacement aliases them to the input.
-            output_storages = FakeTensorUpdater._storage_ids(node.meta["val"])
-            tracked_storages = OrderedSet(
-                get_node_storage(result) for result in result_nodes
-            )
-            if output_storages is None or any(
-                storage not in tracked_storages for storage in output_storages
-            ):
                 return False
             for result in result_nodes:
                 views = storage_to_nodes[get_node_storage(result)]
@@ -970,6 +1026,17 @@ def reinplace_inplaceable_ops_core(
         copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
         if copy_node is not None and copy_node._erased:
             copy_node = None
+        if copy_node is not None and node.target in inplaceable_foreach_ops:
+            src = copy_node.args[1]
+            inputs = node.args[0]
+            if (
+                src.target is not operator.getitem
+                or src.args[0] is not node
+                or not isinstance(index := src.args[1], int)
+                or not -len(inputs) <= index < len(inputs)
+                or inputs[index] is not mutated_arg
+            ):
+                copy_node = None
         if copy_node is None and isinstance(mutated_arg, torch.fx.Node):
             # Only a layout-preserving copy of this candidate's result can be removed
             # upon reinplacement of candidate.
@@ -1522,13 +1589,11 @@ def reinplace_inplaceable_ops_core(
                     can_rewire_results = False
                     break
 
-            if not all((arg, node) in copy_args_to_copy_nodes for arg in mutated_args):
-                continue
-
             if can_rewire_results and can_inplace(node, mutated_args):
                 for arg in mutated_args:
-                    copy_node = copy_args_to_copy_nodes[(arg, node)]
-                    replacements[copy_node] = copy_node.args[0]
+                    copy_node = copy_node_for_reinplaced_arg(node, arg)
+                    if copy_node is not None:
+                        replacements[copy_node] = copy_node.args[0]
                 replacements.update(result_replacements)
 
                 node.target = inplaceable_op.inplace_op
