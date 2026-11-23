@@ -208,6 +208,17 @@ def graph_module(description: dict[str, Any]) -> torch.fx.GraphModule:
             # A store into a tensor the graph made: it gives no value.
             _, (tensor, index, stored), _, _, _ = parts
             graph.call_function(operator.setitem, (of(tensor), of(index), of(stored)))
+        elif kind == "same":
+            # The results of an operation that has several, unpacked.
+            (several, value) = parts
+            values[value] = of(several)
+        elif kind == "item":
+            several, index, value = parts
+            picked = (of(several), of(index))
+            values[value] = graph.call_function(operator.getitem, picked)
+        elif kind == "attr":
+            several, name, value = parts
+            values[value] = graph.call_function(getattr, (of(several), name))
         elif kind == "size":
             tensor, dim, value = parts
             size = torch.ops.aten.sym_size.int

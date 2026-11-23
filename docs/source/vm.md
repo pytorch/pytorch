@@ -255,11 +255,14 @@ for _ in range(4):
 found["ops"], found["why"]  # (9, 'the function returns')
 ```
 
+A copy of such a list (`[*out]`, `(*out,)`) has the items the list holds
+where the copy is made, and an operation that the copy is spread into is
+handed those, whatever is appended to the list afterwards.
+
 What ends a path:
 
 - a call that the path does not go into ("Paths across calls" below says
   which), or of something that is no operation, like `print`;
-- an operation with several results (`x.chunk(2)`, `torch.max(x, 0)`);
 - behind an operation that writes to a tensor from outside the path or draws
   random numbers: whatever a form would have to check behind what was made
   of the graph, and such an operation behind a check of that kind ("Writes"
@@ -1729,9 +1732,8 @@ int(model.norm.num_batches_tracked)  # 8
 found["ops"], found["hits"], found["why"]  # (6, 6, 'the function returns')
 ```
 
-An operation with several results (`x.chunk(2)`, `torch.max(x, 0)`) ends a
-path. A write that a path takes as an operation is
-not among what `regions` lists as left out.
+A write that a path takes as an operation is not among what `regions`
+lists as left out.
 
 ### Stores into objects
 
@@ -1886,6 +1888,108 @@ appended  # [1, 1, 1, 1, 1, 2, 1, 2]: where the two are one object, `a.n` is wha
 found["ops"], found["exports"], found["hits"]  # (8, 2, 5)
 ```
 
+### Operations with several results
+
+An operation that gives several tensors is an operation of a graph:
+`x.chunk(2)`, `x.split(3)`, `x.unbind(0)`, `torch.max(x, 1)` and
+`torch.min(x, 1)`, `torch.topk`, `torch.sort`. What the function does with
+the tuple it gives is computed in the graph: unpacking it
+(`a, b = x.chunk(2)`), an item of it (`parts[1]`), an attribute of it
+(`torch.max(x, 1).values`).
+
+```python
+def several(x):
+    y = (x.sin() * 2 + 1).cos()
+    a, b = y.chunk(2, 1)
+    top, where = torch.max(a, 1)
+    lowest = torch.min(b, 1)
+    return (a * b).exp() + top.unsqueeze(1) + lowest.values.unsqueeze(1) + y.split(1, 1)[1]
+
+
+g = torch.vm(several, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), show))
+x = torch.randn(4, 4)
+for _ in range(6):
+    same = torch.equal(g(x), several(x))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["hits"], found["why"]  # (True, 15, 4, 'the function returns')
+print(shown[-1][0])
+# def forward(self, x):
+#     sin_default = torch.ops.aten.sin.default(x);  x = None
+#     mul_tensor = torch.ops.aten.mul.Tensor(sin_default, 2);  sin_default = None
+#     add_tensor = torch.ops.aten.add.Tensor(mul_tensor, 1, alpha = 1);  mul_tensor = None
+#     cos_default = torch.ops.aten.cos.default(add_tensor);  add_tensor = None
+#     chunk = cos_default.chunk(2, 1)
+#     getitem = chunk[1]
+#     getitem_1 = chunk[0];  chunk = None
+#     max_1 = torch.max(getitem_1, 1)
+#     getitem_2 = max_1[0];  max_1 = None
+#     min_1 = torch.min(getitem, 1)
+#     mul_tensor_1 = torch.ops.aten.mul.Tensor(getitem_1, getitem);  getitem_1 = getitem = None
+#     exp_default = torch.ops.aten.exp.default(mul_tensor_1);  mul_tensor_1 = None
+#     unsqueeze_default = torch.ops.aten.unsqueeze.default(getitem_2, 1);  getitem_2 = None
+#     add_tensor_1 = torch.ops.aten.add.Tensor(exp_default, unsqueeze_default, alpha = 1);  exp_default = unsqueeze_default = None
+#     getattr_1 = min_1.values;  min_1 = None
+#     unsqueeze_default_1 = torch.ops.aten.unsqueeze.default(getattr_1, 1);  getattr_1 = None
+#     add_tensor_2 = torch.ops.aten.add.Tensor(add_tensor_1, unsqueeze_default_1, alpha = 1);  add_tensor_1 = unsqueeze_default_1 = None
+#     split = torch.split(cos_default, 1, 1)
+#     getitem_3 = split[1];  split = None
+#     add_tensor_3 = torch.ops.aten.add.Tensor(add_tensor_2, getitem_3, alpha = 1);  add_tensor_2 = getitem_3 = None
+#     return (cos_default, add_tensor_3)
+```
+
+A graph gives back tensors, not the tuple. Where what such an operation
+gave is needed whole behind the path (the function returns it, a loop goes
+over it), the path is taken down again at the next call and ends in front
+of the operation, which the instructions run:
+
+```python
+def whole(x):
+    y = (x.sin() * 2 + 1).cos().exp().tanh()
+    return y.chunk(2, 1)
+
+
+g = torch.vm(whole, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(6):
+    got, expected = g(x), whole(x)
+[torch.equal(a, b) for a, b in zip(got, expected)]  # [True, True]
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+found["ops"], found["why"]  # (6, 'what an operation with several results gives is used whole')
+```
+
+A method of a tensor that is written in Python (`Tensor.split`) is gone
+into with the tensor of the graph as its `self`. `isinstance` of a class
+whose `__instancecheck__` is a Python function is followed into that
+function, and the path checks that what it returned is a bool: for anything
+else `isinstance` gives whether it is true, as the interpreter does, and the
+path ends in front of the call. A C function
+that is called with what the code spreads (`torch.add(*pair)`) is an
+operation where the path built the tuple and no keyword is spread:
+
+```python
+class Meta(type):
+    def __instancecheck__(cls, obj):
+        return hasattr(obj, "shape")
+
+
+class Shaped(metaclass=Meta):
+    pass
+
+
+def spreads(x):
+    y = (x.sin() * 2 + 1).cos()
+    pair = (y, x)
+    if isinstance(y, Shaped):
+        y = torch.add(*pair)
+    return y.exp().tanh().sum()
+
+
+g = torch.vm(spreads, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(6):
+    same = torch.equal(g(x), spreads(x))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["why"]  # (True, 8, 'the function returns')
+```
+
 ### The order of the list
 
 - `Graphs()` can stand anywhere among the passes over a block. It looks at a
@@ -1931,8 +2035,9 @@ What graphs do not do at this stage:
   tensor, `gather`, `embedding`, `cross_entropy`): the forward of a model in
   training mode with batch norms and its loss computed in the same function
   is a graph up to the loss. A graph with such a write has no second run
-  where what was made of it raises. An operation with several results ends
-  a path.
+  where what was made of it raises. A path ends in front of an operation
+  with several results whose value is needed whole behind it ("Operations
+  with several results").
 - What a path reads behind a store of its own into an object is checked at
   every call to go through another dict or list than the store changes, a
   check per store ("Stores into objects"); a read through what a store
