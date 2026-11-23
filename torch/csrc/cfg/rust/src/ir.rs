@@ -215,6 +215,14 @@ pub struct Block {
     pub bc_start: u32,
 }
 
+/// Executable code of one basic block: its instructions with their kill
+/// lists.
+pub struct BlockCode {
+    pub insts: Vec<Inst>,
+    pub term: Term,
+    pub term_kills: Vec<V>,
+}
+
 pub struct Function {
     pub name: String,
     pub qualname: String,
