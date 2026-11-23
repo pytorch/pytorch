@@ -130,7 +130,7 @@ pub fn clear_shortcuts() {
 }
 
 #[pyfunction]
-#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, callees=true, shortcuts=true, demote=true, workspace=None, hook=true))]
+#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, max_trip_count=8, callees=true, shortcuts=true, demote=true, workspace=None, hook=true))]
 pub fn compile(
     py: Python<'_>,
     func: &Bound<'_, PyAny>,
@@ -142,6 +142,7 @@ pub fn compile(
     max_respecializations: u32,
     inline: bool,
     unroll: bool,
+    max_trip_count: i64,
     callees: bool,
     shortcuts: bool,
     demote: bool,
@@ -170,6 +171,7 @@ pub fn compile(
         max_respecializations,
         inline,
         unroll,
+        max_trip_count,
         callees,
         shortcuts,
         demote,
