@@ -5170,6 +5170,23 @@ impl Compiled {
                 kill(t, regs);
                 return Taken::Went;
             }
+            Op::LoadSlot(slot) | Op::StoreSlot(slot, _) => {
+                // A variable that a handler finds: the value it is.
+                let (from, to) = match &inst.op {
+                    Op::StoreSlot(_, v) => (*v, *slot),
+                    _ => (*slot, inst.dst),
+                };
+                let held = self.path_value(t, regs, from);
+                let Ok(obj) = self.exec_op(regs, &inst.op) else {
+                    return Taken::Raised;
+                };
+                if inst.dst != NONE {
+                    capi::release(std::mem::replace(&mut regs[inst.dst as usize], obj));
+                }
+                t.rename(to, held);
+                kill(t, regs);
+                return Taken::Went;
+            }
             _ => {}
         }
         // What the instruction is to a path, or why it is no part of one.
@@ -5561,6 +5578,12 @@ impl Compiled {
             let index = c.origins[pc..].iter().find(|o| **o != NONE).map_or(func.blocks[b].insts.len(), |o| *o as usize);
             ((b, index), Some((code, pc)), self.read_from(c, b, pc))
         };
+        // The variables that handlers find are read without an instruction
+        // saying so: what the path stored in one is there when it ends.
+        let mut live = live;
+        for slot in &func.slots {
+            live.insert(*slot);
+        }
         let landing = Landing { block: b, code, pc: if afresh { AFRESH } else { pc } };
         if t.abandoned.is_some() {
             // The function let go of an object whose end may run Python
