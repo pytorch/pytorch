@@ -339,6 +339,23 @@ size_t getWorkspaceSize(
     return sz;
 }
 
+// MIOpen reports the largest workspace any applicable solver needs. Cap it at
+// the largest block the allocator can provide, so Find picks among the solvers
+// that fit instead of failing with OOM.
+template<typename algo_t>
+size_t getMaxWorkspaceSize(const ConvolutionArgs& args, const algo_t algo)
+{
+    size_t ws_size = getWorkspaceSize(args, algo);
+    size_t max_block_size = 0;
+    try {
+        c10::cuda::CUDACachingAllocator::cacheInfo(at::cuda::current_device(), &max_block_size);
+    } catch (const c10::Error&) {
+        // A CUDAPluggableAllocator does not implement cacheInfo.
+        return ws_size;
+    }
+    return std::min(ws_size, max_block_size);
+}
+
 template<typename perf_t>
 perf_t getBestAlgorithm(perf_t *perfResults, bool deterministic, int n_algo) {
   return perfResults[0];
@@ -356,7 +373,7 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
   static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
     int perf_count;
     perf_t perf_results;
-    size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
+    size_t max_ws_size = getMaxWorkspaceSize(args, DEFAULT_ALGO);
     Workspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionForwardAlgorithm(
         args.handle,
@@ -429,7 +446,7 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
   static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
     int perf_count;
     perf_t perf_results;
-    size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
+    size_t max_ws_size = getMaxWorkspaceSize(args, DEFAULT_ALGO);
     Workspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionBackwardDataAlgorithm(
         args.handle,
@@ -502,7 +519,7 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
   static perf_t findAlgorithm(const ConvolutionArgs& args, bool benchmark) {
     int perf_count;
     perf_t perf_results;
-    size_t max_ws_size = getWorkspaceSize(args, DEFAULT_ALGO);
+    size_t max_ws_size = getMaxWorkspaceSize(args, DEFAULT_ALGO);
     Workspace ws(max_ws_size);
     MIOPEN_CHECK(miopenFindConvolutionBackwardWeightsAlgorithm(
         args.handle,
