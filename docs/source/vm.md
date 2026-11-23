@@ -536,6 +536,16 @@ What graphs do not do at this stage:
   as well. The value of a `return` whose `finally` returns or breaks ends in
   front of the `finally` in the same way: what the interpreter keeps on its
   stack is let go of behind its last use, not where the interpreter pops it.
+- An `Exception` that the handler of a signal raises (a timeout) while a
+  pass over graphs runs, or in the first run of what a pass made, is
+  swallowed: the call returns as if no signal had come, and the graph is
+  left to the VM for good. A `KeyboardInterrupt` gets through.
+- While a `TorchFunctionMode` is on, the default pass that puts an accessor
+  in place of a read of `shape` or `ndim` of a tensor, or of a call of its
+  `dim()` or `size(0)` (`TensorAccessors`), does not ask the mode from the
+  second call on: a mode that returns something else for them changes what
+  the function computes. With that pass left out of the list the mode is
+  asked for them as in eager mode.
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported.
