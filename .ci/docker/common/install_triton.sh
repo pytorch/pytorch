@@ -59,7 +59,7 @@ if [ ! -f setup.py ]; then
   cd python
 fi
 
-pip_install pybind11==3.0.1
+pip_install pybind11==3.0.1 nanobind==2.10.2
 
 # TODO: remove patch setup.py once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
 as_jenkins sed -i -e 's/https:\/\/tritonlang.blob.core.windows.net\/llvm-builds/https:\/\/oaitriton.blob.core.windows.net\/public\/llvm-builds/g' setup.py
@@ -104,6 +104,8 @@ fi
 # IMPORTANT: helion needs to be installed without dependencies.
 # It depends on torch and triton. We don't want to install
 # triton and torch from production on Docker CI images
+# Pinned: helion 1.6.0 fails to import on Python 3.11 (a dataclass field
+# defaults to MappingProxyType({}), which 3.11 rejects as a mutable default).
 if [[ "$ANACONDA_PYTHON_VERSION" != 3.9* ]]; then
-  pip_install helion --no-deps
+  pip_install helion==1.5.2 --no-deps
 fi
