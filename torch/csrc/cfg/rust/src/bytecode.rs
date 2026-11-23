@@ -247,6 +247,9 @@ impl OpcodeTable {
 #[derive(Clone, Debug)]
 pub struct Ins {
     pub off: u32,
+    /// Where the instruction starts, EXTENDED_ARG prefixes included. Jumps
+    /// and the exception table can name that offset.
+    pub start: u32,
     pub op: Bc,
     pub code: u8,
     pub arg: u32,
@@ -259,16 +262,19 @@ pub fn decode(table: &OpcodeTable, code: &Bound<'_, PyBytes>) -> Vec<Ins> {
     let mut out = Vec::new();
     let mut i = 0usize;
     let mut ext: u32 = 0;
+    let mut prefix: Option<usize> = None;
     while i + 1 < bytes.len() {
         let opcode = bytes[i];
         let arg = (ext << 8) | bytes[i + 1] as u32;
         let kind = table.kinds[opcode as usize];
         if kind == Bc::ExtendedArg {
             ext = arg;
+            prefix.get_or_insert(i);
             i += 2;
             continue;
         }
         ext = 0;
+        let start = prefix.take().unwrap_or(i) as u32;
         let caches = table.caches[opcode as usize] as usize;
         let next = i + 2 + 2 * caches;
         let target = if kind.is_forward_jump() {
@@ -279,9 +285,17 @@ pub fn decode(table: &OpcodeTable, code: &Bound<'_, PyBytes>) -> Vec<Ins> {
             None
         };
         if kind != Bc::Cache {
-            out.push(Ins { off: i as u32, op: kind, code: opcode, arg, target });
+            out.push(Ins { off: i as u32, start, op: kind, code: opcode, arg, target });
         }
         i = next;
+    }
+    // A jump to a prefixed instruction names its first prefix.
+    let prefixed: std::collections::HashMap<u32, u32> =
+        out.iter().filter(|ins| ins.start != ins.off).map(|ins| (ins.start, ins.off)).collect();
+    for ins in out.iter_mut() {
+        if let Some(target) = ins.target.and_then(|t| prefixed.get(&t)) {
+            ins.target = Some(*target);
+        }
     }
     out
 }
