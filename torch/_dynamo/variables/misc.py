@@ -283,6 +283,10 @@ class SuperVariable(VariableTracker):
         # about here (e.g., note the staticmethod, classmethod cases).
         if inner_fn is object.__init__:
             return VariableTracker.tp_init_impl(self.objvar, tx, args, kwargs)
+        elif inner_fn is property.__init__ and isinstance(
+            self.objvar, variables.PropertyVariable
+        ):
+            return self.objvar.tp_init_impl(tx, args, kwargs)
         elif (
             isinstance(inner_fn, types.WrapperDescriptorType)
             and inner_fn.__name__ == "__init__"

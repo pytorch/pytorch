@@ -40,6 +40,7 @@ from .base import (
     getset_set,
     load_pending_mutation,
     Member,
+    Method,
     NO_SUCH_SUBOBJ,
     readonly_setter,
     store_attr_mutation,
@@ -50,11 +51,7 @@ from .base import (
 from .constant import ConstantVariable
 from .functions import BaseUserFunctionVariable, UserMethodVariable
 from .object_protocol import mro_lookup, python_constant_repr_impl
-from .user_defined import (
-    setattr_hackcheck,
-    UserDefinedClassVariable,
-    UserDefinedObjectVariable,
-)
+from .user_defined import setattr_hackcheck, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
@@ -1381,120 +1378,168 @@ class GetSetDescriptorVariable(DescriptorVariable):
         return VariableTracker.build(tx, resolved, result_source)
 
 
-def _unwrap_property_arg(arg: VariableTracker) -> Any:
-    if isinstance(arg, UserMethodVariable):
-        # UserMethodVariable wraps a bound method.  Materialising via
-        # im_func.get_function() snapshots NestedUserFunctionVariable closure
-        # cells, so nonlocal rebinds are silently lost and p.fget is not the
-        # same object f later.  Raise so callers emit a clean graph break
-        # instead of silently using the wrong callable.
-        raise NotImplementedError(
-            "UserMethodVariable cannot be safely unwrapped for property argument"
-        )
-    if isinstance(arg, BaseUserFunctionVariable):
-        return arg.get_function()
-    if isinstance(arg, variables.BuiltinVariable):
-        return arg.fn
-    if isinstance(arg, UserDefinedClassVariable):
-        return arg.value
-    if isinstance(arg, UserDefinedObjectVariable):
-        return arg.value
-    if isinstance(arg, PropertyVariable):
-        return arg.descriptor
-    if arg.is_python_constant():
-        return arg.as_python_constant()
-    try:
-        return arg.as_python_constant()
-    except Exception:
-        raise NotImplementedError(
-            f"Unable to extract Python object for property argument: {arg}"
-        )
+def _reconstruct_property(
+    cls: type,
+    fget: Any,
+    fset: Any,
+    fdel: Any,
+    doc: Any,
+    initialized: bool,
+) -> property:
+    result = property.__new__(cls)
+    if initialized:
+        property.__init__(result, fget, fset, fdel, doc)
+    return result
 
 
 class PropertyVariable(VariableTracker):
-    """Python property descriptor.
+    """A property whose accessors stay as VTs when constructed while tracing."""
 
-    The property type is a data descriptor with tp_descr_get =
-    property_descr_get which calls fget(obj) to compute the value.
-    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L2073
-    https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1660-L1693
-    """
-
+    _cpython_type = property
     _nonvar_fields = {
         "descriptor",
+        "initialized",
+        "getter_doc",
         *VariableTracker._nonvar_fields,
     }
 
+    def __init__(
+        self,
+        descriptor: property | None = None,
+        cls: VariableTracker | None = None,
+        fields: dict[str, VariableTracker] | None = None,
+        initialized: bool = False,
+        getter_doc: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.descriptor = descriptor
+        self.cls = cls
+        self.fields = fields if fields is not None else {}
+        self.initialized = initialized
+        self.getter_doc = getter_doc
+
+    @staticmethod
+    def is_supported_type(cls: type) -> bool:
+        if not issubclass(cls, property):
+            return False
+        dict_descriptor = mro_lookup(cls, "__dict__")
+        if dict_descriptor is not NO_SUCH_SUBOBJ and not isinstance(
+            dict_descriptor, types.GetSetDescriptorType
+        ):
+            return False
+        for name in (
+            "__get__",
+            "__set__",
+            "__delete__",
+            "__getattribute__",
+            "__getattr__",
+            "__setattr__",
+            "__delattr__",
+            "getter",
+            "setter",
+            "deleter",
+            "__set_name__",
+            "fget",
+            "fset",
+            "fdel",
+            "__isabstractmethod__",
+        ):
+            if mro_lookup(cls, name) is not mro_lookup(property, name):
+                return False
+        if sys.version_info >= (3, 13):
+            if mro_lookup(cls, "__name__") is not property.__dict__["__name__"]:
+                return False
+        doc = mro_lookup(cls, "__doc__")
+        return (
+            doc is property.__dict__["__doc__"]
+            or doc is None
+            or isinstance(doc, (str, types.MemberDescriptorType))
+        )
+
+    @staticmethod
+    def create(
+        descriptor: property | None = None,
+        source: Source | None = None,
+        *,
+        cls: VariableTracker | None = None,
+    ) -> "PropertyVariable":
+        return PropertyVariable(descriptor, cls=cls, source=source)
+
+    def __repr__(self) -> str:
+        return f"PropertyVariable({self.python_type().__name__})"
+
+    def python_type(self) -> type:
+        if self.descriptor is not None:
+            return type(self.descriptor)
+        if self.cls is None:
+            raise AssertionError("A new property must have a class")
+        return self.cls.as_python_constant()
+
+    def as_python_constant(self) -> property:
+        if self.descriptor is None:
+            raise AsPythonConstantNotImplementedError(self)
+        return self.descriptor
+
+    def _field(self, tx: "InstructionTranslatorBase", name: str) -> VariableTracker:
+        if self.descriptor is not None:
+            return VariableTracker.build(
+                tx,
+                getattr(self.descriptor, name),
+                self.source and AttrSource(self.source, name),
+            )
+        return self.fields.get(name, ConstantVariable.create(None))
+
     tp_members = {
-        "fget": Member(
-            getset_load_or_build(
-                lambda s: s.descriptor.fget,
-                "fget",
-                lambda s: s.source and AttrSource(s.source, "fget"),
-            ),
-            readonly_setter,
-        ),
-        "fset": Member(
-            getset_load_or_build(
-                lambda s: s.descriptor.fset,
-                "fset",
-                lambda s: s.source and AttrSource(s.source, "fset"),
-            ),
-            readonly_setter,
-        ),
-        "fdel": Member(
-            getset_load_or_build(
-                lambda s: s.descriptor.fdel,
-                "fdel",
-                lambda s: s.source and AttrSource(s.source, "fdel"),
-            ),
-            readonly_setter,
-        ),
+        "fget": Member(lambda s, tx: s._field(tx, "fget"), readonly_setter),
+        "fset": Member(lambda s, tx: s._field(tx, "fset"), readonly_setter),
+        "fdel": Member(lambda s, tx: s._field(tx, "fdel"), readonly_setter),
     }
+
+    def lookup_tp_getset_member(self, name: str) -> GetSet | Member | None:
+        if name == "__doc__" and self.python_type() is not property:
+            return None
+        return super().lookup_tp_getset_member(name)
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        pending = load_pending_mutation(tx, self, name)
+        if pending is not None:
+            return None if isinstance(pending, variables.DeletedVariable) else pending
+        if self.descriptor is not None:
+            attrs = getattr(self.descriptor, "__dict__", {})
+            if name in attrs:
+                return VariableTracker.build(
+                    tx, attrs[name], self.source and AttrSource(self.source, name)
+                )
+        return None
 
     def _doc_getter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         pending = load_pending_mutation(tx, self, "__doc__")
         if pending is not None:
-            if isinstance(pending, variables.DeletedVariable):
-                return ConstantVariable.create(None)
             return pending
-        try:
-            doc = self.descriptor.__doc__
-        except AttributeError as exc:
-            raise_attribute_error(
-                tx,
-                str(exc) or f"'{self.python_type_name()}' object has no attribute '__doc__'",
-            )
-        source = self.source and AttrSource(self.source, "__doc__")
-        return VariableTracker.build(tx, doc, source)
+        return self._field(tx, "__doc__")
 
     def _doc_setter(
-        self,
-        tx: "InstructionTranslatorBase",
-        value: VariableTracker | None,
-    ) -> None:
-        cls = self.python_type()
-        if cls is not property:
-            has_dict = hasattr(self.descriptor, "__dict__")
-            has_doc_slot = hasattr(cls, "__doc__") and isinstance(
-                getattr(cls, "__doc__"), types.MemberDescriptorType
-            )
-            if not has_dict and not has_doc_slot:
-                raise_attribute_error(
-                    tx,
-                    f"'{self.python_type_name()}' object attribute '__doc__' is read-only",
-                )
-        if value is None:
-            value = ConstantVariable.create(None)
-        store_attr_mutation(tx, self, "__doc__", value)
+        self, tx: "InstructionTranslatorBase", value: VariableTracker | None
+    ) -> VariableTracker:
+        store_attr_mutation(tx, self, "__doc__", value or ConstantVariable.create(None))
+        return ConstantVariable.create(None)
 
     def _name_getter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # property.__name__ only exists from 3.13
-        if sys.version_info >= (3, 13):
-            name = getattr(self.descriptor, "__name__", None)
-            if name is not None:
-                source = self.source and AttrSource(self.source, "__name__")
-                return VariableTracker.build(tx, name, source)
+        from .object_protocol import generic_getattr
+
+        pending = load_pending_mutation(tx, self, "__name__")
+        if pending is not None:
+            return pending
+        if self.descriptor is not None:
+            if hasattr(self.descriptor, "__name__"):
+                return self._field(tx, "__name__")
+        elif sys.version_info >= (3, 13):
+            fget = self._field(tx, "fget")
+            if not fget.is_constant_none():
+                return generic_getattr(tx, fget, "__name__")
         raise_attribute_error(
             tx, f"'{self.python_type_name()}' object has no attribute '__name__'"
         )
@@ -1505,291 +1550,211 @@ class PropertyVariable(VariableTracker):
         from ..polyfills import property_isabstractmethod
         from .builder import SourcelessBuilder
 
-        # Trace truth testing so user-defined __bool__ methods and their
-        # exceptions are handled within the traced program.
         fn = SourcelessBuilder.create_internal_user_function(property_isabstractmethod)
         return fn.call_function(tx, [self], {})
 
     tp_getset = {
         "__doc__": GetSet(_doc_getter, _doc_setter),
         "__name__": GetSet(_name_getter, getset_set("__name__")),
-        "__isabstractmethod__": GetSet(
-            _isabstractmethod_getter,
-            readonly_setter,
-        ),
+        "__isabstractmethod__": GetSet(_isabstractmethod_getter, readonly_setter),
     }
 
-    def __init__(
+    def tp_new_impl(
         self,
-        descriptor: property,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(**kwargs)
-        self.descriptor = descriptor
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if not args:
+            raise_type_error(tx, "property.__new__(): not enough arguments")
+        cls = args[0]
+        target = cls.as_python_constant()
+        if not isinstance(target, type):
+            raise_type_error(
+                tx,
+                f"property.__new__(X): X is not a type object ({type(target).__name__})",
+            )
+        if not issubclass(target, property):
+            raise_type_error(
+                tx,
+                f"property.__new__({target.__name__}): {target.__name__} is not a subtype of property",
+            )
+        if not PropertyVariable.is_supported_type(target):
+            unimplemented(
+                gb_type="property subclass with custom descriptor behavior",
+                context=f"Constructing {target}",
+                explanation="Dynamo cannot construct a property subclass that overrides its descriptor or attribute-access behavior.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        result = PropertyVariable.create(cls=cls)
+        tx.output.side_effects.track_attribute_mutation_new(result)
+        return result
 
-    @staticmethod
-    def create(
-        descriptor: property, source: Source | None = None
-    ) -> "PropertyVariable":
-        return PropertyVariable(descriptor, source=source)
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .object_protocol import generic_getattr, object_generic_setattr_str
 
-    def __repr__(self) -> str:
-        fget_name = getattr(self.descriptor.fget, "__name__", "?")
-        return f"PropertyVariable({fget_name})"
+        if self.descriptor is not None or self.initialized:
+            unimplemented(
+                gb_type="Reinitializing an existing property",
+                context="property.__init__ on an existing property",
+                explanation="Dynamo cannot replay reinitialization of an existing property.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        names = ("fget", "fset", "fdel", "doc")
+        if len(args) + len(kwargs) > 4:
+            raise_type_error(
+                tx,
+                f"property() takes at most 4 arguments ({len(args) + len(kwargs)} given)",
+            )
+        fields = dict(zip(names, args))
+        for name, value in kwargs.items():
+            if name not in names:
+                raise_type_error(
+                    tx, f"'{name}' is an invalid keyword argument for property()"
+                )
+            if name in fields:
+                raise_type_error(
+                    tx,
+                    f"argument for property() given by name ('{name}') and position ({names.index(name) + 1})",
+                )
+            fields[name] = value
+        for name in names:
+            fields.setdefault(name, ConstantVariable.create(None))
+        fget = fields["fget"]
+        doc = fields["doc"]
+        getter_doc = doc.is_constant_none() and not fget.is_constant_none()
+        if getter_doc:
+            if load_pending_mutation(tx, fget, "__doc__") is not None:
+                unimplemented(
+                    gb_type="property getter with a pending docstring mutation",
+                    context="property getter with a pending docstring mutation",
+                    explanation="Dynamo cannot preserve docstring mutation ordering when reconstructing this property.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            # Arbitrary callable objects may run user code on __doc__ access;
+            # replaying property.__init__ would execute that code a second time.
+            if not isinstance(
+                fget.realize(), (BaseUserFunctionVariable, variables.BuiltinVariable)
+            ):
+                unimplemented(
+                    gb_type="property getter with unsupported docstring lookup",
+                    context=f"property getter {fget}",
+                    explanation="Dynamo cannot copy a property docstring from an arbitrary callable object.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            doc = generic_getattr(tx, fget, "__doc__", ConstantVariable.create(None))
+            getter_doc = not doc.is_constant_none()
+        self.fields = {name: fields[name] for name in names[:3]}
+        self.fields["doc"] = fields["doc"]
+        self.fields["__doc__"] = doc
+        self.getter_doc = getter_doc
+        self.initialized = True
+        if self.python_type() is not property:
+            doc_attr = mro_lookup(self.python_type(), "__doc__")
+            if (
+                self.python_type().__dictoffset__
+                or isinstance(doc_attr, types.MemberDescriptorType)
+                or getter_doc
+            ):
+                object_generic_setattr_str(tx, self, "__doc__", doc)
+        return ConstantVariable.create(None)
 
-    def python_type(self) -> type:
-        return type(self.descriptor)
-
-    def as_python_constant(self) -> property:
-        return self.descriptor
-
-    def lookup_instance_dict(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker | None:
-        pending = load_pending_mutation(tx, self, name)
-        if pending is not None:
-            if isinstance(pending, variables.DeletedVariable):
-                return None
-            return pending
-        if hasattr(self.descriptor, "__dict__") and name in self.descriptor.__dict__:
-            source = self.source and AttrSource(self.source, name)
-            return VariableTracker.build(tx, self.descriptor.__dict__[name], source)
-        return None
-
-    def call_method(
+    def _copy(
         self,
         tx: "InstructionTranslatorBase",
         name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
+        value: VariableTracker,
     ) -> VariableTracker:
-        if name in ("getter", "setter", "deleter") and len(args) == 1 and not kwargs:
-            try:
-                fn = _unwrap_property_arg(args[0])
-            except NotImplementedError:
-                unimplemented(
-                    gb_type="property.getter/setter/deleter with unsupported argument",
-                    context=f"property.{name}({args[0]})",
-                    explanation=(
-                        f"property.{name} received an argument that cannot be "
-                        "unwrapped to a Python callable"
-                    ),
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-            method = getattr(self.descriptor, name)
-            try:
-                new_descriptor = method(fn)
-            except Exception as exc:
-                raise_observed_exception(type(exc), tx, args=list(exc.args))
-            if id(new_descriptor) in tx.output.side_effects.id_to_variable:
-                return tx.output.side_effects.id_to_variable[id(new_descriptor)]
-            result = PropertyVariable(new_descriptor)
-            # Newly produced descriptor -- register as AttributeMutationNew so
-            # it can be reconstructed from scratch without a source.
-            tx.output.side_effects.track_attribute_mutation_new(result)
-            tx.output.side_effects.id_to_variable[id(new_descriptor)] = result
-            tx.output.side_effects.keepalive.append(new_descriptor)
-            return result
-
-        if name == "__set_name__":
-            try:
-                py_args = [_unwrap_property_arg(a) for a in args]
-                py_kwargs = {k: _unwrap_property_arg(v) for k, v in kwargs.items()}
-            except NotImplementedError:
-                unimplemented(
-                    gb_type="property.__set_name__ with unsupported arguments",
-                    context="property.__set_name__",
-                    explanation=(
-                        "property.__set_name__ received arguments that cannot be "
-                        "unwrapped to Python objects"
-                    ),
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-            try:
-                res = self.descriptor.__set_name__(*py_args, **py_kwargs)
-            except Exception as exc:
-                raise_observed_exception(type(exc), tx, args=list(exc.args))
-            return ConstantVariable.create(res)
-
-        if name == "__get__":
-            if (len(args) in (1, 2)) and not kwargs:
-                obj = (
-                    None
-                    if args[0].is_python_constant() and args[0].as_python_constant() is None
-                    else args[0]
-                )
-                owner = args[1] if len(args) == 2 else VariableTracker.build(tx, type(obj))
-                return self.tp_descr_get_impl(tx, obj, owner)
-
-        if name == "__set__":
-            if len(args) == 2 and not kwargs:
-                return self.tp_descr_set_impl(tx, args[0], args[1])
-
-        if name == "__delete__":
-            if len(args) == 1 and not kwargs:
-                return self.tp_descr_set_impl(tx, args[0], None)
-
-        if name == "__setattr__":
-            if len(args) != 2:
-                raise AssertionError(f"__setattr__ expects 2 args, got {len(args)}")
-            name_var, val = args
-            if not name_var.is_python_constant():
-                unimplemented(
-                    gb_type="setattr on property with non-constant attribute name",
-                    context="property.__setattr__",
-                    explanation=(
-                        "Dynamo cannot trace setattr on a property descriptor "
-                        "with a dynamic attribute name"
-                    ),
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-            attr_name = name_var.as_python_constant()
-            getset = self.lookup_tp_getset_member(attr_name)
-            if getset is not None and getset.setter is not None:
-                getset.setter(self, tx, val)
-                return val
-            cls = self.python_type()
-            if cls is not property:
-                if hasattr(self.descriptor, "__dict__"):
-                    store_attr_mutation(tx, self, attr_name, val)
-                    return val
-                elif hasattr(cls, attr_name):
-                    slot = getattr(cls, attr_name)
-                    if isinstance(slot, types.MemberDescriptorType):
-                        store_attr_mutation(tx, self, attr_name, val)
-                        return val
-            raise_attribute_error(
-                tx,
-                f"'{self.python_type_name()}' object has no attribute '{attr_name}'"
-                if cls is property
-                else f"'{self.python_type_name()}' object attribute '{attr_name}' is read-only",
-            )
-
-        if name == "__delattr__":
-            if len(args) != 1:
-                raise AssertionError(f"__delattr__ expects 1 arg, got {len(args)}")
-            name_var = args[0]
-            if not name_var.is_python_constant():
-                unimplemented(
-                    gb_type="delattr on property with non-constant attribute name",
-                    context="property.__delattr__",
-                    explanation=(
-                        "Dynamo cannot trace delattr on a property descriptor "
-                        "with a dynamic attribute name"
-                    ),
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-            attr_name = name_var.as_python_constant()
-            if attr_name == "__doc__":
-                self._doc_setter(tx, None)
-                return ConstantVariable.create(None)
-            cls = self.python_type()
-            if cls is not property and hasattr(self.descriptor, "__dict__"):
-                pending = load_pending_mutation(tx, self, attr_name)
-                if pending is not None:
-                    if isinstance(pending, variables.DeletedVariable):
-                        raise_attribute_error(
-                            tx,
-                            f"'{self.python_type_name()}' object has no attribute '{attr_name}'",
-                        )
-                elif attr_name not in self.descriptor.__dict__:
-                    raise_attribute_error(
-                        tx,
-                        f"'{self.python_type_name()}' object has no attribute '{attr_name}'",
-                    )
-                store_attr_mutation(tx, self, attr_name, variables.DeletedVariable())
-                return ConstantVariable.create(None)
-            raise_attribute_error(
-                tx,
-                f"'{self.python_type_name()}' object has no attribute '{attr_name}'",
-            )
-
-        return super().call_method(tx, name, args, kwargs)
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.append_output(codegen.create_load_const_unchecked(self.descriptor))
-
-    @classmethod
-    def create_from_call(
-        cls,
-        target_cls: type,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        try:
-            py_args = [_unwrap_property_arg(arg) for arg in args]
-            py_kwargs = {k: _unwrap_property_arg(v) for k, v in kwargs.items()}
-        except NotImplementedError:
+        if self.descriptor is not None:
             unimplemented(
-                gb_type="property subclass construction with unsupported arguments",
-                context=f"Constructing {target_cls}",
-                explanation=(
-                    f"Constructing a property subclass {target_cls} with "
-                    "arguments that cannot be unwrapped to Python objects"
-                ),
+                gb_type="property.getter/setter/deleter with unsupported argument",
+                context=f"property.{name} on an existing property",
+                explanation="Dynamo cannot determine whether an existing property's docstring was copied from its getter.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
+        args = [self._field(tx, field) for field in ("fget", "fset", "fdel")]
+        if not value.is_constant_none():
+            args[("getter", "setter", "deleter").index(name)] = value
+        # Subclass docs live in the instance dict or slot, while property_copy
+        # reads the base property's internal doc field, which remains empty.
+        args.append(
+            ConstantVariable.create(None)
+            if self.getter_doc or self.python_type() is not property
+            else self._doc_getter(tx)
+        )
+        if self.cls is None:
+            raise AssertionError("A new property must have a class")
+        result = self.cls.call_function(tx, args, {})
+        if isinstance(result, PropertyVariable) and sys.version_info >= (3, 13):
+            name_value = load_pending_mutation(tx, self, "__name__")
+            if name_value is not None:
+                store_attr_mutation(tx, result, "__name__", name_value)
+        return result
 
-        try:
-            prop = target_cls(*py_args, **py_kwargs)
-        except Exception as exc:
-            raise_observed_exception(type(exc), tx, args=list(exc.args))
+    def _getter(self, tx, args, kwargs):
+        return self._copy(tx, "getter", args[0])
 
-        if isinstance(prop, property):
-            if id(prop) in tx.output.side_effects.id_to_variable:
-                return tx.output.side_effects.id_to_variable[id(prop)]
-            result = cls(prop)
-            # Property is newly constructed inside the compiled region -- no
-            # outer-scope source.  Register as AttributeMutationNew so that
-            # codegen_save_tempvars can reconstruct it via reconstruct().
-            tx.output.side_effects.track_attribute_mutation_new(result)
-            tx.output.side_effects.id_to_variable[id(prop)] = result
-            tx.output.side_effects.keepalive.append(prop)
-            return result
-        return VariableTracker.build(tx, prop)
+    def _setter(self, tx, args, kwargs):
+        return self._copy(tx, "setter", args[0])
 
-    @classmethod
-    def tp_new_impl(
-        cls,
-        self_vt: VariableTracker,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        """Handle property.__new__(target_cls, fget=None, ...).
+    def _deleter(self, tx, args, kwargs):
+        return self._copy(tx, "deleter", args[0])
 
-        property.__new__ is PyType_GenericNew in CPython -- it only allocates;
-        __init__ fills in fget/fset/fdel/doc.  Calling T(*a) for real would
-        run __init__ twice and skip CPython's subtype guard (raises TypeError
-        for non-property subtypes).  Instead we:
-          1. Validate target_cls is a property subclass.
-          2. Delegate to create_from_call which calls target_cls(fget,...).
-        """
-        from .builtin import BuiltinVariable
-
-        if not args:            raise_type_error(tx, "property.__new__(): not enough arguments")
-        cls_arg = args[0]
-        try:
-            target_cls = cls_arg.as_python_constant()
-        except Exception:
-            unimplemented(
-                gb_type="property.__new__ with non-constant class argument",
-                context=f"property.__new__({cls_arg})",
-                explanation=(
-                    "property.__new__ requires a constant class argument "
-                    "to determine the property subclass to construct"
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        # CPython checks: type must be a subtype of property.
-        if not (isinstance(target_cls, type) and issubclass(target_cls, property)):
+    def _set_name(self, tx, args, kwargs):
+        if len(args) != 2 or kwargs:
             raise_type_error(
                 tx,
-                f"property.__new__({target_cls!r}): "
-                f"{target_cls!r} is not a subtype of property",
+                f"__set_name__() takes 2 positional arguments but {len(args)} were given",
             )
-        return cls.create_from_call(target_cls, tx, list(args[1:]), kwargs)
+        if sys.version_info >= (3, 13):
+            store_attr_mutation(tx, self, "__name__", args[1])
+        return ConstantVariable.create(None)
+
+    tp_methods = {
+        "getter": Method(_getter),
+        "setter": Method(_setter),
+        "deleter": Method(_deleter),
+        "__set_name__": Method(_set_name),
+    }
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        if self.descriptor is not None:
+            codegen.append_output(codegen.create_load_const_unchecked(self.descriptor))
+            return
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(__name__, "_reconstruct_property")
+        )
+        codegen(self.cls)
+        for name in ("fget", "fset", "fdel", "doc"):
+            codegen(self.fields.get(name, ConstantVariable.create(None)))
+        codegen(ConstantVariable.create(self.initialized))
+        codegen.extend_output(create_call_function(6, False))
+
+    def _missing_accessor(
+        self, tx: "InstructionTranslatorBase", obj: VariableTracker, kind: str
+    ) -> None:
+        from .object_protocol import generic_getattr
+
+        display_name = None
+        if sys.version_info >= (3, 13):
+            name = generic_getattr(tx, self, "__name__", ConstantVariable.create(None))
+        else:
+            name = generic_getattr(
+                tx, self._field(tx, "fget"), "__name__", ConstantVariable.create(None)
+            )
+        if name.is_python_constant():
+            display_name = name.as_python_constant()
+        cls_name = obj.python_type().__qualname__
+        if display_name is not None:
+            msg = f"property '{display_name}' of '{cls_name}' object has no {kind}"
+        else:
+            msg = f"property of '{cls_name}' object has no {kind}"
+        raise_attribute_error(tx, msg)
 
     def tp_descr_set_impl(
         self,
@@ -1797,33 +1762,12 @@ class PropertyVariable(VariableTracker):
         obj: VariableTracker,
         value: VariableTracker | None,
     ) -> VariableTracker:
-        attr = "fset" if value is not None else "fdel"
-        fn = getattr(self.descriptor, attr)
-
-        if fn is None:
-            if sys.version_info >= (3, 13):
-                display_name = getattr(self.descriptor, "__name__", None)
-            else:
-                display_name = getattr(self.descriptor.fget, "__name__", None)
-            kind = "setter" if value is not None else "deleter"
-            # property_descr_set formats %R of the owner's *type*, whose
-            # repr is its bare __qualname__ (no module prefix) -- unlike
-            # python_qualified_name(), which mirrors the module-qualified
-            # _PyType_GetFullyQualifiedName used elsewhere (e.g. __repr__).
-            try:
-                cls_name = obj.python_type().__qualname__
-            except NotImplementedError:
-                cls_name = obj.python_type_name()
-            if display_name is not None:
-                msg = f"property '{display_name}' of '{cls_name}' object has no {kind}"
-            else:
-                msg = f"property of '{cls_name}' object has no {kind}"
-            raise_attribute_error(tx, msg)
-
-        args = [obj] if value is None else [obj, value]
-        VariableTracker.build(
-            tx, fn, source=self.source and AttrSource(self.source, attr)
-        ).call_function(tx, args, {})
+        fn = self._field(tx, "fset" if value is not None else "fdel")
+        if fn.is_constant_none():
+            self._missing_accessor(
+                tx, obj, "setter" if value is not None else "deleter"
+            )
+        fn.call_function(tx, [obj] if value is None else [obj, value], {})
         return ConstantVariable.create(None)
 
     def tp_descr_get_impl(
@@ -1832,15 +1776,12 @@ class PropertyVariable(VariableTracker):
         obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
-        # Mirrors property_descr_get: if obj is NULL or None, return self.
-        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1660-L1693
-        if obj is None:
+        if obj is None or obj.is_constant_none():
             return self
-        fget_source = AttrSource(self.source, "fget") if self.source else None
-        fget_vt = VariableTracker.build(
-            tx, self.descriptor.fget, source=fget_source, realize=True
-        )
-        return fget_vt.call_function(tx, [obj], {})
+        fget = self._field(tx, "fget")
+        if fget.is_constant_none():
+            self._missing_accessor(tx, obj, "getter")
+        return fget.call_function(tx, [obj], {})
 
 
 class TupleGetterVariable(VariableTracker):

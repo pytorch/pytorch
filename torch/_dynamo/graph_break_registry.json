@@ -2102,6 +2102,46 @@
       ]
     }
   ],
+  "GB0524": [
+    {
+      "Gb_type": "property subclass with custom descriptor behavior",
+      "Context": "Constructing {target}",
+      "Explanation": "Dynamo cannot construct a property subclass that overrides its descriptor or attribute-access behavior.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5178": [
+    {
+      "Gb_type": "Reinitializing an existing property",
+      "Context": "property.__init__ on an existing property",
+      "Explanation": "Dynamo cannot replay reinitialization of an existing property.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5617": [
+    {
+      "Gb_type": "property getter with a pending docstring mutation",
+      "Context": "property getter with a pending docstring mutation",
+      "Explanation": "Dynamo cannot preserve docstring mutation ordering when reconstructing this property.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1455": [
+    {
+      "Gb_type": "property getter with unsupported docstring lookup",
+      "Context": "property getter {fget}",
+      "Explanation": "Dynamo cannot copy a property docstring from an arbitrary callable object.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0123": [
     {
       "Gb_type": "Unsupported Tensor.backward() call",
@@ -7434,6 +7474,14 @@
     }
   ],
   "GB7101": [
+    {
+      "Gb_type": "property.getter/setter/deleter with unsupported argument",
+      "Context": "property.{name} on an existing property",
+      "Explanation": "Dynamo cannot determine whether an existing property's docstring was copied from its getter.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "property.getter/setter/deleter with unsupported argument",
       "Context": "property.{name}({arg})",

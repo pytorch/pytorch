@@ -1,12 +1,6 @@
-"""Regression tests for TorchDynamo property subclass support.
+# Owner(s): ["module: dynamo"]
 
-Covers the cases tracked in https://github.com/pytorch/pytorch/issues/195901:
-  - Constructing property subclasses inside torch.compile
-  - Slotted property subclasses with/without __doc__ slot
-  - .getter() / .setter() / .deleter() chaining on subclasses
-  - __doc__ read/write semantics matching CPython
-  - Instance attribute access on property subclasses with __dict__
-"""
+"""Regression tests for TorchDynamo property subclass support."""
 
 import sys
 import unittest
@@ -14,52 +8,45 @@ import unittest
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+from torch._dynamo.test_case import run_tests
+from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
-
-# ---------------------------------------------------------------------------
-# Module-level class definitions (match style of test/cpython/v3_13/test_property.py)
-# ---------------------------------------------------------------------------
 
 class PropertySub(property):
     """This is a subclass of property"""
 
 
-class PropertySubSlots(property):
-    """Slotted subclass -- no __doc__ slot, so doc is dropped."""
-    __slots__ = ()
-
-
+@instantiate_parametrized_tests
 class PropertySubclassTests(torch._dynamo.test_case.TestCase):
-    """Regression tests for GitHub issue #195901 (property subclass in Dynamo)."""
+    hw_classification = HardwareClassification.GENERIC
 
-    # ------------------------------------------------------------------
-    # test_issue41287: subclass __doc__ and explicit doc= kwarg
-    # ------------------------------------------------------------------
-    @unittest.skipIf(sys.flags.optimize >= 2, "Docstrings are omitted with -O2 and above")
+    @unittest.skipIf(
+        sys.flags.optimize >= 2, "Docstrings are omitted with -O2 and above"
+    )
     def test_issue41287(self):
-        """property subclass class docstring and doc= kwarg are preserved."""
-
         def fn():
             cls_doc = PropertySub.__doc__
             inst_doc = PropertySub(None, None, None, "issue 41287 is fixed").__doc__
             return cls_doc, inst_doc
 
         cls_doc, inst_doc = fn()
-        self.assertEqual(cls_doc, "This is a subclass of property",
-                         "Docstring of `property` subclass is ignored")
-        self.assertEqual(inst_doc, "issue 41287 is fixed",
-                         "Subclasses of `property` ignores `doc` constructor argument")
+        self.assertEqual(cls_doc, "This is a subclass of property")
+        self.assertEqual(inst_doc, "issue 41287 is fixed")
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         cls_doc2, inst_doc2 = opt_fn()
         self.assertEqual(cls_doc2, "This is a subclass of property")
         self.assertEqual(inst_doc2, "issue 41287 is fixed")
 
-    # ------------------------------------------------------------------
-    # Slotted subclass: no __doc__ slot -- doc silently dropped
-    # ------------------------------------------------------------------
+    @unittest.skipIf(
+        sys.version_info < (3, 13), "Requires Python 3.13 property semantics"
+    )
     def test_property_with_slots_no_docstring(self):
-        """Slotted property subclass (no __doc__ slot): __doc__ reads None."""
         class slotted_prop(property):
             __slots__ = ("foo",)
 
@@ -71,9 +58,10 @@ class PropertySubclassTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertIsNone(opt_fn())
 
-    @unittest.skipIf(sys.flags.optimize >= 2, "Docstrings are omitted with -O2 and above")
+    @unittest.skipIf(
+        sys.flags.optimize >= 2, "Docstrings are omitted with -O2 and above"
+    )
     def test_property_with_slots_docstring_silently_dropped(self):
-        """Explicit doc= kwarg on slotted subclass without __doc__ slot: dropped."""
         class slotted_prop(property):
             __slots__ = ("foo",)
 
@@ -85,12 +73,13 @@ class PropertySubclassTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertIsNone(opt_fn())
 
-    # ------------------------------------------------------------------
-    # Slotted subclass WITH __doc__ slot: doc is preserved
-    # ------------------------------------------------------------------
-    @unittest.skipIf(sys.flags.optimize >= 2, "Docstrings are omitted with -O2 and above")
+    @unittest.skipIf(
+        sys.flags.optimize >= 2, "Docstrings are omitted with -O2 and above"
+    )
+    @unittest.skipIf(
+        sys.version_info < (3, 13), "Requires Python 3.13 property semantics"
+    )
     def test_property_with_slots_and_doc_slot_docstring_present(self):
-        """Slotted subclass with __doc__ slot: doc kwarg and getter doc preserved."""
         class slotted_prop(property):
             __slots__ = ("foo", "__doc__")
 
@@ -114,12 +103,7 @@ class PropertySubclassTests(torch._dynamo.test_case.TestCase):
         opt_fn2 = torch.compile(fn_getter, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn2(), "what's up getter doc?")
 
-    # ------------------------------------------------------------------
-    # .getter() / .setter() / .deleter() chaining preserves subclass type
-    # ------------------------------------------------------------------
     def test_property_subclass_getter_chaining(self):
-        """property.getter() on a subclass returns the same subclass type."""
-
         class Sub(property):
             pass
 
@@ -138,41 +122,50 @@ class PropertySubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(val2, 2)
 
     def test_property_subclass_setter_chaining(self):
-        """property.setter() on a subclass preserves the subclass type."""
-
         class Sub(property):
             pass
 
         def fn():
             p = Sub(lambda self: 1)
-            p2 = p.setter(lambda self, v: None)
-            return type(p2).__name__
 
-        self.assertEqual(fn(), "Sub")
+            def setter(self, v):
+                return v + 1
+
+            p2 = p.setter(setter)
+            return (
+                type(p2).__name__,
+                p2.fget is p.fget,
+                p2.fset is setter,
+                p2.fset(None, 2),
+            )
+
+        self.assertEqual(fn(), ("Sub", True, True, 3))
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(), "Sub")
+        self.assertEqual(opt_fn(), fn())
 
     def test_property_subclass_deleter_chaining(self):
-        """property.deleter() on a subclass preserves the subclass type."""
-
         class Sub(property):
             pass
 
         def fn():
             p = Sub(lambda self: 1)
-            p2 = p.deleter(lambda self: None)
-            return type(p2).__name__
 
-        self.assertEqual(fn(), "Sub")
+            def deleter(self):
+                return 3
+
+            p2 = p.deleter(deleter)
+            return (
+                type(p2).__name__,
+                p2.fget is p.fget,
+                p2.fdel is deleter,
+                p2.fdel(None),
+            )
+
+        self.assertEqual(fn(), ("Sub", True, True, 3))
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(), "Sub")
+        self.assertEqual(opt_fn(), fn())
 
-    # ------------------------------------------------------------------
-    # Instance dict attribute access on subclasses with __dict__
-    # ------------------------------------------------------------------
     def test_property_subclass_instance_dict_attr(self):
-        """Property subclasses with __dict__ support arbitrary attribute sets."""
-
         class Tagged(property):
             pass
 
@@ -185,12 +178,7 @@ class PropertySubclassTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(), "mytag")
 
-    # ------------------------------------------------------------------
-    # __doc__ write semantics
-    # ------------------------------------------------------------------
     def test_property_doc_write_base(self):
-        """property (base) __doc__ is writable."""
-
         def fn():
             p = property(lambda self: 1)
             p.__doc__ = "new doc"
@@ -201,8 +189,6 @@ class PropertySubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(), "new doc")
 
     def test_property_subclass_doc_write_with_dict(self):
-        """property subclass with __dict__: __doc__ is writable."""
-
         class Sub(property):
             pass
 
@@ -216,52 +202,152 @@ class PropertySubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(), "written")
 
     def test_property_subclass_doc_write_readonly(self):
-        """Slotted subclass WITHOUT __doc__ slot: writing __doc__ raises AttributeError."""
-
         class slotted_prop(property):
             __slots__ = ("foo",)
 
         def fn():
-            p = slotted_prop(lambda self: 1)
-            p.__doc__ = "nope"
-
-        # Eager: AttributeError is raised directly.
-        with self.assertRaises(AttributeError):
-            fn()
-
-        # Compiled: Dynamo surfaces it as Unsupported (observed exception at the
-        # top-level compiled frame with no handler) rather than re-raising the
-        # AttributeError directly.  Both confirm the write is rejected.
-        import torch._dynamo.exc
+            p = slotted_prop()
+            try:
+                p.__doc__ = "nope"
+            except AttributeError as exc:
+                return str(exc)
+            return None
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaises((AttributeError, torch._dynamo.exc.Unsupported)):
-            opt_fn()
+        self.assertIsNotNone(fn())
+        self.assertEqual(opt_fn(), fn())
 
-    # ------------------------------------------------------------------
-    # property used as a class-level descriptor (integration smoke test)
-    # ------------------------------------------------------------------
-    def test_property_subclass_as_descriptor(self):
-        """property subclass installed on a class works under torch.compile."""
+    @parametrize("construct", [False, True])
+    def test_descriptor_override(self, construct):
+        class Sub(property):
+            def __get__(self, obj, owner=None):
+                return obj + 2
 
-        class LoggedProperty(property):
-            pass
+        prop = Sub(lambda obj: obj + 1)
 
-        class MyObj:
-            def __init__(self, v):
-                self._v = v
+        def fn(x):
+            p = Sub(lambda obj: obj + 1) if construct else prop
+            return p.__get__(x)
 
-            @LoggedProperty
-            def value(self):
-                return self._v
+        x = torch.ones(2)
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=not construct)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertGreater(counter.frame_count, 0)
 
-        def fn(obj):
-            return obj.value
+    def test_closure_rebinding(self):
+        def fn(x):
+            value = 1
 
-        obj = MyObj(7)
+            def getter(obj):
+                return obj + value
+
+            prop = PropertySub(getter)
+            value = 2
+            return prop.__get__(x), prop.fget is getter
+
+        x = torch.ones(2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(obj), 7)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    @parametrize("cls", [property, PropertySub])
+    def test_return_property(self, cls):
+        def fn(x):
+            prop = cls(lambda obj: obj + x)
+            return x + 1, prop
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        first_result, first = opt_fn(x)
+        second_result, second = opt_fn(x)
+        self.assertEqual(first_result, x + 1)
+        self.assertEqual(second_result, x + 1)
+        self.assertIsInstance(first, cls)
+        self.assertIsInstance(second, cls)
+        self.assertIsNot(first, second)
+        self.assertEqual(first.fget(x), x + x)
+        self.assertEqual(second.fget(x), x + x)
+
+    @parametrize("cls", [property, PropertySub])
+    def test_new_only_allocates(self, cls):
+        def fn(x):
+            prop = property.__new__(cls, lambda obj: obj)
+            return x + 1, prop.fget, prop.fset, prop.fdel
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_subclass_constructor_side_effects(self):
+        class Sub(property):
+            def __new__(cls, getter, events):
+                events.append("new")
+                return property.__new__(cls)
+
+            def __init__(self, getter, events):
+                events.append("init")
+                super().__init__(getter)
+
+        def fn(x, events):
+            prop = Sub(lambda obj: obj + 1, events)
+            return prop.__get__(x)
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for _ in range(2):
+            events = []
+            self.assertEqual(opt_fn(x, events), x + 1)
+            self.assertEqual(events, ["new", "init"])
+
+    @parametrize("cls", [property, PropertySub])
+    def test_undocumented_getter_doc(self, cls):
+        def getter(obj):
+            return obj
+
+        def fn():
+            return cls(getter).__doc__
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertIsNone(fn())
+        self.assertEqual(opt_fn(), fn())
+
+    @parametrize("cls", [property, PropertySub])
+    def test_doc_write_then_replace_undocumented_getter(self, cls):
+        def getter(obj):
+            return obj
+
+        def replacement(obj):
+            """replacement doc"""
+            return obj
+
+        def fn():
+            prop = cls(getter)
+            prop.__doc__ = "updated doc"
+            return prop.getter(replacement).__doc__
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(), fn())
+
+    @parametrize("cls", [property, PropertySub])
+    def test_doc_write_then_getter(self, cls):
+        def getter(obj):
+            """original getter"""
+            return obj + 1
+
+        def replacement(obj):
+            """replacement getter"""
+            return obj + 2
+
+        def fn(x):
+            prop = cls(getter, doc="explicit doc")
+            prop.__doc__ = "updated doc"
+            copied = prop.getter(replacement)
+            return copied.__get__(x), copied.__doc__
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()

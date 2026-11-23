@@ -4012,7 +4012,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
         ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
             if source is not None:
-                if isinstance(mro_lookup(type(self.value), name), property):
+                if type(mro_lookup(type(self.value), name)) is property:
                     # Guarding the result would call the property getter again.
                     return TorchInGraphFunctionVariable(  # noqa: RVT001
                         member, source=source

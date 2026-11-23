@@ -213,7 +213,6 @@ _MUTABLE_GETATTRIBUTES: tuple[Any, ...] = (
     collections.defaultdict.__getattribute__,
     collections.deque.__getattribute__,
     BaseException.__getattribute__,
-    property.__getattribute__,
 )
 if sys.version_info < (3, 13):
     # SimpleNamespace names tp_getattro in its static struct before 3.13, so
@@ -1274,11 +1273,12 @@ class SideEffects:
                     explanation="We cannot reconstruct a torch.autograd.Function's context object.",
                     hints=[],
                 )
-            elif isinstance(var, variables.ExceptionVariable):
-                # Exceptions cannot be built via object.__new__ (CPython rejects
-                # it), so reconstruct() constructs by calling the type. Cache
-                # the result so later references load the single instance; any
-                # __dict__ attributes replay in codegen_update_mutated.
+            elif isinstance(
+                var, (variables.ExceptionVariable, variables.PropertyVariable)
+            ):
+                # These types cannot be allocated by object.__new__. Cache
+                # their reconstruction so aliases share the same instance;
+                # attribute mutations replay in codegen_update_mutated.
                 var.reconstruct(cg)
                 cg.add_cache(var)
                 var.source = TempLocalSource(cg.tempvars[var])

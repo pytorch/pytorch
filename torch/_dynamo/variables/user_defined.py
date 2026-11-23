@@ -629,6 +629,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             frozenset.__new__,
             tuple.__new__,
             list.__new__,
+            property.__new__,
             int.__new__,
             float.__new__,
             str.__new__,
@@ -1374,6 +1375,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         set,
         frozenset,
         list,
+        property,
     }
 
     @staticmethod
@@ -1698,8 +1700,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             result.call_method(tx, "__init__", list(args), kwargs)
             return result
         elif isinstance(self.value, type) and issubclass(self.value, property):
-            return variables.PropertyVariable.create_from_call(
-                self.value, tx, args, kwargs
+            return tx.inline_user_function_return(
+                VariableTracker.build(
+                    tx, polyfills.instantiate_user_defined_class_object
+                ),
+                [self, *args],
+                kwargs,
             )
         elif is_typeddict(self.value):
             if self.value.__optional_keys__:  # type: ignore[attr-defined]
