@@ -17,7 +17,7 @@ class TestFusedAdamClipping(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
-    @parametrize("optimizer", ["Adam"])
+    @parametrize("optimizer", ["Adam", "AdamW"])
     @parametrize("lr_kind", ["float", "cuda_tensor", "cpu_tensor"])
     @parametrize("amsgrad", [False, True])
     @parametrize("max_norm", [0.0, 1.0, 1e6])
@@ -95,7 +95,7 @@ class TestFusedAdamClipping(TestCase):
                         maxima[i], ref_opt.state[q]["max_exp_avg_sq"], rtol=0, atol=0
                     )
 
-    @parametrize("optimizer", ["Adam"])
+    @parametrize("optimizer", ["Adam", "AdamW"])
     @parametrize("amsgrad", [False, True])
     @torch.no_grad()
     def test_mixed_precision_states(self, device, optimizer, amsgrad):
@@ -155,7 +155,7 @@ class TestFusedAdamClipping(TestCase):
                     maximum, ref.state[q]["max_exp_avg_sq"], rtol=0, atol=0
                 )
 
-    @parametrize("optimizer", ["Adam"])
+    @parametrize("optimizer", ["Adam", "AdamW"])
     @parametrize("invalid", ["dtype", "shape", "device", "grad_scale"])
     def test_invalid_coefficient(self, device, optimizer, invalid):
         p = torch.ones(9, device=device)
@@ -198,7 +198,7 @@ class TestFusedAdamClipping(TestCase):
         self.assertEqual(avg, torch.zeros_like(avg))
         self.assertEqual(square, torch.zeros_like(square))
 
-    @parametrize("optimizer", ["Adam"])
+    @parametrize("optimizer", ["Adam", "AdamW"])
     @parametrize("tensor_lr", [False, True])
     @parametrize("amsgrad", [False, True])
     def test_found_inf_skips_update(self, device, optimizer, tensor_lr, amsgrad):

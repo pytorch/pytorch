@@ -17,7 +17,8 @@ void _fused_adamw_amsgrad_cuda_impl_(
     const double eps,
     const bool maximize,
     const std::optional<at::Tensor>& grad_scale,
-    const std::optional<at::Tensor>& found_inf);
+    const std::optional<at::Tensor>& found_inf,
+    const std::optional<at::Tensor>& grad_clip_coef = std::nullopt);
 
 void _fused_adamw_amsgrad_cuda_impl_(
     at::TensorList params,
@@ -33,6 +34,7 @@ void _fused_adamw_amsgrad_cuda_impl_(
     const double eps,
     const bool maximize,
     const std::optional<at::Tensor>& grad_scale,
-    const std::optional<at::Tensor>& found_inf);
+    const std::optional<at::Tensor>& found_inf,
+    const std::optional<at::Tensor>& grad_clip_coef = std::nullopt);
 
 } // namespace at::native
