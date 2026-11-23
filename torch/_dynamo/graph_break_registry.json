@@ -7571,6 +7571,16 @@
       ]
     }
   ],
+  "GB1124": [
+    {
+      "Gb_type": "Using a getset descriptor on a class created in the same frame",
+      "Context": "{self.descriptor.__objclass__.__name__}.{self.descriptor.__name__}",
+      "Explanation": "Dynamo cannot safely use this descriptor on a class being rebuilt.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4909": [
     {
       "Gb_type": "DELETE_GLOBAL in non-module globals",

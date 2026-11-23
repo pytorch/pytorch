@@ -429,6 +429,40 @@ class MiscTests(torch._inductor.test_case.TestCase):
             cls.__qualname__ = "B"
             return x + int("B" in "%s" % cls)
 
+        def read_inplace_percent_format(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            value = "%s"
+            value %= cls
+            return x + int("B" in value)
+
+        def call_percent_dunder(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in "%s".__mod__(cls))
+
+        def read_type_dict_descriptor(x):
+            cls = type("A", (), {})
+            cls.answer = 42
+            namespace = type.__dict__["__dict__"].__get__(cls)
+            return x + int("answer" in namespace)
+
+        def set_type_name_descriptor(x):
+            cls = type("A", (), {})
+            try:
+                type.__dict__["__name__"].__set__(cls, 1)
+            except TypeError:
+                return x + 1
+            return x
+
+        def delete_type_doc_descriptor(x):
+            cls = type("A", (), {})
+            try:
+                type.__dict__["__doc__"].__delete__(cls)
+            except TypeError:
+                return x + 1
+            return x
+
         def call_type_setattr(x):
             cls = type("A", (), {})
             type.__setattr__(cls, "answer", 42)
@@ -469,6 +503,26 @@ class MiscTests(torch._inductor.test_case.TestCase):
             (
                 read_percent_format,
                 "Percent-formatting a class created in the same frame",
+            ),
+            (
+                read_inplace_percent_format,
+                "Percent-formatting a class created in the same frame",
+            ),
+            (
+                call_percent_dunder,
+                "Percent-formatting a class created in the same frame",
+            ),
+            (
+                read_type_dict_descriptor,
+                "Using a getset descriptor on a class created in the same frame",
+            ),
+            (
+                set_type_name_descriptor,
+                "Using a getset descriptor on a class created in the same frame",
+            ),
+            (
+                delete_type_doc_descriptor,
+                "Using a getset descriptor on a class created in the same frame",
             ),
             (
                 call_type_setattr,

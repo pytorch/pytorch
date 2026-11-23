@@ -139,6 +139,25 @@ class ConstantVariable(VariableTracker):
 
         def impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
             if not other.is_python_constant():
+                if ty is str:
+                    found_new_class = False
+
+                    def visit(vt: VariableTracker) -> None:
+                        nonlocal found_new_class
+                        found_new_class |= isinstance(
+                            vt, variables.user_defined.NewClassVariable
+                        )
+
+                    VariableTracker.visit(visit, other)
+                    if found_new_class:
+                        unimplemented(
+                            gb_type="Percent-formatting a class created in the same frame",
+                            context="percent-formatting a class created in the same frame",
+                            explanation="Dynamo cannot safely format this class while it has deferred mutations.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                            skip_frame=True,
+                            preserve_skip_frame_after_inline=True,
+                        )
                 return ConstantVariable.create(NotImplemented)
             return ConstantVariable._fold(tx, rev if reverse else fwd, self, other)
 

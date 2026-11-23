@@ -842,17 +842,6 @@ def _uses_custom_classinfo_check(
     return False
 
 
-def _contains_new_class_variable(value: Any) -> bool:
-    found = False
-
-    def visit(vt: VariableTracker) -> None:
-        nonlocal found
-        found |= isinstance(vt, variables.user_defined.NewClassVariable)
-
-    VariableTracker.visit(visit, value)
-    return found
-
-
 class BuiltinVariable(TypeVariable):
     """
     A VariableTracker that represents a built-in value (functions and operators).
@@ -3482,7 +3471,16 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if _contains_new_class_variable((_format_string, args, kwargs)):
+        found_new_class = False
+
+        def visit(vt: VariableTracker) -> None:
+            nonlocal found_new_class
+            found_new_class |= isinstance(
+                vt, variables.user_defined.NewClassVariable
+            )
+
+        VariableTracker.visit(visit, (_format_string, args, kwargs))
+        if found_new_class:
             unimplemented(
                 gb_type="Formatting a class created in the same frame",
                 context="formatting a class created in the same frame",
@@ -3740,15 +3738,6 @@ class BuiltinVariable(TypeVariable):
     def call_mod(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
-        if _contains_new_class_variable((a, b)):
-            unimplemented(
-                gb_type="Percent-formatting a class created in the same frame",
-                context="percent-formatting a class created in the same frame",
-                explanation="Dynamo cannot safely format this class while it has deferred mutations.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-                skip_frame=True,
-                preserve_skip_frame_after_inline=True,
-            )
         return binary_op(tx, a, b, "nb_remainder", "%")
 
     def call_imod(
