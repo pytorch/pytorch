@@ -9036,8 +9036,8 @@ Tensor grid_sampler_3d_jvp(
 std::tuple<Tensor, Tensor> philox_uniform_bounds_backward(
     const Tensor& grad,
     const Tensor& key,
-    const Tensor& low,
-    const Tensor& high,
+    c10::SymIntArrayRef low_sizes,
+    c10::SymIntArrayRef high_sizes,
     std::array<bool, 2> grad_input_mask) {
   if (!grad.defined()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
@@ -9045,9 +9045,8 @@ std::tuple<Tensor, Tensor> philox_uniform_bounds_backward(
   // The standard sample is regenerated from the key rather than saved.
   auto u = at::empty_like(grad)._philox_uniform_(key);
   return {
-      grad_input_mask[0] ? at::sum_to(grad * (1 - u), low.sym_sizes())
-                         : Tensor(),
-      grad_input_mask[1] ? at::sum_to(grad * u, high.sym_sizes()) : Tensor()};
+      grad_input_mask[0] ? at::sum_to(grad * (1 - u), low_sizes) : Tensor(),
+      grad_input_mask[1] ? at::sum_to(grad * u, high_sizes) : Tensor()};
 }
 
 Tensor philox_uniform_bounds_jvp(
@@ -9063,8 +9062,8 @@ Tensor philox_uniform_bounds_jvp(
 std::tuple<Tensor, Tensor> philox_normal_params_backward(
     const Tensor& grad,
     const Tensor& key,
-    const Tensor& mean,
-    const Tensor& std,
+    c10::SymIntArrayRef mean_sizes,
+    c10::SymIntArrayRef std_sizes,
     std::array<bool, 2> grad_input_mask) {
   if (!grad.defined()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
@@ -9074,10 +9073,10 @@ std::tuple<Tensor, Tensor> philox_normal_params_backward(
     // The standard sample is regenerated from the key rather than saved.
     // Note: For half/bf16, z is rounded to grad's dtype, as is grad * z.
     auto z = at::empty_like(grad)._philox_normal_(key);
-    grad_std = at::sum_to(grad * z, std.sym_sizes());
+    grad_std = at::sum_to(grad * z, std_sizes);
   }
   return {
-      grad_input_mask[0] ? at::sum_to(grad, mean.sym_sizes()) : Tensor(),
+      grad_input_mask[0] ? at::sum_to(grad, mean_sizes) : Tensor(),
       grad_std};
 }
 
