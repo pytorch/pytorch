@@ -226,6 +226,35 @@ def is_floating(x):
 
 
 @triton.jit
+def trunc_to_float(x, float_dtype: tl.constexpr):
+    # libdevice.trunc only accepts floating-point inputs.
+    if is_floating(x):
+        # Adding zero preserves large results while canonicalizing
+        # libdevice.trunc(-0.0) to Python's +0.0 materialization behavior.
+        return libdevice.trunc(x) + tl.zeros_like(x)
+    else:
+        return x.to(float_dtype)
+
+
+# libdevice.ceil, libdevice.floor, and libdevice.trunc accept only floating-point
+# inputs. Conservatively canonicalized symbolic expressions can still be integer
+# at Triton compile time, so bypass libdevice for those inputs.
+@triton.jit
+def rounding_to_int(x, index_dtype: tl.constexpr, rounding: tl.constexpr):
+    if is_floating(x):
+        if rounding == "ceil":
+            return libdevice.ceil(x).to(index_dtype)
+        elif rounding == "floor":
+            return libdevice.floor(x).to(index_dtype)
+        elif rounding == "trunc":
+            return libdevice.trunc(x).to(index_dtype)
+        else:
+            tl.static_assert(False, "unsupported rounding mode")
+    else:
+        return x.to(index_dtype)
+
+
+@triton.jit
 def _prod_accumulate(a, b):
     return a * b
 

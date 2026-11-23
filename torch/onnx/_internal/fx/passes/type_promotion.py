@@ -29,8 +29,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from types import ModuleType
 
-    from torch._subclasses import fake_tensor
-
 
 logger = logging.getLogger(__name__)
 
@@ -1609,7 +1607,7 @@ class InsertTypePromotion(_pass.Transform):
     def _fetch_fake_args(
         self,
     ) -> Sequence[
-        fake_tensor.FakeTensor
+        torch.Tensor
         | float
         | int
         | bool

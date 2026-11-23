@@ -246,6 +246,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   // Explicitly supplied group names must remain unique among siblings.
   c10::intrusive_ptr<Store> store = c10::static_intrusive_pointer_cast<Store>(
       c10::make_intrusive<PrefixStore>(fmt::format("{}/", groupName), store_));
+  auto op_id = firePreHook(HookOpName::SPLIT, /*async_op=*/false, /*root=*/-1);
   std::string groupDesc = desc.has_value()
       ? desc.value()
       : c10::str(getGroupDesc(), ":split:", incrementSplitCount());
@@ -296,12 +297,12 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     newGroup->setBackend(deviceType, backendType, splitBackend);
     splitBackends.emplace(backendType, splitBackend);
   }
-
-  if (!newGroup) {
-    return nullptr;
+  if (newGroup) {
+    newGroup->setGroupName(groupName);
+    newGroup->setGroupDesc(groupDesc);
   }
-  newGroup->setGroupName(groupName);
-  newGroup->setGroupDesc(groupDesc);
+  firePostHook(
+      HookOpName::SPLIT, /*async_op=*/false, op_id, /*work=*/nullptr, newGroup);
   return newGroup;
 }
 
