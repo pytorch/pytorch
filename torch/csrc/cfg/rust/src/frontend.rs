@@ -65,6 +65,10 @@ struct Builder<'a> {
     /// loop header is read before the loop is complete, so whether it is NULL
     /// is only known once construction is done; a second run uses the answer.
     null_slots: Vec<Vec<bool>>,
+    /// What CALL_FUNCTION_EX found in the place of the NULL next to its
+    /// callable, where it was not the marker: a slot of a loop header whose
+    /// run has not learned yet that it is NULL, or else an error.
+    not_null: Vec<V>,
     forward: Vec<V>,
     phi_block: HashMap<V, usize>,
     phi_ops: HashMap<V, Vec<V>>,
@@ -853,8 +857,11 @@ impl<'a> Builder<'a> {
                     let second = pop!();
                     let first = pop!();
                     let (null, callee) = if self.table.callable_first { (second, first) } else { (first, second) };
-                    if null != NULLMARK || callee == NULLMARK {
+                    if callee == NULLMARK {
                         return unsupported("unexpected CALL_FUNCTION_EX stack layout");
+                    }
+                    if null != NULLMARK {
+                        self.not_null.push(null);
                     }
                     let v = emit!(off, Op::CallEx { callee, args, kwargs });
                     stack.push(v);
@@ -1410,6 +1417,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
             entry_depth: vec![None; nblocks],
             entry_stacks: vec![Vec::new(); nblocks],
             null_slots: null_slots.clone(),
+            not_null: Vec::new(),
             const_values: HashSet::new(),
             forward: Vec::new(),
             phi_block: HashMap::new(),
@@ -1494,6 +1502,9 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
             null_slots[b] = slots;
         }
         if !learned {
+            if !builder.not_null.is_empty() {
+                return unsupported("unexpected CALL_FUNCTION_EX stack layout");
+            }
             break (builder, params);
         }
         attempts += 1;
