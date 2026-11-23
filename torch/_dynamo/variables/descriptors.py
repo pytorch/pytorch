@@ -49,7 +49,7 @@ from .base import (
 from .constant import ConstantVariable
 from .functions import BaseUserFunctionVariable, UserMethodVariable
 from .object_protocol import mro_lookup, python_constant_repr_impl
-from .user_defined import UserDefinedObjectVariable
+from .user_defined import setattr_hackcheck, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
@@ -248,6 +248,8 @@ class WrapperDescriptorVariable(DescriptorVariable):
         # and find Python overrides on subclasses. Routing through the class
         # mirrors CPython's wrapperdescr_call which invokes the C slot directly.
         obj = obj.realize()
+        if name in ("__setattr__", "__delattr__"):
+            setattr_hackcheck(tx, obj, self.descriptor)
         # The VT class modeling objclass, e.g. ConstDictVariable for
         # dict.__eq__ on an OrderedDict: its impl, not the subclass VT's.
         vt_cls = _vt_cls_modeling(obj, objclass)
@@ -326,8 +328,13 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         "__self__": Member(lambda s, tx: s.obj, readonly_setter),
     }
 
-    def get_real_python_backed_value(self) -> types.MethodWrapperType:
-        return self.as_python_constant()
+    def get_real_python_backed_value(self) -> object:
+        # The owner may be backed by a real object without being a constant
+        # (e.g. an lru_cache wrapper).
+        obj_value = self.obj.get_real_python_backed_value()
+        if obj_value is NO_SUCH_SUBOBJ:
+            return NO_SUCH_SUBOBJ
+        return self.descriptor.__get__(obj_value, type(obj_value))
 
     def is_python_constant(self) -> bool:
         return self.obj.is_python_constant()
@@ -801,6 +808,8 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
         # producing a builtin_function_or_method via PyCMethod_New.
         # It first requires owner to be a type and a subtype of __objclass__.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
+        if owner.is_constant_none():
+            owner = obj.tp_getattro_impl(tx, "__class__")
         owner_type = owner.python_type()
         if not issubclass(owner_type, type):
             raise_type_error(

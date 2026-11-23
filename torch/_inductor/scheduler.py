@@ -7528,7 +7528,10 @@ class Scheduler:
                         raise AssertionError("No extern kernel detected for fallback")
                     if len(extern_choices) > 1:
                         timings = multi_node.choice_timings()
-                        min_node_unfused = min(extern_choices, key=lambda c: timings[c])
+                        # choice_timings() keeps only the fastest extern choice, so the others have no timing.
+                        min_node_unfused = min(
+                            extern_choices, key=lambda c: timings.get(c, float("inf"))
+                        )
                     else:
                         min_node_unfused = extern_choices[0]
 
