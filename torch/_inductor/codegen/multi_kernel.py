@@ -41,7 +41,7 @@ class MultiKernelState:
 
     def define_dispatcher(self, multi_kernel: "DispatchedMultiKernel") -> str:
         """Register a multi-kernel whose sub-kernel is picked at run time by a
-        dispatcher object in the generated module (MultiKernel, SizeHintMultiKernel;
+        dispatcher object in the generated module (BenchmarkedMultiKernel, SizeHintMultiKernel;
         see DispatchedMultiKernel), and return its name.
 
         Multi-kernels with the same sub-kernels share one name; otherwise a new
@@ -116,7 +116,7 @@ class MultiKernelBase:
     """
     Compile-time state shared by every kernel that wraps several sub-kernels and
     launches one of them. Subclasses decide how the launched one is picked:
-    MultiKernel benchmarks them once and keeps the fastest, SizeHintMultiKernel
+    BenchmarkedMultiKernel benchmarks them once and keeps the fastest, SizeHintMultiKernel
     picks the one tuned for the nearest size hint (both are DispatchedMultiKernels:
     the pick happens at run time, in MultiKernelCall / SizeHintMultiKernelCall),
     and ConditionalMultiKernel checks conditions on every launch, generated inline.
@@ -319,9 +319,7 @@ class DispatchedMultiKernel(MultiKernelBase):
             V.graph.wrapper_code.generate_workspace_deallocation(ws)
 
 
-# TODO: rename to BenchmarkedMultiKernel (keeping a MultiKernel alias): it benchmarks
-# the sub-kernels once and keeps the fastest, unlike ConditionalMultiKernel.
-class MultiKernel(DispatchedMultiKernel):
+class BenchmarkedMultiKernel(DispatchedMultiKernel):
     """
     Launches the fastest of several interchangeable sub-kernels, e.g. persistent
     and looped variants of one reduction (see add_multi_kernel_choices); each is
@@ -348,6 +346,10 @@ class MultiKernel(DispatchedMultiKernel):
             for kernel_name in kernel_names:
                 buf.writeline(f"{kernel_name},")
         buf.writeline("], arg_index=arg_index)")
+
+
+# The previous name, still imported by code outside torch.
+MultiKernel = BenchmarkedMultiKernel
 
 
 class MultiKernelCall:
@@ -639,7 +641,7 @@ class ConditionalMultiKernel(MultiKernelBase):
     """
     Launches the first sub-kernel whose condition holds.
 
-    Unlike MultiKernel, the sub-kernels are not interchangeable: each one is only
+    Unlike BenchmarkedMultiKernel, the sub-kernels are not interchangeable: each one is only
     correct when its condition holds, so the wrapper checks the conditions on every
     launch instead of benchmarking once. Every input must match some condition: the
     last condition is True, or the conditions together must be provably exhaustive,

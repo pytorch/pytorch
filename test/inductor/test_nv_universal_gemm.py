@@ -400,7 +400,7 @@ class TestNVUniversalGemmPDLMetadata(TestCase):
             self.assertTrue(enabled)
 
     def test_pdl_composite_codegen_marks_kernels(self):
-        from torch._inductor.codegen.multi_kernel import MultiKernel
+        from torch._inductor.codegen.multi_kernel import BenchmarkedMultiKernel
         from torch._inductor.codegen.triton import TritonScheduling
 
         def kernel(source, *, persistent=False):
@@ -420,7 +420,7 @@ class TestNVUniversalGemmPDLMetadata(TestCase):
         scheduling.kernel_type = MagicMock(return_value=second)
         with config.patch({"triton.multi_kernel": True}):
             multi_kernel = scheduling.add_multi_kernel_choices(first, [], {})
-        self.assertIsInstance(multi_kernel, MultiKernel)
+        self.assertIsInstance(multi_kernel, BenchmarkedMultiKernel)
         self.assertEqual(len(multi_kernel.kernels), 2)
         self.assertTrue(all(kernel._in_multi_kernel for kernel in multi_kernel.kernels))
 
