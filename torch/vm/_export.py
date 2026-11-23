@@ -19,7 +19,7 @@ from typing import Any
 
 import torch
 
-from . import _types
+from . import _types, passes as listed
 
 
 _BINARY = {
@@ -326,8 +326,6 @@ def build(
     the values it gives, and the guards the passes brought, as (which input,
     check). Or, as a str, why there is none: a pass raised, or returned what
     is no graph of these inputs."""
-    from . import passes as listed
-
     inputs = description["inputs"]
     graded = torch.is_grad_enabled() and any(tensor.requires_grad for tensor in inputs)
     derived = any(isinstance(pass_, listed.AOTAutograd) for pass_ in passes)
@@ -405,3 +403,18 @@ def exporter(
         return build(description, passes, runtime, backward)
 
     return export
+
+
+def _ask_fx() -> None:
+    """``torch.fx`` finds some of its classes when the first node of a process
+    needs them, by importing their modules. That is done here, where this
+    module is imported, and not in the call of a compiled function in which
+    the first graph is made: an import calls ``builtins.__import__``, which
+    eager mode would not call there."""
+    graph = torch.fx.Graph()
+    taken = graph.placeholder("taken")
+    item = graph.call_function(operator.getitem, ([taken], 0), {"held": {"by": taken}})
+    graph.output(item)
+
+
+_ask_fx()
