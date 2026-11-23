@@ -394,7 +394,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
       .def_readonly("total_memory", &DeviceProp::global_mem_size)
       // TODO: Expose cache size by level when available from SYCL
       .def_readonly("last_level_cache_size", &DeviceProp::global_mem_cache_size)
-      .def_property_readonly("gpu_subslice_count", gpu_subslice_count)
+      .def_property_readonly("gpu_subslice_count", xe_core_count)
       .def_property_readonly("xe_core_count", xe_core_count)
       .def_property_readonly("architecture", get_device_architecture)
       .def_property_readonly("type", get_device_type)
