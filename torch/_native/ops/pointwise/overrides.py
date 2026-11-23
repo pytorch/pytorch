@@ -15,6 +15,7 @@ from ...cutedsl.config import POINTWISE_ARCH_MAJORS as _ARCH_MAJORS
 from ...registry import _resolve_overload
 from ...utils import capability as cap
 from ...utils.lazy import LazyModule
+from ...utils.operator import variant_aten_name
 from ...utils.scalar import check_scalar
 from ...utils.tensor import can_use_32bit_indexing, const_data_ptr
 from .layout import output_strides, row_gap_view
@@ -24,7 +25,6 @@ from .table import (
     POINTWISE_VARIANTS,
     PointwiseDef,
     PointwiseVariant,
-    variant_aten_name,
 )
 
 
@@ -43,6 +43,23 @@ else:
 
 
 _SUPPORTED = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+
+
+# Complex and float8 conversions use ATen.
+_CONV_DTYPES = (
+    _SUPPORTED
+    + _INT_DTYPES
+    + (
+        torch.int8,
+        torch.int16,
+        torch.uint8,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
+    )
+)
+
+_CONV_STORAGE_DTYPES = _CONV_DTYPES + (torch.bool,)
 
 
 def _layouts_serveable(ins: Sequence[torch.Tensor]) -> bool:
@@ -219,12 +236,23 @@ def _make_cond(row: PointwiseDef, variant: PointwiseVariant) -> Callable[..., bo
             return False
         if not (cap.device_ok(ref, _ARCH_MAJORS) and cap.on_current_device(ref)):
             return False
+        tgt = _out_tensor(variant, args, kwargs)
+        if variant != "functional":
+            if not (
+                isinstance(tgt, torch.Tensor)
+                and not cap.is_traced(tgt)
+                and is_non_overlapping_and_dense_or_false(tgt)
+                and tgt.device == ref.device
+                and const_data_ptr(tgt) % 16 == 0
+            ):
+                return False
         if not all(_supported(t, dtypes) for t in ins):
             return False
         if any(
             t.device != ref.device and i not in cpu_inputs for i, t in enumerate(ins)
         ):
             return False
+        # Host scalar reads cannot be replayed by CUDA graphs.
         if cpu_inputs and torch.cuda.is_current_stream_capturing():
             return False
         scalars = _scalars(row, args, kwargs)
@@ -251,16 +279,16 @@ def _make_cond(row: PointwiseDef, variant: PointwiseVariant) -> Callable[..., bo
             ):
                 return False
         promotion = None
-        fn_name = None
+        functor = None
         if row.mode_kwarg is not None:
-            fn_name, promotion = _mode_fn_and_promotion(row, args, kwargs)
-            if fn_name is None:
+            functor, promotion = _mode_fn_and_promotion(row, args, kwargs)
+            if functor is None:
                 return False
             # Float div floor/trunc via fmod is inexact; defer to ATen's exact kernels.
             if row.mode_int_only and _mode_of(row, args, kwargs) in row.mode_int_only:
                 if any(t.dtype.is_floating_point for t in ins):
                     return False
-        signature = _signature(row, _promo_key(ins), promotion, fn_name)
+        signature = _signature(row, _promo_key(ins), promotion, functor)
         result = signature.results[0]
         try:
             for scalar, dtype in zip(
@@ -284,28 +312,19 @@ def _make_cond(row: PointwiseDef, variant: PointwiseVariant) -> Callable[..., bo
             return False
         if math.prod(bshape) >= 2**31 - 1:
             return False
-        tgt = _out_tensor(variant, args, kwargs)
         if row.precondition is not None and not row.precondition(ins, tgt):
             return False
         if variant != "functional":
-            if not (
-                isinstance(tgt, torch.Tensor)
-                and not cap.is_traced(tgt)
-                and is_non_overlapping_and_dense_or_false(tgt)
-                and tgt.device == ref.device
-                and const_data_ptr(tgt) % 16 == 0
-            ):
-                return False
             if any(_has_partial_overlap(tgt, t) for t in ins):
                 return False
             if tuple(tgt.shape) != tuple(bshape):
                 return False
-            if tgt.dtype not in _CONV_SRC_DTYPES:
+            if tgt.dtype not in _CONV_STORAGE_DTYPES:
                 return False
             if not torch.can_cast(result, tgt.dtype):
                 return False
             # Generated out kernels use copy_arg, which requires an exact dtype.
-            if (row.output_dispatch or generated_out) and tgt.dtype != result:
+            if (row.exact_out_dtype or generated_out) and tgt.dtype != result:
                 return False
             if _needs_native_narrowing(result, tgt.dtype):
                 return False
@@ -407,22 +426,6 @@ def _make_impl(
         return targets[0] if row.nout == 1 else tuple(targets)
 
     return impl
-
-
-_CONV_DTYPES = (
-    _SUPPORTED
-    + _INT_DTYPES
-    + (
-        torch.int8,
-        torch.int16,
-        torch.uint8,
-        torch.uint16,
-        torch.uint32,
-        torch.uint64,
-    )
-)
-
-_CONV_SRC_DTYPES = _CONV_DTYPES + (torch.bool,)
 
 
 def register_pointwise_overrides() -> None:

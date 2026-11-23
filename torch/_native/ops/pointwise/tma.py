@@ -20,6 +20,10 @@ from .layout import (
 )
 
 
+if _BOX != 32 or _THREADS != 128:
+    raise ValueError("TMA arithmetic requires 32-column tiles and 128 threads")
+
+
 def fake_tensor(
     dtype: NumericType,
     view: tuple[Shape, Shape],
