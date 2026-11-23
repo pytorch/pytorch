@@ -2402,7 +2402,7 @@ class TestCuteDSLSubprocessGroupedGemm(TestCase):
     def test_grouped_gemm_descriptor_seed_at_allocation_end(self):
         device = "cuda"
         dtype = torch.bfloat16
-        group_sizes = (504, 8)
+        group_sizes = (1279, 1)
         K, N = 4096, 1024
         total_rows = sum(group_sizes)
         offsets = torch.tensor(
@@ -2412,12 +2412,9 @@ class TestCuteDSLSubprocessGroupedGemm(TestCase):
         )
 
         a_numel = total_rows * K
-        # Use a 10 MiB, 2 MiB-aligned allocation so the final A slice can be
-        # placed at the end of a fresh CUDA allocation.
-        allocation_bytes = max(
-            10 * 2**20,
-            ((a_numel * dtype.itemsize + 2**21 - 1) // 2**21) * 2**21,
-        )
+        # 1280 * 4096 * 2 bytes is exactly one 10 MiB, 2 MiB-aligned allocation.
+        allocation_bytes = a_numel * dtype.itemsize
+        self.assertEqual(allocation_bytes, 10 * 2**20)
 
         if EXPANDABLE_SEGMENTS:
             self.skipTest("allocation-end regression requires non-expandable segments")
@@ -2434,11 +2431,9 @@ class TestCuteDSLSubprocessGroupedGemm(TestCase):
             }
         ), fresh_cache():
             torch.cuda.empty_cache()
-            storage = torch.randn(
-                allocation_bytes // dtype.itemsize, device=device, dtype=dtype
-            )
-            storage_ptr = storage.untyped_storage().data_ptr()
-            storage_nbytes = storage.numel() * dtype.itemsize
+            A = torch.randn(total_rows, K, device=device, dtype=dtype)
+            storage_ptr = A.untyped_storage().data_ptr()
+            storage_nbytes = A.untyped_storage().nbytes()
             terminal_segments = [
                 segment
                 for segment in torch.cuda.memory_snapshot(include_traces=False)
@@ -2450,7 +2445,6 @@ class TestCuteDSLSubprocessGroupedGemm(TestCase):
             ]
             if not terminal_segments:
                 self.skipTest("storage was not allocated at a CUDA segment boundary")
-            A = storage[-a_numel:].view(total_rows, K)
             B = torch.randn(2, K, N, device=device, dtype=dtype)
             expected = grouped_gemm_fn(A, B, offsets)
             compiled = torch.compile(grouped_gemm_fn, backend="inductor", dynamic=False)
