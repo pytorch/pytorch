@@ -517,7 +517,7 @@ class DeferredTritonCallWrapper:
                 writer(f"{p},")
             writer(params[-1])
 
-        prefix.writeline(f"static __attribute__((noinline)) void {self.wrapper_name}(")
+        prefix.writeline(f"static AOTI_NOINLINE void {self.wrapper_name}(")
         with prefix.indent():
             emit(prefix.writeline_jit, [*shared_params, cubin_dir_param])
             emit(prefix.writeline_aot, [*shared_params, kernels_param, cubin_dir_param])
