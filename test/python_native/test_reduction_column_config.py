@@ -93,6 +93,8 @@ class TestColumnConfig(TestCase):
         """Honor explicit column geometry without rewriting it through policy, even at
         SM107's rubin_sum_c4096_tiled anchor, and derive the free field from the explicit
         one."""
+        if cc == (10, 7):
+            self.assertEqual(self.select(cc=cc).rule, "rubin_sum_c4096_tiled")
         cfg = self.select(cc=cc, **kwargs)
         self.assertEqual(cfg.rule, rule)
         self.assertEqual((cfg.npar, cfg.vec), geometry)

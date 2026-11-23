@@ -94,6 +94,18 @@ class TestKernelRowTile(TestCase):
             ref = x.sum(1)
         self.assertEqual(got, ref, atol=0, rtol=0)
 
+    @parametrize("name", ("sum", "mean", "nansum"))
+    def test_tma_rows_of_negative_zeros_sum_to_positive_zero(self, name):
+        """TMA rows fold leaves, which keep -0.0; ATen's 0.0 + x gives +0.0."""
+        if not rt.tma_ok(128, 4, 65536, torch.device("cuda")):
+            self.skipTest("TMA path not applicable on this device")
+        ops = {"sum": T.SumOps, "mean": T.MeanOps, "nansum": T.NanSumOps}
+        op = ops[name](acc=cutlass.Float32)
+        x = -torch.zeros(65536, 128, device="cuda")
+        kw = {"threads_per_row": 1, "use_tma": True}
+        (got,) = rt.reduce_row_tile(op, "tma_nz", x, [x.dtype], **kw)
+        self.assertEqual(got.view(torch.int32), torch.zeros(65536, dtype=torch.int32))
+
     def test_narrow_one_thread_row_chains(self):
         f32 = cutlass.Float32
         sum_trait = T.SumOps(acc=f32)
@@ -132,7 +144,8 @@ class TestKernelRowTile(TestCase):
     )
     def test_narrow_one_thread_rows_match_warp_chains(self, dtype, columns):
         """Narrow one-thread rows match the row padded with identities to WARP elements
-        bitwise, signed zeros, a subnormal sum and NaNs included. Widths 16 and 24
+        bitwise, signed zeros and NaNs included, plus a subnormal sum for fp32 and bf16
+        (fp64's Float64 accumulator keeps that sum normal). Widths 16 and 24
         (fp32), 8, 16 and 24 (bf16) and 8 and 24 (fp64) reach the leaf branch; 1, 3, 17,
         20 and 22 fold only the masked tail, and 31 keeps WARP chains."""
         M, inf = 4096, float("inf")
@@ -219,6 +232,23 @@ class TestKernelRowTile(TestCase):
         # Row-tile keys end their fixed fields with the device index.
         mine = [k for k in rt._CACHE if "bydevice" in k]
         self.assertEqual(sorted(k[5] for k in mine), [0, 1])
+
+    def test_plans_key_the_device_index(self):
+        # The index follows the alignment in row-tile keys and the destination layout in
+        # inner-tree keys; without it, those slots would hold the next field.
+        trait = T.SumOps(acc=cutlass.Float32)
+        x = torch.randn(64, 512, device="cuda")
+        out = torch.empty(64, device="cuda")
+        (got,) = rt.reduce_row_tile(trait, "bykey", x, [torch.float32], order="linear")
+        self.assertTrue(rt.reduce_row_itree(trait, "bykey", x, out))
+        for result in (got, out):
+            torch.testing.assert_close(
+                result, x.double().sum(1).float(), atol=1e-5, rtol=1e-5
+            )
+        slots = {"rowtile": 5, "rowitree": 7}
+        devices = {(k[0], k[slots[k[0]]]) for k in rt._CACHE if k[1] == "bykey"}
+        index = x.get_device()
+        self.assertEqual(devices, {("rowtile", index), ("rowitree", index)})
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
     def test_launchers_reject_a_non_current_device(self):
