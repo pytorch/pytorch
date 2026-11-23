@@ -12,10 +12,12 @@ C10_METAL_CONSTEXPR int32_t kConv1dDepthwiseOutputsPerThread = 8;
 // once a tile exceeds kMPSGraphDepthwiseTileBytes, and on GPUs older than the
 // Apple9 family (M1, M2) also when it takes exactly that many bytes.
 // kMPSGraphDepthwiseTileOutputs bounds the output columns, output rows and
-// images it gives one threadgroup.
+// images it gives one threadgroup. channels_last inputs of at least
+// kMPSGraphDepthwiseUntiledChannels channels run on a kernel without tiles.
 C10_METAL_CONSTEXPR int32_t kMPSGraphDepthwiseMaxStride = 2;
 C10_METAL_CONSTEXPR int32_t kMPSGraphDepthwiseMaxTaps = 1024;
 C10_METAL_CONSTEXPR int32_t kMPSGraphDepthwiseTileBytes = 65536;
+C10_METAL_CONSTEXPR int32_t kMPSGraphDepthwiseUntiledChannels = 4;
 C10_METAL_CONSTEXPR ::c10::metal::array<::c10::metal::array<int32_t, 3>, 5>
     kMPSGraphDepthwiseTileOutputs = {
         {{2, 2, 32}, {4, 2, 31}, {2, 4, 31}, {16, 2, 16}, {2, 16, 16}}};
