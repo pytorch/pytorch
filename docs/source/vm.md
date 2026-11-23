@@ -1776,6 +1776,52 @@ found["state"], found["reason"]
 # ('vm', 'the compiled graph failed: RuntimeError: what was made of the graph does not run')
 ```
 
+Whether its operations write to a tensor from outside is asked of each take
+of a path, and two takes of the same instructions can differ in it: a batch
+norm updates its running statistics in a call that trains and not in one
+that does not. Such takes are a path each, whichever came first, so that
+what was made of the one that writes is run as what writes, and what it
+raises goes out of the call:
+
+```python
+def normed(x, mean, var, training):
+    y = torch.batch_norm(x * 2, None, None, mean, var, training, 0.1, 1e-5, True)
+    return (torch.relu(y) + 1).mean((2, 3)).sum()
+
+
+def failing(gm, input_types):
+    batch_norm = torch.ops.aten.batch_norm.default
+    norms = [node for node in gm.graph.nodes if node.target is batch_norm]
+    trains, inner, ran = any(node.args[5] is True for node in norms), gm.forward, []
+
+    def forward(*args):  # raises behind the write, the first time it trains
+        out = inner(*args)
+        if trains and not ran:
+            ran.append(True)
+            raise RuntimeError("fails behind the write")
+        return out
+
+    gm.forward = forward
+    return gm
+
+
+g = torch.vm(normed, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), failing))
+images = torch.randn(2, 4, 5, 5)
+mine, theirs = (torch.zeros(4), torch.ones(4)), (torch.zeros(4), torch.ones(4))
+went = []
+for training in (False,) * 5 + (True,) * 5:
+    try:
+        out = g(images, *mine, training)
+        went.append("returned")
+    except RuntimeError:
+        went.append("raised")
+    expected = normed(images, *theirs, training)
+went[5:]  # ['returned', 'raised', 'returned', 'returned', 'returned']
+torch.equal(mine[0], theirs[0])  # True: the statistics were updated once in the call that raised
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+found["paths"]  # 2
+```
+
 What a compiler makes of writes to its inputs depends on which of them
 share memory, and where: it writes a view of an input back to the place the
 view had when it compiled. A form of a path that writes to tensors from
@@ -3306,15 +3352,16 @@ which is what the dashboard's runner does:
 | adv_inception_v3 (timm) | 21.27, 21.13 ms | 8.66, 8.62 ms | 2.45x, 2.45x | 8.45, 8.39 ms | 2.52x, 2.52x | 0.97, 0.97 | 314 x1 |
 | deit_base_distilled_patch16_224 (timm) | 6.68, 6.73 ms | 6.28, 6.29 ms | 1.07x, 1.07x | 6.21, 6.21 ms | 1.08x, 1.08x | 0.99, 0.99 | 233 x1 |
 
-One step before the code of this commit, which since changed which dicts the
-engine looks a name up in (none whose keys are not all plain; the graphs of
-these models are the same on both), by another job with the same tool, which
-enters the runner's own grad mode around the calls: the median of three
-turns in one process, on 16 cores, with the load average between 1.5 and 20,
-falling, and nothing else on the GPU. The graphs that run are those counted
-above (DistillGPT2 with the operations it has on a GPU; of hf_DistilBert the
-graph of a layer and the one of its feed-forward part run six times each in
-a call):
+Two steps before the code of this commit, which since changed which dicts
+the engine looks a name up in (none whose keys are not all plain) and made a
+take that writes to a tensor from outside a path of its own (the graphs of
+these models are the same on all three), by another job with the same tool,
+which enters the runner's own grad mode around the calls: the median of
+three turns in one process, on 16 cores, with the load average between 1.5
+and 20, falling, and nothing else on the GPU. The graphs that run are those
+counted above (DistillGPT2 with the operations it has on a GPU; of
+hf_DistilBert the graph of a layer and the one of its feed-forward part run
+six times each in a call):
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
 |---|---|---|---|---|---|---|---|
@@ -3374,7 +3421,7 @@ that tree's byte for byte), on 16 cores, with the load average between 5 and
 6 and nothing else on the GPU. With gradients recorded only 2 small graphs
 of hf_DistilBert run (6 x1, 4 x1), and its call takes what eager's takes.
 The rows of yolov3 and of DistillGPT2's training step are of the measurement
-of the eight rows above, one step before the code of this commit. yolov3
+of the eight rows above, two steps before the code of this commit. yolov3
 with gradients recorded runs its graph in the process that fills the
 compiler's cache as in a later one ("Limits").
 
