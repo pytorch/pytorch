@@ -176,6 +176,12 @@ pub struct PathInst {
     /// For an operation that was handed a dict with `**`: the names, a
     /// tuple, of its last operands, which no constant of the function is.
     pub named: Option<PyObj>,
+    /// For a read in front of the callable (a global, an attribute of a
+    /// module) that an earlier instruction in front of it makes as well:
+    /// the value that one gives, or NONE. Nothing changes between the
+    /// instructions in front of the callable, so the second read finds
+    /// the object the first found (`Path::of`, `run_stage`).
+    pub again: PathValue,
 }
 
 /// What a check looks at and a callable is handed: a value, or one of the
@@ -3372,6 +3378,66 @@ unsafe fn python_descriptor(descr: Obj) -> bool {
     !is_static(ty) && ffi::PyFunction_Check(descr) == 0 && !is_cache_wrapper(descr)
 }
 
+/// What `getattr(obj, name)` gives (a new reference), where the lookup
+/// runs no Python code and comes down to finding the object in a dict: in
+/// that of a module; in that of an object whose attributes are looked up
+/// as `object` does it and whose class has nothing under the name that
+/// takes the lookup (no descriptor that also takes stores); in one of the
+/// dicts that a `__getattr__` with a shortcut looks into, where the class
+/// has nothing under the name at all. None for every other lookup, quiet
+/// or not: `quiet_attr` says which, and the lookup is made as it is.
+pub unsafe fn read_attr(obj: Obj, name: Obj) -> Option<Obj> {
+    if obj.is_null() || capi::is_unboxed(obj) {
+        return None;
+    }
+    let found = |dict: Obj| {
+        let held = ffi::PyDict_GetItemWithError(dict, name);
+        if held.is_null() {
+            ffi::PyErr_Clear();
+        }
+        (!held.is_null()).then(|| new_ref(held))
+    };
+    let ty = ffi::Py_TYPE(obj);
+    if ffi::PyModule_CheckExact(obj) != 0 {
+        let dict = ffi::PyModule_GetDict(obj);
+        return if dict.is_null() { None } else { found(dict) };
+    }
+    if ty == std::ptr::addr_of_mut!(ffi::PySuper_Type) || ffi::PyType_Check(obj) != 0 {
+        return None;
+    }
+    let object = std::ptr::addr_of!(ffi::PyBaseObject_Type);
+    let generic = (*ty).tp_getattro.map(|own| own as usize) == (*object).tp_getattro.map(|own| own as usize);
+    if !generic && !plain_lookup(obj) {
+        return None;
+    }
+    let descr = pyffi::_PyType_Lookup(ty, name);
+    if !descr.is_null() && (*ffi::Py_TYPE(descr)).tp_descr_set.is_some() {
+        return None;
+    }
+    let slot = pyffi::_PyObject_GetDictPtr(obj);
+    if !slot.is_null() && !(*slot).is_null() {
+        if let Some(held) = found(*slot) {
+            return Some(held);
+        }
+    }
+    if !descr.is_null() || generic || !crate::shortcuts::has_getattr(ty) {
+        return None;
+    }
+    let held = crate::shortcuts::found(obj, name);
+    (!held.is_null()).then(|| new_ref(held))
+}
+
+/// `read_attr`, with what was found put into `found`.
+pub unsafe fn holds_attr(obj: Obj, name: Obj, found: &mut Obj) -> bool {
+    match read_attr(obj, name) {
+        Some(held) => {
+            *found = held;
+            true
+        }
+        None => false,
+    }
+}
+
 /// Whether `getattr(obj, name)` runs no Python code, as far as that can be
 /// told without running it: what the lookup of the object's type would do
 /// is followed up to where it finds the attribute. False where it would
@@ -5154,6 +5220,7 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
             assert: None,
             owner: 0,
             named: None,
+            again: NONE,
         });
     }
     let late = |inst: &PathInst| {
@@ -6087,7 +6154,7 @@ impl Trace {
     pub fn push(&mut self, op: Op, dst: PathValue, kind: Kind, bc: u32) {
         let owner = self.owner();
         self.note(&op, dst, kind);
-        self.body.push(PathInst { op, dst, kind, bc, stage: Stage::Before, in_graph: false, assert: None, owner, named: None });
+        self.body.push(PathInst { op, dst, kind, bc, stage: Stage::Before, in_graph: false, assert: None, owner, named: None, again: NONE });
     }
 
     pub fn check(&mut self, assert: Assert, bc: u32) {
@@ -6700,6 +6767,32 @@ impl Path {
         exits.reverse();
         let held: Vec<bool> = outputs.iter().map(|v| kept[*v as usize]).collect();
         let effects = trace.body.iter().any(|inst| inst.stage == Stage::Landing);
+        // The reads in front of the callable that an earlier one makes as
+        // well: of a global under one name in one module's globals, of an
+        // attribute under one name of one value. Which value a read is of
+        // is followed through such reads.
+        let mut same: Vec<PathValue> = (0..nregs as PathValue).collect();
+        let mut globals: HashMap<(usize, usize, usize), PathValue> = HashMap::new();
+        let mut attributes: HashMap<(PathValue, usize), PathValue> = HashMap::new();
+        for inst in trace.body.iter_mut().filter(|inst| inst.stage == Stage::Before && inst.assert.is_none() && inst.dst != NONE) {
+            let function = unsafe { &(*trace.owners[inst.owner as usize]).func };
+            let first = match &inst.op {
+                Op::LoadGlobal(name) => {
+                    let name = function.consts[*name as usize].as_ptr() as usize;
+                    let key = (function.globals.as_ptr() as usize, function.builtins.as_ptr() as usize, name);
+                    Some(*globals.entry(key).or_insert(inst.dst))
+                }
+                Op::LoadAttr(of, name) => {
+                    let key = (same[*of as usize], function.consts[*name as usize].as_ptr() as usize);
+                    Some(*attributes.entry(key).or_insert(inst.dst))
+                }
+                _ => None,
+            };
+            if let Some(first) = first.filter(|first| *first != inst.dst) {
+                inst.again = first;
+                same[inst.dst as usize] = same[first as usize];
+            }
+        }
         let constants = constants.into_inner();
         let mut feeds: Vec<PathValue> = Vec::new();
         for (at, inst) in trace.body.iter().enumerate().filter(|(_, inst)| inst.kind == Kind::Node || inst.in_graph) {

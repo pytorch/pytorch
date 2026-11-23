@@ -5151,6 +5151,7 @@ impl Compiled {
         function: Obj,
         api: &TcfgApi,
     ) -> Staged {
+        let mut read: Obj = null_mut();
         for inst in path.staged(stage) {
             let owner = &*path.owners[inst.owner as usize];
             if let Some(assert) = &inst.assert {
@@ -5223,6 +5224,26 @@ impl Compiled {
                 }
                 continue;
             }
+            // A read that an instruction in front of this one made: what
+            // that one found is what this one finds. Of a module, whose
+            // attributes are the entries of its dict; anything else is
+            // asked again.
+            if inst.again != NONE && !reg(own, inst.again).is_null() {
+                let found = match &inst.op {
+                    Op::LoadGlobal(_) => true,
+                    Op::LoadAttr(of, _) => {
+                        let held = reg(own, *of);
+                        !held.is_null() && !capi::is_unboxed(held) && ffi::PyModule_CheckExact(held) != 0
+                    }
+                    _ => false,
+                };
+                if found {
+                    let held = reg(own, inst.again);
+                    capi::retain(held);
+                    capi::release(std::mem::replace(&mut own[inst.dst as usize], held));
+                    continue;
+                }
+            }
             let result = match &inst.op {
                 // The registers of a path do not have the function.
                 Op::LoadDeref(i) => {
@@ -5231,6 +5252,9 @@ impl Compiled {
                     let held = if there { pyffi::PyCell_Get(ffi::PyTuple_GET_ITEM(closure, *i as isize)) } else { null_mut() };
                     checked(held)
                 }
+                // An attribute that is found in a dict: found once, not
+                // once to show that the lookup is quiet and once more.
+                Op::LoadAttr(of, name) if graph::holds_attr(reg(own, *of), owner.func.consts[*name as usize].as_ptr(), &mut read) => Ok(read),
                 op if owner.quiet_of(own, op, &|v| path.made.get(v as usize).is_some_and(|made| *made), api) => owner.exec_op(own, op),
                 // An attribute that the path read is not there at this
                 // call, and `object` says so itself: the read raises and

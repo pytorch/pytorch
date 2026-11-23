@@ -459,9 +459,12 @@ that what is called still comes down to that function. A hook that was
 registered on a module since, a module of another class in its place, a
 function that was swapped: the call is none for this path. The reads of
 attributes between the calls are instructions of the path like any other, so
-a submodule that was replaced by assignment is read at every call. In the
-text of `regions`, `calls` counts these checks, one per call the path goes
-into; `branches` counts the branches and the loop tests.
+a submodule that was replaced by assignment is read at every call; a global,
+or an attribute of a module, that the path reads several times is read once
+in a call, since nothing changes between the reads in front of what stands
+for the graph. In the text of `regions`, `calls` counts these checks, one
+per call the path goes into; `branches` counts the branches and the loop
+tests.
 
 A path does not go into every call. It ends in front of a call
 
