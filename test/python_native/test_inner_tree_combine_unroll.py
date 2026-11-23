@@ -411,8 +411,9 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
     @parametrize("name", ["sum", "var1"])
     @largeTensorTest("1GB", device="cuda")
     def test_sm107_profile_reaches_every_plan(self, device, name):
-        """Thread the SM107 profile through both row entry points' split and combine
-        builders, bitwise equal to the default profile."""
+        """Thread SM107's selected profile, moved off every device row, through both
+        row entry points' split and combine builders, bitwise equal to the default
+        profile."""
         import cutlass
 
         from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
