@@ -38,10 +38,13 @@ impl ValueObs {
         if obj.is_null() {
             return;
         }
-        let new = if obj == ffi::Py_True() || obj == ffi::Py_False() {
+        // An unboxed tensor is not a Python object: only the tensor check at
+        // the end may look at it.
+        let python = !capi::is_unboxed(obj);
+        let new = if python && (obj == ffi::Py_True() || obj == ffi::Py_False()) {
             let t = obj == ffi::Py_True();
             ValueObs::Bool { seen_true: t as u32, seen_false: !t as u32, last: t }
-        } else if ffi::PyLong_CheckExact(obj) != 0 {
+        } else if python && ffi::PyLong_CheckExact(obj) != 0 {
             let mut overflow = 0;
             let x = ffi::PyLong_AsLongLongAndOverflow(obj, &mut overflow);
             if overflow != 0 {
