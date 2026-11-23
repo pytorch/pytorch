@@ -67,6 +67,7 @@ A pass of one's own goes in the list as well: a Python callable taking a
 
 import functools
 import importlib
+import os
 import sys
 import types
 import warnings
@@ -175,6 +176,7 @@ def vm(
     skip_autograd: bool = True,
     unboxed: bool = True,
     callees: bool = True,
+    demote: bool | None = None,
     max_versions: int = 4,
     max_respecializations: int = 6,
 ) -> Any:
@@ -211,6 +213,14 @@ def vm(
             (functions, methods, and objects whose ``__call__`` is a Python
             function) the first time each is called, with the same options. A
             callee the frontend does not support runs in the interpreter.
+        demote: measure the function and each of its callees, once warmed up,
+            both rewritten and in the interpreter, and leave to the interpreter
+            what runs faster there: the VM gains on tensor operations and loses
+            on plain Python, and library code is often mostly the latter.
+            ``stats()["demoted_callees"]`` lists the callees that were left,
+            and ``stats()["demoted"]`` says whether the function itself was. On
+            by default; the environment variable ``TORCH_VM_DEMOTE=0`` turns
+            the default off, for looking at the VM itself.
         max_versions: how many specialized versions a block can have at once.
         max_respecializations: how many times a block may be profiled and
             specialized again before it settles on code without guards.
@@ -219,6 +229,8 @@ def vm(
         A callable with the signature of ``fn``. It has ``dump()``, returning
         the graph as text, ``stats()`` and ``sites()``.
     """
+    if demote is None:
+        demote = os.environ.get("TORCH_VM_DEMOTE", "1") != "0"
     passes = DEFAULT_PASSES if passes is None else tuple(passes)
     options: dict[str, Any] = {
         "passes": passes,
@@ -226,6 +238,7 @@ def vm(
         "skip_autograd": skip_autograd,
         "unboxed": unboxed,
         "callees": callees,
+        "demote": demote,
         "max_versions": max_versions,
         "max_respecializations": max_respecializations,
     }
@@ -250,6 +263,7 @@ def vm(
             unroll=whole["unroll"],
             callees=callees,
             shortcuts=whole["shortcuts"] and _shortcuts.register(runtime),
+            demote=demote,
             max_versions=max_versions,
             max_respecializations=max_respecializations,
         )
