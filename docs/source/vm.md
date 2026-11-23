@@ -258,8 +258,10 @@ What ends a path:
 - a call that the path does not go into ("Paths across calls" below says
   which), or of something that is no operation, like `print`;
 - an operation that writes to a tensor from outside the path or draws random
-  numbers, one with several results (`x.chunk(2)`, `torch.max(x, 0)`), a
-  store into an object ("Writes" below);
+  numbers, and one with several results (`x.chunk(2)`, `torch.max(x, 0)`):
+  see "Writes" below;
+- a store into an object that would run Python code, and a read of a list
+  or a dict that a store of the path changed ("Stores into objects");
 - a number read from a tensor (`x.item()`, `float(x)`), and with it a branch
   on the data of a tensor;
 - an instruction that could run Python code on the values of this call: a
@@ -559,13 +561,17 @@ at some call. What the function had before the path, and what it reads of
 objects from outside, is never one: nothing of the path's is stored there
 before the path ends. So what an iterator of the path gives is from outside
 where what it goes over is: `for i, layer in enumerate(self.layers)` gives
-the layers.
+the layers, and a store into one of them (`layer.grid = ...`) is a store
+into an object from outside ("Stores into objects"), whatever the path made
+to go over them: the iterator, the `enumerate`, a list or the `**kwargs` of
+a call built of such objects.
 
 **What runs.** What changes a thing (an append, `[*a, b]`, an entry of a
 dict it builds, the next item of an iterator) runs in a run of the path
 whenever anything that runs takes the thing, or what may be it or hold it,
 in front of the change or behind it. It is left out only together with the
-thing.
+thing. A list that the function stores into an object and appends to
+afterwards is held there by reference, and has the item.
 
 **On which side of the graph.** The instructions that take nothing the graph
 gives run in front of what stands for the graph, the others behind it
@@ -597,10 +603,12 @@ found = torch.vm.regions(g)[0]
 found["ops"], found["hits"]  # (6, 2)
 ```
 
-**What ends a path instead.** A path ends in front of an operation that is
-handed something of a thing that has moved behind the graph, other than
-tensors and sizes of the graph's own (a list of those is handed over item by
-item).
+**What ends a path instead.** A path ends in front of a store into a value
+that may be a thing without being the value that made it, and of an `extend`
+with one ("Stores into objects"): which object such a value is can differ
+from call to call. It ends in front of an operation that is handed something
+of a thing that has moved behind the graph, other than tensors and sizes of
+the graph's own (a list of those is handed over item by item).
 
 ### Passes over graphs
 
@@ -1145,12 +1153,12 @@ $ TORCH_VM_GRAPH_TIMES=1 python times.py
 
 With `TORCH_VM_GRAPH_DEBUG=1` in the environment the engine says on stderr
 what it does with graphs: a line per path it takes down (how long it is, how
-many of its instructions run in front of what stands for its operations and
-behind it, how many registers it has and how many results the graph gives,
-where it ends and why), per call that is not gone into, and per call that
-did not run what was made of a graph, with the check that did not hold (with
-`TORCH_VM_GRAPH_DEBUG=2`, also the instructions that run in front of what
-stands for a path and behind it):
+many of its instructions run in front of what stands for its operations,
+behind it and where it lands, how many registers it has and how many results
+the graph gives, where it ends and why), per call that is not gone into, and
+per call that did not run what was made of a graph, with the check that did
+not hold (with `TORCH_VM_GRAPH_DEBUG=2`, also the instructions that run in
+front of what stands for a path and behind it):
 
 ```console
 $ cat debug.py
@@ -1173,9 +1181,9 @@ x = torch.randn(4)
 for flag in (True, True, True, False):
     out = g(x, flag)
 $ TORCH_VM_GRAPH_DEBUG=1 python debug.py
-torch.vm graph branchy (block 0)[0]: a path of 11 instructions, 7 operations (4 in front of what stands for them, 0 behind; 13 registers, 1 results), ends at (3, 6): the function returns
+torch.vm graph branchy (block 0)[0]: a path of 11 instructions, 7 operations (4 in front of what stands for them, 0 behind, 0 where it lands; 13 registers, 1 results), ends at (3, 6): the function returns
 torch.vm graph branchy (block 0)[0]: a check of the path does not hold: the way of a branch (instruction 4 of 11, in branchy; of: to_bool %5)
-torch.vm graph branchy (block 0)[0]: a path of 5 instructions, 2 operations (3 in front of what stands for them, 0 behind; 7 registers, 1 results), ends at (2, 0): a block that was not profiled yet
+torch.vm graph branchy (block 0)[0]: a path of 5 instructions, 2 operations (3 in front of what stands for them, 0 behind, 0 where it lands; 7 registers, 1 results), ends at (2, 0): a block that was not profiled yet
 ```
 
 ### AOTAutograd and Inductor
@@ -1337,11 +1345,159 @@ same, torch.equal(mine, theirs)  # (True, True)
 # [(5, 'aten::add_.Tensor writes to an argument'), (5, 'the function returns')]
 ```
 
-A store into a Python object ends a path in the same way (an attribute of a
-module or of any other object, `list.append` and `d[k] = v` on a container
-from outside the path), and so does an operation with several results
-(`x.chunk(2)`, `torch.max(x, 0)`). A write that a path takes as an operation is
+An operation with several results (`x.chunk(2)`, `torch.max(x, 0)`) ends a
+path in the same way. A write that a path takes as an operation is
 not among what `regions` lists as left out.
+
+### Stores into objects
+
+A store into a Python object from outside the path is an effect of the path,
+and does not end it: `obj.name = value`, `d[k] = v` on a dict, `l[i] = v`,
+`l.append(x)` and `l.extend(xs)` on a list. A store under a key compares it
+with the keys the dict holds, as a lookup does, so it is an effect only for
+a dict whose keys are compared without Python code ("Passes over graphs");
+into any other dict it ends the path. While a path is taken down, the
+instructions of the function do the stores where the function has them. Where
+what was made of the graph runs in their place, the stores are done when the
+path ends, all of them, in the order of the function, and behind every check
+of the path and of the form. So nothing is stored for a call that the path
+turns out not to be for: that call runs the instructions, which do the
+stores themselves. The same holds where what was made of the graph raises:
+the instructions run, do the stores in front of what raises, and raise.
+
+A store keeps a reference to what it is given, and what the function changes
+of a list or a dict it made itself is changed in its place ("What a function
+makes"), in front of the stores: a list that is stored and then appended to
+has the item when it is stored, as it has in the function once both are
+done. `l.extend(xs)` is the one store that reads what it is given. Of a list
+the path made it takes the items the list holds where the instruction
+stands, whatever is appended to that list behind it.
+
+What is stored into is an object from outside the path. A list or a dict
+that the function made itself is changed in place, and a value that may be
+such a list without being the name it was made under (what a dict the
+function built gives under a key, the default of a `get`, what a method of
+the list is bound to) may be that very list at one call and a list from
+outside at the next: a store into such a value ends the path in front of
+it, and so does an `extend` with one.
+
+A read of what a store of the path put there, behind the store, is given the
+stored value (`self.n = k` and then `self.n`). What is stored is not one of
+the checks: a counter that is another number at every call does not make
+another form. A tensor that the graph computed is stored as the object the
+graph gave, so two names for it stay one object:
+
+```python
+class Keeps(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc = torch.nn.Linear(4, 4)
+        self.calls = 0
+        self.seen = []
+        self.last = None
+
+    def forward(self, x, notes):
+        y = (self.fc(x).sin() * 2).cos().tanh()
+        self.calls += 1
+        self.seen.append(y.shape[0])
+        notes["calls"] = self.calls
+        self.last = y
+        return (y + 1).exp().sin().cos().tanh()
+
+
+model = Keeps().eval()
+g = torch.vm(model, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+v, notes = torch.randn(3, 4), {}
+with torch.no_grad():
+    for _ in range(8):
+        out = g(v, notes)
+model.calls, model.seen, notes  # (8, [3, 3, 3, 3, 3, 3, 3, 3], {'calls': 8})
+torch.equal(out, (model.last + 1).exp().sin().cos().tanh())  # True
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+found["ops"], found["hits"], found["exports"]  # (10, 6, 1): one graph across the stores, exported once
+```
+
+A store that would run Python code is no effect, and ends the path in front
+of itself: into an object whose class has a `__setattr__` of its own, through
+a property or another descriptor that takes stores, and on a module where
+`nn.Module.__setattr__` does more than one store (a `Parameter` or a module
+that is assigned is registered).
+
+A store also lets go of what it replaces: the attribute that was there, the
+value under the key, the item at the place. That is looked at as what a
+variable lets go of is ("Passes over graphs"), for every call in front of
+what was made of the graph and once more when the path ends: where a store
+would end an object whose end runs Python code, the path is not for the
+call, and the instructions run and end it where the store stands.
+
+```python
+class Guarded(Keeps):
+    def __setattr__(self, name, value):
+        super().__setattr__(name, value)
+
+
+model = Guarded().eval()
+g = torch.vm(model, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+notes = {}
+with torch.no_grad():
+    for _ in range(8):
+        out = g(v, notes)
+model.calls, notes  # (8, {'calls': 8})
+[(found["ops"], found["why"]) for found in torch.vm.regions(g) if "ops" in found]
+# [(5, 'stores into an object'), (5, 'the function returns')]
+```
+
+Since the stores are done when the path ends, what the path reads behind a
+store must not be something the store changes. A store changes one dict or
+list: the dict an object keeps its attributes in, the dict a module keeps
+its buffers in, or the list or dict itself. A read goes through dicts and
+lists as well: an attribute through the dict of its object, `len`, a loop or
+an item through the list or dict, an iterator or a view through what the
+path made it of. A read under a name that the path stored under (an
+attribute, an entry of a dict, also by `getattr` or `hasattr`) is the stored
+value where it is of the object that was stored into, in the same way. Every
+other read behind a store goes past it only where it goes through another
+dict or list than the store changes, and the path checks that at every
+call: two arguments that are two objects in one call may be one object in
+the next, two objects may keep their attributes in one dict, and a dict that
+is handed about may be the one an object keeps them in. A call that fails
+such a check runs the instructions. Where the read goes through what a store
+changed in the very call the path is taken down in (`h.__dict__["n"] = 7`
+and then `h.n`; `a.append(1)` and then `len(a)`), the path ends in front of
+the read, and so it does for an iterator or a view from outside the path,
+of which it is not known what it goes over, and for a read of an attribute
+of an object whose class reads its attributes in a function of its own (a
+`__getattribute__` written in Python): what that function gives under a
+name need not be what was stored under it. A store at a place of a list
+(`l[0] = v`) is to a place the list has by then, the items that the stores
+of the path in front of it append counted.
+
+```python
+class Box:
+    def __init__(self):
+        self.n = 0
+        self.items = []
+
+
+def two_names(x, a, b):
+    y = (x.sin() * 2 + 1).cos()
+    a.n = 1
+    b.n = 2
+    b.items.append(a.n)
+    return (y + a.n).exp().tanh().sum()
+
+
+g = torch.vm(two_names, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+appended = []
+for shared in (False, False, False, False, False, True, False, True):
+    a = Box()
+    b = a if shared else Box()
+    out = g(v, a, b)
+    appended.append(b.items[-1])
+appended  # [1, 1, 1, 1, 1, 2, 1, 2]: where the two are one object, `a.n` is what `b.n = 2` stored
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+found["ops"], found["exports"], found["hits"]  # (8, 2, 5)
+```
 
 ### The order of the list
 
@@ -1380,13 +1536,17 @@ What graphs do not do at this stage:
 - A path per way. A function whose calls go many ways through it has a path
   and an export for each, and they share the `max_variants` of the graph.
   So does a loop that goes round another number of times on every call.
-- No effects outside a path. A write to a tensor from outside the path, a
-  store into an object and an operation with several results end a path
+- No writes outside a path. A write to a tensor from outside the path and
+  an operation with several results end a path
   ("Writes"), and a call whose operations turn out to have written to what
   the graph was given is not exported. A batch norm in training mode writes
   its running statistics after every convolution, so a training step is run
   by the instructions for the most part, and the same model has its graphs
   in eval mode.
+- What a path reads behind a store of its own into an object is checked at
+  every call to go through another dict or list than the store changes, a
+  check per store ("Stores into objects"); a read through what a store
+  changed ends the path.
 - A graph does not take a call in which it would let go of the last
   reference that Python has to a tensor which requires a gradient ("Passes
   over graphs"), also where what the graph gives keeps the history of that
@@ -1398,7 +1558,8 @@ What graphs do not do at this stage:
   stays alive is looked at in front of what stands for the graph: for a
   variable that the path binds anew, an object whose other reference is
   dropped while what a pass made of the graph runs (by that code itself, or
-  by another thread it waits for) ends where the path lands.
+  by another thread it waits for) ends where the path lands. A store looks
+  again where it lands.
 - Sizes are fixed per export. Every size a graph is called with is a kind of
   call of its own, with a graph of its own, so a function that is called
   with many sizes uses up `max_variants`. Sizes of the tensors the graph
@@ -1423,9 +1584,9 @@ What graphs do not do at this stage:
   front of the `finally` in the same way: what the interpreter keeps on its
   stack is let go of behind its last use, not where the interpreter pops it.
 - An `Exception` that the handler of a signal raises (a timeout) while a
-  pass over graphs runs, or in the first run of what a pass made, is
-  swallowed: the call returns as if no signal had come, and the graph is
-  left to the VM for good. A `KeyboardInterrupt` gets through.
+  pass over graphs runs, in the first run of what a pass made, or in a later
+  run of it where the path stores into an object, is swallowed: the call
+  returns as if no signal had come. A `KeyboardInterrupt` gets through.
 - While a `TorchFunctionMode` is on, the default pass that puts an accessor
   in place of a read of `shape` or `ndim` of a tensor, or of a call of its
   `dim()` or `size(0)` (`TensorAccessors`), does not ask the mode from the
