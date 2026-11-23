@@ -202,6 +202,26 @@ class TestAutocastMPS(TestCase):
         y = F.scaled_dot_product_attention(query, key, value.to(torch.float32))
         self.assertEqual(y.to(y_autocast.dtype), y_autocast)
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/201630
+    # None and "eager" are baselines that worked before the fix. "aot_eager"
+    # used to fail.
+    @parametrize("backend", [None, "eager", "aot_eager"])
+    def test_nested_autocast_compiled(self, backend):
+        def f(x):
+            with torch.autocast(device_type=x.device.type, enabled=False):
+                return x @ x
+
+        device = "mps"
+
+        x = torch.rand(64, 64, device=device) + 10.0
+        x.requires_grad_()
+        torch._dynamo.reset()
+        fn = f if backend is None else torch.compile(f, fullgraph=True, backend=backend)
+        with torch.autocast(device, dtype=torch.float16):
+            out = fn(x)
+
+        self.assertEqual(out.dtype, x.dtype)
+
     def test_conv_transpose3d_autocast_fp32(self):
         m = nn.ConvTranspose3d(16, 33, 3, stride=2).to("mps")
         x = torch.randn(20, 16, 10, 50, 100, device="mps")
@@ -13996,12 +14016,7 @@ class TestNondeterministic(TestCaseMPS):
         input = torch.randn(1, 2, 6, 6, device=device, requires_grad=True)
         res = module(input)
         grad = torch.ones_like(res)
-
-        def f():
-            res.backward(grad, retain_graph=True)
-            return input.grad
-
-        return f
+        return lambda: torch.autograd.grad(res, input, grad, retain_graph=True)
 
     def _case_upsample_bilinear2d_aa_backward(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
@@ -15941,6 +15956,16 @@ class TestMetalLibrary(TestCaseMPS):
         for inp in inputs:
             correct += inp
         self.assertEqual(correct, output)
+        # The kernel reaches the inputs only through their addresses, so unless they are
+        # declared to the encoder, it can run before the writes that fill them complete
+        for _ in range(20):
+            # Leave garbage in the memory that the inputs get allocated from
+            garbage = [torch.full((1 << 20,), -1000.0, device="mps") for _ in range(64)]
+            del garbage
+            inputs = [torch.full((1 << 20,), float(i), device="mps") for i in range(64)]
+            output = torch.empty_like(inputs[0])
+            lib.sum_all(output, inputs)
+            self.assertEqual(output, torch.full_like(output, sum(range(64))))
 
     @unittest.skipIf(not torch.mps.profiler.is_metal_capture_enabled(), "Set MTL_CAPTURE_ENABLED and try again")
     def test_metal_capture(self):
