@@ -5666,6 +5666,52 @@ def graph_counter(x, i):
     return ((x + i).sin() * i).cos().exp().tanh()
 
 
+def graph_cat(a, b):
+    return torch.cat([a.sin(), b.cos()], 1).tanh() * 2
+
+
+def graph_stack(a, b):
+    return torch.stack((a.sin(), b, a * 2)).tanh().sum(0)
+
+
+def graph_masked(x, mask):
+    y = x.sin() * 2
+    return (y[mask].cos() + 1).tanh()
+
+
+def graph_subscripts(x, i):
+    y = x.sin() * 2
+    return (y[0] + y[1:, 2].sum() + y[i].mean() + y[:, i].sum()).tanh()
+
+
+def graph_conv(x, w, b):
+    y = torch.conv2d(x.sin(), w, b, 1, 1)
+    return (torch.relu(y) * 2).tanh()
+
+
+def graph_listed(xs, k):
+    y = torch.cat(xs, 1).sin()
+    return (torch.max_pool2d(y, k, 1, 0, 1, False) * 2).cos().tanh()
+
+
+def graph_operands(case, device):
+    """A function with an operation that is no call site, and tensors to
+    call it with."""
+    make = functools.partial(torch.randn, device=device)
+    if case == "cat":
+        return graph_cat, (make(3, 4), make(3, 4))
+    if case == "stack":
+        return graph_stack, (make(3, 4), make(3, 4))
+    if case == "masked":
+        x = make(4, 5)
+        return graph_masked, (x, x > 0)
+    if case == "subscripts":
+        return graph_subscripts, (make(4, 5), torch.tensor([0, 2], device=device))
+    if case == "listed":
+        return graph_listed, ((make(2, 3, 8, 8), make(2, 3, 8, 8)), 3)
+    return graph_conv, (make(2, 3, 8, 8), make(4, 3, 3, 3), make(4))
+
+
 class GraphScaled:
     """An object whose ``scale`` is an attribute, until its class gets a
     property of the name that counts its reads."""
@@ -5687,6 +5733,18 @@ class GraphCalls(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         self.seen.append(getattr(func, "__name__", str(func)))
         return func(*args, **(kwargs or {}))
+
+
+class GraphSub(torch.Tensor):
+    pass
+
+
+def graph_named(x, y):
+    return torch.relu(x * y + y) - torch.cat([x, y], 1).sum()
+
+
+def graph_reshaped(x, shape):
+    return torch.flatten(x.sin().reshape(shape).cos().tanh(), 2).exp()
 
 
 def graph_rated(x, rate):
@@ -6464,6 +6522,78 @@ print(json.dumps(found))
         self.assertEqual((graph["variants"], forms[0]), (2, (["%x.1: float64[5]"], 2)))
         self.assertEqual(compiled.stats()["graphs"]["given_up"], 0)
 
+    def test_an_operation_that_is_no_call_site_is_exported_as_it_was_written(self):
+        graphs = []
+
+        def keep(gm, input_types):
+            graphs.append(gm)
+            return gm
+
+        def calls(target):
+            nodes = graphs[-1].graph.nodes
+            return [n for n in nodes if n.op == "call_function" and n.target is target]
+
+        passes = (*DEFAULT, P.Graphs(), keep)
+        compiled = torch.vm(graph_cat, passes=passes, fallback=False)
+        a, b = torch.randn(3, 4), torch.randn(3, 4)
+        for _ in range(3):
+            self.assertEqual(compiled(a, b), graph_cat(a, b), atol=0, rtol=0)
+        # The list of the call is a list of two values of the graph.
+        (cat,) = calls(torch.cat)
+        parts, dim = cat.args
+        self.assertEqual(([type(p) for p in parts], dim), ([torch.fx.Node] * 2, 1))
+        targets = [p.target for p in parts]
+        aten = torch.ops.aten
+        self.assertEqual(targets, [aten.sin.default, aten.cos.default])
+        self.assertIn("aten::cat", self.graphs(compiled)[0]["operators"])
+        compiled = torch.vm(graph_conv, passes=passes, fallback=False)
+        x, w, bias = torch.randn(2, 3, 8, 8), torch.randn(4, 3, 3, 3), torch.randn(4)
+        for _ in range(3):
+            got = compiled(x, w, bias)
+            self.assertEqual(got, graph_conv(x, w, bias), atol=0, rtol=0)
+        (conv,) = calls(torch.conv2d)
+        self.assertEqual(conv.args[3:], (1, 1))
+        # A subscript is the index the function wrote: an int, slices, and a
+        # tensor, which is an input of the graph.
+        compiled = torch.vm(graph_subscripts, passes=passes, fallback=False)
+        x, index = torch.randn(4, 5), torch.tensor([0, 2])
+        for _ in range(3):
+            got = compiled(x, index)
+            self.assertEqual(got, graph_subscripts(x, index), atol=0, rtol=0)
+        indices = [n.args[1] for n in calls(__import__("operator").getitem)]
+        self.assertEqual(indices[:2], [0, (slice(1, None, None), 2)])
+        self.assertEqual([type(i) for i in indices[2:]], [torch.fx.Node, tuple])
+        graph, forms = self.forms(compiled, "aten::index.Tensor")
+        self.assertEqual(forms[0][0], ["%x.1: float32[4, 5]", "%i.2: int64[2]"])
+        # Another kind of index is another form: its number is checked.
+        for _ in range(3):
+            self.assertEqual(compiled(x, 1), graph_subscripts(x, 1), atol=0, rtol=0)
+        graph, forms = self.forms(compiled, "aten::index.Tensor")
+        self.assertEqual(graph["variants"], 2)
+        self.assertEqual(forms[0][0], ["%i.2 == 1", "%x.1: float32[4, 5]"])
+        # A tuple of tensors that the function is handed: the graph takes
+        # its items, and is for a tuple of as many.
+        compiled = torch.vm(graph_listed, passes=passes, fallback=False)
+        pair = (torch.randn(2, 3, 8, 8), torch.randn(2, 3, 8, 8))
+        for _ in range(3):
+            self.assertEqual(compiled(pair, 3), graph_listed(pair, 3), atol=0, rtol=0)
+        (cat,) = calls(torch.cat)
+        self.assertIs(type(cat.args[0]), tuple)
+        self.assertEqual([p.op for p in cat.args[0]], ["placeholder"] * 2)
+        graph, forms = self.forms(compiled, "aten::cat")
+        self.assertIn("%xs.1 is a tuple of 2", forms[0][0])
+        self.assertIn("%xs.1[1]: float32[2, 3, 8, 8]", forms[0][0])
+        triple = (*pair, torch.randn(2, 3, 8, 8))
+        for _ in range(3):
+            got = compiled(triple, 3)
+            self.assertEqual(got, graph_listed(triple, 3), atol=0, rtol=0)
+        graph, forms = self.forms(compiled, "aten::cat")
+        self.assertEqual((graph["variants"], graph["hits"]), (2, 3))
+        self.assertIn("%xs.1 is a tuple of 3", forms[0][0])
+        self.assertEqual(len(calls(torch.cat)[0].args[0]), 3)
+        # The function of the module is looked up at every call.
+        self.assertTrue(any(".max_pool2d is " in check for check in forms[0][0]))
+
     def test_a_hook_for_every_module_is_not_for_what_was_made_of_a_graph(self):
         def keep(gm, input_types):
             return gm
@@ -6570,6 +6700,67 @@ print(json.dumps(found))
             got = torch.func.grad(compiled, argnums=1)(x, wrt)
             expected = torch.func.grad(graph_mixed, argnums=1)(x, wrt)
             self.assertEqual(got, expected, atol=0, rtol=0)
+
+    def test_a_form_for_a_tensor_subclass_is_for_no_other_call(self):
+        def keep(gm, input_types):
+            return gm
+
+        x, y = torch.randn(4, 4), torch.randn(4, 4)
+        expected = graph_named(x, y)
+        passes = (*DEFAULT, P.Graphs(), keep)
+        for subclassed in ((0,), (1,), (0, 1)):
+            compiled = torch.vm(graph_named, passes=passes, fallback=False)
+            for _ in range(4):
+                self.assertEqual(compiled(x, y), expected, atol=0, rtol=0)
+            (graph,) = self.graphs(compiled)
+            hits = graph["hits"]
+            pair = enumerate((x, y))
+            args = [t.as_subclass(GraphSub) if k in subclassed else t for k, t in pair]
+            got = compiled(*args)
+            self.assertIs(type(got), GraphSub)
+            self.assertEqual(got.as_subclass(torch.Tensor), expected, atol=0, rtol=0)
+            # The form of that call says which of its tensors were of the
+            # subclass, so the calls with plain tensors still run the graph.
+            (graph,) = self.graphs(compiled)
+            (closed,) = [form for form in graph["forms"] if "reason" in form]
+            for k, name in enumerate(("x", "y")):
+                said = f"type(%{name}.{k + 1}) is GraphSub" in closed["checks"]
+                self.assertEqual(said, k in subclassed)
+            for _ in range(5):
+                self.assertEqual(compiled(x, y), expected, atol=0, rtol=0)
+            (graph,) = self.graphs(compiled)
+            counts = graph["hits"], graph["exports"], graph["variants"]
+            self.assertEqual(counts, (hits + 5, 1, 1))
+            # And a call like the first is known.
+            misses = graph["misses"]
+            again = compiled(*args).as_subclass(torch.Tensor)
+            self.assertEqual(again, expected, atol=0, rtol=0)
+            (graph,) = self.graphs(compiled)
+            self.assertEqual((graph["misses"], len(graph["forms"])), (misses + 1, 2))
+
+    def test_the_text_of_a_check_is_the_same_in_every_run(self):
+        def keep(gm, input_types):
+            return gm
+
+        def texts(fn, *args):
+            compiled = torch.vm(fn, passes=(*DEFAULT, P.Graphs(), keep), fallback=False)
+            for _ in range(4):
+                compiled(*args)
+            (graph,) = self.graphs(compiled)
+            (form,) = graph["forms"]
+            return form["checks"]
+
+        x, y = torch.randn(4, 4), torch.randn(4, 4)
+        # A function is named, not shown with where it is in memory.
+        checks = texts(graph_named, x, y)
+        named = sorted(check.split(" is ")[1] for check in checks if " is " in check)
+        self.assertEqual(named, ["torch.cat", "torch.relu"])
+        # A long value is cut, and the text says so.
+        checks = texts(graph_reshaped, x, (1,) * 14 + (4, 4))
+        cut = "%shape.2 == (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, ..."
+        self.assertIn(cut, checks)
+        named = [check.split(" is ")[1] for check in checks if " is " in check]
+        self.assertEqual(named, ["torch.flatten"])
 
     def test_a_kind_of_call_is_open_again_once_its_numbers_stay(self):
         exports = []
@@ -6907,6 +7098,37 @@ class TestVmGraphResults(TestCase):
                 self.assertEqual(out, graph_mixed(x, w), rtol=1e-4, atol=1e-5)
         self.assertIsNone(out.grad_fn)
         self.assertEqual(torch.vm.regions(compiled)[0]["variants"], 2)
+
+    @parametrize("case", ("cat", "stack", "masked", "subscripts", "conv", "listed"))
+    def test_an_operation_that_is_no_call_site_is_a_node_of_a_graph(self, device, case):
+        def keep(gm, input_types):
+            return gm
+
+        fn, args = graph_operands(case, device)
+        operator = {"masked": "index.Tensor", "subscripts": "index.Tensor"}
+        operator.update(conv="conv2d", listed="cat")
+        operator = "aten::" + operator.get(case, case)
+        expected = fn(*args)
+        # With the kernels of eager mode: the engine's own graph, and the
+        # one a pass over graphs is handed.
+        for behind in ((), (keep,)):
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(fn, passes=passes, fallback=False)
+            for _ in range(4):
+                self.assertEqual(compiled(*args), expected, atol=0, rtol=0)
+            (graph,) = [r for r in torch.vm.regions(compiled) if "ops" in r]
+            self.assertIn(operator, graph["operators"])
+            self.assertEqual(graph["state"], "compiled" if behind else "built")
+            self.assertEqual(graph["hits"], 2 if behind else 0)
+        if case == "masked":
+            # How many items a mask picks is not known to a graph compiler.
+            return
+        passes = (*DEFAULT, P.Graphs(), P.AOTAutograd())
+        compiled = torch.vm(fn, passes=passes, fallback=False)
+        for _ in range(4):
+            self.assertEqual(compiled(*args), expected, rtol=1e-5, atol=1e-6)
+        (graph,) = [r for r in torch.vm.regions(compiled) if "ops" in r]
+        self.assertEqual((graph["state"], graph["hits"]), ("compiled", 2))
 
     def test_a_graph_is_for_the_dtype_autocast_casts_to(self, device):
         kind = torch.device(device).type

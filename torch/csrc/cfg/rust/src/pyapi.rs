@@ -669,6 +669,7 @@ fn facts_dict<'py>(py: Python<'py>, facts: &InstFacts) -> PyResult<Bound<'py, Py
         }
     }
     d.set_item("wrote", facts.wrote)?;
+    d.set_item("operators", facts.operators.clone())?;
     Ok(d)
 }
 

@@ -10,11 +10,15 @@ The default passes make each tensor operation of a block a direct call of its
 kernel. `torch.vm.passes.Graphs()` looks one level up: in every block, once
 the other passes are done with it, it finds the runs of such calls together
 with what sits between them (reads of globals and attributes, constants,
-arithmetic on sizes) and takes each run down as a graph. A run ends in front
-of everything else: a call of a Python function, an operation that writes to
-one of its arguments or draws random numbers, a number read from a tensor. A
-run of fewer than `min_ops` operations (4 unless the pass is made with
-another number) is no graph.
+arithmetic on sizes) and takes each run down as a graph. An operation that
+the default passes leave as it is can be an operation of a graph as well, if
+all it did whenever the block was watched was run kernels that neither write
+nor draw random numbers: `torch.cat` and `torch.stack` of a list, a subscript
+of a tensor (`x[mask]`, `x[0]`, `x[1:, 2]`), `torch.conv2d` with ints for
+stride and padding. A run ends in front of everything else: a call of a
+Python function, an operation that writes to one of its arguments or draws
+random numbers, a number read from a tensor. A run of fewer than `min_ops`
+operations (4 unless the pass is made with another number) is no graph.
 
 With `Graphs()` in the list the function runs as it runs without it. The
 engine runs a graph as it runs the rest of the block: the same kernels, on
@@ -144,6 +148,41 @@ print(shown[0][0])
 #     return (add_tensor,)
 shown[0][1]  # [float32[4, 8], float32[8, 8]]
 torch.equal(out, f(x, w))  # True: the graph, as it was given, runs eager's kernels
+```
+
+An operation that is no single kernel call is a node of the graph as the
+function wrote it, a call of `torch.cat` or a subscript, with the lists,
+tuples and slices it is given built of the values of the graph. A list or a
+tuple of tensors that the function is handed is taken apart: its tensors are
+inputs of the graph, and the form is for a list of that length.
+
+```python
+def joined(a, b, mask):
+    y = torch.cat([a.sin(), b.cos()], 1).tanh() * 2
+    return y[mask].sum() + y[0, 1:].mean()
+
+
+g = torch.vm(joined, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), show))
+a, b = torch.randn(3, 4), torch.randn(3, 4)
+mask = torch.cat([a, b], 1) > 0
+for _ in range(3):
+    out = g(a, b, mask)
+torch.equal(out, joined(a, b, mask))  # True
+print(shown[-1][0])
+# def forward(self, a, b, mask):
+#     sin_default = torch.ops.aten.sin.default(a);  a = None
+#     cos_default = torch.ops.aten.cos.default(b);  b = None
+#     cat = torch.cat([sin_default, cos_default], 1);  sin_default = cos_default = None
+#     tanh_default = torch.ops.aten.tanh.default(cat);  cat = None
+#     mul_tensor = torch.ops.aten.mul.Tensor(tanh_default, 2);  tanh_default = None
+#     getitem = mul_tensor[mask];  mask = None
+#     sum_default = torch.ops.aten.sum.default(getitem, dtype = None);  getitem = None
+#     getitem_1 = mul_tensor[(0, slice(1, None, None))];  mul_tensor = None
+#     mean_default = torch.ops.aten.mean.default(getitem_1, dtype = None);  getitem_1 = None
+#     add_tensor = torch.ops.aten.add.Tensor(sum_default, mean_default, alpha = 1);  sum_default = mean_default = None
+#     return (add_tensor,)
+torch.vm.regions(g)[0]["operators"][5:8]
+# ['aten::index.Tensor', 'aten::sum', 'aten::select.int+aten::slice.Tensor']
 ```
 
 The passes are applied in the order of the list. What the last one returns
@@ -599,7 +638,9 @@ What graphs do not do at this stage:
   graph, and a call whose operations turn out to write when they are taken
   down is not exported: a batch norm in training, which updates its running
   statistics, runs its operations on every call, and the same graph is
-  exported for the calls in eval mode.
+  exported for the calls in eval mode. A store into a subscript (`x[0] =
+  y`) ends a graph, and so does an operation with several results
+  (`x.split(2)`, `torch.max(x, 0)`).
 - A graph does not take a call in which it would let go of the last
   reference that Python has to a tensor which requires a gradient ("Passes
   over graphs"), also where what the graph gives keeps the history of that
