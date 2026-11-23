@@ -11,6 +11,7 @@ from unittest.mock import patch
 import torch
 from torch._inductor import config, ir, select_algorithm
 from torch._inductor.choices import (
+    _ComposedInductorChoices,
     create_inductor_choices,
     InductorChoices,
     MultiTemplateFusionDecision,
@@ -18,6 +19,7 @@ from torch._inductor.choices import (
     registered_inductor_choices,
     unregister_inductor_choices,
 )
+from torch._inductor.kernel.flex.backend import FlexAttentionDeclined
 from torch._inductor.scheduler import Scheduler
 from torch._inductor.virtualized import _choices, threadlocal, V
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -143,6 +145,26 @@ class StaticTrueChoices(InductorChoices):
         shared_data_score: int,
     ) -> bool:
         return True
+
+
+class _LoweringChoices(InductorChoices):
+    """Answers lower_flex_attention with ``answer``: a value, None, or an
+    exception to raise."""
+
+    def __init__(self, name: str, answer: Any) -> None:
+        super().__init__()
+        self.name = name
+        self.answer = answer
+        self.calls = 0
+
+    def uuid(self) -> str:
+        return self.name
+
+    def lower_flex_attention(self, call: Any) -> Any:
+        self.calls += 1
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
 
 
 class ChoicesCompositionTest(TestCase):
@@ -424,6 +446,40 @@ class ChoicesCompositionTest(TestCase):
             self.assertIsInstance(
                 executor.submit(lambda: V.choices).result(), AlphaChoices
             )
+
+    def test_lowering_hooks_ask_each_contributor_until_one_accepts(self) -> None:
+        declining = _LoweringChoices("a", FlexAttentionDeclined("no GQA"))
+        passing = _LoweringChoices("b", None)
+        accepting = _LoweringChoices("c", "outputs")
+        never = _LoweringChoices("d", "other outputs")
+        composed = _ComposedInductorChoices([declining, passing, accepting, never])
+
+        self.assertEqual(composed.lower_flex_attention(object()), "outputs")
+        self.assertEqual(
+            [declining.calls, passing.calls, accepting.calls, never.calls],
+            [1, 1, 1, 0],
+        )
+
+    def test_lowering_hooks_raise_every_reason_when_none_accepts(self) -> None:
+        composed = _ComposedInductorChoices(
+            [
+                _LoweringChoices("a", FlexAttentionDeclined("no GQA")),
+                _LoweringChoices("b", None),
+                _LoweringChoices("c", FlexAttentionDeclined("fp8")),
+            ]
+        )
+        with self.assertRaisesRegex(
+            FlexAttentionDeclined,
+            "_LoweringChoices: no GQA; _LoweringChoices: fp8",
+        ):
+            composed.lower_flex_attention(object())
+
+    def test_lowering_hooks_return_none_when_all_pass(self) -> None:
+        composed = _ComposedInductorChoices(
+            [_LoweringChoices("a", None), AlphaChoices()]
+        )
+        self.assertIsNone(composed.lower_flex_attention(object()))
+        self.assertIsNone(composed.lower_flex_attention_backward(object()))
 
     def test_inherited_default_is_used_when_nobody_overrides(self) -> None:
         register_inductor_choices("beta", BetaChoices)

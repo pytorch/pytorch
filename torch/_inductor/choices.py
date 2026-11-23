@@ -48,6 +48,12 @@ if TYPE_CHECKING:
     from .codegen.simd_kernel_features import SIMDKernelFeatures
     from .codegen.triton import TritonKernel
     from .ir import ChoiceCaller
+    from .kernel.flex.backend import (
+        FlexAttentionBackwardCall,
+        FlexAttentionBackwardOutputs,
+        FlexAttentionCall,
+        FlexAttentionOutputs,
+    )
     from .kernel_template_choice import KernelTemplateChoice
 
     from torch.utils._ordered_set import OrderedSet  # isort: skip
@@ -272,6 +278,27 @@ class InductorChoices:
         subgraphs, and the output buffers in ``mutated_inputs``.
         """
         return choices
+
+    def lower_flex_attention(
+        self, call: FlexAttentionCall
+    ) -> FlexAttentionOutputs | None:
+        """Lower a whole flex_attention forward, or decline it.
+
+        Inductor calls this before it builds anything for its own kernels.
+        Return every output to lower the call; return ``None``, or raise
+        ``FlexAttentionDeclined`` with a reason, to leave it to Inductor. With
+        several contributors, each overriding contributor is asked in order
+        and the first that returns outputs lowers the call. See
+        ``torch._inductor.kernel.flex.backend`` for the contract.
+        """
+        return None
+
+    def lower_flex_attention_backward(
+        self, call: FlexAttentionBackwardCall
+    ) -> FlexAttentionBackwardOutputs | None:
+        """Lower a whole flex_attention backward, or decline it; as
+        :meth:`lower_flex_attention`."""
+        return None
 
     def _logging_context(self) -> dict[str, Any]:
         """Extra fields for the per-shape log row. Subclasses may override."""
@@ -916,8 +943,40 @@ def _validate_choice_uuid(
     return uuid
 
 
+# Hooks every overriding contributor is asked in turn, until one accepts (returns
+# something other than None). A contributor that raises FlexAttentionDeclined
+# declines too; when none accepts, the reasons are raised together.
+_FIRST_ACCEPTING_HOOKS = ("lower_flex_attention", "lower_flex_attention_backward")
+
+
+def _first_accepting(
+    name: str, hooks: list[tuple[str, typing.Callable[..., Any]]]
+) -> typing.Callable[..., Any]:
+    """Call each of ``hooks`` (owner name, bound hook) in turn and return the
+    first result that is not None."""
+    from .kernel.flex.backend import FlexAttentionDeclined
+
+    def dispatch(*args: Any, **kwargs: Any) -> Any:
+        reasons = []
+        for owner, hook in hooks:
+            try:
+                result = hook(*args, **kwargs)
+            except FlexAttentionDeclined as e:
+                reasons.append(f"{owner}: {e}")
+                continue
+            if result is not None:
+                return result
+        if reasons:
+            raise FlexAttentionDeclined("; ".join(reasons))
+        return None
+
+    dispatch.__name__ = name
+    return dispatch
+
+
 class _ComposedInductorChoices(InductorChoices):
-    """Use the first contributor that overrides each InductorChoices hook."""
+    """Use the first contributor that overrides each InductorChoices hook
+    (each overriding contributor in turn for _FIRST_ACCEPTING_HOOKS)."""
 
     def __init__(self, choices: list[InductorChoices]) -> None:
         super().__init__()
@@ -948,9 +1007,21 @@ class _ComposedInductorChoices(InductorChoices):
             dispatchers[name] = None
             return object.__getattribute__(self, name)
 
+        choices = object.__getattribute__(self, "_choices")
+        if name in _FIRST_ACCEPTING_HOOKS:
+            hooks = [
+                (type(choice).__name__, getattr(choice, name))
+                for choice in choices
+                if inspect.getattr_static(choice, name) is not default
+            ]
+            dispatcher = _first_accepting(name, hooks) if hooks else None
+            dispatchers[name] = dispatcher
+            if dispatcher is None:
+                return object.__getattribute__(self, name)
+            return dispatcher
+
         dispatcher = None
         owner = ""
-        choices = object.__getattribute__(self, "_choices")
         for choice in choices:
             if inspect.getattr_static(choice, name) is default:
                 continue
