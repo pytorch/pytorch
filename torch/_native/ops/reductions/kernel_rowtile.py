@@ -112,13 +112,13 @@ def one_thread_row_ok(
 
 
 # --- INNER-TREE ORDER (opt-in) --- Unlike launch-shape orders, this fixes the DAG from N,
-# making it hash-pinnable, and covers every N to prevent silent fallback. It costs
+# making it hash-pinnable, and covers every N whose geometry fits Int32. It costs
 # 0.92-1.41x the rolled fold and requires per-N compilation. On B200, column layouts try
 # reduce_ordered_col first; otherwise they take the general axis's decoded-gather tree
-# ahead of coltile: x.sum(0) of fp32 (65536, 256) took 68.4us against 17.2us (B200 CUDA
-# graphs, L2-cold). Its independent env var avoids affecting upstream kernels, which
-# register first. `1` prefers the order and warns once when a call cannot use it;
-# `strict` raises instead, as an explicit order= argument does.
+# ahead of coltile: for x.sum(0) of fp32 (65536, 256) the tree took 68.4us and coltile
+# 17.2us (B200 CUDA graphs, L2-cold). Its independent env var avoids affecting upstream
+# kernels, which register first. `1` prefers the order and warns once when a call cannot
+# use it; `strict` raises instead, as an explicit order= argument does.
 _INNER_TREE_ENV = "PYTORCH_NATIVE_INNER_TREE"
 _INNER_TREE_STRICT = "strict"
 # Reasons a dispatcher cannot serve an inner-tree request.
@@ -501,7 +501,7 @@ def itree_plan(
     *,
     arch: _ItreeArch | None = None,
 ) -> _ItreePlan | None:
-    """Return the upstream-matching plan, or None for default order without declining.
+    """Return the upstream-matching plan, or None when N < 1.
 
     `arch` replaces the device's policy; give itree_combine_plan the same profile.
     """

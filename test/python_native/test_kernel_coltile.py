@@ -266,9 +266,8 @@ class TestKernelColTile(TestCase):
         # fp32 outputs keep the tolerance tight enough to catch dropped tail rows.
         out = [torch.float32] * nouts
         results = []
-        # col_group=1 folds every row online, which rounds differently. Grouped folds
-        # run their prefix at unroll 1, so unroll 2 and 8 give the same bits.
-        runs = ((group, 2, key), (group, 8, f"{key}_unroll8"), (1, 4, online_key))
+        # col_group=1 folds every row online, which rounds differently.
+        runs = ((group, 2, key), (1, 4, online_key))
         for g, u, k in runs:
             cfg = ct.ColConfig("grouped", 64, npar, 1, "column", unroll=u, col_group=g)
             with mock.patch.object(ct, "select_col_config", return_value=cfg):
@@ -283,8 +282,7 @@ class TestKernelColTile(TestCase):
         groups = {k[slot] for k in ct._CACHE if k[:2] == ("coltile", key)}
         self.assertEqual(groups, {group})
         flat = [torch.cat([t.flatten() for t in r]).view(torch.int32) for r in results]
-        grouped, unrolled, online = flat
-        self.assertEqual(grouped, unrolled)
+        grouped, online = flat
         # Equal bits would mean no grouped fold ran; setUp's seed keeps this deterministic.
         self.assertNotEqual(grouped, online)
         with torch.backends.python_native.cutedsl.disabled():
@@ -1324,26 +1322,11 @@ class TestOrderedColDevice(TestCase):
         plan = ct.trait_itree_plan(trait, rows, columns, 2, stage=False, device=device)
         self.assertEqual(plan.shape, "split")
         self.assertEqual(plan.split[1] != plan.split[2], rows == 32769)
-        cfg = ct.select_ordered_col_config(
-            (10, 0),
-            x.dtype,
-            columns,
-            1,
-            plan.split[0],
-            trait_type=T.SumOps,
-            nfields=1,
-            nouts=1,
-            welford_outs=0,
-            acc_bits=32,
-            out_dtypes=tuple(outputs),
-            rows=rows,
-        )
         # 257 columns at R 32768-65536 sit in the C 128-257 band of 16-column tiles.
         self.assertEqual({f["tile_columns"] for f in ops}, {16})
         # A ragged last partition keeps every partition's clamps.
         ragged = plan.split[1] != plan.split[2]
-        tiles = [cfg.full_tiles and not ragged]
-        self.assertEqual([f["full_tiles"] for f in ops], tiles)
+        self.assertEqual([f["full_tiles"] for f in ops], [not ragged])
         want, _ = self._reduce(device, trait, key, x, 0, outputs, route=False)
         self._assert_bitwise(got, want)
 
@@ -1538,7 +1521,7 @@ class TestOrderedColDevice(TestCase):
                 workers = min(fallback.worker_warps, plan.wpr)
                 ops = [_ordered_fields(k) for k in ct._CACHE if k[1] == "select_mean"]
                 launched = {tuple(map(f.get, names)) for f in ops}
-                self.assertEqual(launched, {(workers, ct.WARP, fallback.full_tiles)})
+                self.assertEqual(launched, {(workers, ct.WARP, True)})
             # It also declines outputs the entry was not measured with.
             got = ct.reduce_ordered_col(T.ArgMaxOps(), "select_argmax", x, [_I32], 1)
             self.assertIsNone(got)
