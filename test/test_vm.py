@@ -1846,6 +1846,30 @@ class TestVmCallees(TestCase):
             self.assertEqual(compiled(x), f(x))
         self.assertEqual(self.callees(compiled), (["dropout"], []))
 
+    def test_a_function_dynamo_compiled_is_dynamo_s(self):
+        graphs = []
+
+        def backend(gm, example_inputs):
+            graphs.append(gm)
+            return gm.forward
+
+        def g(x):
+            return x * 2 + 1
+
+        dynamo = torch.compile(g, backend=backend)
+
+        def f(x):
+            return dynamo(x) + 1
+
+        compiled = torch.vm(f, fallback=False)
+        x = torch.arange(3.0)
+        for _ in range(4):
+            self.assertEqual(compiled(x), g(x) + 1)
+        # Dynamo traced it, as it does when the interpreter makes the call:
+        # what torch.compile returns is left to the interpreter.
+        self.assertEqual(len(graphs), 1)
+        self.assertEqual(self.callees(compiled), ([], []))
+
     def test_methods_and_callable_objects(self):
         def f(obj, x):
             bound = obj.twice
