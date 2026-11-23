@@ -6206,8 +6206,9 @@ class TestPrecompileDynamoCapture(TestCase):
         with torch._inductor.config.patch({"triton.cudagraphs": True}):
             f = load(self.artifact, self.cache)
             self.assertEqual(f(self.model, self.x2), y)
-        # A CPU graph: no CUDA graph was skipped.
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+        # Counted, as a graph with a reason against CUDA graphs is; a CPU graph
+        # is not logged, and does not raise under cudagraph_or_error.
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
     @parametrize("backend", ["inductor", "eager"])
     def test_a_single_graph_serves_in_process(self, backend):
