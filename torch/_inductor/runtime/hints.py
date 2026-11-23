@@ -408,6 +408,9 @@ class InductorMeta(typing.TypedDict, total=False):
     combo_coordesc_field_limits: dict[str, int]
     combo_coordesc_field_minimums: dict[str, int]
     combo_warp_stage_candidates: typing.Any
+    # Set only by the combo-kernel sub-kernel probe (SIMDScheduling); the
+    # pointwise heuristic then omits device-specific extra 1D configs.
+    combo_subkernel_probe: bool
     extra_launcher_args: typing.Any
     fixed_grid: typing.Any
     precomputed_grids: typing.Any

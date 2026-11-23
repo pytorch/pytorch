@@ -5224,6 +5224,7 @@ def pointwise(
         hinted_configs,
         tile_hint=tile_hint,
         inductor_meta=inductor_meta,
+        triton_meta=triton_meta,
     )
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)

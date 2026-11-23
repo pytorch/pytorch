@@ -5206,6 +5206,9 @@ class SIMDScheduling(BaseScheduling):
             {
                 **kernel.inductor_meta_common(),
                 **kernel.inductor_meta_per_kernel(),
+                # The no-bench combo gate counts these configs; keep
+                # device-specific extra autotune candidates out of the count.
+                "combo_subkernel_probe": True,
             },
         )
         if kernel.persistent_reduction:
