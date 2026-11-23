@@ -82,6 +82,33 @@ class TestPointwiseKernel(TestCase):
 
     @onlyCUDA
     @skipIfNoCuteDSL
+    def test_transpose_decline_preserves_cow_output(self, device: str) -> None:
+        from torch._native.ops.pointwise.overrides import _copy_cond
+
+        # Complex dtype prevents conversion fallback for this permutation.
+        src = torch.arange(120, device=device).to(torch.complex64)
+        src = src.reshape(2, 3, 4, 5).permute(1, 0, 3, 2)
+        base = torch.full(src.shape, 7, dtype=src.dtype, device=device)
+        out = base._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(out))
+        self.assertFalse(_copy_cond(out, src))
+        self.assertTrue(torch._C._is_cow_tensor(out))
+        self.assertEqual(out, base)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    def test_arange_decline_preserves_cow_output(self, device: str) -> None:
+        from torch._native.ops.pointwise.overrides import _arange_out_cond
+
+        base = torch.full((4,), 7.0, device=device)
+        out = base._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(out))
+        self.assertFalse(_arange_out_cond(0, 4, 0, out=out))
+        self.assertTrue(torch._C._is_cow_tensor(out))
+        self.assertEqual(out, base)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
     @parametrize("operation", ("logaddexp", "bitwise_left_shift.Tensor"))
     def test_mixed_dtype_adapter(self, device: str, operation: str) -> None:
         from torch._native.ops.pointwise import overrides, table
