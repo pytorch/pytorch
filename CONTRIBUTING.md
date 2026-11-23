@@ -169,6 +169,7 @@ The labels are the source of truth for where your PR is in the process. For what
 **When does my PR become `ready for review`?** The bot replaces `in progress` with `ready for review` once all of the following hold:
 
 - The automated review ([pr-review skill](.agents/skills/pr-review/SKILL.md)) does not flag anything blocking. You can run the skill locally to check your PR before pushing.
+- Your PR is not on a stale base: if it targets `main` or is a ghstack PR, and its merge base is more than 7 days old when the automated review runs, the review asks you to rebase. The local skill does not check this.
 - All CI has finished and Dr. CI classified every failure as unrelated to your PR. Fix the failures it attributes to your PR. Workflows waiting for a maintainer to approve their run do not block this.
 - Every comment from a maintainer has been addressed, either with a code change that fixes the specific problem or with a reply explaining why no change is needed. If you reply without pushing, comment `@pytorchbot review` to run the automated review again.
 

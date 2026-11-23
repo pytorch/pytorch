@@ -67,6 +67,9 @@ When a PR is in your `ready for review` queue, you can expect that:
 
 - The automated review ([pr-review skill](https://github.com/pytorch/pytorch/blob/main/.agents/skills/pr-review/SKILL.md)) <!-- @lint-ignore -->
   ran and did not flag anything blocking.
+- The automated review asked for a rebase if the PR targets `main` or is a ghstack PR, and its merge base was more
+  than 7 days old when the review ran. Nothing checks again later, and when the review cannot check the merge base,
+  it does not ask, so a PR in your queue can still be on an old base.
 - All CI has finished and Dr. CI classified every failure as unrelated to the PR. Workflows waiting for a maintainer to
   approve their run do not block this, so you may still need to approve CI.
 - Every comment from a maintainer has been addressed, either by a code change that fixes the specific problem or by a
