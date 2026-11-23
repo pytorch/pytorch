@@ -50,7 +50,7 @@ import shlex
 import tempfile
 from typing import Any
 
-from tools.native_aot.compression import compress_cuda_image, compress_cute_module
+from tools.native_aot.cuda_image import compress_cuda_image, compress_cute_module
 
 
 class Toolchain:

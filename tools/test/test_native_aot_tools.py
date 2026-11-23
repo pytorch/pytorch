@@ -270,7 +270,7 @@ class TestExportJobs(unittest.TestCase):
         import struct
 
         from cutlass._mlir import ir
-        from tools.native_aot import compression
+        from tools.native_aot import cuda_image
 
         cubin = b"\x7fELFfake"
         data = struct.pack("<IHHQ", 0xBA55ED50, 1, 16, 16 + len(cubin))
@@ -291,9 +291,9 @@ llvm.func @use() -> !llvm.ptr {{
                 gep = function.regions[0].blocks[0].operations[1]
                 compiled = types.SimpleNamespace(__cubin__=cubin, ir_module=module)
                 with mock.patch.object(
-                    compression, "compress_cuda_image", return_value=result
+                    cuda_image, "compress_cuda_image", return_value=result
                 ):
-                    compression.compress_cute_module(compiled, "sm_100")
+                    cuda_image.compress_cute_module(compiled, "sm_100")
                 expected = data if result is cubin else result
                 value = ir.StringAttr(image.attributes["value"]).value_bytes
                 self.assertEqual(value, expected)
@@ -5830,6 +5830,13 @@ class TestOrphanCheckIsCalled(unittest.TestCase):
 
 
 class TestModulePathOrder(unittest.TestCase):
+    def test_gzip_roundtrip_from_script_directory(self) -> None:
+        code = "import gzip; print(gzip.decompress(gzip.compress(b'payload')).decode())"
+        output = subprocess.check_output(
+            [sys.executable, "-c", code], cwd=os.path.dirname(_TOOLS_FILE)
+        )
+        self.assertEqual(output, b"payload\n")
+
     def test_the_repo_root_is_appended_never_prepended(self):
         # The repo root's torch/ SOURCE tree shadows the installed wheel if inserted.
         for mod in ("build_stage2.py", "export.py", "gen_aot_lib.py"):
