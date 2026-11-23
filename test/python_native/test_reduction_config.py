@@ -905,8 +905,8 @@ class TestReductionConfig(TestCase):
         self.assertFalse(ok((10, 0), dtype, N, 16, trait, acc_bits=64))
 
     def test_b200_ragged_rows_take_whole_widths_at_a_narrow_pitch(self):
-        """Whole-vector rows at a pitch below the vector width take ragged rows from the
-        odd-width band's start: the general kernel is their only other route."""
+        """Whole-vector rows at a pitch that is not whole vectors take ragged rows from
+        the odd-width band's start: the general kernel is their only other route."""
         ok, f16, trait = kg._ragged_rows_ok, torch.float16, T.SumOps()
         for N, pitch, routed in (
             (1024, 1025, True),
