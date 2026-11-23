@@ -557,27 +557,27 @@ class TestInnerTreeOrder(TestCase):
                 self.assertEqual(got.reshape(-1), want)
 
     def test_indexed_split_cache_distinguishes_partial_dtypes(self):
-        """Compile distinct stage-one launchers when accumulator dtypes differ."""
-        x = (
-            torch.arange(2 * 65538, device="cuda", dtype=torch.float32).reshape(
-                2, 65538
-            )
-            % 17
-        )[:, ::2]
+        """Compile distinct stage-one launchers when accumulator dtypes differ, and
+        allocate Int64 partials."""
+        base = torch.arange(2 * 65538, device="cuda").reshape(2, 65538) % 17
+        x = base.float()[:, ::2]
         key = "inner_tree_test_partial_dtype_cache"
-        self.assertEqual(rt.itree_plan(32769, 2, 4, stage=False).shape, "split")
-        for acc, dtype in (
-            (cutlass.Float32, torch.float32),
-            (cutlass.Float64, torch.float64),
+        for itemsize in (4, 8):
+            plan = rt.itree_plan(32769, 2, itemsize, stage=False)
+            self.assertEqual(plan.shape, "split")
+        for acc, src, dtype in (
+            (cutlass.Float32, x, torch.float32),
+            (cutlass.Float64, x, torch.float64),
+            (cutlass.Int64, base[:, ::2], torch.int64),
         ):
             with _order_on():
-                got = kg.reduce_dim(T.SumOps(acc=acc), key, x, [1], dtype)
+                got = kg.reduce_dim(T.SumOps(acc=acc), key, src, [1], dtype)
             with torch.backends.python_native.cutedsl.disabled():
-                want = x.sum(dim=1, dtype=dtype)
+                want = src.sum(dim=1, dtype=dtype)
             self.assertEqual(got, want)
-        # Both ran the indexed split path, each with its own stage-one kernel.
+        # Each ran the indexed split path with its own stage-one kernel.
         stage1 = [k for k in kg._COMPILE_CACHE if k[1:3] == ("genitree1", key)]
-        self.assertEqual(len(stage1), 2)
+        self.assertEqual(len(stage1), 3)
 
     def test_strided_rows_use_the_trait_plan(self):
         """Serve strided ragged rows with the same trait-tuned DAG as contiguous rows."""
