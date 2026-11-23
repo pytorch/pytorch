@@ -440,6 +440,9 @@ class ImplDetailTest(MockSchedulerTest):
     def test_weighted_cost_penalizes_uncoalesced(self):
         self.assertEqual(MemoryCoalescing(10, 0).weighted_cost(), 10)
         self.assertEqual(MemoryCoalescing(0, 10).weighted_cost(), 160)
+        self.assertEqual(
+            MemoryCoalescing(0, 10).weighted_cost(uncoalesced_weight=1), 10
+        )
         # Uncoalesced traffic is what the fusion guard weighs against.
         self.assertGreater(
             MemoryCoalescing(0, 1).weighted_cost(),
@@ -472,6 +475,62 @@ class ImplDetailTest(MockSchedulerTest):
                 ),
                 reject,
             )
+
+    @parametrize(
+        "cache_bytes,scale,reject",
+        [
+            (None, 1, True),
+            (18 * 2**20, 1, False),
+            (18 * 2**20, 10, True),
+        ],
+    )
+    def test_reindexing_memory_guard_cache_resident(self, cache_bytes, scale, reject):
+        scheduler = Scheduler.__new__(Scheduler)
+        unfused_memory = (
+            MemoryCoalescing(5_300_000 * scale, 0),
+            MemoryCoalescing(5_300_000 * scale, 0),
+        )
+        fused_memory = MemoryCoalescing(3_500_000 * scale, 3_500_000 * scale)
+
+        with (
+            mock.patch("torch._inductor.scheduler.get_gpu_dram_gbps", return_value=456),
+            mock.patch(
+                "torch._inductor.scheduler._last_level_cache_bytes",
+                return_value=cache_bytes,
+            ),
+            mock.patch.object(
+                scheduler, "_selected_tiling_memory", return_value=fused_memory
+            ),
+        ):
+            self.assertEqual(
+                scheduler._reindexing_regresses_memory_coalescing(
+                    mock.Mock(), mock.Mock(), unfused_memory
+                ),
+                reject,
+            )
+
+    def test_last_level_cache_bytes(self):
+        from torch._inductor.scheduler import _last_level_cache_bytes
+
+        self.assertIsNone(_last_level_cache_bytes(None))
+        self.assertIsNone(_last_level_cache_bytes(torch.device("cpu")))
+        interface = mock.Mock()
+        interface.get_device_properties.return_value = mock.Mock(
+            L2_cache_size=0, last_level_cache_size=18 * 2**20
+        )
+        _last_level_cache_bytes.cache_clear()
+        try:
+            with mock.patch(
+                "torch._dynamo.device_interface.get_interface_for_device",
+                return_value=interface,
+            ):
+                self.assertEqual(
+                    _last_level_cache_bytes(torch.device("xpu", 0)), 18 * 2**20
+                )
+                interface.get_device_properties.side_effect = RuntimeError
+                self.assertIsNone(_last_level_cache_bytes(torch.device("xpu", 1)))
+        finally:
+            _last_level_cache_bytes.cache_clear()
 
     @parametrize("dram_gbps", [None, 0, -1, float("nan"), float("inf")])
     def test_reindexing_memory_guard_with_invalid_bandwidth(self, dram_gbps):
