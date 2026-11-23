@@ -285,5 +285,7 @@ def ipc_collect() -> None:
     Frees device memory of tensors previously shared with other processes once all consumers have released them,
     and closes the shared memory file used for reference counting if it has no active counters. This is useful
     when the producer process has stopped sending tensors and wants to release unused memory.
+
+    .. note:: This function is a no-op on the current :ref:`accelerator <accelerators>` that do not support IPC.
     """
     torch._C._accelerator_ipcCollect()
