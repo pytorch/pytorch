@@ -13398,10 +13398,19 @@ class Scheduler:
                 prologue, template_node, epilogue = node.get_prologue_template_epilogue(
                     list(node.get_nodes())
                 )
-                # pyrefly: ignore [unbound-name]
-                self.get_backend(device).codegen_template(
-                    template_node, epilogue, prologue
-                )
+                # Template kernels launch through generate_kernel_call like SIMD
+                # kernels, so label them the same way (see codegen_nodes).
+                if config.triton.cudagraph_kernel_annotations:
+                    V.graph._current_kernel_module_fqn = get_fused_kernel_module_fqn(
+                        node.get_nodes()
+                    )
+                try:
+                    # pyrefly: ignore [unbound-name]
+                    self.get_backend(device).codegen_template(
+                        template_node, epilogue, prologue
+                    )
+                finally:
+                    V.graph._current_kernel_module_fqn = None
             elif node.is_extern():
                 self.codegen_extern_call(node)
             elif node.is_foreach():

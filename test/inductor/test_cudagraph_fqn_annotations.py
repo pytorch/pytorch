@@ -234,15 +234,12 @@ class TestFqnAnnotationCodegen(TestCase):
         all_strs = self._mark_kernels_args(model, x)
         _assert_per_layer_fused_and_extern(self, all_strs, 2, "L.model.layers.")
 
-    def test_every_kernel_call_annotated(self):
-        # Kernels that only serve an extern op, such as the channels-last
-        # copies of a convolution's input and weight, carry its FQN too.
-        model = CNNEnsemble(n=2).cuda()
-        x = torch.randn(4, 3, 32, 32, device="cuda")
-        lines = self._wrapper_code(model, x).splitlines()
+    @staticmethod
+    def _unannotated_calls(code: str, call_pattern: str) -> list[str]:
+        lines = code.splitlines()
         unannotated = []
         for i, line in enumerate(lines):
-            if not re.search(r"\.run\(|= extern_kernels\.|^\s+extern_kernels\.", line):
+            if not re.search(call_pattern, line):
                 continue
             indent = len(line) - len(line.lstrip())
             parent = next(
@@ -252,7 +249,26 @@ class TestFqnAnnotationCodegen(TestCase):
             )
             if "mark_kernels(" not in parent:
                 unannotated.append(line.strip())
-        self.assertEqual(unannotated, [])
+        return unannotated
+
+    def test_every_kernel_call_annotated(self):
+        # Kernels that only serve an extern op, such as the channels-last
+        # copies of a convolution's input and weight, carry its FQN too.
+        model = CNNEnsemble(n=2).cuda()
+        x = torch.randn(4, 3, 32, 32, device="cuda")
+        code = self._wrapper_code(model, x)
+        pattern = r"\.run\(|= extern_kernels\.|^\s+extern_kernels\."
+        self.assertEqual(self._unannotated_calls(code, pattern), [])
+
+    def test_template_kernel_annotated(self):
+        # With max-autotune, a GEMM and its pointwise epilogue can fuse into a
+        # Triton template kernel, which must carry the FQN like any SIMD kernel.
+        model = OuterModel(dim=64, num_layers=2).cuda()
+        x = torch.randn(16, 64, device="cuda")
+        with config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON"):
+            code = self._wrapper_code(model, x)
+        self.assertIn("triton_tem_", code)
+        self.assertEqual(self._unannotated_calls(code, r"triton_tem_\w*\.run\("), [])
 
     def test_no_annotations_when_flag_off(self):
         model = OuterModel(dim=64, num_layers=2).cuda()
