@@ -261,6 +261,12 @@ pub fn plan_changed() {
     PLAN_EPOCH.fetch_add(1, Ordering::Relaxed);
 }
 
+/// Counts as a call that is part of a measurement: the samples of the
+/// functions that are running do not count as settled.
+pub fn unsettled() {
+    TRIAL_EVENTS.fetch_add(1, Ordering::Relaxed);
+}
+
 /// The builtins `locals`, `vars` and `dir`, which look for the variables of
 /// the frame that calls them (see `Op::Locals`). Kept for good.
 unsafe fn frame_readers() -> (Obj, Obj, Obj) {

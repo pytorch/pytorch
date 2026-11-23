@@ -807,6 +807,15 @@ impl Replay {
 
 /// Tells the VM that compiled code changed behind its back: measurements of
 /// compiled code against the interpreter that are under way start over.
+/// Says that what is running is not yet what it will be: a region is
+/// still running its instructions one by one before it decides whether to
+/// compile them. A measurement that this falls into does not count against
+/// the compiled form of a function.
+#[pyfunction]
+pub fn unsettled() {
+    vm::unsettled();
+}
+
 #[pyfunction]
 pub fn plan_changed() {
     vm::plan_changed();

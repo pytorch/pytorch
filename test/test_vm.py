@@ -4209,6 +4209,18 @@ def demote_caller(n, x):
     return demote_python(n), x + 1
 
 
+def demote_unsettled(n):
+    total = 0
+    for i in range(n):
+        total += i * i % 7
+    cfg_rs.unsettled()
+    return total
+
+
+def demote_unsettled_caller(n, x):
+    return demote_unsettled(n), x + 1
+
+
 def demote_tensor_caller(n, x):
     for _ in range(100):
         x = x + 1
@@ -4250,6 +4262,21 @@ class TestVmDemotion(TestCase):
         # A loop of integer arithmetic is several times slower in the VM.
         self.assertEqual(stats["demoted_callees"], ["demote_python"])
         self.assertEqual(stats["compiled_callees"], ["demote_python"])
+
+    def test_a_call_that_is_not_settled_does_not_count_against_a_function(self):
+        # The same loop as demote_python, which is left to the interpreter;
+        # this one says of every call that it is not what it will be.
+        compiled = torch.vm(
+            demote_unsettled_caller,
+            fallback=False,
+            demote=True,
+            passes=without(P.Inline),
+        )
+        x = torch.ones(2)
+        for _ in range(200):
+            total, _ = compiled(300, x)
+            self.assertEqual(total, demote_python(300))
+        self.assertEqual(compiled.stats()["demoted_callees"], [])
 
     def test_python_function_is_left_to_the_interpreter(self):
         compiled = torch.vm(demote_python, fallback=False, demote=True)
