@@ -1993,7 +1993,8 @@ function, and the path checks that what it returned is a bool: for anything
 else `isinstance` gives whether it is true, as the interpreter does, and the
 path ends in front of the call. A C function
 that is called with what the code spreads (`torch.add(*pair)`) is an
-operation where the path built the tuple and no keyword is spread:
+operation where no keyword is spread ("Methods read off a tensor, and what a
+call spreads" has what may be spread):
 
 ```python
 class Meta(type):
@@ -2133,6 +2134,40 @@ The dropout of the layer is among the six operations: a dropout of a model
 that is not training drops nothing and draws nothing, and is an operation
 like any other, with `Graphs()` alone as well ("Writes" has what one that
 drops is).
+
+### Methods read off a tensor, and what a call spreads
+
+`y.to(device)` is a call of a method by its name. Where the code reads the
+method first and calls it later, or calls it with `*` (`y.view(*shape)`),
+what is called is a method that was bound to the tensor; it is the same
+operation, the method of that name of the tensor it was read off. What a
+call spreads with `*` is handed over item by item. The items of a tuple or
+a list the path built are the values it was built of. Those of any other
+list or tuple (the function's own `*sizes`, a `torch.Size`, a list of the
+caller) are read off it, with a check at every call that it has that many:
+
+```python
+def hands_on(x, pair, *sizes):
+    y = (x.sin() + 1).cos()
+    shape = y.shape[:-1] + (2, 2)
+    y = y.view(*shape).reshape(*sizes)
+    return (torch.mul(y, *pair) * 2).tanh().exp()
+
+
+g = torch.vm(hands_on, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+x, w = torch.randn(3, 4), torch.randn(4)
+for _ in range(6):
+    same = torch.equal(g(x, (w,), 3, 4), hands_on(x, (w,), 3, 4))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["why"]  # (True, 9, 'the function returns')
+torch.equal(g(x, [w[:1]], 2, 6), hands_on(x, [w[:1]], 2, 6))  # True: other items are another form
+```
+
+A call with `*` is an operation only where the operator it runs enters no
+Python code. On a GPU that is not so for `bmm`, and for what comes down to
+it (`matmul` of two stacks of matrices), whose CUDA kernel is entered
+through a Python function (`torch._native`): a path ends in front of such a
+call of them, where a call that is written out goes on.
 
 ### The order of the list
 

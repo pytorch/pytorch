@@ -4753,14 +4753,17 @@ impl Compiled {
         // half, float, double, the complex types, bfloat16
         const FLOATING: [i32; 7] = [5, 6, 7, 8, 9, 10, 15];
         let mut floats = true;
-        inst.op.for_each_use(|v| {
-            for item in flattened(&[reg(regs, v)]) {
-                let mut info = TcfgTensorInfo::empty();
-                if (api.tensor_info)(item, &mut info) != 0 {
-                    floats &= FLOATING.contains(&info.dtype);
-                }
+        let mut taken: Vec<Obj> = Vec::new();
+        inst.op.for_each_use(|v| taken.push(reg(regs, v)));
+        if let Op::Call { callee, .. } | Op::CallEx { callee, .. } = &inst.op {
+            taken.extend(self.bound_tensor(regs, *callee, api).map(|(tensor, ..)| tensor));
+        }
+        for item in flattened(&taken) {
+            let mut info = TcfgTensorInfo::empty();
+            if (api.tensor_info)(item, &mut info) != 0 {
+                floats &= FLOATING.contains(&info.dtype);
             }
-        });
+        }
         let names = Self::operators_of(inst, operators);
         !names.is_empty()
             && names.iter().all(|name| match graph::total_operator(name) {
@@ -4812,6 +4815,8 @@ impl Compiled {
                 }
                 (c"site", exported, d.operands.to_vec(), none())
             }
+            // Not the method of the tensor itself, which would run on it.
+            Op::Call { callee, .. } if self.bound_tensor(regs, *callee, api).is_some() => return false,
             Op::Call { callee, args, kwnames } => (c"call", new_ref(self.obj(regs, *callee)), args.to_vec(), names_of(*kwnames)),
             Op::CallMethod { recv, name, args, kwnames } => {
                 let mut taken = vec![*recv];
@@ -5905,6 +5910,26 @@ impl Compiled {
         read
     }
 
+    /// For a callee that is a method of a tensor, bound when it was read
+    /// off the tensor (`x.to`, where the call is not one of a method by its
+    /// name): the tensor, the value it was read off and the name. The call
+    /// is then one of that method of that value.
+    unsafe fn bound_tensor(&self, regs: &[Obj], callee: V, api: &TcfgApi) -> Option<(Obj, V, u32)> {
+        let c = reg(regs, callee);
+        if c.is_null() || capi::is_unboxed(c) || ffi::PyCFunction_Check(c) == 0 {
+            return None;
+        }
+        let bound = ffi::PyCFunction_GetSelf(c);
+        let mut info = TcfgTensorInfo::empty();
+        if bound.is_null() || (api.tensor_info)(bound, &mut info) == 0 {
+            return None;
+        }
+        match self.analysis.def_op(&self.func, callee) {
+            Some(Op::LoadAttr(recv, name)) => Some((bound, *recv, *name)),
+            _ => None,
+        }
+    }
+
     /// Whether an instruction that is no call site is an operation of a
     /// graph all the same (see `graph::generic`), on the values it is about
     /// to run on: its operators, as they are reported.
@@ -5955,8 +5980,14 @@ impl Compiled {
             let operators = found.map_or(String::new(), |f| f.operators.join("+"));
             return fine.then(|| if operators.is_empty() { "setitem".to_string() } else { operators });
         }
+        // A method that was bound to a tensor earlier has its receiver in
+        // no operand: it is the value the method was read off.
+        let bound = match &inst.op {
+            Op::Call { callee, .. } | Op::CallEx { callee, .. } => self.bound_tensor(regs, *callee, api),
+            _ => None,
+        };
         // The first tensor it is handed, in the order of the call.
-        let mut first: Option<V> = None;
+        let mut first: Option<V> = bound.map(|(_, recv, _)| recv);
         let mut look = |v: V| {
             if first.is_none() && tensor(v) {
                 first = Some(v);
@@ -5968,23 +5999,19 @@ impl Compiled {
             _ => {}
         }
         let fits = match &inst.op {
-            // A method that was bound to a tensor earlier has its receiver
-            // in no operand.
-            Op::Call { callee, .. } => {
+            // A C function, or such a method; with `CallEx`, handed what
+            // the code spreads with `*`.
+            Op::Call { callee, .. } | Op::CallEx { callee, .. } => {
                 let c = reg(regs, *callee);
                 let function = !c.is_null() && !capi::is_unboxed(c) && ffi::PyCFunction_Check(c) != 0;
-                let bound = if function { ffi::PyCFunction_GetSelf(c) } else { null_mut() };
-                function && (bound.is_null() || (api.tensor_info)(bound, &mut info) == 0)
+                let free = function && {
+                    let of = ffi::PyCFunction_GetSelf(c);
+                    of.is_null() || (api.tensor_info)(of, &mut info) == 0
+                };
+                free || bound.is_some()
             }
             Op::CallMethod { .. } => true,
             Op::GetItem(a, _) => tensor(*a),
-            // A C function that is handed what the code spreads with `*`.
-            Op::CallEx { callee, .. } => {
-                let c = reg(regs, *callee);
-                let function = !c.is_null() && !capi::is_unboxed(c) && ffi::PyCFunction_Check(c) != 0;
-                let bound = if function { ffi::PyCFunction_GetSelf(c) } else { null_mut() };
-                function && (bound.is_null() || (api.tensor_info)(bound, &mut info) == 0)
-            }
             _ => false,
         };
         if !fits || origin == NONE {
@@ -6275,7 +6302,9 @@ impl Compiled {
             // What the code spreads into a call of a C function is known
             // where the path built it: the call with those values.
             Op::CallEx { args, kwargs, .. } if operators.is_some() => {
-                let known = t.mapped(*args) != NONE && self.built(t, t.mapped(*args)).is_some();
+                let held = reg(regs, *args);
+                let row = !held.is_null() && graph::is_row(held);
+                let known = row || (t.mapped(*args) != NONE && self.built(t, t.mapped(*args)).is_some());
                 let bare = *kwargs == NONE
                     || (t.mapped(*kwargs) != NONE && self.entries(t, t.mapped(*kwargs)).is_some_and(|named| named.is_empty()));
                 (known && bare).then_some(Kind::Node)
@@ -6344,10 +6373,33 @@ impl Compiled {
         let Some(kind) = kind else {
             return ends();
         };
+        // A method that was bound to a tensor earlier is called as the
+        // method of that name of the value it was read off; what the code
+        // spreads into a call is handed over item by item.
+        let method = match (&inst.op, kind) {
+            (Op::Call { callee, .. } | Op::CallEx { callee, .. }, Kind::Node) => self.bound_tensor(regs, *callee, api),
+            _ => None,
+        };
+        let receiver = method.map(|(_, recv, name)| (t.mapped(recv), name));
+        if receiver.is_some_and(|(recv, _)| recv == NONE) {
+            return ends();
+        }
         let spread = match (&inst.op, kind) {
             (Op::CallEx { callee, args, .. }, Kind::Node) => {
-                let callee = self.path_value(t, regs, *callee);
-                self.built(t, t.mapped(*args)).map(|args| Op::Call { callee, args, kwnames: NONE })
+                let sequence = self.path_value(t, regs, *args);
+                let items = if sequence == UNDEF { None } else { self.spread(t, sequence, inst.bc) };
+                match receiver {
+                    Some((recv, name)) => items.map(|args| Op::CallMethod { recv, name, args, kwnames: NONE }),
+                    None => {
+                        let callee = self.path_value(t, regs, *callee);
+                        items.map(|args| Op::Call { callee, args, kwnames: NONE })
+                    }
+                }
+            }
+            (Op::Call { args, kwnames, .. }, Kind::Node) if receiver.is_some() => {
+                let (recv, name) = receiver.expect("just asked");
+                let args: Vec<PathValue> = args.iter().map(|v| self.path_value(t, regs, *v)).collect();
+                (!args.contains(&UNDEF)).then_some(Op::CallMethod { recv, name, args, kwnames: *kwnames })
             }
             _ => None,
         };
@@ -6627,6 +6679,11 @@ impl Compiled {
                         given.push(reg(regs, v));
                     }
                 });
+                if let Some((tensor, recv, _)) = method {
+                    if !owned(t, recv) {
+                        given.push(tensor);
+                    }
+                }
                 let versions = versions_of(&flattened(&given), api);
                 let kinds = kinds_of(&flattened(&given), api);
                 let result = self.exec_op(regs, op);
@@ -7878,6 +7935,56 @@ impl Compiled {
             }
             _ => None,
         }
+    }
+
+    /// The values a call takes out of a list or a tuple that the code
+    /// spreads into it: those the path built it of, or, of one that it did
+    /// not build, its items, each read off it, with a check that it has
+    /// that many.
+    unsafe fn spread(&self, t: &mut Trace, sequence: PathValue, bc: u32) -> Option<Vec<PathValue>> {
+        let upto = t.body.len();
+        self.spread_by(t, sequence, bc, upto)
+    }
+
+    /// `spread` of a sequence the path built as the first `upto`
+    /// instructions of the trace left it (see `built_by`, also for why
+    /// this ends).
+    unsafe fn spread_by(&self, t: &mut Trace, sequence: PathValue, bc: u32, upto: usize) -> Option<Vec<PathValue>> {
+        // What the path built: from what it was built of, a sequence that
+        // was added to it item by item.
+        let steps: Vec<(usize, Op)> = t.body[..upto].iter().enumerate().filter(|(_, inst)| match &inst.op {
+            Op::BuildTuple(_) | Op::BuildList(_) | Op::ListToTuple(_) => inst.dst == sequence,
+            Op::ListAppend(target, _) | Op::ListExtend(target, _) => *target == sequence,
+            _ => false,
+        }).map(|(at, inst)| (at, inst.op.clone())).collect();
+        if !steps.is_empty() {
+            let mut items: Option<Vec<PathValue>> = None;
+            for (at, step) in steps {
+                match step {
+                    Op::BuildTuple(vs) | Op::BuildList(vs) => items = Some(vs),
+                    Op::ListToTuple(list) => items = Some(self.spread_by(t, list, bc, at)?),
+                    Op::ListAppend(_, v) => items.as_mut()?.push(v),
+                    Op::ListExtend(_, more) => {
+                        let more = self.spread_by(t, more, bc, at)?;
+                        items.as_mut()?.extend(more);
+                    }
+                    _ => {}
+                }
+            }
+            return items;
+        }
+        let held = t.rec.values[sequence as usize];
+        if held.is_null() || !graph::is_row(held) {
+            return None;
+        }
+        let count = ffi::PyObject_Size(held);
+        t.check(Assert::Sequence(sequence, ffi::Py_TYPE(held) as usize, count as usize), bc);
+        let fixed = t.defs[sequence as usize].fixed;
+        let item = |t: &mut Trace, i: isize| {
+            let kept = new_ref(graph::sequence_item(held, i));
+            t.derive_fixed(Op::Part(Part::Index(i as u32), sequence), Kind::Pure, false, kept, bc, fixed)
+        };
+        Some((0..count).map(|i| item(t, i)).collect())
     }
 
     /// For a tuple or a list that a path built: the values it holds where
