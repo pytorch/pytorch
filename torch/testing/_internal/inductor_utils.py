@@ -216,6 +216,33 @@ def skipDeviceIf(cond, msg, *, device):
     return decorate_fn
 
 
+def _cpp_compiler_is_msvc_cl() -> bool:
+    if not IS_WINDOWS:
+        return False
+    try:
+        from torch._inductor.cpp_builder import is_msvc_cl
+
+        return is_msvc_cl()
+    except Exception:
+        return False
+
+
+def skipIfMsvcCl(msg):
+    """Skip when Inductor compiles C++ with MSVC cl. Checked when the test runs,
+    so importing the test module never probes the compiler."""
+
+    def decorate_fn(fn):
+        @functools.wraps(fn)
+        def inner(*args, **kwargs):
+            if _cpp_compiler_is_msvc_cl():
+                raise unittest.SkipTest(msg)
+            return fn(*args, **kwargs)
+
+        return inner
+
+    return decorate_fn
+
+
 def skip_windows_ci(name: str, file: str) -> None:
     if IS_WINDOWS and IS_CI:
         module = os.path.basename(file).strip(".py")

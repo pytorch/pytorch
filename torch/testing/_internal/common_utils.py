@@ -1773,7 +1773,7 @@ IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
-IS_X86 = platform.machine() in ('x86_64', 'i386')
+IS_X86 = platform.machine() in ('x86_64', 'i386', 'AMD64')
 IS_ARM64 = platform.machine() in ('arm64', 'aarch64', 'ARM64')
 IS_S390X = platform.machine() == "s390x"
 IS_AVX512_VNNI_SUPPORTED = torch.cpu.get_capabilities().get("avx512_vnni", False)
@@ -2857,6 +2857,12 @@ def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows 
 def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windows stack"):
     decorator = lazy_skip_if(
         lambda: IS_WINDOWS and torch.xpu.is_available(), f"skipIfWindowsXPU: {msg}"
+    )
+    return decorator(func) if func is not None else decorator
+
+def skipIfRocmWindows(func=None, *, msg="test doesn't currently work on the Windows ROCm stack"):
+    decorator = lazy_skip_if(
+        lambda: IS_WINDOWS and torch.version.hip, f"skipIfRocmWindows: {msg}"
     )
     return decorator(func) if func is not None else decorator
 
@@ -6477,7 +6483,8 @@ def find_library_location(lib_name: str) -> Path:
     if os.path.exists(path):
         return path
     torch_root = Path(__file__).resolve().parents[2]
-    path = torch_root.parent / 'build' / 'lib' / lib_name
+    # CMake puts DLLs in build/bin on Windows.
+    path = torch_root.parent / 'build' / ('bin' if IS_WINDOWS else 'lib') / lib_name
     if os.path.exists(path):
         return path
     raise FileNotFoundError(f"Could not find library '{lib_name}' in installed or build paths")
