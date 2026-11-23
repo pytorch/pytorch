@@ -17,25 +17,11 @@ Tensor my_empty(
   return empty(size, dtype, layout, device, pin_memory, memory_format);
 }
 
-Tensor my_empty_strided(
-    torch::headeronly::IntHeaderOnlyArrayRef size,
-    torch::headeronly::IntHeaderOnlyArrayRef stride,
-    std::optional<torch::headeronly::ScalarType> dtype,
-    std::optional<torch::headeronly::Layout> layout,
-    std::optional<torch::stable::Device> device,
-    std::optional<bool> pin_memory) {
-  return torch::stable::empty_strided(
-      size, stride, dtype, layout, device, pin_memory);
-}
-
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def(
       "my_empty(int[] size, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor");
-  m.def(
-      "my_empty_strided(int[] size, int[] stride, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_empty", TORCH_BOX(&my_empty));
-  m.impl("my_empty_strided", TORCH_BOX(&my_empty_strided));
 }
