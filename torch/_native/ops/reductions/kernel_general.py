@@ -638,16 +638,17 @@ def _oneshot_ok(x: torch.Tensor) -> bool:
 # argmin, aminmax and max/min.dim (fp32) run 0.97-3.9x. Absmax and absmin (0.88-0.91x)
 # and general-p norms (0.57-0.92x; p = 3 and 0.5) lose at N = 255, so they start at
 # N = 1023. Welford traits start at N = 1025, the narrowest odd width that won; the
-# floor also covers even widths and narrow pitches, which were not measured for Welford
-# below 1025. Var, std, var_mean and std_mean (fp16/bf16/fp32, N = 1025-16383, 64 and
-# 4096 rows) ran 1.09-2.3x. All and any (fp16/bf16/fp32, N = 255-16383, 2 to 4096 rows)
-# ran 1.07-2.4x, and two- and three-row sums 1.28-1.91x. WelfordOps(return_mean=True) is
-# unmeasured, so it takes the Welford floor too. One kernel per launch class serves
-# every width and pitch. Even widths that are not whole vectors (16-bit N = 1026-4102,
-# fp32 N = 1026-4102 with N % 4 == 2) ran 0.96-1.6x against the vector-class kernel they
-# replace, but 0.67-1.03x at N = 258/260, so they start at N = 1023. Whole widths at a
-# pitch that is not whole vectors have only the general kernel to fall back to, which
-# ran them 1.8-2.1x slower (16384 rows of 1024 at pitch 1025).
+# floor also covers even widths and a pitch that is not whole vectors, which were not
+# measured for Welford below 1025. Var, std, var_mean and std_mean (fp16/bf16/fp32,
+# N = 1025-16383, 64 and 4096 rows) ran 1.09-2.3x. All and any (fp16/bf16/fp32,
+# N = 255-16383, 2 to 4096 rows) ran 1.07-2.4x, and two- and three-row sums 1.28-1.91x.
+# WelfordOps(return_mean=True) is unmeasured, so it takes the Welford floor too. One
+# kernel per launch class serves every width and pitch. Even widths that are not whole
+# vectors (16-bit N = 1026-4102, fp32 N = 1026-4102 with N % 4 == 2) ran 0.96-1.6x
+# against the vector-class kernel they replace, but 0.67-1.03x at N = 258/260, so they
+# start at N = 1023. Whole widths at a pitch that is not whole vectors have only the
+# general kernel to fall back to, which ran them 1.8-2.1x slower (16384 rows of 1024 at
+# pitch 1025).
 _RAGGED_ROW_MIN_N = 255
 _RAGGED_ROW_LATE_MIN_N = 1023
 _RAGGED_ROW_WELFORD_MIN_N = 1025
