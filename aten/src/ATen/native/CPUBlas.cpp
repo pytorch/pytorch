@@ -129,7 +129,8 @@ C10_DIAGNOSTIC_POP()
 // Runs a bf16/f16 gemm on MKL, which only writes f32 C, through an f32 copy of C.
 // Returns false when the ATen kernel should handle the problem instead: tiny
 // problems (same bound as mkldnn_gemm, where MKL's call overhead dominates),
-// alpha == 0 (ATen kernel still propagates inf/NaN) and skinny transa ones.
+// alpha == 0 (ATen kernel still propagates inf/NaN) and skinny transa ones, and
+// bf16 matrix-vector products with only B transposed.
 template <typename scalar_t>
 bool mkl_xf16_gemm(
     TransposeType transa, TransposeType transb,
@@ -139,18 +140,23 @@ bool mkl_xf16_gemm(
     const scalar_t *b, int64_t ldb,
     float beta,
     scalar_t *c, int64_t ldc) {
-  // in cpu/BlasKernel.cpp beats MKL's bf16/f16 gemm when B has few columns.
+  // For transa/no-transb problems, the dot-product kernel in cpu/BlasKernel.cpp 
+  // beats MKL's bf16/f16 gemm when B has few columns.
   // For small size problem MKL wins from about 24 columns at any thread count.
   // For larger problem the ATen kernel splits the m rows of C across threads, so its
   // time scales with problem size / threads, while at small n MKL's time is nearly
   // flat in n and scales poorly with threads; so the crossover grows with the
   // thread count. The constants come from a sweep on one Xeon 8570 with AVX2 and
-  // AVX-512 without AMX emulated by capping the ISA 
+  // AVX-512 without AMX emulated by capping the ISA
   const int64_t threads = at::in_parallel_region() ? 1 : at::get_num_threads();
   const int64_t min_cols_transa = m * k <= 1024 * 1024 ? 24 : 24 + 6 * threads;
   const bool skinny_transa = transa != TransposeType::NoTranspose &&
       transb == TransposeType::NoTranspose && n < min_cols_transa;
-  if (m * n * k <= 16 * 16 * 16 || alpha == 0.0f || skinny_transa ||
+  // MKL's bf16 gemm is slow for matrix-vector products with A not transposed. With B
+  // transposed the ATen kernel is much faster
+  const bool bf16_gemv_transb = std::is_same_v<scalar_t, at::BFloat16> && n == 1 &&
+      transa == TransposeType::NoTranspose && transb != TransposeType::NoTranspose;
+  if (m * n * k <= 16 * 16 * 16 || alpha == 0.0f || skinny_transa || bf16_gemv_transb ||
       !use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     return false;
   }
