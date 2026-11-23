@@ -580,8 +580,6 @@ class TileReduce:
         npairs_kept=0,
         wide_count=False,
         wide_output=False,
-        wide_red=False,
-        wide_kept=False,
         gidx_from="r",
         flat_tail=False,
         ragged_chunk=False,
@@ -598,7 +596,7 @@ class TileReduce:
                 raise ValueError(
                     "the inner-tree order needs a row or general axis and a plan"
                 )
-            wide = wide_count or wide_red or wide_output
+            wide = wide_count or wide_output
             if axis == "general" and (
                 combine
                 or flat_tail
@@ -666,8 +664,6 @@ class TileReduce:
         self.npairs_kept = npairs_kept
         self.wide_count = wide_count
         self.wide_output = wide_output
-        self.wide_red = wide_red
-        self.wide_kept = wide_kept
         self.gidx_from = gidx_from
         self.flat_tail = flat_tail
         self.ragged_chunk = ragged_chunk
@@ -733,8 +729,6 @@ class TileReduce:
             self.npairs_kept,
             self.wide_count,
             self.wide_output,
-            self.wide_red,
-            self.wide_kept,
             self.gidx_from,
             self.flat_tail,
             self.ragged_chunk,
@@ -1136,7 +1130,7 @@ class TileReduce:
         # Build V2 divisors in the MLIR context so .divisor crosses the kernel boundary.
         rdivs = (
             rexts
-            if const_expr(self.wide_count or self.wide_red)
+            if const_expr(self.wide_count)
             else (
                 [cute.FastDivmodDivisorV2(e) for e in rexts]
                 if rexts is not None
@@ -1145,7 +1139,7 @@ class TileReduce:
         )
         kdivs = (
             kexts
-            if const_expr(self.wide_output or self.wide_kept)
+            if const_expr(self.wide_output)
             else (
                 [cute.FastDivmodDivisorV2(e) for e in kexts]
                 if kexts is not None
@@ -1272,7 +1266,7 @@ class TileReduce:
                     kdivs,
                     kstrides,
                     const_expr(self.npairs_kept),
-                    const_expr(self.wide_output or self.wide_kept),
+                    const_expr(self.wide_output),
                 )
             if const_expr(self.itree.shape == "combine"):
                 accs = (self._fold_itree_combine(mIns, unit),)
@@ -1302,7 +1296,7 @@ class TileReduce:
                     kdivs,
                     kstrides,
                     const_expr(self.npairs_kept),
-                    const_expr(self.wide_output or self.wide_kept),
+                    const_expr(self.wide_output),
                 )
             rb = nchunks
             if const_expr(self.flat_tail):
@@ -1361,7 +1355,7 @@ class TileReduce:
                         in_base,
                         chunk_base,
                         const_expr(self.gidx_from),
-                        const_expr(self.wide_count or self.wide_red),
+                        const_expr(self.wide_count),
                     ),
                 )
             accs = (merge_lanes(trait, accs[0], const_expr(self.threads_per_row)),)
