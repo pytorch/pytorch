@@ -326,6 +326,60 @@ class TestMemoryPlanning(TestCase):
         ).check_next("aoti_torch__alloc_from_pool(pool1, 0").run(code)
         self.assertTrue(same(f(*args), result))
 
+    @config.patch(memory_pool="intermediates")
+    def test_unbacked_input_dim_pools(self):
+        """
+        Buffers sized by an unbacked input dim plan like buffers sized by a backed
+        dim: the dim is defined before any of them is allocated.
+        """
+
+        def f(x, w):
+            for _ in range(4):
+                x = torch.relu(x @ w)
+            return x
+
+        w = torch.randn(64, 64, device=self.device)
+        pool_counts = []
+        for mark in (
+            torch._dynamo.decorators.mark_dynamic,
+            torch._dynamo.decorators.mark_unbacked,
+        ):
+            torch._dynamo.reset()
+            x = torch.randn(37, 64, device=self.device)
+            mark(x, 0)
+            result, code = run_and_get_cpp_code(torch.compile(f, fullgraph=True), x, w)
+            self.assertTrue(same(f(x, w), result))
+            pool_counts.append(len(re.findall(r"^\s*pool\d+ = ", code, re.MULTILINE)))
+        self.assertEqual(pool_counts[0], pool_counts[1])
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_data_dependent_size_pools(self):
+        """
+        Buffers sized by a data-dependent size only go to pools created after
+        that size is computed.
+        """
+
+        def f(x, w):
+            h = torch.relu(x @ w)
+            selected = h[x[:, 0] > 0]
+            return torch.relu(torch.relu(selected @ w) @ w).sum(0) + h.sum(0)
+
+        x = torch.randn(37, 64, device=self.device)
+        w = torch.randn(64, 64, device=self.device)
+        result, code = run_and_get_cpp_code(torch.compile(f, fullgraph=True), x, w)
+        self.assertTrue(same(f(x, w), result))
+
+        defined = set()
+        pools_with_unbacked_size = 0
+        for line in code.splitlines():
+            if match := re.match(r"\s*(u\d+) = ", line):
+                defined.add(match.group(1))
+            elif re.match(r"\s*pool\d+ = ", line):
+                symbols = set(re.findall(r"\bu\d+\b", line))
+                self.assertLessEqual(symbols, defined, line)
+                pools_with_unbacked_size += bool(symbols)
+        self.assertGreater(pools_with_unbacked_size, 0)
+
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/168171",
