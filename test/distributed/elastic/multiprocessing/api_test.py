@@ -1219,6 +1219,31 @@ class ShutdownTimeoutConfigTest(TestCase):
             with self.assertRaises(ValueError):
                 resolve_shutdown_timeout(None)
 
+    def test_close_defaults_to_configured_shutdown_timeout(self):
+        ctx = self._make_subprocess_context(shutdown_timeout=5)
+        with mock.patch.object(ctx, "_close") as mock_close:
+            ctx.close()
+        self.assertEqual(mock_close.call_args.kwargs["timeout"], 5)
+
+    def test_close_defaults_to_env_var_shutdown_timeout(self):
+        with mock.patch.dict(os.environ, {SHUTDOWN_TIMEOUT_ENV_VAR: "2.5"}):
+            ctx = self._make_subprocess_context()
+            with mock.patch.object(ctx, "_close") as mock_close:
+                ctx.close()
+        self.assertEqual(mock_close.call_args.kwargs["timeout"], 2.5)
+
+    def test_close_defaults_to_default_shutdown_timeout(self):
+        ctx = self._make_subprocess_context()
+        with mock.patch.object(ctx, "_close") as mock_close:
+            ctx.close()
+        self.assertEqual(mock_close.call_args.kwargs["timeout"], DEFAULT_SHUTDOWN_TIMEOUT)
+
+    def test_close_explicit_timeout_overrides_configured(self):
+        ctx = self._make_multiprocess_context(shutdown_timeout=5)
+        with mock.patch.object(ctx, "_close") as mock_close:
+            ctx.close(timeout=42)
+        self.assertEqual(mock_close.call_args.kwargs["timeout"], 42)
+
     def test_start_processes_forwards_shutdown_timeout_to_subprocess_context(self):
         with mock.patch(
             "torch.distributed.elastic.multiprocessing.SubprocessContext"

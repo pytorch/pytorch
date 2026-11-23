@@ -728,7 +728,7 @@ class PContext(abc.ABC):
     def close(
         self,
         death_sig: signal.Signals | None = None,
-        timeout: float = DEFAULT_SHUTDOWN_TIMEOUT,
+        timeout: float | None = None,
     ) -> None:
         r"""
         Terminates all processes managed by this context and cleans up any
@@ -738,9 +738,15 @@ class PContext(abc.ABC):
             death_sig: Death signal to terminate processes.
             timeout: Time to wait for processes to finish, if process is
                 still alive after this time, it will be terminated via SIGKILL.
+                If ``None``, the context's configured ``shutdown_timeout``
+                is used (resolved from the ``shutdown_timeout`` argument,
+                the ``TORCH_ELASTIC_SHUTDOWN_TIMEOUT`` environment variable,
+                or :data:`DEFAULT_SHUTDOWN_TIMEOUT`; see :meth:`__init__`).
         """
         if not death_sig:
             death_sig = _get_default_signal()
+        if timeout is None:
+            timeout = self._shutdown_timeout
         self._close(death_sig=death_sig, timeout=timeout)
         for tail_log in self._tail_logs:
             tail_log.stop()
