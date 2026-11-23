@@ -30,7 +30,7 @@ from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8,
-    SM90OrLater,
+    PLATFORM_SUPPORTS_GROUPED_GEMM,
 )
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -39,7 +39,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocm,
-    TEST_CUDA,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -1031,8 +1030,7 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
             self.assertEqual(local_result, dist_result_full)
 
     @unittest.skipIf(
-        not TEST_CUDA or (torch.version.cuda and not SM90OrLater),
-        "Grouped gemm supported on SM90",
+        not PLATFORM_SUPPORTS_GROUPED_GEMM, "Grouped gemm supported on SM90"
     )
     @with_comms
     @skip_unless_torch_gpu

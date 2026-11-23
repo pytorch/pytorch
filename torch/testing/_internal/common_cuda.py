@@ -369,6 +369,14 @@ PLATFORM_SUPPORTS_SYSTEM_SCOPE_SPIN_WAIT: bool = LazyVal(lambda: _cuda_sm_or_any
 # A GPU that Triton can target; says nothing about whether Triton is installed
 PLATFORM_SUPPORTS_TRITON: bool = LazyVal(lambda: _cuda_sm_or_any_rocm(SM70OrLater))
 PLATFORM_SUPPORTS_INT_MM: bool = LazyVal(lambda: _cuda_sm_or_any_rocm(SM80OrLater))
+# Inductor GPU codegen (torch.compile, aoti_eager) in tests with an SM80 floor on CUDA
+PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN: bool = LazyVal(lambda: _cuda_sm_or_any_rocm(SM80OrLater))
+# Inductor bf16 index_put(accumulate=True): tl.atomic_add on SM90, a fallback on ROCm
+PLATFORM_SUPPORTS_INDUCTOR_BF16_ATOMIC_ADD: bool = LazyVal(lambda: _cuda_sm_or_any_rocm(SM90OrLater))
+# grouped_mm and foreach.mm tests: the grouped GEMM kernels need SM90 on CUDA
+PLATFORM_SUPPORTS_GROUPED_GEMM: bool = LazyVal(lambda: _cuda_sm_or_any_rocm(SM90OrLater))
+# FSDP comm over symmetric memory; ROCm archs are narrowed by PLATFORM_SUPPORTS_SYMM_MEM
+PLATFORM_SUPPORTS_FSDP_SYMM_MEM: bool = LazyVal(lambda: _cuda_sm_or_any_rocm(SM90OrLater))
 PLATFORM_SUPPORTS_ASYNC_INPUT_MM: bool = LazyVal(lambda: evaluate_platform_supports_async_input_mm())
 
 PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())

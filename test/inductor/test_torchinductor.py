@@ -90,8 +90,10 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_INDUCTOR_BF16_ATOMIC_ADD,
+    PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN,
+    PLATFORM_SUPPORTS_INT_MM,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM80OrLater,
     SM90OrLater,
     TEST_CUDNN,
     tf32_on_and_off,
@@ -1580,7 +1582,7 @@ class CommonTemplate:
             ),
         )
 
-    @skipCUDAIf(torch.version.cuda is not None and not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN, "Requires sm80")
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
@@ -1624,7 +1626,7 @@ class CommonTemplate:
             )
             self.assertEqual(ref, res)
 
-    @skipCUDAIf(torch.version.cuda is not None and not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN, "Requires sm80")
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
@@ -1680,7 +1682,7 @@ class CommonTemplate:
             self.assertEqual(ref_tensor1, res_tensor1)
             self.assertEqual(ref_out_tensor1, res_out_tensor1)
 
-    @skipCUDAIf(torch.version.cuda is not None and not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN, "Requires sm80")
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
@@ -1721,7 +1723,7 @@ class CommonTemplate:
             for ref_value, res_value in zip(ref_value_list, res_value_list):
                 self.assertEqual(ref_value, res_value)
 
-    @skipCUDAIf(torch.version.cuda is not None and not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN, "Requires sm80")
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
@@ -1766,7 +1768,7 @@ class CommonTemplate:
 
                 self.assertEqual(ref_value, res_value)
 
-    @skipCUDAIf(torch.version.cuda is not None and not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN, "Requires sm80")
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
@@ -1814,7 +1816,7 @@ class CommonTemplate:
 
         self.assertTrue(kernel_lib_path in kernel_libs_abs_path)
 
-    @skipCUDAIf(torch.version.cuda is not None and not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN, "Requires sm80")
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
@@ -1888,7 +1890,7 @@ class CommonTemplate:
             self.assertEqual(len(ref_values), len(res_values))
             self.assertEqual(ref_values, res_values)
 
-    @skipCUDAIf(torch.version.cuda is not None and not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN, "Requires sm80")
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
@@ -2834,7 +2836,7 @@ class CommonTemplate:
         b = make_tensor(64, low=0, dtype=torch.float32, device=self.device)
         self.common(fn, (x, b))
 
-    @skipCUDAIf(torch.version.cuda is not None and not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Requires sm80")
     @skip_if_gpu_halide  # accuracy issue
     def test_split_cumsum_low_prec(self):
         if is_cpp_backend(self.device):
@@ -5460,7 +5462,7 @@ for dtype in (torch.int32, torch.int64):
         self.common(fn, (a2, b2))
 
     @skipIfPy312  # segfaults
-    @skipCUDAIf(torch.version.cuda is not None and not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_INT_MM, "Requires sm80")
     def test_mixed_mm(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -5475,7 +5477,7 @@ for dtype in (torch.int32, torch.int64):
         )
 
     @skipIfPy312  # segfaults
-    @skipCUDAIf(torch.version.cuda is not None and not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_INT_MM, "Requires sm80")
     def test_mixed_mm2(self):
         def fn(a, b, scale, bias):
             return torch.mm(a, b.to(a.dtype)) * scale + bias
@@ -5492,7 +5494,7 @@ for dtype in (torch.int32, torch.int64):
         )
 
     @skipIfPy312  # segfaults
-    @skipCUDAIf(torch.version.cuda is not None and not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_INT_MM, "Requires sm80")
     def test_mixed_mm3(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -24319,7 +24321,7 @@ if RUN_GPU:
                 ).run(code)
 
         @skipCUDAIf(
-            torch.version.cuda is not None and not SM90OrLater,
+            not PLATFORM_SUPPORTS_INDUCTOR_BF16_ATOMIC_ADD,
             "uses bfloat16 atomic add instrs which requires SM >= 90",
         )
         def test_bf16_atomic_add(self):

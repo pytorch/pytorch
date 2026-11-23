@@ -90,6 +90,7 @@ from torch.compiler._cache import (
 )
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN,
     SM80OrLater,
     TEST_MULTIGPU,
     with_tf32_off,
@@ -5524,7 +5525,7 @@ class TestAutotuneCache(TestCase):
 
     @requires_gpu_and_triton
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and torch.version.hip is None and not SM80OrLater,
+        not HAS_XPU_AND_TRITON and not PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN,
         "Requires SM80+",
     )
     @config.patch({"use_static_triton_launcher": True})
@@ -5576,7 +5577,7 @@ class TestAutotuneCache(TestCase):
 
     @requires_gpu_and_triton
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and torch.version.hip is None and not SM80OrLater,
+        not HAS_XPU_AND_TRITON and not PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN,
         "Requires SM80+",
     )
     @config.patch({"fx_graph_cache": False})
@@ -5620,7 +5621,7 @@ class TestAutotuneCache(TestCase):
 
     @requires_gpu_and_triton
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and torch.version.hip is None and not SM80OrLater,
+        not HAS_XPU_AND_TRITON and not PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN,
         "Requires SM80+",
     )
     @config.patch({"fx_graph_cache": False})
@@ -5684,7 +5685,7 @@ class TestAutotuneCache(TestCase):
     @requires_triton()
     @requires_gpu_and_triton
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and torch.version.hip is None and not SM80OrLater,
+        not HAS_XPU_AND_TRITON and not PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN,
         "Requires SM80+",
     )
     @config.patch({"fx_graph_cache": False})
@@ -5751,8 +5752,7 @@ class TestAutotuneCache(TestCase):
 class TestRemoteAOTAutogradCache(TestCase):
     @requires_gpu()
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON
-        and (not torch.cuda.is_available() or (torch.version.cuda and not SM80OrLater)),
+        not HAS_XPU_AND_TRITON and not PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN,
         "Requires SM80+",
     )
     @config.patch({"fx_graph_cache": False})
@@ -5794,7 +5794,7 @@ class TestRemoteAOTAutogradCache(TestCase):
 
     @requires_gpu_and_triton
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and torch.version.hip is None and not SM80OrLater,
+        not HAS_XPU_AND_TRITON and not PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN,
         "Requires SM80+",
     )
     @config.patch({"fx_graph_cache": False})

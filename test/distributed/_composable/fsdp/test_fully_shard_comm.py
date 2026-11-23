@@ -67,7 +67,11 @@ from torch.distributed.tensor.experimental import implicit_replication
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
 from torch.profiler import profile, ProfilerActivity
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FSDP_SYMM_MEM,
+    TEST_CUDA,
+    TEST_MULTIGPU,
+)
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -3142,7 +3146,7 @@ class TestFullyShardAllocFromPG(FSDPTest):
     not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this platform"
 )
 @requires_nccl_version((2, 28), "Need NCCL 2.28+ for CE collectives")
-@skipCUDAIf(torch.version.cuda is not None and not SM90OrLater, "requires sm90+")
+@skipCUDAIf(not PLATFORM_SUPPORTS_FSDP_SYMM_MEM, "requires sm90+")
 class TestFullyShardSymmMem(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str | None:

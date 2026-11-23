@@ -32,6 +32,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_INDUCTOR_BF16_ATOMIC_ADD,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM90OrLater,
     TEST_MULTIGPU,
@@ -3265,8 +3266,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         )
 
     @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "uses bfloat16 which requires SM >= 80")
+    # ROCm ran this test before SM90OrLater became NVIDIA-only; keep it running.
     @skipCUDAIf(
-        torch.version.cuda is not None and not SM90OrLater,
+        not SM90OrLater and not TEST_WITH_ROCM,
         "needs at least 6 GiB of GPU memory headroom",
     )
     def test_chunked_unrolled_slice_gather_int32_overflow(self):
@@ -3351,7 +3353,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             torch.testing.assert_allclose(foo(inp), foo_c(inp))
 
     @skipCUDAIf(
-        torch.version.cuda is not None and not SM90OrLater,
+        not PLATFORM_SUPPORTS_INDUCTOR_BF16_ATOMIC_ADD,
         "uses bfloat16 atomic add instrs which requires SM >= 90",
     )
     def test_float8_e8m0fnu(self):

@@ -32,7 +32,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_TRITON,
-    SM70OrLater,
     tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
@@ -7465,9 +7464,7 @@ torch.cuda.synchronize()
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Platform doesn't support flash or mem-efficient attention",
     )
-    @skipCUDAIf(
-        torch.version.cuda is not None and not SM70OrLater, "GPU capability is < SM70"
-    )
+    @skipCUDAIf(not PLATFORM_SUPPORTS_TRITON, "GPU capability is < SM70")
     @onlyCUDA
     @skipIfTorchDynamo()
     def test_sdpa_flop_counter(self, device):
