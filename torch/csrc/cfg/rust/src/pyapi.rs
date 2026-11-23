@@ -349,6 +349,7 @@ impl CfgFunction {
         out.set_item("interpreted_callees", interpreted)?;
         out.set_item("demoted_callees", cf.callees.demoted())?;
         out.set_item("demoted", cf.is_demoted())?;
+        out.set_item("measuring", cf.is_measuring())?;
         out.set_item("log", state.log.clone())?;
         Ok(out.into_any().unbind())
     }
@@ -512,6 +513,13 @@ impl Region {
         u.inst.op = Op::Const(c);
         Ok(())
     }
+}
+
+/// Tells the VM that compiled code changed behind its back: measurements of
+/// compiled code against the interpreter that are under way start over.
+#[pyfunction]
+pub fn plan_changed() {
+    vm::plan_changed();
 }
 
 pub fn run_python_pass(callable: &PyObj, unit: &mut Unit, cx: &PassCx) -> PyResult<bool> {
