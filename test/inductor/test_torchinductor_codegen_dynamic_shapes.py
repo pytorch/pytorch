@@ -265,7 +265,7 @@ test_failures = {
     "test_compar_dynamic_shapes": TestFailure(("cpu",)),
     "test_complex_from_real_imag_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_const_int32_to_float_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
-    "test_conv_backward_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_conv_backward_dynamic_shapes": TestFailure(("cuda", "xpu")),
     "test_conv_functional_bn_fuse_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_convolution2_dynamic_shapes": TestFailure(("cpu",)),
     "test_cumprod_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
