@@ -139,7 +139,7 @@ impl CfgFunction {
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<PyObject> {
         let result =
-            unsafe { self.inner.call(args.as_ptr(), kwargs.map_or(null_mut(), |k| k.as_ptr())) };
+            unsafe { self.inner.call(self.wrapped.as_ptr(), args.as_ptr(), kwargs.map_or(null_mut(), |k| k.as_ptr())) };
         if result.is_null() {
             Err(PyErr::fetch(py))
         } else {

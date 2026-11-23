@@ -1276,14 +1276,6 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     let value_names = std::mem::take(&mut builder.value_names);
     drop(builder);
 
-    let opt_attr = |name: &str| -> PyResult<Option<PyObj>> {
-        let v = func.getattr(name)?;
-        if v.is_none() {
-            Ok(None)
-        } else {
-            Ok(Some(unsafe { PyObj::from_borrowed(v.as_ptr()) }))
-        }
-    };
     let globals = func.getattr("__globals__")?;
     globals.downcast::<PyDict>()?;
     let builtins = func.getattr("__builtins__")?;
@@ -1322,12 +1314,9 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         lines,
         globals: unsafe { PyObj::from_borrowed(globals.as_ptr()) },
         builtins: unsafe { PyObj::from_borrowed(builtins.as_ptr()) },
-        closure: opt_attr("__closure__")?,
         freevars: code.getattr("co_freevars")?.extract()?,
         exc_reg,
         slots,
-        defaults: opt_attr("__defaults__")?,
-        kwdefaults: opt_attr("__kwdefaults__")?,
         argcount,
         posonlyargcount,
         kwonlyargcount,
