@@ -3267,6 +3267,18 @@ class TestVmFrames(TestCase):
         self.assertEqual(compiled(adds), 8)
         self.assertEqual(len(compiled.stats()["interpreted_callees"]), 1)
 
+    def test_call_of_a_c_function_does_not_keep_its_tensors_alive(self):
+        # The first calls of a C function are recorded, to see whether it is
+        # one kernel: when it is a whole computation, its tensors come and go.
+        def f(x, log):
+            return FrameWork.apply(x, log)
+
+        compiled = torch.vm(f, fallback=False)
+        x, log = torch.ones(3), []
+        for _ in range(4):
+            self.assertEqual(compiled(x, log), x + 1)
+        self.assertEqual(log, [[True] * 4] * 4)
+
     def test_callee_that_reads_its_frame_is_compiled(self):
         def fmt(name, value):
             return eval("'{}={}'.format(name, value)")
@@ -3304,6 +3316,24 @@ def frame_sets_a_trace(n):
     finally:
         sys.settrace(previous)
     return before, traced, frame_traced_callee(n), events
+
+
+class FrameWork(torch.autograd.Function):
+    """Computes with temporaries, in a function that is entered from C."""
+
+    @staticmethod
+    def forward(ctx, x, log):
+        gone = []
+        for _ in range(4):
+            temporary = x * 2
+            gone.append(weakref.ref(temporary))
+            del temporary
+        log.append([ref() is None for ref in gone])
+        return x + 1
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad, None
 
 
 def breaker_signals_itself(log):
