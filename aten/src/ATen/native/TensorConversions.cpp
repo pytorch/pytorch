@@ -24,6 +24,8 @@
 #include <ATen/ops/_to_copy_native.h>
 #include <ATen/ops/_to_cpu_native.h>
 #include <ATen/ops/_to_dense_native.h>
+#include <ATen/ops/_to_dtype_rounded.h>
+#include <ATen/ops/_to_dtype_rounded_native.h>
 #include <ATen/ops/_to_sparse_bsc_native.h>
 #include <ATen/ops/_to_sparse_bsr_native.h>
 #include <ATen/ops/_to_sparse_csc_native.h>
@@ -52,6 +54,7 @@
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
+#include <ATen/native/RoundedConversion.h>
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/TensorConversions.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
@@ -388,6 +391,18 @@ Tensor _to_copy(
             std::nullopt);
   r.copy_(self, non_blocking);
   return r;
+}
+
+Tensor _to_dtype_rounded(
+    const Tensor& self,
+    ScalarType dtype,
+    std::string_view round,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
+  check_to_dtype_rounded(self, dtype, round);
+  auto result =
+      at::empty_like(self, self.options().dtype(dtype), optional_memory_format);
+  return at::_to_dtype_rounded_out(
+      result, self, dtype, round, optional_memory_format);
 }
 
 template <typename T>
