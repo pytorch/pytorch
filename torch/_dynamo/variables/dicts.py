@@ -1144,6 +1144,8 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
             return result
         if result.as_python_constant() is (op == "__ne__"):
             return result
+        self.install_dict_order_guard(tx)
+        other.install_dict_order_guard(tx)
         keys_equal = list(self.items) == list(other.items)
         return ConstantVariable.create(keys_equal is (op == "__eq__"))
 
