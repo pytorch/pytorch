@@ -254,7 +254,7 @@ static at::Tensor view3d(const at::Tensor& tensor) {
 using namespace impl;
 
 // is_contiguous(fmt) ignores strides of size-1 dims; rewrite them to the
-// canonical ones (no copy) so oneDNN reads the layout we expect.
+// canonical ones (no copy) so the oneDNN format tags match the real strides.
 static Tensor with_canonical_strides(const Tensor& t, at::MemoryFormat fmt) {
   c10::DimVector expected;
   if (fmt == at::MemoryFormat::Contiguous) {
@@ -343,8 +343,15 @@ Tensor _convolution_out(
   auto bias = bias_r.defined() ? make_contiguous_and_aligned(bias_r) : bias_r;
   input = make_contiguous_and_aligned(input, mfmt);
   weight = make_contiguous_and_aligned(weight, mfmt);
-  input = with_canonical_strides(input, mfmt);
-  weight = with_canonical_strides(weight, mfmt);
+  auto input_c = with_canonical_strides(input, mfmt);
+  auto weight_c = with_canonical_strides(weight, mfmt);
+  // oneDNN wrappers re-derive the layout from the tensors; keep it equal to
+  // mfmt.
+  if (use_channels_last_for_conv(input_c, weight_c) ==
+      is_channels_last_suggested) {
+    input = input_c;
+    weight = weight_c;
+  }
   check_shape_forward(input, weight, bias, params);
 
   Tensor output;
@@ -553,9 +560,21 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   grad_output_ = make_contiguous_and_aligned(grad_output_, mfmt);
   weight_ = make_contiguous_and_aligned(weight_, mfmt);
   input_ = make_contiguous_and_aligned(input_, mfmt);
-  grad_output_ = with_canonical_strides(grad_output_, mfmt);
-  weight_ = with_canonical_strides(weight_, mfmt);
-  input_ = with_canonical_strides(input_, mfmt);
+  auto grad_output_c = with_canonical_strides(grad_output_, mfmt);
+  auto weight_c = with_canonical_strides(weight_, mfmt);
+  auto input_c = with_canonical_strides(input_, mfmt);
+  // oneDNN wrappers re-derive the layout from tensor pairs; keep it equal to
+  // mfmt.
+  if (use_channels_last_for_conv(input_c, weight_c) ==
+          is_channels_last_suggested &&
+      use_channels_last_for_conv(input_c, grad_output_c) ==
+          is_channels_last_suggested &&
+      use_channels_last_for_conv(grad_output_c, weight_c) ==
+          is_channels_last_suggested) {
+    grad_output_ = grad_output_c;
+    weight_ = weight_c;
+    input_ = input_c;
+  }
 
   auto opt = grad_output_.options();
   Tensor grad_input;

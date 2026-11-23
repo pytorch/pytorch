@@ -1430,7 +1430,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
             return input, weight, bias, cotangent
 
         def _batch_last(tensor, batch_size):
-            return tensor.unsqueeze(-1).expand(*tensor.shape, batch_size).contiguous()
+            # distinct values per batch sample, batch in the last dim
+            return torch.stack([tensor * (i + 1) for i in range(batch_size)], dim=-1)
 
         batch_size = 2
         input, weight, bias, cotangent = _make_inputs()
@@ -1450,8 +1451,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             cotangent, batch_size
         )  # [1, 1, 1, 1, 1, batch_size]
 
-        # Reference: slice out each sample manually so every tensor passed to
-        # conv3d has dense, contiguous strides.
+        # Reference: loop over the samples manually (no vmap batch rule).
         loop_out = [
             vjp_fn(
                 batched_input[..., i],
@@ -1472,9 +1472,46 @@ class TestConvolutionNNDeviceType(NNTestCase):
             vjp_fn, in_dims=(-1, -1, -1, -1)
         )(batched_input, batched_weight, batched_bias, batched_cotangent)
 
-        torch.testing.assert_close(vmap_grad_input, loop_grad_input)
-        torch.testing.assert_close(vmap_grad_weight, loop_grad_weight)
-        torch.testing.assert_close(vmap_grad_bias, loop_grad_bias)
+        self.assertEqual(vmap_grad_input, loop_grad_input)
+        self.assertEqual(vmap_grad_weight, loop_grad_weight)
+        self.assertEqual(vmap_grad_bias, loop_grad_bias)
+
+    @onlyXPU
+    @dtypes(torch.float)
+    def test_conv_size1_dims_noncanonical_strides(self, device, dtype):
+        # Size-1 dims with arbitrary strides must not change forward/backward results.
+        def check(conv, x, w):
+            x_ref = x.detach().cpu().contiguous().requires_grad_()
+            w_ref = w.detach().cpu().contiguous().requires_grad_()
+            x = x.detach().requires_grad_()
+            w = w.detach().requires_grad_()
+            for pad in (0, 1):
+                out = conv(x, w, padding=pad)
+                ref = conv(x_ref, w_ref, padding=pad)
+                self.assertEqual(out.cpu(), ref)
+                g = torch.randn_like(ref)
+                gx, gw = torch.autograd.grad(out, (x, w), g.to(device))
+                rgx, rgw = torch.autograd.grad(ref, (x_ref, w_ref), g)
+                self.assertEqual(gx.cpu(), rgx)
+                self.assertEqual(gw.cpu(), rgw)
+
+        # non-canonical strides on the size-1 channel dim
+        xb = torch.randn(2, 8, 4, 4, device=device, dtype=dtype)
+        x = xb.as_strided((2, 1, 4, 4), (16, 5, 4, 1))
+        wb = torch.randn(4, 9, 3, 3, device=device, dtype=dtype)
+        w = wb.as_strided((4, 1, 3, 3), (9, 7, 3, 1))
+        check(F.conv2d, x, w)
+
+        # all-size-1 input whose strides look channels-last
+        for conv, mf, nd in (
+            (F.conv2d, torch.channels_last, 2),
+            (F.conv3d, torch.channels_last_3d, 3),
+        ):
+            x = torch.randn(1, 2, *[1] * nd, device=device, dtype=dtype)
+            x = x.to(memory_format=mf)[:, :1]
+            w = torch.randn(4, 1, *[1] * nd, device=device, dtype=dtype)
+            check(conv, x, w)
+
     @dtypes(torch.float)
     def test_conv_cow_input(self, device, dtype):
         # 1D
