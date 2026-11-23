@@ -41,7 +41,12 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_GPU,
+    running_on_tdm_device,
+)
 from torch.utils._triton import has_datacenter_blackwell_tma_device
 
 
@@ -97,6 +102,186 @@ def tearDownModule():
     if _PRIOR_FP32_MATMUL_PRECISION is not None:
         torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
         _PRIOR_FP32_MATMUL_PRECISION = None
+
+
+@unittest.skipUnless(
+    running_on_tdm_device(),
+    "requires gfx1250 with ROCm 7.14+ and TDM-capable Triton",
+)
+@instantiate_parametrized_tests
+class TestMaxAutotuneMI450(TestCase):
+    @staticmethod
+    def _compile_and_get_code(fn, *args, tma_store=False, extra_config=None):
+        with config.patch(
+            {
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_template_tma_store": tma_store,
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tdm",
+                **(extra_config or {}),
+            }
+        ):
+            return run_and_get_code(torch.compile(fn), *args)
+
+    @staticmethod
+    def _cpu_reference(fn, *args):
+        # A CPU fp32 reference keeps correctness independent of eager GEMM
+        # libraries on gfx1250.
+        out = fn(*(arg.cpu().float() for arg in args))
+        return out.to(args[-1].dtype)
+
+    def _check_output_store(self, code, tma_store):
+        # The TDM template loads through descriptors either way; only the
+        # output store differs.
+        fc = FileCheck().check("triton_tem_fused").check("load_tensor_descriptor")
+        if tma_store:
+            fc.check("tl.make_tensor_descriptor(out_ptr0").check(
+                "tma_descriptor0.store("
+            )
+        else:
+            fc.check("tl.store(")
+        fc.run(code[0])
+        if not tma_store:
+            self.assertNotIn("tl.make_tensor_descriptor(out_ptr0", code[0])
+
+    @parametrize("tma_store", (False, True))
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    def test_mi450_max_autotune_regular_mm_persistent_tdm(
+        self, a_transposed: bool, b_transposed: bool, tma_store: bool
+    ):
+        M, N, K = 256, 128, 384
+        a = torch.randn(
+            *((K, M) if a_transposed else (M, K)),
+            dtype=torch.float16,
+            device=GPU_TYPE,
+        )
+        b = torch.randn(
+            *((N, K) if b_transposed else (K, N)),
+            dtype=torch.float16,
+            device=GPU_TYPE,
+        )
+        if a_transposed:
+            a = a.T
+        if b_transposed:
+            b = b.T
+
+        expected = torch.mm(a.cpu().float(), b.cpu().float()).half()
+        actual, code = self._compile_and_get_code(torch.mm, a, b, tma_store=tma_store)
+
+        torch.testing.assert_close(actual.cpu(), expected, atol=2e-2, rtol=2e-2)
+        FileCheck().check("make_tensor_descriptor").check("load_tensor_descriptor").run(
+            "\n".join(code)
+        )
+        self._check_output_store(code, tma_store)
+
+    @parametrize("tma_store", (False, True))
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    def test_mi450_max_autotune_addmm_persistent_tdm(
+        self, a_transposed: bool, b_transposed: bool, tma_store: bool
+    ):
+        M, N, K = 256, 128, 384
+        a = torch.randn(
+            *((K, M) if a_transposed else (M, K)),
+            dtype=torch.float16,
+            device=GPU_TYPE,
+        )
+        b = torch.randn(
+            *((N, K) if b_transposed else (K, N)),
+            dtype=torch.float16,
+            device=GPU_TYPE,
+        )
+        if a_transposed:
+            a = a.T
+        if b_transposed:
+            b = b.T
+        bias = torch.randn(N, dtype=torch.float16, device=GPU_TYPE)
+
+        expected = torch.addmm(
+            bias.cpu().float(), a.cpu().float(), b.cpu().float()
+        ).half()
+        actual, code = self._compile_and_get_code(
+            torch.addmm, bias, a, b, tma_store=tma_store
+        )
+
+        torch.testing.assert_close(actual.cpu(), expected, atol=2e-2, rtol=2e-2)
+        FileCheck().check("make_tensor_descriptor").check("load_tensor_descriptor").run(
+            "\n".join(code)
+        )
+        self._check_output_store(code, tma_store)
+
+    def test_mi450_tdm_store_with_fused_bool_epilogue(self):
+        # A fused comparison writes a bool buffer, which cannot take a TDM
+        # descriptor. Fusion must still compile, with tl.store for that
+        # destination. Entries in {-1, 0, 1} make every sum exact, so the
+        # comparison has no rounding-dependent sign flips.
+        def fn(a, b):
+            return torch.mm(a, b) > 0
+
+        def make(rows, cols):
+            return torch.randint(-1, 2, (rows, cols), device=GPU_TYPE).half()
+
+        a, b = make(256, 192), make(192, 128)
+        # Fuse the epilogue directly, as the reported failure requires, rather
+        # than through benchmarked multi-template fusion, which can swallow it.
+        result, code = self._compile_and_get_code(
+            fn,
+            a,
+            b,
+            tma_store=True,
+            extra_config={
+                "max_autotune_gemm_backends": "TRITON",
+                "benchmark_template_fusion": False,
+                "benchmark_fusion": False,
+                "pipeline_max_autotune_gemm": False,
+            },
+        )
+        self.assertEqual(result.dtype, torch.bool)
+        # The comparison is fused into the TDM template kernel.
+        self.assertRegex(code[0], r"triton_tem_fused\w*gt")
+        FileCheck().check("triton_tem_fused").check("load_tensor_descriptor").run(
+            code[0]
+        )
+        self.assertEqual(result.cpu(), self._cpu_reference(torch.mm, a, b) > 0)
+
+    def test_mi450_tdm_store_falls_back_for_ineligible_output(self):
+        # Operand outer strides stay 512 bytes, but the contiguous output's row
+        # is 136 fp16 = 272 bytes: 16-byte aligned, outside the 128-byte policy.
+        # TDM loads must remain, and the output must use tl.store, not raise.
+        a = torch.randn(256, 256, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(136, 256, device=GPU_TYPE, dtype=torch.float16).T
+        result, code = self._compile_and_get_code(torch.mm, a, b, tma_store=True)
+        self._check_output_store(code, tma_store=False)
+        torch.testing.assert_close(
+            result.cpu(), self._cpu_reference(torch.mm, a, b), atol=2e-2, rtol=2e-2
+        )
+
+    @largeTensorTest("20 GB", device=GPU_TYPE)
+    @largeTensorTest("16 GB", device="cpu")
+    def test_mi450_tdm_store_large_output_int64_indexing(self):
+        # An output past 2^31 elements makes the kernel index in int64; the
+        # descriptor store must still be emitted, with per-dim int32 coordinates.
+        M, N, K = 5592406, 384, 128
+        self.assertGreater(M * N, 2**31 - 1)
+        # Entries in {-1, 0, 1} keep every partial sum exact.
+        a = torch.randint(-1, 2, (M, K), device=GPU_TYPE, dtype=torch.int8).bfloat16()
+        b = torch.randint(-1, 2, (K, N), device=GPU_TYPE, dtype=torch.int8).bfloat16()
+
+        result, code = self._compile_and_get_code(
+            torch.mm,
+            a,
+            b,
+            tma_store=True,
+            extra_config={"triton.num_decompose_k_splits": 0},
+        )
+        FileCheck().check("INDEX_DTYPE : tl.constexpr = tl.int64").check(
+            "tma_descriptor0.store("
+        ).run(code[0])
+        # Exact: every output is an integer in [-128, 128], representable in bf16.
+        self.assertEqual(
+            result.cpu(), self._cpu_reference(torch.mm, a, b), atol=0, rtol=0
+        )
 
 
 @instantiate_parametrized_tests
