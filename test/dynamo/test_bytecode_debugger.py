@@ -14,6 +14,7 @@ import torch
 import torch._dynamo
 from torch._dynamo.bytecode_debugger import debug
 from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class InteractiveDebugSession:
@@ -82,6 +83,8 @@ class InteractiveDebugSession:
 # -- the marker is orthogonal to the debugger mechanics under test.
 @torch._dynamo.config.patch(record_runtime_overhead=False)
 class TestBytecodeDebugger(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_debug_context_manager_basic(self):
         """Test that the debug context manager works without errors."""
 

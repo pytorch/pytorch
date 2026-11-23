@@ -529,7 +529,6 @@ Tensor _weight_int4pack_mm_xpu(
       A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
       __func__,
       " : expect A to be either 32-bit or 16-bit float tensor.");
-  TORCH_CHECK(A.is_contiguous(), __func__, " : expect A to be contiguous.");
   TORCH_CHECK(A.dim() == 2, __func__, " : expect A to be 2D tensor.");
 
   TORCH_CHECK(B.dtype() == kInt, __func__, " : expect B to be int32 tensor.");
@@ -569,7 +568,8 @@ Tensor _weight_int4pack_mm_xpu(
 
   // qscale:[K/qGroupSize, N]
   // qzp:[K/qGroupSize, N]
-  at::native::onednn::woq_matmul_int4(C, A, B, qScale, qZeros, qGroupSize);
+  at::native::onednn::woq_matmul_int4(
+      C, A.contiguous(), B, qScale, qZeros, qGroupSize);
 
   return C;
 }

@@ -303,6 +303,16 @@
       "Hints": []
     }
   ],
+  "GB3253": [
+    {
+      "Gb_type": "Unbound method descriptor call with unmodeled owner",
+      "Context": "{self.descriptor.__qualname__}({obj}, ...)",
+      "Explanation": "Dynamo has no model of {objclass.__qualname__}.{name} for a {obj.python_type().__qualname__} receiver.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0017": [
     {
       "Gb_type": "Attempted to wrap torch._higher_order_ops.invoke_subgraph",
@@ -946,6 +956,15 @@
   "GB0056": [
     {
       "Gb_type": "Failed to mutate tensor data attribute",
+      "Context": "setattr({self}, data, {value})",
+      "Explanation": "Dynamo only supports mutating `.data` of tensor created outside `torch.compile` region",
+      "Hints": [
+        "Don't mutate `.data` on this tensor, or move ",
+        "the mutation out of `torch.compile` region"
+      ]
+    },
+    {
+      "Gb_type": "Failed to mutate tensor data attribute",
       "Context": "setattr({obj}, {name}, {val})",
       "Explanation": "Dynamo only supports mutating `.data` of tensor created outside `torch.compile` region",
       "Hints": [
@@ -1469,6 +1488,16 @@
       "Explanation": "Dynamo requires the attribute name passed to `super().__delattr__(...)` to be a constant (string).",
       "Hints": [
         "Ensure the attribute name is a string literal or a constant variable."
+      ]
+    }
+  ],
+  "GB8600": [
+    {
+      "Gb_type": "Class attribute mutation on a torch-owned class",
+      "Context": "class={self.value}, name={name}, value={value}",
+      "Explanation": "Dynamo does not support mutating attributes of classes owned by torch.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -2029,6 +2058,17 @@
       "Hints": [
         "Ensure your nn.Module instance has called `super().__init__()`.",
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB3303": [
+    {
+      "Gb_type": "Unsupported unbound builtin __hash__ call",
+      "Context": "{self.fn.__name__}.__hash__({arg})",
+      "Explanation": "Dynamo cannot safely trace this explicit builtin type's __hash__ method.",
+      "Hints": [
+        "Use hash(x) if calling x's own hash implementation is intended.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -2946,6 +2986,15 @@
   "GB1177": [
     {
       "Gb_type": "nn.Module mutation in HigherOrderOp",
+      "Context": "nn.Module: {self}",
+      "Explanation": "Inplace modifying nn.Module params/buffers inside HigherOrderOps is not allowed.",
+      "Hints": [
+        "Remove the mutation or move it outside of the HigherOrderOp.",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    },
+    {
+      "Gb_type": "nn.Module mutation in HigherOrderOp",
       "Context": "nn.Module: {obj}",
       "Explanation": "Inplace modifying nn.Module params/buffers inside HigherOrderOps is not allowed.",
       "Hints": [
@@ -3473,7 +3522,26 @@
       ]
     }
   ],
+  "GB8630": [
+    {
+      "Gb_type": "DELETE_GLOBAL in module with __getattr__",
+      "Context": "name",
+      "Explanation": "Dynamo cannot safely replay global deletes for a module that defines __getattr__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB5491": [
+    {
+      "Gb_type": "Failed to mutate tensor data attribute across devices with different shape/strides",
+      "Context": "setattr({self}, data, {value})",
+      "Explanation": "Dynamo only supports cross-device `.data` mutation when shape and strides match",
+      "Hints": [
+        "Don't mutate `.data` on this tensor, or move ",
+        "the mutation out of `torch.compile` region"
+      ]
+    },
     {
       "Gb_type": "Failed to mutate tensor data attribute across devices with different shape/strides",
       "Context": "setattr({obj}, {name}, {val})",
@@ -3685,6 +3753,14 @@
   "GB6602": [
     {
       "Gb_type": "setattr() on Tensor.data with different shape",
+      "Context": "setattr({self}, data, {value})",
+      "Explanation": "Dynamo does not trace shape-changing `.data` mutations on differentiable tensors. AOTAutograd assumes graph input metadata is stable while building the backward graph.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "setattr() on Tensor.data with different shape",
       "Context": "setattr({obj}, {name}, {val})",
       "Explanation": "Dynamo does not trace shape-changing `.data` mutations on differentiable tensors. AOTAutograd assumes graph input metadata is stable while building the backward graph.",
       "Hints": [
@@ -3832,6 +3908,14 @@
     }
   ],
   "GB0206": [
+    {
+      "Gb_type": "setattr() on Tensor.requires_grad",
+      "Context": "setattr({self}, requires_grad, {value})",
+      "Explanation": "setattr() on Tensor.requires_grad not supported. Mutating requires_grad can introduce a new leaf from non-leaf or vice versa in the middle of the graph, which AOTAutograd does not currently know how to handle.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "setattr() on Tensor.requires_grad",
       "Context": "setattr({obj}, {name}, {val})",
@@ -4054,6 +4138,15 @@
   "GB0220": [
     {
       "Gb_type": "Failed to mutate tensor data attribute to different dtype",
+      "Context": "setattr({self}, data, {value})",
+      "Explanation": "Dynamo only supports mutating `.data` of tensor to a new one with the same dtype",
+      "Hints": [
+        "Don't mutate `.data` on this tensor, or move ",
+        "the mutation out of `torch.compile` region"
+      ]
+    },
+    {
+      "Gb_type": "Failed to mutate tensor data attribute to different dtype",
       "Context": "setattr({obj}, {name}, {val})",
       "Explanation": "Dynamo only supports mutating `.data` of tensor to a new one with the same dtype",
       "Hints": [
@@ -4089,6 +4182,16 @@
       "Hints": [
         "Use `yield` in the function body instead of `return`.",
         "Remove the `@contextlib.contextmanager` decorator."
+      ]
+    }
+  ],
+  "GB8553": [
+    {
+      "Gb_type": "Replacing an instance dictionary with pending mutations",
+      "Context": "pending mutations={names}",
+      "Explanation": "Dynamo cannot preserve mutations of the previous instance dictionary.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -4388,6 +4491,14 @@
   "GB0467": [
     {
       "Gb_type": "setattr() on unsupported type",
+      "Context": "setattr({obj}, {name}, {value})",
+      "Explanation": "setattr() is not supported on type {obj.python_type_name()}",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "setattr() on unsupported type",
       "Context": "setattr({obj}, {name_var}, {val})",
       "Explanation": "setattr() is not supported on type {obj.python_type_name()}",
       "Hints": [
@@ -4637,6 +4748,14 @@
     }
   ],
   "GB9860": [
+    {
+      "Gb_type": "P2POp mutation",
+      "Context": "object={obj}, name={name}, value={value}",
+      "Explanation": "Dynamo does not support mutating torch.distributed.P2POp instances.",
+      "Hints": [
+        "Construct a new torch.distributed.P2POp instead of mutating an existing one inside torch.compile."
+      ]
+    },
     {
       "Gb_type": "P2POp mutation",
       "Context": "object={self}, name={name}, value={value}",
@@ -4965,7 +5084,7 @@
   "GB1392": [
     {
       "Gb_type": "Attribute mutation on a sourced but untracked user-defined object",
-      "Context": "object={self}, name={name_str}, value={value}",
+      "Context": "object={obj}, name={name}, value={value}",
       "Explanation": "Dynamo encountered a sourced user-defined object that supports mutation tracking but was not registered for it.",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
@@ -5280,6 +5399,16 @@
       "Explanation": "Dynamo does not support calling method `{name}` of ``nn.Module`` {module} with a non-constant or non-(str, int) key.",
       "Hints": [
         "Use constant arguments of type str or int for __getitem__"
+      ]
+    }
+  ],
+  "GB1943": [
+    {
+      "Gb_type": "Copying an OrderedDict with instance attributes",
+      "Context": "OrderedDict.__reduce_ex__",
+      "Explanation": "The OrderedDict has instance attributes, or a pending dictionary write could have modified them. Dynamo cannot preserve this state when tracing the copy.",
+      "Hints": [
+        "Copy the OrderedDict outside the compiled region."
       ]
     }
   ],
@@ -6044,6 +6173,17 @@
       ]
     }
   ],
+  "GB9423": [
+    {
+      "Gb_type": "Identity-based __hash__ escapes to user code",
+      "Context": "{self}.__hash__()",
+      "Explanation": "Dynamo cannot guard an identity-based hash, so its value could go stale.",
+      "Hints": [
+        "Use hash(x) if calling x's own hash implementation is intended.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0319": [
     {
       "Gb_type": "torch.associative_scan: mismatched input/output tree structure",
@@ -6418,6 +6558,16 @@
       "Context": "str(body_lifted_freevars)",
       "Explanation": "wrap_with_autocast expects no freevars.",
       "Hints": []
+    }
+  ],
+  "GB2259": [
+    {
+      "Gb_type": "DELETE_GLOBAL with a module namespace access",
+      "Context": "context",
+      "Explanation": "A module object or module __dict__ access in the same trace as a global delete would race the delete, which is replayed after the graph. Eager resume has to order them instead.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB0335": [
@@ -7044,6 +7194,14 @@
   "GB1940": [
     {
       "Gb_type": "Attribute mutation on an untracked user-defined object",
+      "Context": "object={obj}, name={name}, value={value}",
+      "Explanation": "Dynamo cannot replay this mutation after the graph: the object predates tracing but has no source to reload it from.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Attribute mutation on an untracked user-defined object",
       "Context": "object={self}, name={name_str}, value={value}",
       "Explanation": "Dynamo cannot safely apply this attribute mutation because the object is not tracked for mutation.",
       "Hints": [
@@ -7262,6 +7420,16 @@
       "Hints": [
         "Use OrderedDict methods instead of raw dict writes such as dict.__setitem__(mapping, key, value).",
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB4909": [
+    {
+      "Gb_type": "DELETE_GLOBAL in non-module globals",
+      "Context": "module_name: {self.f_globals.get('__name__')}",
+      "Explanation": "Dynamo cannot safely replay global deletes for a frame whose globals dict is not the registered module __dict__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ]
