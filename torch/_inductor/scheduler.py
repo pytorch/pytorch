@@ -3335,6 +3335,7 @@ class BaseSchedulerNode:
                                 ir.NoneLayout,
                                 ir.MultiOutputLayout,
                                 ir.MutationLayoutSHOULDREMOVE,
+                                ir.NonOwningLayout,
                                 ir.CommBufferLayout,
                             ),
                         )
