@@ -2896,8 +2896,9 @@ def _build_multigraph_python_source(
     if mode == "installed":
         # load(allow_serve_time_compiles=True) flips this to True before exec.
         buf.writeline("_ALLOW_SERVE_TIME_COMPILES = False")
-        # What a serve-time compile is configured with: the capture's options, or
-        # None when they have no literal form (a custom pass), which load() refuses.
+        # What a serve-time compile is configured with: the capture's options and
+        # CUDA graph settings, or None when the options have no literal form (a
+        # custom pass), which load() refuses.
         options = dict(inductor_options or {})
         try:
             recordable = ast.literal_eval(repr(options)) == options
@@ -4084,10 +4085,10 @@ def capture(
     on ``triton.cudagraphs`` (such as ``mode="reduce-overhead"``) and serves
     no CUDA graphs whatever ``torch._inductor.config`` says: its module runs
     outside Inductor's CUDA graph wrapper. Either tracer refuses
-    ``triton.autotune_at_compile_time``
-    off and a nonzero ``triton.multi_kernel``, which the paragraph above turns
-    off. A :class:`DynamoTracer` capture refuses ``freezing``
-    and ``force_disable_caches``, whose compiles file no AOTAutograd cache
+    ``triton.autotune_at_compile_time`` off and a nonzero
+    ``triton.multi_kernel``, which the paragraph above turns off. A
+    :class:`DynamoTracer` capture refuses ``freezing`` and
+    ``force_disable_caches``, whose compiles file no AOTAutograd cache
     entry for the artifact to ship, ``fx_wrapper``, whose graphs Inductor does
     not cache, and ``bundled_autotune_remote_cache`` on, which the capture
     turns off (its eager backward lowering fails on a remote autotune cache
@@ -4121,7 +4122,9 @@ def capture(
     out of CUDA graphs, so such a capture's calls are traced under
     ``triton.cudagraphs``: Dynamo then specializes every Python float
     argument, and each distinct value is its own captured variant, as it is
-    whenever that flag is on in ``torch._inductor.config``.
+    whenever that flag is on in ``torch._inductor.config``. To keep such a
+    value one input there, pass it as a tensor on the device or turn
+    ``graph_partition`` on.
 
     As under :func:`torch.compile`, a graph's outputs are overwritten by its
     next replay, so clone what you keep across calls or call
@@ -4302,8 +4305,8 @@ def load(
     ``triton.cudagraph_or_error``, the warmup and sync knobs, ...) are the
     loading process's, as for a :func:`torch.compile` cache hit. Loading does
     not apply :func:`torch.compile`'s CUPTI workaround for CUDA graphs
-    (``allow_serve_time_compiles``, below, does when the artifact's CUDA
-    graphs are on): when profiling repeatedly on CUDA older than 12.6, set
+    (``allow_serve_time_compiles``, below, does for a capture that compiled
+    with them on): when profiling repeatedly on CUDA older than 12.6, set
     ``DISABLE_CUPTI_LAZY_REINIT=1`` and ``TEARDOWN_CUPTI=0`` yourself.
 
     Frozen C++ kernels are keyed by their build command with the PyTorch install
@@ -4321,14 +4324,15 @@ def load(
     refusal: a call no captured variant covers compiles with the artifact's
     backend and the capture's ``mode`` or ``options`` (recorded in the
     artifact's ``INDUCTOR_OPTIONS``), as ``torch.compile`` would, under the
-    process-wide stance like any other compile. For the CUDA graph settings
-    those do not name, Inductor lowers it under the artifact's
-    ``CUDAGRAPH_CONFIG``, so a miss runs as a CUDA graph when the artifact's
-    graphs do. Dynamo traces it under the loading process's own config,
-    though: for an artifact captured with CUDA graphs on and
-    ``graph_partition`` off, turn ``triton.cudagraphs`` on in the loading
-    process too, or a Python float argument becomes a CPU scalar input that
-    keeps the serve-time graph out of CUDA graphs. An artifact whose options are
+    process-wide stance like any other compile. ``INDUCTOR_OPTIONS`` also
+    holds the ``triton.cudagraphs`` and ``triton.cudagraph_trees`` the
+    capture's own compiles ran under, wherever they came from, so a miss is
+    lowered with CUDA graphs exactly when the capture's graphs were. Dynamo
+    traces it under the loading process's own config, though: for an artifact
+    captured with CUDA graphs on and ``graph_partition`` off, turn
+    ``triton.cudagraphs`` on in the loading process too, or a Python float
+    argument becomes a CPU scalar input that keeps the serve-time graph out
+    of CUDA graphs. An artifact whose options are
     not all Python literals (such as a custom pass) refuses the flag. The
     captured variants are still served first and do not count toward
     ``torch._dynamo.config.recompile_limit``, so each frame gets
