@@ -1181,7 +1181,7 @@ class TestStatelessRNGCompile(TestCase):
 
     @parametrize("op", ["uniform", "normal"])
     @dtypes(*all_floating_dtypes)
-    def test_tensor_bounds_match_scalar(self, device, dtype, op):
+    def test_tensor_bounds_match_eager(self, device, dtype, op):
         if torch.device(device).type == "cuda" and not HAS_TRITON:
             self.skipTest("CUDA inductor codegen requires triton")
         name0, name1 = bound_test_values[op][0]
@@ -1192,7 +1192,7 @@ class TestStatelessRNGCompile(TestCase):
 
         key = random.key(42, device=device)
         p0, p1 = (torch.full((8, 1), v, device=device) for v in (-3.0, 5.5))
-        expected = f(key, -3.0, 5.5)
+        expected = f(key, p0, p1)
         actual = torch.compile(f, fullgraph=True)(key, p0, p1)
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
