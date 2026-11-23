@@ -42,6 +42,9 @@ L1:
   - RBLN-SW/torch-rbln
   - ROCm/pytorch-windows-ci
   - Cambricon/torch_mlu_ci
+  - versi379/pytorch-tccl-ci:
+      events:
+        - nightly
 
 L2:
   - NVIDIA/pytorch-windows-ci:

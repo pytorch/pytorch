@@ -1663,6 +1663,10 @@ from . import config
 for name in _allowed_config_patches:
     if not hasattr(config, name):
         raise AssertionError(f"nonexistent config: {name}")
+    # DynamoConfigPatchVariable saves the entry's raw override, which an alias
+    # entry never has.
+    if config._config[name].alias:  # type: ignore[attr-defined]
+        raise AssertionError(f"aliased config cannot be patched: {name}")
 del config
 
 
@@ -1843,6 +1847,9 @@ def override_cudagraphs(
              If None, don't override.
         bwd: If False, disable cudagraphs for backward. If True, force enable.
              If None, don't override.
+
+    With cpp_wrapper or fx_wrapper and graph_partition=True, fwd=True is ignored
+    with a warning: those wrappers can't partition a graph for CUDA Graphs.
     """
     return CudagraphOverrideContextManager(fwd=fwd, bwd=bwd)
 

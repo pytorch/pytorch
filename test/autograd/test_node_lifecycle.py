@@ -18,7 +18,11 @@ from enum import auto, Enum
 
 import torch
 from torch.autograd import Function
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class NodeType(Enum):
@@ -108,6 +112,8 @@ class Marker:
 
 class TestNodeLifecycle(TestCase):
     """Single output, various node types / hooks / backward states."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _run(self, node_type, hook_type, backward_state):
         a = torch.randn(4, requires_grad=True)
@@ -298,6 +304,8 @@ class TestNodeLifecycle(TestCase):
 class TestLeafNodeLifecycle(TestCase):
     """Leaf-specific tests (AccumulateGrad)."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_accumulate_grad_freed_refcount(self):
         """AccumulateGrad releases variable when graph is freed."""
         a = torch.randn(2, requires_grad=True)
@@ -343,6 +351,8 @@ class TestLeafNodeLifecycle(TestCase):
 
 class TestSharedGradFn(TestCase):
     """Tests for grad_fn shared by multiple output tensors."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_cpp_shared_grad_fn_one_deleted(self):
         """Shared grad_fn stays alive when one output is deleted."""
@@ -420,6 +430,8 @@ class TestSharedGradFn(TestCase):
 class TestChainLifecycle(TestCase):
     """Tests for chains of nodes."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_cpp_chain_freed_refcount(self):
         a = torch.randn(2, requires_grad=True)
         b = a * 2
@@ -468,6 +480,8 @@ class TestSavedVariableLifecycle(TestCase):
     Python tests (save_for_backward saves input). Both use a non-leaf
     intermediate tracked via weakref.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_cpp_saved_freed_on_graph_free(self):
         a = torch.randn(2, requires_grad=True)

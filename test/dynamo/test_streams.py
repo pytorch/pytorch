@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     requires_accelerator,
     requires_cuda,
+    requires_multigpu,
     requires_xpu,
     TEST_WITH_ROCM,
 )
@@ -751,6 +752,90 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(
                 torch.ones(2, 2, device="cpu")
             )
+
+    def _record_reconstructed_types(self):
+        """Build a (seen, record) pair where record appends the runtime type of
+        each argument. record is dynamo-disabled so it runs eagerly on whatever
+        the graph actually reconstructed instead of being traced."""
+        seen = []
+
+        @torch._dynamo.disable
+        def record(*objs):
+            seen.extend(type(obj) for obj in objs)
+
+        return seen, record
+
+    def _allow_in_graph_classes(self, *classes):
+        original = UserDefinedClassVariable._in_graph_classes
+        return patch.object(
+            UserDefinedClassVariable,
+            "_in_graph_classes",
+            staticmethod(lambda: original() | set(classes)),
+        )
+
+    def test_stream_event_subclass_preserved_across_graph_break(self):
+        # A stream/event created inside the graph is rebuilt from emitted
+        # bytecode in the resumed frame. The subclass has to survive that
+        # rebuild: backends downcast the result to their own stream/event type.
+        class MyStream(torch.Stream):
+            pass
+
+        class MyEvent(torch.Event):
+            pass
+
+        seen, record = self._record_reconstructed_types()
+
+        def fn(x):
+            stream = MyStream()
+            event = MyEvent()
+            torch._dynamo.graph_break()
+            record(stream, event)
+            return x + 1
+
+        with self._allow_in_graph_classes(MyStream, MyEvent):
+            compiled = torch.compile(fn, backend="eager", fullgraph=False)
+            x = torch.ones(2, 2)
+            self.assertEqual(compiled(x), x + 1)
+
+        self.assertEqual(seen, [MyStream, MyEvent])
+
+    def test_stream_subclass_change_recompiles_and_reconstructs(self):
+        class FirstStream(torch.Stream):
+            pass
+
+        class SecondStream(torch.Stream):
+            pass
+
+        class MyEvent(torch.Event):
+            pass
+
+        seen, record = self._record_reconstructed_types()
+        stream_cls = FirstStream
+
+        def fn(x):
+            stream = stream_cls()
+            event = MyEvent()
+            torch._dynamo.graph_break()
+            record(stream, event)
+            return x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        with self._allow_in_graph_classes(FirstStream, SecondStream, MyEvent):
+            compiled = torch.compile(fn, backend=counter, fullgraph=False)
+            x = torch.ones(2, 2)
+            self.assertEqual(compiled(x), x + 1)
+            frame_count = counter.frame_count
+            self.assertEqual(compiled(x), x + 1)
+            self.assertEqual(counter.frame_count, frame_count)
+            self.assertEqual(seen, [FirstStream, MyEvent] * 2)
+
+            # Rebinding the cell must invalidate the guard, and the rebuilt
+            # graph must reconstruct the new subclass rather than the old one.
+            stream_cls = SecondStream
+            self.assertEqual(compiled(x), x + 1)
+            self.assertGreater(counter.frame_count, frame_count)
+
+        self.assertEqual(seen[-2:], [SecondStream, MyEvent])
 
 
 @requires_accelerator
@@ -3347,6 +3432,139 @@ class <lambda>(torch.nn.Module):
         self.assertIn("sync_dealloc", graph_str)
         self.assertIn("record_event", graph_str)
 
+    @parametrize("preexisting", (True, False))
+    def test_del_global_multi_stream_sync_dealloc(self, device, preexisting):
+        def fn(x, y):
+            global _stream_del_global_sync_dealloc
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            _stream_del_global_sync_dealloc = x
+            if preexisting:
+                z0 = _stream_del_global_sync_dealloc + 1
+            else:
+                z0 = x + 1
+            with s:
+                z = torch.add(x, y)
+                e.record()
+            e.wait()
+            del _stream_del_global_sync_dealloc
+            return z0, z
+
+        inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        torch.accelerator.synchronize()
+        expected = fn(*inp)
+        _name = "_stream_del_global_sync_dealloc"
+        with patch.dict(globals(), {_name: inp[0]} if preexisting else {}):
+            self.assertEqual(_name in globals(), preexisting)
+            (
+                actual,
+                _,
+                fw_graphs,
+                _,
+            ) = extract_graph(fn, *inp)
+            self.assertEqual(len(fw_graphs), 1)
+            self.assertEqual(expected, actual)
+            graph_str = print_graph(fw_graphs[0])
+            self.assertIn("sync_dealloc", graph_str)
+            self.assertIn("record_event", graph_str)
+            self.assertNotIn(_name, globals())
+
+    # The deleted pre-existing tensor's dealloc is not synced: tracking its
+    # identity would need a guard on the tensor, which globals do not carry.
+    @unittest.expectedFailure
+    def test_del_global_preexisting_tensor_sync_dealloc(self, device):
+        def fn(x, y):
+            global _stream_del_global_preexisting
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            z0 = _stream_del_global_preexisting + 1
+            with s:
+                z = torch.add(_stream_del_global_preexisting, y)
+                e.record()
+            e.wait()
+            del _stream_del_global_preexisting
+            return z0, z
+
+        inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        # The inputs are filled on the current stream and first read on s,
+        # which does not wait for it.
+        torch.accelerator.synchronize()
+        with patch.dict(globals(), {"_stream_del_global_preexisting": inp[0]}):
+            expected = fn(*inp)
+            self.assertNotIn("_stream_del_global_preexisting", globals())
+            globals()["_stream_del_global_preexisting"] = inp[0]
+
+            (
+                actual,
+                _,
+                fw_graphs,
+                _,
+            ) = extract_graph(fn, *inp)
+            self.assertEqual(len(fw_graphs), 1)
+            self.assertEqual(expected, actual)
+            graph_str = print_graph(fw_graphs[0])
+            self.assertIn("sync_dealloc", graph_str)
+            self.assertNotIn("_stream_del_global_preexisting", globals())
+
+    def test_del_global_same_stream_no_sync_dealloc(self, device):
+        def fn(x, y):
+            global _stream_del_global
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                _stream_del_global = x
+                z = torch.add(_stream_del_global, y)
+                del _stream_del_global
+                e.record()
+            e.wait()
+            return z
+
+        inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        # The inputs are filled on the current stream and first read on s,
+        # which does not wait for it.
+        torch.accelerator.synchronize()
+        expected = fn(*inp)
+        with patch.dict(globals(), {"_stream_del_global": inp[0]}):
+            (
+                actual,
+                _,
+                fw_graphs,
+                _,
+            ) = extract_graph(fn, *inp)
+            self.assertEqual(len(fw_graphs), 1)
+            self.assertEqual(expected, actual)
+            graph_str = print_graph(fw_graphs[0])
+            self.assertNotIn("sync_dealloc", graph_str)
+
+    def test_del_global_crossfile_multi_stream_sync_dealloc(self, device):
+        try:
+            from . import mock_store_global_crossfile_inline as mod
+        except ImportError:
+            import mock_store_global_crossfile_inline as mod
+
+        def fn(x, y):
+            return mod.store_then_delete_multi_stream_tensor_fn(x, y, device)
+
+        inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        # The inputs are filled on the current stream and first read on s,
+        # which does not wait for it.
+        torch.accelerator.synchronize()
+        expected = fn(*inp)
+        with patch.dict(
+            mod.__dict__, {"store_then_delete_multi_stream_tensor_value": inp[0]}
+        ):
+            (
+                actual,
+                _,
+                fw_graphs,
+                _,
+            ) = extract_graph(fn, *inp)
+            self.assertEqual(len(fw_graphs), 1)
+            self.assertEqual(expected, actual)
+            graph_str = print_graph(fw_graphs[0])
+            self.assertIn("sync_dealloc", graph_str)
+            self.assertIn("record_event", graph_str)
+
     def test_del_subscr_multi_stream_sync_dealloc(self, device):
         def fn(x, y):
             s = torch.Stream(device=device)
@@ -3810,6 +4028,91 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         x = torch.zeros(1, device="cuda")
         compiled = torch.compile(fn_cuda_stream, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x), fn_cuda_stream(x))
+
+    @requires_multigpu
+    def test_cuda_current_stream_other_device(self):
+        def fn(x):
+            return torch.cuda.current_stream(1)
+
+        def key(s):
+            return s.device_index, s.stream_id
+
+        x = torch.zeros(1, device="cuda:0")
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(key(compiled(x)), key(fn(x)))
+        s = torch.cuda.Stream(device=1)
+        with torch.cuda.stream(s):
+            self.assertEqual(key(compiled(x)), key(s))
+        self.assertEqual(counter.frame_count, 1, "stream switch must not recompile")
+
+        # In-graph uses must reference the minted registry slot, not slot 0
+        # (a returned stream is rebuilt from its source and never reads it).
+        idxs = []
+
+        def backend(gm, *args):
+            for n in gm.graph.nodes:
+                if n.op == "call_function" and "synchronize_stream" in str(n.target):
+                    idxs.append(n.args[0])
+            return gm.forward
+
+        def fn_sync(x):
+            torch.cuda.current_stream(1).synchronize()
+            torch.cuda.current_stream().synchronize()
+            return x + 1
+
+        torch.compile(fn_sync, backend=backend, fullgraph=True)(x)
+        self.assertEqual(len(idxs), 2)
+        self.assertNotEqual(idxs[0], CURRENT_STREAM_INDEX)
+        self.assertEqual(idxs[1], CURRENT_STREAM_INDEX)
+
+    @requires_multigpu
+    def test_cuda_current_stream_queries_distinct_objects(self):
+        """Separate current_stream(1) queries return distinct objects, as in eager."""
+
+        def fn(x, side):
+            a = torch.cuda.current_stream(1)
+            with torch.cuda.stream(side):
+                b = torch.cuda.current_stream(1)
+            return x + 1, a is b, a == b, a, b
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        with torch.cuda.device(0):
+            side = torch.cuda.Stream(device=0)
+            x = torch.zeros(1, device="cuda:0")
+            result = compiled(x, side)
+        eager = fn(x, side)
+        self.assertEqual(result[0], eager[0])
+        self.assertFalse(result[1])
+        self.assertTrue(result[2])
+        self.assertIsNot(result[3], result[4])
+        # Compare by (device_index, stream_id): the compiled side rebuilds
+        # streams as plain torch.Stream, which torch.cuda.Stream == rejects.
+        for got, exp in zip(result[3:], eager[3:]):
+            self.assertEqual(
+                (got.device_index, got.stream_id), (exp.device_index, exp.stream_id)
+            )
+
+    def test_cuda_current_stream_no_index_inside_stream_context(self):
+        """An indexless device argument means the current stream of the
+        tracked device: inside a stream context entered in the compiled
+        function, that is the context's stream."""
+
+        def fn(x, s, arg):
+            with torch.cuda.stream(s):
+                return torch.cuda.current_stream(arg), x + 1
+
+        s = torch.cuda.Stream()
+        x = torch.zeros(2, device="cuda")
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for name, arg in (("str", "cuda"), ("torch.device", torch.device("cuda"))):
+            with self.subTest(form=name):
+                got = compiled(x, s, arg)[0]
+                self.assertEqual(
+                    (got.device_index, got.stream_id),
+                    (s.device_index, s.stream_id),
+                )
 
     def test_cuda_current_stream_with_entered_stream(self):
         """Verify that torch.cuda.current_stream().cuda_stream returns the
