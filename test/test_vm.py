@@ -13118,6 +13118,173 @@ print(json.dumps(out))
 """
 
 
+VM_ASKS_LOG = []
+VM_ASKS_GETTERS = {torch.Tensor.shape: "shape", torch.Tensor.ndim: "ndim"}
+
+
+def vm_asks_name(func):
+    return VM_ASKS_GETTERS.get(getattr(func, "__self__", None)) or getattr(
+        func, "__name__", "?"
+    )
+
+
+class VmAsksLogs(TorchFunctionMode):
+    """Writes down what it is asked for."""
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        VM_ASKS_LOG.append(("logs", vm_asks_name(func)))
+        return func(*args, **(kwargs or {}))
+
+
+class VmAsksChanges(TorchFunctionMode):
+    """Gives twice the first size, one more dimension, and one more than a product."""
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        name = vm_asks_name(func)
+        VM_ASKS_LOG.append(("changes", name))
+        out = func(*args, **(kwargs or {}))
+        if name == "shape":
+            return torch.Size([2 * out[0], *out[1:]])
+        if name == "size":
+            return (
+                2 * out if isinstance(out, int) else torch.Size([2 * out[0], *out[1:]])
+            )
+        if name in ("ndim", "dim", "numel", "__len__", "mul", "__mul__"):
+            return out + 1
+        return out
+
+
+class VmAsksAnswers(TorchFunctionMode):
+    """Answers a read of the sizes without calling what was read."""
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        name = vm_asks_name(func)
+        VM_ASKS_LOG.append(("answers", name))
+        if name == "shape":
+            return torch.Size([7, 7])
+        if name == "size":
+            return 7 if len(args) > 1 else torch.Size([7, 7])
+        if name in ("ndim", "dim"):
+            return 5
+        return func(*args, **(kwargs or {}))
+
+
+VM_ASKS_MODE = VmAsksChanges()
+
+
+def vm_asks_case_shape_item(x):
+    h = (x * 2).sin() + 1
+    return (h * h.shape[0] + h.shape[-1]).sum()
+
+
+def vm_asks_case_size_call(x):
+    h = (x * 2).sin() + 1
+    return (h * h.size(0) + h.size(-1)).sum()
+
+
+def vm_asks_case_dim_call(x):
+    h = (x * 2).sin() + 1
+    return (h * h.dim()).sum()
+
+
+def vm_asks_case_ndim(x):
+    h = (x * 2).sin() + 1
+    return (h * h.ndim).sum()
+
+
+def vm_asks_case_of_the_argument(x):
+    n = x.shape[0] + x.ndim + x.size(1) + x.dim()
+    h = (x * 2).sin() + 1
+    return (h * n).sum()
+
+
+def vm_asks_case_compared(x):
+    h = (x * 2).sin() + 1
+    if h.shape[0] > 3:
+        return (h * 3).sum()
+    return (h - 1).sum()
+
+
+def vm_asks_case_compared_argument(x):
+    if x.shape[0] > 3:
+        return ((x * 2).sin() * 3).sum()
+    return ((x * 2).sin() - 1).sum()
+
+
+def vm_asks_case_compared_behind_a_kernel(x):
+    h = (x * 2).sin() + 1
+    if x.size(0) > 3:
+        return (h * 3).sum()
+    return (h - 1).sum()
+
+
+def vm_asks_case_other_reads(x):
+    h = (x * 2).sin() + 1
+    rows, columns = h.shape
+    n = h.numel() + len(h) + h.size(-1) + len(h.shape) + h.T.shape[0] + rows + columns
+    return (h * n).sum() + (1 if h.is_cuda or h.dtype == torch.float64 else 0)
+
+
+def vm_asks_case_kernels(x):
+    h = torch.add(x, 1)
+    h = h.mul(2).cos()
+    return (torch.mul(h, h) + h * 3).sum()
+
+
+def vm_asks_case_in_a_loop(x):
+    total = x * 0
+    for _ in range(4):
+        total = total + x * x.shape[0] + x.ndim
+    return total.sum()
+
+
+def vm_asks_case_inside(x):
+    h = (x * 2).sin() + 1
+    with VmAsksChanges():
+        n = h.shape[0] + x.shape[0] + x.ndim + h.dim()
+    m = h.shape[0] + x.size(0)
+    return (h * n + m).sum()
+
+
+def vm_asks_case_inside_compared(x):
+    h = (x * 2).sin() + 1
+    with VmAsksChanges():
+        if x.shape[0] > 5:
+            h = h * 3
+    if x.shape[0] > 5:
+        h = h + 7
+    return h.sum()
+
+
+def vm_asks_case_enters(x):
+    h = (x * 2).sin() + 1
+    VM_ASKS_MODE.__enter__()
+    n = x.shape[0] + h.shape[0]
+    VM_ASKS_MODE.__exit__(None, None, None)
+    return (h * n + x.shape[0]).sum()
+
+
+def vm_asks_turn_on():
+    VM_ASKS_MODE.__enter__()
+
+
+def vm_asks_turn_off():
+    VM_ASKS_MODE.__exit__(None, None, None)
+
+
+def vm_asks_case_enters_in_a_callee(x):
+    h = (x * 2).sin() + 1
+    vm_asks_turn_on()
+    n = x.shape[0] + h.shape[0] + x.ndim
+    vm_asks_turn_off()
+    return (h * n + x.shape[0]).sum()
+
+
+def vm_asks_case_reads(x):
+    h = (x * 2).sin() + 1
+    return (h * h.shape[0] + h.ndim + x.shape[0] + h.size(1) + x.dim()).sum()
+
+
 GRAPH_NAME_LOG = []
 
 
@@ -18732,6 +18899,299 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
         ).items():
             self.assertEqual(got, expected, msg=way)
             self.assertEqual([seen for _, seen in expected], [[]] * 9, msg=way)
+
+    def vm_asks_calls(self, fn, device, schedule, graded):
+        # One row per call: the value, the gradient, and what the modes
+        # that `schedule` has on in that call were asked for.
+        rows = []
+        for at in range(9):
+            size = 2 + 3 * (at % 2)
+            x = (torch.arange(float(size * 3), device=device).reshape(size, 3) + at) / 7
+            if graded:
+                x.requires_grad_(True)
+            entered = [mode() for mode in schedule(at)]
+            for mode in entered:
+                mode.__enter__()
+            try:
+                del VM_ASKS_LOG[:]
+                out = fn(x)
+                log = list(VM_ASKS_LOG)
+            finally:
+                for mode in reversed(entered):
+                    mode.__exit__(None, None, None)
+            grad = torch.autograd.grad(out, x)[0].tolist() if graded else None
+            rows.append((out.detach().tolist(), grad, log))
+        return rows
+
+    def test_a_torch_function_mode_is_asked_wherever_a_pass_stands_for_a_read(
+        self, device
+    ):
+        # What a default pass puts in place of a read or a call of the
+        # function is valid only while the interpreter would run no Python
+        # code there. A torch function mode that is on is asked at every
+        # read of a tensor's sizes (`x.shape`, `x.size(0)`, `x.dim()`,
+        # `x.ndim`) and at every operation, and may answer with something
+        # else: the read of a size that a specialized block makes itself,
+        # the comparison of a size that it folded and the kernel that a call
+        # site calls directly are for the calls with no mode on. That is
+        # asked at every run, where the read is: with a mode on the
+        # instructions the read stands for run as they are written and the
+        # mode is asked, whether the mode was on from the first call, is
+        # entered when the block is specialized already, or is entered
+        # inside the function, between the entry of the block and the read.
+        # (The mode was asked in the first call and never again from the
+        # first call on that ran the specialized block: a mode that gives
+        # another size changed the values of the function.)
+        def keep(gm, input_types):
+            return gm
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (
+            ("the default passes", None, False),
+            ("graphs", graphs, False),
+            ("a pass", (*graphs, keep), False),
+            ("a gradient", graphs, True),
+        )
+        changing = {
+            "a mode that changes what it returns": lambda at: (VmAsksChanges,),
+            "a mode from the fourth call on": lambda at: (VmAsksChanges,)
+            if at >= 3
+            else (),
+            "two modes from the fifth call on": lambda at: (VmAsksChanges, VmAsksLogs)
+            if at >= 4
+            else (),
+        }
+        others = {
+            "a mode that logs": lambda at: (VmAsksLogs,),
+            "a mode that answers by itself": lambda at: (VmAsksAnswers,),
+            "a mode in every other call": lambda at: (VmAsksChanges,) if at % 2 else (),
+        }
+        around = {
+            "no mode around the call": lambda at: (),
+            "a mode that logs around the call": lambda at: (VmAsksLogs,),
+        }
+        sized = (
+            vm_asks_case_shape_item,
+            vm_asks_case_size_call,
+            vm_asks_case_dim_call,
+            vm_asks_case_ndim,
+            vm_asks_case_of_the_argument,
+            vm_asks_case_compared,
+            vm_asks_case_compared_argument,
+            vm_asks_case_compared_behind_a_kernel,
+            vm_asks_case_other_reads,
+            vm_asks_case_in_a_loop,
+        )
+        own = (
+            vm_asks_case_inside,
+            vm_asks_case_inside_compared,
+            vm_asks_case_enters,
+            vm_asks_case_enters_in_a_callee,
+        )
+        cases = [(fn, changing) for fn in (*sized, vm_asks_case_kernels)]
+        cases += [
+            (fn, others)
+            for fn in (
+                vm_asks_case_shape_item,
+                vm_asks_case_compared_argument,
+                vm_asks_case_kernels,
+            )
+        ]
+        cases += [(fn, around) for fn in own]
+        # With the pass that folds a comparison of a size, which is no
+        # default: its guard is the same question.
+        folding = ("the comparisons folded", narrowing(), False)
+        folded = (
+            vm_asks_case_compared,
+            vm_asks_case_compared_argument,
+            vm_asks_case_compared_behind_a_kernel,
+            vm_asks_case_inside_compared,
+        )
+        for fn, schedules in cases:
+            plain = self.vm_asks_calls(fn, device, lambda at: (), False)
+            for label, schedule in schedules.items():
+                for way, passes, graded in (*ways, folding) if fn in folded else ways:
+                    compiled = (
+                        torch.vm(fn)
+                        if passes is None
+                        else torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    )
+                    msg = f"{fn.__name__}, {label}, {way}"
+                    expected = self.vm_asks_calls(fn, device, schedule, graded)
+                    self.assertEqual(
+                        self.vm_asks_calls(compiled, device, schedule, graded),
+                        expected,
+                        msg=msg,
+                    )
+                    # The calls say something: a mode is asked in each call
+                    # it is on in, and one that changes what it returns
+                    # changes the value of the function.
+                    under = [at for at in range(9) if schedule(at) or fn in own]
+                    self.assertTrue(
+                        under and all(expected[at][2] for at in under), msg=msg
+                    )
+                    quiet = label == "a mode that logs" or (
+                        fn is vm_asks_case_kernels
+                        and label == "a mode that answers by itself"
+                    )
+                    if fn not in own and not quiet:
+                        self.assertTrue(
+                            any(expected[at][0] != plain[at][0] for at in under),
+                            msg=msg,
+                        )
+
+    def test_a_call_under_a_torch_function_mode_leaves_the_specialized_blocks_as_they_are(
+        self, device
+    ):
+        # A mode that is on says nothing about a specialized block. A read
+        # of a size in it runs as the instructions it stands for, which ask
+        # the mode, and the rest of the block as it is specialized: no guard
+        # fails. Where a comparison of a size is folded (`NarrowDims`) the
+        # guard of the comparison fails and the block goes on with its
+        # instructions from there. Either way the block is neither profiled
+        # again nor given another version, and the calls behind the mode run
+        # the same version.
+        def blocks(compiled):
+            found = compiled.stats()["blocks"]
+            turned = sum(
+                block["entry_guard_misses"] + block["guard_failures"] for block in found
+            )
+            return (
+                [(block["profile_runs"], block["versions"]) for block in found],
+                sum(block["specialized_executions"] for block in found),
+                turned,
+            )
+
+        def calls(fn, count):
+            rows = []
+            for at in range(count):
+                del VM_ASKS_LOG[:]
+                rows.append((fn(x + at).tolist(), list(VM_ASKS_LOG)))
+            return rows
+
+        x = torch.arange(6.0, device=device).reshape(2, 3) / 7
+        cases = [
+            (fn, torch.vm.DEFAULT_PASSES, False)
+            for fn in (
+                vm_asks_case_reads,
+                vm_asks_case_compared_argument,
+                vm_asks_case_of_the_argument,
+            )
+        ]
+        cases += [
+            (fn, narrowing(), True)
+            for fn in (
+                vm_asks_case_compared_argument,
+                vm_asks_case_compared_behind_a_kernel,
+            )
+        ]
+        for fn, passes, folded in cases:
+            msg = f"{fn.__name__}, {'the comparisons folded' if folded else 'the default passes'}"
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            self.assertEqual(calls(compiled, 6), calls(fn, 6), msg=msg)
+            versions, specialized, turned = blocks(compiled)
+            self.assertGreater(specialized, 0, msg=msg)
+            with VmAsksLogs():
+                expected = calls(fn, 5)
+                self.assertEqual(calls(compiled, 5), expected, msg=msg)
+            self.assertTrue(all(log for _, log in expected), msg=msg)
+            under = blocks(compiled)
+            self.assertEqual(under[0], versions, msg=msg)
+            self.assertGreaterEqual(under[1], specialized + 5, msg=msg)
+            if folded:
+                self.assertGreaterEqual(under[2], turned + 5, msg=msg)
+            else:
+                self.assertEqual(under[2], turned, msg=msg)
+            self.assertEqual(calls(compiled, 5), calls(fn, 5), msg=msg)
+            behind = blocks(compiled)
+            self.assertEqual((behind[0], behind[2]), (versions, under[2]), msg=msg)
+            self.assertGreaterEqual(behind[1], under[1] + 5, msg=msg)
+
+    def test_what_is_put_on_the_tensor_class_is_called_wherever_a_pass_stands_for_a_read(
+        self, device
+    ):
+        # The read of a size that a specialized block makes itself stands
+        # for what the class of the tensor has under the name: the getter
+        # or the method that the class under every tensor defines. A
+        # property or a function that somebody puts on `torch.Tensor` under
+        # one of the names is Python code that the interpreter runs at
+        # every read, and so does a compiled function: the class is asked
+        # at every run of the read (its version tag says in one comparison
+        # that nobody assigned to it since it was looked at), and no graph
+        # runs in the place of the instructions meanwhile. With the
+        # attribute taken off again the block makes the read itself again.
+        def keep(gm, input_types):
+            return gm
+
+        def calls(fn, name, put):
+            rows = []
+            try:
+                for at in range(10):
+                    size = 2 + 3 * (at % 2)
+                    x = (
+                        torch.arange(float(size * 3), device=device).reshape(size, 3)
+                        + at
+                    ) / 7
+                    if at == 4:
+                        setattr(torch.Tensor, name, put)
+                    if at == 8:
+                        delattr(torch.Tensor, name)
+                    rows.append(fn(x).tolist())
+            finally:
+                if name in torch.Tensor.__dict__:
+                    delattr(torch.Tensor, name)
+            return rows
+
+        base = torch._C.TensorBase
+        shape, ndim, size, dim = base.shape, base.ndim, base.size, base.dim
+        puts = {
+            "shape": property(
+                lambda self: torch.Size(
+                    [2 * shape.__get__(self)[0], *shape.__get__(self)[1:]]
+                )
+            ),
+            "ndim": property(lambda self: ndim.__get__(self) + 1),
+            "size": lambda self, *at: 2 * size(self, *at) if at else size(self),
+            "dim": lambda self: dim(self) + 1,
+        }
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (
+            ("the default passes", torch.vm.DEFAULT_PASSES),
+            ("graphs", graphs),
+            ("a pass", (*graphs, keep)),
+        )
+        for fn in (
+            vm_asks_case_reads,
+            vm_asks_case_compared_behind_a_kernel,
+            vm_asks_case_in_a_loop,
+        ):
+            plain = calls(fn, "shape", shape)
+            for name, put in puts.items():
+                for way, passes in ways:
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{fn.__name__}, `{name}`, {way}"
+                    expected = calls(fn, name, put)
+                    self.assertEqual(calls(compiled, name, put), expected, msg=msg)
+                    if fn is vm_asks_case_reads:
+                        self.assertTrue(expected[4:8] != plain[4:8], msg=msg)
+                    self.assertEqual(
+                        expected[:4] + expected[8:], plain[:4] + plain[8:], msg=msg
+                    )
+                    if way == "the default passes":
+                        # Behind it the specialized blocks run again.
+                        specialized = sum(
+                            block["specialized_executions"]
+                            for block in compiled.stats()["blocks"]
+                        )
+                        compiled(torch.ones(2, 3, device=device))
+                        self.assertGreater(
+                            sum(
+                                block["specialized_executions"]
+                                for block in compiled.stats()["blocks"]
+                            ),
+                            specialized,
+                            msg=msg,
+                        )
 
     def test_a_key_that_compares_in_python_is_compared_once_per_lookup(self, device):
         # A dict that the engine looks a name up in (the dict of an object,

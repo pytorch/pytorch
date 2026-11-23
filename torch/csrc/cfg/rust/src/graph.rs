@@ -4287,6 +4287,48 @@ unsafe fn torch_classes() -> &'static [usize; 9] {
     })
 }
 
+/// Whether the classes of the tensors that `own_tensor` says read
+/// `shape`, `ndim`, `size` and `dim` through the getters and the methods
+/// that the class under every tensor defines in C: nobody has put
+/// anything under one of the names on `Tensor`, on `Parameter` or on that
+/// class, where the interpreter would find it and run it. (A tensor
+/// without a Python object would get one of `Tensor`.) The four names
+/// are looked up once per state of a class: its version tag is a number
+/// that no other state of this or any other class has, and the
+/// interpreter takes it away whenever the class or a class under it is
+/// assigned to.
+pub unsafe fn sizes_are_own() -> bool {
+    static SEEN: [AtomicU32; 2] = [AtomicU32::new(0), AtomicU32::new(0)];
+    let classes = torch_classes();
+    let tag = |which: usize| {
+        let class = classes[which] as *mut ffi::PyTypeObject;
+        if class.is_null() { 0 } else { (*class).tp_version_tag }
+    };
+    if (0..2).all(|which| tag(which) != 0 && SEEN[which].load(Ordering::Relaxed) == tag(which)) {
+        return true;
+    }
+    let base = classes[2] as *mut ffi::PyTypeObject;
+    let defined = [std::ptr::addr_of_mut!(ffi::PyGetSetDescr_Type), std::ptr::addr_of_mut!(ffi::PyMethodDescr_Type)];
+    let own = !base.is_null()
+        && classes[..2].iter().all(|class| {
+            let class = *class as *mut ffi::PyTypeObject;
+            !class.is_null()
+                && [c"shape", c"ndim", c"size", c"dim"].iter().all(|name| {
+                    let name = ffi::PyUnicode_InternFromString(name.as_ptr());
+                    let found = if name.is_null() { null_mut() } else { pyffi::_PyType_Lookup(class, name) };
+                    xdecref(name);
+                    !found.is_null() && defined.contains(&ffi::Py_TYPE(found)) && (*(found as *mut ffi::PyDescrObject)).d_type == base
+                })
+        });
+    ffi::PyErr_Clear();
+    // The lookups gave each class its tag, if it had none.
+    if own && tag(0) != 0 && tag(1) != 0 {
+        SEEN[0].store(tag(0), Ordering::Relaxed);
+        SEEN[1].store(tag(1), Ordering::Relaxed);
+    }
+    own
+}
+
 /// A tensor of one of the two classes that the kernels' own code treats
 /// as a tensor and nothing else (`Tensor`, `Parameter`), or one without a
 /// Python object: asked whether it is true, or indexed by plain values or
