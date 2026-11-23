@@ -248,6 +248,15 @@ class WrapperDescriptorVariable(DescriptorVariable):
         # and find Python overrides on subclasses. Routing through the class
         # mirrors CPython's wrapperdescr_call which invokes the C slot directly.
         obj = obj.realize()
+        if isinstance(obj, variables.user_defined.NewClassVariable):
+            unimplemented(
+                gb_type="Calling a type slot on a class created in the same frame",
+                context=f"{self.descriptor.__objclass__.__name__}.{name}({obj})",
+                explanation="Dynamo cannot safely run this slot while the class has deferred mutations.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
         if name in ("__setattr__", "__delattr__"):
             setattr_hackcheck(tx, obj, self.descriptor)
         # The VT class modeling objclass, e.g. ConstDictVariable for

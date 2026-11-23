@@ -414,6 +414,36 @@ class MiscTests(torch._inductor.test_case.TestCase):
             cls.__qualname__ = "B"
             return x + int("B" in "{}".format(cls))
 
+        def read_nested_fstring(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in f"{[cls]}")
+
+        def read_nested_str_format(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in "{0[k]}".format({"k": cls}))
+
+        def read_percent_format(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in "%s" % cls)
+
+        def call_type_setattr(x):
+            cls = type("A", (), {})
+            type.__setattr__(cls, "answer", 42)
+            return x + cls.answer
+
+        def call_type_delattr(x):
+            cls = type("A", (), {"answer": 42})
+            type.__delattr__(cls, "answer")
+            return x + int(hasattr(cls, "answer"))
+
+        def call_type_repr(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in type.__repr__(cls))
+
         def delete_attr(x):
             cls = type("A", (), {"value": 1})
             del cls.value
@@ -431,6 +461,27 @@ class MiscTests(torch._inductor.test_case.TestCase):
             (read_fstring, "Formatting a class created in the same frame"),
             (read_format, "Formatting a class created in the same frame"),
             (read_str_format, "Formatting a class created in the same frame"),
+            (read_nested_fstring, "Formatting a class created in the same frame"),
+            (
+                read_nested_str_format,
+                "Formatting a class created in the same frame",
+            ),
+            (
+                read_percent_format,
+                "Percent-formatting a class created in the same frame",
+            ),
+            (
+                call_type_setattr,
+                "Calling a type slot on a class created in the same frame",
+            ),
+            (
+                call_type_delattr,
+                "Calling a type slot on a class created in the same frame",
+            ),
+            (
+                call_type_repr,
+                "Calling a type slot on a class created in the same frame",
+            ),
             (
                 delete_attr,
                 "Deleting an attribute from a class created in the same frame",
