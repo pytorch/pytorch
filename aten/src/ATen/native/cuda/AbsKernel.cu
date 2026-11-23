@@ -36,13 +36,17 @@ void abs_kernel_cuda(TensorIteratorBase& iter) {
     });
 #endif
   } else {
-    AT_DISPATCH_ALL_TYPES_AND3(
-        ScalarType::Half,
-        ScalarType::BFloat16,
-        ScalarType::Bool,
+    AT_DISPATCH_SWITCH(
         iter.dtype(),
         "abs_cuda",
-        [&]() { gpu_kernel(iter, AbsFunctor<scalar_t>()); });
+        AT_DISPATCH_CASE_ALL_TYPES_AND3(
+            ScalarType::Half,
+            ScalarType::BFloat16,
+            ScalarType::Bool,
+            [&]() { gpu_kernel(iter, AbsFunctor<scalar_t>()); })
+        AT_DISPATCH_CASE(
+            ScalarType::Float8_e5m2,
+            [&]() { gpu_kernel(iter, AbsFunctor<scalar_t>()); }));
   }
 }
 

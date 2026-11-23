@@ -204,6 +204,23 @@ def is_available() -> bool:
     return device_count() > 0
 
 
+def _sleep(cycles: int) -> None:
+    r"""Spin the current MPS device for the given number of loop iterations.
+
+    The kernel is enqueued on the current stream and returns immediately on the
+    host; the device-side spin runs asynchronously.
+
+    Metal has no device clock, so ``cycles`` counts loop iterations rather than
+    clock cycles. Use
+    :func:`torch.testing._internal.common_utils.get_cycles_per_ms` to convert a
+    duration into iterations.
+
+    Args:
+        cycles (int): number of device loop iterations.
+    """
+    torch._C._mps_sleep(cycles)
+
+
 def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorage":
     r"""Returns a CPU :class:`torch.UntypedStorage` that aliases the
     host-visible contents of the MTLBuffer backing ``storage``.
@@ -238,6 +255,7 @@ def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorag
 
 from . import profiler
 from .event import Event
+from .streams import current_stream, default_stream, set_stream, Stream, stream
 
 
 __all__ = [
@@ -254,6 +272,11 @@ __all__ = [
     "current_allocated_memory",
     "driver_allocated_memory",
     "Event",
+    "Stream",
+    "stream",
+    "current_stream",
+    "set_stream",
+    "default_stream",
     "profiler",
     "recommended_max_memory",
     "is_available",

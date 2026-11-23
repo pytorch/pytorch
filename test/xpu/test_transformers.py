@@ -232,6 +232,92 @@ class TestSDPAXpuOnly(NNTestCase):
 
         self.assertEqual(actual, expected, atol=tol.atol, rtol=tol.rtol)
 
+    @parametrize("dtype", [torch.half, torch.bfloat16])
+    def test_onednn_attention_pure_mqa_without_enable_gqa(self, device, dtype):
+        """
+        Pure MQA (single shared K/V head, e.g. Falcon-7B) should work on the
+        OVERRIDEABLE backend even without enable_gqa=True.
+        """
+        tol = Tolerances(1e-2, 1e-2)
+        if dtype is torch.bfloat16:
+            tol = Tolerances(5e-2, 5e-2)
+
+        batch_size = 2
+        query_heads = 71
+        key_value_heads = 1
+        seq_len = 32
+        head_dim = 64
+
+        torch.manual_seed(0)
+        query = torch.randn(
+            batch_size, query_heads, seq_len, head_dim, device=device, dtype=dtype
+        )
+        key = torch.randn(
+            batch_size, key_value_heads, seq_len, head_dim, device=device, dtype=dtype
+        )
+        value = torch.randn(
+            batch_size, key_value_heads, seq_len, head_dim, device=device, dtype=dtype
+        )
+
+        with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
+            actual = F.scaled_dot_product_attention(
+                query, key, value, dropout_p=0.0, is_causal=False, enable_gqa=False
+            )
+
+        key_expanded = key.expand(
+            batch_size, query_heads, seq_len, head_dim
+        ).contiguous()
+        value_expanded = value.expand(
+            batch_size, query_heads, seq_len, head_dim
+        ).contiguous()
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = F.scaled_dot_product_attention(
+                query, key_expanded, value_expanded, dropout_p=0.0, is_causal=False
+            )
+
+        self.assertEqual(actual, expected, atol=tol.atol, rtol=tol.rtol)
+
+    @parametrize("dtype", [torch.half, torch.bfloat16, torch.float32])
+    def test_sdpa_cow_input(self, device, dtype):
+        q = torch.randn(2, 4, 8, 16, device=device, dtype=dtype)
+        k = torch.randn(2, 4, 8, 16, device=device, dtype=dtype)
+        v = torch.randn(2, 4, 8, 16, device=device, dtype=dtype)
+        q_cow = torch._lazy_clone(q)
+        k_cow = torch._lazy_clone(k)
+        v_cow = torch._lazy_clone(v)
+        q_copy, k_copy, v_copy = q_cow.clone(), k_cow.clone(), v_cow.clone()
+        with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
+            F.scaled_dot_product_attention(q_cow, k_cow, v_cow)
+        self.assertTrue(torch._C._is_cow_tensor(q_cow))
+        self.assertTrue(torch._C._is_cow_tensor(k_cow))
+        self.assertTrue(torch._C._is_cow_tensor(v_cow))
+        self.assertEqual(q_cow, q_copy)
+        self.assertEqual(k_cow, k_copy)
+        self.assertEqual(v_cow, v_copy)
+
+        # With attn_mask
+        mask = torch.zeros(2, 4, 8, 8, device=device, dtype=dtype)
+        mask_cow = torch._lazy_clone(mask)
+        q_cow = torch._lazy_clone(q)
+        k_cow = torch._lazy_clone(k)
+        v_cow = torch._lazy_clone(v)
+        q_copy, k_copy, v_copy, mask_copy = (
+            q_cow.clone(),
+            k_cow.clone(),
+            v_cow.clone(),
+            mask_cow.clone(),
+        )
+        with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
+            F.scaled_dot_product_attention(q_cow, k_cow, v_cow, attn_mask=mask_cow)
+        self.assertTrue(torch._C._is_cow_tensor(q_cow))
+        self.assertTrue(torch._C._is_cow_tensor(k_cow))
+        self.assertTrue(torch._C._is_cow_tensor(v_cow))
+        self.assertTrue(torch._C._is_cow_tensor(mask_cow))
+        self.assertEqual(q_cow, q_copy)
+        self.assertEqual(k_cow, k_copy)
+        self.assertEqual(v_cow, v_copy)
+        self.assertEqual(mask_cow, mask_copy)
+
 
 instantiate_device_type_tests(
     TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True
