@@ -296,6 +296,194 @@ impl Frames {
     }
 }
 
+/// `match_keys` of ceval.c: the values `map` has for `keys`, as a tuple; None
+/// if it lacks one of them; null with an error set if looking raised.
+unsafe fn match_keys(map: Obj, keys: Obj) -> Obj {
+    let nkeys = ffi::PyTuple_GET_SIZE(keys);
+    if nkeys == 0 {
+        return ffi::PyTuple_New(0);
+    }
+    // The two-argument form of get: it neither raises for a missing key nor
+    // creates one in a mapping that defines __missing__.
+    let name = ffi::PyUnicode_InternFromString(c"get".as_ptr());
+    let mut get: Obj = null_mut();
+    let unbound = if name.is_null() { 0 } else { pyffi::_PyObject_GetMethod(map, name, &mut get) };
+    xdecref(name);
+    if get.is_null() {
+        return null_mut();
+    }
+    let seen = ffi::PySet_New(null_mut());
+    let dummy = ffi::PyObject_CallNoArgs(std::ptr::addr_of_mut!(ffi::PyBaseObject_Type) as Obj);
+    let mut values = ffi::PyTuple_New(nkeys);
+    let mut ok = !seen.is_null() && !dummy.is_null() && !values.is_null();
+    let mut i = 0;
+    while ok && i < nkeys {
+        let key = ffi::PyTuple_GET_ITEM(keys, i);
+        if ffi::PySet_Contains(seen, key) != 0 || ffi::PySet_Add(seen, key) != 0 {
+            if ffi::PyErr_Occurred().is_null() {
+                set_error(
+                    ffi::PyExc_ValueError,
+                    format!("mapping pattern checks duplicate key ({})", pyffi::repr(key)),
+                );
+            }
+            ok = false;
+            break;
+        }
+        let args = [map, key, dummy];
+        let value = if unbound == 1 {
+            ffi::PyObject_Vectorcall(get, args.as_ptr(), 3, null_mut())
+        } else {
+            ffi::PyObject_Vectorcall(get, args.as_ptr().add(1), 2, null_mut())
+        };
+        if value.is_null() {
+            ok = false;
+        } else if value == dummy {
+            // The key is not in the mapping: no match.
+            ffi::Py_DECREF(value);
+            ffi::Py_DECREF(values);
+            values = new_ref(ffi::Py_None());
+            break;
+        } else {
+            ffi::PyTuple_SET_ITEM(values, i, value);
+        }
+        i += 1;
+    }
+    xdecref(get);
+    xdecref(seen);
+    xdecref(dummy);
+    if !ok {
+        xdecref(values);
+        return null_mut();
+    }
+    values
+}
+
+/// `match_class_attr` of ceval.c: the attribute, or null, with an error set
+/// only if the name was looked up before or the lookup raised something
+/// other than AttributeError.
+unsafe fn match_class_attr(subject: Obj, class: Obj, name: Obj, seen: Obj) -> Obj {
+    if ffi::PySet_Contains(seen, name) != 0 || ffi::PySet_Add(seen, name) != 0 {
+        if ffi::PyErr_Occurred().is_null() {
+            set_error(
+                ffi::PyExc_TypeError,
+                format!(
+                    "{}() got multiple sub-patterns for attribute {}",
+                    pyffi::class_name(class),
+                    pyffi::repr(name)
+                ),
+            );
+        }
+        return null_mut();
+    }
+    let attr = ffi::PyObject_GetAttr(subject, name);
+    if attr.is_null() && ffi::PyErr_ExceptionMatches(ffi::PyExc_AttributeError) != 0 {
+        ffi::PyErr_Clear();
+    }
+    attr
+}
+
+/// `match_class` of ceval.c: the attributes a class pattern with `nargs`
+/// positional sub-patterns and the keyword sub-patterns `names` binds, as a
+/// tuple; None if the subject does not match; null with an error set.
+unsafe fn match_class(subject: Obj, class: Obj, nargs: isize, names: Obj) -> Obj {
+    const MATCH_SELF: std::os::raw::c_ulong = 1 << 22;
+    if ffi::PyType_Check(class) == 0 {
+        set_error(ffi::PyExc_TypeError, "called match pattern must be a class".to_string());
+        return null_mut();
+    }
+    let no_match = || -> Obj {
+        if ffi::PyErr_Occurred().is_null() {
+            new_ref(ffi::Py_None())
+        } else {
+            null_mut()
+        }
+    };
+    if ffi::PyObject_IsInstance(subject, class) <= 0 {
+        return no_match();
+    }
+    let seen = ffi::PySet_New(null_mut());
+    let attrs = ffi::PyList_New(0);
+    let mut ok = !seen.is_null() && !attrs.is_null();
+    if ok && nargs > 0 {
+        let mut match_self = false;
+        let mut match_args = ffi::PyObject_GetAttrString(class, c"__match_args__".as_ptr());
+        if match_args.is_null() {
+            if ffi::PyErr_ExceptionMatches(ffi::PyExc_AttributeError) != 0 {
+                ffi::PyErr_Clear();
+                // Only a type without __match_args__ matches as itself.
+                match_args = ffi::PyTuple_New(0);
+                match_self =
+                    ffi::PyType_HasFeature(class as *mut ffi::PyTypeObject, MATCH_SELF) != 0;
+            }
+            ok = !match_args.is_null();
+        } else if ffi::PyTuple_CheckExact(match_args) == 0 {
+            set_error(
+                ffi::PyExc_TypeError,
+                format!(
+                    "{}.__match_args__ must be a tuple (got {})",
+                    pyffi::class_name(class),
+                    pyffi::type_name(match_args)
+                ),
+            );
+            ok = false;
+        }
+        if ok {
+            let allowed = if match_self { 1 } else { ffi::PyTuple_GET_SIZE(match_args) };
+            if allowed < nargs {
+                set_error(
+                    ffi::PyExc_TypeError,
+                    format!(
+                        "{}() accepts {} positional sub-pattern{} ({} given)",
+                        pyffi::class_name(class),
+                        allowed,
+                        if allowed == 1 { "" } else { "s" },
+                        nargs
+                    ),
+                );
+                ok = false;
+            } else if match_self {
+                ok = ffi::PyList_Append(attrs, subject) == 0;
+            } else {
+                for i in 0..nargs {
+                    let name = ffi::PyTuple_GET_ITEM(match_args, i);
+                    if ffi::PyUnicode_CheckExact(name) == 0 {
+                        set_error(
+                            ffi::PyExc_TypeError,
+                            format!(
+                                "__match_args__ elements must be strings (got {})",
+                                pyffi::type_name(name)
+                            ),
+                        );
+                        ok = false;
+                        break;
+                    }
+                    let attr = match_class_attr(subject, class, name, seen);
+                    ok = !attr.is_null() && ffi::PyList_Append(attrs, attr) == 0;
+                    xdecref(attr);
+                    if !ok {
+                        break;
+                    }
+                }
+            }
+        }
+        xdecref(match_args);
+    }
+    if ok {
+        for i in 0..ffi::PyTuple_GET_SIZE(names) {
+            let attr = match_class_attr(subject, class, ffi::PyTuple_GET_ITEM(names, i), seen);
+            ok = !attr.is_null() && ffi::PyList_Append(attrs, attr) == 0;
+            xdecref(attr);
+            if !ok {
+                break;
+            }
+        }
+    }
+    let result = if ok { ffi::PyList_AsTuple(attrs) } else { no_match() };
+    xdecref(seen);
+    xdecref(attrs);
+    result
+}
+
 thread_local! {
     /// How many compiled functions are running on this thread, one inside the
     /// other.
@@ -1528,6 +1716,28 @@ impl Compiled {
                 status(ffi::PyDict_Update(d, o))
             }
             Op::ListToTuple(l) => checked(ffi::PyList_AsTuple(self.obj(regs, *l))),
+            Op::GetLen(v) => {
+                let len = ffi::PyObject_Length(self.obj(regs, *v));
+                if len < 0 {
+                    return Err(());
+                }
+                checked(ffi::PyLong_FromSsize_t(len))
+            }
+            Op::MatchKind(v, mapping) => {
+                let flag =
+                    if *mapping { ffi::Py_TPFLAGS_MAPPING } else { ffi::Py_TPFLAGS_SEQUENCE };
+                let holds = ffi::PyType_HasFeature(ffi::Py_TYPE(self.obj(regs, *v)), flag) != 0;
+                Ok(new_ref(if holds { ffi::Py_True() } else { ffi::Py_False() }))
+            }
+            Op::MatchKeys(subject, keys) => {
+                checked(match_keys(self.obj(regs, *subject), self.obj(regs, *keys)))
+            }
+            Op::MatchClass { subject, class, nargs, names } => checked(match_class(
+                self.obj(regs, *subject),
+                self.obj(regs, *class),
+                *nargs as isize,
+                self.obj(regs, *names),
+            )),
             Op::UnpackEx(seq, before, after) => {
                 let seq = self.obj(regs, *seq);
                 let items = ffi::PySequence_List(seq);
