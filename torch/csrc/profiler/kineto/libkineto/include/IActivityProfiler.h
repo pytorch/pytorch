@@ -155,6 +155,11 @@ class IActivityProfiler {
 
   // Calls prepare() on registered tracer providers passing in the relevant
   // activity types. Returns a profiler session handle
+  //
+  // A profiler that traces a device must return no session from either
+  // overload when config.deviceTracingEnabled() is false. Clients set that
+  // for traces that request no device activity, since another tool may own
+  // the device tracer.
   virtual std::unique_ptr<IActivityProfilerSession> configure(
       const std::set<ActivityType>& activity_types,
       const Config& config) = 0;

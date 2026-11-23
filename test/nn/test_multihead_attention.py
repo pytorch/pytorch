@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize as parametrize_test,
     run_tests,
+    skipIfCppFakeTensor,
     TEST_NUMPY,
     TEST_WITH_CROSSREF,
     xfailIfNoAcceleratorTriton,
@@ -693,6 +694,7 @@ class TestMultiheadAttentionNN(NNTestCase):
                 attn_mask=torch.randn(5, 4, 4).bernoulli_().to(torch.bool),
             )
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_multihead_attn_nested_tensor_outside_fast_path(self):
         mha = torch.nn.MultiheadAttention(4, 4, batch_first=True).eval()
         nt = torch.nested.nested_tensor([torch.randn(4, 4)])

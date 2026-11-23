@@ -1,15 +1,15 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/Pool.h>
+#include <ATen/ceil_div.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/detail/TensorInfo.cuh>
-#include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/native/Pool.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/safe_conv.h>
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/detail/TensorInfo.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -322,7 +322,7 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda)
 
   Tensor input = input_.contiguous(memory_format);
 
-  const auto count = c10::safe_conv<int32_t>(output.numel(), "output.numel()");
+  const auto count = c10::safe_conv<int32_t>(output.numel(), "int32_t");
   const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   const uint32_t num_blocks = ceil_div<uint32_t>(count, num_threads);
 
@@ -417,15 +417,18 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
   checkAllSameGPU("avg_pool2d_backward_out_cuda",
                   {gradInput_arg, gradOutput_arg, input_arg});
 
-  const int kH = c10::safe_conv<int>(kernel_size[0], "kernel_size");
-  const int kW = kernel_size.size() == 1 ? kH : c10::safe_conv<int>(kernel_size[1], "kernel_size");
+  const int kH = c10::safe_conv<int>(kernel_size[0], "int");
+  const int kW =
+      kernel_size.size() == 1 ? kH : c10::safe_conv<int>(kernel_size[1], "int");
 
-  const int dH = stride.empty() ? kH : c10::safe_conv<int>(stride[0], "stride");
-  const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : c10::safe_conv<int>(stride[1], "stride");
+  const int dH = stride.empty() ? kH : c10::safe_conv<int>(stride[0], "int");
+  const int dW = stride.empty() ? kW
+      : stride.size() == 1      ? dH
+                                : c10::safe_conv<int>(stride[1], "int");
 
-  const int padH = c10::safe_conv<int>(padding[0], "padding");
-  const int padW = padding.size() == 1 ? padH : c10::safe_conv<int>(padding[1], "padding");
+  const int padH = c10::safe_conv<int>(padding[0], "int");
+  const int padW =
+      padding.size() == 1 ? padH : c10::safe_conv<int>(padding[1], "int");
 
   const auto memory_format = input_.suggest_memory_format();
   const Tensor input = input_.contiguous(memory_format);

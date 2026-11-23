@@ -35,6 +35,8 @@ def define_torch_headeronly_ovrsource(name, is_mobile):
             "cuda/*.h",
             "cuda/detail/*.h",
             "macros/*.h",
+            "native/*.h",
+            "native/**/*.h",
             "util/*.h",
         ]),
         # Its raw headers include files of subpackages; see `subpackage_exports.bzl`.

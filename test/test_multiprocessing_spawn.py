@@ -11,6 +11,7 @@ import unittest
 import torch.multiprocessing as mp
 
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     run_tests,
     TestCase,
@@ -95,6 +96,8 @@ def _test_nested(i, pids_queue, nested_child_sleep, start_method):
 
 @instantiate_parametrized_tests
 class _TestMultiProcessing:
+    hw_classification = HardwareClassification.GENERIC
+
     start_method = None
 
     def test_success(self):
@@ -212,6 +215,8 @@ class _TestMultiProcessing:
             time.sleep(0.1)
 
 class SpawnTest(TestCase, _TestMultiProcessing):
+    hw_classification = HardwareClassification.GENERIC
+
     start_method = 'spawn'
 
     def test_exception_raises(self):
@@ -236,6 +241,8 @@ class SpawnTest(TestCase, _TestMultiProcessing):
     "Fork is only available on Unix",
 )
 class ForkTest(TestCase, _TestMultiProcessing):
+    hw_classification = HardwareClassification.GENERIC
+
     start_method = 'fork'
 
 
@@ -244,6 +251,8 @@ class ForkTest(TestCase, _TestMultiProcessing):
     "Fork is only available on Unix",
 )
 class ParallelForkServerShouldWorkTest(TestCase, _TestMultiProcessing):
+    hw_classification = HardwareClassification.GENERIC
+
     orig_paralell_env_val = None
 
     def setUp(self):
@@ -264,6 +273,7 @@ class ParallelForkServerShouldWorkTest(TestCase, _TestMultiProcessing):
     "Fork is only available on Unix",
 )
 class ParallelForkServerPerfTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @unittest.skipIf(
         sys.version_info >= (3, 13, 8),
@@ -313,6 +323,8 @@ class Expensive:
 
 
 class ErrorTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_errors_pickleable(self):
         for error in (
             mp.ProcessRaisedException("Oh no!", 1, 1),

@@ -12,7 +12,10 @@ from torch._library.opaque_object import (
     is_custom_class,
     is_opaque_symbolic_type,
 )
-from torch._subclasses.fake_tensor import unset_fake_temporarily
+from torch._subclasses.fake_tensor import (
+    maybe_set_fake_constant,
+    unset_fake_temporarily,
+)
 from torch.export.exported_program import (
     ArgumentSpec,
     CustomObjArgument,
@@ -209,9 +212,8 @@ def lift_constants_pass(
         input_spec.kind == InputKind.CONSTANT_TENSOR for input_spec in input_specs
     )
 
-    fake_mode = detect_fake_mode(
-        tuple(node.meta["val"] for node in gm.graph.nodes if node.op == "placeholder")
-    )
+    placeholder_vals = (n.meta["val"] for n in gm.graph.nodes if n.op == "placeholder")
+    fake_mode = detect_fake_mode(tuple(placeholder_vals))
 
     first_user_input_loc, first_user_input = 0, next(iter(gm.graph.nodes))
     used_target_names = set()
@@ -330,10 +332,11 @@ def lift_constants_pass(
                 input_spec_arg: ArgumentSpec
                 if isinstance(constant_val, torch.Tensor):
                     if fake_mode is not None:
-                        const_placeholder_node.meta["val"] = fake_mode.from_tensor(
+                        fake_constant = fake_mode.from_tensor(
                             constant_val, static_shapes=True
                         )
-                        const_placeholder_node.meta["val"].constant = constant_val
+                        maybe_set_fake_constant(fake_constant, constant_val)
+                        const_placeholder_node.meta["val"] = fake_constant
                     else:
                         const_placeholder_node.meta["val"] = constant_val
                     input_spec_arg = TensorArgument(name=const_placeholder_node.name)
