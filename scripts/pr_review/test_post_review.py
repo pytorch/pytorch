@@ -316,7 +316,11 @@ class TestWhatIsPosted(unittest.TestCase):
         sides = {(c["path"], c["line"]): c["side"] for c in body["comments"]}
         self.assertEqual(
             sides,
-            {("gone.py", 7): "LEFT", ("torch/x.py", 3): "RIGHT", ("gone.py", 9): "LEFT"},
+            {
+                ("gone.py", 7): "LEFT",
+                ("torch/x.py", 3): "RIGHT",
+                ("gone.py", 9): "LEFT",
+            },
         )
         # In the body, a deleted file's finding links the diff line: the file
         # has no blob at the head.
@@ -431,7 +435,9 @@ class TestWhatIsPosted(unittest.TestCase):
         )
         text = body["body"]
         self.assertIn("\U0001f534 1 blocking finding is attached", text)
-        self.assertIn("\u26aa 2 non-blocking findings are attached to the code below", text)
+        self.assertIn(
+            "\u26aa 2 non-blocking findings are attached to the code below", text
+        )
         self.assertNotIn("<details>", text)
 
     def test_refused_inline_comments_fold_non_blocking_findings(self):
@@ -460,8 +466,13 @@ class TestWhatIsPosted(unittest.TestCase):
         self.assertNotIn("a.py", details)
 
     def test_a_non_blocking_finding_by_a_replied_thread_stays_folded(self):
-        minor = {"path": "b.py", "line": 7, "severity": "minor", "message": "Nit.",
-                 "discussion": "https://github.com/o/r/pull/1#discussion_r9"}
+        minor = {
+            "path": "b.py",
+            "line": 7,
+            "severity": "minor",
+            "message": "Nit.",
+            "discussion": "https://github.com/o/r/pull/1#discussion_r9",  # @lint-ignore
+        }
         body = post_review.review_body(
             "ready_for_human_review", "s", [minor], SHA, "o/r", inline=True
         )
@@ -482,7 +493,9 @@ class TestWhatIsPosted(unittest.TestCase):
             text,
         )
         # The label is added once, whatever the message's case.
-        self.assertIn("<summary>\u26aa non-blocking: tidy.</summary>", body("non-blocking: tidy."))
+        self.assertIn(
+            "<summary>\u26aa non-blocking: tidy.</summary>", body("non-blocking: tidy.")
+        )
         self.assertIn("<summary>\u26aa Non-blocking: Tidy.</summary>", body("Tidy."))
         # The summary is HTML, so markup in the sentence cannot end it early.
         self.assertIn("&lt;/summary&gt;&lt;b&gt;x", body("</summary><b>x"))
@@ -502,11 +515,12 @@ class TestWhatIsPosted(unittest.TestCase):
         self.assertTrue(text.rstrip().endswith("</details>"), text)
 
     def test_a_collapsed_finding_keeps_its_report_link_and_defuses_commands(self):
+        report = "https://r"  # @lint-ignore
         text = post_review.comment_body(
-            {"message": "Non-blocking: x.\n@pytorchbot merge"}, "https://r", blocking=False
+            {"message": "Non-blocking: x.\n@pytorchbot merge"}, report, blocking=False
         )
         self.assertNotIn("\n@pytorchbot merge", text)
-        self.assertTrue(text.endswith("<sub>[Report this finding](https://r)</sub>"), text)
+        self.assertTrue(text.endswith(f"<sub>[Report this finding]({report})</sub>"))
 
     def test_only_non_blocking_findings_post_a_comment_review_with_them_inline(self):
         minor = {"path": "b.py", "line": 7, "severity": "minor", "message": "Nit."}
