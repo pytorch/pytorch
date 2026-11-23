@@ -762,7 +762,8 @@ def fold_smem_rotated(trait, sX, rb, N: cutlass.Constexpr):
     """Fold one staged row per thread, rotating reads by row to avoid 32-way bank conflicts.
 
     Pass logical columns to the trait; power-of-two N makes rotation a mask. Single-field
-    traits sum the reads pairwise; a binary counter keeps log2(N) + 1 roots live.
+    traits sum the reads pairwise; a binary counter keeps log2(N) + 1 roots live. Leaves
+    keep a sum's -0.0, so the tree combines with init once, as ATen's 0.0 + x does.
     Multi-field traits fold read c into accumulator c % nacc, as fold_row_rolled does.
     """
     mask = const_expr(N - 1)
@@ -772,7 +773,7 @@ def fold_smem_rotated(trait, sX, rb, N: cutlass.Constexpr):
             col = (Int32(c) + rb) & Int32(mask)
             leaf = trait.leaf(sX[rb, col], col)
             _streaming_push(tree, leaf, c, N, trait.combine)
-        return tree[0]
+        return trait.combine(tree[0], trait.init())
     vec = const_expr(TRANSFER_ALIGNMENT * 8 // sX.element_type.width)
     nacc = const_expr(min(N, vec, _FIELD_ACCS))
     accs = tuple(trait.init() for _ in range(nacc))
@@ -1024,9 +1025,9 @@ class TileReduce:
         # or 24, the top ones of WARP only combine identities into the rest, which every
         # single-field trait returns bitwise (a sum leaf 0.0 + y is never -0.0), so
         # fewer keep the bits. Narrow rows then fold leaves, not reduce(init, x), so
-        # only traits that promise leaf_is_reduce_init opt in: of the norms, only
-        # NormOps(2)'s leaf rounds its square on its own, and an abs-extremum leaf can
-        # carry another NaN payload than max(0.0, |x|).
+        # only traits that promise leaf_is_reduce_init opt in. NormOps(2) cannot, as its
+        # leaf rounds the square on its own; other p do not opt in either. An
+        # abs-extremum leaf can carry another NaN payload than max(0.0, |x|).
         narrow = (
             axis == "row"
             and order == "linear"

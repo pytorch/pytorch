@@ -156,6 +156,13 @@ class TestNativeUtils(TestCase):
                 self.assertEqual(torch.cuda.current_device(), 0)
         self.assertEqual(seen, [0, 0, 1, 1])
 
+    def test_cuda_device_guard_passes_non_cuda_inputs_through(self):
+        # On CPU-only builds, querying the current CUDA device raises.
+        from torch._native.utils.device import cuda_device_guard
+
+        x = torch.ones(2)
+        self.assertIs(cuda_device_guard(lambda t: t)(x), x)
+
     def test_device_ok_never_raises_without_a_usable_device(self):
         # On CPU-only systems, fake CUDA tensors normalize to cuda:0 but device queries raise.
         # The condition must return False to preserve the dispatcher's fallback.
