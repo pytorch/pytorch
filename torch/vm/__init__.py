@@ -555,7 +555,8 @@ def regions(fn: Any) -> list[dict[str, Any]]:
     the instruction the function goes on at behind it) and ``why`` (it ends
     there: what the instruction behind it is),
     ``variants`` (how many exported forms it has), ``exports`` (how many
-    times it was handed to the passes over graphs), and ``hits`` and
+    times it was handed to the passes over graphs), ``taken`` (how many
+    calls took a path of it down), and ``hits`` and
     ``misses`` (the calls that ran what was made of it, and those that came
     to it and ran its operations). The ``state`` is ``"built"`` for a graph
     the engine runs itself; ``"waiting"`` for one that is exported at its
@@ -579,8 +580,10 @@ def regions(fn: Any) -> list[dict[str, Any]]:
     ``"vm"``, the ``reason``, and for one instruction its ``text``.
 
     ``fn.stats()["graphs"]`` has the totals: ``built`` (graphs), ``exported``
-    (times one was handed to the passes), ``hits``, ``misses`` and
-    ``given_up`` (graphs that are not exported anymore).
+    (times one was handed to the passes), ``hits``, ``misses``,
+    ``given_up`` (graphs that are not exported anymore) and ``taken`` (calls
+    that took a path down, of every graph, also of what turned out too
+    short to be one).
     """
     fn = getattr(fn, "__func__", fn)
     graphs = getattr(fn, "graphs", None)
