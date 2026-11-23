@@ -304,7 +304,7 @@ class FlexKernelOptions(TypedDict, total=False):
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
 
-    BACKEND: NotRequired[_Backend]
+    BACKEND: NotRequired[_Backend | str]
     """Selects a specific kernel backend.
 
     Options:
@@ -318,9 +318,21 @@ class FlexKernelOptions(TypedDict, total=False):
           Unsupported backward configurations fall back to Triton, including GQA,
           decode, gradients through LSE, and shapes exceeding the dQ workspace limit.
 
+    Any other name selects an out-of-tree backend: an
+    :class:`~torch._inductor.choices.InductorChoices` contributor that claims
+    the name in ``flex_attention_backends()``. Only that contributor is asked
+    to lower the call, and the call fails if it declines; under "AUTO" every
+    contributor is asked and Inductor lowers what they decline.
+
     This option cannot be combined with legacy knobs such as ``FORCE_USE_FLEX_ATTENTION``.
     Raises an error if the requested forward backend cannot be used. Default: "AUTO"
     """
+
+    BACKEND_OPTIONS: NotRequired[dict[str, Any]]
+    """Options for the out-of-tree backend that ``BACKEND`` names, passed to
+    it unchanged. Requires such a ``BACKEND``. Values must be constants
+    torch.compile can trace (numbers, strings, booleans, ``None``, and tuples,
+    lists and dicts of these)."""
 
 
 class _KernelOptionsWithInternals(FlexKernelOptions, total=False):
@@ -2150,6 +2162,14 @@ def _create_empty_block_mask(query: Tensor, key: Tensor) -> BlockMask:
     )
 
 
+def _claimed_backends() -> tuple[str, ...]:
+    """The BACKEND names InductorChoices contributors claim. A module
+    attribute rather than a call, so torch.compile traces it."""
+    import torch._inductor.choices
+
+    return torch._inductor.choices._flex_attention_backend_names
+
+
 def _apply_kernel_options(
     query: Tensor,
     key: Tensor,
@@ -2173,12 +2193,26 @@ def _apply_kernel_options(
             "and only specify the desired BACKEND."
         )
 
+    builtin_backends = typing.get_args(_Backend)
     if "BACKEND" in kernel_options:
-        valid_backends = typing.get_args(_Backend)
-        if kernel_options["BACKEND"] not in valid_backends:
+        backend = kernel_options["BACKEND"]
+        if backend not in builtin_backends:
+            valid_backends = builtin_backends + _claimed_backends()
+            if backend not in valid_backends:
+                raise ValueError(
+                    f"Invalid BACKEND value '{backend}'. "
+                    f"Must be one of {valid_backends}"
+                )
+    if "BACKEND_OPTIONS" in kernel_options:
+        if kernel_options.get("BACKEND", "AUTO") in builtin_backends:
             raise ValueError(
-                f"Invalid BACKEND value '{kernel_options['BACKEND']}'. "
-                f"Must be one of {valid_backends}"
+                "BACKEND_OPTIONS requires a BACKEND claimed by an InductorChoices "
+                f"contributor, got BACKEND='{kernel_options.get('BACKEND', 'AUTO')}'"
+            )
+        if not isinstance(kernel_options["BACKEND_OPTIONS"], dict):
+            raise ValueError(
+                "BACKEND_OPTIONS must be a dict, got "
+                f"{type(kernel_options['BACKEND_OPTIONS']).__name__}"
             )
 
     kernel_options.setdefault("BACKEND", "AUTO")

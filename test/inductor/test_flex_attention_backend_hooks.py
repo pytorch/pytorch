@@ -149,6 +149,16 @@ class ToyFlexBackend(InductorChoices):
         return FlexAttentionBackwardOutputs(dq, dk, dv, ())
 
 
+class NamedToyBackend(ToyFlexBackend):
+    """ToyFlexBackend under BACKEND="TOY"."""
+
+    def uuid(self) -> str:
+        return "named-toy-backend"
+
+    def flex_attention_backends(self) -> tuple[str, ...]:
+        return ("TOY",)
+
+
 class NoneBackend(InductorChoices):
     def __init__(self) -> None:
         super().__init__()
@@ -159,6 +169,26 @@ class NoneBackend(InductorChoices):
 
     def lower_flex_attention(self, call: Any) -> None:
         self.calls += 1
+        return None
+
+
+class ClaimingBackend(InductorChoices):
+    """Claims BACKEND names (``names``) and records the calls it is
+    offered, lowering none."""
+
+    def __init__(self, *names: str) -> None:
+        super().__init__()
+        self.names = names
+        self.calls: list[FlexAttentionCall] = []
+
+    def uuid(self) -> str:
+        return f"claiming-backend-{self.names}"
+
+    def flex_attention_backends(self) -> tuple[str, ...]:
+        return self.names
+
+    def lower_flex_attention(self, call: FlexAttentionCall) -> None:
+        self.calls.append(call)
         return None
 
 
@@ -320,6 +350,108 @@ class FlexBackendHooksTest(TestCase):
         )(q, k, v)
         torch.testing.assert_close(out, flex_attention(q, k, v), atol=2e-3, rtol=2e-3)
         self.assertEqual(backend.forward_calls, [])
+
+    def test_named_backend_gets_its_options(self) -> None:
+        backend = self.register(NamedToyBackend())
+        q, k, v = self.tensors(requires_grad=True)
+        options = {"BACKEND": "TOY", "BACKEND_OPTIONS": {"tile": 64, "mode": "x"}}
+
+        def f(q, k, v):
+            return flex_attention(q, k, v, kernel_options=options)
+
+        out, (code,) = run_and_get_code(torch.compile(f, fullgraph=True), q, k, v)
+        torch.testing.assert_close(
+            out, _math(q, k, v, 1 / math.sqrt(64))[0], atol=2e-3, rtol=2e-3
+        )
+        out.sum().backward()
+        self.assertIn("toyflex.attention", code)
+        (call,) = backend.forward_calls
+        self.assertEqual(call.backend, "TOY")
+        self.assertEqual(call.backend_options, {"tile": 64, "mode": "x"})
+        self.assertNotIn("BACKEND_OPTIONS", call.kernel_options)
+        (bwd,) = backend.backward_calls
+        self.assertEqual(bwd.backend, "TOY")
+        self.assertEqual(bwd.backend_options, {"tile": 64, "mode": "x"})
+
+    def test_named_backend_decline_is_an_error(self) -> None:
+        self.register(NamedToyBackend())
+        q, k, v = self.tensors()
+
+        def biased(score, b, h, m, n):
+            return score + (m - n).to(score.dtype) * 0.01
+
+        f = torch.compile(
+            lambda q, k, v: flex_attention(
+                q, k, v, score_mod=biased, kernel_options={"BACKEND": "TOY"}
+            )
+        )
+        with self.assertRaisesRegex(
+            Exception,
+            r"BACKEND='TOY' cannot lower this flex_attention forward: "
+            r"score_mod is not the identity",
+        ):
+            f(q, k, v)
+
+    def test_named_backend_returning_none_is_an_error(self) -> None:
+        self.register(ClaimingBackend("CLAIMED"))
+        q, k, v = self.tensors()
+        f = torch.compile(
+            lambda q, k, v: flex_attention(
+                q, k, v, kernel_options={"BACKEND": "CLAIMED"}
+            )
+        )
+        with self.assertRaisesRegex(
+            Exception, r"BACKEND='CLAIMED' did not lower this flex_attention forward"
+        ):
+            f(q, k, v)
+
+    def test_named_backend_is_offered_only_to_its_claimant(self) -> None:
+        first = ClaimingBackend("FIRST")
+        register_inductor_choices("first", lambda: first)
+        toy = self.register(NamedToyBackend())
+        q, k, v = self.tensors()
+        out = torch.compile(
+            lambda q, k, v: flex_attention(q, k, v, kernel_options={"BACKEND": "TOY"})
+        )(q, k, v)
+        torch.testing.assert_close(
+            out, _math(q, k, v, 1 / math.sqrt(64))[0], atol=2e-3, rtol=2e-3
+        )
+        self.assertEqual(first.calls, [])
+        self.assertEqual(len(toy.forward_calls), 1)
+        # Under AUTO, every contributor is asked.
+        torch._dynamo.reset()
+        torch.compile(lambda q, k, v: flex_attention(q, k, v))(q, k, v)
+        self.assertEqual(len(first.calls), 1)
+        self.assertEqual(first.calls[0].backend_options, {})
+
+    def test_unclaimed_backend_names_are_rejected(self) -> None:
+        q, k, v = self.tensors()
+        with self.assertRaisesRegex(ValueError, r"Invalid BACKEND value 'TOY'"):
+            flex_attention(q, k, v, kernel_options={"BACKEND": "TOY"})
+        self.register(NamedToyBackend())
+        with self.assertRaisesRegex(ValueError, r"Invalid BACKEND value 'TYPO'.*TOY"):
+            flex_attention(q, k, v, kernel_options={"BACKEND": "TYPO"})
+        unregister_inductor_choices("test-backend")
+        with self.assertRaisesRegex(ValueError, r"Invalid BACKEND value 'TOY'"):
+            flex_attention(q, k, v, kernel_options={"BACKEND": "TOY"})
+
+    def test_backend_options_need_a_claimed_backend(self) -> None:
+        self.register(NamedToyBackend())
+        q, k, v = self.tensors()
+        with self.assertRaisesRegex(ValueError, r"BACKEND_OPTIONS requires"):
+            flex_attention(q, k, v, kernel_options={"BACKEND_OPTIONS": {"a": 1}})
+        with self.assertRaisesRegex(ValueError, r"BACKEND_OPTIONS must be a dict"):
+            flex_attention(
+                q, k, v, kernel_options={"BACKEND": "TOY", "BACKEND_OPTIONS": 3}
+            )
+
+    def test_claimed_names_are_checked_at_registration(self) -> None:
+        with self.assertRaisesRegex(ValueError, r"'TRITON' is a built-in BACKEND"):
+            register_inductor_choices("bad", lambda: ClaimingBackend("TRITON"))
+        register_inductor_choices("one", lambda: ClaimingBackend("SAME"))
+        with self.assertRaisesRegex(ValueError, r"'SAME' is claimed twice"):
+            register_inductor_choices("two", lambda: ClaimingBackend("SAME"))
+        self.assertEqual([key for key, _ in registered_inductor_choices()], ["one"])
 
 
 if __name__ == "__main__":

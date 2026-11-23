@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import types
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any
@@ -165,6 +166,19 @@ class _LoweringChoices(InductorChoices):
         if isinstance(self.answer, Exception):
             raise self.answer
         return self.answer
+
+
+# A flex_attention call as the lowering hooks see it, under BACKEND="AUTO".
+_AUTO_CALL = types.SimpleNamespace(backend="AUTO")
+
+
+class _ClaimingLoweringChoices(_LoweringChoices):
+    def __init__(self, name: str, answer: Any, *backends: str) -> None:
+        super().__init__(name, answer)
+        self.backends = backends
+
+    def flex_attention_backends(self) -> tuple[str, ...]:
+        return self.backends
 
 
 class ChoicesCompositionTest(TestCase):
@@ -454,7 +468,7 @@ class ChoicesCompositionTest(TestCase):
         never = _LoweringChoices("d", "other outputs")
         composed = _ComposedInductorChoices([declining, passing, accepting, never])
 
-        self.assertEqual(composed.lower_flex_attention(object()), "outputs")
+        self.assertEqual(composed.lower_flex_attention(_AUTO_CALL), "outputs")
         self.assertEqual(
             [declining.calls, passing.calls, accepting.calls, never.calls],
             [1, 1, 1, 0],
@@ -472,14 +486,28 @@ class ChoicesCompositionTest(TestCase):
             FlexAttentionDeclined,
             "_LoweringChoices: no GQA; _LoweringChoices: fp8",
         ):
-            composed.lower_flex_attention(object())
+            composed.lower_flex_attention(_AUTO_CALL)
 
     def test_lowering_hooks_return_none_when_all_pass(self) -> None:
         composed = _ComposedInductorChoices(
             [_LoweringChoices("a", None), AlphaChoices()]
         )
-        self.assertIsNone(composed.lower_flex_attention(object()))
-        self.assertIsNone(composed.lower_flex_attention_backward(object()))
+        self.assertIsNone(composed.lower_flex_attention(_AUTO_CALL))
+        self.assertIsNone(composed.lower_flex_attention_backward(_AUTO_CALL))
+
+    def test_named_backend_calls_go_only_to_its_claimants(self) -> None:
+        unnamed = _LoweringChoices("a", "unnamed outputs")
+        other = _ClaimingLoweringChoices("b", "other outputs", "OTHER")
+        named = _ClaimingLoweringChoices("c", FlexAttentionDeclined("fp8"), "NAMED")
+        composed = _ComposedInductorChoices([unnamed, other, named])
+
+        self.assertEqual(composed.flex_attention_backends(), ("OTHER", "NAMED"))
+        with self.assertRaisesRegex(
+            FlexAttentionDeclined, "^_ClaimingLoweringChoices: fp8$"
+        ):
+            composed.lower_flex_attention(types.SimpleNamespace(backend="NAMED"))
+        self.assertEqual([unnamed.calls, other.calls, named.calls], [0, 0, 1])
+        self.assertEqual(composed.lower_flex_attention(_AUTO_CALL), "unnamed outputs")
 
     def test_inherited_default_is_used_when_nobody_overrides(self) -> None:
         register_inductor_choices("beta", BetaChoices)
