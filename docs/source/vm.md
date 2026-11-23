@@ -381,10 +381,10 @@ where it would run, at every call:
   traceback, a generator and a coroutine lead to a frame;
 - at a branch on a value that is no bool, the same way;
 - where the function lets go of an object (a variable is bound over or
-  deleted, a value is used for the last time, an iterator comes to its
-  end), unless something else refers to the object, it is a number, a str
-  or None, or its end is shown to run nothing: neither it nor anything it
-  takes along has a `__del__`, a weak reference with a callback or a
+  deleted, the interpreter pops a value off its stack, an iterator comes to
+  its end), unless something else refers to the object, it is a number, a
+  str or None, or its end is shown to run nothing: neither it nor anything
+  it takes along has a `__del__`, a weak reference with a callback or a
   generator that waits at a `yield`;
 - where the interpreter starts the frame of a Python function under the
   compiled one, whatever made it start one: a kernel under a
@@ -3598,13 +3598,15 @@ in eager mode, under `torch.vm` with `Graphs(), Inductor()`, and under
 times, and the figures are the median of the three medians. At inference the
 runner has `torch.no_grad()` around the calls of a model, and the
 `forward_pass` of the huggingface suite enters it itself. Measured that way,
-which is what the dashboard's runner does, on the code of this commit: one
-process a row, the median of three turns, on 16 cores under the lock for
-timed runs, with the load average between 1.8 and 7.5 in front of a row
-(above 4 in front of three of them) and nothing else on the GPU. The graphs
-that run are those counted above (DistillGPT2 with the operations it has on
-a GPU; of hf_DistilBert the graph of a layer and the one of its feed-forward
-part run six times each in a call):
+which is what the dashboard's runner does, on the code one step before this
+commit, which changes where a value on the interpreter's stack is let go of
+and no graph of these models (their graphs, operations, runs in a call and
+hits are the same on both): one process a row, the median of three turns, on
+16 cores under the lock for timed runs, with the load average between 1.8
+and 7.5 in front of a row (above 4 in front of three of them) and nothing
+else on the GPU. The graphs that run are those counted above (DistillGPT2
+with the operations it has on a GPU; of hf_DistilBert the graph of a layer
+and the one of its feed-forward part run six times each in a call):
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
 |---|---|---|---|---|---|---|---|
@@ -3625,7 +3627,7 @@ for five of the models (`python benchmarks/dynamo/torchbench.py
 --performance --inference --bfloat16 --only MODEL` with `--vm` and with
 `--backend inductor`, `timm_models.py` and `huggingface.py` for the models
 of those suites; one run each), which report the speed against eager mode,
-next to what the tool had on the runner's code. That is the code five steps
+next to what the tool had on the runner's code. That is the code six steps
 before this commit (the one that changed which dicts the engine looks a name
 up in): the runner's lines were taken one after the other with the load
 average between 0.8 and 2.6 in front of a line and nothing else on the GPU,
@@ -3666,15 +3668,15 @@ same tool on the same code as the rows of this job (the Rust of its build is
 that tree's byte for byte), on 16 cores, with the load average between 5 and
 6 and nothing else on the GPU. With gradients recorded only 2 small graphs
 of hf_DistilBert run (6 x1, 4 x1), and its call takes what eager's takes.
-The rows of yolov3 and of DistillGPT2's training step are of the code of
-this commit, measured with the rows of the table in the runner's mode (the
-load average 6.0 and 4.2 in front of them). Six steps before, when a graph
-gave only what the code behind it reads, another job had yolov3 with
-gradients recorded at 7.67 ms (1.53 times eager's speed) in the process that
-fills the compiler's cache and at 7.73 ms (1.54) with the cache filled, and
-at 4.34 ms under `torch.no_grad()`; the graph runs in a first process as in
-a later one ("Limits"). Since then a graph gives what the variables of the
-function are bound to where its path lands as well ("Paths"): as the job
+The rows of yolov3 and of DistillGPT2's training step are of the code one
+step before this commit, measured with the rows of the table in the runner's
+mode (the load average 6.0 and 4.2 in front of them). Seven steps before,
+when a graph gave only what the code behind it reads, another job had yolov3
+with gradients recorded at 7.67 ms (1.53 times eager's speed) in the process
+that fills the compiler's cache and at 7.73 ms (1.54) with the cache filled,
+and at 4.34 ms under `torch.no_grad()`; the graph runs in a first process as
+in a later one ("Limits"). Since then a graph gives what the variables of
+the function are bound to where its path lands as well ("Paths"): as the job
 that made the change counts them, the graph of yolov3 gives 77 results where
 it gave 49 (what the layers put into the list that the model keeps until its
 forward returns), the two small graphs of DistillGPT2 6 and 3 where they
@@ -3682,8 +3684,8 @@ gave 3 and 1, and two graphs of whisper-tiny 7 and 4 where they gave 6 and
 3; the graphs of the other models give what they gave. With gradients
 recorded the graph of yolov3 is cut at 28 more of its results, those that it
 also reads ("Writes"). That costs yolov3 nothing that two takes of the row
-tell apart under `torch.no_grad()` (4.31 ms on the code of this commit and
-4.48 two steps before it, on the same graph, for 4.34) and about a third
+tell apart under `torch.no_grad()` (4.31 ms one step before this commit and
+4.48 three steps before it, on the same graph, for 4.34) and about a third
 with gradients recorded (10.47 ms and 9.98 for 7.67 and 7.73; 9.19 of the
 10.34 ms that the tool takes apart are in what stands for the graph). The
 rows of this section with gradients recorded that have two figures in a
@@ -3863,14 +3865,6 @@ What graphs do not do at this stage:
   computes are computed in it (`torch.ops.aten.sym_size.int`), but its
   inputs have the sizes of the call it was exported from. With `Inductor()`
   every export is a compilation.
-- A `for` that is left by `break`, `return` or an exception has its
-  generator closed in front of the loop's body, not where the loop is left;
-  so ends any other iterator, and a list that only its iterator holds. A
-  function whose body, or a `finally` on its way out, reads what that end
-  changes computes other values than in eager mode, with the default passes
-  as well. The value of a `return` whose `finally` returns or breaks ends in
-  front of the `finally` in the same way: what the interpreter keeps on its
-  stack is let go of behind its last use, not where the interpreter pops it.
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported.
