@@ -1150,39 +1150,6 @@ class TestPrecompile(TestCase):
         exec(compile(code, "<artifact>", "exec"), ns)
         self.assertEqual(ns["forward"](m, x), m(x))
 
-    @unittest.skipUnless(
-        torch.cuda.is_available(), "needs CUDA + Triton for the kernel cache"
-    )
-    @torch._inductor.config.patch({"compile_threads": 1})
-    def test_cache_reload_without_eager_static_launcher_rehydration(self):
-        # A cold load should use JIT instead of eagerly rehydrating the static launcher.
-        import torch._inductor.config as ind_config
-
-        if ind_config.force_disable_caches or not ind_config.fx_graph_cache:
-            self.skipTest("requires inductor FxGraphCache enabled")
-        if not ind_config.use_static_cuda_launcher:
-            self.skipTest("requires the static CUDA launcher")
-        from torch._dynamo.utils import counters
-        from torch._inductor.utils import fresh_cache
-
-        m = (
-            torch.nn.Sequential(
-                torch.nn.Linear(8, 16), torch.nn.ReLU(), torch.nn.Linear(16, 4)
-            )
-            .eval()
-            .cuda()
-        )
-        x = torch.randn(3, 8, device="cuda")
-        code, cache = _precompile_pair(lambda model, x: model(x), m, x)
-        self.assertIsInstance(cache, bytes)
-
-        with fresh_cache():
-            counters.clear()
-            f_c = _load_pair(code, cache)
-            self.assertEqual(f_c(m, x), m(x))
-            self.assertEqual(
-                counters["inductor"]["triton_bundler_load_static_autotuner"], 0
-            )
 
     def test_dtensor_subclass(self):
         import torch.distributed as dist
@@ -2581,32 +2548,6 @@ class TestPrecompile(TestCase):
         xt = torch.randn(8, 4)
         self.assertEqual(f_c(m, xt), m(xt))
 
-    @unittest.skipUnless(TEST_CUDA, "functionalize_rng_ops seeds via CUDA rng state")
-    def test_functionalized_rng_matches_eager_cpu(self):
-        # Under functionalized RNG the dropout draw is seeded from the global generator,
-        # so seeding torch.manual_seed identically before the artifact run and before eager
-        # makes both draw the SAME dropout mask: the artifact output is numerically EQUAL
-        # to eager (a stronger check than structure-only). This runs on CPU tensors, but
-        # functionalize_rng_ops still seeds via CUDARngStateHelper.get_torch_state_as_tuple,
-        # which raises unless CUDA is available, so the whole test is gated on TEST_CUDA
-        # (mirroring test_functionalized_rng_supported). The CUDA functionalized path uses
-        # different Philox offset bookkeeping than eager, so this numeric equivalence is
-        # CPU-tensor-only (see test_functionalized_rng_supported for the device-generic
-        # structural check).
-        import torch._functorch.config as functorch_config
-
-        x = torch.randn(64)
-        with functorch_config.patch(functionalize_rng_ops=True):
-            code, cache = _precompile_pair(
-                lambda a: torch.nn.functional.dropout(a, 0.5, training=True), x
-            )
-            f_c = _load_pair(code, cache)
-            torch.manual_seed(0)
-            out = f_c(x)
-        torch.manual_seed(0)
-        ref = torch.nn.functional.dropout(x, 0.5, training=True)
-        self.assertTrue((out == 0).any())  # dropout zeroed some elements
-        self.assertEqual(out, ref)  # same mask under the same seed
 
     @parametrize("backend", ("inductor", "eager"))
     def test_param_shape_mismatch_rejected(self, backend):
@@ -3693,10 +3634,45 @@ class TestPrecompileCaptureFiles(TestCase):
 
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
-class TestPrecompileNumerics(TestCase):
+class TestPrecompileNumericsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
     # Numeric-correctness tests run device-generically so the same coverage
     # exercises the accelerator lowering, not just CPU.
+
+    @unittest.skipUnless(
+        torch.cuda.is_available(), "needs CUDA + Triton for the kernel cache"
+    )
+    @torch._inductor.config.patch({"compile_threads": 1})
+    def test_cache_reload_without_eager_static_launcher_rehydration(self, device):
+        # A cold load should use JIT instead of eagerly rehydrating the static launcher.
+        import torch._inductor.config as ind_config
+
+        if ind_config.force_disable_caches or not ind_config.fx_graph_cache:
+            self.skipTest("requires inductor FxGraphCache enabled")
+        if not ind_config.use_static_cuda_launcher:
+            self.skipTest("requires the static CUDA launcher")
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import fresh_cache
+
+        m = (
+            torch.nn.Sequential(
+                torch.nn.Linear(8, 16), torch.nn.ReLU(), torch.nn.Linear(16, 4)
+            )
+            .eval()
+            .to(device)
+        )
+        x = torch.randn(3, 8, device=device)
+        code, cache = _precompile_pair(lambda model, x: model(x), m, x)
+        self.assertIsInstance(cache, bytes)
+
+        with fresh_cache():
+            counters.clear()
+            f_c = _load_pair(code, cache)
+            self.assertEqual(f_c(m, x), m(x))
+            self.assertEqual(
+                counters["inductor"]["triton_bundler_load_static_autotuner"], 0
+            )
+
 
     def test_plain_function(self, device):
         def f(x, y):
@@ -3755,6 +3731,7 @@ class TestPrecompileNumerics(TestCase):
         code, cache = _precompile_pair(lambda model, x: model(x), m, x)
         f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, x), m(x))
+
 
     def test_training_backward_harvest_matches_eager(self, device):
         # A training step that calls loss.backward(): precompile scatters the
@@ -4226,7 +4203,40 @@ class TestPrecompileNumerics(TestCase):
         self.assertEqual(f_c(x), x.t())
 
 
-instantiate_device_type_tests(TestPrecompileNumerics, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestPrecompileNumericsDevice, globals(), allow_xpu=True)
+
+
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+@unittest.skipUnless(TEST_CUDA, "functionalize_rng_ops seeds via CUDA rng state")
+class TestPrecompileFunctionalizedRngCUDA(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_functionalized_rng_matches_eager_cpu(self):
+        # Under functionalized RNG the dropout draw is seeded from the global generator,
+        # so seeding torch.manual_seed identically before the artifact run and before eager
+        # makes both draw the SAME dropout mask: the artifact output is numerically EQUAL
+        # to eager (a stronger check than structure-only). This runs on CPU tensors, but
+        # functionalize_rng_ops still seeds via CUDARngStateHelper.get_torch_state_as_tuple,
+        # which raises unless CUDA is available, so the whole test is gated on TEST_CUDA
+        # (mirroring test_functionalized_rng_supported). The CUDA functionalized path uses
+        # different Philox offset bookkeeping than eager, so this numeric equivalence is
+        # CPU-tensor-only (see test_functionalized_rng_supported for the device-generic
+        # structural check).
+        import torch._functorch.config as functorch_config
+
+        x = torch.randn(64)
+        with functorch_config.patch(functionalize_rng_ops=True):
+            code, cache = _precompile_pair(
+                lambda a: torch.nn.functional.dropout(a, 0.5, training=True), x
+            )
+            f_c = _load_pair(code, cache)
+            torch.manual_seed(0)
+            out = f_c(x)
+        torch.manual_seed(0)
+        ref = torch.nn.functional.dropout(x, 0.5, training=True)
+        self.assertTrue((out == 0).any())  # dropout zeroed some elements
+        self.assertEqual(out, ref)  # same mask under the same seed
+
 
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
