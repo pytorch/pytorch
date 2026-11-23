@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
+    set_warn_always_context,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
@@ -513,6 +514,15 @@ class TestTorchTidyProfiler(TestCase):
         self._test_allocation_ids(
             lambda: (x + 1).relu_(), lambda: torch.zeros((1,)).cos()
         )
+
+    def test_allow_tf32_cublas_deprecated(self) -> None:
+        with profile() as p:
+            torch.ones(1) + 1
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::add")
+        with set_warn_always_context(True):
+            with self.assertWarnsRegex(UserWarning, "allow_tf32_cublas is deprecated"):
+                node.extra_fields.allow_tf32_cublas
 
     def test_impl_reuse(self) -> None:
         repeats = 1_000

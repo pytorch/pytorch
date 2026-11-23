@@ -247,6 +247,36 @@ def should_reinplace_index_put(node: torch.fx.Node) -> bool:
     )
 
 
+def annotate_scatter_chain_lengths(graph: torch.fx.Graph) -> None:
+    """
+    Record on each _generalized_scatter node the length of the chain it is in.
+
+    Consider a generalized_scatter chain in the following format:
+        gs(gs(gs(base, s0, ...), s1, ...), s2, ...)
+    Every generalized_scatter op is given the same length of 3 and is stored in the
+    "scatter_chain_length" field in the node's metadata. Note that only single-user
+    links in the example above count.
+
+    When should_reinplace_scatter() runs, it will use this field to make decisions on
+    whether to preserve the chained scatter (functional form) or reinplace the chain into
+    a mutate in-place form that costs more kernel launches but is more memory bw efficient
+    per threadblock.
+    """
+    for head in graph.find_nodes(op="call_function", target=_generalized_scatter):
+        if "scatter_chain_length" in head.meta:
+            continue
+        chain = [head]
+        tail = head
+        while len(tail.users) == 1:
+            (user,) = tail.users
+            if user.target is not _generalized_scatter or user.args[0] is not tail:
+                break
+            chain.append(user)
+            tail = user
+        for node in chain:
+            node.meta["scatter_chain_length"] = len(chain)
+
+
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -276,6 +306,17 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     # realized as the output is a user of the input
     if inp.op in ("placeholder", "get_attr") and any(  # type: ignore[union-attr]
         user.target is aten.copy_.default and user.args[0] is inp for user in node.users
+    ):
+        return True
+
+    # TODO This can and should be moved to a fxgraph pass upstream
+    # A long chain of scatters should NOT be kept in functional variant, as each thread block
+    # in functional variant is required to load all input pointers instead of just the one it
+    # needs. Therefore, we should reinplace for longer scatter chains.
+    chain_length = node.meta.get("scatter_chain_length", 1)
+    if (
+        config.reinplace_scatter_chain_threshold > 0
+        and chain_length >= config.reinplace_scatter_chain_threshold
     ):
         return True
 
@@ -317,11 +358,20 @@ def decompose_generalized_scatter(graph: torch.fx.Graph) -> None:
             or scatter_always_uses_mutation(node)
         )
 
+        prev = node.prev
         with graph.inserting_before(node):
             if use_mutation:
                 new_node = _decompose_scatter_mutating(graph, node)
             else:
                 new_node = _decompose_scatter_functional(graph, node)
+
+        # Keep user stream/mempool annotations on the decomposed nodes, so they
+        # run in the same context as the scatter they replace.
+        if custom := node.meta.get("custom"):
+            inserted = node.prev
+            while inserted is not prev:
+                inserted.meta["custom"] = custom.copy()
+                inserted = inserted.prev
 
         node.replace_all_uses_with(new_node)
         graph.erase_node(node)
@@ -380,6 +430,9 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
         def can_fuse():
             if src.target is not _generalized_scatter:  # type: ignore[union-attr]
                 return False
+            # Fusing would move one scatter into the other's stream/mempool.
+            if src.meta.get("custom") != node.meta.get("custom"):  # type: ignore[union-attr]
+                return False
             src_inp, _src_src, _src_scatter_view_op = src.args  # type: ignore[union-attr]
 
             inp_base = node_to_view_base.get(inp, inp)  # type: ignore[arg-type]
@@ -389,6 +442,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                 scatter_view_op,
             ]
 
+        custom = node.meta.get("custom")
         if not can_fuse():
             with graph.inserting_before(node):
                 new_node = graph_call_function(
@@ -398,6 +452,8 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                     src,
                     [scatter_view_op],
                 )
+            if custom:
+                new_node.meta["custom"] = custom.copy()
             node.replace_all_uses_with(new_node)
             graph.erase_node(node)
             return
@@ -411,6 +467,8 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                 src_src,
                 [scatter_view_op, *src_scatter_view_op],  # type: ignore[misc]
             )
+            if custom:
+                new_node.meta["custom"] = custom.copy()
             node.replace_all_uses_with(new_node)
             graph.erase_node(node)
 
@@ -422,6 +480,8 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                     *node.args[2:],
                     **node.kwargs,
                 )
+                if custom:
+                    new_src.meta["custom"] = custom.copy()
 
                 handle_views(new_src)
                 src.replace_all_uses_with(new_src)  # type: ignore[union-attr]
@@ -507,12 +567,20 @@ def _is_layout_preserving_view_copy_back(
     mutated_arg: torch.fx.Node,
     src_base: torch.fx.Node,
 ) -> bool:
-    return _same_size_stride_and_storage_offset(
-        cast(torch.Tensor, src_base.meta["val"]),
-        cast(torch.Tensor, mutated_arg.meta["val"]),
-    ) and _same_size_stride_and_storage_offset(
-        cast(torch.Tensor, src.meta["val"]),
-        cast(torch.Tensor, dst.meta["val"]),
+    return (
+        src.meta["val"].dtype == dst.meta["val"].dtype
+        and src_base.meta["val"].is_conj() == mutated_arg.meta["val"].is_conj()
+        and src_base.meta["val"].is_neg() == mutated_arg.meta["val"].is_neg()
+        and src.meta["val"].is_conj() == dst.meta["val"].is_conj()
+        and src.meta["val"].is_neg() == dst.meta["val"].is_neg()
+        and _same_size_stride_and_storage_offset(
+            cast(torch.Tensor, src_base.meta["val"]),
+            cast(torch.Tensor, mutated_arg.meta["val"]),
+        )
+        and _same_size_stride_and_storage_offset(
+            cast(torch.Tensor, src.meta["val"]),
+            cast(torch.Tensor, dst.meta["val"]),
+        )
     )
 
 
@@ -579,11 +647,7 @@ def reinplace_inplaceable_ops_core(
         raise ValueError("reinplacement updater must own the supplied graph")
 
     copy_args_to_copy_nodes = {}
-    # maps argument to the first copy_ node that mutates it.
-    copy_nodes = {}
-    # maps (view_arg, inplaceable_op_node) to copy_ nodes that copy a view of
-    # the op result back into the graph input that view_arg aliases.
-    copy_args_to_copy_nodes_via_views = {}
+    copy_nodes: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = defaultdict(OrderedSet)
     mutated_inputs = OrderedSet[Any]()
     storage_to_nodes = defaultdict(OrderedSet)
     node_to_storage = {}
@@ -616,32 +680,19 @@ def reinplace_inplaceable_ops_core(
                 or node_order[node] < node_order[previous]
             ):
                 copy_args_to_copy_nodes[(dst, src)] = node
-            previous = copy_nodes.get(dst)
-            if (
-                previous is None
-                or previous._erased
-                or node_order[node] < node_order[previous]
-            ):
-                copy_nodes[dst] = node
+            copy_nodes[dst].add(node)
 
             mutated_inputs.add(node.args[0])
 
-            src_base = _get_view_base(src)
-            if src_base is not src and isinstance(src_base.target, Callable):
-                inplaceable_op = inplaceable_ops.get(src_base.target)
-                if inplaceable_op is not None:
-                    for mutated_arg_idx in inplaceable_op.mutated_args:
-                        mutated_arg = src_base.args[mutated_arg_idx]
-                        if (
-                            isinstance(mutated_arg, torch.fx.Node)
-                            and _get_view_base(mutated_arg) is dst
-                            and _is_layout_preserving_view_copy_back(
-                                dst, src, mutated_arg, src_base
-                            )
-                        ):
-                            copy_args_to_copy_nodes_via_views[
-                                (mutated_arg, src_base)
-                            ] = node
+    def get_input_copybacks_after_candidate(node, mutated_arg):
+        base = _get_view_base(mutated_arg)
+        return (
+            copy_node
+            for copy_node in copy_nodes.get(base, ())
+            if not copy_node._erased
+            and copy_node.args[0] is base
+            and node_order[copy_node] > node_order[node]
+        )
 
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
@@ -845,23 +896,12 @@ def reinplace_inplaceable_ops_core(
                     return False
 
         if mutated_arg.op in ("placeholder", "get_attr"):
-            # Get the first copy_ node that mutates the mutated_arg.
-            copy_node = copy_nodes.get(mutated_arg)
-            if copy_node is not None and (
-                copy_node._erased or node_order[copy_node] <= node_order[node]
-            ):
-                copy_node = min(
-                    (
-                        user
-                        for user in mutated_arg.users
-                        if user.target is aten.copy_.default
-                        and user.args[0] is mutated_arg
-                        and node_order[user] > node_order[node]
-                    ),
-                    key=node_order.__getitem__,
-                    default=None,
-                )
-                copy_nodes[mutated_arg] = copy_node
+            # Use the next input overwrite for permission and liveness checks.
+            copy_node = min(
+                get_input_copybacks_after_candidate(node, mutated_arg),
+                key=node_order.__getitem__,
+                default=None,
+            )
             if copy_node is None:
                 # There is no copy_ back to the candidate mutated_arg (which is a graph input).
                 # Therefore the semantics of the program are that it does not mutate
@@ -876,7 +916,7 @@ def reinplace_inplaceable_ops_core(
         elif any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
             # If mutated_arg is a view of a graph input, we can only reinplace
             # when a later copy_ writes this op's result back to that input.
-            copy_node = copy_args_to_copy_nodes_via_views.get((mutated_arg, node))
+            copy_node = copy_node_for_reinplaced_arg(node, mutated_arg)
             if copy_node is None:
                 return False
 
@@ -908,20 +948,25 @@ def reinplace_inplaceable_ops_core(
         copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
         if copy_node is not None and copy_node._erased:
             copy_node = None
-        if copy_node is None:
-            copy_node = copy_args_to_copy_nodes_via_views.get((mutated_arg, node))
-            if copy_node is not None:
-                copy_dst = copy_node.args[0]
-                copy_src = copy_node.args[1]
-                if not (
-                    isinstance(copy_dst, torch.fx.Node)
-                    and isinstance(copy_src, torch.fx.Node)
-                    and _is_layout_preserving_view_copy_back(
-                        copy_dst, copy_src, mutated_arg, node
+        if copy_node is None and isinstance(mutated_arg, torch.fx.Node):
+            # Only a layout-preserving copy of this candidate's result can be removed
+            # upon reinplacement of candidate.
+            copy_node = min(
+                (
+                    copy_node
+                    for copy_node in get_input_copybacks_after_candidate(
+                        node, mutated_arg
                     )
-                ):
-                    return None
-        return copy_node if copy_node is None or not copy_node._erased else None
+                    if isinstance(copy_node.args[1], torch.fx.Node)
+                    and _get_view_base(copy_node.args[1]) is node
+                    and _is_layout_preserving_view_copy_back(
+                        copy_node.args[0], copy_node.args[1], mutated_arg, node
+                    )
+                ),
+                key=node_order.__getitem__,
+                default=None,
+            )
+        return copy_node
 
     def all_can_inplace(node, mutated_args):
         return all(can_inplace(node, arg) for arg in mutated_args)
@@ -1482,6 +1527,12 @@ def reinplace_inplaceable_ops(
         # We run fake_tensor_updater to update the alias information.
         # Correct alias information is required for `reinplace_inplaceable_ops_core`.
         fake_tensor_updater.incremental_update()
+        # Calculate scatter chain length on scatter nodes if we intend to reinplace long
+        # scatter chains. Reinplacing scatter may be more efficient on some hardware types.
+        # Must calculate scatter chain length on original fx graph. Therefore should
+        # precede reinplace_inplaceable_ops_core as that pass rewrites the scatter nodes.
+        if config.reinplace_scatter_chain_threshold > 0:
+            annotate_scatter_chain_lengths(graph)
         reinplace_inplaceable_ops_core(
             graph,
             fake_tensor_updater=fake_tensor_updater,

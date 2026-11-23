@@ -6,6 +6,7 @@ import unittest
 
 import torch
 from torch._inductor import config
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.inductor_utils import HAS_XPU_AND_TRITON
 
 
@@ -25,7 +26,10 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 # Will remove this file when pass full test in test/inductor/*.
 
 
+@unittest.skipUnless(torch.xpu.is_available(), "requires XPU")
 class XpuBasicTests(TestCase):
+    hw_classification = HardwareClassification.XPU
+
     common = check_model_gpu
     device = "xpu"
 
