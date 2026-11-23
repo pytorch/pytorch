@@ -149,6 +149,7 @@ def vm(
     fallback: bool = True,
     skip_autograd: bool = True,
     unboxed: bool = True,
+    callees: bool = True,
     max_versions: int = 4,
     max_respecializations: int = 6,
 ) -> Any:
@@ -181,6 +182,10 @@ def vm(
         unboxed: keep the tensors that kernels return without a Python object
             until Python code needs one. A tensor that only flows from one
             kernel call into others then never gets one.
+        callees: rewrite the Python functions that the rewritten code calls
+            (functions, methods, and objects whose ``__call__`` is a Python
+            function) the first time each is called, with the same options. A
+            callee the frontend does not support runs in the interpreter.
         max_versions: how many specialized versions a block can have at once.
         max_respecializations: how many times a block may be profiled and
             specialized again before it settles on code without guards.
@@ -195,6 +200,7 @@ def vm(
         "fallback": fallback,
         "skip_autograd": skip_autograd,
         "unboxed": unboxed,
+        "callees": callees,
         "max_versions": max_versions,
         "max_respecializations": max_respecializations,
     }
@@ -217,6 +223,7 @@ def vm(
             unboxed=unboxed,
             inline=whole["inline"],
             unroll=whole["unroll"],
+            callees=callees,
             max_versions=max_versions,
             max_respecializations=max_respecializations,
         )
