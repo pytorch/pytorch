@@ -9,8 +9,10 @@
 #include <torch/headeronly/util/Float8_e8m0fnu.h>
 #include <torch/headeronly/util/Half.h>
 #include <torch/headeronly/util/complex.h>
+#include <torch/headeronly/util/floating_point_utils.h>
 #include <torch/headeronly/util/overflows.h>
 
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <type_traits>
@@ -71,6 +73,38 @@ unchecked_cast_to_int(src_t src) {
   return static_cast<dest_t>(src);
 }
 
+namespace detail {
+// Whether a double can be rounded correctly to T through float: rounding it to
+// odd (round_to_odd_float) and then with T's float conversion rounds it once,
+// for binary formats that float covers with at least two more significand
+// bits. Converting a double through T's float conversion directly would round
+// twice. This holds for any T with a complete floating-point numeric_limits
+// specialization whose conversion from float rounds to nearest (with any tie
+// rule) and handles NaN, infinities and overflow as a conversion from double
+// would.
+// Complex types are excluded: their parts are converted on their own.
+template <typename T>
+inline constexpr bool rounds_through_float = [] {
+  using L = std::numeric_limits<T>;
+  using F = std::numeric_limits<float>;
+  // Only floating-point specializations must have the other members.
+  if constexpr (
+      L::is_specialized && !L::is_integer &&
+      !torch::headeronly::is_complex<T>::value) {
+    return L::radix == 2 && L::digits + 2 <= F::digits &&
+        L::max_exponent <= F::max_exponent &&
+        L::min_exponent - L::digits >= F::min_exponent - F::digits + 2;
+  } else {
+    return false;
+  }
+}();
+// This deliberately includes Half on aarch64 CPUs, where it is constructed from
+// the native float16_t, which converts from double with a single rounding (fcvt
+// h, d): GCC 13 to 15 vectorize that conversion for SVE as two roundings (fcvt
+// z.s, z.d then fcvt z.h, z.s), so Half goes through round_to_odd_float there
+// too.
+} // namespace detail
+
 template <typename dest_t, typename src_t>
 struct static_cast_with_inter_type {
   C10_HOST_DEVICE static inline dest_t apply(src_t src) {
@@ -79,6 +113,17 @@ struct static_cast_with_inter_type {
     if constexpr (
         std::is_integral_v<dest_t> && !std::is_integral_v<decltype(r)>) {
       return unchecked_cast_to_int<dest_t>(r);
+    } else if constexpr (
+        std::is_same_v<decltype(r), double> &&
+        torch::headeronly::is_complex<dest_t>::value) {
+      // The real part on its own, so that it is rounded once.
+      using part_t = std::decay_t<decltype(std::declval<dest_t>().real())>;
+      return dest_t(
+          static_cast_with_inter_type<part_t, double>::apply(r), part_t(0));
+    } else if constexpr (
+        std::is_same_v<decltype(r), double> &&
+        detail::rounds_through_float<dest_t>) {
+      return static_cast<dest_t>(detail::round_to_odd_float(r));
     } else {
       return static_cast<dest_t>(r);
     }
@@ -192,8 +237,9 @@ struct static_cast_with_inter_type<
     c10::complex<double>> {
   C10_HOST_DEVICE static inline c10::complex<c10::Half> apply(
       c10::complex<double> src) {
-    return static_cast<c10::complex<c10::Half>>(
-        static_cast<c10::complex<float>>(src));
+    using part = static_cast_with_inter_type<c10::Half, double>;
+    return c10::complex<c10::Half>(
+        part::apply(src.real()), part::apply(src.imag()));
   }
 };
 
@@ -282,8 +328,9 @@ struct static_cast_with_inter_type<
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
       c10::BFloat16>
   apply(c10::complex<double> src) {
-    return static_cast<c10::complex<c10::BFloat16>>(
-        static_cast<c10::complex<float>>(src));
+    using part = static_cast_with_inter_type<c10::BFloat16, double>;
+    return c10::complex<c10::BFloat16>(
+        part::apply(src.real()), part::apply(src.imag()));
   }
 };
 
@@ -395,6 +442,9 @@ using c10::report_overflow;
 using c10::static_cast_with_inter_type;
 using c10::unchecked_cast_to_int;
 using c10::unsafe_wrapping_convert;
+namespace detail {
+using c10::detail::rounds_through_float;
+} // namespace detail
 HIDDEN_NAMESPACE_END(torch, headeronly)
 
 C10_CLANG_DIAGNOSTIC_POP()
