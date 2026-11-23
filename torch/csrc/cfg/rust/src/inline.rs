@@ -165,6 +165,9 @@ impl Inliner<'_, '_> {
         let join = fallback + 1;
         // What the call raised, the inlined body raises to the same handler.
         let handler = func.blocks[b].handler;
+        // The block is cut in two at the call; the second half keeps the
+        // terminator.
+        let term_bc = std::mem::replace(&mut func.blocks[b].term_bc, call.bc);
 
         func.origins.push(Origin {
             name: callee.name.clone(),
@@ -239,7 +242,7 @@ impl Inliner<'_, '_> {
                     returns.push((this, v));
                     Term::Jump(join)
                 }
-                raise @ (Term::Raise { .. } | Term::Reraise(_)) => raise,
+                raise @ (Term::Raise { .. } | Term::Reraise(..)) => raise,
             };
             let phis = block
                 .phis
@@ -248,7 +251,8 @@ impl Inliner<'_, '_> {
                 .collect();
             let preds =
                 if j == 0 { vec![b as B] } else { block.preds.iter().map(|p| p + block_offset).collect() };
-            func.blocks.push(Block { phis, insts, term, preds, bc_start: tag(block.bc_start), handler });
+            let (bc_start, term_bc) = (tag(block.bc_start), tag(block.term_bc));
+            func.blocks.push(Block { phis, insts, term, preds, bc_start, term_bc, handler });
         }
 
         // The rest of the caller's block runs after either side.
@@ -276,6 +280,7 @@ impl Inliner<'_, '_> {
             term: Term::Jump(join),
             preds: vec![b as B],
             bc_start: call.bc,
+            term_bc: call.bc,
             handler,
         });
         let mut preds: Vec<B> = returns.iter().map(|(block, _)| *block).collect();
@@ -288,6 +293,7 @@ impl Inliner<'_, '_> {
             term,
             preds,
             bc_start: call.bc,
+            term_bc,
             handler,
         });
         // The handler catches from the new blocks as it does from this one.

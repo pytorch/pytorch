@@ -1759,9 +1759,25 @@ void* framePush(PyObject* func, uint16_t*** instr, uint16_t** code_start) {
   return frame;
 }
 
-void framePop(void* popped) {
+int32_t frameHeld(void* held) {
+  auto* frame = static_cast<_PyInterpreterFrame*>(held);
+  return frame->frame_obj != nullptr &&
+      Py_REFCNT(reinterpret_cast<PyObject*>(frame->frame_obj)) > 1;
+}
+
+void framePop(void* popped, PyObject* kept) {
   auto* frame = static_cast<_PyInterpreterFrame*>(popped);
   PyThreadState* tstate = PyThreadState_Get();
+  if (kept != nullptr) {
+    // On the frame's own stack, which is empty: the frame object clears it
+    // with its locals, and f_locals does not show it.
+    PyCodeObject* code = frame->f_code;
+    if (frame->stacktop < code->co_nlocalsplus + code->co_stacksize) {
+      frame->localsplus[frame->stacktop++] = kept;
+    } else {
+      Py_DECREF(kept);
+    }
+  }
   // Unlinked before it is cleared, as in the interpreter: clearing can run
   // finalizers, which must not find a half-cleared frame on the stack.
   tstate->cframe->current_frame = frame->previous;
@@ -1788,7 +1804,9 @@ const TcfgApi api_table = {
 #ifdef TCFG_HAS_FRAMES
     &framePush,
     &framePop,
+    &frameHeld,
 #else
+    nullptr,
     nullptr,
     nullptr,
 #endif

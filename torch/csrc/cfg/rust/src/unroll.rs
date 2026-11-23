@@ -221,6 +221,7 @@ fn unroll(func: &mut Function, lp: &Loop) {
         term: Term::Br { cond: holds, then_: entry, else_: h as B },
         preds: vec![lp.pre as B],
         bc_start: bc,
+        term_bc: bc,
         handler: NONE,
     };
     func.blocks[lp.pre].term = Term::Jump(guard as B);
@@ -264,6 +265,7 @@ fn unroll(func: &mut Function, lp: &Loop) {
                 term: Term::Jump(exit as B),
                 preds,
                 bc_start: bc,
+                term_bc: bc,
                 handler: NONE,
             });
             func.blocks[exit].preds.push(tail as B);
@@ -322,6 +324,7 @@ fn unroll(func: &mut Function, lp: &Loop) {
                     }),
                     preds: preds.clone(),
                     bc_start: block.bc_start,
+                    term_bc: block.term_bc,
                     handler: NONE,
                 }
             } else {
@@ -350,6 +353,7 @@ fn unroll(func: &mut Function, lp: &Loop) {
                     term,
                     preds: block.preds.iter().map(|p| copy(j, position[&(*p as usize)])).collect(),
                     bc_start: block.bc_start,
+                    term_bc: block.term_bc,
                     handler: NONE,
                 }
             };
