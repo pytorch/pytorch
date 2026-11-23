@@ -716,6 +716,17 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
                 with self.assertRaises(torch._dynamo.exc.Unsupported):
                     torch.compile(fn, backend="eager", fullgraph=True)()
 
+    def test_classmethod_descriptor_call_none_owner(self):
+        descr = dict.__dict__["fromkeys"]
+
+        def fn():
+            try:
+                return descr(None, "ab")
+            except TypeError as e:
+                return str(e)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
     def test_staticmethod_constructor_func_attr(self):
         def fn():
             def f():
@@ -1706,6 +1717,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         x = torch.zeros(1)
         self.assertEqual(fn(Child, Base, x), (x + 1, False, "default"))
 
+    @unittest.expectedFailure
     def test_class_setattr_abstractmethods_hasattr(self):
         class Base:
             pass

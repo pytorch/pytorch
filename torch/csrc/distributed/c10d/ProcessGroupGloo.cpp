@@ -786,7 +786,13 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
 
     AsyncWork::execute(work);
     lock.lock();
-    workInProgress_[workerIndex].reset();
+    auto finished = std::move(workInProgress_[workerIndex]);
+    lock.unlock();
+    // Releasing a work can take the GIL (PyObject decrefs), while a thread
+    // holding the GIL can be blocked in enqueue() on workMutex_.
+    finished.reset();
+    work.reset();
+    lock.lock();
   }
 }
 
