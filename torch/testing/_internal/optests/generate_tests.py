@@ -111,8 +111,6 @@ def safe_symbolic_fake_check(
 ) -> None:
     if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
         return None
-    if copy_inputs:
-        args, kwargs = deepcopy_tensors((args, kwargs))
     return symbolic_fake_check(op, args, kwargs)
 
 
@@ -219,7 +217,8 @@ def generate_opcheck_tests(
     - test_autograd_registration: This runs autograd_registration_check.
     - test_faketensor: This runs CrossRefFakeMode.
     - test_symbolic_faketensor: Experimental. This checks that explicit
-        Meta/Fake kernels do not specialize symbolic Tensor input sizes.
+        Meta/Fake kernels do not specialize symbolic Tensor input sizes. Size
+        constraints must use torch._check or TORCH_SYM_CHECK.
     - test_aot_dispatch_static: This runs aot_autograd_check, which:
         checks that the outputs (and gradients, if they are computable)
         are the same under eager-mode PyTorch and using AOTAutograd.

@@ -1,7 +1,5 @@
 # mypy: ignore-errors
 
-import functools
-
 import torch
 import torch._subclasses
 import torch.utils._pytree as pytree
@@ -27,20 +25,27 @@ def symbolic_fake_check(op, args, kwargs):
     ):
         return
 
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+    from torch._dynamo.source import LocalSource
+    from torch.fx.experimental.symbolic_shapes import (
+        DimDynamic,
+        ShapeEnv,
+        StatelessSymbolicContext,
+    )
 
-    shape_env = ShapeEnv()
-    with FakeTensorMode(shape_env=shape_env) as fake_mode:
+    flat_args, spec = pytree.tree_flatten((args, kwargs))
+    with FakeTensorMode(shape_env=ShapeEnv()) as fake_mode:
         try:
-            fake_args, fake_kwargs = pytree.tree_map_only(
-                torch.Tensor,
-                functools.partial(fake_mode.from_tensor, static_shapes=False),
-                (args, kwargs),
-            )
+            for i, arg in enumerate(flat_args):
+                if isinstance(arg, torch.Tensor):
+                    ctx = StatelessSymbolicContext(
+                        dynamic_sizes=[DimDynamic.UNBACKED] * arg.dim()
+                    )
+                    flat_args[i] = fake_mode.from_tensor(
+                        arg,
+                        source=LocalSource(f"arg{i}"),
+                        symbolic_context=ctx,
+                    )
+            fake_args, fake_kwargs = pytree.tree_unflatten(flat_args, spec)
+            op(*fake_args, **fake_kwargs)
         except UnsupportedFakeTensorException:
             return
-        try:
-            with shape_env.error_on_new_guards():
-                op(*fake_args, **fake_kwargs)
-        except UnsupportedFakeTensorException as e:
-            raise RuntimeError(str(e)) from e
