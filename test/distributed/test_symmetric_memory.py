@@ -2600,6 +2600,50 @@ class FlyDSLAsyncTPTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     @skip_if_no_flydsl
     @mock.patch.dict(os.environ, {_FLY_ENV: "1"})
+    def test_fused_flydsl_forced_tile(self) -> None:
+        """The TP 2 CI shapes never pick the 128x256 all-gather tile on their own. Each forced tile builds the state of
+        this call, compiled with that tile height, and matches; the two tiles' results are bit-identical."""
+        self._init_flydsl()
+        real_tile, picked = _fused_flydsl._ag_tile, []
+
+        def spy(*args):
+            picked.append(real_tile(*args))
+            return picked[-1]
+
+        for shape in ("k384_n768_col", "k1152_n1280_row"):
+            _, k, n, lay = _FLY_AG_SHAPES[shape]
+            A_shard, B = self._fly_ag_inputs(shape)
+            outs = []
+            for tile in _fused_flydsl.TILES:
+                picked.clear()
+                with (
+                    mock.patch.dict(os.environ, {_fused_flydsl.TILE_ENV: tile}),
+                    mock.patch.object(_fused_flydsl, "_ag_tile", spy),
+                ):
+                    ag, mm = self._fly_ag(A_shard, [B], 0, True)
+                self._fly_check_ag(A_shard, [B], 0, ag, mm, True)
+                self.assertEqual(picked, [tile])
+                # ("ag", K, N, TP, B column-major, rows per rank, group, device, tile)
+                key = (
+                    "ag",
+                    k,
+                    n,
+                    self.world_size,
+                    lay == "col",
+                    A_shard.shape[0],
+                    dist.group.WORLD.group_name,
+                    A_shard.device.index,
+                    tile,
+                )
+                st = _fused_flydsl._states[key]
+                self.assertEqual(st.prm.block_m, int(tile.split("x")[0]), tile)
+                outs.append((ag, mm[0]))
+            for what, x, y in zip(("gathered A", "matmul"), *outs, strict=True):
+                self.assertTrue(torch.equal(x, y), f"{shape}: {what} differs")
+
+    @skip_if_lt_x_gpu(2)
+    @skip_if_no_flydsl
+    @mock.patch.dict(os.environ, {_FLY_ENV: "1"})
     @torch._inductor.config.patch(_micro_pipeline_tp=True)
     @fresh_cache()
     def test_fused_flydsl_micro_pipeline_tp(self) -> None:
@@ -2795,6 +2839,32 @@ class FlyDSLAsyncTPPredicateTest(TestCase):
         for table in (_fused_flydsl.R, _fused_flydsl.R_DEFAULT):
             for key, r in table.items():
                 self.assertGreaterEqual(r, 1, key)
+
+    def test_ag_tile(self) -> None:
+        env = _fused_flydsl.TILE_ENV
+
+        def tile(want, lm, n, w):
+            # _ag_tile is only called for calls the default tile admits
+            self.assertTrue(_fused_flydsl._ag_fits(lm, 384, n, w), f"{lm} {n} {w}")
+            with mock.patch.dict(os.environ):
+                os.environ.pop(env, None)
+                if want is not None:
+                    os.environ[env] = want
+                return _fused_flydsl._ag_tile(lm, n, w)
+
+        # auto: 128x256 up to 2048 rows per rank and N per rank x TP of 14336, else 256x256
+        for lm, n, w, auto in (
+            (1024, 1024, 8, "128x256"),
+            (2048, 1792, 8, "128x256"),  # both bounds
+            (2048, 2048, 8, "256x256"),  # N 16384
+            (3072, 1792, 8, "256x256"),  # 3072 rows per rank
+            (4096, 768, 2, "256x256"),  # the TP 2 CI shape
+        ):
+            for want in (None, "auto"):
+                self.assertEqual(tile(want, lm, n, w), auto, f"{want}: {lm} {n} {w}")
+        self.assertEqual(tile("256x256", 1024, 1024, 8), "256x256")  # auto: 128x256
+        self.assertEqual(tile("128x256", 2048, 2048, 8), "128x256")  # auto: 256x256
+        self.assertRaisesRegex(ValueError, env, tile, "128x128", 1024, 1024, 8)
 
     def test_helpers(self) -> None:
         """Operand alignment, the timeouts, and the ranks' agreement check before a state's rendezvous."""

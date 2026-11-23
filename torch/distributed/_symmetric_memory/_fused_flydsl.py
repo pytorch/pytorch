@@ -12,8 +12,8 @@ route and the state are chosen from each rank's own arguments and environment. R
 result: they fail with an error from check_group_agrees() (a store timeout, or different states) or at the barrier's
 timeout.
 
-All-gather + matmul (_AGState): one state per (K, N, TP, B layout, rows per rank, group, device), running one kernel
-(agmm_gfx950): the first KC blocks
+All-gather + matmul (_AGState): one state per (K, N, TP, B layout, rows per rank, group, device, tile), running one
+kernel (agmm_gfx950): the first KC blocks
 (rounded up to a multiple of 8) only pull the peers' shards into the gathered A chunk by chunk and then exit; every
 other block computes one tile, peer tiles waiting on their chunk flag. One call, all on the current stream: stage the
 shard into half ((epoch + 1) & 1) of the symmetric buffer and into this rank's rows of the gathered A, flush (one L2
@@ -40,6 +40,10 @@ rank's staging from the previous call), bump the device epoch, the kernel. The s
 state. Its first call compiles and runs the kernel once with no reducers and every counter add into local scratch;
 the rest is as for the all-gather: the ranks agree again once the state is built, a step counter still short after
 wait_ms() fails the launch, and the barrier is bounded by the group's store timeout (barrier_ms()).
+
+Tiles: both kernels run the 256x256 tile, except a narrow all-gather at small M (see TILE_ENV and _ag_tile), which runs
+128x256: a different state (the tile is in its key) with the same kernel body and the same per-element accumulation over
+K; the tile order is recomputed for the tile grid.
 """
 
 from __future__ import annotations
@@ -56,8 +60,7 @@ WORLDS = (2, 4, 8)
 # Above this N per rank the stock path is faster (its copy hides behind its own matmul).
 AG_MAX_N = 20480
 TIMEOUT_ENV = "TORCH_SYMM_MEM_FLYDSL_TIMEOUT_MS"
-_AGREE = "TORCH_SYMM_MEM_ENABLE_FLYDSL_ASYNC_TP, TORCH_DISABLE_NATIVE_JIT, the FlyDSL and triton installs"
-CHUNK_ROWS = 256  # rows per flagged chunk of the gathered A: one tile row
+CHUNK_ROWS = 256  # rows per flagged chunk of the gathered A: one tile row of 256x256, two of 128x256
 SLOT = 32  # int32 stride between flags, so each flag has its own 128-byte line
 STAGE_BLOCK = 4096
 # Workgroups go round-robin over the XCDs (8 per XCD on gfx950), so every XCD's L2 gets a flush; a CU mask that left
@@ -98,6 +101,22 @@ R = {
     (5120, 8192, 2): 16,
 }
 R_DEFAULT = {8: 28, 4: 12, 2: 8}
+
+# Tile (block_m x block_n) of the all-gather kernel's GEMM (512 threads at both). At small M a narrow-N all-gather is transfer
+# bound, and the 256 rows of the last arriving chunk are a whole 256x256 tile's time of exposed tail: the half-height tile
+# halves it (measured at TP 8, M 8192 / 16384, N <= 1792: 3-10% faster, and at TP 4, M 8192, N up to 3584 per rank:
+# 3.5-5.8% faster; at a wider N it is GEMM bound, and forcing 128x256 (TILE_ENV) is 2-46% slower: TP 8, M 8192 / 16384).
+# The reduce-scatter gains nothing from it, so it always runs the default tile.
+# TORCH_SYMM_MEM_FLYDSL_TILE: "auto" (default), or one of TILES to force it for the all-gather. Read on every call; the
+# tile is part of the state's key.
+TILE_ENV = "TORCH_SYMM_MEM_FLYDSL_TILE"
+TILES = ("256x256", "128x256")  # the first is the default
+# "auto" takes AUTO_TILE for an all-gather of at most AUTO_MAX_LM rows per rank and a global N (N per rank x TP) of at most
+# AUTO_MAX_N.
+AUTO_TILE = "128x256"
+AUTO_MAX_LM = 2048
+AUTO_MAX_N = 14336
+_AGREE = f"TORCH_SYMM_MEM_ENABLE_FLYDSL_ASYNC_TP, {TILE_ENV}, TORCH_DISABLE_NATIVE_JIT, the FlyDSL and triton installs"
 
 _states: dict = {}
 _states_built: collections.Counter = collections.Counter()
@@ -167,6 +186,21 @@ def _ag_fits(lm, k, n, world):
     # The gathered A and the output are addressed per tile; B's buffer offsets (one descriptor over K x N) and
     # _stage3's int32 offsets into the shard are still 32-bit.
     return _fits(k, n) and _fits(lm, k)
+
+
+def _ag_tile(lm, n, world):
+    """The tile of an all-gather the default tile admits, which every tile of TILES then admits too: a 128-row tile
+    doubles the tile rows, so the group-of-32, multiple-of-8 and whole-chunk conditions still hold. TILE_ENV forces one;
+    "auto" takes AUTO_TILE for the calls described at AUTO_*, else the default."""
+    want = os.environ.get(TILE_ENV, "auto")
+    if want != "auto":
+        if want not in TILES:
+            raise ValueError(f"{TILE_ENV}={want!r}: expected auto or one of {TILES}")
+    elif lm <= AUTO_MAX_LM and n * world <= AUTO_MAX_N:
+        want = AUTO_TILE
+    else:
+        want = TILES[0]
+    return want
 
 
 def _ag_meta(A_shard, Bs, gather_dim, world):
@@ -350,7 +384,7 @@ def _group_m(tpr):
 
 
 class _AGState:
-    def __init__(self, m, k, n, b_t, kc, group, b):
+    def __init__(self, m, k, n, b_t, kc, group, b, tile):
         import flydsl.compiler as flyc
 
         import torch.distributed._symmetric_memory as symm_mem
@@ -358,12 +392,15 @@ class _AGState:
 
         rank, world = group.rank(), group.size()
         self.K, self.m, self.k, self.n, self.kc = K, m, k, n, kc
+        bm = int(tile.split("x")[0])
         self.rank, self.world, self.group = rank, world, group
         self.ms, self.bar_ms = wait_ms(), barrier_ms(group)
         lm = m // world
         self.shard, self.nch = lm * k // 2, lm // CHUNK_ROWS
         self.shard_b, self.ch_b = lm * k * 2, CHUNK_ROWS * k * 2
-        what = f"fused_all_gather_matmul M {m} K {k} N {n} B transposed {b_t}"
+        what = (
+            f"fused_all_gather_matmul M {m} K {k} N {n} B transposed {b_t} tile {tile}"
+        )
         check_group_agrees("fused_all_gather_matmul", group, what)
         self.buf = symm_mem.empty(
             2 * self.shard, dtype=torch.int32, device=torch.device("cuda")
@@ -375,7 +412,7 @@ class _AGState:
         self.ep = _control_block(self.ms)
         self.sink = torch.zeros(1, dtype=torch.int32, device="cuda")
         self.mult = kc // (world - 1)
-        self.prm = K.gemm_param(m, n, k, b_t, _group_m(self.nch))
+        self.prm = K.gemm_param(m, n, k, b_t, _group_m(lm // bm), bm)
         self.stream = None
         # Compiling also runs the kernel once: with kc 0 (no copy blocks) on flags far past any target.
         never = torch.full_like(self.flags, 1 << 30)
@@ -450,7 +487,8 @@ class _AGState:
 def _ag_2d(a, b, k, n, b_t, group):
     """The gathered A [M, K] and A @ b [M, N] for a contiguous, aligned 2D shard a."""
     world, lm = group.size(), a.shape[0]
-    skey = ("ag", k, n, world, b_t, lm, group.group_name, a.device.index)
+    tile = _ag_tile(lm, n, world)
+    skey = ("ag", k, n, world, b_t, lm, group.group_name, a.device.index, tile)
     with torch.cuda.device(a.device):
         st = _states.get(skey)
         # A group destroyed and re-created under the same name: the state's handles belong to the old one.
@@ -461,7 +499,7 @@ def _ag_2d(a, b, k, n, b_t, group):
                     "under CUDA graph capture; it compiles and rendezvouses, so make one eager call first"
                 )
             kc = KC.get((k, n, world), KC_DEFAULT[world])
-            st = _states[skey] = _AGState(lm * world, k, n, b_t, kc, group, b)
+            st = _states[skey] = _AGState(lm * world, k, n, b_t, kc, group, b, tile)
         _order_streams(st)
         gat, c = st(a, b)
     return gat, c
