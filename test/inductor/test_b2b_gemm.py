@@ -1,14 +1,21 @@
 # Owner(s): ["module: inductor"]
 import os
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch._dynamo.utils import counters
+from torch._inductor.fx_passes import b2b_gemm
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
-from torch.testing._internal.common_utils import recover_orig_fp32_precision, skipIfXpu
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    parametrize,
+    recover_orig_fp32_precision,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -354,6 +361,178 @@ class B2BGEMMTest(TestCase):
 
         # flaky test assertion: disabled
         # self.assertTrue(average_speedup > 1)
+
+
+class B2BGEMMPrecisionTest(TestCase):
+    def _make_inputs(self, device, is_left_assoc, dtype, value=None):
+        m, n = (256, 32) if is_left_assoc else (32, 256)
+        shapes = ((m, n), (n, m), (m, n))
+        torch.manual_seed(314159)
+        if value is None:
+            return [torch.randn(shape, device=device, dtype=dtype) for shape in shapes]
+        return [
+            torch.full(shape, value, device=device, dtype=dtype) for shape in shapes
+        ]
+
+    @torch._inductor.config.patch(b2b_gemm_pass=True, force_disable_caches=True)
+    def _compile_fused(self, fn, inputs, is_left_assoc):
+        select_algorithm = b2b_gemm.autotune_select_algorithm
+
+        def select_fused(name, choices, *args, **kwargs):
+            if name == "b2b_gemm":
+                choices = [
+                    choice
+                    for choice in choices
+                    if isinstance(choice, b2b_gemm.TritonTemplateCaller)
+                ]
+                self.assertTrue(choices, "expected a fused B2B GEMM template")
+                choices = choices[:1]
+            return select_algorithm(name, choices, *args, **kwargs)
+
+        counters.clear()
+        with patch.object(b2b_gemm, "autotune_select_algorithm", select_fused):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), *inputs
+            )
+        code = "\n".join(codes)
+        assoc = "LEFT" if is_left_assoc else "RIGHT"
+        self.assertIn(f"B2B_GEMM_{assoc}_TRITON_ENTRANCE", code)
+        self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
+        return actual, code
+
+    def _assert_input_precision(self, code, inner, outer):
+        for name, value in (
+            ("INNER_MM_PRECISION", inner),
+            ("OUTER_MM_PRECISION", outer),
+        ):
+            self.assertIn(f"input_precision={name}", code)
+            value_pattern = "None" if value is None else f"['\"]{value}['\"]"
+            self.assertRegex(
+                code, rf"{name}\s*:\s*tl.constexpr\s*=\s*{value_pattern}(?:\s|$)"
+            )
+
+    def _check_fp32_accuracy(self, device, is_left_assoc, precision):
+        def fn(a, b, c):
+            return (a @ b) @ c if is_left_assoc else a @ (b @ c)
+
+        torch.set_float32_matmul_precision("highest")
+        inputs = self._make_inputs(device, is_left_assoc, torch.float32)
+        expected = fn(*inputs)
+        double_reference = fn(*(x.double() for x in inputs))
+        if precision == "ieee":
+            torch.backends.cuda.matmul.fp32_precision = "ieee"
+        else:
+            torch.set_float32_matmul_precision(precision)
+        actual, code = self._compile_fused(fn, inputs, is_left_assoc)
+        self.assertEqual(actual.dtype, torch.float32)
+        self.assertEqual(actual, expected, atol=1e-3, rtol=1e-5)
+        self.assertEqual(actual.double(), double_reference, atol=1e-3, rtol=1e-5)
+        # Both logical GEMMs are below the MM policy's CUDA TF32 shape threshold.
+        self._assert_input_precision(code, "ieee", "ieee")
+
+    @recover_orig_fp32_precision
+    @parametrize("is_left_assoc", (False, True))
+    @parametrize("precision", ("highest", "ieee", "high", "medium"))
+    def test_fp32_accuracy(self, device, is_left_assoc, precision):
+        self._check_fp32_accuracy(device, is_left_assoc, precision)
+
+    @recover_orig_fp32_precision
+    @torch._inductor.config.patch(compile_threads=1)
+    @parametrize("is_left_assoc", (False, True))
+    @patch.dict(os.environ, {"TRITON_F32_DEFAULT": "tf32"})
+    def test_fp32_highest_triton_override(self, device, is_left_assoc):
+        from triton import knobs
+
+        self.assertEqual(knobs.language.fp32_default, "tf32")
+        self._check_fp32_accuracy(device, is_left_assoc, "highest")
+
+    @recover_orig_fp32_precision
+    @parametrize("precision", ("highest", "high"))
+    def test_tf32_outer_mm_precision(self, device, precision):
+        def fn(a, b, c):
+            return a @ (b @ c)
+
+        torch.manual_seed(314159)
+        torch.set_float32_matmul_precision(precision)
+        inputs = [
+            torch.randn(shape, device=device, dtype=torch.float32) / 4
+            for shape in ((16, 512), (512, 16), (16, 512))
+        ]
+        expected = fn(*inputs)
+        actual, code = self._compile_fused(fn, inputs, is_left_assoc=False)
+        self.assertEqual(actual.dtype, torch.float32)
+        self.assertTrue(torch.isfinite(actual).all())
+        tol = 1e-2 if precision == "high" else 1e-4
+        self.assertEqual(actual, expected, atol=tol, rtol=tol)
+        outer_precision = None if precision == "high" else "ieee"
+        self._assert_input_precision(code, "ieee", outer_precision)
+
+    @recover_orig_fp32_precision
+    @parametrize("is_left_assoc", (False, True))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_low_precision_output(self, device, is_left_assoc, dtype):
+        def fn(a, b, c):
+            return (a @ b) @ c if is_left_assoc else a @ (b @ c)
+
+        torch.set_float32_matmul_precision("highest")
+        inputs = self._make_inputs(device, is_left_assoc, dtype)
+        # Preserve the existing promoted-intermediate contract.
+        expected = fn(*(x.float() for x in inputs)).to(dtype)
+        actual, code = self._compile_fused(fn, inputs, is_left_assoc)
+        self.assertEqual(actual.dtype, dtype)
+        self.assertTrue(torch.isfinite(actual).all())
+        self.assertEqual(actual, expected, atol=0.1, rtol=0.01)
+        self._assert_input_precision(code, None, None)
+
+    @recover_orig_fp32_precision
+    @parametrize("is_left_assoc", (False, True))
+    @parametrize(
+        "dtype,value",
+        (
+            (torch.float32, 2.0),
+            (torch.bfloat16, 2.0),
+            (torch.float16, 1.0),
+            (torch.float16, 2.0),
+        ),
+    )
+    def test_output_range(self, device, is_left_assoc, dtype, value):
+        def fn(a, b, c):
+            return (a @ b) @ c if is_left_assoc else a @ (b @ c)
+
+        torch.set_float32_matmul_precision("highest")
+        inputs = self._make_inputs(device, is_left_assoc, dtype, value)
+        expected = fn(*inputs)
+        actual, _ = self._compile_fused(fn, inputs, is_left_assoc)
+        self.assertEqual(actual.dtype, dtype)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        if dtype == torch.float16 and value == 2.0:
+            self.assertTrue(torch.isinf(actual).all())
+        else:
+            self.assertTrue(torch.isfinite(actual).all())
+        if dtype != torch.float16:
+            self.assertGreater(
+                actual.abs().max().item(), torch.finfo(torch.float16).max
+            )
+
+    @recover_orig_fp32_precision
+    @parametrize("is_left_assoc", (False, True))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_mixed_dtype_output(self, device, is_left_assoc, dtype):
+        def fn(a, b, c):
+            return (a @ b).float() @ c if is_left_assoc else a @ (b @ c).float()
+
+        torch.set_float32_matmul_precision("highest")
+        inputs = self._make_inputs(device, is_left_assoc, dtype)
+        outer_input = 2 if is_left_assoc else 0
+        inputs[outer_input] = inputs[outer_input].float()
+        expected = fn(*(x.float() for x in inputs))
+        actual, code = self._compile_fused(fn, inputs, is_left_assoc)
+        self.assertEqual(actual.dtype, torch.float32)
+        self.assertEqual(actual, expected, atol=1e-3, rtol=1e-5)
+        self._assert_input_precision(code, None, "ieee")
+
+
+instantiate_device_type_tests(B2BGEMMPrecisionTest, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
