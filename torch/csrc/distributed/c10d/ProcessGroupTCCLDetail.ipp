@@ -63,9 +63,12 @@ inline int slot(uint64_t wr_id) {
 
 // mesh_exchange
 //
-// The one place the UC-ordering discipline (recv before send) and the WC-status
-// / duplicate-completion / timeout-watchdog checks live. The mesh collectives
-// are thin adapters over this; contract in the header.
+// The one place the UC-ordering discipline and the WC-status /
+// duplicate-completion / timeout-watchdog checks live. Recvs are posted in
+// chunk order; a send that arrives before its recv is posted stalls the sender
+// (Apple TN3205 sec. 12.3), which the 2-rank path relies on: it posts a chunk's
+// recv only after its own send of that chunk. The mesh collectives are thin
+// adapters over this; contract in the header.
 template <bool Pipeline, typename SendSrc, typename WantRecv, typename OnRecv>
 void TCCLEngine::mesh_exchange(
     std::size_t total_bytes,
@@ -99,21 +102,8 @@ void TCCLEngine::mesh_exchange(
     std::size_t send_off = 0, recv_off = 0, send_done = 0, recv_done = 0;
     int send_if = 0, recv_if = 0;
     std::size_t slen[D] = {0}, roff[D] = {0}, rlen[D] = {0};
-    auto fill_recv = [&]() {
-      if (!do_recv) return;
-      for (int s = 0; s < D; ++s) {
-        const std::size_t idx = static_cast<std::size_t>(peer) * D + s;
-        if (rlen[s] == 0 && recv_off < total_bytes) {
-          const std::size_t L = std::min(kChunkSize, total_bytes - recv_off);
-          roff[s] = recv_off;
-          rlen[s] = L;
-          connections_[peer]->postRecv(
-              pipe_recv_buffers_[idx], L, tccl_wr::makeRecv(peer, s));
-          recv_off += L;
-          ++recv_if;
-        }
-      }
-    };
+    // In-place all_reduce sends from the buffer on_recv reduces into, so a
+    // chunk's receive is posted only after fill_send has copied it out.
     auto fill_send = [&]() {
       if (!do_send) return;
       for (int s = 0; s < D; ++s) {
@@ -130,8 +120,24 @@ void TCCLEngine::mesh_exchange(
         }
       }
     };
-    fill_recv();
+    auto fill_recv = [&]() {
+      if (!do_recv) return;
+      for (int s = 0; s < D; ++s) {
+        const std::size_t idx = static_cast<std::size_t>(peer) * D + s;
+        if (rlen[s] == 0 && recv_off < total_bytes &&
+            (!do_send || recv_off < send_off)) {
+          const std::size_t L = std::min(kChunkSize, total_bytes - recv_off);
+          roff[s] = recv_off;
+          rlen[s] = L;
+          connections_[peer]->postRecv(
+              pipe_recv_buffers_[idx], L, tccl_wr::makeRecv(peer, s));
+          recv_off += L;
+          ++recv_if;
+        }
+      }
+    };
     fill_send();
+    fill_recv();
     auto deadline = std::chrono::steady_clock::now() + timeout_;
     while ((do_send && send_done < total_bytes) ||
            (do_recv && recv_done < total_bytes)) {
@@ -161,6 +167,8 @@ void TCCLEngine::mesh_exchange(
           slen[s] = 0;
           --send_if;
           fill_send();
+          // A completed send may unblock receives fill_recv held back.
+          fill_recv();
         } else {
           on_recv(peer, pipe_recv_buffers_[idx].data(), roff[s], rlen[s]);
           recv_done += rlen[s];

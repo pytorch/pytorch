@@ -403,8 +403,10 @@ class TCCLEngine {
  private:
   // Core mesh primitive shared by the mesh collectives. Exchanges up to
   // `total_bytes` with every non-self peer in kChunkSize chunks. Per chunk:
-  //   - want_recv(peer): pre-post a recv (UC needs recv before the matching
-  //     send, Apple TN3205 sec. 12.3)
+  //   - want_recv(peer): post a recv (at 2 ranks only after this rank's own
+  //     send of that chunk, since all_reduce reduces into the send buffer; a
+  //     send that arrives first stalls until it is posted, Apple TN3205
+  //     sec. 12.3)
   //   - send_src(peer, off) != nullptr: memcpy into the send buffer, post a
   //   send
   //   - busy-poll (timeout watchdog) until all WRs complete, firing
