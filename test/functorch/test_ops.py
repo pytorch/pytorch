@@ -2103,6 +2103,12 @@ class TestOperatorsDevice(TestCase):
         "TestOperatorsDevice",
         "test_vmapjvpvjp",
         (
+            # CUDA batched and unbatched QR can use different GEQRF kernels.
+            tol1(
+                "linalg.qr",
+                {torch.float32: tol(atol=2e-04, rtol=1e-04)},
+                device_type="cuda",
+            ),
             tol1("linalg.svd", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             # aarch64 reaches abs 5.2e-04 here, past the test default of 1e-04; cpu is
             # the narrowest device_type that covers it.
