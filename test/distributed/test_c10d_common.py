@@ -259,11 +259,11 @@ class MultiProcContinuousSkipTest(MultiProcContinuousTest):
     world_size = 2
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "gloo"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cpu"
 
     def test_1_worker_skip(self) -> None:
@@ -430,8 +430,11 @@ class BackendEntryPointTest(TestCase):
             "ENTRYPOINT_TEST": hasattr(dist.Backend, "ENTRYPOINT_TEST"),
             "NCCL-LEGACY": hasattr(dist.Backend, "NCCL-LEGACY"),
         }
+        self._fr_self_recording = c10d._FR_SELF_RECORDING_BACKENDS.copy()
 
     def tearDown(self):
+        c10d._FR_SELF_RECORDING_BACKENDS.clear()
+        c10d._FR_SELF_RECORDING_BACKENDS.update(self._fr_self_recording)
         dist.Backend._plugins = self._plugins
         dist.Backend.backend_list = self._backend_list
         dist.Backend.backend_capability = self._backend_capability
@@ -574,29 +577,41 @@ class BackendEntryPointTest(TestCase):
             out.split(), ["False", "False", "torch.distributed._backends.fake"]
         )
 
-    @parametrize("backend", ["nccl", "nccl-legacy", "nccl2", "nccl-lazy"])
+    @parametrize("backend", ["nccl", "nccl2", "nccl-lazy"])
     def test_nccl_backend_default_timeout(self, backend):
         timeout = timedelta(seconds=1)
         with unittest.mock.patch.object(c10d, "default_pg_nccl_timeout", timeout):
             self.assertEqual(c10d._get_default_timeout(backend), timeout)
 
+    @parametrize("legacy_default", [False, True])
     @parametrize("nccl2_override", [None, "0", "1"])
-    def test_nccl_backend_registration(self, nccl2_override):
+    def test_nccl_backend_registration(self, nccl2_override, legacy_default):
+        # legacy_default=True is the internal entry point, which keeps legacy
+        # unless TORCH_DIST_USE_NCCL2=1.
+        register = (
+            c10d._register_builtin_nccl_as_legacy
+            if legacy_default
+            else c10d._register_builtin_nccl_backend
+        )
         with unittest.mock.patch.dict(os.environ):
             if nccl2_override is None:
                 os.environ.pop("TORCH_DIST_USE_NCCL2", None)
             else:
                 os.environ["TORCH_DIST_USE_NCCL2"] = nccl2_override
-            c10d._register_builtin_nccl_backend()
+            register()
 
-        expected_creator = (
-            c10d._create_nccl_process_group
-            if nccl2_override == "0"
-            else c10d._create_nccl2_process_group
+        wants_legacy = nccl2_override == "0" or (
+            legacy_default and nccl2_override is None
         )
+        is_legacy = wants_legacy and c10d._NCCL_LEGACY_AVAILABLE
         self.assertIs(
             dist.Backend._plugins["NCCL"].creator_fn,
-            expected_creator,
+            c10d._create_nccl_process_group
+            if is_legacy
+            else c10d._create_nccl2_process_group,
+        )
+        self.assertEqual(
+            dist.Backend.NCCL in c10d._FR_SELF_RECORDING_BACKENDS, is_legacy
         )
         self.assertEqual(
             dist.Backend.backend_type_map["nccl"],
@@ -617,19 +632,6 @@ class BackendEntryPointTest(TestCase):
         ):
             os.environ.pop("LOCAL_RANK", None)
             self.assertEqual(c10d._nccl2_device(opts), torch.device("cuda:3"))
-
-    def test_nccl_legacy_backend_registration(self):
-        c10d._register_builtin_nccl_legacy_backend()
-
-        self.assertIs(
-            dist.Backend._plugins["NCCL-LEGACY"].creator_fn,
-            c10d._create_nccl_process_group,
-        )
-        self.assertEqual(dist.Backend.backend_capability["nccl-legacy"], ["cuda"])
-        self.assertEqual(
-            dist.Backend.backend_type_map["nccl-legacy"],
-            dist.ProcessGroup.BackendType.CUSTOM,
-        )
 
 
 instantiate_parametrized_tests(BackendEntryPointTest)
