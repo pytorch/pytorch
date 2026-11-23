@@ -508,7 +508,7 @@ class TestAutoWrap(TestCase):
             transformer_auto_wrap_policy,
             transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer},
         )
-        self._test_transformer_wrapping(auto_wrap_policy)
+        self._test_transformer_wrapping(auto_wrap_policy, device)
 
     @unittest.skipIf(
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
@@ -518,7 +518,7 @@ class TestAutoWrap(TestCase):
         auto_wrap_policy = ModuleWrapPolicy(
             {TransformerEncoderLayer, TransformerDecoderLayer}
         )
-        self._test_transformer_wrapping(auto_wrap_policy)
+        self._test_transformer_wrapping(auto_wrap_policy, device)
 
     @unittest.skipIf(
         not TEST_MULTIACCELERATOR, "Requires at least 2 accelerator devices"
@@ -529,15 +529,14 @@ class TestAutoWrap(TestCase):
             {TransformerEncoderLayer, TransformerDecoderLayer}
         )
         callable_policy = functools.partial(_or_policy, policies=[auto_wrap_policy])
-        self._test_transformer_wrapping(callable_policy)
+        self._test_transformer_wrapping(callable_policy, device)
 
-    def _test_transformer_wrapping(self, auto_wrap_policy: Callable | _Policy):
-        fsdp_kwargs = {"auto_wrap_policy": auto_wrap_policy}
-        fsdp_model = TransformerWithSharedParams.init(
-            self.process_group,
-            FSDPInitMode.RECURSIVE,
-            DEVICEInitMode.DEVICE_BEFORE,
-            fsdp_kwargs,
+    def _test_transformer_wrapping(self, auto_wrap_policy: Callable | _Policy, device):
+        model = TransformerWithSharedParams.init(
+            self.process_group, FSDPInitMode.NO_FSDP, DEVICEInitMode.DEVICE_NEVER
+        ).to(device)
+        fsdp_model = FSDP(
+            model, process_group=self.process_group, auto_wrap_policy=auto_wrap_policy
         )
         modules = list(fsdp_model.modules())
         encoder_layers = set(fsdp_model.module.transformer.encoder.layers)
