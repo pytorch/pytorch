@@ -34,10 +34,11 @@ from torch.testing._internal.common_utils import (
 
 
 try:
-    from .test_aot_inductor import AOTIRunnerUtil
+    from .test_aot_inductor import AOTIRunnerUtil, INT64_LITERAL_SUFFIX
 except ImportError:
     from test_aot_inductor import (  # @manual=fbcode//caffe2/test/inductor:test_aot_inductor-library
         AOTIRunnerUtil,
+        INT64_LITERAL_SUFFIX,
     )
 
 
@@ -313,15 +314,16 @@ class TestMemoryPlanning(TestCase):
             lambda: AOTIRunnerUtil.run(f, args, dynamic_shapes=dynamic_shapes)
         )
 
+        sfx = INT64_LITERAL_SUFFIX
         FileCheck().check(
-            "int64_t int_array_0[] = {24L + align(12L*s6), };"
-        ).check_next("int64_t int_array_1[] = {1L, };").check_next(
+            f"int64_t int_array_0[] = {{24{sfx} + align(12{sfx}*s6), }};"
+        ).check_next(f"int64_t int_array_1[] = {{1{sfx}, }};").check_next(
             "AtenTensorHandle pool1_handle;"
         ).check_next(
             "aoti_torch_empty_strided(1, int_array_0, int_array_1,"
         ).check_next("RAIIAtenTensorHandle pool1(pool1_handle);").check_next(
-            "int64_t int_array_2[] = {s6, 3L};"
-        ).check_next("int64_t int_array_3[] = {3L, 1L};").check_next(
+            f"int64_t int_array_2[] = {{s6, 3{sfx}}};"
+        ).check_next(f"int64_t int_array_3[] = {{3{sfx}, 1{sfx}}};").check_next(
             "AtenTensorHandle tmp_tensor_handle_0;"
         ).check_next("aoti_torch__alloc_from_pool(pool1, 0").run(code)
         self.assertTrue(same(f(*args), result))

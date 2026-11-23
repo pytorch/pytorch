@@ -340,7 +340,9 @@ int munmap(void* addr, size_t length) {
 #include <torch/csrc/inductor/aoti_runtime/constant_type.h>
 
 #if defined(USE_CUDA) && defined(USE_ROCM) && \
-    TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0 && !defined(_WIN32)
+    TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+// On Windows the shim.h declaration is used; it links through torch_hip.lib.
+#ifndef _WIN32
 // Weak, so that a model .so still loads into a libtorch without this function.
 // Its address is then null and sharedConstantsH2DStream() uses a stream of its
 // own instead.
@@ -348,6 +350,7 @@ extern "C" __attribute__((weak)) AOTITorchError
 aoti_torch_get_constants_copy_cuda_stream(
     int32_t device_index,
     void** ret_stream);
+#endif
 #define AOTI_HAS_CONSTANTS_COPY_STREAM_SHIM 1
 #endif
 
@@ -437,7 +440,10 @@ inline cudaStream_t sharedConstantsH2DStream() {
   }
 
 #ifdef AOTI_HAS_CONSTANTS_COPY_STREAM_SHIM
-  if (aoti_torch_get_constants_copy_cuda_stream != nullptr) {
+#ifndef _WIN32
+  if (aoti_torch_get_constants_copy_cuda_stream != nullptr)
+#endif
+  {
     void* process_stream = nullptr;
     if (aoti_torch_get_constants_copy_cuda_stream(device, &process_stream) ==
             AOTI_TORCH_SUCCESS &&

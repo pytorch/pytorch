@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/stable/library.h>
 #include <torch/library.h>
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -1294,12 +1295,17 @@ void aoti_torch_save_tensor_handle(
       return;
     }
   }
+  std::string device_str = t->device().str();
+#ifdef _WIN32
+  // ':' is not allowed in a Windows file name.
+  std::replace(device_str.begin(), device_str.end(), ':', '_');
+#endif
   // Join as a path component: plain concatenation had no separator, so files
   // landed beside the created directory rather than inside it.
   std::string tensor_filepath_to_save =
       (tmp_folder /
        (std::string(launch_prefix) + "_" + kernel_name + "_" + tensor_name +
-        "_" + t->device().str() + ".pt"))
+        "_" + device_str + ".pt"))
           .string();
 
   auto bytes = torch::jit::pickle_save(c10::IValue(*t));

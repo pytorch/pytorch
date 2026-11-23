@@ -3150,8 +3150,12 @@ class CppBuilder:
 
 def run_asm_build_object(src: str, target: str, cwd: str) -> None:
     def get_asm_compiler() -> str:
-        if _IS_WINDOWS:
+        if _IS_WINDOWS and src.endswith(".asm"):
             ASM_CC = "ml64"
+        elif _IS_WINDOWS:
+            # Windows ROCm emits GNU assembly and assembles it with ROCm clang.
+            clang_dir = os.path.dirname(_get_rocm_clang_cl_windows())
+            ASM_CC = normalize_path_separator(os.path.join(clang_dir, "clang.exe"))
         else:
             ASM_CC = get_cpp_compiler()
             # Intel compiler is not support to compile asm, switch to gcc.
@@ -3160,7 +3164,7 @@ def run_asm_build_object(src: str, target: str, cwd: str) -> None:
         return ASM_CC
 
     def get_command_line(asm_cc: str, src: str, target: str) -> str:
-        if _IS_WINDOWS:
+        if asm_cc == "ml64":
             # Format reference:
             # https://learn.microsoft.com/en-us/cpp/assembler/masm/ml-and-ml64-command-line-reference?view=msvc-170
             cmd = f"{asm_cc} {src} /c /Fo {target}"  # codespell:ignore /Fo

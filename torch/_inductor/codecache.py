@@ -84,6 +84,7 @@ from torch._inductor.codegen.rocm.compile_command import (
 )
 from torch._inductor.compile_worker.utils import in_toplevel_process
 from torch._inductor.cpp_builder import (
+    _get_rocm_clang_cl_windows,
     _LINKER_SCRIPT,
     _set_gpu_runtime_env,
     _TORCH_PATH,
@@ -523,6 +524,10 @@ class PersistentCache(CacheBase):
             self.update_local_cache(local_cache)
 
         return timings
+
+
+# Placeholder that is patched with the real bytes of large constants.
+_CONSTS_MAGIC_NUMBER = 0x1234567899ABCDEF
 
 
 def get_lock_dir() -> str:
@@ -2996,8 +3001,13 @@ class AotCodeCompiler:
                 symbol_prefix = "_"
             elif platform == "win32":
                 symbol_prefix = ""
-                # ASM build is not supported on Windows, force use CPP build.
-                use_asm_build = False
+                if torch.version.hip is None:
+                    # ASM build is not supported on Windows, force use CPP build.
+                    use_asm_build = False
+                elif graph.mutated_buffers & OrderedSet(graph.constants.keys()):
+                    section_attr = '.data, "dw"'
+                else:
+                    section_attr = '.rdata, "dr"'
             else:
                 raise RuntimeError(f"Unsupported platform: {platform}")
 
@@ -3015,10 +3025,15 @@ class AotCodeCompiler:
                 symbol_prefix: str,
                 is_large_consts: bool,
             ) -> tuple[str, str]:
+                start = f"{symbol_prefix}_binary_constants_bin_start"
+                end = f"{symbol_prefix}_binary_constants_bin_end"
+                if platform == "win32":
+                    # MSVC-mangled names of the uint8_t[] arrays in model_base.h.
+                    start, end = f'"?{start}@@3PAEA"', f'"?{end}@@3PAEA"'
                 consts_asm = f"\t.section\t{section_attr}\n"
                 consts_asm += f"\t.balign {align_bytes}\n"
-                consts_asm += f"\t.globl\t{symbol_prefix}_binary_constants_bin_start\n"
-                consts_asm += f"{symbol_prefix}_binary_constants_bin_start:\n"
+                consts_asm += f"\t.globl\t{start}\n"
+                consts_asm += f"{start}:\n"
                 if not is_large_consts:
                     for c in consts:
                         consts_asm += f"\t.byte {c}\n"
@@ -3027,10 +3042,10 @@ class AotCodeCompiler:
                     if not consts:
                         consts_asm += "\t.space 1\n"
                 else:
-                    consts_asm += "\t.quad 0x1234567899abcdef\n"
+                    consts_asm += f"\t.quad {_CONSTS_MAGIC_NUMBER:#x}\n"
                     consts_asm += f"\t.space {len(consts) - 8}\n"
-                consts_asm += f".globl\t{symbol_prefix}_binary_constants_bin_end\n"
-                consts_asm += f"{symbol_prefix}_binary_constants_bin_end:\n"
+                consts_asm += f".globl\t{end}\n"
+                consts_asm += f"{end}:\n"
                 return consts_asm, "weights.S"
 
             # Use c++ to convert consts to object file can support more compilers, such as msvc and icx.
@@ -3138,21 +3153,27 @@ end
                 BuildOption=object_build_options,
             )
             consts_o = object_builder.get_target_file_path()
-            if use_asm_build is False and is_zero_size_consts:
+            if (use_asm_build is False and is_zero_size_consts) or (
+                use_asm_build and platform == "win32"
+            ):
                 run_asm_build_object(str(consts_s), consts_o, str(consts_s.parent))
             else:
                 object_builder.build()
 
             if is_large_consts and use_asm_build:
+                magic = _CONSTS_MAGIC_NUMBER.to_bytes(8, sys.byteorder)
                 with open(consts_o, "r+b") as f:
-                    f.seek(0)
-                    hdr = f.read(1024)
-                    # Search for magic number and write the actual data over it
-                    start_idx = (
-                        hdr.find(b"\xef\xcd\xab\x99\x78\x56\x34\x12")
-                        if sys.byteorder == "little"
-                        else hdr.find(b"\x12\x34\x56\x78\x99\xab\xcd\xef")
-                    )
+                    if platform == "win32":
+                        # COFF section data may start past the first 1024 bytes.
+                        import mmap
+
+                        with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                            start_idx = mm.find(magic)
+                    else:
+                        f.seek(0)
+                        hdr = f.read(1024)
+                        # Search for magic number and write the actual data over it
+                        start_idx = hdr.find(magic)
                     if start_idx == -1:
                         raise AssertionError(
                             "Magic number not found in constants header"
@@ -3550,9 +3571,10 @@ end
             cubins_o = []
             asm_files = []
             fatbin_cmds: list[tuple[str, str, str | None, str | None]] = []
-            if not _IS_WINDOWS:
+            if not _IS_WINDOWS or torch.version.hip is not None:
                 cubins_to_embed: list[tuple[str, str]] = []
-                ld, objcopy = get_ld_and_objcopy(use_relative_path)
+                if not _IS_WINDOWS:
+                    ld, objcopy = get_ld_and_objcopy(use_relative_path)
                 kernels = getattr(V.graph.wrapper_code, "_kernel_name_to_body", {})
                 for kernel_name, value in CudaKernelParamCache.cache.items():
                     if kernel_name not in kernels:
@@ -3647,7 +3669,18 @@ end
                     ):
                         list(pool.map(_compile_fatbin, fatbin_cmds))
 
-                if cubins_to_embed:
+                if cubins_to_embed and _IS_WINDOWS:
+                    rocm_clang = os.path.join(
+                        os.path.dirname(_get_rocm_clang_cl_windows()), "clang.exe"
+                    )
+                    cubins_o.append(
+                        batch_convert_cubins_to_obj(
+                            cubins_to_embed,
+                            os.path.dirname(output_so),
+                            cpp_compiler=rocm_clang,
+                        )
+                    )
+                elif cubins_to_embed:
                     # Batch all cubins into a single .o using .incbin assembly.
                     # This replaces N * 3 subprocess calls (ld + 2x objcopy per
                     # cubin) with a single compiler invocation.

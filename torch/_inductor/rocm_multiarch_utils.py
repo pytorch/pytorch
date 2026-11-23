@@ -9,10 +9,18 @@ import re
 import subprocess
 
 import torch
+from torch._utils import IS_WINDOWS
 from torch.utils.cpp_extension import _join_rocm_home, ROCM_HOME
 
 
 log = logging.getLogger(__name__)
+
+
+def _rocm_llvm_tool(name: str) -> str:
+    # The Windows ROCm SDK keeps LLVM in lib/llvm/bin.
+    if IS_WINDOWS:
+        return _join_rocm_home("lib", "llvm", "bin", name + ".exe")
+    return _join_rocm_home("llvm", "bin", name)
 
 
 def get_rocm_compiler() -> str:
@@ -33,7 +41,7 @@ def get_rocm_compiler() -> str:
         )
 
     # ROCm's clang is at <ROCM_HOME>/llvm/bin/clang
-    clang_path = _join_rocm_home("llvm", "bin", "clang")
+    clang_path = _rocm_llvm_tool("clang")
 
     if not os.path.exists(clang_path):
         raise RuntimeError(
@@ -61,7 +69,7 @@ def get_rocm_bundler() -> str:
         )
 
     # Bundler is at <ROCM_HOME>/llvm/bin/clang-offload-bundler
-    bundler_path = _join_rocm_home("llvm", "bin", "clang-offload-bundler")
+    bundler_path = _rocm_llvm_tool("clang-offload-bundler")
 
     if not os.path.exists(bundler_path):
         raise RuntimeError(
@@ -218,7 +226,7 @@ def create_multiarch_bundle(code_objects: dict, output_bundle_path: str) -> bool
     targets = ["host-x86_64-unknown-linux-gnu"]
 
     # We include a dummy host entry to satisfy the bundler format
-    inputs = ["/dev/null"]
+    inputs = [os.devnull]
 
     for arch, path in sorted(code_objects.items()):
         if not os.path.exists(path):

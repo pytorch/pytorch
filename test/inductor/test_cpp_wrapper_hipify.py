@@ -48,6 +48,10 @@ class TestCppWrapperHipify(TestCase):
         ):
             header = cuda_codegen.kernel_driver()
         expected = """
+            #if defined(USE_ROCM) && defined(_WIN32)
+            #include <fstream>
+            #endif
+
             #define CUDA_DRIVER_CHECK(EXPR)                    \\
             do {                                               \\
                 hipError_t code = EXPR;                          \\
@@ -122,7 +126,20 @@ class TestCppWrapperHipify(TestCase):
 
                 hipModule_t mod;
                 hipFunction_t func;
+            #if defined(USE_ROCM) && defined(_WIN32)
+                // hipModuleLoad keeps the file locked after hipModuleUnload, so read it into
+                // memory and load it with hipModuleLoadData; the file is then never held open.
+                std::ifstream file(filePath, std::ios::binary);
+                if (!file) {
+                    throw std::runtime_error("Failed to open " + filePath);
+                }
+                std::vector<char> image(
+                    (std::istreambuf_iterator<char>(file)),
+                    std::istreambuf_iterator<char>());
+                CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, image.data()));
+            #else
                 CUDA_DRIVER_CHECK(hipModuleLoad(&mod, filePath.c_str()));
+            #endif
                 if (loaded_modules) {
                     loaded_modules->push_back(mod);
                 }

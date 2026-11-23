@@ -1,7 +1,6 @@
 import io
 import logging
 import os
-import tempfile
 from typing import IO
 
 import torch
@@ -66,7 +65,9 @@ def load_package(
             log.warning("Loading outdated pt2 file. Please regenerate your package.")
 
     if isinstance(path, (io.IOBase, IO)):
-        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+        from torch._inductor.codecache import WritableTempFile
+
+        with WritableTempFile("wb", suffix=".pt2") as f:
             # TODO(angelayi): We shouldn't need to do this -- miniz should
             # handle reading the buffer. This is just a temporary workaround
             path.seek(0)

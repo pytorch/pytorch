@@ -402,6 +402,8 @@ class TestGpuWrapper(InductorTestCase):
                 self.assertTrue(
                     any("*" in entry[1] for entry in torch.cuda.tunable.get_results())
                 )
+                # Close the results file; Windows cannot delete an open file.
+                torch.cuda.tunable._clear_all()
         finally:
             torch.cuda.tunable._clear_all()
             torch.cuda.tunable.set_filename(previous_filename, False)
@@ -531,9 +533,9 @@ class TestGpuWrapper(InductorTestCase):
         elif IS_MACOS:
             self.skipTest("non-portable load_library call used in test")
         else:
-            lib_path = find_library_location("libaoti_custom_ops.so")
-            if IS_WINDOWS:
-                lib_path = find_library_location("aoti_custom_ops.dll")
+            lib_path = find_library_location(
+                "aoti_custom_ops.dll" if IS_WINDOWS else "libaoti_custom_ops.so"
+            )
             if not os.path.exists(lib_path):
                 self.skipTest("libaoti_custom_ops not built")
             torch.ops.load_library(str(lib_path))

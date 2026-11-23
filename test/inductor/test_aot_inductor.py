@@ -109,7 +109,7 @@ from torch.testing._internal.common_utils import (
     set_cwd,
     skipIfCachingAllocatorDisabled,
     skipIfCppFakeTensor,
-    skipIfWindows,
+    skipIfRocmWindows,
     skipIfWindowsXPU,
     skipIfXpu,
     TEST_MPS,
@@ -124,6 +124,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_XPU_AND_TRITON,
     IS_BIG_GPU,
+    skipIfMsvcCl,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import requires_gpu
@@ -273,6 +274,9 @@ def get_module_ext_type():
         return "so"
 
 
+INT64_LITERAL_SUFFIX = "LL" if IS_MACOS or IS_WINDOWS else "L"
+
+
 def get_triton_grid_info(kernel, total_elements, src_code):
     expected_grids = [
         triton.cdiv(
@@ -280,7 +284,7 @@ def get_triton_grid_info(kernel, total_elements, src_code):
         )
         for cfg in kernel.configs
     ]
-    grid_match = re.search(r"uint32_t grid_0 = (\d+)L;", src_code)
+    grid_match = re.search(rf"uint32_t grid_0 = (\d+){INT64_LITERAL_SUFFIX};", src_code)
     if grid_match:
         return int(grid_match.group(1)), expected_grids
     else:
@@ -2347,7 +2351,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (x, y)
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
-    @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
+    @skipIfMsvcCl("TODO: (xuhancn) confirm, Crash: access violation")
     def test_large_dynamic_dim(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -2698,7 +2702,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
+    @skipIfMsvcCl("TODO: (xuhancn) confirm, Crash: access violation")
     def test_foreach_multiple_dynamic(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -3917,7 +3921,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
+    @skipIfMsvcCl("TODO: (xuhancn) confirm, Crash: access violation")
     @common_utils.parametrize("dynamic", [False, True])
     def test_cond_mismatched_branch_output(self, dynamic):
         inputs = (
@@ -4447,8 +4451,8 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(10, device=self.device),)
         self.check_model(Model(self.device), example_inputs)
 
-    @skipIfWindows(
-        msg="OpenMP crashed application on windows"
+    @skipIfMsvcCl(
+        "OpenMP crashed application on windows"
     )  # TODO: (xuhancn) need to root cause and fix.
     def test_buffer_mutation_3(self):
         class KVCache(torch.nn.Module):
@@ -7303,7 +7307,7 @@ class AOTInductorTestsTemplate:
         with self.assertRaisesRegex(Exception, "Expected .* but received"):
             optimized(*input2)
 
-    @skipIfWindows(msg="TODO: (xuhancn) confirm, Crash: access violation")
+    @skipIfMsvcCl("TODO: (xuhancn) confirm, Crash: access violation")
     def test_index_put_with_none_index(self):
         # index_put falls back in the deterministic mode
         with DeterministicGuard(True):
@@ -8872,6 +8876,9 @@ class AOTInductorTestsTemplate:
             self.check_model(Model(), example_inputs)
 
     @_requires_non_mps_gpu
+    @skipIfRocmWindows(
+        msg="Kineto is not built on Windows ROCm yet; profiler support belongs to future Kineto work"
+    )
     def test_aoti_user_defined_triton_kernel_profiling(self):
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
@@ -9066,7 +9073,7 @@ class AOTInductorTestsTemplate:
         expected_scalar_args = [
             "triton_poi_fused_zeros_like_0_xnumel",
             "triton_poi_fused_ones_1_xnumel",
-            "std::max(static_cast<int64_t>(512L), static_cast<int64_t>(u0))",
+            f"std::max(static_cast<int64_t>(512{INT64_LITERAL_SUFFIX}), static_cast<int64_t>(u0))",
         ]
 
         with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
@@ -9742,8 +9749,8 @@ class AOTInductorTestsTemplate:
             # CI can OOM because this test uses too much memory
             raise unittest.SkipTest("OOM. Test is too large") from None
 
-    @skipIfWindows(
-        msg="OpenMP crashed application on windows"
+    @skipIfMsvcCl(
+        "OpenMP crashed application on windows"
     )  # TODO: (xuhancn) need to root cause and fix.
     def test_issue_140766(self):
         class Model(torch.nn.Module):
@@ -12473,6 +12480,7 @@ compiled.run_with_lazy_cuda_graphs(x)
         self.assertTrue(allocated_memory[1] == allocated_memory[2])
 
     @unittest.skipIf(IS_MACOS, "might have no readelf on Mac")
+    @unittest.skipIf(IS_WINDOWS, "reads ELF NEEDED entries")
     def test_libtorch_free_so(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -12750,7 +12758,7 @@ compiled.run_with_lazy_cuda_graphs(x)
             script = f"""
 import torch
 
-torch._inductor.aoti_load_package("{model_path}")
+torch._inductor.aoti_load_package({str(model_path)!r})
 """
             result = subprocess.run(
                 [sys.executable, "-c", script], capture_output=True, text=True
@@ -12795,7 +12803,7 @@ torch._inductor.aoti_load_package("{model_path}")
             script = f"""
 import torch
 
-torch._inductor.aoti_load_package("{model_path}")
+torch._inductor.aoti_load_package({str(model_path)!r})
 """
             result = subprocess.run(
                 [sys.executable, "-c", script], capture_output=True, text=True
