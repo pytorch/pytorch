@@ -432,11 +432,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     filtered_ops_cache: dict[str, list[Any]] = {}
     cache_clear = staticmethod(filtered_ops_cache.clear)
 
-    @property
-    def _device_cutlass_config(self):
-        """Get device-specific CUTLASS config (xpu/cuda overrides general cutlass config)."""
-        return cutlass_utils.get_device_cutlass_config(self.device_type)
-
     def __init__(
         self,
         input_nodes: list[Buffer],
@@ -601,9 +596,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         )
 
         with dynamo_timed("CUTLASSGemmTemplate.maybe_append_choice"):
-            device_config = self._device_cutlass_config
+            swizzles = inductor_cutlass_config.cutlass_max_profiling_swizzle_options
             for name, op in ops:
-                for swizzle in device_config.cutlass_max_profiling_swizzle_options:
+                for swizzle in swizzles:
                     description = f"{name} swizzle={swizzle}"
                     self.maybe_append_choice(
                         choices,
@@ -1086,8 +1081,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             time.time() - start_time,
         )
         sorted_res = sorted(res.items())
-        device_config = self._device_cutlass_config
-        ret_res = sorted_res[: device_config.cutlass_max_profiling_configs]
+        ret_res = sorted_res[: inductor_cutlass_config.cutlass_max_profiling_configs]
         if len(self.filtered_ops_cache) < 50:
             self.filtered_ops_cache[self.cache_key] = ret_res
         else:
