@@ -51,6 +51,12 @@ static_assert(
     sizeof(ScaledMMParams<>) == 72,
     "ScaledMMParams layout must match Metal");
 
+// _scaled_grouped_mm splits one operand by the jagged offsets: the rows of A
+// (2d x 3d) or the contraction dim (2d x 2d). batch is the 3d x 3d case,
+// without offsets. The host computes 3d x 2d as its transpose, a 2d x 3d
+// product.
+enum class ScaledGroupedMMMode : uint32_t { rows, k, batch };
+
 // Batch strides of the operands of _scaled_grouped_mm, by which the kernels
 // offset each group's view; zero for operands shared by every group.
 // scale_a/scale_b are the float (RowWise, TensorWise or NVFP4 global) scales,
@@ -58,6 +64,7 @@ static_assert(
 struct ScaledGroupedMMParams {
   ScaledMMParams<> mm;
   uint32_t groups;
+  ScaledGroupedMMMode mode;
   int64_t a_batch_stride, b_batch_stride, out_batch_stride;
   int64_t scale_a_batch_stride, scale_b_batch_stride;
   int64_t block_scale_a_batch_stride, block_scale_b_batch_stride;

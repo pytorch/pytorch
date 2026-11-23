@@ -938,11 +938,8 @@ REGISTER_SCALED_MM_BLOCKWISE_MPP_WITH_OUT_T(bfloat);
 // Metal 4.1 MPP multiplies fp8 operands directly, without staging them as half
 // in threadgroup memory. A must be row-major and B column-major (both
 // K-contiguous), which is the layout cuBLASLt requires too.
-// MPP rejects const-qualified element types, hence non-const a and b
 template <typename T>
 inline void scaled_mm_native_tile_run(
-    device float8_e4m3fn* a,
-    device float8_e4m3fn* b,
     thread const ScaledMMArgs<T>& args,
     thread const ScaledMMParams<>& p,
     uint row_start,
@@ -950,14 +947,17 @@ inline void scaled_mm_native_tile_run(
   constexpr auto tile = scaled_mm_native_tile;
   using fp8_tensor =
       tensor<device metal_fp8_e4m3_format, dextents<int32_t, 2>, tensor_inline>;
-  const auto operand = [&](device float8_e4m3fn* data, uint rows, int64_t ld) {
+  // MPP rejects const-qualified element types
+  const auto operand = [&](device const float8_e4m3fn* data,
+                           uint rows,
+                           int64_t ld) {
     return fp8_tensor(
-        reinterpret_cast<device uchar*>(data),
+        const_cast<device uchar*>(reinterpret_cast<device const uchar*>(data)),
         dextents<int32_t, 2>(p.k, rows),
         array<int32_t, 2>{1, int32_t(ld)});
   };
-  auto a_tile = operand(a, p.m, p.a_row_stride).slice(0, row_start);
-  auto b_tile = operand(b, p.n, p.b_col_stride).slice(0, col_start);
+  auto a_tile = operand(args.a, p.m, p.a_row_stride).slice(0, row_start);
+  auto b_tile = operand(args.b, p.n, p.b_col_stride).slice(0, col_start);
   // A single run over all of K, so the default multiply mode needs no zeroed
   // accumulator
   constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
@@ -986,7 +986,7 @@ kernel void scaled_mm_native(
   constexpr auto tile = scaled_mm_native_tile;
   const ScaledMMParams<> p = params;
   const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, {}, {}};
-  scaled_mm_native_tile_run(a, b, args, p, group.y * tile, group.x * tile);
+  scaled_mm_native_tile_run(args, p, group.y * tile, group.x * tile);
 }
 
 #define REGISTER_SCALED_MM_NATIVE_WITH_OUT_T(T)              \
@@ -1120,17 +1120,14 @@ REGISTER_SCALED_MM_NATIVE_MXFP8_WITH_OUT_T(bfloat);
 #endif // __METAL_VERSION__ >= 410
 #endif // C10_METAL_HAS_MPP
 
-// _scaled_grouped_mm splits one operand by the jagged offsets: the rows of A
-// (2d x 3d) or the contraction dim (2d x 2d). batch is the 3d x 3d case,
-// without offsets. The host computes 3d x 2d as its transpose, a 2d x 3d
-// product. Every recipe on MPS produces BFloat16.
-enum class ScaledGroupedMMMode { rows, k, batch };
-
+// Every _scaled_grouped_mm recipe on MPS produces BFloat16. The layout is a
+// runtime parameter: it only changes how a tile finds its group, once per
+// threadgroup, so templating on it would multiply the kernels for no speedup.
 // Narrows p to this threadgroup's group and returns that group, the tile's
 // first row and column and the group's first K index. The jagged dimension
 // keeps its global indices, so only the batched operands need offsetting.
 // Returns false for the padding tiles of the jagged modes.
-template <uint tile_m, uint tile_n, ScaledGroupedMMMode MODE>
+template <uint tile_m, uint tile_n>
 inline bool scaled_grouped_mm_tile(
     device const int32_t* offsets,
     constant ScaledGroupedMMParams& params,
@@ -1147,7 +1144,7 @@ inline bool scaled_grouped_mm_tile(
   row_start = tgid.y * tile_m;
   col_start = tgid.x * tile_n;
   k_begin = 0;
-  if IF_CONSTEXPR (MODE == ScaledGroupedMMMode::rows) {
+  if (params.mode == ScaledGroupedMMMode::rows) {
     uint rows;
     if (!grouped_mm_group_tile_broadcast<tile_m>(
             offsets,
@@ -1162,7 +1159,7 @@ inline bool scaled_grouped_mm_tile(
       return false;
     }
     p.m = row_start + rows;
-  } else if IF_CONSTEXPR (MODE == ScaledGroupedMMMode::k) {
+  } else if (params.mode == ScaledGroupedMMMode::k) {
     const uint k_end = grouped_mm_offset(offsets[group], p.k);
     k_begin =
         group == 0 ? 0 : min(grouped_mm_offset(offsets[group - 1], p.k), k_end);
@@ -1244,25 +1241,24 @@ inline ScaledMMBlockwiseArgs<T> scaled_grouped_mm_blockwise_args(
       constant ScaledGroupedMMParams &params [[buffer(8)]]
 
 // Resolves the tile, or returns from the kernel for a padding tile
-#define SCALED_GROUPED_MM_TILE(TILE)             \
-  threadgroup uint32_t tile_info[3];             \
-  ScaledMMParams<> p;                            \
-  uint group, row_start, col_start, k_begin;     \
-  if (!scaled_grouped_mm_tile<TILE, TILE, MODE>( \
-          offsets,                               \
-          params,                                \
-          tgid,                                  \
-          tid,                                   \
-          tile_info,                             \
-          p,                                     \
-          group,                                 \
-          row_start,                             \
-          col_start,                             \
-          k_begin)) {                            \
-    return;                                      \
+#define SCALED_GROUPED_MM_TILE(TILE)         \
+  threadgroup uint32_t tile_info[3];         \
+  ScaledMMParams<> p;                        \
+  uint group, row_start, col_start, k_begin; \
+  if (!scaled_grouped_mm_tile<TILE, TILE>(   \
+          offsets,                           \
+          params,                            \
+          tgid,                              \
+          tid,                               \
+          tile_info,                         \
+          p,                                 \
+          group,                             \
+          row_start,                         \
+          col_start,                         \
+          k_begin)) {                        \
+    return;                                  \
   }
 
-template <ScaledGroupedMMMode MODE>
 [[max_total_threads_per_threadgroup(scaled_mm_threads)]]
 kernel void scaled_grouped_mm(
     SCALED_GROUPED_MM_BUFFERS,
@@ -1279,7 +1275,7 @@ kernel void scaled_grouped_mm(
   scaled_mm_tile_run(args, p, row_start, col_start, tid, sg, c_tile);
 }
 
-template <typename F, ScaledGroupedMMMode MODE>
+template <typename F>
 [[max_total_threads_per_threadgroup(scaled_mm_threads)]]
 kernel void scaled_grouped_mm_blockwise(
     SCALED_GROUPED_MM_BLOCKWISE_BUFFERS,
@@ -1353,7 +1349,6 @@ kernel void scaled_grouped_mm_blockwise_few_rows(
 }
 
 #if C10_METAL_HAS_MPP
-template <ScaledGroupedMMMode MODE>
 [[max_total_threads_per_threadgroup(scaled_mm_threads)]]
 kernel void scaled_grouped_mm_mpp(
     SCALED_GROUPED_MM_BUFFERS,
@@ -1368,7 +1363,7 @@ kernel void scaled_grouped_mm_mpp(
   scaled_mm_mpp_tile_run(args, p, row_start, col_start, tid);
 }
 
-template <typename F, ScaledGroupedMMMode MODE>
+template <typename F>
 [[max_total_threads_per_threadgroup(scaled_mm_threads)]]
 kernel void scaled_grouped_mm_blockwise_mpp(
     SCALED_GROUPED_MM_BLOCKWISE_BUFFERS,
@@ -1395,102 +1390,56 @@ kernel void scaled_grouped_mm_blockwise_mpp(
 }
 #endif // C10_METAL_HAS_MPP
 
-#define SCALED_GROUPED_MM_SIGNATURE                                         \
-  device const float8_e4m3fn*, device const float8_e4m3fn*, device bfloat*, \
-      device const float*, device const float*, device const int32_t*,      \
-      constant ScaledGroupedMMParams&
-
 #define SCALED_GROUPED_MM_BLOCKWISE_SIGNATURE                        \
   device const uchar*, device const uchar*, device bfloat*,          \
       device const uchar*, device const uchar*, device const float*, \
       device const float*, device const int32_t*,                    \
       constant ScaledGroupedMMParams&
 
-#define REGISTER_SCALED_GROUPED_MM(MODE)                         \
-  template [[host_name("scaled_grouped_mm_" #MODE)]] kernel void \
-  scaled_grouped_mm<ScaledGroupedMMMode::MODE>(                  \
-      SCALED_GROUPED_MM_SIGNATURE, uint3, uint, uint)
-
-REGISTER_SCALED_GROUPED_MM(rows);
-REGISTER_SCALED_GROUPED_MM(k);
-REGISTER_SCALED_GROUPED_MM(batch);
-
-#define REGISTER_SCALED_GROUPED_MM_BLOCKWISE(MODE, NAME, FORMAT)           \
-  template [[host_name("scaled_grouped_mm_" #MODE "_" #NAME)]] kernel void \
-  scaled_grouped_mm_blockwise<FORMAT, ScaledGroupedMMMode::MODE>(          \
-      SCALED_GROUPED_MM_BLOCKWISE_SIGNATURE, uint3, uint, uint)
-
-#define REGISTER_SCALED_GROUPED_MM_BLOCKWISE_FORMAT(NAME, FORMAT)         \
-  REGISTER_SCALED_GROUPED_MM_BLOCKWISE(rows, NAME, FORMAT);               \
-  REGISTER_SCALED_GROUPED_MM_BLOCKWISE(k, NAME, FORMAT);                  \
+#define REGISTER_SCALED_GROUPED_MM_BLOCKWISE(NAME, FORMAT)                \
+  template [[host_name("scaled_grouped_mm_" #NAME)]] kernel void          \
+      scaled_grouped_mm_blockwise<FORMAT>(                                \
+          SCALED_GROUPED_MM_BLOCKWISE_SIGNATURE, uint3, uint, uint);      \
   template [[host_name("scaled_grouped_mm_few_rows_" #NAME)]] kernel void \
   scaled_grouped_mm_blockwise_few_rows<FORMAT>(                           \
       SCALED_GROUPED_MM_BLOCKWISE_SIGNATURE, uint2, uint, uint)
 
-REGISTER_SCALED_GROUPED_MM_BLOCKWISE_FORMAT(mxfp8, mxfp8_format);
-REGISTER_SCALED_GROUPED_MM_BLOCKWISE_FORMAT(nvfp4, nvfp4_format);
+REGISTER_SCALED_GROUPED_MM_BLOCKWISE(mxfp8, mxfp8_format);
+REGISTER_SCALED_GROUPED_MM_BLOCKWISE(nvfp4, nvfp4_format);
 
 #if C10_METAL_HAS_MPP
-#define REGISTER_SCALED_GROUPED_MM_MPP(MODE)                            \
-  template [[host_name("scaled_grouped_mm_" #MODE "_mpp")]] kernel void \
-  scaled_grouped_mm_mpp<ScaledGroupedMMMode::MODE>(                     \
-      SCALED_GROUPED_MM_SIGNATURE, uint3, uint)
-
-REGISTER_SCALED_GROUPED_MM_MPP(rows);
-REGISTER_SCALED_GROUPED_MM_MPP(k);
-REGISTER_SCALED_GROUPED_MM_MPP(batch);
-
-#define REGISTER_SCALED_GROUPED_MM_BLOCKWISE_MPP(MODE, NAME, FORMAT)           \
-  template [[host_name("scaled_grouped_mm_" #MODE "_mpp_" #NAME)]] kernel void \
-  scaled_grouped_mm_blockwise_mpp<FORMAT, ScaledGroupedMMMode::MODE>(          \
+#define REGISTER_SCALED_GROUPED_MM_BLOCKWISE_MPP(NAME, FORMAT)       \
+  template [[host_name("scaled_grouped_mm_mpp_" #NAME)]] kernel void \
+  scaled_grouped_mm_blockwise_mpp<FORMAT>(                           \
       SCALED_GROUPED_MM_BLOCKWISE_SIGNATURE, uint3, uint)
 
-REGISTER_SCALED_GROUPED_MM_BLOCKWISE_MPP(rows, mxfp8, mxfp8_format);
-REGISTER_SCALED_GROUPED_MM_BLOCKWISE_MPP(k, mxfp8, mxfp8_format);
-REGISTER_SCALED_GROUPED_MM_BLOCKWISE_MPP(rows, nvfp4, nvfp4_format);
-REGISTER_SCALED_GROUPED_MM_BLOCKWISE_MPP(k, nvfp4, nvfp4_format);
+REGISTER_SCALED_GROUPED_MM_BLOCKWISE_MPP(mxfp8, mxfp8_format);
+REGISTER_SCALED_GROUPED_MM_BLOCKWISE_MPP(nvfp4, nvfp4_format);
 #endif // C10_METAL_HAS_MPP
 
 #if C10_METAL_HAS_MPP && __METAL_VERSION__ >= 410
-// scaled_mm_native per group; the host routes only the K-contiguous rows and
-// batch modes here
-template <ScaledGroupedMMMode MODE>
+// scaled_mm_native per group, for K-contiguous operands
 [[max_total_threads_per_threadgroup(scaled_mm_threads)]]
 kernel void scaled_grouped_mm_native(
-    device float8_e4m3fn* a [[buffer(0)]],
-    device float8_e4m3fn* b [[buffer(1)]],
-    device bfloat* out [[buffer(2)]],
-    device const float* scale_a [[buffer(3)]],
-    device const float* scale_b [[buffer(4)]],
-    device const int32_t* offsets [[buffer(5)]],
-    constant ScaledGroupedMMParams& params [[buffer(6)]],
+    SCALED_GROUPED_MM_BUFFERS,
     uint3 tgid [[threadgroup_position_in_grid]],
     uint tid [[thread_index_in_threadgroup]]) {
-  SCALED_GROUPED_MM_TILE(scaled_mm_native_tile);
+  constexpr auto tile = scaled_mm_native_tile;
+  SCALED_GROUPED_MM_TILE(tile);
   const auto args = scaled_grouped_mm_args<bfloat>(
-      a, b, out, scale_a, scale_b, params, p, group, 0, nullptr, nullptr);
-  scaled_mm_native_tile_run(
-      a + group * params.a_batch_stride,
-      b + group * params.b_batch_stride,
-      args,
-      p,
-      row_start,
-      col_start);
+      a, b, out, scale_a, scale_b, params, p, group, k_begin, nullptr, nullptr);
+  if (p.k != 0) {
+    scaled_mm_native_tile_run(args, p, row_start, col_start);
+    return;
+  }
+  // matmul2d writes no accumulator for an empty group of K
+  for (uint i = tid; i < tile * tile; i += scaled_mm_threads) {
+    const uint row = row_start + i / tile;
+    const uint col = col_start + i % tile;
+    if (row < p.m && col < p.n) {
+      scaled_mm_store(0.0f, row, col, args, p);
+    }
+  }
 }
 
-#define REGISTER_SCALED_GROUPED_MM_NATIVE(MODE)                            \
-  template [[host_name("scaled_grouped_mm_" #MODE "_native")]] kernel void \
-  scaled_grouped_mm_native<ScaledGroupedMMMode::MODE>(                     \
-      device float8_e4m3fn*,                                               \
-      device float8_e4m3fn*,                                               \
-      device bfloat*,                                                      \
-      device const float*,                                                 \
-      device const float*,                                                 \
-      device const int32_t*,                                               \
-      constant ScaledGroupedMMParams&,                                     \
-      uint3,                                                               \
-      uint)
-
-REGISTER_SCALED_GROUPED_MM_NATIVE(rows);
-REGISTER_SCALED_GROUPED_MM_NATIVE(batch);
 #endif // C10_METAL_HAS_MPP && __METAL_VERSION__ >= 410

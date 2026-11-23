@@ -190,9 +190,9 @@ void scaled_grouped_mm_out(const Tensor& mat_a,
   const bool rowwise = gemm_impl == ScaledGemmImplementation::ROWWISE_ROWWISE;
   const bool nvfp4 = gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4;
   const bool blockwise = nvfp4 || gemm_impl == ScaledGemmImplementation::MXFP8_MXFP8;
+  TORCH_CHECK_NOT_IMPLEMENTED(!blockwise || mat_a.dim() == 2,
+                              "MPS _scaled_grouped_mm_v2 supports MXFP8 and NVFP4 for 2d x 3d and 2d x 2d inputs");
   if (mat_a.dim() == 3 && mat_b.dim() == 2) {
-    TORCH_CHECK_NOT_IMPLEMENTED(!blockwise,
-                                "MPS _scaled_grouped_mm_v2 supports MXFP8 and NVFP4 for 2d x 3d and 2d x 2d inputs");
     // The columns of mat_b split into groups are the rows of its transpose, so compute the transposed product
     scaled_grouped_mm_out(mat_b.transpose(-2, -1),
                           mat_a.transpose(-2, -1),
@@ -204,7 +204,6 @@ void scaled_grouped_mm_out(const Tensor& mat_a,
                           {scale_names[1], scale_names[0]});
     return;
   }
-  const auto mode = mat_a.dim() == 2 ? (mat_b.dim() == 3 ? "rows" : "k") : "batch";
   const bool jagged_rows = mat_a.dim() == 2 && mat_b.dim() == 3;
   const bool jagged_k = mat_a.dim() == 2 && mat_b.dim() == 2;
   const int64_t groups = offs.has_value() ? offs->numel() : mat_a.size(0);
@@ -235,16 +234,17 @@ void scaled_grouped_mm_out(const Tensor& mat_a,
               .out_row_stride = out.stride(-2),
               .out_col_stride = out.stride(-1),
               .rowwise = rowwise,
-              .has_tensor_scales = !blockwise || scale_a.size() == 2,
+              .has_tensor_scales = gemm_impl != ScaledGemmImplementation::MXFP8_MXFP8,
           },
       .groups = c10::safe_conv<uint32_t>(groups, "number of groups"),
+      .mode = jagged_rows ? ScaledGroupedMMMode::rows
+          : jagged_k      ? ScaledGroupedMMMode::k
+                          : ScaledGroupedMMMode::batch,
       .a_batch_stride = batch_stride(mat_a),
       .b_batch_stride = batch_stride(mat_b),
       .out_batch_stride = batch_stride(out),
   };
   if (blockwise) {
-    TORCH_CHECK_NOT_IMPLEMENTED(jagged_rows || jagged_k,
-                                "MPS _scaled_grouped_mm_v2 supports MXFP8 and NVFP4 for 2d x 3d and 2d x 2d inputs");
     TORCH_CHECK_VALUE(mat_a.stride(-1) == 1 && mat_b.stride(-2) == 1,
                       "MPS block-scaled _scaled_grouped_mm_v2 expects a row-major mat_a and a column-major mat_b, got "
                       "strides ",
@@ -272,7 +272,7 @@ void scaled_grouped_mm_out(const Tensor& mat_a,
                       " tensor, got shape ",
                       scale_b[0].sizes());
     params.block_scale_b_batch_stride = jagged_rows ? n * k_blocks : 0;
-    if (params.mm.has_tensor_scales) {
+    if (nvfp4) {
       params.scale_a_batch_stride = scaled_grouped_mm_tensor_scale_stride(scale_a[1], groups, "scale_a[1]");
       params.scale_b_batch_stride = scaled_grouped_mm_tensor_scale_stride(scale_b[1], groups, "scale_b[1]");
     }
@@ -299,20 +299,18 @@ void scaled_grouped_mm_out(const Tensor& mat_a,
   // NVFP4 groups of K start at multiples of 8 bytes, short of the MPP kernel's 16-byte loads
   const bool mpp = has_mpp() && (!blockwise || (aligned(scaled_mm_alignment) && !(nvfp4 && jagged_k)));
   // As in _scaled_mm, Metal 4.1 multiplies K-contiguous fp8 operands natively, with int32 MPP strides
-  const bool native = !blockwise && !few_rows && !jagged_k && k_contiguous && has_metal_4_1() &&
+  const bool native = !blockwise && !few_rows && k_contiguous && has_metal_4_1() &&
       std::in_range<int32_t>(params.mm.a_row_stride) && std::in_range<int32_t>(params.mm.b_col_stride);
   const auto format = blockwise ? (nvfp4 ? "_nvfp4" : "_mxfp8") : "";
   const auto variant = native ? "_native" : mpp ? "_mpp" : "";
   const auto kernel_name = few_rows ? fmt::format("scaled_grouped_mm_few_rows{}", format)
-                                    : fmt::format("scaled_grouped_mm_{}{}{}", mode, variant, format);
+                                    : fmt::format("scaled_grouped_mm{}{}", variant, format);
   const int64_t tile = native ? scaled_mm_native_tile : blockwise && mpp ? scaled_mm_blockwise_tile : scaled_mm_tile;
   const auto threadgroups = few_rows ? MTLSizeMake(c10::metal::ceil_div<int64_t>(n, scaled_mm_simdgroups), m, 1)
                                      : MTLSizeMake(c10::metal::ceil_div<int64_t>(n, tile),
                                                    c10::metal::ceil_div<int64_t>(m, tile) + (jagged_rows ? groups : 0),
                                                    jagged_rows ? 1 : groups);
-  const auto tensor_scale = [&](ArrayRef<Tensor> scales) {
-    return scales.size() == 2 ? std::make_optional(scales[1]) : std::nullopt;
-  };
+  const auto global_scale = [&](ArrayRef<Tensor> scales) { return nvfp4 ? std::optional(scales[1]) : std::nullopt; };
   auto pso = lib.getPipelineStateForFunc(kernel_name);
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -327,8 +325,8 @@ void scaled_grouped_mm_out(const Tensor& mat_a,
                     out,
                     scale_a[0],
                     scale_b[0],
-                    tensor_scale(scale_a),
-                    tensor_scale(scale_b),
+                    global_scale(scale_a),
+                    global_scale(scale_b),
                     offs,
                     params);
       } else {

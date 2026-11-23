@@ -3201,7 +3201,9 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     # AMD does not support NVFP4
     # v1 _scaled_grouped_mm has no MPS kernel
     @parametrize("wrap_v2", [True, subtest(False, decorators=[skipMPS])])
-    def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided, wrap_v2, device):
+    # A group with no K writes zeros, which the MPS Metal 4.1 kernel does separately
+    @parametrize("empty_group", [False, subtest(True, decorators=[onlyMPS])])
+    def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided, wrap_v2, empty_group, device):
 
         fp8_dtype = e4m3_type
         m, n, k, n_groups = 16, 32, 64, 4
@@ -3210,6 +3212,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
         scale_b = torch.rand(n * n_groups, device=device, dtype=torch.float32)
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
+        if empty_group:
+            offs[0] = 0
         f = scaled_grouped_mm_wrap
         out = f(a, b.t(),
                 scale_a,
