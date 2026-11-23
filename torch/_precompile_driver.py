@@ -53,9 +53,11 @@ if TYPE_CHECKING:
     _ALLOW_SERVE_TIME_COMPILES: bool = False
     # The Inductor config the subgraphs are post-compiled under: CUDA graphs on
     # if any of them compiled for CUDA graphs, and the capture's cudagraph_trees.
+    # Empty for a backend other than Inductor, whose subgraphs have none.
     CUDAGRAPH_CONFIG: dict[str, bool] = {}
-    # The capture's normalized mode/options, which a serve-time compile uses;
-    # None when they have no literal form.
+    # The capture's normalized mode/options and the CUDA graph settings its
+    # compiles ran under, which a serve-time compile uses; None when the options
+    # have no literal form.
     INDUCTOR_OPTIONS: dict[str, object] | None = {}
     BACKEND: str = ""
     FN_NAME: str = ""
@@ -996,11 +998,8 @@ def _build_installed_forward():
         # caching_precompile would make optimize(package=None) create its own
         # package, which context(fn) fills from the on-disk Dynamo cache.
         backend: object = BACKEND
-        if _ALLOW_SERVE_TIME_COMPILES and BACKEND == "inductor":
-            # A miss is lowered as the captured graphs were: for the CUDA graph
-            # settings the capture's options do not name, by CUDAGRAPH_CONFIG.
-            options = {**CUDAGRAPH_CONFIG, **(INDUCTOR_OPTIONS or {})}
-            backend = torch._TorchCompileInductorWrapper(None, options, None)
+        if _ALLOW_SERVE_TIME_COMPILES and INDUCTOR_OPTIONS:
+            backend = torch._TorchCompileInductorWrapper(None, INDUCTOR_OPTIONS, None)
         with torch._dynamo.config.patch(caching_precompile=False):
             context = torch._dynamo.optimize(
                 backend, package=None if _ALLOW_SERVE_TIME_COMPILES else package
