@@ -218,8 +218,10 @@ struct Frame {
 }
 
 impl Frame {
+    const NONE: Frame = Frame { ptr: null_mut(), instr: null_mut(), code: null_mut() };
+
     unsafe fn push(function: Obj) -> Result<Frame, ()> {
-        let mut frame = Frame { ptr: null_mut(), instr: null_mut(), code: null_mut() };
+        let mut frame = Frame::NONE;
         if let Some(push) = capi::api().and_then(|api| api.frame_push) {
             frame.ptr = push(function, &mut frame.instr, &mut frame.code);
             if frame.ptr.is_null() {
@@ -242,6 +244,55 @@ impl Frame {
         if !self.instr.is_null() {
             *self.instr = self.code.add(offset as usize / 2);
         }
+    }
+}
+
+const OFFSET_MASK: u32 = (1 << ORIGIN_SHIFT) - 1;
+
+/// The frame of a compiled function and, above it, those of the inlined
+/// functions that are running in it.
+struct Frames {
+    frames: [Frame; Frames::CAPACITY],
+    /// How many inlined functions deep the VM is.
+    depth: usize,
+}
+
+impl Frames {
+    /// Inlining nests four deep at most.
+    const CAPACITY: usize = 6;
+
+    fn new(root: Frame) -> Frames {
+        Frames { frames: [root; Frames::CAPACITY], depth: 0 }
+    }
+
+    #[inline(always)]
+    fn top(&self) -> Frame {
+        if self.depth < Frames::CAPACITY {
+            self.frames[self.depth]
+        } else {
+            Frame::NONE
+        }
+    }
+
+    /// The depth grows even when the frame could not be pushed, so that
+    /// every enter has its leave.
+    unsafe fn enter(&mut self, function: Obj) -> Result<(), ()> {
+        self.depth += 1;
+        if self.depth < Frames::CAPACITY {
+            self.frames[self.depth] = Frame::NONE;
+            self.frames[self.depth] = Frame::push(function)?;
+        }
+        Ok(())
+    }
+
+    unsafe fn leave(&mut self) {
+        if self.depth == 0 {
+            return;
+        }
+        if self.depth < Frames::CAPACITY {
+            self.frames[self.depth].pop();
+        }
+        self.depth -= 1;
     }
 }
 
@@ -803,39 +854,31 @@ impl Compiled {
         Some(handler as usize)
     }
 
-    /// The offset in the function's own bytecode that stands for an
-    /// instruction: its own, or for an inlined one that of the call it was
-    /// inlined at.
-    #[inline(always)]
-    fn frame_offset(&self, bc: u32) -> u32 {
-        let mut bc = bc;
-        while bc >> ORIGIN_SHIFT != 0 {
-            bc = self.func.origins[(bc >> ORIGIN_SHIFT) as usize].call_bc;
-        }
-        bc
-    }
-
-    unsafe fn fail(&self, frame: Frame, bc: u32) -> Obj {
-        // One entry per frame the interpreter would have had: the inlined
-        // function the instruction came from, then each call it sits under.
-        // The function itself has a real frame where those are supported,
-        // which gives its entry the position within the line.
+    /// Records the error that the instruction at `bc` raised in the
+    /// traceback: one entry per frame the interpreter would have had, the
+    /// inlined function the instruction came from and each call it sits
+    /// under, and unwinds the frames of the inlined functions. Where frames
+    /// are supported the entries come from them, which gives them the
+    /// position within the line.
+    unsafe fn fail(&self, frames: &mut Frames, bc: u32) -> Obj {
         let mut bc = bc;
         loop {
             let origin = (bc >> ORIGIN_SHIFT) as usize;
-            if origin == 0 && !frame.ptr.is_null() {
-                frame.at(bc);
+            let frame = frames.top();
+            if frame.ptr.is_null() {
+                let (name, filename) = &self.origin_c[origin];
+                pyffi::_PyTraceback_Add(name.as_ptr(), filename.as_ptr(), self.func.line_of(bc));
+            } else {
+                frame.at(bc & OFFSET_MASK);
                 let current = ffi::PyEval_GetFrame();
                 if !current.is_null() {
                     ffi::PyTraceBack_Here(current);
                 }
-                break;
             }
-            let (name, filename) = &self.origin_c[origin];
-            pyffi::_PyTraceback_Add(name.as_ptr(), filename.as_ptr(), self.func.line_of(bc));
             if origin == 0 {
                 break;
             }
+            frames.leave();
             bc = self.func.origins[origin].call_bc;
         }
         null_mut()
@@ -1097,7 +1140,8 @@ impl Compiled {
                 xdecref(package);
                 checked(found)
             }
-            Op::Hold(_) => Ok(null_mut()),
+            // The block loop runs these two; it has the frames.
+            Op::Hold(_) | Op::FrameEnter(_) | Op::FrameLeave => Ok(null_mut()),
             Op::LoadSlot(slot) => {
                 let o = reg(regs, *slot);
                 capi::retain(o);
@@ -2135,6 +2179,17 @@ impl Compiled {
     // ------------------------------------------------------------------
 
     unsafe fn exec(&self, regs: &mut [Obj], frame: Frame) -> Obj {
+        let mut frames = Frames::new(frame);
+        let result = self.exec_blocks(regs, &mut frames);
+        // Every path out of an inlined function pops its frame; this is for
+        // the one that was not thought of.
+        while frames.depth > 0 {
+            frames.leave();
+        }
+        result
+    }
+
+    unsafe fn exec_blocks(&self, regs: &mut [Obj], frames: &mut Frames) -> Obj {
         let api = capi::api();
         let func = &self.func;
         if self.options.specialize {
@@ -2191,7 +2246,7 @@ impl Compiled {
                 if cur <= pred {
                     back_edges = back_edges.wrapping_add(1);
                     if back_edges & 63 == 0 && ffi::PyErr_CheckSignals() != 0 {
-                        self.fail(frame, block.bc_start);
+                        self.fail(frames, block.bc_start);
                         raised!('blocks, cur);
                     }
                 }
@@ -2215,8 +2270,16 @@ impl Compiled {
                                     break;
                                 }
                             }
+                            Op::FrameEnter(function) => {
+                                let function = func.consts.get_unchecked(*function as usize).as_ptr();
+                                frames.enter(function).map(|()| null_mut())
+                            }
+                            Op::FrameLeave => {
+                                frames.leave();
+                                Ok(null_mut())
+                            }
                             op => {
-                                frame.at(self.frame_offset(inst.bc));
+                                frames.top().at(inst.bc & OFFSET_MASK);
                                 if mode == Mode::Profile {
                                     self.exec_profiled(cur, pc, inst, regs, api.unwrap())
                                 } else {
@@ -2238,7 +2301,7 @@ impl Compiled {
                                 }
                             }
                             Err(()) => {
-                                self.fail(frame, inst.bc);
+                                self.fail(frames, inst.bc);
                                 raised!('blocks, cur);
                             }
                         }
@@ -2259,7 +2322,7 @@ impl Compiled {
                                 } else {
                                     let r = ffi::PyObject_IsTrue(c);
                                     if r < 0 {
-                                        self.fail(frame, func.blocks[cur].bc_start);
+                                        self.fail(frames, func.blocks[cur].bc_start);
                                         raised!('blocks, cur);
                                     }
                                     r != 0
@@ -2288,12 +2351,12 @@ impl Compiled {
                                         ffi::PyExc_RuntimeError,
                                         "No active exception to reraise".to_string(),
                                     );
-                                    self.fail(frame, bc);
+                                    self.fail(frames, bc);
                                 } else {
                                     let cause =
                                         if *cause == NONE { null_mut() } else { self.obj(regs, *cause) };
                                     do_raise(self.obj(regs, *exc), cause);
-                                    self.fail(frame, bc);
+                                    self.fail(frames, bc);
                                 }
                                 raised!('blocks, cur);
                             }
