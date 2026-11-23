@@ -2488,7 +2488,10 @@ impl Compiled {
         if trial.phase != TRIAL_SAMPLING {
             return result;
         }
-        if !result.is_null() {
+        // A call that raised is a sample like any other: a callee that
+        // always raises (a lookup that fails, and is caught) would otherwise
+        // never be decided, and nothing above it either.
+        if !result.is_null() || !ffi::PyErr_Occurred().is_null() {
             if as_compiled {
                 trial.compiled_best = trial.compiled_best.min(elapsed);
                 trial.compiled_samples += 1;
