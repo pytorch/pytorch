@@ -2234,7 +2234,12 @@ void upsample_inter_area2d_kernel_impl_for(
     std::optional<double> scales_w) {
   if (input.dtype() == at::kByte) {
     #ifdef CPU_CAPABILITY_AVX2
-      if (input.size(1) <= 4) {
+      // The RGB packing helpers flatten the spatial dimensions using the
+      // width stride, which can be arbitrary for a singleton width.
+      if (input.size(1) <= 4 &&
+          (input.size(3) != 1 || input.size(2) == 1 || input.stride(3) == input.stride(2)) &&
+          (output.is_contiguous() || output.is_contiguous(at::MemoryFormat::ChannelsLast)) &&
+          (output.size(3) != 1 || output.size(2) == 1 || output.stride(3) == output.stride(2))) {
         return upsample_avx_bilinear_bicubic_uint8<scale_t, F>(
           input, output, /*align_corners=*/false, {scales_h, scales_w},
           /*antialias=*/true);

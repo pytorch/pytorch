@@ -5158,8 +5158,9 @@ def interpolate(  # noqa: F811
         With ``size``, it matches ``cv2.resize(x, (w, h))``. With ``scale_factor``, it is used like OpenCV's
         ``fx`` / ``fy`` (unless ``recompute_scale_factor=True``), but the output size is
         ``floor(input_size * scale_factor)`` as for the other modes, where OpenCV rounds to the nearest.
-        It only supports 4-D input and CPU, and doesn't support ``align_corners``, ``antialias`` or backward.
-        For ``uint8`` inputs, outputs can differ from OpenCV's by 1.
+        It only supports 4-D input and CPU, and doesn't support ``align_corners``, ``antialias``,
+        or autograd (backward or forward-mode AD).
+        For ``uint8`` inputs, rounding can cause differences from OpenCV.
 
     .. note::
         Mode ``mode='nearest-exact'`` matches Scikit-Image and PIL nearest neighbours interpolation

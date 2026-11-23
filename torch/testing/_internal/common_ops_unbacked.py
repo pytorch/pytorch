@@ -145,6 +145,7 @@ ops_dde_xfail = {
     xfail("nn.functional.interpolate", "area"),
     xfail("nn.functional.interpolate", "bicubic"),
     xfail("nn.functional.interpolate", "bilinear"),
+    xfail("nn.functional.interpolate", "inter-area"),
     xfail("nn.functional.interpolate", "linear"),
     xfail("nn.functional.interpolate", "trilinear"),
     xfail("nn.functional.l1_loss"),

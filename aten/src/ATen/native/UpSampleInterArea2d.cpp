@@ -5,6 +5,8 @@
 #include <c10/util/irange.h>
 
 #include <cmath>
+#include <iomanip>
+#include <limits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -28,8 +30,11 @@ void check_inter_area_scales(IntArrayRef input_size, IntArrayRef output_size,
     TORCH_CHECK(
         !scale.has_value() || scale.value() <= 0 ||
             std::floor(static_cast<double>(input_size[i + 2]) * scale.value()) == static_cast<double>(output_size[i]),
-        "_upsample_inter_area2d: the output size must be floor(input size * scale), but got input size ",
-        input_size[i + 2], ", output size ", output_size[i], " and scale ", scale.value());
+        "_upsample_inter_area2d: the output size must be floor(input size * scale) for ",
+        i == 0 ? "height" : "width",
+        ", but got input size ",
+        input_size[i + 2], ", output size ", output_size[i], " and scale ",
+        std::setprecision(std::numeric_limits<double>::max_digits10), scale.value());
   }
 }
 

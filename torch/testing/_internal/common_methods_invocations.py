@@ -5228,9 +5228,9 @@ def sample_inputs_interpolate_inter_area(op_info, device, dtype, requires_grad, 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, high=high)
     # Area weights (non-integer and integer factors), and at most 2 input pixels per output pixel (an axis grows).
     for input_size, output_size in [((7, 9), (3, 4)), ((6, 6), (3, 2)), ((3, 7), (5, 4))]:
-        yield SampleInput(make_arg((2, 3, *input_size)), output_size, mode="inter-area")
+        yield SampleInput(make_arg((2, 3, *input_size)), size=output_size, mode="inter-area")
     # scale_factor is used as the interpolation scale; channels-last uint8 takes the AVX2 / NEON kernels.
-    yield SampleInput(make_arg((1, 3, 10, 10), memory_format=torch.channels_last), None, scale_factor=0.45, mode="inter-area")
+    yield SampleInput(make_arg((1, 3, 10, 10), memory_format=torch.channels_last), scale_factor=0.45, mode="inter-area")
 
 
 def reference_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs):

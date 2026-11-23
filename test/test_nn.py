@@ -10461,6 +10461,67 @@ class TestNNDeviceType(NNTestCase):
             F.interpolate(x, size=(4, 4), mode="inter-area")
 
     @onlyCPU
+    def test_upsamplingInterArea2d_strided_out(self, device):
+        op = torch.ops.aten._upsample_inter_area2d
+        x = torch.full((1, 3, 8, 8), 42, dtype=torch.uint8, device=device)
+        backing = x.new_zeros((1, 3, 6, 4))
+        out = backing[:, :, ::2, :]
+        strides = out.stride()
+        self.assertIs(op.out(x, [3, 4], out=out), out)
+        self.assertEqual(out.stride(), strides)
+        self.assertEqual(out, op.default(x, [3, 4]))
+        self.assertEqual(backing[:, :, 1::2, :], torch.zeros_like(out))
+
+    @onlyCPU
+    def test_upsamplingInterArea2d_singleton_width_input(self, device):
+        x = torch.tensor([0, 10, 20, 30], dtype=torch.uint8, device=device)
+        x = x.reshape(1, 1, 4, 1)
+        # Contiguity does not constrain the stride of a size-one dimension.
+        view = x.as_strided(x.shape, (4, 4, 1, 0))
+        self.assertTrue(view.is_contiguous())
+        expected = torch.tensor([5, 25], dtype=torch.uint8, device=device)
+        result = F.interpolate(view, size=(2, 1), mode="inter-area")
+        self.assertEqual(result.flatten(), expected)
+
+    @onlyCPU
+    def test_upsamplingInterArea2d_symbolic_out(self, device):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        op = torch.ops.aten._upsample_inter_area2d.out
+
+        def resize(x):
+            return op(x, [x.size(2), 4], out=x.new_empty(0))
+
+        x = torch.rand(1, 3, 8, 8, device=device)
+        traced = make_fx(resize, tracing_mode="symbolic")(x)
+        other = torch.rand(1, 3, 12, 8, device=device)
+        self.assertEqual(traced(other), resize(other))
+
+    @onlyCPU
+    @parametrize_test("scale", [2.0, 0.45])
+    def test_upsamplingInterArea2d_dynamic_export(self, device, scale):
+        class Resize(torch.nn.Module):
+            def forward(self, x):
+                return F.interpolate(x, scale_factor=scale, mode="inter-area")
+
+        resize = Resize()
+        x = torch.rand(1, 3, 8, 8, device=device)
+        height = torch.export.Dim("height", min=6, max=16)
+        exported = torch.export.export(resize, (x,), dynamic_shapes=({2: height},))
+        other = torch.rand(1, 3, 12, 8, device=device)
+        self.assertEqual(exported.module()(other), resize(other))
+
+    @onlyCPU
+    def test_upsamplingInterArea2d_inconsistent_scales(self, device):
+        op = torch.ops.aten._upsample_inter_area2d.default
+        x = torch.empty(1, 3, 10, 10, device=device)
+        error = r"the output size must be floor\(input size \* scale\) for width"
+        with self.assertRaisesRegex(RuntimeError, error):
+            op(x, [5, 5], 0.5, 0.4999999)
+        with FakeTensorMode() as mode, self.assertRaisesRegex(RuntimeError, error):
+            op(mode.from_tensor(x), [5, 5], 0.5, 0.4999999)
+
+    @onlyCPU
     def test_upsamplingInterArea2d_errors(self, device):
         x = torch.rand(1, 3, 8, 8, device=device)
         with self.assertRaisesRegex(ValueError, "align_corners option can only be set"):
@@ -10471,8 +10532,6 @@ class TestNNDeviceType(NNTestCase):
             F.interpolate(x[0], size=4, mode="inter-area")
         with self.assertRaisesRegex(NotImplementedError, "Got 5D input, but inter-area mode needs 4D input"):
             F.interpolate(x[None], size=(2, 4, 4), mode="inter-area")
-        with self.assertRaisesRegex(RuntimeError, r"the output size must be floor\(input size \* scale\)"):
-            torch.ops.aten._upsample_inter_area2d(x, [6, 6], 0.5, 0.5)
         with self.assertRaisesRegex(RuntimeError, "derivative for '_upsample_inter_area2d' is not implemented"):
             F.interpolate(x.clone().requires_grad_(), size=(4, 4), mode="inter-area").sum().backward()
         with fwAD.dual_level(), self.assertRaisesRegex(RuntimeError, "forward AD"):
