@@ -827,7 +827,7 @@ class TestOrderedColRoute(TestCase):
     @parametrize(
         "shape,routed",
         [
-            # reduce_ordered_col tiles 32 columns per warp.
+            # Ordered routing skips views narrower than a warp.
             ((128, 128, 31), False),
             ((128, 128, 32), True),
         ],
@@ -843,6 +843,7 @@ class TestOrderedColRoute(TestCase):
             ("shape", "do not support"),
             ("vec_linear", "tree vector folds"),
             ("batches", "single planner batch"),
+            ("wpr", "one-warp split plan"),
             ("worker_warps", "worker_warps must be one of"),
             ("tile_columns", "tile_columns must be one of"),
         ],
@@ -855,9 +856,14 @@ class TestOrderedColRoute(TestCase):
         plan = rt.trait_itree_plan(trait, 1024, 32, 4, stage=False)
         state = (plan.shape, plan.vec_linear, len(plan.batches))
         self.assertEqual(state, ("looped", False, 1))
-        invalid = {"shape": "multirow", "vec_linear": True, "batches": plan.batches * 2}
+        invalid = {
+            "shape": {"shape": "multirow"},
+            "vec_linear": {"vec_linear": True},
+            "batches": {"batches": plan.batches * 2},
+            "wpr": {"shape": "split", "wpr": 1},
+        }
         mapping = {"worker_warps": 3, "tile_columns": 7}
-        bad = plan._replace(**{field: invalid[field]}) if field in invalid else plan
+        bad = plan._replace(**invalid.get(field, {}))
         kwargs = {field: mapping[field]} if field in mapping else {}
         with self.assertRaisesRegex(ValueError, error):
             ct._OrderedColReduce(trait, bad, 1024, 32, 1, **kwargs)
@@ -1472,7 +1478,7 @@ class TestOrderedColDevice(TestCase):
                     rows=rows,
                 )
                 self.assertEqual(fallback.tile_columns, ct.WARP)
-                workers = min(fallback.worker_warps, plan.wpr)
+                workers = min(ct._ORDERED_WORKER_WARPS, plan.wpr)
                 ops = [_ordered_fields(k) for k in ct._CACHE if k[1] == "select_mean"]
                 launched = {tuple(map(f.get, names)) for f in ops}
                 self.assertEqual(launched, {(workers, ct.WARP, True)})
