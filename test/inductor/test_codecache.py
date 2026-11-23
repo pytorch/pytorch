@@ -100,6 +100,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
+    IS_WINDOWS,
     parametrize,
     skipIfCppFakeTensor,
 )
@@ -3081,7 +3082,9 @@ class TestStandaloneCompile(TestCase):
         eager_out = f(x)
 
         with (
-            tempfile.TemporaryDirectory() as temp_dir,
+            # On Windows a loaded DLL can't be deleted; the CPU kernel or Triton .pyd
+            # in this cache dir stays loaded (CPython never unloads extension modules).
+            tempfile.TemporaryDirectory(ignore_cleanup_errors=IS_WINDOWS) as temp_dir,
             config.patch(graph_partition=graph_partition),
         ):
             path = (
@@ -3248,7 +3251,9 @@ class TestStandaloneCompile(TestCase):
         x = torch.randn(2, 4)
         eager_out = mod(x).detach()
 
-        with tempfile.TemporaryDirectory() as temp_dir:
+        # On Windows a loaded DLL can't be deleted; the CPU kernel .pyd loaded from
+        # this cache dir stays loaded (CPython never unloads extension modules).
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=IS_WINDOWS) as temp_dir:
             with fresh_cache():
                 gm, args, kwargs = self.capture(mod)(x)
                 if kwargs:
@@ -3289,7 +3294,9 @@ class TestStandaloneCompile(TestCase):
 
         eager_out = f(x)
 
-        with tempfile.TemporaryDirectory() as temp_dir:
+        # On Windows a loaded DLL can't be deleted; the CPU kernel or Triton .pyd
+        # in this cache dir stays loaded (CPython never unloads extension modules).
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=IS_WINDOWS) as temp_dir:
             with fresh_cache():
                 gm, args, kwargs = self.capture(f)(x)
                 if kwargs:
@@ -5240,6 +5247,7 @@ class TestCudaCompileCommand(TestCase):
                 ["/usr/lib/x86_64-linux-gnu"],
             )
 
+    @unittest.skipIf(IS_WINDOWS, "LD_LIBRARY_PATH and libcuda.so.1 are Linux-only")
     def test_cuda_driver_lib_dirs_from_ld_library_path(self):
         with tempfile.TemporaryDirectory() as cuda_dir:
             open(os.path.join(cuda_dir, "libcuda.so.1"), "w").close()
@@ -5666,7 +5674,9 @@ class TestAutotuneCache(TestCase):
 
         # Check that the cache entries seem reasonable
         for k in global_stats.autotune_local.cache:
-            self.assertRegex(k, r"tmp[^/]*/([^/]{2})/[^/]{64}\.best_config")
+            self.assertRegex(
+                normalize_path_separator(k), r"tmp[^/]*/([^/]{2})/[^/]{64}\.best_config"
+            )
         for k in global_stats.bundled_autotune.cache:
             self.assertRegex(k, r"pt2:bundled-autotune-v1::[0-9a-z]{64}:c[0-9]+")
         for k in global_stats.triton.cache:

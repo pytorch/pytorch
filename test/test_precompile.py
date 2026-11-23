@@ -6890,7 +6890,7 @@ class TestTritonRuntimeCacheTransport(TestCase):
             if consumer_exists:
                 consumer.mkdir()
                 consumer.chmod(0o750)
-                mode = 0o750
+                mode = stat.S_IMODE(consumer.stat().st_mode)
             else:
                 probe = pathlib.Path(tmp, "probe")
                 probe.mkdir()
@@ -7237,7 +7237,9 @@ class TestTritonRuntimeCacheTransport(TestCase):
         from torch.compiler._triton_runtime_cache import export_runtime_cache
 
         with (
-            tempfile.TemporaryDirectory() as tmp,
+            # On Windows a loaded DLL can't be deleted; Triton's hip_utils .pyd in this
+            # Triton cache stays loaded (CPython never unloads extension modules).
+            tempfile.TemporaryDirectory(ignore_cleanup_errors=IS_WINDOWS) as tmp,
             _triton_cache_namespace(tmp),
             triton.knobs.autotuning.scope(),
         ):
@@ -7593,7 +7595,11 @@ class TestPrecompileNoCompilation(TestCase):
             f.write(existing_payload)
         # The bundle stores the kernel directory in .json files as [REPLACE].
         with open(os.path.join(directory, "kernel.json"), "wb") as f:
-            f.write(b'{"path": "' + directory.encode() + b'/kernel.cubin"}')
+            f.write(
+                b'{"path": "'
+                + json.dumps(directory)[1:-1].encode()
+                + b'/kernel.cubin"}'
+            )
         bundle = triton_bundler.TritonBundle(
             kernel_artifacts=[
                 triton_bundler.TritonKernelArtifacts(
@@ -9822,10 +9828,11 @@ class TestPrecompileRuntimeCache(TestCase):
             self.assertEqual(
                 (kernel_dir / "kernel.cubin").read_bytes(), b"compiled-kernel"
             )
+            children = json.loads((kernel_dir / "__grp__kernel.json").read_text())[
+                "child_paths"
+            ]
             self.assertEqual(
-                json.loads((kernel_dir / "__grp__kernel.json").read_text())[
-                    "child_paths"
-                ],
+                {name: os.path.normpath(path) for name, path in children.items()},
                 {"kernel.cubin": str(kernel_dir / "kernel.cubin")},
             )
             TritonBundler.read_and_emit(bundle)

@@ -48,12 +48,23 @@ _AUTOTUNE_SUFFIX = ".autotune.json"
 def _create_root(root: Path) -> None:
     try:
         root.mkdir(parents=True, exist_ok=True)
-    except FileExistsError:
+    except FileExistsError as exc:
+        # On Windows a file in place of a parent directory also raises this.
+        if not os.path.lexists(root):
+            raise RuntimeError(f"Cannot create Triton cache directory {root}") from exc
         raise RuntimeError(
             f"Triton cache directory {root} is not a directory"
         ) from None
     except OSError as exc:
         raise RuntimeError(f"Cannot create Triton cache directory {root}") from exc
+
+
+def _same_path(a: str | os.PathLike[str], b: str | os.PathLike[str]) -> bool:
+    # triton-windows records extended-length paths (\\?\C:\...).
+    def norm(path: str | os.PathLike[str]) -> str:
+        return os.path.normpath(os.fspath(path).removeprefix("\\\\?\\"))
+
+    return norm(a) == norm(b)
 
 
 def runtime_cache_root(*, require_explicit: bool = False) -> Path:
@@ -203,9 +214,9 @@ def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) ->
                     member = _member_name(member)
                     # Triton records paths under knobs.cache.dir, which may
                     # spell the same directory differently.
-                    if not isinstance(original, str) or os.path.normpath(
-                        original
-                    ) != os.path.normpath(directory / member):
+                    if not isinstance(original, str) or not _same_path(
+                        original, directory / member
+                    ):
                         raise RuntimeError(
                             f"Triton runtime-cache group points outside its entry: "
                             f"{path}"
@@ -378,8 +389,7 @@ def _group_matches(path: Path, root: Path, record: dict[str, Any]) -> bool:
         isinstance(children, dict)
         and children.keys() == expected.keys()
         and all(
-            isinstance(child, str)
-            and os.path.normpath(child) == os.path.normpath(expected[name])
+            isinstance(child, str) and _same_path(child, expected[name])
             for name, child in children.items()
         )
     )

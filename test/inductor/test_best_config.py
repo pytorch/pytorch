@@ -9,7 +9,10 @@ import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+)
 from torch.testing._internal.inductor_utils import HAS_TRITON, requires_triton
 
 
@@ -40,7 +43,9 @@ class TestKernelBestConfig(TestCase):
 
     @requires_triton()
     def test_best_config_has_triton_cache_key(self, device):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        # On Windows a loaded DLL can't be deleted; Triton's hip_utils .pyd in this
+        # Triton cache stays loaded (CPython never unloads extension modules).
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=IS_WINDOWS) as tmpdir:
             os.environ["TORCHINDUCTOR_CACHE_DIR"] = tmpdir
             triton_cache_dir = os.path.join(tmpdir, "triton_cache")
             os.environ["TRITON_CACHE_DIR"] = triton_cache_dir
@@ -86,5 +91,5 @@ instantiate_device_type_tests(
 )
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_TRITON:
+    if HAS_TRITON:
         run_tests()

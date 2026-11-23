@@ -1,5 +1,6 @@
 import copy
 import dataclasses
+import json
 import logging
 import os
 import shutil
@@ -113,6 +114,20 @@ class TritonBundler:
     # __grp__kernel_name.json contains metadata with source code paths
     # we use this as sentinel value for search and replace
     _REPLACE_BYTES: bytes = b"[REPLACE]"
+
+    @staticmethod
+    def _json_path(path: str) -> bytes:
+        # The path as it appears inside a JSON string (Windows: "\\" escaped).
+        return json.dumps(path)[1:-1].encode()
+
+    @staticmethod
+    def _same_group(existing: bytes, payload: bytes) -> bool:
+        # The runtime-cache import writes group paths without the \\?\ prefix.
+        from torch.compiler._triton_runtime_cache import _same_path
+
+        a = json.loads(existing)["child_paths"]
+        b = json.loads(payload)["child_paths"]
+        return a.keys() == b.keys() and all(_same_path(a[k], b[k]) for k in a)
 
     @staticmethod
     def is_enabled() -> bool:
@@ -329,7 +344,8 @@ class TritonBundler:
                                         )
                                     # Remove the path from payload
                                     payload = payload.replace(
-                                        str.encode(path), TritonBundler._REPLACE_BYTES
+                                        TritonBundler._json_path(path),
+                                        TritonBundler._REPLACE_BYTES,
                                     )
                                 artifacts.append(
                                     TritonKernelArtifact(filename, payload)
@@ -384,10 +400,16 @@ class TritonBundler:
                 payload = artifact.payload
                 if artifact.filename.endswith(".json"):
                     payload = payload.replace(
-                        TritonBundler._REPLACE_BYTES, str.encode(directory)
+                        TritonBundler._REPLACE_BYTES,
+                        TritonBundler._json_path(directory),
                     )
                 path = Path(directory) / artifact.filename
-                if not path.is_file() or path.read_bytes() != payload:
+                existing = path.read_bytes() if path.is_file() else None
+                if existing != payload and not (
+                    existing is not None
+                    and artifact.filename.startswith("__grp__")
+                    and TritonBundler._same_group(existing, payload)
+                ):
                     raise PrecompileError(
                         "precompile.no_compilation() found an incomplete or "
                         f"incompatible Triton kernel file in the cache: {path}"
@@ -467,7 +489,8 @@ class TritonBundler:
                         payload = artifact.payload
                         if artifact.filename.endswith(".json"):
                             payload = payload.replace(
-                                TritonBundler._REPLACE_BYTES, str.encode(directory)
+                                TritonBundler._REPLACE_BYTES,
+                                TritonBundler._json_path(directory),
                             )
                         file.write(payload)
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"] += 1

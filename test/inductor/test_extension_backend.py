@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
+    IS_WINDOWS,
     parametrize,
     xfailIfS390X,
 )
@@ -121,7 +122,9 @@ class BaseExtensionBackendTests(TestCase):
     def setUpClass(cls):
         super().setUpClass()
 
-        cls._build_dir = tempfile.TemporaryDirectory()
+        # On Windows a loaded DLL can't be deleted; the extension_device .pyd built
+        # here stays loaded (CPython never unloads extension modules).
+        cls._build_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=IS_WINDOWS)
         source_file_path = os.path.dirname(os.path.abspath(__file__))
         source_file = os.path.join(
             source_file_path, "extension_backends/cpp/extension_device.cpp"
