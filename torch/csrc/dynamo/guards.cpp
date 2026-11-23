@@ -10,7 +10,6 @@
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <c10/util/SmallVector.h>
 #include <c10/util/Synchronized.h>
 #include <c10/util/flat_hash_map.h>
 #include <fmt/format.h>
@@ -49,14 +48,11 @@
 
 #include <c10/util/irange.h>
 #include <chrono>
-#include <functional>
-#include <limits>
 #include <memory>
 #include <numeric>
 #include <optional>
 #include <sstream>
 #include <tuple>
-#include <typeinfo>
 #include <unordered_map>
 #include <utility>
 
@@ -68,6 +64,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <cstdint>
+#include <functional>
 
 int open_counter() {
   perf_event_attr attr{};
@@ -1671,78 +1668,6 @@ bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
   return false;
 }
 
-struct TensorStorageRange {
-  int64_t begin;
-  int64_t end;
-  size_t index;
-};
-
-constexpr size_t kMinStorageRangeSortSize = 9;
-
-bool has_plain_static_metadata(const Tensor& tensor) {
-  const auto* impl = tensor.unsafeGetTensorImpl();
-  // Metadata access can dispatch to Python even with an exact TensorImpl.
-  return typeid(*impl) == typeid(c10::TensorImpl) &&
-      !impl->is_python_dispatch() && !impl->has_symbolic_sizes_strides();
-}
-
-template <typename GetTensor>
-bool try_get_sorted_contiguous_ranges(
-    size_t size,
-    GetTensor get_tensor,
-    c10::SmallVectorImpl<TensorStorageRange>& ranges) {
-  ranges.clear();
-  const auto dtype = get_tensor(0).dtype();
-  for (const auto i : c10::irange(size)) {
-    const auto& tensor = get_tensor(i);
-    if (!has_plain_static_metadata(tensor) || tensor.dtype() != dtype ||
-        !tensor.is_contiguous()) {
-      return false;
-    }
-    const auto begin = tensor.storage_offset();
-    const auto numel = tensor.numel();
-    // The pairwise path handles repeated references to an empty tensor.
-    if (numel == 0 || begin < 0 ||
-        numel > std::numeric_limits<int64_t>::max() - begin) {
-      return false;
-    }
-    if (i == 0) {
-      ranges.reserve(size);
-    }
-    ranges.push_back({begin, begin + numel, i});
-  }
-
-  std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) {
-    return a.begin < b.begin;
-  });
-  return true;
-}
-
-bool try_group_contiguous_storage_ranges(
-    const std::vector<Tensor>& tensors,
-    const std::vector<int64_t>& indices,
-    std::vector<int64_t>& parents) {
-  c10::SmallVector<TensorStorageRange, 16> ranges;
-  const auto get_tensor = [&](size_t i) -> const Tensor& {
-    return tensors[indices[i]];
-  };
-  if (!try_get_sorted_contiguous_ranges(indices.size(), get_tensor, ranges)) {
-    return false;
-  }
-  int64_t group_end = 0;
-  int64_t leader = 0;
-  for (const auto& range : ranges) {
-    if (range.begin >= group_end) {
-      leader = indices[range.index];
-      group_end = range.end;
-    } else {
-      parents[indices[range.index]] = leader;
-      group_end = std::max(group_end, range.end);
-    }
-  }
-  return true;
-}
-
 /**
  * Computes connected groups of tensors that might overlap.
  *
@@ -1777,13 +1702,7 @@ std::vector<std::vector<int64_t>> compute_overlapping_tensor_groups(
     return i;
   };
 
-  for (const auto& [storage, indices] : storage_to_indices) {
-    if constexpr (std::is_same_v<Meta, StaticMeta>) {
-      if (storage && indices.size() >= kMinStorageRangeSortSize &&
-          try_group_contiguous_storage_ranges(tensors, indices, parents)) {
-        continue;
-      }
-    }
+  for (const auto& [_, indices] : storage_to_indices) {
     for (const auto i_pos : c10::irange(indices.size())) {
       const auto i = indices[i_pos];
       for (const auto j_pos : c10::irange(i_pos)) {
@@ -3221,77 +3140,6 @@ class STORAGE_OVERLAPPING : public RelationalGuard {
   std::shared_ptr<StorageOverlapChecker> _checker;
 };
 
-// The views share storage and have plain, concrete metadata. Return whether
-// they are disjoint, or std::nullopt if the row-band check is inconclusive.
-template <typename GetTensor>
-std::optional<bool> try_check_disjoint_row_tiles(
-    size_t size,
-    GetTensor get_tensor) {
-  const auto& first = get_tensor(0);
-  if (first.dim() != 2) {
-    return std::nullopt;
-  }
-  const auto row_stride = first.strides()[0];
-  if (row_stride <= 0) {
-    return std::nullopt;
-  }
-  const auto dtype = first.dtype();
-  struct Tile {
-    int64_t row;
-    int64_t last_row;
-    int64_t col;
-    int64_t col_end;
-  };
-  c10::SmallVector<Tile, 16> tiles;
-  for (const auto i : c10::irange(size)) {
-    const auto& tensor = get_tensor(i);
-    if (tensor.dim() != 2 || tensor.dtype() != dtype) {
-      return std::nullopt;
-    }
-    const auto strides = tensor.strides();
-    if (strides[0] != row_stride || strides[1] != 1) {
-      return std::nullopt;
-    }
-    const auto sizes = tensor.sizes();
-    const auto offset = tensor.storage_offset();
-    const auto height = sizes[0];
-    const auto width = sizes[1];
-    if (offset < 0 || height <= 0 || width <= 0) {
-      return std::nullopt;
-    }
-    const auto row = offset / row_stride;
-    const auto col = offset % row_stride;
-    const auto remaining = std::numeric_limits<int64_t>::max() - offset;
-    if (width > row_stride - col || width - 1 > remaining ||
-        height - 1 > (remaining - (width - 1)) / row_stride) {
-      return std::nullopt;
-    }
-    if (i == 0) {
-      tiles.reserve(size);
-    }
-    tiles.push_back({row, row + (height - 1), col, col + width});
-  }
-  std::sort(tiles.begin(), tiles.end(), [](const auto& a, const auto& b) {
-    return std::tie(a.row, a.col) < std::tie(b.row, b.col);
-  });
-  int64_t band_row = -1;
-  int64_t last_row = -1;
-  int64_t col_end = 0;
-  for (const auto& tile : tiles) {
-    if (tile.row != band_row) {
-      if (tile.row <= last_row) {
-        return std::nullopt;
-      }
-      band_row = tile.row;
-    } else if (tile.col < col_end) {
-      return false;
-    }
-    last_row = std::max(last_row, tile.last_row);
-    col_end = tile.col_end;
-  }
-  return true;
-}
-
 class StorageOverlapPartitionChecker {
  public:
   StorageOverlapPartitionChecker(
@@ -3322,13 +3170,6 @@ class StorageOverlapPartitionChecker {
       return true;
     }
 
-    if (_expected_partition.empty() &&
-        _inputs.size() >= kMinStorageRangeSortSize) {
-      if (auto disjoint = try_check_disjoint()) {
-        return *disjoint;
-      }
-    }
-
     std::vector<Tensor> tensors;
     std::vector<int64_t> tensor_positions;
     tensors.reserve(_inputs.size());
@@ -3352,91 +3193,6 @@ class StorageOverlapPartitionChecker {
   }
 
  private:
-  std::optional<bool> try_check_disjoint() const {
-    // Check all inputs before allocating scratch space. The generic type
-    // check can invoke __class__, so leave it to the fallback.
-    for (auto* obj : _inputs) {
-      TORCH_CHECK(obj != nullptr);
-      if (!THPVariable_CheckExact(obj)) {
-        return std::nullopt;
-      }
-      const auto& tensor = THPVariable_Unpack(obj);
-      if (!has_plain_static_metadata(tensor)) {
-        return std::nullopt;
-      }
-      if (!tensor.unsafeGetTensorImpl()
-               ->unsafe_storage()
-               .unsafeGetStorageImpl()) {
-        return std::nullopt;
-      }
-    }
-
-    struct StorageInput {
-      const c10::StorageImpl* storage;
-      size_t index;
-      const Tensor* tensor;
-    };
-
-    // The guard holds the Python owners until reset.
-    std::vector<StorageInput> inputs;
-    inputs.reserve(_inputs.size());
-    for (const auto i : c10::irange(_inputs.size())) {
-      const auto& tensor = THPVariable_Unpack(_inputs[i]);
-      const auto* storage =
-          tensor.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl();
-      inputs.push_back({storage, i, &tensor});
-    }
-    // Keep the original pair order within each storage for the fallback.
-    std::sort(inputs.begin(), inputs.end(), [](const auto& a, const auto& b) {
-      return a.storage == b.storage
-          ? a.index < b.index
-          : std::less<const c10::StorageImpl*>{}(a.storage, b.storage);
-    });
-
-    // An empty partition only requires detecting the first overlapping pair.
-    c10::SmallVector<TensorStorageRange, 16> ranges;
-    for (size_t end = 0; end < inputs.size();) {
-      const auto begin = end++;
-      while (end < inputs.size() &&
-             inputs[end].storage == inputs[begin].storage) {
-        ++end;
-      }
-      const auto size = end - begin;
-      if (size == 1) {
-        continue;
-      }
-      const auto get_tensor = [&](size_t i) -> const Tensor& {
-        return *inputs[begin + i].tensor;
-      };
-      if (size >= kMinStorageRangeSortSize) {
-        if (try_get_sorted_contiguous_ranges(size, get_tensor, ranges)) {
-          for (const auto i : c10::irange(1, size)) {
-            if (ranges[i].begin < ranges[i - 1].end) {
-              return false;
-            }
-          }
-          continue;
-        }
-        if (auto disjoint = try_check_disjoint_row_tiles(size, get_tensor)) {
-          if (!*disjoint) {
-            return false;
-          }
-          continue;
-        }
-      }
-
-      for (const auto i : c10::irange(size)) {
-        for (const auto j : c10::irange(i)) {
-          if (!tensors_definitely_do_not_overlap<StaticMeta>(
-                  get_tensor(i), get_tensor(j))) {
-            return false;
-          }
-        }
-      }
-    }
-    return true;
-  }
-
   std::vector<std::vector<int64_t>> _expected_partition;
   std::vector<PyObject*> _inputs;
   size_t _seen{0};
