@@ -80,9 +80,17 @@ struct TcfgTensorInfo {
   int32_t requires_grad;
   const int64_t* sizes;
   uint64_t key_set;
+  // What else a graph that was compiled for a tensor depends on: how it is
+  // laid out in its storage (strides is null for a tensor that has none, a
+  // sparse one say), and its element type and device (the device type in the
+  // upper half, the index plus one in the lower).
+  const int64_t* strides;
+  int64_t storage_offset;
+  int32_t dtype;
+  int32_t device;
 };
 
-#define TCFG_API_VERSION 4
+#define TCFG_API_VERSION 5
 
 struct TcfgApi {
   uint32_t version;
