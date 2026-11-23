@@ -234,12 +234,15 @@ impl InstFacts {
         }
     }
 
-    pub fn saw_callee(&mut self, code: PyObj, kind: CalleeKind) {
-        self.callee = match &self.callee {
-            CalleeFact::Unseen => CalleeFact::One(code, kind),
-            CalleeFact::One(seen, how) if seen.as_ptr() == code.as_ptr() && *how == kind => return,
-            _ => CalleeFact::Many,
-        };
+    /// Hands back what it lets go of: a code object does not end while
+    /// the caller has something borrowed.
+    #[must_use]
+    pub fn saw_callee(&mut self, code: PyObj, kind: CalleeKind) -> (Option<PyObj>, Option<CalleeFact>) {
+        match &self.callee {
+            CalleeFact::Unseen => (None, Some(std::mem::replace(&mut self.callee, CalleeFact::One(code, kind)))),
+            CalleeFact::One(seen, how) if seen.as_ptr() == code.as_ptr() && *how == kind => (Some(code), None),
+            _ => (Some(code), Some(std::mem::replace(&mut self.callee, CalleeFact::Many))),
+        }
     }
 }
 
