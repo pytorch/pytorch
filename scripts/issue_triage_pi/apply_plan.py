@@ -9,11 +9,13 @@ explicitly close-enabled umbrella policy may close the issue. Labels are only ev
 requests redact download links using a fixed policy, never a model-written body.
 
 Usage:
-  apply_plan.py <owner/repo> <issue> <plan.json> [--apply] [--replay]
+  apply_plan.py <owner/repo> <issue> <plan.json> [--apply] [--replay | --new-issue]
 
 Without --apply nothing is written (dry run). --replay evaluates the plan
 against the issue as it was before the triage bot acted (labels from before its
-first label event) and compares it with the labels added since.
+first label event) and compares it with the labels added since. --new-issue
+evaluates a just-opened issue as if it had no labels other than close blockers
+(see `triage_labels`); its labels are kept, never removed.
 """
 
 from __future__ import annotations
@@ -45,6 +47,9 @@ from labels import (
 BOT_TRIAGED = "bot-triaged"
 TRIAGE_REVIEW = "triage review"
 TRIAGE_BOT = "github-actions[bot]"
+# Labels that stop an umbrella or expected-behavior close, or completion; these
+# count even on a new issue. `close_question` does not check labels.
+CLOSE_BLOCKERS = frozenset({TRIAGE_REVIEW, "high priority", "needs reproduction"})
 LABELING_DECISIONS = {"label", "redirect_oncall", "triage_review"}
 # Decisions that close the issue, and the template each must post.
 CLOSING_TEMPLATES = {
@@ -282,8 +287,7 @@ def pending_pt2_close(
         and "oncall: pt2" in requested
         and {label for label in labels | requested if label.startswith("oncall:")}
         == {"oncall: pt2"}
-        and not {TRIAGE_REVIEW, "high priority", "needs reproduction"}
-        & (labels | requested)
+        and not CLOSE_BLOCKERS & (labels | requested)
         and not {"request_more_info", "request_self_contained_reproduction"}
         & set(plan.get("templates", []))
         and target
@@ -600,6 +604,21 @@ def labels_before_triage(events: list[dict]) -> set[str]:
     return labels
 
 
+def triage_labels(issue: dict, new_issue: bool) -> set[str]:
+    """The issue labels triage takes into account.
+
+    A just-opened issue is triaged as if unlabeled (issue templates add labels such
+    as `oncall: pt2`), except for close blockers. Bots label the issues they open
+    (e.g. DISABLED tests) deliberately, so those keep all their labels, and so does
+    a reopened issue, so that a re-run cannot undo the reopen.
+    """
+    labels = {label["name"] for label in issue["labels"]}
+    bot = (issue.get("user") or {}).get("type") == "Bot"
+    if new_issue and not bot and issue.get("state_reason") != "reopened":
+        return labels & CLOSE_BLOCKERS
+    return labels
+
+
 def redact_external_links(body: str) -> str:
     """Replace download URLs without following them or accepting replacement prose."""
 
@@ -632,11 +651,13 @@ def redact_external_links(body: str) -> str:
     return redacted.replace("<" + REDACTED_LINK + ">", REDACTED_LINK)
 
 
-def current_reference_effects(repo: str, issue: int, plan: dict) -> Effects:
+def current_reference_effects(
+    repo: str, issue: int, plan: dict, new_issue: bool
+) -> Effects:
     current, comments = fetch_issue(repo, issue, all_comments=True)
     return plan_effects(
         plan,
-        {label["name"] for label in current["labels"]},
+        triage_labels(current, new_issue),
         load_valid_labels(),
         load_templates(TRIAGE_SKILL),
         comments,
@@ -656,11 +677,16 @@ def post_labels(repo: str, issue: int, labels: list[str]) -> None:
 
 
 def apply_effects(
-    repo: str, issue: int, effects: Effects, *, plan: dict | None = None
+    repo: str,
+    issue: int,
+    effects: Effects,
+    *,
+    plan: dict | None = None,
+    new_issue: bool = False,
 ) -> Effects:
     """Write only on the source issue; recheck related-issue plans before writes."""
     if plan is not None and ("umbrella" in plan or "possible_duplicate" in plan):
-        effects = current_reference_effects(repo, issue, plan)
+        effects = current_reference_effects(repo, issue, plan, new_issue)
     elif effects.umbrella_action or effects.possible_duplicate is not None:
         raise ValueError(
             "related-issue effects require the plan for trusted revalidation"
@@ -696,7 +722,7 @@ def apply_effects(
     if effects.close and effects.umbrella_action:
         if plan is None:
             raise ValueError("umbrella closure requires a plan")
-        checked = current_reference_effects(repo, issue, plan)
+        checked = current_reference_effects(repo, issue, plan, new_issue)
         effects.duplicate_issue_id = checked.duplicate_issue_id
         if not checked.close:
             effects.close = False
@@ -780,6 +806,12 @@ def main() -> int:
         action="store_true",
         help="plan was made on the issue as it was before the triage bot acted",
     )
+    parser.add_argument(
+        "--new-issue",
+        action="store_true",
+        help="issue was just opened: disregard its labels other than close blockers, "
+        "unless a bot opened it or it was reopened",
+    )
     args = parser.parse_args()
 
     plan = json.loads(args.plan.read_text())
@@ -802,7 +834,7 @@ def main() -> int:
         )
         existing = labels_before_triage([event for page in pages for event in page])
     else:
-        existing = current
+        existing = triage_labels(issue, args.new_issue)
     effects = plan_effects(
         plan,
         existing,
@@ -816,9 +848,11 @@ def main() -> int:
         duplicate_target=fetch_possible_duplicate(args.repo, args.issue, plan),
     )
     if args.apply:
-        effects = apply_effects(args.repo, args.issue, effects, plan=plan)
+        effects = apply_effects(
+            args.repo, args.issue, effects, plan=plan, new_issue=args.new_issue
+        )
 
-    labels_after = existing | set(effects.add_labels)
+    labels_after = (existing if args.replay else current) | set(effects.add_labels)
     state_after = (
         "closed" if effects.close else ("open" if args.replay else issue["state"])
     )

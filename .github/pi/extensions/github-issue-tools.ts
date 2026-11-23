@@ -13,6 +13,10 @@
  *                             triage bot acted: open, with the labels and the
  *                             human comments from before its first label event
  *                             (dry-run replays of already-triaged issues)
+ *   TRIAGE_NEW_ISSUE          optional issue number just opened: shown without
+ *                             labels other than close blockers, unless a bot
+ *                             opened it or it was reopened (see triage_labels in
+ *                             apply_plan.py)
  */
 
 import { execFile } from "node:child_process";
@@ -28,6 +32,9 @@ const MAX_COMMENTS = 50;
 const TRIAGE_BOT = "github-actions[bot]";
 const repo = process.env.TRIAGE_REPO ?? "";
 const replayIssue = Number(process.env.TRIAGE_REPLAY_ISSUE ?? 0);
+const newIssue = Number(process.env.TRIAGE_NEW_ISSUE ?? 0);
+// Same as CLOSE_BLOCKERS in scripts/issue_triage_pi/apply_plan.py.
+const CLOSE_BLOCKERS = new Set(["triage review", "high priority", "needs reproduction"]);
 
 async function ghApi(args: string[], signal?: AbortSignal): Promise<unknown> {
   const { stdout } = await run("gh", ["api", ...args], {
@@ -80,11 +87,15 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, { issue_number }, signal) {
       const issue = (await ghApi([`repos/${repo}/issues/${issue_number}`], signal)) as any;
       const replay = issue_number === replayIssue;
+      let labels: string[] = replay ? (await preTriage(issue_number, signal)).labels : issue.labels.map((label: any) => label.name);
+      if (issue_number === newIssue && issue.user?.type !== "Bot" && issue.state_reason !== "reopened") {
+        labels = labels.filter(label => CLOSE_BLOCKERS.has(label));
+      }
       return text({
         number: issue.number,
         title: issue.title,
         state: replay ? "open" : issue.state,
-        labels: replay ? (await preTriage(issue_number, signal)).labels : issue.labels.map((label: any) => label.name),
+        labels,
         author: issue.user?.login,
         author_association: issue.author_association,
         created_at: issue.created_at,

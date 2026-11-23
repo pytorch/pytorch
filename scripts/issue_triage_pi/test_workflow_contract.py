@@ -115,6 +115,27 @@ class TriageWorkflowContract(unittest.TestCase):
         self.assertEqual(PLAN["env"]["TRIAGE_SOURCE_ISSUE"], "${{ matrix.issue }}")
         self.assertEqual(PLAN["env"]["TRIAGE_REPO"], "${{ github.repository }}")
 
+    def test_only_issue_opened_runs_disregard_existing_labels(self):
+        stage1 = yaml.safe_load(
+            (ROOT / ".github/workflows/issue-triage.yml").read_text()
+        )
+        # PyYAML reads the `on` key as True.
+        self.assertEqual(stage1[True]["issues"], {"types": ["opened"]})
+        new_issue = "${{ github.event_name == 'workflow_run' && github.event.workflow_run.event == 'issues' }}"  # noqa: B950
+        self.assertEqual(JOBS["prepare"]["outputs"]["new_issue"], new_issue)
+        plan_issue = (
+            "${{ needs.prepare.outputs.new_issue == 'true' && matrix.issue || '' }}"  # noqa: B950
+        )
+        self.assertEqual(PLAN["env"]["TRIAGE_NEW_ISSUE"], plan_issue)
+        apply = step(JOBS["apply"], lambda s: s.get("name") == "Apply plan")
+        self.assertEqual(
+            apply["env"]["NEW_ISSUE"], "${{ needs.prepare.outputs.new_issue }}"
+        )
+        self.assertIn(
+            '[[ "$NEW_ISSUE" == "true" ]] && flags+=(--new-issue)', apply["run"]
+        )
+        self.assertIn('--apply "${flags[@]}"', apply["run"])
+
     def test_metrics_are_best_effort_but_model_failures_block_apply(self):
         metrics = step(PLAN, lambda s: "upload-claude-usage" in s.get("uses", ""))
         self.assertIs(metrics.get("continue-on-error"), True)
