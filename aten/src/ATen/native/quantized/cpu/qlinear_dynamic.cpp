@@ -108,7 +108,7 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(
         "bias should have N elements: " + std::to_string(N));
     // TODO: contiguous is called for further jit optimizations.
     auto bias_contig = bias_vec.contiguous();
-    bias_ptr = bias_contig.data_ptr<float>();
+    bias_ptr = bias_contig.const_data_ptr<float>();
   }
   // The resulting matrix here is 2-D, let's view it with the original
   // left hand dimensions of the input. Here are two examples:
@@ -180,8 +180,8 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(
         fbgemm::fbgemmPacked(
             /*packA=*/packA,
             /*packB=*/*packB,
-            /*C=*/output.data_ptr<float>(),
-            /*C_buffer=*/buffer.data_ptr<int32_t>(),
+            /*C=*/output.mutable_data_ptr<float>(),
+            /*C_buffer=*/buffer.mutable_data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
             /*thread_id=*/task_id,
@@ -214,8 +214,8 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(
         fbgemm::fbgemmPacked(
             /*packA=*/packA,
             /*packB=*/*packB,
-            /*C=*/output.data_ptr<float>(),
-            /*C_buffer=*/buffer.data_ptr<int32_t>(),
+            /*C=*/output.mutable_data_ptr<float>(),
+            /*C_buffer=*/buffer.mutable_data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
             /*thread_id=*/task_id,
@@ -289,7 +289,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
       /*max=*/x_max,
       /*qmin=*/0,
       /*qmax=*/255);
-  float* weight_scales_data = w_scales.data_ptr<float>();
+  const float* weight_scales_data = w_scales.const_data_ptr<float>();
 
   if (!input_scale.has_value() || input_scale.value() != q_params.scale) {
     generate_requantization_scales(
@@ -312,8 +312,9 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
         at::device(c10::kCPU).dtype(c10::kQUInt8),
         weight_scales_data[0],
         w_zero_points[0]);
-    auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
-    int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
+    auto* qnnp_w_data = qnnp_weight.mutable_data_ptr<c10::quint8>();
+    const int8_t* w_data =
+        reinterpret_cast<const int8_t*>(weight_contig.const_data_ptr<c10::qint8>());
     auto wt_numel = weight_contig.numel();
     for (const auto i : c10::irange(wt_numel)) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
@@ -370,7 +371,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
       cols_input /* input_stride */,
       packB->getPackedWeights(),
       bias_ptr,
-      output.data_ptr<float>(),
+      output.mutable_data_ptr<float>(),
       rows_w /* output_stride */,
       caffe2::pthreadpool_() /* threadpool */);
 
@@ -422,7 +423,7 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_impl(
   // Resize output Tensor
   output.resize_(output_sizes);
 
-  auto output_data = output.data_ptr<float>();
+  auto output_data = output.mutable_data_ptr<float>();
 
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
@@ -566,15 +567,15 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   // weights, dst
   auto w = *weight_;
   auto dst_dims = {x.get_dim(0), w.get_dim(1)};
-  const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/q_params.scale);
-  const ideep::scale_t& weights_scales = w.get_scale();
+  const std::vector<float>& src_scales = std::vector<float>(1, 1.0/q_params.scale);
+  const std::vector<float>& weights_scales = w.get_scale();
   // Compute -> f32
   // Use ideep::matmul_forward instead of ideep::inner_product_forward,
   // since the latter does not support asymmetric quantization
   // Allocate output Tensor
   at::Tensor output = at::empty(dst_dims, input.options().dtype(at::kFloat));
   if (output.numel() == 0) return output;
-  ideep::tensor y({dst_dims, ideep::tensor::data_type::f32,
+  ideep::tensor y({dst_dims, dnnl::memory::data_type::f32,
                    {output.strides().cbegin(), output.strides().cend()}},
                   output.data_ptr());
   bool with_bias = bias_.has_value();
@@ -595,9 +596,9 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
       LinearParams params;
       ideep::matmul_forward::prepare</*is_dynamic=*/true>(
           params, x, w, b, y,
-          src_scales, weights_scales, ideep::scale_t(),
-          src_zero_point, ideep::zero_point_t(), 1.0f, 1.0f, op_attr,
-          ideep::tensor::data_type::f32, std::is_signed_v<input_qtype> ? ideep::s8s8 : ideep::u8s8);
+          src_scales, weights_scales, std::vector<float>(),
+          src_zero_point, std::vector<int32_t>(), 1.0f, 1.0f, op_attr,
+          dnnl::memory::data_type::f32, std::is_signed_v<input_qtype> ? ideep::s8s8 : ideep::u8s8);
       get_cache() = LinearPrimitiveCache(cache_key, params);
       w = w.reorder_if_differ_in(params.pd.weights_desc());
   });
@@ -606,8 +607,8 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
     ideep::matmul_forward::compute(params, x, w, b, y, src_scales, src_zero_point);
   } else {
     ideep::matmul_forward::compute(x, w, b, y,
-                                   src_scales, weights_scales, ideep::scale_t(),
-                                   src_zero_point, ideep::zero_point_t(),
+                                   src_scales, weights_scales, std::vector<float>(),
+                                   src_zero_point, std::vector<int32_t>(),
                                    1.0f, 1.0f, op_attr);
   }
   auto out_sizes = input.sizes().vec();
@@ -682,15 +683,15 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
   static tensor::desc empty_tensor_desc;
 
   // Create matmul primitive
-  auto src_dtype = ideep::data_type::f32;
-  auto src_desc = tensor::desc(src_dims, src_dtype, ideep::format_tag::any);
+  auto src_dtype = dnnl::memory::data_type::f32;
+  auto src_desc = tensor::desc(src_dims, src_dtype, dnnl::memory::format_tag::any);
   // onednn does not support f32f16f32 matmul, so we get primitive with f32 weight desc
   // weight is stored in f16 and reordered to f32 below by `reorder_if_differ_in`
-  auto weights_desc = tensor::desc(packed_weight.get_dims(), ideep::data_type::f32, ideep::format_tag::any);
+  auto weights_desc = tensor::desc(packed_weight.get_dims(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::any);
   auto dst_dtype = dst.get_data_type();
-  auto dst_desc = tensor::desc(dst_dims, dst_dtype, ideep::format_tag::any);
+  auto dst_desc = tensor::desc(dst_dims, dst_dtype, dnnl::memory::format_tag::any);
   auto bias_desc = with_bias ?
-      tensor::desc(onednn_bias.value().get_dims(), ideep::data_type::f32, ideep::format_tag::any) :
+      tensor::desc(onednn_bias.value().get_dims(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::any) :
       empty_tensor_desc;
   // Get op attr for primitive
   auto op_attr = relu_fused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
@@ -706,7 +707,7 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
 
   // Prepare args and execute primitive
   tensor scratchpad(primitive_desc.scratchpad_desc());
-  ideep::exec_args args;
+  std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, src});
   args.insert({DNNL_ARG_WEIGHTS, expected_weight});
   args.insert({DNNL_ARG_DST, dst});
