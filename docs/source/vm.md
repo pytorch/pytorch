@@ -3297,6 +3297,12 @@ What graphs do not do at this stage:
   operations run one by one, and the call is as fast as eager mode, no
   faster. Under `torch.no_grad()`, and in `float32`, such a graph is compiled
   like any other.
+- `module.__class__` (and `module.__dict__`) of a module whose own dict has
+  an entry under that name gives the entry. The interpreter itself gives
+  two answers there: the class the first time the instruction runs, and
+  the dict's entry once it has specialized the instruction, which then
+  reads the module's dict and does not look at the class of modules. There
+  is no single answer of eager mode to give.
 - With the engine's backward ("Gradients") the state behind a backward that
   raises is not eager's. Eager raises at the node that needs the tensor that
   was written to in place, and has by then added up the gradient of every
