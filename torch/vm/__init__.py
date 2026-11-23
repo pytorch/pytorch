@@ -34,6 +34,9 @@ default list::
 
     @torch.vm(passes=torch.vm.DEFAULT_PASSES)
     def forward(model, x): ...
+
+A pass of one's own goes in the list as well: a Python callable taking a
+``Region``, the instructions of one basic block.
 """
 
 import functools
@@ -105,17 +108,18 @@ def _plan(given: Iterable[Any]) -> list[Any]:
     """
     listed = tuple(given)
     for one in listed:
-        if not isinstance(one, BuiltinPass):
+        if not (isinstance(one, BuiltinPass) or callable(one)):
             kind = type(one).__name__
             raise TypeError(
-                f"passes has a {kind}: a pass is one of torch.vm.passes (torch.vm.passes.Fold())"
+                f"passes has a {kind}: a pass is one of torch.vm.passes "
+                "(torch.vm.passes.Fold()), or a callable taking a region"
             )
-    own = [type(one) for one in listed]
+    own = [type(one) for one in listed if isinstance(one, BuiltinPass)]
     twice = sorted({kind.__name__ for kind in own if own.count(kind) > 1})
     if twice:
         raise ValueError(f"torch.vm.passes.{twice[0]} is given more than once")
     block = list(listed)
-    engine = [one.engine for one in block]
+    engine = [one.engine if isinstance(one, BuiltinPass) else one for one in block]
     return engine
 
 
@@ -141,10 +145,13 @@ def vm(
             :data:`DEFAULT_PASSES`. They are applied to a basic block in the
             order of the list, and again until none changes the block, once the
             block has run and was watched. An entry is one of
-            :mod:`torch.vm.passes` (``torch.vm.passes.Fold()``). With an empty
-            list nothing is rewritten: the function runs in the generic tier of
-            the VM, which does what the interpreter does, without profiling and
-            without direct kernel calls.
+            :mod:`torch.vm.passes` (``torch.vm.passes.Fold()``), or a pass of
+            one's own: a callable ``pass_(region) -> bool`` that looks at the
+            instructions of one basic block and at what was observed of them,
+            rewrites them, and returns whether it changed anything. With an
+            empty list nothing is rewritten: the function runs in the generic
+            tier of the VM, which does what the interpreter does, without
+            profiling and without direct kernel calls.
         fallback: if the function uses something that is not supported, warn
             and return it unchanged instead of raising :class:`Unsupported`.
         skip_autograd: let a call site enter below the Autograd kernel when the

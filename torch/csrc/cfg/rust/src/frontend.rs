@@ -987,6 +987,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     unsafe {
         all_consts.push(PyObj::from_borrowed(ffi::Py_True()));
         all_consts.push(PyObj::from_borrowed(ffi::Py_False()));
+        all_consts.push(PyObj::from_borrowed(ffi::Py_None()));
     }
     let nvalues = builder.forward.len() as u32;
     let value_names = std::mem::take(&mut builder.value_names);
@@ -1026,6 +1027,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         consts: all_consts,
         const_true,
         const_false: const_true + 1,
+        const_none: const_true + 2,
         blocks,
         nvalues,
         params,

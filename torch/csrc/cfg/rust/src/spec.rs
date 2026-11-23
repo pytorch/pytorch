@@ -14,7 +14,7 @@
 use crate::analysis::BitSet;
 use crate::capi::{self, SiteSlot, TCFG_METHOD};
 use crate::ir::*;
-use crate::pyffi;
+use crate::pyffi::{self, PyObj};
 use crate::vm::Compiled;
 use pyo3::prelude::*;
 use std::sync::Arc;
@@ -219,6 +219,15 @@ impl Unit {
         true
     }
 
+    pub fn dump(&self, func: &Function) -> String {
+        let mut out = String::new();
+        for g in &self.entry_guards {
+            out.push_str(&format!("    entry guard {}\n", func.guard_repr(g)));
+        }
+        let insts: Vec<Inst> = self.insts.iter().map(|u| u.inst.clone()).collect();
+        func.dump_code(&mut out, &insts, &self.term);
+        out
+    }
 }
 
 /// What a pass can look at besides the unit: the whole generic graph with its
@@ -672,6 +681,23 @@ impl CfgPass for Dce {
             keep[pos - 1]
         });
         Ok(unit.insts.len() != before)
+    }
+}
+
+/// A pass written in Python: a callable taking a `Region` and returning
+/// whether it changed it.
+pub struct PyPass {
+    pub callable: PyObj,
+    pub name: String,
+}
+
+impl CfgPass for PyPass {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    fn run(&self, unit: &mut Unit, cx: &PassCx) -> PyResult<bool> {
+        crate::pyapi::run_python_pass(&self.callable, unit, cx)
     }
 }
 

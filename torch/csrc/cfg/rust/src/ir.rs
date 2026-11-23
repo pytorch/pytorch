@@ -318,6 +318,7 @@ pub struct Function {
     pub consts: Vec<PyObj>,
     pub const_true: u32,
     pub const_false: u32,
+    pub const_none: u32,
     pub blocks: Vec<Block>,
     pub nvalues: u32,
     /// The value of each parameter, in co_varnames order.
