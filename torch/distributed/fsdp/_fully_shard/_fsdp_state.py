@@ -584,7 +584,13 @@ class FSDPState(_State):
         # In eager, register hooks directly on grad-requiring outputs.
         tensors = collect_grad_tensors(output)
         for t in tensors:
-            if t._base is not None:
+            # Autograd already raises on in-place ops on non-DEFAULT views
+            # (e.g. created in a custom Function), so only warn for DEFAULT.
+            if (
+                t._base is not None
+                and torch._C._autograd._get_creation_meta(t)
+                == torch._C._autograd.CreationMeta.DEFAULT
+            ):
                 cls = ", ".join(type(m).__name__ for m in self._modules) or "?"
                 warnings.warn(
                     f"FSDP2-wrapped module ({cls}) returned a view tensor. "
