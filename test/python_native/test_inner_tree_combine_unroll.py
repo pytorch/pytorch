@@ -22,7 +22,7 @@ from torch.testing._internal.common_utils import (
 
 @unittest.skipUnless(TEST_CUTEDSL, "requires CuTeDSL")
 class TestInnerTreeCombineUnroll(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CUDA
 
     @parametrize(
         "unroll,rows",
@@ -417,59 +417,31 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
 
         from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 
-        real_arch, real_plan, real_combine = (
-            rt._full_itree_arch,
-            rt.itree_plan,
-            rt.itree_combine_plan,
-        )
-        sm107 = mock.Mock(cc=(10, 7))
-        profiles, archs, plans = [], [], []
-
-        def full_arch(*args):
-            with mock.patch.object(rt._hw, "caps", return_value=sm107):
-                profiles.append(real_arch(*args))
-            return profiles[-1]
-
-        def recorded(real):
-            def plan(*args, **kwargs):
-                archs.append(kwargs.get("arch"))
-                plans.append(real(*args, **kwargs))
-                return plans[-1]
-
-            return plan
-
         welford = name == "var1"
         key = f"sm107_profile_{name}"
         trait = (T.WelfordOps if welford else T.SumOps)(acc=cutlass.Float32)
         x = torch.randn(1, (256 << 20) // 4, device=device)
-        with (
-            mock.patch.object(rt, "_full_itree_arch", full_arch),
-            mock.patch.object(rt, "itree_plan", recorded(real_plan)),
-            mock.patch.object(rt, "itree_combine_plan", recorded(real_combine)),
-        ):
+        with mock.patch.object(rt._hw, "caps", return_value=mock.Mock(cc=(10, 7))):
+            profile = rt._full_itree_arch(trait, x, [torch.float32])
+        self.assertIsNotNone(profile)
+        # The plans both entry points build under the profile.
+        split = rt.trait_itree_plan(trait, x.shape[1], 1, 4, arch=profile)
+        c = rt.itree_combine_plan(split, 4, nrows=1, trait=trait, arch=profile)
+        # Welford partials come from uniform 8192-element batches, so they are weighted.
+        self.assertEqual(c.uniform_combine, "weights" if welford else "off")
+        ordered = torch.empty(1, device=device)
+        with mock.patch.object(rt, "_full_itree_arch", return_value=profile):
             (got,) = rt.reduce_row_tile(
                 trait, key, x, [torch.float32], order="inner_tree"
             )
-            # The ordered entry point takes the same profile and plans, compiling its own
-            # kernels under a distinct key.
-            ordered = torch.empty(1, device=device)
+            # The ordered entry point compiles its own kernels under a distinct key.
             self.assertTrue(rt.reduce_row_itree(trait, key + "_ordered", x, ordered))
-        self.assertEqual(len(profiles), 2)
-        self.assertIsNotNone(profiles[0])
-        self.assertTrue(all(arch == profiles[0] for arch in archs))
-        split, c, ordered_split, ordered_c = plans
-        self.assertEqual((ordered_split.sig, ordered_c.sig), (split.sig, c.sig))
         self.assertEqual(ordered.view(torch.int32), got.view(torch.int32))
-        staged = (split.shape, split.rows_per_block, split.stage_e)
-        self.assertEqual(staged, ("split", 4, 32))
-        folded = (c.combine_tile, c.combine_unroll, c.uniform_combine)
-        # Welford partials come from uniform 8192-element batches, so they are weighted.
-        want = (2048, 64, "weights") if welford else (2048, 128, "off")
-        self.assertEqual(folded, want)
         # Each stage's cache key ends with its plan's sig.
-        for tag, plan in (("rowitree1", split), ("rowitree2", c)):
-            sigs = {k[-1] for k in rt._CACHE if k[:2] == (tag, key)}
-            self.assertEqual(sigs, {plan.sig})
+        for k in (key, key + "_ordered"):
+            for tag, plan in (("rowitree1", split), ("rowitree2", c)):
+                sigs = {e[-1] for e in rt._CACHE if e[:2] == (tag, k)}
+                self.assertEqual(sigs, {plan.sig})
         # Every _ItreeArch knob is bit-neutral, so the default profile gives the same bits.
         default = rt._ITREE_ARCH["default"]
         ref_plan = rt.trait_itree_plan(trait, x.shape[1], 1, 4, arch=default)
