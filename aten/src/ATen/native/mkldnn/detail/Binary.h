@@ -9,9 +9,9 @@ namespace at::native::mkldnn {
 
 // Ported from ideep::binary::compute.
 void binary(
-    const ideep::tensor& src0,
-    const ideep::tensor& src1,
-    ideep::tensor& dst,
+    const ITensor& src0,
+    const ITensor& src1,
+    ITensor& dst,
     dnnl::algorithm algorithm);
 
 } // namespace at::native::mkldnn
