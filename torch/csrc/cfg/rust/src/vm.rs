@@ -389,27 +389,19 @@ unsafe fn trial_settle() {
 }
 
 /// The builtins `locals`, `vars` and `dir`, which look for the variables of
-/// the frame that calls them (see `Op::Locals`). Kept for good.
+/// the frame that calls them (see `Op::Locals`): the functions of C that
+/// the module `builtins` was made with, null for one that is not there.
+/// Kept once all three are found.
 unsafe fn frame_readers() -> (Obj, Obj, Obj) {
-    static FOUND: std::sync::OnceLock<(usize, usize, usize)> = std::sync::OnceLock::new();
-    let found = FOUND.get_or_init(|| {
-        let builtins = ffi::PyImport_ImportModule(c"builtins".as_ptr());
-        let get = |name: &std::ffi::CStr| {
-            let found = if builtins.is_null() {
-                null_mut()
-            } else {
-                ffi::PyObject_GetAttrString(builtins, name.as_ptr())
-            };
-            if found.is_null() {
-                ffi::PyErr_Clear();
-            }
-            found as usize
-        };
-        let all = (get(c"locals"), get(c"vars"), get(c"dir"));
-        xdecref(builtins);
-        all
-    });
-    (found.0 as Obj, found.1 as Obj, found.2 as Obj)
+    static FOUND: pyffi::Once<(usize, usize, usize)> = pyffi::Once::new();
+    if let Some(found) = FOUND.get() {
+        return (found.0 as Obj, found.1 as Obj, found.2 as Obj);
+    }
+    let all = (pyffi::builtin(c"locals"), pyffi::builtin(c"vars"), pyffi::builtin(c"dir"));
+    if !all.0.is_null() && !all.1.is_null() && !all.2.is_null() {
+        FOUND.set((all.0 as usize, all.1 as usize, all.2 as usize));
+    }
+    all
 }
 
 static TRIAL_DRAW: AtomicU64 = AtomicU64::new(0x9E37_79B9_7F4A_7C15);
@@ -599,8 +591,8 @@ impl Callees {
         }
         let dropped = std::mem::take(&mut *self.entries.borrow_mut());
         drop(dropped);
-        self.interpreted.borrow_mut().clear();
-        self.left.borrow_mut().clear();
+        let dropped = (std::mem::take(&mut *self.interpreted.borrow_mut()), std::mem::take(&mut *self.left.borrow_mut()));
+        drop(dropped);
     }
 }
 
@@ -1274,7 +1266,10 @@ impl Probe {
         Probe { frames: api.frame_count.map_or(0, |count| count()), kernel_frames: kernel_frames(), versions, outer }
     }
 
-    unsafe fn finish(self, callees: &Callees, facts: &mut InstFacts, api: &TcfgApi) {
+    /// Hands back what the facts let go of, for the caller to end with
+    /// nothing borrowed.
+    #[must_use]
+    unsafe fn finish(self, callees: &Callees, facts: &mut InstFacts, api: &TcfgApi) -> (Option<PyObj>, Option<spec::CalleeFact>) {
         // Where the interpreter does not tell of its frames, one may have
         // been entered. The frames that a kernel enters by itself (its
         // router where its implementation is chosen in Python, what
@@ -1291,9 +1286,10 @@ impl Probe {
             // interpreter's making to count.
             if let Some((code, kind)) = callees.callee_seen.replace(seen) {
                 facts.frames = true;
-                facts.saw_callee(code, kind);
+                return facts.saw_callee(code, kind);
             }
         }
+        (None, None)
     }
 }
 
@@ -1609,6 +1605,14 @@ impl Drop for Hooked {
     }
 }
 
+/// Runs what the engine does for itself and no instruction of a compiled
+/// function asked for as it stands: a frame that the interpreter starts on
+/// this thread meanwhile is offered to nobody (`take_frame`).
+pub fn own<R>(work: impl FnOnce() -> R) -> R {
+    let _nobody = unsafe { Hooked::nobody() };
+    work()
+}
+
 /// Whether the frames the interpreter starts on this thread are offered to a
 /// compiled function now.
 pub fn frames_offered() -> bool {
@@ -1751,7 +1755,7 @@ pub struct Compiled {
     live: Shared<HashMap<(usize, usize), Arc<analysis::BitSet>>>,
     /// The function without what its holds name, and its liveness: made
     /// when `read_at` is first asked.
-    reads: std::sync::OnceLock<(Function, Analysis)>,
+    reads: pyffi::Once<(Function, Analysis)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -2185,7 +2189,7 @@ impl Compiled {
             callees,
             handler_keep,
             live: Shared::new(HashMap::new()),
-            reads: std::sync::OnceLock::new(),
+            reads: pyffi::Once::new(),
             global_cache: empty(),
             module_attr_cache: empty(),
             plain_name,
@@ -2732,7 +2736,8 @@ impl Compiled {
     #[cold]
     unsafe fn note_callee(&self, func: Obj, kind: CalleeKind) {
         let code = PyObj::from_borrowed(ffi::PyFunction_GetCode(func));
-        *self.callees.callee_seen.borrow_mut() = Some((code, kind));
+        let before = self.callees.callee_seen.replace(Some((code, kind)));
+        drop(before);
     }
 
     #[inline(always)]
@@ -2793,14 +2798,9 @@ impl Compiled {
                     callees.clone(),
                 ));
                 let pointer = Arc::as_ptr(&compiled);
-                callees.entries.borrow_mut().insert(
-                    key,
-                    Callee {
-                        code: PyObj::from_borrowed(code),
-                        _globals: PyObj::from_borrowed(globals),
-                        compiled,
-                    },
-                );
+                let entry = Callee { code: PyObj::from_borrowed(code), _globals: PyObj::from_borrowed(globals), compiled };
+                let before = callees.entries.borrow_mut().insert(key, entry);
+                drop(before);
                 pointer
             }
             // Unsupported by the frontend: the interpreter runs it.
@@ -4761,35 +4761,45 @@ impl Compiled {
                     let (result, site, reason, calls, names) = self.capture_exec(regs, &inst.op, kind, api);
                     kernels = calls;
                     operators = names;
-                    let mut st = self.state.borrow_mut();
-                    let bs = &mut st.blocks[b];
-                    bs.capture_attempts[index] += 1;
-                    if !site.is_null() {
-                        let slot = SiteSlot::new(kind);
-                        slot.push(site);
-                        bs.slots[index] = Some(Arc::new(slot));
-                        bs.reasons[index] = None;
-                    } else if reason.is_some() {
-                        bs.reasons[index] = reason;
-                    }
+                    // A slot that the instruction's own run put there
+                    // ends with nothing borrowed: a site holds an object.
+                    let before = {
+                        let mut st = self.state.borrow_mut();
+                        let bs = &mut st.blocks[b];
+                        bs.capture_attempts[index] += 1;
+                        if !site.is_null() {
+                            let slot = SiteSlot::new(kind);
+                            slot.push(site);
+                            bs.reasons[index] = None;
+                            bs.slots[index].replace(Arc::new(slot))
+                        } else {
+                            if reason.is_some() {
+                                bs.reasons[index] = reason;
+                            }
+                            None
+                        }
+                    };
+                    drop(before);
                     result
                 }
             }
         };
-        let mut st = self.state.borrow_mut();
-        let facts = &mut st.blocks[b].facts[index];
-        facts.runs += 1;
-        facts.saw_kernels(kernels);
-        facts.saw_operators(operators);
-        facts.raised |= result.is_err();
-        if let Some(probe) = probe {
-            probe.finish(&self.callees, facts, api);
-        }
-        if let Ok(obj) = result {
-            if inst.dst != NONE {
-                st.obs[inst.dst as usize].observe(obj);
+        let gone = {
+            let mut st = self.state.borrow_mut();
+            let facts = &mut st.blocks[b].facts[index];
+            facts.runs += 1;
+            facts.saw_kernels(kernels);
+            facts.saw_operators(operators);
+            facts.raised |= result.is_err();
+            let gone = probe.map(|probe| probe.finish(&self.callees, facts, api));
+            if let Ok(obj) = result {
+                if inst.dst != NONE {
+                    st.obs[inst.dst as usize].observe(obj);
+                }
             }
-        }
+            gone
+        };
+        drop(gone);
         result
     }
 
@@ -5232,6 +5242,13 @@ impl Compiled {
             None => return true,
             Some(false) => return false,
             Some(true) => {}
+        }
+        // On tensors that hold nothing torch runs Python code of its own
+        // (the meta kernels), which imports as it goes: with an
+        // `__import__` that is not the interpreter's, that would be called
+        // where eager calls nothing. It cannot be asked then.
+        if pyffi::builtin(c"__import__").is_null() {
+            return false;
         }
         let f = &self.func;
         let none = || new_ref(ffi::Py_None());
@@ -6163,7 +6180,8 @@ impl Compiled {
                 } else {
                     exported.repeats.store(0, Ordering::Relaxed);
                     let kept = now.iter().filter(|o| !o.is_null() && !capi::is_unboxed(**o)).map(|o| PyObj::from_borrowed(*o));
-                    *exported.last.borrow_mut() = kept.collect();
+                    let before = std::mem::replace(&mut *exported.last.borrow_mut(), kept.collect());
+                    drop(before);
                 }
             }
             leave(own);
@@ -7223,10 +7241,13 @@ impl Compiled {
             op => self.quiet(regs, op, api).then_some(Kind::Pure),
         };
         let why = || {
-            let st = self.state.borrow();
-            let bs = &st.blocks[block];
-            let found = bs.facts.get(origin as usize);
-            let reason = bs.reasons.get(origin as usize).and_then(|r| r.as_ref());
+            // Copied out: what a `repr` runs finds nothing borrowed.
+            let (found, reason) = {
+                let st = self.state.borrow();
+                let bs = &st.blocks[block];
+                (bs.facts.get(origin as usize).cloned(), bs.reasons.get(origin as usize).and_then(|r| r.clone()))
+            };
+            let (found, reason) = (found.as_ref(), reason.as_ref());
             if graph::debug() {
                 let seen = found.map_or(String::new(), |f| format!("runs {} operators {:?} frames {} wrote {}", f.runs, f.operators, f.frames, f.wrote));
                 eprintln!("torch.vm graph: a path ends in {} in front of {} ({})", self.func.qualname, self.func.op_repr(&inst.op), seen);
@@ -8791,7 +8812,8 @@ impl Compiled {
             compiled: Arc::new(Compiled::new(function, self.options.clone(), self.pipeline.clone(), callees.clone())),
         });
         let found = made.as_ref().map(|callee| Arc::as_ptr(&callee.compiled));
-        callees.generators.borrow_mut().insert(key, made);
+        let before = callees.generators.borrow_mut().insert(key, made);
+        drop(before);
         found
     }
 

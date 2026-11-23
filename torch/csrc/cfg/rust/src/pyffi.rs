@@ -207,7 +207,7 @@ pub unsafe fn dict_version(dict: Obj) -> u64 {
 #[cold]
 unsafe fn watch_dict(dict: Obj) -> u64 {
     use std::sync::atomic::Ordering::Relaxed;
-    static WATCHER: std::sync::OnceLock<c_int> = std::sync::OnceLock::new();
+    static WATCHER: Once<c_int> = Once::new();
     let id = *WATCHER.get_or_init(|| {
         let id = PyDict_AddWatcher(watched_dict_changed);
         if id >= 0 {
@@ -258,6 +258,122 @@ pub unsafe fn repr(o: Obj) -> String {
     let text = str_to_string(r);
     ffi::Py_DECREF(r);
     text
+}
+
+/// What a dict of the interpreter's own holds under a name, borrowed; null
+/// where it holds nothing, or where the read could run code (a table that
+/// took a key that is no text compares keys in their own code).
+unsafe fn held(dict: Obj, name: &std::ffi::CStr) -> Obj {
+    #[cfg(not(Py_3_14))]
+    let plain = |dict: Obj| text_keys(dict);
+    // The kind of the table is not read there (`text_keys`).
+    #[cfg(Py_3_14)]
+    let plain = |_dict: Obj| true;
+    if dict.is_null() || ffi::PyDict_CheckExact(dict) == 0 || !plain(dict) {
+        return std::ptr::null_mut();
+    }
+    ffi::PyDict_GetItemString(dict, name.as_ptr())
+}
+
+/// The module the interpreter keeps under a name (`sys.modules`), borrowed;
+/// null where it keeps none there, or something that is no module. The
+/// engine imports nothing: an import is a call of `builtins.__import__`,
+/// which is the user's to replace, and runs the finders and the module.
+pub unsafe fn module(name: &std::ffi::CStr) -> Obj {
+    let found = held(ffi::PyImport_GetModuleDict(), name);
+    if found.is_null() || ffi::PyModule_Check(found) == 0 {
+        return std::ptr::null_mut();
+    }
+    found
+}
+
+/// What a module has under a name in its own dict, borrowed; null where it
+/// has nothing there (a `__getattr__` of the module is not asked), or
+/// `module` is null.
+pub unsafe fn in_module(module: Obj, name: &std::ffi::CStr) -> Obj {
+    if module.is_null() || ffi::PyModule_Check(module) == 0 {
+        return std::ptr::null_mut();
+    }
+    held(ffi::PyModule_GetDict(module), name)
+}
+
+/// The function of C that the module `builtins` was made with under a
+/// name, borrowed; null where the module has something else there.
+pub unsafe fn builtin(name: &std::ffi::CStr) -> Obj {
+    let builtins = module(c"builtins");
+    let found = in_module(builtins, name);
+    if found.is_null() || ffi::PyCFunction_Check(found) == 0 {
+        return std::ptr::null_mut();
+    }
+    let fields = found as *mut ffi::PyCFunctionObject;
+    let own = (*fields).m_self == builtins && std::ffi::CStr::from_ptr((*(*fields).m_ml).ml_name) == name;
+    if own { found } else { std::ptr::null_mut() }
+}
+
+/// `module.name` of a module that was imported, as `module` and
+/// `in_module` read it; an error where there is none.
+pub fn of_module<'py>(py: pyo3::Python<'py>, name: &std::ffi::CStr, has: &std::ffi::CStr) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::PyAny>> {
+    unsafe {
+        let found = in_module(module(name), has);
+        if found.is_null() {
+            let text = format!("torch.vm: {}.{} is not there", name.to_string_lossy(), has.to_string_lossy());
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(text));
+        }
+        Ok(pyo3::Bound::from_borrowed_ptr(py, found))
+    }
+}
+
+/// A value the engine finds once and keeps, with the GIL held. Nothing
+/// waits for it: where what finds it comes to ask for it again (Python
+/// code it runs calls a compiled function, or lets another thread run one),
+/// it is found a second time, and the one that was kept first stays. What
+/// finds it is the engine's own work (`vm::own`): a frame the interpreter
+/// starts meanwhile is the interpreter's.
+pub struct Once<T>(std::cell::UnsafeCell<Option<T>>);
+
+unsafe impl<T> Send for Once<T> {}
+unsafe impl<T> Sync for Once<T> {}
+
+impl<T> Once<T> {
+    pub const fn new() -> Once<T> {
+        Once(std::cell::UnsafeCell::new(None))
+    }
+
+    #[inline(always)]
+    pub fn get(&self) -> Option<&T> {
+        unsafe { (*self.0.get()).as_ref() }
+    }
+
+    #[inline(always)]
+    pub fn get_or_init(&self, find: impl FnOnce() -> T) -> &T {
+        match self.get() {
+            Some(found) => found,
+            None => self.keep(find),
+        }
+    }
+
+    /// Keeps what was found elsewhere, unless something is kept.
+    pub fn set(&self, found: T) {
+        unsafe {
+            let slot = self.0.get();
+            if (*slot).is_none() {
+                slot.write(Some(found));
+            }
+        }
+    }
+
+    #[cold]
+    fn keep(&self, find: impl FnOnce() -> T) -> &T {
+        let found = crate::vm::own(find);
+        unsafe {
+            let slot = self.0.get();
+            // Nothing refers to an empty slot.
+            if (*slot).is_none() {
+                slot.write(Some(found));
+            }
+            (*slot).as_ref().unwrap_unchecked()
+        }
+    }
 }
 
 /// A cell for state that is only touched with the GIL held. Borrows must not
