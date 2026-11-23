@@ -4084,10 +4084,10 @@ def capture(
     on ``triton.cudagraphs`` (such as ``mode="reduce-overhead"``) and serves
     no CUDA graphs whatever ``torch._inductor.config`` says: its module runs
     outside Inductor's CUDA graph wrapper. Either tracer refuses
-    ``triton.autotune_at_compile_time``
-    off and a nonzero ``triton.multi_kernel``, which the paragraph above turns
-    off. A :class:`DynamoTracer` capture refuses ``freezing``
-    and ``force_disable_caches``, whose compiles file no AOTAutograd cache
+    ``triton.autotune_at_compile_time`` off and a nonzero
+    ``triton.multi_kernel``, which the paragraph above turns off. A
+    :class:`DynamoTracer` capture refuses ``freezing`` and
+    ``force_disable_caches``, whose compiles file no AOTAutograd cache
     entry for the artifact to ship, ``fx_wrapper``, whose graphs Inductor does
     not cache, and ``bundled_autotune_remote_cache`` on, which the capture
     turns off (its eager backward lowering fails on a remote autotune cache
