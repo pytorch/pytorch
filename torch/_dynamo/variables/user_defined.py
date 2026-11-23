@@ -2331,6 +2331,17 @@ class NewClassVariable(UserDefinedClassVariable):
     def is_python_constant(self) -> bool:
         return False
 
+    @staticmethod
+    def contains_new_class(value: Any) -> bool:
+        found = False
+
+        def visit(vt: VariableTracker) -> None:
+            nonlocal found
+            found |= isinstance(vt, NewClassVariable)
+
+        VariableTracker.visit(visit, value)
+        return found
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",

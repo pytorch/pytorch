@@ -3471,16 +3471,9 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        found_new_class = False
-
-        def visit(vt: VariableTracker) -> None:
-            nonlocal found_new_class
-            found_new_class |= isinstance(
-                vt, variables.user_defined.NewClassVariable
-            )
-
-        VariableTracker.visit(visit, (_format_string, args, kwargs))
-        if found_new_class:
+        if variables.user_defined.NewClassVariable.contains_new_class(
+            (_format_string, args, kwargs)
+        ):
             unimplemented(
                 gb_type="Formatting a class created in the same frame",
                 context="formatting a class created in the same frame",

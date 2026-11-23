@@ -478,6 +478,16 @@ class MiscTests(torch._inductor.test_case.TestCase):
             cls.__qualname__ = "B"
             return x + int("B" in type.__repr__(cls))
 
+        def call_object_new(x):
+            cls = type("A", (), {"answer": 1})
+            cls.answer = 42
+            return x + object.__new__(cls).answer
+
+        def call_class_new(x):
+            cls = type("A", (), {"answer": 1})
+            cls.answer = 42
+            return x + cls.__new__(cls).answer
+
         def delete_attr(x):
             cls = type("A", (), {"value": 1})
             del cls.value
@@ -535,6 +545,14 @@ class MiscTests(torch._inductor.test_case.TestCase):
             (
                 call_type_repr,
                 "Calling a type slot on a class created in the same frame",
+            ),
+            (
+                call_object_new,
+                "Instantiating a class created in the same frame",
+            ),
+            (
+                call_class_new,
+                "Instantiating a class created in the same frame",
             ),
             (
                 delete_attr,

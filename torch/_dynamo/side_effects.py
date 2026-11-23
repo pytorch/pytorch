@@ -975,6 +975,9 @@ class SideEffects:
         reconstruction. Roughly, the reconstruction looks like this
             base_cls_vt.__new__(user_cls, *init_args)
         """
+        if isinstance(cls_vt, variables.user_defined.NewClassVariable):
+            assert tx is not None
+            return cls_vt.call_function(tx, [], {})
         cls_source = cls_vt.source
         user_cls = cls_vt.value  # type: ignore[attr-defined]
         variable_cls = self.get_variable_cls(user_cls)
