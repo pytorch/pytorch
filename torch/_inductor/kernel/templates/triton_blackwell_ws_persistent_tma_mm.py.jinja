@@ -38,10 +38,16 @@
         warp_specialize=WARP_SPECIALIZE,
         data_partition_factor=DATA_PARTITION_FACTOR,
         separate_epilogue_store=SEPARATE_EPILOGUE_STORE,
+        {%- if DISALLOW_ACC_MULTI_BUFFER is defined and DISALLOW_ACC_MULTI_BUFFER %}
+        disallow_acc_multi_buffer=True,
+        {%- endif %}
     ):
     {%- else %}
     for tile_id in tl.range(
         start_pid, num_tiles, NUM_SMS, flatten=FLATTEN, warp_specialize=WARP_SPECIALIZE
+        {%- if DISALLOW_ACC_MULTI_BUFFER is defined and DISALLOW_ACC_MULTI_BUFFER -%}
+        , disallow_acc_multi_buffer=True
+        {%- endif %}
     ):
     {%- endif %}
         pid_m, pid_n = _compute_pid(
