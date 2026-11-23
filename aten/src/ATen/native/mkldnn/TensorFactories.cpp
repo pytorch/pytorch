@@ -18,7 +18,7 @@ Tensor empty_mkldnn(IntArrayRef sizes, std::optional<ScalarType> dtype, std::opt
      "'memory_format' argument is incompatible with mkldnn tensor");
   dnnl::memory::dims dst_dims (sizes.begin(), sizes.end());
   auto data_type = dtype.has_value() ? get_mkldnn_dtype(dtype.value()) : dnnl::memory::data_type::f32;
-  ideep::tensor it {dst_dims, data_type};
+  mkldnn::ITensor it {dst_dims, data_type};
   return new_with_itensor_mkldnn(std::move(it), dtype, device);
 }
 
