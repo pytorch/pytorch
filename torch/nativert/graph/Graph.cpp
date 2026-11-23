@@ -592,9 +592,10 @@ void Graph::lint() const {
   for (const auto& node : nodes()) {
     TORCH_CHECK(node.owningGraph() == this);
   }
-  // Check that every list type is either produced by a prim.ListPack or
-  // immediately consumed by a prim.ListUnpack. We make use of this invariant
-  // to retrieve list elements in `getListElements`.
+  // Check that every used list type is either produced by a prim.ListPack or
+  // immediately consumed by a prim.ListUnpack. An unused list output is valid
+  // for a reachable multi-output operator: cleanupDeadNodes cannot remove one
+  // output without removing the producer and its other, live outputs.
   for (const auto& [_, value] : values_) {
     if (value->type().kind() != Type::Kind::TensorList) {
       continue;
@@ -602,9 +603,10 @@ void Graph::lint() const {
     const bool producedByListPack =
         value->producer(/* resolve_folded = */ true)->target() ==
         "prim.ListPack";
+    const bool unused = value->users().empty();
     const bool consumedByListUnpack = value->users().size() == 1 &&
         value->users()[0]->target() == "prim.ListUnpack";
-    TORCH_CHECK(producedByListPack || consumedByListUnpack);
+    TORCH_CHECK(unused || producedByListPack || consumedByListUnpack);
   }
 
   auto getNames = [](const auto& values) {
@@ -727,7 +729,7 @@ void Graph::overrideWeightsDevice(
   for (auto& [weightName, weightMeta] : weightsMeta_) {
     for (auto& [name, device] : submodNameToDevice) {
       if (device.has_value() && weightMeta.device() != device &&
-          c10::starts_with(weightName, name) &&
+          weightName.starts_with(name) &&
           (weightName == name || weightName[name.length()] == '.')) {
         LOG(INFO) << "Overriding " << weightName << " from "
                   << weightMeta.device() << " to device " << device.value();
@@ -740,7 +742,7 @@ void Graph::overrideWeightsDevice(
   for (auto& [tensorName, tensorMeta] : tensorValuesMeta_) {
     for (auto& [name, device] : submodNameToDevice) {
       if (device.has_value() && tensorMeta.device() != device &&
-          c10::starts_with(tensorName, name) &&
+          tensorName.starts_with(name) &&
           (tensorName == name || tensorName[name.length()] == '.')) {
         LOG(INFO) << "Overriding " << tensorName << " from "
                   << tensorMeta.device() << " to device " << device.value();
@@ -971,6 +973,11 @@ std::vector<const Value*> Value::getListElements() const {
     for (const auto& tv : p->inputs()) {
       ret.push_back(tv.value);
     }
+  } else if (users().empty()) {
+    // A non-ListPack value has explicit element Values only when a ListUnpack
+    // consumes it. An unused list therefore has no structural elements to
+    // return.
+    return ret;
   } else {
     TORCH_CHECK(users().size() == 1);
     const auto listUnpack = users()[0];
@@ -1193,7 +1200,7 @@ c10::Device convertDevice(std::string_view symbol) {
 }
 
 Constant convertAtomicConstant(std::string_view symbol) {
-  if (c10::starts_with(symbol, "\"")) {
+  if (symbol.starts_with("\"")) {
     // chop off the outer quotes and return the string
     TORCH_CHECK(symbol.size() >= 2);
     symbol.remove_prefix(1);
@@ -1205,19 +1212,19 @@ Constant convertAtomicConstant(std::string_view symbol) {
     return true;
   } else if (symbol == "false") {
     return false;
-  } else if (c10::starts_with(symbol, kMemoryFormatPrefix)) {
+  } else if (symbol.starts_with(kMemoryFormatPrefix)) {
     torch::_export::MemoryFormat value = torch::_export::MemoryFormat::Unknown;
     symbol.remove_prefix(kMemoryFormatPrefix.length());
     torch::_export::parseEnum(symbol, value);
     return convertJsonMemoryFormat(value);
-  } else if (c10::starts_with(symbol, kLayoutPrefix)) {
+  } else if (symbol.starts_with(kLayoutPrefix)) {
     torch::_export::Layout value = torch::_export::Layout::Unknown;
     symbol.remove_prefix(kLayoutPrefix.length());
     torch::_export::parseEnum(symbol, value);
     return convertJsonLayout(value);
-  } else if (c10::starts_with(symbol, kDevicePrefix)) {
+  } else if (symbol.starts_with(kDevicePrefix)) {
     return convertDevice(symbol);
-  } else if (c10::starts_with(symbol, kScalarTypePrefix)) {
+  } else if (symbol.starts_with(kScalarTypePrefix)) {
     torch::_export::ScalarType value = torch::_export::ScalarType::UNKNOWN;
     symbol.remove_prefix(kScalarTypePrefix.length());
     torch::_export::parseEnum(symbol, value);
