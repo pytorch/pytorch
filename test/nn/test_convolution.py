@@ -3379,6 +3379,12 @@ class TestConvolutionNNDevice(NNTestCase):
         grad2 = grad2 * scale
         self.assertEqual(grad1, grad2, atol=5e-2, rtol=5e-3)
 
+    @parametrize_test("kh,kw", [(64, 1), (31, 31)])
+    def test_conv2d_depthwise_large_filter(self, device, kh, kw):
+        x = torch.randint(-2, 3, (32, 8, kh + 3, kw + 31), device=device).float()
+        w = torch.randint(-2, 3, (8, 1, kh, kw), device=device).float()
+        self.assertEqual(F.conv2d(x, w, groups=8), F.conv2d(x.cpu(), w.cpu(), groups=8))
+
     @onlyAccelerator
     @largeTensorTest("20GB", "cpu")
     @largeTensorTest("60GB", "cuda")

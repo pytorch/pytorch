@@ -808,6 +808,27 @@ static Tensor mps_convolution_2d_large_kernel(const Tensor& input_t,
   return output;
 }
 
+static bool mpsgraph_depthwise_overflows(const Tensor& weight,
+                                         IntArrayRef stride,
+                                         IntArrayRef dilation,
+                                         int64_t groups) {
+  const auto kernel_height = weight.size(2);
+  const auto kernel_width = weight.size(3);
+  const bool is_depthwise = weight.size(1) == 1 && (groups > 1 || weight.size(0) == 1);
+  const bool is_dilated = dilation[0] > 1 || dilation[1] > 1;
+  const bool has_large_stride = std::max(stride[0], stride[1]) > kMPSGraphDepthwiseMaxStride;
+  const bool has_many_taps = kernel_height * kernel_width * stride[0] * stride[1] > kMPSGraphDepthwiseMaxTaps;
+  if (!is_depthwise || is_dilated || has_large_stride || has_many_taps || kernel_height == 1) {
+    return false;
+  }
+  const int64_t tile_element_size = weight.scalar_type() == kHalf ? sizeof(c10::Half) : sizeof(float);
+  return std::ranges::any_of(kMPSGraphDepthwiseTileOutputs, [&](const auto& outputs) {
+    const auto tile_width = outputs[0] * stride[1] + kernel_width - 1;
+    const auto tile_height = outputs[1] * stride[0] + kernel_height - 1;
+    return tile_width * tile_height * outputs[2] * tile_element_size > kMPSGraphDepthwiseTileBytes;
+  });
+}
+
 static Tensor _mps_convolution_impl(const Tensor& input_t,
                                     const Tensor& weight_t,
                                     const std::optional<Tensor>& bias_opt,
@@ -818,7 +839,8 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                                     std::optional<IntArrayRef> input_shape,
                                     Tensor output_t = {}) {
   // MPSGraph 2D conv miscomputes the output once a filter spatial dim reaches 256; use a Metal kernel instead.
-  if (input_t.dim() == 4 && (weight_t.size(2) >= 256 || weight_t.size(3) >= 256)) {
+  const bool has_large_filter = weight_t.size(2) >= 256 || weight_t.size(3) >= 256;
+  if (input_t.dim() == 4 && (has_large_filter || mpsgraph_depthwise_overflows(weight_t, stride, dilation, groups))) {
     const auto outH = (input_t.size(2) + 2 * padding[0] - dilation[0] * (weight_t.size(2) - 1) - 1) / stride[0] + 1;
     const auto outW = (input_t.size(3) + 2 * padding[1] - dilation[1] * (weight_t.size(3) - 1) - 1) / stride[1] + 1;
     // Degenerate shapes fall through to the normal path's shape check.
