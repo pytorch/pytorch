@@ -1784,19 +1784,17 @@ def has_meta(func: OpOverload) -> bool:
 
 
 def maybe_to_dense_mkldnn(
-    fake_mode: FakeTensorMode,
-    a: FakeTensor,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
+    a: torch.Tensor,
     dtype: torch.dtype | None = None,
     masked_grad: bool | None = None,
 ) -> object:
-    # this function invokes in_kernel_invocation_manager and creates python
-    # FakeTensor, revisit later for C++ behaviour
-    if (
-        not isinstance(a, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-        or not a.is_mkldnn
-    ):
+    if not is_fake_tensor(a) or not a.is_mkldnn:
         return NotImplemented
 
+    fake_device = maybe_get_fake_device(a)
+    if fake_device is None:
+        raise AssertionError("expected a fake tensor device")
     out_dtype = dtype if dtype is not None else a.dtype
     if a.dtype not in _MKLDNN_TO_DENSE_DTYPES:
         raise RuntimeError(
@@ -1821,7 +1819,9 @@ def maybe_to_dense_mkldnn(
             dtype=out_dtype,
             device="meta",
         )
-    return FakeTensor(fake_mode, out, a.fake_device)
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, out, fake_device
+    )
 
 
 class _ToDenseMkldnn(torch.autograd.Function):
@@ -1973,17 +1973,12 @@ aten.to_dense.default.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(
 
 @register_op_impl(aten.to_mkldnn.default)
 def to_mkldnn(
-    fake_mode: FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
     func: OpOverload,
-    a: FakeTensor,
+    a: torch.Tensor,
     dtype: torch.dtype | None = None,
 ) -> object:
-    if not isinstance(a, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-        if is_fake_tensor(a):
-            raise NotImplementedError(
-                "The C++ fake tensor fallback does not support mkldnn tensors yet, "
-                f"found in {func.name()}"
-            )
+    if not is_fake_tensor(a):
         return NotImplemented
 
     fake_device = maybe_get_fake_device(a)
@@ -2019,7 +2014,9 @@ def to_mkldnn(
             dtype=out_dtype,
             device="meta",
         )
-    return FakeTensor(fake_mode, out, fake_device, dispatch_keys=_MKLDNN_DISPATCH_KEYS)
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, out, fake_device, dispatch_keys=_MKLDNN_DISPATCH_KEYS
+    )
 
 
 # These are for the `torch._foreach_...` ops like `torch._foreach_add`.
@@ -2517,7 +2514,7 @@ def infer_size(
             guard_or_false(sizeA == 1) or guard_or_false(sizeB == 1) or sizeA == sizeB,
             lambda: f"The size of tensor a ({sizeA}) "
             f"must match the size of tensor b ({sizeB}) "
-            f"at non-singleton dimension {i})",
+            f"at non-singleton dimension {i}",
         )
         expandedSizes[i] = sizeB if guard_or_false(sizeA == 1) else sizeA
     return tuple(expandedSizes)
@@ -2530,10 +2527,15 @@ def make_fast_binary_impl(
     def fast_binary_impl(
         mode: FakeTensorMode | CppFakeTensorMode, *args: Any, **kwargs: Any
     ) -> FakeTensorLike:
-        def slow(msg: str) -> FakeTensor:
+        def slow(msg: str) -> FakeTensorLike:
             count_label(f"slow {msg}")
             with mode:
                 return slow_ref(*args, **kwargs)
+
+        # Native dispatch already tries the binary fast path. Its Python
+        # fallback should not repeat the same shape and layout checks.
+        if isinstance(mode, CppFakeTensorMode):
+            return slow("native fast path fallback")
 
         count_label("attempt fast")
 

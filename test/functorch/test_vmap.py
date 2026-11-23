@@ -71,6 +71,7 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     parametrize,
     run_tests,
+    skipIfCppFakeTensor,
     skipIfTorchDynamo,
     subtest,
     TEST_WITH_ROCM,
@@ -6645,6 +6646,7 @@ class TestVmapDevice(Namespace.TestVmapBase):
         check_vmap_fallback(self, test, torch._test_check_tensor)
 
 
+@skipIfCppFakeTensor("no nested tensor support")
 @markDynamoStrictTest
 class TestVmapNestedTensorDevice(Namespace.TestVmapBase):
     hw_classification = HardwareClassification.ACCELERATOR
