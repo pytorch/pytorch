@@ -10,12 +10,11 @@
 //! `torch/vm/_shortcuts.py`), and registered here.
 
 use crate::capi;
-use crate::pyffi::{self, Obj, PyObj, Shared};
+use crate::pyffi::{self, Obj, Once, PyObj, Shared};
 use pyo3::ffi;
 use std::cell::Cell;
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
 
 pub enum Condition {
     /// The entry of the instance's dict is None or an empty container. An
@@ -70,7 +69,7 @@ pub struct Shortcuts {
 const TYPE_SLOTS: usize = 64;
 
 fn registry() -> &'static Shared<Shortcuts> {
-    static REGISTRY: OnceLock<Shared<Shortcuts>> = OnceLock::new();
+    static REGISTRY: Once<Shared<Shortcuts>> = Once::new();
     REGISTRY.get_or_init(|| Shared::new(Shortcuts::default()))
 }
 
@@ -151,7 +150,7 @@ unsafe impl Send for ResolvedCache {}
 unsafe impl Sync for ResolvedCache {}
 
 fn resolved() -> &'static ResolvedCache {
-    static CACHE: OnceLock<ResolvedCache> = OnceLock::new();
+    static CACHE: Once<ResolvedCache> = Once::new();
     CACHE.get_or_init(|| {
         let empty = Resolved {
             epoch: 0,
@@ -333,7 +332,7 @@ unsafe fn getattr_shortcut(ty: *mut ffi::PyTypeObject) -> usize {
             }
         }
     }
-    static NAMES: OnceLock<(PyObj, PyObj)> = OnceLock::new();
+    static NAMES: Once<(PyObj, PyObj)> = Once::new();
     let (getattr, getattribute) = NAMES.get_or_init(|| {
         (
             PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__getattr__".as_ptr())),

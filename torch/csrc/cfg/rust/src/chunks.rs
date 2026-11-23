@@ -18,10 +18,10 @@
 //! is one for the process and public (`PyObject_SetArenaAllocator`): what is
 //! put in front of it here hands everything else through.
 
+use crate::pyffi::Once;
 use std::ffi::c_void;
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicPtr, Ordering};
-use std::sync::OnceLock;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -47,7 +47,7 @@ const CHUNK: usize = 16 * 1024;
 /// A thread goes back and forth over one end of a chunk at a time.
 const KEPT: usize = 4;
 
-static BELOW: OnceLock<ArenaAllocator> = OnceLock::new();
+static BELOW: Once<ArenaAllocator> = Once::new();
 static CHUNKS: [AtomicPtr<c_void>; KEPT] = [const { AtomicPtr::new(null_mut()) }; KEPT];
 
 unsafe extern "C" fn alloc(_ctx: *mut c_void, size: usize) -> *mut c_void {
