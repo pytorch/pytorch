@@ -2755,6 +2755,55 @@ pub unsafe fn interposed() -> Option<&'static str> {
     }
 }
 
+/// The name and the overload of an operator as the dispatcher names it:
+/// (`aten::add_`, `Tensor`) of `aten::add_.Tensor`.
+fn overload_of(name: &str) -> (&str, &str) {
+    match name.split_once("::").and_then(|(_, rest)| rest.find('.')) {
+        Some(dot) => {
+            let at = name.len() - (name.split_once("::").unwrap().1.len() - dot);
+            (&name[..at], &name[at + 1..])
+        }
+        None => (name, ""),
+    }
+}
+
+/// Whether an operator writes to its first argument and to nothing else,
+/// and draws no random numbers (`aten::relu_`, `aten::add_.Tensor`,
+/// `aten::copy_`; not `aten::add.out`, not `aten::uniform_`): its schema
+/// and its tags are asked once.
+pub fn writes_first(name: &str) -> bool {
+    static KNOWN: std::sync::OnceLock<Shared<HashMap<String, bool>>> = std::sync::OnceLock::new();
+    let known = KNOWN.get_or_init(|| Shared::new(HashMap::new()));
+    if let Some(writes) = known.borrow().get(name) {
+        return *writes;
+    }
+    let (qualified, overload) = overload_of(name);
+    let asked = |py: Python<'_>| -> PyResult<bool> {
+        let binding = py.import("torch._C")?;
+        let schema = binding.call_method1("_get_schema", (qualified, overload))?;
+        let mut first = true;
+        for argument in schema.getattr("arguments")?.try_iter()? {
+            let alias = argument?.getattr("alias_info")?;
+            let written = !alias.is_none() && alias.getattr("is_write")?.is_truthy()?;
+            if written != first {
+                return Ok(false);
+            }
+            first = false;
+        }
+        let found = binding.call_method1("_get_operation_overload", (qualified, overload))?;
+        if first || found.is_none() {
+            return Ok(false);
+        }
+        let seeded = py.import("torch")?.getattr("Tag")?.getattr("nondeterministic_seeded")?;
+        Ok(!found.get_item(2)?.contains(seeded)?)
+    };
+    let quiet = !UPDATES_STATISTICS.iter().any(|(op, _)| *op == qualified);
+    let writes = quiet && unsafe { asked(Python::assume_attached()).unwrap_or(false) };
+    unsafe { ffi::PyErr_Clear() };
+    known.borrow_mut().insert(name.to_string(), writes);
+    writes
+}
+
 /// Whether an operator, as the dispatcher names it (`aten::cat`,
 /// `aten::add_.Tensor`), neither writes to an argument nor draws random
 /// numbers: its schema and its tags are asked once.
@@ -2764,13 +2813,7 @@ pub fn pure_operator(name: &str) -> bool {
     if let Some(pure) = known.borrow().get(name) {
         return *pure;
     }
-    let (qualified, overload) = match name.split_once("::").and_then(|(_, rest)| rest.find('.')) {
-        Some(dot) => {
-            let at = name.len() - (name.split_once("::").unwrap().1.len() - dot);
-            (&name[..at], &name[at + 1..])
-        }
-        None => (name, ""),
-    };
+    let (qualified, overload) = overload_of(name);
     let asked = |py: Python<'_>| -> PyResult<bool> {
         let binding = py.import("torch._C")?;
         let schema = binding.call_method1("_get_schema", (qualified, overload))?;
@@ -3317,6 +3360,7 @@ impl Path {
                             }
                         }
                         Op::GetItem(a, k) => ("getitem", none(), free(&[*a, *k]), none()),
+                        Op::SetItem { obj, key, val } => ("setitem", none(), free(&[*obj, *key, *val]), none()),
                         _ => return Err("an operation of the graph has no node".to_string()),
                     };
                     let taken = match gather(&mut operand, &taken) {
@@ -3588,6 +3632,10 @@ pub struct Def {
     /// A list, a dict or an iterator that an instruction of the path made:
     /// the path may change it.
     pub made: bool,
+    /// A tensor whose memory an operation of the path made (it, or one it
+    /// is a view of): nothing outside the path has it, and an operation
+    /// that writes to it is an operation of the graph.
+    pub own: bool,
 }
 
 /// The binary operators a graph computes on integers: + - * // %.
@@ -3975,7 +4023,7 @@ fn define(unit: &Unit, cx: &PassCx, roles: &[Role], defs: &mut HashMap<V, Def>, 
     }
     if inst.dst != NONE {
         let graph = late && !node && computes(&inst.op, defs, cx, unit);
-        defs.insert(inst.dst, Def { node, late, graph, made: false });
+        defs.insert(inst.dst, Def { node, late, graph, made: false, own: false });
     }
     true
 }
@@ -4220,6 +4268,7 @@ pub struct Mark {
     /// a call it went into.
     pub frames: usize,
     pins: usize,
+    inplace: bool,
     body: usize,
     values: usize,
     nodes: usize,
@@ -4256,6 +4305,8 @@ pub struct Trace {
     pub shape: Vec<u32>,
     pub rec: Recording,
     pub mark: Option<Mark>,
+    /// An operation of the path writes to a tensor in place.
+    pub inplace: bool,
     /// See `Path::first`.
     pub first: Option<(usize, u32)>,
     /// Per inlined call the trace is in, in its first function: how many
@@ -4349,6 +4400,7 @@ impl Trace {
             rec: Recording { values: vec![null_mut()], kept: HashMap::new(), nodes: Vec::new(), failed: None, wrote: false },
             abandoned: None,
             mark: None,
+            inplace: false,
             first: None,
             inlined: Vec::new(),
             lost: false,
@@ -4715,7 +4767,7 @@ impl Trace {
         let mut late = false;
         reads(&op, |v| late |= self.defs[v as usize].late);
         let graph = late && computed(&op, &self.defs, |_| false);
-        let dst = self.value(Def { node: false, late, graph, made }, kept);
+        let dst = self.value(Def { node: false, late, graph, made, own: false }, kept);
         self.push(op, dst, kind, bc);
         dst
     }
@@ -4746,6 +4798,7 @@ impl Trace {
             at,
             frames,
             pins: self.pins.len(),
+            inplace: self.inplace,
             body: self.body.len(),
             values: self.defs.len(),
             nodes: self.rec.nodes.len(),
@@ -4775,6 +4828,7 @@ impl Trace {
         };
         self.body.truncate(mark.body);
         self.pins.truncate(mark.pins);
+        self.inplace = mark.inplace;
         if self.operators.is_empty() {
             self.first = None;
         }
@@ -4853,6 +4907,7 @@ pub fn renamed(op: &Op, f: &mut impl FnMut(V) -> V) -> Option<Op> {
         Op::ImportName { name, fromlist, level } => {
             Op::ImportName { name: *name, fromlist: f(*fromlist), level: f(*level) }
         }
+        Op::SetItem { obj, key, val } => Op::SetItem { obj: f(*obj), key: f(*key), val: f(*val) },
         Op::ListAppend(a, b) => Op::ListAppend(f(*a), f(*b)),
         Op::ListExtend(a, b) => Op::ListExtend(f(*a), f(*b)),
         Op::DictMerge(a, b, c) => Op::DictMerge(f(*a), f(*b), f(*c)),

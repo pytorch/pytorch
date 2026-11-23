@@ -257,9 +257,9 @@ What ends a path:
 
 - a call that the path does not go into ("Paths across calls" below says
   which), or of something that is no operation, like `print`;
-- an operation that writes to one of its arguments or draws random numbers,
-  one with several results (`x.split(2)`, `torch.max(x, 0)`), a store into
-  an object or a subscript;
+- an operation that writes to a tensor from outside the path or draws random
+  numbers, one with several results (`x.chunk(2)`, `torch.max(x, 0)`), a
+  store into an object ("Writes" below);
 - a number read from a tensor (`x.item()`, `float(x)`), and with it a branch
   on the data of a tensor;
 - an instruction that could run Python code on the values of this call: a
@@ -1184,6 +1184,128 @@ so the last bits of a result may differ, and `torch.vm.is_exact` is false
 for a list with one of these passes in it (and for a list with a pass of
 one's own, which is not taken to be exact).
 
+### Writes
+
+An operation that writes to a tensor is an operation of a graph where the
+tensor is one that the path made itself: what an operation of the path
+gave, or a view of that. Nothing outside the path has such a tensor before
+the path ends, so the write is the graph's own. That holds for the in-place
+operators (`y.add_(1)`, `y += z`, `torch.relu_(y)`, `nn.ReLU(inplace=True)`,
+`F.leaky_relu(y, 0.1, inplace=True)`), for a write through a view
+(`y[:, :2].mul_(3)`), for a store into a subscript (`y[0] = 0.0`), and for
+`torch.tensor([...])`, which writes to what it makes:
+
+```python
+def writes(x):
+    y = x.sin() * 2
+    y.add_(1)
+    y[0] = 0.0
+    half = y[:, :2]
+    half.mul_(3)
+    return y.cos().sum(), y, half
+
+
+g = torch.vm(writes, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), show))
+x = torch.randn(4, 4)
+for _ in range(6):
+    got, expected = g(x), writes(x)
+[torch.equal(a, b) for a, b in zip(got, expected)]  # [True, True, True]
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+found["ops"], found["hits"], found["why"]  # (8, 4, 'the function returns')
+print(shown[-1][0])
+# def forward(self, x):
+#     sin_default = torch.ops.aten.sin.default(x);  x = None
+#     mul_tensor = torch.ops.aten.mul.Tensor(sin_default, 2);  sin_default = None
+#     add__tensor = torch.ops.aten.add_.Tensor(mul_tensor, 1, alpha = 1);  add__tensor = None
+#     mul_tensor[0] = 0.0;  setitem = mul_tensor;  setitem = None
+#     getitem = mul_tensor[(slice(None, None, None), slice(None, 2, None))]
+#     mul__tensor = torch.ops.aten.mul_.Tensor(getitem, 3);  mul__tensor = None
+#     cos_default = torch.ops.aten.cos.default(mul_tensor)
+#     sum_default = torch.ops.aten.sum.default(cos_default, dtype = None);  cos_default = None
+#     return (mul_tensor, getitem, sum_default)
+got[2]._base is got[1]  # True
+```
+
+The graph a pass is given has the writes as the function wrote them, in
+their order. A pass that returns the graph has it run as it is, on the
+kernels of eager mode, so what aliases in eager mode aliases here: the view
+that the function returns is a view of the tensor it returns, and a write to
+one shows in the other. `AOTAutograd()` makes the graph functional before it
+traces it and gives the same results bit for bit, with the results aliasing
+as before; `Inductor()` compiles that functional graph:
+
+```python
+g = torch.vm(writes, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), P.AOTAutograd()))
+for _ in range(6):
+    got = g(x)
+[torch.equal(a, b) for a, b in zip(got, writes(x))], got[2]._base is got[1]  # ([True, True, True], True)
+```
+
+Where gradients are recorded, eager mode raises when it goes backward
+through an operation whose saved tensor was written to in place afterwards
+(`y = x.exp(); y.add_(1)`: the derivative of `exp` is its result). A graph
+whose writes a compiler made functional would go backward without a word. So
+before a run with a write in place is exported with gradients on, the
+functions of autograd that its results came from are asked whether what they
+saved is still what it was. Where it is not, calls of that kind are not
+exported: the instructions of the function run, and the error is eager's.
+The same holds where that cannot be shown: the functions are followed back
+through 4096 of them, and a run with a longer history is not exported
+(`what autograd saved is not looked at behind 4096 functions`). The same
+function without gradients is a graph:
+
+```python
+def saves(x):
+    y = x.exp()
+    y.add_(1)
+    return (y * 2).sin().cos().sum()
+
+
+g = torch.vm(saves, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), P.AOTAutograd()))
+for _ in range(6):
+    loss = g(torch.randn(4, requires_grad=True))
+try:
+    loss.backward()
+except RuntimeError as error:
+    said = str(error)
+"modified by an inplace operation" in said  # True
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+found["state"], found["reason"]  # ('vm', 'a tensor that autograd saved is written in place')
+with torch.no_grad():
+    for _ in range(6):
+        same = torch.equal(g(x), saves(x))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["state"], found["ops"], found["hits"]  # (True, 'compiled', 6, 5)
+```
+
+A write to a tensor that comes from outside the path ends the path in front
+of it: an argument of the function or a view of one, a buffer or a parameter
+of a module, the running statistics of a batch norm in training mode. The
+instructions of the function do such a write, once, where the function has
+it, and the next graph starts behind it:
+
+```python
+def outside(x, buffer):
+    y = (x.sin() * 2 + 1).cos()
+    buffer.add_(y.mean())
+    return (y + buffer).exp().tanh().cos().sum()
+
+
+g = torch.vm(outside, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+mine, theirs = torch.zeros(()), torch.zeros(())
+for _ in range(6):
+    same = torch.equal(g(x, mine), outside(x, theirs))
+same, torch.equal(mine, theirs)  # (True, True)
+[(found["ops"], found["why"]) for found in torch.vm.regions(g) if "ops" in found]
+# [(5, 'aten::add_.Tensor writes to an argument'), (5, 'the function returns')]
+```
+
+A store into a Python object ends a path in the same way (an attribute of a
+module or of any other object, `list.append` and `d[k] = v` on a container
+from outside the path), and so does an operation with several results
+(`x.chunk(2)`, `torch.max(x, 0)`). A write that a path takes as an operation is
+not among what `regions` lists as left out.
+
 ### The order of the list
 
 - `Graphs()` can stand anywhere among the passes over a block. It looks at a
@@ -1221,16 +1343,13 @@ What graphs do not do at this stage:
 - A path per way. A function whose calls go many ways through it has a path
   and an export for each, and they share the `max_variants` of the graph.
   So does a loop that goes round another number of times on every call.
-- No effects. An operation that writes to one of its arguments is in no
-  graph, and a call whose operations turn out to write when they are taken
-  down is not exported: a batch norm in training, which updates its running
-  statistics, runs its operations on every call, and the same graph is
-  exported for the calls in eval mode. A store into a subscript (`x[0] =
-  y`) ends a graph, and so does an operation with several results
-  (`x.split(2)`, `torch.max(x, 0)`). A write to a tensor that the path made
-  itself ends it like any other: a model whose layers work in place
-  (`nn.ReLU(inplace=True)`, `x += y`) has its paths end there, which for the
-  models of the usual collections is after one to three operations.
+- No effects outside a path. A write to a tensor from outside the path, a
+  store into an object and an operation with several results end a path
+  ("Writes"), and a call whose operations turn out to have written to what
+  the graph was given is not exported. A batch norm in training mode writes
+  its running statistics after every convolution, so a training step is run
+  by the instructions for the most part, and the same model has its graphs
+  in eval mode.
 - A graph does not take a call in which it would let go of the last
   reference that Python has to a tensor which requires a gradient ("Passes
   over graphs"), also where what the graph gives keeps the history of that
