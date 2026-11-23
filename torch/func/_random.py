@@ -31,10 +31,11 @@ def _as_int64(value: int) -> int:
 def _wrap_scalar_as_float64(
     value: float | torch.Tensor, device: torch.device
 ) -> torch.Tensor:
-    # Wrap as float64 to match the scalar overloads.
+    # Wrap as float64 to match the scalar overloads. torch.full fills on device,
+    # avoiding torch.tensor's host-to-device copy.
     if isinstance(value, torch.Tensor):
         return value
-    return torch.tensor(value, dtype=torch.float64, device=device)
+    return torch.full((), value, dtype=torch.float64, device=device)
 
 
 def key(
