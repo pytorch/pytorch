@@ -35,9 +35,10 @@ under a guard on the function; any other Python function, method or
 handled. A rewritten function runs under a frame of the interpreter that has
 its variables, so what looks for them there finds them: ``locals()``, ``eval``,
 ``exec``, ``super()`` without arguments, a traceback, a debugger. Generators
-and coroutines run in the interpreter, and so does what they call. A Python
-side effect does not split the function: it is one more instruction of the
-graph, between the specialized ones. A whole training step can therefore be one
+and coroutines run in the interpreter, and so does what they call; so does what
+is called while a trace function (``sys.settrace``) is set. A Python side
+effect does not split the function: it is one more instruction of the graph,
+between the specialized ones. A whole training step can therefore be one
 rewritten function, with the same results bit for bit as the interpreter::
 
     @torch.vm
