@@ -1036,6 +1036,28 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = opt_fn(x, y)
         self.assertEqual(res, ref)
 
+    @parametrize("placement", ["shard", "replicate"])
+    def test_dtensor_dynamic_stride_static_shape(self, placement):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        placements = [Shard(2)] if placement == "shard" else [Replicate()]
+
+        # A fixed-size slice along a dynamic dim has a static shape but a
+        # symbolic stride, so its DTensorSpec is not hashable.
+        def fn(x):
+            return (
+                torch.mul(x[:, :2], 2)
+                .redistribute(device_mesh=x.device_mesh, placements=[Replicate()])
+                .to_local()
+            )
+
+        x = DTensor.from_local(torch.rand(2, 6, 4), mesh, placements, run_check=False)
+        torch._dynamo.mark_dynamic(x, 1)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
     def test_dtensor_dynamic_recompiles(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
