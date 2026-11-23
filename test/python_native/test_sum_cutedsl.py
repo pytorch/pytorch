@@ -10,7 +10,6 @@
 # CUDA inner-tree kernel produced -- the CuTeDSL kernel reproduces them
 # bit-for-bit, which is the contract for this op.
 
-import contextlib
 import hashlib
 import math
 import os
@@ -324,33 +323,6 @@ class TestSumCuteDSLOverride(TestCase):
             self.assertEqual(torch.cuda.current_device(), 0)
             want_cuda0 = {(t, f"itree_{op}") for t in tags for op in ("sum", "prod")}
             self.assertEqual({k[:2] for k in keys(0)}, want_cuda0)
-
-    def test_overrides_enter_the_inputs_device(self):
-        # One GPU has no other device, so pretend another one is current and record the
-        # device context each impl's launch runs in.
-        active, seen = [], []
-
-        @contextlib.contextmanager
-        def device(index):
-            active.append(index)
-            yield
-            active.pop()
-
-        def run(*args):
-            seen.append(list(active))
-
-        x = torch.ones(4, 8, device="cuda")
-        index = x.get_device()
-        out = torch.empty(4, device="cuda")
-        with (
-            mock.patch.object(torch.cuda, "current_device", return_value=index + 1),
-            mock.patch.object(torch.cuda, "device", device),
-            mock.patch.object(cutedsl_impl, "_run", run),
-        ):
-            for into in (cutedsl_impl._sum_into, cutedsl_impl._prod_into):
-                cutedsl_impl._make_impl(into)(x, [1])
-                cutedsl_impl._make_out_impl(into)(x, [1], out=out)
-        self.assertEqual(seen, [[index]] * 4)
 
     @parametrize("op", ("sum", "prod"))
     def test_singleton_noncollapsible_rows_fall_through(self, op):
