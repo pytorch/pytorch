@@ -1279,6 +1279,18 @@ enum Form<'a> {
     Property(V, u32),
     Descriptor(V, u32),
     Getattr(V, u32),
+    /// The `__getattribute__` of the class, where it is a Python function:
+    /// every read of an attribute of the object.
+    Getattribute(V, u32),
+    /// A call of what `object.__getattribute__` is when bound to an object
+    /// (`super().__getattribute__(key)`), for a key under which the class
+    /// has a property: the getter. With a name, the callee is what has
+    /// the bound function under that name.
+    Reads { callee: V, name: Option<u32>, key: V },
+    /// `getattr(object, key)`, with or without a default, and
+    /// `hasattr(object, key)`, of an object whose class has a
+    /// `__getattribute__` written in Python: that function.
+    Asks(V, V),
 }
 
 impl Form<'_> {
@@ -1290,6 +1302,9 @@ impl Form<'_> {
             Form::Property(..) => "a property",
             Form::Descriptor(..) => "a descriptor",
             Form::Getattr(..) => "a __getattr__",
+            Form::Getattribute(..) => "a __getattribute__",
+            Form::Reads { .. } => "a property behind object.__getattribute__",
+            Form::Asks(..) => "a __getattribute__ behind getattr",
         }
     }
 }
@@ -3768,6 +3783,7 @@ impl Compiled {
                     Part::Receiver if ffi::Py_TYPE(held) == std::ptr::addr_of_mut!(pyffi::PyMethod_Type) => {
                         new_ref(pyffi::PyMethod_Self(held))
                     }
+                    Part::Receiver => graph::generic_reader(held),
                     Part::Target => self.target(held).map_or(null_mut(), |(func, ..)| new_ref(func)),
                     Part::Type => new_ref(ffi::Py_TYPE(held) as Obj),
                     Part::OfType(name) => {
@@ -4978,6 +4994,18 @@ impl Compiled {
             Op::BuildString(vs) => {
                 vs.iter().all(|v| !at(*v).is_null() && !capi::is_unboxed(at(*v)) && ffi::PyUnicode_CheckExact(at(*v)) != 0)
             }
+            // `super()` with the class of the function and an instance of
+            // it: nothing is asked of the object.
+            Op::SuperObject { global_super, class, this, .. } => {
+                let plain = |o: Obj| !o.is_null() && !capi::is_unboxed(o);
+                let (callee, class, this) = (at(*global_super), at(*class), at(*this));
+                callee == std::ptr::addr_of_mut!(ffi::PySuper_Type) as Obj
+                    && plain(class)
+                    && plain(this)
+                    && ffi::PyType_Check(class) != 0
+                    && ffi::PyType_Check(this) == 0
+                    && ffi::PyType_IsSubtype(ffi::Py_TYPE(this), class as *mut ffi::PyTypeObject) != 0
+            }
             Op::DictMerge(d, more, _) => graph::quiet_merge(at(*d), at(*more)),
             Op::ImportName { name, fromlist, level } => {
                 let f = &self.func;
@@ -5078,7 +5106,7 @@ impl Compiled {
                             Assert::Enters(..) => "the function a call enters",
                             Assert::Iterator(_) | Assert::Count(_) | Assert::Flag(_) => "what a function of a class returned",
                             Assert::Absent(..) => "an attribute left to __getattr__",
-                            Assert::Lacks(..) => "a class without a __len__",
+                            Assert::Lacks(..) => "a class without a __getattr__",
                             Assert::Sequence(..) | Assert::Keys(..) => "what a call spreads",
                             Assert::Equals(..) => "the place of an item",
                             Assert::Is(..) => "an object that is computed with behind the callable",
@@ -6582,6 +6610,11 @@ impl Compiled {
                 }
             }
         }
+        if let Op::SuperObject { global_super, .. } = &renamed {
+            // What made it is the builtin, at every call.
+            let builtin = PyObj::from_borrowed(std::ptr::addr_of_mut!(ffi::PySuper_Type) as Obj);
+            t.check(Assert::Is(*global_super, builtin), inst.bc);
+        }
         if let (Op::LoadDeref(cell), false) = (&inst.op, t.outermost()) {
             // The closure of a called function is that of the function the
             // call was found to enter.
@@ -7196,6 +7229,14 @@ impl Compiled {
             Op::StoreAttr { .. } | Op::SetItem { .. } | Op::Hold(_) => return None,
             Op::LoadAttr(a, name) => {
                 let held = reg(regs, *a);
+                // What `super()` gave reads of the classes: no store of the
+                // path under the name is looked through.
+                let name_of = f.consts[*name as usize].as_ptr();
+                let bound = !held.is_null() && !capi::is_unboxed(held) && ffi::Py_TYPE(held) == std::ptr::addr_of_mut!(ffi::PySuper_Type);
+                let named = |store: &graph::Stored| store.key.as_ref().is_some_and(|key| graph::same_value(key.as_ptr(), name_of));
+                if bound && t.stores.iter().any(named) {
+                    return ends();
+                }
                 return match self.stored(t, regs, *a, f.consts[*name as usize].as_ptr(), true, inst.bc) {
                     Behind::Clear => None,
                     Behind::Ends => ends(),
@@ -7246,6 +7287,22 @@ impl Compiled {
                 let name = reg(regs, args[1]);
                 let named = !name.is_null() && !capi::is_unboxed(name) && ffi::PyUnicode_CheckExact(name) != 0;
                 if !named || !matches!(self.stored(t, regs, args[0], name, true, inst.bc), Behind::Clear) {
+                    return ends();
+                }
+            }
+            // What `object.__getattribute__` reads of the object it is
+            // bound to is not looked for among the stores.
+            Op::Call { callee, .. } if !reg(regs, *callee).is_null() => {
+                let reader = graph::generic_reader(reg(regs, *callee));
+                xdecref(reader);
+                if !reader.is_null() {
+                    return ends();
+                }
+            }
+            Op::CallMethod { recv, name, .. } => {
+                let held = reg(regs, *recv);
+                let bound = !held.is_null() && !capi::is_unboxed(held) && ffi::Py_TYPE(held) == std::ptr::addr_of_mut!(ffi::PySuper_Type);
+                if bound && graph::same_value(f.consts[*name as usize].as_ptr(), graph::specials().getattribute.as_ptr()) {
                     return ends();
                 }
             }
@@ -7414,6 +7471,11 @@ impl Compiled {
             Op::Call { callee, args, kwnames } => {
                 let held = reg(regs, *callee);
                 let plain = *kwnames == NONE && !held.is_null() && !capi::is_unboxed(held);
+                let reader = if plain && args.len() == 1 { graph::generic_reader(held) } else { null_mut() };
+                let key = if reader.is_null() { null_mut() } else { reg(regs, args[0]) };
+                let named = !key.is_null() && !capi::is_unboxed(key) && ffi::PyUnicode_CheckExact(key) != 0;
+                let property = named && !graph::generic_property(reader, key).is_null();
+                xdecref(reader);
                 // A builtin that asks its arguments for an iterator, one of
                 // them through an `__iter__` written in Python, and the
                 // others in C.
@@ -7426,7 +7488,20 @@ impl Compiled {
                 } else {
                     0
                 };
-                if plain && args.len() == 1 && graph::is_len(held) && special(args[0], &names.len) {
+                let asks = plain && (2..=3).contains(&args.len()) && graph::reads_attribute(held) && {
+                    let (object, key) = (reg(regs, args[0]), reg(regs, args[1]));
+                    !object.is_null()
+                        && !key.is_null()
+                        && !capi::is_unboxed(key)
+                        && ffi::PyUnicode_CheckExact(key) != 0
+                        && special(args[0], &names.getattribute)
+                        && pyffi::_PyType_Lookup(ffi::Py_TYPE(object), names.getattr.as_ptr()).is_null()
+                };
+                if property {
+                    Form::Reads { callee: *callee, name: None, key: args[0] }
+                } else if asks {
+                    Form::Asks(args[0], args[1])
+                } else if plain && args.len() == 1 && graph::is_len(held) && special(args[0], &names.len) {
                     Form::Special(&names.len, args[0], None)
                 } else if plain
                     && args.len() == 2
@@ -7443,14 +7518,45 @@ impl Compiled {
                 }
             }
             Op::CallMethod { recv, name, args, kwnames } => {
-                Form::Method { recv: *recv, name: *name, args, kwnames: *kwnames }
+                // `super().__getattribute__(key)` for a key that is a property.
+                let held = reg(regs, *recv);
+                let load = Op::LoadAttr(*recv, *name);
+                let bound = *kwnames == NONE
+                    && args.len() == 1
+                    && !held.is_null()
+                    && !capi::is_unboxed(held)
+                    && ffi::Py_TYPE(held) == std::ptr::addr_of_mut!(ffi::PySuper_Type)
+                    && self.quiet(regs, &load, api);
+                let found = if bound { self.exec_op(regs, &load).unwrap_or(null_mut()) } else { null_mut() };
+                ffi::PyErr_Clear();
+                let reader = graph::generic_reader(found);
+                let key = reg(regs, args.first().copied().unwrap_or(NONE));
+                let named = !reader.is_null() && !key.is_null() && !capi::is_unboxed(key) && ffi::PyUnicode_CheckExact(key) != 0;
+                let property = named && !graph::generic_property(reader, key).is_null();
+                xdecref(reader);
+                xdecref(found);
+                if property {
+                    Form::Reads { callee: *recv, name: Some(*name), key: args[0] }
+                } else {
+                    Form::Method { recv: *recv, name: *name, args, kwnames: *kwnames }
+                }
             }
             Op::CallEx { callee, args, kwargs } => Form::Spread { callee: *callee, args: *args, kwargs: *kwargs },
             Op::GetIter(v) if special(*v, &names.iter) => Form::Special(&names.iter, *v, None),
             Op::GetItem(a, key) if special(*a, &names.getitem) => Form::Special(&names.getitem, *a, Some(*key)),
+            Op::Contains(item, container, _) if special(*container, &names.contains) => {
+                Form::Special(&names.contains, *container, Some(*item))
+            }
             Op::LoadAttr(a, name) if !reg(regs, *a).is_null() && !self.quiet(regs, &inst.op, api) => {
                 let descr = graph::data_descriptor(reg(regs, *a), f.consts[*name as usize].as_ptr());
-                if descr.is_null() {
+                if special(*a, &names.getattribute) {
+                    // With a `__getattr__` behind it, what it raises is not
+                    // what the read raises.
+                    if !pyffi::_PyType_Lookup(ffi::Py_TYPE(reg(regs, *a)), names.getattr.as_ptr()).is_null() {
+                        return None;
+                    }
+                    Form::Getattribute(*a, *name)
+                } else if descr.is_null() {
                     Form::Getattr(*a, *name)
                 } else if ffi::Py_TYPE(descr) == std::ptr::addr_of_mut!(ffi::PyProperty_Type) {
                     Form::Property(*a, *name)
@@ -7460,7 +7566,7 @@ impl Compiled {
             }
             _ => return None,
         };
-        let (result, value) = match self.follow(t, site, at, regs, frames, api, &form) {
+        let (mut result, mut value) = match self.follow(t, site, at, regs, frames, api, &form) {
             Followed::Not => return None,
             Followed::Raised => return Some(Taken::Raised),
             // The function ran to its end off the path, which ends in front
@@ -7469,6 +7575,17 @@ impl Compiled {
             Followed::Left(result, reason) => return Some(Taken::Cut(self.makes_of(&form, inst, regs, result), reason)),
             Followed::Returned(result, value) => (result, value),
         };
+        if let (Form::Asks(..), Op::Call { callee, .. }) = (&form, &inst.op) {
+            // What was called is the builtin at every call; `hasattr`
+            // gives that the attribute is there.
+            let builtin = self.path_value(t, regs, *callee);
+            t.check(Assert::Is(builtin, PyObj::from_borrowed(reg(regs, *callee))), inst.bc);
+            if graph::is_hasattr(reg(regs, *callee)) {
+                ffi::Py_DECREF(result);
+                result = new_ref(ffi::Py_True());
+                value = t.derive(Op::Object(PyObj::from_borrowed(ffi::Py_True())), Kind::Pure, false, new_ref(ffi::Py_True()), inst.bc);
+            }
+        }
         // What the interpreter makes of what such a function returns. A path
         // goes on where that is the value itself under a check the path can
         // make at every call (an iterator, a count, a bool); anything else
@@ -7481,6 +7598,8 @@ impl Compiled {
                 (graph::is_count(result), Assert::Count(value), "a __len__ returns what is no count")
             } else if std::ptr::eq(*name, &names.instancecheck) {
                 (flag, Assert::Flag(value), "an __instancecheck__ returns what is no bool")
+            } else if std::ptr::eq(*name, &names.contains) {
+                (flag, Assert::Flag(value), "a __contains__ returns what is no bool")
             } else {
                 (true, Assert::Flag(NONE), "")
             };
@@ -7489,6 +7608,13 @@ impl Compiled {
             }
             if !why.is_empty() {
                 t.check(check, inst.bc);
+            }
+            // `not in` is whether what was returned is not true.
+            if std::ptr::eq(*name, &names.contains) && matches!(inst.op, Op::Contains(_, _, true)) {
+                let flipped = if result == ffi::Py_True() { ffi::Py_False() } else { ffi::Py_True() };
+                ffi::Py_DECREF(result);
+                result = new_ref(flipped);
+                value = t.derive(Op::Unary(UnaryKind::Not, value), Kind::Pure, false, new_ref(flipped), inst.bc);
             }
         }
         t.unmark();
@@ -7511,12 +7637,14 @@ impl Compiled {
     /// function on which the path does not go on comes through here:
     /// `iter` and `for` raise for what is no iterator; `len` gives the
     /// index of what `__len__` returned as an int and raises for a negative
-    /// one; `isinstance` gives whether what was returned is true; a read
-    /// of an attribute whose property or descriptor raised AttributeError
-    /// asks the `__getattr__` of the class, if it has one. Any other
-    /// instruction gives what the function returned, and raises what it
-    /// raised. Takes the reference to `result`; gives one, or null with
-    /// the error set.
+    /// one; `isinstance`, `in` and `not in` give whether what was returned
+    /// is true (or is not); `hasattr` gives whether the function returned,
+    /// and it and `getattr` with a default make their answer of an
+    /// AttributeError; a read of an attribute whose property or descriptor
+    /// raised AttributeError asks the `__getattr__` of the class, if it
+    /// has one. Any other instruction gives what the function returned,
+    /// and raises what it raised. Takes the reference to `result`; gives
+    /// one, or null with the error set.
     unsafe fn makes_of(&self, form: &Form, inst: &Inst, regs: &mut [Obj], result: Obj) -> Obj {
         let names = graph::specials();
         let truth = |result: Obj, invert: bool| {
@@ -7525,6 +7653,21 @@ impl Compiled {
             if truth < 0 { null_mut() } else { new_ref(py_bool((truth != 0) != invert)) }
         };
         match (form, &inst.op) {
+            (Form::Asks(..), Op::Call { callee, args, .. }) => {
+                let whether = graph::is_hasattr(reg(regs, *callee));
+                if !result.is_null() {
+                    if whether {
+                        ffi::Py_DECREF(result);
+                        return new_ref(ffi::Py_True());
+                    }
+                    return result;
+                }
+                if (whether || args.len() == 3) && ffi::PyErr_ExceptionMatches(ffi::PyExc_AttributeError) != 0 {
+                    ffi::PyErr_Clear();
+                    return new_ref(if whether { ffi::Py_False() } else { self.obj(regs, args[2]) });
+                }
+                null_mut()
+            }
             (Form::Property(v, name) | Form::Descriptor(v, name), _) if result.is_null() => {
                 self.asks_getattr(reg(regs, *v), self.func.consts[*name as usize].as_ptr())
             }
@@ -7539,6 +7682,9 @@ impl Compiled {
             }
             (Form::Special(name, ..), _) if std::ptr::eq(*name, &names.len) => counted(result),
             (Form::Special(name, ..), _) if std::ptr::eq(*name, &names.instancecheck) => truth(result, false),
+            (Form::Special(name, ..), op) if std::ptr::eq(*name, &names.contains) => {
+                truth(result, matches!(op, Op::Contains(_, _, true)))
+            }
             _ => result,
         }
     }
@@ -7821,6 +7967,44 @@ impl Compiled {
                 items.extend([reg(regs, *v), attr]);
                 graph::special(items[0], &names.getattr)
             }
+            Form::Getattribute(v, name) => {
+                items.extend([reg(regs, *v), f.consts[*name as usize].as_ptr()]);
+                graph::special(items[0], &names.getattribute)
+            }
+            Form::Asks(v, key) => {
+                items.extend([reg(regs, *v), reg(regs, *key)]);
+                graph::special(items[0], &names.getattribute)
+            }
+            Form::Reads { callee, name, key } => {
+                let wrapper = match name {
+                    None => new_ref(reg(regs, *callee)),
+                    Some(name) => {
+                        let load = Op::LoadAttr(*callee, *name);
+                        let found = if self.quiet(regs, &load, api) { self.exec_op(regs, &load).unwrap_or(null_mut()) } else { null_mut() };
+                        ffi::PyErr_Clear();
+                        found
+                    }
+                };
+                if wrapper.is_null() {
+                    return Followed::Not;
+                }
+                read.push(PyObj::from_owned(wrapper));
+                called = wrapper;
+                let bound = graph::generic_reader(wrapper);
+                if bound.is_null() {
+                    return Followed::Not;
+                }
+                read.push(PyObj::from_owned(bound));
+                descr = graph::generic_property(bound, reg(regs, *key));
+                let getter = if descr.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(descr, c"fget".as_ptr()) };
+                if getter.is_null() {
+                    ffi::PyErr_Clear();
+                    return Followed::Not;
+                }
+                read.push(PyObj::from_owned(getter));
+                items.push(bound);
+                getter
+            }
         };
         if func.is_null() || ffi::PyFunction_Check(func) == 0 {
             return not("it comes down to no Python function");
@@ -7987,6 +8171,34 @@ impl Compiled {
                 let attr = t.derive(Op::Const(*name), Kind::Pure, false, new_ref(items[1]), bc);
                 given.extend([value, attr]);
                 t.derive(Op::Part(Part::OfType(names.getattr.clone()), value), Kind::Read, false, new_ref(func), bc)
+            }
+            Form::Getattribute(v, name) => {
+                let value = self.path_value(t, regs, *v);
+                t.check(Assert::Lacks(value, names.getattr.clone()), bc);
+                let attr = t.derive(Op::Const(*name), Kind::Pure, false, new_ref(items[1]), bc);
+                given.extend([value, attr]);
+                t.derive(Op::Part(Part::OfType(names.getattribute.clone()), value), Kind::Read, false, new_ref(func), bc)
+            }
+            Form::Asks(v, key) => {
+                let value = self.path_value(t, regs, *v);
+                t.check(Assert::Lacks(value, names.getattr.clone()), bc);
+                let attr = self.path_value(t, regs, *key);
+                given.extend([value, attr]);
+                t.derive(Op::Part(Part::OfType(names.getattribute.clone()), value), Kind::Read, false, new_ref(func), bc)
+            }
+            Form::Reads { callee, name, key } => {
+                // The key is the one the property was found under.
+                let asked = self.path_value(t, regs, *key);
+                t.check(Assert::Equals(asked, PyObj::from_borrowed(reg(regs, *key))), bc);
+                let mut reader = self.path_value(t, regs, *callee);
+                if let Some(name) = name {
+                    reader = t.derive(Op::LoadAttr(reader, *name), Kind::Read, false, new_ref(called), bc);
+                }
+                let value = t.derive(Op::Part(Part::Receiver, reader), Kind::Read, false, new_ref(items[0]), bc);
+                let part = Part::OfType(PyObj::from_borrowed(reg(regs, *key)));
+                let found = t.derive(Op::Part(part, value), Kind::Read, false, new_ref(descr), bc);
+                given.push(value);
+                t.derive(Op::Part(Part::Getter, found), Kind::Read, false, new_ref(func), bc)
             }
         };
         t.check(Assert::Enters(function, compiled, Self::defaults_of(func)), bc);

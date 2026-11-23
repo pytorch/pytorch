@@ -471,9 +471,9 @@ A path does not go into every call. It ends in front of a call
   calls itself is gone into that often, and an `nn.Sequential` inside an
   `nn.Sequential` is on a path twice;
 - more than 48 calls deep;
-- of a `functools.partial`, of a class (constructing an object), of
-  `super()`, and of a function that was made on the path (a closure that
-  the function defines and calls);
+- of a `functools.partial`, of a class (constructing an object), and of a
+  function that was made on the path (a closure that the function defines
+  and calls);
 - whose arguments do not fit the function: the call raises the `TypeError`
   where the function has it;
 - that hands on `**kwargs` from a dict whose keys are no strs;
@@ -2216,6 +2216,58 @@ A list or a tuple that the path put together of sizes of what the graph
 computes and of numbers from in front of it (`(*x.shape[:-1], -1,
 self.heads)`) is the same in every call where the path checks those numbers,
 which it does when an operation takes such a sequence.
+
+### Classes that read their attributes themselves
+
+A read of an attribute of an object whose class has a `__getattribute__`
+written in Python goes into that function, as a read goes into a property
+("Paths across calls"), unless the class has a `__getattr__` as well: what
+the function raises is then not what the read raises, and such a read is
+left to the interpreter. `super()` in a method is an instruction of a path,
+and `super().method(...)` is followed like any call of a method.
+`super().__getattribute__(key)`, which is the lookup of `object`, is a call
+the path makes where that lookup runs no Python code, and goes into the
+getter where it finds a property. `getattr` and `hasattr` of such an object
+go into the function as a read does: `hasattr` is `True` where the function
+returns, whatever it returns, and where it raises `AttributeError`,
+`hasattr` and `getattr` with a default make their answer of that, and the
+path ends in front of the call. `a in b` goes into a `__contains__` written
+in Python and gives whether what that returned is true, `a not in b` whether
+it is not; the path goes on behind it where that was a bool, and ends in
+front of the instruction for anything else. `hasattr(module, name)` and
+`getattr(module, name, default)` for a name that an `nn.Module` does not
+have are calls a path makes, at every call, so an attribute that appears
+later is seen.
+
+```python
+class Settings:
+    renamed = {"width": "hidden"}
+
+    def __init__(self):
+        self.hidden = 2.0
+
+    def __getattribute__(self, key):
+        if key != "renamed" and key in super().__getattribute__("renamed"):
+            key = super().__getattribute__("renamed")[key]
+        return super().__getattribute__(key)
+
+
+def reads_settings(x, settings):
+    y = (x.sin() + 1).cos()
+    if hasattr(settings, "width"):
+        y = y * settings.width
+    return (y * getattr(settings, "hidden", 1.0)).tanh().exp()
+
+
+settings = Settings()
+g = torch.vm(reads_settings, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(6):
+    same = torch.equal(g(x, settings), reads_settings(x, settings))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["why"]  # (True, 7, 'the function returns')
+settings.hidden = 3.0
+torch.equal(g(x, settings), reads_settings(x, settings))  # True: what the function reads is read at every call
+```
 
 ### The order of the list
 
