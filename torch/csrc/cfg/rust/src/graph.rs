@@ -554,7 +554,7 @@ pub const SETTLED: u32 = 3;
 /// is taken down: how long it is, where it ends and why, and why a run was
 /// not exported.
 pub fn debug() -> bool {
-    static ASKED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    static ASKED: pyffi::Once<bool> = pyffi::Once::new();
     *ASKED.get_or_init(|| std::env::var_os("TORCH_VM_GRAPH_DEBUG").is_some_and(|v| v != "0"))
 }
 
@@ -562,7 +562,7 @@ pub fn debug() -> bool {
 /// an exported form to be taken: what runs in front of the callable, the
 /// callable, and what runs behind it (`GraphSite::times`).
 pub fn timed() -> bool {
-    static ASKED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    static ASKED: pyffi::Once<bool> = pyffi::Once::new();
     *ASKED.get_or_init(|| std::env::var_os("TORCH_VM_GRAPH_TIMES").is_some_and(|v| v != "0"))
 }
 
@@ -898,19 +898,32 @@ impl GraphSite {
             return;
         }
         let known = self.known(&path);
-        let mut paths = self.variants.borrow_mut();
-        let at = known.unwrap_or_else(|| {
-            // A path that was not final makes way for the ones that are.
-            paths.retain(|other| !other.provisional);
-            paths.insert(0, Arc::new(path));
-            self.passing.store(false, Ordering::Relaxed);
-            0
-        });
-        if let Some(form) = form {
-            paths[at].exported.borrow_mut().insert(0, form);
+        // What makes way is let go of behind the borrow: the end of what a
+        // path holds can run code, which may come to this graph.
+        let (mut gone, mut unused) = (Vec::new(), None);
+        {
+            let mut paths = self.variants.borrow_mut();
+            let at = match known {
+                Some(at) => {
+                    unused = Some(path);
+                    at
+                }
+                None => {
+                    // A path that was not final makes way for the ones that are.
+                    let (kept, provisional) = std::mem::take(&mut *paths).into_iter().partition(|other| !other.provisional);
+                    (*paths, gone) = (kept, provisional);
+                    paths.insert(0, Arc::new(path));
+                    self.passing.store(false, Ordering::Relaxed);
+                    0
+                }
+            };
+            if let Some(form) = form {
+                paths[at].exported.borrow_mut().insert(0, form);
+            }
+            let path = paths.remove(at);
+            paths.insert(0, path);
         }
-        let path = paths.remove(at);
-        paths.insert(0, path);
+        drop((gone, unused));
     }
 
     /// Where the graph has a path already: the same instructions, taken
@@ -994,8 +1007,11 @@ impl GraphSite {
     /// forms are dropped and the graph is left to the VM.
     pub fn unsure(&self, what: &str) {
         if self.unsure.fetch_add(1, Ordering::Relaxed) + 1 >= MAX_UNSURE {
-            for path in self.variants.borrow().iter() {
-                path.exported.borrow_mut().clear();
+            // The forms end with nothing borrowed: their end can run code.
+            let paths: Vec<Arc<Path>> = self.variants.borrow().iter().cloned().collect();
+            for path in paths {
+                let forms = std::mem::take(&mut *path.exported.borrow_mut());
+                drop(forms);
             }
             self.give_up(format!("{} could run Python code", what));
         }
@@ -1039,10 +1055,15 @@ impl GraphSite {
         varying.sort_unstable();
         varying.dedup();
         let mut at = 0;
-        forms.retain(|_| {
+        let (gone, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut *forms).into_iter().partition(|_| {
             at += 1;
-            !alike.iter().any(|(k, _)| *k == at - 1)
+            alike.iter().any(|(k, _)| *k == at - 1)
         });
+        *forms = kept;
+        // The forms end with nothing borrowed: their end can run code.
+        drop(forms);
+        drop(paths);
+        drop(gone);
         Some(varying)
     }
 
@@ -1484,7 +1505,7 @@ unsafe fn is_static(ty: *mut ffi::PyTypeObject) -> bool {
 /// A dict of a type that is defined in C and has no `__missing__` (an
 /// `OrderedDict`; not a `defaultdict`, which makes what it lacks).
 unsafe fn is_plain_dict(o: Obj) -> bool {
-    static MISSING: std::sync::OnceLock<PyObj> = std::sync::OnceLock::new();
+    static MISSING: pyffi::Once<PyObj> = pyffi::Once::new();
     if ffi::PyDict_CheckExact(o) != 0 {
         return true;
     }
@@ -1554,15 +1575,9 @@ unsafe fn entry_of(dict: Obj, name: &std::ffi::CStr) -> Result<Obj, ()> {
 /// The class of what `functools.lru_cache` makes of a function, or null
 /// where `functools` was not imported.
 unsafe fn cache_wrapper() -> *mut ffi::PyTypeObject {
-    static WRAPPER: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    static WRAPPER: pyffi::Once<usize> = pyffi::Once::new();
     let found = *WRAPPER.get_or_init(|| {
-        let module = ffi::PyDict_GetItemString(ffi::PyImport_GetModuleDict(), c"functools".as_ptr());
-        let class = if module.is_null() || ffi::PyModule_CheckExact(module) == 0 {
-            null_mut()
-        } else {
-            ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), c"_lru_cache_wrapper".as_ptr())
-        };
-        ffi::PyErr_Clear();
+        let class = pyffi::in_module(pyffi::module(c"functools"), c"_lru_cache_wrapper");
         if class.is_null() || ffi::PyType_Check(class) == 0 { 0 } else { class as usize }
     });
     found as *mut ffi::PyTypeObject
@@ -1751,17 +1766,12 @@ unsafe fn weak_containers() -> Vec<Remover> {
         ((c"_weakrefset", c"WeakSet"), 2, &[WEAKREF]),
         ((c"torch._dynamo.utils", c"ExactWeakKeyDictionary"), 3, &[WEAKREF]),
     ];
-    static FOUND: std::sync::OnceLock<Vec<Remover>> = std::sync::OnceLock::new();
+    static FOUND: pyffi::Once<Vec<Remover>> = pyffi::Once::new();
     if let Some(found) = FOUND.get() {
         return found.clone();
     }
     let class_of = |(module, class): Class| {
-        let module = ffi::PyDict_GetItemString(ffi::PyImport_GetModuleDict(), module.as_ptr());
-        let found = if module.is_null() || ffi::PyModule_Check(module) == 0 {
-            null_mut()
-        } else {
-            ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), class.as_ptr())
-        };
+        let found = pyffi::in_module(pyffi::module(module), class);
         if found.is_null() || ffi::PyType_Check(found) == 0 { null_mut() } else { found }
     };
     // The names a code object uses, and whether it has code of its own
@@ -2064,12 +2074,7 @@ pub unsafe fn holds_unseen(o: Obj) -> bool {
 /// A class by where it is, found once: `module.name`. Null where the
 /// module was not imported or has no such class.
 unsafe fn class_named(module: &std::ffi::CStr, name: &std::ffi::CStr) -> Obj {
-    let module = ffi::PyDict_GetItemString(ffi::PyImport_GetModuleDict(), module.as_ptr());
-    let found = if module.is_null() || ffi::PyModule_Check(module) == 0 {
-        null_mut()
-    } else {
-        ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), name.as_ptr())
-    };
+    let found = pyffi::in_module(pyffi::module(module), name);
     if found.is_null() || ffi::PyType_Check(found) == 0 { null_mut() } else { found }
 }
 
@@ -2102,7 +2107,7 @@ unsafe fn class_named(module: &std::ffi::CStr, name: &std::ffi::CStr) -> Obj {
 /// for as long as a view needs it. They are looked at like what the
 /// tensor refers to, whatever their counts of references say.
 unsafe fn unseen(o: Obj) -> Result<Vec<PyObj>, ()> {
-    static NAMES: std::sync::OnceLock<(PyObj, PyObj)> = std::sync::OnceLock::new();
+    static NAMES: pyffi::Once<(PyObj, PyObj)> = pyffi::Once::new();
     if holds_unseen(o) {
         return Err(());
     }
@@ -2153,13 +2158,11 @@ unsafe fn unseen(o: Obj) -> Result<Vec<PyObj>, ()> {
 /// asked of the tensor through an attribute or a function that torch has
 /// in C; false where one cannot be asked.
 unsafe fn plainly_laid_out(o: Obj) -> bool {
-    static PARTS: std::sync::OnceLock<Option<(PyObj, PyObj, PyObj)>> = std::sync::OnceLock::new();
+    static PARTS: pyffi::Once<Option<(PyObj, PyObj, PyObj)>> = pyffi::Once::new();
     let parts = PARTS.get_or_init(|| {
         let of = |module: &std::ffi::CStr, name: &std::ffi::CStr| {
-            let module = ffi::PyDict_GetItemString(ffi::PyImport_GetModuleDict(), module.as_ptr());
-            let found = if module.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(module, name.as_ptr()) };
-            ffi::PyErr_Clear();
-            (!found.is_null()).then(|| PyObj::from_owned(found))
+            let found = pyffi::in_module(pyffi::module(module), name);
+            (!found.is_null()).then(|| PyObj::from_borrowed(found))
         };
         Some((of(c"torch", c"strided")?, of(c"torch._C._functorch", c"is_functorch_wrapped_tensor")?, of(c"torch", c"_is_functional_tensor")?))
     });
@@ -2188,11 +2191,11 @@ unsafe fn plainly_laid_out(o: Obj) -> bool {
 /// Whether a level of forward-mode differentiation is open on this thread
 /// (`torch.autograd.forward_ad`), or cannot be shown not to be.
 unsafe fn forward_level() -> bool {
-    let module = ffi::PyDict_GetItemString(ffi::PyImport_GetModuleDict(), c"torch.autograd.forward_ad".as_ptr());
-    if module.is_null() || ffi::PyModule_Check(module) == 0 {
+    let module = pyffi::module(c"torch.autograd.forward_ad");
+    if module.is_null() {
         return false;
     }
-    let level = ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), c"_current_level".as_ptr());
+    let level = pyffi::in_module(module, c"_current_level");
     level.is_null() || ffi::PyLong_CheckExact(level) == 0 || ffi::PyLong_AsLong(level) >= 0
 }
 
@@ -2216,7 +2219,7 @@ unsafe fn holds_nothing(o: Obj) -> bool {
     let ty = ffi::Py_TYPE(o);
     let class = ty as Obj;
     if ffi::PyType_GetFlags(ty) & BUILT_IN != 0 {
-        static RANGES: std::sync::OnceLock<[usize; 2]> = std::sync::OnceLock::new();
+        static RANGES: pyffi::Once<[usize; 2]> = pyffi::Once::new();
         let ranges = RANGES.get_or_init(|| {
             // What goes over a range, a short one and a long one.
             let over = |stop: Obj| {
@@ -2393,7 +2396,7 @@ unsafe fn draws_in_c(o: Obj, depth: usize) -> bool {
         into.count += 1;
         0
     }
-    static OWN: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
+    static OWN: pyffi::Once<Vec<usize>> = pyffi::Once::new();
     if o.is_null() || capi::is_unboxed(o) {
         return false;
     }
@@ -2831,12 +2834,11 @@ pub unsafe fn quiet_import(builtins: Obj, name: Obj, fromlist: Obj, level: Obj) 
         let Ok(name) = std::ffi::CString::new(name) else {
             return false;
         };
-        let module = ffi::PyDict_GetItemString(ffi::PyImport_GetModuleDict(), name.as_ptr());
+        let module = pyffi::module(&name);
         if module.is_null() || ffi::PyModule_CheckExact(module) == 0 {
-            ffi::PyErr_Clear();
             return false;
         }
-        let spec = ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), c"__spec__".as_ptr());
+        let spec = pyffi::in_module(module, c"__spec__");
         let slot = if spec.is_null() { std::ptr::null_mut() } else { pyffi::_PyObject_GetDictPtr(spec) };
         let done = !slot.is_null()
             && !(*slot).is_null()
@@ -2886,13 +2888,10 @@ pub unsafe fn quiet_truth(o: Obj) -> bool {
 /// to it in place would (`torch._C._increment_version`, which takes the
 /// tensors to do it for).
 pub unsafe fn move_version(tensor: Obj, count: u64) {
-    static BUMP: std::sync::OnceLock<Option<PyObj>> = std::sync::OnceLock::new();
+    static BUMP: pyffi::Once<Option<PyObj>> = pyffi::Once::new();
     let bump = BUMP.get_or_init(|| {
-        let module = ffi::PyImport_ImportModule(c"torch._C".as_ptr());
-        let found = if module.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(module, c"_increment_version".as_ptr()) };
-        xdecref(module);
-        ffi::PyErr_Clear();
-        (!found.is_null()).then(|| PyObj::from_owned(found))
+        let found = pyffi::in_module(pyffi::module(c"torch._C"), c"_increment_version");
+        (!found.is_null()).then(|| PyObj::from_borrowed(found))
     });
     let Some(bump) = bump else {
         return;
@@ -3089,25 +3088,37 @@ const BUILTINS: [(&std::ffi::CStr, Builtin); 19] = [
     (c"str", Builtin::Str),
 ];
 
-/// The address of one of them.
+/// The address of one of them: of a class, where the interpreter has it;
+/// of a function, what the module `builtins` has under the name if that is
+/// the function of C that the module was made with (not one that was put
+/// there in its place), and 0 otherwise. Kept once every one is found.
 unsafe fn builtin_named(which: Builtin) -> usize {
-    static FOUND: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
-    let found = FOUND.get_or_init(|| {
-        let module = ffi::PyImport_ImportModule(c"builtins".as_ptr());
-        let found = BUILTINS
-            .iter()
-            .map(|(name, _)| {
-                let function = if module.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(module, name.as_ptr()) };
-                // The module keeps it.
-                xdecref(function);
-                function as usize
-            })
-            .collect();
-        ffi::PyErr_Clear();
-        xdecref(module);
-        found
-    });
-    found[BUILTINS.iter().position(|(_, other)| *other == which).unwrap()]
+    static FOUND: pyffi::Once<Vec<usize>> = pyffi::Once::new();
+    let at = BUILTINS.iter().position(|(_, other)| *other == which).unwrap();
+    if let Some(found) = FOUND.get() {
+        return found[at];
+    }
+    let class = |which: Builtin| -> Option<*mut ffi::PyTypeObject> {
+        Some(match which {
+            Builtin::Range => std::ptr::addr_of_mut!(ffi::PyRange_Type),
+            Builtin::Enumerate => std::ptr::addr_of_mut!(ffi::PyEnum_Type),
+            Builtin::Zip => std::ptr::addr_of_mut!(ffi::PyZip_Type),
+            Builtin::Int => std::ptr::addr_of_mut!(ffi::PyLong_Type),
+            Builtin::Float => std::ptr::addr_of_mut!(ffi::PyFloat_Type),
+            Builtin::Bool => std::ptr::addr_of_mut!(ffi::PyBool_Type),
+            Builtin::Tuple => std::ptr::addr_of_mut!(ffi::PyTuple_Type),
+            Builtin::List => std::ptr::addr_of_mut!(ffi::PyList_Type),
+            Builtin::Type => std::ptr::addr_of_mut!(ffi::PyType_Type),
+            Builtin::Str => std::ptr::addr_of_mut!(ffi::PyUnicode_Type),
+            _ => return None,
+        })
+    };
+    let found: Vec<usize> = BUILTINS.iter().map(|(name, which)| class(*which).map_or_else(|| pyffi::builtin(name) as usize, |class| class as usize)).collect();
+    let asked = found[at];
+    if found.iter().all(|address| *address != 0) {
+        FOUND.set(found);
+    }
+    asked
 }
 
 /// Whether an object is code of a generator (and of no coroutine, nor of
@@ -3172,7 +3183,7 @@ pub unsafe fn is_len(callee: Obj) -> bool {
 /// itself.
 pub unsafe fn goes_over(callee: Obj, args: &[Obj]) -> usize {
     const TAKE: [Builtin; 5] = [Builtin::Enumerate, Builtin::Zip, Builtin::Iter, Builtin::List, Builtin::Tuple];
-    static HINT: std::sync::OnceLock<PyObj> = std::sync::OnceLock::new();
+    static HINT: pyffi::Once<PyObj> = pyffi::Once::new();
     let Some(which) = TAKE.iter().copied().find(|which| builtin_named(*which) == callee as usize) else {
         return 0;
     };
@@ -3226,15 +3237,11 @@ struct AbcData {
 /// imported.
 #[cfg(not(Py_3_13))]
 unsafe fn abc_parts() -> Option<(usize, usize, usize)> {
-    static FOUND: std::sync::OnceLock<(usize, usize, usize)> = std::sync::OnceLock::new();
+    static FOUND: pyffi::Once<(usize, usize, usize)> = pyffi::Once::new();
     if let Some(found) = FOUND.get() {
         return Some(*found);
     }
-    let modules = ffi::PyImport_GetModuleDict();
-    let of = |module: &std::ffi::CStr, name: &std::ffi::CStr| {
-        let module = ffi::PyDict_GetItemString(modules, module.as_ptr());
-        if module.is_null() || ffi::PyModule_Check(module) == 0 { null_mut() } else { ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), name.as_ptr()) }
-    };
+    let of = |module: &std::ffi::CStr, name: &std::ffi::CStr| pyffi::in_module(pyffi::module(module), name);
     let (check, token, base) = (of(c"_abc", c"_abc_instancecheck"), of(c"_abc", c"get_cache_token"), of(c"abc", c"ABC"));
     let builtin = |o: Obj| !o.is_null() && ffi::PyCFunction_Check(o) != 0;
     if !builtin(check) || !builtin(token) || base.is_null() || ffi::PyType_Check(base) == 0 {
@@ -3264,7 +3271,7 @@ unsafe fn abc_parts() -> Option<(usize, usize, usize)> {
 /// any other call: the builtin then asks `__subclasscheck__`.
 #[cfg(not(Py_3_13))]
 pub unsafe fn abc_kept(callee: Obj, args: &[Obj], api: &TcfgApi) -> Option<bool> {
-    static NAMES: std::sync::OnceLock<(PyObj, PyObj)> = std::sync::OnceLock::new();
+    static NAMES: pyffi::Once<(PyObj, PyObj)> = pyffi::Once::new();
     let (check, token, data) = abc_parts()?;
     if callee as usize != check || args.len() != 2 || args.iter().any(|o| o.is_null() || capi::is_unboxed(*o)) {
         return None;
@@ -3347,15 +3354,10 @@ pub unsafe fn abc_kept(callee: Obj, args: &[Obj], api: &TcfgApi) -> Option<bool>
 /// those that ask about the state of the thread or of what they are given)
 /// or on numbers (`math`).
 unsafe fn quiet_modules() -> (usize, usize, usize) {
-    static FOUND: std::sync::OnceLock<(usize, usize, usize)> = std::sync::OnceLock::new();
+    static FOUND: pyffi::Once<(usize, usize, usize)> = pyffi::Once::new();
     *FOUND.get_or_init(|| {
-        let [state, math, operator] = [c"torch._C", c"math", c"_operator"].map(|name| {
-            let module = ffi::PyImport_ImportModule(name.as_ptr());
-            // The interpreter keeps it.
-            xdecref(module);
-            module as usize
-        });
-        ffi::PyErr_Clear();
+        // The interpreter keeps them.
+        let [state, math, operator] = [c"torch._C", c"math", c"_operator"].map(|name| pyffi::module(name) as usize);
         (state, math, operator)
     })
 }
@@ -3465,7 +3467,7 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
             named && (quiet_attr(args[0], args[1], api) || (caught && absent()))
         }
         Builtin::IsInstance => {
-            static CLASS: std::sync::OnceLock<PyObj> = std::sync::OnceLock::new();
+            static CLASS: pyffi::Once<PyObj> = pyffi::Once::new();
             let name = CLASS.get_or_init(|| PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__class__".as_ptr())));
             // A class whose instances `type` itself tells; any class tells
             // what is exactly of it without being asked.
@@ -3569,7 +3571,7 @@ pub struct Specials {
 }
 
 pub unsafe fn specials() -> &'static Specials {
-    static NAMES: std::sync::OnceLock<Specials> = std::sync::OnceLock::new();
+    static NAMES: pyffi::Once<Specials> = pyffi::Once::new();
     let name = |name: &std::ffi::CStr| PyObj::from_owned(ffi::PyUnicode_InternFromString(name.as_ptr()));
     NAMES.get_or_init(|| Specials {
         new: name(c"__new__"),
@@ -3775,7 +3777,7 @@ pub unsafe fn plainly_absent(obj: Obj, name: Obj) -> bool {
 /// `None.__getattribute__`, against what its attributes say); (0, 0)
 /// where it has not.
 unsafe fn generic_wrapper() -> (usize, usize) {
-    static FOUND: std::sync::OnceLock<(usize, usize)> = std::sync::OnceLock::new();
+    static FOUND: pyffi::Once<(usize, usize)> = pyffi::Once::new();
     *FOUND.get_or_init(|| {
         let names = specials();
         let bound = ffi::PyObject_GetAttr(ffi::Py_None(), names.getattribute.as_ptr());
@@ -3857,7 +3859,7 @@ pub unsafe fn holds_generic(callee: Obj, name: Obj, found: &mut Obj, api: &TcfgA
 /// key and a dict whose keys are all plain: the entry, or the default.
 /// False for every other callee and call.
 pub unsafe fn holds_get(callee: Obj, key: Obj, default: Obj, found: &mut Obj) -> bool {
-    static GET: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    static GET: pyffi::Once<usize> = pyffi::Once::new();
     if callee.is_null() || capi::is_unboxed(callee) || ffi::PyCFunction_Check(callee) == 0 {
         return false;
     }
@@ -3903,7 +3905,7 @@ pub unsafe fn generic_reader(callee: Obj) -> Obj {
         ffi::Py_XINCREF(held);
         return held;
     }
-    static WRAPPER: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    static WRAPPER: pyffi::Once<usize> = pyffi::Once::new();
     if callee.is_null() || capi::is_unboxed(callee) {
         return null_mut();
     }
@@ -3970,7 +3972,7 @@ pub unsafe fn generic_property(obj: Obj, name: Obj) -> Obj {
 /// `pyffi::SuperObject` says: shown once, on `super(int, True)`, against
 /// what its attributes say.
 unsafe fn super_fields() -> bool {
-    static SHOWN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    static SHOWN: pyffi::Once<bool> = pyffi::Once::new();
     *SHOWN.get_or_init(|| {
         let (int, flag) = (std::ptr::addr_of_mut!(ffi::PyLong_Type) as Obj, ffi::Py_True());
         let made = ffi::PyObject_CallFunctionObjArgs(std::ptr::addr_of_mut!(ffi::PySuper_Type) as Obj, int, flag, null_mut::<ffi::PyObject>());
@@ -4130,7 +4132,7 @@ unsafe fn plain_getters(class: *mut ffi::PyTypeObject, name: Obj) -> bool {
 /// a dtype, a device, a layout, a memory format and the limits of a
 /// dtype. Looked up once: they stay.
 unsafe fn torch_classes() -> &'static [usize; 9] {
-    static FOUND: std::sync::OnceLock<[usize; 9]> = std::sync::OnceLock::new();
+    static FOUND: pyffi::Once<[usize; 9]> = pyffi::Once::new();
     FOUND.get_or_init(|| {
         let named = |module: &std::ffi::CStr, name: &std::ffi::CStr| class_named(module, name) as usize;
         [
@@ -4293,18 +4295,16 @@ pub unsafe fn thread_state() -> u64 {
         c"_get_deterministic_algorithms",
         c"_get_deterministic_algorithms_warn_only",
     ];
-    static FUNCTIONS: std::sync::OnceLock<(Vec<Option<PyObj>>, Vec<PyObj>)> = std::sync::OnceLock::new();
+    static FUNCTIONS: pyffi::Once<(Vec<Option<PyObj>>, Vec<PyObj>)> = pyffi::Once::new();
     let (functions, devices) = FUNCTIONS.get_or_init(|| {
-        let binding = ffi::PyImport_ImportModule(c"torch._C".as_ptr());
+        let binding = pyffi::module(c"torch._C");
         let functions = ASKED
             .iter()
             .map(|name| {
-                let found = if binding.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(binding, name.as_ptr()) };
-                (!found.is_null()).then(|| PyObj::from_owned(found))
+                let found = pyffi::in_module(binding, name);
+                (!found.is_null()).then(|| PyObj::from_borrowed(found))
             })
             .collect();
-        ffi::PyErr_Clear();
-        xdecref(binding);
         let devices = DEVICES.iter().map(|name| PyObj::from_owned(ffi::PyUnicode_FromString(name.as_ptr()))).collect();
         (functions, devices)
     });
@@ -4343,14 +4343,11 @@ pub unsafe fn thread_state() -> u64 {
 /// in `call_modes`). A run under one is never exported: what was made of a
 /// graph would hide its operations, or show others.
 pub unsafe fn interposed() -> Option<&'static str> {
-    static ASKED: std::sync::OnceLock<[Option<PyObj>; 2]> = std::sync::OnceLock::new();
+    static ASKED: pyffi::Once<[Option<PyObj>; 2]> = pyffi::Once::new();
     let asked = ASKED.get_or_init(|| {
         let found = |module: &std::ffi::CStr, name: &std::ffi::CStr| {
-            let module = ffi::PyImport_ImportModule(module.as_ptr());
-            let function = if module.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(module, name.as_ptr()) };
-            ffi::PyErr_Clear();
-            xdecref(module);
-            (!function.is_null()).then(|| PyObj::from_owned(function))
+            let function = pyffi::in_module(pyffi::module(module), name);
+            (!function.is_null()).then(|| PyObj::from_borrowed(function))
         };
         [found(c"torch._C", c"_len_torch_dispatch_stack"), found(c"torch._C._functorch", c"maybe_current_level")]
     });
@@ -4388,15 +4385,14 @@ fn overload_of(name: &str) -> (&str, &str) {
 /// `aten::copy_`; not `aten::add.out`, not `aten::uniform_`): its schema
 /// and its tags are asked once.
 pub fn writes_first(name: &str) -> bool {
-    static KNOWN: std::sync::OnceLock<Shared<HashMap<String, bool>>> = std::sync::OnceLock::new();
+    static KNOWN: pyffi::Once<Shared<HashMap<String, bool>>> = pyffi::Once::new();
     let known = KNOWN.get_or_init(|| Shared::new(HashMap::new()));
     if let Some(writes) = known.borrow().get(name) {
         return *writes;
     }
     let (qualified, overload) = overload_of(name);
     let asked = |py: Python<'_>| -> PyResult<bool> {
-        let binding = py.import("torch._C")?;
-        let schema = binding.call_method1("_get_schema", (qualified, overload))?;
+        let schema = pyffi::of_module(py, c"torch._C", c"_get_schema")?.call1((qualified, overload))?;
         let mut first = true;
         for argument in schema.getattr("arguments")?.try_iter()? {
             let alias = argument?.getattr("alias_info")?;
@@ -4406,11 +4402,11 @@ pub fn writes_first(name: &str) -> bool {
             }
             first = false;
         }
-        let found = binding.call_method1("_get_operation_overload", (qualified, overload))?;
+        let found = pyffi::of_module(py, c"torch._C", c"_get_operation_overload")?.call1((qualified, overload))?;
         if first || found.is_none() {
             return Ok(false);
         }
-        let seeded = py.import("torch")?.getattr("Tag")?.getattr("nondeterministic_seeded")?;
+        let seeded = pyffi::of_module(py, c"torch", c"Tag")?.getattr("nondeterministic_seeded")?;
         Ok(!found.get_item(2)?.contains(seeded)?)
     };
     let quiet = !UPDATES_STATISTICS.iter().any(|(op, _)| *op == qualified);
@@ -4427,19 +4423,18 @@ pub fn writes_first(name: &str) -> bool {
 /// own; one that is made of others (`composite_operator`) is asked by
 /// running it on tensors that hold nothing (`Compiled::sized`).
 pub fn shaped_operator(name: &str) -> bool {
-    static KNOWN: std::sync::OnceLock<Shared<HashMap<String, bool>>> = std::sync::OnceLock::new();
+    static KNOWN: pyffi::Once<Shared<HashMap<String, bool>>> = pyffi::Once::new();
     let known = KNOWN.get_or_init(|| Shared::new(HashMap::new()));
     if let Some(shaped) = known.borrow().get(name) {
         return *shaped;
     }
     let (qualified, overload) = overload_of(name);
     let asked = |py: Python<'_>| -> PyResult<bool> {
-        let binding = py.import("torch._C")?;
-        let found = binding.call_method1("_get_operation_overload", (qualified, overload))?;
+        let found = pyffi::of_module(py, c"torch._C", c"_get_operation_overload")?.call1((qualified, overload))?;
         if found.is_none() {
             return Ok(false);
         }
-        let tags = py.import("torch")?.getattr("Tag")?;
+        let tags = pyffi::of_module(py, c"torch", c"Tag")?;
         let (dynamic, data) = (tags.getattr("dynamic_output_shape")?, tags.getattr("data_dependent_output")?);
         Ok(!found.get_item(2)?.contains(dynamic)? && !found.get_item(2)?.contains(data)?)
     };
@@ -4463,23 +4458,22 @@ pub const DRAWS_AT_A_RATE: [(&str, usize, &std::ffi::CStr); 1] = [("aten::scaled
 /// arguments is that it draws random numbers: it writes to none of them,
 /// and its tags say that it draws from the generator.
 pub fn seeded_operator(name: &str) -> bool {
-    static KNOWN: std::sync::OnceLock<Shared<HashMap<String, bool>>> = std::sync::OnceLock::new();
+    static KNOWN: pyffi::Once<Shared<HashMap<String, bool>>> = pyffi::Once::new();
     let known = KNOWN.get_or_init(|| Shared::new(HashMap::new()));
     if let Some(seeded) = known.borrow().get(name) {
         return *seeded;
     }
     let (qualified, overload) = overload_of(name);
     let asked = |py: Python<'_>| -> PyResult<bool> {
-        let binding = py.import("torch._C")?;
-        let schema = binding.call_method1("_get_schema", (qualified, overload))?;
+        let schema = pyffi::of_module(py, c"torch._C", c"_get_schema")?.call1((qualified, overload))?;
         if schema.getattr("is_mutable")?.is_truthy()? {
             return Ok(false);
         }
-        let found = binding.call_method1("_get_operation_overload", (qualified, overload))?;
+        let found = pyffi::of_module(py, c"torch._C", c"_get_operation_overload")?.call1((qualified, overload))?;
         if found.is_none() {
             return Ok(false);
         }
-        let seeded = py.import("torch")?.getattr("Tag")?.getattr("nondeterministic_seeded")?;
+        let seeded = pyffi::of_module(py, c"torch", c"Tag")?.getattr("nondeterministic_seeded")?;
         found.get_item(2)?.contains(seeded)
     };
     let quiet = !UPDATES_STATISTICS.iter().any(|(op, _)| *op == qualified);
@@ -4494,14 +4488,17 @@ pub fn seeded_operator(name: &str) -> bool {
 /// its tags do not say what those do. What cannot be asked is taken to be
 /// one.
 pub fn composite_operator(name: &str) -> bool {
-    static KNOWN: std::sync::OnceLock<Shared<HashMap<String, bool>>> = std::sync::OnceLock::new();
+    static KNOWN: pyffi::Once<Shared<HashMap<String, bool>>> = pyffi::Once::new();
     let known = KNOWN.get_or_init(|| Shared::new(HashMap::new()));
     if let Some(composite) = known.borrow().get(name) {
         return *composite;
     }
     let asked = |py: Python<'_>| -> PyResult<bool> {
-        let has = py.import("torch._C")?.getattr("_dispatch_has_kernel_for_dispatch_key")?;
-        has.call1((name, "CompositeImplicitAutograd"))?.is_truthy()
+        let has = pyffi::of_module(py, c"torch._C", c"_dispatch_has_kernel_for_dispatch_key")?;
+        // The key itself: named by a text, torch looks for `builtins` by
+        // an import at every call.
+        let key = pyffi::of_module(py, c"torch._C", c"DispatchKey")?.getattr("CompositeImplicitAutograd")?;
+        has.call1((name, key))?.is_truthy()
     };
     let composite = unsafe { asked(Python::assume_attached()).unwrap_or(true) };
     unsafe { ffi::PyErr_Clear() };
@@ -4560,7 +4557,7 @@ const WHOLE_NUMBERS: [&str; 23] = [
 /// the rest is the list above. `aten::as_strided` is a view that can fail
 /// for how much memory there is, which no form checks.
 pub fn total_operator(name: &str) -> Total {
-    static KNOWN: std::sync::OnceLock<Shared<HashMap<String, Total>>> = std::sync::OnceLock::new();
+    static KNOWN: pyffi::Once<Shared<HashMap<String, Total>>> = pyffi::Once::new();
     let known = KNOWN.get_or_init(|| Shared::new(HashMap::new()));
     if let Some(total) = known.borrow().get(name) {
         return *total;
@@ -4575,19 +4572,18 @@ pub fn total_operator(name: &str) -> Total {
         if TOTAL.contains(&base) {
             return Ok(Total::Always);
         }
-        let binding = py.import("torch._C")?;
-        let schema = binding.call_method1("_get_schema", (qualified, overload))?;
+        let schema = pyffi::of_module(py, c"torch._C", c"_get_schema")?.call1((qualified, overload))?;
         for given in schema.getattr("returns")?.try_iter()? {
             let alias = given?.getattr("alias_info")?;
             if !alias.is_none() && !alias.getattr("is_write")?.is_truthy()? {
                 return Ok(Total::Always);
             }
         }
-        let found = binding.call_method1("_get_operation_overload", (qualified, overload))?;
+        let found = pyffi::of_module(py, c"torch._C", c"_get_operation_overload")?.call1((qualified, overload))?;
         if found.is_none() {
             return Ok(Total::Never);
         }
-        let (tags, tag) = (found.get_item(2)?, py.import("torch")?.getattr("Tag")?);
+        let (tags, tag) = (found.get_item(2)?, pyffi::of_module(py, c"torch", c"Tag")?);
         if tags.contains(tag.getattr("reduction")?)? || tags.contains(tag.getattr("inplace_view")?)? {
             return Ok(Total::Always);
         }
@@ -4606,23 +4602,22 @@ pub fn total_operator(name: &str) -> Total {
 /// `aten::add_.Tensor`), neither writes to an argument nor draws random
 /// numbers: its schema and its tags are asked once.
 pub fn pure_operator(name: &str) -> bool {
-    static KNOWN: std::sync::OnceLock<Shared<HashMap<String, bool>>> = std::sync::OnceLock::new();
+    static KNOWN: pyffi::Once<Shared<HashMap<String, bool>>> = pyffi::Once::new();
     let known = KNOWN.get_or_init(|| Shared::new(HashMap::new()));
     if let Some(pure) = known.borrow().get(name) {
         return *pure;
     }
     let (qualified, overload) = overload_of(name);
     let asked = |py: Python<'_>| -> PyResult<bool> {
-        let binding = py.import("torch._C")?;
-        let schema = binding.call_method1("_get_schema", (qualified, overload))?;
+        let schema = pyffi::of_module(py, c"torch._C", c"_get_schema")?.call1((qualified, overload))?;
         if schema.getattr("is_mutable")?.is_truthy()? {
             return Ok(false);
         }
-        let found = binding.call_method1("_get_operation_overload", (qualified, overload))?;
+        let found = pyffi::of_module(py, c"torch._C", c"_get_operation_overload")?.call1((qualified, overload))?;
         if found.is_none() {
             return Ok(false);
         }
-        let seeded = py.import("torch")?.getattr("Tag")?.getattr("nondeterministic_seeded")?;
+        let seeded = pyffi::of_module(py, c"torch", c"Tag")?.getattr("nondeterministic_seeded")?;
         Ok(!found.get_item(2)?.contains(seeded)?)
     };
     let quiet = !UPDATES_STATISTICS.iter().any(|(op, _)| *op == qualified);
@@ -5608,21 +5603,26 @@ impl Graphs {
         seeds.sort_by_key(|(first, ..)| *first);
         for (first, seed, entry) in seeds {
             let root = seed.root.1 as u32;
-            let mut state = cx.cf.state.borrow_mut();
-            let known = &mut state.blocks[unit.block].graphs;
-            let site = match known.iter().find(|(at, _)| *at == root) {
-                Some((_, site)) => {
-                    *site.seed.borrow_mut() = Arc::new(seed);
-                    site.clone()
-                }
-                None => {
-                    let name =
-                        format!("{} (block {})[{}]", cx.func().qualname, unit.block, seed.root.1);
-                    let site = Arc::new(GraphSite::new(name, seed, entry, self));
-                    known.push((root, site.clone()));
-                    site
+            // The seed that makes way ends with nothing borrowed.
+            let mut gone = None;
+            let site = {
+                let mut state = cx.cf.state.borrow_mut();
+                let known = &mut state.blocks[unit.block].graphs;
+                match known.iter().find(|(at, _)| *at == root) {
+                    Some((_, site)) => {
+                        gone = Some(std::mem::replace(&mut *site.seed.borrow_mut(), Arc::new(seed)));
+                        site.clone()
+                    }
+                    None => {
+                        let name =
+                            format!("{} (block {})[{}]", cx.func().qualname, unit.block, seed.root.1);
+                        let site = Arc::new(GraphSite::new(name, seed, entry, self));
+                        known.push((root, site.clone()));
+                        site
+                    }
                 }
             };
+            drop(gone);
             unit.graphs.push((site, first));
         }
         !unit.graphs.is_empty()
@@ -5636,9 +5636,9 @@ const MODEL_CODE: [&str; 7] = ["nn/", "functional.py", "_tensor.py", "distributi
 
 /// Whether graphs start in the functions of a file.
 fn starts_graphs(filename: &str) -> bool {
-    static TORCH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    static TORCH: pyffi::Once<String> = pyffi::Once::new();
     let torch = TORCH.get_or_init(|| {
-        let asked = |py: Python<'_>| -> PyResult<String> { py.import("torch")?.getattr("__file__")?.extract() };
+        let asked = |py: Python<'_>| -> PyResult<String> { pyffi::of_module(py, c"torch", c"__file__")?.extract() };
         let file = unsafe { asked(Python::assume_attached()) }.unwrap_or_default();
         unsafe { ffi::PyErr_Clear() };
         file.rsplit_once('/').map_or(String::new(), |(dir, _)| format!("{}/", dir))
@@ -6259,14 +6259,11 @@ pub unsafe fn settled_attribute(tensor: Obj, name: Obj) -> bool {
     if SETTLED.contains(&text.as_str()) || (text.starts_with("is_") && text != "is_leaf" && text != "is_inference") {
         return true;
     }
-    static TENSOR: std::sync::OnceLock<Option<PyObj>> = std::sync::OnceLock::new();
+    static TENSOR: pyffi::Once<Option<PyObj>> = pyffi::Once::new();
     let class = if capi::is_unboxed(tensor) {
         let found = TENSOR.get_or_init(|| {
-            let module = ffi::PyImport_ImportModule(c"torch".as_ptr());
-            let class = if module.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(module, c"Tensor".as_ptr()) };
-            xdecref(module);
-            ffi::PyErr_Clear();
-            (!class.is_null()).then(|| PyObj::from_owned(class))
+            let class = class_named(c"torch", c"Tensor");
+            (!class.is_null()).then(|| PyObj::from_borrowed(class))
         });
         match found {
             Some(class) => class.as_ptr() as *mut ffi::PyTypeObject,
@@ -6331,21 +6328,16 @@ pub enum Store {
 /// What `nn.Module.__setattr__` is, the dict of the hooks it calls for a
 /// buffer, and the classes it tells apart: `nn.Module` and `torch.Tensor`.
 unsafe fn module_store() -> (usize, usize, usize, usize) {
-    static FOUND: std::sync::OnceLock<(usize, usize, usize, usize)> = std::sync::OnceLock::new();
+    static FOUND: pyffi::Once<(usize, usize, usize, usize)> = pyffi::Once::new();
     *FOUND.get_or_init(|| {
-        let torch = ffi::PyImport_ImportModule(c"torch".as_ptr());
-        let tensor = if torch.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(torch, c"Tensor".as_ptr()) };
-        let module = ffi::PyImport_ImportModule(c"torch.nn.modules.module".as_ptr());
-        let class = if module.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(module, c"Module".as_ptr()) };
-        let dict = if class.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(class, c"__dict__".as_ptr()) };
-        let setattr = if dict.is_null() { null_mut() } else { ffi::PyObject_GetItem(dict, specials().setattr.as_ptr()) };
-        let hooks =
-            if module.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(module, c"_global_buffer_registration_hooks".as_ptr()) };
+        // The modules keep them.
+        let tensor = class_named(c"torch", c"Tensor");
+        let class = class_named(c"torch.nn.modules.module", c"Module");
+        let own = if class.is_null() { null_mut() } else { pyffi::PyType_GetDict(class as *mut ffi::PyTypeObject) };
+        let setattr = if own.is_null() { null_mut() } else { ffi::PyDict_GetItemWithError(own, specials().setattr.as_ptr()) };
+        let hooks = pyffi::in_module(pyffi::module(c"torch.nn.modules.module"), c"_global_buffer_registration_hooks");
         ffi::PyErr_Clear();
-        // The module keeps them.
-        for held in [module, class, dict, setattr, hooks, torch, tensor] {
-            xdecref(held);
-        }
+        xdecref(own);
         (setattr as usize, hooks as usize, class as usize, tensor as usize)
     })
 }

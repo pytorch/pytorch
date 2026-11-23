@@ -426,6 +426,57 @@ interpreter looks for them behind a call, so a loop of kernels answers
 Ctrl-C within a round; the handler is given the frame of the function,
 with every variable.
 
+The engine imports nothing. What it needs of a module (`torch._C`,
+`builtins`, `opcode`, ...) it reads off the modules the interpreter keeps
+(`sys.modules`) and off the module's own dict: no `__import__` is called, no
+finder and no `__getattr__` of a module is asked. A module that is not
+there, or a name that a module does not have, is taken for what cannot be
+asked: the path ends, or the function is left to the interpreter. So a
+`builtins.__import__` written in Python (a lazy-import shim, an import
+profiler, a test harness) is called exactly where the function's own
+instructions import, and as often as in eager mode:
+
+```python
+import builtins
+
+calls, handed_on = [], builtins.__import__
+
+def hook(name, globals=None, locals=None, fromlist=(), level=0):
+    calls.append(name)
+    return handed_on(name, globals, locals, fromlist, level)
+
+def imports_math(x):
+    import math
+    h = torch.relu(x) + 1
+    return (h * math.pi).sin().sum()
+
+watched = torch.vm(
+    imports_math, passes=[*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs()]
+)
+builtins.__import__ = hook
+for _ in range(6):
+    watched(torch.ones(3, 4))
+builtins.__import__ = handed_on
+calls  # ['math', 'math', 'math', 'math', 'math', 'math']
+```
+
+A table that ever took a key that is no text (`sys.modules`, the dict of a
+module) compares its keys in their own code, and the engine does not read
+it: with such a key in `sys.modules` every function is left to the
+interpreter for the rest of the process, with one in the dict of `torch._C`
+no path is taken down. And what the engine finds once it keeps also where
+that is "not there": a module that is put back into `sys.modules` later is
+not looked for again in that process (with `torch._C` missing at the first
+call, no path is taken down afterwards either).
+
+What the engine finds once (a function of `torch._C`, a class of the
+interpreter) it finds without waiting for itself: a frame that the
+interpreter starts while it is found is the interpreter's, and whoever asks
+meanwhile finds it again. While `builtins.__import__` is not the
+interpreter's own, the engine also does not ask torch for the sizes of
+what an operator gives that is made of others (`conv2d`): torch answers
+that on tensors that hold nothing, in Python code that imports.
+
 What stands in front of an instruction that raised is a path like any other:
 its operations are a graph that the calls like it run, and such calls are
 not taken down again. Its checks say nothing of the raise; where it lands,
@@ -1000,6 +1051,13 @@ to be there, in front of the first of them. A pass over graphs in front of
 `Graphs()` is a `ValueError`.) The engine then enters each graph through an
 instruction of its own, which `dump()` shows where the graph starts (`graph
 f (block 0)[2:11]: 6 operations`), and the graph is `"waiting"`.
+
+The first `torch.vm(...)` of a process that lists a pass over graphs imports
+the module that hands graphs to Python (`torch.vm._export`), as a library
+imports a module of its own; a `builtins.__import__` of the user's sees that
+import. Nothing is imported inside a call of what `torch.vm` returns but
+what the function, a pass, or an `fx.GraphModule` that a pass returned
+imports itself.
 
 The next call that comes to the graph runs its instructions as before, and
 the engine takes down the path and what its operations did: the kernel call
@@ -3540,36 +3598,34 @@ in eager mode, under `torch.vm` with `Graphs(), Inductor()`, and under
 times, and the figures are the median of the three medians. At inference the
 runner has `torch.no_grad()` around the calls of a model, and the
 `forward_pass` of the huggingface suite enters it itself. Measured that way,
-which is what the dashboard's runner does, on the code one step before this
-commit, which changes the VM's own loop and no graph of these models (their
-graphs, operations, runs in a call and hits are the same on both): one
-process a row, the median of three turns, on 16 cores of a quiet machine
-under the lock for timed runs, with the load average between 1.8 and 2.6 in
-front of a row and nothing else on the GPU. The graphs that run are those
-counted above (DistillGPT2 with the operations it has on a GPU; of
-hf_DistilBert the graph of a layer and the one of its feed-forward part run
-six times each in a call):
+which is what the dashboard's runner does, on the code of this commit: one
+process a row, the median of three turns, on 16 cores under the lock for
+timed runs, with the load average between 1.8 and 7.5 in front of a row
+(above 4 in front of three of them) and nothing else on the GPU. The graphs
+that run are those counted above (DistillGPT2 with the operations it has on
+a GPU; of hf_DistilBert the graph of a layer and the one of its feed-forward
+part run six times each in a call):
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
 |---|---|---|---|---|---|---|---|
-| resnet18 (TorchBench) | 2.42 ms | 1.05 ms | 2.30x | 1.00 ms | 2.41x | 0.95 | 69 x1 |
-| resnet50 (TorchBench) | 6.27 ms | 2.73 ms | 2.30x | 2.62 ms | 2.39x | 0.96 | 175 x1 |
-| yolov3 (TorchBench) | 10.10 ms | 4.48 ms | 2.26x | 3.98 ms | 2.54x | 0.89 | 328 x1 |
-| mobilenetv2_100 (timm) | 8.49 ms | 3.10 ms | 2.74x | 3.00 ms | 2.83x | 0.97 | 152 x1 |
-| adv_inception_v3 (timm) | 21.26 ms | 8.70 ms | 2.45x | 8.47 ms | 2.51x | 0.97 | 314 x1 |
-| deit_base_distilled_patch16_224 (timm) | 6.74 ms | 6.46 ms | 1.04x | 6.40 ms | 1.05x | 0.99 | 233 x1 |
-| hf_DistilBert (TorchBench) | 3.28 ms | 3.18 ms | 1.03x | 1.65 ms | 1.99x | 0.52 | 17 x6, 6 x1, 4 x6, 4 x1 |
-| DistillGPT2 (HuggingFace) | 13.92 ms | 4.59 ms | 3.04x | 3.79 ms | 3.67x | 0.83 | 231 x1, 10 x1, 8 x1, 8 x1 |
-| MobileBertForMaskedLM (HuggingFace) | 29.20 ms | 14.36 ms | 2.03x | 12.86 ms | 2.27x | 0.90 | 1272 x1, 16 x1, 7 x1 |
-| whisper-tiny (HuggingFace) | 9.00 ms | 4.91 ms | 1.83x | 3.08 ms | 2.92x | 0.63 | 237 x1, 126 x1, 8 x1 |
-| Qwen3-0.6B (HuggingFace) | 33.09 ms | 9.30 ms | 3.56x | 7.33 ms | 4.52x | 0.79 | 2080 x1, 11 x1, 6 x1 |
+| resnet18 (TorchBench) | 2.41 ms | 1.04 ms | 2.31x | 0.99 ms | 2.43x | 0.95 | 69 x1 |
+| resnet50 (TorchBench) | 6.27 ms | 2.77 ms | 2.26x | 2.58 ms | 2.43x | 0.93 | 175 x1 |
+| yolov3 (TorchBench) | 9.83 ms | 4.31 ms | 2.28x | 3.87 ms | 2.54x | 0.90 | 328 x1 |
+| mobilenetv2_100 (timm) | 8.49 ms | 3.27 ms | 2.60x | 3.16 ms | 2.68x | 0.97 | 152 x1 |
+| adv_inception_v3 (timm) | 21.25 ms | 8.73 ms | 2.44x | 8.46 ms | 2.51x | 0.97 | 314 x1 |
+| deit_base_distilled_patch16_224 (timm) | 6.75 ms | 6.30 ms | 1.07x | 6.25 ms | 1.08x | 0.99 | 233 x1 |
+| hf_DistilBert (TorchBench) | 3.35 ms | 3.21 ms | 1.04x | 1.66 ms | 2.01x | 0.52 | 17 x6, 6 x1, 4 x6, 4 x1 |
+| DistillGPT2 (HuggingFace) | 13.90 ms | 4.57 ms | 3.05x | 3.78 ms | 3.68x | 0.83 | 231 x1, 10 x1, 8 x1, 8 x1 |
+| MobileBertForMaskedLM (HuggingFace) | 30.73 ms | 14.93 ms | 2.06x | 13.26 ms | 2.32x | 0.89 | 1272 x1, 16 x1, 7 x1 |
+| whisper-tiny (HuggingFace) | 9.03 ms | 4.94 ms | 1.83x | 3.20 ms | 2.82x | 0.65 | 237 x1, 126 x1, 8 x1 |
+| Qwen3-0.6B (HuggingFace) | 32.49 ms | 9.70 ms | 3.35x | 7.47 ms | 4.35x | 0.77 | 2080 x1, 11 x1, 6 x1 |
 
 As a check that the tool measures the runner's mode, the runner's own lines
 for five of the models (`python benchmarks/dynamo/torchbench.py
 --performance --inference --bfloat16 --only MODEL` with `--vm` and with
 `--backend inductor`, `timm_models.py` and `huggingface.py` for the models
 of those suites; one run each), which report the speed against eager mode,
-next to what the tool had on the runner's code. That is the code four steps
+next to what the tool had on the runner's code. That is the code five steps
 before this commit (the one that changed which dicts the engine looks a name
 up in): the runner's lines were taken one after the other with the load
 average between 0.8 and 2.6 in front of a line and nothing else on the GPU,
@@ -3600,34 +3656,36 @@ altogether ("Limits"):
 | adv_inception_v3 (timm), gradients recorded | 21.21, 21.23 ms | 12.82, 12.85 ms | 1.66x, 1.65x | 8.72, 8.72 ms | 2.43x, 2.43x | 0.68, 0.68 | 314 x1 |
 | deit_base_distilled_patch16_224 (timm), gradients recorded | 6.80, 6.82 ms | 6.95, 6.84 ms | 0.98x, 1.00x | 6.21, 6.22 ms | 1.10x, 1.10x | 0.89, 0.91 | 233 x1 |
 | hf_DistilBert (TorchBench), gradients recorded | 3.88 ms | 3.97 ms | 0.98x | 1.99 ms | 1.95x | 0.50 | 6 x1, 4 x1 |
-| yolov3 (TorchBench), gradients recorded | 12.00 ms | 9.98 ms | 1.20x | 4.57 ms | 2.62x | 0.46 | 328 x1 |
+| yolov3 (TorchBench), gradients recorded | 12.16 ms | 10.47 ms | 1.16x | 4.70 ms | 2.58x | 0.45 | 328 x1 |
 | resnet18 (TorchBench), a training step | 8.50, 8.35 ms | 5.48, 5.37 ms | 1.55x, 1.56x | 5.42, 5.22 ms | 1.57x, 1.60x | 0.99, 0.97 | 89 x1 |
 | resnet50 (TorchBench), a training step | 23.48, 22.99 ms | 15.74, 15.68 ms | 1.49x, 1.47x | 13.98, 13.37 ms | 1.68x, 1.72x | 0.89, 0.85 | 228 x1 |
-| DistillGPT2, a training step | 53.31 ms | 29.67 ms | 1.80x | 17.99 ms | 2.96x | 0.61 | 15 x6, 10 x1, 8 x1, 8 x1 |
+| DistillGPT2, a training step | 53.30 ms | 29.65 ms | 1.80x | 17.98 ms | 2.96x | 0.61 | 15 x6, 10 x1, 8 x1, 8 x1 |
 
 The row of hf_DistilBert is one measurement, made by another job with the
 same tool on the same code as the rows of this job (the Rust of its build is
 that tree's byte for byte), on 16 cores, with the load average between 5 and
 6 and nothing else on the GPU. With gradients recorded only 2 small graphs
 of hf_DistilBert run (6 x1, 4 x1), and its call takes what eager's takes.
-The rows of yolov3 and of DistillGPT2's training step are of the code one
-step before this commit, measured with the rows of the table in the runner's
-mode. Five steps before, when a graph gave only what the code behind it
-reads, another job had yolov3 with gradients recorded at 7.67 ms (1.53 times
-eager's speed) in the process that fills the compiler's cache and at 7.73 ms
-(1.54) with the cache filled, and at 4.34 ms under `torch.no_grad()`; the
-graph runs in a first process as in a later one ("Limits"). Since then a
-graph gives what the variables of the function are bound to where its path
-lands as well ("Paths"): as the job that made the change counts them, the
-graph of yolov3 gives 77 results where it gave 49 (what the layers put into
-the list that the model keeps until its forward returns), the two small
-graphs of DistillGPT2 6 and 3 where they gave 3 and 1, and two graphs of
-whisper-tiny 7 and 4 where they gave 6 and 3; the graphs of the other models
-give what they gave. With gradients recorded the graph of yolov3 is cut at
-28 more of its results, those that it also reads ("Writes"). That costs
-yolov3 about 3 percent under `torch.no_grad()` (4.48 ms for 4.34) and about
-30 percent with gradients recorded (9.98 ms for 7.67 and 7.73; 8.83 of the
-9.93 ms that the tool takes apart are in what stands for the graph). The
+The rows of yolov3 and of DistillGPT2's training step are of the code of
+this commit, measured with the rows of the table in the runner's mode (the
+load average 6.0 and 4.2 in front of them). Six steps before, when a graph
+gave only what the code behind it reads, another job had yolov3 with
+gradients recorded at 7.67 ms (1.53 times eager's speed) in the process that
+fills the compiler's cache and at 7.73 ms (1.54) with the cache filled, and
+at 4.34 ms under `torch.no_grad()`; the graph runs in a first process as in
+a later one ("Limits"). Since then a graph gives what the variables of the
+function are bound to where its path lands as well ("Paths"): as the job
+that made the change counts them, the graph of yolov3 gives 77 results where
+it gave 49 (what the layers put into the list that the model keeps until its
+forward returns), the two small graphs of DistillGPT2 6 and 3 where they
+gave 3 and 1, and two graphs of whisper-tiny 7 and 4 where they gave 6 and
+3; the graphs of the other models give what they gave. With gradients
+recorded the graph of yolov3 is cut at 28 more of its results, those that it
+also reads ("Writes"). That costs yolov3 nothing that two takes of the row
+tell apart under `torch.no_grad()` (4.31 ms on the code of this commit and
+4.48 two steps before it, on the same graph, for 4.34) and about a third
+with gradients recorded (10.47 ms and 9.98 for 7.67 and 7.73; 9.19 of the
+10.34 ms that the tool takes apart are in what stands for the graph). The
 rows of this section with gradients recorded that have two figures in a
 column are of code from before the change: a model whose forward binds a
 tensor that its graph reads again is cut there since.
@@ -3639,7 +3697,7 @@ and with gradients recorded a graph that holds it keeps eager's tape and is
 handed to no compiler ("Limits"). The graph of deit is its whole forward,
 233 operations, and its operations run one by one on eager's kernels. Under
 `torch.no_grad()` the same graph is compiled like any other, and a call of
-deit takes 6.46 ms where eager's takes 6.74. The graph of a layer of
+deit takes 6.30 ms where eager's takes 6.75. The graph of a layer of
 hf_DistilBert, 17 operations, keeps eager's tape for the same node; it is no
 faster than the instructions it stands for, so the measurement leaves the
 layer to the interpreter, at its second look as at its first ("Limits"), and
@@ -3652,9 +3710,9 @@ kernels of the optimizer's update, which are no call sites.
 
 In the runner's mode the layers of hf_DistilBert are graphs (17 operations,
 and the 4 of the feed-forward part, six times each in a call), and a call
-takes 3.18 ms where eager's takes 3.28: of the 3.22 ms of a call that the
-tool takes apart, 1.98 are in what stands for the graphs, 0.37 in front of
-them and 0.83 between them.
+takes 3.21 ms where eager's takes 3.35: of the 3.20 ms of a call that the
+tool takes apart, 1.97 are in what stands for the graphs, 0.37 in front of
+them and 0.82 between them.
 
 ### Limits
 
@@ -3768,6 +3826,9 @@ What graphs do not do at this stage:
   variable unbound. A signal handler would too: there, pending signals are
   looked for at the next call that is no kernel, at every 64th round of a
   loop and when the function returns, not behind each kernel.
+- Loading the runtime, which the first `torch.vm(...)` of a process does,
+  asks for the module `warnings` twice through `builtins.__import__`: a
+  `__import__` that is not the interpreter's own is called for it.
 - Where a pass over graphs or a gradient stands for a path, Python code that
   runs inside what was made of the graph, or among the reads that the path
   makes in front of it, finds the frame of the function as it was in front
@@ -3802,10 +3863,6 @@ What graphs do not do at this stage:
   computes are computed in it (`torch.ops.aten.sym_size.int`), but its
   inputs have the sizes of the call it was exported from. With `Inductor()`
   every export is a compilation.
-- While `builtins.__import__` is a function written in Python (a lazy-import
-  shim, a test harness that patches it), a function with `Graphs()` in the
-  list does not come back from the call that takes its path down: the
-  engine imports through it there, and waits for itself.
 - A `for` that is left by `break`, `return` or an exception has its
   generator closed in front of the loop's body, not where the loop is left;
   so ends any other iterator, and a list that only its iterator holds. A

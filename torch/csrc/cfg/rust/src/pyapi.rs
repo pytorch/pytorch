@@ -355,11 +355,12 @@ impl CfgFunction {
             func.filename,
             func.firstlineno
         ));
-        let state = cf.state.borrow();
+        // What a `repr` runs must find nothing borrowed.
+        let versions: Vec<Vec<Arc<BlockCode>>> = cf.state.borrow().blocks.iter().map(|bs| bs.versions.clone()).collect();
         for b in 0..func.blocks.len() {
             func.dump_block_header(&mut out, b);
             func.dump_code(&mut out, &func.blocks[b].insts, &func.blocks[b].term);
-            for version in &state.blocks[b].versions {
+            for version in &versions[b] {
                 let guards: Vec<String> =
                     version.entry_guards.iter().map(|g| func.guard_repr(g)).collect();
                 out.push_str(&format!(
@@ -392,6 +393,7 @@ impl CfgFunction {
         out.set_item("calls", cf.calls())?;
         let blocks = PyList::empty(py);
         let unlowered = PyList::empty(py);
+        let mut turned_down = Vec::new();
         let (mut sites, mut hits, mut misses) = (0u64, 0u64, 0u64);
         for (b, bs) in state.blocks.iter().enumerate() {
             let d = PyDict::new(py);
@@ -411,8 +413,7 @@ impl CfgFunction {
                     hits += slot.hits.load(Ordering::Relaxed);
                     misses += slot.misses.load(Ordering::Relaxed);
                 } else if let Some(reason) = &bs.reasons[i] {
-                    let text = cf.func.op_repr(&cf.func.blocks[b].insts[i].op);
-                    unlowered.append((b, i, text, reason.clone()))?;
+                    turned_down.push((b, i, reason.clone()));
                 }
             }
         }
@@ -423,7 +424,7 @@ impl CfgFunction {
         out.set_item("unboxed_results", cf.unboxed_results.load(Ordering::Relaxed))?;
         out.set_item("boxed_later", cf.boxed_later.load(Ordering::Relaxed))?;
         out.set_item("bound_later", cf.bound_later.load(Ordering::Relaxed))?;
-        out.set_item("unlowered", unlowered)?;
+        out.set_item("unlowered", &unlowered)?;
         let inlined: Vec<String> = cf.func.origins[1..].iter().map(|o| o.name.clone()).collect();
         out.set_item("inlined", inlined)?;
         out.set_item("unrolled_loops", cf.func.unrolled)?;
@@ -444,6 +445,10 @@ impl CfgFunction {
         out.set_item("second_looks", looks)?;
         out.set_item("log", state.log.clone())?;
         drop(state);
+        // What a `repr` runs must find nothing borrowed.
+        for (b, i, reason) in turned_down {
+            unlowered.append((b, i, cf.func.op_repr(&cf.func.blocks[b].insts[i].op), reason))?;
+        }
         // The graphs of the function and of what it called: how many there
         // are, how many times one was handed to the passes over graphs, how
         // many calls ran what those made (`hits`) and how many came to a
@@ -981,8 +986,10 @@ impl Region {
     #[setter]
     fn set_note(&self, note: &Bound<'_, PyAny>) -> PyResult<()> {
         let (unit, cx) = self.parts()?;
-        cx.cf.state.borrow_mut().blocks[unit.block].note =
-            if note.is_none() { None } else { Some(unsafe { PyObj::from_borrowed(note.as_ptr()) }) };
+        let note = if note.is_none() { None } else { Some(unsafe { PyObj::from_borrowed(note.as_ptr()) }) };
+        // The note that was there ends with nothing borrowed.
+        let before = std::mem::replace(&mut cx.cf.state.borrow_mut().blocks[unit.block].note, note);
+        drop(before);
         Ok(())
     }
 
@@ -1226,8 +1233,9 @@ impl Replay {
     /// again, with that note, before this returns.
     fn settle(&self, note: &Bound<'_, PyAny>) -> PyResult<()> {
         let compiled = self.compiled()?;
-        compiled.state.borrow_mut().blocks[self.block].note =
-            Some(unsafe { PyObj::from_borrowed(note.as_ptr()) });
+        let note = Some(unsafe { PyObj::from_borrowed(note.as_ptr()) });
+        let before = std::mem::replace(&mut compiled.state.borrow_mut().blocks[self.block].note, note);
+        drop(before);
         compiled.respecialize(self.block);
         Ok(())
     }
