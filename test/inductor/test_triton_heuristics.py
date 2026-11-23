@@ -89,7 +89,7 @@ from torch._inductor.runtime.triton_heuristics import (
     triton_config_tiled_reduction,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache, get_code
+from torch._inductor.utils import fresh_cache, get_code, run_and_get_code
 
 
 class _FindNamesProbe:
@@ -1040,6 +1040,62 @@ class TestTritonHeuristics(TestCase):
             ),
             8192,
         )
+
+    @parametrize(
+        "cc,reduction_numel,numel,expected",
+        [
+            # sum(dim=0) over [8192, 8704]: 13 does not divide 8192.
+            (100, 8192, 8704, 13),
+            (107, 8192, 8704, 16),
+            # A split factor that already divides the reduction is kept.
+            (100, 8192, 4096, 32),
+            (107, 8192, 4096, 32),
+            # 36854 = 2 * 18427 has no divisor within 2x of 18.
+            (100, 36854, 4096, 18),
+            (107, 36854, 4096, 18),
+            # Small reductions, where the divisors are not computed upfront.
+            (100, 1100, 1024, 9),
+            (107, 1100, 1024, 10),
+            # 1 is never chosen, so the reduction stays split.
+            (100, 129, 128, 2),
+            (107, 129, 128, 3),
+            (107, 131, 128, 2),
+            # 265 = 5 * 53: 5 is in the band although 1 is nearer to 3.
+            (100, 265, 128, 3),
+            (107, 265, 128, 5),
+        ],
+    )
+    def test_outer_reduction_split_factor(self, cc, reduction_numel, numel, expected):
+        from torch._inductor.choices import InductorChoices
+
+        # A Rubin-sized device: 212 SMs, 1024 threads per SM.
+        props = self._fake_cuda_device_properties()._replace(
+            cc=cc,
+            major=cc // 10,
+            multi_processor_count=212,
+            max_threads_per_multi_processor=1024,
+        )
+        with patch.object(DeviceProperties, "create", return_value=props):
+            split_factor = InductorChoices().reduction_split_factor(
+                torch.device("cuda"), reduction_numel, numel, inner_reduction=False
+            )
+        self.assertEqual(split_factor, expected)
+
+    @skipUnless(HAS_GPU_AND_TRITON and GPU_TYPE == "cuda", "requires CUDA and Triton")
+    def test_sm107_outer_reduction_split_divides_reduction(self):
+        from torch._inductor.choices import InductorChoices
+
+        if torch.cuda.get_device_capability() != (10, 7):
+            self.skipTest("requires sm_107")
+        x = torch.randn(8192, 8704, device=GPU_TYPE)
+        split_factor = InductorChoices().reduction_split_factor(
+            x.device, 8192, 8704, inner_reduction=False
+        )
+        self.assertEqual(8192 % split_factor, 0)
+        with fresh_cache():
+            out, code = run_and_get_code(torch.compile(lambda t: t.sum(0)), x)
+        self.assertRegex("\n".join(code), rf"\br0_numel = {8192 // split_factor}\b")
+        self.assertEqual(out, x.sum(0), atol=1e-3, rtol=1e-4)
 
     def test_reduction_r0_block_cap_is_nvidia_only(self):
         from torch._inductor.heuristics.triton_codegen.reduction import (
