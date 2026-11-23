@@ -3410,6 +3410,12 @@ What graphs do not do at this stage:
   computes are computed in it (`torch.ops.aten.sym_size.int`), but its
   inputs have the sizes of the call it was exported from. With `Inductor()`
   every export is a compilation.
+- Where what the passes made runs in place of the operations of a graph, or
+  the graph runs with a backward of its own while gradients are recorded, a
+  variable that the graph binds and that nothing reads behind it is not in
+  the frame of the function there: `locals()`, a callee that reads its
+  caller's frame (`sys._getframe(1).f_locals`) and the frame of a traceback
+  do not have it.
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported.
