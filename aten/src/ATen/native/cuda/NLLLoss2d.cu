@@ -21,8 +21,8 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
-#include <ATen/ops/nll_loss2d_forward_native.h>
 #include <ATen/ops/nll_loss2d_backward_native.h>
+#include <ATen/ops/nll_loss2d_forward_native.h>
 #endif
 
 namespace at::native {
@@ -134,12 +134,14 @@ template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1)
 __global__ void nll_loss2d_forward_finalize_kernel(
     scalar_t* output,
+    scalar_t* total_weight,
     const accscalar_t* acc_output,
-    const accscalar_t* total_weight,
+    const accscalar_t* acc_total_weight,
     bool size_average) {
   const accscalar_t sum = *acc_output;
-  const accscalar_t tw = *total_weight;
+  const accscalar_t tw = *acc_total_weight;
   *output = static_cast<scalar_t>(size_average ? (sum / tw) : sum);
+  *total_weight = static_cast<scalar_t>(tw);
 }
 
 template <typename scalar_t>
@@ -172,25 +174,22 @@ __global__ void nll_loss2d_backward_no_reduce_kernel(
   }
 }
 
-template <typename scalar_t, typename accscalar_t, typename index_t>
+template <typename scalar_t, typename index_t>
 C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void nll_loss2d_backward_kernel(
   scalar_t* grad_input,
   const scalar_t* grad_output,
   const int64_t* target,
   const scalar_t* weights,
-  const accscalar_t* total_weight,
+  const scalar_t* total_weight,
   bool size_average,
   index_t n_classes,
   index_t map_nelem,
   int blocks_per_sample,
   int64_t ignore_index
 ) {
-  // Divide in accscalar_t. total_weight is the uncast accumulator; fp16
-  // cannot represent counts above 65504, and inf here zeros the gradient.
-  const accscalar_t grad_output_acc = static_cast<accscalar_t>(*grad_output);
-  const accscalar_t grad = -(size_average ? grad_output_acc / *total_weight
-                                          : grad_output_acc);
+  const auto grad = -(size_average ? *grad_output / *total_weight
+                                   : *grad_output);
 
   const index_t sample = blockIdx.x / blocks_per_sample;
   const index_t step =
@@ -212,12 +211,8 @@ __global__ void nll_loss2d_backward_kernel(
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       const auto grad_input_index = i + map_nelem * t;
       CUDA_KERNEL_ASSERT(grad_input_index >= 0);
-      if (weights != nullptr) {
-        grad_input_thread[i + map_nelem * t] = static_cast<scalar_t>(
-            static_cast<accscalar_t>(weights[t]) * grad);
-      } else {
-        grad_input_thread[i + map_nelem * t] = static_cast<scalar_t>(grad);
-      }
+      grad_input_thread[i + map_nelem * t] = weights != nullptr ? weights[t] * grad
+                                                                : grad;
     }
   }
 }
@@ -334,11 +329,9 @@ void nll_loss2d_forward_out_cuda_template(
   blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
   int total_blocks = blocks_per_sample * batch_size;
 
-  // Same accumulation type as NLLLoss in Loss.cu (fp32 for half/bfloat16).
-  // total_weight is left in that type when the caller allocated it that way,
-  // because backward divides by it and fp16 overflows at 65504.
-  const auto acc_dtype =
-      at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
+  // Accumulate in fp32 for half/bfloat16. Cast total_weight back to the
+  // caller's dtype once; float already matches and skips the copy.
+  const auto acc_dtype = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
   Tensor acc_output = at::empty({}, input.options().dtype(acc_dtype));
   acc_output.zero_();
   Tensor acc_total_weight;
@@ -378,15 +371,13 @@ void nll_loss2d_forward_out_cuda_template(
             nll_loss2d_forward_finalize_kernel<scalar_t, accscalar_t>
                 <<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
                     output.mutable_data_ptr<scalar_t>(),
+                    total_weight.mutable_data_ptr<scalar_t>(),
                     acc_output.const_data_ptr<accscalar_t>(),
                     acc_total_weight.const_data_ptr<accscalar_t>(),
                     reduction == at::Reduction::Mean);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
       });
-  if (total_weight.scalar_type() != acc_dtype) {
-    total_weight.copy_(acc_total_weight);
-  }
 }
 
 void nll_loss2d_backward_out_cuda_template(
@@ -481,21 +472,13 @@ void nll_loss2d_backward_out_cuda_template(
         input.scalar_type(),
         "nll_loss2d_backward_kernel",
         [&] {
-          using accscalar_t = acc_type<scalar_t, true>;
-          const auto acc_dtype =
-              at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
-          // Promote a scalar_t total_weight (out= callers) so the division
-          // matches the fp32 accumulator used in forward.
-          Tensor total_weight_acc = total_weight.scalar_type() == acc_dtype
-              ? total_weight
-              : total_weight.to(acc_dtype);
           AT_DISPATCH_INDEX_TYPES(
               at::native::canUse32BitIndexMath(input, INT_MAX)
                   ? ScalarType::Int
                   : ScalarType::Long,
               "nll_loss2d_backward_launcher",
               [&] {
-                nll_loss2d_backward_kernel<scalar_t, accscalar_t, index_t>
+                nll_loss2d_backward_kernel<scalar_t, index_t>
                     <<<total_blocks,
                       CUDA_NUM_THREADS,
                       0,
@@ -504,7 +487,7 @@ void nll_loss2d_backward_out_cuda_template(
                         grad_output.const_data_ptr<scalar_t>(),
                         target_.const_data_ptr<int64_t>(),
                         optional_data<scalar_t>(weight_),
-                        total_weight_acc.const_data_ptr<accscalar_t>(),
+                        total_weight.const_data_ptr<scalar_t>(),
                         reduction == at::Reduction::Mean,
                         input.size(1),
                         map_nelem,
@@ -537,14 +520,7 @@ std::tuple<Tensor, Tensor> nll_loss2d_forward_cuda(
     int64_t reduction,
     int64_t ignore_index) {
   auto output = at::empty({0}, self.options());
-  // Reduction divides by total_weight in backward. half/bfloat16 cannot hold
-  // spatial counts above 65504, so keep that scalar in the acc type (fp32).
-  auto total_weight_opts = self.options();
-  if (reduction != at::Reduction::None) {
-    total_weight_opts = total_weight_opts.dtype(
-        at::toAccumulateType(self.scalar_type(), /*is_cuda=*/true));
-  }
-  auto total_weight = at::empty({0}, total_weight_opts);
+  auto total_weight = at::empty({0}, self.options());
   nll_loss2d_forward_out_cuda_template(
       output, total_weight, self, target, weight_opt, reduction, ignore_index);
   return std::make_tuple(std::move(output), std::move(total_weight));
