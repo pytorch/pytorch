@@ -49,6 +49,14 @@ at::cuda::CUDAEventPool::Event getEventFromPool(const at::DeviceIndex device_idx
 // buffers; copies of at least this many bytes use the kernel.
 constexpr int64_t kGfx1250ElementwiseCopyMinBytes = 8 << 20;
 constexpr uintptr_t kGfx1250ElementwiseCopyAlignment = 16;
+
+// Dtypes that were benchmarked and that direct_copy_kernel_cuda dispatches
+// unconditionally. Everything else (quantized, sub-byte shell, bits, float8,
+// float4) stays on memcpyAsync, which does not depend on the dtype.
+inline bool gfx1250ElementwiseCopyDtype(ScalarType t) {
+  return isIntegralType(t, /*includeBool=*/true) || isComplexType(t) ||
+      t == kFloat || t == kDouble || t == kHalf || t == kBFloat16;
+}
 #endif
 
 } // namespace
@@ -639,16 +647,16 @@ void copy_device_to_device(TensorIterator& iter,
   // On gfx1250 a large same-device contiguous copy is faster as an elementwise
   // kernel than as hipMemcpyAsync (see kGfx1250ElementwiseCopyMinBytes).
   // Cross-device copies and self copies (a no-op below) keep the memcpy path,
-  // as do quantized dtypes (direct_copy_kernel_cuda cannot dispatch the
-  // sub-byte ones) and buffers that are not 16-byte aligned (not benchmarked,
-  // and the kernel then loses its vectorized loads). The arch check is last
-  // so it only runs for large copies; the gfx1250 substring match covers
-  // every gfx1250 variant.
+  // as do dtypes outside the benchmarked set (direct_copy_kernel_cuda cannot
+  // dispatch every dtype that memcpy can copy) and buffers that are not
+  // 16-byte aligned (not benchmarked, and the kernel then loses its vectorized
+  // loads). The arch check is last so it only runs for large copies; the
+  // gfx1250 substring match covers every gfx1250 variant.
   bool use_elementwise_copy = false;
 #ifdef USE_ROCM
   use_elementwise_copy = memcpy_eligible && src_device == dst_device &&
       numel * iter.element_size(0) >= kGfx1250ElementwiseCopyMinBytes &&
-      !isQIntType(iter.dtype(0)) &&
+      gfx1250ElementwiseCopyDtype(iter.dtype(0)) &&
       iter.data_ptr(0) != iter.data_ptr(1) &&
       reinterpret_cast<uintptr_t>(iter.data_ptr(0)) % kGfx1250ElementwiseCopyAlignment == 0 &&
       reinterpret_cast<uintptr_t>(iter.data_ptr(1)) % kGfx1250ElementwiseCopyAlignment == 0 &&

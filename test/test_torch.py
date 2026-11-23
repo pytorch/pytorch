@@ -3450,19 +3450,24 @@ class TestTorchDeviceType(TestCase):
                 # elements outside the destination slice are unchanged
                 assert_bytes_equal(dst_base[:offset], dst_base_before[:offset], msg)
                 assert_bytes_equal(dst_base[offset + n:], dst_base_before[offset + n:], msg)
-        # a self copy of a large tensor must be a no-op
         t = make_tensor((gate // es,), dtype=dtype, device=device)
         expected = t.clone()
+        # t.copy_(t) returns early in copy_impl. A second view of the same
+        # memory is a different tensor with the same pointer, so it reaches
+        # copy_device_to_device and must leave the data unchanged.
         t.copy_(t)
         assert_bytes_equal(t, expected, "self copy")
+        t.copy_(t.view_as(t))
+        assert_bytes_equal(t, expected, "aliased self copy")
         # clone() goes through the same path
         assert_bytes_equal(t.clone(), expected, "clone")
 
     # Large contiguous quantized copies must keep working on every backend: the
     # gfx1250 elementwise copy kernel does not dispatch every quantized dtype,
-    # so quantized dtypes stay on memcpy. (The sub-byte quint4x2 / quint2x4
-    # dtypes are not covered: their element count is not their byte count, and
-    # memcpy-based copies of them are not supported on CUDA either way.)
+    # so dtypes outside its benchmarked set stay on memcpy. (The sub-byte
+    # quint4x2 / quint2x4 dtypes are not covered: their element count is not
+    # their byte count, and memcpy-based copies of them are not supported on
+    # CUDA either way.)
     @onlyCUDA
     @parametrize("qdtype", (torch.qint8, torch.quint8),
                  name_fn=lambda qdtype: str(qdtype).split(".")[-1])
@@ -3481,6 +3486,23 @@ class TestTorchDeviceType(TestCase):
         dst = torch._empty_affine_quantized((numel,), scale=1.0, zero_point=0, dtype=qdtype, device=device)
         dst.copy_(src)
         self.assertTrue(torch.equal(storage_bytes(dst), raw))
+
+    # Same-dtype copies of the sub-byte shell dtypes (UInt1-7, Int1-7) are
+    # allowed and are plain byte copies; the gfx1250 elementwise copy kernel
+    # does not dispatch them, so large copies must stay on memcpy.
+    @onlyCUDA
+    @parametrize("shell_dtype", (torch.uint1, torch.uint4, torch.int4),
+                 name_fn=lambda shell_dtype: str(shell_dtype).split(".")[-1])
+    def test_copy_subbyte_shell_dtype_large_clone(self, device, shell_dtype):
+        numel = 16 << 20
+        raw = torch.randint(0, 256, (numel,), dtype=torch.uint8, device=device)
+        src = raw.view(shell_dtype)
+        out = src.clone()
+        self.assertEqual(out.dtype, shell_dtype)
+        self.assertTrue(torch.equal(out.view(torch.uint8), raw))
+        dst = torch.zeros(numel, dtype=torch.uint8, device=device).view(shell_dtype)
+        dst.copy_(src)
+        self.assertTrue(torch.equal(dst.view(torch.uint8), raw))
 
     # Exercises the tiled CUDA kernel for dense 2D transpose copies. The
     # shapes are deliberately larger than the 4 MB dispatch threshold, and
