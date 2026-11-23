@@ -25,6 +25,17 @@ from torch.testing._internal.common_utils import (
 class TestPointwiseIndexing(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_row_first_grid_limit(self) -> None:
+        from torch._native.ops.pointwise.layout import tma_layout
+
+        # FP32 transpose + bool output selects rows_first with 192-column groups.
+        # grid.y = 65536 exceeds CUDA's launch limit.
+        shape = (32, 192 * 65535 + 32)
+        layout = tma_layout(
+            ((torch.float32, shape, (1, 32)),), shape, torch.bool, (shape[1], 1)
+        )
+        self.assertIsNone(layout)
+
     @parametrize(
         "shape,strides,expected",
         (((2**31,), (1,), False), ((2,), (2**31,), False), ((8, 8), (16, 1), True)),
