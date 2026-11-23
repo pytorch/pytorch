@@ -105,6 +105,9 @@ class XPUCombinedScheduling(BaseScheduling):
     def codegen_staged_reduction(self, node):
         return self._triton_scheduling.codegen_staged_reduction(node)
 
+    def codegen_outer_reduction_plans(self, node):
+        return self._triton_scheduling.codegen_outer_reduction_plans(node)
+
     def codegen_node(
         self, node: FusedSchedulerNode | SchedulerNode
     ) -> Kernel[Any] | MultiKernel | None:
