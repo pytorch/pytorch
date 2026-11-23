@@ -78,6 +78,13 @@ endif()
 add_executable(test_aoti_abi_check
   ${AOTI_ABI_CHECK_TEST_SRCS}
 )
+# A HIP source makes CMake link this target with ROCm clang. Manywheel
+# gtest is not PIC, and that ld.lld link fails. Keep the host linker.
+if(USE_ROCM)
+  set_target_properties(test_aoti_abi_check PROPERTIES
+    LINKER_LANGUAGE CXX
+    HIP_ARCHITECTURES "${PYTORCH_ROCM_ARCH}")
+endif()
 
 # TODO temporary until we can delete the old gtest polyfills.
 target_compile_definitions(test_aoti_abi_check PRIVATE USE_GTEST)
