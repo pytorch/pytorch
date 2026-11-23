@@ -325,7 +325,7 @@ class MeshTopoInfo:
     """
     Mesh information for collective cost estimation
     """
-    
+
     mesh_dim_devices: list[int]
     mesh_dim_bandwidth: list[float]
     mesh_dim_latency: list[float]
@@ -368,9 +368,7 @@ def _build_mesh_topo_info(
             # set to ethernet latency for inter-host
             mesh_dim_latency[mesh_dim] = 2.7
 
-    return MeshTopoInfo(
-        mesh_dim_devices, mesh_dim_bandwidth, mesh_dim_latency
-    )
+    return MeshTopoInfo(mesh_dim_devices, mesh_dim_bandwidth, mesh_dim_latency)
 
 
 def allgather_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> float:
@@ -572,11 +570,7 @@ def redistribute_cost(
     # Transformation that considered for redistribute cost:
     # 1. allgather 2. alltoall
     # 3. allreduce 4. reduce_scatter
-    from torch.distributed._functional_collectives import _are_we_tracing
-    from torch.distributed.tensor._redistribute import (
-        _gen_transform_infos,
-        _gen_transform_infos_non_cached,
-    )
+    from torch.distributed.tensor._redistribute import _gen_transform_infos
 
     # TODO(zpcore): Support _StridedShard redistribution. Remove the temporary
     # fix, which is to prevent StridedShard erroring out.
@@ -594,10 +588,7 @@ def redistribute_cost(
     ):
         return cost
 
-    if _are_we_tracing():
-        transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
-    else:
-        transform_infos = _gen_transform_infos(current_spec, target_spec)
+    transform_infos = _gen_transform_infos(current_spec, target_spec)
     for transform_info in transform_infos:
         if current_spec.tensor_meta is None:
             raise AssertionError("spec should have tensor meta defined!")

@@ -8,7 +8,6 @@ import math
 import weakref
 from collections import defaultdict
 from collections.abc import Sequence
-from functools import cache
 from typing import Any, cast, TypedDict
 
 import torch
@@ -844,7 +843,9 @@ class DTensorRedistributePlanner:
             device_mesh: The device mesh for this planner
             dtensor_meta: TensorMeta of the DTensor to redistribute
         """
-        self._device_mesh_ref: weakref.ReferenceType[DeviceMesh] = weakref.ref(device_mesh)
+        self._device_mesh_ref: weakref.ReferenceType[DeviceMesh] = weakref.ref(
+            device_mesh
+        )
         if not device_mesh._is_current_rank_part_of_mesh():
             raise AssertionError
         if dtensor_meta is None:
@@ -860,7 +861,7 @@ class DTensorRedistributePlanner:
         mesh = self._device_mesh_ref()
         if mesh is None:
             raise RuntimeError(
-                "DTensorRedistributePlanner outlived its DeviceMesh. The planner" \
+                "DTensorRedistributePlanner outlived its DeviceMesh. The planner"
                 "cache should have rebuilt this entry against the live mesh."
             )
         return mesh
@@ -1589,6 +1590,10 @@ def _gen_transform_infos(
     dst_spec: DTensorSpec,
     use_graph_based_transform: bool | None = None,
 ) -> list[_TransformInfo]:
+    if _are_we_tracing():
+        return _gen_transform_infos_non_cached(
+            src_spec, dst_spec, use_graph_based_transform
+        )
     key = (
         src_spec.mesh._cache_key,
         src_spec._hash_key_no_mesh,

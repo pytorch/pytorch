@@ -1351,7 +1351,9 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
 
         if not compare_full_expansion:
             from torch.distributed.tensor._collective_utils import redistribute_cost
-            from torch.distributed.tensor._redistribute import clear_transform_infos_cache
+            from torch.distributed.tensor._redistribute import (
+                clear_transform_infos_cache,
+            )
 
             clear_transform_infos_cache()
             with use_min_cost_redistribution_plan():

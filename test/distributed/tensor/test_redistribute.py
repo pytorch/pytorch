@@ -33,11 +33,11 @@ from torch.distributed.tensor._dtensor_spec import (
     TensorMeta,
 )
 from torch.distributed.tensor._redistribute import (
-    clear_transform_infos_cache,
     _FlattenedTransformInfo,
     _optimize_transform_infos,
     _redistribute_cost_sort_key,
     _TransformInfo,
+    clear_transform_infos_cache,
     disable_redistribute_transform_optimization,
     redistribute_local_tensor,
     use_min_cost_redistribution_plan,
