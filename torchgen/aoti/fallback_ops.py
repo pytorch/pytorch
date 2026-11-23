@@ -231,6 +231,4 @@ aten_shimified_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = {
     "aten.full.default": {"since": "TORCH_VERSION_2_10_0"},
     "aten.subtract.Tensor": {"since": "TORCH_VERSION_2_10_0"},
     "aten.add.Tensor": {"since": "TORCH_VERSION_2_16_0"},
-    "aten.empty_strided.default": {"since": "TORCH_VERSION_2_16_0"},
-    "aten.slice.Tensor": {"since": "TORCH_VERSION_2_16_0"},
 }
