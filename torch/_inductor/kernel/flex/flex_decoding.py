@@ -159,14 +159,7 @@ flex_decoding_template = TritonTemplate(
 )
 
 
-# BLOCK_N of the XPU default decode configs. Capping SPLIT_KV on it, rather than on
-# the configs being tried, keeps SPLIT_KV independent of the autotune search space.
-XPU_SPLIT_KV_BLOCK_N = 64
-
-
-def get_split_k(
-    B: int, H: int, Mk: int, device: torch.device, block_n: int | None = None
-) -> int:
+def get_split_k(B: int, H: int, Mk: int, device: torch.device) -> int:
     interface = get_interface_for_device(device)
     num_SM = interface.get_multi_processor_count(device)
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
@@ -177,8 +170,10 @@ def get_split_k(
     # Before we have runtime workload evening, assign 2 splits per SM.
     split_k = max(split_k, 1)
 
-    if block_n is not None and isinstance(Mk, (int, sympy.Integer)):
-        split_k = max(min(split_k, ceildiv(int(Mk), block_n)), 1)
+    # XPU: at most one split per KV tile of the default decode BLOCK_N (64). A fixed
+    # BLOCK_N keeps SPLIT_KV independent of the autotune search space.
+    if device.type == "xpu" and isinstance(Mk, (int, sympy.Integer)):
+        split_k = max(min(split_k, ceildiv(int(Mk), 64)), 1)
 
     return split_k
 
@@ -292,13 +287,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     kernel_options.setdefault("SM_SCALE", scale)
     if "SPLIT_KV" not in kernel_options:
-        kernel_options["SPLIT_KV"] = get_split_k(
-            B,
-            Hkv,
-            seq_len_kv,
-            device,
-            block_n=XPU_SPLIT_KV_BLOCK_N if device.type == "xpu" else None,
-        )
+        kernel_options["SPLIT_KV"] = get_split_k(B, Hkv, seq_len_kv, device)
     MAX_SPLIT_KV = kernel_options["SPLIT_KV"]
 
     # create config dependent intermediate buffers
