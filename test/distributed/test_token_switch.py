@@ -1532,8 +1532,18 @@ instantiate_device_type_tests(TokenSwitchRoutingDtypeTest, globals(), only_for="
 class _TokenSwitchMoRIOnlyTests:
     """MoRI-only tests; the host class is TokenSwitchMoRITest."""
 
-    @parametrize("layout", ["flat", "expert_major"])
-    def test_dispatch_short_out_raises(self, layout):
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "layout,output_index",
+        [
+            ("flat", 0),
+            ("flat", 1),
+            ("flat", 2),
+            ("expert_major", 0),
+            ("expert_major", 1),
+        ],
+    )
+    def test_dispatch_short_out_raises(self, layout, output_index):
         self._init()
         ts = self.get_contract_token_switch()
         topk_idx, w, x, _nd, _exp, _ = self._contract_inputs(seed=31)
@@ -1541,10 +1551,14 @@ class _TokenSwitchMoRIOnlyTests:
         need = ts.max_expert_major_slots_per_rank
         if layout == "flat":
             need = ts.max_recv_tokens_per_rank
-        out = ts._alloc_dispatch_outputs(routing, x, w, need, HIDDEN, CONTRACT_TOP_K)
+        out = list(
+            ts._alloc_dispatch_outputs(routing, x, w, need, HIDDEN, CONTRACT_TOP_K)
+        )
+        out[output_index] = out[output_index][: need - 1]
         with self.assertRaisesRegex(ValueError, f"require at least {need} rows"):
-            ts.dispatch(routing, x, w, out=(out[0][: need - 1], out[1], out[2]))
+            ts.dispatch(routing, x, w, out=tuple(out))
 
+    @skip_if_lt_x_gpu(2)
     @parametrize("layout", ["flat", "expert_major"])
     def test_combine_backward_zeroes_unused_rows(self, layout):
         # combine ignores rows past the received slots, so their gradient is zero.
@@ -1629,6 +1643,7 @@ class TokenSwitchMoRITest(
         torch.cuda.set_device(self.device)
         dist.barrier()
 
+    @skip_if_lt_x_gpu(2)
     def test_expert_major_slots_and_combine(self):
         # One slot per (token, local expert), grouped by local expert; a second
         # dispatch on the Routing keeps the slots; unweighted combine of an identity
@@ -1677,6 +1692,7 @@ class TokenSwitchMoRITest(
         ts.combine(routing, first, out=combined)
         self.assertEqual(combined.float(), CONTRACT_TOP_K * x.float())
 
+    @skip_if_lt_x_gpu(2)
     def test_expert_major_interleaved_autograd(self):
         # Two expert_major Routings, two dispatches before either combine; each
         # token's gradient is its number of (token, expert) pairs, K.

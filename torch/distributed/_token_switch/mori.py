@@ -104,7 +104,6 @@ class TokenSwitchMoRI(TokenSwitch):
         )
         self._op = ep.EpDispatchCombineOp(cfg, self._comm)
         self._comm.barrier()
-        self._max_recv_tokens_per_rank = cfg.max_recv
         self._recv_cap = cfg.effective_max_recv
         self._em_slots = self._recv_cap * min(top_k, self._experts_per_rank)
         self._last_op: str | None = None
@@ -113,11 +112,10 @@ class TokenSwitchMoRI(TokenSwitch):
 
     @property
     def max_recv_tokens_per_rank(self) -> int:
-        return self._max_recv_tokens_per_rank
+        return self._recv_cap
 
     @property
     def max_expert_major_slots_per_rank(self) -> int:
-        """Upper bound on expert_major receive slots per rank."""
         return self._em_slots
 
     def close(self) -> None:
@@ -241,11 +239,12 @@ class TokenSwitchMoRI(TokenSwitch):
                 "TokenSwitchMoRI needs out_topk_weights (and flat: out_topk_idx)"
             )
         need = self._recv_cap if flat else self._em_slots
+        prop = "max_recv_tokens_per_rank" if flat else "max_expert_major_slots_per_rank"
         for t in (out_tokens, out_topk_weights, out_topk_idx):
             if t is not None and t.shape[0] < need:
                 raise ValueError(
                     f"TokenSwitchMoRI {routing.layout} dispatch outputs require at "
-                    f"least {need} rows, got {t.shape[0]}"
+                    f"least {need} rows ({prop}), got {t.shape[0]}"
                 )
         self._fence_if_repeat("dispatch")
         state = self._state(routing)
@@ -328,30 +327,23 @@ class TokenSwitchMoRI(TokenSwitch):
     ) -> None:
         flat, K = routing.layout == "flat", self._top_k
         need = self._recv_cap if flat else self._em_slots
-        # A combine input with fewer rows than the layout's bound gets a gradient
-        # buffer that short; dispatch into a full one and copy its leading rows out.
-        out = out_expert_grads
-        if out.shape[0] < need:
-            out = out.new_zeros(need, out.shape[1])
-        rows = out.shape[0]
+        rows = out_expert_grads.shape[0]
         weights = grad_tokens.new_zeros(grad_tokens.shape[0], K, dtype=torch.float32)
         if flat:
             out_w = weights.new_zeros(rows, K)
             out_idx = weights.new_zeros(rows, K, dtype=torch.int64)
         else:
             out_w, out_idx = weights.new_zeros(rows), None
-        self._dispatch(routing, grad_tokens, weights, out, out_w, out_idx)
+        self._dispatch(routing, grad_tokens, weights, out_expert_grads, out_w, out_idx)
         # The forward combine ignores rows past the receive count (flat) and unused
         # slots (expert_major), so their gradient is zero, not what dispatch copied.
         state = self._state(routing)
         if flat:
             total = state.mori_handle.total_recv_token_num.long()
-            dead = torch.arange(need, device=out.device) >= total
+            dead = torch.arange(need, device=out_expert_grads.device) >= total
         else:
             dead = state.slot_dest_row >= self._recv_cap
-        out[:need].masked_fill_(dead[:, None], 0)
-        if out is not out_expert_grads:
-            out_expert_grads.copy_(out[: out_expert_grads.shape[0]])
+        out_expert_grads[:need].masked_fill_(dead[:, None], 0)
 
     def _dispatch_backward(
         self,
