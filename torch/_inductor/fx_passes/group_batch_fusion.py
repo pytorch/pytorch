@@ -2073,17 +2073,26 @@ def group_batch_fusion_passes(
         post_grad_options = dict(config.post_grad_fusion_options)
         # Keep the old pre-grad key working for fusions that moved post grad.
         for name in _PRE_GRAD_OPTIONS_FORWARDED_TO_POST_GRAD:
-            if name in config.pre_grad_fusion_options and name not in post_grad_options:
-                # An explicit post-grad entry wins; the legacy key fills a
-                # missing entry for stacks that still set the old key.
+            if name not in config.pre_grad_fusion_options:
+                continue
+            shipped = config.DEFAULT_POST_GRAD_FUSION_OPTIONS.get(name)
+            if name in post_grad_options and post_grad_options[name] != shipped:
                 warning_once(
                     log,
-                    "Fusion option %s is post-grad; running it post grad. "
-                    "Move it from pre_grad_fusion_options to "
-                    "post_grad_fusion_options.",
+                    "Fusion option %s is post-grad; the explicit "
+                    "post_grad_fusion_options entry was kept. Remove the "
+                    "pre_grad_fusion_options entry.",
                     name,
                 )
-                post_grad_options[name] = config.pre_grad_fusion_options[name]
+                continue
+            warning_once(
+                log,
+                "Fusion option %s is post-grad; running it post grad. "
+                "Move it from pre_grad_fusion_options to "
+                "post_grad_fusion_options.",
+                name,
+            )
+            post_grad_options[name] = config.pre_grad_fusion_options[name]
         # Device-scoped defaults must not pay for the search on other
         # devices. The "devices" filter applies to every group/batch fusion
         # option, not just batch_linear_lhs, and the scan is skipped entirely

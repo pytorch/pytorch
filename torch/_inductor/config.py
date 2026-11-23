@@ -422,13 +422,18 @@ pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 # Assign a merged dict to keep these defaults; assigning a new dict replaces
 # them. Keys: devices (device types or torch.device), min_fuse_set_size,
 # static_widths_only, and max_fuse_tensor_size (max fused weight elements).
-post_grad_fusion_options: dict[str, dict[str, Any]] = {
+# Shipped defaults; post_grad_fusion_options below is a mutable copy.
+DEFAULT_POST_GRAD_FUSION_OPTIONS: dict[str, dict[str, Any]] = {
     "batch_linear_lhs": {
         "devices": ("xpu",),
         "min_fuse_set_size": 2,
         "static_widths_only": True,
         "max_fuse_tensor_size": 1 << 24,
     },
+}
+
+post_grad_fusion_options: dict[str, dict[str, Any]] = {
+    name: dict(options) for name, options in DEFAULT_POST_GRAD_FUSION_OPTIONS.items()
 }
 
 # enable reordering pass for improving memory locality
