@@ -200,10 +200,9 @@ class WelfordOps:
     @cute.jit
     def leaf(self, val, idx):
         # The online update makes m2 NaN for +-inf (inf * (inf - inf)), and the leaf must
-        # agree: (v - v) ** 2 is +0.0 for finite v and NaN otherwise.
+        # agree: v - v is +0.0 for finite v and NaN otherwise.
         v = self.acc(val)
-        d = v - v
-        return (v, d * d, self.acc(1.0))
+        return (v, v - v, self.acc(1.0))
 
     @cute.jit
     def reduce(self, acc, val, idx, valid):
