@@ -975,22 +975,19 @@ class CompiledFxGraph(OutputCode):
                 # The graph compiled without CUDA graphs, so it has nothing to be
                 # wrapped with. A bundled AOTAutograd entry gets here when it is
                 # post-compiled under another triton.cudagraphs than it compiled
-                # under (deserialize_bundled_cache_entry reads the ambient flag).
-                # So does a backward that an override_cudagraphs kept out beside
-                # its CUDA graphed forward, in a bundled entry and on an
-                # AOTAutograd cache hit: the two share one box. The override was
-                # reported when the backward compiled, and
-                # create_compiler_config_extra reports it again on a cache hit
-                # (not when a bundled entry loads), so only a forward or
-                # inference graph is reported here.
-                if not is_backward:
-                    reason = "the graph having compiled without them"
-                    if any(is_gpu(device) for device in self.device_types):
-                        log_cudagraph_skip_and_bump_counter(
-                            format_default_skip_message(reason)
-                        )
-                    else:
-                        counters["inductor"]["cudagraph_skips"] += 1
+                # under (deserialize_bundled_cache_entry reads the ambient flag),
+                # or holds a backward that an override_cudagraphs kept out beside
+                # its CUDA graphed forward: the two share its box.
+                reason = (
+                    "the graph having been compiled without them; "
+                    "recompile or recapture it with CUDA graphs on"
+                )
+                if any(is_gpu(device) for device in self.device_types):
+                    log_cudagraph_skip_and_bump_counter(
+                        format_default_skip_message(reason)
+                    )
+                else:
+                    counters["inductor"]["cudagraph_skips"] += 1
                 BoxedBool.disable(cudagraphs)
             else:
                 if is_backward:
