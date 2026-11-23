@@ -8902,7 +8902,9 @@ print(json.dumps(found))
             # find them; the graph goes on across their reads and writes.
             (graph,) = self.graphs(compiled)
             self.assertEqual((graph["ops"], graph["why"]), (7, "the function returns"))
-            ((block, _),) = graph["ends"]
+            # The path that ran last; the calls in which the lookup raises
+            # have one of their own, which ends in front of the lookup.
+            block, _ = graph["ends"][0]
             self.assertGreater(block, 0)
             if behind:
                 self.assertEqual((graph["variants"], graph["hits"]), (1, 2))
@@ -11321,6 +11323,64 @@ def graph_asks_whether_any(held, x):
     return torch.tanh(h) + h
 
 
+GRAPH_RAISE_OUT = {"there": 2.0}
+GRAPH_RAISE_NUMBERS = {"there": 1, "missing": 0}
+GRAPH_RAISE_ROWS = {"there": (2.0, 0.5), "missing": (2.0, 0.5, 1.0)}
+GRAPH_RAISE_SEEN = []
+
+
+def graph_raises_out(x, given):
+    # An entry of a dict from outside, which is not there at some calls.
+    h = torch.relu(x) + 1
+    h = h * 2 + 1
+    scale = GRAPH_RAISE_OUT[given]
+    return (torch.tanh(h * scale) * 2 - 1).sum()
+
+
+def graph_raises_and_handles(x, given):
+    h = torch.relu(x) + 1
+    h = h * 2 + 1
+    try:
+        scale = GRAPH_RAISE_OUT[given]
+    except KeyError:
+        scale = 3.0
+    return (torch.tanh(h * scale) * 2 - 1).sum()
+
+
+def graph_raises_dividing(x, given):
+    h = torch.relu(x) + 1
+    h = h * 2 + 1
+    scale = 2.0 / GRAPH_RAISE_NUMBERS[given]
+    return (torch.tanh(h * scale) * 2 - 1).sum()
+
+
+def graph_raises_unpacking(x, given):
+    h = torch.relu(x) + 1
+    h = h * 2 + 1
+    scale, shift = GRAPH_RAISE_ROWS[given]
+    return (torch.tanh(h * scale + shift) * 2 - 1).sum()
+
+
+def graph_stores_and_raises(x, given):
+    # A store that waits for the path to land, in front of what raises.
+    h = torch.relu(x) + 1
+    h = h * 2 + 1
+    GRAPH_RAISE_SEEN.append(given)
+    scale = GRAPH_RAISE_OUT[given]
+    return (torch.tanh(h * scale) * 2 - 1).sum()
+
+
+def graph_raise_reads(key):
+    return GRAPH_RAISE_OUT[key]
+
+
+def graph_raises_in_what_it_calls(x, given):
+    h = torch.relu(x) + 1
+    h = h * 2 + 1
+    scale = graph_raise_reads(given)
+    return (torch.tanh(h * scale) * 2 - 1).sum()
+
+
 GRAPH_FRAME_TABLE = {1: 2.0}
 GRAPH_FRAME_SEEN = []
 GRAPH_FRAME_KEPT = []
@@ -11334,6 +11394,14 @@ class GraphFrameSized:
 
 
 GRAPH_FRAME_SIZED = GraphFrameSized()
+
+
+def graph_frame_missing_key(x, given):
+    # Nothing behind the lookup, which raises at some calls, uses `h`.
+    h = torch.relu(x) + 1
+    y = (h * 2).sin() * 3 + 1
+    scale = GRAPH_FRAME_TABLE[given]
+    return (y * scale).sum()
 
 
 def graph_frame_python_call(x, given):
@@ -11365,6 +11433,18 @@ def graph_frame_raise(x, given):
     return (y * 2).sum()
 
 
+def graph_frame_inner(y, given):
+    w = y + 1
+    v = (w * 2).cos()
+    return v * GRAPH_FRAME_TABLE[given]
+
+
+def graph_frame_two_deep(x, given):
+    h = torch.relu(x) + 1
+    y = (h * 2).sin() * 3 + 1
+    return graph_frame_inner(y, given).sum()
+
+
 def graph_frame_outlives(x, given):
     # The frame object outlives the call.
     GRAPH_FRAME_KEPT.append(sys._getframe())
@@ -11389,6 +11469,23 @@ def graph_frame_returns(x, given):
     h = torch.relu(x) + 1
     y = (h * 2).sin() * 3 + 1
     return (y * 2).sum()
+
+
+def graph_short_way_returns(x, given):
+    # A way through the function with fewer operations than a graph has.
+    h = torch.relu(x) + 1
+    if given != 1:
+        return h.sum()
+    h = (h * 2).sin() + 1
+    return (torch.tanh(h * 2) * 2 - 1).sum()
+
+
+def graph_short_way_raises(x, given):
+    h = torch.relu(x) + 1
+    if given != 1:
+        raise ValueError
+    h = (h * 2).sin() + 1
+    return (torch.tanh(h * 2) * 2 - 1).sum()
 
 
 GRAPH_NAME_LOG = []
@@ -15874,6 +15971,113 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
                 whole = sum(hits for ops, hits in graphs if ops >= 7)
                 self.assertGreaterEqual(whole, 6, msg=f"{name}, {way}: {graphs}")
 
+    def test_what_stands_in_front_of_an_instruction_that_raises_is_a_path(self, device):
+        # An instruction that raises while a path is taken down ends the
+        # path in front of it (or in front of the call the path went into
+        # that it is in): the operations in front are a graph that the
+        # calls like it run, the raise goes its way, and no call like it
+        # is taken down again. Such a path is tried behind the others, and
+        # stands back for a call that gets further once the raise did not
+        # come. Against eager, call by call: what is returned or raised,
+        # and what a store in front of the raise left; and what the report
+        # says of the graphs and of how many calls were taken down.
+        def keep(gm, input_types):
+            return gm
+
+        schedules = {
+            "always": lambda at: True,
+            "every other call": lambda at: at % 2 == 0,
+            "calls 7 and 10": lambda at: at in (7, 10),
+            "calls 1 and 2": lambda at: at in (1, 2),
+        }
+        raised = (KeyError, ZeroDivisionError, ValueError)
+
+        def calls(run, raises, graded, count):
+            del GRAPH_RAISE_SEEN[:]
+            found = []
+            for at in range(count):
+                x = torch.full((3, 4), 0.25 * (at + 1), device=device)
+                x.requires_grad_(graded)
+                try:
+                    out = run(x, "missing" if raises(at) else "there")
+                    if graded:
+                        out.backward()
+                    grad = None if x.grad is None else x.grad.sum().item()
+                    found.append((out.item(), grad, list(GRAPH_RAISE_SEEN)))
+                except raised as error:
+                    said = (type(error).__name__, str(error))
+                    found.append((*said, list(GRAPH_RAISE_SEEN)))
+            return found
+
+        functions = (
+            graph_raises_out,
+            graph_raises_and_handles,
+            graph_raises_dividing,
+            graph_raises_unpacking,
+            graph_stores_and_raises,
+            graph_raises_in_what_it_calls,
+        )
+        ways = (((), False), ((keep,), False), ((), True))
+        for fn in functions:
+            for when, raises in schedules.items():
+                for behind, graded in ways:
+                    exported = bool(behind) or graded
+                    count = 24 if exported else 40
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{fn.__name__}, raises {when}, pass {bool(behind)}, gradient {graded}"
+                    got = calls(compiled, raises, graded, count)
+                    expected = calls(fn, raises, graded, count)
+                    self.assertTrue(got == expected, msg=f"{msg}: {got} {expected}")
+                    found = [g for g in torch.vm.regions(compiled) if "ops" in g]
+                    taken = compiled.stats()["graphs"]["taken"]
+                    msg = f"{msg}: taken down {taken}, {found}"
+                    if when == "always":
+                        # The four operations in front of the raise are a
+                        # graph, and the calls are not taken down again.
+                        front = [g for g in found if g["ops"] == 4]
+                        one = len(front) == 1 and "raised" in front[0]["why"]
+                        self.assertTrue(one, msg=msg)
+                        self.assertLessEqual(taken, 4 if exported else 20, msg=msg)
+                        if exported:
+                            ran = front[0]["hits"]
+                            self.assertGreaterEqual(ran, count - 6, msg=msg)
+                    if not exported:
+                        continue
+                    returns = "the function returns"
+                    whole = [g for g in found if g["why"] == returns and g["ops"] >= 9]
+                    hits = sorted(form["hits"] for g in whole for form in g["forms"])
+                    if when == "every other call":
+                        # Both paths are there and run in turns: the
+                        # function has settled.
+                        self.assertTrue([g["paths"] for g in whole] == [2], msg=msg)
+                        self.assertGreaterEqual(hits[0], count // 2 - 6, msg=msg)
+                        self.assertLessEqual(taken, 9, msg=msg)
+                    if when == "calls 7 and 10":
+                        # The path in front of the raise ran at the second
+                        # of the two calls, and the whole one at the rest.
+                        two = [g["paths"] for g in whole] == [2] and hits[0] == 1
+                        self.assertTrue(two, msg=msg)
+                        self.assertGreaterEqual(hits[-1], count - 8, msg=msg)
+                        if behind and fn is graph_raises_out:
+                            # A call that the whole path is for and has no
+                            # form for (another number behind the lookup)
+                            # is taken down at once: the path in front of
+                            # the raise does not run in its place.
+                            GRAPH_RAISE_OUT["there"] = 3.0
+                            try:
+                                x = torch.full((3, 4), 0.5, device=device)
+                                self.assertEqual(compiled(x, "there"), fn(x, "there"))
+                            finally:
+                                GRAPH_RAISE_OUT["there"] = 2.0
+                            again = compiled.stats()["graphs"]["taken"]
+                            self.assertEqual(again, taken + 1, msg=msg)
+                    if when == "calls 1 and 2":
+                        # The first call that was taken down raised: the
+                        # calls behind still get the whole path.
+                        self.assertTrue(len(whole) == 1, msg=msg)
+                        self.assertGreaterEqual(hits[-1], count - 8, msg=msg)
+
     def test_the_frame_has_every_variable_wherever_a_path_lands(self, device):
         # Wherever a path lands, the frame has every variable the
         # instructions would have bound: what a variable is bound to last
@@ -15907,7 +16111,7 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
             del GRAPH_FRAME_SEEN[:], GRAPH_FRAME_KEPT[:]
             try:
                 said = run(x, given).item()
-            except ValueError as error:
+            except (KeyError, ValueError) as error:
                 said = type(error).__name__
                 tb = error.__traceback__.tb_next
                 while tb is not None:
@@ -15933,20 +16137,23 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
             return True
 
         every, every_other = (lambda at: 5), (lambda at: 5 if at % 2 else 1)
-        # The function, which calls are given what it raises for, how many
+        # The function, which calls have the key that is missing, how many
         # frames are looked at per call, and how many results the graph
         # that runs gives (None: it does not run).
         cases = (
+            (graph_frame_missing_key, every, 1, 2),
+            (graph_frame_missing_key, every_other, 1, 2),
             (graph_frame_python_call, every, 1, 2),
             (graph_frame_locals, every, 1, 2),
             (graph_frame_len, every, 1, 2),
             (graph_frame_raise, every, 1, 2),
             (graph_frame_raise, every_other, 1, 2),
+            (graph_frame_two_deep, every, 2, 2),
             (graph_frame_outlives, every, 1, None),
             (graph_frame_caught, every, 0, 1),
             (graph_frame_returns, every, 0, 1),
         )
-        raisers = (graph_frame_raise,)
+        raisers = (graph_frame_missing_key, graph_frame_raise, graph_frame_two_deep)
         count = 16
         for fn, givens, frames, results in cases:
             for behind, graded in (((), False), ((keep,), False), ((), True)):
@@ -15993,6 +16200,49 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
                 self.assertEqual(sorted(seen), names, msg=f"call {at}")
                 self.assertEqual(seen["h"], torch.relu(x) + 1)
         self.assertGreaterEqual(took, count - 6)
+
+    def test_a_short_way_that_ends_the_call_is_not_taken_down_again(self, device):
+        # A way through a function with fewer operations than a graph has,
+        # at a graph that has another path, which ends at a `return` or a
+        # `raise` of the function itself with every check asked in front
+        # of the operations: it is kept with a form without a callable,
+        # and the calls like it run the instructions and are not taken
+        # down again.
+        def keep(gm, input_types):
+            return gm
+
+        def calls(run, graded, count):
+            found = []
+            for at in range(count):
+                value = 0.25 * (at % 3 + 1)
+                x = torch.full((3, 4), value, device=device, requires_grad=graded)
+                try:
+                    out = run(x, 5 if at % 2 else 1)
+                    if graded:
+                        out.backward()
+                    grad = None if x.grad is None else x.grad.sum().item()
+                    found.append((out.item(), grad))
+                except ValueError as error:
+                    found.append((type(error).__name__, str(error)))
+            return found
+
+        count = 40
+        for fn in (graph_short_way_returns, graph_short_way_raises):
+            for behind, graded in (((), False), ((keep,), False), ((), True)):
+                passes = (*DEFAULT, P.Graphs(), *behind)
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                msg = f"{fn.__name__}, with a pass: {bool(behind)}, with a gradient: {graded}"
+                got, expected = calls(compiled, graded, count), calls(fn, graded, count)
+                self.assertTrue(got == expected, msg=f"{msg}: {got} {expected}")
+                found = [g for g in torch.vm.regions(compiled) if "ops" in g]
+                taken = compiled.stats()["graphs"]["taken"]
+                msg = f"{msg}: taken down {taken}, {found}"
+                self.assertLessEqual(taken, 10, msg=msg)
+                if behind or graded:
+                    # The way through the function runs as a graph at its calls.
+                    big = [g for g in found if g["ops"] >= 6]
+                    hits = sorted(form["hits"] for g in big for form in g["forms"])
+                    self.assertGreaterEqual(hits[-1], count // 2 - 8, msg=msg)
 
     def test_a_take_that_writes_to_an_outside_tensor_is_a_path_of_its_own(self, device):
         # Two takes of the same instructions, one that writes to a tensor

@@ -382,6 +382,13 @@ pub struct Path {
     /// It ended at a block that had not been profiled yet: the next run
     /// gets further.
     pub provisional: bool,
+    /// It ends in front of an instruction that raised when it was taken
+    /// down, or of a call it went into that did. Its checks say nothing
+    /// of the raise: it lands in front of the instruction, which the
+    /// function then runs. It is tried behind the paths that are not so
+    /// (`Compiled::enter_graph`), and stands back for a call when the
+    /// raise did not come (`GraphSite::passes`).
+    pub raised: bool,
     /// It leaves a variable of the frame unbound that the instructions
     /// bind: one that is bound to what the graph computes and does not
     /// give back, where the path lands at the return of the function and
@@ -606,8 +613,22 @@ pub struct GraphSite {
     turned: AtomicU32,
     provisional: AtomicU32,
     /// How often a path was taken down again to land in a new version of
-    /// a block (`retakes`).
+    /// a block, or with the paths that end at a raise passed over
+    /// (`retakes`).
     moves: AtomicU32,
+    /// The call of the function in which a path that ends in front of an
+    /// instruction that raised (`Path::raised`) was last the path of the
+    /// call; u64::MAX for none. If nothing raised in that call, such
+    /// paths are passed over (`passes`) until a call that is taken down
+    /// gets a path of its own.
+    awaits: AtomicU64,
+    passing: AtomicBool,
+    /// How many calls were taken down and ended at what raised, or left
+    /// such a path the one that is reported: a graph that is not exported
+    /// is taken down `MAX_MOVES` times more for it.
+    raises: AtomicU32,
+    /// How many calls took a path of the graph down.
+    pub taken: AtomicU64,
     /// How many times it was handed to the exporter, and how many calls
     /// ran what was made of it and how many ran its instructions.
     pub exports: AtomicU64,
@@ -659,6 +680,10 @@ impl GraphSite {
             turned: AtomicU32::new(0),
             provisional: AtomicU32::new(0),
             moves: AtomicU32::new(0),
+            awaits: AtomicU64::new(u64::MAX),
+            passing: AtomicBool::new(false),
+            raises: AtomicU32::new(0),
+            taken: AtomicU64::new(0),
             exports: AtomicU64::new(0),
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
@@ -716,8 +741,10 @@ impl GraphSite {
                 compiled < self.max_variants && closed <= self.max_variants
             }
             GraphState::Built => {
-                self.again.load(Ordering::Relaxed)
-                    || self.variants.borrow().first().is_none_or(|path| path.provisional)
+                // A path that ends in front of what raised is the report
+                // until a call gets further, for a few calls more.
+                let open = |path: &Arc<Path>| path.provisional || (path.raised && self.raises.load(Ordering::Relaxed) < MAX_MOVES);
+                self.again.load(Ordering::Relaxed) || self.variants.borrow().first().is_none_or(open)
             }
             _ => false,
         }
@@ -857,30 +884,26 @@ impl GraphSite {
         if path.provisional && self.provisional.fetch_add(1, Ordering::Relaxed) + 1 < MAX_PROVISIONAL {
             return;
         }
-        if path.operators.len() < self.min_ops {
+        if path.operators.len() < self.min_ops && form.is_none() {
+            // Too few operations for a graph, and no other path: the graph
+            // is none. Not yet where the path ended at what raised, which
+            // the next call may get past: only when that has been so a
+            // few times.
             let small = matches!(*self.state.borrow(), GraphState::Built | GraphState::Waiting)
-                && self.variants.borrow().is_empty();
+                && self.variants.borrow().is_empty()
+                && !(path.raised && self.raises.load(Ordering::Relaxed) < MAX_MOVES);
             if small {
                 *self.state.borrow_mut() = GraphState::Small(path.operators.len());
             }
             return;
         }
+        let known = self.known(&path);
         let mut paths = self.variants.borrow_mut();
-        // The same path: the same instructions, taken down with the same
-        // pinned values, and writing to a tensor from outside or not as
-        // this one does. A form runs under the checks of the path it is
-        // kept with, and as what that path is (`Path::mutates`: what wrote
-        // is not run a second time), so the form of a trace with other
-        // pinned values, or of one that writes where the other did not (a
-        // batch norm that trains at one call and not at another), is kept
-        // with a path of its own.
-        let known = paths.iter().position(|other| {
-            other.shape == path.shape && other.provisional == path.provisional && other.mutates == path.mutates && other.pinned_as(&path)
-        });
         let at = known.unwrap_or_else(|| {
             // A path that was not final makes way for the ones that are.
             paths.retain(|other| !other.provisional);
             paths.insert(0, Arc::new(path));
+            self.passing.store(false, Ordering::Relaxed);
             0
         });
         if let Some(form) = form {
@@ -890,11 +913,71 @@ impl GraphSite {
         paths.insert(0, path);
     }
 
+    /// Where the graph has a path already: the same instructions, taken
+    /// down with the same pinned values, and writing to a tensor from
+    /// outside or not as this one does. A form runs under the checks of
+    /// the path it is kept with, and as what that path is (`Path::mutates`:
+    /// what wrote is not run a second time), so the form of a trace with
+    /// other pinned values, or of one that writes where the other did not
+    /// (a batch norm that trains at one call and not at another), is kept
+    /// with a path of its own.
+    pub fn known(&self, path: &Path) -> Option<usize> {
+        let same = |other: &Arc<Path>| {
+            other.shape == path.shape && other.provisional == path.provisional && other.mutates == path.mutates && other.pinned_as(path)
+        };
+        self.variants.borrow().iter().position(same)
+    }
+
     /// Whether a path of the graph may be dropped and taken down again at
-    /// the next call, so that it lands in a new version of a block: a
-    /// few times per graph. Counts the time it says yes.
+    /// the next call, so that it lands in a new version of a block, or a
+    /// call be taken down although a path that ends in front of what
+    /// raised is for it (`passes`): `MAX_MOVES` times per graph. Counts
+    /// the time it says yes.
     pub fn retakes(&self) -> bool {
         self.moves.fetch_add(1, Ordering::Relaxed) < MAX_MOVES
+    }
+
+    /// A path that ends in front of an instruction that raised when it was
+    /// taken down is the path of this call of the function.
+    pub fn awaits(&self, call: u64) {
+        self.awaits.store(call, Ordering::Relaxed);
+    }
+
+    /// Whether the paths that end in front of an instruction that raised
+    /// are passed over for this call. One of them was the path of an
+    /// earlier call, and nothing raised in that call (`raised` is the
+    /// call of the function in which something last did): a call that
+    /// gets further finds the checks of such a path holding too, and
+    /// would never be taken down. From there on they are passed over,
+    /// so that a call that no other path is for is taken down, until one
+    /// gets a path of its own (`install`) or the graph `retakes` no more
+    /// (`passed`).
+    pub fn passes(&self, raised: u64) -> bool {
+        let awaited = self.awaits.swap(u64::MAX, Ordering::Relaxed);
+        if awaited != u64::MAX && awaited != raised && self.moves.load(Ordering::Relaxed) < MAX_MOVES {
+            self.passing.store(true, Ordering::Relaxed);
+        }
+        self.passing.load(Ordering::Relaxed)
+    }
+
+    /// Whether such paths may still be passed over for a call (`passed`).
+    pub fn skips(&self) -> bool {
+        self.moves.load(Ordering::Relaxed) < MAX_MOVES
+    }
+
+    /// A call was taken down with such paths passed over, and for
+    /// nothing: it ended where one of them does. One of the graph's
+    /// retakes; with those used up they are passed over no more.
+    pub fn passed(&self) {
+        if !self.retakes() || !self.skips() {
+            self.passing.store(false, Ordering::Relaxed);
+        }
+    }
+
+    /// A call was taken down and ended at what raised, or left such a
+    /// path the one that is reported.
+    pub fn raise(&self) {
+        self.raises.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Whether the graph is being taken down again because its path ended
@@ -5836,6 +5919,7 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
         calls: 0,
         first: None,
         provisional: false,
+        raised: false,
         unbinds: false,
         effects: false,
         mutates: false,
@@ -6952,6 +7036,14 @@ pub fn computed(op: &Op, defs: &[Def], int: impl Fn(PathValue) -> bool) -> bool 
 }
 
 impl Path {
+    /// Whether every check of the path is asked in front of the callable:
+    /// none waits for what the operations give, so a form without a
+    /// callable says of a call that it goes the way of the path.
+    pub fn asked_in_front(&self) -> bool {
+        let waits = |inst: &PathInst| inst.kind == Kind::Check && matches!(inst.stage, Stage::Inside | Stage::After);
+        self.exits.is_empty() && !self.body.iter().any(waits)
+    }
+
     /// A path without instructions: what a graph that starts with the
     /// function is before a path was taken down.
     pub fn empty(root: (usize, usize), land: (usize, usize)) -> Path {
@@ -6978,6 +7070,7 @@ impl Path {
             calls: 0,
             first: None,
             provisional: false,
+            raised: false,
             unbinds: false,
             effects: false,
             mutates: false,
@@ -7364,6 +7457,7 @@ impl Path {
             calls,
             first: trace.first,
             provisional,
+            raised: false,
             effects,
             mutates: trace.writes,
             pinned: std::mem::take(&mut trace.pinned),

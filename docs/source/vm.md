@@ -55,7 +55,8 @@ torch.vm.regions(g)
 #   'aten::mul.Tensor', 'aten::mean', 'aten::add.Tensor'], 'inputs': 2,
 #   'outputs': 1, 'held': 1, 'branches': 0, 'calls': 0, 'paths': 1,
 #   'ends': [(0, 12)], 'why': 'the function returns', 'variants': 0,
-#   'hits': 0, 'misses': 2, 'exports': 0, 'version': 1, 'forms': []}]
+#   'hits': 0, 'misses': 2, 'exports': 0, 'taken': 2, 'version': 1,
+#   'forms': []}]
 ```
 
 `where` names the function, the block, and the instruction of the first
@@ -283,6 +284,10 @@ What ends a path:
   on the data of a tensor;
 - an instruction that could run Python code on the values of this call: a
   read of an attribute that is a property, an iterator that is unpacked;
+- an instruction that raises in the call the path is taken down from (a key
+  that a dict does not have, a division by zero): the path ends in front of
+  it, or in front of the call it is in where the path had gone into a
+  function, and the raise goes its way;
 - the end of the function, a block that this call is the first to run (the
   path is taken down again at the next call, up to three times), and 200,000
   instructions.
@@ -330,6 +335,47 @@ for _ in range(8):
 names  # ['h', 'x', 'y']
 (found,) = [found for found in torch.vm.regions(g) if "ops" in found]
 found["ops"], found["outputs"]  # (6, 2): y, which is read behind the call, and h
+```
+
+What stands in front of an instruction that raised is a path like any other:
+its operations are a graph that the calls like it run, and such calls are
+not taken down again. Its checks say nothing of the raise; where it lands,
+the function runs the instruction, which raises or does not. So that it does
+not stand in the way of a call that gets further, it is tried behind the
+other paths of the graph; and once a call that it ran in went on without a
+raise, the calls that no other path is for are taken down instead (up to
+eight times per graph) until one of them has given the graph a path of its
+own. A function that raises at every other call ends up with both paths and
+is taken down no more. A call that another path is for and that only lacks a
+form of it (other sizes, another number) is taken down for that path as
+before. Where fewer than `min_ops` operations stand in front of what raised,
+the path is kept without anything made of it: the calls like it run the
+instructions. So is a way through the function with fewer than `min_ops`
+operations that ends at a `return` or a `raise` statement of the function
+itself, at a graph that has another path, if every check of the way is asked
+in front of the operations (no branch on what an operation gives): a call
+that such a way is for goes it to that end, and is not taken down again.
+
+```python
+table = {"there": 2.0}
+
+
+def looks_up(x, key):
+    y = (x.sin() * 2 + 1).cos()
+    scale = table[key]  # KeyError for a key that is not there
+    return (y * scale).tanh().sum()
+
+
+g = torch.vm(looks_up, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(8):
+    try:
+        g(torch.randn(4, 8), "missing")
+    except KeyError:
+        pass
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+found["ops"], found["why"], found["taken"]
+# (4, 'what raised when the path was taken down', 1)
+found["hits"]  # 5: the four operations in front of the lookup, as one graph
 ```
 
 A branch on the data of a tensor therefore ends a graph, and another starts
@@ -1019,11 +1065,11 @@ torch.vm.Dim(0, range(16, 33)))`: a call that fails a guard runs the
 operations.
 
 `torch.vm.regions` lists the forms of a graph under `forms`, those of the
-path that ran last first: what a call has to be like to be of the kind (`checks`, as
-text), how many calls ran the form (`hits`), and the `reason` if calls of
-the kind are not exported. `exports` is how many times the graph was handed
-to the passes, and `fn.stats()["graphs"]` has the totals for a function and
-what it calls.
+path that ran last first: what a call has to be like to be of the kind
+(`checks`, as text), how many calls ran the form (`hits`), and the `reason`
+if calls of the kind are not exported. `exports` is how many times the graph
+was handed to the passes, `taken` how many calls took a path of it down, and
+`fn.stats()["graphs"]` has the totals for a function and what it calls.
 
 ```python
 (found,) = torch.vm.regions(g)
@@ -1034,7 +1080,7 @@ for _ in range(3):
 found["state"], found["variants"], found["hits"], found["misses"]  # ('compiled', 2, 4, 2)
 [(form["checks"][1:], form["hits"]) for form in found["forms"]]
 # [(['%x.1: float32[6, 8]', '%w.2: float32[8, 8]'], 2), (['%x.1: float32[4, 8]', '%w.2: float32[8, 8]'], 2)]
-g.stats()["graphs"]  # {'built': 1, 'exported': 2, 'hits': 4, 'misses': 2, 'given_up': 0}
+g.stats()["graphs"]  # {'built': 1, 'exported': 2, 'hits': 4, 'misses': 2, 'given_up': 0, 'taken': 2}
 ```
 
 A number that an operation takes is one of the checks, wherever the function
@@ -3216,19 +3262,21 @@ torch.vm(f, passes=(*default, keep, P.Inductor())).passes
 
 The times of this section were measured on the tree of commit `90f834123d55`
 of this series, on one H100 and eight cores, one process at a time under the
-lock that every job on the machine takes for a timed run. In front of every
-row the load average of the last minute was under 10 (between 1.2 and 9.8)
-and no process was on the GPU. Every row was measured twice, and every row
-whose eager figure was more than 3 percent apart between the two processes a
-third time (eager's own figure moves by up to 11 percent from one process to
-the next); all the figures are given, and the rows whose eager figure moved
-are listed with the figures of each process behind the tables. Eager mode
-and what is compared with it take turns in one process, so that both have
-the same machine: a ratio is of the turns inside one process, never of
-figures from two. The row of yolov3 is of the tree of commit `5c0ad0cf96d7`,
-on which its forward is one graph: on the other tree a store that a
-detection layer makes into itself ended the path, and the model was two
-graphs.
+lock that every job on the machine takes for a timed run, except the rows
+that have one figure in a column: those are of one process each, and the
+sentence in front of or behind their table says on which code and how. In
+front of every row of that tree the load average of the last minute was
+under 10 (between 1.2 and 9.8) and no process was on the GPU. Every row of
+that tree was measured twice, and every row whose eager figure was more than
+3 percent apart between the two processes a third time (eager's own figure
+moves by up to 11 percent from one process to the next); all the figures are
+given, and the rows whose eager figure moved are listed with the figures of
+each process behind the tables. Eager mode and what is compared with it take
+turns in one process, so that both have the same machine: a ratio is of the
+turns inside one process, never of figures from two. The row of yolov3 is of
+the tree of commit `5c0ad0cf96d7`, on which its forward is one graph: on the
+other tree a store that a detection layer makes into itself ended the path,
+and the model was two graphs.
 
 With the default settings and `Graphs()` and `Inductor()` in the list, the
 forward of a resnet is one graph, and so is that of yolov3. In images per
@@ -3403,26 +3451,32 @@ in eager mode, under `torch.vm` with `Graphs(), Inductor()`, and under
 times, and the figures are the median of the three medians. At inference the
 runner has `torch.no_grad()` around the calls of a model, and the
 `forward_pass` of the huggingface suite enters it itself. Measured that way,
-which is what the dashboard's runner does:
+which is what the dashboard's runner does. The row of resnet50 is of two
+processes on the tree named above. The rows of the three timm models are of
+one process each on the code three steps before this commit (the one that
+changed which dicts the engine looks a name up in), the median of three
+turns, with the load average between 3.3 and 5.1 in front of a row and
+nothing else on the GPU:
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
 |---|---|---|---|---|---|---|---|
 | resnet50 (TorchBench) | 6.02, 6.06 ms | 2.62, 2.61 ms | 2.29x, 2.32x | 2.51, 2.47 ms | 2.40x, 2.45x | 0.96, 0.95 | 175 x1 |
-| mobilenetv2_100 (timm) | 8.51, 8.55 ms | 3.12, 3.14 ms | 2.73x, 2.72x | 3.04, 3.06 ms | 2.80x, 2.80x | 0.97, 0.97 | 152 x1 |
-| adv_inception_v3 (timm) | 21.27, 21.13 ms | 8.66, 8.62 ms | 2.45x, 2.45x | 8.45, 8.39 ms | 2.52x, 2.52x | 0.97, 0.97 | 314 x1 |
-| deit_base_distilled_patch16_224 (timm) | 6.68, 6.73 ms | 6.28, 6.29 ms | 1.07x, 1.07x | 6.21, 6.21 ms | 1.08x, 1.08x | 0.99, 0.99 | 233 x1 |
+| mobilenetv2_100 (timm) | 8.50 ms | 3.22 ms | 2.64x | 3.12 ms | 2.72x | 0.97 | 152 x1 |
+| adv_inception_v3 (timm) | 21.17 ms | 8.64 ms | 2.45x | 8.40 ms | 2.52x | 0.97 | 314 x1 |
+| deit_base_distilled_patch16_224 (timm) | 6.71 ms | 6.29 ms | 1.07x | 6.22 ms | 1.08x | 0.99 | 233 x1 |
 
-Three steps before the code of this commit, which since changed which dicts
+Four steps before the code of this commit, which since changed which dicts
 the engine looks a name up in (none whose keys are not all plain), made a
-take that writes to a tensor from outside a path of its own, and gave the
-frame every variable wherever a path lands (the graphs of these models have
-the same operations and run as often on all four; what the variables add to
-what a graph gives is said behind the next table but one), by another job
-with the same tool, which enters the runner's own grad mode around the
-calls: the median of three turns in one process, on 16 cores, with the load
-average between 1.5 and 20, falling, and nothing else on the GPU. The graphs
-that run are those counted above (DistillGPT2 with the operations it has on
-a GPU; of hf_DistilBert the graph of a layer and the one of its feed-forward
+take that writes to a tensor from outside a path of its own, gave the frame
+every variable wherever a path lands, and made a path of what stands in
+front of an instruction that raised (the graphs of these models have the
+same operations and run as often on all five; what the variables add to what
+a graph gives is said behind the next table but one), by another job with
+the same tool, which enters the runner's own grad mode around the calls: the
+median of three turns in one process, on 16 cores, with the load average
+between 1.5 and 20, falling, and nothing else on the GPU. The graphs that
+run are those counted above (DistillGPT2 with the operations it has on a
+GPU; of hf_DistilBert the graph of a layer and the one of its feed-forward
 part run six times each in a call):
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
@@ -3441,20 +3495,19 @@ the same models (`python benchmarks/dynamo/torchbench.py --performance
 --inference --bfloat16 --only MODEL` with `--vm` and with `--backend
 inductor`, `timm_models.py` and `huggingface.py` for the models of those
 suites; one run each), which report the speed against eager mode, next to
-what the tool has:
+what the tool has. The runner's lines are of the code three steps before
+this commit, the code of the tool's rows of the timm models, taken one after
+the other with the load average between 0.8 and 2.6 in front of a line and
+nothing else on the GPU; the tool's figures of resnet50 and DistillGPT2 are
+those of the eight rows above, one step before that code:
 
 | model | the runner with `--vm` | the tool, `torch.vm` | the runner with `--backend inductor` | the tool, `torch.compile` |
 |---|---|---|---|---|
-| resnet50 | 2.25x | 2.29x, 2.32x | 2.29x | 2.40x, 2.45x |
-| mobilenetv2_100 | 2.71x | 2.73x, 2.72x | 2.77x | 2.80x, 2.80x |
-| adv_inception_v3 | 2.45x | 2.45x, 2.45x | 2.49x | 2.52x, 2.52x |
-| deit_base_distilled_patch16_224 | 1.06x | 1.07x, 1.07x | 1.08x | 1.08x, 1.08x |
-| DistillGPT2 | 2.98x | 2.99x | 3.71x | 3.69x |
-
-The line of DistillGPT2 is of the code before the two reads of a
-configuration were found once ("Classes that read their attributes
-themselves"): the runner's lines and the tool's figures of that code, where
-the row above is of the code behind it.
+| resnet50 | 2.22x | 2.26x | 2.35x | 2.38x |
+| mobilenetv2_100 | 2.64x | 2.64x | 2.71x | 2.72x |
+| adv_inception_v3 | 2.45x | 2.45x | 2.50x | 2.52x |
+| deit_base_distilled_patch16_224 | 1.06x | 1.07x | 1.08x | 1.08x |
+| DistillGPT2 | 3.03x | 3.06x | 3.62x | 3.68x |
 
 With gradients recorded: the same calls without `torch.no_grad()` (the tool
 calls the `forward_pass` of the torchbench and timm suites directly, which
@@ -3483,7 +3536,7 @@ that tree's byte for byte), on 16 cores, with the load average between 5 and
 6 and nothing else on the GPU. With gradients recorded only 2 small graphs
 of hf_DistilBert run (6 x1, 4 x1), and its call takes what eager's takes.
 The rows of yolov3 and of DistillGPT2's training step are of the measurement
-of the eight rows above, three steps before the code of this commit. Since
+of the eight rows above, four steps before the code of this commit. Since
 then a graph gives what the variables of the function are bound to where its
 path lands as well ("Paths"): as the job that measured it counts them, the
 graph of yolov3 gives 77 results where it gave 49 (what the layers put into
@@ -3510,16 +3563,16 @@ and with gradients recorded a graph that holds it keeps eager's tape and is
 handed to no compiler ("Limits"). The graph of deit is its whole forward,
 233 operations, and its operations run one by one on eager's kernels. Under
 `torch.no_grad()` the same graph is compiled like any other, and a call of
-deit takes 6.28, 6.29 ms where eager's takes 6.68, 6.73. The graph of a
-layer of hf_DistilBert, 17 operations, keeps eager's tape for the same node;
-it is no faster than the instructions it stands for, so the measurement
-leaves the layer to the interpreter, at its second look as at its first
-("Limits"), and the 2 graphs that run hold 0.25 of the 4.02 ms of a call.
-DistillGPT2's training step has 1.7 of its 29.7 ms in what stands for its
-graphs: a layer's MLP is a graph of 15 operations that runs 6 times in a
-step, but the attention of a layer is in none (the operator draws random
-numbers, and the call around it runs kernels and is no call site), and
-neither are the kernels of the optimizer's update, which are no call sites.
+deit takes 6.29 ms where eager's takes 6.71. The graph of a layer of
+hf_DistilBert, 17 operations, keeps eager's tape for the same node; it is no
+faster than the instructions it stands for, so the measurement leaves the
+layer to the interpreter, at its second look as at its first ("Limits"), and
+the 2 graphs that run hold 0.25 of the 4.02 ms of a call. DistillGPT2's
+training step has 1.7 of its 29.7 ms in what stands for its graphs: a
+layer's MLP is a graph of 15 operations that runs 6 times in a step, but the
+attention of a layer is in none (the operator draws random numbers, and the
+call around it runs kernels and is no call site), and neither are the
+kernels of the optimizer's update, which are no call sites.
 
 In the runner's mode the layers of hf_DistilBert are graphs (17 operations,
 and the 4 of the feed-forward part, six times each in a call), and a call
@@ -3611,6 +3664,15 @@ What graphs do not do at this stage:
   measured twice: with gradients recorded the layers of hf_DistilBert lose
   both times ("Models"), and the model settles after 147 to 159 calls
   where one measurement took 136.
+- A way through a function with fewer than `min_ops` operations, at a graph
+  that has another path, is taken down at every call that goes it unless it
+  ends at an instruction that raised or at a `return` or `raise` statement
+  of the function ("Paths"). Where it ends in front of a call that a path
+  does not go into, nothing of the path says why it ended there: `raise
+  ValueError("...")` behind fewer than four operations is such a way (the
+  exception is made by a call), and a function that takes it at every other
+  call runs at 3.8 times the time of eager mode with a pass, as the job that
+  made the change measured it.
 - A function whose frame object something holds when a path would land at
   its `return` (the function put `sys._getframe()` somewhere, a traceback of
   an earlier exception in it is kept, a debugger is attached) runs the

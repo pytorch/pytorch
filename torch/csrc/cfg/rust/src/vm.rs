@@ -153,6 +153,9 @@ struct Settled {
 struct SettledBlocks {
     blocks: Vec<std::cell::Cell<Settled>>,
     calls: std::cell::Cell<u64>,
+    /// The call of the function in which something last raised, in it or
+    /// below it; u64::MAX for none.
+    raised: std::cell::Cell<u64>,
     /// How many calls of the function are running with its first block in
     /// the profiling tier.
     warming: std::cell::Cell<u32>,
@@ -1376,6 +1379,9 @@ enum Ran {
     Landed(Landing),
     /// The path is not for this call: another may be.
     Other,
+    /// The path is this call's (its checks hold) and no form of it is for
+    /// the call: taken down, the call gives the path one.
+    Lacks,
     /// The call is one that runs the instructions.
     Miss,
 }
@@ -1488,7 +1494,11 @@ enum Walked {
     /// The trace did not come back from the call at instruction `call`,
     /// which has run: the function goes on behind it.
     Left { block: usize, code: *const BlockCode, call: usize, reason: String },
-    Raised(usize, u32),
+    /// An instruction raised: its block and the offset of its bytecode;
+    /// and the code and its place in it, where the trace is as it was in
+    /// front of the instruction or has a mark to be cut back to, so that
+    /// what stands in front is a path.
+    Raised(usize, u32, Option<(*const BlockCode, usize)>),
     Deopt(usize, usize),
 }
 
@@ -1503,6 +1513,10 @@ const MAX_PATH_AGAIN: usize = 8;
 const MAX_WANTED: usize = 4;
 
 const NOT_PROFILED: &str = "a block that was not profiled yet";
+
+/// Why a path ends in front of an instruction that raised when the path
+/// was taken down (`Path::raised`).
+const RAISED: &str = "what raised when the path was taken down";
 
 thread_local! {
     /// How many calls on this thread are of a function whose first block is
@@ -2120,6 +2134,7 @@ impl Compiled {
                 blocks: (0..generic.len()).map(|_| std::cell::Cell::new(Settled { code: std::ptr::null(), specialized: false, entries: 0 })).collect(),
                 warming: std::cell::Cell::new(0),
                 calls: std::cell::Cell::new(0),
+                raised: std::cell::Cell::new(u64::MAX),
                 trial: std::cell::Cell::new(Trial::start(PLAN_EPOCH.load(Ordering::Relaxed))),
                 watched: std::cell::Cell::new(false),
                 below: std::cell::Cell::new(false),
@@ -4871,13 +4886,33 @@ impl Compiled {
         // What else a compiled graph depends on is asked of Python: only
         // for a call that is like one a form was made for in all the rest.
         let mut state: Option<u64> = None;
-        for (at, path) in site.paths().into_iter().enumerate() {
-            match self.run_path(site, &path, regs, frames, api, world, &mut state) {
+        // A path that ends in front of an instruction that raised when it
+        // was taken down is the path of the calls in which it raises, and
+        // its checks hold in the others as well: it is tried behind the
+        // paths that are not so. And not at all for a call that another
+        // path is for and only lacks a form of, nor for the calls behind
+        // one in which it was the path and nothing raised: such a call is
+        // taken down, to where it gets to.
+        let passing = site.passes(self.settled.raised.get());
+        let paths = site.paths();
+        let (mut lacks, mut passed) = (false, false);
+        for (at, path) in paths.iter().enumerate().filter(|(_, path)| !path.raised).chain(paths.iter().enumerate().filter(|(_, path)| path.raised)) {
+            if path.raised && !passed {
+                passed = (passing || lacks) && site.skips() && site.records();
+            }
+            if path.raised && passed {
+                break;
+            }
+            let ran = self.run_path(site, path, regs, frames, api, world, &mut state);
+            if path.raised && !matches!(ran, Ran::Other | Ran::Lacks) {
+                site.awaits(serial);
+            }
+            match ran {
                 Ran::Landed(landing) => {
                     site.hits.fetch_add(1, Ordering::Relaxed);
                     if at > 0 {
                         let mut paths = site.variants.borrow_mut();
-                        if paths.get(at).is_some_and(|other| Arc::ptr_eq(other, &path)) {
+                        if paths.get(at).is_some_and(|other| Arc::ptr_eq(other, path)) {
                             let ran = paths.remove(at);
                             paths.insert(0, ran);
                         }
@@ -4888,6 +4923,7 @@ impl Compiled {
                     site.misses.fetch_add(1, Ordering::Relaxed);
                     return PathEnd::Miss;
                 }
+                Ran::Lacks => lacks = true,
                 Ran::Other => {}
             }
         }
@@ -4918,7 +4954,7 @@ impl Compiled {
         site.misses.fetch_add(1, Ordering::Relaxed);
         if site.records() {
             let state = state.unwrap_or_else(|| graph::thread_state());
-            return self.record(site, regs, frames, api, block, code, pc, (modes, included, excluded, state));
+            return self.take_down(site, regs, frames, api, block, code, pc, (modes, included, excluded, state), passed);
         }
         // The loop that comes here again in this call finds the same.
         site.missed.store(serial, Ordering::Relaxed);
@@ -5984,7 +6020,7 @@ impl Compiled {
         }
         let Some((at, exported)) = found else {
             leave(own);
-            return Ran::Other;
+            return Ran::Lacks;
         };
         if at > 0 {
             let mut forms = path.exported.borrow_mut();
@@ -8741,7 +8777,7 @@ impl Compiled {
                 let landing = Landing { block, code, pc: call + 1 };
                 (c.exec_blocks(&mut inner, &mut below, Some(PathEnd::Landed(landing))), Err(reason))
             }
-            Walked::Raised(block, bc) => {
+            Walked::Raised(block, bc, _) => {
                 (c.exec_blocks(&mut inner, &mut below, Some(PathEnd::Raised(block, bc))), Err("it raised".to_string()))
             }
             Walked::Deopt(block, at) => {
@@ -9609,8 +9645,8 @@ impl Compiled {
             // A lookup that found nothing raised, as the path checks, and
             // the function has no handler there: it is left by the raise,
             // and has nothing more to run.
-            Walked::Raised(block, _) if t.absent && cf.blocks[block].handler == NONE => (null_mut(), Err(String::new())),
-            Walked::Raised(block, bc) => {
+            Walked::Raised(block, _, _) if t.absent && cf.blocks[block].handler == NONE => (null_mut(), Err(String::new())),
+            Walked::Raised(block, bc, _) => {
                 t.absent = false;
                 let raised = Some(PathEnd::Raised(block, bc));
                 (c.exec_blocks(&mut inner, &mut below, raised), Err("it raised".to_string()))
@@ -9979,6 +10015,7 @@ impl Compiled {
                 // What the function lets go of here must end here, also
                 // where the trace keeps it.
                 let sweep = self.lets_go(t, &c.insts[pc], regs, frames.top(), api, &mut suspects);
+                let had = (t.body.len(), t.stores.len(), t.classes.len());
                 let taken = self.record_inst(t, site, b, c, pc, regs, frames, api);
                 // What the instruction gave and the function let go of
                 // with the same instruction (its register is empty behind
@@ -10002,13 +10039,21 @@ impl Compiled {
                 match taken {
                     Taken::Went => pc += 1,
                     Taken::Ends(reason) => return Walked::Ended { block: b, code, pc, afresh: false, reason },
-                    Taken::Raised => return Walked::Raised(b, c.insts[pc].bc),
+                    Taken::Raised => {
+                        // What stands in front of it is a path if the
+                        // trace has nothing of the instruction: it is as
+                        // it was, or is cut back in front of the call or
+                        // the inlined call that it is in.
+                        let clean = had == (t.body.len(), t.stores.len(), t.classes.len()) && !t.absent;
+                        let front = (t.mark.is_some() || (clean && t.outermost())).then_some((code, pc));
+                        return Walked::Raised(b, c.insts[pc].bc, front);
+                    }
                     Taken::Deopt(at) => return Walked::Deopt(b, at),
                     Taken::Cut(result, reason) => {
                         // The call has run: the function has what it gave.
                         let inst = &c.insts[pc];
                         if result.is_null() {
-                            return Walked::Raised(b, inst.bc);
+                            return Walked::Raised(b, inst.bc, t.mark.is_some().then_some((code, pc)));
                         }
                         if inst.dst == NONE {
                             capi::release(result);
@@ -10126,6 +10171,48 @@ impl Compiled {
     /// this run of it has got to. With a pass over graphs, the path is
     /// handed to it; a run that cannot be exported gets a form without a
     /// callable, so that the calls like it are not taken down again.
+    ///
+    /// An instruction that raises while the path is taken down ends the
+    /// path in front of it, or in front of the call the path went into
+    /// that it is in: what stands in front is a path like any other
+    /// (`Path::raised`), so that the calls like this one find it and are
+    /// not taken down again, and the raise goes its way when the path has
+    /// been kept. `passed`: the paths that end so were passed over for
+    /// this call (`GraphSite::passes`).
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn take_down(
+        &self,
+        site: &Arc<GraphSite>,
+        regs: &mut [Obj],
+        frames: &mut Frames,
+        api: &TcfgApi,
+        block: usize,
+        code: *const BlockCode,
+        pc: usize,
+        world: (u64, u64, u64, u64),
+        passed: bool,
+    ) -> PathEnd {
+        site.taken.fetch_add(1, Ordering::Relaxed);
+        let mut raised = None;
+        let end = self.record(site, regs, frames, api, block, code, pc, world, passed, &mut raised);
+        if raised.is_some() || site.path().raised {
+            site.raise();
+        }
+        let Some((block, bc, error)) = raised else {
+            return end;
+        };
+        // What a pass over graphs raised in between goes first.
+        if ffi::PyErr_Occurred().is_null() {
+            ffi::PyErr_SetRaisedException(error);
+        } else {
+            xdecref(error);
+        }
+        PathEnd::Raised(block, bc)
+    }
+
+    /// `take_down`, up to where the raise of an instruction goes on:
+    /// `raised` gets the block, the offset of the bytecode and the
+    /// exception, and no error is set from there on.
     #[allow(clippy::too_many_arguments)]
     unsafe fn record(
         &self,
@@ -10137,6 +10224,8 @@ impl Compiled {
         code: *const BlockCode,
         pc: usize,
         world: (u64, u64, u64, u64),
+        passed: bool,
+        raised: &mut Option<(usize, u32, Obj)>,
     ) -> PathEnd {
         let func = &self.func;
         // Neither does a call in which a path is taken down.
@@ -10157,7 +10246,13 @@ impl Compiled {
                 left = true;
                 (Landing { block, code, pc: call + 1 }, reason)
             }
-            Walked::Raised(block, bc) => return PathEnd::Raised(block, bc),
+            Walked::Raised(block, bc, None) => return PathEnd::Raised(block, bc),
+            Walked::Raised(block, bc, Some((code, pc))) => {
+                // As a call that has run without the trace coming back.
+                left = true;
+                *raised = Some((block, bc, ffi::PyErr_GetRaisedException()));
+                (Landing { block, code, pc: pc + 1 }, RAISED.to_string())
+            }
             Walked::Deopt(block, at) => return PathEnd::Deopt(block, at),
             Walked::Returned(..) => unreachable!("the function a path starts in is not left by it"),
         };
@@ -10244,7 +10339,8 @@ impl Compiled {
         }
         let landing = went;
         let returns = cut.is_none() && !afresh && pc == c.insts.len() && matches!(c.term, Term::Return(_));
-        let path = Path::of(&mut t, root, land, resume, &live, ends, afresh_path, returns);
+        let mut path = Path::of(&mut t, root, land, resume, &live, ends, afresh_path, returns);
+        path.raised = raised.is_some();
         if graph::debug() {
             let (steps, ops) = (path.body.len(), path.operators.len());
             eprintln!(
@@ -10267,6 +10363,13 @@ impl Compiled {
                     eprintln!("    {:?} {} in {}: %{} = {}", inst.stage, what, owner.func.qualname, inst.dst, owner.func.op_repr(&inst.op));
                 }
             }
+        }
+        if passed && site.known(&path).is_some_and(|at| site.paths()[at].raised) {
+            // A path that was passed over for this call is the one it
+            // takes after all: what was made of it is there, and the call
+            // was taken down for nothing.
+            site.passed();
+            return PathEnd::Landed(landing);
         }
         // What an operation with several results gave is needed whole
         // behind the path, and a graph gives back its items: the path is
@@ -10312,7 +10415,19 @@ impl Compiled {
             site.stand_back(path.operators.len());
             return PathEnd::Landed(landing);
         }
-        let finished = path.provisional || path.operators.len() < site.min_ops || !site.exports();
+        // A path of fewer operations than a graph has that ended at what
+        // raised is kept, with a form without a callable, so that the calls
+        // like it run the instructions and are not taken down again. And
+        // one that ends where no path goes on, at a `return` or a `raise`
+        // of the function itself, with every check asked in front of the
+        // callable, at a graph that has another path (with none, the
+        // graph is none): a call such a form is for goes this way to that
+        // end, and taking it down again would make the same of it.
+        let short = path.operators.len() < site.min_ops;
+        let last = cut.is_none() && !afresh && pc == c.insts.len() && matches!(c.term, Term::Return(_) | Term::Raise { .. } | Term::Reraise(..));
+        let ends_the_call = last && path.asked_in_front() && !site.variants.borrow().is_empty();
+        let kept = short && !path.operators.is_empty() && (path.raised || ends_the_call);
+        let finished = path.provisional || (short && !kept) || !site.exports();
         if finished {
             site.install(path, None);
             if site.dormant() && self.settled.dormant.get().0 == 0 {
@@ -10340,6 +10455,9 @@ impl Compiled {
         if closed.is_none() && site.derives && !graded {
             // Nothing to derive, and no pass over graphs to hand it to.
             closed = Some("no tensor of the call needs a gradient: its operations run as they are".to_string());
+        }
+        if closed.is_none() && short {
+            closed = Some(format!("{} operations, fewer than min_ops ({})", path.operators.len(), site.min_ops));
         }
         if closed.is_none() && t.inplace {
             // What autograd kept of an operation was written to in place:
@@ -10463,6 +10581,7 @@ impl Compiled {
         // raised in, entered like the first block, or leaves the function.
         macro_rules! raised {
             ($blocks:lifetime, $block:expr) => {
+                self.settled.raised.set(serial);
                 match self.catch(regs, $block) {
                     Some(handler) => {
                         pred = usize::MAX;
