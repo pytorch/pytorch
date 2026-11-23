@@ -2051,8 +2051,16 @@ static Tensor _matmul_impl(
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
     return has_out ? at::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
-    return has_out ? at::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
-                   : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
+    if (!has_out) {
+      return tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
+    }
+    // mm_out expects a (1, n) output and would resize a correctly-shaped 1D out,
+    // so resize out here and write through a 2D view of it
+    const c10::SymDimVector output_shape{tensor2.sym_sizes()[1]};
+    at::native::resize_output_symint(out, output_shape);
+    auto out_2d = out.unsqueeze(0);
+    at::mm_out(out_2d, tensor1.unsqueeze(0), tensor2);
+    return out;
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (should_fold(tensor1, tensor2, has_out)) {
