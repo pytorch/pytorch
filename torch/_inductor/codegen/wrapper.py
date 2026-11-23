@@ -1636,6 +1636,54 @@ class KernelCallLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class ConditionalKernelDispatchLine(WrapperLine):
+    """Launches the first kernel whose condition holds, as an `if`/`elif`/`else` chain.
+
+    For example, with choices
+    `[("s0*s1 <= 2147483647", [<launch of k_i32>]), (None, [<launch of k_i64>])]`:
+
+        if s0*s1 <= 2147483647:
+            k_i32.run(...)
+        else:
+            k_i64.run(...)
+
+    If the last condition is not None, the chain ends in an `else` that raises, so
+    no input silently skips the launch.
+    """
+
+    wrapper: PythonWrapperCodegen
+    # One (condition, lines) per branch, highest priority first. The condition is
+    # Python over the wrapper's size symbols, or None for the final `else`. The lines
+    # are wrapper lines not yet generated (see ConditionalMultiKernel.call_kernel);
+    # codegen generates them indented under their branch.
+    choices: list[tuple[str | None, list[Line]]]
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        for i, (cond, lines) in enumerate(self.choices):
+            if cond is None:
+                code.writeline("else:")
+            else:
+                code.writeline(f"{'if' if i == 0 else 'elif'} {cond}:")
+            with code.indent():
+                for line in lines:
+                    if isinstance(line, WrapperLine):
+                        line.codegen(code)
+                    else:
+                        code.writeline(line)
+        if self.choices[-1][0] is not None:
+            code.writeline("else:")
+            with code.indent():
+                code.writeline(
+                    'raise RuntimeError("no kernel variant matches the input sizes")'
+                )
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        raise NotImplementedError(
+            "ConditionalKernelDispatchLine is not supported by the FX wrapper"
+        )
+
+
+@dataclasses.dataclass
 class KernelDefinitionLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     kernel_name: str
@@ -2558,6 +2606,15 @@ class PythonWrapperCodegen(CodeGen):
         self.multi_kernel_state = MultiKernelState()
         self.already_codegened_subgraphs: OrderedSet[str] = OrderedSet()
         self.allocated_workspaces: dict[str, Any] = {}
+        # True inside capture_lines(). While set, generate_workspace_allocation and
+        # generate_workspace_deallocation write nothing: the captured lines go into
+        # a branch of a dispatch line (ConditionalKernelDispatchLine), and the caller
+        # allocates and frees the workspaces once around it instead. They cannot live
+        # inside a branch: memory planning only sees top-level lines, and a per-graph
+        # workspace (e.g. cooperative-reduction semaphores) is allocated by the first
+        # kernel that needs it and reused by later ones, so it must not be in a
+        # branch that may not run.
+        self._capturing_lines = False
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
@@ -3733,6 +3790,27 @@ class PythonWrapperCodegen(CodeGen):
             return 2
         else:
             return 1
+
+    @contextlib.contextmanager
+    def capture_lines(
+        self,
+    ) -> Iterator[list[Line]]:
+        """Collect the lines written inside the block instead of emitting them.
+
+        Workspace allocations and frees inside the block write nothing (see
+        _capturing_lines), and any other memory-planning line raises.
+        """
+        captured: list[Line] = []
+        outer_lines, self.lines = self.lines, captured
+        outer_capturing, self._capturing_lines = self._capturing_lines, True
+        try:
+            yield captured
+        finally:
+            self.lines = outer_lines
+            self._capturing_lines = outer_capturing
+        for line in captured:
+            if isinstance(line, (MemoryPlanningLine, FreeLine)):
+                raise AssertionError(f"cannot capture a memory-planning line: {line}")
 
     @contextlib.contextmanager
     def set_writeline(
@@ -5288,6 +5366,8 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(f"{arg.inner} = {pexpr(arg.inner_expr)}")
 
     def generate_workspace_allocation(self, ws: WorkspaceArg):
+        if self._capturing_lines:
+            return
         name = ws.get_name()
         line = AllocateLine(self, ws)
         if ws.zero_mode == WorkspaceZeroMode.UNINITIALIZED:
@@ -5335,6 +5415,8 @@ class PythonWrapperCodegen(CodeGen):
                 )
 
     def generate_workspace_deallocation(self, ws: WorkspaceArg):
+        if self._capturing_lines:
+            return
         if ws.zero_mode != WorkspaceZeroMode.ZERO_PER_GRAPH:
             self.writeline(FreeIfNotReusedLine(self, ws))
 
