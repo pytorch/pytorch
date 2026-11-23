@@ -6208,9 +6208,11 @@ class TestPrecompileDynamoCapture(TestCase):
 
     def test_a_capture_holds_cudagraph_trees_to_the_value_it_records(self):
         seen = self._compiles_see("triton.cudagraph_trees")
-        # Read when capture() is called: the options over the ambient config.
-        options = {"triton.cudagraph_trees": False}
-        with self._capture(self.mod.single, options=options) as cap:
+        # Read when capture() is called, here from the ambient config: nothing
+        # but the session holds the captured calls to it.
+        with torch._inductor.config.patch({"triton.cudagraph_trees": False}):
+            session = self._capture(self.mod.single)
+        with session as cap:
             with torch._inductor.config.patch({"triton.cudagraph_trees": True}):
                 cap(self.model, self.x2)
         self.assertEqual(seen, [False])
@@ -6222,12 +6224,17 @@ class TestPrecompileDynamoCapture(TestCase):
         # Load post-compiles each graph under the loading process's
         # triton.cudagraphs; one compiled without CUDA graphs has nothing to be
         # wrapped with, and runs as it compiled.
+        from torch._dynamo.utils import counters
+
         single = self.mod.single
         with self._capture(single) as cap:
             y = cap(self.model, self.x2)
+        counters.clear()
         with torch._inductor.config.patch({"triton.cudagraphs": True}):
             f = load(self.artifact, self.cache)
             self.assertEqual(f(self.model, self.x2), y)
+        # Not a skip: the graph was never meant to run as a CUDA graph.
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
     @parametrize("backend", ["inductor", "eager"])
     def test_a_single_graph_serves_in_process(self, backend):
