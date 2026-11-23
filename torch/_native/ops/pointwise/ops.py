@@ -509,11 +509,11 @@ def _bitwise_not(x: StorageScalar) -> StorageScalar:
 
 @cute.jit
 def _bitwise_left_shift(x: StorageScalar, y: StorageScalar) -> StorageScalar:
-    valid = y >= y.__class__(0) and y < y.__class__(x.__class__.width)
-    value = x if valid else x.__class__(0)
-    # Bound the shift count even when its result is masked out.
+    result = x.__class__(0)
     count = y & y.__class__(x.__class__.width - 1)
-    return value << count
+    if y >= 0 and y < x.__class__.width:
+        result = x << count
+    return result
 
 
 @cute.jit
