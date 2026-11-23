@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
+    MI300_ARCH, MI350_ARCH, MI450_ARCH, runOnRocmArch, \
     TEST_WITH_TORCHDYNAMO, HardwareClassification, serialTest, decorateIf, skipIfCppFakeTensor
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, has_device_side_assert
@@ -9650,6 +9651,156 @@ class TestNNDeviceType(NNTestCase):
         torch._C._nn.upsample_bilinear2d(x, [oh, ow], align_corners, scale, scale, out=out)
         expected = torch._C._nn.upsample_bilinear2d(x.cpu().double(), [oh, ow], align_corners, scale, scale)
         self.assertEqual(out.cpu(), expected.to(dtype))
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @toleranceOverride({
+        torch.float: tol(atol=1e-5, rtol=1e-5),
+        torch.half: tol(atol=1e-2, rtol=1e-2),
+        torch.bfloat16: tol(atol=5e-2, rtol=5e-2),
+    })
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("align_corners", [True, False])
+    # (ih, iw), (oh, ow), (scales_h, scales_w), channels.
+    # scales None => size-based scale. Ratio is 4 * o_numel / i_numel.
+    @parametrize_test("input_hw, output_hw, scales, channels", [
+        subtest(((6, 8), (24, 32), (None, None), 16), name="upsample"),  # ratio 64
+        # 5.06: on ROCm channels_last, scatter on gfx950 (cut 6), gather on
+        # gfx1250 (2) and for fp16 on gfx942 (4; the bf16/fp32/double cut is 16).
+        subtest(((8, 8), (9, 9), (None, None), 16), name="near_cut"),
+        subtest(((24, 32), (12, 16), (None, None), 16), name="downsample"),  # ratio 1.0
+        subtest(((13, 11), (7, 5), (None, None), 16), name="mild_downsample"),  # ratio 0.98
+        subtest(((9, 10), (9, 31), (None, None), 16), name="anisotropic"),  # ratio 12.4
+        # scales are forward scale_factors. 1.75 differs from the 17/10 = 1.7
+        # size-based scale, so a path that ignored them would not match the
+        # reference.
+        subtest(((10, 10), (17, 17), (1.75, 1.75), 16), name="explicit_scales"),  # ratio 11.6
+        # C=6 is not a multiple of the fp16, bf16 or fp32 vector width, so where
+        # the NHWC gather runs it uses vec_size 1 for those dtypes (double has
+        # width 2 and stays vectorized).
+        subtest(((6, 8), (24, 32), (None, None), 6), name="odd_channels"),
+    ])
+    def test_upsamplingBilinear2d_backward_many_channels(
+        self, device, dtype, memory_format, align_corners, input_hw, output_hw, scales, channels
+    ):
+        # channels >= 4 so channels_last takes the NHWC backward. On ROCm
+        # gfx942/gfx950/gfx1250 that is the NHWC gather above a per-arch,
+        # per-dtype ratio cut and the atomic scatter below it; CUDA and other
+        # ROCm archs always scatter. NaN-prefilled grad_input checks every
+        # element is written (gather) or correctly zeroed then scattered.
+        n, c = 2, channels
+        input_size = [n, c, *input_hw]
+        output_size = list(output_hw)
+        scales_h, scales_w = scales
+        go = make_tensor((n, c, *output_hw), device=device, dtype=dtype, low=-1, high=1)
+        go = go.contiguous(memory_format=memory_format)
+        # NaN prefill exposes any unwritten grad_input element.
+        gi = torch.full(input_size, float("nan"), device=device, dtype=dtype)
+        gi = gi.contiguous(memory_format=memory_format)
+
+        torch.ops.aten.upsample_bilinear2d_backward.grad_input(
+            go, output_size, input_size, align_corners,
+            scales_h, scales_w, grad_input=gi,
+        )
+
+        self.assertTrue(gi.is_contiguous(memory_format=memory_format))
+        self.assertFalse(gi.isnan().any())
+
+        ref = torch.ops.aten.upsample_bilinear2d_backward(
+            go.cpu().double(), output_size, input_size, align_corners, scales_h, scales_w,
+        ).to(dtype=dtype)
+        self.assertEqual(gi, ref)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(MI300_ARCH + MI350_ARCH + MI450_ARCH)
+    @dtypes(torch.half)
+    @toleranceOverride({torch.half: tol(atol=1e-2, rtol=1e-2)})
+    @parametrize_test("align_corners", [True, False])
+    def test_upsamplingBilinear2d_backward_nhwc_gather_high_ratio(self, device, dtype, align_corners):
+        # 2x2 -> 64x64 is 4096 contributions per grad_input address. fp16 has
+        # no upper ratio cap, so on these archs channels_last takes the NHWC
+        # gather and accumulates in fp32. 4096 is the average number of
+        # contributions per address; each thread's window is smaller (49 per
+        # axis, 2401 elements, with align_corners=False).
+        # The fp16 atomic scatter used elsewhere does not meet this tolerance.
+        n, c = 2, 16
+        input_size = [n, c, 2, 2]
+        output_size = [64, 64]
+        go = make_tensor((n, c, *output_size), device=device, dtype=dtype, low=-1, high=1)
+        go = go.contiguous(memory_format=torch.channels_last)
+        gi = torch.full(input_size, float("nan"), device=device, dtype=dtype)
+        gi = gi.contiguous(memory_format=torch.channels_last)
+
+        torch.ops.aten.upsample_bilinear2d_backward.grad_input(
+            go, output_size, input_size, align_corners, None, None, grad_input=gi,
+        )
+
+        self.assertTrue(gi.is_contiguous(memory_format=torch.channels_last))
+        self.assertFalse(gi.isnan().any())
+        ref = torch.ops.aten.upsample_bilinear2d_backward(
+            go.cpu().double(), output_size, input_size, align_corners, None, None,
+        ).to(dtype=dtype)
+        self.assertEqual(gi, ref)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(MI300_ARCH + MI350_ARCH + MI450_ARCH)
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @toleranceOverride({
+        torch.float: tol(atol=1e-5, rtol=1e-5),
+        torch.half: tol(atol=1e-2, rtol=1e-2),
+        torch.bfloat16: tol(atol=5e-2, rtol=5e-2),
+    })
+    @parametrize_test("align_corners", [True, False])
+    def test_upsamplingBilinear2d_backward_nhwc_gather_below_cap(self, device, dtype, align_corners):
+        # 4x4 -> 32x32 is 256 contributions per grad_input address, below the
+        # 512 cap for bf16, fp32 and double and above every lower cut (gfx950 6,
+        # gfx942 4 for fp16 and 16 otherwise, gfx1250 2). All four dtypes take
+        # the NHWC gather here. The test is limited to those archs because CUDA
+        # and other ROCm archs run the atomic scatter, which this test does
+        # not target and whose fp16 error grows with the ratio.
+        n, c = 2, 16
+        input_size = [n, c, 4, 4]
+        output_size = [32, 32]
+        go = make_tensor((n, c, *output_size), device=device, dtype=dtype, low=-1, high=1)
+        go = go.contiguous(memory_format=torch.channels_last)
+        gi = torch.full(input_size, float("nan"), device=device, dtype=dtype)
+        gi = gi.contiguous(memory_format=torch.channels_last)
+
+        torch.ops.aten.upsample_bilinear2d_backward.grad_input(
+            go, output_size, input_size, align_corners, None, None, grad_input=gi,
+        )
+
+        self.assertTrue(gi.is_contiguous(memory_format=torch.channels_last))
+        self.assertFalse(gi.isnan().any())
+        ref = torch.ops.aten.upsample_bilinear2d_backward(
+            go.cpu().double(), output_size, input_size, align_corners, None, None,
+        ).to(dtype=dtype)
+        self.assertEqual(gi, ref)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(MI300_ARCH + MI350_ARCH + MI450_ARCH)
+    @largeTensorTest("3GB", "cuda")
+    @parametrize_test("align_corners", [True, False])
+    def test_upsamplingBilinear2d_backward_nhwc_gather_large_axis(self, device, align_corners):
+        # 16777716 -> 33555432 along one axis, 8 contributions per grad_input
+        # address (gather on gfx950 and gfx1250; gfx942 fp32 scatters). The
+        # input axis is past 2^24, where the float rounding of the inverse
+        # output range is larger than a one-output margin, and the gather used
+        # to drop contributions there (weight sum short by ~500 and ~1000).
+        # Each grad_output element spreads a total weight of 1, so with ones
+        # the sum of grad_input must equal grad_output.numel(). The float
+        # source index still loses a few contributions at this size in the
+        # scatter as well (-8 on gfx950), hence the tolerance.
+        c, w_in, w_out = 4, 16777716, 33555432
+        go = torch.ones(1, c, 1, w_out, device=device, dtype=torch.float)
+        go = go.contiguous(memory_format=torch.channels_last)
+        gi = torch.ops.aten.upsample_bilinear2d_backward(
+            go, [1, w_out], [1, c, 1, w_in], align_corners, None, None,
+        )
+        self.assertLess(abs(gi.sum(dtype=torch.float64).item() - go.numel()), 64)
 
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
