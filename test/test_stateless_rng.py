@@ -305,8 +305,8 @@ class TestStatelessRNGKeyFoldIn(TestCase):
             with self.assertRaisesRegex(ValueError, "data must be in"):
                 random.fold_in(key, bad)
         # tensor with the wrong dtype
-        with self.assertRaisesRegex(RuntimeError, "data must have dtype uint64"):
-            random.fold_in(key, torch.tensor(7, dtype=torch.int64, device=device))
+        with self.assertRaisesRegex(RuntimeError, "dtype uint64 or int64"):
+            random.fold_in(key, torch.tensor(7, dtype=torch.int32, device=device))
         # tensor with more than one value
         with self.assertRaisesRegex(RuntimeError, "data must be a single value"):
             random.fold_in(key, torch.tensor([1, 2], dtype=torch.uint64, device=device))
@@ -327,16 +327,20 @@ class TestStatelessRNGKeyFoldIn(TestCase):
             subtest(7, name="small"),
             subtest(1 << 63, name="int64_max_plus_one"),
             subtest((1 << 64) - 1, name="uint64_max"),
+            subtest(-1, name="negative"),
         ],
     )
     def test_tensor_data_matches_int(self, device, data):
         key = random.split(random.key(42, device=device), 4)  # (4, 2) batched
         expected = random.fold_in(key, data)
-        # Both a 0-dim scalar and a (1,) tensor are accepted as a single value.
-        scalar = torch.tensor(data, dtype=torch.uint64, device=device)
-        one_d = torch.tensor([data], dtype=torch.uint64, device=device)
-        self.assertEqual(random.fold_in(key, scalar), expected)
-        self.assertEqual(random.fold_in(key, one_d), expected)
+        # An int64 tensor holds the same bits as the uint64 one.
+        as_uint64 = data % (1 << 64)
+        as_int64 = as_uint64 - (1 << 64) if as_uint64 >= (1 << 63) else as_uint64
+        for dtype, value in ((torch.uint64, as_uint64), (torch.int64, as_int64)):
+            # Both a 0-dim scalar and a (1,) tensor are accepted as a single value.
+            for v in (value, [value]):
+                data_t = torch.tensor(v, dtype=dtype, device=device)
+                self.assertEqual(random.fold_in(key, data_t), expected)
 
     @onlyCUDA
     def test_tensor_data_cuda_graph(self, device):
