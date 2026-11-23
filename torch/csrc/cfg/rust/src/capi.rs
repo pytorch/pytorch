@@ -27,7 +27,7 @@ pub const TCFG_ALLOW_SKIP_AUTOGRAD: u32 = 1;
 
 pub const TCFG_UNBOXED_RESULT: u32 = 1;
 
-pub const TCFG_API_VERSION: u32 = 15;
+pub const TCFG_API_VERSION: u32 = 17;
 
 #[repr(C)]
 pub struct TcfgPyOp {

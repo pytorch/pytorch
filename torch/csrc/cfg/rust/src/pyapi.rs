@@ -23,7 +23,8 @@ use std::sync::Arc;
 #[pyfunction]
 pub fn init(capsule: &Bound<'_, PyCapsule>) -> PyResult<()> {
     let api = capsule.pointer_checked(Some(c"torch._C._cfg_c_api"))?.as_ptr() as *mut TcfgApi;
-    if unsafe { (*api).version } != TCFG_API_VERSION {
+    let version = unsafe { (*api).version };
+    if version != TCFG_API_VERSION {
         return Err(PyRuntimeError::new_err(
             "torch._C and the torch.vm runtime were built from different sources",
         ));
