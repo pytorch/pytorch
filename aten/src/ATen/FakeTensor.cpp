@@ -94,7 +94,7 @@ bool may_turn_const(const Tensor& t) {
 }
 
 Tensor fake_detach(const Tensor& self) {
-  return fake_shallow_copy(
+  return fake_tensor_data(
       self, /*version_counter=*/0, /*allow_tensor_metadata_change=*/false);
 }
 
@@ -109,6 +109,10 @@ Tensor fake_tensor_data(
   auto result =
       fake_shallow_copy(self, version_counter, allow_tensor_metadata_change);
   if (!python_hook) {
+    if (auto real = self.unsafeGetTensorImpl()->real_tensor()) {
+      result.unsafeGetTensorImpl()->set_real_tensor(real->shallow_copy_and_detach(
+          real->version_counter(), /*allow_tensor_metadata_change=*/false));
+    }
     if (auto mode = self.unsafeGetTensorImpl()->fake_tensor_mode()) {
       if (auto constant = mode->get_constant(self.unsafeGetTensorImpl())) {
         // ExtraMeta's shallow copy drops constants; register this storage alias.
