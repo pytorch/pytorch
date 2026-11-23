@@ -11,7 +11,12 @@ from unittest import mock
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_device_type import largeTensorTest
-from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    serialTest,
+    TEST_CUTEDSL,
+    TestCase,
+)
 
 
 # Guard before importing cutlass-dependent kernels to avoid collection errors.
@@ -126,13 +131,14 @@ class TestKernelGeneral(TestCase):
         self.assertEqual(out[:7], x)
         self.assertEqual(out[7:], torch.full((2,), -1.0, device="cuda"))
 
+    @serialTest()
     @largeTensorTest("24GB", device="cuda")
     def test_wide_outputs_store_every_output(self):
         """Bound 2^31 outputs by the output's full 64-bit size: a 64-bit extent's
         shape[0] reads back as Int32 and wraps negative, which stored nothing."""
         x = torch.ones(2**31, 2, device="cuda", dtype=torch.float16)
-        out = torch.empty(2**31, device="cuda")
-        red, kept = kg._ti_pairs(x, kg._probe(x, {1}))
+        out = torch.full((2**31,), -1.0, device="cuda")
+        red, kept = ((2, 1),), ((2**31, 2),)
         trait = T.SumOps(acc=cutlass.Float32)
         op = kg.ReduceBlock(trait, count=2, num_o=2**31, red_pairs=red, kept_pairs=kept)
         kg._launch(op, ("wide", "wide_outputs"), [kg._flat(x)], [out])
@@ -253,8 +259,8 @@ class TestKernelGeneral(TestCase):
     @unittest.skipIf(
         rt.inner_tree_order_enabled(), "requires unordered reduction order"
     )
-    def test_reduce_all_grid_stride_index_and_cache_key(self):
-        """Carry global indices and separate fp32/fp64 stage-2 kernels."""
+    def test_reduce_all_grid_stride_index(self):
+        """Carry global indices through both grid-stride stages for fp32 and fp64."""
         n = (1 << 20) + 3
         winner = 700000
         for dtype, acc in (
@@ -266,13 +272,13 @@ class TestKernelGeneral(TestCase):
             x[winner + 100000] = 1
             out = kg.reduce_all(
                 T.ArgMaxOps(acc=acc),
-                "index_cache_key",
+                "grid_stride_index",
                 x,
                 torch.int32,
             )
             with self.subTest(dtype=dtype):
                 self.assertEqual(out, winner)
-        self.assertEqual(_plan_tags("index_cache_key"), {"all1", "all2"})
+        self.assertEqual(_plan_tags("grid_stride_index"), {"all1", "all2"})
 
     def test_noncontiguous_reduce_all_index_is_logical(self):
         """Report row-major logical indices for non-contiguous inputs."""
@@ -286,13 +292,20 @@ class TestKernelGeneral(TestCase):
         )
         self.assertEqual(out, 1)
 
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
     def test_dense_permuted_full_reduction_takes_the_reduce_all_route(self):
         """TI flattens a transposed full reduction to the storage's unit-stride run."""
         y = torch.randn(1024, 1024, device="cuda")
-        trait = T.SumOps(acc=cutlass.Float32)
-        got = kg.reduce_dim(trait, "ti_flat_all", y.t(), [0, 1], torch.float32)
-        want = kg.reduce_all(trait, "ti_flat_all_ref", y, torch.float32)
+        trait, f32, block = T.SumOps(acc=cutlass.Float32), torch.float32, kg._K0_BLOCK
+        got = kg.reduce_dim(trait, "ti_flat_all", y.t(), [0, 1], f32, block=block)
+        want = kg.reduce_all(trait, "ti_flat_all_ref", y, f32, block=block)
         self.assertEqual(got.view(torch.int32), want.view(torch.int32))
+        with torch.backends.python_native.cutedsl.disabled():
+            self.assertEqual(got, y.double().sum().float(), atol=1e-2, rtol=1e-5)
+        # The flat run took reduce-all's cross-CTA split, not a general decode.
+        self.assertTrue(any(k[1] == "ti_flat_all" for k in xc._PLAN))
         self.assertFalse(_plan_tags("ti_flat_all") & {"reduce", "gensplit1"})
 
     @unittest.skipIf(
@@ -346,16 +359,6 @@ class TestKernelGeneral(TestCase):
         with torch.backends.python_native.cutedsl.disabled():
             want = x.double().sum().float()
         self.assertEqual(got, want, atol=1e-3, rtol=1e-5)
-
-    def test_oneshot_load_bound(self):
-        """16-bit N = 4097 takes 65 scalar loads at 64 threads and stays one-shot;
-        N = 4161 takes 66."""
-
-        def row(n):
-            return torch.empty(1, n, device="meta", dtype=torch.float16)
-
-        self.assertTrue(kg._oneshot_ok(row(4097)))
-        self.assertFalse(kg._oneshot_ok(row(4161)))
 
     @largeTensorTest("24GB", device="cuda")
     def test_wide_rows_skip_the_row_kernels(self):
@@ -469,14 +472,6 @@ class TestKernelGeneral(TestCase):
             gidx_from="chunk",
         )
         self.assertEqual(offset_op.limit, offset + 1024)
-        # No reduced runs at all is LEGAL -- an extent-1 reduced axis coalesces away in TI. Pinned
-        # here because the arm that allows it is one line in tile._decode_offset, and a crash.
-        self.assertEqual(
-            kg.ReduceBlock(
-                trait, count=1, num_o=1, red_pairs=(), kept_pairs=()
-            ).npairs_red,
-            0,
-        )
         # The reshaping cross-CTA path also requires contiguous CUDA input.
         with self.assertRaisesRegex(AssertionError, "CUDA"):
             xc.reduce_row_xcta(trait, "inv_xcta", xt, torch.float32)

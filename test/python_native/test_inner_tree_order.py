@@ -365,6 +365,8 @@ class TestInnerTreeOrder(TestCase):
             "var_mean": (T.VarMeanOps, base[:4, ::2], [1], base[:4, ::2].contiguous()),
         }
         trait, x, dims, rows = cases[name]
+        if name == "multirow":
+            self.assertEqual(rt.itree_plan(5, 300, 4, stage=False).shape, "multirow")
         key = f"inner_tree_test_indexed_{name}"
         nouts = getattr(trait, "nouts", 1)
         dtypes = [torch.float32] * nouts
@@ -411,6 +413,7 @@ class TestInnerTreeOrder(TestCase):
             % 17
         )[:, ::2]
         key = "inner_tree_test_partial_dtype_cache"
+        self.assertEqual(rt.itree_plan(32769, 2, 4, stage=False).shape, "split")
         for acc, dtype in (
             (cutlass.Float32, torch.float32),
             (cutlass.Float64, torch.float64),

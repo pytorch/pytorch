@@ -1,6 +1,7 @@
 # Reduction dispatcher and general-axis plan for the shared TileReduce kernel.
 # TensorIterator geometry handles every layout. Runtime values keep kernel count
-# O(op * dtype * pair-count); cache_sig compiles decode depths, outputs, index mode,
+# O(op * dtype * pair-count), except that the gated general-axis inner-tree path
+# compiles per reduction length; cache_sig compiles decode depths, outputs, index mode,
 # projection/partial mode, and fold clamps.
 
 import math
@@ -64,7 +65,10 @@ class ReduceBlock:
         index_extent = limit - in_base if flat_tail and limit is not None else limit
         index_extent = count if index_extent is None else index_extent
         if getattr(trait, "has_index", False) and index_extent > _INT32_LIMIT:
-            raise ValueError("index reductions require indices representable in Int32")
+            raise ValueError(
+                "index reductions require indices representable in Int32, got "
+                f"{index_extent=}"
+            )
         self.in_base = in_base  # flat input offset of output coordinate 0
         # Ragged tail bound: an absolute storage offset under flat_tail, and each output's
         # reduced count, relative to its run, under ragged_chunk.
@@ -148,7 +152,8 @@ def _operands(ts: Sequence[torch.Tensor], read_only: bool = False) -> list[Any]:
 
 
 def _exts(pairs: Pairs, wide: bool = False) -> list[Any] | None:
-    # FastDivmod has an Int32 dividend; wider decodes use native Int64 division.
+    # FastDivmod takes Int32 extents, and its dividends (r < count, o < num_o) stay
+    # below 2^31; wider decodes use native Int64 division.
     dtype = Int64 if wide else Int32
     return [dtype(ext) for ext, _ in pairs] or None
 
@@ -494,7 +499,10 @@ def _try_indexed_itree(
     out_dtypes: Sequence[torch.dtype],
     nouts: int,
 ) -> tuple[torch.Tensor, ...] | None:
-    """Apply the fixed logical-row DAG through arbitrary storage strides."""
+    """Apply the fixed logical-row DAG through arbitrary storage strides, or return None
+    when the geometry is declined; _reduce then silently uses the default order. From
+    _reduce (0 < count) the only decline is num_o * nbatch reaching Int32: itree_plan
+    returns None only for N < 1."""
     from . import kernel_rowtile as rt
 
     plan = rt.itree_plan(count, num_o, x.element_size(), stage=False)
