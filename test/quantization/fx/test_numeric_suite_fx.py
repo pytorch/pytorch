@@ -2940,7 +2940,9 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             qconfig_dict=qconfig_dict,
             should_log_inputs=False)
 
-instantiate_device_type_tests(TestFXNumericSuiteCoreAPIsAccelerator, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestFXNumericSuiteCoreAPIsAccelerator, globals(), except_for="cpu", allow_mps=True, allow_xpu=True
+)
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")
