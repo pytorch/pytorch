@@ -206,6 +206,44 @@ impl Callees {
     }
 }
 
+thread_local! {
+    /// How many compiled functions are running on this thread, one inside the
+    /// other.
+    static DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The address the native stack of this thread must stay above: its end,
+    /// plus room for what the deepest compiled function still calls.
+    static STACK_FLOOR: usize = stack_end().map_or(0, |end| end + STACK_MARGIN);
+}
+
+const STACK_MARGIN: usize = 512 * 1024;
+
+/// The lowest address of the calling thread's stack, where that is known.
+#[cfg(target_os = "linux")]
+fn stack_end() -> Option<usize> {
+    extern "C" {
+        fn pthread_self() -> usize;
+        fn pthread_getattr_np(thread: usize, attr: *mut u64) -> i32;
+        fn pthread_attr_getstack(attr: *const u64, addr: *mut *mut u8, size: *mut usize) -> i32;
+        fn pthread_attr_destroy(attr: *mut u64) -> i32;
+    }
+    // Larger than pthread_attr_t on every Linux target.
+    let mut attr = [0u64; 16];
+    let (mut addr, mut size) = (null_mut(), 0usize);
+    unsafe {
+        if pthread_getattr_np(pthread_self(), attr.as_mut_ptr()) != 0 {
+            return None;
+        }
+        let found = pthread_attr_getstack(attr.as_ptr(), &mut addr, &mut size) == 0;
+        pthread_attr_destroy(attr.as_mut_ptr());
+        found.then_some(addr as usize)
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn stack_end() -> Option<usize> {
+    None
+}
+
 pub struct Compiled {
     pub callees: Arc<Callees>,
     global_cache: LoadCaches,
@@ -634,7 +672,23 @@ impl Compiled {
     /// `args` is a tuple, `kwargs` a dict or null. Returns a new reference,
     /// or null with a Python error set.
     pub unsafe fn call(&self, function: Obj, args: Obj, kwargs: Obj) -> Obj {
+        // A compiled function counts against the limit on Python calls,
+        // like the function it was compiled from. Unlike a Python call it
+        // also uses native stack, about 2 kB a level, and the limit on C
+        // calls that Py_EnterRecursiveCall enforces (10000) is beyond what
+        // the stack holds of that: so the stack itself is checked too.
+        let depth = DEPTH.with(|d| {
+            d.set(d.get() + 1);
+            d.get()
+        });
+        let here = std::ptr::addr_of!(depth) as usize;
+        if depth > ffi::Py_GetRecursionLimit() as usize || here < STACK_FLOOR.with(|floor| *floor) {
+            DEPTH.with(|d| d.set(d.get() - 1));
+            set_error(ffi::PyExc_RecursionError, "maximum recursion depth exceeded".to_string());
+            return null_mut();
+        }
         if ffi::Py_EnterRecursiveCall(c" while calling a cfg-compiled function".as_ptr()) != 0 {
+            DEPTH.with(|d| d.set(d.get() - 1));
             return null_mut();
         }
         // One register past the values holds the function for the length of
@@ -651,6 +705,7 @@ impl Compiled {
         }
         self.frames.borrow_mut().push(regs);
         ffi::Py_LeaveRecursiveCall();
+        DEPTH.with(|d| d.set(d.get() - 1));
         result
     }
 
