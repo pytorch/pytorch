@@ -119,7 +119,7 @@ if typing.TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.base import VariableTracker
     from torch._prims_common import DeviceLikeType
-    from torch._subclasses import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
 
 
 try:
@@ -3262,6 +3262,8 @@ deque_methods = {
 }
 
 str_methods = {method for method in str.__dict__.values() if callable(method)}
+int_methods = {method for method in int.__dict__.values() if callable(method)}
+float_methods = {method for method in float.__dict__.values() if callable(method)}
 
 # EnumType is the metaclass for Enum classes
 enum_type_methods = {
@@ -3527,6 +3529,18 @@ def check_positional(
         )
 
 
+def check_num_args(
+    tx: InstructionTranslatorBase, args: list[VariableTracker], n: int
+) -> None:
+    # Mirrors CPython check_num_args (Objects/typeobject.c), used by the
+    # slot wrappers (wrap_binaryfunc, wrap_delitem, ...).
+    from torch._dynamo.exc import raise_type_error
+
+    if len(args) != n:
+        s = "" if n == 1 else "s"
+        raise_type_error(tx, f"expected {n} argument{s}, got {len(args)}")
+
+
 def no_positional(
     tx: InstructionTranslatorBase, funcname: str, args: list[VariableTracker]
 ) -> None:
@@ -3699,7 +3713,7 @@ def wrap_fake_exception(fn: Callable[[], Any]) -> Any:
 
 
 def deepcopy_to_fake_tensor(
-    obj: Any, fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    obj: Any, fake_mode: FakeTensorMode | CppFakeTensorMode
 ) -> Any:
     with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
         return wrap_fake_exception(lambda: copy.deepcopy(obj))
@@ -4180,7 +4194,9 @@ def get_fake_values_from_nodes(
     return torch.fx.node.map_arg(nodes, visit)
 
 
-def get_concrete_sizes_from_symints(msg: str, fake_mode: FakeTensorMode | None) -> str:
+def get_concrete_sizes_from_symints(
+    msg: str, fake_mode: FakeTensorMode | CppFakeTensorMode | None
+) -> str:
     """
     Replace symbolic size expressions (like 's0', 's94') in error messages
     with their concrete runtime values for better readability.
@@ -5790,7 +5806,7 @@ def has_torch_function(vt: VariableTracker) -> bool:
 
 # see note [Tensor Fakification and Symbol Caching]
 def to_fake_tensor(
-    t: torch.Tensor, fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    t: torch.Tensor, fake_mode: FakeTensorMode | CppFakeTensorMode
 ) -> Any:
     symbolic_context = None
     source = None
@@ -6102,12 +6118,18 @@ def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
     return tensor_dict
 
 
-def build_stream(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Stream:
-    return torch._C.Stream(*args, **kwargs)
+def build_stream(
+    args: tuple[Any],
+    kwargs: dict[Any, Any],
+    stream_cls: type[torch.Stream] = torch.Stream,
+) -> torch.Stream:
+    return stream_cls(*args, **kwargs)
 
 
-def build_event(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Event:
-    return torch._C.Event(*args, **kwargs)
+def build_event(
+    args: tuple[Any], kwargs: dict[Any, Any], event_cls: type[torch.Event] = torch.Event
+) -> torch.Event:
+    return event_cls(*args, **kwargs)
 
 
 class FrameState(enum.Enum):
