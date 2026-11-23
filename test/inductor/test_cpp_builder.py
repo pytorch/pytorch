@@ -94,11 +94,11 @@ class TestGetCppCompilerWindows(TestCase):
                 name="rocm_indexed_cuda_default",
             ),
             subtest(
-                ("7.14.0", "cpu", None, "cl", False),
+                ("7.14.0", "cpu", None, THEROCK_CLANG_CL, True),
                 name="rocm_cpu_default",
             ),
             subtest(
-                ("7.14.0", None, None, "cl", False),
+                ("7.14.0", None, None, THEROCK_CLANG_CL, True),
                 name="rocm_no_device_default",
             ),
             subtest(
@@ -149,6 +149,11 @@ class TestGetCppCompilerWindows(TestCase):
         with (
             mock.patch.object(cpp_builder, "_IS_WINDOWS", True),
             mock.patch.object(torch.version, "hip", "7.14.0"),
+            mock.patch.object(
+                cpp_builder,
+                "_get_rocm_clang_cl_windows",
+                return_value=THEROCK_CLANG_CL_WINDOWS,
+            ),
             mock.patch.dict(os.environ, {}, clear=True),
             self.assertRaises(RuntimeError),
         ):

@@ -462,12 +462,10 @@ def get_cpp_compiler(device_type: str | None = None) -> str:
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX")
         if compiler is None:
-            if device_type is not None:
-                device_type = _normalize_device_type(device_type)
+            # Windows ROCm torch is built with clang-cl; cl-built CPU kernels crash
+            # in its Sleef (misaligned __m512 arguments).
             compiler = (
-                _get_rocm_clang_cl_windows()
-                if device_type == "cuda" and torch.version.hip is not None
-                else "cl"
+                _get_rocm_clang_cl_windows() if torch.version.hip is not None else "cl"
             )
         compiler = normalize_path_separator(compiler)
         check_compiler_exist_windows(compiler)
@@ -1055,7 +1053,7 @@ def _get_ffast_math_flags() -> list[str]:
     return flags
 
 
-def _get_inductor_debug_symbol_cflags() -> tuple[list[str], list[str]]:
+def _get_inductor_debug_symbol_cflags(cpp_compiler: str) -> tuple[list[str], list[str]]:
     """
     When we turn on generate debug symbol.
     On Windows, it should create a [module_name].pdb file. It helps debug by WinDBG.
@@ -1065,7 +1063,8 @@ def _get_inductor_debug_symbol_cflags() -> tuple[list[str], list[str]]:
     ldflags: list[str] = []
 
     if _IS_WINDOWS:
-        cflags = ["ZI", "_DEBUG"]
+        # clang-cl rejects /ZI and /_DEBUG.
+        cflags = ["Z7"] if _is_clang(cpp_compiler) else ["ZI", "_DEBUG"]
         ldflags = ["DEBUG", "ASSEMBLYDEBUG ", "OPT:REF", "OPT:ICF"]
     else:
         cflags.append("g")
@@ -1199,7 +1198,7 @@ def _get_optimization_cflags(
             cflags += ["O0"]
 
     if should_add_debug_symbol_flags:
-        debug_cflags, debug_ldflags = _get_inductor_debug_symbol_cflags()
+        debug_cflags, debug_ldflags = _get_inductor_debug_symbol_cflags(cpp_compiler)
         cflags += debug_cflags
         ldflags += debug_ldflags
 

@@ -363,6 +363,9 @@ class TestStandaloneInductor(TestCase):
         ]
 
     @unittest.skipIf(config.is_fbcode(), "fbcode does not emit CPU architecture flags")
+    @unittest.skipIf(
+        _IS_WINDOWS, "cpp.march maps to -march/-mcpu, which MSVC-style compilers lack"
+    )
     def test_aot_cpp_march_config(self):
         with (
             config.patch({"cpp.march": "x86-64"}),
@@ -375,6 +378,9 @@ class TestStandaloneInductor(TestCase):
         self.assertEqual(arch_flags, ["march=x86-64"])
 
     @unittest.skipIf(config.is_fbcode(), "fbcode does not emit CPU architecture flags")
+    @unittest.skipIf(
+        _IS_WINDOWS, "cpp.march maps to -march/-mcpu, which MSVC-style compilers lack"
+    )
     def test_aot_cpp_march_config_ppc64le(self):
         with (
             config.patch({"cpp.march": "power9"}),
