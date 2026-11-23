@@ -60,7 +60,10 @@ class ReduceBlock:
         self.wide_kept = any(ext >= _INT32_LIMIT for ext, _ in self.kept_pairs)
         index_extent = limit if limit is not None else count
         if getattr(trait, "has_index", False) and index_extent > _INT32_LIMIT:
-            raise ValueError("index reductions require indices representable in Int32")
+            raise ValueError(
+                "index reductions require indices representable in Int32, got "
+                f"{index_extent=}"
+            )
         self.in_base = in_base  # flat input offset of output coordinate 0
         self.limit = limit if limit is not None else count  # ragged tail bound
         # Projection divisor: count normally, or original L when stage 2 folds G partials.
@@ -139,7 +142,8 @@ def _operands(ts: Sequence[torch.Tensor], read_only: bool = False) -> list[Any]:
 
 
 def _exts(pairs: Pairs, wide: bool = False) -> list[Any] | None:
-    # FastDivmod has an Int32 dividend; wider decodes use native Int64 division.
+    # FastDivmod takes Int32 extents, and its dividends (r < count, o < num_o) stay
+    # below 2^31; wider decodes use native Int64 division.
     dtype = Int64 if wide else Int32
     return [dtype(ext) for ext, _ in pairs] or None
 
