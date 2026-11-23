@@ -637,6 +637,7 @@ class TestOrderedColRoute(TestCase):
             ("shape", "do not support"),
             ("vec_linear", "tree vector folds"),
             ("batches", "single planner batch"),
+            ("wpr", "one-warp split plan"),
         ],
     )
     def test_constructor_invariants_raise(self, field, error):
@@ -647,8 +648,13 @@ class TestOrderedColRoute(TestCase):
         plan = rt.trait_itree_plan(trait, 1024, 32, 4, stage=False)
         state = (plan.shape, plan.vec_linear, len(plan.batches))
         self.assertEqual(state, ("looped", False, 1))
-        invalid = {"shape": "multirow", "vec_linear": True, "batches": plan.batches * 2}
-        bad = plan._replace(**{field: invalid[field]})
+        invalid = {
+            "shape": {"shape": "multirow"},
+            "vec_linear": {"vec_linear": True},
+            "batches": {"batches": plan.batches * 2},
+            "wpr": {"shape": "split", "wpr": 1},
+        }
+        bad = plan._replace(**invalid[field])
         with self.assertRaisesRegex(ValueError, error):
             ct._OrderedColReduce(trait, bad, 1024, 32, 1)
 
@@ -746,7 +752,7 @@ class TestOrderedColDevice(TestCase):
         # The same view runs as a split plan once allowed.
         got = ct.reduce_ordered_col(trait, "decline", x, out, 1, allow_split=True)
         self.assertIsNotNone(got)
-        self.assertIn("ordered_col1", _tags("decline"))
+        self.assertEqual(_tags("decline"), {"ordered_col1"})
 
     def test_split_partial_indices_stay_below_int32(self, device):
         """Split partials are indexed output * partitions + partition in Int32."""

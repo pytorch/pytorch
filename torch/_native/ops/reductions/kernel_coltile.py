@@ -52,6 +52,8 @@ _SHORT_R = 64
 _MIN_LANES = 64
 # Stage one chunks and ordered split partitions launch along grid y.
 _MAX_NPAR = 65535
+# Ordered split plans are verified bitwise for these input dtypes only.
+_ORDERED_SPLIT_DTYPES = (torch.float32, torch.bfloat16, torch.float16, torch.float64)
 # Use blocks per column below the measured 4096-16384 crossover, then threads per column.
 _C_THREAD_STAGE2 = 8192
 # Small blocks avoid idle threads on narrow columns; threads_per_block=256 took 17.3us versus 9.9us
@@ -271,6 +273,8 @@ class _OrderedColReduce:
             raise ValueError("ordered columns replay tree vector folds only")
         if len(plan.batches) != 1:
             raise ValueError("ordered columns fold a single planner batch")
+        if plan.shape == "split" and plan.wpr == 1:
+            raise ValueError("a one-warp split plan would seed an extra identity")
         self.trait = trait
         self.plan = plan
         self.R = R
@@ -488,7 +492,12 @@ def reduce_ordered_col(
     *,
     allow_split: bool = False,
 ) -> tuple[torch.Tensor, ...] | None:
-    """Reduce axis -2 of a contiguous (R, C) or (B, R, C) view, or return None."""
+    """Reduce axis -2 of a contiguous (R, C) or (B, R, C) view, or return None.
+
+    allow_split lets rows past one looped plan run as split plans. Those decline for
+    inputs outside _ORDERED_SPLIT_DTYPES, Int32 partial-index overflow and over
+    _MAX_NPAR partitions.
+    """
     if not x.is_cuda:
         raise AssertionError(f"want a CUDA input, got {x.device}")
     device = x.get_device()
@@ -516,17 +525,16 @@ def reduce_ordered_col(
     # fp32/bf16/fp16 sums, fp32/bf16 amax). Multi-field traits roll lanes but replay a
     # static lane tree per load, taking 1.3 s at R = 8192 and 2.5-3.1 s at
     # R = 8193-16384 (fp32). The indexed tree takes 0.3-0.75 s, so cap replays at
-    # tile.MAX_UNROLL leaves (looped rows up to 8192).
+    # tile.MAX_UNROLL leaves (looped rows up to 8192). Split plans replay exactly
+    # tile.MAX_UNROLL leaves per warp, so they fit with no headroom.
     # Plans past one planner batch always exceed the cap.
     if sum(b[2] for b in plan.batches) * WARP * plan.vec > tile.MAX_UNROLL:
         return None
     split = plan.shape == "split"
-    # Split is verified bitwise for floating inputs only. Partials are indexed in Int32
-    # and partitions ride grid y.
-    floating = (torch.float32, torch.bfloat16, torch.float16, torch.float64)
+    # Partials are indexed in Int32 and partitions ride grid y.
     if split and (
         not allow_split
-        or x.dtype not in floating
+        or x.dtype not in _ORDERED_SPLIT_DTYPES
         or B * C * plan.split[0] >= _INT32_LIMIT
         or plan.split[0] > _MAX_NPAR
     ):
