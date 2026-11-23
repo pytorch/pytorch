@@ -97,7 +97,7 @@ struct TcfgTensorInfo {
 
 #define TCFG_NO_VERSION UINT64_MAX
 
-#define TCFG_API_VERSION 11
+#define TCFG_API_VERSION 12
 
 // What frame_hook registers. It is offered the frame the interpreter made
 // for a call of func, with the arguments bound and nothing run. It returns 0
@@ -227,6 +227,12 @@ struct TcfgApi {
   // from it. Enter returns what leave is to put back.
   void* (*workspace_enter)(void* workspace);
   void (*workspace_leave)(void* workspace, void* previous);
+
+  // The modes of the thread that a graph depends on, as one number: whether
+  // gradients are recorded (bit 0), inference mode (1), autocast for CUDA
+  // (2) and for the CPU (3), the default dtype (bits 8 to 15) and, from bit
+  // 16, how many torch function modes are active.
+  uint64_t (*call_modes)();
 };
 
 } // extern "C"
