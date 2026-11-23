@@ -2,11 +2,15 @@
 #include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 
+#include <c10/util/irange.h>
+
 #if defined(USE_ROCM)
 #include <amd_smi/amdsmi.h>
+#include <string>
+#if ROCM_VERSION < 71400
 #include <dlfcn.h>
 #include <cstdlib>
-#include <string>
+#endif
 #endif
 
 namespace c10d::intra_node_comm {
@@ -26,7 +30,7 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
 #if !defined(USE_ROCM)
   auto connectivity = detect_dma_connectivity(c10::DeviceType::CUDA, "nvlink");
   NvlMesh nvlMesh = {};
-  for (size_t srcRank = 0; srcRank < kMaxDevices; ++srcRank) {
+  for (const auto srcRank : c10::irange(kMaxDevices)) {
     for (size_t dstRank = 0; dstRank < kMaxDevices; ++dstRank) {
       if (srcRank < rankToDeviceIdx.size() &&
           dstRank < rankToDeviceIdx.size()) {
@@ -38,8 +42,6 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
   }
   return nvlMesh;
 #else
-  // Load libamd_smi at runtime to avoid linking it into torch_hip (double-load
-  // with Python amdsmi causes bus errors). Types/constants from amdsmi.h only.
   struct AmdsmiApi {
     amdsmi_status_t (*init)(uint64_t);
     amdsmi_status_t (*get_socket_handles)(uint32_t*, amdsmi_socket_handle*);
@@ -52,6 +54,17 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
         amdsmi_processor_handle,
         bool*);
   };
+#if ROCM_VERSION >= 71400
+  // amd_smi is linked into torch_hip at build time, so bind the entry points
+  // directly. Types/constants from amdsmi.h only.
+  static const AmdsmiApi amdsmi = {
+      amdsmi_init,
+      amdsmi_get_socket_handles,
+      amdsmi_get_processor_handles,
+      amdsmi_is_P2P_accessible};
+#else
+  // Load libamd_smi at runtime to avoid linking it into torch_hip (double-load
+  // with Python amdsmi causes bus errors). Types/constants from amdsmi.h only.
   static void* amdsmi_handle = nullptr;
   static AmdsmiApi amdsmi = {};
   static bool amdsmi_resolved = false;
@@ -87,6 +100,7 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
       return {};
     }
   }
+#endif
 
   NvlMesh nvlMesh = {};
   const auto worldSize = rankToDeviceIdx.size();
@@ -175,8 +189,8 @@ static Topology detectTopology(const NvlMesh nvlMesh, size_t worldSize) {
     return Topology::FULLY_CONNECTED;
   }
   bool fullyConnected = true;
-  for (size_t i = 0; i < worldSize - 1; ++i) {
-    for (size_t j = i + 1; j < worldSize; ++j) {
+  for (const auto i : c10::irange(worldSize - 1)) {
+    for (const auto j : c10::irange(i + 1, worldSize)) {
       if (nvlMesh[i][j] == 0 || nvlMesh[j][i] == 0) {
         fullyConnected = false;
       }
@@ -227,7 +241,7 @@ static std::vector<T> storeAllGather(
   static_assert(std::is_trivially_copyable_v<T>);
 
   std::vector<std::string> peerKeys;
-  for (size_t r = 0; r < worldSize; ++r) {
+  for (const auto r : c10::irange(worldSize)) {
     std::ostringstream oss;
     oss << prefix << '-' << r;
     peerKeys.push_back(std::move(oss).str());
@@ -241,7 +255,7 @@ static std::vector<T> storeAllGather(
   }
 
   std::vector<T> peerVals;
-  for (size_t r = 0; r < worldSize; ++r) {
+  for (const auto r : c10::irange(worldSize)) {
     if (r == rank) {
       peerVals.push_back(val);
       continue;

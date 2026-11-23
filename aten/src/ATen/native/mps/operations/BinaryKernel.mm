@@ -159,6 +159,14 @@ static void laguerre_polynomial_l_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "laguerre_polynomial_l");
 }
 
+static void legendre_polynomial_p_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "legendre_polynomial_p");
+}
+
+static void heaviside_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "heaviside");
+}
+
 static void polar_mps_kernel(TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "polar");
 }
@@ -180,6 +188,10 @@ static void add_mps_kernel(TensorIteratorBase& iter, const Scalar& alpha) {
 }
 
 static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.common_dtype()) || isComplexType(iter.common_dtype()),
+                              "\"lerp_mps\" not implemented for '",
+                              iter.common_dtype(),
+                              "'");
   // Narrowing the weight to a low-precision dtype would overflow for weights outside its
   // range and lose accuracy inside it, so hand it over at opmath precision.
   lib.exec_binary_kernel(iter, "lerp_alpha", weight, at::toOpMathType(iter.common_dtype()));
@@ -191,6 +203,10 @@ static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
   // other backends to cast while loading. `exec_ternary_kernel` picks the cast flavor for
   // anything that disagrees with the common dtype.
   const auto common_dtype = iter.common_dtype();
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(common_dtype) || isComplexType(common_dtype),
+                              "\"lerp_mps\" not implemented for '",
+                              common_dtype,
+                              "'");
 
   // Mirror the CUDA kernel: read a CPU scalar weight on the host, drop it from the iterator
   // and let the scalar-weight path cast it to the compute dtype. `lerp_alpha` is instantiated
@@ -286,12 +302,24 @@ static void bitwise_right_shift_mps_kernel(TensorIteratorBase& iter) {
 // The ILP threshold matches the floating-point default (256K) -- benchmark
 // shows float inputs gain ~4x at 1M; int inputs are neutral.
 static constexpr uint32_t kCmpILPThreshold = 1u << 18;
+// float4_e2m1fn_x2 has no Metal type; like CPU, eq/ne compare its packed bytes. TensorIterator has already rejected
+// operands of any other dtype.
+static void exec_equality_kernel(TensorIteratorBase& iter, const std::string& name) {
+  if (iter.common_dtype() == kFloat4_e2m1fn_x2) {
+    Tensor out = iter.output();
+    auto byte_iter = TensorIterator::comparison_op(out, iter.input(0).view(kByte), iter.input(1).view(kByte));
+    lib.exec_binary_kernel(byte_iter, name, std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+    return;
+  }
+  lib.exec_binary_kernel(iter, name, std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+}
+
 static void eq_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "eq", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+  exec_equality_kernel(iter, "eq");
 }
 
 static void ne_mps_kernel(TensorIteratorBase& iter) {
-  lib.exec_binary_kernel(iter, "ne", std::nullopt, std::nullopt, kBool, kCmpILPThreshold);
+  exec_equality_kernel(iter, "ne");
 }
 
 static void lt_mps_kernel(TensorIteratorBase& iter) {
@@ -346,6 +374,7 @@ REGISTER_DISPATCH(shifted_chebyshev_polynomial_w_stub, &shifted_chebyshev_polyno
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_mps_kernel)
 REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_mps_kernel)
 REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_mps_kernel)
+REGISTER_DISPATCH(legendre_polynomial_p_stub, &legendre_polynomial_p_mps_kernel)
 REGISTER_DISPATCH(polar_stub, &polar_mps_kernel);
 REGISTER_DISPATCH(complex_stub, &complex_mps_kernel);
 REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_mps_kernel)
@@ -354,6 +383,7 @@ REGISTER_DISPATCH(mul_stub, &mul_mps_kernel)
 REGISTER_DISPATCH(div_true_stub, &div_true_mps_kernel)
 REGISTER_DISPATCH(div_floor_stub, &div_floor_mps_kernel)
 REGISTER_DISPATCH(div_trunc_stub, &div_trunc_mps_kernel)
+REGISTER_DISPATCH(heaviside_stub, &heaviside_mps_kernel)
 REGISTER_DISPATCH(fmod_stub, &fmod_mps_kernel)
 REGISTER_DISPATCH(remainder_stub, &remainder_mps_kernel)
 REGISTER_DISPATCH(igamma_stub, &igamma_mps_kernel)

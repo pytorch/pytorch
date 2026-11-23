@@ -40,7 +40,7 @@ std::string IRPrinter::to_string(CompareSelectOperation op) {
     case CompareSelectOperation::kLE:
       return "<=";
     default:
-      throw std::runtime_error("invalid compare select operator");
+      TORCH_CHECK(false, "invalid compare select operator");
   }
 }
 
@@ -131,7 +131,7 @@ void IRPrinter::visit(const ModPtr& v) {
   } else if (v->dtype().is_floating_point()) {
     os() << "mod(" << *v->lhs() << ", " << *v->rhs() << ')';
   } else {
-    throw std::runtime_error("invalid dtype: " + std::to_string(v->dtype()));
+    TORCH_CHECK(false, "invalid dtype: " + std::to_string(v->dtype()));
   }
 }
 

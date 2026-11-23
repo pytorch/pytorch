@@ -97,10 +97,6 @@ def _rocm_compiler_options() -> list[str]:
         "-fPIC",
         "-fvisibility=hidden",
         "-mllvm",
-        "-amdgpu-early-inline-all=true",
-        "-mllvm",
-        "-amdgpu-function-calls=false",
-        "-mllvm",
         "-enable-post-misched=0",
     ]
     if config.rocm.is_debug:
@@ -113,6 +109,12 @@ def _rocm_compiler_options() -> list[str]:
         opts += ["-fgpu-flush-denormals-to-zero"]
     if config.rocm.use_fast_math:
         opts += ["-ffast-math"]
+        # Works around a gfx950 codegen issue that gives wrong CK addmm results.
+        # -Xarch_ must match the target id exactly, and --offload-arch=native may
+        # resolve to any feature spelling (e.g. gfx950:sramecc+:xnack-).
+        for sramecc in ("", ":sramecc+", ":sramecc-"):
+            for xnack in ("", ":xnack+", ":xnack-"):
+                opts += [f"-Xarch_gfx950{sramecc}{xnack}", "-fno-associative-math"]
     return opts
 
 

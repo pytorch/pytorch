@@ -1,0 +1,156 @@
+diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
+index 23f904b..475d200 100644
+--- a/quack/epilogue/frontend.py
++++ b/quack/epilogue/frontend.py
+@@ -723,0 +724 @@ class EpiMod:
++        cu_seqlens_k=None,
+@@ -761,0 +763,21 @@ class EpiMod:
++        varlen_k = cu_seqlens_k is not None
++        if varlen_m and varlen_k:
++            raise ValueError("cu_seqlens_m and cu_seqlens_k are mutually exclusive")
++        if varlen_k:
++            if b_kn:
++                raise ValueError("varlen_k requires B in (n, total_k) layout and b_kn=False")
++            if (
++                A_idx is not None
++                or use_tma_gather
++                or SFA is not None
++                or SFB is not None
++                or concat_layout
++                or transform_a is not None
++                or ag_args is not None
++                or swap_ab
++                or split_k != 1
++                or add_to_output
++            ):
++                raise ValueError("varlen_k supports plain GEMM without gather/scales/swap/split-K")
++            if self.mode != "element" or self.sinks or self.prepass is not None:
++                raise ValueError("varlen_k supports element-mode epilogues without reductions")
+@@ -860,0 +883 @@ class EpiMod:
++            tensor_key(cu_seqlens_k),
+@@ -909,0 +933 @@ class EpiMod:
++                    cu_seqlens_k=cu_seqlens_k,
+@@ -922,0 +947,16 @@ class EpiMod:
++        if varlen_k:
++            if not persistent:
++                raise ValueError("varlen_k requires persistent=True")
++            if A.dtype not in (torch.bfloat16, torch.float16) or B.dtype != A.dtype:
++                raise ValueError("varlen_k requires matching BF16/FP16 operands")
++            if (
++                A.ndim != 2 or B.ndim != 2 or A.shape[-1] != B.shape[-1]
++                or A.stride(-2) != 1 or B.stride(-2) != 1
++            ):
++                raise ValueError("varlen_k requires m-major A (m, total_k), n-major B (n, total_k)")
++            if (
++                cu_seqlens_k.ndim != 1 or cu_seqlens_k.numel() < 1
++                or cu_seqlens_k.dtype != torch.int32 or cu_seqlens_k.stride(0) != 1
++                or cu_seqlens_k.device != A.device or B.device != A.device
++            ):
++                raise ValueError("cu_seqlens_k must be a contiguous int32 prefix on the operand device")
+@@ -985,0 +1026,2 @@ class EpiMod:
++        if varlen_k:
++            batch = cu_seqlens_k.shape[0] - 1
+@@ -1025,0 +1068,2 @@ class EpiMod:
++            if varlen_k and out_n != n_gemm:
++                raise ValueError("varlen_k does not support output contraction")
+@@ -1072 +1116 @@ class EpiMod:
+-            batch_l = B.shape[0] if B.ndim == 3 else 1
++            batch_l = batch if batch is not None else 1
+@@ -1249,0 +1294 @@ class EpiMod:
++            varlen_k=varlen_k,
+@@ -1281,0 +1327 @@ class EpiMod:
++                cu_seqlens_k=cu_seqlens_k,
+@@ -1296 +1342,3 @@ class EpiMod:
+-    def _lead_shape(self, A, cu_seqlens_m, A_idx):
++    def _lead_shape(self, A, cu_seqlens_m, A_idx, cu_seqlens_k=None):
++        if cu_seqlens_k is not None:
++            return (cu_seqlens_k.shape[0] - 1, A.shape[-2])
+@@ -1313 +1361,2 @@ class EpiMod:
+-        self, out, A, B, C, store_d, out_dtype, cu_seqlens_m, A_idx, n_override=None
++        self, out, A, B, C, store_d, out_dtype, cu_seqlens_m, A_idx,
++        n_override=None, cu_seqlens_k=None,
+@@ -1320 +1369 @@ class EpiMod:
+-        lead = self._lead_shape(A, cu_seqlens_m, A_idx)
++        lead = self._lead_shape(A, cu_seqlens_m, A_idx, cu_seqlens_k)
+@@ -1386,0 +1436,2 @@ class EpiMod:
++        if ctx.get("cu_seqlens_k") is not None and config.split_k not in (None, 1):
++            raise ValueError("varlen_k does not support split-K")
+@@ -1424,0 +1476 @@ class EpiMod:
++            cu_seqlens_k=ctx.get("cu_seqlens_k"),
+@@ -1455,0 +1508 @@ class EpiMod:
++        cu_seqlens_k=None,
+@@ -1495,0 +1549,5 @@ class EpiMod:
++        if cu_seqlens_k is not None:
++            if cu_seqlens_m is not None:
++                raise ValueError("cu_seqlens_m and cu_seqlens_k are mutually exclusive")
++            if tuned or compile_dispatch:
++                raise NotImplementedError("varlen_k requires tuned=False and compile_dispatch=False")
+@@ -1604,0 +1663 @@ class EpiMod:
++                tensor_key(cu_seqlens_k),
+@@ -1643,0 +1703 @@ class EpiMod:
++                    cu_seqlens_k=cu_seqlens_k,
+@@ -1656 +1716 @@ class EpiMod:
+-        b_kn = mod_b_kn(A.device, concat_layout)
++        b_kn = cu_seqlens_k is None and mod_b_kn(A.device, concat_layout)
+@@ -1661 +1721,2 @@ class EpiMod:
+-            out, A, B, C, store_d, out_dtype, cu_seqlens_m, A_idx, n_override=n_override
++            out, A, B, C, store_d, out_dtype, cu_seqlens_m, A_idx, n_override=n_override,
++            cu_seqlens_k=cu_seqlens_k,
+@@ -1664 +1725 @@ class EpiMod:
+-        lead = self._lead_shape(A, cu_seqlens_m, A_idx)
++        lead = self._lead_shape(A, cu_seqlens_m, A_idx, cu_seqlens_k)
+@@ -1736,0 +1798 @@ class EpiMod:
++                cu_seqlens_k=cu_seqlens_k,
+@@ -1768,0 +1831 @@ class EpiMod:
++                    cu_seqlens_k=cu_seqlens_k,
+@@ -1832,0 +1896 @@ class EpiMod:
++        cu_seqlens_k=None,
+@@ -1851 +1915 @@ class EpiMod:
+-        b_kn = get_device_capacity(A.device)[0] >= 9
++        b_kn = cu_seqlens_k is None and get_device_capacity(A.device)[0] >= 9
+@@ -1886 +1950 @@ class EpiMod:
+-            lead=self._lead_shape(A, cu_seqlens_m, A_idx),
++            lead=self._lead_shape(A, cu_seqlens_m, A_idx, cu_seqlens_k),
+@@ -1888,0 +1953 @@ class EpiMod:
++            cu_seqlens_k=cu_seqlens_k,
+@@ -2045,0 +2111 @@ class EpiPlan:
++        cu_seqlens_k=None,
+@@ -2068,0 +2135 @@ class EpiPlan:
++            cu_seqlens_k=cu_seqlens_k,
+diff --git a/quack/gemm_runtime/autotune.py b/quack/gemm_runtime/autotune.py
+index 37e5417..5186733 100644
+--- a/quack/gemm_runtime/autotune.py
++++ b/quack/gemm_runtime/autotune.py
+@@ -193,0 +194 @@ class ModProblem(NamedTuple):
++        cu_seqlens_k = named_args.get("cu_seqlens_k")
+@@ -206 +207,3 @@ class ModProblem(NamedTuple):
+-            lead=_lead(A, A_idx, m_gemm),
++            lead=(cu_seqlens_k.shape[0] - 1, m_gemm)
++            if cu_seqlens_k is not None
++            else _lead(A, A_idx, m_gemm),
+@@ -229 +231,0 @@ def prune_mod_configs(mod, transform_a, configs, problem):
+-    varlen_or_gather = problem.varlen_m or problem.gather_A
+@@ -269 +270,0 @@ def prune_mod_configs(mod, transform_a, configs, problem):
+-            or varlen_or_gather
+@@ -481,0 +483 @@ def mod_selection_args(
++    cu_seqlens_k=None,
+@@ -493,0 +496 @@ def mod_selection_args(
++        "cu_seqlens_k": cu_seqlens_k,
+diff --git a/quack/gemm_runtime/host.py b/quack/gemm_runtime/host.py
+index 4af37eb..591aea4 100644
+--- a/quack/gemm_runtime/host.py
++++ b/quack/gemm_runtime/host.py
+@@ -105,0 +106 @@ def _compile_gemm_epi(
++    varlen_k=False,
+@@ -174,0 +176 @@ def _compile_gemm_epi(
++            varlen_k=varlen_k,
+@@ -218 +220 @@ def _compile_gemm_epi(
+-        False,
++        varlen_k,
+@@ -333,0 +336 @@ def build_gemm_epi_plan(
++    varlen_k=False,
+@@ -383 +386 @@ def build_gemm_epi_plan(
+-    batched = A.ndim == 3 or varlen_m
++    batched = A.ndim == 3 or varlen_m or varlen_k
+@@ -443,0 +447 @@ def build_gemm_epi_plan(
++        varlen_k=varlen_k,

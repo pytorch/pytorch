@@ -73,6 +73,16 @@ TRACKER_MODE: Literal["0", "1", "2", "3"] = os.environ.get(
 
 
 class _SplitterSettingBase:
+    """
+    Settings for _SplitterBase.
+
+    A nonzero --min-acc-module-size and the flags --skip-fusion,
+    --allow-non-tensor and --move-non-tensor-nodes-on-boundary in sys.argv (or
+    their underscore spellings) override the matching constructor arguments.
+    Everything else in sys.argv, including -h and shortened flag names, is
+    ignored. A malformed splitter flag raises argparse.ArgumentError.
+    """
+
     def __init__(
         self,
         min_acc_module_size: int = DEFAULT_MIN_ACC_MODULE_SIZE,
@@ -81,20 +91,17 @@ class _SplitterSettingBase:
         max_acc_splits: int = -1,
         move_non_tensor_nodes_on_boundary: bool = False,
     ) -> None:
-        parser = argparse.ArgumentParser()
+        # This parses the host program's sys.argv, so it must not react to that
+        # program's own flags or exit it.
+        parser = argparse.ArgumentParser(
+            add_help=False, allow_abbrev=False, exit_on_error=False
+        )
         parser.add_argument(
             "--min-acc-module-size",
             "--min_acc_module_size",
             required=False,
             type=int,
             help="Minimum size limit of an accelerator subgraph.",
-        )
-        parser.add_argument(
-            "--max-acc-splits",
-            "--max_acc_splits",
-            required=False,
-            type=int,
-            help="Enforce a maximum number of split subgraphs.",
         )
         parser.add_argument(
             "--skip-fusion",
@@ -565,7 +572,15 @@ class _SplitterBase:
             )
         self.acc_nodes = nodes_finder()
 
-        if self.settings.skip_fusion:
+        # Fusion dependency analysis only protects boundaries between supported
+        # and unsupported callable nodes. There can be no such boundary when
+        # every callable node is supported.
+        all_callable_nodes_supported = all(
+            node in self.acc_nodes
+            for node in self.module.graph.nodes
+            if node.op in CALLABLE_NODE_OPS
+        )
+        if self.settings.skip_fusion or all_callable_nodes_supported:
             self.fusions = {}
         else:
             self.fusions = FxNetAccFusionsFinder(module, self.acc_nodes)()
@@ -618,14 +633,35 @@ class _SplitterBase:
         - nodes from the same fusion depend on the same set of outer nodes,
         - outer nodes depending on a fusion depend on all nodes in that fusion.
         """
-        for node in self.fusions:
-            fusion = self.fusions[node]
-            for fused_neighbor in fusion:
-                self.deps[node].update(self.deps[fused_neighbor] - fusion)
+        # FxNetAccFusionsFinder maps every member of a fusion group to the same
+        # set object, so a group of size K appears K times here. Deduplicate by
+        # identity and do the work once per group: iterating per member repeated
+        # it K times, and because each repeat unioned into self.deps while
+        # reading from it, the sets grew as it went. That made this pass
+        # quadratic in group size, which dominates lowering on graphs with large
+        # fusion groups.
+        visited_fusions: set[int] = set()
+        for fusion in self.fusions.values():
+            if id(fusion) in visited_fusions:
+                continue
+            visited_fusions.add(id(fusion))
 
-                for user in fused_neighbor.users:
-                    if user not in fusion:
-                        self.deps[user].add(node)
+            external_deps: NodeSet = set()
+            for fused_node in fusion:
+                external_deps |= self.deps[fused_node]
+            external_deps -= fusion
+
+            outside_users = {
+                user
+                for fused_node in fusion
+                for user in fused_node.users
+                if user not in fusion
+            }
+
+            for fused_node in fusion:
+                self.deps[fused_node] |= external_deps
+            for user in outside_users:
+                self.deps[user] |= fusion
 
     def _merge_overlapping_fusions(self) -> None:
         """

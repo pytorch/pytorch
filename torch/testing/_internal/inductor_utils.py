@@ -5,8 +5,10 @@ import functools
 import logging
 import os
 import re
+import string
 import sys
 import unittest
+import unittest.mock
 from subprocess import CalledProcessError
 
 import torch
@@ -14,6 +16,7 @@ import torch._inductor.config as config
 
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor import compile_fx  # noqa: F401
+from torch._inductor import ir
 from torch._inductor.utils import (
     _device_is_available,
     get_gpu_shared_memory,
@@ -29,15 +32,19 @@ from torch.utils._triton import (
     has_triton,
     has_triton_block_ptr,
     has_triton_cpu_backend,
+    has_triton_stable_tma_api,
 )
 from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
 from torch.testing._internal.common_utils import (
+    add_skip_condition,
     IS_CI,
     IS_WINDOWS,
     LazyVal,
+    NOTEST_CPU,
+    TEST_INDUCTOR_RUN_CPU,
     TestCase,
 )
 
@@ -85,6 +92,16 @@ HAS_GPU_AND_TRITON = HAS_GPU
 GPU_TYPE = get_gpu_type()
 
 
+def platform_supports_tensor_descriptor() -> bool:
+    """Return whether CUDA TMA descriptors are supported on this platform."""
+    return (
+        HAS_CUDA_AND_TRITON
+        and not torch.version.hip
+        and torch.cuda.get_device_capability()[0] >= 9
+        and has_triton_stable_tma_api()
+    )
+
+
 def running_on_tdm_device() -> bool:
     """Return whether the active ROCm device and Triton support gfx1250 TDM."""
     if not torch.version.hip or not HAS_CUDA_AND_TRITON:
@@ -118,16 +135,26 @@ RUN_GPU = HAS_GPU and any(
     is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases
 )
 
+# PYTORCH_TEST_INDUCTOR_RUN_CPU=1 runs the CPU tests even when
+# PYTORCH_TESTING_DEVICE_ONLY_FOR leaves CPU out (but not when
+# PYTORCH_TESTING_DEVICE_EXCEPT_FOR excludes it). CI sets it for the
+# nogpu_NO_AVX2 job, which runs a CUDA build (so ONLY_FOR=cuda) on a machine
+# without a GPU.
+# test_cpu_cpp_wrapper keeps its own check, which ignores the flag.
 RUN_CPU = LazyVal(
     lambda: HAS_CPU
-    and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
+    and (
+        any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
+        or (TEST_INDUCTOR_RUN_CPU and not NOTEST_CPU)
+    )
 )
 
 HAS_TPU = LazyVal(has_tpu_pallas)
 # TPU is a privateuse1 backend that isn't in _desired_test_bases (it requires
 # runtime initialization before the test base is registered). Check the env var
-# directly, matching the same semantics as RUN_CPU/RUN_GPU: when the env var is
-# unset, run if the hardware is available; when set, only run if "tpu" is listed.
+# directly, matching RUN_GPU's ONLY_FOR semantics: when the env var is unset, run
+# if the hardware is available; when set, only run if "tpu" is listed. Unlike
+# RUN_GPU, it ignores PYTORCH_TESTING_DEVICE_EXCEPT_FOR.
 RUN_TPU = LazyVal(
     lambda: HAS_TPU
     and (
@@ -174,6 +201,11 @@ def skipDeviceIf(cond, msg, *, device):
                     raise unittest.SkipTest(msg)
                 return fn(self, *args, **kwargs)
 
+            add_skip_condition(
+                inner,
+                lambda cls: type(device) is str and vars(cls).get("_device_at_collection") == device,
+                msg,
+            )
             return inner
 
     else:
@@ -403,10 +435,7 @@ def _quantize_blockwise(
     scale_expanded = scale.repeat_interleave(min_outer, dim=0).repeat_interleave(
         min_inner, dim=1
     )
-    x_fp8 = _to_fp8_saturated(
-        x / scale_expanded,  # Ensures that scaling doesn't cause inf/nan values
-        float8_dtype,
-    )
+    x_fp8 = _to_fp8_saturated(x * scale_expanded, float8_dtype)
     inverse_scale = scale.reciprocal()
     return x_fp8, inverse_scale
 
@@ -434,6 +463,50 @@ class MockGraphHandler:
     def get_dtype(self, buffer_name: str) -> torch.dtype:
         """Return default dtype for any buffer (for testing)."""
         return torch.float32
+
+
+@contextlib.contextmanager
+def patch_lowering(lowering_overrides):
+    """
+    Temporarily register lowerings, given as
+    {op: (lowering_fn, broadcast, type_promotion_kind, convert_input_to_bool)}.
+    """
+    import torch._inductor.lowering as inductor_lowering
+
+    with unittest.mock.patch.dict(inductor_lowering.lowerings):
+        for op, (fn, broadcast, type_promotion_kind, convert_input_to_bool) in lowering_overrides.items():
+            inductor_lowering._register_lowering(
+                op,
+                fn,
+                broadcast=broadcast,
+                type_promotion_kind=type_promotion_kind,
+                convert_input_to_bool=convert_input_to_bool,
+                lowering_dict=inductor_lowering.lowerings,
+            )
+        yield
+
+
+class MockExternalTemplateBuffer(ir.TemplateBuffer):
+    """
+    A TemplateBuffer whose kernel is an ExternalTritonTemplateKernel that renders
+    its own Python source, as Helion does. render_fn(buf, kernel) sets
+    kernel._call_args and returns the PartialRender. Inputs are named A, B, ...
+    in order.
+    """
+
+    def __init__(self, layout, inputs, render_fn):
+        from torch._inductor.select_algorithm import ExternalTritonTemplateKernel
+
+        def make_kernel_render(out_node, hint_override=None):
+            kernel = ExternalTritonTemplateKernel(self)
+            return kernel, lambda: render_fn(self, kernel)
+
+        super().__init__(
+            layout,
+            inputs,
+            make_kernel_render,
+            named_inputs=dict(zip(string.ascii_uppercase, inputs)),
+        )
 
 
 def has_cpp_wrapper_for_device(device: str) -> bool:

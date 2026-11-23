@@ -40,7 +40,9 @@ package). When unavailable, recording silently degrades to a no-op; use
 
 from torch.cuda._graph_annotations import (
     clear_kernel_annotations,
+    dump_kernel_py_stacks,
     get_kernel_annotations,
+    get_kernel_py_stacks,
     is_available,
     mark_kernels,
 )
@@ -48,7 +50,9 @@ from torch.cuda._graph_annotations import (
 
 __all__ = [
     "clear_kernel_annotations",
+    "dump_kernel_py_stacks",
     "get_kernel_annotations",
+    "get_kernel_py_stacks",
     "is_available",
     "mark_kernels",
 ]

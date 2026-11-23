@@ -359,6 +359,15 @@ class saved_tensors_hooks:
         To avoid reference cycle, the return value of ``pack_hook`` cannot hold a
         reference to the input tensor. For example, use `lambda x: x.detach()`
         instead of `lambda x: x` as the pack hook.
+
+    .. note ::
+        The order in which ``unpack_hook`` calls are made during the backward
+        pass is not specified. It follows the autograd engine's execution
+        order, which is not, in general, the reverse of the order in which
+        ``pack_hook`` was called during the forward pass, and it can differ
+        between graphs, workloads, and releases. Hooks that reconstruct
+        tensors from shared state must therefore not rely on being invoked in
+        reverse packing order.
     """
 
     def __init__(

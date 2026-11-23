@@ -134,7 +134,7 @@ std::string show_config() {
   // Reference:
   // https://blog.kowalczyk.info/article/j/guide-to-predefined-macros-in-c-compilers-gcc-clang-msvc-etc..html
 
-#if defined(__GNUC__)
+#if defined(__GNUC__) && !defined(__clang__)
   {
     ss << "  - GCC " << __GNUC__ << '.' << __GNUC_MINOR__ << '\n';
   }
@@ -173,11 +173,6 @@ std::string show_config() {
 #if AT_BUILD_WITH_LAPACK()
   // TODO: Actually record which one we actually picked
   ss << "  - LAPACK is enabled (usually provided by MKL)\n";
-#endif
-
-#if AT_NNPACK_ENABLED()
-  // TODO: No version; c.f. https://github.com/Maratyszcza/NNPACK/issues/165
-  ss << "  - NNPACK is enabled\n";
 #endif
 
 #ifdef CROSS_COMPILING_MACOSX
@@ -223,6 +218,24 @@ std::string get_cxx_flags() {
   #else
   return caffe2::GetBuildOptions().at("CXX_FLAGS");
   #endif
+}
+
+std::pair<std::string, std::string> get_cxx_compiler() {
+  // The versions show_config() prints. clang also defines __GNUC__ (as 4.2), and
+  // clang-cl _MSC_VER, so clang comes first.
+#if defined(__clang_major__)
+  return {
+      "clang",
+      std::to_string(__clang_major__) + '.' + std::to_string(__clang_minor__) +
+          '.' + std::to_string(__clang_patchlevel__)};
+#elif defined(_MSC_VER)
+  return {"msvc", std::to_string(_MSC_FULL_VER)};
+#elif defined(__GNUC__)
+  return {
+      "gcc", std::to_string(__GNUC__) + '.' + std::to_string(__GNUC_MINOR__)};
+#else
+  return {"", ""};
+#endif
 }
 
 }

@@ -13,7 +13,7 @@ c10::intrusive_ptr<rpc::Message> CleanupAutogradContextResp::
 }
 
 std::unique_ptr<CleanupAutogradContextResp> CleanupAutogradContextResp::
-    fromMessage(const rpc::Message& message /* unused */) {
+    fromMessage(const rpc::Message& /*message*/ /* unused */) {
   return std::unique_ptr<CleanupAutogradContextResp>();
 }
 

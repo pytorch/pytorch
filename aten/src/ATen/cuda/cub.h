@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
+#include <limits>
 #include <c10/core/ScalarType.h>
+#include <c10/util/Exception.h>
 #include <ATen/cuda/CUDAConfig.h>
 
 // NOTE: These templates are intentionally not defined in this header,
@@ -38,13 +40,28 @@ void radix_sort_pairs_impl(
     const OpaqueType<value_size> *values_in, OpaqueType<value_size> *values_out,
     int64_t n, bool descending, int64_t begin_bit, int64_t end_bit);
 
+#if defined(USE_ROCM)
+template<typename key_t, int value_size>
+void radix_sort_pairs_onesweep_impl(
+    const key_t *keys_in, key_t *keys_out,
+    const OpaqueType<value_size> *values_in, OpaqueType<value_size> *values_out,
+    int64_t n, int64_t begin_bit, int64_t end_bit);
+#endif
+
 }  // namespace detail
 
+// The backends take a 64-bit item count, but most callers here (randperm,
+// embedding backward, index_put) index their own surrounding kernels in 32
+// bits and rely on this check to reject oversized inputs. Only pass
+// allow_large_n from a caller that has been audited for it.
 template<typename key_t, typename value_t>
 void radix_sort_pairs(
     const key_t *keys_in, key_t *keys_out,
     const value_t *values_in, value_t *values_out,
-    int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8) {
+    int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8,
+    bool allow_large_n=false) {
+  TORCH_CHECK(allow_large_n || n <= std::numeric_limits<int>::max(),
+              "cub sort does not support sorting more than INT_MAX elements");
   static_assert(std::is_trivially_copyable_v<value_t> ||
                 AT_ROCM_ENABLED(),  // ROCm incorrectly fails this check for vector types
                 "radix_sort_pairs value type must be trivially copyable");
@@ -60,6 +77,25 @@ void radix_sort_pairs(
       reinterpret_cast<opaque_t*>(values_out),
       n, descending, begin_bit, end_bit);
 }
+
+#if defined(USE_ROCM)
+// Ascending radix_sort_pairs that always uses rocPRIM's onesweep algorithm.
+// rocPRIM's default config switches to merge sort for n <= 1,048,576 when keys
+// are wider than 2 bytes. Only (int32_t key, 4-byte value) is instantiated.
+template<typename key_t, typename value_t>
+void radix_sort_pairs_onesweep(
+    const key_t *keys_in, key_t *keys_out,
+    const value_t *values_in, value_t *values_out,
+    int64_t n, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8) {
+  using opaque_t = detail::OpaqueType<sizeof(value_t)>;
+  static_assert(sizeof(value_t) == alignof(value_t), "Expected value_t to be size-aligned");
+  detail::radix_sort_pairs_onesweep_impl(
+      keys_in, keys_out,
+      reinterpret_cast<const opaque_t*>(values_in),
+      reinterpret_cast<opaque_t*>(values_out),
+      n, begin_bit, end_bit);
+}
+#endif
 
 template<typename key_t>
 void radix_sort_keys(

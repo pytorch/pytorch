@@ -17,6 +17,7 @@
 #include <ATen/BlasBackend.h>
 #include <ATen/Context.h>
 #include <ATen/OpMathType.h>
+#include <optional>
 
 namespace at::cuda::blas {
 
@@ -71,13 +72,13 @@ template <typename Dtype, typename C_Dtype, typename std::enable_if<CUDABLAS_GEM
 void gemm(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype));
 
 template <>
-void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double));
+TORCH_CUDA_CU_API void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double));
 template <>
-void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
+TORCH_CUDA_CU_API void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
 template <>
-void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
+TORCH_CUDA_CU_API void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
 template <>
-void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
+TORCH_CUDA_CU_API void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
 template <>
@@ -173,12 +174,14 @@ void scaled_gemm(
     ScalarType mat1_dtype,
     ScalarType mat1_scale_dtype,
     at::blas::ScalingType mat1_scaling_type,
+    at::blas::SwizzleType mat1_swizzle_type,
     const void* mat2_ptr,
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
     ScalarType mat2_scale_dtype,
     at::blas::ScalingType mat2_scaling_type,
+    at::blas::SwizzleType mat2_swizzle_type,
     const void* bias_ptr,
     ScalarType bias_dtype,
     void* result_ptr,
@@ -193,6 +196,32 @@ void scaled_gemm(
     float alpha_multiplier = 1.0f,
     const Tensor* device_beta = nullptr);
 
+enum class CublasGroupedScaleLayout : uint8_t {
+  Scalar,
+  PerBatchScalar,
+  Vec128F32,
+  Block128x128F32,
+  Vec32MnK4UE8M0,
+  Vec128MnK4UE8M0,
+};
+
+inline bool cublaslt_grouped_gemm_arch_supported() {
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
+  const auto major = at::cuda::getCurrentDeviceProperties()->major;
+  return major >= 9 && major <= 11;
+#else
+  return false;
+#endif
+}
+
+struct GroupedGemmScaleOptions {
+  const void* A_scale_ptr = nullptr;
+  const void* B_scale_ptr = nullptr;
+  bool use_fast_accum = false;
+  CublasGroupedScaleLayout A_layout = CublasGroupedScaleLayout::Scalar;
+  CublasGroupedScaleLayout B_layout = CublasGroupedScaleLayout::Scalar;
+};
+
 void grouped_gemm(
       char transa,
       char transb,
@@ -204,9 +233,10 @@ void grouped_gemm(
       int64_t avgK,
       const int64_t* alphaArrayDev,
       const float* alphaScalar,
-      ScalarType input_dtype,
+      ScalarType A_dtype,
       const int64_t* APtrArrayDev,
       const void* ldaArrayDev,
+      ScalarType B_dtype,
       const int64_t* BPtrArrayDev,
       const void* ldbArrayDev,
       const int64_t* betaArrayDev,
@@ -217,7 +247,8 @@ void grouped_gemm(
       int64_t* DPtrArrayDev,
       const void* lddArrayDev,
       int batchCount,
-      bool use_int64_dims);
+      bool use_int64_dims,
+      const std::optional<GroupedGemmScaleOptions>& scales = std::nullopt);
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)  CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, Dtype)
 

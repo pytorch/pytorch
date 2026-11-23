@@ -54,7 +54,7 @@ class PointwiseHeuristic(CodegenConfigHeuristics):
                 tile_hint,
                 inductor_meta,
             )
-        if n == 3:
+        if n >= 3:
             return self._configs_3d(
                 size_hints, bs, hinted_configs, triton_config_fn, inductor_meta
             )
@@ -202,7 +202,7 @@ class XPUPointwiseHeuristic(PointwiseHeuristic):
         )
         if len(configs) > 1:
             configs.append(
-                # intel-xpu-backend-for-triton #5133
+                # intel-xpu-backend-for-triton #5124
                 triton_config_fn(size_hints, 32)
             )
         return configs

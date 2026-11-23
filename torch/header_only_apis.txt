@@ -36,6 +36,9 @@ Float8_e5m2
 # torch/headeronly/util/Float8_e5m2fnuz.h
 Float8_e5m2fnuz
 
+# torch/headeronly/util/Float8_e5m3fnu.h
+Float8_e5m3fnu
+
 # torch/headeronly/util/Float8_e8m0fnu.h
 Float8_e8m0fnu
 
@@ -47,6 +50,7 @@ fp16_ieee_to_fp32_value
 # torch/headeronly/util/floating_point_utils.h
 # fp32_from_bits called from fp16_ieee_to_fp32_value
 # fp32_to_bits called from fp16_ieee_from_fp32_value
+# round_to_odd_float called from convert
 
 # torch/headeronly/util/HeaderOnlyArrayRef.h
 HeaderOnlyArrayRef
@@ -57,6 +61,28 @@ complex
 # torch/headeronly/util/complex_utils.h
 is_complex
 scalar_value_type
+
+# torch/headeronly/util/complex_math.h
+acos
+acosh
+asin
+asinh
+atan
+atanh
+cos
+cosh
+exp
+expm1
+log
+log10
+log1p
+log2
+pow
+sin
+sinh
+sqrt
+tan
+tanh
 
 # c10/util/generic_math.h
 div_floor_floating
@@ -118,6 +144,39 @@ size
 # torch/headeronly/cpu/vec/vec_half.h
 float2half_scalar
 half2float_scalar
+
+# torch/headeronly/native/cpu/zmath.h
+zabs
+angle_impl
+real_impl
+imag_impl
+conj_impl
+ceil_impl
+sgn_impl
+floor_impl
+round_impl
+trunc_impl
+max_impl
+min_impl
+
+# torch/headeronly/native/Math.h
+zeta
+trigamma
+calc_polygamma
+calc_erfinv
+calc_digamma
+calc_i0
+calc_i0e
+calc_igamma
+calc_igammac
+chbevl
+polevl
+exp2_impl
+
+# torch/headeronly/util/jiterator_macros.h
+JITERATOR_HOST_DEVICE
+jiterator_code
+jiterator_also_stringify_as
 
 # torch/headeronly/macros/Export.h
 C10_API
@@ -205,6 +264,9 @@ kJagged
 MemoryFormat
 get_contiguous_memory_format
 
+# torch/headeronly/core/TransposeType.h
+TransposeType
+
 # torch/headeronly/core/Dispatch_v2.h
 THO_DISPATCH_V2_TMPL
 THO_PRIVATE_CASE_TYPE_USING_HINT_TMPL
@@ -230,6 +292,12 @@ HeaderOnlyGenericPackedTensorAccessor
 # HeaderOnlyTensorAccessorBase and
 # HeaderOnlyGenericPackedTensorAccessorBase are tested through
 # HeaderOnlyTensorAccessor and HeaderOnlyGenericPackedTensorAccessor
+
+# torch/headeronly/core/AccumulateType.h
+AccumulateTypeDevice
+AccumulateType
+acc_type_device
+acc_type
 
 # torch/headeronly/util/Deprecated.h
 # C10_DEPRECATED, C10_DEPRECATED_MESSAGE, and

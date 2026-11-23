@@ -137,7 +137,7 @@ static void visit_binary_op(
       visit_min<T>(os, lhs, rhs);
       break;
     default:
-      throw std::runtime_error("invalid op type");
+      TORCH_CHECK(false, "invalid op type");
   }
 }
 
@@ -151,7 +151,7 @@ static void dispatch_binary_op(std::ostream& os, const BinaryOpNode<Op>* v) {
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
     default:
-      throw unsupported_dtype();
+      TORCH_CHECK(false, "UNSUPPORTED DTYPE");
   }
 }
 
@@ -193,7 +193,7 @@ void CppPrinter::visit(const AllocatePtr& v) {
     if (d) {
       size *= d->value();
     } else {
-      throw std::runtime_error("Only IntImm dimensions are supported for now");
+      TORCH_CHECK(false, "Only IntImm dimensions are supported for now");
     }
   }
 
@@ -237,9 +237,9 @@ void CppPrinter::visit(const BitCastPtr& v) {
 }
 
 void CppPrinter::visit(const IntrinsicsPtr& v) {
-  if (v->op_type() == kRand || v->op_type() == kSigmoid) {
-    throw std::runtime_error("kRand and kSigmoid are not supported");
-  }
+  TORCH_CHECK(
+      v->op_type() != kRand && v->op_type() != kSigmoid,
+      "kRand and kSigmoid are not supported");
 
   os() << "std::" << v->func_name() << '(';
   for (size_t i = 0; i < v->nparams(); i++) {
@@ -256,9 +256,10 @@ void CppPrinter::visit(const ExternalCallPtr& v) {
   // in external_functions.cpp.
 
   auto& func_registry = getNNCFunctionRegistry();
-  if (!func_registry.contains(v->func_name())) {
-    throw unimplemented_lowering(v);
-  }
+  TORCH_CHECK(
+      func_registry.contains(v->func_name()),
+      "UNIMPLEMENTED LOWERING: ",
+      std::to_string(v));
 
   std::vector<BufPtr> bufs(v->buf_args());
   bufs.insert(bufs.begin(), v->buf());

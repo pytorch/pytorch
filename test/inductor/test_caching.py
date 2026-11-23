@@ -31,6 +31,7 @@ from torch._inductor.runtime.caching import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     recover_orig_fp32_precision,
@@ -102,6 +103,8 @@ class TestMixin:
 
 @instantiate_parametrized_tests
 class ConfigTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     FOO_THIS_VERSION: int = 0
     FOO_JK_NAME: str = "foo_jk_name"
     FOO_OSS_DEFAULT: bool = False
@@ -225,6 +228,8 @@ class ConfigTest(TestCase):
 
 @instantiate_parametrized_tests
 class ContextTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def isolation_schema_from_forms_of_context_selected(
         self,
         runtime_forms_of_context_selected: Sequence[str],
@@ -391,6 +396,8 @@ class ContextTest(TestCase):
 
 @instantiate_parametrized_tests
 class ExceptionsTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     exception_typenames: list[str] = [
         "CacheError",
         "SystemError",
@@ -435,6 +442,8 @@ class ExceptionsTest(TestCase):
 
 @instantiate_parametrized_tests
 class ImplementationsTest(TestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def sub_dir(cls) -> str:
         return f"testing-impls-instance-{cls.cls_id}"
@@ -627,6 +636,8 @@ class ImplementationsTest(TestMixin, TestCase):
 
 @instantiate_parametrized_tests
 class LocksTest(TestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     T = TypeVar("T")
 
     @contextmanager
@@ -830,6 +841,8 @@ class LocksTest(TestMixin, TestCase):
 
 @instantiate_parametrized_tests
 class UtilsTest(TestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_lru_cache(self) -> None:
         """Test that the LRU cache decorator works correctly with various argument types.
 
@@ -876,6 +889,8 @@ class UtilsTest(TestMixin, TestCase):
 @instantiate_parametrized_tests
 class InterfacesTest(TestMixin, TestCase):
     """Test class for Memoizer and PersistentMemoizer interfaces."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @classmethod
     def sub_dir(cls) -> str:
@@ -1831,6 +1846,8 @@ class InterfacesTest(TestMixin, TestCase):
 class ForceDisableCachesTest(TestMixin, TestCase):
     """Test class for force_disable_caches integration with the caching module."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def sub_dir(cls) -> str:
         return f"testing-force-disable-caches-{cls.cls_id}"
@@ -1913,6 +1930,8 @@ class ForceDisableCachesTest(TestMixin, TestCase):
 @instantiate_parametrized_tests
 class FreshCacheIntegrationTest(TestMixin, TestCase):
     """Test class for fresh_cache integration with the caching module."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @classmethod
     def sub_dir(cls) -> str:
@@ -2136,6 +2155,8 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
     correctly memoizes and replays results based on tensor metadata and
     operation parameters.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     @classmethod
     def sub_dir(cls) -> str:
@@ -2553,6 +2574,54 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
 
         self.assertEqual(len(benchmark_keys), len(precisions))
 
+    def test_should_pad_encoder_is_device_scoped(self) -> None:
+        # The persistent memoizer keys on this dict's pickle. The device
+        # element is hardware identity, not the rank-local ordinal: cuda:0 and
+        # cuda:1 on the same GPU model share one warm entry (DDP/FSDP ranks
+        # compile the same shape on cuda:0..N-1 and share cache_dir()), a
+        # different hardware name or device type does not, and a device with no
+        # resolvable name falls back to its type alone.
+        import torch
+        from torch._inductor.runtime.caching import encoders
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        op = torch.ops.aten.mm
+        with FakeTensorMode():
+            a_cuda0 = torch.empty(4, 13, device="cuda:0")
+            b_cuda0 = torch.empty(13, 8, device="cuda:0")
+            a_cuda1 = torch.empty(4, 13, device="cuda:1")
+            b_cuda1 = torch.empty(13, 8, device="cuda:1")
+            a_other = torch.empty(4, 13, device="privateuseone:0")
+            b_other = torch.empty(13, 8, device="privateuseone:0")
+
+        def same_model(device):
+            return "A100" if device.type == "cuda" else None
+
+        def by_index(device):
+            return {0: "A100", 1: "H100"}.get(device.index)
+
+        pad_mm_import = "torch._inductor.fx_passes.pad_mm.should_exclude_padding_time"
+        info_import = "torch._inductor.utils._get_device_info_key"
+        enc = encoders.should_pad_params_encoder
+        with (
+            patch(pad_mm_import, return_value=False),
+            patch(info_import, side_effect=same_model),
+        ):
+            enc_cuda0 = enc(None, a_cuda0, b_cuda0, op)
+            enc_cuda1 = enc(None, a_cuda1, b_cuda1, op)
+            enc_other = enc(None, a_other, b_other, op)
+        self.assertEqual(enc_cuda0["device"], "cuda:A100")
+        self.assertEqual(str(enc_cuda0), str(enc_cuda1))
+        self.assertNotEqual(str(enc_cuda0), str(enc_other))
+
+        with (
+            patch(pad_mm_import, return_value=False),
+            patch(info_import, side_effect=by_index),
+        ):
+            enc_h0 = enc(None, a_cuda0, b_cuda0, op)
+            enc_h1 = enc(None, a_cuda1, b_cuda1, op)
+        self.assertNotEqual(str(enc_h0), str(enc_h1))
+
     @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
     @patch_on_disk_cache_base_dir
     @set_caching_module_enabled(True)
@@ -2607,6 +2676,8 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
 @instantiate_parametrized_tests
 class DeferredRecordingTest(TestMixin, TestCase):
     """Test class for DeferredRecording functionality."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @classmethod
     def sub_dir(cls) -> str:

@@ -73,19 +73,13 @@ inline void check_grid_sampler_2d(
 // See NOTE [ grid_sampler Native Functions ].
 inline void check_grid_sampler_3d(
   const TensorBase& input,
-  const TensorBase& grid,
-  int64_t interpolation_mode
+  const TensorBase& grid
 ) {
   TORCH_CHECK(
     input.dim() == 5 && input.dim() == grid.dim(),
     "grid_sampler(): expected 5D input and grid with same number of "
     "dimensions, but got input with sizes ", input.sizes(),
     " and grid with sizes ", grid.sizes());
-  TORCH_CHECK(
-    !(input.dim() == 5 &&
-      static_cast<GridSamplerInterpolation>(interpolation_mode) ==
-        GridSamplerInterpolation::Bicubic),
-    "grid_sampler(): bicubic interpolation only supports 4D input");
 }
 
 // See NOTE [ grid_sampler Native Functions ].
@@ -122,11 +116,10 @@ inline void check_grid_sampler_2d_backward(
 inline void check_grid_sampler_3d_backward(
   const TensorBase& input,
   const TensorBase& grid,
-  const TensorBase& grad_output,
-  int64_t interpolation_mode
+  const TensorBase& grad_output
 ) {
   check_grid_sampler_common(input, grid);
-  check_grid_sampler_3d(input, grid, interpolation_mode);
+  check_grid_sampler_3d(input, grid);
   check_grid_sampler_backward(input, grid, grad_output);
 }
 

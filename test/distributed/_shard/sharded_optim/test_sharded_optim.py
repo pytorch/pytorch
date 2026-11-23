@@ -12,8 +12,8 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.distributed._shard.sharded_tensor import (
-    ShardedTensorTestBase,
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorContinuousTestBase,
     with_comms,
 )
 
@@ -21,7 +21,6 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
-backend = torch.distributed.get_default_backend_for_device(device_type)
 
 
 class MyShardedModel(torch.nn.Module):
@@ -87,8 +86,10 @@ class MyShardedLinear(torch.nn.Module):
         return self.linear2(self.gelu(self.linear1(inp)))
 
 
-class TestShardedOptimizer(ShardedTensorTestBase):
-    @with_comms(init_rpc=False, backend=backend)
+class TestShardedOptimizer(DTensorContinuousTestBase):
+    world_size = 4
+
+    @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_sharded_optim(self):
@@ -149,7 +150,7 @@ class TestShardedOptimizer(ShardedTensorTestBase):
                 self.assertNotEqual(val, new_val)
                 self.assertEqual(new_val, local_model.param)
 
-    @with_comms(init_rpc=False, backend=backend)
+    @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend(["nccl", "xccl", "privateuse1"])
     def test_named_params_with_sharded_tensor(self):

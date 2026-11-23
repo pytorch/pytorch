@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
-import itertools
 import unittest
 
 import torch
@@ -24,15 +23,14 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
     DTensorConverter,
-    DTensorTestBase,
     LocalDTensorContinuousTestBase,
     LocalDTensorTestBase,
+    NUM_DEVICES,
     op_strategy_context,
     with_comms,
 )
@@ -798,7 +796,6 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
             self.assertEqual(output_dt.placements, [Shard(gather_dim)])
             self.assertEqual(output_dt.full_tensor(), global_output)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/175064")
     @serialTest()  # heavy combinatorial _test_op calls, serialize to avoid OOM
     def test_index(self):
         meshes = [
@@ -1484,32 +1481,84 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
 
     def test_unbind(self):
         device_mesh = self.build_device_mesh()
-        shard_dims = [0, 1]
-        unbind_dims = [0, 1]
-        local_tensor = torch.randn(4, 8, requires_grad=True)
-        for shard_dim, unbind_dim in itertools.product(shard_dims, unbind_dims):
+        cases = [
+            # (shape, shard_dim, unbind_dim)
+            ((4, 8), 0, 1),
+            ((4, 8), 1, 0),
+            ((4, 3), 1, 0),
+            ((4, 8), 0, 0),
+            ((4, 8), 1, 1),
+            ((4, 8), 0, -1),
+            ((4, 4, 8), 0, 1),
+            ((4, 4, 8), 2, 1),
+            ((4, 4, 8), 1, 1),
+            ((4, 4, 8), 0, -1),
+        ]
+        for shape, shard_dim, unbind_dim in cases:
+            local_tensor = torch.randn(*shape, requires_grad=True)
             dist_tensor = distribute_tensor(
                 local_tensor, device_mesh, (Shard(shard_dim),)
             )
+            norm_dim = unbind_dim if unbind_dim >= 0 else unbind_dim + len(shape)
+            if shard_dim == norm_dim:
+                with CommDebugMode() as comm_mode:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        f"Attempted to unbind along the sharded dimension {norm_dim}. "
+                        "Please redistribute the input explicitly before unbinding.",
+                    ):
+                        dist_tensor.unbind(dim=unbind_dim)
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+                continue
 
-            if shard_dim == unbind_dim:
-                with self.assertRaisesRegex(
-                    RuntimeError, "Sharding propagation failed"
-                ):
-                    dist_tensor.unbind(dim=unbind_dim)
-            else:
+            with CommDebugMode() as comm_mode:
                 unbinded_dist_tensors = dist_tensor.unbind(dim=unbind_dim)
-                new_shard_dim = shard_dim if shard_dim < unbind_dim else shard_dim - 1
-                self.assertTrue(
-                    all(
-                        elem.placements[0].is_shard(dim=new_shard_dim)
-                        for elem in unbinded_dist_tensors
-                    )
+            self.assertEqual(len(unbinded_dist_tensors), shape[norm_dim])
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            new_shard_dim = shard_dim if shard_dim < norm_dim else shard_dim - 1
+            self.assertTrue(
+                all(
+                    elem.placements[0].is_shard(dim=new_shard_dim)
+                    for elem in unbinded_dist_tensors
                 )
-                for x, y in zip(
-                    unbinded_dist_tensors, local_tensor.unbind(dim=unbind_dim)
-                ):
-                    self.assertEqual(x.full_tensor(), y)
+            )
+            for x, y in zip(unbinded_dist_tensors, local_tensor.unbind(dim=unbind_dim)):
+                self.assertEqual(x.full_tensor(), y)
+
+        # replicated input stays replicated without communication
+        local_tensor = torch.randn(4, 8)
+        dist_tensor = distribute_tensor(local_tensor, device_mesh, (Replicate(),))
+        with CommDebugMode() as comm_mode:
+            unbinded_dist_tensors = dist_tensor.unbind(dim=0)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        for elem in unbinded_dist_tensors:
+            self.assertEqual(elem.placements, (Replicate(),))
+
+    def test_unbind_on_partial(self):
+        self.run_subtests(
+            {
+                "reduce_op": ["sum", "avg", "min", "max"],
+                "unbind_dim": [0, -1],
+            },
+            self._test_unbind_on_partial,
+        )
+
+    def _test_unbind_on_partial(self, reduce_op: str, unbind_dim: int):
+        self.init_manual_seed_for_rank()
+        mesh = self.build_device_mesh()
+
+        partial_tensor = torch.randn(8, 8, device=self.device_type)
+        partial_dt = DTensor.from_local(
+            local_tensor=partial_tensor,
+            device_mesh=mesh,
+            placements=[Partial(reduce_op=reduce_op)],
+        )
+        with CommDebugMode() as comm_mode:
+            unbinded = torch.unbind(partial_dt, dim=unbind_dim)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        for elem in unbinded:
+            self.assertEqual(elem.placements, (Partial(reduce_op),))
+        self._test_op_on_dtensor(torch.unbind, partial_dt, dim=unbind_dim)
 
     @with_comms
     def test_select_scatter(self):
@@ -1552,23 +1601,24 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
 class DistBucketizeTest(LocalDTensorTestBase):
     @with_comms
     def test_bucketize_partial_input(self):
-        # Bucketize is non-linear, so Partial("sum")/Partial("avg") inputs
-        # must be converted to Replicate. But bucketize is monotone, so
-        # Partial("max") and Partial("min") can propagate directly.
+        # Partial inputs are reduced before bucketize. Partial("sum")/("avg")
+        # because bucketize is non-linear, Partial("max")/("min") because it maps
+        # NaN to the last bucket, so applying it first turns a NaN held by one
+        # rank into a number that can lose the reduction (or win it on NCCL,
+        # whose all_reduce MAX/MIN ignores NaN).
         with LocalTensorMode(ranks=self.world_size):
             mesh = self.build_device_mesh()
             boundaries = torch.tensor([1.0, 3.0, 5.0, 7.0], device=self.device_type)
+            dist_boundaries = distribute_tensor(boundaries, mesh, [Replicate()])
             input_tensor = torch.tensor(
                 [[2.0, 4.0, 6.0, 8.0], [0.0, 1.0, 5.0, 9.0]],
                 device=self.device_type,
             )
 
-            # Non-linear reductions: must redistribute to Replicate
-            for reduce_op in ("sum", "avg"):
+            for reduce_op in ("sum", "avg", "max", "min"):
                 partial_input = DTensor.from_local(
                     input_tensor, mesh, [Partial(reduce_op)]
                 )
-                dist_boundaries = distribute_tensor(boundaries, mesh, [Replicate()])
                 result = torch.bucketize(partial_input, dist_boundaries)
 
                 self.assertTrue(
@@ -1580,25 +1630,15 @@ class DistBucketizeTest(LocalDTensorTestBase):
                 expected = torch.bucketize(global_input, boundaries)
                 self.assertEqual(result.to_local(), expected)
 
-            # Monotone reductions: output inherits the same partial type
-            for reduce_op in ("max", "min"):
-                partial_input = DTensor.from_local(
-                    input_tensor, mesh, [Partial(reduce_op)]
-                )
-                dist_boundaries = distribute_tensor(boundaries, mesh, [Replicate()])
+            rows = torch.tensor([[2.0, 4.0]], device=self.device_type).repeat(
+                self.world_size, 1
+            )
+            rows[0] = float("nan")
+            sharded = distribute_tensor(rows, mesh, [Shard(0)])
+            # Pending Partial("max"/"min") whose local value on rank r is rows[r]
+            for partial_input in (sharded.amax(0), sharded.amin(0)):
                 result = torch.bucketize(partial_input, dist_boundaries)
-
-                self.assertTrue(
-                    result.placements[0].is_partial(),
-                    lambda msg: f"{msg}\nExpected Partial output but got {result.placements[0]} "
-                    f"for Partial({reduce_op}) input",
-                )
-                self.assertEqual(
-                    result.placements[0].reduce_op,
-                    reduce_op,
-                    lambda msg: f"{msg}\nExpected Partial({reduce_op}) output but got {result.placements[0]}",
-                )
-                expected = torch.bucketize(input_tensor, boundaries)
+                expected = torch.bucketize(partial_input.full_tensor(), boundaries)
                 self.assertEqual(result.full_tensor(), expected)
 
     @with_comms
@@ -1904,7 +1944,9 @@ class DistTensorCppPyTree(DTensorContinuousTestBase):
         self.assertNotEqual(schema1, schema2)
 
 
-class TestNewEmptyStridedUneven(DTensorTestBase):
+class TestNewEmptyStridedUneven(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     @with_comms
     def test_backward_no_allgather(self):
         """Backward on unevenly-sharded DTensor should not allgather (issue #107661)."""

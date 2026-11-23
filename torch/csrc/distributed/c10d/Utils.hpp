@@ -27,6 +27,7 @@ typedef SSIZE_T ssize_t;
 #include <cstdlib>
 #include <functional>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace c10d {
@@ -69,13 +70,13 @@ inline void assertSameType(
     const at::DeprecatedTypeProperties& type,
     const std::vector<at::Tensor>& tensors) {
   for (const auto& tensor : tensors) {
-    if (!tensor.options().type_equal(type.options())) {
-      const std::string expected = type.toString();
-      const std::string actual = tensor.toString();
-      throw std::invalid_argument(
-          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-          "mixed types (" + expected + " and " + actual + ")");
-    }
+    TORCH_CHECK_VALUE(
+        tensor.options().type_equal(type.options()),
+        "mixed types (",
+        type.toString(),
+        " and ",
+        tensor.toString(),
+        ")");
   }
 }
 
@@ -191,42 +192,38 @@ inline void assertSameSizes(
     const at::IntArrayRef& sizes,
     const std::vector<at::Tensor>& tensors) {
   for (const auto& tensor : tensors) {
-    if (!tensor.sizes().equals(sizes)) {
-      const auto expected = toString(sizes);
-      const auto actual = toString(tensor.sizes());
-      throw std::invalid_argument(
-          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-          "mixed sizes (" + expected + " and " + actual + ")");
-    }
+    TORCH_CHECK_VALUE(
+        tensor.sizes().equals(sizes),
+        "mixed sizes (",
+        toString(sizes),
+        " and ",
+        toString(tensor.sizes()),
+        ")");
   }
 }
 
 inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   // Ensure we have at least one tensor
-  if (tensors.empty()) {
-    throw std::invalid_argument("argument is empty");
-  }
+  TORCH_CHECK_VALUE(!tensors.empty(), "argument is empty");
 
   // Ensure all tensors have identical type and shape
   auto options = tensors[0].options();
   auto sizes = tensors[0].sizes();
   for (const auto i : c10::irange(1, tensors.size())) {
-    if (!tensors[i].options().type_equal(options)) {
-      const auto expected = toString(options);
-      const auto actual = toString(tensors[i].options());
-      throw std::invalid_argument(
-          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-          "argument contains mixed types (" + expected + " and " + actual +
-          ")");
-    }
-    if (!tensors[i].sizes().equals(sizes)) {
-      const auto expected = toString(sizes);
-      const auto actual = toString(tensors[i].sizes());
-      throw std::invalid_argument(
-          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-          "argument contains mixed types (" + expected + " and " + actual +
-          ")");
-    }
+    TORCH_CHECK_VALUE(
+        tensors[i].options().type_equal(options),
+        "argument contains mixed types (",
+        toString(options),
+        " and ",
+        toString(tensors[i].options()),
+        ")");
+    TORCH_CHECK_VALUE(
+        tensors[i].sizes().equals(sizes),
+        "argument contains mixed types (",
+        toString(sizes),
+        " and ",
+        toString(tensors[i].sizes()),
+        ")");
   }
 }
 
@@ -799,17 +796,38 @@ void recvBytes(int socket, T* buffer, size_t length) {
   }
 }
 
+// Overloads for stream types (e.g. a socket with TLS) that provide
+// sendBytes(data, length, moreData) and recvBytes(data, length).
+template <typename T, typename Stream>
+  requires std::is_class_v<Stream>
+void sendBytes(
+    const Stream& stream,
+    const T* buffer,
+    size_t length,
+    bool moreData = false) {
+  stream.sendBytes(buffer, sizeof(T) * length, moreData);
+}
+
+template <typename T, typename Stream>
+  requires std::is_class_v<Stream>
+void recvBytes(const Stream& stream, T* buffer, size_t length) {
+  stream.recvBytes(buffer, sizeof(T) * length);
+}
+
 // send a vector's length and data
-template <typename T>
-void sendVector(int socket, const std::vector<T>& vec, bool moreData = false) {
+template <typename T, typename Socket>
+void sendVector(
+    const Socket& socket,
+    const std::vector<T>& vec,
+    bool moreData = false) {
   SizeType size = vec.size();
   sendBytes<SizeType>(socket, &size, 1, true);
   sendBytes<T>(socket, vec.data(), size, moreData);
 }
 
 // receive a vector as sent in sendVector
-template <typename T>
-std::vector<T> recvVector(int socket) {
+template <typename T, typename Socket>
+std::vector<T> recvVector(const Socket& socket) {
   SizeType valueSize = 0;
   recvBytes<SizeType>(socket, &valueSize, 1);
   std::vector<T> value(valueSize);
@@ -818,21 +836,22 @@ std::vector<T> recvVector(int socket) {
 }
 
 // this is only for convenience when sending rvalues
-template <typename T>
-void sendValue(int socket, const T& value, bool moreData = false) {
+template <typename T, typename Socket>
+void sendValue(const Socket& socket, const T& value, bool moreData = false) {
   sendBytes<T>(socket, &value, 1, moreData);
 }
 
-template <typename T>
-T recvValue(int socket) {
+template <typename T, typename Socket>
+T recvValue(const Socket& socket) {
   T value;
   recvBytes<T>(socket, &value, 1);
   return value;
 }
 
 // send a string's length and data
-inline void sendString(
-    int socket,
+template <typename Socket>
+void sendString(
+    const Socket& socket,
     const std::string& str,
     bool moreData = false) {
   SizeType size = str.size();
@@ -841,7 +860,8 @@ inline void sendString(
 }
 
 // receive a string as sent in sendString
-inline std::string recvString(int socket) {
+template <typename Socket>
+std::string recvString(const Socket& socket) {
   SizeType valueSize = 0;
   recvBytes<SizeType>(socket, &valueSize, 1);
   std::vector<char> value(valueSize);

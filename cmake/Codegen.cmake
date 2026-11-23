@@ -71,7 +71,7 @@ if(INTERN_BUILD_ATEN_OPS)
   endif(MSVC)
 
   if(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
-    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/MapAllocator.cpp PROPERTIES COMPILE_FLAGS "-fno-openmp")
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/MapAllocator.cpp PROPERTIES COMPILE_OPTIONS "-fno-openmp")
   endif()
 
   file(GLOB_RECURSE all_python "${CMAKE_CURRENT_LIST_DIR}/../torchgen/*.py")
@@ -174,20 +174,9 @@ if(INTERN_BUILD_ATEN_OPS)
   endif()
 
   set(CUSTOM_BUILD_FLAGS)
-  if(INTERN_BUILD_MOBILE)
-    if(USE_VULKAN)
-      list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU Vulkan)
-    else()
-      list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU)
-    endif()
-  endif()
 
   if(SELECTED_OP_LIST)
-    if(TRACING_BASED)
-      message(STATUS "Running tracing-based selective build given operator list: ${SELECTED_OP_LIST}")
-      list(APPEND CUSTOM_BUILD_FLAGS
-        --op_selection_yaml_path ${SELECTED_OP_LIST})
-    elseif(NOT STATIC_DISPATCH_BACKEND)
+    if(NOT STATIC_DISPATCH_BACKEND)
       message(WARNING
         "You have to run tracing-based selective build with dynamic dispatch.\n"
         "Switching to STATIC_DISPATCH_BACKEND=CPU."
@@ -440,13 +429,13 @@ if(INTERN_BUILD_ATEN_OPS)
     add_compile_definitions("HAVE_VSX_CPU_DEFINITION")
     LIST(APPEND CPU_CAPABILITY_NAMES "VSX")
     LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_VSX_FLAGS}")
-  endif(CXX_VSX_FOUND)
+  endif()
 
   if(CXX_ZVECTOR_FOUND AND NOT "$ENV{USE_CPU_VECTORIZATION}" STREQUAL "0")
     add_compile_definitions("HAVE_ZVECTOR_CPU_DEFINITION")
     LIST(APPEND CPU_CAPABILITY_NAMES "ZVECTOR")
     LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}  ${CXX_ZVECTOR_FLAGS}")
-  endif(CXX_ZVECTOR_FOUND)
+  endif()
 
   if(CXX_SVE256_FOUND AND NOT "$ENV{USE_CPU_VECTORIZATION}" STREQUAL "0")
     add_compile_definitions("HAVE_SVE_CPU_DEFINITION")

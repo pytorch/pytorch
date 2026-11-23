@@ -1,13 +1,16 @@
 # Owner(s): ["module: cpp"]
 
 import gc
+import importlib
 import math
 import sysconfig
 import unittest
+import warnings
 from pathlib import Path
 
 import torch
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal import common_device_type
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
@@ -18,13 +21,18 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     install_cpp_extension,
     parametrize,
     run_tests,
+    set_warn_always_context,
     skipIfTorchDynamo,
     skipIfWindows,
+    subtest,
+    TemporaryFileName,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xfailIfTorchDynamo,
+    xfailIf,
 )
 
 
@@ -63,12 +71,15 @@ class TestLibtorchAgnostic(TestCase):
     - libtorch_agn_2_12: Extension built with TORCH_TARGET_VERSION=2.12.0
     - libtorch_agn_2_13: Extension built with TORCH_TARGET_VERSION=2.13.0
     - libtorch_agn_2_14: Extension built with TORCH_TARGET_VERSION=2.14.0
+    - libtorch_agn_2_15: Extension built with TORCH_TARGET_VERSION=2.15.0
+    - libtorch_agn_2_16: Extension built with TORCH_TARGET_VERSION=2.16.0
 
     Tests should be decorated with @skipIfTorchVersionLessThan to indicate the
     version that they target.
     """
 
     @classmethod
+    @getattr(common_device_type, "preserves_device_selection", lambda fn: fn)
     def setUpClass(cls):
         # Build versioned extensions
         base_dir = Path(__file__).parent
@@ -137,6 +148,26 @@ class TestLibtorchAgnostic(TestCase):
                 )
         else:
             print(f"Skipping 2.14 extension (running on PyTorch {torch.__version__})")
+
+        if (current_major > 2) or (current_major == 2 and current_minor >= 15):
+            try:
+                import libtorch_agn_2_15  # noqa: F401
+            except Exception:
+                install_cpp_extension(
+                    extension_root=base_dir / "libtorch_agn_2_15_extension"
+                )
+        else:
+            print(f"Skipping 2.15 extension (running on PyTorch {torch.__version__})")
+
+        if (current_major > 2) or (current_major == 2 and current_minor >= 16):
+            try:
+                import libtorch_agn_2_16  # noqa: F401
+            except Exception:
+                install_cpp_extension(
+                    extension_root=base_dir / "libtorch_agn_2_16_extension"
+                )
+        else:
+            print(f"Skipping 2.16 extension (running on PyTorch {torch.__version__})")
 
     @onlyCPU
     def test_slow_sgd(self, device):
@@ -384,6 +415,127 @@ class TestLibtorchAgnostic(TestCase):
         pinned = torch.randn(2, 3, device="cpu", pin_memory=True)
         self.assertTrue(libtorch_agnostic.ops.my_is_pinned(pinned))
 
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize("descending", [False, True])
+    @parametrize("dim", [0, 1, -1, -3])
+    def test_my_sort(self, device, dim, descending):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        my_sort = libtorch_agnostic.ops.my_sort
+
+        t = torch.randint(-2, 2, (3, 8, 5), device=device)
+        values, _ = my_sort(t, dim=dim, descending=descending)
+        self.assertEqual(values, torch.sort(t, dim=dim, descending=descending).values)
+
+        values, _ = my_sort(t)
+        self.assertEqual(values, torch.sort(t).values)
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize("descending", [False, True])
+    @parametrize("dim", [0, 1, -1, -3])
+    def test_my_sort_stable(self, device, dim, descending):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        my_sort_stable = libtorch_agnostic.ops.my_sort_stable
+
+        t = torch.randint(-2, 2, (3, 8, 5), device=device)
+        values, indices = my_sort_stable(t, stable=True, dim=dim, descending=descending)
+        expected = torch.sort(t, stable=True, dim=dim, descending=descending)
+        self.assertEqual(values, expected.values)
+        self.assertEqual(indices, expected.indices)
+
+        t_view = t.transpose(0, 2)[:, ::2, :]
+        values, indices = my_sort_stable(
+            t_view, stable=True, dim=dim, descending=descending
+        )
+        expected = torch.sort(t_view, stable=True, dim=dim, descending=descending)
+        self.assertEqual(values, expected.values)
+        self.assertEqual(indices, expected.indices)
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @skipIfTorchDynamo("Dynamo failed to run FX node with fake tensors")
+    def test_my_masked_select(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        t = torch.randn(3, 8, 5, device=device)
+        mask = t > 0
+        result = libtorch_agnostic.ops.my_masked_select(t, mask)
+        self.assertEqual(result, torch.masked_select(t, mask))
+
+        t_view = t.transpose(0, 2)[:, ::2, :]
+        mask_view = mask.transpose(0, 2)[:, ::2, :]
+        result = libtorch_agnostic.ops.my_masked_select(t_view, mask_view)
+        self.assertEqual(result, torch.masked_select(t_view, mask_view))
+
+        broadcast_mask = torch.tensor([True, False, True], device=device).view(3, 1, 1)
+        result = libtorch_agnostic.ops.my_masked_select(t, broadcast_mask)
+        self.assertEqual(result, torch.masked_select(t, broadcast_mask))
+
+        with self.assertRaisesRegex(RuntimeError, "expected BoolTensor for mask"):
+            libtorch_agnostic.ops.my_masked_select(t, mask.to(torch.int64))
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @dtypes(torch.float32, torch.float64)
+    @parametrize(
+        "torch_op,batch_shape",
+        [(torch.mm, ()), (torch.bmm, (4,))],
+        name_fn=lambda op, _: op.__name__,
+    )
+    def test_my_mm_out_ops(self, device, dtype, torch_op, batch_shape):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        stable_op = getattr(libtorch_agnostic.ops, f"my_{torch_op.__name__}_out")
+
+        a = torch.randn(*batch_shape, 3, 5, device=device, dtype=dtype)
+        b = torch.randn(*batch_shape, 5, 2, device=device, dtype=dtype)
+        out = torch.empty(*batch_shape, 3, 2, device=device, dtype=dtype)
+        result = stable_op(out, a, b)
+        self.assertEqual(out, torch_op(a, b))
+        self.assertEqual(id(result), id(out))
+
+    @onlyCUDA
+    @skipIfTorchVersionLessThan(2, 10)
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize(
+        "torch_op,batch_shape",
+        [(torch.mm, ()), (torch.bmm, (4,))],
+        name_fn=lambda op, _: op.__name__,
+    )
+    def test_my_mm_out_dtype_ops(self, device, dtype, torch_op, batch_shape):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        stable_op = getattr(libtorch_agnostic.ops, f"my_{torch_op.__name__}_out_dtype")
+
+        a = torch.randn(*batch_shape, 3, 5, device=device, dtype=dtype)
+        b = torch.randn(*batch_shape, 5, 2, device=device, dtype=dtype)
+        out = torch.empty(*batch_shape, 3, 2, device=device, dtype=torch.float32)
+        result = stable_op(out, a, b, torch.float32)
+        self.assertEqual(out, torch_op(a, b, out_dtype=torch.float32))
+        self.assertEqual(id(result), id(out))
+
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_flip(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        t = torch.arange(24, device=device).reshape(2, 3, 4)
+        dims = [-1, 0]
+        result = libtorch_agnostic.ops.my_flip(t, dims)
+        self.assertEqual(result, torch.flip(t, dims))
+
+    @skipIfWindows(msg="TemporaryFileName cannot unlink a memory-mapped file")
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_from_file(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        data = bytearray(range(256))
+        with TemporaryFileName() as path:
+            Path(path).write_bytes(data)
+            result = libtorch_agnostic.ops.my_from_file(
+                path, shared=False, size=len(data), dtype=torch.uint8
+            )
+            self.assertEqual(result, torch.frombuffer(data, dtype=torch.uint8))
+
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
     # extension's importable PyMethodDef module (_interop).
@@ -428,11 +580,150 @@ class TestLibtorchAgnostic(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expected torch.Tensor"):
             libtorch_agnostic._interop.pyobject_roundtrip("not a tensor")
 
-    # TODO: Debug this:
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 15)
+    def test_pyobject_is_tensor(self, device):
+        import libtorch_agn_2_15 as libtorch_agnostic
+
+        is_tensor = libtorch_agnostic._interop.is_tensor
+        self.assertTrue(is_tensor(torch.randn(2, device=device)))
+        self.assertTrue(is_tensor(torch.nn.Parameter(torch.randn(2))))
+        self.assertFalse(is_tensor(1))
+        self.assertFalse(is_tensor(None))
+        self.assertFalse(is_tensor(torch.float32))
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 15)
+    def test_pyobject_tensor_subclass(self, device):
+        import libtorch_agn_2_14
+        import libtorch_agn_2_15
+
+        class TensorSubclass(torch.Tensor):
+            pass
+
+        x = torch.randn(2, 3, device=device).as_subclass(TensorSubclass)
+        self.assertTrue(libtorch_agn_2_15._interop.is_tensor(x))
+        y = libtorch_agn_2_14._interop.pyobject_roundtrip(x)
+        self.assertEqual(y, x)
+        self.assertEqual(y.data_ptr(), x.data_ptr())
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 15)
+    @skipIfTorchDynamo("Dynamo intercepts the spoofed __class__")
+    def test_pyobject_spoofed_tensor_class(self, device):
+        import libtorch_agn_2_14
+        import libtorch_agn_2_15
+
+        class PretendTensor:
+            @property
+            def __class__(self):
+                return torch.Tensor
+
+        obj = PretendTensor()
+        self.assertIsInstance(obj, torch.Tensor)
+        self.assertFalse(libtorch_agn_2_15._interop.is_tensor(obj))
+        with self.assertRaisesRegex(RuntimeError, "expected torch.Tensor"):
+            libtorch_agn_2_14._interop.pyobject_roundtrip(obj)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 15)
+    @parametrize(
+        "dtype",
+        [
+            torch.float32,
+            torch.float64,
+            torch.bfloat16,
+            torch.int64,
+            torch.bool,
+            torch.complex64,
+            torch.float8_e4m3fn,
+        ],
+    )
+    def test_pyobject_dtype_roundtrip(self, device, dtype):
+        import libtorch_agn_2_15 as libtorch_agnostic
+
+        out = libtorch_agnostic._interop.dtype_roundtrip(dtype)
+        # torch.dtype objects are singletons.
+        self.assertIs(out, dtype)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 15)
+    # "cuda" (no index) must not come back as cuda:0; constructing the
+    # device objects needs no GPU.
+    @parametrize("roundtrip_device", ["cpu", "meta", "cuda", "cuda:1"])
+    def test_pyobject_device_roundtrip(self, device, roundtrip_device):
+        import libtorch_agn_2_15 as libtorch_agnostic
+
+        dev = torch.device(roundtrip_device)
+        out = libtorch_agnostic._interop.device_roundtrip(dev)
+        self.assertIsInstance(out, torch.device)
+        self.assertEqual(out, dev)
+        self.assertEqual(out.index, dev.index)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 15)
+    def test_pyobject_tensor_dtype_and_device(self, device):
+        import libtorch_agn_2_15 as libtorch_agnostic
+
+        x = torch.randn(2, 3, device=device, dtype=torch.float64)
+        self.assertIs(libtorch_agnostic._interop.tensor_dtype(x), torch.float64)
+        self.assertEqual(libtorch_agnostic._interop.tensor_device(x), x.device)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 15)
+    def test_pyobject_non_dtype_raises(self, device):
+        import libtorch_agn_2_15 as libtorch_agnostic
+
+        with self.assertRaisesRegex(RuntimeError, "expected torch.dtype"):
+            libtorch_agnostic._interop.dtype_roundtrip("not a dtype")
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 15)
+    def test_pyobject_unsupported_dtype_raises(self, device):
+        import libtorch_agn_2_15 as libtorch_agnostic
+
+        with self.assertRaisesRegex(RuntimeError, "Not yet supported ScalarType"):
+            libtorch_agnostic._interop.dtype_roundtrip(torch.qint8)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 15)
+    def test_pyobject_non_device_raises(self, device):
+        import libtorch_agn_2_15 as libtorch_agnostic
+
+        with self.assertRaisesRegex(RuntimeError, "expected torch.device"):
+            libtorch_agnostic._interop.device_roundtrip("not a device")
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 15)
+    def test_pyobject_unsupported_device_raises(self, device):
+        import libtorch_agn_2_15 as libtorch_agnostic
+
+        with self.assertRaisesRegex(RuntimeError, "Not yet supported DeviceType"):
+            libtorch_agnostic._interop.device_roundtrip(torch.device("xla"))
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @skipIfTorchDynamo("Dynamo failed to run FX node with fake tensors")
+    def test_my_add(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        a = torch.randn(3, 4, device=device)
+        b = torch.randn(3, 4, device=device)
+
+        result = libtorch_agnostic.ops.my_add(a, b, alpha=2)
+        expected = torch.add(a, b, alpha=2)
+        self.assertEqual(result, expected)
+
+        i = torch.ones(3, 4, dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "argument alpha must not be a floating point number"
+        ):
+            libtorch_agnostic.ops.my_add(i, i)
+
+    # TODO: Debug this for Python FakeTensor:
     # torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors:
     # call_function libtorch_agnostic.my_ones_like.default(*(FakeTensor(..., size=(3, 1)), 'cpu'),
     # **{}): got AssertionError("tensor's device must be `meta`, got cpu instead")
-    @xfailIfTorchDynamo
+    @xfailIf(TEST_WITH_TORCHDYNAMO)
     def test_my_ones_like(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
 
@@ -452,7 +743,7 @@ class TestLibtorchAgnostic(TestCase):
                 curr_mem = torch.cuda.memory_allocated(device)
                 self.assertEqual(curr_mem, init_mem)
 
-    @xfailIfTorchDynamo
+    @xfailIf(TEST_WITH_TORCHDYNAMO)
     @skipIfTorchVersionLessThan(2, 11)  # Requires 2.11 for Float8_e8m0fnu support
     def test_my_ones_like_with_Float8_e8m0fnu(self, device):
         import libtorch_agn_2_11 as libtorch_agnostic
@@ -569,6 +860,26 @@ class TestLibtorchAgnostic(TestCase):
         out0 = libtorch_agnostic.ops.my_narrow(t, dim0, start0, length0)
         expected0 = torch.narrow(t, dim0, start0, length0)
         self.assertEqual(out0, expected0)
+
+    def test_my_narrow_conj_neg_view(self, device):
+        import libtorch_agn_2_9 as libtorch_agnostic
+
+        # narrow is backed by a c_shim_aten shim; it should return a view of a
+        # conj/neg view, not of a materialized copy.
+        conj_t = torch.randn(2, 5, dtype=torch.cfloat, device=device).conj()
+        neg_t = torch.randn(2, 5, device=device)._neg_view()
+        for t, fill_value in ((conj_t, 1 + 2j), (neg_t, 3.0)):
+            out = libtorch_agnostic.ops.my_narrow(t, 0, 0, 1)
+            self.assertEqual(out, torch.narrow(t, 0, 0, 1))
+            # only fixed in 2.16+
+            if _torchVersionLessThan(2, 16):
+                self.assertFalse(out.is_conj() or out.is_neg())
+                self.assertNotEqual(out.data_ptr(), t.data_ptr())
+                continue
+            self.assertEqual(out.is_conj(), t.is_conj())
+            self.assertEqual(out.is_neg(), t.is_neg())
+            out.fill_(fill_value)
+            self.assertEqual(t[0], torch.full_like(t[0], fill_value))
 
     @onlyCPU
     def test_my_narrow_symint(self, device):
@@ -754,7 +1065,7 @@ class TestLibtorchAgnostic(TestCase):
         result = libtorch_agnostic.ops.my_clone(t)
         expected = t.clone()
         self.assertEqual(result, expected)
-        self.assertNotEqual(result.data_ptr(), expected.data_ptr())
+        self.assertNotEqual(result.data_ptr(), t.data_ptr())
         self.assertEqual(result.stride(), expected.stride())
 
     @skipIfTorchVersionLessThan(2, 10)
@@ -915,6 +1226,158 @@ class TestLibtorchAgnostic(TestCase):
         expected_num_threads = torch.get_num_threads()
         self.assertEqual(num_threads, expected_num_threads)
 
+    @skipIfTorchVersionLessThan(2, 15)  # Requires 2.15 for C++ warnings to reach Python
+    @skipIfTorchDynamo("Dynamo also runs the op while tracing")
+    @onlyCPU
+    def test_stable_torch_warn(self, device):
+        import libtorch_agn_2_9 as libtorch_agnostic
+
+        values = (3, 3, -7)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            for value in values:
+                libtorch_agnostic.ops.test_stable_torch_warn(value)
+
+        self.assertEqual(len(w), len(values))
+        for value, warning in zip(values, w):
+            self.assertIs(warning.category, UserWarning)
+            expected = f"test_stable_torch_warn value={value} scale=0.5 1"
+            self.assertIn(expected, str(warning.message))
+
+    def _run_stable_torch_warn_once(self):
+        """Runs in a subprocess so neither STABLE_TORCH_WARN_ONCE call site has warned yet."""
+        import os
+        import subprocess
+        import sys
+
+        test_script = """
+import warnings
+
+import torch
+import libtorch_agn_2_16 as libtorch_agnostic
+
+with warnings.catch_warnings(record=True) as w:
+    warnings.simplefilter("always")
+    for warn_always in (False, True, False):
+        torch.set_warn_always(warn_always)
+        for value in (7, 8, -1):
+            libtorch_agnostic.ops.test_stable_torch_warn_once(value)
+
+for warning in w:
+    print(warning.category.__name__, warning.message)
+"""
+        env = os.environ.copy()
+        # Pass the current sys.path to subprocess so it can find the locally installed extension
+        env["PYTHONPATH"] = os.pathsep.join(sys.path)
+
+        result = subprocess.run(
+            [sys.executable, "-c", test_script],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.splitlines()
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    def test_stable_torch_warn_once(self, device):
+        emitted = self._run_stable_torch_warn_once()
+
+        expected = ("value=7", "negative value", "value=7", "value=8", "negative value")
+        self.assertEqual(len(emitted), len(expected))
+        for message, line in zip(expected, emitted):
+            self.assertIn(f"UserWarning test_stable_torch_warn_once {message}", line)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @parametrize("warn_always", [False, True])
+    def test_is_warn_always_enabled(self, device, warn_always):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with set_warn_always_context(warn_always):
+            enabled = libtorch_agnostic.ops.my_is_warn_always_enabled()
+        self.assertEqual(enabled, warn_always)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @parametrize("flag", ["conj", "neg", "inference"])
+    def test_is_conj_is_neg_is_inference(self, device, flag):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with torch.inference_mode(flag == "inference"):
+            t = torch.ones(2, device=device, dtype=torch.complex64)
+        if flag == "conj":
+            t = t.conj()
+        elif flag == "neg":
+            t = torch._neg_view(t)
+
+        for name in ("conj", "neg", "inference"):
+            actual = getattr(libtorch_agnostic.ops, f"my_is_{name}")(t)
+            self.assertEqual(actual, name == flag)
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_empty_strided(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        size, stride = (2, 3), (1, 4)
+        cases = [
+            {},
+            {"dtype": torch.int32},
+            {"device": device},
+            {"pin_memory": False},
+            {
+                "dtype": torch.int32,
+                "layout": torch.strided,
+                "device": device,
+                "pin_memory": False,
+            },
+        ]
+        # CUDA provides the pinning runtime. The allocation itself is on CPU.
+        if torch.device(device).type == "cuda":
+            cases.append({"device": "cpu", "pin_memory": True})
+
+        with DeterministicGuard(True):
+            for options in cases:
+                actual = libtorch_agnostic.ops.my_empty_strided(size, stride, **options)
+                expected = torch.empty_strided(size, stride, **options)
+                self.assertEqual(actual, expected, exact_device=True, exact_layout=True)
+                self.assertEqual(actual.stride(), expected.stride())
+                if options.get("pin_memory"):
+                    self.assertTrue(actual.is_pinned())
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_slice(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.arange(12, device=device).reshape(2, 6)
+        self.assertEqual(libtorch_agnostic.ops.my_slice(x), x[:])
+        view = libtorch_agnostic.ops.my_slice(x, -1, 1, 5, 2)
+        self.assertEqual(view, x[:, 1:5:2])
+        expected = x.clone()
+        expected[:, 1:5:2] = -1
+        view.fill_(-1)
+        self.assertEqual(x, expected)
+
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize("layout", [None, torch.strided, torch.sparse_coo])
     @parametrize("memory_format", [None, torch.channels_last, torch.contiguous_format])
@@ -1019,7 +1482,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(result_range, expected_range)
 
     @onlyCPU
-    @xfailIfTorchDynamo
+    @xfailIf(TEST_WITH_TORCHDYNAMO)
     def test_my_optional_tensor_ref(self, device):
         """Test TORCH_BOX with const std::optional<Tensor>& parameter."""
         import libtorch_agn_2_9 as libtorch_agnostic
@@ -1811,19 +2274,26 @@ except RuntimeError as e:
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result.device, expected.device)
 
-        # Test with different dtype
+        # Test with different dtype and layout
         result_dtype = libtorch_agnostic.ops.my_new_empty(
-            t, [2, 3], dtype=torch.float64
+            t, [2, 3], dtype=torch.float64, layout=torch.sparse_coo
         )
-        expected_dtype = t.new_empty([2, 3], dtype=torch.float64)
+        expected_dtype = t.new_empty(
+            [2, 3], dtype=torch.float64, layout=torch.sparse_coo
+        )
         self.assertEqual(result_dtype.shape, expected_dtype.shape)
         self.assertEqual(result_dtype.dtype, torch.float64)
+        self.assertEqual(result_dtype.layout, expected_dtype.layout)
 
         # Test with different device (move to CPU)
-        result_device = libtorch_agnostic.ops.my_new_empty(t, [2, 3], device="cpu")
+        pin_memory = torch.cuda.is_available()
+        result_device = libtorch_agnostic.ops.my_new_empty(
+            t, [2, 3], device="cpu", pin_memory=pin_memory
+        )
         expected_device = t.new_empty([2, 3], device="cpu")
         self.assertEqual(result_device.shape, expected_device.shape)
         self.assertEqual(result_device.device.type, "cpu")
+        self.assertEqual(result_device.is_pinned(), pin_memory)
 
         # Test with dtype and device together
         result_both = libtorch_agnostic.ops.my_new_empty(
@@ -1849,17 +2319,25 @@ except RuntimeError as e:
         expected = t.new_zeros([2, 3])
         self.assertEqual(result, expected, exact_device=True)
 
-        # Test with different dtype
+        # Test with different dtype and layout
         result_dtype = libtorch_agnostic.ops.my_new_zeros(
-            t, [2, 3], dtype=torch.float64
+            t, [2, 3], dtype=torch.float64, layout=torch.sparse_coo
         )
-        expected_dtype = t.new_zeros([2, 3], dtype=torch.float64)
-        self.assertEqual(result_dtype, expected_dtype, exact_device=True)
+        expected_dtype = t.new_zeros(
+            [2, 3], dtype=torch.float64, layout=torch.sparse_coo
+        )
+        self.assertEqual(
+            result_dtype, expected_dtype, exact_device=True, exact_layout=True
+        )
 
         # Test with different device (move to CPU)
-        result_device = libtorch_agnostic.ops.my_new_zeros(t, [2, 3], device="cpu")
+        pin_memory = torch.cuda.is_available()
+        result_device = libtorch_agnostic.ops.my_new_zeros(
+            t, [2, 3], device="cpu", pin_memory=pin_memory
+        )
         expected_device = t.new_zeros([2, 3], device="cpu")
         self.assertEqual(result_device, expected_device, exact_device=True)
+        self.assertEqual(result_device.is_pinned(), pin_memory)
 
         # Test with dtype and device together
         result_both = libtorch_agnostic.ops.my_new_zeros(

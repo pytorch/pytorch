@@ -444,22 +444,13 @@ namespace {
               output_arg{ output, "output", 2 };
     checkAllSameGPU(__func__, {input_arg, output_arg});
 
-    TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
-    int64_t ndim = input.dim();
-    TORCH_CHECK((ndim == 3 || ndim == 4),
-      "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got ", input.sizes());
-    for (const auto i : {-2, -1}) {
-      TORCH_CHECK(input.size(i) > 0,
-        "adaptive_avg_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
-        "but input has sizes ", input.sizes(), " with dimension ", i + ndim, " being "
-        "empty");
-    }
+    adaptive_avg_pool_check(input, output, output_size, /*pooling_dims=*/2, "adaptive_avg_pool2d()");
 
     Tensor input_ = input;
     switch (input.suggest_memory_format()) {
       case at::MemoryFormat::ChannelsLast: {
         // special case for tensor memory format in channels_last
-        TORCH_CHECK(input.ndimension() == 4,
+        TORCH_CHECK_VALUE(input.ndimension() == 4,
                     "adaptive_avg_pool2d(): Expected 4D tensor, but got ",
                     input.sizes());
 
@@ -554,7 +545,10 @@ namespace {
         int64_t isizeH = input_.size(-2);
         int64_t isizeW = input_.size(-1);
 
-        int64_t istrideD = input_.stride(-3);
+        // For 4D input the kernel flattens batch and channel and steps them by
+        // istrideD. With size(1) == 1, a contiguous input's stride(1) need not
+        // be H * W (see AdaptiveMaxPooling2d.cu).
+        int64_t istrideD = input.ndimension() == 4 ? isizeH * isizeW : input_.stride(-3);
         int64_t istrideH = input_.stride(-2);
         int64_t istrideW = input_.stride(-1);
 
@@ -613,16 +607,15 @@ namespace {
               grad_output_arg{ gradOutput_, "gradOutput_", 2 },
               input_arg{ input, "input", 3 };
 
-    adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool2d_backward");
-    TORCH_CHECK(input.dim() == gradOutput_.dim(),
-      __func__, ": Expected dimensions ", input.dim(), " for `gradOutput_` but got dimensions ", gradOutput_.dim());
+    adaptive_avg_pool_backward_check(
+      gradInput, gradOutput_, input, /*pooling_dims=*/2, "adaptive_avg_pool2d_backward()");
 
     checkAllSameGPU(__func__, {grad_input_arg, grad_output_arg, input_arg});
 
     switch (input.suggest_memory_format()) {
       case at::MemoryFormat::ChannelsLast: {
         // special case for tensor memory format in channels_last
-        TORCH_CHECK(input.ndimension() == 4,
+        TORCH_CHECK_VALUE(input.ndimension() == 4,
                     "adaptive_avg_pool2d_backward_cuda(): Expected 4D tensor, but got ", input.ndimension());
 
         int sizeB = input.size(0);

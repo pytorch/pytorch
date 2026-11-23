@@ -88,47 +88,51 @@ class TORCH_API Block : public StmtNode<Block> {
   }
 
   void prepend_stmt(const StmtPtr& s) {
-    if (s->get_parent()) {
-      throw malformed_input("Block prepend Stmt with existing parent", s);
-    }
+    TORCH_CHECK(
+        !s->get_parent(),
+        "MALFORMED INPUT: Block prepend Stmt with existing parent - ",
+        std::to_string(s));
 
     stmts_.push_front(s);
     set_parent(s, this);
   }
   void append_stmt(const StmtPtr& s) {
-    if (s->get_parent()) {
-      throw malformed_input("Block append Stmt with existing parent", s);
-    }
+    TORCH_CHECK(
+        !s->get_parent(),
+        "MALFORMED INPUT: Block append Stmt with existing parent - ",
+        std::to_string(s));
 
     stmts_.push_back(s);
     set_parent(s, this);
   }
 
   void insert_stmt_before(const StmtPtr& s, const StmtPtr& before) {
-    if (s->get_parent()) {
-      throw malformed_input("Block append Stmt with existing parent", s);
-    }
+    TORCH_CHECK(
+        !s->get_parent(),
+        "MALFORMED INPUT: Block append Stmt with existing parent - ",
+        std::to_string(s));
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), before);
-    if (pos == stmts_.end()) {
-      throw malformed_input(
-          "Inserting after statement that is not in block", s);
-    }
+    TORCH_CHECK(
+        pos != stmts_.end(),
+        "MALFORMED INPUT: Inserting after statement that is not in block - ",
+        std::to_string(s));
 
     stmts_.insert(pos, s);
     set_parent(s, this);
   }
 
   void insert_stmt_after(const StmtPtr& s, const StmtPtr& after) {
-    if (s->get_parent()) {
-      throw malformed_input("Block append Stmt with existing parent", s);
-    }
+    TORCH_CHECK(
+        !s->get_parent(),
+        "MALFORMED INPUT: Block append Stmt with existing parent - ",
+        std::to_string(s));
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), after);
-    if (pos == stmts_.end()) {
-      throw malformed_input(
-          "Inserting after statement that is not in block", s);
-    }
+    TORCH_CHECK(
+        pos != stmts_.end(),
+        "MALFORMED INPUT: Inserting after statement that is not in block - ",
+        std::to_string(s));
 
     ++pos;
 
@@ -137,10 +141,10 @@ class TORCH_API Block : public StmtNode<Block> {
   }
 
   bool replace_stmt(const StmtPtr& old_stmt, const StmtPtr& new_stmt) {
-    if (new_stmt->get_parent()) {
-      throw malformed_input(
-          "Block replace Stmt with existing parent", new_stmt);
-    }
+    TORCH_CHECK(
+        !new_stmt->get_parent(),
+        "MALFORMED INPUT: Block replace Stmt with existing parent - ",
+        std::to_string(new_stmt));
 
     auto pos = std::find(stmts_.begin(), stmts_.end(), old_stmt);
     if (pos == stmts_.end()) {
@@ -157,10 +161,10 @@ class TORCH_API Block : public StmtNode<Block> {
   // statement with a new statement. Note that `old_stmt` refers to a statement
   // in `this` block. If the `old_stmt` is not found, it will return `nullptr`.
   BlockPtr clone_and_replace(const StmtPtr& old_stmt, const StmtPtr& new_stmt) {
-    if (new_stmt->get_parent()) {
-      throw malformed_input(
-          "Block replace Stmt with existing parent", new_stmt);
-    }
+    TORCH_CHECK(
+        !new_stmt->get_parent(),
+        "MALFORMED INPUT: Block replace Stmt with existing parent - ",
+        std::to_string(new_stmt));
 
     std::vector<StmtPtr> stmts(stmts_.begin(), stmts_.end());
     std::vector<StmtPtr> cloned_stmts(stmts.size());
@@ -581,9 +585,8 @@ class TORCH_API LoopOptions {
   }
 
   std::string gpu_block_index_str() const {
-    if (!is_gpu_block_index()) {
-      throw malformed_input("Has no GPU block index");
-    }
+    TORCH_CHECK(
+        is_gpu_block_index(), "MALFORMED INPUT: Has no GPU block index");
 
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     static constexpr const char* kBlockIndexNames[] = {
@@ -593,9 +596,9 @@ class TORCH_API LoopOptions {
         "blockIdx.w",
     };
 
-    if (gpu_block_index_ < IDX_X || gpu_block_index_ > IDX_MAX) {
-      throw malformed_input("invalid GPU block index");
-    }
+    TORCH_CHECK(
+        gpu_block_index_ >= IDX_X && gpu_block_index_ <= IDX_MAX,
+        "MALFORMED INPUT: invalid GPU block index");
 
     return kBlockIndexNames[gpu_block_index_];
   }
@@ -605,12 +608,11 @@ class TORCH_API LoopOptions {
       gpu_block_index_ = IDX_UNSET;
     }
 
-    if (is_gpu_thread_index()) {
-      throw std::runtime_error("Cannot set both gpu block and thread index");
-    }
-    if (is_gpu_block_index() && gpu_block_index() != index) {
-      throw std::runtime_error("Cannot set a previously set block index");
-    }
+    TORCH_CHECK(
+        !is_gpu_thread_index(), "Cannot set both gpu block and thread index");
+    TORCH_CHECK(
+        !is_gpu_block_index() || gpu_block_index() == index,
+        "Cannot set a previously set block index");
     gpu_block_index_ = index;
   }
 
@@ -624,17 +626,16 @@ class TORCH_API LoopOptions {
   }
 
   std::string gpu_thread_index_str() const {
-    if (!is_gpu_thread_index()) {
-      throw malformed_input("has no GPU thread index");
-    }
+    TORCH_CHECK(
+        is_gpu_thread_index(), "MALFORMED INPUT: has no GPU thread index");
 
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     static constexpr const char* kThreadIndexNames[] = {
         "threadIdx.x", "threadIdx.y", "threadIdx.z", "threadIdx.w"};
 
-    if (gpu_thread_index_ < IDX_X || gpu_thread_index_ > IDX_MAX) {
-      throw malformed_input("invalid GPU thread index");
-    }
+    TORCH_CHECK(
+        gpu_thread_index_ >= IDX_X && gpu_thread_index_ <= IDX_MAX,
+        "MALFORMED INPUT: invalid GPU thread index");
 
     return kThreadIndexNames[gpu_thread_index_];
   }
@@ -644,12 +645,11 @@ class TORCH_API LoopOptions {
       gpu_thread_index_ = IDX_UNSET;
     }
 
-    if (is_gpu_block_index()) {
-      throw std::runtime_error("Cannot set both gpu thread and block index");
-    }
-    if (is_gpu_thread_index() && gpu_thread_index() != index) {
-      throw std::runtime_error("Cannot set a previously set thread index");
-    }
+    TORCH_CHECK(
+        !is_gpu_block_index(), "Cannot set both gpu thread and block index");
+    TORCH_CHECK(
+        !is_gpu_thread_index() || gpu_thread_index() == index,
+        "Cannot set a previously set thread index");
     gpu_thread_index_ = index;
   }
 
@@ -751,15 +751,12 @@ class TORCH_API For : public StmtNode<For> {
         start_(std::move(start)),
         stop_(std::move(stop)),
         loop_options_(std::move(loop_options)) {
-    if (!var_) {
-      throw malformed_input("invalid Var in For loop");
-    } else if (!start_) {
-      throw malformed_input("invalid Start in For loop");
-    } else if (!stop_) {
-      throw malformed_input("invalid Stop in For loop");
-    } else if (!body || body->get_parent()) {
-      throw malformed_input("invalid Body in For loop");
-    }
+    TORCH_CHECK(var_, "MALFORMED INPUT: invalid Var in For loop");
+    TORCH_CHECK(start_, "MALFORMED INPUT: invalid Start in For loop");
+    TORCH_CHECK(stop_, "MALFORMED INPUT: invalid Stop in For loop");
+    TORCH_CHECK(
+        body && !body->get_parent(),
+        "MALFORMED INPUT: invalid Body in For loop");
 
     BlockPtr b = to<Block>(body);
     if (!b) {

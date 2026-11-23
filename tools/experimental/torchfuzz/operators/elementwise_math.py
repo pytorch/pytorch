@@ -30,6 +30,14 @@ from torchfuzz.operators.tensor_pointwise import PointwiseOperatorBase
 from torchfuzz.tensor_fuzzer import Spec, TensorSpec
 
 
+_INTEGER_DTYPES: tuple[torch.dtype, ...] = (
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+)
+
+
 # ---------------------------------------------------------------------------
 # Base classes (excluded from introspection by the ``Base`` suffix)
 # ---------------------------------------------------------------------------
@@ -467,6 +475,16 @@ class DivideOperator(PointwiseOperatorBase):
     ) -> str:
         rm = self._rounding_mode
         self._rounding_mode = None
+        if (
+            rm in ("trunc", "floor")
+            and isinstance(output_spec, TensorSpec)
+            and output_spec.dtype in _INTEGER_DTYPES
+        ):
+            divisor = input_names[1]
+            input_names = [
+                input_names[0],
+                f"({divisor} + ({divisor} == 0))",
+            ]
         base = super().codegen(output_name, input_names, output_spec)
         if rm != "default":
             base = base[:-1] + f", rounding_mode={rm!r})"

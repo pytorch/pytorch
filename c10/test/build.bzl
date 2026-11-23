@@ -3,6 +3,7 @@ def define_targets(rules):
         name = "tests",
         tests = [
             ":core_tests",
+            ":cpu_caching_allocator_test",
             ":typeid_test",
             ":util_base_tests",
         ],
@@ -21,6 +22,16 @@ def define_targets(rules):
             "//c10/core:base",
             "//c10/util:base",
             "//c10/core:CPUAllocator",
+            "@com_google_googletest//:gtest_main",
+        ],
+    )
+
+    rules.cc_test(
+        name = "cpu_caching_allocator_test",
+        srcs = ["mobile/CPUCachingAllocator_test.cpp"],
+        deps = [
+            "//c10/core:CPUAllocator",
+            "//c10/mobile:CPUCachingAllocator",
             "@com_google_googletest//:gtest_main",
         ],
     )
