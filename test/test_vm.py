@@ -10596,6 +10596,15 @@ def graph_spread_twice(x, given):
 # How long one case of `GRAPH_THINGS` may take before it counts as one that
 # does not come back.
 GRAPH_CASE_SECONDS = 300
+
+
+def vm_case_script(script):
+    # Under load the teardown of a PyTorch process that ran autograd on CUDA can end in
+    # "terminate called without an active exception" (stock builds too): not asserted.
+    ends = "import os, sys\nsys.stdout.flush()\nsys.stderr.flush()\nos._exit(0)\n"
+    return script.rstrip("\n") + "\n" + ends
+
+
 GRAPH_THINGS = '''"""The things a function makes between its operations (a list, a dict,
 an object, a cell, an iterator), on a path: the cases of a group, each with
 `Graphs()` alone, with a pass that returns the graph and with an input that
@@ -13307,7 +13316,7 @@ class TestVmGraphResults(TestCase):
         import queue
 
         env = dict(os.environ, TORCH_VM_GRAPH_DEBUG="2") if debug else None
-        command = [sys.executable, "-c", GRAPH_THINGS, device, group]
+        command = [sys.executable, "-c", vm_case_script(GRAPH_THINGS), device, group]
         pipes = {"stdout": subprocess.PIPE, "stderr": subprocess.DEVNULL, "text": True}
         ran = subprocess.Popen(command, env=env, **pipes)
         lines = queue.Queue()
