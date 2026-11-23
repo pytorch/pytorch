@@ -105,6 +105,7 @@ class TestReductions(TestCase):
     # ReductionOpInfo unit tests
     ###########################################################################
 
+    @onlyCPU
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     def test_cumsum_preserves_signed_zero(self, device, dtype):
         # A prefix of -0.0 should preserve its sign.
