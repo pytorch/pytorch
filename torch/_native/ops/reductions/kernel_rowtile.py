@@ -199,6 +199,9 @@ _ITREE_ARCH: dict[str | tuple[int, int], _ItreeArch] = {
         stage_rows=False,
         combine_async=0,
         combine_max=512,
+        combine_unroll=128,
+        lowp_thread_elems=0,
+        uniform_combine="off",
     ),
 }
 
