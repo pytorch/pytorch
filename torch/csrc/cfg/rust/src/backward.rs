@@ -2562,6 +2562,10 @@ impl Form {
             Some(why) => State::Refused(why),
             None if first.cut.is_some() => match Parts::new(py, self.graph.clone(), first, &self.export) {
                 Ok(parts) => State::Cut(Arc::new(parts)),
+                // What came between (an interrupt, what the handler of a
+                // signal raised) says nothing about the form: it leaves
+                // the call, and the form goes on learning.
+                Err(error) if unsafe { crate::graph::came_between(error.value(py).as_ptr()) } => return Err(error),
                 Err(error) => State::Refused(error.value(py).to_string()),
             },
             None => {
@@ -2571,6 +2575,7 @@ impl Form {
                     Ok(plan) => State::Proven(Arc::new(plan)),
                     Err(Stop::Refused(why)) => State::Refused(why),
                     Err(Stop::Cut(_)) => State::Refused("the graph is cut".to_string()),
+                    Err(Stop::Raised(error)) if unsafe { crate::graph::came_between(error.value(py).as_ptr()) } => return Err(error),
                     Err(Stop::Raised(error)) => State::Refused(error.value(py).to_string()),
                 }
             }

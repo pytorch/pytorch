@@ -1252,6 +1252,15 @@ pub fn unsettled() {
     vm::unsettled();
 }
 
+/// Whether an exception that was caught came between the instructions of
+/// what raised it and was raised by none of them (`graph::interrupted`):
+/// a signal's handler raised it, or it is no `Exception`. What catches
+/// the exceptions of a pass asks, and hands such an exception on.
+#[pyfunction]
+pub fn interrupted(error: &Bound<'_, PyAny>) -> bool {
+    unsafe { crate::graph::came_between(error.as_ptr()) }
+}
+
 /// Has the measurement of a function against the interpreter wait, with
 /// `settle()`, for the devices that run what it started: see
 /// `TRIAL_SETTLE`. `settle` must be a builtin, which runs without a frame
