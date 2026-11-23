@@ -73,6 +73,8 @@ struct Builder<'a> {
     /// run has not learned yet that it is NULL, or else an error.
     not_null: Vec<V>,
     forward: Vec<V>,
+    /// See `Function::ranks`.
+    ranks: Vec<u32>,
     phi_block: HashMap<V, usize>,
     phi_ops: HashMap<V, Vec<V>>,
     phi_users: HashMap<V, Vec<V>>,
@@ -109,7 +111,18 @@ impl<'a> Builder<'a> {
         let v = self.forward.len() as V;
         self.forward.push(v);
         self.value_names.push(None);
+        self.ranks.push(0);
         v
+    }
+
+    /// Writes down where the values of the stack are on it, the lowest
+    /// place of a value that is on it twice.
+    fn rank(&mut self, stack: &[V]) {
+        for (place, v) in stack.iter().enumerate().rev() {
+            if *v < NULLMARK && *v != UNDEF {
+                self.ranks[*v as usize] = place as u32 + 1;
+            }
+        }
     }
 
     fn resolve(&self, mut v: V) -> V {
@@ -346,6 +359,7 @@ impl<'a> Builder<'a> {
         }
 
         for idx in start..end {
+            self.rank(&stack);
             let ins = self.instrs[idx].clone();
             let off = ins.off;
             let arg = ins.arg;
@@ -1101,6 +1115,7 @@ impl<'a> Builder<'a> {
             Some(t) => t,
             None => Term::Jump(self.block_at_index(end)? as B),
         };
+        self.rank(&stack);
         for (i, v) in stack.iter().enumerate() {
             self.write_var((self.nlocals + i) as u32, b, *v);
         }
@@ -1488,6 +1503,7 @@ fn build_as(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>, genera
             not_null: Vec::new(),
             const_values: HashSet::new(),
             forward: Vec::new(),
+            ranks: Vec::new(),
             phi_block: HashMap::new(),
             phi_ops: HashMap::new(),
             phi_users: HashMap::new(),
@@ -1674,6 +1690,15 @@ fn build_as(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>, genera
     slots.sort_unstable();
     let nvalues = builder.forward.len() as u32;
     let value_names = std::mem::take(&mut builder.value_names);
+    // A value that stands for another one has its place where that one has
+    // none.
+    let mut ranks = std::mem::take(&mut builder.ranks);
+    for v in 0..nvalues {
+        let stands = builder.resolve(v);
+        if stands < NULLMARK && ranks[stands as usize] == 0 {
+            ranks[stands as usize] = ranks[v as usize];
+        }
+    }
     let exit_stacks: Vec<Vec<V>> = builder
         .exit_stacks
         .iter()
@@ -1726,6 +1751,7 @@ fn build_as(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>, genera
         nvalues,
         params,
         value_names,
+        ranks,
         lines,
         globals: unsafe { PyObj::from_borrowed(globals.as_ptr()) },
         builtins: unsafe { PyObj::from_borrowed(builtins.as_ptr()) },
@@ -1752,10 +1778,10 @@ fn build_as(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>, genera
 /// that is still on the stack where a block ends and that nothing takes
 /// off it from there on, because the function raises or goes round a loop
 /// that only a raise leaves. The interpreter takes such a value off its
-/// stack when it unwinds, the topmost first: so are they held, each by
-/// itself. Where an instruction takes the value off later (the next draw
-/// of a `for`, a call that is handed it) that instruction is its use, and
-/// nothing is added.
+/// stack when it unwinds, the topmost first, and so does `Compiled::catch`
+/// with what is held here. Where an instruction takes the value off later
+/// (the next draw of a `for`, a call that is handed it) that instruction is
+/// its use, and nothing is added.
 fn hold_stacks(func: &mut Function, exits: &[Vec<V>]) {
     if exits.iter().all(|stack| stack.is_empty()) {
         return;

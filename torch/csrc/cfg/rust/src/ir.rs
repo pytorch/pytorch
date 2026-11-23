@@ -705,6 +705,12 @@ pub struct Function {
     /// The value of each parameter, in co_varnames order.
     pub params: Vec<V>,
     pub value_names: Vec<Option<String>>,
+    /// Where each value is on the interpreter's stack while it is on it,
+    /// counted from 1 at the bottom, with the stacks of the functions that
+    /// were inlined on top of their callers'; 0 for a value that is never
+    /// on it. What a raise takes off the stack ends in this order, the
+    /// topmost first (`Compiled::catch`).
+    pub ranks: Vec<u32>,
     /// (start offset, end offset, line), the offsets tagged like `Inst::bc`.
     pub lines: Vec<(u32, u32, i32)>,
     pub origins: Vec<Origin>,
@@ -753,7 +759,7 @@ impl Function {
     }
 
     fn const_repr(&self, idx: u32) -> String {
-        let mut s = unsafe { pyffi::repr_string(self.consts[idx as usize].as_ptr()) };
+        let mut s = unsafe { crate::graph::shown(self.consts[idx as usize].as_ptr()) };
         if s.len() > 60 {
             s.truncate(57);
             s.push_str("...");
@@ -889,7 +895,7 @@ impl Function {
                 if *explicit { "" } else { "    ; arguments implied" }
             ),
             Op::CallObject(callee, args) => {
-                let repr = unsafe { crate::pyffi::repr(callee.as_ptr()) };
+                let repr = unsafe { crate::graph::shown(callee.as_ptr()) };
                 format!("call_object {}({})", repr.chars().take(60).collect::<String>(), self.values(args))
             }
             Op::Locals(callee, entries) => {

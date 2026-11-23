@@ -145,7 +145,7 @@ fn changed(py: Python<'_>, results: &Bound<'_, PyAny>) -> PyResult<String> {
                 if !error.is_instance_of::<PyRuntimeError>(py) {
                     return Err(error);
                 }
-                let text = error.value(py).to_string();
+                let text = unsafe { crate::graph::message(error.value(py).as_ptr()) };
                 if text.contains("modified by an inplace operation") {
                     return Ok("a tensor that autograd saved is written in place".to_string());
                 }

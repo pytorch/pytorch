@@ -187,6 +187,7 @@ fn find_loop(func: &Function, done: &HashSet<usize>, most: i64) -> Option<Loop> 
 fn new_value(func: &mut Function, like: V) -> V {
     let name = func.value_names[like as usize].clone();
     func.value_names.push(name);
+    func.ranks.push(func.ranks[like as usize]);
     func.nvalues += 1;
     func.nvalues - 1
 }

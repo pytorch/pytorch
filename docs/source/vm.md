@@ -419,6 +419,17 @@ operations are part of a graph, `frame.f_locals` is where one lands. A
 tensor that only goes from one kernel into the next still never gets an
 object: `stats()["bound_later"]` counts the variables that did.
 
+An object ends where eager mode ends it, and in its order. A value lives
+until the interpreter lets go of it: a variable until it is bound over or
+deleted, a value on the interpreter's stack until the instruction that takes
+it off. Where something raises, the interpreter takes what is on its stack
+off topmost first, down to what the handler keeps, or all of it where the
+function is left: the iterator of an inner loop is closed in front of the
+outer one's, the later value of an expression ends in front of the earlier
+one, and what the instruction that raised was handed ends in front of both.
+What the variables are bound to stays with the frame, which the traceback
+keeps.
+
 ```python
 class Config:
     @property
@@ -1287,16 +1298,22 @@ The states `torch.vm.regions` reports of a graph:
   the kinds of calls that were exported; `variants` is how many forms with
   something to run there are.
   A `reason` next to it says why no further kind of call is exported.
-- `"vm"`: the engine runs the operations, for the `reason` given. Either
-  the graph was given up: a pass raised (`the pass broken raised
-  RuntimeError: not today`) or returned something that is no graph of the
-  same inputs, what was made of the graph raised the first time it was
-  called (`the compiled graph failed: ...`), in which case the operations
-  ran in its place (or, for a graph that writes to a tensor from outside,
-  the call raised: "Writes"), or something between its operations could run Python
-  code (below). Or every kind of call it has seen is one that is not
-  exported (`a tensor of the call carries a forward-mode gradient`). The
-  entries for what is in no graph have this state too.
+- `"vm"`: the engine runs the operations, for the `reason` given. Either the
+  graph was given up: a pass raised (`the pass broken raised RuntimeError:
+  not today`) or returned something that is no graph of the same inputs,
+  what was made of the graph raised the first time it was called (`the
+  compiled graph failed: ...`), in which case the operations ran in its
+  place (or, for a graph that writes to a tensor from outside, the call
+  raised: "Writes"). What the exception says is in the reason where the
+  interpreter's own code alone says it (its class has the `__str__` of the
+  base class of exceptions, of `KeyError` or of `OSError`, and what that
+  reads are numbers, texts or None); of any other exception the reason names
+  the class, since the engine calls no `__str__` and no `__repr__` of an
+  object of the user's, in a reason or in a report. Or something between its
+  operations could run Python code (below). Or every kind of call it has
+  seen is one that is not exported (`a tensor of the call carries a
+  forward-mode gradient`). The entries for what is in no graph have this
+  state too.
 
 `hits` counts the calls that ran what was made of the graph, and `misses`
 those that came to the graph and ran its operations, the calls that were
@@ -3615,19 +3632,19 @@ in eager mode, under `torch.vm` with `Graphs(), Inductor()`, and under
 times, and the figures are the median of the three medians. At inference the
 runner has `torch.no_grad()` around the calls of a model, and the
 `forward_pass` of the huggingface suite enters it itself. Measured that way,
-which is what the dashboard's runner does, on the code three steps before
-this commit; none of the three changes a graph of these models (their
-graphs, operations, runs in a call and hits are the same on all four): one
-process a row, the median of three turns, on 16 cores under the lock for
-timed runs, with the load average between 1.8 and 7.5 in front of a row
-(above 4 in front of three of them) and nothing else on the GPU. Taken again
-on this commit's code and on the code one step before it, model by model in
-one window, the 13 rows differ by no more than eager mode and
-`torch.compile` differ between the same two processes (`torch.vm` between
-0.95 and 1.04 of the row of the step before, and between 0.99 and 1.02 of it
-against those two). The graphs that run are those counted above (DistillGPT2
-with the operations it has on a GPU; of hf_DistilBert the graph of a layer
-and the one of its feed-forward part run six times each in a call):
+which is what the dashboard's runner does, on the code four steps before
+this commit; none of the four changes a graph of these models (their graphs,
+operations, runs in a call and hits are the same on all five): one process a
+row, the median of three turns, on 16 cores under the lock for timed runs,
+with the load average between 1.8 and 7.5 in front of a row (above 4 in
+front of three of them) and nothing else on the GPU. Taken again on this
+commit's code and on the code one step before it, model by model in one
+window, the 13 rows differ by no more than eager mode and `torch.compile`
+differ between the same two processes (`torch.vm` between 0.94 and 1.07 of
+the row of the step before, and between 0.98 and 1.00 of it against those
+two). The graphs that run are those counted above (DistillGPT2 with the
+operations it has on a GPU; of hf_DistilBert the graph of a layer and the
+one of its feed-forward part run six times each in a call):
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
 |---|---|---|---|---|---|---|---|
@@ -3648,7 +3665,7 @@ for five of the models (`python benchmarks/dynamo/torchbench.py
 --performance --inference --bfloat16 --only MODEL` with `--vm` and with
 `--backend inductor`, `timm_models.py` and `huggingface.py` for the models
 of those suites; one run each), which report the speed against eager mode,
-next to what the tool had on the runner's code. That is the code eight steps
+next to what the tool had on the runner's code. That is the code nine steps
 before this commit (the one that changed which dicts the engine looks a name
 up in): the runner's lines were taken one after the other with the load
 average between 0.8 and 2.6 in front of a line and nothing else on the GPU,
@@ -3689,9 +3706,9 @@ same tool on the same code as the rows of this job (the Rust of its build is
 that tree's byte for byte), on 16 cores, with the load average between 5 and
 6 and nothing else on the GPU. With gradients recorded only 2 small graphs
 of hf_DistilBert run (6 x1, 4 x1), and its call takes what eager's takes.
-The rows of yolov3 and of DistillGPT2's training step are of the code three
+The rows of yolov3 and of DistillGPT2's training step are of the code four
 steps before this commit, measured with the rows of the table in the
-runner's mode (the load average 6.0 and 4.2 in front of them). Nine steps
+runner's mode (the load average 6.0 and 4.2 in front of them). Ten steps
 before, when a graph gave only what the code behind it reads, another job
 had yolov3 with gradients recorded at 7.67 ms (1.53 times eager's speed) in
 the process that fills the compiler's cache and at 7.73 ms (1.54) with the
@@ -3705,8 +3722,8 @@ DistillGPT2 6 and 3 where they gave 3 and 1, and two graphs of whisper-tiny
 7 and 4 where they gave 6 and 3; the graphs of the other models give what
 they gave. With gradients recorded the graph of yolov3 is cut at 28 more of
 its results, those that it also reads ("Writes"). That costs yolov3 nothing
-that two takes of the row tell apart under `torch.no_grad()` (4.31 ms three
-steps before this commit and 4.48 five steps before it, on the same graph,
+that two takes of the row tell apart under `torch.no_grad()` (4.31 ms four
+steps before this commit and 4.48 six steps before it, on the same graph,
 for 4.34) and about a third with gradients recorded (10.47 ms and 9.98 for
 7.67 and 7.73; 9.19 of the 10.34 ms that the tool takes apart are in what
 stands for the graph). The rows of this section with gradients recorded that
@@ -3868,16 +3885,21 @@ What graphs do not do at this stage:
   leaves the function from in front of the graph, where the signal could as
   well have come. Nothing looks for signals inside what the engine itself
   makes of a graph, so a handler that waits for the function's frame to be
-  at a place does not find it there. What tells a handler's raise from a
-  raise of the function, of a pass or of what a pass made is the frame of
-  the signal's handler in the traceback. Three kinds of handler are not seen
-  that way: one that is a `functools.partial`, one written in C that raises
-  by itself, and one that is no longer its signal's handler when it raises.
-  An `Exception` from one of these is still swallowed (the call returns as
-  if no signal had come) while a pass over graphs runs, in the first run of
-  what a pass made, in a later run of it where the path stores into an
-  object, and while the first backward of a graph is compared with the
-  autograd engine's.
+  at a place does not find it there.
+- What a handler raises while the engine works for itself (a pass runs, what
+  a pass made runs for the first time, the backward of a graph is compared
+  with autograd's) leaves the call. The engine knows it by its traceback:
+  the frame of a function that is the handler of a signal now, or a frame
+  that was called as the interpreter calls a handler, with the number of a
+  signal and the frame that was running (which sees a handler that
+  `functools.partial` gives its state, and one that put another handler back
+  before it raised). It does not know an `Exception` that a handler written
+  in C raises, which has no frame, nor one of a handler that is the signal's
+  no longer and has deleted or bound over those two arguments: such an
+  exception is taken for a failure of the pass or of the graph, the call
+  returns, and the graph is given up. The other way round, a function that a
+  pass calls with the number of a signal and the pass's own running frame,
+  and that raises an `Exception`, has that exception leave the call.
 - An audit hook (`sys.addaudithook`) is a tool that watches what runs, as a
   trace function is, and is not asked for. The engine raises no event for
   the reads it makes itself (the first `torch.vm(...)` of a process reads
@@ -3935,13 +3957,35 @@ What graphs do not do at this stage:
   function that is first called with a default device set is specialized in
   almost none of its runs, gets no graph, and takes what eager mode takes;
   set after the first calls, the function keeps its blocks and takes about
-  15 percent more than eager mode while the device is set.
+  15 percent more than eager mode while the device is set. Under
+  `torch.set_default_device("cuda")` no model of the table in "Models" gets
+  a graph, and each runs at 0.95 to 1.00 of eager's speed, where
+  `torch.compile` keeps its time (measured on the code one step before this
+  commit, which changes nothing of it).
 - While a `TorchFunctionMode` is on and `Graphs()` alone is in the list, the
   first call under a mode that is entered after a graph was built asks the
   mode for seven reads that the engine makes for itself (`untyped_storage`,
   `layout`, `is_quantized`, `is_nested`, `is_mkldnn`, `grad`, `_base`) of a
   view that a function of `torch.nn.functional` such as `F.dropout2d` is
   given.
+- Where a raise leaves a function that was inlined into its caller, what was
+  on that function's stack ends when its frame is gone already: code that
+  runs at such an end (the `finally` of a generator, a `__del__`) and looks
+  at the frames finds the caller's frame on top. What ends, in which order,
+  and what the variables hold are eager's.
+- What the instruction that raised was handed ends in the order of its
+  operands, which is the interpreter's order but for three kinds of
+  instruction: a store to a subscript that fails (the interpreter lets go of
+  the value first, then of the container and the key), a call of a Python
+  function with more arguments than it takes (of the last argument first),
+  and `raise X(...) from Y` where `Y` is no exception (of what `X` was made
+  with first).
+- With `Graphs()` or a pass over graphs, where a raise is caught inside an
+  inlined function that has a value with an end on its stack (the generator
+  of a loop it is in), the code of that function's handler (its `except`,
+  its `finally`) runs before the value ends, where the interpreter ends it
+  first: a function whose result depends on that order computes another
+  value.
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported. A `TorchFunctionMode` is asked

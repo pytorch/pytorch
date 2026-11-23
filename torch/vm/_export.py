@@ -12,8 +12,8 @@ the modules of a graph compiler are imported by the pass that is one.
 
 import operator
 import os
+import sys
 import threading
-import traceback
 from collections.abc import Callable
 from typing import Any
 
@@ -364,14 +364,19 @@ def build(
             # wherever else in the call the signal comes.
             if runtime.interrupted(e):
                 raise
-            reason = f"the pass {name} raised {type(e).__name__}: {e}"
-            reason = reason.split("\n")[0][:200]
+            # What it says is asked only where no code of anybody's makes
+            # the text: eager mode never asks it.
+            reason = f"the pass {name} raised {runtime.said(e)}"[:200]
             # Where it was raised, for a pass that raises from inside what
-            # it calls.
-            frames = traceback.extract_tb(e.__traceback__)
-            if len(frames) > 2:
-                last = frames[-1]
-                reason += f" (in {last.name}, {os.path.basename(last.filename)}:{last.lineno})"
+            # it calls: read off the traceback as it is, without the lines
+            # of the source (a file that is opened is seen by an audit
+            # hook).
+            last, depth = sys.exc_info()[2], 1
+            while last.tb_next is not None:
+                last, depth = last.tb_next, depth + 1
+            if depth > 2:
+                code = last.tb_frame.f_code
+                reason += f" (in {code.co_name}, {os.path.basename(code.co_filename)}:{last.tb_lineno})"
             return reason
         finally:
             _state.examples = None
@@ -384,7 +389,7 @@ def build(
         try:
             guards += _types.guards_of(made)
         except ValueError as e:
-            return str(e)[:200]
+            return runtime.said(e)[:200]
         made.meta.pop(_types._GUARDS, None)
         made.recompile()
         gm = made

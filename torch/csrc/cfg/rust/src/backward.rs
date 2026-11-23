@@ -52,7 +52,7 @@ impl From<PyErr> for Stop {
 fn joint_says<T>(py: Python<'_>, result: PyResult<T>) -> Result<T, Stop> {
     result.map_err(|error| {
         if error.is_instance_of::<PyValueError>(py) {
-            Stop::Refused(error.value(py).to_string())
+            Stop::Refused(unsafe { crate::graph::message(error.value(py).as_ptr()) })
         } else {
             Stop::Raised(error)
         }
@@ -1156,7 +1156,7 @@ impl<'py> Nodes<'py> {
                     // forward is for the backward to raise, if one comes.
                     let outs = match node.call(&handed, twice) {
                         Ok(outs) => outs,
-                        Err(error) => return refused(format!("{} raised when it was called behind the forward: {}", node.name, error.value(py))),
+                        Err(error) => return refused(format!("{} raised when it was called behind the forward: {}", node.name, unsafe { crate::graph::message(error.value(py).as_ptr()) })),
                     };
                     taken_down(joint, tape.end(py)?)?;
                     outs
@@ -1415,7 +1415,7 @@ fn take_down<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>]) -
             let name = function.getattr("__name__").and_then(|name| name.extract::<String>()).unwrap_or_else(|_| "made".to_string());
             let random = records.iter().any(|record| record.random);
             if let Err(error) = joint.forward(&function, &format!("python::{name}"), &args, &kwargs, &given[0], Vec::new(), random) {
-                why = Some(error.value(py).to_string());
+                why = Some(unsafe { crate::graph::message(error.value(py).as_ptr()) });
             }
             continue;
         }
@@ -1436,7 +1436,7 @@ fn take_down<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>]) -
             }
             let written: Vec<Bound<'py, PyAny>> = record.written.iter().filter_map(|at| record.args.get_item(*at).ok()).filter(is_tensor).collect();
             if let Err(error) = joint.forward(&record.op, &record.name, &record.args, &none, &record.out, written, record.random) {
-                why = Some(error.value(py).to_string());
+                why = Some(unsafe { crate::graph::message(error.value(py).as_ptr()) });
                 break;
             }
             events.push(Event { at: joint.forward_len() - 1, view: record.view, args: record.args, out: record.out });
@@ -1879,11 +1879,7 @@ fn runner<'py>(py: Python<'py>, export: &Option<Py<PyAny>>, ops: &Bound<'py, PyA
     match export.bind(py).call1((ops, takes, gives.clone(), PyTuple::new(py, detached)?)) {
         Ok(made) => Ok(Runner::Made(made.unbind(), gives.len())),
         // What a pass raises is a reason like any other.
-        Err(error) => {
-            let kind = error.get_type(py).name().map(|name| name.to_string()).unwrap_or_default();
-            let text = format!("{kind}: {}", error.value(py));
-            refused(text.lines().next().unwrap_or("").chars().take(200).collect::<String>())
-        }
+        Err(error) => refused(unsafe { crate::graph::said(error.value(py).as_ptr()) }),
     }
 }
 
@@ -2191,7 +2187,7 @@ impl Kept {
             Err(error) if needed.is_empty() && pattern.iter().all(|came| *came) => return Err(error),
             Err(error) => {
                 crate::vm::unsettled();
-                let why = format!("its kernels do not fit: {}", error.value(py).to_string().lines().next().unwrap_or(""));
+                let why = format!("its kernels do not fit: {}", unsafe { crate::graph::message(error.value(py).as_ptr()) }.lines().next().unwrap_or(""));
                 let before = self.plan.backs.lock().unwrap().insert((way, pattern.clone(), needed.to_vec()), Err(why.clone()));
                 drop(before);
                 return self.again(py, grads, out, false, &why);
@@ -2566,7 +2562,7 @@ impl Form {
                 // signal raised) says nothing about the form: it leaves
                 // the call, and the form goes on learning.
                 Err(error) if unsafe { crate::graph::came_between(error.value(py).as_ptr()) } => return Err(error),
-                Err(error) => State::Refused(error.value(py).to_string()),
+                Err(error) => State::Refused(unsafe { crate::graph::message(error.value(py).as_ptr()) }),
             },
             None => {
                 *self.bytes.lock().unwrap() = first.joint.cut(true);
@@ -2576,7 +2572,7 @@ impl Form {
                     Err(Stop::Refused(why)) => State::Refused(why),
                     Err(Stop::Cut(_)) => State::Refused("the graph is cut".to_string()),
                     Err(Stop::Raised(error)) if unsafe { crate::graph::came_between(error.value(py).as_ptr()) } => return Err(error),
-                    Err(Stop::Raised(error)) => State::Refused(error.value(py).to_string()),
+                    Err(Stop::Raised(error)) => State::Refused(unsafe { crate::graph::message(error.value(py).as_ptr()) }),
                 }
             }
         };
@@ -2633,7 +2629,7 @@ pub unsafe fn staged(description: Obj) -> Result<crate::pyffi::PyObj, String> {
     };
     match made() {
         Ok(form) => Ok(crate::pyffi::PyObj::from_owned(form.into_ptr())),
-        Err(error) => Err(format!("the engine's backward: {}", error.value(py))),
+        Err(error) => Err(format!("the engine's backward: {}", crate::graph::message(error.value(py).as_ptr()))),
     }
 }
 

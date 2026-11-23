@@ -13285,6 +13285,631 @@ def vm_asks_case_reads(x):
     return (h * h.shape[0] + h.ndim + x.shape[0] + h.size(1) + x.dim()).sum()
 
 
+VM_SAYS_LOG = []
+
+
+class VmSaysLoud(Exception):
+    def __str__(self):
+        VM_SAYS_LOG.append("str")
+        return "loud"
+
+    def __repr__(self):
+        VM_SAYS_LOG.append("repr")
+        return "VmSaysLoud()"
+
+
+class VmSaysPlain(RuntimeError):
+    """An exception class with the text of the class it is made of."""
+
+
+class VmSaysArgument:
+    def __repr__(self):
+        VM_SAYS_LOG.append("repr of an argument")
+        return "argument"
+
+    __str__ = __repr__
+
+
+def vm_says_case(x):
+    h = (x * 2).sin() + 1
+    return (h.cos() * 3 + h).sum()
+
+
+def vm_says_helper(gm):
+    raise IndexError("deep")
+
+
+def vm_says_pass_that_raises_deep(gm, input_types):
+    return vm_says_helper(gm)
+
+
+def vm_signalled_raise():
+    state = VM_SEES_SIGNAL
+    if state["armed"]:
+        state["armed"] = False
+        raise VmSeesTimeout("a signal")
+
+
+def vm_signalled_function(signum, frame):
+    vm_signalled_raise()
+
+
+def vm_signalled_with_state(state, signum, frame):
+    vm_signalled_raise()
+
+
+def vm_signalled_any(*args):
+    vm_signalled_raise()
+
+
+def vm_signalled_quiet(signum, frame):
+    pass
+
+
+def vm_signalled_replaced(signum, frame):
+    # A timeout of one shot: it puts another handler back before it raises.
+    if VM_SEES_SIGNAL["armed"]:
+        signal.signal(signum, vm_signalled_quiet)
+    vm_signalled_raise()
+
+
+class VmSignalledOwner:
+    def handle(self, state, signum, frame):
+        vm_signalled_raise()
+
+
+def vm_signalled_pass(gm, input_types):
+    # A pass over graphs in which a signal comes, in every run of it.
+    if VM_SEES_SIGNAL["armed"]:
+        VM_SEES_SIGNAL["number"].again
+        len(())
+    return gm
+
+
+VM_UNWINDS_LOG = []
+
+
+def vm_unwinds_resource(name, values=(2.0, 3.0)):
+    try:
+        for value in values:  # noqa: UP028
+            yield value
+    finally:
+        VM_UNWINDS_LOG.append(("closed", name))
+
+
+class VmUnwindsLoud:
+    def __init__(self, name):
+        self.name = name
+
+    def __del__(self):
+        VM_UNWINDS_LOG.append(("del", self.name))
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return 2.0
+
+
+def vm_unwinds_leaves(x, stop):
+    for a in vm_unwinds_resource("outer"):
+        for b in vm_unwinds_resource("inner"):
+            while True:
+                x = x * a + b
+                if x.sum() > stop:
+                    raise KeyError("out")
+
+
+def vm_unwinds_case_leaves_caught(x, stop):
+    try:
+        return vm_unwinds_leaves(x, stop)
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+        return x
+
+
+def vm_unwinds_case_caught_inside(x, stop):
+    try:
+        for a in vm_unwinds_resource("outer"):
+            for b in vm_unwinds_resource("inner"):
+                while True:
+                    x = x * a + b
+                    if x.sum() > stop:
+                        raise KeyError("in")
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+    VM_UNWINDS_LOG.append("behind")
+    return x + 1
+
+
+def vm_unwinds_case_caught_between(x, stop):
+    for a in vm_unwinds_resource("outer"):
+        try:
+            for b in vm_unwinds_resource("inner"):
+                for c in vm_unwinds_resource("innermost"):
+                    while True:
+                        x = x * a + b + c
+                        if x.sum() > stop:
+                            raise KeyError("in")
+        except KeyError:
+            VM_UNWINDS_LOG.append("handler")
+        VM_UNWINDS_LOG.append("between")
+        break
+    VM_UNWINDS_LOG.append("behind")
+    return x + 1
+
+
+def vm_unwinds_case_three(x, stop):
+    try:
+        for a in vm_unwinds_resource("first"):
+            for b in vm_unwinds_resource("second"):
+                for c in vm_unwinds_resource("third"):
+                    while True:
+                        x = x * a + b + c
+                        if x.sum() > stop:
+                            raise KeyError("in")
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+    return x + 1
+
+
+def vm_unwinds_case_kernel_raises(x, stop):
+    try:
+        for a in vm_unwinds_resource("outer"):
+            for b in vm_unwinds_resource("inner"):
+                while True:
+                    x = x * a + b
+                    if x.sum() > stop:
+                        x = x.view(7, 7)
+    except RuntimeError:
+        VM_UNWINDS_LOG.append("handler")
+    return x + 1
+
+
+def vm_unwinds_case_with_a_variable(x, stop):
+    held = VmUnwindsLoud("variable")
+    try:
+        for a in vm_unwinds_resource("outer"):
+            for b in vm_unwinds_resource("inner"):
+                while True:
+                    x = x * a + b
+                    if x.sum() > stop:
+                        raise KeyError("in")
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+    del held
+    return x + 1
+
+
+def vm_unwinds_case_objects(x, stop):
+    try:
+        for a in VmUnwindsLoud("outer"):
+            for b in VmUnwindsLoud("inner"):
+                while True:
+                    x = x * a + b
+                    if x.sum() > stop:
+                        raise KeyError("in")
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+    return x + 1
+
+
+def vm_unwinds_objects_leave(x, stop):
+    for a in VmUnwindsLoud("outer"):
+        for b in VmUnwindsLoud("inner"):
+            while True:
+                x = x * a + b
+                if x.sum() > stop:
+                    raise KeyError("out")
+
+
+def vm_unwinds_case_objects_leave_caught(x, stop):
+    try:
+        return vm_unwinds_objects_leave(x, stop)
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+        return x
+
+
+def vm_unwinds_case_callee(x, stop):
+    def inner(y):
+        for a in vm_unwinds_resource("outer"):
+            for b in vm_unwinds_resource("inner"):
+                while True:
+                    y = y * a + b
+                    if y.sum() > stop:
+                        raise KeyError("out")
+
+    try:
+        return inner(x)
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+        return x
+
+
+def vm_unwinds_case_round_a_for(x, stop):
+    # The innermost loop never runs out: its own iterator is taken off the
+    # stack by its next draw.
+    try:
+        for a in vm_unwinds_resource("outer"):
+            for b in vm_unwinds_resource("inner"):
+                for c in VmUnwindsLoud("endless"):
+                    x = x * a + b + c
+                    if x.sum() > stop:
+                        raise KeyError("in")
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+    return x + 1
+
+
+def vm_unwinds_case_in_an_expression(x, stop):
+    # No loop: the values of an expression that are on the stack where a
+    # call raises.
+    def raises(y):
+        if y.sum() > stop:
+            raise KeyError("in")
+        return y
+
+    try:
+        return [VmUnwindsLoud("first"), VmUnwindsLoud("second"), raises(x * 2.0 + 1.0)][
+            2
+        ] + 1
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+    return x + 1
+
+
+class VmUnwindsMade(KeyError):
+    def __init__(self, *args):
+        VM_UNWINDS_LOG.append("made")
+        super().__init__(*args)
+
+
+def vm_unwinds_raises_if(y, stop):
+    if y.sum() > stop:
+        raise KeyError("in")
+    return y
+
+
+def vm_unwinds_case_variable_and_stack(x, stop):
+    def inner(y):
+        for a in vm_unwinds_resource("stack"):
+            held = VmUnwindsLoud("variable")  # noqa: F841
+            while True:
+                y = y * a + 1
+                if y.sum() > stop:
+                    raise KeyError("out")
+
+    try:
+        return inner(x)
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+        return x
+
+
+def vm_unwinds_case_variable_and_stack_kernel(x, stop):
+    def inner(y):
+        for a in vm_unwinds_resource("stack"):
+            held = VmUnwindsLoud("variable")  # noqa: F841
+            while True:
+                y = y * a + 1
+                if y.sum() > stop:
+                    y = y.view(7, 7)
+
+    try:
+        return inner(x)
+    except RuntimeError:
+        VM_UNWINDS_LOG.append("handler")
+        return x
+
+
+def vm_unwinds_leaves_two(y, stop):
+    if stop < 0:
+        first = None
+    second = VmUnwindsLoud("second")  # noqa: F841
+    first = VmUnwindsLoud("first")  # noqa: F841
+    y = y * 2.0 + 1.0
+    if y.sum() > stop:
+        raise KeyError("out")
+    return y
+
+
+def vm_unwinds_case_two_variables(x, stop):
+    try:
+        return vm_unwinds_leaves_two(x, stop) + 1
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+        return x
+
+
+def vm_unwinds_leaves_two_kernel(y, stop):
+    if stop < 0:
+        first = None
+    second = VmUnwindsLoud("second")  # noqa: F841
+    first = VmUnwindsLoud("first")  # noqa: F841
+    y = y * 2.0 + 1.0
+    if y.sum() > stop:
+        y = y.view(7, 7)
+    return y
+
+
+def vm_unwinds_case_two_variables_kernel(x, stop):
+    try:
+        return vm_unwinds_leaves_two_kernel(x, stop) + 1
+    except RuntimeError:
+        VM_UNWINDS_LOG.append("handler")
+        return x
+
+
+def vm_unwinds_case_raises_a_class(x, stop):
+    try:
+        for a in vm_unwinds_resource("outer"):
+            for b in vm_unwinds_resource("inner"):
+                while True:
+                    x = x * a + b
+                    if x.sum() > stop:
+                        raise VmUnwindsMade
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+    return x + 1
+
+
+def vm_unwinds_case_comprehension(x, stop):
+    try:
+        return [  # noqa: RUF015
+            VmUnwindsLoud("element")
+            for a in vm_unwinds_resource("iterator")
+            if vm_unwinds_raises_if(x * a, stop) is not None
+        ][0].name
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+    return x + 1
+
+
+class VmUnwindsManager:
+    def __enter__(self):
+        VM_UNWINDS_LOG.append("enter")
+
+    def __exit__(self, *exc):
+        VM_UNWINDS_LOG.append("exit")
+
+
+def vm_unwinds_case_under_with(x, stop):
+    try:
+        with VmUnwindsManager():
+            for a in vm_unwinds_resource("iterator"):
+                while True:
+                    x = x * a + 1
+                    if x.sum() > stop:
+                        x = x.view(7, 7)
+    except RuntimeError:
+        VM_UNWINDS_LOG.append("handler")
+    return x + 1
+
+
+def vm_unwinds_takes(*args):
+    raise KeyError("in")
+
+
+def vm_unwinds_case_operands(x, stop):
+    x = x * 2.0 + 1.0
+    try:
+        if x.sum() > stop:
+            vm_unwinds_takes(VmUnwindsLoud("first"), VmUnwindsLoud("second"))
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+    return x + 1
+
+
+def vm_unwinds_case_operands_builtin(x, stop):
+    x = x * 2.0 + 1.0
+    try:
+        if x.sum() > stop:
+            len(VmUnwindsLoud("first"), VmUnwindsLoud("second"))
+    except TypeError:
+        VM_UNWINDS_LOG.append("handler")
+    return x + 1
+
+
+def vm_unwinds_case_bystanders_kernel(x, stop):
+    x = x * 2.0 + 1.0
+    try:
+        if x.sum() > stop:
+            return [VmUnwindsLoud("first"), VmUnwindsLoud("second"), x.view(7, 7)][2]
+    except RuntimeError:
+        VM_UNWINDS_LOG.append("handler")
+    return x + 1
+
+
+def vm_unwinds_case_inlined_result_below(x, stop):
+    def made(y):
+        return VmUnwindsLoud("result")
+
+    x = x * 2.0 + 1.0
+    try:
+        return [made(x), VmUnwindsLoud("second"), vm_unwinds_raises_if(x, stop)][2] + 1
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+    return x + 1
+
+
+def vm_unwinds_case_conditional_below(x, stop):
+    x = x * 2.0 + 1.0
+    try:
+        return [
+            VmUnwindsLoud("first"),
+            (VmUnwindsLoud("left") if stop > 45 else VmUnwindsLoud("right")),
+            vm_unwinds_raises_if(x, stop),
+        ][2] + 1
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+    return x + 1
+
+
+def vm_unwinds_case_callee_stack_and_callers(x, stop):
+    def inner(y):
+        for a in vm_unwinds_resource("callee"):
+            while True:
+                y = y * a + 1
+                if y.sum() > stop:
+                    raise KeyError("in")
+
+    try:
+        return [VmUnwindsLoud("first"), VmUnwindsLoud("second"), inner(x)][2] + 1
+    except KeyError:
+        VM_UNWINDS_LOG.append("handler")
+    return x + 1
+
+
+def vm_unwinds_case_finally_runs(x, stop):
+    try:
+        for a in vm_unwinds_resource("outer"):
+            try:
+                for b in vm_unwinds_resource("inner"):
+                    while True:
+                        x = x * a + b
+                        if x.sum() > stop:
+                            x = x.view(7, 7)
+            finally:
+                VM_UNWINDS_LOG.append("finally")
+    except RuntimeError:
+        VM_UNWINDS_LOG.append("handler")
+    return x + 1
+
+
+VM_UNWINDS_STATE = {"value": 1.0}
+
+
+def vm_unwinds_scaling(factor, shift):
+    # A generator whose end changes a number that a function can read: two
+    # of them that end in another order leave another number.
+    try:
+        yield 2.0
+        yield 3.0
+    finally:
+        VM_UNWINDS_STATE["value"] = VM_UNWINDS_STATE["value"] * factor + shift
+        VM_UNWINDS_LOG.append(("closed", factor))
+
+
+class VmUnwindsScales:
+    def __init__(self, factor, shift):
+        self.factor, self.shift = factor, shift
+
+    def __del__(self):
+        VM_UNWINDS_STATE["value"] = VM_UNWINDS_STATE["value"] * self.factor + self.shift
+        VM_UNWINDS_LOG.append(("del", self.factor))
+
+
+class VmUnwindsSaw(KeyError):
+    def __init__(self):
+        super().__init__(VM_UNWINDS_STATE["value"])
+
+
+def vm_unwinds_case_reads_the_closes(x, stop):
+    VM_UNWINDS_STATE["value"] = 1.0
+    try:
+        for a in vm_unwinds_scaling(2.0, 0.0):
+            for b in vm_unwinds_scaling(1.0, 1.0):
+                while True:
+                    x = x * a + b
+                    if x.sum() > stop:
+                        x = x.view(7, 7)
+    except RuntimeError:
+        pass
+    return x * VM_UNWINDS_STATE["value"]
+
+
+def vm_unwinds_case_reads_the_ends(x, stop):
+    VM_UNWINDS_STATE["value"] = 1.0
+    x = x * 2.0 + 1.0
+    try:
+        if x.sum() > stop:
+            return [VmUnwindsScales(2.0, 0.0), VmUnwindsScales(1.0, 1.0), x.view(7, 7)][
+                2
+            ]
+    except RuntimeError:
+        VM_UNWINDS_LOG.append("handler")
+    return x * VM_UNWINDS_STATE["value"]
+
+
+def vm_unwinds_case_reads_what_the_exception_saw(x, stop):
+    VM_UNWINDS_STATE["value"] = 1.0
+    try:
+        for a in vm_unwinds_scaling(2.0, 0.0):
+            for b in vm_unwinds_scaling(1.0, 1.0):
+                while True:
+                    x = x * a + b
+                    if x.sum() > stop:
+                        raise VmUnwindsSaw
+    except KeyError as error:
+        return x * error.args[0]
+    return x
+
+
+VM_UNWINDS_FRAMES = []
+
+
+def vm_unwinds_looking(name):
+    # A generator whose end looks at the frames it is closed from.
+    try:
+        yield 2.0
+        yield 3.0
+    finally:
+        frame, names = sys._getframe(1), []
+        while frame is not None and len(names) < 2:
+            names.append(frame.f_code.co_name)
+            frame = frame.f_back
+        VM_UNWINDS_FRAMES.append((name, tuple(names)))
+
+
+def vm_unwinds_leaves_looking(x, stop):
+    for a in vm_unwinds_looking("outer"):
+        for b in vm_unwinds_looking("inner"):
+            while True:
+                x = x * a + b
+                if x.sum() > stop:
+                    raise KeyError("out")
+
+
+def vm_unwinds_case_looks_at_the_frames(x, stop):
+    try:
+        return vm_unwinds_leaves_looking(x, stop)
+    except KeyError:
+        return x
+
+
+VM_UNWINDS_CASES = (
+    vm_unwinds_case_leaves_caught,
+    vm_unwinds_case_caught_inside,
+    vm_unwinds_case_caught_between,
+    vm_unwinds_case_three,
+    vm_unwinds_case_kernel_raises,
+    vm_unwinds_case_with_a_variable,
+    vm_unwinds_case_objects,
+    vm_unwinds_case_objects_leave_caught,
+    vm_unwinds_case_callee,
+    vm_unwinds_case_round_a_for,
+    vm_unwinds_case_in_an_expression,
+    vm_unwinds_case_variable_and_stack,
+    vm_unwinds_case_variable_and_stack_kernel,
+    vm_unwinds_case_two_variables,
+    vm_unwinds_case_two_variables_kernel,
+    vm_unwinds_case_raises_a_class,
+    vm_unwinds_case_comprehension,
+    vm_unwinds_case_under_with,
+    vm_unwinds_case_operands,
+    vm_unwinds_case_operands_builtin,
+    vm_unwinds_case_bystanders_kernel,
+    vm_unwinds_case_inlined_result_below,
+    vm_unwinds_case_conditional_below,
+    vm_unwinds_case_callee_stack_and_callers,
+    vm_unwinds_case_finally_runs,
+    vm_unwinds_case_reads_the_closes,
+    vm_unwinds_case_reads_the_ends,
+    vm_unwinds_case_reads_what_the_exception_saw,
+)
+
+
 GRAPH_NAME_LOG = []
 
 
@@ -19192,6 +19817,344 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
                             specialized,
                             msg=msg,
                         )
+
+    def test_the_text_of_what_was_raised_is_asked_only_where_no_code_makes_it(
+        self, device
+    ):
+        # The engine writes down why it gives a graph up, and what a pass
+        # or what a pass made raised is part of that. It asks no object of
+        # the user's for its text: eager mode never calls the `__str__` of
+        # an exception that nobody prints. What an exception says is in the
+        # reason where the interpreter's own code alone says it: the class
+        # has the `__str__` of the base class of exceptions (or `KeyError`'s,
+        # or `OSError`'s), and what that reads are numbers, texts or None;
+        # otherwise the reason names the class. Nor do the reports
+        # (`dump()`, `regions()`, `stats()`, `repr`) call the `__repr__` of
+        # a callable that a pass put in. (The `__str__` of an exception of
+        # the user's ran once, in the call in which a pass raised it.)
+        def raises(error):
+            def failing(gm, input_types):
+                raise error
+
+            return failing
+
+        def made_raises(error):
+            def wraps(gm, input_types):
+                inner, ran = gm.forward, []
+
+                def forward(*args):
+                    if not ran:
+                        ran.append(True)
+                        raise error
+                    return inner(*args)
+
+                gm.forward = forward
+                return gm
+
+            return wraps
+
+        def reports(compiled):
+            return [
+                compiled.dump(),
+                torch.vm.regions(compiled),
+                compiled.stats(),
+                repr(compiled),
+            ]
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        cases = (
+            (VmSaysLoud("x"), "VmSaysLoud"),
+            (ValueError(VmSaysArgument()), "ValueError"),
+            (OSError(2, "gone", VmSaysArgument()), "FileNotFoundError"),
+            (UnicodeDecodeError("utf-8", b"x", 0, 1, "odd"), "UnicodeDecodeError"),
+            (OSError(2, "gone", "there"), "FileNotFoundError: [Errno 2] gone: 'there'"),
+            (VmSaysPlain("not today"), "VmSaysPlain: not today"),
+            (KeyError("missing"), "KeyError: 'missing'"),
+            (RuntimeError("two", 2), "RuntimeError: ('two', 2)"),
+            (TypeError(), "TypeError: "),
+        )
+        places = (
+            ("a pass", raises, "the pass failing raised "),
+            ("what a pass made", made_raises, "the compiled graph failed: "),
+        )
+        for error, said in cases:
+            for where, make, reason in places:
+                msg = f"{type(error).__name__} raised by {where}"
+                compiled = torch.vm(
+                    vm_says_case,
+                    passes=(*graphs, make(error)),
+                    fallback=False,
+                    demote=False,
+                )
+                for at in range(6):
+                    x = torch.arange(6.0, device=device) / 7 + at
+                    del VM_SAYS_LOG[:]
+                    self.assertEqual(
+                        compiled(x).tolist(), vm_says_case(x).tolist(), msg=msg
+                    )
+                    reports(compiled)
+                    self.assertEqual(VM_SAYS_LOG, [], msg=msg)
+                reasons = [
+                    region.get("reason") for region in torch.vm.regions(compiled)
+                ]
+                self.assertIn(reason + said, reasons, msg=msg)
+        # Where a pass raises from inside what it calls, the reason says
+        # where, read off the traceback: no line of the source is looked
+        # up for it (a file that is opened is seen by an audit hook).
+        with (
+            unittest.mock.patch("linecache.getline") as getline,
+            unittest.mock.patch("linecache.checkcache") as checkcache,
+        ):
+            compiled = torch.vm(
+                vm_says_case,
+                passes=(*graphs, vm_says_pass_that_raises_deep),
+                fallback=False,
+                demote=False,
+            )
+            for at in range(4):
+                x = torch.arange(6.0, device=device) / 7 + at
+                self.assertEqual(compiled(x).tolist(), vm_says_case(x).tolist())
+            reasons = [region.get("reason") for region in torch.vm.regions(compiled)]
+        line = vm_says_helper.__code__.co_firstlineno + 1
+        self.assertIn(
+            f"the pass vm_says_pass_that_raises_deep raised IndexError: deep (in vm_says_helper, test_vm.py:{line})",
+            reasons,
+        )
+        self.assertEqual((getline.call_count, checkcache.call_count), (0, 0))
+
+        # A callable that a pass over a block put in the place of a run of
+        # operations is named by its class, in the reports and where the
+        # pass looks at the instructions.
+        class Run:
+            def __init__(self, replay):
+                self.replay = replay
+                self.inputs, self.outputs = replay.io(replay.start, replay.end)
+
+            def __repr__(self):
+                VM_SAYS_LOG.append("repr of a callable")
+                return "a run"
+
+            def __call__(self, *args):
+                env = dict(zip(self.inputs, args))
+                self.replay.run(self.replay.start, self.replay.end, env)
+                return tuple(env[value] for value in self.outputs)
+
+        def replace(region):
+            insts = region.instructions()
+            work = [i for i, inst in enumerate(insts) if inst["op"] == "binary"]
+            if not work or any(inst["op"] == "call_object" for inst in insts):
+                return False
+            if region.note is None:
+                region.note = Run(region.replayer(work[0], work[-1] + 1))
+            return region.fuse(
+                region.note.replay.start, region.note.replay.end, region.note
+            )
+
+        def scaled(x, y, k):
+            a = x * y + k
+            b = a - x
+            return a, b * 2
+
+        del VM_SAYS_LOG[:]
+        compiled = torch.vm(scaled, passes=[*CFG, replace], fallback=False)
+        for k in range(6):
+            x, y = torch.rand(3, device=device), torch.rand(3, device=device)
+            self.assertEqual(compiled(x, y, k), scaled(x, y, k), atol=0, rtol=0)
+        self.assertIn("call_object a Run(", reports(compiled)[0])
+        self.assertEqual(VM_SAYS_LOG, [])
+
+    def test_what_a_raise_takes_off_the_stack_ends_topmost_first(self, device):
+        # A value lives as long as the interpreter keeps it, and where a
+        # raise leaves loops, an expression or the function, the
+        # interpreter takes what is on its stack off topmost first: the
+        # iterator of the inner loop is closed in front of the outer one's,
+        # the later value of an expression ends in front of the earlier
+        # one, down to what the handler keeps; a `raise` of a class makes
+        # the exception with all of it there; what the function is bound to
+        # stays with the frame. Whether a `raise` statement, a kernel or a
+        # call raises, in the function, in a function it calls, with one
+        # handler or several. (Where an instruction raised, what was on the
+        # stack ended in the order it was made in, and in front of a
+        # `raise` of a class all but the last of it: a function that reads
+        # what two ends leave behind, or what the exception saw when it was
+        # made, computed another value.)
+        def keep(gm, input_types):
+            return gm
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (
+            ("the default passes", None),
+            ("graphs", graphs),
+            ("a pass", (*graphs, keep)),
+            ("no pass", ()),
+        )
+
+        def calls(fn):
+            rows = []
+            for at in range(8):
+                x = torch.arange(3.0, device=device) + at
+                del VM_UNWINDS_LOG[:]
+                out = fn(x, 40.0 + 10 * (at % 3))
+                rows.append(
+                    (
+                        out.tolist() if isinstance(out, torch.Tensor) else out,
+                        list(VM_UNWINDS_LOG),
+                    )
+                )
+            return rows
+
+        for fn in VM_UNWINDS_CASES:
+            expected = calls(fn)
+            # Every shape ends something, and something raises in it.
+            self.assertTrue(any(log for _, log in expected), msg=fn.__name__)
+            for way, passes in ways:
+                compiled = (
+                    torch.vm(fn)
+                    if passes is None
+                    else torch.vm(fn, passes=passes, fallback=False, demote=False)
+                )
+                self.assertEqual(calls(compiled), expected, msg=f"{fn.__name__}, {way}")
+
+    def test_what_ends_on_the_stack_of_an_inlined_function_finds_its_caller(
+        self, device
+    ):
+        # A limit, pinned as it is. Where a raise leaves a function, what is
+        # on that function's stack ends while its frame is still there: the
+        # `finally` of a generator that looks at the frames finds the
+        # function's on top, in eager mode and where the function is called
+        # as one. Where the function was inlined into its caller its frame
+        # is gone by then, and the caller's is on top. What ends, in which
+        # order, and what the function returns are eager's either way.
+        def calls(fn):
+            rows = []
+            for at in range(6):
+                x = torch.arange(3.0, device=device) + at
+                del VM_UNWINDS_FRAMES[:]
+                rows.append((fn(x, 40.0).tolist(), list(VM_UNWINDS_FRAMES)))
+            return rows
+
+        case, callee = vm_unwinds_case_looks_at_the_frames, "vm_unwinds_leaves_looking"
+        expected = calls(case)
+        self.assertEqual(
+            expected[0][1],
+            [("inner", (callee, case.__name__)), ("outer", (callee, case.__name__))],
+        )
+        self.assertEqual(calls(torch.vm(case, passes=(), fallback=False)), expected)
+        inlined = calls(torch.vm(case, fallback=False, demote=False))
+        self.assertEqual([row[0] for row in inlined], [row[0] for row in expected])
+        self.assertEqual(
+            inlined[-1][1],
+            [("inner", (case.__name__, "calls")), ("outer", (case.__name__, "calls"))],
+        )
+
+    def test_a_handler_is_known_by_how_the_interpreter_calls_it(self, device):
+        # What the handler of a signal raises is no raise of a pass, of
+        # what a pass made, or of the instruction that was running: it
+        # leaves the call it came in. The engine knows it by the frame of a
+        # function that is the handler of a signal now, and by the call the
+        # interpreter makes, `handler(number, frame)`: a frame of the
+        # traceback that was handed the number of a signal and the frame
+        # that was running. The second sees a handler that takes more in
+        # front (a `functools.partial` with its state, a method of an object
+        # behind one), one that takes `*args`, and one that is the signal's
+        # no longer when it raises (it put another handler back first).
+        # (Such an `Exception` was taken for a failure of the pass or of the
+        # graph: the call returned a value, and the graph was given up.)
+        if threading.current_thread() is not threading.main_thread():
+            self.skipTest("signals are handled in the main thread")
+
+        def keep(gm, input_types):
+            return gm
+
+        state = VM_SEES_SIGNAL
+
+        def one(fn, x, armed, mark):
+            state["armed"] = armed
+            if armed and mark:
+                state["number"].again
+            try:
+                return fn(x).detach().tolist()
+            except VmSeesTimeout:
+                return "VmSeesTimeout"
+            finally:
+                state["armed"] = False
+
+        kinds = {
+            "a function": lambda: vm_signalled_function,
+            "a functools.partial": lambda: functools.partial(
+                vm_signalled_with_state, {}
+            ),
+            "a partial of a method": lambda: functools.partial(
+                VmSignalledOwner().handle, {}
+            ),
+            "a function of *args": lambda: vm_signalled_any,
+            "one that is the signal's no longer": lambda: vm_signalled_replaced,
+        }
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        fn = vm_sees_case_interrupted
+        previous = signal.getsignal(signal.SIGUSR1)
+        state["number"] = VmSeesTrips(signal.SIGUSR1)
+        try:
+            for kind, make in kinds.items():
+                # While a pass runs: the pass marks the signal as arrived.
+                compiled = torch.vm(
+                    fn,
+                    passes=(*graphs, vm_signalled_pass),
+                    fallback=False,
+                    demote=False,
+                )
+                for at in range(8):
+                    signal.signal(signal.SIGUSR1, make())
+                    x = torch.arange(6.0, device=device) + at
+                    said = one(compiled, x, at == 1, False)
+                    self.assertEqual(
+                        said,
+                        "VmSeesTimeout" if at == 1 else fn(x).tolist(),
+                        msg=f"{kind}, in a pass, call {at}",
+                    )
+                (found,) = [
+                    region for region in torch.vm.regions(compiled) if "ops" in region
+                ]
+                self.assertEqual(
+                    (found["state"], found["hits"] >= 4),
+                    ("compiled", True),
+                    msg=f"{kind}, in a pass",
+                )
+                # Arrived when a call starts: the call that takes the path
+                # down and hands it to a pass, the first runs of what the
+                # pass made, the first backward of a form and its
+                # comparison with the autograd engine.
+                for way, passes, graded in (
+                    ("a pass", (*graphs, keep), False),
+                    ("a gradient", graphs, True),
+                ):
+                    for pending in range(1, 6):
+                        rows = []
+                        for run in (
+                            torch.vm(fn, passes=passes, fallback=False, demote=False),
+                            fn,
+                        ):
+                            row = []
+                            for at in range(8):
+                                signal.signal(signal.SIGUSR1, make())
+                                x = (
+                                    torch.arange(6.0, device=device) + at
+                                ).requires_grad_(graded)
+                                row.append(one(run, x, at == pending, True))
+                            rows.append(row)
+                        msg = f"{kind}, arrived at call {pending}, {way}"
+                        self.assertEqual(rows[0], rows[1], msg=msg)
+                        self.assertEqual(
+                            [
+                                at
+                                for at, said in enumerate(rows[1])
+                                if said == "VmSeesTimeout"
+                            ],
+                            [pending],
+                            msg=msg,
+                        )
+        finally:
+            signal.signal(signal.SIGUSR1, previous)
 
     def test_a_key_that_compares_in_python_is_compared_once_per_lookup(self, device):
         # A dict that the engine looks a name up in (the dict of an object,

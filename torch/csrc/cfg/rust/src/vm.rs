@@ -2126,6 +2126,7 @@ impl Compiled {
         // One value no instruction of the function defines: where a pass can
         // put a result it takes apart right away (see `Region.fuse`).
         func.value_names.push(None);
+        func.ranks.push(0);
         func.nvalues += 1;
         let analysis = analysis::analyze(&func);
         let mut generic = Vec::with_capacity(func.blocks.len());
@@ -2576,13 +2577,15 @@ impl Compiled {
     /// Hands the exception that was raised in block `cur` to the block's
     /// handler and returns that block; None if the block has no handler and
     /// the exception leaves the function.
-    unsafe fn catch(&self, regs: &mut [Obj], cur: usize) -> Option<usize> {
+    unsafe fn catch(&self, regs: &mut [Obj], cur: usize, first: &[V]) -> Option<usize> {
         let handler = self.func.blocks.get_unchecked(cur).handler;
         if handler == NONE {
+            self.unwind(regs, first, None);
             return None;
         }
         let exc = ffi::PyErr_GetRaisedException();
         if exc.is_null() {
+            self.unwind(regs, first, None);
             return None;
         }
         // The handler's phis, for the edge from this block.
@@ -2604,14 +2607,29 @@ impl Compiled {
         }
         // Everything the handler does not read is dead from here on.
         let keep = self.handler_keep.get_unchecked(handler as usize).as_ref().unwrap_unchecked();
-        let nvalues = self.func.nvalues as usize;
-        for (v, r) in regs[..nvalues].iter_mut().enumerate() {
-            if !r.is_null() && !keep.contains(v as V) {
-                capi::release(std::mem::replace(r, null_mut()));
-            }
-        }
+        self.unwind(regs, first, Some(keep));
         *regs.get_unchecked_mut(self.func.exc_reg as usize) = exc;
         Some(handler as usize)
+    }
+
+    /// Lets go of what a raise ends, in the interpreter's order: of what
+    /// the instruction that raised took off the stack itself (`first`: what
+    /// it uses last), then of what the unwinding takes off the stack, the
+    /// topmost first (`Function::ranks`), then of the rest. `keep` is what
+    /// the handler goes on with; None where the function is left.
+    #[cold]
+    unsafe fn unwind(&self, regs: &mut [Obj], first: &[V], keep: Option<&analysis::BitSet>) {
+        let ends = |v: V| keep.is_none_or(|keep| !keep.contains(v));
+        for v in first {
+            if ends(*v) {
+                capi::release(take(regs, *v));
+            }
+        }
+        let mut rest: Vec<V> = (0..self.func.nvalues).filter(|v| !regs[*v as usize].is_null() && ends(*v)).collect();
+        rest.sort_by_key(|v| std::cmp::Reverse(self.func.ranks[*v as usize]));
+        for v in rest {
+            capi::release(take(regs, v));
+        }
     }
 
     /// Records the error that the instruction at `bc` raised in the
@@ -4998,7 +5016,7 @@ impl Compiled {
             Err(err) => {
                 // A failing pass must not take the program down with it: the
                 // block simply stays generic.
-                let msg = pyo3::Python::attach(|py| err.value(py).to_string());
+                let msg = pyo3::Python::attach(|py| unsafe { graph::message(err.value(py).as_ptr()) });
                 Err(format!("pass failed: {}", msg))
             }
         };
@@ -10850,8 +10868,11 @@ impl Compiled {
         // raised in, entered like the first block, or leaves the function.
         macro_rules! raised {
             ($blocks:lifetime, $block:expr) => {
+                raised!($blocks, $block, &[])
+            };
+            ($blocks:lifetime, $block:expr, $first:expr) => {
                 self.settled.raised.set(serial);
-                match self.catch(regs, $block) {
+                match self.catch(regs, $block, $first) {
                     Some(handler) => {
                         pred = usize::MAX;
                         cur = handler;
@@ -11094,7 +11115,7 @@ impl Compiled {
                                 if mode == Mode::Profile {
                                     self.raised_profiling(cur);
                                 }
-                                raised!('blocks, cur);
+                                raised!('blocks, cur, &inst.kills);
                             }
                         }
                         pc += 1;

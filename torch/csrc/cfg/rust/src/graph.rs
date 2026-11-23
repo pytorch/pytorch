@@ -1185,25 +1185,79 @@ pub unsafe fn raised_text_kept() -> String {
     text
 }
 
-/// The error that is set, as one line of text; clears it.
+/// The error that is set, as one line of text (`said`); clears it.
 pub unsafe fn raised_text() -> String {
     let raised = ffi::PyErr_GetRaisedException();
     if raised.is_null() {
         return "unknown error".to_string();
     }
-    let text = ffi::PyObject_Str(raised);
-    let message = if text.is_null() {
-        ffi::PyErr_Clear();
-        String::new()
-    } else {
-        let message = pyffi::str_to_string(text);
-        ffi::Py_DECREF(text);
-        message
-    };
-    let kind = pyffi::type_name(raised);
+    let text = said(raised);
     ffi::Py_DECREF(raised);
-    let line = message.lines().next().unwrap_or("");
-    format!("{}: {}", kind, line.chars().take(200).collect::<String>())
+    text
+}
+
+/// What an exception says, where C code alone says it: its class has the
+/// base exception's own `__str__`, `KeyError`'s or `OSError`'s, which read
+/// the arguments (and of an `OSError` its number, its text and its file
+/// names), and those are numbers, texts or None. A `__str__` or a
+/// `__repr__` of anybody's never runs. None otherwise.
+unsafe fn spoken(raised: Obj) -> Option<String> {
+    if raised.is_null() || ffi::PyExceptionInstance_Check(raised) == 0 {
+        return None;
+    }
+    let slot = |class: Obj| (*(class as *mut ffi::PyTypeObject)).tp_str.map(|says| says as usize);
+    let own = slot(ffi::Py_TYPE(raised) as Obj);
+    let (keyed, filed) = (own == slot(ffi::PyExc_KeyError), own == slot(ffi::PyExc_OSError));
+    if own != slot(ffi::PyExc_BaseException) && !keyed && !filed {
+        return None;
+    }
+    let args = (*(raised as *mut ffi::PyBaseExceptionObject)).args;
+    if args.is_null() || ffi::PyTuple_CheckExact(args) == 0 {
+        return None;
+    }
+    let count = ffi::PyTuple_GET_SIZE(args);
+    if !(0..count).all(|i| is_plain(ffi::PyTuple_GET_ITEM(args, i))) {
+        return None;
+    }
+    if filed {
+        let error = raised as *mut ffi::PyOSErrorObject;
+        let read = [(*error).myerrno, (*error).strerror, (*error).filename, (*error).filename2];
+        if !read.iter().all(|part| part.is_null() || is_plain(*part)) {
+            return None;
+        }
+        // The class's own code, over what was just looked at.
+        let text = ffi::PyObject_Str(raised);
+        if text.is_null() {
+            ffi::PyErr_Clear();
+            return None;
+        }
+        let said = pyffi::str_to_string(text);
+        ffi::Py_DECREF(text);
+        return Some(said);
+    }
+    let only = if count == 1 { ffi::PyTuple_GET_ITEM(args, 0) } else { null_mut() };
+    Some(match count {
+        0 => String::new(),
+        1 if !keyed && ffi::PyUnicode_CheckExact(only) != 0 => pyffi::str_to_string(only),
+        1 => pyffi::repr(only),
+        _ => pyffi::repr(args),
+    })
+}
+
+/// An exception in a reason: its class, and behind it the first line of
+/// what it says where that can be asked without running code (`spoken`).
+pub unsafe fn said(raised: Obj) -> String {
+    let kind = pyffi::type_name(raised);
+    match spoken(raised) {
+        Some(text) => format!("{}: {}", kind, text.lines().next().unwrap_or("").chars().take(200).collect::<String>()),
+        None => kind,
+    }
+}
+
+/// What an exception says (`spoken`), or its class where that cannot be
+/// asked.
+pub unsafe fn message(raised: Obj) -> String {
+    spoken(raised).unwrap_or_else(|| pyffi::type_name(raised))
 }
 
 /// Whether two values are the same as far as a kernel that is given them
@@ -4521,10 +4575,10 @@ pub unsafe fn thread_state() -> u64 {
 /// function and was raised by none of them: one that is no `Exception`
 /// (a `KeyboardInterrupt`, which the interpreter's own handler of an
 /// interrupt raises from C; a `SystemExit`), or one whose traceback goes
-/// through a function that is the handler of a signal now. A handler
-/// runs wherever the interpreter or the VM looks for signals, behind
-/// whichever instruction was running: what it raises says nothing about
-/// that instruction. The exception stays set.
+/// through the handler of a signal (`through_handler`). A handler runs
+/// wherever the interpreter or the VM looks for signals, behind whichever
+/// instruction was running: what it raises says nothing about that
+/// instruction. The exception stays set.
 pub unsafe fn interrupted() -> bool {
     let raised = ffi::PyErr_GetRaisedException();
     if raised.is_null() {
@@ -4540,10 +4594,18 @@ pub unsafe fn came_between(raised: Obj) -> bool {
     ffi::PyErr_GivenExceptionMatches(raised, ffi::PyExc_Exception) == 0 || through_handler(raised)
 }
 
-/// Whether the traceback of an exception has the frame of a function
-/// that is installed as the handler of a signal: a function, a method of
-/// one, or an object whose class has a function for calls. Asked of
-/// `_signal.getsignal`, the function of C that reads the table.
+/// Whether the traceback of an exception goes through the handler of a
+/// signal. Two marks, either of which says so. The frame is that of a
+/// function that is installed as the handler of a signal now: a
+/// function, a method of one, or an object whose class has a function
+/// for calls (asked of `_signal.getsignal`, the function of C that reads
+/// the table). Or the frame was called as the interpreter calls a
+/// handler, `handler(number, frame)` (`called_as_handler`): with the
+/// number of a signal and the frame that was running, which is the frame
+/// of the entry above it in the traceback, or for the outermost entry
+/// the frame that is running now; that mark sees a handler that takes
+/// more in front (a `functools.partial`, a method) and one that is the
+/// signal's no longer. Neither sees a handler of C, which has no frame.
 unsafe fn through_handler(raised: Obj) -> bool {
     let module = pyffi::module(c"_signal");
     let asks = pyffi::in_module(module, c"getsignal");
@@ -4577,18 +4639,75 @@ unsafe fn through_handler(raised: Obj) -> bool {
     ffi::PyErr_Clear();
     let first = ffi::PyException_GetTraceback(raised);
     let mut at = first as *mut ffi::PyTracebackObject;
+    let mut above: *mut ffi::PyFrameObject = null_mut();
     let mut found = false;
-    while !at.is_null() && !found && !codes.is_empty() {
+    while !at.is_null() && !found {
         let frame = (*at).tb_frame;
         if !frame.is_null() {
             let code = ffi::PyFrame_GetCode(frame) as Obj;
-            found = codes.contains(&code);
+            found = codes.contains(&code) || called_as_handler(frame, code, above, count);
             xdecref(code);
         }
+        above = frame;
         at = (*at).tb_next;
     }
     xdecref(first);
     found
+}
+
+/// Whether a frame was called as the interpreter calls the handler of a
+/// signal: among what it was called with (its arguments, and what a
+/// `*args` holds) are a whole number that names a signal and the frame
+/// that was running when the interpreter looked for signals: `above`,
+/// the frame of the traceback entry above this one, or where this is the
+/// outermost entry (null) the frame that is running now, which the
+/// exception has not gone back through. Reads the arguments as the frame
+/// has them: one that the function has bound to something else or
+/// deleted is not seen.
+unsafe fn called_as_handler(frame: *mut ffi::PyFrameObject, code: Obj, above: *mut ffi::PyFrameObject, signals: std::ffi::c_long) -> bool {
+    let number = |name: &std::ffi::CStr| {
+        let held = ffi::PyObject_GetAttrString(code, name.as_ptr());
+        let count = if held.is_null() { 0 } else { ffi::PyLong_AsLong(held) };
+        xdecref(held);
+        count.max(0) as isize
+    };
+    // CO_VARARGS and CO_VARKEYWORDS.
+    let flags = number(c"co_flags");
+    let taken = number(c"co_argcount") + number(c"co_kwonlyargcount") + ((flags >> 2) & 1) + ((flags >> 3) & 1);
+    let names = ffi::PyObject_GetAttrString(code, c"co_varnames".as_ptr());
+    let (mut named, mut running): (bool, Vec<Obj>) = (false, Vec::new());
+    if !names.is_null() && ffi::PyTuple_CheckExact(names) != 0 {
+        let mut look = |value: Obj| {
+            if ffi::PyLong_CheckExact(value) != 0 {
+                let signal = ffi::PyLong_AsLong(value);
+                named |= signal >= 1 && signal < signals;
+            } else if ffi::Py_TYPE(value) == std::ptr::addr_of_mut!(ffi::PyFrame_Type) {
+                running.push(value);
+            }
+        };
+        for i in 0..taken.min(ffi::PyTuple_GET_SIZE(names)) {
+            let value = ffi::PyFrame_GetVar(frame, ffi::PyTuple_GET_ITEM(names, i));
+            if value.is_null() {
+                continue;
+            }
+            if ffi::PyTuple_CheckExact(value) != 0 {
+                (0..ffi::PyTuple_GET_SIZE(value)).for_each(|k| look(ffi::PyTuple_GET_ITEM(value, k)));
+            } else {
+                look(value);
+            }
+            // The frame holds it.
+            ffi::Py_DECREF(value);
+        }
+    }
+    xdecref(names);
+    ffi::PyErr_Clear();
+    if !named || running.is_empty() {
+        return false;
+    }
+    // Asked only of a frame that was handed a signal's number and a frame:
+    // the frame that is running gets its object here, if it has none.
+    let above = if above.is_null() { ffi::PyEval_GetFrame() } else { above };
+    !above.is_null() && running.contains(&(above as Obj))
 }
 
 /// What stands between the operations of the thread and their kernels and
@@ -5615,6 +5734,57 @@ impl Exported {
             })
             .chain(shared)
             .collect()
+    }
+}
+
+/// Whether `repr` of a value is made by C code alone: what a check
+/// compares by value, a text of bytes, a function, a function of C code, a
+/// code object, and a tuple or a frozenset of such (what the constants of a
+/// code object are).
+unsafe fn quiet_repr(o: Obj) -> bool {
+    if checkable(o) || ffi::PyBytes_CheckExact(o) != 0 || ffi::PyFunction_Check(o) != 0 || ffi::PyCFunction_CheckExact(o) != 0 {
+        return true;
+    }
+    if ffi::PyCode_Check(o) != 0 {
+        // Its text has `repr` of the file's name in it.
+        let file = ffi::PyObject_GetAttrString(o, c"co_filename".as_ptr());
+        let quiet = !file.is_null() && ffi::PyUnicode_CheckExact(file) != 0;
+        xdecref(file);
+        ffi::PyErr_Clear();
+        return quiet;
+    }
+    if ffi::PyTuple_CheckExact(o) != 0 {
+        return !holds_itself(o) && (0..ffi::PyTuple_GET_SIZE(o)).all(|i| quiet_repr(ffi::PyTuple_GET_ITEM(o, i)));
+    }
+    if ffi::PyFrozenSet_CheckExact(o) != 0 {
+        let items = ffi::PyObject_GetIter(o);
+        let mut quiet = !items.is_null();
+        while quiet {
+            let item = ffi::PyIter_Next(items);
+            if item.is_null() {
+                break;
+            }
+            quiet = quiet_repr(item);
+            ffi::Py_DECREF(item);
+        }
+        xdecref(items);
+        ffi::PyErr_Clear();
+        return quiet;
+    }
+    false
+}
+
+/// A value in a report (`dump()`): `repr` of it where C code alone makes
+/// that (`quiet_repr`), and otherwise what a check calls it (`named`):
+/// `repr` of anything else can be somebody's code, which a report never
+/// runs.
+pub unsafe fn shown(o: Obj) -> String {
+    if o.is_null() {
+        "<null>".to_string()
+    } else if quiet_repr(o) {
+        pyffi::repr(o)
+    } else {
+        named(o)
     }
 }
 

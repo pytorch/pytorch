@@ -1261,6 +1261,13 @@ pub fn interrupted(error: &Bound<'_, PyAny>) -> bool {
     unsafe { crate::graph::came_between(error.as_ptr()) }
 }
 
+/// An exception in a reason (`graph::said`): its class, and what it says
+/// where no code of anybody's is run to ask it.
+#[pyfunction]
+pub fn said(error: &Bound<'_, PyAny>) -> String {
+    unsafe { crate::graph::said(error.as_ptr()) }
+}
+
 /// Has the measurement of a function against the interpreter wait, with
 /// `settle()`, for the devices that run what it started: see
 /// `TRIAL_SETTLE`. `settle` must be a builtin, which runs without a frame

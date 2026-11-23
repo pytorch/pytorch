@@ -109,20 +109,6 @@ pub unsafe fn py_bool(b: bool) -> Obj {
     new_ref(if b { ffi::Py_True() } else { ffi::Py_False() })
 }
 
-pub unsafe fn repr_string(o: Obj) -> String {
-    if o.is_null() {
-        return "<null>".to_string();
-    }
-    let r = ffi::PyObject_Repr(o);
-    if r.is_null() {
-        ffi::PyErr_Clear();
-        return "<unprintable>".to_string();
-    }
-    let s = str_to_string(r);
-    ffi::Py_DECREF(r);
-    s
-}
-
 pub unsafe fn str_to_string(s: Obj) -> String {
     let mut size: ffi::Py_ssize_t = 0;
     let data = ffi::PyUnicode_AsUTF8AndSize(s, &mut size);

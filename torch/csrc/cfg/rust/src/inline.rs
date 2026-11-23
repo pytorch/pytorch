@@ -151,18 +151,26 @@ impl Inliner<'_, '_> {
     fn splice(&mut self, func: &mut Function, b: usize, i: usize, callee: Function, target: PyObj, code: PyObj) {
         // A value lives as long as the interpreter keeps it, and while a
         // function it called runs the interpreter keeps what the caller
-        // goes on with behind the call. Where the callee raises there is
-        // no "behind the call" in the inlined body, so each way out of it
-        // by a raise holds those values until there, the latest made (the
-        // topmost of the interpreter's stack) first.
-        let raises = callee.blocks.iter().any(|block| matches!(block.term, Term::Raise { .. } | Term::Reraise(..)));
+        // goes on with behind the call. In a block of the callee that no
+        // way leads back from (it raises, or goes round a loop that only a
+        // raise leaves) there is no "behind the call" in the inlined body,
+        // so each such block holds those values.
+        let mut returns_from: Vec<bool> = callee.blocks.iter().map(|block| matches!(block.term, Term::Return(_))).collect();
+        loop {
+            let before = returns_from.iter().filter(|back| **back).count();
+            for (j, block) in callee.blocks.iter().enumerate() {
+                returns_from[j] |= block.term.successors().iter().any(|next| returns_from[*next as usize]);
+            }
+            if returns_from.iter().filter(|back| **back).count() == before {
+                break;
+            }
+        }
         let mut kept: Vec<V> = Vec::new();
-        if raises {
+        if returns_from.iter().any(|back| !back) {
             let consts: HashSet<V> =
                 func.blocks.iter().flat_map(|block| &block.insts).filter(|inst| matches!(inst.op, Op::Const(_))).map(|inst| inst.dst).collect();
             let live = crate::analysis::analyze(func).live_before(func, b, i + 1);
             kept = live.iter().filter(|v| *v != func.blocks[b].insts[i].dst && !consts.contains(v)).collect();
-            kept.sort_unstable_by(|one, other| other.cmp(one));
         }
         let tail = func.blocks[b].insts.split_off(i + 1);
         let call = func.blocks[b].insts.pop().unwrap();
@@ -196,9 +204,14 @@ impl Inliner<'_, '_> {
         func.consts.push(target);
         func.consts.push(code);
         func.value_names.extend(callee.value_names.iter().cloned());
+        // The callee's stack is on top of the caller's, whose topmost value
+        // behind the call is its result.
+        let below = if call.dst == NONE { 0 } else { func.ranks[call.dst as usize] };
+        func.ranks.extend(callee.ranks.iter().map(|rank| if *rank == 0 { 0 } else { rank + below }));
         func.nvalues += callee.nvalues;
-        let mut new_value = |func: &mut Function| {
+        let new_value = |func: &mut Function| {
             func.value_names.push(None);
+            func.ranks.push(0);
             func.nvalues += 1;
             func.nvalues - 1
         };
@@ -248,7 +261,7 @@ impl Inliner<'_, '_> {
                 let bc = insts.last().map_or(tag(block.bc_start), |inst| inst.bc);
                 insts.push(Inst { dst: NONE, op: Op::FrameLeave, bc, kills: Vec::new() });
             }
-            if matches!(block.term, Term::Raise { .. } | Term::Reraise(..)) {
+            if !returns_from[j] {
                 for v in &kept {
                     insts.push(Inst { dst: NONE, op: Op::Hold(vec![*v]), bc: tag(block.term_bc), kills: Vec::new() });
                 }
