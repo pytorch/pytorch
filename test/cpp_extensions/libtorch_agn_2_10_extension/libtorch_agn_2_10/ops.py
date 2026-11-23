@@ -177,20 +177,6 @@ def my_empty(
     )
 
 
-def my_empty_strided(
-    size, stride, dtype=None, layout=None, device=None, pin_memory=None
-) -> Tensor:
-    """Create an uninitialized tensor with the given size and stride."""
-    return torch.ops.libtorch_agn_2_10.my_empty_strided.default(
-        size, stride, dtype, layout, device, pin_memory
-    )
-
-
-def my_slice(self, dim=0, start=None, end=None, step=1) -> Tensor:
-    """Return a sliced view along the specified dimension."""
-    return torch.ops.libtorch_agn_2_10.my_slice.default(self, dim, start, end, step)
-
-
 def my_reshape(t, shape) -> Tensor:
     """
     Returns a tensor with the same data but different shape.
