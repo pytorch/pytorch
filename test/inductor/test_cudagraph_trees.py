@@ -8417,7 +8417,11 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
 
             def graph_test(generator, capture_cuda_graph):
                 if capture_cuda_graph:
-                    graph = torch.accelerator.Graph()
+                    graph = (
+                        torch.cuda.CUDAGraph()
+                        if self.device_type == "cuda"
+                        else torch.xpu.XPUGraph()
+                    )
 
                 # state should be cloned before the graph
                 old_state = generator.graphsafe_get_state()
@@ -8425,7 +8429,7 @@ if HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON:
 
                 if capture_cuda_graph:
                     # only capturing the backward
-                    with torch.Stream(device=device), graph:
+                    with torch.get_device_module(device).graph(graph):
                         repro_perm = graphsafe_backward(generator, new_state)
 
                 # some number of uneven forwards
