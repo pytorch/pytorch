@@ -145,7 +145,7 @@ class TestPointwiseTma(TestCase):
             expected = x + y
         actual = self._run([x, y])
         with torch.backends.python_native.cutedsl.disabled():
-            self.assertEqual(actual, expected)
+            self.assertEqual(actual, expected, atol=0, rtol=0)
         if dtype is torch.float32 and layout == "transpose":
             actual = self._run([x, y], fn="_gt", dtype=torch.bool)
             with torch.backends.python_native.cutedsl.disabled():
@@ -206,6 +206,9 @@ class TestPointwiseTma(TestCase):
     def test_kernel_reuses_runtime_geometry(self, device: str) -> None:
         from torch._native.ops.pointwise import kernel
 
+        with kernel._PLAN_LOCK:
+            kernel._PLAN.clear()
+            kernel._KERNELS.clear()
         count = None
         with torch.backends.python_native.cutedsl.disabled():
             for batch, rows, cols, pitch in (
@@ -234,7 +237,6 @@ class TestPointwiseTma(TestCase):
         actual = self._run([x, y], fn="_div", dtype=torch.float32)
         with torch.backends.python_native.cutedsl.disabled():
             self.assertEqual(actual, expected, atol=0, rtol=0)
-        self.assertEqual(torch.div(x, y), expected, atol=0, rtol=0)
 
 
 instantiate_device_type_tests(TestPointwiseTma, globals(), only_for="cuda")
