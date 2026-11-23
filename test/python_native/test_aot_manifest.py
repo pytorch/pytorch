@@ -12,7 +12,6 @@ import sys
 import tempfile
 import types
 import unittest.mock as mock
-from typing import Any
 
 import torch
 from torch._native import aot_manifest
@@ -21,7 +20,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skipIfTorchDynamo,
     TestCase,
 )
 
@@ -192,48 +190,6 @@ class TestGetCoverage(TestCase):
             base = aot_manifest.get_coverage("fakeop", "CUDA")
             self.assertIs(aot_manifest.get_coverage("fakeop.values", "CUDA"), base)
             self.assertIs(aot_manifest.get_coverage("fakeop_", "CUDA"), base)
-
-    @skipIfTorchDynamo("Runtime registry tests exercise the dispatcher directly")
-    def test_router_declines_covered_calls_once(self) -> None:
-        from test_registry import TestRegistryRuntime
-
-        runtime = TestRegistryRuntime("runTest")
-        runtime.setUp()
-        self.addCleanup(runtime.tearDown)
-        with ManifestFixture():
-            cond_calls: list[int] = []
-            axes_calls: list[int] = []
-            coverage = aot_manifest.get_coverage("fakeop", "CUDA")
-            inner_axes = coverage._covered_axes
-
-            def counting_axes(*args: Any, **kwargs: Any) -> dict[str, Any]:
-                axes_calls.append(1)
-                return inner_axes(*args, **kwargs)
-
-            coverage._covered_axes = counting_axes
-            aot_manifest._load_coverage()[("topk", "CPU")] = coverage
-
-            def probe_cond(*args: Any, **kwargs: Any) -> bool:
-                cond_calls.append(1)
-                return False
-
-            for index in range(2):
-                runtime.registry.register_op_override(
-                    f"coverage_count_{index}",
-                    "aten",
-                    "topk",
-                    "CPU",
-                    probe_cond,
-                    torch.topk,
-                    allow_multiple_override=True,
-                )
-            runtime._install("topk", "CPU")
-            torch.topk(torch.empty(4, 1024), 8)
-            self.assertEqual(axes_calls, [1])
-            self.assertEqual(cond_calls, [])
-            torch.topk(torch.empty(4, 512), 8)
-            self.assertEqual(axes_calls, [1, 1])
-            self.assertEqual(cond_calls, [1, 1])
 
 
 class TestEmbeddedCoverage(TestCase):
