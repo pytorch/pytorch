@@ -6653,6 +6653,23 @@ TORCH_LIBRARY_IMPL(opcheck_symbolic_meta_guard, Meta, m) {
         )
         self.assertEqual(result, {"test_symbolic_faketensor": "SUCCESS"})
 
+    def test_opcheck_symbolic_faketensor_wrapper_subclass(self):
+        lib = self.lib()
+        lib.define("wrapper_input(Tensor x) -> Tensor")
+        lib.impl("wrapper_input", lambda x: x.clone(), "CPU")
+
+        @torch.library.register_fake(f"{self.test_ns}::wrapper_input", lib=lib)
+        def wrapper_input_fake(x):
+            return x.new_empty(x.shape)
+
+        x = TwoTensor(torch.randn(3, 4), torch.randn(3, 4))
+        result = torch.library.opcheck(
+            self.ns().wrapper_input.default,
+            (x,),
+            test_utils="test_symbolic_faketensor",
+        )
+        self.assertEqual(result, {"test_symbolic_faketensor": "SUCCESS"})
+
     @skipIfTorchDynamo("OpCheckMode skips opcheck checks while Dynamo is compiling")
     def test_generate_opcheck_tests_ignores_experimental_xfails_for_pt2_compliance(
         self,

@@ -4,6 +4,7 @@ import torch
 import torch._subclasses
 import torch.utils._pytree as pytree
 from torch._subclasses.fake_tensor import FakeTensorMode, UnsupportedFakeTensorException
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
 def is_builtin(op):
@@ -37,6 +38,8 @@ def symbolic_fake_check(op, args, kwargs):
         try:
             for i, arg in enumerate(flat_args):
                 if isinstance(arg, torch.Tensor):
+                    if is_traceable_wrapper_subclass(arg):
+                        return
                     ctx = StatelessSymbolicContext(
                         dynamic_sizes=[DimDynamic.UNBACKED] * arg.dim()
                     )
