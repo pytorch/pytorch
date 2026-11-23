@@ -9160,7 +9160,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             self.assertEqual(out_accelerator.cpu(), out_cpu)
 
 
-class TestLinalgSVD(TestCase):
+class TestLinalgSVDDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @skipCPUIfNoLapack
@@ -12939,7 +12939,7 @@ _GROUPED_MM_CK_TILE_CONFIGS = {
 }
 
 
-class TestGroupedMM(TestCase):
+class TestGroupedMMDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @preserves_device_selection
@@ -13314,10 +13314,10 @@ class TestGroupedMM(TestCase):
         self.grouped_mm_helper(a, b, offs, backward=False)
 
 instantiate_device_type_tests(TestLinalgDevice, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestLinalgSVD, globals(), allow_mps=True, allow_xpu=True)
+instantiate_device_type_tests(TestLinalgSVDDevice, globals(), allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda",))
 instantiate_device_type_tests(TestLinalgCpuOnly, globals(), only_for=("cpu",))
-instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True, allow_xpu=True)
+instantiate_device_type_tests(TestGroupedMMDevice, globals(), allow_mps=True, allow_xpu=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
