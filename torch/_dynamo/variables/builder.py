@@ -1723,8 +1723,9 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.EQUALS_MATCH)
             return FrozensetVariable(items, source=self.source)
         elif ProtobufEnumWrapperVariable.is_matching_object(value):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return ProtobufEnumWrapperVariable(value, source=self.source)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = ProtobufEnumWrapperVariable(value, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(
             value,
             (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
@@ -5935,8 +5936,6 @@ class SourcelessBuilder:
         elif is_function_or_wrapper(value):
             # pyrefly: ignore[not-callable, bad-argument-count]
             return trace_rules.lookup(value)(value)
-        elif ProtobufEnumWrapperVariable.is_matching_object(value):
-            return ProtobufEnumWrapperVariable(value)
         elif isinstance(
             value,
             (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),

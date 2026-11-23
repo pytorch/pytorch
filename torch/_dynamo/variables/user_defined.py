@@ -5103,34 +5103,60 @@ _CONSTANT_BASE_TYPES = (int, float, str)
 
 
 class ProtobufEnumWrapperVariable(UserDefinedObjectVariable):
-    """Protobuf EnumTypeWrapper instances -- immutable name-to-int mappings.
-
-    Attribute access (e.g. MyEnum.MEMBER) resolves through __getattr__
-    which calls into C extension code (_ByNameMap) that Dynamo cannot
-    trace.  Since the wrapper is immutable once constructed, we resolve
-    all attribute access eagerly at trace time.
-    """
+    """Resolve protobuf enum members backed by UPB's unmodeled C mapping slot."""
 
     @staticmethod
     def is_matching_object(obj: object) -> bool:
         mod = sys.modules.get("google.protobuf.internal.enum_type_wrapper")
-        return mod is not None and isinstance(obj, mod.EnumTypeWrapper)
+        return mod is not None and type(obj) is mod.EnumTypeWrapper
 
-    def var_getattr(
+    def call_getattr_fallback(
         self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        source = AttrSource(self.source, name) if self.source else None
+    ) -> VariableTracker | None:
+        upb = sys.modules.get("google._upb._message")
+        getattr_fn = self._check_for_getattr()
+        side_effects = tx.output.side_effects
+        if (
+            self.source is None
+            or upb is None
+            or self._object_has_getattribute
+            or not isinstance(getattr_fn, types.FunctionType)
+            or getattr_fn.__module__ != "google.protobuf.internal.enum_type_wrapper"
+            or getattr_fn.__qualname__ != "EnumTypeWrapper.__getattr__"
+            or type(vars(self.value).get("_enum_type")) is not upb.EnumDescriptor
+            or side_effects.has_pending_mutation_of_attr(self, "_enum_type")
+            or side_effects.has_pending_mutation_of_attr(self, name)
+            or side_effects.has_pending_mutation_of_attr(self, "__dict__")
+        ):
+            return super().call_getattr_fallback(tx, name)
+
+        cls_source = TypeSource(self.source)
+        # Use ordinary lookup to guard the result, including changes to the
+        # wrapper's descriptor or attributes that shadow enum members.
+        install_guard(
+            AttrSource(cls_source, "__getattribute__").make_guard(
+                GuardBuilder.FUNCTION_MATCH
+            ),
+            AttrSource(cls_source, "__getattr__").make_guard(
+                GuardBuilder.FUNCTION_MATCH
+            ),
+            AttrSource(self.source, "_enum_type").make_guard(GuardBuilder.TYPE_MATCH),
+        )
         try:
-            result = getattr(self.value, name)
-        except AttributeError:
+            result = getattr_fn(self.value, name)
+        except AttributeError as exc:
+            install_guard(
+                self.source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
+            )
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[
-                    f"'{type(self.value).__name__}' object has no attribute '{name}'"
-                ],
+                args=exc.args,
+                kwargs={"name": variables.ConstantVariable.create(name), "obj": self},
             )
-        return VariableTracker.build(tx, result, source)
+        return VariableTracker.build(tx, result, AttrSource(self.source, name))
 
 
 class UserDefinedConstantVariable(UserDefinedObjectVariable):
