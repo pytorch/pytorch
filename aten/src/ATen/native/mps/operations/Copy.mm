@@ -31,6 +31,12 @@ namespace mps {
 // copy_conj_neg functor for complex (the only case where it differs from neg); real types route through copy_neg.
 // Strided iterators get the `_strided_castout_<in>` template; contiguous get `_dense_castout_*`.
 void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
+  // float4_e2m1fn_x2 has no Metal type and copy_ rejects casts to or from it, so move its packed bytes.
+  if (src.scalar_type() == kFloat4_e2m1fn_x2) {
+    auto dst_bytes = dst.view(kByte);
+    copy_cast_kernel_mps(dst_bytes, src.view(kByte));
+    return;
+  }
   const bool needs_conj = src.is_conj() != dst.is_conj();
   const bool needs_neg = src.is_neg() != dst.is_neg();
 

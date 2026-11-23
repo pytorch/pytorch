@@ -37,7 +37,6 @@ from collections.abc import Callable, Iterable, Sequence
 from typing import Any, NoReturn, TYPE_CHECKING
 
 import torch
-from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -75,10 +74,8 @@ from ..utils import (
     check_unspec_python_args,
     dict_methods,
     extract_fake_example_value,
-    get_fake_value,
     has_torch_function,
     is_safe_constant,
-    is_tensor_getset_descriptor,
     is_torch_class,
     istype,
     no_keywords,
@@ -130,6 +127,7 @@ from .object_protocol import (
     generic_str,
     maybe_get_python_type,
     mro_lookup,
+    object_generic_setattr,
     Py_TPFLAGS_HEAPTYPE,
     pycallable_check,
     pyiter_check,
@@ -169,6 +167,7 @@ from .tensor import (
 )
 from .user_defined import (
     is_data_descriptor,
+    setattr_hackcheck,
     UserDefinedObjectVariable,
     UserDefinedVariable,
 )
@@ -1829,12 +1828,10 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "vars() takes no keyword arguments")
+        no_keywords(tx, "vars", kwargs)
+        check_positional(tx, "vars", len(args), 0, 1)
         if len(args) == 0:
             return self._call_frame_locals_snapshot(tx)
-        if len(args) != 1:
-            raise_type_error(tx, f"vars expected at most 1 argument, got {len(args)}")
         # vars(obj) is obj.__dict__ if __dict__ is present else TypeError
         try:
             return args[0].tp_getattro_impl(tx, "__dict__")
@@ -1981,14 +1978,8 @@ class BuiltinVariable(TypeVariable):
                 args = [args[0], args[1]]  # type: ignore[assignment]
 
             if fn is operator.getitem:
-                if kwargs:
-                    raise_type_error(
-                        tx, "_operator.getitem() takes no keyword arguments"
-                    )
-                if len(args) != 2:
-                    raise_type_error(
-                        tx, f"getitem expected 2 arguments, got {len(args)}"
-                    )
+                no_keywords(tx, "_operator.getitem", kwargs)
+                check_positional(tx, "getitem", len(args), 2, 2)
                 if isinstance(args[1], SymNodeVariable):
                     # Standard indexing will force specialization due to
                     # __index__.  Rewrite as a regular torch op which will
@@ -2158,23 +2149,20 @@ class BuiltinVariable(TypeVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if self.fn is object and name == "__setattr__":
-            if len(args) != 3:
-                raise AssertionError(
-                    f"object.__setattr__ expects 3 args, got {len(args)}"
-                )
-            if len(kwargs) != 0:
-                raise AssertionError(
-                    f"object.__setattr__ expects no kwargs, got {len(kwargs)}"
-                )
-            obj, name_var, val = args
+        if self.fn is object and name in ("__setattr__", "__delattr__"):
+            if name == "__setattr__":
+                no_keywords(tx, "wrapper __setattr__", kwargs)
+                check_positional(tx, "object.__setattr__", len(args), 3, 3)
+                obj, attr, value = args
+            else:
+                no_keywords(tx, "wrapper __delattr__", kwargs)
+                check_positional(tx, "object.__delattr__", len(args), 2, 2)
+                obj, attr = args
+                value = None
+            # Getset setters key side effects on the VT they receive.
             obj = obj.realize()
-            if (
-                isinstance(obj, UserDefinedObjectVariable)
-                and tx.output.side_effects.is_attribute_mutation(obj)
-                and name_var.is_python_constant()
-            ):
-                return obj.method_setattr_standard(tx, name_var, val)
+            setattr_hackcheck(tx, obj, getattr(object, name))
+            return object_generic_setattr(tx, obj, attr, value)
 
         if name in _BUILTIN_CONSTANT_FOLDABLE_METHODS.get(self.fn, ()):
             if all(a.is_python_constant() for a in args) and all(
@@ -2675,13 +2663,17 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "range() takes no keyword arguments")
-        if len(args) == 0:
-            raise_type_error(tx, "range expected at least 1 argument, got 0")
-        if len(args) > 3:
-            raise_type_error(tx, f"range expected at most 3 arguments, got {len(args)}")
+        no_keywords(tx, "range", kwargs)
+        check_positional(tx, "range", len(args), 1, 3)
         args = tuple(pynumber_index(tx, arg) for arg in args)
+        if (
+            len(args) == 3
+            and args[2].is_python_constant()
+            and args[2].as_python_constant() == 0
+        ):
+            raise_observed_exception(
+                ValueError, tx, args=["range() arg 3 must not be zero"]
+            )
         return variables.RangeVariable(list(args))
 
     def _dynamic_args(self, *args: VariableTracker, **kwargs: VariableTracker) -> bool:
@@ -2692,8 +2684,7 @@ class BuiltinVariable(TypeVariable):
     def call_slice(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
-        if not 1 <= len(args) < 4:
-            raise_type_error(tx, f"slice expected at least 1 argument, got {len(args)}")
+        check_positional(tx, "slice", len(args), 1, 3)
         return variables.SliceVariable(list(args), tx)
 
     def _dyn_proxy(
@@ -2715,18 +2706,10 @@ class BuiltinVariable(TypeVariable):
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
         # ref: https://github.com/python/cpython/blob/main/Objects/abstract.c#L2004-L2078
-        if kwargs:
-            raise_type_error(
-                tx,
-                f"{self.fn.__name__}() takes no keyword arguments",
-            )
+        no_keywords(tx, self.fn.__name__, kwargs)
+        check_positional(tx, self.fn.__name__, len(args), 0, 1)
         if len(args) == 0:
             return TupleVariable([], mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(
-                tx,
-                f"{self.fn.__name__} expected at most 1 argument, got {len(args)}",
-            )
 
         obj = args[0]
         if isinstance(obj, TupleVariable) and obj.python_type() is tuple:
@@ -2783,18 +2766,10 @@ class BuiltinVariable(TypeVariable):
         # ref: https://github.com/python/cpython/blob/main/Objects/setobject.c#L2708-L2735
         # CPython set_init rejects keywords before unpacking positional args, so
         # set(a=1) and set().__init__(a=1) both raise regardless of arg count.
-        if kwargs:
-            raise_type_error(
-                tx,
-                "set() takes no keyword arguments",
-            )
+        no_keywords(tx, "set", kwargs)
+        check_positional(tx, "set", len(args), 0, 1)
         if len(args) == 0:
             return variables.SetVariable(set(), mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(
-                tx,
-                f"set expected at most 1 argument, got {len(args)}",
-            )
 
         s = SetVariable([], mutation_type=ValueMutationNew())
         s.call_method(tx, "update", [args[0]], kwargs)
@@ -2806,18 +2781,10 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(
-                tx,
-                "frozenset() takes no keyword arguments",
-            )
+        no_keywords(tx, "frozenset", kwargs)
+        check_positional(tx, "frozenset", len(args), 0, 1)
         if len(args) == 0:
             return variables.FrozensetVariable(set(), mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(
-                tx,
-                f"frozenset expected at most 1 argument, got {len(args)}",
-            )
 
         if istype(args[0], variables.FrozensetVariable):
             # CPython: frozenset(existing_frozenset) returns the same object.
@@ -2885,10 +2852,9 @@ class BuiltinVariable(TypeVariable):
         # ref: PyObject_LengthHint (Objects/abstract.c): try __len__, then
         # __length_hint__, falling back to the supplied default for a missing
         # slot, a TypeError raised by the slot, or a NotImplemented result.
-        if kwargs:
-            # `default` is positional-only, so a keyword call is rejected before
-            # any argument count is looked at.  The name matches CPython's.
-            raise_type_error(tx, "_operator.length_hint() takes no keyword arguments")
+        # `default` is positional-only, so a keyword call is rejected before
+        # any argument count is looked at.
+        no_keywords(tx, "_operator.length_hint", kwargs)
         check_positional(tx, "length_hint", len(args), 1, 2)
         obj = args[0]
         if len(args) == 2:
@@ -2976,10 +2942,8 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "_operator.getitem() takes no keyword arguments")
-        if len(args) != 2:
-            raise_type_error(tx, f"getitem expected 2 arguments, got {len(args)}")
+        no_keywords(tx, "_operator.getitem", kwargs)
+        check_positional(tx, "getitem", len(args), 2, 2)
         return generic_getitem(tx, args[0], args[1])
 
     def call_setitem(
@@ -2988,10 +2952,8 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "_operator.setitem() takes no keyword arguments")
-        if len(args) != 3:
-            raise_type_error(tx, f"setitem expected 3 arguments, got {len(args)}")
+        no_keywords(tx, "_operator.setitem", kwargs)
+        check_positional(tx, "setitem", len(args), 3, 3)
         return generic_setitem(tx, args[0], args[1], args[2])
 
     def call_delitem(
@@ -3000,10 +2962,8 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "_operator.delitem() takes no keyword arguments")
-        if len(args) != 2:
-            raise_type_error(tx, f"delitem expected 2 arguments, got {len(args)}")
+        no_keywords(tx, "_operator.delitem", kwargs)
+        check_positional(tx, "delitem", len(args), 2, 2)
         return generic_delitem(tx, args[0], args[1])
 
     def call_isinstance(
@@ -3224,12 +3184,8 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "next() takes no keyword arguments")
-        if len(args) == 0:
-            raise_type_error(tx, "next expected at least 1 argument, got 0")
-        if len(args) > 2:
-            raise_type_error(tx, f"next expected at most 2 arguments, got {len(args)}")
+        no_keywords(tx, "next", kwargs)
+        check_positional(tx, "next", len(args), 1, 2)
         arg = args[0]
         if not pyiter_check(maybe_get_python_type(arg)):
             raise_type_error(
@@ -3288,7 +3244,9 @@ class BuiltinVariable(TypeVariable):
         obj: VariableTracker,
         name_var: VariableTracker,
     ) -> VariableTracker:
-        return obj.call_method(tx, "__delattr__", [name_var], {})
+        from .object_protocol import generic_setattr
+
+        return generic_setattr(tx, obj, name_var, None)
 
     def call_type(
         self, tx: "InstructionTranslatorBase", obj: VariableTracker
@@ -4004,258 +3962,12 @@ class SetAttrBuiltinVariable(BuiltinVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .lazy import LazyVariableTracker
+        from .object_protocol import generic_setattr
 
-        if any(isinstance(a, LazyVariableTracker) for a in args):
-            args = [
-                a.realize() if isinstance(a, LazyVariableTracker) else a for a in args
-            ]
-        if len(args) != 3 or kwargs:
-            raise_observed_exception(TypeError, tx)
+        no_keywords(tx, "setattr", kwargs)
+        check_positional(tx, "setattr", len(args), 3, 3)
         obj, name_var, val = args
-        if not issubclass(name_var.python_type(), str):
-            raise_type_error(
-                tx,
-                f"attribute name must be string, not '{name_var.python_type_name()}'",
-            )
-        result = self._call_setattr(tx, obj, name_var, val)
-        if result is not None:
-            return result
-        unimplemented(
-            gb_type="setattr() on unsupported type",
-            context=f"setattr({obj}, {name_var}, {val})",
-            explanation=f"setattr() is not supported on type {obj.python_type_name()}",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
-
-    def _call_setattr(
-        self,
-        tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
-        name_var: VariableTracker,
-        val: VariableTracker,
-    ) -> VariableTracker | None:
-        if isinstance(
-            obj,
-            (
-                variables.DefaultDictVariable,
-                variables.UserDefinedObjectVariable,
-                variables.NestedUserFunctionVariable,
-                variables.ExceptionVariable,
-                variables.TracebackVariable,
-                variables.DequeVariable,
-            ),
-        ):
-            return obj.call_method(tx, "__setattr__", [name_var, val], {})
-        elif isinstance(
-            obj, variables.UserDefinedClassVariable
-        ) and name_var.is_constant_match("__bases__"):
-            # CPython recomputes the MRO of the class and its subclasses on this
-            # write; a pending store would leave later lookups on the old one.
-            unmodeled_setter(obj, tx, val)
-        elif (
-            not tx.output.side_effects.is_attribute_mutation(obj)
-            and obj.source is not None
-            and (underlying := obj.get_value_for_setattr()) is not None
-            and hasattr(underlying, "__dict__")
-            and name_var.is_python_constant()
-        ):
-            tx.output.side_effects.track_object_existing(underlying, obj)
-            name = name_var.as_python_constant()
-            tx.output.side_effects.store_attr(obj, name, val)
-            return val
-        elif (
-            tx.output.side_effects.is_attribute_mutation(obj)
-            and name_var.is_python_constant()
-        ):
-            name = name_var.as_python_constant()
-            if obj.is_tensor():
-                from .builder import wrap_fx_proxy
-
-                if name == "requires_grad":
-                    dtype = obj.dtype  # type: ignore[attr-defined]
-                    if (
-                        obj.source is None
-                        and val.is_python_constant()
-                        and val.as_python_constant() is True
-                        and not obj.requires_grad  # type: ignore[attr-defined]
-                        and dtype is not None
-                        and (dtype.is_floating_point or dtype.is_complex)
-                    ):
-                        obj.method_requires_grad_(tx, val)  # type: ignore[attr-defined]
-                        return val
-                    unimplemented(
-                        gb_type="setattr() on Tensor.requires_grad",
-                        context=f"setattr({obj}, {name}, {val})",
-                        explanation="setattr() on Tensor.requires_grad not supported. "
-                        "Mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
-                        "the middle of the graph, which AOTAutograd does not currently know how to handle.",
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
-                elif name == "data":
-                    # [Note: set_data_on_scoped_tensor]
-                    tensor_obj = typing.cast(TensorVariable, obj)
-                    if isinstance(val, TensorVariable) and tensor_obj.requires_grad:
-                        obj_fake = get_fake_value(tensor_obj.as_proxy().node, tx)
-                        val_fake = get_fake_value(val.as_proxy().node, tx)
-                        # Do not guard on symbolic equality: an unproven match
-                        # could become a shape change when the graph is reused.
-                        if not statically_known_true(
-                            sym_eq(obj_fake.shape, val_fake.shape)
-                        ):
-                            unimplemented(
-                                gb_type="setattr() on Tensor.data with different shape",
-                                context=f"setattr({obj}, {name}, {val})",
-                                explanation="Dynamo does not trace shape-changing "
-                                "`.data` mutations on differentiable tensors. "
-                                "AOTAutograd assumes graph input metadata is stable "
-                                "while building the backward graph.",
-                                hints=[*graph_break_hints.SUPPORTABLE],
-                            )
-                    if obj.source is None:
-                        unimplemented(
-                            gb_type="Failed to mutate tensor data attribute",
-                            context=f"setattr({obj}, {name}, {val})",
-                            explanation="Dynamo only supports mutating `.data`"
-                            " of tensor created outside `torch.compile` region",
-                            hints=[
-                                "Don't mutate `.data` on this tensor, or move "
-                                "the mutation out of `torch.compile` region",
-                            ],
-                        )
-                    elif obj.dtype != val.dtype:  # type: ignore[attr-defined]
-                        unimplemented(
-                            gb_type="Failed to mutate tensor data attribute to different dtype",
-                            context=f"setattr({obj}, {name}, {val})",
-                            explanation="Dynamo only supports mutating `.data`"
-                            " of tensor to a new one with the same dtype",
-                            hints=[
-                                "Don't mutate `.data` on this tensor, or move "
-                                "the mutation out of `torch.compile` region",
-                            ],
-                        )
-                    elif obj.device != val.device:  # type: ignore[attr-defined]
-                        obj_fake = get_fake_value(obj.as_proxy().node, tx)
-                        val_fake = get_fake_value(val.as_proxy().node, tx)
-                        if (
-                            obj_fake.dtype != val_fake.dtype
-                            or obj_fake.shape != val_fake.shape
-                            or obj_fake.stride() != val_fake.stride()
-                        ):
-                            unimplemented(
-                                gb_type="Failed to mutate tensor data attribute across devices with different shape/strides",
-                                context=f"setattr({obj}, {name}, {val})",
-                                explanation="Dynamo only supports cross-device `.data`"
-                                " mutation when shape and strides match",
-                                hints=[
-                                    "Don't mutate `.data` on this tensor, or move "
-                                    "the mutation out of `torch.compile` region",
-                                ],
-                            )
-
-                    # Remove the old reference in tracked fakes - if we don't
-                    # do this, .data value size/shape differences cause
-                    # tracked fakes to produce incorrect guards. Sound
-                    # because the TensorVariable from shallow_copy_data_
-                    # below is new and gets installed in tracked fakes.
-                    to_remove = [
-                        tf for tf in tx.output.tracked_fakes if tf.source == obj.source
-                    ]
-                    for tf in to_remove:
-                        tx.output.tracked_fakes.remove(tf)
-
-                    # Snapshot the placeholder before
-                    # shallow_copy_data_ mutates it. Record the node
-                    # and snapshot so compile_and_call_fx_graph can
-                    # restore the correct metadata before passing the
-                    # graph to the backend.
-                    input_node = obj.as_proxy().node
-                    if input_node.op == "placeholder":
-                        ev = input_node.meta.get("example_value")
-                        from torch._subclasses.fake_tensor import (
-                            is_fake_tensor,
-                            maybe_get_fake_mode,
-                        )
-
-                        if is_fake_tensor(ev):
-                            from torch._subclasses.fake_impls import fast_detach
-
-                            snapshot = fast_detach(maybe_get_fake_mode(ev), ev)
-                            tx.output._shallow_copy_placeholder_snapshots.setdefault(
-                                input_node, snapshot
-                            )
-
-                    with dynamo_disable_grad(tx), torch.no_grad():
-                        out = wrap_fx_proxy(
-                            tx,
-                            tx.output.create_proxy(
-                                "call_function",
-                                torch.ops.aten.shallow_copy_data_,
-                                *proxy_args_kwargs([obj, val], {}),
-                            ),
-                        )
-
-                    return out
-                elif name in ("_grad", "grad"):
-                    # NOTE: [Tensor "grad" and "_grad" attr]
-                    # _grad and grad share the same setter/getter, see
-                    # THPVariable_properties, and here we make sure setting one
-                    # enables reading `val` from the other, by routing all
-                    # read/write to `grad`.
-                    name = "grad"
-                elif is_tensor_getset_descriptor(name):
-                    # Attribute like `torch.Tensor.real` has special setters we
-                    # don't yet support; it's not as simple adding an entry to
-                    # the side effect mapping.
-                    unimplemented(
-                        gb_type="Failed to set tensor attribute",
-                        context=f"setattr({obj}, {name}, {val})",
-                        explanation="Dynamo doesn't support setting these tensor attributes",
-                        hints=[
-                            f"Don't mutate attribute '{name}' on tensors, or "
-                            "move the mutation out of `torch.compile` region",
-                        ],
-                    )
-
-            tx.output.side_effects.store_attr(obj, name, val)
-            return val
-        elif isinstance(obj, variables.NNModuleVariable):
-            if not tx.output.is_root_tracer():
-                unimplemented(
-                    gb_type="nn.Module mutation in HigherOrderOp",
-                    context=f"nn.Module: {obj}",
-                    explanation="Inplace modifying nn.Module params/buffers inside HigherOrderOps is not allowed.",
-                    hints=[
-                        "Remove the mutation or move it outside of the HigherOrderOp.",
-                        *graph_break_hints.FUNDAMENTAL,
-                    ],
-                )
-            if name_var.is_python_constant() and isinstance(
-                val, variables.TensorVariable
-            ):
-                assigning_fake_val = get_fake_value(val.as_proxy().node, tx)
-
-                try:
-                    getattr_var = obj.tp_getattro_impl(
-                        tx, name_var.as_python_constant()
-                    )
-                except (AttributeError, ObservedAttributeError):
-                    getattr_var = None
-
-                if getattr_var is not None and getattr_var.is_tensor():
-                    # get_fake_val will get the same fake tensor
-                    existing_fake_attr = get_fake_value(getattr_var.as_proxy().node, tx)
-
-                    # same tensor identity, setattr is a no-op
-                    mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
-                    if (
-                        existing_fake_attr is assigning_fake_val
-                        and mod_setattr is torch.nn.Module.__setattr__
-                    ):
-                        return getattr_var
-
-            obj.convert_to_unspecialized(tx)
-        return None
+        return generic_setattr(tx, obj, name_var, val)
 
 
 class ListBuiltinVariable(TypeVariable):
@@ -4278,18 +3990,10 @@ class ListBuiltinVariable(TypeVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/listobject.c#L1265-L1287
-        if kwargs:
-            raise_type_error(
-                tx,
-                "list() takes no keyword arguments",
-            )
+        no_keywords(tx, "list", kwargs)
+        check_positional(tx, "list", len(args), 0, 1)
         if len(args) == 0:
             return ListVariable([], mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(
-                tx,
-                f"list expected at most 1 argument, got {len(args)}",
-            )
 
         obj = args[0]
         if obj.source and not is_constant_source(obj.source):

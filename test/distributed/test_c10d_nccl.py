@@ -36,13 +36,11 @@ if not c10d.is_available() or not (
     print("c10d NCCL/XCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-# On CUDA these tests target the legacy backend (fbcode-only); XPU uses xccl.
+# On CUDA most tests target the legacy backend (fbcode-only); XPU uses xccl.
 _acc = torch.accelerator.current_accelerator(True)
-if (
+_NCCL_LEGACY_MISSING = (
     _acc is None or _acc.type == "cuda"
-) and not c10d.distributed_c10d._NCCL_LEGACY_AVAILABLE:
-    print("c10d legacy NCCL not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+) and not c10d.distributed_c10d._NCCL_LEGACY_AVAILABLE
 
 
 import test_c10d_common
@@ -481,13 +479,19 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         TEST_NAN_ASSERT_RETURN = (
             0 if (IS_SANDCASTLE and not TEST_MULTIACCELERATOR) else signal.SIGABRT
         )
+        nan_assert_tests = (
+            self.test_nan_assert_float16,
+            self.test_nan_assert_float32,
+            self.test_nan_assert_float64,
+            self.test_nan_assert_bfloat16,
+            self.test_nan_assert_float8_e4m3fn,
+            self.test_nan_assert_float8_e5m2,
+        )
+        # Hidden (None) without nccl-legacy; see the end of this file.
         self.special_return_code_checks = {
-            self.test_nan_assert_float16.__wrapped__: TEST_NAN_ASSERT_RETURN,
-            self.test_nan_assert_float32.__wrapped__: TEST_NAN_ASSERT_RETURN,
-            self.test_nan_assert_float64.__wrapped__: TEST_NAN_ASSERT_RETURN,
-            self.test_nan_assert_bfloat16.__wrapped__: TEST_NAN_ASSERT_RETURN,
-            self.test_nan_assert_float8_e4m3fn.__wrapped__: TEST_NAN_ASSERT_RETURN,
-            self.test_nan_assert_float8_e5m2.__wrapped__: TEST_NAN_ASSERT_RETURN,
+            fn.__wrapped__: TEST_NAN_ASSERT_RETURN
+            for fn in nan_assert_tests
+            if fn is not None
         }
 
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -8119,7 +8123,7 @@ class CollectiveAnnotationTest(MultiProcContinuousTest):
     world_size = 2
 
     @classmethod
-    def backend_str(cls):
+    def backend_str(cls, device):
         return "nccl"
 
     @property
@@ -8181,6 +8185,36 @@ class CollectiveAnnotationTest(MultiProcContinuousTest):
             self.assertEqual(kernel["args"]["Collective name"], "all_reduce")
             self.assertEqual(kernel["args"]["In msg nelems"], 1024)
 
+
+# Without nccl-legacy only the tests using the default nccl backend run. The
+# rest are hidden rather than skipped so run_test.py --subprocess does not spawn
+# a process per skipped test. CollectiveAnnotationTest is excluded: its worker
+# exits with 1 under nccl2.
+if _NCCL_LEGACY_MISSING:
+    _DEFAULT_BACKEND_TESTS = {
+        "test_init_wo_backend_str",
+        "test_init_with_idx",
+        "test_send_recv_non_dense_tensor",
+        "test_set_nccl_pg_timeout_backend0",
+        "test_extend_nccl_pg_timeout_backend0",
+    }
+    _found = set()
+    for _cls in list(globals().values()):
+        if not (
+            isinstance(_cls, type)
+            and issubclass(_cls, unittest.TestCase)
+            and _cls.__module__ == __name__
+        ):
+            continue
+        for _name in dir(_cls):
+            if not _name.startswith("test"):
+                continue
+            if _name in _DEFAULT_BACKEND_TESTS:
+                _found.add(_name)
+                continue
+            setattr(_cls, _name, None)
+    if _found != _DEFAULT_BACKEND_TESTS:
+        raise AssertionError(f"missing tests: {_DEFAULT_BACKEND_TESTS - _found}")
 
 if __name__ == "__main__":
     if device_type != "cpu" and device_module._initialized:

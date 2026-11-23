@@ -460,7 +460,7 @@ struct VecConvert<float, 1, double, 1> {
   }
 };
 
-// Truncates toward zero, as the generic static_cast does. Where that cast is
+// Truncates toward zero, as the generic c10::convert does. Where that cast is
 // undefined, FCVTZS is not: out-of-range lanes saturate and NaN gives 0.
 template <>
 struct VecConvert<int64_t, 1, double, 1> {
@@ -470,7 +470,7 @@ struct VecConvert<int64_t, 1, double, 1> {
   }
 };
 
-// Rounds in the current rounding mode, as the generic static_cast does.
+// Rounds in the current rounding mode, as the generic c10::convert does.
 template <>
 struct VecConvert<double, 1, int64_t, 1> {
   static inline VectorizedN<double, 1> apply(
