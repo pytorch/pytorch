@@ -97,13 +97,14 @@ class _Coverage:
         *,
         op_symbol: str | None = None,
     ) -> bool:
+        """Normalize the supplied variant before consulting native coverage."""
         # Keep JIT eligible when the C++ AOT consultation is disabled.
         if not torch._C._get_native_aot_enabled():
             return False
         if (
             self.structured
             and op_symbol
-            and op_symbol.split(".")[0].endswith("_")
+            and op_symbol.split(".")[0] != _base_name(op_symbol)
             and args
         ):
             kwargs = dict(kwargs, out=args[0])
@@ -162,7 +163,7 @@ def _load_coverage() -> dict[tuple[str, str], _Coverage]:
                 structured=getattr(d, "STRUCTURED", True),
                 exact=getattr(d, "EXACT", False),
             )
-    from .ops.pointwise.table import variant_aten_name
+    from .utils.operator import variant_aten_name
 
     for (op, key), c in list(coverage.items()):
         if c.structured:
@@ -184,7 +185,7 @@ def _base_name(op_symbol: str) -> str:
 
 
 def get_coverage(op_symbol: str, dispatch_key: str) -> _Coverage | None:
-    r"""Resolve exact coverage first, then the matching structured variants."""
+    r"""Resolve declared coverage; only non-exact structured declarations share variants."""
     table = _load_coverage()
     c = table.get((op_symbol, dispatch_key))
     if c is not None:
