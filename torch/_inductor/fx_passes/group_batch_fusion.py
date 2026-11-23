@@ -846,7 +846,10 @@ class BatchLinearLHSFusion(BatchFusion):
 
         max_size = self.graph_search_options.get("max_fuse_tensor_size")
         if max_size is not None:
-            total = sum(weight.meta["val"].numel() for weight in batch_weights)
+            total = sum(
+                weight.meta["val"].numel()  # type: ignore[union-attr]
+                for weight in batch_weights
+            )
             if statically_known_true(total > max_size):
                 return
 
