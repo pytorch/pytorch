@@ -477,9 +477,11 @@ function does not run, and its graphs do nothing: `regions` lists such a
 graph with the key `within`, the graph of the caller that holds its
 operations and runs them, and `stats()["graphs"]` does not count it. A call
 that a path goes through is not among what `regions` lists as left out.
-The functions that are called are warm before their callers are, so with a
-pass over graphs their graphs are exported first, and the graph of the
-caller, which holds the same operations, a few calls later.
+The functions that are called are warm before their callers are, and their
+graphs would be exported first, to be of no use a few calls later when the
+graph of the caller holds the same operations. So a graph waits, and
+`regions` says `"waiting"`, while a function further out is still being
+watched by the engine or has a graph that is not done being taken down:
 
 ```python
 exported = []
@@ -493,11 +495,11 @@ def count(gm, input_types):
 g = torch.vm(net, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), count))
 for _ in range(8):
     same = torch.equal(g(v), net(v))
-same, exported  # (True, [4, 9]): a block first, then the model, which is what runs from then on
+same, exported  # (True, [9]): the model, once
 handle = net.a.register_forward_hook(lambda module, args, output: output * 2)
 for _ in range(4):
     same = torch.equal(g(v), net(v))
-same, exported  # (True, [4, 9, 4, 4]): with the hook the path of the model is not for the call
+same, exported  # (True, [9, 4, 4]): with the hook the path of the model is not for the call
 handle.remove()
 whole = [found for found in torch.vm.regions(g) if found["where"].startswith("Net.forward")][0]
 hits = whole["hits"]

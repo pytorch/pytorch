@@ -150,6 +150,9 @@ struct Settled {
 struct SettledBlocks {
     blocks: Vec<std::cell::Cell<Settled>>,
     calls: std::cell::Cell<u64>,
+    /// How many calls of the function are running with its first block in
+    /// the profiling tier.
+    warming: std::cell::Cell<u32>,
     trial: std::cell::Cell<Trial>,
     /// For the function that was handed to torch.vm: whether calls
     /// below its last call were part of a measurement (`watched`), and
@@ -1296,6 +1299,37 @@ const MAX_PATH_AGAIN: usize = 8;
 
 const NOT_PROFILED: &str = "a block that was not profiled yet";
 
+thread_local! {
+    /// How many calls on this thread are of a function whose first block is
+    /// still in the profiling tier.
+    static WARMING: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Counts a call of a function whose first block is still in the profiling
+/// tier, for as long as the call lives: the graphs of what it calls wait
+/// for the graph it may get itself, which would hold their operations.
+struct Warming<'a>(Option<&'a Compiled>);
+
+impl<'a> Warming<'a> {
+    #[cold]
+    fn begin(&mut self, compiled: &'a Compiled) {
+        if self.0.is_none() {
+            WARMING.with(|w| w.set(w.get() + 1));
+            compiled.settled.warming.set(compiled.settled.warming.get() + 1);
+            self.0 = Some(compiled);
+        }
+    }
+}
+
+impl Drop for Warming<'_> {
+    fn drop(&mut self) {
+        if let Some(compiled) = self.0 {
+            WARMING.with(|w| w.set(w.get() - 1));
+            compiled.settled.warming.set(compiled.settled.warming.get() - 1);
+        }
+    }
+}
+
 /// Says, for as long as it lives, whom the frames that the interpreter
 /// starts on this thread are offered to.
 struct Hooked {
@@ -1878,6 +1912,7 @@ impl Compiled {
             analysis,
             settled: SettledBlocks {
                 blocks: (0..generic.len()).map(|_| std::cell::Cell::new(Settled { code: std::ptr::null(), specialized: false, entries: 0 })).collect(),
+                warming: std::cell::Cell::new(0),
                 calls: std::cell::Cell::new(0),
                 trial: std::cell::Cell::new(Trial::start(PLAN_EPOCH.load(Ordering::Relaxed))),
                 watched: std::cell::Cell::new(false),
@@ -4538,6 +4573,20 @@ impl Compiled {
                 Ran::Other => {}
             }
         }
+        // A function further out that is still being profiled may get a
+        // graph that holds these operations, and so may a graph that starts
+        // earlier and is not done being taken down: that one goes first.
+        if WARMING.with(|w| w.get()) > self.settled.warming.get() || profiling_depth() > 0 {
+            return PathEnd::Miss;
+        }
+        let waits = {
+            let st = self.state.borrow();
+            let mut others = st.blocks.iter().flat_map(|bs| bs.graphs.iter().map(|(_, other)| other));
+            others.any(|other| !Arc::ptr_eq(other, site) && other.pending())
+        };
+        if waits {
+            return PathEnd::Miss;
+        }
         if site.exporter.is_none() && site.variants.borrow().is_empty() && self.asks(site, block) {
             // A graph that starts earlier in the function is taken down
             // again: this call goes a way its path does not, and may come
@@ -6934,6 +6983,7 @@ impl Compiled {
         let mut pred: usize = usize::MAX;
         let mut back_edges: u32 = 0;
         let mut start = start;
+        let mut warming = Warming(None);
         // An exception either continues in the handler of the block it was
         // raised in, entered like the first block, or leaves the function.
         macro_rules! raised {
@@ -7028,6 +7078,9 @@ impl Compiled {
                 }
             };
             let _profiling = Profiling::enter(mode == Mode::Profile);
+            if mode == Mode::Profile && cur == 0 {
+                warming.begin(self);
+            }
             let next: usize = loop {
                 let mut resume: Option<usize> = None;
                 let mut leap: Option<Landing> = None;
@@ -7047,7 +7100,11 @@ impl Compiled {
                             }
                             Op::Graph(site) => {
                                 let api = api.unwrap_unchecked();
-                                match self.enter_graph(site, regs, frames, api, cur, code, pc + 1, serial) {
+                                let end = self.enter_graph(site, regs, frames, api, cur, code, pc + 1, serial);
+                                if site.pending() {
+                                    warming.begin(self);
+                                }
+                                match end {
                                     PathEnd::Miss => Ok(null_mut()),
                                     // What was made of a graph raised.
                                     PathEnd::Landed(landing) if landing.block == usize::MAX => {
