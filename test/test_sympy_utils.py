@@ -601,7 +601,6 @@ class TestValueRanges(TestCase):
 
     def test_truncdiv(self):
         V = ValueRanges
-        truncdiv = ValueRangeAnalysis.truncdiv
         self.assertEqual(ValueRangeAnalysis.truncdiv(V(2, int_oo), V(1, int_oo)), V(0, int_oo))
         self.assertEqual(ValueRangeAnalysis.truncdiv(V(-int_oo, -2), V(1, int_oo)), V(-int_oo, 0))
         self.assertEqual(ValueRangeAnalysis.truncdiv(V(2, int_oo), V(-int_oo, -1)), V(-int_oo, 0))
