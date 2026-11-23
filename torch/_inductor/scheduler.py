@@ -75,7 +75,7 @@ from .ir import (
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
 from .runtime.hints import DeviceProperties, ReductionHint
-from .runtime.runtime_utils import green_text, is_power_of_2, red_text
+from .runtime.runtime_utils import green_text, is_power_of_2, last_power_of_2, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
@@ -84,6 +84,7 @@ from .utils import (
     collective_config_value_key,
     decompose_index,
     device_need_guard,
+    dtype_from_size,
     fx_node_crosses_devices,
     get_current_backend,
     get_device_tflops,
@@ -99,10 +100,11 @@ from .utils import (
     is_multi_outputs_template,
     is_output_of_multi_outputs_template,
     is_wait,
+    sympy_dot,
     sympy_product,
     sympy_subs,
 )
-from .virtualized import V
+from .virtualized import ops, V
 
 
 log = logging.getLogger(__name__)
@@ -366,6 +368,19 @@ class MixOrderReduction:
             for subnode in node.get_nodes()
             if subnode.is_reduction()
         )
+
+    @classmethod
+    def pick_split_size(cls, node: BaseSchedulerNode) -> int:
+        """Rows per program of the mix-order kernel for ``node``, from the row hint."""
+        if config.triton.mix_order_reduction_split_size is not None:
+            return config.triton.mix_order_reduction_split_size
+        numel, _ = cls.get_numel_rnumel(node)
+        num_sm = DeviceProperties.create(node.get_device()).multi_processor_count
+        # optimization_hint is fine here: the result is clamped to [16, 128], so
+        # any fallback value still produces a valid split size.
+        numel_hint = V.graph.sizevars.optimization_hint(numel)
+        split_size = max(last_power_of_2(numel_hint // (num_sm * 8)), 16)
+        return min(split_size, 128)
 
     @classmethod
     def get_numel_rnumel(cls, node: BaseSchedulerNode) -> tuple[sympy.Expr, sympy.Expr]:
@@ -4801,6 +4816,9 @@ class FusedSchedulerNode(BaseSchedulerNode):
 class FusedMixOrderReductions(FusedSchedulerNode):
     """Fused node for two reductions with different iteration orders (inner + outer)."""
 
+    # Set by Scheduler.finalize_mix_order_reductions, which keeps the second stages.
+    mix_order_split_size: int | None = None
+
     def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
         if not MixOrderReduction.is_contiguous_node(node1):
             if not MixOrderReduction.is_contiguous_node(node2):
@@ -4899,16 +4917,22 @@ class FusedMixOrderReductions(FusedSchedulerNode):
         backend = self.scheduler.get_backend(device)
 
         if isinstance(other, FusedMixOrderReductions):
+            # The partials buffers are sized for the split size of each node.
+            if other.mix_order_split_size != self.mix_order_split_size:
+                raise AssertionError(
+                    "mix-order reductions with different finalize split sizes"
+                )
             fused_node1 = backend.fuse(self.node1, other.node1)
             fused_node2 = backend.fuse(self.node2, other.node2)
-            return FusedMixOrderReductions(fused_node1, fused_node2)
+            fused = FusedMixOrderReductions(fused_node1, fused_node2)
+        elif self.sub_node_can_fuse(self.node1, other, (self.node2,)):
+            fused_node = backend.fuse(self.node1, other)
+            fused = FusedMixOrderReductions(fused_node, self.node2)
         else:
-            if self.sub_node_can_fuse(self.node1, other, (self.node2,)):
-                fused_node = backend.fuse(self.node1, other)
-                return FusedMixOrderReductions(fused_node, self.node2)
-            else:
-                fused_node = backend.fuse(self.node2, other)
-                return FusedMixOrderReductions(self.node1, fused_node)
+            fused_node = backend.fuse(self.node2, other)
+            fused = FusedMixOrderReductions(self.node1, fused_node)
+        fused.mix_order_split_size = self.mix_order_split_size
+        return fused
 
 
 class FusedStagedReduction(FusedSchedulerNode):
@@ -5111,6 +5135,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     # Set when this node is derived from another foreach node; see __init__.
     _strict_reduction: bool | None = None
     _reduction: bool | None = None
+    is_mix_order_finalize: bool = False
 
     def get_consumer_subnode_for(
         self, producer: BaseSchedulerNode
@@ -5370,6 +5395,27 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             self._reduction = super().is_reduction()
         return self._reduction
 
+    @staticmethod
+    def benchmarks_with_synthetic_inputs() -> bool:
+        """Whether combo kernels are benchmarked on synthetic inputs.
+
+        Synthetic inputs cannot preserve indirect-index constraints and may produce
+        out-of-bounds indices, so nodes with indirect indexing stay out of combos.
+        """
+        return config.benchmark_combo_kernel or (
+            config.combo_kernels_autotune > 0
+            and config.combo_kernel_per_subkernel_blocks
+            and config.combo_kernel_compile_time_autotune
+            and not config.deterministic
+        )
+
+    @staticmethod
+    def has_indirect_indexing(node: BaseSchedulerNode) -> bool:
+        return any(
+            isinstance(dep, MemoryDep) and dep.is_indirect()
+            for dep in node.read_writes.reads_and_writes()
+        )
+
     @classmethod
     def combinable_nodes(
         cls, nodes: list[BaseSchedulerNode]
@@ -5453,22 +5499,8 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 )
             filtered_nodes = [x for x in filtered_nodes if not x.is_reduction()]
 
-        # Synthetic benchmark inputs cannot preserve indirect-index constraints and may
-        # produce out-of-bounds indices. Keep these nodes out of benchmarked combos.
-        if config.benchmark_combo_kernel or (
-            config.combo_kernels_autotune > 0
-            and config.combo_kernel_per_subkernel_blocks
-            and config.combo_kernel_compile_time_autotune
-            and not config.deterministic
-        ):
-            indirect_nodes = [
-                n
-                for n in filtered_nodes
-                if any(
-                    isinstance(dep, MemoryDep) and dep.is_indirect()
-                    for dep in n.read_writes.reads_and_writes()
-                )
-            ]
+        if cls.benchmarks_with_synthetic_inputs():
+            indirect_nodes = [n for n in filtered_nodes if cls.has_indirect_indexing(n)]
             if indirect_nodes:
                 log.debug(
                     "ComboKernels: %d indirect-indexing nodes are filtered",
@@ -6383,6 +6415,7 @@ class Scheduler:
 
         self.merge_loops()
         self.finalize_multi_template_buffers()
+        self.finalize_mix_order_reductions()
         if (
             config.max_autotune_gemm or config.max_autotune
         ) and use_pipelined_autotuning():
@@ -7634,6 +7667,454 @@ class Scheduler:
 
                 out_buffer.layout = multi_node.layout
                 self._replace_node(out_buffer, multi_node, i, node)
+
+    def finalize_mix_order_reductions(self) -> None:
+        """Finalize the column sums of mix-order reductions with regular reductions.
+
+        The mix-order kernel writes the partial sums of each column reduction to
+        an ``[nsplit, d]`` buffer. A second-stage reduction over that buffer is a
+        regular scheduler node: its epilogues fuse into it, and the second stages
+        of one mix-order reduction run as combo kernels of at most
+        ``config.combo_kernel_max_num_nodes`` if they are all independent and share
+        a stream and memory pool. This grouping does not depend on
+        ``config.combo_kernels``; a cap below 2 turns it off. Split reductions keep
+        their second stage; for the others, this adds one. ``nsplit`` depends on
+        the split size, so for the reductions handled here the split size comes
+        from ``MixOrderReduction.pick_split_size`` and is not autotuned at
+        codegen. The reductions skipped here keep the ATen finalize and the
+        split-size autotune.
+        """
+        if not config.triton.mix_order_reduction_sched_finalize:
+            return
+        nodes = OrderedSet(self.nodes)
+        changed = False
+        for node in list(nodes):
+            if isinstance(node, FusedMixOrderReductions):
+                changed |= self._finalize_mix_order_reduction(node, nodes)
+        if changed:
+            # Old positions, not min_order: fusion (with the fusion memory timeline)
+            # and _post_fusion_custom_pass can reorder the nodes.
+            position = {
+                leaf: i
+                for i, node in enumerate(self.nodes)
+                for leaf in node.get_nodes()
+            }
+            self.nodes = self.topological_sort_schedule(
+                sorted(
+                    nodes,
+                    key=lambda n: min(
+                        (position[leaf] for leaf in n.get_nodes() if leaf in position),
+                        default=len(self.nodes),
+                    ),
+                )
+            )
+            self.prune_redundant_deps(self.nodes)
+
+    def _finalize_mix_order_reduction(
+        self, node: FusedMixOrderReductions, nodes: OrderedSet[BaseSchedulerNode]
+    ) -> bool:
+        reductions = [n for n in node.node2.get_nodes() if n.is_reduction()]
+        if not reductions:
+            return False
+        is_split = [MixOrderReduction.is_split_reduction(n) for n in reductions]
+        if any(is_split) and not all(is_split):
+            return False
+        numel, rnumel = MixOrderReduction.get_numel_rnumel(node.node1)
+        split_size = MixOrderReduction.pick_split_size(node.node1)
+        nsplit = (numel + split_size - 1) // split_size
+        if V.graph.sizevars.statically_known_leq(nsplit, 1):
+            return False
+        if all(is_split):
+            mix_node = node
+            finalizes = self._retarget_split_second_stages(
+                reductions, nsplit, rnumel, split_size
+            )
+        else:
+            result = self._add_mix_order_second_stages(
+                node, reductions, nsplit, rnumel, split_size, nodes
+            )
+            mix_node, finalizes = result if result is not None else (node, None)
+            if finalizes is not None:
+                counters["inductor"]["mix_order_sched_finalize_new_stage"] += len(
+                    finalizes
+                )
+        if finalizes is None:
+            return False
+        mix_node.mix_order_split_size = split_size
+        counters["inductor"]["mix_order_sched_finalize"] += len(finalizes)
+        counters["inductor"]["mix_order_sched_finalize_nodes"] += 1
+        self._fuse_mix_order_finalize_consumers(finalizes, nodes)
+        self._group_mix_order_finalizes(finalizes, nodes)
+        return True
+
+    @staticmethod
+    def _mix_order_finalize_data(
+        data: ir.Reduction,
+        partials_name: str,
+        size: list[sympy.Expr],
+        nsplit: sympy.Expr,
+        rnumel: sympy.Expr,
+    ) -> ir.Reduction:
+        """A reduction over the ``nsplit`` rows of a ``[nsplit, rnumel]`` partials buffer.
+
+        ``rnumel`` is in row-major order of the output ``size``.
+        """
+        strides = ir.FlexibleLayout.contiguous_strides(size)
+
+        def inner_fn(index, rindex):
+            return ops.load(
+                partials_name, rindex[0] * rnumel + sympy_dot(index, strides)
+            )
+
+        return ir.Reduction(
+            device=data.device,
+            dtype=data.dtype,
+            inner_fn=inner_fn,
+            ranges=size,
+            reduction_ranges=[nsplit],
+            reduction_type=data.reduction_type,
+            src_dtype=torch.float32,
+            reduction_hint=ReductionHint.DEFAULT,
+        )
+
+    @staticmethod
+    def _mix_order_partials_data(
+        data: ir.Reduction,
+        inner_fn: Callable[..., Any],
+        ranges: Sequence[sympy.Expr],
+        reduction_ranges: Sequence[sympy.Expr],
+        size: list[sympy.Expr],
+        split_size: int,
+    ) -> ir.Reduction:
+        """The partial sums the mix-order kernel writes, as IR of the partials layout.
+
+        Row ``s`` of the ``[nsplit, ...]`` buffer of ``size`` reduces rows
+        ``[s * split_size, (s + 1) * split_size)`` of the reduction given by
+        ``inner_fn``, ``ranges`` and ``reduction_ranges``. Codegen keeps the body
+        that the scheduler node was built with; this data keeps IR queries such as
+        ``get_read_writes`` consistent with the layout.
+        """
+        rows = sympy_product(reduction_ranges)
+        reindex = ir.View.dynamic_reshape_indexer(list(ranges), size[1:])
+        reindex_rows = ir.View.dynamic_reshape_indexer(list(reduction_ranges), [rows])
+        default = ir.Reduction.default_value(data.reduction_type, data.src_dtype)
+        index_dtype = dtype_from_size(rows)
+
+        def inner(index, rindex):
+            row = index[0] * split_size + rindex[0]
+            mask = ops.lt(
+                ops.index_expr(row, index_dtype), ops.index_expr(rows, index_dtype)
+            )
+            return ops.masked(
+                mask,
+                lambda: inner_fn(reindex(index[1:]), reindex_rows([row])),
+                default,
+            )
+
+        return ir.Reduction(
+            device=data.device,
+            dtype=torch.float32,
+            inner_fn=inner,
+            ranges=size,
+            reduction_ranges=[split_size],
+            reduction_type=data.reduction_type,
+            src_dtype=data.src_dtype,
+            reduction_hint=data.reduction_hint,
+            strict_reduction_multirow=data.strict_reduction_multirow,
+            strict_reduction_rblock=data.strict_reduction_rblock,
+        )
+
+    def _retarget_split_second_stages(
+        self,
+        first_stages: list[BaseSchedulerNode],
+        nsplit: sympy.Expr,
+        rnumel: sympy.Expr,
+        split_size: int,
+    ) -> list[SchedulerNode] | None:
+        """Point the existing second stages at the mix-order partial sums."""
+        stages: list[tuple[ComputedBuffer, SchedulerNode, ComputedBuffer]] = []
+        for first in first_stages:
+            outputs = first.get_outputs()
+            if not (
+                isinstance(first, SchedulerNode)
+                and isinstance(first.node, ComputedBuffer)
+                and len(outputs) == 1
+                and len(outputs[0].users) == 1
+            ):
+                return None
+            second = outputs[0].users[0].node
+            if not (
+                isinstance(second, SchedulerNode)
+                and isinstance(second.node, ComputedBuffer)
+                and isinstance(second.node.data, ir.Reduction)
+                and second.node.data.reduction_type in ("sum", "prod")
+                and V.graph.sizevars.statically_known_equals(
+                    sympy_product(second.node.get_size()), rnumel
+                )
+            ):
+                return None
+            stages.append((first.node, second, second.node))
+
+        for partials, second, finalize in stages:
+            if not isinstance(finalize.data, ir.Reduction):
+                raise AssertionError(type(finalize.data))
+            if not (
+                isinstance(partials.data, ir.Reduction)
+                and partials._original_inner_fn is not None
+                and partials._original_ranges is not None
+                and partials._original_reduction_ranges is not None
+            ):
+                raise AssertionError(partials.get_name())
+            partials.layout = ir.FixedLayout(
+                partials.get_device_or_error(), torch.float32, [nsplit, rnumel]
+            )
+            partials.data = self._mix_order_partials_data(
+                partials.data,
+                partials._original_inner_fn,
+                partials._original_ranges,
+                partials._original_reduction_ranges,
+                [nsplit, rnumel],
+                split_size,
+            )
+            finalize.data = self._mix_order_finalize_data(
+                finalize.data,
+                partials.get_name(),
+                list(finalize.get_size()),
+                nsplit,
+                rnumel,
+            )
+            finalize.get_default_sizes_body.clear_cache(finalize)
+            second.recompute_size_and_body()
+            container = self.name_to_fused_node[second.get_name()]
+            if container is not second:
+                if not isinstance(container, FusedSchedulerNode):
+                    raise AssertionError(type(container))
+                container.group = max(
+                    container.snodes, key=lambda x: int(x.is_reduction())
+                ).group
+                refresh_group_node_dependencies(container)
+        return [second for _, second, _ in stages]
+
+    def _add_mix_order_second_stages(
+        self,
+        node: FusedMixOrderReductions,
+        reductions: list[BaseSchedulerNode],
+        nsplit: sympy.Expr,
+        rnumel: sympy.Expr,
+        split_size: int,
+        nodes: OrderedSet[BaseSchedulerNode],
+    ) -> tuple[FusedMixOrderReductions, list[SchedulerNode]] | None:
+        """Split unsplit column reductions into mix-order partials and a finalize.
+
+        Each reduction keeps its node, output buffer and users, but now reduces a
+        new partials buffer, which a new first-stage node in the mix-order kernel
+        writes. The node2 epilogues move out of the mix-order node with them.
+        """
+        finalizes: list[tuple[SchedulerNode, ComputedBuffer, ir.Reduction]] = []
+        for r in reductions:
+            if not (
+                isinstance(r, SchedulerNode)
+                and isinstance(r.node, ComputedBuffer)
+                and isinstance(r.node.data, ir.Reduction)
+                and r.node.data.reduction_type in ("sum", "prod")
+                and len(r.node.get_size()) > 0
+                and len(r.get_outputs()) == 1
+                and not r.get_outputs()[0].get_mutations()
+                and V.graph.sizevars.statically_known_equals(
+                    sympy_product(r.node.get_size()), rnumel
+                )
+            ):
+                return None
+            finalizes.append((r, r.node, r.node.data))
+        epilogues = [n for n in node.node2.get_nodes() if not n.is_reduction()]
+        if not all(isinstance(e, SchedulerNode) for e in epilogues):
+            return None
+
+        first_stages: list[BaseSchedulerNode] = []
+        for r, finalize, data in finalizes:
+            size = list(finalize.get_size())
+            device = finalize.get_device_or_error()
+            # The node body is built from the reduction, with a layout of its rank;
+            # the mix-order kernel writes the rows itself.
+            partials = ir.ComputedBuffer(
+                name=None,
+                layout=ir.FixedLayout(
+                    device, torch.float32, [size[0] * nsplit, *size[1:]]
+                ),
+                data=data,
+            )
+            partials.name = V.graph.register_buffer(partials)
+            V.graph.register_operation(partials)
+            partials.origins = OrderedSet(finalize.origins)
+            first = self.create_scheduler_node(partials)
+            partials.layout = ir.FixedLayout(device, torch.float32, [nsplit, *size])
+            partials.data = self._mix_order_partials_data(
+                data,
+                data.inner_fn,
+                size,
+                data.reduction_ranges,
+                [nsplit, *size],
+                split_size,
+            )
+            # The pass runs after the stream, mempool, mutation and dependency
+            # bookkeeping, so the new node takes them from the reduction whose reads
+            # it does, including its ordering-only dependencies.
+            first.update_mutated_names(r.mutation_renames)
+            first.set_read_writes(
+                first.read_writes.with_read(
+                    OrderedSet(
+                        dep
+                        for dep in r.read_writes.reads
+                        if isinstance(dep, (WeakDep, StarDep))
+                    )
+                )
+            )
+            stream = self.get_node_stream(r)
+            mempool = (
+                self.node_to_mempool[r]
+                if r in self.node_to_mempool
+                else self._get_node_mempool(r)
+            )
+            partials.stream_idx = finalize.stream_idx
+            partials.mempool = mempool
+            self.node_to_stream[first] = stream
+            self.node_to_mempool[first] = mempool
+            for buf_name in first.get_buffer_names():
+                self.buff_to_stream[buf_name] = stream
+                self.buff_to_mempool[buf_name] = mempool
+            first.min_order = r.min_order
+            first.max_order = r.max_order
+            first.min_input_distance = r.min_input_distance
+            first.max_input_distance = r.max_input_distance
+            first.ancestors = OrderedSet(r.ancestors)
+            self.name_to_node[first.get_name()] = first
+            for buf in first.get_outputs():
+                self.name_to_buf[buf.get_name()] = buf
+                buf.set_users([NodeUser(r)])
+            first_stages.append(first)
+
+            finalize.data = self._mix_order_finalize_data(
+                data, partials.get_name(), size, nsplit, rnumel
+            )
+            finalize.get_default_sizes_body.clear_cache(finalize)
+            r.recompute_size_and_body()
+            # Scheduler.merge_loops runs before this pass; the rebuilt finalize
+            # needs the same normalized dependencies as the consumers it fuses with.
+            if config.loop_ordering_after_fusion:
+                r.merge_loops()
+            r.ancestors = r.ancestors | first.get_operation_names()
+
+        node2 = (
+            first_stages[0]
+            if len(first_stages) == 1
+            else FusedSchedulerNode(self, first_stages)
+        )
+        mix_node = FusedMixOrderReductions(node.node1, node2)
+        self.name_to_fused_node.update(
+            {n.get_name(): mix_node for n in mix_node.get_nodes()}
+        )
+        self.node_to_stream[mix_node] = self.get_node_stream(node)
+        self.node_to_mempool[mix_node] = self.node_to_mempool.get(node)
+
+        moved: list[BaseSchedulerNode] = [*reductions, *epilogues]
+        for n in moved:
+            self.name_to_fused_node[n.get_name()] = n
+            self.node_to_stream[n] = self.node_to_stream[mix_node]
+            self.node_to_mempool[n] = self.node_to_mempool[mix_node]
+        nodes.discard(node)
+        nodes.add(mix_node)
+        nodes.update(moved)
+
+        return mix_node, [r for r, _, _ in finalizes]
+
+    def _fuse_mix_order_finalize_consumers(
+        self, finalizes: list[SchedulerNode], nodes: OrderedSet[BaseSchedulerNode]
+    ) -> None:
+        """Fuse the pointwise consumers of each finalize into it, as for any reduction.
+
+        A consumer that reads several finalizes, or depends on anything the
+        finalize does not, stays separate, so that the finalizes of one mix-order
+        node stay independent and can share a combo kernel.
+        """
+        finalize_bufs = OrderedSet(b for f in finalizes for b in f.get_buffer_names())
+        for finalize in finalizes:
+            for buf in finalize.get_outputs():
+                for user in list(buf.users):
+                    if isinstance(user.node, OutputNode) or user.is_weak:
+                        continue
+                    producer = self.name_to_fused_node[finalize.get_name()]
+                    consumer = self.name_to_fused_node[user.node.get_name()]
+                    if consumer is producer or consumer.is_reduction():
+                        continue
+                    if len(consumer.used_buffer_names() & finalize_bufs) != 1:
+                        continue
+                    if not (
+                        consumer.ancestors - producer.get_operation_names()
+                        <= producer.ancestors
+                    ):
+                        continue
+                    if not self.can_fuse(producer, consumer):
+                        continue
+                    self.fuse_two_nodes(producer, consumer, nodes)
+
+    def _group_mix_order_finalizes(
+        self, finalizes: list[SchedulerNode], nodes: OrderedSet[BaseSchedulerNode]
+    ) -> None:
+        """Group the finalizes of one mix-order node into combo kernels.
+
+        Each finalize with its fused consumers is one container. Up to
+        ``config.combo_kernel_max_num_nodes`` containers share a combo kernel, and
+        a trailing single container stays its own kernel. If any container depends
+        on another or differs in stream or memory pool, none are grouped. As in
+        ``ForeachKernelSchedulerNode.combinable_nodes``, containers with indirect
+        indexing stay out when combo kernels are benchmarked on synthetic inputs.
+        """
+        containers: list[BaseSchedulerNode] = []
+        for finalize in finalizes:
+            container = self.name_to_fused_node[finalize.get_name()]
+            if container not in containers:
+                containers.append(container)
+        if ForeachKernelSchedulerNode.benchmarks_with_synthetic_inputs():
+            containers = [
+                c
+                for c in containers
+                if not ForeachKernelSchedulerNode.has_indirect_indexing(c)
+            ]
+        max_num_nodes = config.combo_kernel_max_num_nodes
+        if len(containers) < 2 or max_num_nodes < 2:
+            return
+        names = [c.get_operation_names() for c in containers]
+        independent = all(
+            not (c.ancestors & other)
+            for i, c in enumerate(containers)
+            for j, other in enumerate(names)
+            if i != j
+        )
+        streams = OrderedSet(self.get_node_stream(c) for c in containers)
+        mempools = OrderedSet(self.node_to_mempool.get(c) for c in containers)
+        if not independent or len(streams) != 1 or len(mempools) != 1:
+            return
+        for start in range(0, len(containers), max_num_nodes):
+            group = containers[start : start + max_num_nodes]
+            if len(group) < 2:
+                continue
+            combo = ForeachKernelSchedulerNode(
+                self,
+                group,
+                use_custom_partition_algo=True,
+                enable_autotune=config.combo_kernels_autotune > 0,
+                per_subkernel_blocks=config.combo_kernel_per_subkernel_blocks,
+            )
+            combo.is_mix_order_finalize = True
+            self.name_to_fused_node.update(
+                {n.get_name(): combo for n in combo.get_nodes()}
+            )
+            self.node_to_stream[combo] = next(iter(streams))
+            if (mempool := next(iter(mempools))) is not None:
+                self.node_to_mempool[combo] = mempool
+            for container in group:
+                nodes.discard(container)
+            nodes.add(combo)
 
     def _replace_node(
         self,
