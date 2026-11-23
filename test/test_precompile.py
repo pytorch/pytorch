@@ -6196,12 +6196,17 @@ class TestPrecompileDynamoCapture(TestCase):
         # Load post-compiles each graph under the loading process's
         # triton.cudagraphs; one compiled without CUDA graphs has nothing to be
         # wrapped with, and runs as it compiled.
+        from torch._dynamo.utils import counters
+
         single = self.mod.single
         with self._capture(single) as cap:
             y = cap(self.model, self.x2)
+        counters.clear()
         with torch._inductor.config.patch({"triton.cudagraphs": True}):
             f = load(self.artifact, self.cache)
             self.assertEqual(f(self.model, self.x2), y)
+        # Not a skip: the graph was never meant to run as a CUDA graph.
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
     @parametrize("backend", ["inductor", "eager"])
     def test_a_single_graph_serves_in_process(self, backend):
