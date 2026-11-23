@@ -388,3 +388,18 @@ your model actually uses::
         q2, k2, v2 = (x.transpose(1, 2).contiguous() for x in (q, k, v))
         out = torch.nn.functional.scaled_dot_product_attention(q2, k2, v2)
         return out.transpose(1, 2)
+
+.. _grid-sample-backward-on-rocm:
+
+grid_sample 2D backward numerics
+--------------------------------
+
+On ROCm, the backward of 2D :func:`~torch.nn.functional.grid_sample`
+accumulates the FP16 and BF16 grid gradient in FP32: each channel's taps are
+summed into a partial, the partials are summed over channels, and the
+coordinate scaling is applied before the single rounding to the input dtype.
+This avoids the stalls and premature overflow of summing in the input dtype,
+and the FP16 and BF16 grid gradients can differ in rounding from those on
+CUDA, which accumulates them in the input dtype. The input gradient is
+unchanged: its taps are still accumulated with atomic additions in the input
+dtype. FP32 and FP64 gradients are not affected.
